@@ -11,7 +11,6 @@ import {
   MessageCircle, Play, Pause, Mic, MicOff, FileText,
   ArrowRight, Activity, NotebookPen, Pencil, ChevronDown, Music, Braces,
   Languages,
-  Archive,
   Lock,
   Pilcrow,
   PilcrowRight,
@@ -25,6 +24,7 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Badge, badgeVariants } from "@/components/ui/badge"
+import { LaneCombobox } from "@/components/LaneCombobox"
 import { EmptyState } from "@/components/ui/page"
 import type { CellData } from "@/hooks/useCells"
 import {
@@ -109,7 +109,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -391,7 +390,7 @@ if (typeof window !== "undefined") {
 /** Tiny gutter badge that surfaces synth lifecycle: translating, generating,
  *  or failed. Lives in the left gutter so the loading state is anchored next
  *  to the cell that's actually working, even if the row scrolls. Errors are
- *  click-to-expand: full message + actions (set Gemini key, dismiss).
+ *  click-to-expand: full message + actions (engine-specific recovery, dismiss).
  *
  * A1: error popover body is surfaced from the first click on the badge (not
  *     just via a tooltip) and includes a plain-English recovery hint.
@@ -490,7 +489,12 @@ function SynthStatusBadge({
       error.category === "translation-not-configured" ||
       error.category === "no-source-text" ||
       error.category === "git-project-unsupported" ||
-      error.category === "sign-in-required"
+      error.category === "sign-in-required" ||
+      error.category === "omnivoice-not-configured" ||
+      error.category === "omnivoice-failed" ||
+      error.category === "seed-vc-not-configured" ||
+      error.category === "seed-vc-failed" ||
+      error.category === "gemini-failed"
     ) {
       // Soft fixes — the popover body explains what to do; no inline action.
     } else {
@@ -967,16 +971,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // ignores it once the cell is off screen or no longer rendered.
   const lastActiveEditorCellIdRef = useRef<string | null>(null)
   const [hoveredFootnote, setHoveredFootnote] = useState<{ cellId: string; index: number } | null>(null)
-  // AQU-601: the lane switcher hides archived lanes by default; this reveals
-  // them within the open dropdown so a retired lane stays reachable.
-  const [showArchivedLanes, setShowArchivedLanes] = useState(false)
-  const laneSwitcher = useMemo(() => {
-    const all = lanes ?? []
-    return {
-      visible: all.filter((l) => !isLaneArchived(l, archivedLanes)),
-      archived: all.filter((l) => isLaneArchived(l, archivedLanes)),
-    }
-  }, [lanes, archivedLanes])
   const isDragging = useRef(false)
   const dragCells = useRef<Set<string>>(new Set())
   const displayCellIds = useCellIds(cellStore, orderedBy, !!audioLens)
@@ -2514,101 +2508,65 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             lanes.length > 1 &&
             onLaneChange &&
             canSwitchLanes(project.syncRole?.level) ? (
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <button
-                      type="button"
-                      data-testid="lane-switcher"
-                      data-active-lane={activeLane}
-                      aria-label={t("editor.lane.activeAria")}
-                      className={cn(
-                        badgeVariants({ variant: "secondary" }),
-                        "gap-1 text-[10px] font-normal normal-case tracking-normal transition-colors hover:bg-muted-foreground/20 hover:text-foreground",
-                      )}
-                    />
-                  }
-                >
-                  {/* AQU-583: on the default lane with no project target set,
-                      `project.targetLanguage` is empty — prompt to set one rather
-                      than showing a blank pill. A named lane always has a tag. */}
-                  {project.targetLanguage || t("editor.lane.setTargetLanguage")}
-                  <ChevronDown className="h-2.5 w-2.5" />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="min-w-[8rem]">
-                  {/* Active lanes, shown by default. */}
-                  {laneSwitcher.visible.map((lane) => {
-                    const active = lane === activeLane
-                    const label = lane === "" ? (defaultLaneLabel || t("editor.column.target")) : lane
-                    return (
-                      <DropdownMenuItem
-                        key={lane || "__default__"}
-                        data-testid={`lane-option-${lane}`}
-                        data-active={active ? "true" : undefined}
-                        onClick={() => onLaneChange(lane)}
-                        className="justify-between gap-2 text-xs"
-                      >
-                        {label}
-                        {active && <Check className="h-3.5 w-3.5" />}
-                      </DropdownMenuItem>
-                    )
-                  })}
-                  {/* AQU-601: archived lanes are hidden behind a reveal so a
-                      retired lane stops cluttering the switcher yet stays
-                      reachable. If the active lane is itself archived we expand
-                      automatically so the current selection is always visible. */}
-                  {laneSwitcher.archived.length > 0 && (
-                    <>
-                      <DropdownMenuSeparator />
-                      {showArchivedLanes || isLaneArchived(activeLane, archivedLanes) ? (
-                        laneSwitcher.archived.map((lane) => {
-                          const active = lane === activeLane
-                          return (
-                            <DropdownMenuItem
-                              key={lane}
-                              data-testid={`lane-option-${lane}`}
-                              data-active={active ? "true" : undefined}
-                              data-archived="true"
-                              onClick={() => onLaneChange(lane)}
-                              className="justify-between gap-2 text-xs text-muted-foreground"
-                            >
-                              <span className="flex items-center gap-1.5">
-                                <Archive className="h-3 w-3" />
-                                {lane}
-                              </span>
-                              {active && <Check className="h-3.5 w-3.5" />}
-                            </DropdownMenuItem>
-                          )
-                        })
-                      ) : (
-                        <DropdownMenuItem
-                          data-testid="lane-show-archived"
-                          closeOnClick={false}
-                          onClick={() => setShowArchivedLanes(true)}
-                          className="gap-1.5 text-xs text-muted-foreground"
+              /* AQU-609: the switcher is a searchable combobox — client
+                 projects carry 150+ lanes, and lane switching is a combobox
+                 by explicit client request. Archived-lane semantics (AQU-601)
+                 live in LaneCombobox: hidden behind a reveal while browsing,
+                 searchable always, auto-revealed when the active lane is
+                 archived. */
+              <LaneCombobox
+                options={(lanes ?? []).map((lane) => ({
+                  value: lane,
+                  label: lane === "" ? (defaultLaneLabel || t("editor.column.target")) : lane,
+                  archived: isLaneArchived(lane, archivedLanes),
+                  testId: lane,
+                }))}
+                value={activeLane}
+                onValueChange={onLaneChange}
+                searchPlaceholder={t("editor.lane.searchPlaceholder")}
+                searchAriaLabel={t("editor.lane.searchAriaLabel")}
+                emptyText={t("editor.lane.searchEmpty")}
+                align="end"
+                trigger={
+                  <button
+                    type="button"
+                    data-testid="lane-switcher"
+                    data-active-lane={activeLane}
+                    aria-label={t("editor.lane.activeAria")}
+                    className={cn(
+                      badgeVariants({ variant: "secondary" }),
+                      "gap-1 text-[10px] font-normal normal-case tracking-normal transition-colors hover:bg-muted-foreground/20 hover:text-foreground",
+                    )}
+                  >
+                    {/* AQU-583: on the default lane with no project target set,
+                        `project.targetLanguage` is empty — prompt to set one
+                        rather than showing a blank pill. A named lane always
+                        has a tag. */}
+                    {project.targetLanguage || t("editor.lane.setTargetLanguage")}
+                    <ChevronDown className="h-2.5 w-2.5" />
+                  </button>
+                }
+                footer={
+                  onEditTargetLanguage
+                    ? (close) => (
+                        /* AQU-583: manage the default target language from the
+                           switcher. */
+                        <button
+                          type="button"
+                          data-testid="edit-target-language"
+                          onClick={() => {
+                            close()
+                            onEditTargetLanguage()
+                          }}
+                          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
                         >
-                          <Archive className="h-3 w-3" />
-                          {t("editor.lane.showArchived", { count: laneSwitcher.archived.length })}
-                        </DropdownMenuItem>
-                      )}
-                    </>
-                  )}
-                  {/* AQU-583: manage the default target language from the switcher. */}
-                  {onEditTargetLanguage && (
-                    <>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        data-testid="edit-target-language"
-                        onClick={onEditTargetLanguage}
-                        className="gap-2 text-xs"
-                      >
-                        <Languages className="h-3.5 w-3.5" />
-                        {t("editor.lane.changeTargetLanguageItem")}
-                      </DropdownMenuItem>
-                    </>
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
+                          <Languages className="h-3.5 w-3.5" />
+                          {t("editor.lane.changeTargetLanguageItem")}
+                        </button>
+                      )
+                    : undefined
+                }
+              />
             ) : onEditTargetLanguage ? (
               <button
                 type="button"
@@ -4153,7 +4111,7 @@ function EditorRow({
   // keeps them out of MemoizedRow's React.memo compare surface.
   const {
     onInfractionClick, onOpenComments, onOpenHistory, onAiSetupNeeded, onOpenRecording,
-    onMediaRowActivate, onAssignCastVoice, onClearCastVoice, onTakeSaved, myScopes,
+    onMediaRowActivate, onAssignCastVoice, onClearCastVoice, onTakeSaved, audioHomeFor, myScopes,
   } = useEditorActions()
   // AQU-633: a scoped member can only validate cells in their assigned lane/file.
   // Combine the role capability with the per-cell scope check so an out-of-scope
@@ -4293,6 +4251,15 @@ function EditorRow({
   const [expansionTab, setExpansionTab] = useState<string>("backtranslation")
   const [btAlignmentOpen, setBtAlignmentOpen] = useState(false)
   const hasSourceFootnoteMarker = (cell.original ?? "").includes("\\f")
+  // AQU-646 stage 3f: where this row's audio belongs — itself on every ordinary
+  // file, the heard lines performing it on a file with an audio-cue sibling, and
+  // NULL when a cue sibling exists but nothing performs this line. Read from
+  // context rather than a prop on purpose: MemoizedRow forwards row props one
+  // by one, so a new prop here is four edits and a silent omission away.
+  const audioHomes = audioHomeFor ? audioHomeFor(cell) : [cell]
+  /** The one the voice button plays and replays from. The rest are written too
+   *  (Sam, 2026-08-25: nothing is left silent) but only one can be heard. */
+  const audioHome = audioHomes?.[0] ?? null
   const visibleTranslated = localTargetDraft?.value ?? cell.translated
   const visibleTranslatedHtml = localTargetDraft?.valueHtml ?? cell.translatedHtml
   const idmlConfiguration = useMemo(
@@ -5529,7 +5496,42 @@ function EditorRow({
   }, [])
 
   const isMultiSelected = useIsSelected(cell.id)
-  const synthStatus = useTtsStatus(ttsStatusKey(cell.id))
+  // AQU-646 stage 4c: THE BADGE WATCHES BOTH CELLS THIS ROW CAN FILE UNDER.
+  //
+  // It used to watch only the row's own id, so on a file with an audio-cue
+  // sibling the rail's voice button — moved to `audioHome` by stage 3f, because
+  // that is where the audio belongs — wrote its failures to `synth:<cue>` while
+  // the badge listened on `synth:<subtitle>` and the two never met.
+  //
+  // MOVING IT TO `audioHome` ALONE WOULD HAVE TRADED ONE BLIND SPOT FOR THREE.
+  // Stage 3f moved the rail button and nothing else, so three producers still
+  // file under the ROW's cell: the audio lens's own CellVoicePanel (the primary
+  // per-line generate control in the lens the dubbing workflow lives in),
+  // dropping a voice from the dock onto the row, and "Voice together". None of
+  // them has an error surface of its own — CellVoicePanel reads this status
+  // only to know it is busy — so this badge is the whole of their failure
+  // reporting, and pointing it at the cue would have silenced all three.
+  //
+  // Watching both is the honest question anyway: "did anything about THIS
+  // ROW's voice fail". Where those producers should be writing is a separate
+  // question from whether the row can see them, and answering it means moving
+  // where audio LANDS, not just where a status goes.
+  const ownSynthStatus = useTtsStatus(ttsStatusKey(cell.id))
+  const homeSynthStatus = useTtsStatus(
+    audioHome && audioHome.id !== cell.id ? ttsStatusKey(audioHome.id) : undefined,
+  )
+  // A RUN IN FLIGHT OUTRANKS AN ERROR, the same precedence the recorder's
+  // button uses: with a stale failure on one key and a fresh attempt on the
+  // other, showing the failure would announce the outcome of something still
+  // running.
+  const synthStatus =
+    ownSynthStatus.kind === "loading" || ownSynthStatus.kind === "synthesizing"
+      ? ownSynthStatus
+      : homeSynthStatus.kind === "loading" || homeSynthStatus.kind === "synthesizing"
+        ? homeSynthStatus
+        : ownSynthStatus.kind === "error"
+          ? ownSynthStatus
+          : homeSynthStatus
   const isSynthBusy = synthStatus.kind === "loading" || synthStatus.kind === "synthesizing"
   const isSynthError = synthStatus.kind === "error"
 
@@ -5922,8 +5924,37 @@ function EditorRow({
                 20px above its translation — the target lane can't be made
                 conditional to match, because it also reserves the strip the
                 floating action rail occupies. */}
-            <div data-testid="source-context-line" data-context-kind={contextIsTimecode ? "timecode" : undefined} className={cn("mb-1 flex h-4 items-center gap-1 text-xs text-muted-foreground", contextIsTimecode ? "justify-start text-left" : "justify-center text-center")} dir="ltr">
-              <span>{cell.context}</span>
+            <div data-testid="source-context-line" className={cn("mb-1 flex h-4 items-center gap-2 text-xs text-muted-foreground", showCellLabel ? "justify-start text-left" : "justify-center text-center")} dir="ltr">
+              {/* AQU-646: the character, on the SOURCE side too (Sam,
+                  2026-08-26) — "put that character label also in the top left
+                  of source cells… we'll just scoot the time range over".
+
+                  THE SAME VALUE THE TARGET CORNER SHOWS, deliberately: the two
+                  names in this app are not interchangeable (the sheet's
+                  `cast_name` is what the timeline, the recorder and the exports
+                  print), and Sam's call was that these two corners agree with
+                  each other rather than with those. It therefore rides the
+                  same "Show cell labels" preference and goes blank in the same
+                  places.
+
+                  `dir="auto"` because the lane is forced LTR for timecodes and
+                  a name is not a timecode. The width cap is what does the
+                  scooting: a long character name truncates rather than pushing
+                  the timing out of the row. */}
+              {showCellLabel && (
+                <AppTooltip content={labelText} disabled={!labelText}>
+                  <span data-testid="source-cell-label" dir="auto" className="max-w-[45%] shrink-0 truncate">
+                    {labelText}
+                  </span>
+                </AppTooltip>
+              )}
+              {/* A TIMECODE IS NOT SHOWN HERE ANY MORE (Sam, 2026-08-27,
+                  relaying the client): it moved to the foot of the cell — see
+                  `source-timing-line` — so the character label has this corner
+                  to itself. Other context, a scripture reference like
+                  "GEN 1:1", still belongs at the top: it names what the line IS
+                  rather than when it happens, and it is centred as it was. */}
+              {!contextIsTimecode && <span className="min-w-0 truncate">{cell.context}</span>}
             </div>
             <SourceReferenceAttachments metadata={cell.metadata} />
             {sourceEditing ? (
@@ -5965,6 +5996,23 @@ function EditorRow({
             )}
             {cellExamples.length > 0 && (
               <ExamplePanel examples={cellExamples} />
+            )}
+            {/* THE TIMING, AT THE FOOT OF THE CELL. Rendered ONLY for a
+                timecode, and that asymmetry with the lane above is deliberate:
+                the top lane is reserved even when empty because its 20px is
+                what keeps the source and target columns' first lines on one
+                baseline, while nothing below the text mirrors anything — so an
+                always-on strip here would be wasted height on every scripture
+                row in the app. */}
+            {contextIsTimecode && (
+              <div
+                data-testid="source-timing-line"
+                data-context-kind="timecode"
+                className="mt-1 flex h-4 items-center justify-start text-left text-xs text-muted-foreground"
+                dir="ltr"
+              >
+                <span className="min-w-0 truncate">{cell.context}</span>
+              </div>
             )}
           </div>
         )}
@@ -6502,8 +6550,26 @@ function EditorRow({
               {/* Round 5: no playOnly — generating here durably attaches the
                   voice; an untranslated line shows the button disabled with
                   the reason instead of hiding it. */}
+              {/* AQU-646 stage 3f: THE VOICE GOES WHERE THE AUDIO LIVES.
+                  The mic a few pixels away already redirects to the heard line
+                  performing this subtitle; this button did not, so a generated
+                  voice landed on the subtitle cell — which the timeline cannot
+                  draw, because it resolves takes over the cues. Two buttons in
+                  one row putting their audio in two different places.
+
+                  The WORDS are still this row's own translation, which is where
+                  they live and always did. Only the destination moves. */}
               <CellTtsButton
-                cellId={cell.id}
+                cellId={audioHome?.id ?? cell.id}
+                // …BUT THE VOICE STILL COMES OFF THIS ROW. Character voices are
+                // assigned on the subtitle and stored by ITS cell id, so handing
+                // the cue's id to the cast lookup — which redirecting `cellId`
+                // alone did — found no assignment and fell through to the
+                // project default. Every character's line was generated, and
+                // durably attached, in the narrator's voice, while the character
+                // gutter in the same row went on showing the right name
+                // (2026-08-27).
+                voiceCellId={cell.id}
                 text={visibleTranslated}
                 original={effectiveSourceText(cell)}
                 context={cell.context}
@@ -6512,11 +6578,24 @@ function EditorRow({
                 targetLanguage={project.targetLanguage}
                 projectTtsSettings={project.ttsSettings}
                 cellTtsSettings={cell.ttsSettings}
-                generatedVoiceAudioId={cell.selectedGeneratedVoiceAudioId}
-                attachments={cell.attachments}
+                // OFF THE HOME, NOT OFF THE ROW. This is a replay button
+                // before it is a generate one, and the clip it replays lives
+                // where it was written — read these off the subtitle and it
+                // finds nothing and re-synthesizes on every press.
+                generatedVoiceAudioId={audioHome?.selectedGeneratedVoiceAudioId}
+                attachments={audioHome?.attachments ?? cell.attachments}
                 projectId={project.id}
-                fileId={cell.fileId}
-                disabled={!editable}
+                fileId={audioHome?.fileId ?? cell.fileId}
+                // Sam, 2026-08-25: a subtitle performed by two heard lines
+                // voices BOTH, so neither is left silent. Only the first is
+                // played back; the rest are generated alongside it.
+                alsoAttachTo={audioHomes
+                  ?.slice(1)
+                  .map((c) => ({ cellId: c.id, fileId: c.fileId }))}
+                // A cue sibling exists but nothing performs this line — about
+                // ten an episode. There is nowhere to put a voice, and writing
+                // it to the subtitle is exactly the bug above.
+                disabled={!editable || audioHomes === null}
               />
 
               {editable && !isLoading && (

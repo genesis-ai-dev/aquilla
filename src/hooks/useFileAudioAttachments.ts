@@ -29,7 +29,8 @@ import {
 } from "@/lib/audio/audio-attachments-bus"
 import { getOutboxRecords, subscribeToOutbox } from "@/lib/sync/outbox"
 import { fetchFileAudioAttachments } from "@/lib/sync/cell-audio-read"
-import type { AudioAttachmentOut, CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
+import { slotSelections, type AudioAttachmentOut, type CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
+import { GENERATED_VOICE_SLOT, RECORDING_SLOT } from "@/lib/timeline/track-slots"
 import type { CellData } from "@/hooks/useCells"
 import type { CodexCellAttachment, WordTiming } from "@/lib/codex-editor/types"
 
@@ -38,7 +39,29 @@ import type { CodexCellAttachment, WordTiming } from "@/lib/codex-editor/types"
 const OUTBOX_REFETCH_DEBOUNCE_MS = 300
 
 function emptyEntry(): CellAudioEntry {
-  return { attachments: {}, selectedAudioId: null, selectedGeneratedVoiceAudioId: null, audioTimings: {} }
+  return {
+    attachments: {},
+    selectedBySlot: {},
+    selectedAudioId: null,
+    selectedGeneratedVoiceAudioId: null,
+    audioTimings: {},
+  }
+}
+
+/**
+ * Re-derive the two named pointers from the slot map. (AQU-646 stage 3)
+ *
+ * Every write below goes to `selectedBySlot` and then comes back through here,
+ * exactly as the server does it. Writing the pointers directly is what the old
+ * code did, and it is why any slot that was not literally `"recording"` claimed
+ * `selectedGeneratedVoiceAudioId` — an `if/else` where a lookup belonged.
+ */
+function withProjections(entry: CellAudioEntry): CellAudioEntry {
+  return {
+    ...entry,
+    selectedAudioId: entry.selectedBySlot?.[RECORDING_SLOT] ?? null,
+    selectedGeneratedVoiceAudioId: entry.selectedBySlot?.[GENERATED_VOICE_SLOT] ?? null,
+  }
 }
 
 /** How the overlay's own sync state should be painted onto the clip it asserts.
@@ -57,18 +80,20 @@ function applyShadow(
   if (shadow.kind === "remove") {
     const attachments = { ...base.attachments }
     delete attachments[shadow.audioId]
-    return {
-      ...base,
-      attachments,
-      // Mirrors the projection's `deleted = 1, selected = 0`: the slot simply
-      // empties — nothing is auto-promoted in its place.
-      ...(shadow.slot === "recording" && base.selectedAudioId === shadow.audioId
-        ? { selectedAudioId: null }
-        : {}),
-      ...(shadow.slot === "generatedVoice" && base.selectedGeneratedVoiceAudioId === shadow.audioId
-        ? { selectedGeneratedVoiceAudioId: null }
-        : {}),
+    // SLOT-AGNOSTIC: drop whichever slot's selection this audioId held.
+    //
+    // The remove EVENT carries no slot (its payload is `{ audioId }` and the
+    // projection's UPDATE is not slot-scoped), so the shadow's slot was only
+    // ever a guess — and `rehydrateShadowsFromOutbox` guesses `"recording"`
+    // unconditionally when rebuilding one from the outbox. Keying on the
+    // audioId, which is what the server keys on, removes the guess entirely.
+    const selectedBySlot = { ...slotSelections(base) }
+    for (const [slot, audioId] of Object.entries(selectedBySlot)) {
+      if (audioId === shadow.audioId) delete selectedBySlot[slot]
     }
+    // Mirrors the projection's `deleted = 1, selected = 0`: the slot simply
+    // empties — nothing is auto-promoted in its place.
+    return withProjections({ ...base, attachments, selectedBySlot })
   }
   const att = shadow.att
   // The flag rides the APPLIED copy only — the stored overlay stays pristine so
@@ -88,15 +113,22 @@ function applyShadow(
   // never landed. So the take stays listed and badged "not saved", and which
   // take is *active* reverts to server truth.
   const claimsSelection = shadow.claimsSelection && sync !== "failed"
-  return {
+  return withProjections({
     ...base,
     attachments: { ...base.attachments, [att.audioId]: applied },
-    ...(claimsSelection
-      ? att.slot === "recording"
-        ? { selectedAudioId: att.audioId }
-        : { selectedGeneratedVoiceAudioId: att.audioId }
-      : {}),
-  }
+    // A MAP WRITE, not an if/else. The old branch sent every slot that was not
+    // literally "recording" to the generated-voice pointer, so a take on an
+    // added track optimistically claimed a selection belonging to a different
+    // track entirely.
+    // NORMALISED EITHER WAY. `withProjections` re-derives the two named
+    // pointers from this map, so handing it an absent map — which is what a
+    // server response predating `selectedBySlot` gives — would derive nulls and
+    // wipe a selection the server had actually reported. The overlay must be
+    // able to add nothing without subtracting anything.
+    selectedBySlot: claimsSelection
+      ? { ...slotSelections(base), [att.slot]: att.audioId }
+      : slotSelections(base),
+  })
 }
 
 /** Has the server read caught up with what this overlay was asserting? */
@@ -110,8 +142,7 @@ function shadowConfirmed(entry: CellAudioEntry | undefined, shadow: OptimisticSh
   const server = entry.attachments[att.audioId]
   if (!server) return false
   if (shadow.claimsSelection) {
-    const selected = att.slot === "recording" ? entry.selectedAudioId : entry.selectedGeneratedVoiceAudioId
-    if (selected !== att.audioId) return false
+    if (slotSelections(entry)[att.slot] !== att.audioId) return false
   }
   if ((server.trimStartMs ?? null) !== (att.trimStartMs ?? null)) return false
   if ((server.trimEndMs ?? null) !== (att.trimEndMs ?? null)) return false
@@ -122,6 +153,16 @@ function shadowConfirmed(entry: CellAudioEntry | undefined, shadow: OptimisticSh
   // Label compared only when the overlay explicitly carries one — trim
   // re-injects omit it and the server keeps the existing name.
   if (att.label !== undefined && (server.label ?? null) !== att.label) return false
+  // THE POSITION, same rule as the label (2026-08-27). A drag's overlay is
+  // nothing BUT its position — every other field it copies verbatim from the
+  // server row it overlays — so without this line every comparison above was
+  // trivially equal and the FIRST read after a drag "confirmed" it: the chip
+  // snapped back to the old spot until the real save landed, and a rejected
+  // placement vanished with no not-saved badge at all. Gated on `undefined`
+  // exactly like the label, because trim and attach overlays legitimately
+  // omit it and must not be held hostage to a position they never asserted.
+  if (att.targetOffsetMs !== undefined && (server.targetOffsetMs ?? null) !== att.targetOffsetMs)
+    return false
   return true
 }
 
@@ -376,6 +417,9 @@ export function mergeCellsWithAudio(
       attachments[audioId] = {
         url: a.url,
         type: "audio",
+        // AQU-646: carry the slot so consumers read it rather than inferring it
+        // from the selection pointers. The inference cannot see a third slot.
+        ...(a.slot ? { slot: a.slot } : {}),
         ...(a.voiceId ? { voiceId: a.voiceId } : {}),
         ...(a.referenceAudioId ? { referenceAudioId: a.referenceAudioId } : {}),
         ...(a.durationMs != null ? { durationMs: a.durationMs } : {}),
@@ -383,6 +427,10 @@ export function mergeCellsWithAudio(
         // address this cell's slice of a shared imported clip.
         ...(a.trimStartMs != null ? { trimStartMs: a.trimStartMs } : {}),
         ...(a.trimEndMs != null ? { trimEndMs: a.trimEndMs } : {}),
+        // `!= null`, so a hand-placed 0 survives the merge. `0` is where a take
+        // that starts exactly on its line sits, and it must stay
+        // distinguishable from "never placed".
+        ...(a.targetOffsetMs != null ? { targetOffsetMs: a.targetOffsetMs } : {}),
         // SUB-48: "saved here, not yet at the server" — drives the saving hint.
         ...(a.pendingSync ? { pendingSync: true as const } : {}),
         // AQU-924: "saved here, and it will NOT reach the server on its own."
@@ -392,6 +440,7 @@ export function mergeCellsWithAudio(
     return {
       ...c,
       attachments,
+      selectedBySlot: entry.selectedBySlot,
       selectedAudioId: entry.selectedAudioId ?? undefined,
       selectedGeneratedVoiceAudioId: entry.selectedGeneratedVoiceAudioId ?? undefined,
       audioTimings: entry.audioTimings as Record<string, WordTiming[]>,

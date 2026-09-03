@@ -80,7 +80,11 @@ export interface TranslationRule {
   description: string
   severity: "major" | "minor"
   source: "algorithmic" | "llm" | "user"
-  scope: "project" | "org"
+  scope: "project" | "org" | "lane"
+  /** For lane-scoped rules (AQU-609): the target-language lane this rule
+   *  applies to. `''` is the project-default lane (matching the cells/lanes
+   *  convention from AQU-538). Only meaningful when `scope === "lane"`. */
+  lane?: string
   check: RuleCheck
   enabled: boolean
   createdAt: string
@@ -253,6 +257,12 @@ export interface Voice {
    * plain TTS, no conversion.
    */
   referenceAudioId?: string
+  /**
+   * When the clone reference was lifted from a line take, `${cellId}:${slot}`
+   * of that take. The Reference audio tab is filled only when `referenceAudioId`
+   * is set *without* this key (a recorded or uploaded clip).
+   */
+  referenceTakeKey?: string
 }
 
 export interface ProjectTtsSettings {
@@ -413,6 +423,13 @@ export interface ProjectRecord {
    *  turned on in project settings — see ProjectWideSettings.allowLineCreation.
    *  Deleting an empty added line is not gated on it. */
   allowLineCreation?: boolean
+  /** AQU-646 stage 2: may this project's timelines be restructured — tracks
+   *  added, deleted, foldered, recoloured? Off unless turned on; a SECOND gate
+   *  on top of the maintainer floor, so with it off the write is refused even
+   *  to an owner. Rename and drag-to-reorder are NOT gated on it. See
+   *  ProjectWideSettings.allowTrackEditing for why it diverges from its
+   *  sibling above on stranding. */
+  allowTrackEditing?: boolean
   /**
    * AQU-701: set when the user explicitly skips the voice & transcription setup
    * step ("we don't use voice or transcription"). Marks that step complete in

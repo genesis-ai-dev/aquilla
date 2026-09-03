@@ -213,8 +213,6 @@ export const importExport = defineNamespace({
       "Original-language OT/NT with per-word lemma, morphology, and Strong's.",
     "importExport.landing.paired.title": "Paired translation",
     "importExport.landing.paired.description": "Source + target pairs from a spreadsheet to fill the target column.",
-    "importExport.landing.labels.title": "Cell labels / cast",
-    "importExport.landing.labels.description": "Re-upload a template to label existing cells with cast names.",
     "importExport.landing.tn.title": "Translation Notes",
     "importExport.landing.tn.hint": "TSV",
     "importExport.landing.tn.description": "unfoldingWord notes, shown beside the matching verse as you translate.",
@@ -400,8 +398,6 @@ export const importExport = defineNamespace({
     "importExport.dialog.titleFileTarget": "Import target translations",
     "importExport.dialog.finishSaveFailed": "Couldn't finish saving your import — please try again. ({message})",
     "importExport.dialog.saveFailed": "Couldn't save your import — please try again. ({message})",
-    "importExport.dialog.labelsNeedSourceFile":
-      "Cell labels require an existing source file in this project. Import source files first, then return here.",
     "importExport.dialog.pairedNeedsSourceCells":
       "Paired translation import requires existing source cells in this project. Import source files first.",
 
@@ -572,6 +568,10 @@ export const importExport = defineNamespace({
     "importExport.dialog.stillToRecordCount": "{count} still to record",
     "importExport.dialog.untimedClipCount": "{count} untimed",
     "importExport.dialog.nothingRecordedYet": "Nothing is recorded yet, so there is nothing to export.",
+    "importExport.dialog.nothingOnMainTrack": plural({
+      one: "Nothing is recorded on the main Target audio track — {count} take is on an added track. Export by line to include it.",
+      other: "Nothing is recorded on the main Target audio track — {count} takes are on added tracks. Export by line to include them.",
+    }),
     "importExport.dialog.unrecordedCharacterCount": plural({
       one: "{count} character with nothing recorded yet",
       other: "{count} characters with nothing recorded yet",
@@ -584,6 +584,8 @@ export const importExport = defineNamespace({
     // — Export dialog: the per-section cards a dubbing file gets —
     "importExport.dialog.audioSectionTitle": "Audio",
     "importExport.dialog.audioShapeGroupAriaLabel": "Audio export shape",
+    "importExport.dialog.audioAddedTracksNote":
+      "Only the main Target audio track is included. Export by line to get the tracks you have added.",
     "importExport.dialog.exportAudio": "Export audio",
     "importExport.dialog.srtExportSectionTitle": "SRT export",
     "importExport.dialog.vttExportSectionTitle": "VTT export",
@@ -862,34 +864,6 @@ export const importExport = defineNamespace({
     "importExport.fileTarget.title": "Import target translations into \"{fileName}\"",
     "importExport.fileTarget.unsupportedFileType": "Unsupported file type. Use USFM (.usfm/.sfm) or a spreadsheet " +
       "(.csv/.tsv/.xlsx).",
-    "importExport.labels.choosePlaceholder": "Choose a file…",
-    "importExport.labels.couldNotMintToken": "Could not mint a sync token for this file.",
-    "importExport.labels.csvTooLarge": "The label CSV exceeds the 10 MB safety limit.",
-    "importExport.labels.description": "Download a template with a file's cell references, fill in cast names, " +
-      "then re-upload.",
-    "importExport.labels.downloadTemplate": "Download CSV template",
-    "importExport.labels.emptyCsv": "The label CSV is empty.",
-    "importExport.labels.failedToApply": "Failed to apply labels",
-    "importExport.labels.failedToLoadCells": "Failed to load cells for this file",
-    "importExport.labels.importLabelCount": plural({
-      one: "Import {count} label",
-      other: "Import {count} labels",
-    }),
-    "importExport.labels.loadingCells": "Loading cells…",
-    "importExport.labels.noRowsFound": "No rows found in file.",
-    "importExport.labels.previewCameraHeader": "Camera",
-    "importExport.labels.previewLabelCount": plural({
-      one: "{count} label to import",
-      other: "{count} labels to import",
-    }),
-    "importExport.labels.refCellCount": plural({
-      one: "{count} cell with references in {fileName}.",
-      other: "{count} cells with references in {fileName}.",
-    }),
-    "importExport.labels.step1Heading": "Step 1 — Choose file & download template",
-    "importExport.labels.step2Heading": "Step 2 — Upload filled template",
-    "importExport.labels.thisFileFallback": "this file",
-    "importExport.labels.title": "Cell Labels / Cast Import",
     "importExport.paired.applyingTargets": "Applying target translations to cells.",
     "importExport.paired.description": "Upload a CSV or XLSX file where each row has both source and target " +
       "text. Rows are matched to existing source cells by canonical reference.",
@@ -1371,6 +1345,25 @@ export const importExport = defineNamespace({
       "importExport.dialog.audioShapeGroupAriaLabel": {
         description:
           "Accessible name for the radio group choosing the shape of an audio export — one track per character, or one file per recorded line.",
+      },
+      "importExport.dialog.nothingOnMainTrack": {
+        description:
+          "Shown in the by-character preview when the default Target audio row " +
+          "holds no recordings but added tracks do. The preview describes the " +
+          "by-character deliverable, which reads the default row only, so the " +
+          "plain 'nothing is recorded yet' was false on exactly these files — " +
+          "and sat beside an Export button that refused for the same reason. " +
+          "Names the count and where to find them.",
+        placeholders: { count: "How many takes are on added tracks. Always 1 or more." },
+      },
+      "importExport.dialog.audioAddedTracksNote": {
+        description:
+          "Shown under the by-character audio export option when the file has " +
+          "audio tracks beyond the four it starts with. That export writes one " +
+          "track per CHARACTER off the main dub row only, so takes recorded " +
+          "onto tracks the user added are not in it — this says so before they " +
+          "export, and points at the by-line shape, which does carry them. A " +
+          "notice, not a restriction: by character remains selectable.",
       },
       "importExport.dialog.subtitleTargetGroupAriaLabel": {
         description:
@@ -2317,138 +2310,6 @@ export const importExport = defineNamespace({
           "this panel cannot read. A short statement followed by an imperative " +
           "sentence naming the acceptable alternatives. The bracketed file " +
           "extensions are literal and stay untranslated.",
-      },
-      "importExport.labels.choosePlaceholder": {
-        description:
-          "Placeholder inside the file dropdown on the cast-labelling panel, shown " +
-          "before a file has been picked. Imperative invitation ending in an " +
-          "ellipsis to signal that a choice follows.",
-      },
-      "importExport.labels.couldNotMintToken": {
-        description:
-          "Error shown in red on the cast-labelling panel when the app could not " +
-          "obtain the short-lived permission it needs to read the chosen file's " +
-          "lines, usually because the sign-in has lapsed. Single past-tense " +
-          "statement of failure.",
-      },
-      "importExport.labels.csvTooLarge": {
-        description:
-          "Error shown in red on the cast-labelling panel when the uploaded " +
-          "spreadsheet is bigger than the ceiling the app will read into memory. " +
-          "Single statement naming the limit; the size figure and its unit are " +
-          "literal.",
-      },
-      "importExport.labels.description": {
-        description:
-          "Explanatory sentence under the cast-labelling heading, summarising the " +
-          "three-step round trip: get a prepared spreadsheet listing the references " +
-          "that identify each line, type the character names into it, then upload " +
-          "it again.",
-      },
-      "importExport.labels.downloadTemplate": {
-        description:
-          "Button in the first box of the cast-labelling panel that saves a " +
-          "prepared spreadsheet, pre-filled with one row per line of the chosen " +
-          "file, for the user to type character names into. Imperative verb; the " +
-          "format name stays untranslated.",
-      },
-      "importExport.labels.emptyCsv": {
-        description:
-          "Error shown in red on the cast-labelling panel when the spreadsheet the " +
-          "user uploaded contains no bytes at all, so there is nothing to read. " +
-          "Single short statement of fact.",
-      },
-      "importExport.labels.failedToApply": {
-        description:
-          "Last-resort error shown in red on the cast-labelling panel when writing " +
-          "the character names onto the project's lines failed without a message of " +
-          "its own. Short statement with no closing full stop, since it is rendered " +
-          "as an error line.",
-      },
-      "importExport.labels.failedToLoadCells": {
-        description:
-          "Last-resort error shown in red on the cast-labelling panel when fetching " +
-          "the chosen file's lines failed without any message of its own. Short " +
-          "statement with no closing full stop, since it is rendered as an error " +
-          "line.",
-      },
-      "importExport.labels.importLabelCount": {
-        description:
-          "Primary button in the footer of the cast-labelling panel, which writes " +
-          "the previewed character names onto the project's lines. Imperative verb " +
-          "followed by how many rows will be applied.",
-        placeholders: {
-          count: "Number of character-name rows that will be applied.",
-        },
-      },
-      "importExport.labels.loadingCells": {
-        description:
-          "Temporary grey status line under the file dropdown on the cast-labelling " +
-          "panel while the chosen file's lines are being fetched, before the count " +
-          "of labelable lines can be shown. Present participle ending in an " +
-          "ellipsis.",
-      },
-      "importExport.labels.noRowsFound": {
-        description:
-          "Error shown in red on the cast-labelling panel when the uploaded " +
-          "spreadsheet was readable but held no rows, so there are no character " +
-          "names to apply. Single short statement of fact.",
-      },
-      "importExport.labels.previewCameraHeader": {
-        description:
-          "Third column header of the preview table on the cast-labelling panel. " +
-          "The column shows whether the character is on screen, off screen, or " +
-          "mixed for that line, as read from the uploaded spreadsheet. Single short " +
-          "noun; the column is narrow.",
-      },
-      "importExport.labels.previewLabelCount": {
-        description:
-          "Small heading above the preview table on the cast-labelling panel, " +
-          "counting the character-name rows read out of the uploaded spreadsheet " +
-          "and awaiting confirmation. A count plus noun plus an infinitive phrase " +
-          "meaning 'still to be brought in'.",
-        placeholders: {
-          count: "Number of character-name rows read from the uploaded spreadsheet.",
-        },
-      },
-      "importExport.labels.refCellCount": {
-        description:
-          "Grey status line under the file dropdown on the cast-labelling panel " +
-          "once the chosen file has loaded, saying how many of its lines carry the " +
-          "reference needed to match a template row, and naming the file. A count " +
-          "plus noun phrase, then the file name, as a full sentence.",
-        placeholders: {
-          count: "Number of lines in the chosen file that carry a reference.",
-          fileName: "Display name of the chosen file, or a generic 'this file' fallback when " +
-            "none is selected — do not translate the substituted value when it is a " +
-            "file name.",
-        },
-      },
-      "importExport.labels.step1Heading": {
-        description:
-          "Heading of the first box on the cast-labelling panel, where the user " +
-          "picks which file to label and downloads the prepared spreadsheet for it. " +
-          "Numbered step label; keep the step number first.",
-      },
-      "importExport.labels.step2Heading": {
-        description:
-          "Heading of the second box on the cast-labelling panel, where the user " +
-          "sends back the spreadsheet they have typed character names into. " +
-          "Numbered step label; keep the step number first.",
-      },
-      "importExport.labels.thisFileFallback": {
-        description:
-          "Stand-in for a file name in the cast-labelling panel's status line when " +
-          "no file name is available, giving 'N cells with references in this " +
-          "file.' A short demonstrative noun phrase used mid-sentence, so it must " +
-          "not be capitalised as a title.",
-      },
-      "importExport.labels.title": {
-        description:
-          "Heading of the panel for labelling existing lines with the name of the " +
-          "character who speaks them, by filling in a downloadable template. Noun " +
-          "phrase naming the panel; 'cast' is the set of characters or voices in " +
-          "the project.",
       },
       "importExport.paired.applyingTargets": {
         description:

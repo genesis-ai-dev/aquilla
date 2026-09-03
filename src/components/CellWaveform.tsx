@@ -9,6 +9,7 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { envelopePoints } from "@/lib/audio/waveform-shape"
 import type { UseCellAudioResult } from "@/hooks/useCellAudio"
 import type { AudioMediaStrategy } from "@/lib/parsers/types"
 
@@ -65,18 +66,27 @@ export function CellWaveform({
       return
     }
 
-    const binCount = data.length
-    const barW = cssW / binCount
-    const barGap = barW > 2 ? 1 : 0
-    const drawW = Math.max(1, barW - barGap)
+    // AQU-646: a filled envelope, not bars. Sam retired the bars — they made
+    // the timeline's trim handles blend into the chip, and the same take now
+    // has to look like the same take in both places, so this draws the shape
+    // `lib/audio/waveform-shape` describes and the timeline's SVG draws too.
+    const points = envelopePoints(data, cssH)
     const mid = cssH / 2
+    const sx = cssW / data.length // bin coordinates → this canvas's pixels
 
-    for (let i = 0; i < binCount; i++) {
-      const v = data[i]
-      const h = Math.max(1, v * (cssH - 2))
-      const x = Math.floor(i * barW)
-      ctx.fillRect(x, mid - h / 2, drawW, h)
+    ctx.beginPath()
+    for (let i = 0; i < points.length; i++) {
+      const p = points[i]
+      const x = p.x * sx
+      if (i === 0) ctx.moveTo(x, mid - p.y)
+      else ctx.lineTo(x, mid - p.y)
     }
+    for (let i = points.length - 1; i >= 0; i--) {
+      const p = points[i]
+      ctx.lineTo(p.x * sx, mid + p.y)
+    }
+    ctx.closePath()
+    ctx.fill()
   }, [peaks, height])
 
   const playheadPct = useMemo(() => {

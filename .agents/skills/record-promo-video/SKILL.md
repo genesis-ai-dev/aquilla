@@ -169,3 +169,24 @@ The brief JSON should include a `clips` array in the `fix` scene that maps claim
 - Real footage + rights-clean synth audio only. Anonymize: seeded data, invented names.
 - Publishing/scheduling is human-gated (outward-facing) — hand the master to the human gate, don't post it.
 - **Proof over polish.** A promo with real walkthrough clips showing the app working beats a beautiful motion-graphics trailer with no product footage. The walkthrough IS the differentiator.
+
+---
+
+## Upgrades (borrowed from the HTML-render / HyperFrames pipeline)
+
+### Brand kit — single source of truth
+Keep every persona cut on-brand from one place. The renderer already reads the design-sync tokens (`.design-sync/.cache/compiled.css`, Geist). For copy-level brand rules (tone, CTA, lower-third caps), add a `brand-kit.md` under `scripts/promo/` — template: the global `edit-video` skill's `brand-kit.template.md`. Set the look once; every cut inherits it, and brand drift stops.
+
+### Preview before you render
+`npm run promo` (render) is the slow step — never iterate on it. `compose.html` already exposes `window.__seek(t)`, so scrub the whole trailer in a browser first:
+```sh
+python3 -m http.server -d scripts/promo   # then open compose.html
+# call __seek(t) in the console (or wire a slider) to scan every beat
+```
+Fix copy/beats in the brief, re-scrub, and only run `npm run promo` when the scrub looks right.
+
+### Thumbnail / poster frame
+A promo still needs a YouTube thumbnail and link-card poster. Pull a frame from the master (`ffmpeg -ss <t> -i master.mp4 -frames:v 1 poster.jpg`) and treat it as a thumbnail: scrape references, find the pattern (one face, <=3-4 big words, high contrast), generate variants, A/B test. Full workflow: the `edit-video` skill's REFERENCE (`#thumbnails`).
+
+### Non-app footage -> use the global `edit-video` skill
+For a cut that is NOT the live app — talking-head, VSL, founder/lead-gen content, or pure motion-graphics scenes — use the global `edit-video` skill instead. It is app-agnostic and shares the same brand kit. The two compose: a doc-mode clip from here is proof footage there; a HyperFrames title card from there can open a promo here.

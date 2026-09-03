@@ -70,7 +70,7 @@ export interface SeededProject {
   cellIds: string[]
 }
 
-async function mintSyncToken(jwt: string, projectId: string, fileId: string): Promise<string> {
+export async function mintSyncToken(jwt: string, projectId: string, fileId: string): Promise<string> {
   const r = await fetch(`${FRONTIER_BASE}/api/v2/sync-token`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` },
@@ -78,6 +78,29 @@ async function mintSyncToken(jwt: string, projectId: string, fileId: string): Pr
   })
   if (!r.ok) throw new Error(`sync-token failed: HTTP ${r.status} — ${await r.text()}`)
   return ((await r.json()) as { token: string }).token
+}
+
+export interface SeededFileEvent {
+  id: string
+  kind: string
+  author: string
+  payload: unknown
+}
+
+/** Read the real event log through the same JWT → sync-token boundary as the SPA. */
+export async function readSeededFileEvents(
+  jwt: string,
+  projectId: string,
+  fileId: string,
+): Promise<SeededFileEvent[]> {
+  const token = await mintSyncToken(jwt, projectId, fileId)
+  const response = await fetch(`${SYNC_BASE}/events?fileId=${encodeURIComponent(fileId)}&limit=200`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!response.ok) {
+    throw new Error(`event read failed: HTTP ${response.status} — ${await response.text()}`)
+  }
+  return ((await response.json()) as { events: SeededFileEvent[] }).events
 }
 
 interface ImportString {

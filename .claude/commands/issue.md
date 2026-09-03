@@ -45,8 +45,16 @@ Parse `$ARGUMENTS`:
   operate on it.
 - **`debug "<desc>"`** or **`improve "<desc>"`** → this is *new* work not yet tracked.
   Create the issue first (`save_issue` into the project, team, priority from your judgment)
-  with status **`Triage`** (`086173c5-…`) — **every new issue is born in `Triage`, never
-  `Todo`**, no matter how agent-ready it looks. Then:
+  **from the team's issue template** — pass `template`: **`Bug Report`** for `debug`,
+  **`Feature Request`** for a new user-facing capability, **`Task`** otherwise. The template
+  applies the category label itself; author the description using the template's exact
+  section headings (a passed `description` replaces the template body — fill its sections,
+  don't invent your own). Create with status **`Triage`** (`086173c5-…`) — **every new issue
+  is born in `Triage`, never `Todo`**, no matter how agent-ready it looks. ⚠️ The templates
+  embed status `Todo`; an explicitly passed `state` overrides that — confirm the create
+  response actually says `Triage`, and re-save if not. Leave it **unassigned**: the team's
+  rotation auto-assigns at create time — if the response shows an assignee, clear it with a
+  follow-up `assignee: null` save. Then:
   - **Interactive session** (a human just typed this command): the invocation *is* the
     triage decision — if the issue is fully specified and agent-ready, promote it to `Todo`
     and proceed as if the user passed that `AQU-###`; if it needs a human decision/review

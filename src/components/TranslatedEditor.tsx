@@ -367,14 +367,14 @@ interface TranslatedEditorProps {
   onNavigateCell?: (direction: "prev" | "next") => void
   /**
    * Optional managed terminology concepts. When provided, active concepts are
-   * highlighted with a tiny status-tinted chip at the top-right of each match.
+   * shown with the shared subtle blue highlight on each match.
    * Defaults to undefined (feature off) so other call sites are unaffected.
-   * Chip click exposes `data-source-term` for AQU-204 (TermLookupPopover).
+   * Highlight clicks expose `data-source-term` for AQU-204 (TermLookupPopover).
    */
   terminologyConcepts?: Concept[]
   /**
-   * AQU-204: Called when the user clicks a term chip in the editor.
-   * Receives the sourceTerm string and the chip DOM element as an anchor.
+   * AQU-204: Called when the user clicks a managed-term highlight in the editor.
+   * Receives the sourceTerm string and the highlight DOM element as an anchor.
    * The caller is responsible for opening TermLookupPopover.
    */
   onTermChipClick?: (term: string, anchor: HTMLElement) => void
@@ -1689,21 +1689,26 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         onKeyDownCapture={handleEditorKeyDownCapture}
         onClick={(e) => {
           const target = e.target as HTMLElement
-          // AQU-204: term chip click → open TermLookupPopover via caller
+          // A violation owns the term text when both decorations overlap.
+          // This preserves the blot-to-toast path after removing the tiny,
+          // separate terminology glyph.
+          if (onRuleClick) {
+            const blot = target.closest("[data-rule-id]")
+            if (blot) {
+              onRuleClick(blot.getAttribute("data-rule-id")!, blot as HTMLElement)
+              return
+            }
+          }
+          // AQU-204: managed-term highlight click → open TermLookupPopover.
           if (onTermChipClick) {
-            const chip = target.closest(".term-chip[data-source-term]")
-            if (chip) {
-              const term = chip.getAttribute("data-source-term")
+            const termHighlight = target.closest(".term-chip-host[data-source-term]")
+            if (termHighlight) {
+              const term = termHighlight.getAttribute("data-source-term")
               if (term) {
-                onTermChipClick(term, chip as HTMLElement)
+                onTermChipClick(term, termHighlight as HTMLElement)
                 return
               }
             }
-          }
-          if (!onRuleClick) return
-          const blot = target.closest("[data-rule-id]")
-          if (blot) {
-            onRuleClick(blot.getAttribute("data-rule-id")!, blot as HTMLElement)
           }
         }}
       >

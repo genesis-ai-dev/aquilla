@@ -10250,6 +10250,10 @@ export function ProjectWorkspace() {
                 // AQU-1119: fires once per gesture, at pointer-up. A drag that
                 // shut a section is heard here, after the group has settled.
                 onLayoutChanged={(_layout, meta) => mediaSections.noteLayoutSettled(meta)}
+                // Fires on every pointer MOVE, where the one above fires
+                // once at the release. Paints the rail over a section the
+                // drag has already shrunk to 40px; commits nothing.
+                onLayoutChange={() => mediaSections.notePointerLayout()}
               >
               {timelineStacked && activeFile ? (
                 <>
@@ -10266,7 +10270,7 @@ export function ProjectWorkspace() {
                     // spreads this after it, so without `hidden` the frozen
                     // content would SCROLL inside the rail instead of being
                     // hidden behind it.
-                    style={mediaSections.isCollapsed("timeline") ? { overflow: "hidden" } : undefined}
+                    style={mediaSections.showsRail("timeline") ? { overflow: "hidden" } : undefined}
                     // Records only. The remembered height is written once the
                     // gesture ENDS (the group's onLayoutChanged), so a drag that
                     // finishes collapsed never overwrites it on the way past
@@ -10434,7 +10438,7 @@ export function ProjectWorkspace() {
                     linkingModeRequest={linkingModeRequest}
                   />
                   </div>
-                  {mediaSections.isCollapsed("timeline") && (
+                  {mediaSections.showsRail("timeline") && (
                     <MediaSectionRail
                       section="timeline"
                       orientation="horizontal"
@@ -10443,6 +10447,7 @@ export function ProjectWorkspace() {
                       // are no longer on screen — and the rail painting over
                       // the toolbar is what takes them away.
                       label={t("editor.timeline.title")}
+                      preview={mediaSections.isPreviewingRail("timeline")}
                       onExpand={() => mediaSections.expand("timeline")}
                     />
                   )}
@@ -10471,6 +10476,10 @@ export function ProjectWorkspace() {
                 orientation="horizontal"
                 className="min-h-0 flex-1"
                 onLayoutChanged={(_layout, meta) => mediaSections.noteLayoutSettled(meta)}
+                // Fires on every pointer MOVE, where the one above fires
+                // once at the release. Paints the rail over a section the
+                // drag has already shrunk to 40px; commits nothing.
+                onLayoutChange={() => mediaSections.notePointerLayout()}
               >
               {showVideoPane && activeFile?.coreMediaUrl ? (
                 <>
@@ -10487,7 +10496,7 @@ export function ProjectWorkspace() {
                     {...mediaSections.constraints.video}
                     groupResizeBehavior="preserve-pixel-size"
                     className="relative"
-                    style={mediaSections.isCollapsed("video") ? { overflow: "hidden" } : undefined}
+                    style={mediaSections.showsRail("video") ? { overflow: "hidden" } : undefined}
                     // Records only; the width is remembered at pointer-up, and
                     // only if the gesture ended with the picture open — a drag
                     // that ends in the rail used to write 220 on its way past
@@ -10532,10 +10541,11 @@ export function ProjectWorkspace() {
                       }
                     />
                     </div>
-                    {mediaSections.isCollapsed("video") && (
+                    {mediaSections.showsRail("video") && (
                       <MediaSectionRail
                         section="video"
                         orientation="vertical"
+                        preview={mediaSections.isPreviewingRail("video")}
                         onExpand={() => mediaSections.expand("video")}
                       />
                     )}
@@ -10551,7 +10561,7 @@ export function ProjectWorkspace() {
                 panelRef={mediaSections.panelRefs.text}
                 {...mediaSections.constraints.table}
                 className="relative"
-                style={mediaSections.isCollapsed("text") ? { overflow: "hidden" } : undefined}
+                style={mediaSections.showsRail("text") ? { overflow: "hidden" } : undefined}
                 onResize={(size) => mediaSections.noteResize("text", size.inPixels)}
               >
               <div
@@ -10666,10 +10676,11 @@ export function ProjectWorkspace() {
           />
               </div>
               </div>
-              {mediaSections.isCollapsed("text") && (
+              {mediaSections.showsRail("text") && (
                 <MediaSectionRail
                   section="text"
                   orientation="vertical"
+                  preview={mediaSections.isPreviewingRail("text")}
                   onExpand={() => mediaSections.expand("text")}
                 />
               )}

@@ -34,6 +34,7 @@ import {
   isSeparatorDisabled,
   mediaPanelConstraints,
   presentSections,
+  railPreviewSections,
   readStoredCollapsedSections,
   reconcilePresence,
   shouldPersistSize,
@@ -50,6 +51,9 @@ interface FrozenBox {
   width: number
   height: number
 }
+
+/** Nothing being previewed, as one shared reference so clearing is free. */
+const NO_PREVIEW: CollapsedSections = []
 
 export interface UseMediaSectionCollapseInput {
   fileId: string | null
@@ -70,6 +74,11 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
   const [collapsed, setCollapsed] = useState<CollapsedSections>(() =>
     timelineStacked ? readStoredCollapsedSections(fileId) : [],
   )
+  /**
+   * Sections the pointer is holding at rail size but has not committed. Purely
+   * what to paint; never read by any decision. See `railPreviewSections`.
+   */
+  const [previewRail, setPreviewRail] = useState<CollapsedSections>(NO_PREVIEW)
   const frozenRef = useRef<Partial<Record<MediaSectionId, FrozenBox>>>({})
   const contentRefs = useRef<Partial<Record<MediaSectionId, HTMLElement | null>>>({})
 
@@ -148,6 +157,41 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- panel refs are stable
   }, [])
+
+  /**
+   * What this panel actually measures on screen, right now.
+   *
+   * `isCollapsed()` cannot answer this once a section is folded: it requires
+   * the panel to still be `collapsible`, and a folded one is pinned instead
+   * (min === max === 40), so it reports `false` for every rail we have made.
+   * The pixel size is read live off the element and stays true either way.
+   * Throws before the group has laid out, like every other panel method.
+   */
+  const safeSizePx = useCallback((id: MediaSectionId): number | null => {
+    try {
+      return panelRefs[id].current?.getSize().inPixels ?? null
+    } catch {
+      return null
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- panel refs are stable
+  }, [])
+
+  /**
+   * A layout report from a drag that is still in progress — this fires on
+   * every pointer move, where `noteLayoutSettled` fires once at the release.
+   *
+   * All it does is decide what to paint. The fold itself still commits at
+   * pointer-up and nowhere else, which is the round-2 rule and the reason
+   * this is a separate handler rather than a second caller of the same one.
+   */
+  const notePointerLayout = useCallback(() => {
+    const sizes: Partial<Record<MediaSectionId, number | null>> = {}
+    for (const id of present) {
+      if (effective.includes(id)) continue
+      sizes[id] = safeSizePx(id)
+    }
+    setPreviewRail((prev) => railPreviewSections(sizes, effective, present, prev))
+  }, [effective, present, safeSizePx])
 
   const collapse = useCallback(
     (id: MediaSectionId) => {
@@ -299,6 +343,11 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
       // measurement is that full-row width. Persisting in the same pass, before
       // the fold has been seen, would remember 1386px as the width the reader
       // chose, and the rail would then reopen the picture to fill the row.
+      // The gesture is over, so nothing is being previewed any more. Batched
+      // with the commit below, so the real rail replaces the preview in one
+      // paint rather than flashing the crushed content between them.
+      setPreviewRail((prev) => (prev.length === 0 ? prev : NO_PREVIEW))
+
       const foldedNow = new Set<MediaSectionId>()
       for (const id of ["timeline", "video", "text"] as const) {
         if (effective.includes(id) || !safeIsCollapsed(id)) continue
@@ -339,9 +388,18 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
     registerContent: (id: MediaSectionId) => (el: HTMLElement | null) => {
       contentRefs.current[id] = el
     },
+    /** Painted like a rail, but not folded — a drag is still holding it. */
+    isPreviewingRail: (id: MediaSectionId) => previewRail.includes(id),
+    /**
+     * Is a rail painted over this section, folded or merely held there? The
+     * two look identical, which is the point; only `isCollapsed` decides
+     * anything, and only it freezes, inerts or persists.
+     */
+    showsRail: (id: MediaSectionId) => effective.includes(id) || previewRail.includes(id),
     collapse,
     expand,
     noteResize,
+    notePointerLayout,
     noteLayoutSettled,
     restoreStoredSize,
     /** Should this measurement be written back as the section's size? */

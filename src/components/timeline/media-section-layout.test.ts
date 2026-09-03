@@ -16,6 +16,7 @@ import {
   isSeparatorDisabled,
   mediaPanelConstraints,
   presentSections,
+  railPreviewSections,
   readStoredCollapsedSections,
   reconcilePresence,
   shouldPersistSize,
@@ -120,6 +121,59 @@ describe("isRailSized", () => {
     // A ResizeObserver reports 0 for a subtree an ancestor has hidden. Reading
     // that as a collapse would shut sections behind the reader's back.
     expect(isRailSized(0)).toBe(false)
+  })
+})
+
+describe("railPreviewSections", () => {
+  const preview = (
+    sizes: Partial<Record<"timeline" | "video" | "text", number | null>>,
+    collapsed: CollapsedSections = [],
+    present: readonly ("timeline" | "video" | "text")[] = ALL,
+    prev: CollapsedSections = [],
+  ) => railPreviewSections(sizes, collapsed, [...present], prev)
+
+  it("marks a section the drag has already shrunk to the rail", () => {
+    // The panel is at 40px but the pointer is still down, so nothing is folded
+    // yet — this is the gap where the crushed content used to show.
+    expect(preview({ video: 288, text: MEDIA_RAIL_PX })).toEqual(["text"])
+  })
+
+  it("says nothing while a drag is still above the snap point", () => {
+    expect(preview({ video: 288, text: VIDEO_PANE_TABLE_MIN_WIDTH })).toEqual([])
+  })
+
+  it("leaves an already folded section alone", () => {
+    // Its real rail is up. A preview over it would be a second copy of the
+    // same strip, and the preview is not a control.
+    expect(preview({ text: MEDIA_RAIL_PX }, ["text"])).toEqual([])
+  })
+
+  it("ignores a section that is not on screen", () => {
+    expect(preview({ video: MEDIA_RAIL_PX }, [], NO_VIDEO)).toEqual([])
+  })
+
+  it("ignores a size it could not read", () => {
+    // The panel throws before its group has laid out, and the hook turns that
+    // into null rather than a number.
+    expect(preview({ text: null })).toEqual([])
+  })
+
+  it("ignores zero, which is a hidden subtree rather than a rail", () => {
+    expect(preview({ text: 0 })).toEqual([])
+  })
+
+  it("returns the same array when the answer has not moved", () => {
+    // A drag fires this on every pointer move. Holding the reference is what
+    // keeps a gesture that never reaches a snap point free of re-renders.
+    const prev = preview({ text: MEDIA_RAIL_PX })
+    expect(preview({ text: MEDIA_RAIL_PX }, [], ALL, prev)).toBe(prev)
+    const none = preview({ text: 900 })
+    expect(preview({ text: 900 }, [], ALL, none)).toBe(none)
+  })
+
+  it("gives a fresh array when the drag crosses the snap point", () => {
+    const prev = preview({ text: 900 })
+    expect(preview({ text: MEDIA_RAIL_PX }, [], ALL, prev)).toEqual(["text"])
   })
 })
 

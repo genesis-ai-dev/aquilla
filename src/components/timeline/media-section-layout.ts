@@ -60,6 +60,9 @@ const EMPTY: CollapsedSections = []
 /** The body's two sections, in the order they sit on screen. */
 const BODY: readonly MediaSectionId[] = ["video", "text"]
 
+/** Every section, top to bottom then left to right. The canonical order. */
+const ALL: readonly MediaSectionId[] = ["timeline", "video", "text"]
+
 /**
  * Which sections exist at all right now.
  *
@@ -88,6 +91,42 @@ export function isSectionCollapsed(collapsed: CollapsedSections, id: MediaSectio
  */
 export function isRailSized(px: number): boolean {
   return px > 0 && px <= MEDIA_RAIL_PX + RAIL_TOLERANCE_PX
+}
+
+/**
+ * Which sections the pointer is currently holding at rail size, mid-drag.
+ *
+ * Dragging a divider past a section's snap point shrinks that panel to 40px
+ * immediately, but the fold is not COMMITTED until the pointer is released —
+ * that ordering is load-bearing and is why the rail was invisible until then
+ * (see the note on `onLayoutChanged` in useMediaSectionCollapse). In the gap
+ * the section was still rendering its real content, crushed into a 40px
+ * sliver: the text column's header and chips squeezed edge to edge, the
+ * picture reduced to a black stripe. Sam, 2026-09-03.
+ *
+ * So this is presentation only. It decides what to PAINT, never what is
+ * folded: nothing here writes state, freezes a box, or persists a size, and
+ * dragging back out clears it on the next pointer move.
+ *
+ * Returns `prev` unchanged when the answer has not moved, so a drag that never
+ * reaches a snap point costs no renders at all.
+ */
+export function railPreviewSections(
+  sizes: Partial<Record<MediaSectionId, number | null>>,
+  collapsed: CollapsedSections,
+  present: MediaSectionId[],
+  prev: CollapsedSections = EMPTY,
+): CollapsedSections {
+  const next = ALL.filter((id) => {
+    if (!present.includes(id)) return false
+    // Already folded: the real rail is up, and a preview over it would be a
+    // second copy of the same strip.
+    if (collapsed.includes(id)) return false
+    const px = sizes[id]
+    return typeof px === "number" && isRailSized(px)
+  })
+  const same = next.length === prev.length && next.every((id, i) => prev[i] === id)
+  return same ? prev : next
 }
 
 /**
@@ -325,8 +364,6 @@ export function isSeparatorDisabled(
 const KEY_PREFIX = "aquilla:mediaSectionsCollapsed:"
 
 const keyFor = (fileId: string) => `${KEY_PREFIX}${fileId}`
-
-const ALL: readonly MediaSectionId[] = ["timeline", "video", "text"]
 
 /** Nothing collapsed for anything that is not an explicit, well-formed list —
  *  private mode, a cleared store, a value from a future build. That default is

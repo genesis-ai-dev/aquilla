@@ -80,6 +80,30 @@ describe("useMediaSectionCollapse", () => {
     expect(result.current.isCollapsed("video")).toBe(false)
   })
 
+  it("never collapses or persists from a pointer-move layout either", () => {
+    // The mid-drag preview reads the same live sizes the fold logic does, so
+    // it is the obvious place to accidentally reintroduce the round-2 bug of
+    // committing a fold under a live pointer. It paints; it decides nothing.
+    const { result } = setup()
+    act(() => result.current.noteResize("video", 300))
+    act(() => result.current.notePointerLayout())
+    expect(result.current.isCollapsed("video")).toBe(false)
+    expect(result.current.isCollapsed("text")).toBe(false)
+    expect(localStorage.getItem("aquilla:video-pane-width")).toBeNull()
+    expect(localStorage.getItem(KEY("f1"))).toBeNull()
+  })
+
+  it("paints no preview when it cannot measure the panels", () => {
+    // Happy-dom renders no panel group, so every handle is null and every
+    // size read comes back null. Nothing to preview, and nothing that throws.
+    const { result } = setup()
+    act(() => result.current.notePointerLayout())
+    for (const id of ["timeline", "video", "text"] as const) {
+      expect(result.current.isPreviewingRail(id)).toBe(false)
+      expect(result.current.showsRail(id)).toBe(false)
+    }
+  })
+
   it("remembers the size a gesture ENDED at, not the ones it passed through", () => {
     // A drag from 288 to the rail passes 220 on its way past the floor. It
     // used to write 220 there, so the rail reopened the picture at its bare

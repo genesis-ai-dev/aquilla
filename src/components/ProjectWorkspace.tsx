@@ -255,19 +255,18 @@ import { TimingVideoWarningDialog } from "./timeline/TimingVideoWarningDialog"
 import { LinkVideoUrlDialog } from "./timeline/LinkVideoUrlDialog"
 import { ImportAudioVttDialog } from "./timeline/ImportAudioVttDialog"
 import { MediaVideoPane } from "./timeline/MediaVideoPane"
+// AQU-1119: the panels' min/max now come from `mediaPanelConstraints`, since
+// several of them depend on which sections are collapsed. What is left here is
+// the two stored sizes and the floors the persistence guards still check.
 import {
   shouldShowVideoPane,
   readStoredVideoPaneWidth,
   writeStoredVideoPaneWidth,
   VIDEO_PANE_MIN_WIDTH,
-  VIDEO_PANE_MAX_SHARE,
-  VIDEO_PANE_TABLE_MIN_WIDTH,
 } from "./timeline/video-pane-layout"
 import {
   readStoredTimelinePaneHeight,
   writeStoredTimelinePaneHeight,
-  MEDIA_BODY_MIN_HEIGHT,
-  TIMELINE_PANE_MAX_SHARE,
   TIMELINE_PANE_MIN_HEIGHT,
 } from "./timeline/timeline-pane-layout"
 import {
@@ -280,12 +279,8 @@ import {
 import { setVideoDurationSec, useVideoDurationSec } from "@/lib/timeline/video-duration"
 import { uiSlotRef } from "@/lib/ui-slots"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
-// Straight from the library, because `ui/resizable` wraps the COMPONENTS and
-// has no hooks to re-export. The timeline panel needs the imperative handle:
-// `defaultSize` is read once at mount and the panel is not remounted on a file
-// switch, so a stored per-file height can only be applied by asking the panel
-// to resize itself (see the effect that does it).
-import { usePanelRef } from "react-resizable-panels"
+import { MediaSectionRail } from "@/components/timeline/MediaSectionRail"
+import { useMediaSectionCollapse } from "@/components/timeline/useMediaSectionCollapse"
 import { TimingModeChangedDialog } from "./timeline/TimingModeChangedDialog"
 import { useTimingModeAck } from "@/hooks/useTimingModeAck"
 import { PeerPresence } from "./PeerPresence"
@@ -7896,7 +7891,24 @@ export function ProjectWorkspace() {
     })
   }, [t])
 
-  const timelinePanelRef = usePanelRef()
+  // AQU-1119: which media-lens sections are collapsed, per file, plus the
+  // panel handles and the constraint rows that follow from it.
+  const mediaSections = useMediaSectionCollapse({
+    fileId: activeFileId,
+    timelineStacked,
+    hasVideo: Boolean(activeFile?.coreMediaUrl),
+    // The rows stay mounted behind the rail — frozen and clipped, not
+    // unmounted — so a cell being edited would keep focus and keep taking
+    // keystrokes out of sight. Blurring runs the editor's real path: TipTap
+    // commits the text, and the row releases its collaboration lease.
+    onBeforeCollapseText: () => {
+      const active = document.activeElement
+      if (active instanceof HTMLElement && active.closest("[data-media-section='text']")) {
+        active.blur()
+      }
+    },
+  })
+  const timelinePanelRef = mediaSections.panelRefs.timeline
   useEffect(() => {
     // `timelineStacked` is a dependency, not just a guard, and it is the whole
     // fix for a bug this effect shipped with (AQU-1119): in the text lens the
@@ -7908,9 +7920,14 @@ export function ProjectWorkspace() {
     // for silently stopped being per file the moment anyone visited the text
     // lens.
     if (!activeFileId || !timelineStacked) return
+    // A collapsed timeline is pinned to its rail, so resizing it here would
+    // be a no-op at best — and on the file where the reader left it shut, a
+    // height restored underneath the rail is exactly the desync the pin
+    // exists to prevent. The rail's own button reopens it.
+    if (mediaSections.isCollapsed("timeline")) return
     timelinePanelRef.current?.resize(readStoredTimelinePaneHeight(activeFileId))
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the panel ref is stable
-  }, [activeFileId, timelineStacked])
+  }, [activeFileId, timelineStacked, mediaSections.collapsed])
 
   /**
    * Does the PICTURE own this file's transport?
@@ -10243,14 +10260,46 @@ export function ProjectWorkspace() {
                     id="media-timeline"
                     panelRef={timelinePanelRef}
                     defaultSize={readStoredTimelinePaneHeight(activeFile.id)}
-                    minSize={TIMELINE_PANE_MIN_HEIGHT}
-                    maxSize={TIMELINE_PANE_MAX_SHARE}
+                    {...mediaSections.constraints.timeline}
                     groupResizeBehavior="preserve-pixel-size"
+                    // The rail is positioned against this box.
+                    className="relative"
+                    // AQU-1119: a collapsed panel clips rather than reflows.
+                    // The library's own content box is `overflow: auto` and
+                    // spreads this after it, so without `hidden` the frozen
+                    // content would SCROLL inside the rail instead of being
+                    // hidden behind it.
+                    style={mediaSections.isCollapsed("timeline") ? { overflow: "hidden" } : undefined}
                     onResize={(size) => {
-                      if (size.inPixels >= TIMELINE_PANE_MIN_HEIGHT) {
+                      mediaSections.noteResize("timeline", size.inPixels)
+                      if (
+                        size.inPixels >= TIMELINE_PANE_MIN_HEIGHT
+                        && mediaSections.canPersist("timeline")
+                      ) {
                         writeStoredTimelinePaneHeight(activeFile.id, size.inPixels)
                       }
                     }}
+                  >
+                  {/* Rendered unconditionally, and only its inline style
+                      changes: adding or removing this wrapper on collapse
+                      would remount TimelineEditor, taking the portaled text
+                      header with it and resetting the per-file prefs guard,
+                      the viewport measurement and the follow state. Frozen at
+                      its last real size so nothing inside ever learns it got
+                      small. */}
+                  <div
+                    ref={mediaSections.registerContent("timeline")}
+                    data-media-section="timeline"
+                    className="flex h-full min-h-0 w-full min-w-0 flex-col"
+                    style={
+                      mediaSections.isCollapsed("timeline") && mediaSections.frozen.timeline
+                        ? {
+                            minWidth: mediaSections.frozen.timeline.width,
+                            minHeight: mediaSections.frozen.timeline.height,
+                          }
+                        : undefined
+                    }
+                    inert={mediaSections.isCollapsed("timeline") || undefined}
                   >
                   <TimelineEditor
                     cells={audioMergedCells}
@@ -10330,6 +10379,17 @@ export function ProjectWorkspace() {
                     // maintainer can change this" title would be a lie — a
                     // maintainer cannot change it here either.
                     hideTimingMode={isSubtitleFile}
+                    // AQU-1119: the timeline's own collapse control, and the
+                    // text section's — the latter because TimelineEditor owns
+                    // the header it portals into the table column's slot.
+                    onCollapseSection={() => mediaSections.collapse("timeline")}
+                    onCollapseTextSection={
+                      // Withheld on a file with no linked video: the table is
+                      // then the only thing in its row, and a flex row with
+                      // nothing in it is the one arrangement the layout cannot
+                      // hold.
+                      activeFile.coreMediaUrl ? () => mediaSections.collapse("text") : undefined
+                    }
                     onOpenRecording={handleOpenRecording}
                     project={editorProject ?? project ?? undefined}
                     onSelectCell={setTimelineSelectedCellId}
@@ -10380,8 +10440,23 @@ export function ProjectWorkspace() {
                     }}
                     linkingModeRequest={linkingModeRequest}
                   />
+                  </div>
+                  {mediaSections.isCollapsed("timeline") && (
+                    <MediaSectionRail
+                      section="timeline"
+                      orientation="horizontal"
+                      onExpand={() => mediaSections.expand("timeline")}
+                    />
+                  )}
                   </ResizablePanel>
-                  <ResizableHandle withHandle />
+                  {/* A pinned panel cannot be dragged, so the handle beside it
+                      must stop claiming it can: disabled drops its tab stop
+                      and its key handling rather than announcing a slider that
+                      will not move. */}
+                  <ResizableHandle
+                    withHandle
+                    disabled={mediaSections.separatorDisabled("timeline-body")}
+                  />
                 </>
               ) : null}
               {/* `minSize` is the only thing keeping the dialogue table usable
@@ -10389,10 +10464,7 @@ export function ProjectWorkspace() {
                   is the mechanism behind an existing browser pass's floor check
                   (browser-verify-media-table-sync.mjs asserts the table clears
                   80px on a 1280x700 window). */}
-              <ResizablePanel
-                id="media-body"
-                minSize={timelineStacked ? MEDIA_BODY_MIN_HEIGHT : undefined}
-              >
+              <ResizablePanel id="media-body" {...mediaSections.constraints.body}>
               {/* AQU-646: in the media lens a linked video docks to the LEFT of
                   the table, under the chip strip. Dragging the divider shut is
                   how you hide it; the table carries a pixel floor so a narrow
@@ -10402,18 +10474,43 @@ export function ProjectWorkspace() {
                 <>
                   <ResizablePanel
                     id="media-video"
+                    panelRef={mediaSections.panelRefs.video}
                     defaultSize={readStoredVideoPaneWidth()}
-                    minSize={VIDEO_PANE_MIN_WIDTH}
-                    // 2026-08-08 (Sam): let the divider travel well past half —
+                    // 2026-08-08 (Sam): the divider travels well past half —
                     // the table's own pixel floor is what protects legibility.
-                    maxSize={VIDEO_PANE_MAX_SHARE}
-                    collapsible
-                    collapsedSize={0}
+                    // AQU-1119 moved the rest of these here: the pane is
+                    // collapsible while OPEN so dragging it shut still works,
+                    // and pinned to the rail once closed so only the rail's
+                    // button can reopen it.
+                    {...mediaSections.constraints.video}
                     groupResizeBehavior="preserve-pixel-size"
+                    className="relative"
+                    style={mediaSections.isCollapsed("video") ? { overflow: "hidden" } : undefined}
                     onResize={(size) => {
-                      if (size.inPixels >= VIDEO_PANE_MIN_WIDTH) writeStoredVideoPaneWidth(size.inPixels)
+                      mediaSections.noteResize("video", size.inPixels)
+                      // `canPersist` is the new half: with the table railed the
+                      // picture legitimately measures the whole row, which
+                      // clears this floor and would overwrite the width the
+                      // reader actually chose.
+                      if (size.inPixels >= VIDEO_PANE_MIN_WIDTH && mediaSections.canPersist("video")) {
+                        writeStoredVideoPaneWidth(size.inPixels)
+                      }
                     }}
                   >
+                    <div
+                      ref={mediaSections.registerContent("video")}
+                      data-media-section="video"
+                      className="flex h-full min-h-0 w-full min-w-0 flex-col"
+                      style={
+                        mediaSections.isCollapsed("video") && mediaSections.frozen.video
+                          ? {
+                              minWidth: mediaSections.frozen.video.width,
+                              minHeight: mediaSections.frozen.video.height,
+                            }
+                          : undefined
+                      }
+                      inert={mediaSections.isCollapsed("video") || undefined}
+                    >
                     <MediaVideoPane
                       key={activeFile.id}
                       src={activeFile.coreMediaUrl}
@@ -10432,13 +10529,47 @@ export function ProjectWorkspace() {
                       targetDirectionMode={fileMeta.targetDirectionMode}
                       sourceTextDirection={fileMeta.sourceTextDirection}
                       targetTextDirection={fileMeta.targetTextDirection}
+                      onCollapse={
+                        timelineStacked ? () => mediaSections.collapse("video") : undefined
+                      }
                     />
+                    </div>
+                    {mediaSections.isCollapsed("video") && (
+                      <MediaSectionRail
+                        section="video"
+                        orientation="vertical"
+                        onExpand={() => mediaSections.expand("video")}
+                      />
+                    )}
                   </ResizablePanel>
-                  <ResizableHandle withHandle />
+                  <ResizableHandle
+                    withHandle
+                    disabled={mediaSections.separatorDisabled("video-table")}
+                  />
                 </>
               ) : null}
-              <ResizablePanel id="media-table" minSize={timelineStacked ? VIDEO_PANE_TABLE_MIN_WIDTH : undefined}>
-              <div className="flex h-full min-h-0 min-w-0 flex-col">
+              <ResizablePanel
+                id="media-table"
+                panelRef={mediaSections.panelRefs.text}
+                {...mediaSections.constraints.table}
+                className="relative"
+                style={mediaSections.isCollapsed("text") ? { overflow: "hidden" } : undefined}
+                onResize={(size) => mediaSections.noteResize("text", size.inPixels)}
+              >
+              <div
+                ref={mediaSections.registerContent("text")}
+                data-media-section="text"
+                className="flex h-full min-h-0 min-w-0 flex-col"
+                style={
+                  mediaSections.isCollapsed("text") && mediaSections.frozen.text
+                    ? {
+                        minWidth: mediaSections.frozen.text.width,
+                        minHeight: mediaSections.frozen.text.height,
+                      }
+                    : undefined
+                }
+                inert={mediaSections.isCollapsed("text") || undefined}
+              >
               {/* 2026-08-08 (Sam): the chip strip heads the TEXT column only —
                   TimelineEditor portals it here, and the video column carries
                   its own "Video" header at the same height. */}
@@ -10522,7 +10653,14 @@ export function ProjectWorkspace() {
             upstreamStaleCellIds={upstreamStaleCellIds}
             assignmentsByCellId={assignmentsByCellId}
             onVisibleRefChange={setTrackedCellRef}
-            onVisibleCellIdsChange={handleVisibleCellIdsChange}
+            // AQU-1119: the rows stay mounted behind the rail, frozen at their
+            // last real size — so without this they would keep reporting
+            // themselves as "on screen" and translate-as-read would queue work
+            // for lines nobody can see. Undefined short-circuits the whole
+            // reporter, and its cleanup emits an empty set on the way in.
+            onVisibleCellIdsChange={
+              mediaSections.isCollapsed("text") ? undefined : handleVisibleCellIdsChange
+            }
             // Stacked mode already shows the toolbar in the media header row
             // above the timeline — don't render it twice. Chapter picker +
             // file options live in the in-editor row above Source/Target.
@@ -10530,6 +10668,13 @@ export function ProjectWorkspace() {
           />
               </div>
               </div>
+              {mediaSections.isCollapsed("text") && (
+                <MediaSectionRail
+                  section="text"
+                  orientation="vertical"
+                  onExpand={() => mediaSections.expand("text")}
+                />
+              )}
               </ResizablePanel>
               </ResizablePanelGroup>
               </ResizablePanel>

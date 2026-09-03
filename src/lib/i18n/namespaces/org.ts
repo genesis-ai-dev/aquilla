@@ -390,6 +390,10 @@ export const org = defineNamespace({
     "org.projectOverview.copyCsv": "Copy CSV",
     "org.projectOverview.downloadCsvTooltip": "Download the file list below as a .csv file",
     "org.projectOverview.downloadCsv": "Download CSV",
+    "org.projectOverview.downloadOriginals": "Download all originals",
+    "org.projectOverview.downloadOriginalsTooltip":
+      "Download every original imported source file as a zip",
+    "org.projectOverview.downloadOriginalAria": "Download original {fileName}",
     "org.projectOverview.copyCsvFailed": "Couldn't copy to clipboard.",
     "org.projectOverview.filterFilesPlaceholder": "Filter files by name…",
     "org.projectOverview.filterFilesAria": "Filter files by name",
@@ -1485,6 +1489,11 @@ export const org = defineNamespace({
           total: "Total number of cells in this file.",
           words: "Total word count in this file.",
         },
+      },
+      "org.projectOverview.downloadOriginalAria": {
+        description:
+          "Accessible name for the icon-only button on a project-overview file row that downloads the exact original imported file.",
+        placeholders: { fileName: "The file's display name — not translated." },
       },
       "org.projectOverview.moreFilesShowAll": {
         description: "Link below the per-file breakdown list that reveals the files hidden past the display cap.",

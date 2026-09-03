@@ -70,6 +70,17 @@ describe("changed-file E2E impact selection", () => {
     ])
   })
 
+  it("maps original-source download to the export journey", () => {
+    const available = [...specs, "e2e/specs/editor/export.smoke.spec.ts"]
+    expect(selectAffectedE2E(["src/lib/sync/original-download.ts"], available).specs).toContain(
+      "e2e/specs/editor/export.smoke.spec.ts",
+    )
+    expect(selectAffectedE2E(
+      ["sync-worker/src/events/original-download-route.ts"],
+      available,
+    ).specs).toContain("e2e/specs/editor/export.smoke.spec.ts")
+  })
+
   it("does not boot a browser for docs and unit-test-only changes", () => {
     expect(selectAffectedE2E([
       "docs/E2E.md",

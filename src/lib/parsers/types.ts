@@ -663,6 +663,12 @@ export interface FileReference {
    */
   trackOverrides?: PersistedTrackOverrides | null
   /**
+   * AQU-656: true when this file has an original import blob. Set on
+   * document imports that uploaded source bytes; absent/false otherwise
+   * (audio/video, Codex-migrated, pre-sidecar).
+   */
+  hasOriginalSource?: boolean
+  /**
    * The files-table `role` column. `"source"` for every ordinary import — the
    * value that matters is `"audio-cues"` (see `AUDIO_CUES_ROLE`), which marks a
    * hidden timeline-only sibling. Deliberately NOT folded into `type`: the

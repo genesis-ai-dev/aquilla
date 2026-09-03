@@ -34,6 +34,8 @@ interface FileRowRaw {
   word_count: number
   last_edit_at: number | null
   deleted_at: number | null
+  /** AQU-656: true when file_source_blobs has a row (pointer or legacy inline). */
+  has_original_source: boolean | number | null
 }
 
 interface FileSummary {
@@ -92,6 +94,8 @@ interface FileSummary {
   lastEditAt: number | null
   /** AQU-272: epoch-ms when this file was soft-deleted, or null if active. */
   deletedAt: number | null
+  /** AQU-656: original import blob exists (R2 or legacy raw_source). */
+  hasOriginalSource: boolean
 }
 
 /** Shape-check the recorded correction. `scale` is the only field that must be
@@ -154,6 +158,7 @@ function mapRow(row: FileRowRaw): FileSummary {
     wordCount: row.word_count,
     lastEditAt: row.last_edit_at,
     deletedAt: row.deleted_at ?? null,
+    hasOriginalSource: Boolean(row.has_original_source),
   }
 }
 
@@ -212,14 +217,16 @@ export async function handleFilesReadRequest(
     "COALESCE(p.total_count, f.cell_count) AS cell_count, " +
     "CASE WHEN p.file_id IS NULL THEN f.approved_count ELSE COALESCE((SELECT SUM((entry.key::integer >= LEAST(15, GREATEST(1, CASE WHEN (ps.settings::jsonb->>'validationCount') ~ '^[0-9]+$' THEN (ps.settings::jsonb->>'validationCount')::integer ELSE 1 END)))::integer * entry.value::integer) FROM jsonb_each_text(p.validator_histogram) entry), 0) END AS approved_count, " +
     "COALESCE(p.filled_count, f.filled_count) AS filled_count, " +
-    "f.word_count, f.last_edit_at, f.deleted_at"
+    "f.word_count, f.last_edit_at, f.deleted_at, " +
+    "(b.file_id IS NOT NULL) AS has_original_source"
   const joins =
     // AQU-538: file_section_progress now materializes one row per target lane.
     // The files list is a cross-project legacy surface — pin it to the default
     // lane ('') so N=1 stays byte-identical and N>1 files don't fan out into
     // one listing row per lane.
     " LEFT JOIN file_section_progress p ON p.project_id = f.project_id AND p.file_id = f.id AND p.scope = 'file' AND p.section_key = '' AND p.target_lang = ''" +
-    " LEFT JOIN project_settings ps ON ps.project_id = f.project_id"
+    " LEFT JOIN project_settings ps ON ps.project_id = f.project_id" +
+    " LEFT JOIN file_source_blobs b ON b.file_id = f.id AND b.project_id = f.project_id"
 
   // ?trash=1 returns soft-deleted files only; default returns active files only.
   const trash = url.searchParams.get("trash") === "1"

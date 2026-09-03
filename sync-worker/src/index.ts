@@ -55,6 +55,8 @@ import { handleMigrateUsersReadRequest } from "./events/migrate-users-read-route
 import { handleSourceUploadRequest } from "./events/source-upload-route"
 import { handleExportSourceRequest } from "./events/export-route"
 import { handleExportBundleRequest } from "./events/export-bundle-route"
+import { handleOriginalDownloadRequest } from "./events/original-download-route"
+import { handleOriginalsBundleRequest } from "./events/originals-bundle-route"
 import { handleRebuildProjectionRequest } from "./events/rebuild"
 import { handleRebuildFtsRequest } from "./events/rebuild-fts"
 import { handleSearchReadRequest, handleSearchPassagesRequest } from "./events/search-route"
@@ -395,6 +397,10 @@ const worker = {
     if (exportSourceResponse) return exportSourceResponse
     const exportBundleResponse = await handleExportBundleRequest(request, env)
     if (exportBundleResponse) return exportBundleResponse
+    const originalDownloadResponse = await handleOriginalDownloadRequest(request, env)
+    if (originalDownloadResponse) return originalDownloadResponse
+    const originalsBundleResponse = await handleOriginalsBundleRequest(request, env)
+    if (originalsBundleResponse) return originalsBundleResponse
     const eventsWriteResponse = await handleEventsWriteRequest(request, env, ctx)
     if (eventsWriteResponse) return withCors(eventsWriteResponse, request)
 

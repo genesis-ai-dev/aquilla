@@ -1602,6 +1602,8 @@ describe("ProjectOverview CSV export (AQU-500)", () => {
     await waitFor(() => expect(screen.getAllByTestId("file-row").length).toBe(1))
     expect(screen.queryByTestId("export-csv-copy")).not.toBeInTheDocument()
     expect(screen.queryByTestId("export-csv-download")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("download-originals-zip")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("download-original-file")).not.toBeInTheDocument()
   })
 
   it("copies the visible rows as CSV, honoring the current sort/filter", async () => {
@@ -1659,6 +1661,33 @@ describe("ProjectOverview CSV export (AQU-500)", () => {
     const [blob, filename] = downloadBlob.mock.calls[0]
     expect(blob).toBeInstanceOf(Blob)
     expect(filename).toBe("My-Project-progress.csv")
+  })
+
+  it("shows Download all originals and per-file download when a blob exists (AQU-656)", async () => {
+    useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), canExport: true })
+    useFiles([
+      { ...fileWith("f1", "Genesis.usfm"), hasOriginalSource: true },
+      fileWith("f2", "Notes.md"),
+    ])
+
+    renderOverview()
+
+    expect(await screen.findByTestId("download-originals-zip")).toBeInTheDocument()
+    expect(screen.getByTestId("download-originals-zip").tagName).toBe("BUTTON")
+    const original = screen.getByTestId("download-original-file")
+    expect(original.tagName).toBe("BUTTON")
+    expect(original).toHaveAttribute("aria-label", "Download original Genesis.usfm")
+    expect(screen.queryByRole("button", { name: "Download original Notes.md" })).not.toBeInTheDocument()
+  })
+
+  it("hides original-download controls when no file has a stored original", async () => {
+    useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), canExport: true })
+    useFiles([fileWith("f1", "Genesis.usfm")])
+
+    renderOverview()
+    await waitFor(() => expect(screen.getAllByTestId("file-row").length).toBe(1))
+    expect(screen.queryByTestId("download-originals-zip")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("download-original-file")).not.toBeInTheDocument()
   })
 })
 

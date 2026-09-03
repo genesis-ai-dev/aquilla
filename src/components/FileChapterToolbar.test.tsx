@@ -128,7 +128,8 @@ describe("FileChapterToolbar draft as you read", () => {
     expect(onChange).toHaveBeenCalledWith(true)
   })
 
-  it("explains what Draft as you read does, as visible copy and as the item's accessible description", async () => {
+  it("explains what Draft as you read does behind an info icon, and exposes it as the item's accessible description", async () => {
+    const onChange = vi.fn()
     render(
       <FileChapterToolbar
         lens="text"
@@ -139,7 +140,7 @@ describe("FileChapterToolbar draft as you read", () => {
         onCheckToggle={vi.fn()}
         menuItems={[]}
         translateAsReadEnabled
-        onTranslateAsReadChange={vi.fn()}
+        onTranslateAsReadChange={onChange}
       />,
     )
 
@@ -148,12 +149,19 @@ describe("FileChapterToolbar draft as you read", () => {
     // On/off state is carried by the checkbox role, so the mode-ness is
     // visible without extra copy.
     expect(toggle).toBeChecked()
-    // The four guarantees from AQU-1078, on the item itself rather than a
-    // hover tooltip.
+    // The four guarantees from AQU-1078 reach assistive tech as the item's
+    // description, never as part of its name.
     const help = "While on, AI drafts empty cells as you scroll and refreshes existing AI drafts when better validated examples appear. Every draft needs human review. Cells a person translated are never touched."
-    expect(toggle).toHaveTextContent(help)
-    expect(toggle).toHaveAccessibleDescription(help)
     expect(toggle).toHaveAccessibleName("Draft as you read")
+    expect(toggle).toHaveAccessibleDescription(help)
+    // Sighted users get the same text from the info icon at the end of the
+    // row: hover shows it, and clicking the icon must not flip the toggle.
+    const hint = toggle.querySelector("[data-slot=tooltip-trigger]") as HTMLElement
+    expect(hint).not.toBeNull()
+    await userEvent.hover(hint)
+    expect(await screen.findByRole("tooltip", { name: help })).toBeVisible()
+    await userEvent.click(hint)
+    expect(onChange).not.toHaveBeenCalled()
   })
 
   it("keeps Draft as you read disabled in File options when unavailable", async () => {

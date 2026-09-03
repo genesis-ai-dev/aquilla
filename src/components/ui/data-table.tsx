@@ -7,9 +7,15 @@ import {
   useReactTable,
   type ColumnDef,
   type FilterFn,
+  type Row,
   type SortingState,
   type Table as TanStackTable,
 } from "@tanstack/react-table"
+import {
+  parseColWidthPx,
+  useVirtualColumnWidths,
+  VirtualizedDataTableBody,
+} from "@/components/ui/data-table-virtual"
 
 import {
   InputGroup,
@@ -102,6 +108,156 @@ function hiddenColumnVisibility<TData, TValue>(
   return visibility
 }
 
+function DataTableColGroup<TData>({
+  table,
+  widths,
+}: {
+  table: TanStackTable<TData>
+  widths?: number[] | null
+}) {
+  if (widths && widths.length > 0) {
+    return (
+      <colgroup>
+        {widths.map((width, i) => (
+          <col key={i} style={{ width }} />
+        ))}
+      </colgroup>
+    )
+  }
+  return (
+    <colgroup>
+      {table.getVisibleLeafColumns().map((col) => (
+        <col
+          key={col.id}
+          className={cn(
+            col.id === "expand" && "w-8",
+            columnMetaClass(col.columnDef.meta),
+          )}
+        />
+      ))}
+    </colgroup>
+  )
+}
+
+function DataTableHeaderTable<TData>({
+  table,
+  dense,
+  tableClassName,
+  sticky,
+}: {
+  table: TanStackTable<TData>
+  dense: boolean
+  tableClassName?: string
+  sticky?: boolean
+}) {
+  const widths = useVirtualColumnWidths()
+  return (
+    <table
+      data-slot="table"
+      className={cn(
+        "w-full caption-bottom text-sm",
+        widths && "table-fixed",
+        tableClassName,
+      )}
+    >
+      <DataTableColGroup table={table} widths={widths} />
+      <TableHeader>
+        {table.getHeaderGroups().map((headerGroup) => (
+          <TableRow key={headerGroup.id} className="hover:bg-transparent">
+            {headerGroup.headers.map((header) => {
+              if (!header.column.getIsVisible()) return null
+              return (
+                <TableHead
+                  key={header.id}
+                  className={cn(
+                    dense ? "h-9 py-1.5" : "h-11",
+                    header.column.id === "expand" ? "w-8" : undefined,
+                    columnMetaClass(header.column.columnDef.meta),
+                    sticky && "bg-card",
+                  )}
+                >
+                  {header.isPlaceholder
+                    ? null
+                    : flexRender(header.column.columnDef.header, header.getContext())}
+                </TableHead>
+              )
+            })}
+          </TableRow>
+        ))}
+      </TableHeader>
+    </table>
+  )
+}
+
+function DataTableVirtualRowTable<TData>({
+  table,
+  tableClassName,
+  children,
+}: {
+  table: TanStackTable<TData>
+  tableClassName?: string
+  children: React.ReactNode
+}) {
+  const widths = useVirtualColumnWidths()
+  return (
+    <table
+      data-slot="table"
+      className={cn(
+        "w-full caption-bottom text-sm",
+        widths && "table-fixed",
+        tableClassName,
+      )}
+    >
+      <DataTableColGroup table={table} widths={widths} />
+      <tbody data-slot="table-body">{children}</tbody>
+    </table>
+  )
+}
+
+function dataTableRowCells<TData>(row: Row<TData>, dense: boolean) {
+  return row.getVisibleCells().map((cell) => (
+    <TableCell
+      key={cell.id}
+      className={cn(
+        dense ? "py-1.5" : "py-2.5",
+        "overflow-hidden",
+        columnMetaClass(cell.column.columnDef.meta),
+      )}
+    >
+      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+    </TableCell>
+  ))
+}
+
+function dataTableRowProps<TData>(
+  row: Row<TData>,
+  {
+    rowClassName,
+    onRowClick,
+    getRowAttributes,
+    hasMenu,
+  }: {
+    rowClassName?: string | ((row: TData) => string | undefined)
+    onRowClick?: (row: TData) => void
+    getRowAttributes?: (
+      row: TData,
+    ) => Record<string, string | number | undefined | null> | undefined
+    hasMenu: boolean
+  },
+) {
+  return {
+    "data-state": row.getIsSelected() && "selected",
+    ...getRowAttributes?.(row.original),
+    className: cn(
+      hasMenu && "group",
+      typeof rowClassName === "function"
+        ? rowClassName(row.original)
+        : rowClassName,
+    ),
+    onClick: onRowClick ? () => onRowClick(row.original) : undefined,
+  } as const
+}
+
 /**
  * Docs-aligned data table shell — see
  * https://ui.shadcn.com/docs/components/base/data-table
@@ -173,7 +329,8 @@ interface DataTableProps<TData, TValue> {
   tableClassName?: string
   /**
    * Fill a flex parent and scroll only the table body — keeps search/toolbar
-   * pinned above while rows scroll (in-card portfolio panels).
+   * pinned above while rows scroll (in-card portfolio panels). When rows are
+   * present, the body is a LegendList so large directories stay cheap to paint.
    */
   fillHeight?: boolean
   /**
@@ -251,10 +408,91 @@ function DataTable<TData, TValue>({
 
   const toolbarNode = typeof toolbar === "function" ? toolbar(table) : toolbar
   const emptyStateNode = typeof emptyState === "function" ? emptyState(table) : emptyState
-  const hasRows = table.getRowModel().rows.length > 0
+  const tableRows = table.getRowModel().rows
+  const hasRows = tableRows.length > 0
   const showEmpty = !loading && !hasRows && emptyStateNode
   const statusLabel = loadingLabel ?? t("common.loadingSpinner")
   const visibleColumnCount = table.getVisibleLeafColumns().length
+  const virtualize = fillHeight && hasRows && !loading && !showEmpty
+  const columnWidthHints = React.useMemo(
+    () =>
+      table.getVisibleLeafColumns().map((col) =>
+        col.id === "expand" ? 32 : parseColWidthPx(columnMetaClass(col.columnDef.meta)),
+      ),
+    // `columns` / visibility, not `table` — useReactTable returns a new object
+    // every render and would rebuild the ResizeObserver loop.
+    [visibleColumnCount, columns, columnVisibility],
+  )
+
+  const virtualExtraData = React.useMemo(
+    () => ({
+      sorting,
+      dense,
+      renderSubRow,
+      renderRowMenuItems,
+      loadingMore,
+      hasMore,
+    }),
+    [sorting, dense, renderSubRow, renderRowMenuItems, loadingMore, hasMore],
+  )
+
+  const renderVirtualRow = React.useCallback(
+    (row: Row<TData>) => {
+      const sub = renderSubRow?.(row.original)
+      const menuItems = renderRowMenuItems?.(row.original) ?? null
+      const cells = dataTableRowCells(row, dense)
+      const rowProps = dataTableRowProps(row, {
+        rowClassName,
+        onRowClick,
+        getRowAttributes,
+        hasMenu: Boolean(menuItems),
+      })
+      return (
+        <DataTableVirtualRowTable table={table} tableClassName={tableClassName}>
+          {menuItems ? (
+            <DataTableRowMenu rowProps={rowProps} items={menuItems}>
+              {cells}
+            </DataTableRowMenu>
+          ) : (
+            <TableRow {...rowProps}>{cells}</TableRow>
+          )}
+          {sub}
+        </DataTableVirtualRowTable>
+      )
+    },
+    [
+      table,
+      tableClassName,
+      dense,
+      renderSubRow,
+      renderRowMenuItems,
+      rowClassName,
+      onRowClick,
+      getRowAttributes,
+    ],
+  )
+
+  const loadMoreFooter =
+    (footer || hasMore || loadingMore) && hasRows && !loading ? (
+      <div
+        role="status"
+        data-testid={loadMoreTestId}
+        className={cn(
+          "flex items-center justify-center gap-2 text-xs text-muted-foreground",
+          dense ? "py-1.5" : "py-2.5",
+        )}
+      >
+        {footer}
+        {(hasMore || loadingMore) && onLoadMore ? (
+          loadingMore ? (
+            <>
+              <Spinner className="size-3" />
+              {t("common.loadingSpinner")}
+            </>
+          ) : null
+        ) : null}
+      </div>
+    ) : null
 
   return (
     <div
@@ -305,7 +543,9 @@ function DataTable<TData, TValue>({
           // `overflow-visible` chrome. overflow-auto keeps sticky headers
           // and lets wide columns scroll horizontally in the same port.
           fillHeight
-            ? "min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain [&_thead]:sticky [&_thead]:top-0 [&_thead]:z-10 [&_thead]:bg-card"
+            ? virtualize
+              ? "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+              : "min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain [&_thead]:sticky [&_thead]:top-0 [&_thead]:z-10 [&_thead]:bg-card"
             : "overflow-hidden",
         )}
         data-testid={testId}
@@ -315,6 +555,24 @@ function DataTable<TData, TValue>({
       >
         {showEmpty ? (
           emptyStateNode
+        ) : virtualize ? (
+          <VirtualizedDataTableBody
+            rows={tableRows}
+            extraData={virtualExtraData}
+            estimatedItemSize={dense ? 36 : 44}
+            columnWidthHints={columnWidthHints}
+            header={
+              <DataTableHeaderTable
+                table={table}
+                dense={dense}
+                tableClassName={tableClassName}
+                sticky
+              />
+            }
+            renderRow={renderVirtualRow}
+            onEndReached={hasMore && onLoadMore && !loadingMore ? onLoadMore : undefined}
+            footer={loadMoreFooter}
+          />
         ) : (
           <Table className={tableClassName}>
             <TableHeader>
@@ -361,31 +619,16 @@ function DataTable<TData, TValue>({
                   </TableRow>
                 ))
               ) : hasRows ? (
-                table.getRowModel().rows.map((row) => {
+                tableRows.map((row) => {
                   const sub = renderSubRow?.(row.original)
                   const menuItems = renderRowMenuItems?.(row.original) ?? null
-                  const cells = row.getVisibleCells().map((cell) => (
-                    <TableCell
-                      key={cell.id}
-                      className={cn(
-                        dense ? "py-1.5" : "py-2.5",
-                        columnMetaClass(cell.column.columnDef.meta),
-                      )}
-                    >
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </TableCell>
-                  ))
-                  const rowProps = {
-                    "data-state": row.getIsSelected() && "selected",
-                    ...getRowAttributes?.(row.original),
-                    className: cn(
-                      menuItems && "group",
-                      typeof rowClassName === "function"
-                        ? rowClassName(row.original)
-                        : rowClassName,
-                    ),
-                    onClick: onRowClick ? () => onRowClick(row.original) : undefined,
-                  } as const
+                  const cells = dataTableRowCells(row, dense)
+                  const rowProps = dataTableRowProps(row, {
+                    rowClassName,
+                    onRowClick,
+                    getRowAttributes,
+                    hasMenu: Boolean(menuItems),
+                  })
                   return (
                     <React.Fragment key={row.id}>
                       {menuItems ? (

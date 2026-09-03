@@ -6,6 +6,7 @@ import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, within } from "@testing-library/react"
 import type { ColumnDef } from "@tanstack/react-table"
 import { DataTable, DataTableColumnHeader, DataTableRowActionsButton } from "./data-table"
+import { allocateColumnWidths } from "./data-table-virtual"
 import { MenuItem } from "./menu-parts"
 
 interface Row {
@@ -192,6 +193,57 @@ describe("DataTable", () => {
     const shell = screen.getByTestId("fill-table")
     expect(shell).toHaveClass("min-w-0")
     expect(shell.parentElement).toHaveClass("min-w-0")
+  })
+
+  it("virtualizes fillHeight rows with LegendList while keeping names queryable", () => {
+    render(
+      <DataTable
+        columns={columns}
+        data={rows}
+        getRowId={(r) => String(r.id)}
+        fillHeight
+      />,
+    )
+    expect(screen.getByTestId("legend-list-mock")).toBeInTheDocument()
+    expect(bodyNames()).toEqual(["Alpha", "Beta", "Gamma"])
+    const htmlTable = document.querySelector('[data-slot="table"]')
+    expect(htmlTable).toHaveClass("w-full")
+    expect(htmlTable).not.toHaveClass("min-w-max")
+  })
+
+  it("gives the name column leftover space with a 16rem floor", () => {
+    const hints = [null, null, 104, 104, 104, 120, 144, 152, 120, 40]
+    const wide = allocateColumnWidths(hints, 2000)
+    expect(wide[0]).toBe(2000 - 888 - 160)
+    expect(wide[1]).toBe(160)
+    expect(wide.slice(2)).toEqual([104, 104, 104, 120, 144, 152, 120, 40])
+
+    const fitted = allocateColumnWidths(hints, 1168)
+    expect(fitted.reduce((sum, w) => sum + w, 0)).toBeLessThanOrEqual(1168)
+    expect(fitted[0]).toBeGreaterThan(200)
+  })
+
+  it("keeps a non-fillHeight table as a single HTML table", () => {
+    render(
+      <DataTable columns={columns} data={rows} getRowId={(r) => String(r.id)} />,
+    )
+    expect(screen.queryByTestId("legend-list-mock")).not.toBeInTheDocument()
+    expect(screen.getAllByRole("table")).toHaveLength(1)
+  })
+
+  it("exposes the load-more sentinel in a fillHeight footer", () => {
+    render(
+      <DataTable
+        columns={columns}
+        data={rows}
+        getRowId={(r) => String(r.id)}
+        fillHeight
+        hasMore
+        onLoadMore={vi.fn()}
+        loadMoreTestId="fill-load-more"
+      />,
+    )
+    expect(screen.getByTestId("fill-load-more")).toBeInTheDocument()
   })
 
   it("applies dense row padding when dense is set", () => {

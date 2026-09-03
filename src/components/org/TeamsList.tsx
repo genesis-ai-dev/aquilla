@@ -196,8 +196,9 @@ export function TeamsList() {
       header={<OrgBreadcrumb section="Teams" />}
       statusBar={null}
       main={
-        <Page size="wide">
+        <Page size="wide" fill>
           <PageHeader
+            className="shrink-0"
             title={t("editor.navTitle.teams")}
             description={t("org.teamsList.pageDescription")}
             inset={false}
@@ -297,7 +298,7 @@ export function TeamsList() {
           ) : (
             <>
               {directory.error ? (
-                <p className="text-sm text-destructive">{directory.error}</p>
+                <p className="shrink-0 text-sm text-destructive">{directory.error}</p>
               ) : null}
               <DataTable
               columns={columns}
@@ -381,6 +382,7 @@ export function TeamsList() {
               testId="org-teams-table"
               className={ADMIN_TABLE_PANEL_CLASS}
               dense
+              fillHeight
             />
             </>
           )}

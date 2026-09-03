@@ -150,12 +150,14 @@ describe("OrgProjectsDataTable lane chips (AQU-538 §3.2)", () => {
     )
 
     const table = screen.getByTestId("project-table")
-    expect(table).toHaveClass("min-w-0", "w-full", "overflow-auto")
+    expect(table).toHaveClass("min-w-0", "w-full", "overflow-hidden")
     expect(table.className).not.toContain("overflow-x-hidden")
-    expect(table.className).toContain("[&_[data-slot=table-container]]:overflow-visible")
+    expect(screen.getByTestId("legend-list-mock")).toBeInTheDocument()
+    expect(table.querySelector(".overflow-x-auto")).toBeTruthy()
 
     const htmlTable = table.querySelector('[data-slot="table"]')
-    expect(htmlTable).not.toHaveClass("table-fixed")
+    expect(htmlTable).toHaveClass("w-full")
+    expect(htmlTable).not.toHaveClass("min-w-max")
 
     const nameCell = screen.getByTestId("project-table-name").closest("td")
     expect(nameCell).toHaveClass("min-w-[12rem]")

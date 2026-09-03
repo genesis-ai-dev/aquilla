@@ -216,9 +216,9 @@ export function OrgProjectsPage() {
       header={<OrgBreadcrumb section="Projects" />}
       statusBar={null}
       main={
-        <Page size="full">
+        <Page size="full" fill>
           {/* Title matches Teams/Members max width; table uses the full content well. */}
-          <div className="max-w-6xl">
+          <div className="max-w-6xl shrink-0">
             <PageHeader
               title={t("nav.projects")}
               description={
@@ -230,95 +230,97 @@ export function OrgProjectsPage() {
             />
           </div>
           {portfolio.error || directory.error ? (
-            <p className="max-w-6xl text-sm text-destructive">{directory.error ?? portfolio.error}</p>
+            <p className="max-w-6xl shrink-0 text-sm text-destructive">{directory.error ?? portfolio.error}</p>
           ) : (
-            <OrgProjectsDataTable
-              projects={visibleProjects}
-              now={portfolio.now}
-              roleByProjectId={portfolio.roleByProjectId}
-              defaultLaneLabelByProjectId={portfolio.defaultLaneLabelByProjectId}
-              filesByProjectId={portfolio.filesByProjectId}
-              orgId={activeOrgId}
-              jwt={jwt}
-              author={session?.username}
-              allowSelfAssignment={orgSettings.allowSelfAssignment}
-              viewerUsername={username}
-              onLanesChanged={() => {
-                portfolio.bumpRefresh()
-                setDirectoryTick((tick) => tick + 1)
-              }}
-              initialLens={statusFilter === "attention" ? "attention" : projectLens}
-              loading={isPageLoading}
-              loadingLabel={t("org.projectsList.loadingLabel")}
-              searchValue={projectQuery}
-              onSearchChange={setProjectQuery}
-              searching={!isGuestOrg && directory.searching}
-              hasMore={!isGuestOrg && directory.hasMore}
-              onLoadMore={directory.loadMore}
-              loadingMore={directory.loadingMore}
-              toolbarLeading={
-                // AQU-1044: the four narrowing dimensions (Status, PM, Role,
-                // Updated) live in one Sort by menu — one submenu each. The
-                // toolbar row is still a flex/wrap track: further sibling
-                // controls slot in next to it, no wrapper needed.
-                <ProjectSortMenu
-                  status={statusFilter}
-                  onStatusChange={setStatusFilter}
-                  pm={activePmFilter}
-                  pmUsernames={pmUsernames}
-                  showUnassignedPm={showUnassignedPm}
-                  viewerUsername={username}
-                  onPmChange={setPmFilter}
-                  role={activeRoleFilter}
-                  roleNames={roleNames}
-                  onRoleChange={setRoleFilter}
-                  updated={activeUpdatedFilter}
-                  onUpdatedChange={setUpdatedFilter}
-                  className="bg-card"
-                />
-              }
-              toolbarTrailing={
-                !isGuestOrg && activeOrgId != null ? (
-                  <div className="ml-auto shrink-0">
-                    <ProjectCreateDialog
-                      orgId={activeOrgId}
-                      onCreated={handleCreated}
-                      linkableProjects={accessibleProjects}
-                    />
-                  </div>
-                ) : null
-              }
-              emptyTitle={
-                noProjects
-                  ? isGuestOrg
-                    ? t("org.guestOrgHome.emptyTitle", { orgName: guestOrgName })
-                    : t("org.orgHome.projectsPanel.emptyTitle")
-                  : activePmFilter !== PM_FILTER_ALL ||
-                      activeRoleFilter !== ROLE_FILTER_ALL ||
-                      activeUpdatedFilter !== UPDATED_FILTER_ANY
-                    ? // AQU-1040/AQU-1042/AQU-1043: a filter combination that matches
-                      // nothing is a filtered-empty table, not an empty org.
-                      // AQU-1027: name the reason when the viewer manages nothing at
-                      // all here, rather than blaming the filter combination.
-                      activePmFilter === PM_FILTER_MINE && managesNone
-                      ? t("org.orgProjectsPage.pmFilter.mineEmptyTitle")
-                      : t("org.orgHome.projectsPanel.noMatchingProjects")
-                    : statusFilter === "stalled"
-                      ? t("org.orgHome.emptyTitle.stalled")
-                      : statusFilter === "attention"
-                        ? t("org.orgHome.emptyTitle.attention")
-                        : statusFilter === "overdue"
-                          ? t("org.orgHome.emptyTitle.overdue")
-                          : t("org.orgHome.projectsPanel.emptyTitle")
-              }
-              emptyDescription={
-                noProjects
-                  ? isGuestOrg
-                    ? t("org.guestOrgHome.emptyDescription")
-                    : t("org.overview.emptyDescription")
-                  : undefined
-              }
-            />
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+              <OrgProjectsDataTable
+                projects={visibleProjects}
+                now={portfolio.now}
+                roleByProjectId={portfolio.roleByProjectId}
+                defaultLaneLabelByProjectId={portfolio.defaultLaneLabelByProjectId}
+                filesByProjectId={portfolio.filesByProjectId}
+                orgId={activeOrgId}
+                jwt={jwt}
+                author={session?.username}
+                allowSelfAssignment={orgSettings.allowSelfAssignment}
+                viewerUsername={username}
+                onLanesChanged={() => {
+                  portfolio.bumpRefresh()
+                  setDirectoryTick((tick) => tick + 1)
+                }}
+                initialLens={statusFilter === "attention" ? "attention" : projectLens}
+                loading={isPageLoading}
+                loadingLabel={t("org.projectsList.loadingLabel")}
+                searchValue={projectQuery}
+                onSearchChange={setProjectQuery}
+                searching={!isGuestOrg && directory.searching}
+                hasMore={!isGuestOrg && directory.hasMore}
+                onLoadMore={directory.loadMore}
+                loadingMore={directory.loadingMore}
+                toolbarLeading={
+                  // AQU-1044: the four narrowing dimensions (Status, PM, Role,
+                  // Updated) live in one Sort by menu — one submenu each. The
+                  // toolbar row is still a flex/wrap track: further sibling
+                  // controls slot in next to it, no wrapper needed.
+                  <ProjectSortMenu
+                    status={statusFilter}
+                    onStatusChange={setStatusFilter}
+                    pm={activePmFilter}
+                    pmUsernames={pmUsernames}
+                    showUnassignedPm={showUnassignedPm}
+                    viewerUsername={username}
+                    onPmChange={setPmFilter}
+                    role={activeRoleFilter}
+                    roleNames={roleNames}
+                    onRoleChange={setRoleFilter}
+                    updated={activeUpdatedFilter}
+                    onUpdatedChange={setUpdatedFilter}
+                    className="bg-card"
+                  />
+                }
+                toolbarTrailing={
+                  !isGuestOrg && activeOrgId != null ? (
+                    <div className="ml-auto shrink-0">
+                      <ProjectCreateDialog
+                        orgId={activeOrgId}
+                        onCreated={handleCreated}
+                        linkableProjects={accessibleProjects}
+                      />
+                    </div>
+                  ) : null
+                }
+                emptyTitle={
+                  noProjects
+                    ? isGuestOrg
+                      ? t("org.guestOrgHome.emptyTitle", { orgName: guestOrgName })
+                      : t("org.orgHome.projectsPanel.emptyTitle")
+                    : activePmFilter !== PM_FILTER_ALL ||
+                        activeRoleFilter !== ROLE_FILTER_ALL ||
+                        activeUpdatedFilter !== UPDATED_FILTER_ANY
+                      ? // AQU-1040/AQU-1042/AQU-1043: a filter combination that matches
+                        // nothing is a filtered-empty table, not an empty org.
+                        // AQU-1027: name the reason when the viewer manages nothing at
+                        // all here, rather than blaming the filter combination.
+                        activePmFilter === PM_FILTER_MINE && managesNone
+                        ? t("org.orgProjectsPage.pmFilter.mineEmptyTitle")
+                        : t("org.orgHome.projectsPanel.noMatchingProjects")
+                      : statusFilter === "stalled"
+                        ? t("org.orgHome.emptyTitle.stalled")
+                        : statusFilter === "attention"
+                          ? t("org.orgHome.emptyTitle.attention")
+                          : statusFilter === "overdue"
+                            ? t("org.orgHome.emptyTitle.overdue")
+                            : t("org.orgHome.projectsPanel.emptyTitle")
+                }
+                emptyDescription={
+                  noProjects
+                    ? isGuestOrg
+                      ? t("org.guestOrgHome.emptyDescription")
+                      : t("org.overview.emptyDescription")
+                    : undefined
+                }
+              />
+            </div>
           )}
         </Page>
       }

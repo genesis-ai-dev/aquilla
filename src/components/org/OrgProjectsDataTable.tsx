@@ -462,7 +462,7 @@ export function OrgProjectsDataTable({
     : null
 
   return (
-    <div className={cn(embedded && "flex min-h-0 min-w-0 w-full flex-1 flex-col")}>
+    <div className="flex min-h-0 min-w-0 w-full flex-1 flex-col">
       <DataTable
         key={`${layout}:${initialLens}`}
         columns={columns}
@@ -479,7 +479,7 @@ export function OrgProjectsDataTable({
         searchValue={searchValue}
         onSearchChange={onSearchChange}
         searching={searching}
-        fillHeight={embedded}
+        fillHeight
         loading={loading}
         loadingLabel={loadingLabel}
         hasMore={hasMore}

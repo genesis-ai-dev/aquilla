@@ -47,9 +47,9 @@ import { portfolioAttentionReasons, type ProjectAttentionReason } from "@/lib/pr
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { SignedOutWorkspace } from "./SignedOutWorkspace"
 
-/** Bounded pane so the continuous project list does not push workload / usage off-screen. */
+/** Bounded pane height so LegendList can virtualize instead of growing with content. */
 const PROJECTS_PANEL_MAX_H =
-  "max-h-[clamp(14rem,calc(100dvh-22rem),28rem)]"
+  "h-[clamp(14rem,calc(100dvh-22rem),28rem)]"
 
 type OverviewProjectRow = {
   project: PortfolioProjectRow

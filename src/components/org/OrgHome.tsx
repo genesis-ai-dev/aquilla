@@ -50,8 +50,9 @@ import { useI18n } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import { SignedOutWorkspace } from "./SignedOutWorkspace"
 
+/** Bounded pane height so LegendList can virtualize instead of growing with content. */
 const PANEL_MAX_H =
-  "max-h-[clamp(14rem,calc(100dvh-22rem),28rem)]"
+  "h-[clamp(14rem,calc(100dvh-22rem),28rem)]"
 
 function DashboardRowTemplate() {
   return (
@@ -1042,7 +1043,7 @@ export function OrgHome() {
                 >
                   <div
                     data-testid="organizations-scroll"
-                    className="min-h-0 min-w-0 overflow-x-auto overflow-y-auto overscroll-contain"
+                    className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
                   >
                     {orgSummaries.length === 0 ? (
                       <EmptyState
@@ -1072,6 +1073,7 @@ export function OrgHome() {
                           "mx-0",
                         )}
                         dense
+                        fillHeight
                         emptyState={
                           <EmptyState
                             variant="inline"

@@ -1,4 +1,5 @@
 import {
+  partitionIdmlUnitAtLineBreaks,
   renderIdmlUnitHtml,
   type IdmlParseResult,
   type IdmlProgress,
@@ -8,6 +9,7 @@ import {
   parseIdmlInWorker,
   type IdmlWorkerCallOptions,
 } from "@/lib/idml/idml-worker-client"
+import { MAX_CELL_TEXT_BYTES, utf8ByteLength } from "../../../shared/import-contract"
 import type { TranslatableString } from "./types"
 
 export type IdmlParseExecutor = (
@@ -84,6 +86,48 @@ export function idmlUnitToTranslatableString(unit: IdmlTranslationUnit): Transla
   }
 }
 
+/** Largest UTF-8 field this cell would upload — the bulk-import route caps
+ *  source and target text alike, and an IDML cell carries both, so the widest
+ *  one decides whether the server will take it. */
+function widestCellFieldBytes(cell: TranslatableString): number {
+  return Math.max(
+    utf8ByteLength(cell.original),
+    cell.originalHtml ? utf8ByteLength(cell.originalHtml) : 0,
+    utf8ByteLength(cell.translated),
+    cell.translatedHtml ? utf8ByteLength(cell.translatedHtml) : 0,
+  )
+}
+
+/**
+ * Map engine units to cells, partitioning any unit too large for the
+ * bulk-import route at the line breaks the engine already knows (AQU-990).
+ *
+ * A single IDML story can hold a whole frontmatter section in one paragraph,
+ * which used to fail the import with a bare HTTP 413 after the entire file had
+ * uploaded. `partitionIdmlUnitAtLineBreaks` is the only sanctioned way to break
+ * a unit up — it re-projects each line onto its own slot range, so `part` /
+ * `slotIndexes` still address the original paragraph and export reassembles it
+ * unchanged. A paragraph with no interior break comes back whole and reaches
+ * the importer's size guard, which names it instead of failing anonymously.
+ */
+export function idmlUnitsToTranslatableStrings(
+  units: readonly IdmlTranslationUnit[],
+): TranslatableString[] {
+  return units.flatMap((unit) => {
+    const cell = idmlUnitToTranslatableString(unit)
+    if (widestCellFieldBytes(cell) <= MAX_CELL_TEXT_BYTES) return [cell]
+    let parts: readonly IdmlTranslationUnit[]
+    try {
+      parts = partitionIdmlUnitAtLineBreaks(unit)
+    } catch {
+      // The engine refuses to partition this paragraph (ANCHOR_INVALID). Keep
+      // it whole rather than guessing at a boundary it does not recognize.
+      return [cell]
+    }
+    return parts.length > 1 ? parts.map(idmlUnitToTranslatableString) : [cell]
+  })
+}
+
 /**
  * Parse every IDML translation unit through the shared v2 engine. Production
  * uses a transferable Web Worker and has no main-thread fallback; tests may
@@ -92,7 +136,8 @@ export function idmlUnitToTranslatableString(unit: IdmlTranslationUnit): Transla
  * One engine unit becomes one Aquilla cell. The generic text splitter is
  * deliberately absent: IDML units may only be partitioned between known slots
  * by the shared engine, which records `part` and exact `slotIndexes` (see
- * `partitionIdmlUnitAtLineBreaks`, which the Biblica adapter opts into).
+ * `partitionIdmlUnitAtLineBreaks`, which the Biblica adapter opts into, and
+ * which `idmlUnitsToTranslatableStrings` applies to an oversized unit).
  */
 export async function extractIdmlStrings(
   buffer: ArrayBuffer,
@@ -101,5 +146,5 @@ export async function extractIdmlStrings(
   options?: IdmlImportParseOptions,
 ): Promise<TranslatableString[]> {
   const result = await parse(buffer, profile, options)
-  return result.units.map(idmlUnitToTranslatableString)
+  return idmlUnitsToTranslatableStrings(result.units)
 }

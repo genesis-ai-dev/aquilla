@@ -100,6 +100,7 @@ import type {
   SourceArtifactFormat,
 } from "../../shared/import-contract"
 import { parseUnknownFileInSandbox } from "./import/sandbox-parser"
+import { assertImportCellsWithinSizeLimit } from "./import/cell-size"
 
 export type EBibleImportPhase = "download" | "parse" | "save"
 export interface EBibleProgress {
@@ -1658,6 +1659,11 @@ export async function emitParsedFile(
   // sequence-true. Absent ⇒ the client treats a file as 'sequence', so we only
   // need to mark the time-ordered case explicitly.
   const orderedBy: OrderedBy = orderedByForFileType(fileType)
+
+  // AQU-990: the bulk-import route rejects an oversized cell with a bare 413
+  // after the whole payload has been chunked and uploaded. Check the same
+  // ceiling here so an unsplittable section fails immediately, naming itself.
+  assertImportCellsWithinSizeLimit(result.name, cells, targets)
 
   const upload = existingFileId ? reconcileSourceImport : bulkUploadSource
   await upload({

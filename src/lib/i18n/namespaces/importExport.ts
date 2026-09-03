@@ -855,15 +855,16 @@ export const importExport = defineNamespace({
       "reference; leave it unmapped to match rows to cells in order.",
     "importExport.columnMapping.typeColumnLabel": "Content type",
     "importExport.errors.failedToParseFile": "Failed to parse file",
-    "importExport.fileTarget.acceptedFormats": "USFM, CSV, TSV, or XLSX",
-    "importExport.fileTarget.description": "Fills this file's target column from a USFM file or spreadsheet. Source " +
-      "text is never changed. You'll review every match before anything is " +
-      "saved.",
+    "importExport.fileTarget.acceptedFormats": "USFM, CSV, TSV, XLSX, or VTT",
+    "importExport.fileTarget.description": "Fills this file's target column from a USFM file, spreadsheet, or VTT " +
+      "subtitle file. Source text is never changed. You'll review every match " +
+      "before anything is saved.",
     "importExport.fileTarget.dropZoneHint": "Drop a file here, or",
+    "importExport.fileTarget.noCuesInVtt": "No cues found in this VTT file.",
     "importExport.fileTarget.noVersesInUsfm": "No verses found in this USFM file.",
     "importExport.fileTarget.title": "Import target translations into \"{fileName}\"",
-    "importExport.fileTarget.unsupportedFileType": "Unsupported file type. Use USFM (.usfm/.sfm) or a spreadsheet " +
-      "(.csv/.tsv/.xlsx).",
+    "importExport.fileTarget.unsupportedFileType": "Unsupported file type. Use USFM (.usfm/.sfm), a spreadsheet " +
+      "(.csv/.tsv/.xlsx), or a WebVTT subtitle file (.vtt).",
     "importExport.paired.applyingTargets": "Applying target translations to cells.",
     "importExport.paired.description": "Upload a CSV or XLSX file where each row has both source and target " +
       "text. Rows are matched to existing source cells by canonical reference.",
@@ -896,8 +897,9 @@ export const importExport = defineNamespace({
       other: "Import {count} cells",
     }),
     "importExport.review.matchedCount": "{count} matched",
-    "importExport.review.orderMatchWarning": "No ref column mapped — rows were matched to cells in order. Check the " +
-      "source text next to each row to confirm alignment before importing.",
+    "importExport.review.orderMatchWarning": "Incoming rows carry no reference, so they were matched to cells in " +
+      "order. Check the source text next to each row to confirm alignment " +
+      "before importing.",
     "importExport.review.replacesExisting": "Replaces: {text}",
     "importExport.review.title": "Review matches",
     "importExport.review.uncoveredCellCount": plural({
@@ -2286,6 +2288,13 @@ export const importExport = defineNamespace({
           "in the open file's translations. Deliberately unfinished: the sentence " +
           "continues into the 'Choose file' button rendered directly beneath it, so " +
           "keep the trailing 'or' (or its equivalent) leading into that button.",
+      },
+      "importExport.fileTarget.noCuesInVtt": {
+        description:
+          "Error shown in red under the drop area when a WebVTT subtitle file was " +
+          "read successfully but contained no cues, so there is nothing to fill in. " +
+          "Single short statement of fact. 'VTT' is the file extension and stays " +
+          "untranslated.",
       },
       "importExport.fileTarget.noVersesInUsfm": {
         description:

@@ -195,6 +195,7 @@ import { defaultFootnoteRef } from "@/lib/footnotes/refs"
 import { displayedSourceText, effectiveSourceText, projectedSourceValue, sourceCommitFields, sourceEditorSeed } from "@/lib/cell-text"
 import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
 import type { FootnoteViewMode, VisibleFootnoteEntry } from "@/lib/footnotes/types"
+import type { TargetKeyTermHighlightMode } from "@/hooks/useTargetKeyTermHighlightPreference"
 import { hasMeaningfulRichText } from "@/lib/richtext/editor-content"
 import {
   resolveIdmlEditorConfiguration,
@@ -841,6 +842,8 @@ interface EditorTableProps {
   footnotePanelActive?: boolean
   /** Current footnote display preference. */
   footnoteViewMode?: FootnoteViewMode
+  /** When approved target renderings receive the subtle key-term highlight. */
+  targetKeyTermHighlightMode?: TargetKeyTermHighlightMode
   /** Emits USFM footnotes from the currently visible virtual rows. */
   onVisibleFootnotesChange?: (entries: VisibleFootnoteEntry[]) => void
   /** Called after a target footnote is created so the parent can reveal footnotes. */
@@ -885,6 +888,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   showFootnotesInline,
   footnotePanelActive,
   footnoteViewMode = "off",
+  targetKeyTermHighlightMode = "never",
   onVisibleRefChange,
   onVisibleCellIdsChange,
   onVisibleFootnotesChange,
@@ -2279,6 +2283,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           showFootnotesInline={showFootnotesInline}
           footnotePanelActive={footnotePanelActive}
           footnoteViewMode={footnoteViewMode}
+          targetKeyTermHighlightMode={targetKeyTermHighlightMode}
           onFootnoteHoverChange={setHoveredFootnote}
           onFootnoteCreated={onFootnoteCreated}
           sourceFootnoteNumberOffset={footnoteOffsets.source}
@@ -2321,6 +2326,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     examples,
     footnotePanelActive,
     footnoteViewMode,
+    targetKeyTermHighlightMode,
     getTokenForFile,
     getAlignmentModel,
     getStatisticalBt,
@@ -2966,6 +2972,8 @@ interface MemoizedRowProps {
   footnotePanelActive?: boolean
   /** Current footnote display preference. */
   footnoteViewMode?: FootnoteViewMode
+  /** When approved target renderings receive the subtle key-term highlight. */
+  targetKeyTermHighlightMode?: TargetKeyTermHighlightMode
   /** Reports the target footnote currently hovered in this row. */
   onFootnoteHoverChange?: (hovered: { cellId: string; index: number } | null) => void
   /** Called after a target footnote is created. */
@@ -3017,6 +3025,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     showFootnotesInline,
     footnotePanelActive,
     footnoteViewMode = "off",
+    targetKeyTermHighlightMode = "never",
     onFootnoteHoverChange,
     onFootnoteCreated,
     sourceFootnoteNumberOffset,
@@ -3196,6 +3205,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         showFootnotesInline={showFootnotesInline}
         footnotePanelActive={footnotePanelActive}
         footnoteViewMode={footnoteViewMode}
+        targetKeyTermHighlightMode={targetKeyTermHighlightMode}
         onFootnoteHoverChange={onFootnoteHoverChange}
         onFootnoteCreated={onFootnoteCreated}
         sourceFootnoteNumberOffset={sourceFootnoteNumberOffset}
@@ -3347,6 +3357,8 @@ interface EditorRowProps {
   footnotePanelActive?: boolean
   /** Current footnote display preference. */
   footnoteViewMode?: FootnoteViewMode
+  /** When approved target renderings receive the subtle key-term highlight. */
+  targetKeyTermHighlightMode?: TargetKeyTermHighlightMode
   /** Reports the target footnote currently hovered in this row. */
   onFootnoteHoverChange?: (hovered: { cellId: string; index: number } | null) => void
   /** Called after a target footnote is created. */
@@ -3845,6 +3857,7 @@ function TargetReadText({
   onTermChipClick,
   footnotePanelActive,
   footnoteNumberOffset = 0,
+  showKeyTermHighlights = false,
 }: {
   text: string
   ranges: RangeHighlight[]
@@ -3853,6 +3866,7 @@ function TargetReadText({
   onTermChipClick?: (term: string, anchor: HTMLElement) => void
   footnotePanelActive?: boolean
   footnoteNumberOffset?: number
+  showKeyTermHighlights?: boolean
 }) {
   const segments = useMemo(() => segmentUsfmForDisplay(text), [text])
 
@@ -3864,6 +3878,7 @@ function TargetReadText({
         ranges={ranges}
         onRangeClick={onRangeClick}
         onTermChipClick={onTermChipClick}
+        showKeyTermHighlights={showKeyTermHighlights}
       />
     )
   }
@@ -3902,6 +3917,7 @@ function TargetReadText({
         ranges={clipRangesToSegment(ranges, seg)}
         onRangeClick={onRangeClick}
         onTermChipClick={onTermChipClick}
+        showKeyTermHighlights={showKeyTermHighlights}
       />,
     )
   })
@@ -3909,18 +3925,20 @@ function TargetReadText({
   return <div>{parts}</div>
 }
 
-function TargetDecoratedText({
+export function TargetDecoratedText({
   text,
   concepts,
   ranges,
   onRangeClick,
   onTermChipClick,
+  showKeyTermHighlights = false,
 }: {
   text: string
   concepts: Concept[]
   ranges: RangeHighlight[]
   onRangeClick?: (ruleId: string, anchor: HTMLElement) => void
   onTermChipClick?: (term: string, anchor: HTMLElement) => void
+  showKeyTermHighlights?: boolean
 }) {
   const t = useT()
   const matches = useMemo(() => {
@@ -3929,8 +3947,13 @@ function TargetDecoratedText({
 
     const out: Array<{ start: number; end: number; term: string }> = []
     for (const concept of activeConcepts) {
-      for (const match of findTermMatches(text, concept.sourceTerm)) {
-        out.push({ ...match, term: concept.sourceTerm })
+      const approvedRenderings = concept.renderings.filter(
+        (rendering) => rendering.status === "preferred" || rendering.status === "admitted",
+      )
+      for (const rendering of approvedRenderings) {
+        for (const match of findTermMatches(text, rendering.rendering)) {
+          out.push({ ...match, term: concept.sourceTerm })
+        }
       }
     }
     out.sort((a, b) => a.start - b.start || b.end - a.end)
@@ -3981,7 +4004,10 @@ function TargetDecoratedText({
           role={onTermChipClick ? "button" : undefined}
           tabIndex={onTermChipClick ? 0 : undefined}
           aria-label={t("editor.term.managed", { term: match.term })}
-          className="term-chip-host"
+          className={cn(
+            "term-chip-host",
+            showKeyTermHighlights && "terminology-highlight",
+          )}
           data-source-term={match.term}
           onClick={onTermChipClick ? (event) => {
             event.stopPropagation()
@@ -4113,6 +4139,7 @@ function EditorRow({
   showFootnotesInline,
   footnotePanelActive,
   footnoteViewMode = "off",
+  targetKeyTermHighlightMode = "never",
   onFootnoteHoverChange,
   onFootnoteCreated,
   sourceFootnoteNumberOffset,
@@ -4345,6 +4372,9 @@ function EditorRow({
   const hasInlineFootnotes = sourceFootnotes.length > 0 || targetFootnotes.length > 0
   const isDocxFile = (cell.fileId ?? "").endsWith(".docx")
   const terminologyConcepts = project.terminology ?? EMPTY_CONCEPTS
+  const showTargetKeyTermHighlights =
+    targetKeyTermHighlightMode === "always" ||
+    (targetKeyTermHighlightMode === "focused" && isRowFocused)
 
   useEffect(() => {
     if (!localTargetDraft) return
@@ -6151,6 +6181,7 @@ function EditorRow({
                             onTermChipClick={handleTermChipClick}
                             footnotePanelActive={footnotePanelActive}
                             footnoteNumberOffset={targetFootnoteNumberOffset}
+                            showKeyTermHighlights={showTargetKeyTermHighlights}
                           />
                         )
                       ) : (

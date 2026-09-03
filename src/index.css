@@ -355,10 +355,9 @@ textarea,
   opacity: 0.6;
 }
 
-/* Managed terminology uses one quiet, marker-like treatment on both sides.
-   The soft edge keeps it distinct from selections and rule-severity blots. */
+/* Managed terminology uses one quiet, marker-like treatment. Target terms add
+   this class only when their editor display preference calls for it. */
 .terminology-highlight,
-.term-chip-host[data-source-term],
 .violation-blot-term {
   margin-inline: -0.08em;
   padding-inline: 0.08em;
@@ -382,8 +381,7 @@ textarea,
 
 /* Prevent a managed source term containing a violation span from getting a
    darker double highlight. The outer term wrapper owns the smudge. */
-:is(.terminology-highlight, .term-chip-host[data-source-term])
-  :is(.terminology-highlight, .violation-blot-term) {
+.terminology-highlight :is(.terminology-highlight, .violation-blot-term) {
   margin-inline: 0;
   padding-inline: 0;
   background-image: none;

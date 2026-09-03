@@ -136,6 +136,7 @@ import { extractCuesFromCells } from "@/lib/video/vtt-generator"
 import { useFileSync } from "@/hooks/useFileSync"
 import { useFileMeta } from "@/hooks/useFileMeta"
 import { useCellLabelsPreference } from "@/hooks/useCellLabelsPreference"
+import { useTargetKeyTermHighlightPreference } from "@/hooks/useTargetKeyTermHighlightPreference"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
@@ -1732,6 +1733,8 @@ export function ProjectWorkspace() {
   }, [cellSummaries])
   const [cellLabelsEnabled, setCellLabelsEnabled] = useCellLabelsPreference(projectId!)
   const [footnoteViewMode, setFootnoteViewMode] = useFootnotesPreference(projectId!)
+  const [targetKeyTermHighlightMode, setTargetKeyTermHighlightMode] =
+    useTargetKeyTermHighlightPreference(projectId!)
   const [visibleFootnotes, setVisibleFootnotes] = useState<VisibleFootnoteEntry[]>([])
   const visibleFootnotesKeyRef = useRef("")
   // FRO-251: per-file, per-side font sizes — adjusted from the View settings
@@ -9615,6 +9618,8 @@ export function ProjectWorkspace() {
           cellLabelsEnabled={cellLabelsEnabled}
           footnoteViewMode={footnoteViewMode}
           onFootnoteViewModeChange={setFootnoteViewMode}
+          targetKeyTermHighlightMode={targetKeyTermHighlightMode}
+          onTargetKeyTermHighlightModeChange={setTargetKeyTermHighlightMode}
           tnSidebarEnabled={tnSidebarVisible}
           sourceFontSize={fontSizes.source}
           targetFontSize={fontSizes.target}
@@ -10438,6 +10443,7 @@ export function ProjectWorkspace() {
             showFootnotesInline={footnoteViewMode === "inline"}
             footnotePanelActive={footnoteViewMode !== "off"}
             footnoteViewMode={footnoteViewMode}
+            targetKeyTermHighlightMode={targetKeyTermHighlightMode}
             onVisibleFootnotesChange={footnoteViewMode === "tray" ? handleVisibleFootnotesChange : undefined}
             username={currentUsername}
             activeLane={activeLane}

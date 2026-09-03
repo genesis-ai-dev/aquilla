@@ -360,6 +360,10 @@ export const editor = defineNamespace({
     "editor.view.showLineNumbers": "Show line numbers",
     "editor.view.showCellLabels": "Show cell labels",
     "editor.view.showTranslationNotes": "Show translation notes",
+    "editor.view.targetKeyTerms": "Target key terms",
+    "editor.view.targetKeyTermsAlways": "Always",
+    "editor.view.targetKeyTermsFocused": "Focused cell only",
+    "editor.view.targetKeyTermsNever": "Never",
     "editor.view.footnotesHidden": "Hidden",
     "editor.view.footnotesInline": "Inline under cells",
     "editor.view.footnotesTray": "Bottom tray",
@@ -2610,6 +2614,27 @@ export const editor = defineNamespace({
           "published exegetical notes for the verse in focus, fetched from a notes " +
           "resource. Not the user's own comments.",
         maxLength: 32,
+      },
+      "editor.view.targetKeyTerms": {
+        description:
+          "Section heading for the setting that controls subtle highlights on approved " +
+          "terminology found in translated target cells.",
+        maxLength: 28,
+      },
+      "editor.view.targetKeyTermsAlways": {
+        description:
+          "Option that shows approved target key-term highlights in every visible cell.",
+        maxLength: 16,
+      },
+      "editor.view.targetKeyTermsFocused": {
+        description:
+          "Option that shows approved target key-term highlights only in the focused cell.",
+        maxLength: 24,
+      },
+      "editor.view.targetKeyTermsNever": {
+        description:
+          "Option that hides approved target key-term highlights. Violation markers remain visible.",
+        maxLength: 16,
       },
       "editor.view.footnotesHidden": {
         description:

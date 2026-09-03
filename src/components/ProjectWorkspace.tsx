@@ -7898,10 +7898,19 @@ export function ProjectWorkspace() {
 
   const timelinePanelRef = usePanelRef()
   useEffect(() => {
-    if (!activeFileId) return
+    // `timelineStacked` is a dependency, not just a guard, and it is the whole
+    // fix for a bug this effect shipped with (AQU-1119): in the text lens the
+    // timeline panel is not rendered, so the ref is null and the resize is
+    // skipped. Without the dep the effect never re-ran on the way back, and the
+    // panel does not re-read `defaultSize` either — the group restores the
+    // layout it cached against the same panel ids. So a lens round-trip left
+    // the PREVIOUS file's height on screen, and the per-file height Sam asked
+    // for silently stopped being per file the moment anyone visited the text
+    // lens.
+    if (!activeFileId || !timelineStacked) return
     timelinePanelRef.current?.resize(readStoredTimelinePaneHeight(activeFileId))
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the panel ref is stable
-  }, [activeFileId])
+  }, [activeFileId, timelineStacked])
 
   /**
    * Does the PICTURE own this file's transport?

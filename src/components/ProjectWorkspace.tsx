@@ -10438,6 +10438,11 @@ export function ProjectWorkspace() {
                     <MediaSectionRail
                       section="timeline"
                       orientation="horizontal"
+                      // The one rail wide enough to keep its name. Its tools go
+                      // with its body — every one of them acts on tracks that
+                      // are no longer on screen — and the rail painting over
+                      // the toolbar is what takes them away.
+                      label={t("editor.timeline.title")}
                       onExpand={() => mediaSections.expand("timeline")}
                     />
                   )}

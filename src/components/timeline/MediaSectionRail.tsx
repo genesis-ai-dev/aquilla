@@ -1,7 +1,7 @@
 // The two controls that fold and unfold a media-lens section. (AQU-1119)
 //
-// A collapsed section is a 40px rail holding one glyph, and THE RAIL IS THE
-// BUTTON. That is the whole point of the round: the video pane has been
+// A collapsed section is a 40px rail, and THE RAIL IS THE BUTTON. That is the
+// whole point of the round: the video pane has been
 // collapsible for months, but shut it and the only thing left to grab was the
 // divider's own 4x24px grip, and dragging that open does nothing for the first
 // 110px because the library swallows the delta until it clears half the
@@ -58,35 +58,90 @@ export interface MediaSectionRailProps {
   section: MediaSectionId
   /** Vertical for the side rails (video, text); horizontal for the timeline. */
   orientation: "vertical" | "horizontal"
+  /**
+   * Shown beside the glyph. Only the timeline passes one: its rail is a 40px
+   * strip across the whole width, so the section's name still fits, and
+   * keeping it is what makes the strip read as the toolbar with its tools
+   * taken away rather than as an anonymous bar. A 40px-WIDE rail has room for
+   * nothing but the glyph, so the video and text rails stay wordless — which
+   * is also what keeps this component's "carries no text" contract true for
+   * the two headers whose textContent is asserted.
+   */
+  label?: string
+  /**
+   * Painted over a section the pointer has dragged to rail size but has not
+   * let go of yet. It is scenery: no tooltip, no click, not focusable, not in
+   * the accessibility tree. Releasing the pointer is what commits the fold
+   * (ProjectWorkspace's `onLayoutChanged`), and only then does the real rail
+   * take over. See the note on the preview in useMediaSectionCollapse.
+   */
+  preview?: boolean
   onExpand: () => void
 }
 
 /** The collapsed section itself: one glyph, and the whole strip is the target. */
-export function MediaSectionRail({ section, orientation, onExpand }: MediaSectionRailProps) {
+export function MediaSectionRail({
+  section,
+  orientation,
+  label,
+  preview = false,
+  onExpand,
+}: MediaSectionRailProps) {
   const t = useT()
   const Open = GLYPH[section].open
-  const label = t(EXPAND_KEY[section])
+  const name = t(EXPAND_KEY[section])
+  const className = cn(
+    // Sits over the frozen, clipped content — which stays mounted, so it
+    // must not be reachable behind this. The panel marks it inert.
+    "absolute inset-0 z-10 flex bg-background text-muted-foreground",
+    orientation === "vertical"
+      ? // The glyph holds the same height it has in the section's own header
+        // (`py-1.5`) instead of dropping to the middle of the strip: folding a
+        // section moves its content out of the way, not its controls. Sam,
+        // 2026-09-03. Centred across a 40px strip because there is no room to
+        // reproduce the header's inset, which sits past a whole label.
+        "flex-col items-center justify-start border-e border-border pt-1.5"
+      : // Left-justified against the toolbar's own `px-3`, so the name and the
+        // chevron do not move at all when the timeline folds.
+        "flex-row items-center justify-start gap-2 border-b border-border ps-3",
+  )
+  const content = (
+    <>
+      {label && <span className="text-xs font-medium">{label}</span>}
+      <Open className="h-3.5 w-3.5 shrink-0" />
+    </>
+  )
+
+  if (preview) {
+    return (
+      <div
+        aria-hidden
+        data-testid={`media-rail-preview-${section}`}
+        className={cn(className, "pointer-events-none")}
+      >
+        {content}
+      </div>
+    )
+  }
+
   return (
-    <AppTooltip content={label} side={orientation === "vertical" ? "right" : "bottom"}>
+    <AppTooltip content={name} side={orientation === "vertical" ? "right" : "bottom"}>
       <button
         type="button"
         // `aria-expanded` rather than a bare label, so the control announces
         // the STATE it is in and not just what it does. Its counterpart beside
         // the section heading is the same button reading `true`.
         aria-expanded={false}
-        aria-label={label}
+        aria-label={name}
         data-testid={`media-rail-${section}`}
         onClick={onExpand}
         className={cn(
-          // Sits over the frozen, clipped content — which stays mounted, so it
-          // must not be reachable behind this. The panel marks it inert.
-          "absolute inset-0 z-10 flex items-center justify-center bg-background",
-          "text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+          className,
+          "transition-colors hover:bg-accent hover:text-foreground",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-500",
-          orientation === "vertical" ? "border-e border-border" : "border-b border-border",
         )}
       >
-        <Open className="h-3.5 w-3.5 shrink-0" />
+        {content}
       </button>
     </AppTooltip>
   )

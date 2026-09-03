@@ -37,6 +37,45 @@ describe("MediaSectionRail", () => {
       expect(onExpand).toHaveBeenCalledTimes(1)
     })
   })
+
+  it("keeps a section's name on the rail when the strip has room for it", () => {
+    // The timeline folds to a strip the full width of the lens, so its name
+    // survives the fold and the rail reads as the toolbar with the tools
+    // taken away. The accessible name is still the aria-label, which is the
+    // action rather than the section.
+    render(
+      <MediaSectionRail
+        section="timeline"
+        orientation="horizontal"
+        label="Timeline"
+        onExpand={() => {}}
+      />,
+    )
+    const rail = screen.getByTestId("media-rail-timeline")
+    expect(rail).toHaveTextContent("Timeline")
+    expect(screen.getByRole("button", { name: "Show the timeline" })).toBe(rail)
+  })
+
+  it("carries no text on a 40px-wide rail", () => {
+    // Nothing is passed, so nothing is shown — the side rails have room for
+    // the glyph and nothing else.
+    render(<MediaSectionRail section="video" orientation="vertical" onExpand={() => {}} />)
+    expect(screen.getByTestId("media-rail-video")).toHaveTextContent("")
+  })
+
+  it("is scenery, not a control, while a drag is still holding the divider", () => {
+    // Mid-drag the fold is not committed — the pointer can still come back —
+    // so the preview must not be clickable, focusable, or announced.
+    const onExpand = vi.fn()
+    render(
+      <MediaSectionRail section="text" orientation="vertical" preview onExpand={onExpand} />,
+    )
+    expect(screen.queryByTestId("media-rail-text")).toBeNull()
+    expect(screen.queryByRole("button", { name: "Show the text" })).toBeNull()
+    const preview = screen.getByTestId("media-rail-preview-text")
+    expect(preview).toHaveAttribute("aria-hidden", "true")
+    expect(preview.tagName).toBe("DIV")
+  })
 })
 
 describe("MediaSectionCollapseButton", () => {

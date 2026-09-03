@@ -87,7 +87,7 @@ function ItemHint({ id, text }: { id: string; text: string }) {
           render={
             <span
               aria-hidden="true"
-              className="ml-auto inline-flex shrink-0 cursor-help text-muted-foreground/60 transition-colors hover:text-foreground"
+              className="ml-auto inline-flex shrink-0 text-muted-foreground/60 transition-colors hover:text-foreground"
             />
           }
           onClick={(event) => {

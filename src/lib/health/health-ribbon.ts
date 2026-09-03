@@ -182,17 +182,45 @@ export function buildHealthRibbon(
   }))
 }
 
+export interface PreTranslationEvidence {
+  score: number
+  evidenceWeight: number
+}
+
+// AQU-1104: the ribbon is rebuilt for every cell of the open file on every
+// cell-store version bump, and tokenizing 30k source texts per commit was a
+// quarter of the main-thread time during "Draft all". A cell's examples array
+// is replaced (not mutated) when retrieval refreshes, so its identity plus the
+// source text is a complete key. WeakMap keeps the cache from outliving the
+// examples it describes.
+const evidenceCache = new WeakMap<object, { sourceText: string; result: PreTranslationEvidence | null }>()
+
 /**
  * Pre-translation evidence is source-side retrieval coverage only. It says how
  * much supplied precedent is available for the source, not how good an
  * unwritten target will be.
+ *
+ * Memoized on the `examples` array identity and the source text. Callers must
+ * replace the array rather than mutate it in place for a refresh to register.
  */
 export function preTranslationEvidence(
   sourceText: string,
   examples: Array<{ matchedTokens: string[] }>,
-): { score: number; evidenceWeight: number } | null {
+): PreTranslationEvidence | null {
+  if (examples.length === 0) return null
+  const cached = evidenceCache.get(examples)
+  if (cached && cached.sourceText === sourceText) return cached.result
+  const result = computePreTranslationEvidence(sourceText, examples)
+  evidenceCache.set(examples, { sourceText, result })
+  return result
+}
+
+function computePreTranslationEvidence(
+  sourceText: string,
+  examples: Array<{ matchedTokens: string[] }>,
+): PreTranslationEvidence | null {
   const sourceTokens = new Set(tokenizeText(sourceText))
-  if (sourceTokens.size === 0 || examples.length === 0) return null
+  if (sourceTokens.size === 0) return null
 
   let bestCoverage = 0
   for (const example of examples) {

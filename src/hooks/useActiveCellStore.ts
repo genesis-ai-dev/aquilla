@@ -276,6 +276,14 @@ export class CellStore {
     details: CellFootnoteDetails
   }>()
   private derivedCache: DerivedCache = { baseVersion: -1, summaries: [], textPairs: [] }
+  private derivedIndexesDirty = true
+  // AQU-1104: a cell's view is a pure function of its per-cell version (the
+  // invariant editor rows already rely on through useCellView), so the built
+  // view and its summary are cached per version. A whole-file read after a
+  // commit then re-derives only the cells the commit touched, instead of
+  // rebuilding 30k views and summaries on every version bump.
+  private viewCache = new Map<string, { version: number; view: CellViewModel }>()
+  private summaryCache = new Map<string, { version: number; summary: CellSummary; textPair: CellTextPair }>()
 
   /**
    * AQU-646: which cells carry a recording of their own.
@@ -368,6 +376,8 @@ export class CellStore {
     this.projectEpoch = null
     this.writeSeq = 0
     this.footnoteCache = new Map()
+    this.viewCache = new Map()
+    this.summaryCache = new Map()
     this.rebuildDerivedIndexes()
     this.listVersion++
     this.fileVersion++
@@ -410,7 +420,8 @@ export class CellStore {
   }
   setMaxServerSeq(seq: number | null): void {
     this.maxServerSeq = seq
-    if (this.fileProgressSnapshot) {
+    // A pending rebuild reads maxServerSeq itself; only a built snapshot needs patching.
+    if (!this.derivedIndexesDirty && this.fileProgressSnapshot) {
       this.fileProgressSnapshot = { ...this.fileProgressSnapshot, revision: seq ?? 0 }
     }
   }
@@ -450,6 +461,7 @@ export class CellStore {
   }
 
   findIndexBySection(label: string): number {
+    this.ensureDerivedIndexes()
     const normalizedKey = legacySectionKey(label)
     const entry = this.navIndex.find((item) => (
       item.key === label || item.label === label || item.key === normalizedKey
@@ -459,17 +471,23 @@ export class CellStore {
 
   getSectionLabelForCellId(cellId: string | undefined | null): string {
     if (!cellId) return ""
+    this.ensureDerivedIndexes()
     return this.sectionLabelById.get(cellId) ?? ""
   }
 
   getNavigationIndex(displayCellIds?: readonly string[]): readonly CellNavigationEntry[] {
-    const navigation = displayCellIds
+    this.ensureDerivedIndexes()
+    // AQU-1104: the text lens displays the store's own order (getCellIdsForLens
+    // returns `this.order` itself), so the index built on every commit can be
+    // reused instead of walking all rows again for the same id list.
+    const navigation = displayCellIds && displayCellIds !== this.order
       ? this.buildNavigationIndex(displayCellIds).entries
       : this.navIndex
     return navigation.length === 0 ? EMPTY_NAVIGATION : navigation
   }
 
   getFileProgressSnapshot(): FileProgressResponse | null {
+    this.ensureDerivedIndexes()
     return this.fileProgressSnapshot
   }
 
@@ -478,6 +496,7 @@ export class CellStore {
   }
 
   getFootnoteOffsets(cellId: string): { source: number; target: number } {
+    this.ensureDerivedIndexes()
     return this.footnoteOffsets.get(cellId) ?? { source: 0, target: 0 }
   }
 
@@ -507,6 +526,9 @@ export class CellStore {
 
   getCellView(cellId: string): CellViewModel | null {
     if (!this.indexById.has(cellId)) return null
+    const version = this.cellVersionById.get(cellId) ?? 0
+    const cached = this.viewCache.get(cellId)
+    if (cached && cached.version === version) return cached.view
     const source = this.sourceById.get(cellId)
     const target = this.targetById.get(cellId)
     const cell = buildCellData(
@@ -520,6 +542,7 @@ export class CellStore {
     )
     this.applyContentOverlays(cell)
     this.applyOwnTake(cell)
+    this.viewCache.set(cellId, { version, view: cell })
     return cell
   }
 
@@ -617,11 +640,18 @@ export class CellStore {
   }
 
   getCellSummary(cellId: string): CellSummary | null {
+    return this.summaryEntry(cellId)?.summary ?? null
+  }
+
+  private summaryEntry(cellId: string): { version: number; summary: CellSummary; textPair: CellTextPair } | null {
     const index = this.indexById.get(cellId)
     if (index == null) return null
+    const version = this.cellVersionById.get(cellId) ?? 0
+    const cached = this.summaryCache.get(cellId)
+    if (cached && cached.version === version && cached.summary.index === index) return cached
     const view = this.getCellView(cellId)
     if (!view) return null
-    return {
+    const summary: CellSummary = {
       id: view.id,
       fileId: view.fileId,
       index,
@@ -653,6 +683,20 @@ export class CellStore {
       selectedGeneratedVoiceAudioId: view.selectedGeneratedVoiceAudioId,
       hasOwnTake: view.hasOwnTake,
     }
+    const entry = {
+      version,
+      summary,
+      textPair: {
+        cellId,
+        fileId: summary.fileId,
+        sourceText: summary.original,
+        targetText: summary.translated,
+        validated: summary.validated,
+        index,
+      },
+    }
+    this.summaryCache.set(cellId, entry)
+    return entry
   }
 
   /**
@@ -766,10 +810,7 @@ export class CellStore {
 
     for (const row of rows) {
       if (row.side === "source") {
-        if (!sourceById.has(row.cellId)) {
-          sourceOrder.push(row.cellId)
-          changedIds.add(row.cellId)
-        }
+        if (!sourceById.has(row.cellId)) sourceOrder.push(row.cellId)
         sourceById.set(row.cellId, row)
       } else {
         // AQU-538: only the active lane's target participates in the paired
@@ -780,8 +821,23 @@ export class CellStore {
         }
         if (!targetById.has(row.cellId)) targetOrder.push(row.cellId)
         targetById.set(row.cellId, row)
-        changedIds.add(row.cellId)
       }
+    }
+
+    // AQU-1104: bump only the cells whose rows changed. This used to mark
+    // every row as changed, so a delta refresh after each commit bumped all
+    // 30k cells of a whole-Bible file, re-rendered every subscribed row, and
+    // invalidated every cached view. The delta merge (mergeCellsDelta) keeps
+    // the same row object for a cell it did not touch, so identity is the
+    // test; a caller that rebuilds every row object still bumps every cell,
+    // which is the conservative side of the version/data invariant.
+    for (const id of sourceById.keys()) {
+      if (this.sourceById.get(id) !== sourceById.get(id) || this.targetById.get(id) !== targetById.get(id)) {
+        changedIds.add(id)
+      }
+    }
+    for (const id of targetById.keys()) {
+      if (!sourceById.has(id) && this.targetById.get(id) !== targetById.get(id)) changedIds.add(id)
     }
 
     const seen = new Set(sourceOrder)
@@ -790,13 +846,18 @@ export class CellStore {
       if (!seen.has(id)) order.push(id)
     }
 
-    if (!sameStringArray(order, this.order)) {
+    const orderChanged = !sameStringArray(order, this.order)
+    if (orderChanged) {
       for (const id of this.order) changedIds.add(id)
       for (const id of order) changedIds.add(id)
       this.listVersion++
     }
 
-    this.order = order
+    // AQU-1104: keep the array identity when the sequence is unchanged.
+    // useCellIds hands `this.order` to the editor as displayCellIds and only
+    // re-reads it on listVersion; a fresh array here made every
+    // getNavigationIndex(displayCellIds) call miss the store's own index.
+    this.order = orderChanged ? order : this.order
     this.sourceOrder = sourceOrder
     this.targetOrder = targetOrder
     this.sourceById = sourceById
@@ -806,6 +867,12 @@ export class CellStore {
     const liveIds = new Set(order)
     for (const id of this.footnoteCache.keys()) {
       if (!liveIds.has(id)) this.footnoteCache.delete(id)
+    }
+    for (const id of this.viewCache.keys()) {
+      if (!liveIds.has(id)) this.viewCache.delete(id)
+    }
+    for (const id of this.summaryCache.keys()) {
+      if (!liveIds.has(id)) this.summaryCache.delete(id)
     }
     if (opts.maxServerSeq !== undefined) this.maxServerSeq = opts.maxServerSeq
     this.rebuildDerivedIndexes()
@@ -1148,6 +1215,7 @@ export class CellStore {
   }
 
   getMemorySnapshot(extra?: Record<string, unknown>): Record<string, unknown> {
+    this.ensureDerivedIndexes()
     let textBytes = 0
     let htmlBytes = 0
     for (const id of this.order) {
@@ -1216,24 +1284,35 @@ export class CellStore {
     const summaries: CellSummary[] = []
     const textPairs: CellTextPair[] = []
     for (const id of this.order) {
-      const summary = this.getCellSummary(id)
-      if (!summary) continue
-      summaries.push(summary)
-      textPairs.push({
-        cellId: id,
-        fileId: summary.fileId,
-        sourceText: summary.original,
-        targetText: summary.translated,
-        validated: summary.validated,
-        index: summary.index,
-      })
+      const entry = this.summaryEntry(id)
+      if (!entry) continue
+      summaries.push(entry.summary)
+      textPairs.push(entry.textPair)
     }
     this.derivedCache = { baseVersion: this.derivedVersion, summaries, textPairs }
   }
 
+  /**
+   * AQU-1104: every mutation used to rebuild the navigation index, the file
+   * and section progress, and the footnote offsets on the spot, walking all
+   * rows each time. One commit runs several mutations back to back
+   * (optimistic edit, pending overlay, server ack, shadow clearing, audit
+   * stats), so a 31k-cell file paid four to six full walks per commit. The
+   * rebuild is now deferred to the first read after the mutations settle.
+   */
   private rebuildDerivedIndexes(): void {
     this.derivedVersion++
     this.derivedCache = { baseVersion: -1, summaries: [], textPairs: [] }
+    this.derivedIndexesDirty = true
+  }
+
+  private ensureDerivedIndexes(): void {
+    if (!this.derivedIndexesDirty) return
+    this.derivedIndexesDirty = false
+    this.computeDerivedIndexes()
+  }
+
+  private computeDerivedIndexes(): void {
     const navigation = this.buildNavigationIndex(this.order)
     const footnoteOffsets = new Map<string, { source: number; target: number }>()
     const countsByScope = new Map<string, { source: number; target: number }>()

@@ -21,6 +21,7 @@ import { VolumeX } from "lucide-react"
 import { fmtClock } from "./format"
 import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { MediaSectionCollapseButton } from "./MediaSectionRail"
 import { uiSlotRef } from "@/lib/ui-slots"
 import type { CellData } from "@/hooks/useCells"
 import type { CameraState } from "@/lib/sync/cells-read-types"
@@ -286,6 +287,7 @@ export function MediaTextHeader({
   castName: castNameOverride,
   cameraState: cameraStateOverride,
   transcribe,
+  onCollapse,
 }: {
   cell: CellData | null
   /**
@@ -326,6 +328,13 @@ export function MediaTextHeader({
    * timing readout below acts on chips and stays where it is.
    */
   transcribe?: TranscribeSelectionControlsProps | null
+  /**
+   * AQU-1119: collapse the whole text section to a rail.
+   *
+   * Absent means no button, which is what keeps every caller outside the media
+   * lens — and every existing test — rendering exactly what it did before.
+   */
+  onCollapse?: () => void
 }) {
   const t = useT()
   const isDialogue = (cell?.medium ?? "media") === "media"
@@ -369,6 +378,10 @@ export function MediaTextHeader({
           label and the navigator stays pinned to the right wall. */}
       {transcribe && <TranscribeSelectionControls {...transcribe} />}
       <StripNavSlot />
+      {/* After the nav, so it sits flush against the right wall: `ms-auto`
+          lives on the slot itself, and anything following it is pushed to the
+          edge without a wrapper. */}
+      {onCollapse && <MediaSectionCollapseButton section="text" onCollapse={onCollapse} />}
     </div>
   )
 }

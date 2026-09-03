@@ -68,6 +68,7 @@ import { chipOverlaps, MIN_ADDABLE_SPAN_SEC } from "@/lib/timeline/lane-timing"
 import { resolveCueCharacter, formatCueCharacter } from "@/lib/timeline/cue-character"
 import { buildTimelineLayout, type TimelineLayout } from "@/lib/timeline/layout"
 import { gutterWidthPx, loadGutterCollapsed, saveGutterCollapsed } from "@/lib/timeline/gutter-width"
+import { MediaSectionCollapseButton } from "./MediaSectionRail"
 import {
   deriveTracksForFile,
   type TimelineTrack,
@@ -379,6 +380,18 @@ export interface TimelineEditorProps {
    *  only one mode it can be in — a picker with a single choice, or a label
    *  saying so, is a question the user cannot act on. */
   hideTimingMode?: boolean
+  /**
+   * AQU-1119: collapse the timeline itself, and collapse the text section
+   * whose header this component portals into the workspace's slot.
+   *
+   * Both are the workspace's business — it owns the panel group and the
+   * per-file collapsed set — so this component only offers the affordance.
+   * Absent means no button at all, which is how every other optional control
+   * here behaves and is right outside the media lens, where there is nothing
+   * to collapse into.
+   */
+  onCollapseSection?: () => void
+  onCollapseTextSection?: () => void
   /** Needed by the missing-audio probe behind the chip strip's badge. */
   project?: ProjectRecord
   /** Fires when the highlighted section changes so a sibling transport (the
@@ -999,6 +1012,8 @@ export function TimelineEditor({
   timingMode = "dubbing",
   onChangeTimingMode,
   hideTimingMode = false,
+  onCollapseSection,
+  onCollapseTextSection,
   project,
   onSelectCell,
   onTranscribeSections,
@@ -3072,10 +3087,15 @@ export function TimelineEditor({
     headingLabel: textHeadingLabel,
     castName: formatCueCharacter(currentCharacter.names),
     cameraState: currentCharacter.cameraState ?? null,
+    // AQU-1119: the text section's own collapse control. It belongs in this
+    // header rather than the timeline toolbar because it acts on the column
+    // beneath it — the same reasoning that keeps the gutter's toggle inside
+    // the gutter.
+    onCollapse: onCollapseTextSection,
     // AQU-646 stage 3e: the transcribe controls used to be a full-width row of
     // their own beneath the lanes, on screen whether or not there was anything
     // to transcribe. They sit in the text header now, and ONLY WHEN THERE IS A
-    // SELECTION (Sam, 2026-08-25) — so the header reads just "Source text" the
+    // SELECTION (Sam, 2026-08-25) — so the header reads just its own name the
     // rest of the time and the row the bar used to occupy goes back to the
     // tracks.
     //
@@ -3773,6 +3793,14 @@ export function TimelineEditor({
               <ChevronsUpDown className="h-3.5 w-3.5" />
             </button>
           </div>
+          {/* AQU-1119: last in the toolbar, because it acts on the whole strip
+              rather than on anything in it. Withheld entirely when the
+              workspace passes no handler — outside the media lens there is
+              nothing to collapse INTO, so a disabled button would be a
+              question the reader cannot act on. */}
+          {onCollapseSection && (
+            <MediaSectionCollapseButton section="timeline" onCollapse={onCollapseSection} />
+          )}
         </div>
       </div>
 

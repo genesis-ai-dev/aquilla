@@ -17,12 +17,19 @@
 // ProjectWorkspace around the media-video/media-table panels).
 
 import { useT } from "@/lib/i18n/I18nProvider"
+import { MediaSectionCollapseButton } from "./MediaSectionRail"
 
 export interface VideoPaneHeaderProps {
   src: string
+  /**
+   * AQU-1119: collapse the video section to a rail. Absent means no button —
+   * the error card renders this same header, and outside the media lens there
+   * is nothing to collapse into.
+   */
+  onCollapse?: () => void
 }
 
-export function VideoPaneHeader({ src }: VideoPaneHeaderProps) {
+export function VideoPaneHeader({ src, onCollapse }: VideoPaneHeaderProps) {
   const t = useT()
   let basename = src
   try {
@@ -39,6 +46,13 @@ export function VideoPaneHeader({ src }: VideoPaneHeaderProps) {
       <span className="inline-flex min-w-0 items-center rounded-md border border-border bg-background px-2 py-0.5 text-[11px] text-foreground/80">
         <span className="truncate font-mono">{basename}</span>
       </span>
+      {/* Icon-only and no taller than the name pill, per the note at the top of
+          this file: a browser pass and a unit test both read this header's
+          textContent, and the row's height is kept in lockstep with the text
+          header's opposite it. `ms-auto` pins it to the right wall. */}
+      {onCollapse && (
+        <MediaSectionCollapseButton section="video" onCollapse={onCollapse} className="ms-auto" />
+      )}
     </div>
   )
 }

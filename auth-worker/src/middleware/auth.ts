@@ -4,39 +4,70 @@
 //
 // Adapted from frontier-server/cloudflare/src/middleware/auth.ts. Hydration is
 // always Neon-only; the optional legacy bridge runs before token issuance.
+//
+// [Pen test] Auth & session mgmt (2026-08-31, OPS-25): every session check
+// below lives in `resolveSession` rather than inline in `authMiddleware`, so
+// the *optional*-identity routes (public invite previews) run the identical
+// checks. Three route files previously hand-rolled their own "best-effort
+// caller" helper that verified only the signature and `exp` — skipping the
+// `jti` denylist and the `password_changed_at` cutoff, i.e. both of this
+// codebase's revocation controls. See `optionalCaller` below.
 
 import type { Context, Next } from "hono"
-import type { Env, Variables } from "../types"
+import type { AuthUser, Env, JWTPayload, Variables } from "../types"
 import { JWTService } from "../auth/jwt"
 import { isTokenRevoked } from "../utils/token-revocation"
 
 export type AuthHonoEnv = { Bindings: Env; Variables: Variables }
 
-export const authMiddleware = async (
-  c: Context<AuthHonoEnv>,
-  next: Next,
-): Promise<Response | void> => {
-  const authHeader = c.req.header("Authorization")
-  if (!authHeader) {
-    return c.json({ error: "Authorization header required" }, 401)
-  }
+/**
+ * Why a session was rejected. Each maps to a distinct response in
+ * `authMiddleware`; `optionalCaller` collapses them all to "anonymous".
+ */
+export type SessionRejection =
+  | "missing_header"
+  | "malformed_header"
+  | "expired"
+  | "invalid_token"
+  | "revoked"
+  | "user_not_found"
+  | "password_changed"
+  /** Lookup failed (DB unreachable), as opposed to "no such user" — AQU-994. */
+  | "hydration_error"
 
-  const jwtService = new JWTService(c.env)
+export type SessionResolution =
+  | { ok: true; user: AuthUser; payload: JWTPayload }
+  | { ok: false; reason: SessionRejection }
+
+/**
+ * The single implementation of "is this Authorization header a live session?".
+ *
+ * Both callers in this file go through it, which is the point: a check added
+ * here (revocation, password-reset invalidation, whatever comes next) applies
+ * to the optional-identity routes automatically instead of having to be
+ * remembered at each hand-written copy.
+ */
+export async function resolveSession(
+  env: Env,
+  authHeader: string | null | undefined,
+): Promise<SessionResolution> {
+  if (!authHeader) return { ok: false, reason: "missing_header" }
+
+  const jwtService = new JWTService(env)
   const token = jwtService.extractTokenFromHeader(authHeader)
-  if (!token) {
-    return c.json({ error: "Invalid authorization header format" }, 401)
-  }
+  if (!token) return { ok: false, reason: "malformed_header" }
 
-  // AQU-995: expiry gets its own response body and `code`. It is by far the
-  // most common 401 here (30-day tokens, no refresh until now) and it is a
-  // normal event, not a fault — separating it lets ops read real
-  // malformed-token incidents out of the identity logs, and lets the SPA act
-  // on a lapsed session without pattern-matching a shared message.
+  // AQU-995: expiry gets its own reason. It is by far the most common
+  // rejection here (30-day tokens, no refresh until now) and it is a normal
+  // event, not a fault — separating it lets ops read real malformed-token
+  // incidents out of the identity logs, and lets the SPA act on a lapsed
+  // session without pattern-matching a shared message.
   const verification = await jwtService.verifyTokenDetailed(token)
   if (!verification.ok) {
-    return verification.reason === "expired"
-      ? c.json({ error: "Token expired", code: "token_expired" }, 401)
-      : c.json({ error: "Invalid or expired token", code: "invalid_token" }, 401)
+    return {
+      ok: false,
+      reason: verification.reason === "expired" ? "expired" : "invalid_token",
+    }
   }
   const payload = verification.payload
 
@@ -46,34 +77,30 @@ export const authMiddleware = async (
   // does, is a token carrying *no* exp claim at all: that verifies cleanly and
   // would otherwise authenticate forever.
   if (typeof payload.exp !== "number") {
-    return c.json({ error: "Invalid or expired token", code: "invalid_token" }, 401)
+    return { ok: false, reason: "invalid_token" }
   }
 
   // [Pen test] Auth & session mgmt (2026-08-03): reject tokens the caller
   // explicitly logged out (POST /auth/logout) rather than only relying on
   // natural 30-day expiry or a full password reset. See
   // utils/token-revocation.ts.
-  if (payload.jti && (await isTokenRevoked(c.env.AQUILLA_PG, payload.jti))) {
-    return c.json({ error: "Token has been revoked. Please log in again." }, 401)
+  if (payload.jti && (await isTokenRevoked(env.AQUILLA_PG, payload.jti))) {
+    return { ok: false, reason: "revoked" }
   }
 
   // AQU-994: hydration hitting a DB error must NOT read as an auth failure.
   // During the 2026-08-25 Postgres/Hyperdrive blip the old code answered 401
   // "User not found" for every authenticated request, and the SPA responded by
   // force-logging active editors out (and revoking their still-valid tokens).
-  // 503 tells clients "retry later" without impugning the credential.
+  // The caller turns this into a 503 "retry later" rather than impugning the
+  // credential.
   let user: Awaited<ReturnType<typeof jwtService.getUserByUsername>>
   try {
     user = await jwtService.getUserByUsername(payload.sub)
   } catch {
-    return c.json(
-      { error: "Unable to verify session right now. Please retry." },
-      503,
-    )
+    return { ok: false, reason: "hydration_error" }
   }
-  if (!user) {
-    return c.json({ error: "User not found" }, 401)
-  }
+  if (!user) return { ok: false, reason: "user_not_found" }
 
   // [Pen test] Auth & session mgmt (2026-07-20): access tokens are stateless
   // and long-lived (ACCESS_TOKEN_EXPIRE_MINUTES, 30 days by default) with no
@@ -86,14 +113,70 @@ export const authMiddleware = async (
       new Date(user.password_changed_at).getTime() / 1000,
     )
     if (payload.iat < changedAtSeconds) {
-      return c.json(
-        { error: "Token invalidated by a password change. Please log in again." },
-        401,
-      )
+      return { ok: false, reason: "password_changed" }
     }
   }
 
-  c.set("user", user)
-  c.set("tokenPayload", payload)
+  return { ok: true, user, payload }
+}
+
+/**
+ * AQU-347: best-effort caller identity for the *public* invite-preview routes
+ * (`routes/invites.ts`, `routes/orgs.ts`, `routes/projects.ts`). A
+ * missing/invalid/expired token is not an error — it just means "treat this
+ * preview as anonymous", since those routes must stay reachable for signed-out
+ * visitors following a share link.
+ *
+ * OPS-25: "not an error" is not the same as "not checked". This resolves
+ * through {@link resolveSession}, so a logged-out (`jti`-denylisted) or
+ * password-reset-invalidated token now reads as anonymous instead of as its
+ * former owner. A hydration failure also reads as anonymous here — unlike
+ * `authMiddleware` there is no credential to impugn and no 503 to return, and
+ * anonymous is the conservative answer for a route whose caller identity only
+ * ever *widens* what the response discloses.
+ */
+export async function optionalCaller(
+  env: Env,
+  authHeader: string | null | undefined,
+): Promise<AuthUser | null> {
+  const resolved = await resolveSession(env, authHeader)
+  return resolved.ok ? resolved.user : null
+}
+
+export const authMiddleware = async (
+  c: Context<AuthHonoEnv>,
+  next: Next,
+): Promise<Response | void> => {
+  const resolved = await resolveSession(c.env, c.req.header("Authorization"))
+
+  if (!resolved.ok) {
+    switch (resolved.reason) {
+      case "missing_header":
+        return c.json({ error: "Authorization header required" }, 401)
+      case "malformed_header":
+        return c.json({ error: "Invalid authorization header format" }, 401)
+      case "expired":
+        return c.json({ error: "Token expired", code: "token_expired" }, 401)
+      case "invalid_token":
+        return c.json({ error: "Invalid or expired token", code: "invalid_token" }, 401)
+      case "revoked":
+        return c.json({ error: "Token has been revoked. Please log in again." }, 401)
+      case "hydration_error":
+        return c.json(
+          { error: "Unable to verify session right now. Please retry." },
+          503,
+        )
+      case "user_not_found":
+        return c.json({ error: "User not found" }, 401)
+      case "password_changed":
+        return c.json(
+          { error: "Token invalidated by a password change. Please log in again." },
+          401,
+        )
+    }
+  }
+
+  c.set("user", resolved.user)
+  c.set("tokenPayload", resolved.payload)
   await next()
 }

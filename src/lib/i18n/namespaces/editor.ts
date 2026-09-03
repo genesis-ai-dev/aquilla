@@ -117,6 +117,9 @@ export const editor = defineNamespace({
       other: "{count} cells with stale source",
     }),
 
+    // — Per-cell action rail ————————————————————————————————————————
+    "editor.rail.moreActions": "More actions",
+
     // — Per-cell audio: record / upload / playback ——————————————————
     "editor.audio.record": "Record audio",
     "editor.audio.recordingDisabled": "Recording disabled",
@@ -1640,6 +1643,15 @@ export const editor = defineNamespace({
           count:
             "The number the sentence counts; it also selects which plural form is used.",
         },
+      },
+      "editor.rail.moreActions": {
+        description:
+          "Tooltip and screen-reader name of the '…' overflow button in a cell's " +
+          "action rail (AQU-200). Opens a small menu holding the row's " +
+          "lower-frequency actions — record, upload audio, play, text-to-speech, " +
+          "footnote, comments, history — which no longer each get their own " +
+          "button. A noun phrase naming what is inside, not an imperative.",
+        maxLength: 20,
       },
       "editor.audio.record": {
         description:

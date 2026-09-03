@@ -1474,8 +1474,6 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
   const enabledRef = useRef(enabled)
   const tokenFetcherRef = useRef(getToken)
   const generationRef = useRef(0)
-  const scanAbortRef = useRef<AbortController | null>(null)
-  useEffect(() => () => { scanAbortRef.current?.abort(); generationRef.current++ }, [])
   const inFlightRef = useRef(false)
   const tokenRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const tokenAttemptsRef = useRef(0)
@@ -1494,14 +1492,12 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     store.setRuntime({ projectId, fileId, username, requiredValidations, auditStats, lane })
   }, [auditStats, fileId, lane, projectId, requiredValidations, store, username])
 
-  const doFetch = useCallback(async (soft = false, catchingUp = false) => {
+  const doFetch = useCallback(async (soft = false) => {
     const pid = projectRef.current
     const fid = fileRef.current
     const isEnabled = enabledRef.current
     const tokenFetcher = tokenFetcherRef.current
     if (!isEnabled || !pid || !fid) {
-      scanAbortRef.current?.abort()
-      generationRef.current++
       store.reset(pid, fid)
       setIsLoading(false)
       setIsError(false)
@@ -1509,10 +1505,6 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     }
     if (soft && inFlightRef.current) return
     const gen = ++generationRef.current
-    scanAbortRef.current?.abort()
-    const scanAbort = new AbortController()
-    scanAbortRef.current = scanAbort
-    let catchUpAfterScan = false
     inFlightRef.current = true
     let usedCache = false
 
@@ -1562,7 +1554,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
       const epoch = store.getProjectEpoch()
       if (since !== null && epoch !== null) {
         const deltaStartSeq = store.getWriteSeq()
-        const result = await fetchCellsDelta(pid, fid, since, token, undefined, epoch, scanAbort.signal)
+        const result = await fetchCellsDelta(pid, fid, since, token, undefined, epoch)
         if (generationRef.current !== gen) return
         if (result.kind === "delta") {
           let nextWatermark = result.maxServerSeq
@@ -1614,15 +1606,13 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
       const trackStreamMeta = () => {
         let sideFirst: number | null = null
         let sideSeen = false
-        return (meta: { maxServerSeq?: number | null; projectEpoch?: number | null; pagination?: "keyset" }) => {
+        return (meta: { maxServerSeq?: number | null; projectEpoch?: number | null }) => {
           const value = typeof meta.maxServerSeq === "number" ? meta.maxServerSeq : null
           if (!cursorSeen) {
             cursorSeen = true
             streamMaxSeq = value
             streamEpoch = typeof meta.projectEpoch === "number" ? meta.projectEpoch : null
           }
-          if ((meta.projectEpoch ?? null) !== streamEpoch) streamTorn = true
-          if (meta.pagination === "keyset") catchUpAfterScan = !catchingUp
           if (!sideSeen) {
             sideSeen = true
             sideFirst = value
@@ -1632,9 +1622,9 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
         }
       }
 
-      await streamFileCells(pid, fid, token, (rows) => pushRows(rows, false), "target", trackStreamMeta(), undefined, { keyset: true, signal: scanAbort.signal })
+      await streamFileCells(pid, fid, token, (rows) => pushRows(rows, false), "target", trackStreamMeta())
       if (generationRef.current !== gen) return
-      await streamFileCells(pid, fid, token, (rows) => pushRows(rows, true), "source", trackStreamMeta(), undefined, { keyset: true, signal: scanAbort.signal })
+      await streamFileCells(pid, fid, token, (rows) => pushRows(rows, true), "source", trackStreamMeta())
       if (generationRef.current !== gen) return
 
       let discardedProtected = false
@@ -1648,23 +1638,18 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
       }
 
       const watermark = streamTorn || discardedProtected ? null : streamMaxSeq
-      catchUpAfterScan = catchUpAfterScan && watermark !== null
       const watermarkEpoch = watermark === null ? null : streamEpoch
       store.setMaxServerSeq(watermark)
       store.setProjectEpoch(watermarkEpoch)
       void writeCellsCache(pid, fid, store.toRows(), watermark ?? undefined, watermarkEpoch ?? undefined)
       setIsLoading(false)
     } catch (err) {
-      catchUpAfterScan = false
       if (generationRef.current !== gen) return
       console.warn("[useActiveCellStore] fetch failed:", err)
       setIsError(true)
       setIsLoading(false)
     } finally {
-      if (generationRef.current === gen) {
-        inFlightRef.current = false
-        if (catchUpAfterScan) void doFetch(true, true)
-      }
+      if (generationRef.current === gen) inFlightRef.current = false
     }
   }, [store])
 

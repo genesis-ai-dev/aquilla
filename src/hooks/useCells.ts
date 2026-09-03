@@ -548,8 +548,6 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   // generation < current. Prevents an in-flight slow fetch from clobbering
   // state after the caller switched files.
   const generationRef = useRef(0)
-  const scanAbortRef = useRef<AbortController | null>(null)
-  useEffect(() => () => { scanAbortRef.current?.abort(); generationRef.current++ }, [])
   // True while a fetch is streaming. A soft refetch (revalidate) must NOT
   // interrupt an in-flight fetch: doing so aborts it via the gen fence,
   // strands `isLoading` at true (the `setIsLoading(false)` is gated behind a
@@ -732,14 +730,12 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   // mode so the user sees content in <50ms while the network fetch streams in
   // and atomically replaces the snapshot. A miss falls through to the original
   // skeleton-then-stream behavior.
-  const doFetch = useCallback(async (soft = false, catchingUp = false) => {
+  const doFetch = useCallback(async (soft = false) => {
     const projectId = projectRef.current
     const fileId = fileRef.current
     const enabled = enabledRef.current
     const getToken = tokenFetcherRef.current
     if (!enabled || !projectId || !fileId) {
-      scanAbortRef.current?.abort()
-      generationRef.current++
       setCells([])
       setIsLoading(false)
       setIsError(false)
@@ -757,10 +753,6 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
     // after it settles will pick up anything newer.
     if (soft && inFlightRef.current) return
     const gen = ++generationRef.current
-    scanAbortRef.current?.abort()
-    const scanAbort = new AbortController()
-    scanAbortRef.current = scanAbort
-    let catchUpAfterScan = false
     inFlightRef.current = true
     let usedCache = false
     if (!soft) {
@@ -833,7 +825,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         // Local-mutation clock at snapshot start (AQU-247): rows for any cell
         // mutated after this point outrank the delta's and must survive it.
         const deltaStartSeq = writeSeqRef.current
-        const result = await fetchCellsDelta(projectId, fileId, since, token, undefined, epoch, scanAbort.signal)
+        const result = await fetchCellsDelta(projectId, fileId, since, token, undefined, epoch)
         if (generationRef.current !== gen) return
         if (result.kind === "delta") {
           // B1: if the protected-row merge discarded any of the delta's rows
@@ -943,15 +935,13 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       const trackStreamMeta = () => {
         let sideFirst: number | null = null
         let sideSeen = false
-        return (meta: { maxServerSeq?: number | null; projectEpoch?: number | null; pagination?: "keyset" }) => {
+        return (meta: { maxServerSeq?: number | null; projectEpoch?: number | null }) => {
           const v = typeof meta.maxServerSeq === "number" ? meta.maxServerSeq : null
           if (!cursorSeen) {
             cursorSeen = true
             streamMaxSeq = v
             streamEpoch = typeof meta.projectEpoch === "number" ? meta.projectEpoch : null
           }
-          if ((meta.projectEpoch ?? null) !== streamEpoch) streamTorn = true
-          if (meta.pagination === "keyset") catchUpAfterScan = !catchingUp
           if (!sideSeen) {
             sideSeen = true
             sideFirst = v
@@ -967,8 +957,6 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         (rows) => pushRows(rows, false),
         "target",
         trackStreamMeta(),
-        undefined,
-        { keyset: true, signal: scanAbort.signal },
       )
       if (generationRef.current !== gen) return
       await streamFileCells(
@@ -978,8 +966,6 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         (rows) => pushRows(rows, true),
         "source",
         trackStreamMeta(),
-        undefined,
-        { keyset: true, signal: scanAbort.signal },
       )
       if (generationRef.current !== gen) return
       let discardedProtected = false
@@ -1007,7 +993,6 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       // a faithful server image at any single seq — store NO cursor so the
       // next trigger full-streams once and self-heals.
       const watermark = streamTorn || discardedProtected ? null : streamMaxSeq
-      catchUpAfterScan = catchUpAfterScan && watermark !== null
       const watermarkEpoch = watermark === null ? null : streamEpoch
       maxServerSeqRef.current = watermark
       projectEpochRef.current = watermarkEpoch
@@ -1023,7 +1008,6 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       // never get stuck on.
       setIsLoading(false)
     } catch (err) {
-      catchUpAfterScan = false
       if (generationRef.current !== gen) return
       console.warn("[useCells] fetch failed:", err)
       setIsError(true)
@@ -1031,10 +1015,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
     } finally {
       // Only the current-generation fetch owns the in-flight flag; a
       // superseded fetch must not clear it out from under its successor.
-      if (generationRef.current === gen) {
-        inFlightRef.current = false
-        if (catchUpAfterScan) void doFetch(true, true)
-      }
+      if (generationRef.current === gen) inFlightRef.current = false
     }
   }, [rebuildFromCache, clearConfirmedShadows, mergeProtectedRows])
 

@@ -11,10 +11,6 @@
 //   limit=N             — page size. Default 500, max 2000.
 //   cursor=...          — opaque pagination cursor; the previous response's
 //                         `nextCursor`.
-//   pagination=keyset  — editor transport scan in immutable row-key order,
-//                         with SQL LIMIT and a fixed first-page watermark.
-//                         Consumers must reconstruct anchor order and apply a
-//                         final delta. Omit for legacy anchor-ordered reads.
 //   lane=<tag>          — AQU-538: optional. When present, target rows are
 //                         filtered to `target_lang = <tag>`; source rows are
 //                         ALWAYS included regardless. Applies to the full
@@ -74,7 +70,6 @@
 import { verifyTokenForProject } from "../auth"
 import type { AiDraftProvenance } from "./types"
 import { PENDING_ALLOC_TTL_MS } from "./event-insert"
-import { decodeCellsScanCursor, encodeCellsScanCursor } from "./cells-keyset"
 
 export interface CellsReadEnv {
   AQUILLA_PG?: AquillaDb
@@ -486,14 +481,6 @@ export async function handleCellsReadRequest(
     return new Response("invalid lane: must be 64 characters or fewer", { status: 400 })
   }
   const laneFilter = qLane && qLane.length > 0 ? qLane : null
-  // Opt-in transport scan: legacy/external consumers still receive anchor order.
-  const keyset = url.searchParams.get("pagination") === "keyset"
-  const scanScope = JSON.stringify([projectId, fileId, sideFilter, laneFilter])
-  const rawCursor = url.searchParams.get("cursor")
-  const scanCursor = keyset && rawCursor ? decodeCellsScanCursor(rawCursor, scanScope) : null
-  if (keyset && rawCursor && !scanCursor) {
-    return new Response("invalid scan cursor", { status: 400 })
-  }
 
   const qSince = url.searchParams.get("since")
   let since: number | null = null
@@ -554,24 +541,13 @@ export async function handleCellsReadRequest(
   let maxServerSeq: number | null = null
   let projectEpoch: number | null = null
   let etag: string | null = null
-  let scanRebuiltSeq = 0
   if (!cellIdsFilter || cellIdsFilter.length === 0) {
     const watermarks = await fetchWatermarks(env.AQUILLA_PG, projectId, fileId)
     maxServerSeq = advertisedSeq(watermarks)
     projectEpoch = watermarks.epoch
-    scanRebuiltSeq = watermarks.rebuiltSeq
     etag = makeEtag(fileId, watermarks)
-    if (!keyset && ifNoneMatchMatches(request.headers.get("If-None-Match"), etag)) {
+    if (ifNoneMatchMatches(request.headers.get("If-None-Match"), etag)) {
       return new Response(null, { status: 304, headers: cacheHeaders(etag) })
-    }
-    if (scanCursor) {
-      if (scanCursor.epoch !== projectEpoch || scanCursor.seq > Math.max(watermarks.maxSeq, watermarks.rebuiltSeq)
-        || scanCursor.rebuiltSeq !== watermarks.rebuiltSeq) {
-        return new Response("file changed incarnation or was rebuilt during scan; retry", { status: 409 })
-      }
-      // Never move the resume watermark mid-scan. A final delta from this
-      // lower bound covers both late writers and inserts behind the keyset.
-      maxServerSeq = scanCursor.seq
     }
     if (since !== null) {
       // The resync gate must use the UNCLAMPED max: a pending-allocation
@@ -697,26 +673,6 @@ export async function handleCellsReadRequest(
     binds.push(laneFilter)
   }
   const sql = parts.join(" ")
-
-  if (keyset && !cellIdsFilter) {
-    const total = scanCursor?.total ?? Number(await env.AQUILLA_PG.prepare(
-      `SELECT COUNT(*) AS total FROM cells ${parts.slice(2).join(" ")}`,
-    ).bind(...binds).first<number>("total"))
-    const after = scanCursor ? " AND (side, target_lang, cell_id) > (?, ?, ?)" : ""
-    const page = await env.AQUILLA_PG.prepare(
-      `${sql}${after} ORDER BY side, target_lang, cell_id LIMIT ?`,
-    ).bind(...binds, ...(scanCursor?.after ?? []), limit + 1).all<CellRowRaw>()
-    const rows = page.results.slice(0, limit)
-    const last = rows.at(-1)
-    return Response.json({
-      cells: rows.map(mapRow),
-      nextCursor: page.results.length > limit && last ? encodeCellsScanCursor({
-        version: 1, scope: scanScope, after: [last.side, last.target_lang, last.cell_id],
-        seq: maxServerSeq ?? 0, epoch: projectEpoch ?? 0, rebuiltSeq: scanRebuiltSeq, total,
-      }) : null,
-      total, maxServerSeq, projectEpoch, pagination: "keyset",
-    }, { headers: { "Cache-Control": "private, no-store" } })
-  }
 
   const result = await env.AQUILLA_PG.prepare(sql).bind(...binds).all<CellRowRaw>()
   const allRows = result.results

@@ -15,7 +15,7 @@
  *    pin onto the source row's `event_id` as observed at commit time.
  */
 
-import type { CameraState } from "./cells-read-types"
+import type { CameraState } from "@/lib/sync/cells-read-types"
 
 // ── Kind union (must mirror sync-worker/src/events/types.ts) ──────────────
 

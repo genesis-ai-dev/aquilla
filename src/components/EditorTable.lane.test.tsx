@@ -9,10 +9,9 @@
  */
 
 import { afterEach, describe, it, expect, vi } from "vitest"
-import { render, screen, fireEvent, act, waitFor } from "@testing-library/react"
+import { render, screen, fireEvent } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import type { ReactNode, ComponentProps } from "react"
-import { ProjectPresenceStore } from "@/lib/sync/presence-store"
+import type { ReactNode } from "react"
 import { EditorTable } from "./EditorTable"
 import { EditorActionsProvider } from "@/context/EditorActionsContext"
 import { CellStore } from "@/hooks/useActiveCellStore"
@@ -129,7 +128,6 @@ function renderTable(
   myScopes: MemberScope[] = [],
   targetValue?: string,
   sourceMetadata?: Record<string, unknown>,
-  extra: Partial<ComponentProps<typeof EditorTable>> = {},
 ) {
   const qc = new QueryClient()
   return render(
@@ -153,7 +151,6 @@ function renderTable(
           cellLabelsEnabled={false}
           sourceTextDirection="ltr"
           targetTextDirection="ltr"
-          {...extra}
         />
       </EditorActionsProvider>
     </QueryClientProvider>,
@@ -165,29 +162,6 @@ afterEach(() => {
 })
 
 describe("EditorTable — active lane threads into target-side emits", () => {
-  it("keeps saved text visible through empty and stale remote full-text drafts", async () => {
-    const presence = new ProjectPresenceStore("tester")
-    renderTable("", [], "saved translation", undefined, { presenceStore: presence })
-    expect(await screen.findByText("saved translation")).toBeVisible()
-    for (const draftText of ["", "someone else's unsaved words"]) {
-      act(() => presence.applyPresenceFrame([{
-        userId: "bob", focusedCell: "cell-1", ts: Date.now(),
-        selection: { side: "target", anchor: 0, head: 0, draftText },
-      }]))
-      expect(screen.getByText("saved translation")).toBeVisible()
-      expect(document.querySelector("[data-remote-presence-draft]")).toBeNull()
-    }
-  })
-
-  it("requests a lock on activation but mounts the editor read-only before acknowledgement", async () => {
-    const onClaimCell = vi.fn()
-    const { container } = renderTable("", [], "saved translation", undefined, { confirmedEditCellId: null, onClaimCell })
-    fireEvent.click(await screen.findByText("saved translation"))
-    await waitFor(() => expect(onClaimCell).toHaveBeenCalledWith("cell-1"))
-    await waitFor(() => expect(container.querySelector(".ProseMirror")).toHaveAttribute("contenteditable", "false"))
-    expect(screen.getByRole("status")).toHaveTextContent("editing paused")
-  })
-
   it("carries the active lane as targetLang on validate", async () => {
     emitCellValidate.mockClear()
     renderTable("fr")

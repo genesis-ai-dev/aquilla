@@ -101,29 +101,13 @@ async function waitForCellReadRetry(delayMs: number): Promise<void> {
   await new Promise<void>((resolve) => setTimeout(resolve, delayMs))
 }
 
-function assertNotAborted(signal?: AbortSignal): void {
-  // AbortSignal.throwIfAborted is absent in older WebKit versions.
-  if (signal?.aborted) throw signal.reason ?? new DOMException("Cell read cancelled", "AbortError")
-}
-
-async function fetchCellsJson<T>(url: string, jwt: string, signal?: AbortSignal): Promise<T> {
+async function fetchCellsJson<T>(url: string, jwt: string): Promise<T> {
   let lastError: unknown
   for (let attempt = 0; attempt < CELL_READ_ATTEMPTS; attempt++) {
     try {
-      assertNotAborted(signal)
-      const controller = new AbortController()
-      const abort = () => controller.abort(signal?.reason)
-      signal?.addEventListener("abort", abort, { once: true })
-      const timeout = setTimeout(() => controller.abort(new DOMException("Cell read timed out", "TimeoutError")), READ_TIMEOUT_MS)
-      try {
-        const res = await fetch(url, { headers: authHeaders(jwt), signal: controller.signal })
-        return await readJson<T>(res)
-      } finally {
-        clearTimeout(timeout)
-        signal?.removeEventListener("abort", abort)
-      }
+      const res = await fetch(url, fetchInit(jwt))
+      return await readJson<T>(res)
     } catch (error) {
-      if (signal?.aborted) throw error
       lastError = error
       if (!isTransientCellsReadError(error) || attempt === CELL_READ_ATTEMPTS - 1) {
         throw error
@@ -186,9 +170,6 @@ export async function fetchFile(
 }
 
 export interface FetchFileCellsOptions {
-  /** Editor transport scan; callers reconstruct anchor order locally. */
-  pagination?: "keyset"
-  signal?: AbortSignal
   /** Restrict to a single side. Omit to fetch both source and target rows
    *  — the default for the editor table which renders them paired. */
   side?: "source" | "target"
@@ -209,7 +190,6 @@ export interface FetchFileCellsOptions {
  *  locally (cells-read-types is owned elsewhere this wave); `maxServerSeq`
  *  is absent when talking to a pre-M2-1 server. */
 export interface CellsPageWithMeta extends CellsPage {
-  pagination?: "keyset"
   maxServerSeq?: number | null
   /** AQU-943: the project incarnation this page's watermark belongs to.
    *  Absent when talking to a pre-AQU-943 server. */
@@ -233,13 +213,12 @@ export async function fetchFileCells(
   if (typeof opts.limit === "number") params.set("limit", String(opts.limit))
   if (opts.cursor) params.set("cursor", opts.cursor)
   if (opts.lane) params.set("lane", opts.lane)
-  if (opts.pagination) params.set("pagination", opts.pagination)
   const qs = params.toString()
   const url =
     `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}` +
     `/files/${encodeURIComponent(fileId)}/cells` +
     (qs ? `?${qs}` : "")
-  const page = await fetchCellsJson<CellsPageWithMeta>(url, jwt, opts.signal)
+  const page = await fetchCellsJson<CellsPageWithMeta>(url, jwt)
   return { ...page, cells: normalizeRowsMetadata(page.cells) }
 }
 
@@ -282,7 +261,6 @@ export async function fetchCellsDelta(
   jwt: string,
   lane?: string,
   projectEpoch?: number | null,
-  signal?: AbortSignal,
 ): Promise<CellsDeltaResult> {
   const params = new URLSearchParams()
   params.set("since", String(since))
@@ -298,7 +276,7 @@ export async function fetchCellsDelta(
     cells?: CellRow[]
     maxServerSeq?: number
     projectEpoch?: number
-  }>(url, jwt, signal)
+  }>(url, jwt)
   if (body.delta === true && typeof body.maxServerSeq === "number") {
     return {
       kind: "delta",
@@ -379,12 +357,7 @@ export async function fetchCellsByIds(
  * the next delta re-fetches it. A page-to-page difference means events landed
  * mid-stream — and because the server paginates by offset, a row that shifted
  * across a page boundary may have been skipped entirely (a torn snapshot), so
- * callers must NOT mint a `?since=` cursor from such a legacy stream (audit B2).
- *
- * Editor callers opt into `scan.keyset`: the server pages immutable row keys
- * with SQL LIMIT, freezes each side's first safe watermark, and reports
- * pagination=keyset. Callers rebuild anchor order and run a final delta from
- * the earliest side's watermark. Existing ordered consumers remain unchanged.
+ * callers must NOT mint a `?since=` cursor from such a stream (audit B2).
  */
 export async function streamFileCells(
   projectId: string,
@@ -392,21 +365,16 @@ export async function streamFileCells(
   jwt: string,
   onPage: (rows: CellRow[], isLast: boolean) => boolean | void | Promise<boolean | void>,
   side?: "source" | "target",
-  onMeta?: (meta: { maxServerSeq?: number | null; projectEpoch?: number | null; pagination?: "keyset" }) => void,
+  onMeta?: (meta: { maxServerSeq?: number | null; projectEpoch?: number | null }) => void,
   lane?: string,
-  scan?: { keyset?: boolean; signal?: AbortSignal },
 ): Promise<void> {
   let cursor: string | undefined
   // Hard cap on page iterations as a safety belt against a malformed nextCursor
   // loop. At max page size (2000) this allows up to 200k cells per file.
   const MAX_PAGES = 100
   for (let i = 0; i < MAX_PAGES; i++) {
-    assertNotAborted(scan?.signal)
-    const page = await fetchFileCells(projectId, fileId, {
-      side, cursor, lane, signal: scan?.signal,
-      ...(scan?.keyset ? { pagination: "keyset" as const, limit: 2000 } : {}),
-    }, jwt)
-    if (onMeta) onMeta({ maxServerSeq: page.maxServerSeq, projectEpoch: page.projectEpoch, pagination: page.pagination })
+    const page = await fetchFileCells(projectId, fileId, { side, cursor, lane }, jwt)
+    if (onMeta) onMeta({ maxServerSeq: page.maxServerSeq, projectEpoch: page.projectEpoch })
     const nextCursor = page.nextCursor ?? undefined
     const isLast = nextCursor === undefined
     const cont = await onPage(page.cells, isLast)

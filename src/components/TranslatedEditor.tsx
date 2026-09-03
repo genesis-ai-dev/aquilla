@@ -1177,7 +1177,6 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       scheduleSelectionPublish(editor)
     },
     onFocus({ editor }) {
-      if (isReadOnlyRef.current) return
       applyEditorDirection(editor)
       const pointerSelection = initialIdmlSelectionRef.current
       initialIdmlSelectionRef.current = null
@@ -1457,7 +1456,6 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
 
   useEffect(() => {
     if (!editor || editor.isDestroyed) return
-    isReadOnlyRef.current = isReadOnly
     editor.setEditable(!isReadOnly)
   }, [editor, isReadOnly])
 

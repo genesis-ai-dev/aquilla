@@ -425,9 +425,15 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
    * measures the element and, if it is not at the rail, drives it there. It is
    * the same distrust `expand()` already applies in the other direction.
    *
-   * Safe rather than a loop: it runs in a passive effect, after the commit and
-   * outside the library's own call stack, so no `flushSync` and no re-entrancy;
-   * it does nothing at all on the normal path, where the clamp already worked;
+   * In practice it is the effect that lands the size, not the clamp: a passive
+   * effect from this commit runs before the render the re-registration
+   * scheduled, so the panel is still at its old width when we measure. Which
+   * is the point — the fold stops depending on a mechanism that was seen to
+   * fail, in every browser rather than the one where it was caught.
+   *
+   * Safe rather than a loop: it runs after the commit and outside the
+   * library's own call stack, so no `flushSync` and no re-entrancy; it is a
+   * no-op the moment the panel is already at the rail;
    * `resize()` clamps rather than throws, and here the neighbour can always
    * absorb the change (the video has no ceiling, the table has none, the body
    * has none); and the layout report it produces is not a user interaction, so
@@ -435,10 +441,12 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
    * collapsed. It cannot fire mid-drag, because `effective` does not change
    * until the pointer is released.
    */
+  const repairsRef = useRef<Partial<Record<MediaSectionId, number>>>({})
   useEffect(() => {
     for (const id of effective) {
       const px = safeSizePx(id)
       if (px === null || isRailSized(px)) continue
+      repairsRef.current[id] = (repairsRef.current[id] ?? 0) + 1
       applySize(id, MEDIA_RAIL_PX)
     }
   }, [applySize, effective, safeSizePx])
@@ -478,6 +486,12 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
               collapsed: effective.includes(id),
               previewing: previewRail.includes(id),
               railed: size ? isRailSized(size.inPixels) : null,
+              // How many times this section's size was driven to the rail
+              // rather than left to the group's own clamp. One per fold is
+              // normal — the effect runs before the remount that would have
+              // clamped it — and that is the point: the fold no longer
+              // depends on a mechanism that was seen to fail.
+              repairs: repairsRef.current[id] ?? 0,
               size,
               frozen: frozenRef.current[id] ?? null,
             },

@@ -53,6 +53,12 @@ export interface CloudProjectSummary {
   /** AQU-822: the org's effective termbase-edit floor. Returned by the
    *  single-project endpoint; absent on the list endpoint / older servers. */
   termbaseEditMinRole?: number | null
+  /** AQU-1002: the org's effective comment floors — the minimum role to open a
+   *  thread, and to resolve/reopen a thread someone else opened. Returned by
+   *  the single-project endpoint; absent on the list endpoint / older servers,
+   *  where callers fall back to the pre-AQU-1002 defaults. */
+  commentCreateMinRole?: number | null
+  commentResolveMinRole?: number | null
   /** Present on the single-project endpoint; list endpoint filters archived rows. */
   archivedAt?: string | null
   /** Present on the single-project endpoint; used to show "archived by X" in Trash. */
@@ -424,6 +430,14 @@ export function minimalProjectRecord(summary: CloudProjectSummary): ProjectRecor
   // callers read as the PROJECT_LEAD default.
   if (summary.termbaseEditMinRole !== undefined) {
     record.termbaseEditMinRole = summary.termbaseEditMinRole
+  }
+  // AQU-1002: same treatment for the comment floors — absent leaves them
+  // undefined, which the comment surfaces read as the stock defaults.
+  if (summary.commentCreateMinRole !== undefined) {
+    record.commentCreateMinRole = summary.commentCreateMinRole
+  }
+  if (summary.commentResolveMinRole !== undefined) {
+    record.commentResolveMinRole = summary.commentResolveMinRole
   }
   // AQU-476/478: propagate link mode/consumes/gate/cursor when present.
   if (summary.sourceLinkMode !== undefined) record.sourceLinkMode = summary.sourceLinkMode

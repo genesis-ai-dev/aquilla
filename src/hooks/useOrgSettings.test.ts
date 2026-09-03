@@ -14,7 +14,12 @@
 
 import { describe, it, expect, vi, afterEach } from "vitest"
 import { renderHook, waitFor, act } from "@testing-library/react"
-import { useOrgSettings, canEditRosterProgressFloor, canEditTermbaseFloor } from "./useOrgSettings"
+import {
+  useOrgSettings,
+  canEditRosterProgressFloor,
+  canEditTermbaseFloor,
+  canEditCommentFloors,
+} from "./useOrgSettings"
 import * as restClient from "@/lib/sync/org-settings"
 import type { OrgSettingsResponse, OrgPatchResult } from "@/lib/sync/org-settings"
 import type { TranslationRule } from "@/lib/parsers/types"
@@ -453,6 +458,74 @@ describe("canEditTermbaseFloor — owner-only write gate (AQU-822)", () => {
   it("denies when the caller's role is unknown (null/undefined)", () => {
     expect(canEditTermbaseFloor(null)).toBe(false)
     expect(canEditTermbaseFloor(undefined)).toBe(false)
+  })
+})
+
+// AQU-1002: the two comment floors. Defaults reproduce post-AQU-999 behaviour
+// exactly — COMMENTER (200) to open a thread, CONTRIBUTOR (400) to resolve one
+// somebody else opened — so an org that never sets them sees no change.
+describe("useOrgSettings — comment floors (AQU-1002)", () => {
+  function makeCommentResponse(settings: Record<string, unknown>): OrgSettingsResponse {
+    return {
+      orgId: 1,
+      settings,
+      version: 1,
+      updatedAt: "2026-01-01T00:00:00Z",
+      updatedBy: 1,
+    }
+  }
+
+  it("defaults to commenter (200) / contributor (400) when the org has set neither", async () => {
+    mockFetchResponse = makeCommentResponse({})
+    const { result } = renderHook(() => useOrgSettings(1, 700))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    expect(result.current.commentCreateMinRole).toBe(200)
+    expect(result.current.commentResolveMinRole).toBe(400)
+  })
+
+  it("reads explicitly configured floors", async () => {
+    mockFetchResponse = makeCommentResponse({
+      commentCreateMinRole: 400,
+      commentResolveMinRole: 600,
+    })
+    const { result } = renderHook(() => useOrgSettings(1, 700))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    expect(result.current.commentCreateMinRole).toBe(400)
+    expect(result.current.commentResolveMinRole).toBe(600)
+  })
+
+  it("keeps the floors independent — setting one leaves the other at its default", async () => {
+    mockFetchResponse = makeCommentResponse({ commentResolveMinRole: 200 })
+    const { result } = renderHook(() => useOrgSettings(1, 700))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    expect(result.current.commentCreateMinRole).toBe(200)
+    expect(result.current.commentResolveMinRole).toBe(200)
+  })
+
+  it("falls back to the defaults for out-of-ladder values", async () => {
+    mockFetchResponse = makeCommentResponse({
+      commentCreateMinRole: 9999,
+      commentResolveMinRole: -1,
+    })
+    const { result } = renderHook(() => useOrgSettings(1, 700))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    expect(result.current.commentCreateMinRole).toBe(200)
+    expect(result.current.commentResolveMinRole).toBe(400)
+  })
+})
+
+describe("canEditCommentFloors — owner-only write gate (AQU-1002)", () => {
+  it("denies a maintainer (600) — who settles other people's threads is org policy", () => {
+    expect(canEditCommentFloors(600)).toBe(false)
+  })
+
+  it("permits an owner (700)", () => {
+    expect(canEditCommentFloors(700)).toBe(true)
+  })
+
+  it("denies when the caller's role is unknown (null/undefined)", () => {
+    expect(canEditCommentFloors(null)).toBe(false)
+    expect(canEditCommentFloors(undefined)).toBe(false)
   })
 })
 

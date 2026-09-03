@@ -8,6 +8,8 @@ import {
   foreignRoleFor,
   effectiveCommentRoleFor,
   canMutateComment,
+  commentFloorsFrom,
+  DEFAULT_COMMENT_FLOORS,
 } from "./role-policy"
 
 describe("role-policy (client mirror)", () => {
@@ -202,6 +204,90 @@ describe("role-policy (client mirror)", () => {
 
     it("fails closed when roleLevel is unknown", () => {
       expect(canSubmitAssignment(null, true, 1, 1)).toBe(false)
+    })
+  })
+
+  // AQU-1002: the org-configurable half of comment policy. The regression to
+  // guard is that omitting the floors reproduces pre-AQU-1002 behaviour
+  // exactly — every existing caller passes three arguments.
+  describe("org-configurable comment floors (AQU-1002)", () => {
+    it("defaults reproduce the pre-AQU-1002 floors", () => {
+      expect(DEFAULT_COMMENT_FLOORS.createMinRole).toBe(ROLE.COMMENTER)
+      expect(DEFAULT_COMMENT_FLOORS.resolveMinRole).toBe(ROLE.CONTRIBUTOR)
+      // Omitting the argument entirely must behave identically.
+      expect(effectiveCommentRoleFor("comment.resolve", false)).toBe(ROLE.CONTRIBUTOR)
+      expect(effectiveCommentRoleFor("comment.create", false)).toBe(ROLE.COMMENTER)
+    })
+
+    it("raises the create floor when the org configured one", () => {
+      const floors = { createMinRole: ROLE.CONTRIBUTOR, resolveMinRole: ROLE.CONTRIBUTOR }
+      expect(canMutateComment("comment.create", ROLE.REVIEWER, true, floors)).toBe(false)
+      expect(canMutateComment("comment.create", ROLE.CONTRIBUTOR, true, floors)).toBe(true)
+    })
+
+    it("never lowers the create floor below the server's static one", () => {
+      // VIEWER is under the static COMMENTER floor the server still enforces,
+      // so a floor set that low must not make the client offer the composer.
+      const floors = { createMinRole: ROLE.VIEWER, resolveMinRole: ROLE.CONTRIBUTOR }
+      expect(effectiveCommentRoleFor("comment.create", true, floors)).toBe(ROLE.COMMENTER)
+      expect(canMutateComment("comment.create", ROLE.VIEWER, true, floors)).toBe(false)
+    })
+
+    it("applies the resolve floor only to threads the caller did not author", () => {
+      const strict = { createMinRole: ROLE.COMMENTER, resolveMinRole: ROLE.MAINTAINER }
+      // Somebody else's thread: held to the raised floor.
+      expect(canMutateComment("comment.resolve", ROLE.CONTRIBUTOR, false, strict)).toBe(false)
+      expect(canMutateComment("comment.resolve", ROLE.MAINTAINER, false, strict)).toBe(true)
+      // Their OWN thread: the ownership carve-out survives any floor.
+      expect(canMutateComment("comment.resolve", ROLE.COMMENTER, true, strict)).toBe(true)
+    })
+
+    it("lets an org open foreign resolve below AQU-999's contributor default", () => {
+      const relaxed = { createMinRole: ROLE.COMMENTER, resolveMinRole: ROLE.COMMENTER }
+      expect(canMutateComment("comment.resolve", ROLE.COMMENTER, false, relaxed)).toBe(true)
+      expect(canMutateComment("comment.resolve", ROLE.REVIEWER, false, relaxed)).toBe(true)
+    })
+
+    it("leaves foreign edit/delete on their static maintainer floor", () => {
+      // Only resolve is configurable — rewriting or removing another person's
+      // words is not a policy orgs asked to tune.
+      const relaxed = { createMinRole: ROLE.COMMENTER, resolveMinRole: ROLE.COMMENTER }
+      expect(canMutateComment("comment.edit", ROLE.CONTRIBUTOR, false, relaxed)).toBe(false)
+      expect(canMutateComment("comment.delete", ROLE.CONTRIBUTOR, false, relaxed)).toBe(false)
+      expect(canMutateComment("comment.edit", ROLE.MAINTAINER, false, relaxed)).toBe(true)
+    })
+
+    it("still fails open on an unknown role (local / git-imported project)", () => {
+      const strict = { createMinRole: ROLE.MAINTAINER, resolveMinRole: ROLE.MAINTAINER }
+      expect(canMutateComment("comment.create", null, true, strict)).toBe(true)
+      expect(canMutateComment("comment.resolve", null, false, strict)).toBe(true)
+    })
+  })
+
+  describe("commentFloorsFrom (AQU-1002)", () => {
+    it("falls back to the defaults when the server sent no floors", () => {
+      expect(commentFloorsFrom(undefined)).toEqual(DEFAULT_COMMENT_FLOORS)
+      expect(commentFloorsFrom(null)).toEqual(DEFAULT_COMMENT_FLOORS)
+      expect(commentFloorsFrom({})).toEqual(DEFAULT_COMMENT_FLOORS)
+    })
+
+    it("reads floors the server did send", () => {
+      expect(
+        commentFloorsFrom({ commentCreateMinRole: 300, commentResolveMinRole: 600 }),
+      ).toEqual({ createMinRole: 300, resolveMinRole: 600 })
+    })
+
+    it("defaults each floor independently", () => {
+      expect(commentFloorsFrom({ commentResolveMinRole: 600 })).toEqual({
+        createMinRole: ROLE.COMMENTER,
+        resolveMinRole: 600,
+      })
+    })
+
+    it("ignores out-of-ladder values rather than clamping them", () => {
+      expect(
+        commentFloorsFrom({ commentCreateMinRole: 9999, commentResolveMinRole: -1 }),
+      ).toEqual(DEFAULT_COMMENT_FLOORS)
     })
   })
 })

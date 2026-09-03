@@ -43,6 +43,7 @@ import {
   resolveRunCostCapCents,
 } from "../lib/agent/frames"
 import { buildMemoryContext, type MemoryContext } from "../../../db/shared/agent-memory"
+import { countRecentRateLimitEvents, recordRateLimitEvent } from "../../../db/shared/rate-limit"
 import { buildAugmentSystemPrompt } from "../lib/agent/prompt-augment"
 import { sandboxDestroy } from "../lib/agent/sandbox-client"
 import { openRouterExtras, streamUsageOptions } from "../lib/llm-vendor"
@@ -75,6 +76,14 @@ const agent = new Hono<{ Bindings: Env; Variables: Variables }>()
 // Overridable so the dev stack / e2e can point the loop at a scripted mock
 // (scripts/mock-openrouter.ts) when no real key is configured. Prod ignores it.
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+// [Pen test] API security & data exposure (2026-09-03): see the matching
+// comment in routes/chat.ts — every spend guard on this route is log-only in
+// every deployed environment, and this is the more expensive of the two
+// OpenRouter proxies (multi-turn tool loop, up to 8 iterations, 60k token
+// ceiling per run). Lower cap than chat's: a real interactive session runs a
+// handful of agent turns, never dozens per minute.
+const AGENT_RUN_MAX_PER_USER_PER_WINDOW = 60
 function resolveOpenRouterUrl(env: Env): string {
   return env.OPENROUTER_BASE_URL
     ? `${env.OPENROUTER_BASE_URL.replace(/\/$/, "")}/chat/completions`
@@ -503,6 +512,19 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
   if (!role) {
     return c.json({ error: "forbidden", message: "No access to this project" }, 403)
   }
+
+  // Volumetric floor: unlike the guards below, this actually blocks (see
+  // comment at AGENT_RUN_MAX_PER_USER_PER_WINDOW).
+  const rateLimitIdentifier = `user:${user.id}`
+  const recentAgentRuns = await countRecentRateLimitEvents(
+    c.env.AQUILLA_PG,
+    "agent_run",
+    rateLimitIdentifier,
+  )
+  if (recentAgentRuns >= AGENT_RUN_MAX_PER_USER_PER_WINDOW) {
+    return c.json({ error: "rate_limited", message: "Too many agent runs, slow down." }, 429)
+  }
+  await recordRateLimitEvent(c.env.AQUILLA_PG, "agent_run", rateLimitIdentifier)
 
   // Resolve the agent model from the global store (env/default fallback).
   const platformSettings = await getPlatformSettingsCached(c.env)

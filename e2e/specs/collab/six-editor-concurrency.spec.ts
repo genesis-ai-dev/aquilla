@@ -38,9 +38,9 @@ import { Workspace } from "../../helpers/page-objects/Workspace"
 
 const EDITOR_COUNT = 6
 const EXTRA_USERS = ["dave", "erin", "frank"] as const
-/** POST /events HTTP round-trip (resource timing). A seq-lock convoy behind
- * a whole-Bible import chunk is tens of seconds to minutes; healthy writes
- * stay well under that even with six editors and the import in flight. */
+/** POST /events request-sent → ack. A seq-lock convoy behind a whole-Bible
+ * import chunk is tens of seconds to minutes; healthy writes stay well under
+ * that even with six editors and the import in flight. */
 const WRITE_BUDGET_MS = 8_000
 /** Events ack → text visible in a different open editor. Matches the
  * two-cursor smoke (`concurrent-edit.smoke.spec.ts`) 15s round-trip. */

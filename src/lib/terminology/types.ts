@@ -56,4 +56,16 @@ export interface Concept {
   createdAt: string
   createdBy?: string
   updatedAt?: string
+  /**
+   * When true, source-term matching is case-sensitive. Omitted/false keeps the
+   * default case-insensitive match used everywhere else in the term pipeline.
+   */
+  caseSensitive?: boolean
+}
+
+/** Payload from the editor "Add to terminology" popover. */
+export interface ConceptDraft {
+  sourceTerm: string
+  rendering?: string
+  caseSensitive?: boolean
 }

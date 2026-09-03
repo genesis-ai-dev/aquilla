@@ -136,6 +136,7 @@ import { extractCuesFromCells } from "@/lib/video/vtt-generator"
 import { useFileSync } from "@/hooks/useFileSync"
 import { useFileMeta } from "@/hooks/useFileMeta"
 import { useCellLabelsPreference } from "@/hooks/useCellLabelsPreference"
+import { useTargetKeyTermHighlightPreference } from "@/hooks/useTargetKeyTermHighlightPreference"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
@@ -344,7 +345,7 @@ import {
 } from "@/lib/richtext/idml-editor"
 import { shouldAutoValidateHumanEdit } from "@/lib/review/auto-validation"
 import { addConcept } from "@/lib/terminology/store"
-import type { Concept } from "@/lib/terminology/types"
+import type { Concept, ConceptDraft } from "@/lib/terminology/types"
 import { buildGlosser, type BtSeed, type Glosser } from "@/lib/completion/bt-glosser"
 import { memMark } from "@/lib/perf-log"
 import { buildAlignmentModel, type AlignmentModel } from "@/lib/completion/interlinear"
@@ -1732,6 +1733,8 @@ export function ProjectWorkspace() {
   }, [cellSummaries])
   const [cellLabelsEnabled, setCellLabelsEnabled] = useCellLabelsPreference(projectId!)
   const [footnoteViewMode, setFootnoteViewMode] = useFootnotesPreference(projectId!)
+  const [targetKeyTermHighlightMode, setTargetKeyTermHighlightMode] =
+    useTargetKeyTermHighlightPreference(projectId!)
   const [visibleFootnotes, setVisibleFootnotes] = useState<VisibleFootnoteEntry[]>([])
   const visibleFootnotesKeyRef = useRef("")
   // FRO-251: per-file, per-side font sizes — adjusted from the View settings
@@ -4554,35 +4557,57 @@ export function ProjectWorkspace() {
     return norm(gloss) === norm(translatedText) ? "" : gloss
   }, [getGlosser])
 
-  // Add-from-selection: create a DRAFT concept from a source-side selection in
-  // the editor and persist it via the same project-settings sync path the
-  // terminology page uses. Renderings start empty — the translator fills them
-  // in later from the Terminology page.
-  const handleAddConceptFromSelection = useCallback(async (sourceTerm: string) => {
+  // Add-from-selection: create a concept from a source-side selection in the
+  // editor. A rendering in the payload activates the concept immediately;
+  // otherwise it lands as a draft. Progress is toasted so the popover can close.
+  const handleAddConceptFromSelection = useCallback(async (draft: ConceptDraft) => {
     if (!project) return
-    const trimmed = sourceTerm.trim()
+    const trimmed = draft.sourceTerm.trim()
     if (!trimmed) return
-    const draft: Omit<Concept, "id" | "createdAt"> = {
-      sourceTerm: trimmed,
-      renderings: [],
-      status: "draft",
-      createdBy: currentUsername,
+    const rendering = draft.rendering?.trim()
+    const toastId = toast.add({
+      type: "loading",
+      title: t("terminology.addConcept.savingToast"),
+      timeout: 0,
+      id: `term-save:${crypto.randomUUID()}`,
+    })
+    try {
+      const payload: Omit<Concept, "id" | "createdAt"> = {
+        sourceTerm: trimmed,
+        renderings: rendering ? [{ rendering, status: "preferred" }] : [],
+        status: rendering ? "active" : "draft",
+        createdBy: currentUsername,
+        ...(draft.caseSensitive ? { caseSensitive: true } : {}),
+      }
+      const updated = addConcept(project, payload)
+      const created = (updated.terminology ?? []).at(-1)
+      const failure = describePatchFailure(await patchSettings({ terminology: updated.terminology ?? [] }))
+      if (failure) throw new Error(failure)
+      toast.update(toastId, {
+        type: "success",
+        title: t("terminology.addConcept.savedToast", { term: trimmed }),
+        timeout: 8000,
+        actionProps: created
+          ? {
+              children: t("terminology.addConcept.viewEntry"),
+              onClick: () => {
+                navigate(`/project/${project.id}/terminology?concept=${encodeURIComponent(created.id)}`)
+              },
+            }
+          : undefined,
+      })
+    } catch (err) {
+      toast.update(toastId, {
+        type: "error",
+        title: err instanceof Error ? err.message : t("terminology.addConcept.saveFailed"),
+      })
     }
-    const updated = addConcept(project, draft)
-    // AQU-754: patchSettings never rejects — it resolves a PatchOutcome. The
-    // prior code ignored it, so an "add concept" from the editor silently
-    // no-op'd whenever the write was rejected (below Maintainer, offline,
-    // version conflict, or a 5xx) — the same silent-failure the Terminology
-    // page hit in AQU-749. Surface it so AddConceptDialog keeps the dialog open
-    // and shows why, instead of closing as if the concept was saved.
-    const failure = describePatchFailure(await patchSettings({ terminology: updated.terminology ?? [] }))
-    if (failure) throw new Error(failure)
-  }, [project, currentUsername, patchSettings])
+  }, [project, currentUsername, patchSettings, t, navigate])
 
   // AQU-754 follow-up: when the caller is on a synced project below the
-  // termbase write floor, open AddConceptDialog pre-blocked (input + Create
-  // draft disabled, reason shown, Cancel active) instead of letting them type
-  // a draft that patchSettings is guaranteed to reject. serverRoleLevel is the
+  // terminology write floor, open the add-term popover pre-blocked (inputs
+  // disabled, reason shown, Cancel active) instead of letting them type a
+  // draft that patchSettings is guaranteed to reject. serverRoleLevel is the
   // server-resolved role (null = unsynced/local-only project, which saves
   // locally and must stay writable).
   const addConceptBlockedReason =
@@ -5990,10 +6015,16 @@ export function ProjectWorkspace() {
 
   /** Stable wrapper over the ref above — see `audioHomeRef`. */
   const audioHomeFor = useCallback((cell: CellData) => audioHomeRef.current(cell), [])
+  const handleOpenTerminologyConcept = useCallback((conceptId: string) => {
+    navigate(
+      `/project/${projectId}/terminology?concept=${encodeURIComponent(conceptId)}`,
+    )
+  }, [navigate, projectId])
   const editorActionsValue = useMemo(() => ({
     onInfractionClick: handleInfractionClick,
     onOpenComments: handleOpenComments,
     onOpenHistory: handleOpenHistory,
+    onOpenTerminologyConcept: handleOpenTerminologyConcept,
     onAiSetupNeeded: handleAiSetupNeeded,
     onOpenRecording: handleOpenRecording,
     onMediaRowActivate: handleMediaRowActivate, // 2026-08-07: row click → timeline (stacked lens only)
@@ -6002,7 +6033,7 @@ export function ProjectWorkspace() {
     onTakeSaved: handleTakeSaved, // AQU-646: a take gives a text-less line a target row
     audioHomeFor, // AQU-646 stage 3f: where this row's audio belongs
     myScopes, // AQU-633: per-cell validate scope gate
-  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleTakeSaved, audioHomeFor, myScopes])
+  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleTakeSaved, audioHomeFor, myScopes])
 
   const handleAssignVoice = useCallback(async (cellId: string, voiceId: string) => {
     if (!audioProject || !frontierSession) return
@@ -9587,6 +9618,8 @@ export function ProjectWorkspace() {
           cellLabelsEnabled={cellLabelsEnabled}
           footnoteViewMode={footnoteViewMode}
           onFootnoteViewModeChange={setFootnoteViewMode}
+          targetKeyTermHighlightMode={targetKeyTermHighlightMode}
+          onTargetKeyTermHighlightModeChange={setTargetKeyTermHighlightMode}
           tnSidebarEnabled={tnSidebarVisible}
           sourceFontSize={fontSizes.source}
           targetFontSize={fontSizes.target}
@@ -10410,6 +10443,7 @@ export function ProjectWorkspace() {
             showFootnotesInline={footnoteViewMode === "inline"}
             footnotePanelActive={footnoteViewMode !== "off"}
             footnoteViewMode={footnoteViewMode}
+            targetKeyTermHighlightMode={targetKeyTermHighlightMode}
             onVisibleFootnotesChange={footnoteViewMode === "tray" ? handleVisibleFootnotesChange : undefined}
             username={currentUsername}
             activeLane={activeLane}

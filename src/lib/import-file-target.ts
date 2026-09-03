@@ -1,13 +1,15 @@
 // File-scoped target import: populate the open file's target column from a
-// USFM file or a spreadsheet (CSV/TSV/XLSX). Two match modes:
+// USFM file, a spreadsheet (CSV/TSV/XLSX) or a subtitle file (SRT/SBV —
+// AQU-1144). Two match modes:
 //
 //   - by ref:   incoming rows carry canonical refs ("GEN 1:1") matched against
 //               the file's cells (CellData.group) — same mechanism as the
 //               eBible → target import (AQU-191).
 //   - by order: Nth data row → Nth cell of the file. Fallback for spreadsheets
-//               with no ref column. The review screen shows the cell's source
-//               text beside each incoming row so misalignment is visible
-//               before anything is committed.
+//               with no ref column, and the only mode for subtitle cues (their
+//               cells carry opaque group ids, not canonical refs). The review
+//               screen shows the cell's source text beside each incoming row
+//               so misalignment is visible before anything is committed.
 //
 // The result shape is a structural superset of EBibleMatchResult, so
 // applyEBibleTargetImport (lib/import.ts) applies the commits unchanged:
@@ -15,6 +17,8 @@
 
 import type { SourceCellRef, EBibleMatchedCell } from "./import"
 import { parseUsfmLossless } from "./parsers/usfm-lossless"
+import { extractSrtStrings } from "./parsers/subtitle"
+import { extractSbvStrings } from "./parsers/sbv"
 
 /** Cell descriptor for file-scoped matching — SourceCellRef plus the source
  *  text, which the review table shows so the user can eyeball alignment. */
@@ -117,7 +121,12 @@ export function matchTargetRowsByOrder(
       continue
     }
     matchedCount++
-    matched.push(toMatchedCell(cell, row.text, cell.canonicalRef ?? `Row ${i + 1}`))
+    // Prefer the incoming row's own label when the format carries one. Cue
+    // formats (AQU-1144) put the cue's timecode range here, which is the only
+    // human-readable handle a cue row has — cue cells' group ids are opaque
+    // uuids, so `cell.canonicalRef` would be absent anyway. Spreadsheet rows
+    // matched by order carry no `ref`, so their behaviour is unchanged.
+    matched.push(toMatchedCell(cell, row.text, row.ref ?? cell.canonicalRef ?? `Row ${i + 1}`))
   }
 
   return {
@@ -142,4 +151,26 @@ export function usfmToTargetRows(
   ]
     .sort((a, b) => a.order - b.order)
     .map(({ ref, text }) => ({ ref, text }))
+}
+
+/** Subtitle formats whose cues this module can turn into target rows. */
+export const CUE_TARGET_EXTENSIONS = new Set(["srt", "sbv"])
+
+/** Extract target rows from a subtitle file (AQU-1144).
+ *
+ *  Reuses the source-import cue parsers verbatim, so SRT numeric cue counters,
+ *  blank-line block separators and SBV's malformed blocks are dropped exactly
+ *  as they are on the source side — a cue's text is the only thing that
+ *  reaches the target column.
+ *
+ *  Each row's `ref` is the cue's own timecode line (`00:00:01,000 -->
+ *  00:00:04,000` for SRT, `0:00:01.000,0:00:02.000` for SBV), which is what
+ *  the review screen labels the row with. Cue-sourced cells carry opaque uuid
+ *  group ids rather than canonical refs, so matching must be positional —
+ *  cue N → cell N, via matchTargetRowsByOrder. Empty cues keep their slot so
+ *  that alignment holds and never clear an existing translation.
+ */
+export function subtitleToTargetRows(raw: string, ext: string): TargetRow[] {
+  const cues = ext === "sbv" ? extractSbvStrings(raw) : extractSrtStrings(raw)
+  return cues.map((cue) => ({ ref: cue.context || undefined, text: cue.original }))
 }

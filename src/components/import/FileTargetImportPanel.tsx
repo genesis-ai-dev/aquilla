@@ -1,11 +1,13 @@
 /**
  * File-scoped target import: populate the OPEN file's target column from a
- * USFM file or a spreadsheet (CSV/TSV/XLSX). Target-only — source cells are
- * never created or modified.
+ * USFM file, a spreadsheet (CSV/TSV/XLSX) or a subtitle file (SRT/SBV).
+ * Target-only — source cells are never created or modified.
  *
  * Flow:
  *   1. User drops/picks a file
  *   2. USFM → refs are intrinsic, straight to review (match by canonical ref)
+ *      Subtitle (AQU-1144) → cues parsed, straight to review, matched by
+ *      order (cue N → cell N) because cue cells carry no canonical refs
  *      Spreadsheet → [sheet selector] → column mapping (target required,
  *      ref optional; no ref column → rows match cells by order)
  *   3. Review: each incoming row beside the matched cell's source text;
@@ -23,6 +25,8 @@ import {
   matchTargetRowsByRef,
   matchTargetRowsByOrder,
   usfmToTargetRows,
+  subtitleToTargetRows,
+  CUE_TARGET_EXTENSIONS,
   type FileTargetCellRef,
   type FileTargetMatchResult,
   type TargetRow,
@@ -62,6 +66,20 @@ type PanelStep = "file" | "sheet" | "mapping" | "review"
 
 const USFM_EXTENSIONS = new Set(["usfm", "sfm", "usf"])
 const SHEET_EXTENSIONS = new Set(["csv", "tsv", "xlsx"])
+
+/** Format tag for the uploaded file's source artifact (SOURCE_ARTIFACT_FORMATS
+ *  in shared/import-contract). Spreadsheets fall through to "csv" because
+ *  that branch also covers the ".txt-as-delimited" cases parseCsvToSheet
+ *  accepts. */
+function sourceArtifactFormat(fileName: string) {
+  const ext = fileName.split(".").pop()?.toLowerCase() ?? ""
+  if (USFM_EXTENSIONS.has(ext)) return "usfm" as const
+  if (ext === "sbv") return "sbv" as const
+  if (ext === "srt") return "srt" as const
+  if (ext === "xlsx") return "xlsx" as const
+  if (ext === "tsv") return "tsv" as const
+  return "csv" as const
+}
 
 export function FileTargetImportPanel({
   projectId,
@@ -111,6 +129,15 @@ export function FileTargetImportPanel({
           return
         }
         showReview(matchTargetRowsByRef(rows, cells), false)
+      } else if (CUE_TARGET_EXTENSIONS.has(ext)) {
+        // AQU-1144: subtitle cues have no canonical refs, so they always match
+        // positionally (cue N → cell N) and the order-match warning applies.
+        const rows = subtitleToTargetRows(decodeImportText(await file.arrayBuffer(), file.name), ext)
+        if (rows.length === 0) {
+          setError(t("importExport.fileTarget.noCuesInSubtitle"))
+          return
+        }
+        showReview(matchTargetRowsByOrder(rows, cells), true)
       } else if (ext === "xls") {
         setError(t("importExport.spreadsheet.legacyXlsUnsupported"))
         return
@@ -181,13 +208,7 @@ export function FileTargetImportPanel({
           sourceArtifact: {
             name: sourceFile.name,
             bytes: await sourceFile.arrayBuffer(),
-            format: USFM_EXTENSIONS.has(sourceFile.name.split(".").pop()?.toLowerCase() ?? "")
-              ? "usfm"
-              : sourceFile.name.toLowerCase().endsWith(".xlsx")
-                ? "xlsx"
-                : sourceFile.name.toLowerCase().endsWith(".tsv")
-                  ? "tsv"
-                  : "csv",
+            format: sourceArtifactFormat(sourceFile.name),
           },
         },
       )
@@ -231,7 +252,7 @@ export function FileTargetImportPanel({
             </span>
             <input
               type="file"
-              accept=".usfm,.sfm,.usf,.csv,.tsv,.xlsx"
+              accept=".usfm,.sfm,.usf,.csv,.tsv,.xlsx,.srt,.sbv"
               className="sr-only"
               onChange={(e) => {
                 const file = e.target.files?.[0]

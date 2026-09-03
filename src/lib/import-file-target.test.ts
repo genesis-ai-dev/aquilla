@@ -3,6 +3,7 @@ import {
   matchTargetRowsByRef,
   matchTargetRowsByOrder,
   usfmToTargetRows,
+  subtitleToTargetRows,
   type FileTargetCellRef,
 } from "./import-file-target"
 
@@ -109,6 +110,28 @@ describe("matchTargetRowsByOrder", () => {
     expect(result.matched).toHaveLength(3)
     expect(result.orphans).toEqual([{ ref: "Row 4", text: "overflow" }])
   })
+
+  it("AQU-1144: labels the row with the incoming row's own ref when it carries one", () => {
+    const result = matchTargetRowsByOrder(
+      [
+        { ref: "00:00:01,000 --> 00:00:04,000", text: "cue one" },
+        { ref: "00:00:05,000 --> 00:00:07,000", text: "cue two" },
+      ],
+      cells,
+    )
+    // A cue row's timecode wins over the matched cell's canonicalRef — the
+    // cell's ref is meaningless for cue files and absent for most of them.
+    expect(result.matched.map((m) => m.ref)).toEqual([
+      "00:00:01,000 --> 00:00:04,000",
+      "00:00:05,000 --> 00:00:07,000",
+    ])
+  })
+
+  it("AQU-1144: rows with no ref still fall back to the cell ref then the row number", () => {
+    const result = matchTargetRowsByOrder([{ text: "a" }, { text: "b" }], cells)
+    // Spreadsheet-by-order rows carry no ref, so their labels are unchanged.
+    expect(result.matched.map((m) => m.ref)).toEqual(["GEN 1:1", "Row 2"])
+  })
 })
 
 describe("usfmToTargetRows", () => {
@@ -149,5 +172,79 @@ describe("usfmToTargetRows", () => {
     // aligned with source cells imported under the same setting.
     expect(refs.some((r) => r?.includes(":s"))).toBe(true)
     expect(refs).toContain("MAT 1:1")
+  })
+})
+
+describe("subtitleToTargetRows (AQU-1144)", () => {
+  const srt = [
+    "1",
+    "00:00:01,000 --> 00:00:04,000",
+    "Bilong wanem yu kam?",
+    "",
+    "2",
+    "00:00:05,500 --> 00:00:08,250",
+    "Mi kam long lukim yu,",
+    "na long harim tok bilong yu.",
+    "",
+    "3",
+    "00:00:09,000 --> 00:00:11,000",
+    "Orait.",
+    "",
+  ].join("\n")
+
+  it("extracts one row per SRT cue, labelled with the cue's timecode range", () => {
+    const rows = subtitleToTargetRows(srt, "srt")
+    expect(rows).toEqual([
+      { ref: "00:00:01,000 --> 00:00:04,000", text: "Bilong wanem yu kam?" },
+      { ref: "00:00:05,500 --> 00:00:08,250", text: "Mi kam long lukim yu,\nna long harim tok bilong yu." },
+      { ref: "00:00:09,000 --> 00:00:11,000", text: "Orait." },
+    ])
+  })
+
+  it("never leaks SRT numeric cue counters or blank separators into the text", () => {
+    const rows = subtitleToTargetRows(srt, "srt")
+    for (const row of rows) {
+      expect(row.text).not.toMatch(/^\d+$/m)
+      expect(row.text.trim()).toBe(row.text)
+    }
+  })
+
+  it("extracts one row per SBV cue, labelled with the cue's timecode line", () => {
+    const sbv = [
+      "0:00:01.000,0:00:04.000",
+      "Bilong wanem yu kam?",
+      "",
+      "0:00:05.500,0:00:08.250",
+      "Mi kam long lukim yu,",
+      "na long harim tok bilong yu.",
+      "",
+    ].join("\n")
+    expect(subtitleToTargetRows(sbv, "sbv")).toEqual([
+      { ref: "0:00:01.000,0:00:04.000", text: "Bilong wanem yu kam?" },
+      { ref: "0:00:05.500,0:00:08.250", text: "Mi kam long lukim yu,\nna long harim tok bilong yu." },
+    ])
+  })
+
+  it("returns no rows for a file with no parseable cues, so the panel can say so", () => {
+    expect(subtitleToTargetRows("not a subtitle file at all\n", "srt")).toEqual([])
+    expect(subtitleToTargetRows("not a subtitle file at all\n", "sbv")).toEqual([])
+  })
+
+  it("feeds matchTargetRowsByOrder so cue N lands on cell N with its timecode label", () => {
+    const cells: FileTargetCellRef[] = [
+      cell({ cellId: "c1" }),
+      cell({ cellId: "c2" }),
+      cell({ cellId: "c3", translated: "already translated", targetEventId: "tgt-evt-c3" }),
+    ]
+    const result = matchTargetRowsByOrder(subtitleToTargetRows(srt, "srt"), cells)
+    expect(result.matched.map((m) => [m.cellId, m.ref])).toEqual([
+      ["c1", "00:00:01,000 --> 00:00:04,000"],
+      ["c2", "00:00:05,500 --> 00:00:08,250"],
+      ["c3", "00:00:09,000 --> 00:00:11,000"],
+    ])
+    // A cell that already holds a translation is a conflict, so the panel
+    // leaves it unticked rather than silently overwriting it.
+    expect(result.matched[2].hasConflict).toBe(true)
+    expect(result.unmatchedSourceCount).toBe(0)
   })
 })

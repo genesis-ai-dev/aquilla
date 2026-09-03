@@ -309,6 +309,121 @@ describe("CSV round-trip", () => {
     const imported = importConceptsCsv(csv)
     expect(imported[0].renderings[0].status).toBe("preferred")
   })
+
+  it("round-trips a concept that has no renderings, keeping its note", () => {
+    const concepts: Concept[] = [
+      makeConcept({ sourceTerm: "spirit", renderings: [], notes: "needs research" }),
+    ]
+    const imported = importConceptsCsv(exportConceptsCsv(concepts))
+    expect(imported).toHaveLength(1)
+    expect(imported[0].renderings).toHaveLength(0)
+    expect(imported[0].notes).toBe("needs research")
+  })
+})
+
+// ---------------------------------------------------------------------------
+// csv.ts — flexible partner-spreadsheet import (AQU-467)
+// ---------------------------------------------------------------------------
+
+describe("flexible terminology import", () => {
+  it("maps the column names the import dialog advertises", () => {
+    const csv = [
+      "source_lemma,target_lemma,target_status,definition",
+      "faith,fe,required,trust in God",
+      "faith,creencia,suggested,",
+      "faith,fideísmo,avoid,",
+    ].join("\n")
+    const imported = importConceptsCsv(csv)
+    expect(imported).toHaveLength(1)
+    expect(imported[0].sourceTerm).toBe("faith")
+    expect(imported[0].notes).toBe("trust in God")
+    expect(imported[0].renderings).toEqual([
+      { rendering: "fe", status: "preferred" },
+      { rendering: "creencia", status: "admitted" },
+      { rendering: "fideísmo", status: "forbidden" },
+    ])
+  })
+
+  it("accepts arbitrary header synonyms in any column order", () => {
+    const csv = ["Notes,Translation,Headword", "key term,fe,Faith"].join("\n")
+    const imported = importConceptsCsv(csv)
+    expect(imported).toHaveLength(1)
+    expect(imported[0].sourceTerm).toBe("Faith")
+    expect(imported[0].notes).toBe("key term")
+    expect(imported[0].renderings).toEqual([{ rendering: "fe", status: "preferred" }])
+  })
+
+  it("reads status-bearing rendering columns without a status column", () => {
+    const csv = [
+      "Term,Preferred rendering,Suggested,Do not use",
+      "spirit,espíritu,aliento,fantasma",
+    ].join("\n")
+    const imported = importConceptsCsv(csv)
+    expect(imported[0].renderings).toEqual([
+      { rendering: "espíritu", status: "preferred" },
+      { rendering: "aliento", status: "admitted" },
+      { rendering: "fantasma", status: "forbidden" },
+    ])
+  })
+
+  it("splits multi-value rendering cells", () => {
+    const csv = ["Term,Renderings,Status", "grace,gracia; favor; merced,preferred"].join("\n")
+    const imported = importConceptsCsv(csv)
+    expect(imported[0].renderings.map((r) => r.rendering)).toEqual([
+      "gracia",
+      "favor",
+      "merced",
+    ])
+    expect(imported[0].renderings.every((r) => r.status === "preferred")).toBe(true)
+  })
+
+  it("sniffs tab and semicolon delimiters", () => {
+    const tsv = "Term\tTranslation\tStatus\nfaith\tfe\tpreferred"
+    expect(importConceptsCsv(tsv)[0].renderings).toEqual([
+      { rendering: "fe", status: "preferred" },
+    ])
+
+    const ssv = "Term;Translation;Status\nfaith;fe;forbidden"
+    expect(importConceptsCsv(ssv)[0].renderings).toEqual([
+      { rendering: "fe", status: "forbidden" },
+    ])
+  })
+
+  it("reads a language-named target column", () => {
+    const csv = ["English,Kilisusu", "water,uwe"].join("\n")
+    const imported = importConceptsCsv(csv)
+    expect(imported).toHaveLength(1)
+    expect(imported[0].sourceTerm).toBe("water")
+    expect(imported[0].renderings).toEqual([{ rendering: "uwe", status: "preferred" }])
+  })
+
+  it("tolerates a UTF-8 BOM and quoted multi-line notes", () => {
+    const csv = '﻿Term,Translation,Notes\r\nfaith,fe,"line one\nline two"\r\ngrace,gracia,'
+    const imported = importConceptsCsv(csv)
+    expect(imported).toHaveLength(2)
+    expect(imported[0].notes).toBe("line one\nline two")
+    expect(imported[1].sourceTerm).toBe("grace")
+  })
+
+  it("falls back to the positional layout when no header is recognized", () => {
+    const csv = "faith,fe,preferred,trust\nfaith,creencia,admitted,"
+    const imported = importConceptsCsv(csv)
+    expect(imported).toHaveLength(1)
+    expect(imported[0].sourceTerm).toBe("faith")
+    expect(imported[0].notes).toBe("trust")
+    expect(imported[0].renderings).toEqual([
+      { rendering: "fe", status: "preferred" },
+      { rendering: "creencia", status: "admitted" },
+    ])
+  })
+
+  it("lands imported concepts active so they compile to rules immediately", () => {
+    const csv = "Term,Translation\nfaith,fe"
+    const imported = importConceptsCsv(csv)
+    expect(imported[0].status).toBe("active")
+    expect(imported[0].id).toBeTruthy()
+    expect(imported[0].createdAt).toBeTruthy()
+  })
 })
 
 // ---------------------------------------------------------------------------

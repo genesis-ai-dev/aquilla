@@ -268,10 +268,16 @@ export interface ReadinessItem {
 
 /** What autopilot knows about this project — the context an expert translator
  *  would have on the desk before drafting a line. */
+/** Prerequisites the server actually enforces before a run may start. */
+export type StartBlockerId = "languages" | "brief"
+
 export interface ContextReadiness {
   items: ReadinessItem[]
   blockingGaps: number
   ready: boolean
+  /** Empty on a project autopilot may start on. Absent from older servers,
+   *  which is read as "nothing blocked" — the server is still authoritative. */
+  startBlockers?: StartBlockerId[]
 }
 
 export interface ContextualOverview {

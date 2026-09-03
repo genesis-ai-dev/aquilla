@@ -83,9 +83,15 @@ export function isSectionCollapsed(collapsed: CollapsedSections, id: MediaSectio
   return collapsed.includes(id)
 }
 
-/** Is a measured panel size the rail rather than a real width? */
+/**
+ * Is a measured panel size the rail rather than a real width?
+ *
+ * Zero is NOT the rail. A ResizeObserver reports 0 for a subtree that has been
+ * hidden by an ancestor, and treating that as "the user collapsed this" would
+ * collapse sections behind the reader's back on any such transition.
+ */
 export function isRailSized(px: number): boolean {
-  return px <= MEDIA_RAIL_PX + RAIL_TOLERANCE_PX
+  return px > 0 && px <= MEDIA_RAIL_PX + RAIL_TOLERANCE_PX
 }
 
 /**
@@ -188,7 +194,12 @@ export function reconcilePresence(
 export interface MediaPanelConstraints {
   minSize?: number | string
   maxSize?: number | string
+  collapsible?: boolean
+  collapsedSize?: number
 }
+
+/** A collapsed section is pinned to the rail: one size, and nothing can move it. */
+const RAIL_PINNED: MediaPanelConstraints = { minSize: MEDIA_RAIL_PX, maxSize: MEDIA_RAIL_PX }
 
 /**
  * The four panels' constraints for a given collapsed set.
@@ -239,26 +250,58 @@ export function mediaPanelConstraints(input: {
     // would be nothing left on screen.
     return { timeline: {}, body: {}, video: {}, table: {} }
   }
-  const rail = { minSize: MEDIA_RAIL_PX, maxSize: MEDIA_RAIL_PX }
   const timelineCollapsed = input.collapsed.includes("timeline")
   const videoCollapsed = input.collapsed.includes("video")
   const textCollapsed = input.collapsed.includes("text")
   return {
     timeline: timelineCollapsed
-      ? rail
-      : { minSize: TIMELINE_PANE_MIN_HEIGHT, maxSize: TIMELINE_PANE_MAX_SHARE },
+      ? RAIL_PINNED
+      : {
+          minSize: TIMELINE_PANE_MIN_HEIGHT,
+          maxSize: TIMELINE_PANE_MAX_SHARE,
+          collapsible: true,
+          collapsedSize: MEDIA_RAIL_PX,
+        },
     body: { minSize: MEDIA_BODY_MIN_HEIGHT },
     video: videoCollapsed
-      ? rail
+      ? RAIL_PINNED
       : {
           minSize: VIDEO_PANE_MIN_WIDTH,
           maxSize: textCollapsed ? "100%" : VIDEO_PANE_MAX_SHARE,
+          collapsible: true,
+          collapsedSize: MEDIA_RAIL_PX,
         },
-    // The table has no ceiling of its own; with the video railed it simply
-    // takes the residual, which is how "collapsing the video gives its space to
-    // the text" is delivered without a rule for it.
-    table: textCollapsed ? rail : { minSize: VIDEO_PANE_TABLE_MIN_WIDTH },
+    // The table is NOT collapsible while open, and that is deliberate rather
+    // than an omission. It is the last panel of its group, so its only
+    // separator is on its left and dragging that grows the video into its own
+    // cap long before the table reaches a collapse threshold — the gesture
+    // cannot reach it. Leaving `collapsible` on would buy nothing and would
+    // hand the library licence to snap the table shut on its own on a very
+    // narrow window. The button collapses it by pinning; the library's own
+    // validation clamps it to the rail on the next commit, with no imperative
+    // call at all. With the video railed the table simply takes the residual,
+    // which is how "collapsing the video gives its space to the text" happens
+    // without a rule for it.
+    table: textCollapsed ? RAIL_PINNED : { minSize: VIDEO_PANE_TABLE_MIN_WIDTH },
   }
+}
+
+/**
+ * May a measured size be written back as the section's remembered size?
+ *
+ * The guard the panels already carry — "only persist a size at or above the
+ * floor" — is not enough once a sibling can be railed. With the table pinned
+ * the video legitimately measures the whole row, which sails past its 220px
+ * floor and would overwrite the width the reader actually chose; expanding the
+ * table again would then restore a full-width picture instead of their 288px.
+ * So a size only counts when nothing in its own group is collapsed.
+ */
+export function shouldPersistSize(
+  collapsed: CollapsedSections,
+  id: MediaSectionId,
+): boolean {
+  if (id === "timeline") return !collapsed.includes("timeline")
+  return !collapsed.includes("video") && !collapsed.includes("text")
 }
 
 /**

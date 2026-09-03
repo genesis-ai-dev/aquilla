@@ -18,6 +18,7 @@ import {
   presentSections,
   readStoredCollapsedSections,
   reconcilePresence,
+  shouldPersistSize,
   writeStoredCollapsedSections,
   type CollapsedSections,
 } from "./media-section-layout"
@@ -118,6 +119,31 @@ describe("isRailSized", () => {
     // The smallest floor in the lens, so nothing legitimate comes near.
     expect(isRailSized(TIMELINE_PANE_MIN_HEIGHT)).toBe(false)
   })
+
+  it("rejects zero, which is a hidden subtree rather than a collapse", () => {
+    // A ResizeObserver reports 0 for a subtree an ancestor has hidden. Reading
+    // that as a collapse would shut sections behind the reader's back.
+    expect(isRailSized(0)).toBe(false)
+  })
+})
+
+describe("shouldPersistSize", () => {
+  it("lets a section remember its size when its group is fully open", () => {
+    expect(shouldPersistSize([], "video")).toBe(true)
+    expect(shouldPersistSize([], "timeline")).toBe(true)
+    expect(shouldPersistSize(["timeline"], "video")).toBe(true)
+  })
+
+  it("refuses the video's width while the table is railed", () => {
+    // With the table pinned the video measures the whole row, which clears its
+    // 220px floor and would overwrite the width the reader chose.
+    expect(shouldPersistSize(["text"], "video")).toBe(false)
+  })
+
+  it("refuses a railed section's own size", () => {
+    expect(shouldPersistSize(["video"], "video")).toBe(false)
+    expect(shouldPersistSize(["timeline"], "timeline")).toBe(false)
+  })
 })
 
 describe("mediaPanelConstraints", () => {
@@ -138,15 +164,33 @@ describe("mediaPanelConstraints", () => {
     expect(c.table.minSize).toBe(VIDEO_PANE_TABLE_MIN_WIDTH)
   })
 
-  it("pins a collapsed section to the rail instead of making it collapsible", () => {
-    // min === max is the whole mechanism: it gives the solver one fixed point,
-    // so drag, Enter, Home/End, arrow keys and double-click all become inert
-    // and cannot move the layout behind React's back.
+  it("pins a collapsed section to the rail instead of leaving it collapsible", () => {
+    // min === max is the whole mechanism once a section is shut: it gives the
+    // solver one fixed point, so drag, Enter, Home/End, arrow keys,
+    // double-click and a window resize all become inert and cannot move the
+    // layout behind React's back.
     for (const section of ALL) {
       const key = section === "text" ? "table" : section
       const c = constraints([section])
       expect(c[key]).toEqual({ minSize: MEDIA_RAIL_PX, maxSize: MEDIA_RAIL_PX })
+      expect(c[key].collapsible).toBeUndefined()
     }
+  })
+
+  it("leaves the two draggable sections collapsible while they are open", () => {
+    // Dragging a divider shut is how you collapse the timeline and the video,
+    // so while open they keep the flag and a rail-sized collapsedSize for the
+    // library to snap to.
+    for (const section of ["timeline", "video"] as const) {
+      const c = constraints([])[section]
+      expect(c.collapsible).toBe(true)
+      expect(c.collapsedSize).toBe(MEDIA_RAIL_PX)
+    }
+  })
+
+  it("never makes the table collapsible — it is the last panel, so no drag reaches it", () => {
+    expect(constraints([]).table.collapsible).toBeUndefined()
+    expect(constraints(["video"]).table.collapsible).toBeUndefined()
   })
 
   it("relaxes the video's ceiling in the same render that rails the table", () => {

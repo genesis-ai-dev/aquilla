@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest"
-import { cleanup, render, screen } from "@testing-library/react"
+import { afterEach, describe, expect, it, vi } from "vitest"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { EquivalentsPanel } from "./EquivalentsPanel"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import { LOCALE_STORAGE_KEY } from "@/lib/i18n/store"
@@ -19,6 +19,10 @@ const LOWER_CONFIDENCE_PREDICTION: PredictedEquivalent = {
   ...PREDICTION,
   target: "señor",
   confidenceScore: 0.42,
+}
+
+function prediction(target: string, confidenceScore: number): PredictedEquivalent {
+  return { ...PREDICTION, target, confidenceScore }
 }
 
 afterEach(() => {
@@ -71,5 +75,45 @@ describe("EquivalentsPanel", () => {
       "dios",
       "señor",
     ])
+  })
+
+  it("shows the top three suggestions until the list is expanded", () => {
+    renderPredictions([
+      prediction("one", 0.9),
+      prediction("two", 0.8),
+      prediction("three", 0.7),
+      prediction("four", 0.6),
+      prediction("five", 0.5),
+    ])
+
+    expect(screen.getByRole("button", { name: "one" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "three" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "four" })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: /show more/i }))
+
+    expect(screen.getByRole("button", { name: "four" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "five" })).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /show less/i })).toBeInTheDocument()
+  })
+
+  it("keeps the compact Add action at the end of each row", () => {
+    const onPromote = vi.fn()
+    render(
+      <I18nProvider>
+        <EquivalentsPanel
+          sourceTerm="God"
+          managed={[]}
+          predicted={[PREDICTION]}
+          canPromote
+          onPromote={onPromote}
+        />
+      </I18nProvider>,
+    )
+
+    const add = screen.getByRole("button", { name: "Add" })
+    expect(add).toHaveClass("ms-auto", "h-6", "text-[10px]")
+    fireEvent.click(add)
+    expect(onPromote).toHaveBeenCalledWith("dios")
   })
 })

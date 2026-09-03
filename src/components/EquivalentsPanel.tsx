@@ -27,7 +27,13 @@
  */
 
 import { useState } from "react"
-import { ChevronRight, ChevronDown, ShieldCheck, Sparkles, ArrowUp } from "lucide-react"
+import {
+  ChevronRight,
+  ChevronDown,
+  ChevronUp,
+  ShieldCheck,
+  Sparkles,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
@@ -89,8 +95,8 @@ function PredictedRow({
   const hasExamples = prediction.examples.length > 0
 
   return (
-    <li className="flex flex-col gap-1.5 border-b py-2 last:border-0">
-      <div className="flex items-center gap-2">
+    <li className="flex flex-col gap-1 border-b py-1.5 last:border-0">
+      <div className="flex min-w-0 items-center gap-1.5">
         <button
           type="button"
           className={cn(
@@ -110,7 +116,7 @@ function PredictedRow({
           ) : (
             <span className="w-3" />
           )}
-          <span className="text-sm font-medium">{prediction.target}</span>
+          <span className="text-xs font-medium">{prediction.target}</span>
         </button>
 
         <ConfidenceLabel score={prediction.confidenceScore} />
@@ -119,11 +125,10 @@ function PredictedRow({
           <AppTooltip content={t("terminology.equivalents.promoteTooltip")}>
             <Button
               variant="ghost"
-              size="sm"
-              className="h-6 gap-1 px-1.5 text-[10px]"
+              size="xs"
+              className="ms-auto h-6 px-1.5 text-[10px]"
               onClick={() => onPromote(prediction.target)}
             >
-              <ArrowUp className="h-3 w-3" />
               {t("terminology.equivalents.promoteButton")}
             </Button>
           </AppTooltip>
@@ -162,6 +167,8 @@ export interface EquivalentsPanelProps {
   className?: string
 }
 
+const COLLAPSED_SUGGESTION_COUNT = 3
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export function EquivalentsPanel({
@@ -173,6 +180,15 @@ export function EquivalentsPanel({
   className,
 }: EquivalentsPanelProps) {
   const t = useT()
+  const [showAllSuggestions, setShowAllSuggestions] = useState(false)
+  const sortedPredictions = [...predicted].sort(
+    (a, b) => b.confidenceScore - a.confidenceScore,
+  )
+  const visiblePredictions = showAllSuggestions
+    ? sortedPredictions
+    : sortedPredictions.slice(0, COLLAPSED_SUGGESTION_COUNT)
+  const hasHiddenSuggestions = predicted.length > COLLAPSED_SUGGESTION_COUNT
+
   return (
     <div className={cn("flex flex-col gap-4 text-sm", className)}>
       {/* ── Approved translations ── */}
@@ -212,10 +228,9 @@ export function EquivalentsPanel({
             {t("terminology.equivalents.noPredicted")}
           </p>
         ) : (
-          <ul>
-            {[...predicted]
-              .sort((a, b) => b.confidenceScore - a.confidenceScore)
-              .map((p) => (
+          <>
+            <ul>
+              {visiblePredictions.map((p) => (
                 <PredictedRow
                   key={p.target}
                   prediction={p}
@@ -223,7 +238,26 @@ export function EquivalentsPanel({
                   onPromote={onPromote}
                 />
               ))}
-          </ul>
+            </ul>
+            {hasHiddenSuggestions && (
+              <div className="mt-1 flex justify-center border-t pt-1">
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  className="h-6 px-1.5 text-[10px] text-muted-foreground"
+                  aria-expanded={showAllSuggestions}
+                  onClick={() => setShowAllSuggestions((showAll) => !showAll)}
+                >
+                  {showAllSuggestions ? t("common.showLess") : t("common.showMore")}
+                  {showAllSuggestions ? (
+                    <ChevronUp data-icon="inline-end" />
+                  ) : (
+                    <ChevronDown data-icon="inline-end" />
+                  )}
+                </Button>
+              </div>
+            )}
+          </>
         )}
       </section>
     </div>

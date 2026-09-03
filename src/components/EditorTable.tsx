@@ -687,6 +687,8 @@ interface EditorTableProps {
   /** Map of cellId → presence holder label. When present, the cell editor
    *  goes read-only with an "Alice is editing" banner. */
   cellLockHolders?: ReadonlyMap<string, string>
+  /** null pauses input; undefined is for standalone/non-realtime consumers. */
+  confirmedEditCellId?: string | null
   /** Project-wide presence store fed by the existing ProjectSync DO. Rows
    *  subscribe per-cell so target cursor motion does not rerender the table. */
   presenceStore?: ProjectPresenceStore | null
@@ -876,6 +878,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   getPendingTargetEventId,
   onOptimisticEdit,
   cellLockHolders,
+  confirmedEditCellId,
   presenceStore,
   cellsWithRemoteChange,
   onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
@@ -1156,10 +1159,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     if (activeEditorCellIdRef.current !== cellId) {
       editorActivationVersionRef.current += 1
     }
+    // All activation paths, including return from AI completion, need a
+    // claim before the read-only editor can become writable and focus.
+    onClaimCell?.(cellId)
     activeEditorCellIdRef.current = cellId
     setActiveEditorCellId(cellId)
     lastActiveEditorCellIdRef.current = cellId
-  }, [])
+  }, [onClaimCell])
 
   const getEditorActivationVersion = useCallback(
     () => editorActivationVersionRef.current,
@@ -2212,6 +2218,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           getPendingTargetEventId={getPendingTargetEventId}
           onOptimisticEdit={onOptimisticEdit}
           lockHolderLabel={cellLockHolders?.get(cell.id) ?? null}
+          confirmedEditCellId={confirmedEditCellId}
           presenceStore={presenceStore}
           remoteChangedWhileFocused={cellsWithRemoteChange?.has(cell.id) ?? false}
           onClaimCell={onClaimCell}
@@ -2317,6 +2324,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     canValidate,
     cellStore,
     cellLockHolders,
+    confirmedEditCellId,
     cellOpenCommentCount,
     cellsWithRemoteChange,
     checkLockHolder,
@@ -2875,6 +2883,7 @@ interface MemoizedRowProps {
   getPendingTargetEventId?: (cellId: string) => string | null
   onOptimisticEdit?: (cellId: string, patch: { value: string; valueHtml?: string }) => void
   lockHolderLabel: string | null
+  confirmedEditCellId?: string | null
   presenceStore?: ProjectPresenceStore | null
   remoteChangedWhileFocused: boolean
   onClaimCell?: (cellId: string) => void
@@ -3017,7 +3026,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, isAnonymous,
     onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, onAskAiFromSelection, onAssignVoice,
     audioLens, onOpenAudioSetup,
-    onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
+    onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, confirmedEditCellId, presenceStore, remoteChangedWhileFocused,
     onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
     isStaleSource,
     isUpstreamStaleSource,
@@ -3193,6 +3202,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         getPendingTargetEventId={getPendingTargetEventId}
         onOptimisticEdit={onOptimisticEdit}
         lockHolderLabel={lockHolderLabel}
+        confirmedEditCellId={confirmedEditCellId}
         presenceStore={presenceStore}
         remoteChangedWhileFocused={remoteChangedWhileFocused}
         onClaimCell={onClaimCell}
@@ -3259,6 +3269,7 @@ interface EditorRowProps {
   getPendingTargetEventId?: (cellId: string) => string | null
   onOptimisticEdit?: (cellId: string, patch: { value: string; valueHtml?: string }) => void
   lockHolderLabel: string | null
+  confirmedEditCellId?: string | null
   presenceStore?: ProjectPresenceStore | null
   remoteChangedWhileFocused: boolean
   onClaimCell?: (cellId: string) => void
@@ -4127,7 +4138,7 @@ function EditorRow({
   rowIndex, contentNumber, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols, castGutter, ttsSettings,
   isAnonymous, micDenied,
   audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection, addConceptBlockedReason, onAskAiFromSelection,
-  onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
+  onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, confirmedEditCellId, presenceStore, remoteChangedWhileFocused,
   onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
   isStaleSource,
   isUpstreamStaleSource,
@@ -4174,16 +4185,9 @@ function EditorRow({
   const rowMediaSyncActive = useMediaSyncActive()
   const isQueueRow = (isQueueCurrentCell || videoSoundingCellId === cell.id) && rowMediaSyncActive
   const remoteCellPresence = useCellPresence(presenceStore, cell.id)
-  // A focus lock admits one active writer. Prefer its newest ephemeral draft
-  // so the read surface and remote caret advance together between commits.
-  const remoteDraftText = useMemo(() => {
-    let latest: CellPresencePeer | null = null
-    for (const peer of remoteCellPresence) {
-      if (peer.selection?.draftText === undefined) continue
-      if (!latest || peer.lastSeenAt > latest.lastSeenAt) latest = peer
-    }
-    return latest?.selection?.draftText
-  }, [remoteCellPresence])
+  // Presence is advisory. It must never replace the durable/local-outbox
+  // text with another client's empty, stale, or uncommitted full-text draft.
+  const leaseReady = confirmedEditCellId === undefined || confirmedEditCellId === cell.id
   const [openRuleId, setOpenRuleId] = useState<string | null>(null)
   // AQU-664: hover ("wave over") a violation blot → preview its rule
   // explanation. Separate from the click path (openRuleId) so a light,
@@ -4980,6 +4984,7 @@ function EditorRow({
   }, [cell.id, onTargetPresenceSelection])
 
   const handleEditorFocus = useCallback(() => {
+    if (!leaseReady) return
     editorFocusedRef.current = true
     // AQU-746: the editor now owns the caret — stop buffering; TranslatedEditor
     // replays whatever was captured during activation (see its onFocus).
@@ -4987,7 +4992,7 @@ function EditorRow({
     onActivateEditor(cell.id)
     onClaimCell?.(cell.id)
     onAckRemoteChange?.(cell.id)
-  }, [cell.id, onActivateEditor, onClaimCell, onAckRemoteChange])
+  }, [cell.id, onActivateEditor, onClaimCell, onAckRemoteChange, leaseReady])
 
   const handleEditorBlurOuter = useCallback(() => {
     // AQU-746: activation was abandoned without the editor ever focusing — drop
@@ -5002,7 +5007,7 @@ function EditorRow({
   }, [cell.id, onDeactivateEditor, onReleaseCell])
 
   useEffect(() => {
-    if (!isEditorActive) return
+    if (!isEditorActive || !leaseReady) return
     let attempts = 0
     let frame = 0
     const focusEditor = () => {
@@ -5031,12 +5036,16 @@ function EditorRow({
     frame = window.requestAnimationFrame(focusEditor)
     return () => {
       if (frame) window.cancelAnimationFrame(frame)
-      if (editorFocusedRef.current) {
-        editorFocusedRef.current = false
-        onReleaseCell?.(cell.id)
-      }
     }
-  }, [isEditorActive, cell.id, idmlConfiguration, onReleaseCell])
+  }, [isEditorActive, cell.id, idmlConfiguration, leaseReady])
+
+  useEffect(() => {
+    if (!isEditorActive) return
+    return () => {
+      editorFocusedRef.current = false
+      onReleaseCell?.(cell.id)
+    }
+  }, [isEditorActive, cell.id, onReleaseCell])
 
   const handleDiscardLocalAndReload = useCallback(() => {
     onAckRemoteChange?.(cell.id)
@@ -6073,6 +6082,8 @@ function EditorRow({
               empty={!visibleTranslated?.trim()}
             >
                 {isEditorActive ? (
+                  <>
+                  {!leaseReady && !lockHolderLabel && <p role="status">{t("workspace.focusLock.waiting")}</p>}
                   <TranslatedEditor
                     ref={translatedEditorRef}
                     cellId={cell.id}
@@ -6100,7 +6111,7 @@ function EditorRow({
                       showCompletionOverlay && "opacity-30 transition-opacity",
                     )}
                     compactHeight={hasInlineFootnotes}
-                    editable={editable && !isLoading}
+                    editable={editable && !isLoading && leaseReady}
                     heldByLabel={lockHolderLabel}
                     infractions={blotInfractions}
                     ruleSeverity={ruleSeverity}
@@ -6125,6 +6136,7 @@ function EditorRow({
                     ariaLabel={editorAriaLabel}
                     onEscapeToGrid={onEscapeToGrid}
                   />
+                  </>
                 ) : (
                   <EditorTargetReadSurface
                     aria-readonly={!editable || isLoading || Boolean(lockHolderLabel)}
@@ -6157,11 +6169,7 @@ function EditorRow({
                         renderer so a new target-text variant inherits the mask
                         instead of having to remember it. */}
                     <div ref={targetReadContentRef} data-ph-mask>
-                      {remoteDraftText !== undefined ? (
-                        <span data-remote-presence-draft>
-                          {remoteDraftText || "\u200b"}
-                        </span>
-                      ) : idmlConfiguration && visibleTranslatedHtml ? (
+                      {idmlConfiguration && visibleTranslatedHtml ? (
                         <TargetIdmlHtml html={visibleTranslatedHtml} />
                       ) : targetHasRichFormatting && visibleTranslatedHtml ? (
                         <TargetRichHtml

@@ -785,6 +785,7 @@ CREATE INDEX idx_cell_validators_cell ON cell_validators(project_id, file_id, ce
 CREATE INDEX idx_cell_waivers_file ON cell_waivers(project_id, file_id);
 CREATE INDEX idx_cells_decay_drags ON cells(project_id, endorsement_count);
 CREATE INDEX idx_cells_file_order ON cells(project_id, file_id, side, anchor_cell_id);
+CREATE INDEX idx_cells_file_scan ON cells(project_id, file_id, side, target_lang, cell_id);
 CREATE INDEX idx_cells_last_edit ON cells(project_id, file_id, side, last_edit_at);
 CREATE INDEX idx_cells_pair_lookup ON cells(project_id, cell_id, side);
 CREATE INDEX idx_cells_source_basis ON cells(source_event_id);

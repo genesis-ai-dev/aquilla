@@ -276,6 +276,7 @@ describe("EditorTable — EditorActionsContext wiring", () => {
   it("shows a Saved confirmation after a single-cell AI generate/Replace resolves (AQU-618)", async () => {
     // AQU-670: `true` = the draft committed; "Saved" is now gated on that signal.
     const onCompleteSingle = vi.fn().mockResolvedValue(true)
+    const onClaimCell = vi.fn()
     const qc = new QueryClient()
     render(
       <QueryClientProvider client={qc}>
@@ -283,6 +284,8 @@ describe("EditorTable — EditorActionsContext wiring", () => {
           <EditorTable
             project={project}
             cellStore={makeEmptyTargetStore("cell-1")}
+            confirmedEditCellId={null}
+            onClaimCell={onClaimCell}
             username="tester"
             isCompletionConfigured={true}
             isCompletionAvailable={true}
@@ -312,6 +315,10 @@ describe("EditorTable — EditorActionsContext wiring", () => {
     // resolves — proving the flow returns the user to the cell with a signal
     // that the change landed (the strand-after-Replace bug this fixes).
     expect(await screen.findByText("Saved")).toBeInTheDocument()
+    // Returning from AI completion is an activation path too: request the
+    // human editing lease, but keep input paused until it is acknowledged.
+    expect(onClaimCell).toHaveBeenCalledWith("cell-1")
+    expect(screen.getByText("Waiting for an editing connection and lock — editing paused.")).toHaveAttribute("role", "status")
   })
 
   it("does not steal focus back when another cell is activated before AI save resolves (AQU-618)", async () => {

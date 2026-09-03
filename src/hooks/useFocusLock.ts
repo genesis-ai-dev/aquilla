@@ -26,10 +26,10 @@
  *     authoritative and re-broadcasts the existing holder's lock.claimed.
  *   - Auto-expiry on disconnect / lease timeout fires lock.released.
  *
- * The hook never makes assumptions about who wins; it reflects what the
- * server tells us via `lock.claimed` / `lock.released`. `claim()` flips
- * isHeld true optimistically; if the server says someone else holds it,
- * the next lock.claimed frame from the server flips us back.
+ * Only a server acknowledgement grants edit permission. Re-claims renew the
+ * lease with an acknowledgement; transport loss or an expired local deadline
+ * pauses input. Deadlines start when the request was sent, not when its delayed
+ * response arrives. Presence alone never grants a local lease.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react"
@@ -64,6 +64,8 @@ export interface LockHolder {
 export interface UseFocusLockArgs {
   /** Project-scoped reconciler. `null` means no live session — claim() is a no-op. */
   reconciler: WsReconciler | null
+  /** Reactive transport state, supplied by the workspace on open/close. */
+  connected?: boolean
   /** Cell to lock. `null` means no cell is focused. */
   cellId: string | null
   /**
@@ -81,8 +83,10 @@ export interface UseFocusLockArgs {
 }
 
 export interface UseFocusLockResult {
-  /** True iff we believe this client holds the lock. */
+  /** True only while a server-confirmed lease and transport are live. */
   isHeld: boolean
+  /** Raw cell whose lease was acknowledged (never the previous focus). */
+  heldCellId: string | null
   /** Present iff another client holds the lock for this cell. */
   heldBy: LockHolder | null
   /** Request the lock + start renewal. Safe to call repeatedly. */
@@ -101,6 +105,7 @@ export function useFocusLock(
 ): [UseFocusLockResult, (msg: ProjectWsServerMessage) => void] {
   const {
     reconciler,
+    connected = reconciler?.isConnected() ?? false,
     cellId,
     lane,
     currentUserId,
@@ -115,8 +120,12 @@ export function useFocusLock(
   const lockKey = cellId != null ? focusLockKey(cellId, lane) : null
 
   const [isHeld, setIsHeld] = useState(false)
+  const [heldCellId, setHeldCellId] = useState<string | null>(null)
+  const confirmedCellRef = useRef<string | null>(null)
   const [heldBy, setHeldBy] = useState<LockHolder | null>(null)
   const renewTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const expiryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const sentAtRef = useRef<number | null>(null)
   const claimedCellRef = useRef<string | null>(null)
   // Holds the composed lock key for the currently-focused cell (see lockKey).
   const cellIdRef = useRef(lockKey)
@@ -131,6 +140,9 @@ export function useFocusLock(
   }, [onLockEvent])
 
   const stopRenewal = useCallback(() => {
+    if (expiryTimerRef.current !== null) clearTimeout(expiryTimerRef.current)
+    expiryTimerRef.current = null
+    sentAtRef.current = null
     if (renewTimerRef.current !== null) {
       clearInterval(renewTimerRef.current)
       renewTimerRef.current = null
@@ -142,16 +154,48 @@ export function useFocusLock(
     // it into the lane-qualified key here so claim/renew/release all agree.
     const rawCellId = cellIdOverride ?? cellId
     const targetCellId = rawCellId != null ? focusLockKey(rawCellId, lane) : null
-    if (!reconciler || !targetCellId) return
+    if (!targetCellId) return
+    // Repeated activation while the reply is in flight must not reset its
+    // send timestamp or let an older acknowledgement extend the deadline.
+    if (claimedCellRef.current === targetCellId && reconciler?.isConnected()
+      && (confirmedCellRef.current === targetCellId || sentAtRef.current !== null)) return
+    if (claimedCellRef.current && claimedCellRef.current !== targetCellId) {
+      reconciler?.send({ t: "focus.release", cellId: claimedCellRef.current })
+    }
     claimedCellRef.current = targetCellId
-    setIsHeld(true)
-    reconciler.send({ t: "focus.claim", cellId: targetCellId, leaseMs })
+    cellIdRef.current = targetCellId
+    confirmedCellRef.current = null
+    setIsHeld(false)
+    setHeldCellId(null)
     stopRenewal()
+    sentAtRef.current = Date.now()
+    if (!reconciler?.send({ t: "focus.claim", cellId: targetCellId, leaseMs })) {
+      sentAtRef.current = null
+      return
+    }
     // Half-period renewal — a single dropped frame shouldn't expire the lease.
     renewTimerRef.current = setInterval(() => {
       const target = claimedCellRef.current
       if (!target) return
-      reconciler.send({ t: "focus.renew", cellId: target })
+      // Re-claim also gets an acknowledgement on older workers. Merely
+      // queueing a renewal frame is not evidence that a lease still exists.
+      if (sentAtRef.current !== null) {
+        if (Date.now() - sentAtRef.current < leaseMs) return
+        // Do not mistake an expired reply for a later claim's acknowledgement.
+        confirmedCellRef.current = null
+        setIsHeld(false)
+        setHeldCellId(null)
+        stopRenewal()
+        reconciler.reconnect()
+        return
+      }
+      sentAtRef.current = Date.now()
+      if (!reconciler.send({ t: "focus.claim", cellId: target, leaseMs })) {
+        confirmedCellRef.current = null
+        setIsHeld(false)
+        setHeldCellId(null)
+        stopRenewal()
+      }
     }, Math.max(1_000, Math.floor(leaseMs / 2)))
   }, [reconciler, cellId, lane, leaseMs, stopRenewal])
 
@@ -159,17 +203,32 @@ export function useFocusLock(
     stopRenewal()
     const target = claimedCellRef.current
     claimedCellRef.current = null
+    confirmedCellRef.current = null
     setIsHeld(false)
+    setHeldCellId(null)
     if (!reconciler || !target) return
     reconciler.send({ t: "focus.release", cellId: target })
   }, [reconciler, stopRenewal])
+
+  // Transport loss immediately revokes edit permission. Keep the requested
+  // cell so reconnect can reacquire it, but require a fresh server response.
+  useEffect(() => {
+    if (!connected) {
+      confirmedCellRef.current = null
+      setIsHeld(false)
+      setHeldCellId(null)
+      stopRenewal()
+    } else if (claimedCellRef.current) {
+      claim(cellId ?? undefined)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connected, reconciler])
 
   // Auto-release when the focused cell changes — otherwise the previous
   // claim's renewal timer keeps firing against the wrong cell. The effect
   // synchronizes the *external* WS lease lifetime to the cellId prop;
   // setIsHeld inside release() is the only React state and it's reflecting
   // the WS state, not deriving new state from props.
-  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     // Compare against the composed key: switching cell OR lane must release
     // the prior lease (otherwise the renewal timer keeps firing the old key).
@@ -177,7 +236,6 @@ export function useFocusLock(
       release()
     }
   }, [lockKey, release])
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Drop the lock on unmount so a refresh or navigate-away doesn't strand a
   // lease (would otherwise wait for leaseMs to auto-expire).
@@ -196,11 +254,29 @@ export function useFocusLock(
       if (msg.t === "lock.claimed") {
         if (msg.cellId !== cur) return
         if (msg.by.userId === currentUserId) {
+          // Ignore our delayed echo after blur / switching cells.
+          if (claimedCellRef.current !== cur || !reconciler?.isConnected()) return
+          if (sentAtRef.current === null) return
+          // Start the deadline at SEND, not receipt: a delayed acknowledgement
+          // must not grant an extra lease's worth of editing time on this client.
+          const remaining = sentAtRef.current + leaseMs - Date.now()
+          sentAtRef.current = null
+          if (remaining <= 0) return
+          if (expiryTimerRef.current !== null) clearTimeout(expiryTimerRef.current)
+          expiryTimerRef.current = setTimeout(() => {
+            confirmedCellRef.current = null
+            setIsHeld(false)
+            setHeldCellId(null)
+          }, remaining)
+          confirmedCellRef.current = cur
           setIsHeld(true)
+          setHeldCellId(lane ? cur.slice(0, -(`@lane:${lane}`).length) : cur)
           setHeldBy(null)
           return
         }
         setIsHeld(false)
+        confirmedCellRef.current = null
+        setHeldCellId(null)
         setHeldBy({ userId: msg.by.userId, ts: msg.by.ts })
         if (claimedCellRef.current === cur) {
           claimedCellRef.current = null
@@ -214,6 +290,8 @@ export function useFocusLock(
         setHeldBy((c) => (c && c.userId === msg.by.userId ? null : c))
         if (msg.by.userId === currentUserId) {
           setIsHeld(false)
+          confirmedCellRef.current = null
+          setHeldCellId(null)
           if (claimedCellRef.current === cur) {
             claimedCellRef.current = null
             stopRenewal()
@@ -230,6 +308,8 @@ export function useFocusLock(
           if (u.focusedCell !== cur) continue
           if (u.userId === currentUserId) continue
           setIsHeld(false)
+          confirmedCellRef.current = null
+          setHeldCellId(null)
           setHeldBy({ userId: u.userId, ts: u.ts })
           if (claimedCellRef.current === cur) {
             claimedCellRef.current = null
@@ -241,8 +321,8 @@ export function useFocusLock(
         return
       }
     },
-    [currentUserId, stopRenewal],
+    [currentUserId, stopRenewal, reconciler, lane, leaseMs],
   )
 
-  return [{ isHeld, heldBy, claim, release }, feedFrame]
+  return [{ isHeld: isHeld && connected, heldCellId, heldBy, claim, release }, feedFrame]
 }

@@ -28,7 +28,7 @@ const SAMPLE_MD = path.resolve(__dirname, "../../fixtures/sample.md")
  *
  * Setup: create project + add bob via API (skips UI share flow).
  */
-test("alice edits cell 0; bob sees the new text in his open editor within 15s", async ({ alice, bob }) => {
+test("delayed lock acknowledgement pauses editing; committed text propagates to bob", async ({ alice, bob }) => {
   test.setTimeout(120_000)
   const aliceSession = await ensureAuthState("alice")
 
@@ -37,6 +37,22 @@ test("alice edits cell 0; bob sees the new text in his open editor within 15s", 
   const projectName = `Concurrent ${Date.now()}`
   await createProjectServerSide(aliceSession.jwt, { id: projectId, name: projectName })
   await addProjectMember(aliceSession.jwt, projectId, "bob", ROLE.CONTRIBUTOR)
+
+  // A deterministic slow-network boundary: hold real DO acknowledgements,
+  // not a sleep or a mocked successful lock. Both users still use real workers.
+  let holdClaims = true
+  const pendingClaims: Array<() => void> = []
+  await alice.routeWebSocket(`**/parties/project-sync/${projectId}*`, (client) => {
+    const server = client.connectToServer()
+    server.onMessage((message) => {
+      const frame = JSON.parse(message.toString()) as { t?: string; by?: { userId?: string } }
+      if (holdClaims && frame.t === "lock.claimed" && frame.by?.userId === "alice") {
+        pendingClaims.push(() => client.send(message))
+      } else {
+        client.send(message)
+      }
+    })
+  })
 
   // 2. Alice navigates to the project, imports the sample file, opens it.
   await alice.goto(`/project/${projectId}/editor`)
@@ -68,13 +84,26 @@ test("alice edits cell 0; bob sees the new text in his open editor within 15s", 
   await bobWs.waitForEditor()
 
   // 4. Alice edits cell 0 and blurs. The edit is committed to IDB and flushed
-  //    to the sync-worker outbox, which writes to D1 + broadcasts via DO.
+  //    to the sync-worker outbox, which writes to Postgres + broadcasts via DO.
   const editText = `concurrent-${Date.now()}`
+  await aliceWs.requestTargetCellEdit(0)
+  await expect.poll(() => pendingClaims.length, { message: "real lock acknowledgement reached the delayed link" }).toBeGreaterThan(0)
+  await expect(aliceWs.targetEditor(0)).toHaveAttribute("contenteditable", "false")
+  await expect(alice.getByText("Waiting for an editing connection and lock — editing paused.")).toBeVisible()
+  holdClaims = false
+  for (const deliver of pendingClaims.splice(0)) deliver()
+  await expect(aliceWs.targetEditor(0)).toHaveAttribute("contenteditable", "true")
+  // Switch directly while the first editor is still active. Its delayed
+  // blur/unmount cleanup must not release the next cell's newly claimed lease.
+  await aliceWs.requestTargetCellEdit(1)
+  await expect(aliceWs.targetEditor(1)).toHaveAttribute("contenteditable", "true")
+  await aliceWs.requestTargetCellEdit(0)
+  await expect(aliceWs.targetEditor(0)).toHaveAttribute("contenteditable", "true")
   await aliceWs.editCell(0, editText)
 
   // 5. Bob's editor should show the updated text somewhere in the cell list.
   //    The ProjectSync DO delivers the event.applied frame to bob's WS
-  //    connection → useCells calls revalidateCell() → D1 refetch → re-render.
+  //    connection → cell-store revalidateCell() → Postgres refetch → re-render.
   //    We filter to the specific cell that contains the edit text rather than
   //    checking a fixed row index — the virtualized list can render cells in varying
   //    DOM order depending on scroll position.

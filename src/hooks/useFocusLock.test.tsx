@@ -1,348 +1,151 @@
-/**
- * Tests for useFocusLock — the AD-1 focus-lock client.
- *
- * The hook owns three transitions:
- *   1. claim() → optimistic isHeld=true + sends focus.claim
- *   2. server frame lock.claimed by another user → flips us to read-only
- *      with heldBy populated; stops our renewal timer
- *   3. release() / unmount → sends focus.release + cleans up
- *
- * We drive the hook with a fake WsReconciler that records `send` calls and
- * exposes `feedFrame` from the hook tuple so we can simulate server frames.
- */
-
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { renderHook, act } from "@testing-library/react"
 import { useFocusLock } from "./useFocusLock"
-import type { ProjectWsClientMessage, ProjectWsServerMessage, WsReconciler } from "@/lib/sync/ws-reconciler"
+import { applyFocusClaim } from "../../sync-worker/src/project-do-handlers"
+import type { ProjectWsClientMessage, WsReconciler } from "@/lib/sync/ws-reconciler"
 
-function makeFakeReconciler(): WsReconciler & { sent: ProjectWsClientMessage[] } {
-  const sent: ProjectWsClientMessage[] = []
-  return {
-    sent,
-    isConnected: () => true,
-    send: (msg) => {
-      sent.push(msg)
-      return true
-    },
-    reconnect: () => undefined,
-    close: () => undefined,
-  } as WsReconciler & { sent: ProjectWsClientMessage[] }
+function setup() {
+  const ws: WsReconciler = {
+    isConnected: vi.fn(() => true),
+    send: vi.fn((_msg: ProjectWsClientMessage) => true),
+    reconnect: vi.fn(), close: vi.fn(),
+  }
+  const hook = renderHook(({ cellId, connected }) => useFocusLock({
+    reconciler: ws, cellId, connected, currentUserId: "alice", leaseMs: 30_000,
+  }), { initialProps: { cellId: "c", connected: true } })
+  const claim = () => act(() => hook.result.current[0].claim())
+  // Real DO producer -> client consumer, not a hand-written acknowledgement.
+  const acknowledge = () => act(() => {
+    const response = applyFocusClaim(new Map(), new Map(), "alice", { t: "focus.claim", cellId: "c", leaseMs: 30_000 }, Date.now())
+    for (const frame of response.emit) hook.result.current[1](frame)
+  })
+  return { ...hook, ws, claim, acknowledge }
 }
 
-describe("useFocusLock", () => {
-  beforeEach(() => {
-    vi.useFakeTimers()
-  })
-  afterEach(() => {
-    vi.useRealTimers()
+describe("acknowledged focus leases", () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  it("stays read-only until the real DO acknowledges the claim", () => {
+    const h = setup()
+    h.claim()
+    expect(h.result.current[0].isHeld).toBe(false)
+    expect(h.result.current[0].heldCellId).toBeNull()
+    expect(h.ws.send).toHaveBeenCalledWith({ t: "focus.claim", cellId: "c", leaseMs: 30_000 })
+    h.acknowledge()
+    expect(h.result.current[0].isHeld).toBe(true)
+    expect(h.result.current[0].heldCellId).toBe("c")
   })
 
-  it("claim() sends focus.claim and flips isHeld optimistically", () => {
-    const ws = makeFakeReconciler()
-    const { result } = renderHook(() =>
-      useFocusLock({
-        reconciler: ws,
-        cellId: "cell-1",
-        currentUserId: "alice",
-        leaseMs: 30_000,
-      }),
-    )
+  it("does not claim success or renew after send returns false", () => {
+    const h = setup()
+    vi.mocked(h.ws.send).mockReturnValue(false)
+    h.claim()
+    act(() => vi.advanceTimersByTime(60_000))
+    expect(h.result.current[0].isHeld).toBe(false)
+    expect(h.ws.send).toHaveBeenCalledTimes(1)
+  })
 
+  it("does not resend or extend a pending claim when activation repeats", () => {
+    const h = setup()
+    h.claim()
+    act(() => vi.advanceTimersByTime(10_000))
+    h.claim()
+    expect(h.ws.send).toHaveBeenCalledTimes(1)
+    h.acknowledge()
+    act(() => vi.advanceTimersByTime(20_000))
+    expect(h.result.current[0].isHeld).toBe(false)
+  })
+
+  it("renews with acknowledgement while keeping a still-valid lease writable", () => {
+    const h = setup()
+    h.claim(); h.acknowledge()
+    act(() => vi.advanceTimersByTime(15_000))
+    expect(h.ws.send).toHaveBeenCalledTimes(2)
+    expect(h.result.current[0].isHeld).toBe(true)
+    h.acknowledge()
+    act(() => vi.advanceTimersByTime(16_000))
+    expect(h.result.current[0].isHeld).toBe(true)
+    h.acknowledge()
+    expect(h.result.current[0].isHeld).toBe(true)
+  })
+
+  it("expires locally when the socket stays open but renewal replies are lost", () => {
+    const h = setup()
+    h.claim(); h.acknowledge()
+    act(() => vi.advanceTimersByTime(30_000))
+    expect(h.result.current[0].isHeld).toBe(false)
+  })
+
+  it("does not extend the lease by the acknowledgement's network delay", () => {
+    const h = setup()
+    h.claim()
+    act(() => vi.advanceTimersByTime(10_000))
+    h.acknowledge()
+    act(() => vi.advanceTimersByTime(20_000))
+    expect(h.result.current[0].isHeld).toBe(false)
+  })
+
+  it("reconnects after an expired unanswered claim and ignores its late echo", () => {
+    const h = setup()
+    h.claim()
+    act(() => vi.advanceTimersByTime(30_000))
+    expect(h.ws.reconnect).toHaveBeenCalledOnce()
+    h.acknowledge()
+    expect(h.result.current[0].isHeld).toBe(false)
+  })
+
+  it("pauses on disconnect and requires a fresh acknowledgement after reconnect", () => {
+    const h = setup()
+    h.claim(); h.acknowledge()
+    h.rerender({ cellId: "c", connected: false })
+    expect(h.result.current[0].isHeld).toBe(false)
+    h.rerender({ cellId: "c", connected: true })
+    expect(h.result.current[0].isHeld).toBe(false)
+    h.acknowledge()
+    expect(h.result.current[0].isHeld).toBe(true)
+  })
+
+  it("denial and another holder's presence stop renewal", () => {
+    const h = setup()
+    h.claim(); h.acknowledge()
+    act(() => h.result.current[1]({ t: "lock.claimed", cellId: "c", by: { userId: "bob", ts: 1 } }))
+    expect(h.result.current[0].isHeld).toBe(false)
+    expect(h.result.current[0].heldBy?.userId).toBe("bob")
+    const sent = vi.mocked(h.ws.send).mock.calls.length
+    act(() => vi.advanceTimersByTime(60_000))
+    expect(h.ws.send).toHaveBeenCalledTimes(sent)
+    act(() => h.result.current[1]({ t: "lock.released", cellId: "c", by: { userId: "bob", ts: 2 } }))
+    expect(h.result.current[0].heldBy).toBeNull()
+    act(() => h.result.current[1]({ t: "presence", users: [{ userId: "bob", focusedCell: "c", ts: 3 }] }))
+    expect(h.result.current[0].heldBy?.userId).toBe("bob")
+  })
+
+  it("ignores other cells and acknowledgements after release", () => {
+    const h = setup()
+    h.claim(); h.acknowledge()
+    act(() => h.result.current[1]({ t: "lock.claimed", cellId: "other", by: { userId: "bob", ts: 1 } }))
+    expect(h.result.current[0].isHeld).toBe(true)
+    act(() => h.result.current[0].release())
+    h.acknowledge()
+    expect(h.result.current[0].isHeld).toBe(false)
+    expect(h.ws.send).toHaveBeenLastCalledWith({ t: "focus.release", cellId: "c" })
+  })
+
+  it("releases on cell change and unmount", () => {
+    const h = setup()
+    h.claim(); h.acknowledge()
+    h.rerender({ cellId: "other", connected: true })
+    expect(h.result.current[0].isHeld).toBe(false)
+    expect(h.ws.send).toHaveBeenLastCalledWith({ t: "focus.release", cellId: "c" })
+    h.claim()
+    h.unmount()
+    expect(h.ws.send).toHaveBeenLastCalledWith({ t: "focus.release", cellId: "other" })
+  })
+
+  it("is read-only without a reconciler", () => {
+    const { result } = renderHook(() => useFocusLock({ reconciler: null, cellId: "c", currentUserId: "alice" }))
+    act(() => result.current[0].claim())
     expect(result.current[0].isHeld).toBe(false)
-    expect(result.current[0].heldBy).toBeNull()
-
-    act(() => {
-      result.current[0].claim()
-    })
-
-    expect(result.current[0].isHeld).toBe(true)
-    expect(ws.sent).toEqual([{ t: "focus.claim", cellId: "cell-1", leaseMs: 30_000 }])
-  })
-
-  it("renews the lease at half-period while held", () => {
-    const ws = makeFakeReconciler()
-    const { result } = renderHook(() =>
-      useFocusLock({
-        reconciler: ws,
-        cellId: "c",
-        currentUserId: "alice",
-        leaseMs: 30_000,
-      }),
-    )
-    act(() => {
-      result.current[0].claim()
-    })
-    // After 15s — one renewal.
-    act(() => {
-      vi.advanceTimersByTime(15_000)
-    })
-    expect(ws.sent).toEqual([
-      { t: "focus.claim", cellId: "c", leaseMs: 30_000 },
-      { t: "focus.renew", cellId: "c" },
-    ])
-    // After another 15s — second renewal.
-    act(() => {
-      vi.advanceTimersByTime(15_000)
-    })
-    expect(ws.sent.filter((m) => m.t === "focus.renew")).toHaveLength(2)
-  })
-
-  it("release() stops renewal + sends focus.release", () => {
-    const ws = makeFakeReconciler()
-    const { result } = renderHook(() =>
-      useFocusLock({
-        reconciler: ws,
-        cellId: "c",
-        currentUserId: "alice",
-        leaseMs: 30_000,
-      }),
-    )
-    act(() => {
-      result.current[0].claim()
-    })
-    act(() => {
-      result.current[0].release()
-    })
-    expect(result.current[0].isHeld).toBe(false)
-    expect(ws.sent.at(-1)).toEqual({ t: "focus.release", cellId: "c" })
-
-    // Advancing past the half-period must NOT emit a renewal.
-    const before = ws.sent.length
-    act(() => {
-      vi.advanceTimersByTime(60_000)
-    })
-    expect(ws.sent.length).toBe(before)
-  })
-
-  it("server says another user grabbed the cell → isHeld false, heldBy populated", () => {
-    const ws = makeFakeReconciler()
-    const { result } = renderHook(() =>
-      useFocusLock({
-        reconciler: ws,
-        cellId: "c",
-        currentUserId: "alice",
-      }),
-    )
-    act(() => {
-      result.current[0].claim()
-    })
-    expect(result.current[0].isHeld).toBe(true)
-
-    // Bob's claim arrives.
-    const frame: ProjectWsServerMessage = {
-      t: "lock.claimed",
-      cellId: "c",
-      by: { userId: "bob", ts: 1000 },
-    }
-    act(() => {
-      result.current[1](frame)
-    })
-
-    expect(result.current[0].isHeld).toBe(false)
-    expect(result.current[0].heldBy).toEqual({ userId: "bob", ts: 1000 })
-
-    // Our renewal timer must be cleared — advancing past the period emits nothing.
-    const before = ws.sent.length
-    act(() => {
-      vi.advanceTimersByTime(60_000)
-    })
-    expect(ws.sent.length).toBe(before)
-  })
-
-  it("lock.released by the other user clears heldBy", () => {
-    const ws = makeFakeReconciler()
-    const { result } = renderHook(() =>
-      useFocusLock({
-        reconciler: ws,
-        cellId: "c",
-        currentUserId: "alice",
-      }),
-    )
-    // First Bob grabs it.
-    act(() => {
-      result.current[1]({
-        t: "lock.claimed",
-        cellId: "c",
-        by: { userId: "bob", ts: 100 },
-      })
-    })
-    expect(result.current[0].heldBy?.userId).toBe("bob")
-
-    // Bob releases — heldBy clears.
-    act(() => {
-      result.current[1]({
-        t: "lock.released",
-        cellId: "c",
-        by: { userId: "bob", ts: 200 },
-      })
-    })
-    expect(result.current[0].heldBy).toBeNull()
-    expect(result.current[0].isHeld).toBe(false)
-  })
-
-  it("ignores lock messages for other cells", () => {
-    const ws = makeFakeReconciler()
-    const { result } = renderHook(() =>
-      useFocusLock({
-        reconciler: ws,
-        cellId: "c-a",
-        currentUserId: "alice",
-      }),
-    )
-    act(() => {
-      result.current[0].claim()
-    })
-    expect(result.current[0].isHeld).toBe(true)
-    act(() => {
-      result.current[1]({
-        t: "lock.claimed",
-        cellId: "c-b",
-        by: { userId: "bob", ts: 1 },
-      })
-    })
-    // Our cell wasn't c-b; still held.
-    expect(result.current[0].isHeld).toBe(true)
-    expect(result.current[0].heldBy).toBeNull()
-  })
-
-  it("presence snapshot with another user focused on this cell flips us read-only", () => {
-    const ws = makeFakeReconciler()
-    const { result } = renderHook(() =>
-      useFocusLock({
-        reconciler: ws,
-        cellId: "c",
-        currentUserId: "alice",
-      }),
-    )
-    act(() => {
-      result.current[1]({
-        t: "presence",
-        users: [
-          { userId: "bob", focusedCell: "c", ts: 1 },
-          { userId: "alice", focusedCell: undefined, ts: 2 },
-        ],
-      })
-    })
-    expect(result.current[0].heldBy?.userId).toBe("bob")
-  })
-
-  it("auto-releases when cellId changes", () => {
-    const ws = makeFakeReconciler()
-    const { result, rerender } = renderHook(
-      ({ cellId }: { cellId: string }) =>
-        useFocusLock({
-          reconciler: ws,
-          cellId,
-          currentUserId: "alice",
-        }),
-      { initialProps: { cellId: "c-1" } },
-    )
-    act(() => {
-      result.current[0].claim()
-    })
-    expect(ws.sent.at(-1)).toEqual({ t: "focus.claim", cellId: "c-1", leaseMs: 30_000 })
-
-    rerender({ cellId: "c-2" })
-    // Switching cells should have queued a release for the previous one.
-    expect(ws.sent.some((m) => m.t === "focus.release" && m.cellId === "c-1")).toBe(true)
-  })
-
-  it("releases on unmount", () => {
-    const ws = makeFakeReconciler()
-    const { result, unmount } = renderHook(() =>
-      useFocusLock({
-        reconciler: ws,
-        cellId: "c",
-        currentUserId: "alice",
-      }),
-    )
-    act(() => {
-      result.current[0].claim()
-    })
-    unmount()
-    expect(ws.sent.some((m) => m.t === "focus.release" && m.cellId === "c")).toBe(true)
-  })
-
-  it("claim() is a no-op when reconciler is null", () => {
-    const { result } = renderHook(() =>
-      useFocusLock({
-        reconciler: null,
-        cellId: "c",
-        currentUserId: "alice",
-      }),
-    )
-    act(() => {
-      result.current[0].claim()
-    })
-    // No fake reconciler to inspect, but isHeld must stay false (we never sent).
-    expect(result.current[0].isHeld).toBe(false)
-  })
-
-  // AQU-288: renewal keeps the lock alive past the 30s DO lease boundary.
-  // Without renewal the DO expires the lease and a second claimant can steal
-  // the lock silently. With the half-period timer, focus.renew fires every 15s
-  // and the server resets the clock; isHeld stays true on our side.
-  it("AQU-288: renewal fires past the 30s lease boundary, keeping the lock", () => {
-    const ws = makeFakeReconciler()
-    const { result } = renderHook(() =>
-      useFocusLock({
-        reconciler: ws,
-        cellId: "c",
-        currentUserId: "alice",
-        leaseMs: 30_000,
-      }),
-    )
-    act(() => {
-      result.current[0].claim()
-    })
-    expect(result.current[0].isHeld).toBe(true)
-
-    // Advance well past the 30s boundary — renewal should have fired twice.
-    act(() => {
-      vi.advanceTimersByTime(35_000)
-    })
-    // Still held locally — the server's clock was reset by the renewals.
-    expect(result.current[0].isHeld).toBe(true)
-    const renewals = ws.sent.filter((m) => m.t === "focus.renew")
-    expect(renewals.length).toBeGreaterThanOrEqual(2)
-  })
-
-  // AQU-288: takeover (another user grabs the cell) must surface heldBy
-  // and stop our renewal timer so we don't keep sending stale renewals.
-  it("AQU-288: takeover sets heldBy and stops the renewal timer", () => {
-    const ws = makeFakeReconciler()
-    const { result } = renderHook(() =>
-      useFocusLock({
-        reconciler: ws,
-        cellId: "c",
-        currentUserId: "alice",
-        leaseMs: 30_000,
-      }),
-    )
-    act(() => {
-      result.current[0].claim()
-    })
-    expect(result.current[0].isHeld).toBe(true)
-
-    // Server broadcasts another user's claim (takeover).
-    act(() => {
-      result.current[1]({
-        t: "lock.claimed",
-        cellId: "c",
-        by: { userId: "bob", ts: 1_000 },
-      })
-    })
-
-    // isHeld must be false; heldBy must identify the takeover user.
-    expect(result.current[0].isHeld).toBe(false)
-    expect(result.current[0].heldBy).toEqual({ userId: "bob", ts: 1_000 })
-
-    // Renewal timer must be stopped — no further renewals after the takeover.
-    const renewalsBefore = ws.sent.filter((m) => m.t === "focus.renew").length
-    act(() => {
-      vi.advanceTimersByTime(60_000)
-    })
-    expect(ws.sent.filter((m) => m.t === "focus.renew").length).toBe(renewalsBefore)
   })
 })

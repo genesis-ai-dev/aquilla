@@ -56,6 +56,7 @@ export const workspace = defineNamespace({
       "Source text changed since your last edit — your translation was saved, but please re-confirm it reflects the latest source.",
     "workspace.focusLock.editingNotice":
       "{user} is now editing this cell — your editor is read-only. Copy any unsaved text before moving away.",
+    "workspace.focusLock.waiting": "Waiting for an editing connection and lock — editing paused.",
     "workspace.loadingComments": "Loading comments",
     "workspace.loadingMemory": "Loading Living Memory",
     // "Loading terminology" → terminology.loadingLabel (same panel, same surface)

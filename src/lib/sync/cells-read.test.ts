@@ -43,6 +43,30 @@ afterEach(() => {
 })
 
 describe("streamFileCells onMeta (B2)", () => {
+  it("opts editor scans into bounded 2000-row pages while preserving returned metadata", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(pageResponse({ cells: [makeRow("a")], nextCursor: null, maxServerSeq: 5, projectEpoch: 1, pagination: "keyset" }))
+    vi.stubGlobal("fetch", fetchMock)
+    const onMeta = vi.fn()
+    await streamFileCells("proj", "file", "jwt", () => {}, "source", onMeta, undefined, { keyset: true })
+    const url = new URL(fetchMock.mock.calls[0][0])
+    expect(url.searchParams.get("limit")).toBe("2000")
+    expect(url.searchParams.get("pagination")).toBe("keyset")
+    expect(onMeta).toHaveBeenCalledWith({ maxServerSeq: 5, projectEpoch: 1, pagination: "keyset" })
+  })
+
+  it("does not retry a cancelled scan, including engines without throwIfAborted", async () => {
+    const controller = new AbortController()
+    Object.defineProperty(controller.signal, "throwIfAborted", { value: undefined })
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      controller.abort()
+      expect(init.signal?.aborted).toBe(true)
+      throw new DOMException("cancelled", "AbortError")
+    })
+    vi.stubGlobal("fetch", fetchMock)
+    await expect(streamFileCells("proj", "file", "jwt", () => {}, "source", undefined, undefined, { keyset: true, signal: controller.signal })).rejects.toMatchObject({ name: "AbortError" })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it("fires onMeta once per page with that page's maxServerSeq, before the page's rows", async () => {
     const fetchMock = vi
       .fn()

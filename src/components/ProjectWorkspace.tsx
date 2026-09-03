@@ -5346,6 +5346,7 @@ export function ProjectWorkspace() {
   // reconcilerRef is still the write target (set inside the async connect effect)
   // and is used by the claim/release callbacks declared below.
   const [liveReconciler, setLiveReconciler] = useState<WsReconciler | null>(null)
+  const [realtimeConnected, setRealtimeConnected] = useState(false)
   // Read the current file list inside the WS connect path without making it a
   // reconnect trigger — otherwise every file-list change (e.g. each batch of a
   // large import landing) tears the socket down and recreates it.
@@ -5436,6 +5437,7 @@ export function ProjectWorkspace() {
         {
           onOpen() {
             if (cancelled) return
+            setRealtimeConnected(true)
             clearPresenceStaleTimer()
             sendPresenceUpdate({
               currentFileId: activeFileIdRef.current,
@@ -5459,6 +5461,7 @@ export function ProjectWorkspace() {
           },
           onClose() {
             if (cancelled) return
+            setRealtimeConnected(false)
             if (presenceStaleTimerRef.current !== null) return
             presenceStaleTimerRef.current = setTimeout(() => {
               presenceStaleTimerRef.current = null
@@ -5713,6 +5716,7 @@ export function ProjectWorkspace() {
       clearPresenceStaleTimer()
       reconcilerRef.current = null
       setLiveReconciler(null)
+      setRealtimeConnected(false)
       reconciler?.close()
     }
   }, [
@@ -5743,6 +5747,7 @@ export function ProjectWorkspace() {
   // breaking hook call order.
   const [focusLockState, focusLockFeedFrame] = useFocusLock({
     reconciler: liveReconciler,
+    connected: realtimeConnected,
     cellId: focusedCellId,
     // AQU-538: lane-qualify the focus lease so per-lane editors don't contend.
     lane: activeLane,
@@ -5780,7 +5785,10 @@ export function ProjectWorkspace() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, activeFileId, currentUsername, focusLockState.claim, getActiveCell, sendPresenceUpdate])
   const handleReleaseCell = useCallback((cellId: string) => {
-    if (focusedCellIdRef.current === cellId) focusedCellIdRef.current = null
+    // A previous row can unmount after the next row has already claimed.
+    // Its cleanup must not release the new row's lease.
+    if (focusedCellIdRef.current !== cellId) return
+    focusedCellIdRef.current = null
     // Deliberately keep focusedCellId / focusedCellCanonicalRef: the chat
     // panel and TN sidebar need the *last* focused cell as context — clicking
     // away (e.g. to open chat) releases the focus lock but shouldn't drop the
@@ -10507,6 +10515,7 @@ export function ProjectWorkspace() {
             getPendingTargetEventId={getPendingTargetEventId}
             onOptimisticEdit={applyOptimisticTargetEditWithCapture}
             cellLockHolders={cellLockHolders}
+            confirmedEditCellId={focusLockState.isHeld ? focusLockState.heldCellId : null}
             presenceStore={presenceStore}
             cellsWithRemoteChange={cellsWithRemoteChange}
             onClaimCell={handleClaimCell}

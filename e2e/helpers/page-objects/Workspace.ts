@@ -380,6 +380,16 @@ export class Workspace {
     return this.targetColumn(index).locator("[data-target-read-view]").first()
   }
 
+  /** Begin activation without assuming that the focus lease is acknowledged. */
+  async requestTargetCellEdit(index: number): Promise<void> {
+    await this.cellRow(index).scrollIntoViewIfNeeded()
+    await this.targetReadView(index).click()
+  }
+
+  targetEditor(index: number): Locator {
+    return this.targetColumn(index).locator(".ProseMirror").first()
+  }
+
   async activateTargetCell(index: number): Promise<Locator> {
     const row = this.cellRow(index)
     await row.scrollIntoViewIfNeeded()

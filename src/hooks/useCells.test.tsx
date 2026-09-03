@@ -1001,7 +1001,7 @@ describe("useCells conditional refetch (M2-1)", () => {
       useCells({ projectId: "proj-a", fileId: "file-x", getToken, enabled: true }),
     )
     await waitFor(() => expect(fetchDeltaMock).toHaveBeenCalledTimes(1))
-    expect(fetchDeltaMock).toHaveBeenCalledWith("proj-a", "file-x", 10, "fake-jwt", undefined, TEST_EPOCH)
+    expect(fetchDeltaMock).toHaveBeenCalledWith("proj-a", "file-x", 10, "fake-jwt", undefined, TEST_EPOCH, expect.any(AbortSignal))
     await waitFor(() => expect(result.current.isLoading).toBe(false))
     expect(result.current.cells).toHaveLength(1)
     expect(result.current.cells[0].original).toBe("cached-src")
@@ -1066,7 +1066,7 @@ describe("useCells conditional refetch (M2-1)", () => {
     })
     act(() => { window.dispatchEvent(new Event("focus")) })
     await waitFor(() => expect(result.current.cells[0].translated).toBe("peer-edit"))
-    expect(fetchDeltaMock).toHaveBeenCalledWith("proj-a", "file-x", 3, "fake-jwt", undefined, TEST_EPOCH)
+    expect(fetchDeltaMock).toHaveBeenCalledWith("proj-a", "file-x", 3, "fake-jwt", undefined, TEST_EPOCH, expect.any(AbortSignal))
     // No additional full stream ran for the focus revalidate.
     expect(fetchAllMock.mock.calls.length).toBe(fullStreamCalls)
 
@@ -1076,7 +1076,7 @@ describe("useCells conditional refetch (M2-1)", () => {
     })
     act(() => { result.current.revalidate() })
     await waitFor(() => expect(fetchDeltaMock).toHaveBeenCalledTimes(2))
-    expect(fetchDeltaMock).toHaveBeenLastCalledWith("proj-a", "file-x", 4, "fake-jwt", undefined, TEST_EPOCH)
+    expect(fetchDeltaMock).toHaveBeenLastCalledWith("proj-a", "file-x", 4, "fake-jwt", undefined, TEST_EPOCH, expect.any(AbortSignal))
   })
 
   it("falls back to the full stream when the server answers resync", async () => {
@@ -1234,7 +1234,7 @@ describe("useCells conditional refetch (M2-1)", () => {
     })
     act(() => { result.current.revalidate() })
     await waitFor(() => expect(fetchDeltaMock).toHaveBeenCalledTimes(2))
-    expect(fetchDeltaMock).toHaveBeenLastCalledWith("p", "f", 1, "fake-jwt", undefined, TEST_EPOCH)
+    expect(fetchDeltaMock).toHaveBeenLastCalledWith("p", "f", 1, "fake-jwt", undefined, TEST_EPOCH, expect.any(AbortSignal))
     await waitFor(() => expect(result.current.cells[0].translated).toBe("peer-E2-final"))
   })
 
@@ -1341,7 +1341,7 @@ describe("useCells conditional refetch (M2-1)", () => {
     })
     act(() => { result.current.revalidate() })
     await waitFor(() => expect(fetchDeltaMock).toHaveBeenCalledTimes(1))
-    expect(fetchDeltaMock).toHaveBeenCalledWith("p", "f", 7, "fake-jwt", undefined, TEST_EPOCH)
+    expect(fetchDeltaMock).toHaveBeenCalledWith("p", "f", 7, "fake-jwt", undefined, TEST_EPOCH, expect.any(AbortSignal))
   })
 
   // ── Project incarnation (AQU-943) ─────────────────────────────────────────
@@ -1389,7 +1389,7 @@ describe("useCells conditional refetch (M2-1)", () => {
     act(() => { result.current.revalidate() })
     await waitFor(() => expect(fetchDeltaMock).toHaveBeenCalledTimes(1))
     expect(fetchDeltaMock).toHaveBeenCalledWith(
-      "proj-a", "file-x", 62_932, "fake-jwt", undefined, 2_000,
+      "proj-a", "file-x", 62_932, "fake-jwt", undefined, 2_000, expect.any(AbortSignal),
     )
   })
 

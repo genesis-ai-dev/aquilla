@@ -8,14 +8,24 @@
 // preview/retake step between stop and upload.
 
 import { type ChangeEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { Check, ChevronLeft, ChevronRight, ChevronsRight, ChevronUp, Lock, Maximize2, Mic, Minimize2, RefreshCw, Settings2, Sparkles, Square, Upload, Volume2, VolumeX, X } from "lucide-react"
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
+import { AlertCircle, Check, ChevronLeft, ChevronRight, ChevronsRight, ChevronUp, Lock, Maximize2, Mic, Minimize2, RefreshCw, Settings2, Sparkles, Square, Upload, Volume2, VolumeX, X } from "lucide-react"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import { MIN_USEFUL_REGION_SEC, targetOffsetMsFor } from "@/lib/timeline/lane-timing"
+import {
+  isDefaultTrackSlot,
+  RECORDING_SLOT,
+  slotsForTrack,
+  trackIdForSlot,
+} from "@/lib/timeline/track-slots"
+import type { TimelineTrack } from "@/lib/timeline/tracks"
+import { DEFAULT_TARGET_TRACK_ID, slotForTrack } from "@/lib/timeline/track-slots"
+import { slotSelections, type AudioAttachmentOut, type CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
+import type { FrontierSession } from "@/lib/frontier/types"
 import { takeTrims } from "@/lib/audio/take-margins"
 import { cameraLabel } from "@/lib/timeline/cue-character"
 import type { CameraState } from "@/lib/sync/cells-read-types"
@@ -29,6 +39,8 @@ import { useOnline } from "@/hooks/useOnline"
 import { pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import { probeDurationMsSafe } from "@/lib/import"
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
+import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
+import { categorizeAiError } from "@/lib/audio/ai-error"
 import { COUNTDOWN_FROM, useCountdown } from "./useCountdown"
 import { AudioWaveform } from "./AudioWaveform"
 import { DurationBar } from "./DurationBar"
@@ -58,6 +70,17 @@ interface Props {
   project: ProjectRecord
   cells: CellData[]
   activeCellId: string | null
+  /**
+   * AQU-646 stage 3: which TRACK a new take lands on, as a storage slot.
+   *
+   * Defaults to the dub row's `"recording"`, so every existing caller and every
+   * existing behaviour is unchanged. An added track's lane passes its own id,
+   * and the take is attached, injected, transcribed and listed under that.
+   */
+  targetSlot?: string
+  /** The file's tracks, so the takes list can be grouped under a heading per
+   *  track. Absent = one ungrouped list, exactly as it has always been. */
+  timelineTracks?: readonly TimelineTrack[]
   username: string
   onActiveCellChange: (cellId: string) => void
   /** AQU-646: the cell's LAST take was removed — see `onTakeSaved`'s mirror in
@@ -95,6 +118,26 @@ interface Props {
     reference?: string | null
     castName?: string | null
     cameraState?: CameraState | null
+    /**
+     * AQU-646 stage 3f: how many subtitles are behind this line. ZERO is not
+     * the same as "no text" — an unlinked cue has nothing to say and needs
+     * pairing, while a linked one just needs translating, and the TTS button
+     * used to report both with the same string.
+     */
+    linkedCount?: number
+    /** Whose cast assignment picks the voice — the first linked subtitle, since
+     *  assignments are keyed by cell id and a cue has none of its own. */
+    voiceCellId?: string | null
+    /**
+     * AQU-646 stage 3g: how many heard lines share the busiest subtitle this
+     * cue performs. 1 for ~92% of lines.
+     *
+     * Above 1 the generated voice will speak the WHOLE subtitle onto this one
+     * cue — more than this line covers — and the others stay silent. The user
+     * is told before pressing, not after: once the clip exists the warning is
+     * late.
+     */
+    sharedWith?: number
   } | null
   /**
    * AQU-646 stage 4: the file whose linked picture this recording is against.
@@ -123,6 +166,10 @@ interface Props {
 // navigating to another line or closing the dialog.
 type Phase = "idle" | "counting" | "recording" | "preview" | "uploading" | "error"
 
+/** A way out of the recorder that a take sitting unsaved has to be asked about
+ *  first — closing it, or stepping to another line. */
+type PendingExit = { kind: "close" } | { kind: "goto"; index: number }
+
 // The read-aloud block's geometry, in one place and independent of whether the
 // film is showing. The line the operator performs from should look the same
 // whichever way the dialog is arranged; only the column width differs, and the
@@ -136,8 +183,84 @@ const READ_ALOUD_LINES = 5
  *  be trading readability for a scrollbar we would rather just have. */
 const READ_ALOUD_MIN_PX = Math.round(READ_ALOUD_BASE_PX * 0.5)
 
+/**
+ * The takes list, grouped by track. (AQU-646 stage 3, Sam's choice)
+ *
+ * ONE `TakesStrip` PER GROUP rather than one strip that knows about groups: a
+ * strip's whole job is a flat list of takes with per-take selection, and that
+ * is exactly what a group is. Threading grouping into it would have put track
+ * headings inside a component that has no other reason to know tracks exist.
+ *
+ * With a single group there is no heading at all, so the common case renders
+ * byte-for-byte what it always did.
+ */
+function GroupedTakes({
+  groups,
+  project,
+  cell,
+  entry,
+  sourceClip,
+  username,
+  session,
+  onLastTakeRemoved,
+}: {
+  groups: Array<{ trackId: string; name: string; takes: AudioAttachmentOut[] }>
+  project: ProjectRecord
+  cell: CellData
+  entry: CellAudioEntry | undefined
+  sourceClip: AudioAttachmentOut | null
+  username: string
+  session: FrontierSession | null
+  onLastTakeRemoved?: (cellId: string) => void
+}) {
+  const showHeadings = groups.length > 1
+  return (
+    <>
+      {groups.map((group) => {
+        // WHICH TAKE SOUNDS, per track. For the default row that is its
+        // recording pointer (falling through to the generated one, exactly as
+        // it always has); for an added track it is that track's single slot.
+        const isDefault = group.trackId === DEFAULT_TARGET_TRACK_ID
+        const selected = isDefault
+          ? (entry?.selectedAudioId ?? null)
+          : (slotSelections(entry ?? { selectedAudioId: null, selectedGeneratedVoiceAudioId: null })[
+              slotForTrack(group.trackId)
+            ] ?? null)
+        return (
+          <div key={group.trackId}>
+            {showHeadings && (
+              <div
+                data-testid={`rec-takes-group-${group.trackId}`}
+                className="sticky top-0 z-10 bg-muted/60 px-4 py-1 text-[11px] font-semibold text-muted-foreground"
+              >
+                {group.name}
+              </div>
+            )}
+            <TakesStrip
+              chromeless
+              projectId={project.id}
+              fileId={cell.fileId}
+              cellId={cell.id}
+              takes={group.takes}
+              onLastTakeRemoved={onLastTakeRemoved}
+              selectedAudioId={selected}
+              // The displace-to-source dance belongs to the default row alone —
+              // an added track has one slot and nothing to displace onto.
+              selectedGeneratedAudioId={isDefault ? (entry?.selectedGeneratedVoiceAudioId ?? null) : null}
+              sourceClip={isDefault ? sourceClip : null}
+              author={username}
+              session={session}
+            />
+          </div>
+        )
+      })}
+    </>
+  )
+}
+
+
 export function AudioRecordingModal({
-  open, project, cells, activeCellId, username,
+  open, project, cells, activeCellId, targetSlot = RECORDING_SLOT, timelineTracks, username,
   onActiveCellChange, onTakeSaved, onLastTakeRemoved, readAloudFor, filmFileId, onClose,
 }: Props) {
   const t = useT()
@@ -278,6 +401,26 @@ export function AudioRecordingModal({
   const readAloudReference = readAloud?.reference ?? null
   const readAloudCast = readAloud?.castName ?? null
   const readAloudCamera = cameraLabel(readAloud?.cameraState ?? undefined)
+  /**
+   * AQU-646 stage 3f: TTS SPEAKS WHAT THE PERFORMER READS.
+   *
+   * It used to read `activeCell.translated` — the cue's own translation, which
+   * on a file with an audio-cue sibling is empty forever, because the words
+   * live on the subtitle cells the cue is linked to. So the button sat disabled
+   * over lines that were translated, saying "translate this line first"
+   * (Sam, 2026-08-25). Read-aloud had resolved this correctly all along, ten
+   * lines above; TTS simply never asked it.
+   *
+   * `readAloudText` already falls back to the cell's own translation when there
+   * is no cue arrangement, so every other file type is untouched.
+   */
+  const ttsText = readAloudText.trim()
+  /** A cue with no subtitle behind it — about ten an episode. There is nothing
+   *  to say, and it is a different problem from "not translated yet". */
+  const ttsUnlinked = readAloud?.linkedCount === 0
+  /** …and a subtitle performed by several heard lines: whatever is generated
+   *  here says the whole line, and the other heard lines get nothing from it. */
+  const ttsSharedWith = readAloud?.sharedWith ?? 1
   // Re-fit when the column's WIDTH changes (window resize) — a narrower box
   // rewraps and can need a smaller size. Width only: the box's height is what
   // the fit itself moves, and observing that would chase its own tail.
@@ -333,19 +476,85 @@ export function AudioRecordingModal({
   // refetch (poked on save below) keeps this fresh as new takes land.
   const { byCellId } = useFileAudioAttachments(open ? project.id : null, open ? (activeCell?.fileId ?? null) : null)
   const audioEntry = activeCell ? byCellId.get(activeCell.id) : undefined
+  /**
+   * The takes on THIS track. (AQU-646 stage 3)
+   *
+   * Drives the strip, the "Take N" numbering (`nextTakeLabel` reads this list,
+   * so per-track numbering falls out with no extra code) and the duration heal.
+   * `slotsForTrack` is what keeps the default row's two slots together as one
+   * list while an added track's single slot stands alone.
+   */
+  const ownSlots = useMemo(() => new Set(slotsForTrack(trackIdForSlot(targetSlot))), [targetSlot])
   const recordingTakes = useMemo(
     () => Object.values(audioEntry?.attachments ?? {})
       // Round 8c (Sam): generated TTS is a TAKE too — one list, recorded and
       // synthesized side by side, any of them circleable.
-      .filter((a) => a.slot === "recording" || a.slot === "generatedVoice")
+      .filter((a) => ownSlots.has(a.slot))
       // The imported SOURCE clip rides the recording slot too (fileId-seeded,
       // per SUB-29 provenance) but is not a take — keep it out of the strip so
       // it can't be listed, named "Take 1", or deleted from here. The Source
       // audio track owns it.
       .filter((a) => !audioIdSeededWith(a.audioId, activeCell?.fileId ?? ""))
       .sort((a, b) => a.audioId.localeCompare(b.audioId)),
-    [audioEntry, activeCell?.fileId],
+    [audioEntry, activeCell?.fileId, ownSlots],
   )
+  /**
+   * EVERY track's takes on this line, grouped. (Sam, 2026-08-24)
+   *
+   * Distinct from `recordingTakes` above, which is this track's alone and is
+   * what "Take N", the duration heal and a new take's slot all read. This one
+   * is for LOOKING: the tab lists what exists on every track under a heading
+   * each, so a take on track 2 is findable from the detail pane even though
+   * recording into track 2 only starts from that track's own lane.
+   *
+   * A single group renders exactly as the ungrouped list always did — the
+   * heading only appears once there is more than one thing to tell apart.
+   */
+  const takeGroups = useMemo(() => {
+    const all = Object.values(audioEntry?.attachments ?? {})
+      // The imported SOURCE clip rides the recording slot but is not a take.
+      .filter((a) => !audioIdSeededWith(a.audioId, activeCell?.fileId ?? ""))
+    const byTrack = new Map<string, AudioAttachmentOut[]>()
+    for (const att of all) {
+      const trackId = trackIdForSlot(att.slot)
+      const list = byTrack.get(trackId)
+      if (list) list.push(att)
+      else byTrack.set(trackId, [att])
+    }
+    // In the file's own track order, so the headings read down the tab the way
+    // the lanes read down the timeline. Tracks this build cannot name (a
+    // collaborator's newer one) still list their takes rather than hiding them.
+    const ordered = (timelineTracks ?? []).filter((tr) => byTrack.has(tr.id))
+    const named = new Set(ordered.map((tr) => tr.id))
+    return [
+      ...ordered.map((tr) => ({ trackId: tr.id, name: tr.name, takes: byTrack.get(tr.id)! })),
+      ...[...byTrack.entries()]
+        .filter(([id]) => !named.has(id))
+        .map(([id, takes]) => ({ trackId: id, name: "", takes })),
+    ].map((g) => ({ ...g, takes: g.takes.sort((a, b) => a.audioId.localeCompare(b.audioId)) }))
+  }, [audioEntry, activeCell?.fileId, timelineTracks])
+
+  /**
+   * How many takes the strip will actually LIST — every track's, not this one's.
+   *
+   * THE GATES BELOW READ THIS AND NOT `recordingTakes`, and that distinction is
+   * the whole of a bug Sam hit (2026-08-24): both render sites asked
+   * `recordingTakes.length > 0`, which is THIS track's takes, and then rendered
+   * `takeGroups`, which is EVERY track's. Open the recorder on a track that has
+   * no takes yet and the entire strip disappeared — taking with it the takes
+   * sitting on every other track, which were listed right there a moment
+   * earlier while the default track happened to hold one. From the outside the
+   * takes had simply vanished.
+   *
+   * `recordingTakes` keeps its own jobs — "Take N" numbering, the duration
+   * heal, which slot a new take is written to — because those are all
+   * per-track. Only "is there anything to show" is about the whole list.
+   */
+  const listedTakeCount = useMemo(
+    () => takeGroups.reduce((n, g) => n + g.takes.length, 0),
+    [takeGroups],
+  )
+
   // The source clip itself — the recording slot's "no take" state. Activating
   // a TTS take hands the slot back to it so the generated audio can sound.
   const sourceClip = useMemo(
@@ -384,7 +593,11 @@ export function AudioRecordingModal({
         if (durationMs == null) return
         const healEventId = await emitCellAudioAttach({
           projectId: project.id, fileId: cell.fileId, cellId: cell.id,
-          audioId: take.audioId, url: take.url, slot: "recording",
+          // AQU-646: the take's own slot. Provably "recording" today (the find
+          // above filters on it), but this re-attach assigns slot outright, so
+          // it must not be the one place still naming it by hand once
+          // `recordingTakes` is scoped to a target track.
+          audioId: take.audioId, url: take.url, slot: take.slot,
           mimeType: take.mimeType ?? undefined,
           durationMs: Math.round(durationMs),
           label: take.label ?? undefined,
@@ -618,6 +831,72 @@ export function AudioRecordingModal({
   useEffect(() => {
     setTtsDone(false)
   }, [activeCellId])
+  /**
+   * AQU-646 stage 4c: the failure this surface has always caused and never
+   * shown (Sam, 2026-08-26).
+   *
+   * `generateCellVoice` already writes every failure into the shared per-cell
+   * status store — the same store, under the same key, that the table row's
+   * voice button reads. This modal simply never read it back: it checked the
+   * helper's boolean, and on `false` let the button fall silently to idle. So
+   * a generation that failed looked exactly like one that had never been
+   * pressed.
+   *
+   * THE STORE, NOT THE BOOLEAN, and that distinction is the whole correctness
+   * of this. `false` also means "you declined the model download", which sets
+   * an IDLE status on purpose — reddening the button for a choice the user
+   * just made would be a worse lie than saying nothing.
+   *
+   * ONE KEY FOR BOTH SURFACES. `activeCellId` is `primaryAudioHome(...)` and
+   * the row button is handed `resolveAudioHomes(...)[0]` — the same cell, so
+   * on a cue file a failure paints the recorder and the table row together
+   * rather than each keeping its own half of the story.
+   *
+   * A failure left over from before this modal opened still shows, and that is
+   * deliberate: the store is only ever overwritten by the next attempt, so an
+   * error sitting in it means the last thing that happened to this line's
+   * voice was a failure and nothing has fixed it since. Pressing the button
+   * clears it — the retry writes `loading` first.
+   */
+  const ttsStatus = useTtsStatus(activeCellId ? ttsStatusKey(activeCellId) : undefined)
+  const ttsFailure = ttsStatus.kind === "error" ? categorizeAiError(ttsStatus.message) : null
+  /**
+   * The heading and the advice, read as one sentence.
+   *
+   * SOME BODIES ALREADY OPEN WITH THEIR OWN HEADING — the daily-quota one is
+   * literally "Daily AI limit reached — resets at midnight UTC…" under the
+   * title "Daily AI limit reached" — so joining them unconditionally produces
+   * "Daily AI limit reached — Daily AI limit reached — resets at midnight".
+   * An equality guard does not catch that; the body merely STARTS with the
+   * title. Where it does, the body is already the whole sentence.
+   */
+  const ttsFailureLine = !ttsFailure
+    ? null
+    : ttsFailure.body.toLowerCase().startsWith(ttsFailure.title.toLowerCase())
+      ? ttsFailure.body
+      : `${ttsFailure.title} — ${ttsFailure.body}`
+  // Another surface generating for THIS cell counts as busy: two synths for one
+  // cell would fight over one status slot, and the row button takes the same
+  // position. Our own press is `ttsBusy`, which leads so that a retry reads as
+  // in-flight even while the previous failure is still in the store.
+  const ttsWorking = ttsBusy || ttsStatus.kind === "loading" || ttsStatus.kind === "synthesizing"
+  // Only the local engines report bytes — OmniVoice (the default) sends no
+  // progress at all and Gemini sends one event — so this appears exactly where
+  // the wait is long enough to look like a hang.
+  const ttsProgressPct =
+    ttsStatus.kind === "loading" && ttsStatus.total > 0
+      ? Math.round((ttsStatus.loaded / ttsStatus.total) * 100)
+      : null
+  /**
+   * Whether the button WEARS the failure — one flag, read by the glyph, the
+   * tone, the label and the line beneath, so those four can never disagree.
+   *
+   * They did: with each reading `ttsFailure` for itself, pressing retry over a
+   * stale error span a spinner underneath the word "failed", announcing the
+   * outcome of an attempt that was still running. An in-flight run always
+   * outranks the error it is trying to replace.
+   */
+  const ttsShowFailure = ttsFailure != null && !ttsWorking
   const generateTts = useCallback(async () => {
     if (!online) return // the disabled button + tooltip carry the message
     if (!activeCell || !session || ttsBusy) return
@@ -628,13 +907,31 @@ export function AudioRecordingModal({
       const ok = await generateCellVoice({
         project, cell: activeCell, session, username,
         label: nextTakeLabel(recordingTakes),
+        // The WORDS come from the subtitle this line performs, and the VOICE
+        // from that subtitle's cast assignment — neither of which the cue
+        // carries itself. Both undefined off a cue file, which is the cell's
+        // own text and its own assignment, exactly as before.
+        text: ttsText,
+        voiceCellId: readAloud?.voiceCellId ?? undefined,
+        // The voice lands on the track the recorder is pointed at, not always
+        // on the default row's generated-voice slot.
+        slot: isDefaultTrackSlot(targetSlot) ? undefined : targetSlot,
       })
       if (ok) {
         setTtsDone(true)
         // You asked for this voice — make it the one that sounds. A recorded
         // take holding the recording slot would shadow it, so hand the slot
         // back to the source clip (the "no take" state).
-        const recSel = audioEntry?.selectedAudioId
+        //
+        // THE DEFAULT TRACK ONLY, and this is why added tracks were given ONE
+        // slot rather than a pair. The juggle exists because the default row's
+        // resolution prefers whatever holds `"recording"`, and it works only
+        // because there is a shared source clip to park that slot on. An added
+        // track has no such clip — and needs no juggle, because its recorded
+        // and generated takes are siblings in one slot, so picking either
+        // deselects the other through the per-(cell, slot) rule the server
+        // already enforces.
+        const recSel = isDefaultTrackSlot(targetSlot) ? audioEntry?.selectedAudioId : null
         if (recSel && audioIdSeededWith(recSel, activeCell.id) && sourceClip) {
           const displaceP = emitCellAudioSelect({
             projectId: project.id, fileId: activeCell.fileId, cellId: activeCell.id,
@@ -648,7 +945,7 @@ export function AudioRecordingModal({
     } finally {
       setTtsBusy(false)
     }
-  }, [online, activeCell, session, ttsBusy, project, username, recordingTakes, audioEntry?.selectedAudioId, sourceClip])
+  }, [online, activeCell, session, ttsBusy, project, username, recordingTakes, audioEntry?.selectedAudioId, sourceClip, targetSlot])
 
   // Settle on the next line after a brief success indication. Shared by the
   // recorded and the uploaded path so keeping a take means exactly the same
@@ -769,7 +1066,7 @@ export function AudioRecordingModal({
           cellId: activeCell.id,
           audioId: `${result.audioId}.${result.ext}`,
           url: result.url,
-          slot: "recording",
+          slot: targetSlot,
           mimeType: blob.type || undefined,
           durationMs: takeDurationMs,
           ...takeTrimWindow,
@@ -796,7 +1093,7 @@ export function AudioRecordingModal({
       injectOptimisticAudioAttachment(activeCell.fileId, activeCell.id, {
         audioId: `${result.audioId}.${result.ext}`,
         url: result.url,
-        slot: "recording",
+        slot: targetSlot,
         mimeType: blob.type || null,
         voiceId: null,
         referenceAudioId: null,
@@ -867,6 +1164,14 @@ export function AudioRecordingModal({
         session,
         projectId: project.id,
         language: project.targetLanguage,
+        // AQU-646: state the slot rather than letting transcription infer it
+        // from the stub above. The stub carries `selectedAudioId` and no slot,
+        // so the inference would read every take as "recording" — which was
+        // right until a take could belong to a second target track, and is a
+        // DATA-MOVER now: the re-attach assigns slot outright and its
+        // sibling-deselect would drop that track's real take. This is the
+        // caller that knows, so it says.
+        slot: targetSlot,
       })
       scheduleAutoAdvance()
     } catch (e) {
@@ -916,6 +1221,9 @@ export function AudioRecordingModal({
         file,
         username,
         label,
+        // Sam, 2026-08-24: uploading is the other way audio gets onto an added
+        // track, so it follows the recorder's target the same way a take does.
+        slot: targetSlot,
       })
       onTakeSaved?.(activeCell.id)
       returnToReady(`${label} added`)
@@ -924,7 +1232,14 @@ export function AudioRecordingModal({
       setErrorMessage(e instanceof Error ? e.message : String(e))
       setPhase("error")
     }
-  }, [activeCell, session, project.id, username, recordingTakes, onTakeSaved, scheduleAutoAdvance, returnToReady])
+    // `targetSlot` is read above, so it is listed — the mic-save callback next
+    // door always has. It is NOT load-bearing today and the omission was never
+    // a live bug: `recordingTakes` is memoised on `ownSlots`, which is itself
+    // memoised on `targetSlot`, so the slot already reached this list
+    // transitively and the callback was rebuilt whenever it changed. Named
+    // explicitly anyway, because that chain is two hops of coincidence away
+    // from someone decoupling the takes list from the track.
+  }, [activeCell, session, project.id, username, recordingTakes, targetSlot, onTakeSaved, scheduleAutoAdvance, returnToReady])
 
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
   const onUploadInputChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
@@ -946,12 +1261,52 @@ export function AudioRecordingModal({
     [],
   )
 
+  /**
+   * AQU-646: leaving with a take you have not kept (Sam, 2026-08-26).
+   *
+   * A recorded take sits in `preview` until Save attaches it — nothing is
+   * written until then, so every way out of this dialog silently threw it away:
+   * the X, clicking outside, and (most quietly of all) Escape, which called
+   * RETAKE and scrapped the take without even closing, so you stayed on the
+   * screen with no sign anything had gone.
+   *
+   * All three now come through here. `preview` is the only phase worth asking
+   * about: `uploading` is already being kept, and the earlier phases have
+   * nothing recorded yet.
+   */
+  /**
+   * What the user asked to do and has not been allowed to yet, because a take
+   * is sitting unsaved. Null when nothing is pending.
+   *
+   * 2026-08-27: this was a bare `confirmCloseOpen` boolean, because closing was
+   * the only exit that asked. But the ‹ › buttons — and Alt+Arrow, which shares
+   * their handler — are an exit too: `canNav` includes `preview`, and the
+   * cell-change effect calls `resetToIdle()`, which drops the pending blob. So
+   * the one control an operator presses over and over while working through a
+   * file was the one that threw a take away without asking. Holding the INTENT
+   * rather than a flag is what lets the same confirmation serve both, which is
+   * Sam's ruling: ask, exactly like the X does.
+   */
+  const [pendingExit, setPendingExit] = useState<PendingExit | null>(null)
+  const hasUnsavedTake = phase === "preview"
+  const requestClose = useCallback(() => {
+    if (hasUnsavedTake) { setPendingExit({ kind: "close" }); return }
+    onClose()
+  }, [hasUnsavedTake, onClose])
+  // Never leave the question hanging over a line it is no longer about. This
+  // also clears it after a discard-and-go, which changes the active cell.
+  useEffect(() => { setPendingExit(null) }, [activeCellId])
+
+  // Deliberately still true in `preview`: the arrows have to stay pressable in
+  // order to ASK. Disabling them there would answer the question by refusing to
+  // pose it, and strand someone who wants to move on.
   const canNav = phase === "idle" || phase === "preview" || phase === "error"
   const gotoIndex = useCallback((idx: number) => {
     if (!canNav) return
     if (idx < 0 || idx >= cells.length) return
+    if (hasUnsavedTake) { setPendingExit({ kind: "goto", index: idx }); return }
     onActiveCellChange(cells[idx].id)
-  }, [canNav, cells, onActiveCellChange])
+  }, [canNav, cells, onActiveCellChange, hasUnsavedTake])
 
   // While the modal is open, claim the audio keyboard shortcuts so the global
   // Space handler doesn't toggle whatever clip the user was just playing.
@@ -978,8 +1333,10 @@ export function AudioRecordingModal({
         e.preventDefault()
         if (phase === "recording") { stopRecording(); return }
         if (phase === "counting") { countdown.cancel(); setLeadIn(null); setPhase("idle"); return }
-        if (phase === "preview") { retake(); return }
-        onClose()
+        // Escape used to RETAKE here, which threw the take away and left the
+        // modal open — the quietest way in the app to lose a recording. It now
+        // asks, like every other way out. Retake is still one button away.
+        requestClose()
         return
       }
       // SUB-52: modifier check matches the other Space handlers — Cmd/Ctrl/
@@ -1010,7 +1367,7 @@ export function AudioRecordingModal({
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [open, phase, startFlow, stopRecording, countdown, retake, save, onClose, gotoIndex, activeIndex])
+  }, [open, phase, startFlow, stopRecording, countdown, retake, save, requestClose, gotoIndex, activeIndex])
 
   if (!open || !activeCell) return null
 
@@ -1023,7 +1380,8 @@ export function AudioRecordingModal({
   const takeInHand = phase === "counting" || phase === "recording" || phase === "preview" || phase === "uploading"
 
   return (
-    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose() }}>
+    <>
+    <Dialog open={open} onOpenChange={(next) => { if (!next) requestClose() }}>
       {/* AQU-230: max-h constrains the dialog to the viewport (with 4vh margin)
           so it never clips at 100% zoom on 1280×800 or smaller viewports.
           The dialog is split into a fixed header, a scrollable stage+takes
@@ -1132,7 +1490,7 @@ export function AudioRecordingModal({
                   type="button"
                   variant="ghost"
                   size="icon-sm"
-                  onClick={onClose}
+                  onClick={requestClose}
                   aria-label={t("common.close")}
                   className="shrink-0 text-muted-foreground/60"
                 >
@@ -1308,6 +1666,39 @@ export function AudioRecordingModal({
               >
                 <span className="font-medium">{t("audio.recordingModal.cueReferenceLabel")} </span>
                 {readAloudReference}
+              </p>
+            )}
+            {/* AQU-646: what a GENERATED voice just did here.
+                
+                Right beside the transcript above, which appears on exactly this
+                condition and for the neighbouring reason — that one tells the
+                performer which part of the line is theirs; this one says a
+                machine voice makes no such distinction.
+                
+                AFTER THE PRESS, NOT BEFORE (Sam, 2026-08-27), which reverses
+                the original call that it should warn first. The reason the
+                first version was wrong: it fires on "this subtitle is shared",
+                NOT on "you are about to generate" — so a performer doing mic
+                takes got a permanent paragraph about text-to-speech, on roughly
+                one line in twelve, for a button they may never press.
+                
+                Moving it costs less than it looks: generating is cheap and
+                undoable, so this never guarded against loss. It corrects a
+                mental model, and afterwards it does that better — before, it is
+                an abstract caveat; after, it is a to-do that names exactly what
+                is still silent.
+                
+                `ttsDone` is precisely the right signal and already existed: set
+                only when a generation SUCCEEDED (a failure leaves its own red
+                message and must not be told the others are silent, because
+                nothing was voiced), and cleared when the active line changes,
+                which is the "until you leave the line" rule. */}
+            {ttsSharedWith > 1 && ttsDone && (
+              <p
+                data-testid="rec-tts-shared-notice"
+                className="mt-1.5 text-[11px] leading-snug text-amber-700 dark:text-amber-400"
+              >
+                {t("audio.recordingModal.ttsSharedNotice", { count: ttsSharedWith })}
               </p>
             )}
           </div>
@@ -1540,16 +1931,29 @@ export function AudioRecordingModal({
                 place. */}
             {/* i18n-exempt "idle"/"error" are RecorderPhase union tags, not copy */}
             {(displayPhase === "idle" || displayPhase === "error") && (
+              // AQU-646 stage 4c: the row and the reason beneath it are one
+              // group, so the parent's `space-y-3` separates the GROUP from the
+              // anchor above while the explanation stays tucked under the
+              // button it belongs to.
+              <div className="space-y-1.5">
               <div className="flex gap-2">
                 <AppTooltip
                   content={
                     !online
                       ? OFFLINE_MESSAGE
-                      : !activeCell?.translated?.trim()
-                        ? t("audio.recordingModal.ttsNeedsTranslation")
-                        : ttsDone
-                          ? t("audio.recordingModal.ttsDoneTooltip")
-                          : t("audio.recordingModal.ttsTooltip")
+                      : ttsUnlinked
+                        ? t("audio.recordingModal.ttsNoLinkedLine")
+                        : !ttsText
+                          ? t("audio.recordingModal.ttsNeedsTranslation")
+                          : ttsShowFailure && ttsFailure
+                            ? // The verbatim text, which the line below
+                              // deliberately does not show: the sentence there
+                              // is for the user, this is for whoever they end
+                              // up sending it to.
+                              t("audio.recordingModal.ttsFailedTooltip", { error: ttsFailure.raw })
+                            : ttsDone
+                              ? t("audio.recordingModal.ttsDoneTooltip")
+                              : t("audio.recordingModal.ttsTooltip")
                   }
                 >
                   <span className="inline-flex min-w-0 flex-1">
@@ -1557,16 +1961,43 @@ export function AudioRecordingModal({
                       variant="outline"
                       size="sm"
                       data-testid="rec-generate-tts"
-                      disabled={!online || !activeCell?.translated?.trim() || ttsBusy}
+                      // A FAILURE NEVER DISABLES THIS. Pressing it again IS the
+                      // retry, and the retry is what clears the state — the run
+                      // writes `loading` before it does anything else.
+                      disabled={!online || !ttsText || ttsWorking}
                       onClick={() => void generateTts()}
-                      className="h-9 w-full bg-muted/30 text-xs font-normal text-muted-foreground"
+                      className={cn(
+                        "h-9 w-full text-xs font-normal",
+                        // No `outline`+`destructive` variant exists, so the tone
+                        // is overridden here; `cn` is tailwind-merge, so these
+                        // win over the resting pair rather than fighting it.
+                        ttsShowFailure
+                          ? "border-destructive/40 bg-destructive/10 text-destructive hover:bg-destructive/20"
+                          : "bg-muted/30 text-muted-foreground",
+                      )}
                     >
-                      {ttsBusy ? (
+                      {ttsWorking ? (
                         <Spinner className="mr-1.5 size-3.5" />
+                      ) : ttsShowFailure ? (
+                        <AlertCircle className="mr-1.5 h-3.5 w-3.5" />
                       ) : (
                         <Sparkles className="mr-1.5 h-3.5 w-3.5" />
                       )}
-                      <span className="truncate">{t("audio.recordingModal.generateButton")}</span>
+                      {/* TWO FIXED WORDS ON FAILURE (Sam, 2026-08-26), never the
+                          reason: this control is about half the panel wide, and a
+                          reason cropped to "Gemini API key requ…" is worse than
+                          one said in full on the line below. */}
+                      <span className="truncate">
+                        {ttsWorking
+                          ? ttsProgressPct != null
+                            ? t("audio.recordingModal.ttsDownloadingPct", { percent: ttsProgressPct })
+                            : ttsStatus.kind === "synthesizing"
+                              ? t("common.synthesizing")
+                              : t("audio.recordingModal.generateButton")
+                          : ttsShowFailure
+                            ? t("audio.recordingModal.ttsFailedButton")
+                            : t("audio.recordingModal.generateButton")}
+                      </span>
                     </Button>
                   </span>
                 </AppTooltip>
@@ -1599,6 +2030,27 @@ export function AudioRecordingModal({
                   </span>
                 </AppTooltip>
               </div>
+              {/* THE REASON, WRITTEN OUT (Sam, 2026-08-26). Full panel width,
+                  wrapping, no hover required — the button says that it failed
+                  and this says what to do about it.
+
+                  `title` is the categorizer's translated heading and `body` its
+                  plain-language advice; the `body !== title` guard is for the
+                  branches that have no better sentence than the heading itself,
+                  where repeating it would read as a stutter. The verbatim
+                  server text is NOT here — it is in the button's tooltip, since
+                  `voice/tts failed (503): TTS not configured` is for support,
+                  not for the person trying to record a line.
+
+                  Same `text-xs font-medium text-destructive` as the recorder's
+                  own `rec-error-message` and `rec-save-error` a few elements
+                  up, so the panel has one voice for "this went wrong". */}
+              {ttsShowFailure && ttsFailureLine && (
+                <p data-testid="rec-tts-error" className="text-xs font-medium text-destructive">
+                  {ttsFailureLine}
+                </p>
+              )}
+              </div>
             )}
           </div>
 
@@ -1613,20 +2065,17 @@ export function AudioRecordingModal({
             {/* The raised list, expanded only. `bottom-full` puts it directly
                 above this strip; capped so it can never cover the line being
                 read, and scrolling inside that cap. */}
-            {showFilm && takesOpen && recordingTakes.length > 0 && activeCell && (
+            {showFilm && takesOpen && listedTakeCount > 0 && activeCell && (
               <div className="absolute inset-x-0 bottom-full z-20 max-h-[260px] overflow-y-auto border-t bg-popover shadow-[0_-10px_28px_rgba(0,0,0,0.2)]">
-                <TakesStrip
-                  chromeless
-                  projectId={project.id}
-                  fileId={activeCell.fileId}
-                  cellId={activeCell.id}
-                  takes={recordingTakes}
-                  onLastTakeRemoved={onLastTakeRemoved}
-                  selectedAudioId={audioEntry?.selectedAudioId ?? null}
-                  selectedGeneratedAudioId={audioEntry?.selectedGeneratedVoiceAudioId ?? null}
+                <GroupedTakes
+                  groups={takeGroups}
+                  project={project}
+                  cell={activeCell}
+                  entry={audioEntry}
                   sourceClip={sourceClip}
-                  author={username}
+                  username={username}
                   session={session ?? null}
+                  onLastTakeRemoved={onLastTakeRemoved}
                 />
               </div>
             )}
@@ -1638,16 +2087,16 @@ export function AudioRecordingModal({
                   size="sm"
                   data-testid="rec-takes-toggle"
                   aria-expanded={takesOpen}
-                  disabled={recordingTakes.length === 0}
+                  disabled={listedTakeCount === 0}
                   onClick={() => setTakesOpen((v) => !v)}
                   className="h-7 shrink-0 gap-1.5 px-2 text-xs text-muted-foreground"
                 >
-                  {t("audio.recordingModal.takesLabel")} <span className="font-mono tabular-nums">{recordingTakes.length}</span>
+                  {t("audio.recordingModal.takesLabel")} <span className="font-mono tabular-nums">{listedTakeCount}</span>
                   <ChevronUp className={cn("h-3.5 w-3.5", takesOpen && "rotate-180")} />
                 </Button>
               ) : (
                 <span data-testid="rec-takes-count" className="shrink-0 px-1 text-xs font-medium">
-                  {t("audio.recordingModal.takesLabel")} <span className="font-mono tabular-nums text-muted-foreground">{recordingTakes.length}</span>
+                  {t("audio.recordingModal.takesLabel")} <span className="font-mono tabular-nums text-muted-foreground">{listedTakeCount}</span>
                 </span>
               )}
 
@@ -1755,19 +2204,16 @@ export function AudioRecordingModal({
               came and went between phases. */}
           {!showFilm && (
             <div className="min-h-0 flex-1 overflow-y-auto bg-muted/20">
-              {recordingTakes.length > 0 && activeCell ? (
-                <TakesStrip
-                  chromeless
-                  projectId={project.id}
-                  fileId={activeCell.fileId}
-                  cellId={activeCell.id}
-                  takes={recordingTakes}
-                  onLastTakeRemoved={onLastTakeRemoved}
-                  selectedAudioId={audioEntry?.selectedAudioId ?? null}
-                  selectedGeneratedAudioId={audioEntry?.selectedGeneratedVoiceAudioId ?? null}
+              {listedTakeCount > 0 && activeCell ? (
+                <GroupedTakes
+                  groups={takeGroups}
+                  project={project}
+                  cell={activeCell}
+                  entry={audioEntry}
                   sourceClip={sourceClip}
-                  author={username}
+                  username={username}
                   session={session ?? null}
+                  onLastTakeRemoved={onLastTakeRemoved}
                 />
               ) : (
                 <p className="px-4 py-6 text-center text-xs text-muted-foreground/60">
@@ -1788,6 +2234,60 @@ export function AudioRecordingModal({
         `}</style>
       </DialogContent>
     </Dialog>
+    {/* AQU-646: the guard on leaving with a take you have not kept.
+        LAYERED, and that is not the compromise it looks like: this component
+        already stacks a dialog (the timing-mode heads-up) and its keyboard
+        handler already stands down for one, so the arrangement is proven here
+        rather than new. It also works identically whichever way you tried to
+        leave — the X, Escape, or clicking outside — where a bubble hung off the
+        close button would have no anchor for the other two.
+
+        Deliberately NOT marked `data-recorder-dialog`: that attribute is how
+        the recorder's own Escape handler recognises its own dialog, and leaving
+        it off is what lets Escape dismiss THIS one without also closing the
+        recorder underneath it. */}
+    <Dialog open={pendingExit !== null} onOpenChange={(next) => { if (!next) setPendingExit(null) }}>
+      <DialogContent className="sm:max-w-[420px]" data-testid="rec-confirm-close">
+        <DialogHeader>
+          <DialogTitle>{t("audio.recordingModal.unsavedTakeTitle")}</DialogTitle>
+          <DialogDescription>{t("audio.recordingModal.unsavedTakeBody")}</DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button
+            variant="ghost"
+            data-testid="rec-confirm-discard"
+            onClick={() => {
+              const exit = pendingExit
+              setPendingExit(null)
+              // Whichever way out was asked for. The index was in range when it
+              // was queued, but the list can move underneath a dialog, so it is
+              // read back rather than trusted.
+              const next = exit?.kind === "goto" ? cells[exit.index] : null
+              if (next) onActiveCellChange(next.id)
+              else if (exit?.kind === "close") onClose()
+            }}
+          >
+            {t("audio.recordingModal.discardTake")}
+          </Button>
+          <Button
+            data-testid="rec-confirm-save"
+            disabled={!online}
+            onClick={() => {
+              setPendingExit(null)
+              // The recorder's own post-save behaviour takes it from here —
+              // settling the line, and advancing or closing as the auto-advance
+              // preference says. NOT forced closed on top of that: a save that
+              // fails leaves the take previewable with its error, and closing
+              // over it would throw away the very thing this asked to keep.
+              void save()
+            }}
+          >
+            {t("audio.recordingModal.saveTake")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   )
 }
 

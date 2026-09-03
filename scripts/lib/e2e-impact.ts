@@ -11,6 +11,7 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
     sentinels: [
       "e2e/specs/auth/login-account-setup-status.smoke.spec.ts",
       "e2e/specs/auth/session-expired-banner.smoke.spec.ts",
+      "e2e/specs/orgs/account-switcher.smoke.spec.ts",
     ],
   },
   {

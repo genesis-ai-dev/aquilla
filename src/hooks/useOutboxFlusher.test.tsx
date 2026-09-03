@@ -20,7 +20,13 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { renderHook, act } from "@testing-library/react"
-import { useOutboxFlusher, drainCycle } from "./useOutboxFlusher"
+import {
+  useOutboxFlusher,
+  drainCycle,
+  drainFlushTargets,
+  type OutboxFlushTarget,
+  type TargetRetryState,
+} from "./useOutboxFlusher"
 
 // ---------------------------------------------------------------------------
 // Mock flushOutboxBatch and outboxPendingCount
@@ -557,6 +563,90 @@ describe("useOutboxFlusher", () => {
       expect(flush).toHaveBeenCalledTimes(200)
       expect(result.iterations).toBe(200)
       expect(result.madeProgress).toBe(true)
+    })
+  })
+
+  describe("drainFlushTargets (all-account scheduler)", () => {
+    const target = (ownerKey: string, authEpoch = `${ownerKey}-jwt`): OutboxFlushTarget => ({
+      ownerKey,
+      authEpoch,
+      getTokenForFile: TOKEN_FN,
+      isSessionCurrent: async () => true,
+      shouldSurface: () => ownerKey === "bob",
+    })
+
+    it("continues draining a healthy account when another account's JWT is rejected", async () => {
+      const states = new Map<string, TargetRetryState>()
+      const calls: string[] = []
+      let bobCalls = 0
+      const flush = vi.fn(async (next: OutboxFlushTarget) => {
+        calls.push(next.ownerKey)
+        if (next.ownerKey === "alice") {
+          return {
+            posted: 0, accepted: 0, networkError: false, authError: true,
+            authStatus: 401, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0,
+          }
+        }
+        bobCalls += 1
+        return bobCalls === 1
+          ? { posted: 1, accepted: 1, networkError: false, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
+          : { posted: 0, accepted: 0, networkError: false, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
+      })
+
+      const result = await drainFlushTargets(
+        [target("alice"), target("bob")],
+        states,
+        flush,
+        () => 0,
+      )
+
+      expect(calls).toEqual(["alice", "bob", "bob"])
+      expect(result.madeProgress).toBe(true)
+      expect(result.sawAuthError).toBe(false) // inactive failures do not degrade active UI
+      expect(states.get("alice")?.nextAttemptAt).toBe(10_000)
+    })
+
+    it("backs off only the rejected owner and retries immediately when its exact JWT epoch changes", async () => {
+      const states = new Map<string, TargetRetryState>()
+      let now = 0
+      const flush = vi.fn(async (next: OutboxFlushTarget) => next.ownerKey === "alice"
+        ? {
+            posted: 0, accepted: 0, networkError: false, authError: true,
+            authStatus: 401, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0,
+          }
+        : { posted: 0, accepted: 0, networkError: false, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 })
+
+      await drainFlushTargets([target("alice", "jwt-1"), target("bob")], states, flush, () => now)
+      flush.mockClear()
+      await drainFlushTargets([target("alice", "jwt-1"), target("bob")], states, flush, () => now)
+      expect(flush.mock.calls.map(([next]) => next.ownerKey)).toEqual(["bob"])
+
+      flush.mockClear()
+      await drainFlushTargets([target("alice", "jwt-2"), target("bob")], states, flush, () => now)
+      expect(flush.mock.calls.map(([next]) => next.ownerKey)).toEqual(["alice", "bob"])
+
+      flush.mockClear()
+      now = 10_000
+      await drainFlushTargets([target("alice", "jwt-2"), target("bob")], states, flush, () => now)
+      expect(flush.mock.calls.map(([next]) => next.ownerKey)).toEqual(["alice", "bob"])
+    })
+
+    it("round-robins productive queues instead of letting the oldest account monopolize the lock", async () => {
+      const states = new Map<string, TargetRetryState>()
+      const remaining = new Map([["alice", 2], ["bob", 2]])
+      const order: string[] = []
+      const flush = vi.fn(async (next: OutboxFlushTarget) => {
+        order.push(next.ownerKey)
+        const count = remaining.get(next.ownerKey) ?? 0
+        remaining.set(next.ownerKey, Math.max(0, count - 1))
+        return count > 0
+          ? { posted: 1, accepted: 1, networkError: false, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
+          : { posted: 0, accepted: 0, networkError: false, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
+      })
+
+      await drainFlushTargets([target("alice"), target("bob")], states, flush)
+
+      expect(order).toEqual(["alice", "bob", "alice", "bob", "alice", "bob"])
     })
   })
 

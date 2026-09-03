@@ -49,19 +49,19 @@ function renderPanel(over: Partial<ComponentProps<typeof BacktranslationPanel>> 
 }
 
 describe("BacktranslationPanel", () => {
-  it("offers Read it back with AI when there is a translation and no reading", () => {
+  it("offers Generate back-translation when there is a translation and no reading", () => {
     renderPanel()
-    expect(screen.getByRole("button", { name: /read it back with AI/i })).toBeTruthy()
+    expect(screen.getByRole("button", { name: /generate back-translation/i })).toBeTruthy()
     expect(screen.getByRole("button", { name: /statistical gloss/i })).toBeTruthy()
   })
 
-  it("shows a live project-pairs gloss before any AI reading exists", () => {
+  it("shows a live project-pairs gloss before any AI back-translation exists", () => {
     renderPanel({ statisticalGloss: "house of him" })
     expect(screen.getByText(/updates as you translate/i)).toBeTruthy()
     expect(screen.getByText("house of him")).toBeTruthy()
   })
 
-  it("labels an AI reading and reassures when it still matches", () => {
+  it("labels an AI back-translation and reassures when it still matches", () => {
     renderPanel({
       cell: cell({
         backtranslation: "the house of him",
@@ -69,12 +69,12 @@ describe("BacktranslationPanel", () => {
         backtranslationPolished: true,
       }),
     })
-    expect(screen.getByText("AI reading")).toBeTruthy()
+    expect(screen.getByText("AI back-translation")).toBeTruthy()
     expect(screen.getByText("Matches this translation")).toBeTruthy()
     expect(screen.getByText("the house of him")).toBeTruthy()
   })
 
-  it("warns when the reading describes an earlier version", () => {
+  it("warns when the back-translation describes an earlier version", () => {
     renderPanel({
       cell: cell({
         backtranslation: "the house of him",
@@ -98,8 +98,8 @@ describe("BacktranslationPanel", () => {
       statisticalGloss: "his house",
       onSaveBacktranslation: onSave,
     })
-    expect(screen.getByText(/pairs read it differently/i)).toBeTruthy()
-    fireEvent.click(screen.getByRole("button", { name: /use this reading/i }))
+    expect(screen.getByText(/statistical gloss differs/i)).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: /use this gloss/i }))
     expect(onSave).toHaveBeenCalledWith(
       expect.objectContaining({ id: "c1", translated: "maison de lui" }),
       "his house",
@@ -137,6 +137,6 @@ describe("BacktranslationPanel", () => {
       }),
     })
     expect(screen.getByLabelText("Contributor+ required to edit back-translations")).toBeTruthy()
-    expect(screen.queryByRole("button", { name: /read it back/i })).toBeNull()
+    expect(screen.queryByRole("button", { name: /generate back-translation/i })).toBeNull()
   })
 })

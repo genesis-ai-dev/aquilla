@@ -423,7 +423,8 @@ export interface CellAudioAttachInput {
   cellId: string
   audioId: string
   url: string
-  slot: "recording" | "generatedVoice"
+  /** Open string (AQU-646): a track id addresses an extra target track. */
+  slot: string
   mimeType?: string
   voiceId?: string
   referenceAudioId?: string
@@ -541,6 +542,49 @@ export async function emitCellAudioTrim(input: CellAudioTrimInput): Promise<stri
   return eventId
 }
 
+export interface CellAudioPlaceInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  audioId: string
+  /** Offset in ms from the LINE's own start. Negative is legal (a take that
+   *  leads its line), `0` is a real placement, and `null` clears it back to the
+   *  line's start. */
+  targetOffsetMs: number | null
+  author: string
+  clientTs?: number
+}
+
+/**
+ * Emit a `cell.audio.place` — where ONE take sits against the line it performs,
+ * and nothing else. (AQU-646 stage 3)
+ *
+ * The sibling of `emitCellAudioTrim` above, and it exists for the same reason
+ * that one does: a placement had to become expressible on the TAKE rather than
+ * on the cell. It used to ride `cell.lane.retime`, which writes the anchor into
+ * the CELL's metadata — exact while a line could hold one dub, and wrong the
+ * moment extra target tracks let two takes share a line, because dragging one
+ * chip would move the other.
+ *
+ * ITS OWN KIND, never a field on attach: absence has to keep meaning exactly
+ * one thing ("never placed by hand"), and on an attach it would also mean "this
+ * attach had no opinion" — the ambiguity that cost every take its trim window
+ * once already.
+ */
+export async function emitCellAudioPlace(input: CellAudioPlaceInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cell.audio.place",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: { audioId: input.audioId, targetOffsetMs: input.targetOffsetMs },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
 export interface CellLinkSetInput {
   projectId: string
   /** The SUBTITLE side — rides the envelope, so per-file auth works. */
@@ -625,7 +669,8 @@ export interface CellAudioSelectInput {
   fileId: string
   cellId: string
   audioId: string
-  slot: "recording" | "generatedVoice"
+  /** Open string (AQU-646): a track id addresses an extra target track. */
+  slot: string
   author: string
   clientTs?: number
 }
@@ -790,6 +835,12 @@ export interface FileTrackSetInput {
     name?: string | null
     order?: number | null
     groupId?: string | null
+    /** A palette id from track-colors.ts; null clears back to the default
+     *  pair. Never colour values — see PersistedTrackPatch.color. */
+    color?: string | null
+    /** Which track's cells an added track's chips line up with. Set once, at
+     *  creation; the server refuses it on a reserved (derived) track id. */
+    sourceTrackId?: string | null
   } | null
   author: string
   clientTs?: number

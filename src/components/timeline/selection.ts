@@ -11,6 +11,16 @@
 // Kept as pure functions (no React) so the modifier rules are unit-testable
 // without a timeline: TimelineEditor holds the two pieces of state and defers
 // every decision about them to `applySelect`.
+//
+// AQU-646 stage 2b: TRACK selection reuses everything below unchanged. Nothing
+// here looks at a cell — `applySelect` and `selectedIdsInOrder` are folds over
+// "ids in an order", and a track list is one. The parameter is still named
+// `cellId` because renaming it would churn the chip call sites for no gain;
+// read it as "the id that was clicked". Only the MODIFIER read differs, which
+// is why `readTrackSelectMods` sits beside `readSelectMods` rather than
+// replacing it.
+
+import { isApplePlatform } from "@/lib/platform"
 
 /** Which modifier the user held while clicking a chip. */
 export interface SelectMods {
@@ -41,6 +51,28 @@ export function readSelectMods(
   // ⌘+Shift-click on a range would otherwise be ambiguous.
   if (e.shiftKey) return { range: true }
   if (e.metaKey || e.ctrlKey) return { toggle: true }
+  return undefined
+}
+
+/**
+ * The same read, for a TRACK row rather than a chip. (AQU-646 stage 2b)
+ *
+ * IDENTICAL EXCEPT THAT CTRL DOES NOT TOGGLE ON A MAC, and that one difference
+ * is forced rather than chosen: macOS synthesises `contextmenu` from
+ * ctrl + primary click, and that is how the track menu opens. If ctrl also
+ * toggled the selection, one gesture would open a menu AND change the selection
+ * underneath it. ⌘ is the additive modifier there — Finder's convention, and
+ * Logic's.
+ *
+ * On every other platform ctrl keeps working, because there is no collision to
+ * avoid.
+ */
+export function readTrackSelectMods(
+  e: Pick<MouseEvent, "metaKey" | "ctrlKey" | "shiftKey">,
+): SelectMods | undefined {
+  if (e.shiftKey) return { range: true }
+  if (e.metaKey) return { toggle: true }
+  if (e.ctrlKey && !isApplePlatform()) return { toggle: true }
   return undefined
 }
 

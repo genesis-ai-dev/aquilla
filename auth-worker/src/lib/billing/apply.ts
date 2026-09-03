@@ -2,7 +2,7 @@
 // Idempotent on stripe_event_id. Period rollover zeroes addon_packs.
 
 import type { BillingPlan, BillingStatus } from "./plans"
-import { emptyBillingRow, readOrgBilling, type OrgBillingRow } from "./words"
+import { readOrgBilling, type OrgBillingRow } from "./words"
 
 function isMissingTableError(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err)
@@ -240,5 +240,3 @@ export function orgIdFromMetadata(meta: unknown): number | null {
   const n = typeof raw === "number" ? raw : Number(raw)
   return Number.isFinite(n) && n > 0 ? n : null
 }
-
-export { emptyBillingRow }

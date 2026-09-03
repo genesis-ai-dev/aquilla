@@ -4,6 +4,24 @@ Bigger opportunities spotted during `/code-health` runs that exceeded that run's
 (one theme, ≤300 lines, ≤8 files). Not done yet — pick one up in a future run. Prune entries
 a later run completes.
 
+## `src/components/org/ArchivedProjects.test.tsx` — flaky in the full `pnpm test` run
+
+Spotted in the 2026-08-28 run's baseline (unrelated to that run's `milestones.ts` change —
+reproduced with zero diff against `dev`, twice). "lists archived projects in a table and
+restores on click" and/or "lists recently deleted files with a project column and restores
+on click" intermittently fail with `getByRole("menuitem", { name: "Restore" })` not found
+(the dropdown menu wasn't open yet when the assertion ran) when run inside the full 939-file
+suite; count varied 2–3 failing tests across repeated full-suite runs. Not reproduced by
+running the file in isolation (not attempted this run — full-suite reproduction was already
+consistent enough to treat as pre-existing and out of scope). Likely the same family of
+issue as the `TeamsList.test.tsx` full-suite-only flake filed as
+[#410](https://github.com/genesis-ai-dev/aquilla/issues/410) (test-isolation/ordering
+sensitivity under vitest's worker sharding), though this one appears without any file-count
+change, so it may be a distinct root cause (a race between the click and the menu's open
+animation/portal mount, not sharding). Needs a `/diagnose` pass or a human to add a
+`findByRole`/`waitFor` around the menu-open step in that test — out of scope here since this
+routine never modifies test files.
+
 ## ESLint `globalIgnores(['dist', '.claude'])` doesn't reach nested `packages/*/dist`
 
 - **Found**: 2026-08-26 run, while diffing `pnpm lint` output against baseline for the
@@ -212,6 +230,29 @@ run until it's fixed.
 - **Proof needed when revisited**: same as this run — `grep -rn` zero-importer check per
   file, `pnpm test` green before and after, run at least twice each way given the
   demonstrated flake risk.
+
+## 2026-08-31 run — reconfirmed the full `ImportDialog` orphan cluster; issue #410 still open
+
+A dead-code research pass this run (independent grep, not reusing the 2026-08-17 list)
+re-derived the same finding above and filled in the remaining file names. The full orphan
+set in `src/components/import/` — all shadowed by same-named inline functions defined
+directly inside `ImportDialog.tsx`, confirmed zero imports from `ImportDialog.tsx` or
+anywhere else except an isolated two-file internal cluster (`HelloaoPanel.tsx` →
+`ImportDialogBackButton.tsx`, `UploadPanel.tsx` → `ParatextChoice.tsx`) — is:
+`ImportLanding.tsx`, `UploadPanel.tsx`, `EBiblePanel.tsx`, `HelloaoPanel.tsx`,
+`ObsPanel.tsx`, `DcsPanel.tsx`, `MaculaPanel.tsx`, `TnPanel.tsx`, `BiblicaPanel.tsx`,
+`SdbhPanel.tsx`, `DirectionPanel.tsx`, `ImportResultPanel.tsx`, `CollisionPanel.tsx`,
+`ParatextChoice.tsx`, `ImportDialogBackButton.tsx` — 15 files, ~3,900 lines total.
+
+[genesis-ai-dev/aquilla#410](https://github.com/genesis-ai-dev/aquilla/issues/410) (the
+`TeamsList.test.tsx` order-dependent flake blocking this) is still **open**, unassigned,
+no linked PR. This run's own `pnpm test` baseline/final comparison did not trigger it
+(failure list byte-identical both times: `ArchivedProjects.test.tsx`,
+`RecordingVideoSurface.test.tsx`, unrelated to this cluster) — consistent with #410 being
+neighbor/order-dependent rather than reliably reproducing on every run. Until #410 is
+fixed, deleting this cluster still can't be proven behavior-preserving by this routine's
+own green-to-green standard; re-verify zero-importer status again before deleting once
+unblocked, since files move.
 
 ## Remaining "frontier-server" comment mention (frozen — test file)
 

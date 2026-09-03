@@ -22,7 +22,11 @@ import type { CellData } from "@/hooks/useCells"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import type { AudioTimingMode } from "@/lib/parsers/types"
 
-type Att = Pick<CodexCellAttachment, "durationMs" | "trimStartMs" | "trimEndMs"> | undefined
+/** What the layout needs off a take to place its chip. AQU-646 stage 3 added
+ *  `targetOffsetMs` — the take's OWN placement, which outranks the line's. */
+type Att =
+  | Pick<CodexCellAttachment, "durationMs" | "trimStartMs" | "trimEndMs" | "targetOffsetMs">
+  | undefined
 
 export interface TimelineLayout {
   mode: AudioTimingMode

@@ -5,10 +5,9 @@
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
-import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
+import { authMiddleware, optionalCaller, type AuthHonoEnv } from "../middleware/auth"
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
-import { JWTService } from "../auth/jwt"
-import { ROLE, type AuthUser, type Env } from "../types"
+import { ROLE, type Env } from "../types"
 import {
   addGroupMember,
   attachGroupProject,
@@ -71,25 +70,6 @@ export function isSameUserId(
 // credential; the payload only names what accepting would already reveal.
 // Everything registered after orgs.use("*") stays authed. (AQU-471)
 // ──────────────────────────────────────────────────────────────────────────
-
-/**
- * AQU-347: best-effort caller identity for the (otherwise public) preview
- * route. A missing/invalid/expired token is NOT an error here — it just means
- * "treat this preview as anonymous", so the route stays reachable for
- * signed-out visitors following a share link. Mirrors `optionalCaller` in
- * routes/invites.ts / routes/projects.ts.
- */
-async function optionalCaller(env: Env, authHeader: string | null): Promise<AuthUser | null> {
-  if (!authHeader) return null
-  const jwtService = new JWTService(env)
-  const token = jwtService.extractTokenFromHeader(authHeader)
-  if (!token) return null
-  const payload = await jwtService.verifyToken(token)
-  if (!payload) return null
-  const now = Math.floor(Date.now() / 1000)
-  if (payload.exp < now) return null
-  return jwtService.getUserByUsername(payload.sub)
-}
 
 orgs.get("/invite-preview/:token", async (c) => {
   const token = c.req.param("token")

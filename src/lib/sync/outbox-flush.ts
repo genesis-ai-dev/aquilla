@@ -11,6 +11,7 @@ import {
   removeOutboxEvents,
   stampOutboxError,
   type OutboxAttemptError,
+  type OutboxOwnerScope,
   type OutboxRecord,
 } from "./outbox"
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
@@ -92,6 +93,17 @@ export interface FlushDeps {
    *  workspace's projectId is what produced "403 token scoped to different
    *  project" on edits queued in another project, wedging the whole queue. */
   getTokenForFile: (projectId: string, fileId: string) => Promise<TokenMintResult>
+  /**
+   * Background drains must name the account whose rows and credential they
+   * carry. The exact stored session is checked before minting and again before
+   * POST, so logout or JWT replacement cancels captured work without falling
+   * through to whichever account happens to be active.
+   */
+  ownerScope?: OutboxOwnerScope & {
+    isSessionCurrent: () => Promise<boolean>
+    /** Only the active account may raise UI/identified telemetry. */
+    shouldSurface?: () => boolean
+  }
   fetchImpl?: typeof fetch
   /** F5: called when one or more target.cell.commit events had a stale
    *  sourceEventId. The caller should surface a "source changed" hint. */
@@ -149,6 +161,8 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
    *  unavailable. Distinct from `networkError` so the caller can back off
    *  on persistent auth failure without conflating "queue is empty". */
   authError: boolean
+  /** HTTP status from a failed token mint, when one was available. */
+  authStatus?: number | null
   /** Records moved to permanent `failed` status this flush because the server
    *  rejected them non-retryably (403). Surfaced so the caller can show an
    *  accurate "couldn't save — review" banner instead of "session expired". */
@@ -156,10 +170,18 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
   staleSiblingCount: number
   staleSourceCount: number
 }> {
-  const ownerVersion = getActiveOutboxOwnerVersion()
+  const ownerVersion = deps.ownerScope ? null : getActiveOutboxOwnerVersion()
+  const outboxScope: OutboxOwnerScope | undefined = deps.ownerScope
+    ? { ownerKey: deps.ownerScope.ownerKey }
+    : undefined
+  const isCredentialCurrent = async (): Promise<boolean> => {
+    if (deps.ownerScope) return deps.ownerScope.isSessionCurrent()
+    return ownerVersion === getActiveOutboxOwnerVersion()
+  }
+  const shouldSurface = (): boolean => deps.ownerScope?.shouldSurface?.() ?? true
   const fetchFn = deps.fetchImpl ?? fetch
-  const records = await peekPendingOutboxBatch(MAX_BATCH * 2)
-  if (records.length === 0 || ownerVersion !== getActiveOutboxOwnerVersion()) {
+  const records = await peekPendingOutboxBatch(MAX_BATCH * 2, outboxScope)
+  if (records.length === 0 || !(await isCredentialCurrent())) {
     return { posted: 0, accepted: 0, networkError: false, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
   }
   const batch = groupOldestFileFirst(records)
@@ -175,7 +197,7 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
     // them from wedging the queue.
     const isCommentKind = batch[0].event.kind.startsWith('comment.')
     if (!isCommentKind) {
-      await removeOutboxEvents([batch[0].id])
+      await removeOutboxEvents([batch[0].id], outboxScope)
       return { posted: 0, accepted: 0, networkError: false, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
     }
     // Fall through with a sentinel fileId so the flusher can mint a token.
@@ -187,10 +209,11 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
   // comment auth). Events WITH a fileId always use their own for correct scope.
   const tokenFileId = fileId ?? '__project__'
   const mint = await deps.getTokenForFile(projectId, tokenFileId)
-  // The queue owner changed while IndexedDB/token minting was in flight. Do
-  // not send the captured rows with a credential from either side of that
-  // transition; the newly-active flusher will pick up its own queue.
-  if (ownerVersion !== getActiveOutboxOwnerVersion()) {
+  // Foreground mode fences account switches. Background mode instead fences
+  // the exact owner/JWT pair, allowing an inactive account to drain while
+  // still cancelling immediately when that stored credential is replaced or
+  // removed.
+  if (!(await isCredentialCurrent())) {
     return { posted: 0, accepted: 0, networkError: false, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
   }
   if (!mint.token) {
@@ -202,14 +225,17 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
       // No access to THIS event's project — e.g. it was queued under a
       // different account/role. Re-auth won't fix it. Quarantine the batch and
       // let the flusher advance to the next file, exactly like a 403 on POST.
-      posthog.capture(OUTBOX_QUARANTINED, {
-        count: batch.length,
-        reason: "token-mint-403",
-        project_id: projectId,
-      })
+      if (shouldSurface()) {
+        posthog.capture(OUTBOX_QUARANTINED, {
+          count: batch.length,
+          reason: "token-mint-403",
+          project_id: projectId,
+        })
+      }
       await quarantineOutboxEvents(
         batch.map((r) => r.id),
         { status: 403, reason: "no access to this change's project" },
+        outboxScope,
       )
       return { posted: 0, accepted: 0, networkError: false, authError: false, quarantined: batch.length, staleSiblingCount: 0, staleSourceCount: 0 }
     }
@@ -222,8 +248,9 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
       mint.status
         ? { status: mint.status, reason: `couldn't get a sync token (HTTP ${mint.status})` }
         : { status: 0, reason: "no active session" },
+      outboxScope,
     )
-    return { posted: 0, accepted: 0, networkError: false, authError: true, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
+    return { posted: 0, accepted: 0, networkError: false, authError: true, authStatus: mint.status, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
   }
   const token = mint.token
   const events: CqrsRawEvent[] = batch.map((r) => r.event)
@@ -252,6 +279,7 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
     await stampOutboxError(
       batch.map((r) => r.id),
       { status: 0, reason },
+      outboxScope,
     )
     return { posted: events.length, accepted: 0, networkError: true, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
   }
@@ -262,14 +290,17 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
     // on this one forever. 401 and 5xx are transient (token re-mint / server
     // hiccup) — RES-2: stamp error WITHOUT burning the retry budget.
     if (res.status === 403) {
-      posthog.capture(OUTBOX_QUARANTINED, {
-        count: batch.length,
-        reason: "post-403",
-        project_id: projectId,
-      })
+      if (shouldSurface()) {
+        posthog.capture(OUTBOX_QUARANTINED, {
+          count: batch.length,
+          reason: "post-403",
+          project_id: projectId,
+        })
+      }
       await quarantineOutboxEvents(
         batch.map((r) => r.id),
         { status: 403, reason: `HTTP 403` },
+        outboxScope,
       )
       return { posted: events.length, accepted: 0, networkError: false, authError: false, quarantined: batch.length, staleSiblingCount: 0, staleSourceCount: 0 }
     }
@@ -281,6 +312,7 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
       await markOutboxAttempt(
         batch.map((r) => r.id),
         { error: { status: res.status, reason: `HTTP ${res.status}` } },
+        outboxScope,
       )
       return { posted: events.length, accepted: 0, networkError: true, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
     }
@@ -288,6 +320,7 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
     await stampOutboxError(
       batch.map((r) => r.id),
       { status: res.status, reason: `HTTP ${res.status}` },
+      outboxScope,
     )
     return { posted: events.length, accepted: 0, networkError: true, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
   }
@@ -299,6 +332,7 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
     await markOutboxAttempt(
       batch.map((r) => r.id),
       { error: { status: 0, reason: "malformed server response" } },
+      outboxScope,
     )
     return { posted: events.length, accepted: 0, networkError: true, authError: false, quarantined: 0, staleSiblingCount: 0, staleSourceCount: 0 }
   }
@@ -319,7 +353,7 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
     // F6: surface stale sibling dead-letters to the caller so a toast can be
     // shown. The full entries (with fileId/cellId) flow through so the
     // caller can deep-link to the affected cells.
-    deps.onStaleSiblings?.(body.stale)
+    if (shouldSurface()) deps.onStaleSiblings?.(body.stale)
   }
   // F5: surface stale-source pins to the caller so a "source changed" hint can appear.
   if (body.staleSource && body.staleSource.length > 0) {
@@ -327,7 +361,7 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
       "[outbox-flush] target.cell.commit events had stale sourceEventId pins:",
       body.staleSource.map((s) => s.id),
     )
-    deps.onStaleSource?.(body.staleSource)
+    if (shouldSurface()) deps.onStaleSource?.(body.staleSource)
   }
 
   const acceptedIds = new Set((body.accepted ?? []).map((a) => a.id))
@@ -355,12 +389,12 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
         fileId: record?.event.fileId ?? null,
       })
     }
-    deps.onRejected?.(rejectedEntries)
+    if (shouldSurface()) deps.onRejected?.(rejectedEntries)
   }
 
   const removableIds = [...acceptedIds, ...permanentlyRejectedIds]
   if (removableIds.length > 0) {
-    await removeOutboxEvents(removableIds)
+    await removeOutboxEvents(removableIds, outboxScope)
   }
 
   // 403 = non-retryable (wrong project scope, or role too low). Quarantine
@@ -377,14 +411,20 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
     .filter((r) => r.status === 403 && !acceptedIds.has(r.id))
     .map((r) => r.id)
   if (forbiddenIds.length > 0) {
-    posthog.capture(OUTBOX_QUARANTINED, {
-      count: forbiddenIds.length,
-      reason: "server-rejected-403",
-      project_id: projectId,
-    })
+    if (shouldSurface()) {
+      posthog.capture(OUTBOX_QUARANTINED, {
+        count: forbiddenIds.length,
+        reason: "server-rejected-403",
+        project_id: projectId,
+      })
+    }
   }
   for (const id of forbiddenIds) {
-    await quarantineOutboxEvents([id], rejectionByid.get(id) ?? { status: 403, reason: "forbidden" })
+    await quarantineOutboxEvents(
+      [id],
+      rejectionByid.get(id) ?? { status: 403, reason: "forbidden" },
+      outboxScope,
+    )
   }
   const forbiddenSet = new Set(forbiddenIds)
 
@@ -413,7 +453,7 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
       bucket.ids.push(id)
     }
     for (const { err, ids } of byErr.values()) {
-      await markOutboxAttempt(ids, { error: err })
+      await markOutboxAttempt(ids, { error: err }, outboxScope)
     }
   }
 

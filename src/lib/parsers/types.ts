@@ -80,7 +80,11 @@ export interface TranslationRule {
   description: string
   severity: "major" | "minor"
   source: "algorithmic" | "llm" | "user"
-  scope: "project" | "org"
+  scope: "project" | "org" | "lane"
+  /** For lane-scoped rules (AQU-609): the target-language lane this rule
+   *  applies to. `''` is the project-default lane (matching the cells/lanes
+   *  convention from AQU-538). Only meaningful when `scope === "lane"`. */
+  lane?: string
   check: RuleCheck
   enabled: boolean
   createdAt: string
@@ -91,8 +95,8 @@ export interface TranslationRule {
 }
 
 export type RuleCheck =
-  | { type: "source-requires-target"; sourcePattern: string; targetPattern: string }
-  | { type: "target-forbids"; targetPattern: string }
+  | { type: "source-requires-target"; sourcePattern: string; targetPattern: string; caseSensitive?: boolean }
+  | { type: "target-forbids"; targetPattern: string; caseSensitive?: boolean }
   | { type: "source-target-match"; pattern: string }
   | { type: "builtin"; checkId: BuiltinCheckId }
 
@@ -157,6 +161,8 @@ export interface RuleInfraction {
    * joined) and `count` (how many) — both are RAW content lifted from the
    * cell (via `InfractionSpan.matchedText`) and must never be routed through
    * `t()`, only interpolated as a variable.
+   * `source-requires-target`: `sourceCount` and `targetCount` (instance
+   * counts as decimal strings).
    */
   reasonParams?: Record<string, string>
   /** Triggering text spans. Empty when the violation has no identifiable

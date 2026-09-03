@@ -13,6 +13,7 @@ function renderViewSettings(overrides: Partial<ComponentProps<typeof ViewSetting
     onSourceFontSizeChange: vi.fn(),
     onTargetFontSizeChange: vi.fn(),
     onTnSidebarChange: vi.fn(),
+    onTargetKeyTermHighlightModeChange: vi.fn(),
   }
   render(
     <>
@@ -28,6 +29,7 @@ function renderViewSettings(overrides: Partial<ComponentProps<typeof ViewSetting
         tnSidebarEnabled={false}
         sourceFontSize={14}
         targetFontSize={14}
+        targetKeyTermHighlightMode="never"
         {...handlers}
         {...overrides}
       />
@@ -54,12 +56,23 @@ describe("ViewSettingsMenu popover", () => {
     expect(panel).toBeTruthy()
     expect(screen.getByText("Show line numbers")).toBeTruthy()
     expect(screen.getByText("Show cell labels")).toBeTruthy()
+    expect(screen.getByText("Target key terms")).toBeTruthy()
     expect(screen.getByText("Text Direction")).toBeTruthy()
     expect(screen.getByText("Font Size")).toBeTruthy()
 
     fireEvent.click(screen.getByRole("switch", { name: /Show line numbers/i }))
     expect(handlers.onLineNumbersChange).toHaveBeenCalledWith(false)
     expect(screen.getByTestId("view-settings-popover")).toBeTruthy()
+  })
+
+  it("changes when target key terms are highlighted", () => {
+    const handlers = renderViewSettings()
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const targetTermOptions = screen.getByRole("radiogroup", { name: "Target key terms" })
+    fireEvent.click(within(targetTermOptions).getByRole("radio", { name: "Focused cell only" }))
+
+    expect(handlers.onTargetKeyTermHighlightModeChange).toHaveBeenCalledWith("focused")
   })
 
   it("changes source direction via the tabs", () => {

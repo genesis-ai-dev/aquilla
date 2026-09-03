@@ -15,9 +15,10 @@
 import { useState, useMemo, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Field, FieldError, FieldLabel, OptionalMark } from "@/components/ui/field"
+import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Switch } from "@/components/ui/switch"
-import { X } from "lucide-react"
+import { LaneCombobox } from "@/components/LaneCombobox"
+import { ChevronDown, X } from "lucide-react"
 import type { TranslationRule, RuleCheck, RuleAutofix } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { checkRulesForCell } from "@/lib/rules/rule-engine"
@@ -128,15 +129,31 @@ interface RuleEditorProps {
   onCancel: () => void
   /** Optional class override for the outer shell (e.g. dialog embed). */
   className?: string
+  /**
+   * AQU-609: the project's NAMED target-language lanes (excluding `''`). When
+   * non-empty, an "Applies to" picker offers project scope ("All lanes"), the
+   * default lane, or one named lane. Omit for org-rule editors and single-lane
+   * projects — the rule then keeps its existing scope (or `project` on create).
+   */
+  lanes?: string[]
+  /** Display label for the default (`''`) lane, e.g. the project's base
+   *  target language. Falls back to a generic string. */
+  defaultLaneLabel?: string
 }
 
-export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: RuleEditorProps) {
+export function RuleEditor({ initialRule, cells, onSave, onCancel, className, lanes, defaultLaneLabel }: RuleEditorProps) {
   const t = useT()
   // ── Field state ──
   const [name, setName] = useState(initialRule?.name ?? "")
   const [description, setDescription] = useState(initialRule?.description ?? "")
   const [severity, setSeverity] = useState<"major" | "minor">(initialRule?.severity ?? "minor")
   const [enabled, setEnabled] = useState(initialRule?.enabled ?? true)
+  // AQU-609: `null` = every lane (project scope); a string = that lane only
+  // (`''` is the default lane, per the AQU-538 convention).
+  const [laneChoice, setLaneChoice] = useState<string | null>(() =>
+    initialRule?.scope === "lane" ? initialRule.lane ?? "" : null,
+  )
+  const showLanePicker = (lanes?.length ?? 0) > 0
 
   // Decode existing check into side/mode/pattern
   const [side, setSide] = useState<Side>(() => {
@@ -233,12 +250,22 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
       has_autofix: !!autofix,
     })
 
+    // Scope: the lane picker decides when shown; otherwise preserve the rule's
+    // existing scope (an org-rule edit must not silently flip to `project`).
+    const scoped: Pick<TranslationRule, "scope" | "lane"> = showLanePicker
+      ? laneChoice === null
+        // `lane: undefined` on purpose: an update spreads over the old rule, so
+        // a lane→all-lanes change must overwrite the stale `lane` field.
+        ? { scope: "project", lane: undefined }
+        : { scope: "lane", lane: laneChoice }
+      : { scope: initialRule?.scope ?? "project", lane: initialRule?.lane }
+
     onSave({
       name: name.trim(),
       description: description.trim(),
       severity,
       source: "user",
-      scope: "project",
+      ...scoped,
       check: currentCheck!,
       enabled,
       autofix,
@@ -278,7 +305,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
         </Field>
         <Field>
           <FieldLabel htmlFor="re-desc" className="text-xs">
-            {t("common.descriptionOptional")} <OptionalMark />
+            {t("common.descriptionOptional")}
           </FieldLabel>
           <Input
             id="re-desc"
@@ -360,6 +387,47 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
             ))}
           </div>
         </div>
+
+        {/* AQU-609: lane scope — only for multi-lane project-rule editors.
+            A searchable combobox, not a button row or plain dropdown:
+            projects can carry 150+ lanes. Values are prefix-encoded
+            ("scope:project" / "lane:<tag>") because the default lane's tag is
+            the empty string. */}
+        {showLanePicker && (
+          <div>
+            <FieldLabel className="text-xs">{t("rules.editor.laneLabel")}</FieldLabel>
+            <LaneCombobox
+              options={[
+                { value: "scope:project", label: t("rules.editor.lane.allLanes") },
+                { value: "lane:", label: defaultLaneLabel || t("rules.editor.lane.defaultLane") },
+                ...(lanes ?? []).map((l) => ({ value: `lane:${l}`, label: l })),
+              ]}
+              value={laneChoice === null ? "scope:project" : `lane:${laneChoice}`}
+              onValueChange={(v) =>
+                setLaneChoice(v === "scope:project" ? null : v.slice("lane:".length))
+              }
+              searchPlaceholder={t("editor.lane.searchPlaceholder")}
+              searchAriaLabel={t("editor.lane.searchAriaLabel")}
+              emptyText={t("editor.lane.searchEmpty")}
+              trigger={
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="mt-1"
+                  aria-label={t("rules.editor.laneLabel")}
+                >
+                  {laneChoice === null
+                    ? t("rules.editor.lane.allLanes")
+                    : laneChoice === ""
+                      ? defaultLaneLabel || t("rules.editor.lane.defaultLane")
+                      : laneChoice}
+                  <ChevronDown className="size-3.5 text-muted-foreground" />
+                </Button>
+              }
+            />
+          </div>
+        )}
 
         <div className="flex items-end">
           <label className="flex items-center gap-1.5 text-xs">
@@ -463,7 +531,7 @@ export function RuleEditor({ initialRule, cells, onSave, onCancel, className }: 
           onClick={() => setShowAutofix((v) => !v)}
           className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
         >
-          {showAutofix ? t("rules.editor.hideAutofix") : <>{t("rules.editor.addAutofix")} <OptionalMark /></>}
+          {showAutofix ? t("rules.editor.hideAutofix") : t("rules.editor.addAutofix")}
         </button>
         {showAutofix && (
           <div className="mt-2 space-y-2 rounded border p-3">

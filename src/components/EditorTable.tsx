@@ -11,7 +11,6 @@ import {
   MessageCircle, Play, Pause, Mic, MicOff, FileText,
   ArrowRight, Activity, NotebookPen, Pencil, ChevronDown, Music, Braces,
   Languages,
-  Archive,
   Lock,
   Pilcrow,
   PilcrowRight,
@@ -25,6 +24,7 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
 import { Badge, badgeVariants } from "@/components/ui/badge"
+import { LaneCombobox } from "@/components/LaneCombobox"
 import { EmptyState } from "@/components/ui/page"
 import type { CellData } from "@/hooks/useCells"
 import {
@@ -109,7 +109,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -165,16 +164,15 @@ import {
 } from "@/lib/text-direction"
 import { partitionInfractions } from "@/lib/rules/waivers"
 import { selectTermRules, computeLiveTermInfractions, mergeBlotInfractions } from "@/lib/rules/live-term-check"
-import { ViolationPopover, type ViolationAnchor } from "./ViolationPopover"
+import { ViolationToast } from "./ViolationToast"
 import { VOICE_ASSIGN_MIME } from "./VoiceLibraryPanel"
 import type { RangeHighlight } from "./HighlightedText"
 import { TermLookupPopover } from "./TermLookupPopover"
-import type { Concept } from "@/lib/terminology/types"
+import type { Concept, ConceptDraft } from "@/lib/terminology/types"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { useFileFontSizes } from "@/lib/store/file-view-prefs"
 import { useEditorActions } from "@/context/EditorActionsContext"
 import { isInMemberScope } from "@/lib/sync/member-scopes"
-import { AddConceptDialog } from "./AddConceptDialog"
 import { SourceSelectionToolbar } from "./SourceSelectionToolbar"
 import { buildSourceChip, type ContextChip } from "@/lib/agent/context-chip"
 import { parseTimestampRange } from "@/lib/video/vtt-generator"
@@ -197,6 +195,7 @@ import { defaultFootnoteRef } from "@/lib/footnotes/refs"
 import { displayedSourceText, effectiveSourceText, projectedSourceValue, sourceCommitFields, sourceEditorSeed } from "@/lib/cell-text"
 import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
 import type { FootnoteViewMode, VisibleFootnoteEntry } from "@/lib/footnotes/types"
+import type { TargetKeyTermHighlightMode } from "@/hooks/useTargetKeyTermHighlightPreference"
 import { hasMeaningfulRichText } from "@/lib/richtext/editor-content"
 import {
   resolveIdmlEditorConfiguration,
@@ -786,10 +785,10 @@ interface EditorTableProps {
   // cleanup) — pure pass-through, never consumed above the row.
   /** Re-read the project record from IDB after a settings change (e.g. voice library edits). */
   onProjectChanged?: () => void
-  /** Add-from-selection: create a DRAFT concept from a selected source token. */
-  onAddConceptFromSelection?: (sourceTerm: string) => void | Promise<void>
-  /** Non-null when the user cannot write to the termbase (below Maintainer) —
-   *  AddConceptDialog opens blocked with this reason instead of accepting input. */
+  /** Add-from-selection: create a terminology entry from selected source text. */
+  onAddConceptFromSelection?: (draft: ConceptDraft) => void | Promise<void>
+  /** Non-null when the user cannot write terminology (below Maintainer) —
+   *  the add-term popover opens blocked with this reason instead of accepting input. */
   addConceptBlockedReason?: string | null
   onAskAiFromSelection?: (chip: ContextChip) => void
   /** Called when the user drops a voice chip onto a cell's audio area.
@@ -843,6 +842,8 @@ interface EditorTableProps {
   footnotePanelActive?: boolean
   /** Current footnote display preference. */
   footnoteViewMode?: FootnoteViewMode
+  /** When approved target renderings receive the subtle key-term highlight. */
+  targetKeyTermHighlightMode?: TargetKeyTermHighlightMode
   /** Emits USFM footnotes from the currently visible virtual rows. */
   onVisibleFootnotesChange?: (entries: VisibleFootnoteEntry[]) => void
   /** Called after a target footnote is created so the parent can reveal footnotes. */
@@ -887,6 +888,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   showFootnotesInline,
   footnotePanelActive,
   footnoteViewMode = "off",
+  targetKeyTermHighlightMode = "never",
   onVisibleRefChange,
   onVisibleCellIdsChange,
   onVisibleFootnotesChange,
@@ -972,16 +974,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // ignores it once the cell is off screen or no longer rendered.
   const lastActiveEditorCellIdRef = useRef<string | null>(null)
   const [hoveredFootnote, setHoveredFootnote] = useState<{ cellId: string; index: number } | null>(null)
-  // AQU-601: the lane switcher hides archived lanes by default; this reveals
-  // them within the open dropdown so a retired lane stays reachable.
-  const [showArchivedLanes, setShowArchivedLanes] = useState(false)
-  const laneSwitcher = useMemo(() => {
-    const all = lanes ?? []
-    return {
-      visible: all.filter((l) => !isLaneArchived(l, archivedLanes)),
-      archived: all.filter((l) => isLaneArchived(l, archivedLanes)),
-    }
-  }, [lanes, archivedLanes])
   const isDragging = useRef(false)
   const dragCells = useRef<Set<string>>(new Set())
   const displayCellIds = useCellIds(cellStore, orderedBy, !!audioLens)
@@ -2291,6 +2283,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           showFootnotesInline={showFootnotesInline}
           footnotePanelActive={footnotePanelActive}
           footnoteViewMode={footnoteViewMode}
+          targetKeyTermHighlightMode={targetKeyTermHighlightMode}
           onFootnoteHoverChange={setHoveredFootnote}
           onFootnoteCreated={onFootnoteCreated}
           sourceFootnoteNumberOffset={footnoteOffsets.source}
@@ -2333,6 +2326,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     examples,
     footnotePanelActive,
     footnoteViewMode,
+    targetKeyTermHighlightMode,
     getTokenForFile,
     getAlignmentModel,
     getStatisticalBt,
@@ -2519,101 +2513,65 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             lanes.length > 1 &&
             onLaneChange &&
             canSwitchLanes(project.syncRole?.level) ? (
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <button
-                      type="button"
-                      data-testid="lane-switcher"
-                      data-active-lane={activeLane}
-                      aria-label={t("editor.lane.activeAria")}
-                      className={cn(
-                        badgeVariants({ variant: "secondary" }),
-                        "gap-1 text-[10px] font-normal normal-case tracking-normal transition-colors hover:bg-muted-foreground/20 hover:text-foreground",
-                      )}
-                    />
-                  }
-                >
-                  {/* AQU-583: on the default lane with no project target set,
-                      `project.targetLanguage` is empty — prompt to set one rather
-                      than showing a blank pill. A named lane always has a tag. */}
-                  {project.targetLanguage || t("editor.lane.setTargetLanguage")}
-                  <ChevronDown className="h-2.5 w-2.5" />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start" className="min-w-[8rem]">
-                  {/* Active lanes, shown by default. */}
-                  {laneSwitcher.visible.map((lane) => {
-                    const active = lane === activeLane
-                    const label = lane === "" ? (defaultLaneLabel || t("editor.column.target")) : lane
-                    return (
-                      <DropdownMenuItem
-                        key={lane || "__default__"}
-                        data-testid={`lane-option-${lane}`}
-                        data-active={active ? "true" : undefined}
-                        onClick={() => onLaneChange(lane)}
-                        className="justify-between gap-2 text-xs"
-                      >
-                        {label}
-                        {active && <Check className="h-3.5 w-3.5" />}
-                      </DropdownMenuItem>
-                    )
-                  })}
-                  {/* AQU-601: archived lanes are hidden behind a reveal so a
-                      retired lane stops cluttering the switcher yet stays
-                      reachable. If the active lane is itself archived we expand
-                      automatically so the current selection is always visible. */}
-                  {laneSwitcher.archived.length > 0 && (
-                    <>
-                      <DropdownMenuSeparator />
-                      {showArchivedLanes || isLaneArchived(activeLane, archivedLanes) ? (
-                        laneSwitcher.archived.map((lane) => {
-                          const active = lane === activeLane
-                          return (
-                            <DropdownMenuItem
-                              key={lane}
-                              data-testid={`lane-option-${lane}`}
-                              data-active={active ? "true" : undefined}
-                              data-archived="true"
-                              onClick={() => onLaneChange(lane)}
-                              className="justify-between gap-2 text-xs text-muted-foreground"
-                            >
-                              <span className="flex items-center gap-1.5">
-                                <Archive className="h-3 w-3" />
-                                {lane}
-                              </span>
-                              {active && <Check className="h-3.5 w-3.5" />}
-                            </DropdownMenuItem>
-                          )
-                        })
-                      ) : (
-                        <DropdownMenuItem
-                          data-testid="lane-show-archived"
-                          closeOnClick={false}
-                          onClick={() => setShowArchivedLanes(true)}
-                          className="gap-1.5 text-xs text-muted-foreground"
+              /* AQU-609: the switcher is a searchable combobox — client
+                 projects carry 150+ lanes, and lane switching is a combobox
+                 by explicit client request. Archived-lane semantics (AQU-601)
+                 live in LaneCombobox: hidden behind a reveal while browsing,
+                 searchable always, auto-revealed when the active lane is
+                 archived. */
+              <LaneCombobox
+                options={(lanes ?? []).map((lane) => ({
+                  value: lane,
+                  label: lane === "" ? (defaultLaneLabel || t("editor.column.target")) : lane,
+                  archived: isLaneArchived(lane, archivedLanes),
+                  testId: lane,
+                }))}
+                value={activeLane}
+                onValueChange={onLaneChange}
+                searchPlaceholder={t("editor.lane.searchPlaceholder")}
+                searchAriaLabel={t("editor.lane.searchAriaLabel")}
+                emptyText={t("editor.lane.searchEmpty")}
+                align="end"
+                trigger={
+                  <button
+                    type="button"
+                    data-testid="lane-switcher"
+                    data-active-lane={activeLane}
+                    aria-label={t("editor.lane.activeAria")}
+                    className={cn(
+                      badgeVariants({ variant: "secondary" }),
+                      "gap-1 text-[10px] font-normal normal-case tracking-normal transition-colors hover:bg-muted-foreground/20 hover:text-foreground",
+                    )}
+                  >
+                    {/* AQU-583: on the default lane with no project target set,
+                        `project.targetLanguage` is empty — prompt to set one
+                        rather than showing a blank pill. A named lane always
+                        has a tag. */}
+                    {project.targetLanguage || t("editor.lane.setTargetLanguage")}
+                    <ChevronDown className="h-2.5 w-2.5" />
+                  </button>
+                }
+                footer={
+                  onEditTargetLanguage
+                    ? (close) => (
+                        /* AQU-583: manage the default target language from the
+                           switcher. */
+                        <button
+                          type="button"
+                          data-testid="edit-target-language"
+                          onClick={() => {
+                            close()
+                            onEditTargetLanguage()
+                          }}
+                          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
                         >
-                          <Archive className="h-3 w-3" />
-                          {t("editor.lane.showArchived", { count: laneSwitcher.archived.length })}
-                        </DropdownMenuItem>
-                      )}
-                    </>
-                  )}
-                  {/* AQU-583: manage the default target language from the switcher. */}
-                  {onEditTargetLanguage && (
-                    <>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        data-testid="edit-target-language"
-                        onClick={onEditTargetLanguage}
-                        className="gap-2 text-xs"
-                      >
-                        <Languages className="h-3.5 w-3.5" />
-                        {t("editor.lane.changeTargetLanguageItem")}
-                      </DropdownMenuItem>
-                    </>
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
+                          <Languages className="h-3.5 w-3.5" />
+                          {t("editor.lane.changeTargetLanguageItem")}
+                        </button>
+                      )
+                    : undefined
+                }
+              />
             ) : onEditTargetLanguage ? (
               <button
                 type="button"
@@ -2979,8 +2937,8 @@ interface MemoizedRowProps {
   audioLens: AudioLensContext | null
   onOpenAudioSetup?: () => void
   onProjectChanged?: () => void
-  /** Add-from-selection: create a DRAFT concept from a selected source token. */
-  onAddConceptFromSelection?: (sourceTerm: string) => void | Promise<void>
+  /** Add-from-selection: create a terminology entry from selected source text. */
+  onAddConceptFromSelection?: (draft: ConceptDraft) => void | Promise<void>
   addConceptBlockedReason?: string | null
   onAskAiFromSelection?: (chip: ContextChip) => void
   onAssignVoice?: (cellId: string, voiceId: string) => void
@@ -3014,6 +2972,8 @@ interface MemoizedRowProps {
   footnotePanelActive?: boolean
   /** Current footnote display preference. */
   footnoteViewMode?: FootnoteViewMode
+  /** When approved target renderings receive the subtle key-term highlight. */
+  targetKeyTermHighlightMode?: TargetKeyTermHighlightMode
   /** Reports the target footnote currently hovered in this row. */
   onFootnoteHoverChange?: (hovered: { cellId: string; index: number } | null) => void
   /** Called after a target footnote is created. */
@@ -3065,6 +3025,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     showFootnotesInline,
     footnotePanelActive,
     footnoteViewMode = "off",
+    targetKeyTermHighlightMode = "never",
     onFootnoteHoverChange,
     onFootnoteCreated,
     sourceFootnoteNumberOffset,
@@ -3244,6 +3205,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         showFootnotesInline={showFootnotesInline}
         footnotePanelActive={footnotePanelActive}
         footnoteViewMode={footnoteViewMode}
+        targetKeyTermHighlightMode={targetKeyTermHighlightMode}
         onFootnoteHoverChange={onFootnoteHoverChange}
         onFootnoteCreated={onFootnoteCreated}
         sourceFootnoteNumberOffset={sourceFootnoteNumberOffset}
@@ -3377,8 +3339,8 @@ interface EditorRowProps {
   audioLens: AudioLensContext | null
   onOpenAudioSetup?: () => void
   onProjectChanged?: () => void
-  /** Add-from-selection: create a DRAFT concept from a selected source token. */
-  onAddConceptFromSelection?: (sourceTerm: string) => void | Promise<void>
+  /** Add-from-selection: create a terminology entry from selected source text. */
+  onAddConceptFromSelection?: (draft: ConceptDraft) => void | Promise<void>
   addConceptBlockedReason?: string | null
   onAskAiFromSelection?: (chip: ContextChip) => void
   onAssignVoice?: (cellId: string, voiceId: string) => void
@@ -3395,6 +3357,8 @@ interface EditorRowProps {
   footnotePanelActive?: boolean
   /** Current footnote display preference. */
   footnoteViewMode?: FootnoteViewMode
+  /** When approved target renderings receive the subtle key-term highlight. */
+  targetKeyTermHighlightMode?: TargetKeyTermHighlightMode
   /** Reports the target footnote currently hovered in this row. */
   onFootnoteHoverChange?: (hovered: { cellId: string; index: number } | null) => void
   /** Called after a target footnote is created. */
@@ -3422,7 +3386,7 @@ interface SourceWithTermLookupProps {
   showEvidence: boolean
   onRangeClick?: (ruleId: string, anchor: HTMLElement) => void
   concepts: Concept[]
-  onTermApply: (rendering: string) => void
+  onViewConcept?: (conceptId: string) => void
   /** Render as an inline span (used per-segment by UsfmSourceText). */
   inline?: boolean
   /** When true, note chips stay markers because detail is shown in a panel. */
@@ -3437,7 +3401,7 @@ function SourceWithTermLookup({
   showEvidence,
   onRangeClick,
   concepts,
-  onTermApply,
+  onViewConcept,
   inline = false,
 }: SourceWithTermLookupProps) {
   // All hooks must run unconditionally before any early return.
@@ -3502,15 +3466,30 @@ function SourceWithTermLookup({
           key={`term-${i}`}
           sourceTerm={word}
           concepts={activeConcepts}
-          onApply={onTermApply}
+          onViewConcept={onViewConcept}
         >
-          <span className="underline decoration-dotted decoration-primary/60 underline-offset-2 hover:decoration-primary">
-            {word}
+          <span className="terminology-highlight">
+            <HighlightedText
+              text={word}
+              highlights={EMPTY_HIGHLIGHTS}
+              ranges={clipRangesToTextSlice(ranges, start, end)}
+              showEvidence={false}
+              onRangeClick={onRangeClick}
+            />
           </span>
         </TermLookupPopover>,
       )
     } else {
-      parts.push(<React.Fragment key={`w-${i}`}>{word}</React.Fragment>)
+      parts.push(
+        <HighlightedText
+          key={`w-${i}`}
+          text={word}
+          highlights={EMPTY_HIGHLIGHTS}
+          ranges={clipRangesToTextSlice(ranges, start, end)}
+          showEvidence={false}
+          onRangeClick={onRangeClick}
+        />,
+      )
     }
     cursor = end
   }
@@ -3878,6 +3857,7 @@ function TargetReadText({
   onTermChipClick,
   footnotePanelActive,
   footnoteNumberOffset = 0,
+  showKeyTermHighlights = false,
 }: {
   text: string
   ranges: RangeHighlight[]
@@ -3886,6 +3866,7 @@ function TargetReadText({
   onTermChipClick?: (term: string, anchor: HTMLElement) => void
   footnotePanelActive?: boolean
   footnoteNumberOffset?: number
+  showKeyTermHighlights?: boolean
 }) {
   const segments = useMemo(() => segmentUsfmForDisplay(text), [text])
 
@@ -3897,6 +3878,7 @@ function TargetReadText({
         ranges={ranges}
         onRangeClick={onRangeClick}
         onTermChipClick={onTermChipClick}
+        showKeyTermHighlights={showKeyTermHighlights}
       />
     )
   }
@@ -3935,6 +3917,7 @@ function TargetReadText({
         ranges={clipRangesToSegment(ranges, seg)}
         onRangeClick={onRangeClick}
         onTermChipClick={onTermChipClick}
+        showKeyTermHighlights={showKeyTermHighlights}
       />,
     )
   })
@@ -3942,18 +3925,20 @@ function TargetReadText({
   return <div>{parts}</div>
 }
 
-function TargetDecoratedText({
+export function TargetDecoratedText({
   text,
   concepts,
   ranges,
   onRangeClick,
   onTermChipClick,
+  showKeyTermHighlights = false,
 }: {
   text: string
   concepts: Concept[]
   ranges: RangeHighlight[]
   onRangeClick?: (ruleId: string, anchor: HTMLElement) => void
   onTermChipClick?: (term: string, anchor: HTMLElement) => void
+  showKeyTermHighlights?: boolean
 }) {
   const t = useT()
   const matches = useMemo(() => {
@@ -3962,8 +3947,13 @@ function TargetDecoratedText({
 
     const out: Array<{ start: number; end: number; term: string }> = []
     for (const concept of activeConcepts) {
-      for (const match of findTermMatches(text, concept.sourceTerm)) {
-        out.push({ ...match, term: concept.sourceTerm })
+      const approvedRenderings = concept.renderings.filter(
+        (rendering) => rendering.status === "preferred" || rendering.status === "admitted",
+      )
+      for (const rendering of approvedRenderings) {
+        for (const match of findTermMatches(text, rendering.rendering)) {
+          out.push({ ...match, term: concept.sourceTerm })
+        }
       }
     }
     out.sort((a, b) => a.start - b.start || b.end - a.end)
@@ -4009,21 +3999,16 @@ function TargetDecoratedText({
 
     const matchedText = text.slice(match.start, match.end)
     parts.push(
-      <span key={`t-${index}-term`} className="term-chip-host" data-source-term={match.term}>
-        <HighlightedText
-          text={matchedText}
-          highlights={EMPTY_HIGHLIGHTS}
-          ranges={clipRangesToTextSlice(ranges, match.start, match.end)}
-          showEvidence={false}
-          onRangeClick={onRangeClick}
-        />
-        <AppTooltip content={t("editor.term.managed", { term: match.term })}>
+      <AppTooltip key={`t-${index}-term`} content={t("editor.term.managed", { term: match.term })}>
         <span
           role={onTermChipClick ? "button" : undefined}
           tabIndex={onTermChipClick ? 0 : undefined}
           aria-label={t("editor.term.managed", { term: match.term })}
+          className={cn(
+            "term-chip-host",
+            showKeyTermHighlights && "terminology-highlight",
+          )}
           data-source-term={match.term}
-          className="term-chip term-chip-preferred"
           onClick={onTermChipClick ? (event) => {
             event.stopPropagation()
             onTermChipClick(match.term, event.currentTarget)
@@ -4034,9 +4019,16 @@ function TargetDecoratedText({
             event.stopPropagation()
             onTermChipClick(match.term, event.currentTarget)
           } : undefined}
-        />
-        </AppTooltip>
-      </span>,
+        >
+          <HighlightedText
+            text={matchedText}
+            highlights={EMPTY_HIGHLIGHTS}
+            ranges={clipRangesToTextSlice(ranges, match.start, match.end)}
+            showEvidence={false}
+            onRangeClick={onRangeClick}
+          />
+        </span>
+      </AppTooltip>,
     )
     cursor = match.end
   })
@@ -4147,6 +4139,7 @@ function EditorRow({
   showFootnotesInline,
   footnotePanelActive,
   footnoteViewMode = "off",
+  targetKeyTermHighlightMode = "never",
   onFootnoteHoverChange,
   onFootnoteCreated,
   sourceFootnoteNumberOffset,
@@ -4157,7 +4150,8 @@ function EditorRow({
   // EditorTable/MemoizedRow) come from context instead of the prop chain —
   // keeps them out of MemoizedRow's React.memo compare surface.
   const {
-    onInfractionClick, onOpenComments, onOpenHistory, onAiSetupNeeded, onOpenRecording,
+    onInfractionClick, onOpenComments, onOpenHistory, onOpenTerminologyConcept,
+    onAiSetupNeeded, onOpenRecording,
     onMediaRowActivate, onAssignCastVoice, onClearCastVoice, onTakeSaved, audioHomeFor, myScopes,
   } = useEditorActions()
   // AQU-633: a scoped member can only validate cells in their assigned lane/file.
@@ -4191,24 +4185,21 @@ function EditorRow({
     return latest?.selection?.draftText
   }, [remoteCellPresence])
   const [openRuleId, setOpenRuleId] = useState<string | null>(null)
-  const [openRuleAnchor, setOpenRuleAnchor] = useState<ViolationAnchor | null>(null)
   // AQU-664: hover ("wave over") a violation blot → preview its rule
   // explanation. Separate from the click path (openRuleId) so a light,
   // non-interactive popover appears on hover and dismisses on mouse-out.
-  const [hoveredRule, setHoveredRule] = useState<{ ruleId: string; anchor: ViolationAnchor } | null>(null)
+  const [hoveredRule, setHoveredRule] = useState<{
+    ruleId: string
+    anchor: { getBoundingClientRect: () => DOMRect }
+  } | null>(null)
   // AQU-664: live editor text, published on a short debounce by TranslatedEditor
   // so terminology blots recompute off the live buffer (not the ~1.2s commit).
   const [liveTargetText, setLiveTargetText] = useState<string | null>(null)
   const examplesExpanded = false
   // FRO-204: chip click state for TermLookupPopover on target editor chips.
   const [termChipState, setTermChipState] = useState<{ term: string; anchor: HTMLElement } | null>(null)
-  // Track whether the target editor has a non-empty text selection when a chip is clicked.
-  const targetHasSelectionRef = useRef(false)
-  // The exact selected target text captured at chip-click time, so Apply can
-  // REPLACE that selection (spec 2c) rather than append. Cleared when no selection.
-  const targetSelectionTextRef = useRef("")
   // Add-from-selection (Slice 5): the source-side text the user has selected,
-  // surfaced as an "Add to termbase" affordance. Null when nothing selected.
+  // surfaced as an "Add to terminology" affordance. Null when nothing selected.
   const [sourceSelection, setSourceSelection] = useState<string | null>(null)
   // FRO-260: ref mirror of sourceSelection so onClick handlers can read the
   // captured text even if a selectionchange event already cleared the React
@@ -4220,7 +4211,7 @@ function EditorRow({
   // sourceSelection before onClick fires.
   const toolbarMouseDownRef = useRef(false)
   // Controls the confirm dialog shown before creating the draft concept.
-  const [showAddConceptDialog, setShowAddConceptDialog] = useState(false)
+  const [addTermOpen, setAddTermOpen] = useState(false)
   const pendingTargetEventIdRef = useRef<string | null>(cell.targetEventId ?? null)
   // Source-edit affordance (project_lead+ on non-live projects). Editing the
   // SOURCE lane emits source.cell.commit — the template-owner correction that
@@ -4381,6 +4372,9 @@ function EditorRow({
   const hasInlineFootnotes = sourceFootnotes.length > 0 || targetFootnotes.length > 0
   const isDocxFile = (cell.fileId ?? "").endsWith(".docx")
   const terminologyConcepts = project.terminology ?? EMPTY_CONCEPTS
+  const showTargetKeyTermHighlights =
+    targetKeyTermHighlightMode === "always" ||
+    (targetKeyTermHighlightMode === "focused" && isRowFocused)
 
   useEffect(() => {
     if (!localTargetDraft) return
@@ -4776,26 +4770,6 @@ function EditorRow({
     return () => window.cancelAnimationFrame(frame)
   }, [sourceEditing])
 
-  // Terminology apply (spec 2c): REPLACE the active target selection with the
-  // chosen rendering. The Apply affordance is only surfaced when there was a
-  // non-empty selection at chip-click time (see handleTermChipClick), and the
-  // selected text is captured in targetSelectionTextRef. We replace the first
-  // occurrence of that selected text in the current target plain text. When
-  // there is no selection (defensive fallback), we append so the translator
-  // can still chain multiple terms. Uses the same commit path as keyboard edits.
-  const handleTermApply = useCallback((rendering: string) => {
-    const existing = visibleTranslated ?? ""
-    const selected = targetSelectionTextRef.current
-    let next: string
-    if (selected && existing.includes(selected)) {
-      next = existing.replace(selected, rendering)
-    } else {
-      const trimmed = existing.trim()
-      next = trimmed ? `${trimmed} ${rendering}` : rendering
-    }
-    handleEditorCommit({ value: next, valueHtml: next })
-  }, [visibleTranslated, handleEditorCommit])
-
   const captureFootnoteAnchor = useCallback(() => {
     pendingFootnoteAnchorRef.current = translatedEditorRef.current?.getFootnoteInsertionAnchor() ?? null
   }, [])
@@ -4849,43 +4823,35 @@ function EditorRow({
     })
   }, [cell, openAddFootnoteDialog])
 
-  // Add-from-selection (Slice 5): capture a source-side text selection so the
-  // translator can promote it to a DRAFT concept without leaving the editor.
+  // Add-from-selection: capture a source-side text selection so the
+  // translator can add it to terminology without leaving the editor.
   const handleSourceMouseUp = useCallback(() => {
     if (!onAddConceptFromSelection && !onAskAiFromSelection) return
     const sel = window.getSelection()
     const text = sel && !sel.isCollapsed ? sel.toString().trim() : ""
-    const captured = text.length > 0 ? text : null
-    // FRO-260: keep the ref in sync with state so onClick handlers can read
-    // the captured text even after the selectionchange race clears the state.
-    capturedSelectionRef.current = captured
-    setSourceSelection(captured)
+    // A collapsed mouseup must not wipe a prior capture. The add-term popover
+    // lives inside this source cell, so its mouseup bubbles here after focus
+    // has already collapsed the browser selection (AQU-1006 / AQU-260).
+    if (!text) return
+    capturedSelectionRef.current = text
+    setSourceSelection(text)
   }, [onAddConceptFromSelection, onAskAiFromSelection])
 
-  // Opens the confirm dialog — actual creation happens in handleAddConceptConfirm.
-  // FRO-260: read from capturedSelectionRef (not sourceSelection state) so the
-  // dialog opens even when the selectionchange event already cleared the state
-  // before this onClick fires (the mousedown-blur race).
-  const handleAddSelectionToTermbase = useCallback(() => {
-    const text = capturedSelectionRef.current
-    if (!text) return
-    // Re-sync state so AddConceptDialog receives the correct pre-fill term even
-    // if the selectionchange handler cleared it between mousedown and click.
-    setSourceSelection(text)
-    setShowAddConceptDialog(true)
+  const handleAddTermOpenChange = useCallback((open: boolean) => {
+    if (open) {
+      const text = capturedSelectionRef.current
+      if (text) setSourceSelection(text)
+    }
+    setAddTermOpen(open)
   }, [])
 
-  const handleAddConceptConfirm = useCallback(async (term: string) => {
-    await onAddConceptFromSelection?.(term)
-    setShowAddConceptDialog(false)
+  const handleCreateTerm = useCallback((draft: ConceptDraft) => {
     capturedSelectionRef.current = null
     setSourceSelection(null)
+    setAddTermOpen(false)
     window.getSelection()?.removeAllRanges()
+    void onAddConceptFromSelection?.(draft)
   }, [onAddConceptFromSelection])
-
-  const handleAddConceptCancel = useCallback(() => {
-    setShowAddConceptDialog(false)
-  }, [])
 
   // FRO-260: toolbar mouse-down/up guards used by the selectionchange handler.
   // Set when the user presses down on a SelectionTermActions button so the
@@ -4920,17 +4886,16 @@ function EditorRow({
 
   // FRO-248: clear source selection when the browser selection collapses (user
   // clicked elsewhere or selected text in a different row). This prevents the
-  // "Add to termbase" toolbar from floating over a different row's content.
+  // "Add to terminology" toolbar from floating over a different row's content.
   // FRO-260: guard — do NOT clear when the user is pressing down on a toolbar
   // button (toolbarMouseDownRef=true). The selectionchange fires before onClick
   // in the mousedown-click sequence; clearing here would make onClick see null.
   useEffect(() => {
     if (!sourceSelection) return
-    // While the AddConceptDialog is open it owns the captured term — its
-    // auto-focus collapses the browser selection, and clearing sourceSelection
-    // here would wipe the dialog's pre-fill (the dialog re-syncs its input
-    // from the prop while open).
-    if (showAddConceptDialog) return
+    // While the add-term popover is open it owns the captured term — focusing
+    // an input collapses the browser selection, and clearing sourceSelection
+    // here would unmount the toolbar (and the popover) mid-edit.
+    if (addTermOpen) return
     const handleSelectionChange = () => {
       // Suppress if the user is mid-click on the SelectionTermActions toolbar.
       if (toolbarMouseDownRef.current) return
@@ -4941,16 +4906,10 @@ function EditorRow({
     }
     document.addEventListener("selectionchange", handleSelectionChange)
     return () => document.removeEventListener("selectionchange", handleSelectionChange)
-  }, [sourceSelection, showAddConceptDialog])
+  }, [sourceSelection, addTermOpen])
 
-  // FRO-204: Chip click handler for terminology chips in the target (TranslatedEditor).
-  // Records whether the target editor had a non-empty text selection at click time
-  // so we can conditionally surface the Apply affordance in the popover.
+  // FRO-204: Chip click handler for terminology chips in the target.
   const handleTermChipClick = useCallback((term: string, anchor: HTMLElement) => {
-    const sel = window.getSelection()
-    const selText = sel && !sel.isCollapsed ? sel.toString() : ""
-    targetHasSelectionRef.current = selText.trim().length > 0
-    targetSelectionTextRef.current = selText
     setTermChipState({ term, anchor })
   }, [])
 
@@ -5474,7 +5433,7 @@ function EditorRow({
     // row still holds it; a newer focus may already own it).
     onRowFocusRelease(cell.id)
     // FRO-248: clear source-text selection when focus leaves this row so the
-    // "Add to termbase" toolbar never floats over a different row's content.
+    // "Add to terminology" toolbar never floats over a different row's content.
     capturedSelectionRef.current = null
     setSourceSelection(null)
   }
@@ -5514,20 +5473,12 @@ function EditorRow({
     }
   }
 
-  // Inline rule click → open expansion to issues tab and remember which rule
-  // is active so the ViolationPopover can anchor to the clicked blot.
-  // Expanding the row re-renders the editor and detaches the blot's DOM node,
-  // and a detached anchor makes the popover fall back to the viewport origin —
-  // so snapshot the rect and anchor to a virtual element instead.
-  const openInlineRule = useCallback((ruleId: string, anchor: HTMLElement) => {
-    // AQU-664: clicking commits to the full (waive-capable) popover — clear any
-    // transient hover preview so the two don't stack.
+  // Inline rule click → open the standard bottom-right violation toast. Keep
+  // the row collapsed and clear the transient hover preview so one gesture
+  // produces one violation surface.
+  const openInlineRule = useCallback((ruleId: string, _anchor: HTMLElement) => {
     setHoveredRule(null)
-    setExpanded(true)
-    setExpansionTab("issues")
     setOpenRuleId(ruleId)
-    const rect = anchor.getBoundingClientRect()
-    setOpenRuleAnchor({ getBoundingClientRect: () => rect })
   }, [])
 
   // AQU-664: hover ("wave over") a blot → snapshot its rect and preview the
@@ -5912,15 +5863,17 @@ function EditorRow({
           >
             {/* Source-selection toolbar. Appears when source text is selected:
                 "Ask AI" pushes the selection into the agent as a context chip,
-                "Add to terms" promotes it to a DRAFT concept, and a "View term"
-                button appears when the selection matches an active concept. */}
-            {sourceSelection && (
+                "Add to terminology" opens a popover to create an entry, and a
+                "View term" button appears when the selection matches an active concept. */}
+            {(sourceSelection || addTermOpen) && (
               <SourceSelectionToolbar
-                sourceSelection={sourceSelection}
+                sourceSelection={sourceSelection ?? capturedSelectionRef.current ?? ""}
                 concepts={terminologyConcepts}
                 onAskAi={handleAskAiFromSelection}
-                onAddToTermbase={onAddConceptFromSelection ? handleAddSelectionToTermbase : undefined}
-                onTermApply={handleTermApply}
+                onAddToTermbase={onAddConceptFromSelection ? handleCreateTerm : undefined}
+                addConceptBlockedReason={addConceptBlockedReason}
+                onAddOpenChange={handleAddTermOpenChange}
+                onViewConcept={onOpenTerminologyConcept}
                 onToolbarMouseDown={handleToolbarMouseDown}
                 onToolbarMouseUp={handleToolbarMouseUp}
               />
@@ -6036,7 +5989,7 @@ function EditorRow({
                 showEvidence={examplesExpanded}
                 onRangeClick={openInlineRule}
                 concepts={terminologyConcepts}
-                onTermApply={handleTermApply}
+                onViewConcept={onOpenTerminologyConcept}
                 footnotePanelActive={footnotePanelActive}
                 footnoteNumberOffset={sourceFootnoteNumberOffset}
               />
@@ -6228,6 +6181,7 @@ function EditorRow({
                             onTermChipClick={handleTermChipClick}
                             footnotePanelActive={footnotePanelActive}
                             footnoteNumberOffset={targetFootnoteNumberOffset}
+                            showKeyTermHighlights={showTargetKeyTermHighlights}
                           />
                         )
                       ) : (
@@ -6240,31 +6194,23 @@ function EditorRow({
                     />
                   </EditorTargetReadSurface>
                 )}
-              {/* FRO-204: Terminology chip popover — controlled via termChipState.
-                  Anchored to the chip DOM element that was clicked. Apply is
-                  offered only when the target had a non-empty text selection
-                  at click time (per spec).
+              {/* FRO-204: Terminology highlight popover — controlled via termChipState.
+                  Anchored to the highlighted term that was clicked.
                   We pass a dummy <span/> trigger so TermLookupPopover renders
                   the popover body; the BaseUI Popover controlled-open + external
-                  anchor positions it on the clicked chip. */}
-              {termChipState && (() => {
-                const concepts = terminologyConcepts
-                const onApply = targetHasSelectionRef.current
-                  ? (rendering: string) => { handleTermApply(rendering); setTermChipState(null) }
-                  : undefined
-                return (
-                  <TermLookupPopover
-                    sourceTerm={termChipState.term}
-                    concepts={concepts}
-                    onApply={onApply}
-                    open
-                    onOpenChange={(isOpen: boolean) => { if (!isOpen) setTermChipState(null) }}
-                    anchor={termChipState.anchor}
-                  >
-                    <span />
-                  </TermLookupPopover>
-                )
-              })()}
+                  anchor positions it on the clicked highlight. */}
+              {termChipState && (
+                <TermLookupPopover
+                  sourceTerm={termChipState.term}
+                  concepts={terminologyConcepts}
+                  onViewConcept={onOpenTerminologyConcept}
+                  open
+                  onOpenChange={(isOpen: boolean) => { if (!isOpen) setTermChipState(null) }}
+                  anchor={termChipState.anchor}
+                >
+                  <span />
+                </TermLookupPopover>
+              )}
               {/* Streaming preview overlay — visible while the LLM is
                   running and the target is still empty. Once committed text
                   is present, the editor becomes the single visible layer even
@@ -7031,21 +6977,16 @@ function EditorRow({
         const rule = ruleMap.get(openRuleId)
         if (!inf || !rule) return null
         return (
-          <ViolationPopover
+          <ViolationToast
             open
             onOpenChange={(next) => {
-              if (!next) {
-                setOpenRuleId(null)
-                setOpenRuleAnchor(null)
-              }
+              if (!next) setOpenRuleId(null)
             }}
             infraction={inf}
             ruleName={translateRuleName(rule, t)}
             waivers={cell.waivers ?? []}
-            anchor={openRuleAnchor}
             onOpenRule={(ruleId) => {
               setOpenRuleId(null)
-              setOpenRuleAnchor(null)
               onInfractionClick?.(ruleId)
             }}
             onWaive={handleWaive}
@@ -7055,10 +6996,10 @@ function EditorRow({
       })()}
 
       {/* AQU-664: hover ("wave over") preview of a violation blot's rule
-          explanation. Non-interactive and separate from the click popover — it
+          explanation. Non-interactive and separate from the click toast — it
           appears on mouse-in and dismisses on mouse-out (see handleRuleHover /
           TranslatedEditor's blot hover handlers). Suppressed while the click
-          popover is open so the two never stack. */}
+          toast is open so the two never stack. */}
       {hoveredRule && !openRuleId && (() => {
         const inf = blotInfractions.find((i) => i.ruleId === hoveredRule.ruleId)
         const rule = ruleMap.get(hoveredRule.ruleId)
@@ -7078,18 +7019,6 @@ function EditorRow({
           </Popover>
         )
       })()}
-
-      {/* Add-from-selection confirm dialog (FRO-260). Mounted per-row so it
-          is scoped to the cell whose selection triggered it. */}
-      {onAddConceptFromSelection && (
-        <AddConceptDialog
-          open={showAddConceptDialog}
-          sourceTerm={sourceSelection ?? ""}
-          blockedReason={addConceptBlockedReason}
-          onConfirm={handleAddConceptConfirm}
-          onCancel={handleAddConceptCancel}
-        />
-      )}
 
       {/* p1-paragraph-ui-wiring (Task 3): confirm before drafting the whole
           paragraph group as one unit. Always confirms — no per-preference

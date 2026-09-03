@@ -78,6 +78,27 @@ describe("cqrs outbox", () => {
     expect((await peekOutboxBatch(10)).map((record) => record.id)).toEqual(["e1"])
   })
 
+  it("supports explicit background reads and owner-guarded mutations without changing the active account", async () => {
+    setActiveOutboxOwner("alice")
+    await enqueueOutboxEvent(sample)
+    setActiveOutboxOwner("bob")
+    await enqueueOutboxEvent({ ...sample, id: "bob-event", author: "bob" })
+
+    expect((await peekPendingOutboxBatch(10, { ownerKey: "alice" })).map((record) => record.id)).toEqual(["e1"])
+    expect((await peekPendingOutboxBatch(10)).map((record) => record.id)).toEqual(["bob-event"])
+
+    // A stale/malicious acknowledgement for Alice cannot mutate Bob's row.
+    await removeOutboxEvents(["bob-event"], { ownerKey: "alice" })
+    await markOutboxAttempt(["bob-event"], {
+      error: { status: 500, reason: "wrong owner" },
+    }, { ownerKey: "alice" })
+
+    const bob = await peekOutboxBatch(10)
+    expect(bob).toHaveLength(1)
+    expect(bob[0].attempts).toBe(0)
+    expect(await outboxPendingCount({ ownerKey: "alice" })).toBe(1)
+  })
+
   it("keeps an enqueue in the owner scope that initiated it", async () => {
     setActiveOutboxOwner("alice")
     const enqueuing = enqueueOutboxEvent(sample)

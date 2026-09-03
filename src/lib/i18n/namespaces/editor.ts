@@ -360,6 +360,10 @@ export const editor = defineNamespace({
     "editor.view.showLineNumbers": "Show line numbers",
     "editor.view.showCellLabels": "Show cell labels",
     "editor.view.showTranslationNotes": "Show translation notes",
+    "editor.view.targetKeyTerms": "Target key terms",
+    "editor.view.targetKeyTermsAlways": "Always",
+    "editor.view.targetKeyTermsFocused": "Focused cell only",
+    "editor.view.targetKeyTermsNever": "Never",
     "editor.view.footnotesHidden": "Hidden",
     "editor.view.footnotesInline": "Inline under cells",
     "editor.view.footnotesTray": "Bottom tray",
@@ -1168,6 +1172,9 @@ export const editor = defineNamespace({
     "editor.lane.setTargetLanguage": "Set target language",
     "editor.lane.changeTargetLanguage": "Change target language",
     "editor.lane.changeTargetLanguageItem": "Change target language…",
+    "editor.lane.searchPlaceholder": "Search lanes…",
+    "editor.lane.searchAriaLabel": "Search lanes",
+    "editor.lane.searchEmpty": "No lanes found.",
     "editor.lane.showArchived": "Show archived ({count})",
     "editor.empty.noMediaSegments": "No media segments yet",
     "editor.empty.mediaLayerHint":
@@ -1234,32 +1241,35 @@ export const editor = defineNamespace({
     // — Expansion tab: back-translation ————————————————————————————
     "editor.bt.label": "Back-translation",
     "editor.bt.explainTooltip":
-      "A reading of this translation back in your reference language. " +
-      "AI can misread, and the project's own pairs can be rough — treat both " +
-      "as checks, not proof.",
+      "A literal back-translation into your source language, for comparing with " +
+      "the original. AI can misread, and the statistical gloss tracks your corpus " +
+      "— treat both as checks, not proof.",
     "editor.bt.needsAiTooltip":
       "Sign in or add an AI model in project settings to generate back-translations",
-    "editor.bt.regenerateTooltip": "Regenerate with AI",
+    "editor.bt.regenerateTooltip": "Regenerate back-translation",
     "editor.bt.regenerateAria": "Regenerate the back-translation",
     "editor.bt.editTooltip": "Edit the back-translation",
     "editor.bt.contributorRequired": "Contributor+ required to edit back-translations",
     "editor.bt.failed": "Back-translation failed",
-    "editor.bt.translateFirst": "Translate this cell to read it back.",
-    "editor.bt.staleWarning": "This reading describes an earlier version of the translation",
+    "editor.bt.translateFirst":
+      "Translate this cell first to generate a back-translation.",
+    "editor.bt.staleWarning":
+      "This back-translation describes an earlier version of the translation",
     "editor.bt.emptyPitch":
-      "See what your translation says when read back, so you can check the " +
-      "meaning carried over.",
-    "editor.bt.readingItBack": "Reading it back…",
-    "editor.bt.readItBack": "Read it back with AI",
+      "Reverse-translate this cell literally, then compare the result with the source.",
+    "editor.bt.readingItBack": "Generating back-translation…",
+    "editor.bt.readItBack": "Generate back-translation",
     "editor.bt.needsAiHint":
-      "Sign in or add an AI model in project settings to generate one.",
-    "editor.bt.contributorCanGenerate": "A contributor can generate one with AI.",
-    "editor.bt.originAi": "AI reading",
-    "editor.bt.originCorrected": "Corrected reading",
+      "Sign in or add an AI model in project settings to generate a back-translation.",
+    "editor.bt.contributorCanGenerate":
+      "A contributor can generate a back-translation.",
+    "editor.bt.originAi": "AI back-translation",
+    "editor.bt.originCorrected": "Hand-corrected",
     "editor.bt.freshLabel": "Matches this translation",
-    "editor.bt.pairsDisagree": "This project's pairs read it differently",
-    "editor.bt.pairsLive": "From this project's own pairs — updates as you translate",
-    "editor.bt.usePairsInstead": "Use this reading",
+    "editor.bt.pairsDisagree": "Statistical gloss differs",
+    "editor.bt.pairsLive":
+      "Statistical gloss from project pairs — updates as you translate",
+    "editor.bt.usePairsInstead": "Use this gloss",
     "editor.bt.statisticalGloss": "Statistical gloss",
     "editor.bt.statisticalGlossSub": "— word-for-word, from this project's own pairs",
     "editor.bt.glossNotEnoughPairs":
@@ -2604,6 +2614,27 @@ export const editor = defineNamespace({
           "published exegetical notes for the verse in focus, fetched from a notes " +
           "resource. Not the user's own comments.",
         maxLength: 32,
+      },
+      "editor.view.targetKeyTerms": {
+        description:
+          "Section heading for the setting that controls subtle highlights on approved " +
+          "terminology found in translated target cells.",
+        maxLength: 28,
+      },
+      "editor.view.targetKeyTermsAlways": {
+        description:
+          "Option that shows approved target key-term highlights in every visible cell.",
+        maxLength: 16,
+      },
+      "editor.view.targetKeyTermsFocused": {
+        description:
+          "Option that shows approved target key-term highlights only in the focused cell.",
+        maxLength: 24,
+      },
+      "editor.view.targetKeyTermsNever": {
+        description:
+          "Option that hides approved target key-term highlights. Violation markers remain visible.",
+        maxLength: 16,
       },
       "editor.view.footnotesHidden": {
         description:
@@ -4175,6 +4206,10 @@ export const editor = defineNamespace({
           "editor. Trailing ellipsis means 'opens a further dialog' — keep it.",
         maxLength: 28,
       },
+      "editor.lane.searchAriaLabel": {
+        description:
+          "Accessible label for the search field inside every lane-picker combobox (editor lane switcher, rule scope picker, rules lane filter). Filters the lane list as the user types.",
+      },
       "editor.lane.showArchived": {
         description:
           "Menu item in the lane switcher that reveals retired language lanes, " +
@@ -4438,10 +4473,10 @@ export const editor = defineNamespace({
       },
       "editor.bt.regenerateTooltip": {
         description:
-          "Tooltip on the enabled regenerate button; it asks the model to read the " +
-          "current translation back again, replacing the existing reading. " +
-          "Imperative.",
-        maxLength: 24,
+          "Tooltip on the enabled regenerate button; it asks the model to " +
+          "back-translate the current target text again, replacing the existing " +
+          "back-translation. Imperative.",
+        maxLength: 28,
       },
       "editor.bt.regenerateAria": {
         description:
@@ -4470,7 +4505,7 @@ export const editor = defineNamespace({
       "editor.bt.translateFirst": {
         description:
           "Empty state of the back-translation tab when the cell has no translation " +
-          "yet: there is nothing to read back. Full sentence.",
+          "yet: there is nothing to back-translate. Full sentence.",
       },
       "editor.bt.staleWarning": {
         description:
@@ -4482,20 +4517,20 @@ export const editor = defineNamespace({
       "editor.bt.emptyPitch": {
         description:
           "Invitation shown when no back-translation exists yet, explaining what the " +
-          "feature is for before the user spends a model call on it. One sentence, " +
-          "wrapped at about 34 characters, so avoid very long words.",
+          "feature is for before the user spends a model call on it. Uses standard " +
+          "Bible-translation / LQA terminology (literal reverse translation, compare " +
+          "to source). One sentence, wrapped at about 34 characters.",
       },
       "editor.bt.readingItBack": {
         description:
           "Label of the generate button while the model is working. Present " +
-          "participle of the same idiom as editor.bt.readItBack.",
-        maxLength: 24,
+          "participle parallel to editor.bt.readItBack.",
+        maxLength: 28,
       },
       "editor.bt.readItBack": {
         description:
-          "Primary button that generates the first back-translation. 'Read it back' " +
-          "is the plain-language version of 'back-translate' — keep it approachable " +
-          "rather than technical. Imperative.",
+          "Primary button that generates the first back-translation. Standard " +
+          "industry noun phrase — same term as the tab label. Imperative.",
         maxLength: 26,
       },
       "editor.bt.needsAiHint": {
@@ -4511,15 +4546,15 @@ export const editor = defineNamespace({
       },
       "editor.bt.originAi": {
         description:
-          "Quiet provenance chip on a model-produced reading. Names the source so " +
-          "the user does not mistake it for a human check. A noun phrase, not a verb.",
-        maxLength: 18,
+          "Quiet provenance chip on a model-produced back-translation. Names the " +
+          "source so the user does not mistake it for a human check. A noun phrase.",
+        maxLength: 22,
       },
       "editor.bt.originCorrected": {
         description:
-          "Quiet provenance chip when a contributor has edited the AI reading. " +
-          "Signals that a human stands behind this wording.",
-        maxLength: 22,
+          "Quiet provenance chip when a contributor has edited the AI " +
+          "back-translation. Signals that a human stands behind this wording.",
+        maxLength: 18,
       },
       "editor.bt.freshLabel": {
         description:
@@ -4529,21 +4564,21 @@ export const editor = defineNamespace({
       },
       "editor.bt.pairsDisagree": {
         description:
-          "Heading of the statistical-clue card when the project's own pairs " +
-          "produce a different wording from the AI reading. This disagreement is " +
-          "the point of the card — keep the contrast.",
+          "Heading of the statistical-clue card when the project's statistical " +
+          "gloss differs from the AI back-translation. This disagreement is the " +
+          "point of the card — keep the contrast.",
       },
       "editor.bt.pairsLive": {
         description:
-          "Heading of the live statistical gloss shown before an AI reading exists. " +
-          "It updates as the translator types. Emphasize that it comes from this " +
-          "project, not from a model.",
+          "Heading of the live statistical gloss shown before an AI back-translation " +
+          "exists. It updates as the translator types. Emphasize project pairs, not " +
+          "a model.",
       },
       "editor.bt.usePairsInstead": {
         description:
-          "Button that adopts the statistical gloss as the saved reading, replacing " +
-          "the AI wording with a human-confirmed project-pairs reading. Imperative.",
-        maxLength: 22,
+          "Button that adopts the statistical gloss as the saved back-translation, " +
+          "replacing the AI wording. Imperative.",
+        maxLength: 18,
       },
       "editor.bt.statisticalGloss": {
         description:

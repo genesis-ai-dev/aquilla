@@ -49,6 +49,8 @@ function renderTable(
     role?: number
     defaultLabels?: Record<string, string>
     jwt?: string | null
+    viewerUsername?: string | null
+    layout?: "page" | "embedded"
   } = {},
 ) {
   const roleByProjectId = new Map<string, CloudProjectSummary["role"]>(
@@ -66,6 +68,8 @@ function renderTable(
         orgId={1}
         jwt={opts.jwt === undefined ? "jwt" : opts.jwt}
         author="anna"
+        viewerUsername={opts.viewerUsername ?? null}
+        layout={opts.layout ?? "page"}
       />
     </MemoryRouter>,
   )
@@ -188,6 +192,24 @@ describe("OrgProjectsDataTable lane chips (AQU-538 §3.2)", () => {
     expect(position & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy()
   })
 
+  it("labels a migrated project's default lane from the project target language (AQU-606)", () => {
+    // Post-lanes-migration shape: the target lives on project settings and no
+    // per-file hint reaches the table, so the chip used to read "Default".
+    const p = baseProject({ id: "p6", name: "Migrated", totalCells: 100, filledCells: 25, targetLanguage: "French" })
+    renderTable([p], { defaultLabels: {} })
+
+    const chip = screen.getByTestId("lane-chip-p6-")
+    expect(chip).toHaveTextContent("French")
+    expect(chip).not.toHaveTextContent("Default")
+  })
+
+  it("shows the neutral placeholder when the project has no target language (AQU-606)", () => {
+    const p = baseProject({ id: "p7", name: "Untargeted", totalCells: 100, filledCells: 25 })
+    renderTable([p], { defaultLabels: {} })
+
+    expect(screen.getByTestId("lane-chip-p7-")).toHaveTextContent("Default")
+  })
+
   it("renders a single chip for a project with no lane breakdown (single-lane, no regression)", () => {
     const p = baseProject({ id: "p2", name: "Ruth", totalCells: 200, filledCells: 100 })
     renderTable([p], { defaultLabels: { p2: "sw" } })
@@ -293,5 +315,47 @@ describe("OrgProjectsDataTable expandable lane sub-rows (AQU-538 §3.2)", () => 
     fireEvent.click(screen.getByTestId("project-row-actions-p1"))
     fireEvent.click(screen.getByRole("menuitem", { name: /assign work/i }))
     expect(screen.getByTestId("assign-open-p1-")).toBeInTheDocument()
+  })
+})
+
+describe("PM column self marker (AQU-1027)", () => {
+  const rows = () => [
+    baseProject({ id: "gospels", name: "Gospels", pm: { id: 5, username: "anna" } }),
+    baseProject({ id: "ruth", name: "Ruth", pm: { id: 6, username: "mark" } }),
+    baseProject({ id: "acts", name: "Acts", pm: null }),
+  ]
+
+  it("marks only the rows the viewer manages", () => {
+    renderTable(rows(), { viewerUsername: "anna" })
+
+    const marks = screen.getAllByTestId("project-pm-you")
+    expect(marks).toHaveLength(1)
+    // The marker sits beside the PM's name, not on its own.
+    expect(marks[0].closest("td")?.textContent).toContain("anna")
+  })
+
+  it("matches the viewer when the stored PM name differs in case", () => {
+    const cased = rows().map((p) =>
+      p.id === "gospels" ? { ...p, pm: { id: 5, username: "Anna" } } : p,
+    )
+    renderTable(cased, { viewerUsername: "anna" })
+    expect(screen.getAllByTestId("project-pm-you")).toHaveLength(1)
+  })
+
+  it("marks nothing when nobody is signed in", () => {
+    renderTable(rows(), { viewerUsername: null })
+    expect(screen.queryAllByTestId("project-pm-you")).toHaveLength(0)
+  })
+
+  it("marks nothing when the viewer manages none of the rows", () => {
+    renderTable(rows(), { viewerUsername: "zoe" })
+    expect(screen.queryAllByTestId("project-pm-you")).toHaveLength(0)
+  })
+
+  // Deliberate non-goal: the embedded all-orgs table drops the PM column
+  // entirely, so there is no PM cell to mark. Pinned so it is not "fixed".
+  it("is absent in embedded layout, which has no PM column at all", () => {
+    renderTable(rows(), { viewerUsername: "anna", layout: "embedded" })
+    expect(screen.queryAllByTestId("project-pm-you")).toHaveLength(0)
   })
 })

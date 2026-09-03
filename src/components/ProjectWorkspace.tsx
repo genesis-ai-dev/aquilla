@@ -10245,6 +10245,11 @@ export function ProjectWorkspace() {
                   virtualization state (and the separator stays a direct DOM
                   child of its Group, which the library requires). */}
               <ResizablePanelGroup
+                // Named rather than left to useId: the library resolves a
+                // group by scanning ids and returns the first match, so two
+                // groups that ever shared one would read stale state and write
+                // fresh. Also what `data-group` shows in the inspector.
+                id="media-lens-rows"
                 orientation="vertical"
                 className="min-h-0"
                 // AQU-1119: fires once per gesture, at pointer-up. A drag that
@@ -10473,6 +10478,7 @@ export function ProjectWorkspace() {
                   how you hide it; the table carries a pixel floor so a narrow
                   window collapses the picture rather than crushing the text. */}
               <ResizablePanelGroup
+                id="media-lens-body"
                 orientation="horizontal"
                 className="min-h-0 flex-1"
                 onLayoutChanged={(_layout, meta) => mediaSections.noteLayoutSettled(meta)}

@@ -32,6 +32,7 @@ import {
   expandSection,
   isRailSized,
   isSeparatorDisabled,
+  MEDIA_RAIL_PX,
   mediaPanelConstraints,
   presentSections,
   railPreviewSections,
@@ -376,6 +377,93 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
     },
     [collapse, effective, fileId, safeIsCollapsed],
   )
+
+  /**
+   * Make sure a folded section is actually AT the rail.
+   *
+   * Pinning a panel (min === max === 40) is supposed to be enough: changing
+   * those props re-registers the panel, which remounts the group, which clamps
+   * the cached layout to the new constraints. Usually it is. Sam found a state
+   * where it was not — timeline already folded, then the text folded by its
+   * chevron — and the result is the worst of both: React renders the rail
+   * because the state says collapsed, while the panel keeps its full width, so
+   * the rail stretches across a thousand pixels of empty room and the video
+   * never grows. Drag-folding the same section works, because a drag sets the
+   * layout itself and the pin only has to agree with it.
+   *
+   * The library gives no way to ask "did the pin land" — `isCollapsed()`
+   * requires the panel to still be `collapsible`, which a pinned one is not,
+   * and `collapse()` is a silent no-op on it for the same reason. So this
+   * measures the element and, if it is not at the rail, drives it there. It is
+   * the same distrust `expand()` already applies in the other direction.
+   *
+   * Safe rather than a loop: it runs in a passive effect, after the commit and
+   * outside the library's own call stack, so no `flushSync` and no re-entrancy;
+   * it does nothing at all on the normal path, where the clamp already worked;
+   * `resize()` clamps rather than throws, and here the neighbour can always
+   * absorb the change (the video has no ceiling, the table has none, the body
+   * has none); and the layout report it produces is not a user interaction, so
+   * the persist pass returns early and the fold pass skips what is already
+   * collapsed. It cannot fire mid-drag, because `effective` does not change
+   * until the pointer is released.
+   */
+  useEffect(() => {
+    for (const id of effective) {
+      const px = safeSizePx(id)
+      if (px === null || isRailSized(px)) continue
+      applySize(id, MEDIA_RAIL_PX)
+    }
+  }, [applySize, effective, safeSizePx])
+
+  /**
+   * The console seam, in the shape of `__aqQueueState` and
+   * `__aqDubDebugSnapshot`. The browser pass runs in Chromium and Sam drives
+   * Safari, so the one bug this round fixes was found somewhere no automated
+   * leg can see it. This is how the next one gets diagnosed rather than
+   * guessed at.
+   *
+   * It reports the two numbers whose disagreement names the cause. Both come
+   * from `getSize()`: `asPercentage` is what the library's own store believes,
+   * `inPixels` is read live off the element. A folded section should be 40px
+   * and a percentage to match. A small percentage beside a large pixel width
+   * means the store is right and the DOM never caught up; two large numbers
+   * mean the clamp never ran at all.
+   */
+  useEffect(() => {
+    if (!import.meta.env.DEV || typeof window === "undefined") return
+    const snapshot = () => ({
+      fileId,
+      present,
+      collapsed: [...effective],
+      previewing: [...previewRail],
+      sections: Object.fromEntries(
+        present.map((id) => {
+          let size: { asPercentage: number; inPixels: number } | null = null
+          try {
+            size = panelRefs[id].current?.getSize() ?? null
+          } catch {
+            /* the group has not laid out — no size to report */
+          }
+          return [
+            id,
+            {
+              collapsed: effective.includes(id),
+              previewing: previewRail.includes(id),
+              railed: size ? isRailSized(size.inPixels) : null,
+              size,
+              frozen: frozenRef.current[id] ?? null,
+            },
+          ]
+        }),
+      ),
+    })
+    const win = window as unknown as { __aqMediaSections?: () => unknown }
+    win.__aqMediaSections = snapshot
+    return () => {
+      delete win.__aqMediaSections
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- panel refs are stable
+  }, [effective, fileId, present, previewRail])
 
   return {
     collapsed: effective,

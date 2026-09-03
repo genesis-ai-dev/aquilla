@@ -3866,6 +3866,11 @@ export function ProjectWorkspace() {
 
   // File-scoped target import: the open file's cells in display order, with
   // source text so the review screen can show alignment.
+  //
+  // AQU-1143: cue cells carry their timings through as well, so an incoming
+  // subtitle file is aligned by timecode overlap rather than raw row order —
+  // one inserted or deleted cue then can't cascade every later translation
+  // onto the wrong cell. Cells without timings simply keep order matching.
   const fileTargetCells = useMemo(() => cellSummaries.map((c) => ({
     cellId: c.id,
     fileId: c.fileId,
@@ -3874,6 +3879,9 @@ export function ProjectWorkspace() {
     translated: c.translated ?? "",
     canonicalRef: c.group,
     original: c.original,
+    ...(c.startTime !== undefined && c.endTime !== undefined
+      ? { startMs: c.startTime, endMs: c.endTime }
+      : {}),
   })), [cellSummaries])
 
   // AD-13 branching-search adapters — single-cell completion's few-shot

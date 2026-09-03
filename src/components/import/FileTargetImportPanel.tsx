@@ -296,6 +296,10 @@ export function FileTargetImportPanel({
   if (step === "review" && matchResult) {
     const { matched, orphans, unmatchedSourceCount } = matchResult
     const conflicts = matched.filter((m) => m.hasConflict)
+    // AQU-1143: a ref-less match that aligned by cue timecode is not the
+    // fragile top-to-bottom pairing this warns about — don't send the user off
+    // to eyeball 500 rows for a drift that cannot have happened.
+    const showOrderMatchWarning = matchedByOrder && matchResult.alignedBy !== "overlap"
 
     function toggleCell(cellId: string) {
       setSelectedCellIds((prev) => {
@@ -316,7 +320,7 @@ export function FileTargetImportPanel({
             {orphans.length > 0 && <span>{t("importExport.review.unmatchedRowCount", { count: orphans.length })}</span>}
             {unmatchedSourceCount > 0 && <span>{t("importExport.review.uncoveredCellCount", { count: unmatchedSourceCount })}</span>}
           </div>
-          {matchedByOrder && (
+          {showOrderMatchWarning && (
             <p className="mt-1.5 text-xs text-amber-600">
               {t("importExport.review.orderMatchWarning")}
             </p>

@@ -183,9 +183,9 @@ This requires an active browser session for the revoked user:
 
 All checkboxes above checked. Key invariants:
 
-1. Org membership = sees ALL org projects (org path fires)
-2. Removing org member = immediately no access on next request (max-wins, no grace)
+1. Org membership below Maintainer does **not** grant project visibility. Only Maintainer/Owner org roles see every project (AQU-435 / AQU-1107).
+2. Removing org member = immediately no access on next request (max-wins, no grace), unless a surviving direct `project_members` row remains
 3. Removing org member cascades to group memberships (no ghost groups)
 4. Direct `project_members` rows survive org removal (OPQ-2 documented intent)
-5. Detaching group project = role reverts to org baseline (not zero)
+5. Detaching a team from a project drops that team path; a Contributor/Viewer org role is not a fallback (AQU-435)
 6. Invite links capped at Contributor (400)

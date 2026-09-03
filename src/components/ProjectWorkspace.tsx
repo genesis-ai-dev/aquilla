@@ -10330,8 +10330,6 @@ export function ProjectWorkspace() {
                     // maintainer can change this" title would be a lie — a
                     // maintainer cannot change it here either.
                     hideTimingMode={isSubtitleFile}
-                    // …and what the text column under the timeline is called.
-                    isSubtitleImport={isSubtitleFile}
                     onOpenRecording={handleOpenRecording}
                     project={editorProject ?? project ?? undefined}
                     onSelectCell={setTimelineSelectedCellId}

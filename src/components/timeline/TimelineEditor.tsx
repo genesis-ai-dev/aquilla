@@ -70,7 +70,6 @@ import { buildTimelineLayout, type TimelineLayout } from "@/lib/timeline/layout"
 import { gutterWidthPx, loadGutterCollapsed, saveGutterCollapsed } from "@/lib/timeline/gutter-width"
 import {
   deriveTracksForFile,
-  TRACK_KIND_LABELS,
   type TimelineTrack,
   type TrackKind,
 } from "@/lib/timeline/tracks"
@@ -380,14 +379,6 @@ export interface TimelineEditorProps {
    *  only one mode it can be in — a picker with a single choice, or a label
    *  saying so, is a question the user cannot act on. */
   hideTimingMode?: boolean
-  /**
-   * Was this file imported as subtitles (VTT/SRT/SBV)?
-   *
-   * Only the workspace can answer it — the file's type does not otherwise
-   * reach this component — and it decides one thing here: what the text
-   * column under the timeline is called. See `textHeadingLabel`.
-   */
-  isSubtitleImport?: boolean
   /** Needed by the missing-audio probe behind the chip strip's badge. */
   project?: ProjectRecord
   /** Fires when the highlighted section changes so a sibling transport (the
@@ -1008,7 +999,6 @@ export function TimelineEditor({
   timingMode = "dubbing",
   onChangeTimingMode,
   hideTimingMode = false,
-  isSubtitleImport = false,
   project,
   onSelectCell,
   onTranscribeSections,
@@ -1742,28 +1732,23 @@ export function TimelineEditor({
   // would be flashing subtitle rows around a stretch where nobody SPOKE. Two
   // tracks, conflated. (EditorTable keeps its pulseCells API for other callers.)
 
-  // What the text column under the timeline is called.
+  // What the section under the timeline is called: "Text".
   //
   // Pinned rather than derived per-cell, because in this workflow every cell is
   // a text cell and the header would otherwise change as you clicked around.
+  // NOT "Dialogue" (Sam, 2026-08-20) — a heading of its own invention, sitting
+  // between the gutter above and "Audio cues" an inch away, invited exactly the
+  // mix-up it was meant to end.
   //
-  // NOT "Dialogue" (Sam, 2026-08-20): these cells ARE the file's source text,
-  // the track gutter directly above already calls them that, and the thing
-  // they were being confused with — the heard lines from the audio sibling —
-  // is labelled "Audio cues" a few inches away. A heading of its own invention
-  // sitting between those two invited exactly that mix-up.
-  //
-  // IT TRACKS THE GUTTER'S WORD, which is the whole point of it — so when the
-  // gutter's went "Subtitles" → "Source text" (2026-08-24) this followed. Two
-  // different names for one column of cells, an inch apart, is precisely the
-  // confusion the heading was rewritten to end.
-  //
-  // Keyed on the FILE now, not on `subtitleFileWithFootage` (a linked-video
-  // heuristic). That gate left a subtitle file with no video falling through to
-  // the per-cell derivation, which says "Dialogue" whenever nothing is
-  // selected — the confusing case, on the one file type that can least afford
-  // it.
-  const textHeadingLabel = isSubtitleImport ? TRACK_KIND_LABELS["source-subtitles"] : undefined
+  // AQU-1119 stopped it borrowing the GUTTER's word. It used to read
+  // `TRACK_KIND_LABELS["source-subtitles"]`, i.e. "Source text", and that was
+  // wrong once the thing being named became a whole collapsible SECTION:
+  // source and target are the two COLUMNS inside it, so naming the section
+  // after one of its own columns mislabels the other half. The gutter's rows
+  // keep their names — a track genuinely is one side — and the section now has
+  // a word of its own, unconditional, so it no longer depends on how the file
+  // was imported.
+  const textHeadingLabel = t("editor.timeline.textPaneTitle")
 
   // Stretches of film that no cell covers — where a line can still be added.
   // Derived from the same sweep the Source track draws, so the two can never

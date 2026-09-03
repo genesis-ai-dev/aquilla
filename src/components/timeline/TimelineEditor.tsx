@@ -3492,6 +3492,15 @@ export function TimelineEditor({
       {/* toolbar */}
       <div className="flex shrink-0 items-center gap-2 border-b border-border bg-muted/30 px-3 py-1.5">
         <span className="text-xs font-medium text-muted-foreground">{t("editor.timeline.title")}</span>
+        {/* AQU-1119: beside the heading, like the gutter's own toggle sits in
+            the gutter — a control that folds a region belongs on that region's
+            name, not in the corner. Withheld entirely when the workspace
+            passes no handler: outside the media lens there is nothing to fold
+            INTO, and a disabled button would be a question the reader cannot
+            act on. */}
+        {onCollapseSection && (
+          <MediaSectionCollapseButton section="timeline" onCollapse={onCollapseSection} />
+        )}
         {/* Pre-merge round: the mode is FILE-level again (the video link it
             interacts with is per-file), so the control returns to the
             toolbar. Same clearance as before: `onChangeTimingMode` absent =
@@ -3793,14 +3802,6 @@ export function TimelineEditor({
               <ChevronsUpDown className="h-3.5 w-3.5" />
             </button>
           </div>
-          {/* AQU-1119: last in the toolbar, because it acts on the whole strip
-              rather than on anything in it. Withheld entirely when the
-              workspace passes no handler — outside the media lens there is
-              nothing to collapse INTO, so a disabled button would be a
-              question the reader cannot act on. */}
-          {onCollapseSection && (
-            <MediaSectionCollapseButton section="timeline" onCollapse={onCollapseSection} />
-          )}
         </div>
       </div>
 

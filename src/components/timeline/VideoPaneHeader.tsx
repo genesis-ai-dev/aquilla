@@ -43,16 +43,15 @@ export function VideoPaneHeader({ src, onCollapse }: VideoPaneHeaderProps) {
       className="flex shrink-0 items-center gap-2 border-t border-border bg-muted/20 px-4 py-1.5"
     >
       <span className="text-xs font-medium text-muted-foreground">{t("editor.timeline.videoPaneTitle")}</span>
+      {/* Beside the heading, pointing the way the section folds — the gutter's
+          own idiom. Icon-only and no taller than the name pill, per the note
+          at the top of this file: a browser pass and a unit test both read
+          this header's textContent, and the row's height is kept in lockstep
+          with the text header's opposite it. */}
+      {onCollapse && <MediaSectionCollapseButton section="video" onCollapse={onCollapse} />}
       <span className="inline-flex min-w-0 items-center rounded-md border border-border bg-background px-2 py-0.5 text-[11px] text-foreground/80">
         <span className="truncate font-mono">{basename}</span>
       </span>
-      {/* Icon-only and no taller than the name pill, per the note at the top of
-          this file: a browser pass and a unit test both read this header's
-          textContent, and the row's height is kept in lockstep with the text
-          header's opposite it. `ms-auto` pins it to the right wall. */}
-      {onCollapse && (
-        <MediaSectionCollapseButton section="video" onCollapse={onCollapse} className="ms-auto" />
-      )}
     </div>
   )
 }

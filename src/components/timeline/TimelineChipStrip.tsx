@@ -364,6 +364,10 @@ export function MediaTextHeader({
       <span className="shrink-0 text-xs font-medium text-muted-foreground">
         {headingLabel ?? (isDialogue ? t("editor.timeline.chipHeadingDialogue") : t("editor.timeline.chipHeadingSubtitle"))}
       </span>
+      {/* AQU-1119: beside the heading, pointing the way the section folds —
+          the gutter's own idiom, and where a reader looks for a disclosure
+          control. Absent handler, absent button. */}
+      {onCollapse && <MediaSectionCollapseButton section="text" onCollapse={onCollapse} />}
       {castName && (
         <Pill>
           {t("editor.timeline.chipSpeaker")} <b className="font-semibold text-foreground">{castName}</b>
@@ -378,10 +382,6 @@ export function MediaTextHeader({
           label and the navigator stays pinned to the right wall. */}
       {transcribe && <TranscribeSelectionControls {...transcribe} />}
       <StripNavSlot />
-      {/* After the nav, so it sits flush against the right wall: `ms-auto`
-          lives on the slot itself, and anything following it is pushed to the
-          edge without a wrapper. */}
-      {onCollapse && <MediaSectionCollapseButton section="text" onCollapse={onCollapse} />}
     </div>
   )
 }

@@ -176,6 +176,7 @@ import { isInMemberScope } from "@/lib/sync/member-scopes"
 import { AddConceptDialog } from "./AddConceptDialog"
 import { SourceSelectionToolbar } from "./SourceSelectionToolbar"
 import { buildSourceChip, type ContextChip } from "@/lib/agent/context-chip"
+import { ownCastName } from "@/lib/timeline/cue-character"
 import { parseTimestampRange } from "@/lib/video/vtt-generator"
 import { FootnoteInline } from "./footnotes/FootnoteInline"
 import {
@@ -5190,11 +5191,24 @@ function EditorRow({
   // parsers produce (<b>, <i>, <u>, <s>, <code>). Anything else in an imported
   // document — notably <img>/<a>, which DOMPurify's defaults let through —
   // is dropped rather than rendered. See OPS-8.
-  // Prefer the explicitly-assigned cast member's name; fall back to the cell's
-  // own label (e.g. a chapter/verse marker from USFM), then nothing.
+  // Prefer the explicitly-assigned cast member's name; then the character the
+  // cell itself names; then the cell's own label (e.g. a chapter/verse marker
+  // from USFM), then nothing.
+  //
+  // AQU-1018: `ownCastName` is the middle rung, and it is what makes a freshly
+  // imported subtitle row say who is speaking. The assigned-voice name only
+  // resolves once `castAssignments` has landed AND the voice is still in the
+  // library, and neither holds at the moment the client actually needs the
+  // label: on import there are no targets yet to read the name off, the
+  // character sheet's `cast.assign` events land BEFORE the `saveTts` that mints
+  // the voices (a documented degraded-success window in
+  // ProjectWorkspace.handleImportCharacters), and deleting a voice later strands
+  // every assignment pointing at it. In all three the sheet's `cast_name` is
+  // sitting right there on the cell — the cast gutter has always drawn it — and
+  // the two corners went blank anyway.
   const castVoiceId = cellLabelsEnabled ? assignedCastVoiceId(project.ttsSettings, cell.id) : undefined
   const castName = castVoiceId ? findVoice(project.ttsSettings, castVoiceId)?.name : undefined
-  const labelText = castName ?? cell.cellLabel ?? null
+  const labelText = castName ?? ownCastName(cell) ?? cell.cellLabel ?? null
   const showCellLabel = cellLabelsEnabled && labelText
 
   // The cell number tints by worst severity. That's the whole signal — the
@@ -5929,13 +5943,14 @@ function EditorRow({
                   2026-08-26) — "put that character label also in the top left
                   of source cells… we'll just scoot the time range over".
 
-                  THE SAME VALUE THE TARGET CORNER SHOWS, deliberately: the two
-                  names in this app are not interchangeable (the sheet's
-                  `cast_name` is what the timeline, the recorder and the exports
-                  print), and Sam's call was that these two corners agree with
-                  each other rather than with those. It therefore rides the
-                  same "Show cell labels" preference and goes blank in the same
-                  places.
+                  THE SAME VALUE THE TARGET CORNER SHOWS, deliberately: Sam's
+                  call was that these two corners agree with EACH OTHER, so both
+                  read the one `labelText` and both ride the "Show cell labels"
+                  preference. AQU-1018 did not weaken that — it only gave
+                  `labelText` a `cast_name` rung beneath the assigned voice, so
+                  the corners now agree with the timeline/recorder/exports in the
+                  cases where they used to agree on NOTHING. The two names still
+                  are not interchangeable, and an assigned voice still wins.
 
                   `dir="auto"` because the lane is forced LTR for timecodes and
                   a name is not a timecode. The width cap is what does the

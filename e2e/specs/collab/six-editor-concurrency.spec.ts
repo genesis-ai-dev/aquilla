@@ -38,12 +38,15 @@ import { Workspace } from "../../helpers/page-objects/Workspace"
 
 const EDITOR_COUNT = 6
 const EXTRA_USERS = ["dave", "erin", "frank"] as const
-/** Blur → POST /events 200. Generous for local wrangler; a seq-lock convoy
- * behind a whole-Bible import is seconds-to-minutes, not ~2s. */
-const WRITE_BUDGET_MS = 2_000
-/** Events ack → text visible in a different open editor. The two-cursor smoke
- * allows 15s; six healthy clients should fan out well under that. */
-const LIVE_UPDATE_BUDGET_MS = 5_000
+/** Blur → POST /events 200, including Playwright protocol delay across six
+ * Chromium contexts. Server-side `/events` stays well under 1s when the
+ * AQU-1005 two-cursor path is healthy; a seq-lock convoy behind a whole-Bible
+ * import chunk is tens of seconds to minutes. Stay under that without making
+ * success depend on machine speed. */
+const WRITE_BUDGET_MS = 8_000
+/** Events ack → text visible in a different open editor. Matches the
+ * two-cursor smoke (`concurrent-edit.smoke.spec.ts`) 15s round-trip. */
+const LIVE_UPDATE_BUDGET_MS = 15_000
 /** BSB verse count from helloao available_translations.json (headings add more). */
 const BSB_VERSE_COUNT = 31_086
 

@@ -666,6 +666,13 @@ export const editor = defineNamespace({
     // affordances. Keyed 2026-08-20 — these surfaces were authored inline
     // while the dubbing workflow was being designed.
     "editor.timeline.videoPaneTitle": "Video",
+    // AQU-1119: the section heading over the dialogue table, opposite the
+    // Video header. It says "Text" and not "Source text" because SOURCE and
+    // TARGET are the two columns underneath it — the section holds both, and
+    // naming it after one of its columns read as a mislabel. Deliberately not
+    // the track row's name: `TRACK_KIND_LABELS` still calls those "Source
+    // text" / "Target text", which is right, because a track IS one side.
+    "editor.timeline.textPaneTitle": "Text",
     "editor.timeline.videoPaneLinked": "Linked video",
     "editor.timeline.videoPaneStart": "Click to start the picture",
     "editor.timeline.videoPanePicture": "picture",
@@ -729,6 +736,16 @@ export const editor = defineNamespace({
     // line, and the summary band says what is inside better.)
     "editor.timeline.gutterCollapseAria": "Narrow the track names",
     "editor.timeline.gutterExpandAria": "Show the track names",
+    // AQU-1119: collapsing a whole section of the media lens down to a rail of
+    // one icon, and bringing it back. Each pair is one button in two states —
+    // the collapse control lives in the section's own header, the expand
+    // control IS the rail.
+    "editor.timeline.collapseVideoAria": "Hide the video",
+    "editor.timeline.expandVideoAria": "Show the video",
+    "editor.timeline.collapseTimelineAria": "Hide the timeline",
+    "editor.timeline.expandTimelineAria": "Show the timeline",
+    "editor.timeline.collapseTextAria": "Hide the text",
+    "editor.timeline.expandTextAria": "Show the text",
     "editor.timeline.folderExpandAria": "Show the tracks in {name}",
     "editor.timeline.folderCollapseAria": "Hide the tracks in {name}",
     "editor.timeline.trackMenuAria": "Track options for {name}",
@@ -1507,6 +1524,49 @@ export const editor = defineNamespace({
           "timeline's track-name column back out, so every track's full name " +
           "and description are readable again. Affects every row at once. " +
           "Doubles as the button's hover tooltip.",
+      },
+      "editor.timeline.collapseVideoAria": {
+        description:
+          "Screen-reader name and tooltip of the button in the video's own " +
+          "header that collapses the whole video section to a 40px rail of one " +
+          "icon, giving its width to the text beside it. Doubles as the " +
+          "button's hover tooltip. Pairs with expandVideoAria.",
+      },
+      "editor.timeline.expandVideoAria": {
+        description:
+          "Screen-reader name and tooltip of the collapsed video rail — the " +
+          "strip of one icon that is all that remains of the video section, " +
+          "and which is itself the button that brings the picture back. The " +
+          "name is only ever seen on hover, so it carries the whole label.",
+      },
+      "editor.timeline.collapseTimelineAria": {
+        description:
+          "Screen-reader name and tooltip of the button in the timeline's " +
+          "toolbar that collapses the whole timeline to a 40px rail of one " +
+          "icon, giving its height to the video and text below it. Doubles as " +
+          "the button's hover tooltip. Pairs with expandTimelineAria.",
+      },
+      "editor.timeline.expandTimelineAria": {
+        description:
+          "Screen-reader name and tooltip of the collapsed timeline rail — the " +
+          "strip of one icon that is all that remains of the timeline, and " +
+          "which is itself the button that brings it back. The name is only " +
+          "ever seen on hover, so it carries the whole label.",
+      },
+      "editor.timeline.collapseTextAria": {
+        description:
+          "Screen-reader name and tooltip of the button in the text section's " +
+          "header that collapses the dialogue table to a 40px rail of one " +
+          "icon, giving its width to the video beside it. 'Text' here is the " +
+          "section holding the source and target columns, not one of them. " +
+          "Doubles as the button's hover tooltip. Pairs with expandTextAria.",
+      },
+      "editor.timeline.expandTextAria": {
+        description:
+          "Screen-reader name and tooltip of the collapsed text rail — the " +
+          "strip of one icon that is all that remains of the dialogue table, " +
+          "and which is itself the button that brings it back. The name is " +
+          "only ever seen on hover, so it carries the whole label.",
       },
       "editor.timeline.folderExpandAria": {
         description:

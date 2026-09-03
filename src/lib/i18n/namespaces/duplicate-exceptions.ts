@@ -43,6 +43,15 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "and a command are different parts of speech and most target languages " +
     "write them differently; folding them together would make one of the two " +
     "wrong wherever they diverge.",
+  "editor.timeline.textPaneTitle":
+    "Heading of the media lens's TEXT SECTION — the panel of cells beside the " +
+    "video, which a reader can collapse to a rail and bring back. editor.lens.text " +
+    "names the editor's Text LENS, a mode you switch into, and the two are on " +
+    "screen at the same time: the lens tab sits in the toolbar above a section " +
+    "heading that would read identically. A language that distinguishes a named " +
+    "region of a screen from a mode you enter needs both words, and tying the " +
+    "section heading to the mode's key would mean a later edit for one silently " +
+    "renamed the other.",
   "importExport.dialog.audioSectionTitle":
     "Title of the export dialog's .zip card, naming a KIND OF DELIVERABLE the " +
     "user is about to download. nav.lens.audio names the editor's Audio lens — " +

@@ -22,6 +22,16 @@ describe("useMediaSectionCollapse", () => {
     localStorage.clear()
   })
 
+  it("keeps every path that shuts a section on the same handler", () => {
+    // The button collapses; the drag is heard at pointer-up and collapses the
+    // same way. Both must freeze and both must blur, so there is one function.
+    const onBeforeCollapseText = vi.fn()
+    const { result } = setup({ onBeforeCollapseText })
+    act(() => result.current.collapse("text"))
+    expect(result.current.isCollapsed("text")).toBe(true)
+    expect(onBeforeCollapseText).toHaveBeenCalledTimes(1)
+  })
+
   it("starts from what this file was left in", () => {
     localStorage.setItem(KEY("f1"), "video")
     const { result } = setup()
@@ -59,32 +69,52 @@ describe("useMediaSectionCollapse", () => {
     expect(localStorage.getItem(KEY("f1"))).toBe("video")
   })
 
-  it("hears a drag-collapse through the resize measurement", () => {
-    // Dragging a divider shut is the library's business; the only signal it
-    // gives us is the panel measuring its collapsed size.
+  it("never collapses from a resize measurement alone", () => {
+    // Two browser-found reasons. onResize fires MID-gesture, and committing
+    // the pin under a live drag leaves the library holding a stale layout
+    // entry the rail's resize then lands on. And it fires with the OLD size
+    // right after React reopens a section, so reading 40px there shut the
+    // section straight back — the rail looked like it did nothing.
     const { result } = setup()
     act(() => result.current.noteResize("video", MEDIA_RAIL_PX))
-    expect(result.current.isCollapsed("video")).toBe(true)
+    expect(result.current.isCollapsed("video")).toBe(false)
   })
 
-  it("ignores a real size, and ignores zero", () => {
+  it("remembers the size a gesture ENDED at, not the ones it passed through", () => {
+    // A drag from 288 to the rail passes 220 on its way past the floor. It
+    // used to write 220 there, so the rail reopened the picture at its bare
+    // minimum. Now nothing is written until pointer-up, and only if the
+    // section is still open then.
     const { result } = setup()
-    act(() => result.current.noteResize("video", 288))
-    expect(result.current.isCollapsed("video")).toBe(false)
-    // Zero is a hidden subtree, not a collapse.
+    act(() => result.current.noteResize("video", 300))
+    act(() => result.current.noteResize("video", 240))
+    expect(localStorage.getItem("aquilla:video-pane-width")).toBeNull()
+    act(() => result.current.noteLayoutSettled({ isUserInteraction: true }))
+    expect(localStorage.getItem("aquilla:video-pane-width")).toBe("240")
+  })
+
+  it("ignores a layout the library settled on its own", () => {
+    const { result } = setup()
+    act(() => result.current.noteResize("video", 300))
+    act(() => result.current.noteLayoutSettled({ isUserInteraction: false }))
+    expect(localStorage.getItem("aquilla:video-pane-width")).toBeNull()
+  })
+
+  it("does not remember a width measured while the table was railed", () => {
+    // With the table pinned the picture measures the whole row; that is not a
+    // width the reader chose.
+    const { result } = setup()
+    act(() => result.current.collapse("text"))
+    act(() => result.current.noteResize("video", 1386))
+    act(() => result.current.noteLayoutSettled({ isUserInteraction: true }))
+    expect(localStorage.getItem("aquilla:video-pane-width")).toBeNull()
+  })
+
+  it("ignores zero, which is a hidden subtree rather than a size", () => {
+    const { result } = setup()
     act(() => result.current.noteResize("video", 0))
-    expect(result.current.isCollapsed("video")).toBe(false)
-  })
-
-  it("does not loop when the same measurement arrives again", () => {
-    // Every constraint change re-registers the panels, which fires onResize
-    // again with the same number. The reducer returning an identical reference
-    // is what stops that becoming a render loop.
-    const { result } = setup()
-    act(() => result.current.noteResize("video", MEDIA_RAIL_PX))
-    const first = result.current.collapsed
-    act(() => result.current.noteResize("video", MEDIA_RAIL_PX))
-    expect(result.current.collapsed).toBe(first)
+    act(() => result.current.noteLayoutSettled({ isUserInteraction: true }))
+    expect(localStorage.getItem("aquilla:video-pane-width")).toBeNull()
   })
 
   it("keeps the body populated: collapsing the second one gives the first back", () => {

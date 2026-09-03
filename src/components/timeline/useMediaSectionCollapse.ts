@@ -41,8 +41,8 @@ import {
   type CollapsedSections,
   type MediaSectionId,
 } from "./media-section-layout"
-import { readStoredTimelinePaneHeight } from "./timeline-pane-layout"
-import { readStoredVideoPaneWidth } from "./video-pane-layout"
+import { readStoredTimelinePaneHeight, writeStoredTimelinePaneHeight } from "./timeline-pane-layout"
+import { readStoredVideoPaneWidth, writeStoredVideoPaneWidth } from "./video-pane-layout"
 
 /** A section's last known real size, kept so the collapsed content can be
  *  frozen at it rather than re-laid-out at 40px. */
@@ -105,17 +105,48 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
     writeStoredCollapsedSections(fileId, effective)
   }, [fileId, timelineStacked, effective])
 
+  /**
+   * The last size each section measured while OPEN, kept from every resize
+   * report. Two jobs: it is what gets written back as the remembered size once
+   * a gesture ends, and it is the width to freeze at when a drag has already
+   * snapped the panel to its rail before we hear about it.
+   */
+  const lastOpenRef = useRef<Partial<Record<MediaSectionId, number>>>({})
+
   /** Freeze the section at the size it is now, before anything shrinks. */
   const freeze = useCallback((id: MediaSectionId) => {
     const el = contentRefs.current[id]
     if (!el) return
     const rect = el.getBoundingClientRect()
+    // A drag has already squeezed the panel to its rail by the time the
+    // gesture ends, so along the collapsing axis the box is 40px — use the
+    // last size it measured open instead. The other axis is still honest.
+    const open = lastOpenRef.current[id] ?? 0
+    const width = id === "timeline" ? rect.width : Math.max(rect.width, open)
+    const height = id === "timeline" ? Math.max(rect.height, open) : rect.height
     // Both axes: collapsing the timeline changes a panel's HEIGHT, and the
     // table's own height changes with it, so freezing width alone would still
     // let the row list re-measure.
-    if (rect.width > 0 && rect.height > 0) {
-      frozenRef.current[id] = { width: rect.width, height: rect.height }
+    if (width > 0 && height > 0) frozenRef.current[id] = { width, height }
+  }, [])
+
+  /**
+   * Is this panel sitting at its collapsed size, as far as the library knows?
+   *
+   * `isCollapsed()` reads the group's layout exactly as `resize()` does, and
+   * throws the same "Layout not found" when that group has not laid out yet.
+   * That is reachable on first mount: the VERTICAL group's settled-layout
+   * report fires before the HORIZONTAL group inside it has a layout, and a
+   * callback that then asks about the video or the table takes the whole
+   * lens down with it. A panel nobody has laid out yet is not collapsed.
+   */
+  const safeIsCollapsed = useCallback((id: MediaSectionId): boolean => {
+    try {
+      return panelRefs[id].current?.isCollapsed() ?? false
+    } catch {
+      return false
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- panel refs are stable
   }, [])
 
   const collapse = useCallback(
@@ -126,6 +157,14 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
       // clamps the panel to the rail on the next commit and gives the space to
       // its neighbour, which is also what makes drag-collapse and
       // button-collapse converge on one code path.
+      //
+      // A partner the swap rule brings back is likewise NOT resized. With its
+      // sibling pinned to the rail the group has exactly one fixed point — the
+      // partner takes the whole residual — so any requested size would be
+      // clamped to a no-op anyway. And the library validates the pin and the
+      // partner's new size in the SAME commit, before paint, so there is no
+      // frame in which the partner still measures 40px and could be misread
+      // as folded. Verified against the library's solver, not assumed.
       setCollapsed((prev) => collapseSection(prev, id, present))
     },
     [freeze, onBeforeCollapseText, present],
@@ -194,25 +233,99 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
       delete frozenRef.current[id]
       const { panel, px } = restoreTargetFor(id)
       applySize(panel, px)
+      // `resize()` reports the settled layout SYNCHRONOUSLY, so this is the
+      // truth, not a guess. It can legitimately refuse: on a body row too
+      // narrow to hold both floors the library returns the previous layout
+      // untouched, the panel stays at its rail with `collapsible` set, and the
+      // next window resize would read that as a fold and shut it anyway. Make
+      // that explicit instead — a rail click that cannot fit the section
+      // leaves it folded, rather than leaving a 40px sliver with no rail.
+      if (safeIsCollapsed(id)) {
+        setCollapsed((prev) => collapseSection(prev, id, present))
+      }
       // `resize`, never `expand()`. The library only remembers an expand-to
       // size after an IMPERATIVE collapse, and re-registration wipes it in any
       // case — so `expand()` would reopen the section at its bare minimum
       // rather than the size the reader left it at.
     },
-    [applySize, restoreTargetFor],
+    [applySize, present, restoreTargetFor, safeIsCollapsed],
   )
 
   /**
-   * Fed from every panel's `onResize`. This is how a DRAG collapse is heard:
-   * the library snaps the panel to its collapsed size, and the measurement is
-   * the only signal we get.
+   * Fed from every panel's `onResize`. It only RECORDS. It must not decide
+   * anything, for two reasons that both showed up in a browser:
+   *
+   * - It fires mid-gesture. Committing the pin while the pointer is still down
+   *   remounts the group under the drag, and pointer-up then re-inserts a
+   *   layout entry keyed by the dead group — after which the rail's `resize()`
+   *   lands on nothing and the panel stays at 40px.
+   * - It fires with the OLD size right after React reopens a section, because
+   *   the panel has not been resized yet on that frame. Reading that 40px as
+   *   "the user collapsed it" shut the section straight back — which is what
+   *   made the rail look like it did nothing.
    */
-  const noteResize = useCallback(
-    (id: MediaSectionId, px: number) => {
-      if (!isRailSized(px)) return
-      setCollapsed((prev) => collapseSection(prev, id, present))
+  const noteResize = useCallback((id: MediaSectionId, px: number) => {
+    if (!isRailSized(px)) lastOpenRef.current[id] = px
+  }, [])
+
+  /**
+   * Fed from BOTH panel groups' `onLayoutChanged`, which the library fires
+   * once per settled layout — at pointer-up for a gesture, and after its own
+   * re-validation otherwise. This is where a fold is heard, and where a size
+   * that ended a gesture OPEN is remembered:
+   *
+   * - A panel the library reports collapsed while React still has it open
+   *   was folded — by a drag, or by the library itself on a window too narrow
+   *   to hold it. Both are committed as real collapses, so the rail appears
+   *   and the fold reads as deliberate rather than as a 40px sliver; a fold
+   *   is a better degradation than the crushed layout such a width gives
+   *   otherwise. Committing here, after the layout settles, is what keeps the
+   *   pin from landing on a group mid-gesture.
+   * - A section that ends a USER gesture open remembers the size it ended at.
+   *   One that ends collapsed remembers NOTHING — which is what "reopen to the
+   *   size it was before" needs: a drag that goes 288 → 220 → rail used to
+   *   write 220 on its way past the floor, so the rail reopened the picture at
+   *   its bare minimum instead of where the reader had it. Layouts the library
+   *   settled on its own are never remembered; they were not chosen.
+   */
+  const noteLayoutSettled = useCallback(
+    (meta: { isUserInteraction: boolean }) => {
+      const partnerOf = (id: MediaSectionId) =>
+        id === "video" ? "text" : id === "text" ? "video" : null
+
+      // Folds first, sizes second — as two passes, and the order is the whole
+      // point. The gesture that folds the TEXT is a drag of the shared divider,
+      // during which the video grows to fill the row; its last open
+      // measurement is that full-row width. Persisting in the same pass, before
+      // the fold has been seen, would remember 1386px as the width the reader
+      // chose, and the rail would then reopen the picture to fill the row.
+      const foldedNow = new Set<MediaSectionId>()
+      for (const id of ["timeline", "video", "text"] as const) {
+        if (effective.includes(id) || !safeIsCollapsed(id)) continue
+        // A body row too narrow to hold even one open section plus a rail
+        // (under ~330px) makes the library fold BOTH body panels. Committing
+        // that would trigger the swap rule, which reopens the partner, which
+        // the library folds again on the next delivery — an oscillation once
+        // per resize. Below that width the layout is already broken; the one
+        // thing not to do is flicker. So a fold the library made on its own is
+        // not committed while the section's partner is already down.
+        const partner = partnerOf(id)
+        if (!meta.isUserInteraction && partner && effective.includes(partner)) continue
+        foldedNow.add(id)
+        collapse(id)
+      }
+      if (!meta.isUserInteraction) return
+      for (const id of ["timeline", "video"] as const) {
+        if (effective.includes(id) || foldedNow.has(id)) continue
+        const partner = partnerOf(id)
+        if (partner && foldedNow.has(partner)) continue
+        const px = lastOpenRef.current[id]
+        if (!px || !shouldPersistSize(effective, id)) continue
+        if (id === "timeline") writeStoredTimelinePaneHeight(fileId ?? "", px)
+        else writeStoredVideoPaneWidth(px)
+      }
     },
-    [present],
+    [collapse, effective, fileId, safeIsCollapsed],
   )
 
   return {
@@ -229,6 +342,7 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
     collapse,
     expand,
     noteResize,
+    noteLayoutSettled,
     restoreStoredSize,
     /** Should this measurement be written back as the section's size? */
     canPersist: (id: MediaSectionId) => shouldPersistSize(effective, id),

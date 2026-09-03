@@ -255,20 +255,12 @@ import { TimingVideoWarningDialog } from "./timeline/TimingVideoWarningDialog"
 import { LinkVideoUrlDialog } from "./timeline/LinkVideoUrlDialog"
 import { ImportAudioVttDialog } from "./timeline/ImportAudioVttDialog"
 import { MediaVideoPane } from "./timeline/MediaVideoPane"
-// AQU-1119: the panels' min/max now come from `mediaPanelConstraints`, since
-// several of them depend on which sections are collapsed. What is left here is
-// the two stored sizes and the floors the persistence guards still check.
-import {
-  shouldShowVideoPane,
-  readStoredVideoPaneWidth,
-  writeStoredVideoPaneWidth,
-  VIDEO_PANE_MIN_WIDTH,
-} from "./timeline/video-pane-layout"
-import {
-  readStoredTimelinePaneHeight,
-  writeStoredTimelinePaneHeight,
-  TIMELINE_PANE_MIN_HEIGHT,
-} from "./timeline/timeline-pane-layout"
+// AQU-1119: the panels' min/max come from `mediaPanelConstraints`, since
+// several of them depend on which sections are collapsed, and the stored sizes
+// are written by `useMediaSectionCollapse` at the end of a gesture. What is
+// left here is reading them for `defaultSize`.
+import { shouldShowVideoPane, readStoredVideoPaneWidth } from "./timeline/video-pane-layout"
+import { readStoredTimelinePaneHeight } from "./timeline/timeline-pane-layout"
 import {
   getVideoClockPlaying,
   setVideoClockSec,
@@ -10252,7 +10244,13 @@ export function ProjectWorkspace() {
                   tree, so toggling the lens never remounts it and loses its
                   virtualization state (and the separator stays a direct DOM
                   child of its Group, which the library requires). */}
-              <ResizablePanelGroup orientation="vertical" className="min-h-0">
+              <ResizablePanelGroup
+                orientation="vertical"
+                className="min-h-0"
+                // AQU-1119: fires once per gesture, at pointer-up. A drag that
+                // shut a section is heard here, after the group has settled.
+                onLayoutChanged={(_layout, meta) => mediaSections.noteLayoutSettled(meta)}
+              >
               {timelineStacked && activeFile ? (
                 <>
                   <ResizablePanel
@@ -10269,15 +10267,11 @@ export function ProjectWorkspace() {
                     // content would SCROLL inside the rail instead of being
                     // hidden behind it.
                     style={mediaSections.isCollapsed("timeline") ? { overflow: "hidden" } : undefined}
-                    onResize={(size) => {
-                      mediaSections.noteResize("timeline", size.inPixels)
-                      if (
-                        size.inPixels >= TIMELINE_PANE_MIN_HEIGHT
-                        && mediaSections.canPersist("timeline")
-                      ) {
-                        writeStoredTimelinePaneHeight(activeFile.id, size.inPixels)
-                      }
-                    }}
+                    // Records only. The remembered height is written once the
+                    // gesture ENDS (the group's onLayoutChanged), so a drag that
+                    // finishes collapsed never overwrites it on the way past
+                    // the floor.
+                    onResize={(size) => mediaSections.noteResize("timeline", size.inPixels)}
                   >
                   {/* Rendered unconditionally, and only its inline style
                       changes: adding or removing this wrapper on collapse
@@ -10468,7 +10462,11 @@ export function ProjectWorkspace() {
                   the table, under the chip strip. Dragging the divider shut is
                   how you hide it; the table carries a pixel floor so a narrow
                   window collapses the picture rather than crushing the text. */}
-              <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
+              <ResizablePanelGroup
+                orientation="horizontal"
+                className="min-h-0 flex-1"
+                onLayoutChanged={(_layout, meta) => mediaSections.noteLayoutSettled(meta)}
+              >
               {showVideoPane && activeFile?.coreMediaUrl ? (
                 <>
                   <ResizablePanel
@@ -10485,16 +10483,12 @@ export function ProjectWorkspace() {
                     groupResizeBehavior="preserve-pixel-size"
                     className="relative"
                     style={mediaSections.isCollapsed("video") ? { overflow: "hidden" } : undefined}
-                    onResize={(size) => {
-                      mediaSections.noteResize("video", size.inPixels)
-                      // `canPersist` is the new half: with the table railed the
-                      // picture legitimately measures the whole row, which
-                      // clears this floor and would overwrite the width the
-                      // reader actually chose.
-                      if (size.inPixels >= VIDEO_PANE_MIN_WIDTH && mediaSections.canPersist("video")) {
-                        writeStoredVideoPaneWidth(size.inPixels)
-                      }
-                    }}
+                    // Records only; the width is remembered at pointer-up, and
+                    // only if the gesture ended with the picture open — a drag
+                    // that ends in the rail used to write 220 on its way past
+                    // the floor, so the rail reopened the picture at its bare
+                    // minimum instead of where the reader had left it.
+                    onResize={(size) => mediaSections.noteResize("video", size.inPixels)}
                   >
                     <div
                       ref={mediaSections.registerContent("video")}

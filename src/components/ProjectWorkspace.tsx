@@ -39,7 +39,10 @@ import type { ScoredPair } from "@/lib/search/dual-index"
 import type { PassageHit } from "@/hooks/useSearchIndex"
 import { useHealth } from "@/hooks/useHealth"
 import { needsAttentionFromConfidence, resolveDecayConfig } from "@/lib/health/decay-engine"
-import { buildHealthRibbon, preTranslationEvidence } from "@/lib/health/health-ribbon"
+import { buildHealthRibbon } from "@/lib/health/health-ribbon"
+import { ribbonInputFor, type RibbonEvidenceReaders } from "@/lib/health/ribbon-inputs"
+import { chapterHealthBuilderFor } from "@/lib/health/chapter-health"
+import { resolveWorkbenchWindow } from "@/lib/agent/workbench-window"
 import { partitionInfractions } from "@/lib/rules/waivers"
 import { useCellConfidence } from "@/hooks/useCellConfidence"
 import { useRules } from "@/hooks/useRules"
@@ -317,7 +320,12 @@ import {
 } from "@/components/ui/select"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { readValidationCount } from "@/lib/progress/read-validation-count"
-import { resolveTextDirection, summarizeTextDirections } from "@/lib/text-direction"
+import {
+  detectStrongTextDirection,
+  resolveTextDirection,
+  summarizeDetectedDirections,
+  type TextDirection,
+} from "@/lib/text-direction"
 import { useSetupChecklist } from "@/hooks/useSetupChecklist"
 import { SetupChecklistDrawer } from "./onboarding/SetupChecklistDrawer"
 import { SystemPromptNudge } from "./onboarding/SystemPromptNudge"
@@ -406,6 +414,24 @@ const PROJECT_MEMORY_PATH_RE = /^\/project\/[^/]+\/memory(\/[^/]+)?$/
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _lastImportWrite: Promise<any> = Promise.resolve(undefined)
 const EMPTY_CELL_DATA: CellData[] = []
+const EMPTY_CHAPTER_HEALTH: BookHealthChapter[] = []
+const EMPTY_SCORED_PAIRS: ScoredPair[] = []
+
+// AQU-1104: the store keeps a summary's identity across commits for cells the
+// commit did not touch, so direction detection (a regex walk over every cell's
+// markup) is cached per summary object instead of re-run per commit.
+const directionBySummary = new WeakMap<CellSummary, { source: TextDirection | null; target: TextDirection | null }>()
+function summaryDirections(summary: CellSummary): { source: TextDirection | null; target: TextDirection | null } {
+  let directions = directionBySummary.get(summary)
+  if (!directions) {
+    directions = {
+      source: detectStrongTextDirection(summary.originalHtml ?? summary.original),
+      target: detectStrongTextDirection(summary.translatedHtml ?? summary.translated),
+    }
+    directionBySummary.set(summary, directions)
+  }
+  return directions
+}
 
 function projectRecordsEquivalent(a: ProjectRecord | null, b: ProjectRecord | null): boolean {
   if (a === b) return true
@@ -1720,15 +1746,15 @@ export function ProjectWorkspace() {
     targetTextDirection: activeFile?.targetTextDirection,
   })
   const activeFileDirectionSummary = useMemo(() => {
-    function* sourceValues() {
-      for (const summary of cellSummaries) yield summary.originalHtml ?? summary.original
+    function* sourceDirections() {
+      for (const summary of cellSummaries) yield summaryDirections(summary).source
     }
-    function* targetValues() {
-      for (const summary of cellSummaries) yield summary.translatedHtml ?? summary.translated
+    function* targetDirections() {
+      for (const summary of cellSummaries) yield summaryDirections(summary).target
     }
     return {
-      source: summarizeTextDirections(sourceValues()),
-      target: summarizeTextDirections(targetValues()),
+      source: summarizeDetectedDirections(sourceDirections()),
+      target: summarizeDetectedDirections(targetDirections()),
     }
   }, [cellSummaries])
   const [cellLabelsEnabled, setCellLabelsEnabled] = useCellLabelsPreference(projectId!)
@@ -4815,34 +4841,33 @@ export function ProjectWorkspace() {
     return confidence.healthMap
   }, [confidenceOverlayActive, healthMap, confidence.healthMap])
 
+  // AQU-1104: built incrementally. Every commit bumps the store version, and
+  // rebuilding this map from all summaries (a fresh Map plus an object per
+  // cell) was one of the per-commit whole-file walks behind the "Draft all"
+  // lag on a 31k-cell file. The builder keeps identities for unchanged cells
+  // and chapters, so the sidebar's chapter grid also skips re-rendering.
+  const chapterHealthBuilder = useMemo(() => chapterHealthBuilderFor(cellStore), [cellStore])
   const activeChapterHealth = useMemo<BookHealthChapter[]>(() => {
-    if (!activeFileId) return []
+    if (!activeFileId) return EMPTY_CHAPTER_HEALTH
     return readAtVersion(cellStoreVersion, () => {
-      const summaries = new Map(cellSummaries.map((cell) => [cell.id, cell]))
-      return cellStore.getNavigationIndex().map((chapter) => ({
-        key: chapter.key,
-        label: chapter.label,
-        translated: chapter.translated,
-        validated: chapter.validated,
-        total: chapter.total,
-        cells: chapter.cellIds.flatMap((cellId) => {
-          const cell = summaries.get(cellId)
-          if (!cell) return []
-          const stage = cell.status === "validated"
-            ? "validated" as const
-            : cell.status === "empty" || !cell.translated.trim()
-              ? "untranslated" as const
-              : "automatic" as const
-          return [{
-            id: cellId,
-            stage,
-            health: stage === "validated" ? 100 : effectiveHealthMap.get(cellId),
-            hasIssue: (infractions.get(cellId)?.length ?? 0) > 0,
-          }]
-        }),
-      }))
+      // Summaries sit in store order, so the store's index is a direct lookup;
+      // the id check guards the (never observed) case of a skipped row, falling
+      // back to a map built once for this pass.
+      let summaryById: Map<string, CellSummary> | null = null
+      const getSummary = (cellId: string): CellSummary | undefined => {
+        const index = cellStore.findIndexByCellId(cellId)
+        const direct = index >= 0 ? cellSummaries[index] : undefined
+        if (direct && direct.id === cellId) return direct
+        summaryById ??= new Map(cellSummaries.map((cell) => [cell.id, cell]))
+        return summaryById.get(cellId)
+      }
+      return chapterHealthBuilder.build(cellStore.getNavigationIndex(), {
+        getSummary,
+        health: (cellId) => effectiveHealthMap.get(cellId),
+        hasIssue: (cellId) => (infractions.get(cellId)?.length ?? 0) > 0,
+      })
     })
-  }, [activeFileId, cellStore, cellStoreVersion, cellSummaries, effectiveHealthMap, infractions])
+  }, [activeFileId, cellStore, cellStoreVersion, cellSummaries, chapterHealthBuilder, effectiveHealthMap, infractions])
 
   // AD-14: the four-sub-score breakdown popover is retired. The project ring
   // shows decay-derived health; the "biggest drags" popover redesign (cells
@@ -5183,7 +5208,10 @@ export function ProjectWorkspace() {
     const sourceLanguage = activeFile?.sourceLanguage || project?.sourceLanguage
     const targetLanguage = activeLaneTargetLanguage || activeFile?.targetLanguage || project?.targetLanguage
 
-    if (!scopeAvailable) {
+    // AQU-1104: the workbench is mounted only on the agent surface, yet this
+    // memo re-ran on every cell commit and walked every cell view in the file.
+    // Off the agent surface nothing reads it, so return the empty shape.
+    if (!scopeAvailable || !agentOpen) {
       return {
         cells: [],
         fileName: activeFile?.name,
@@ -5197,40 +5225,33 @@ export function ProjectWorkspace() {
     }
 
     // Keep rendering bounded around the focused cell for very large files.
-    const allCells = readAtVersion(cellStoreVersion, getActiveCells).filter(
-      (cell) => cell.fileId === activeFileId,
+    // The ribbon kernel reaches only a few dozen cells, so reading a padded
+    // window around the focus reproduces the full-file ribbon for every cell
+    // shown without deriving every view in the file (see workbench-window.ts).
+    const { order, window, readCells } = readAtVersion(cellStoreVersion, () => {
+      const order = cellStore.getCellIds()
+      const focusIndex = focusedCellId ? Math.max(0, cellStore.findIndexByCellId(focusedCellId)) : 0
+      const window = resolveWorkbenchWindow(order.length, focusIndex)
+      const readCells = cellStore
+        .getCellsByIds(order.slice(window.readStart, window.readEnd))
+        .filter((cell) => cell.fileId === activeFileId)
+      return { order, window, readCells }
+    })
+    const ribbonReaders: RibbonEvidenceReaders<CellData> = {
+      sourceText: effectiveSourceText,
+      health: (cellId: string) => effectiveHealthMap.get(cellId),
+      examples: (cellId: string) => examples.get(cellId) ?? EMPTY_SCORED_PAIRS,
+    }
+    const healthRibbonByCellId = buildHealthRibbon(
+      readCells.map((cell) => ribbonInputFor(cell.id, cell, ribbonReaders)),
     )
-    const healthRibbonByCellId = buildHealthRibbon(allCells.map((cell) => {
-      const stage = cell.status === "validated"
-        ? "validated" as const
-        : cell.status === "empty" || !cell.translated.trim()
-          ? "untranslated" as const
-          : "automatic" as const
-      const preTranslation = stage === "untranslated"
-        ? preTranslationEvidence(effectiveSourceText(cell), examples.get(cell.id) ?? [])
-        : null
-      return {
-        id: cell.id,
-        scope: `${cell.fileId}:${cell.group || cell.section || "document"}`,
-        stage,
-        rawScore: stage === "validated"
-          ? 100
-          : stage === "automatic"
-            ? effectiveHealthMap.get(cell.id)
-            : preTranslation?.score,
-        evidenceWeight: preTranslation?.evidenceWeight ?? 1,
-      }
-    }))
     const ruleById = new Map(rules.map((rule) => [rule.id, rule]))
     const validationRequirement = project ? readValidationCount(project) : 1
     const decayConfig = resolveDecayConfig(project?.decaySettings, validationRequirement)
     const roleCanValidate = canPerform("cell.validate", project?.syncRole?.level ?? null)
-    const focusIndex = focusedCellId
-      ? Math.max(0, allCells.findIndex((cell) => cell.id === focusedCellId))
-      : 0
-    const windowSize = 80
-    const start = Math.max(0, Math.min(focusIndex - Math.floor(windowSize / 2), allCells.length - windowSize))
-    const cells = allCells.slice(start, start + windowSize).map((cell, index) => {
+    const shownIds = new Set(order.slice(window.start, window.end))
+    const start = window.start
+    const cells = readCells.filter((cell) => shownIds.has(cell.id)).map((cell, index) => {
       const healthRibbonPoint = healthRibbonByCellId.get(cell.id)
       const activeInfractions = partitionInfractions(infractions.get(cell.id) ?? [], cell.waivers).active
       const hasMajorHealthIssue = activeInfractions.some(
@@ -5276,7 +5297,7 @@ export function ProjectWorkspace() {
       sourceLanguage,
       targetLanguage,
       focusedCellId,
-      totalCells: allCells.length,
+      totalCells: order.length,
       scopeAvailable: true,
       loading: cellsLoading,
     }
@@ -5285,6 +5306,8 @@ export function ProjectWorkspace() {
     activeFile,
     activeLane,
     activeLaneTargetLanguage,
+    agentOpen,
+    cellStore,
     cellStoreVersion,
     cellsLoading,
     effectiveHealthMap,
@@ -5292,7 +5315,6 @@ export function ProjectWorkspace() {
     fileMeta.targetDirectionMode,
     fileMeta.targetTextDirection,
     focusedCellId,
-    getActiveCells,
     infractions,
     myScopes,
     project,

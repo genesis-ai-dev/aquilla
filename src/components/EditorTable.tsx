@@ -56,12 +56,8 @@ import { needsAttentionFromConfidence, resolveDecayConfig } from "@/lib/health/d
 import { readValidationCount } from "@/lib/progress/read-validation-count"
 import { StaleSourceIndicator } from "./StaleSourceIndicator"
 import { HealthRibbon } from "./HealthRibbon"
-import {
-  buildHealthRibbon,
-  preTranslationEvidence,
-  type HealthRibbonPoint,
-  type HealthRibbonStage,
-} from "@/lib/health/health-ribbon"
+import { type HealthRibbonPoint } from "@/lib/health/health-ribbon"
+import { ribbonInputCacheFor, type RibbonInputCache } from "@/lib/health/ribbon-inputs"
 import { TranslatedEditor, type FootnoteInsertionAnchor, type TranslatedEditorHandle } from "./TranslatedEditor"
 import { TimelineAddMedia } from "./TimelineAddMedia"
 import { CellTtsButton } from "./CellTtsButton"
@@ -1195,35 +1191,23 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // Cell-level quality estimates are noisy. Present a symmetric local trend
   // instead of a progress ring, while keeping the three evidence stages
   // separate so validated 100s never inflate nearby automatic estimates.
+  //
+  // AQU-1104: inputs are cached per cell on the store's per-cell version, so a
+  // commit re-derives only the cells it touched instead of every view in the
+  // file. The smoothing pass itself still runs over the whole list; it is a
+  // few arithmetic operations per cell.
+  // The cache is keyed to the store instance: per-cell versions are only
+  // comparable within one store, so a new store gets a fresh cache.
+  const ribbonInputCache = useMemo<RibbonInputCache>(() => ribbonInputCacheFor(cellStore), [cellStore])
   const healthRibbonByCellId = useMemo(() =>
-    readAtVersion(cellStoreVersion, () => buildHealthRibbon(
-      displayCellIds.map((id) => {
-        const view = cellStore.getCellView(id)
-        if (!view) return { id, scope: "missing", stage: "untranslated" as const }
-
-        const stage: HealthRibbonStage = view.status === "validated"
-          ? "validated"
-          : view.status === "empty" || !view.translated.trim()
-            ? "untranslated"
-            : "automatic"
-        const pre = stage === "untranslated"
-          ? preTranslationEvidence(effectiveSourceText(view), examples.get(id) ?? EMPTY_EXAMPLES)
-          : null
-
-        return {
-          id,
-          scope: `${view.fileId}:${view.group || view.section || "document"}`,
-          stage,
-          rawScore: stage === "validated"
-            ? 100
-            : stage === "automatic"
-              ? healthMap.get(id)
-              : pre?.score,
-          evidenceWeight: pre?.evidenceWeight ?? 1,
-        }
-      }),
-    )),
-  [cellStore, cellStoreVersion, displayCellIds, examples, healthMap])
+    readAtVersion(cellStoreVersion, () => ribbonInputCache.ribbon<CellData>(displayCellIds, {
+      getCellVersion: cellStore.getCellVersion,
+      getCell: (id) => cellStore.getCellView(id),
+      sourceText: effectiveSourceText,
+      health: (id) => healthMap.get(id),
+      examples: (id) => examples.get(id) ?? EMPTY_EXAMPLES,
+    })),
+  [cellStore, cellStoreVersion, displayCellIds, examples, healthMap, ribbonInputCache])
 
   // FRO-251: per-file, per-side font size. Persisted in localStorage keyed by
   // fileId; adjusted from the View settings (eye) menu in the header.

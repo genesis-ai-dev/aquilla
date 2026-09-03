@@ -28,6 +28,7 @@ import { toast } from "@/components/ui/toast"
 import { cn } from "@/lib/utils"
 import { MIN_FONT_SIZE, MAX_FONT_SIZE, FONT_SIZE_STEP } from "@/lib/store/file-view-prefs"
 import type { FootnoteViewMode } from "@/lib/footnotes/types"
+import type { TargetKeyTermHighlightMode } from "@/hooks/useTargetKeyTermHighlightPreference"
 import type { DirectionMode, TextDirection, TextDirectionSummary } from "@/lib/text-direction"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
@@ -56,6 +57,8 @@ interface ViewSettingsMenuProps {
   tnSidebarEnabled: boolean
   /** AQU-317: USFM \f...\f* footnote display mode. */
   footnoteViewMode?: FootnoteViewMode
+  /** When approved target renderings receive the quiet key-term highlight. */
+  targetKeyTermHighlightMode?: TargetKeyTermHighlightMode
   /** Per-file source-column font size in px. */
   sourceFontSize: number
   /** Per-file target-column font size in px. */
@@ -68,6 +71,7 @@ interface ViewSettingsMenuProps {
   onTargetFontSizeChange: (v: number) => void
   onTnSidebarChange: (v: boolean) => void
   onFootnoteViewModeChange?: (v: FootnoteViewMode) => void
+  onTargetKeyTermHighlightModeChange?: (v: TargetKeyTermHighlightMode) => void
 }
 
 const FOOTNOTE_OPTIONS: { value: FootnoteViewMode; labelKey: MessageKey }[] = [
@@ -89,6 +93,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
   cellLabelsEnabled,
   tnSidebarEnabled,
   footnoteViewMode = "off",
+  targetKeyTermHighlightMode = "never",
   sourceFontSize,
   targetFontSize,
   onLineNumbersChange,
@@ -99,6 +104,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
   onTargetFontSizeChange,
   onTnSidebarChange,
   onFootnoteViewModeChange,
+  onTargetKeyTermHighlightModeChange,
 }, ref) {
   const t = useT()
   const [menuOpen, setMenuOpen] = useState(false)
@@ -291,6 +297,40 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
               onCheckedChange={onTnSidebarChange}
             />
           </FieldGroup>
+
+          {onTargetKeyTermHighlightModeChange && (
+            <>
+              <Separator />
+              <div className="flex flex-col gap-2">
+                <SectionLabel>{t("editor.view.targetKeyTerms")}</SectionLabel>
+                <RadioGroup
+                  value={targetKeyTermHighlightMode}
+                  disabled={!fileOpen}
+                  onValueChange={(value) => onTargetKeyTermHighlightModeChange(
+                    value as TargetKeyTermHighlightMode,
+                  )}
+                  aria-label={t("editor.view.targetKeyTerms")}
+                  className="gap-2"
+                >
+                  {([
+                    ["always", "editor.view.targetKeyTermsAlways"],
+                    ["focused", "editor.view.targetKeyTermsFocused"],
+                    ["never", "editor.view.targetKeyTermsNever"],
+                  ] as const).map(([value, labelKey]) => {
+                    const id = `target-key-terms-${value}`
+                    return (
+                      <div key={value} className="flex items-center gap-3">
+                        <RadioGroupItem id={id} value={value} />
+                        <Label htmlFor={id} layout="inline" className="font-normal">
+                          {t(labelKey)}
+                        </Label>
+                      </div>
+                    )
+                  })}
+                </RadioGroup>
+              </div>
+            </>
+          )}
 
           {onFootnoteViewModeChange && (
             <>

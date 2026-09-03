@@ -10,9 +10,10 @@
  */
 
 import { useMemo, useCallback, useState } from "react"
-import { X, CheckCircle2, AlertCircle, Minus } from "lucide-react"
+import { X, CheckCircle2, AlertCircle, Minus, SquareArrowOutUpRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
 import type { Concept, TermRendering } from "@/lib/terminology/types"
 import { renderingStatusLabelKey } from "@/lib/terminology/types"
@@ -52,7 +53,7 @@ type Verdict = "enforced" | "infringed" | "na"
 
 function deriveVerdict(concept: Concept, original: string, translated: string): Verdict {
   // Wildcard-aware match (grac* matches grace/graced/gracia) via shared matcher.
-  if (!matchesTerm(original, concept.sourceTerm)) return "na"
+  if (!matchesTerm(original, concept.sourceTerm, { caseSensitive: concept.caseSensitive })) return "na"
 
   const approved = concept.renderings.filter(
     (r) => r.status === "preferred" || r.status === "admitted",
@@ -108,6 +109,7 @@ interface OccurrenceRowProps {
   username: string
   onOptimisticEdit: (cellId: string, patch: { value: string; valueHtml?: string }) => void
   onCellCommitted: () => void
+  onJumpToCell?: (cell: { cellId: string; fileId: string }) => void
 }
 
 function OccurrenceRow({
@@ -119,6 +121,7 @@ function OccurrenceRow({
   username,
   onOptimisticEdit,
   onCellCommitted,
+  onJumpToCell,
 }: OccurrenceRowProps) {
   const t = useT()
   const verdict = deriveVerdict(concept, cell.original, translated)
@@ -163,7 +166,7 @@ function OccurrenceRow({
     >
       {/* Cell ref */}
       <span className="w-24 shrink-0 font-mono text-[11px] text-muted-foreground pt-0.5">
-        {cell.group || cell.id.slice(0, 8)}
+        {cell.context || cell.group || cell.id.slice(0, 8)}
       </span>
 
       {/* Source snippet */}
@@ -204,6 +207,21 @@ function OccurrenceRow({
           </button>
         )}
       </div>
+
+      {onJumpToCell && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          className="shrink-0"
+          aria-label={t("terminology.termDetail.goToCellAria", {
+            ref: cell.context || cell.group || cell.id.slice(0, 8),
+          })}
+          onClick={() => onJumpToCell({ cellId: cell.id, fileId: cell.fileId })}
+        >
+          <SquareArrowOutUpRight />
+        </Button>
+      )}
     </li>
   )
 }
@@ -229,6 +247,10 @@ export interface TerminologyTermDetailProps {
    * concept. Persistence is owned by the parent (patchSettings).
    */
   onPromoteRendering?: (conceptId: string, target: string) => void | Promise<void>
+  /** True while the parent is still fetching cells for the examples list. */
+  examplesLoading?: boolean
+  /** Jump to this occurrence in the editor. */
+  onJumpToCell?: (cell: { cellId: string; fileId: string }) => void
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -244,13 +266,15 @@ export function TerminologyTermDetail({
   onOptimisticEdit,
   canManageTermbase = false,
   onPromoteRendering,
+  examplesLoading = false,
+  onJumpToCell,
 }: TerminologyTermDetailProps) {
   const t = useT()
   // Per-cell translated values — optimistic updates are already reflected via
   // the parent's useCells applyOptimisticTargetEdit before this renders.
   const occurrences = useMemo(
-    () => cells.filter((c) => matchesTerm(c.original, concept.sourceTerm)),
-    [cells, concept.sourceTerm],
+    () => cells.filter((c) => matchesTerm(c.original, concept.sourceTerm, { caseSensitive: concept.caseSensitive })),
+    [cells, concept.sourceTerm, concept.caseSensitive],
   )
 
   const { enforced, infringed } = useMemo(() => {
@@ -329,7 +353,8 @@ export function TerminologyTermDetail({
           <p className="text-xs text-muted-foreground">{concept.notes}</p>
         )}
 
-        {/* Stats summary */}
+        {/* Stats summary — hidden while examples load so we don't flash "0 occurrences". */}
+        {!examplesLoading && (
         <div className="flex items-center gap-4 text-xs text-muted-foreground">
           <span>
             <RichMessage
@@ -353,21 +378,28 @@ export function TerminologyTermDetail({
             </>
           )}
         </div>
+        )}
       </div>
 
-      {/* Target equivalents — managed (deterministic) vs AI-assumed (predicted) */}
+      {/* Managed renderings / predicted equivalents don't need the cell query. */}
       <div className="border-b px-4 py-3">
         <EquivalentsPanel
           sourceTerm={concept.sourceTerm}
           managed={concept.renderings}
-          predicted={predicted}
+          predicted={examplesLoading ? [] : predicted}
           canPromote={canManageTermbase && Boolean(onPromoteRendering)}
           onPromote={handlePromoteEquivalent}
         />
       </div>
 
-      {/* Occurrence list */}
-      <main className="flex-1 overflow-y-auto px-4 py-2">
+      {/* Occurrence list — the cells query lives here, not on the whole entry. */}
+      {examplesLoading ? (
+        <div role="status" className="flex items-center justify-center gap-2 px-4 py-16 text-sm text-muted-foreground">
+          <Spinner className="size-4" />
+          {t("terminology.termDetail.loadingExamples")}
+        </div>
+      ) : (
+        <main className="flex-1 overflow-y-auto px-4 py-2">
         {occurrences.length === 0 ? (
           <div className="flex flex-col items-center gap-2 py-16 text-center text-muted-foreground">
             <Minus className="h-8 w-8 opacity-30" />
@@ -381,6 +413,7 @@ export function TerminologyTermDetail({
               <span className="flex-1">{t("editor.column.source")}</span>
               <span className="w-20 shrink-0">{t("terminology.common.columnVerdict")}</span>
               <span className="flex-1">{t("editor.column.target")}</span>
+              {onJumpToCell && <span className="w-8 shrink-0" />}
             </div>
             <ul>
               {occurrences.map((cell) => (
@@ -394,12 +427,14 @@ export function TerminologyTermDetail({
                   username={username}
                   onOptimisticEdit={onOptimisticEdit}
                   onCellCommitted={onCellCommitted}
+                  onJumpToCell={onJumpToCell}
                 />
               ))}
             </ul>
           </>
         )}
       </main>
+      )}
     </div>
   )
 }

@@ -17,6 +17,8 @@ import {
 import { AppTooltip } from "@/components/ui/tooltip"
 import { prefetchFileProgress } from "@/lib/progress/file-progress-resource"
 import { canExportSourceFile, exportSourceFile } from "@/lib/file-source-export"
+import { downloadImportedOriginal } from "@/lib/file-original-download"
+import { useOriginalSourceFlags } from "@/hooks/useOriginalSourceFlags"
 import type { BookHealthChapter } from "./sidebar/BookHealthSpine"
 import { useT } from "@/lib/i18n/I18nProvider"
 
@@ -73,6 +75,7 @@ export function ExpandableFileList({
   const [filter, setFilter] = useState("")
   const [editingCorpus, setEditingCorpus] = useState<string | null>(null)
   const { requestScrollToSection } = useEditorScroll()
+  const originalSourceIds = useOriginalSourceFlags(projectId, files, getTokenForFile)
 
   useEffect(() => {
     if (activeFileId) prefetchFileProgress(projectId, activeFileId, getTokenForFile)
@@ -231,6 +234,15 @@ export function ExpandableFileList({
                             onExportSource={
                               canExportSourceFile(file, canExportByOrgPolicy)
                                 ? () => { void exportFile(file) }
+                                : undefined
+                            }
+                            onDownloadOriginal={
+                              canExportByOrgPolicy && originalSourceIds.has(file.id)
+                                ? () => { void downloadImportedOriginal({
+                                    projectId,
+                                    file,
+                                    getToken: getTokenForFile,
+                                  }) }
                                 : undefined
                             }
                             onApplySuggestion={

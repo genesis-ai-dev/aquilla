@@ -56,6 +56,10 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
     source: /^(?:src\/(?:components|lib)\/(?:editor|cell|workspace-actions|import|export|audio|voice|video|search|sidebar|timeline|storage)|packages\/idml)/i,
     sentinels: ["e2e/specs/editor/import-and-edit.smoke.spec.ts"],
   },
+  {
+    source: /(?:original-download|originals-bundle|file-original-download|useOriginalSourceFlags|original-source)/i,
+    sentinels: ["e2e/specs/editor/export.smoke.spec.ts"],
+  },
 ]
 
 const NON_RUNTIME = /^(?:docs\/|\.github\/|\.claude\/|\.agents\/|test-results|playwright-report|.*\.(?:md|mdx|txt|png|jpe?g|gif|svg|mp4|mov|csv))$/i

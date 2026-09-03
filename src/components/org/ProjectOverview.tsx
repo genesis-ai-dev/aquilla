@@ -26,6 +26,7 @@ import { markProjectOpened } from "@/lib/frontier/opened-shared-store"
 import { useProjectLifecycle } from "@/hooks/useProjectLifecycle"
 import { InactiveProjectBanner } from "@/components/InactiveProjectBanner"
 import { downloadProjectBundle } from "@/lib/sync/export-bundle"
+import { downloadImportedOriginal, downloadImportedOriginalsZip } from "@/lib/file-original-download"
 import { AssignWork } from "./AssignWork"
 import { MemberActivityPanel } from "./MemberActivityPanel"
 import { ProjectAutopilotPanel } from "./ProjectAutopilotPanel"
@@ -1594,6 +1595,7 @@ export function ProjectOverview() {
                 const sorted = sortFiles(filtered, fileSortMode)
                 const shown = showAllFiles ? sorted : sorted.slice(0, FILE_ROW_CAP)
                 const hidden = sorted.length - shown.length
+                const hasAnyOriginal = files.some((f) => f.hasOriginalSource)
 
                 // AQU-500: export the full sorted+filtered list (honoring
                 // AQU-499's current sort/filter), not just the `shown` slice
@@ -1688,31 +1690,60 @@ export function ProjectOverview() {
                           </SelectGroup>
                         </SelectContent>
                       </Select>
-                      {orgSettings.canExport && sorted.length > 0 && (
-                        <ButtonGroup className="ms-auto shadow-xs">
-                          <AppTooltip content={t("org.projectOverview.copyCsvTooltip")}>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              onClick={() => void handleCopyCsv()}
-                              data-testid="export-csv-copy"
-                            >
-                              {csvCopied ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
-                              {csvCopied ? t("nav.version.copiedLabel") : t("org.projectOverview.copyCsv")}
-                            </Button>
-                          </AppTooltip>
-                          <AppTooltip content={t("org.projectOverview.downloadCsvTooltip")}>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              onClick={handleDownloadCsv}
-                              data-testid="export-csv-download"
-                            >
-                              <Download data-icon="inline-start" />
-                              {t("org.projectOverview.downloadCsv")}
-                            </Button>
-                          </AppTooltip>
-                        </ButtonGroup>
+                      {orgSettings.canExport && (hasAnyOriginal || sorted.length > 0) && (
+                        <div className="ms-auto flex flex-wrap items-center gap-2">
+                          {hasAnyOriginal && jwt && (
+                            <AppTooltip content={t("org.projectOverview.downloadOriginalsTooltip")}>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                data-testid="download-originals-zip"
+                                onClick={() => {
+                                  const fileId = project?.files[0]?.id ?? files[0]?.fileId
+                                  if (!fileId) {
+                                    setError(t("org.projectOverview.noFilesToExport"))
+                                    return
+                                  }
+                                  void downloadImportedOriginalsZip({
+                                    projectId: id,
+                                    projectName: project?.name ?? "project",
+                                    jwt,
+                                    fileId,
+                                  })
+                                }}
+                              >
+                                <Download data-icon="inline-start" />
+                                {t("org.projectOverview.downloadOriginals")}
+                              </Button>
+                            </AppTooltip>
+                          )}
+                          {sorted.length > 0 && (
+                            <ButtonGroup className="shadow-xs">
+                              <AppTooltip content={t("org.projectOverview.copyCsvTooltip")}>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  onClick={() => void handleCopyCsv()}
+                                  data-testid="export-csv-copy"
+                                >
+                                  {csvCopied ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
+                                  {csvCopied ? t("nav.version.copiedLabel") : t("org.projectOverview.copyCsv")}
+                                </Button>
+                              </AppTooltip>
+                              <AppTooltip content={t("org.projectOverview.downloadCsvTooltip")}>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  onClick={handleDownloadCsv}
+                                  data-testid="export-csv-download"
+                                >
+                                  <Download data-icon="inline-start" />
+                                  {t("org.projectOverview.downloadCsv")}
+                                </Button>
+                              </AppTooltip>
+                            </ButtonGroup>
+                          )}
+                        </div>
                       )}
                     </div>
                     {sorted.length === 0 ? (
@@ -1741,6 +1772,7 @@ export function ProjectOverview() {
                           <span className="w-14 text-end">{t("org.projectOverview.columnApproved")}</span>
                           <span className="w-10 text-end">{t("org.projectOverview.columnTotal")}</span>
                           <span className="w-12 text-end">{t("org.projectOverview.columnWords")}</span>
+                          <span className="w-8 shrink-0" />
                         </span>
                       </div>
                       <ul className="space-y-2" aria-label={t("org.projectOverview.filesListAria")}>
@@ -1790,6 +1822,34 @@ export function ProjectOverview() {
                                     <span className="w-12 text-end">{f.wordCount}</span>
                                   </span>
                                 </AppTooltip>
+                                {orgSettings.canExport && f.hasOriginalSource && jwt ? (
+                                  <AppTooltip content={t("fileDetails.downloadOriginal")}>
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="icon-sm"
+                                      className="shrink-0"
+                                      aria-label={t("org.projectOverview.downloadOriginalAria", { fileName: f.name })}
+                                      data-testid="download-original-file"
+                                      onClick={() => {
+                                        void downloadImportedOriginal({
+                                          projectId: id,
+                                          file: { id: f.fileId, name: f.name, type: f.fileType },
+                                          getToken: async (fileId) => {
+                                            const tok = await fetchSyncToken(jwt, id, fileId, {
+                                              projectName: project?.name,
+                                            })
+                                            return tok.token
+                                          },
+                                        })
+                                      }}
+                                    >
+                                      <Download className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </AppTooltip>
+                                ) : (
+                                  <span className="w-8 shrink-0" />
+                                )}
                               </div>
                               {isExpanded && (
                                 <FileCanonicalRollup

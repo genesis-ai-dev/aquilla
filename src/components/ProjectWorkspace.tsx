@@ -299,6 +299,8 @@ import { EditorScrollProvider, useEditorScroll } from "@/context/EditorScrollCon
 import { EditorActionsProvider } from "@/context/EditorActionsContext"
 import { detectSuggestions, type RenameSuggestion } from "@/lib/file-labeling/detect"
 import { canExportSourceFile, exportSourceFile } from "@/lib/file-source-export"
+import { downloadImportedOriginal } from "@/lib/file-original-download"
+import { useOriginalSourceFlags } from "@/hooks/useOriginalSourceFlags"
 import { applySuggestions, buildUndo, hasEffectiveChange } from "@/lib/file-labeling/apply"
 import { renameFile, moveFileToCorpus, renameCorpus, deleteFile } from "@/lib/store/file-operations"
 import { deleteFileProjection } from "@/lib/sync/file-projection"
@@ -1140,6 +1142,8 @@ export function ProjectWorkspace() {
     project?.origin?.kind,
     project?.origin?.kind === "git" ? project?.origin.gitlabProjectId : undefined,
   ])
+
+  const originalSourceIds = useOriginalSourceFlags(project?.id, project?.files ?? [], getTokenForFile)
 
   // Project-AWARE fetcher for the outbox flusher. The outbox is global across
   // every project the user touches, so the flusher must mint a token for each
@@ -9217,6 +9221,20 @@ export function ProjectWorkspace() {
         },
       })
     }
+    if (activeFile && projectId && canExportByOrgPolicy && originalSourceIds.has(activeFile.id)) {
+      items.push({
+        id: "file-download-original",
+        label: t("fileDetails.downloadOriginal"),
+        icon: Download,
+        onClick: () => {
+          void downloadImportedOriginal({
+            projectId,
+            file: activeFile,
+            getToken: getTokenForFile,
+          })
+        },
+      })
+    }
     if (currentRoleLevel >= ROLE.PROJECT_LEAD) {
       items.push({ id: "sep-file-delete", type: "separator" })
       items.push({
@@ -9251,6 +9269,7 @@ export function ProjectWorkspace() {
     hasUnfinished,
     lens,
     openExportFlow,
+    originalSourceIds,
     project,
     projectId,
     suggestions.length,

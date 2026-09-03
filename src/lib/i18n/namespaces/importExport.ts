@@ -535,6 +535,9 @@ export const importExport = defineNamespace({
     "importExport.dialog.voiceFilterAriaLabel": "Filter export by voice",
     "importExport.dialog.allVoices": "All voices",
     "importExport.dialog.voiceFilterHint": "Export will include only cells assigned to {voice}, across all camera angles.",
+    "importExport.dialog.chapterFilterAriaLabel": "Filter export by chapter",
+    "importExport.dialog.allChapters": "All chapters",
+    "importExport.dialog.chapterFilterHint": "Export will include only the cells in {chapter}.",
     "importExport.dialog.filenameLegend": "Filename",
     "importExport.dialog.filenameAriaLabel": "Export filename (without extension)",
     "importExport.dialog.projectScopeUsesProjectName": "Project-scope exports use the project name.",
@@ -1309,6 +1312,13 @@ export const importExport = defineNamespace({
       "importExport.dialog.voiceFilterHint": {
         description: "Hint below the voice filter once a specific voice is chosen. {voice} is bold-styled, rendered by RichMessage.",
         placeholders: { voice: "Bold-styled name of the selected cast voice." },
+      },
+      "importExport.dialog.chapterFilterAriaLabel": {
+        description: "Accessible name for the chapter-scope select on the Export dialog.",
+      },
+      "importExport.dialog.chapterFilterHint": {
+        description: "Hint below the chapter scope once a single chapter is chosen. {chapter} is bold-styled, rendered by RichMessage.",
+        placeholders: { chapter: "Bold-styled label of the selected chapter, e.g. 'GEN 1'." },
       },
       "importExport.dialog.filenameAriaLabel": {
         description: "Accessible name for the export filename input.",

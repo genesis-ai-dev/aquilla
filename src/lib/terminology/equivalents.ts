@@ -53,6 +53,8 @@ export interface PredictedEquivalent {
   source: EquivalentSource
   /** Confidence band — agreement boosts to HIGH; disagreement caps at AMBER. */
   confidence: EquivalentConfidence
+  /** How consistently source and target occur together across project examples. */
+  confidenceScore: number
   /** χ² statistic, if χ² surfaced it. */
   chi2?: number
   /** IBM Model 1 P(target | source), if EM surfaced it. */
@@ -134,12 +136,14 @@ export function predictEquivalents(
 
   // ── Few-shot examples: nearby pairs containing the source term ──
   const termExamples: EquivalentExample[] = []
+  const sourcePairs: BilingualPair[] = []
   for (const p of pairs) {
     if (tokenizeSet(p.source).has(term)) {
+      sourcePairs.push(p)
       termExamples.push({ source: p.source, target: p.target })
-      if (termExamples.length >= maxExamples) break
     }
   }
+  const visibleTermExamples = termExamples.slice(0, maxExamples)
   // Per-candidate examples: prefer pairs that show BOTH the source term and the
   // predicted target token; fall back to generic term examples.
   function examplesFor(target: string): EquivalentExample[] {
@@ -151,7 +155,18 @@ export function predictEquivalents(
       }
     }
     if (both.length > 0) return both
-    return termExamples.slice(0, maxExamples)
+    return visibleTermExamples
+  }
+
+  function confidenceScoreFor(target: string): number {
+    if (sourcePairs.length === 0) return 0
+    const cooccurrences = sourcePairs.filter((pair) =>
+      tokenizeSet(pair.target).has(target),
+    ).length
+    const targetOccurrences = pairs.filter((pair) =>
+      tokenizeSet(pair.target).has(target),
+    ).length
+    return (2 * cooccurrences) / (sourcePairs.length + targetOccurrences)
   }
 
   // ── Reconcile ──
@@ -186,6 +201,7 @@ export function predictEquivalents(
       target: t,
       source,
       confidence,
+      confidenceScore: confidenceScoreFor(t),
       chi2: chi?.chi2,
       emProb,
       examples: examplesFor(t),

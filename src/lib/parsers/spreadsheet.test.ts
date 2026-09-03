@@ -10,7 +10,6 @@ import {
   parseXlsxToSheets,
   applyColumnMapping,
   mappedRowsToStrings,
-  generateLabelTemplate,
   matchPairedRowsToSourceCells,
   splitCastName,
 } from "./spreadsheet"
@@ -382,26 +381,6 @@ describe("mappedRowsToStrings", () => {
     }])
 
     expect(cue).toMatchObject({ type: "cue", start: 1.5, end: 3, speaker: "Narrator" })
-  })
-})
-
-describe("generateLabelTemplate", () => {
-  it("produces a CSV with a BOM and correct columns", () => {
-    const csv = generateLabelTemplate(["GEN 1:1", "GEN 1:2"])
-    expect(csv.charCodeAt(0)).toBe(0xfeff) // BOM
-    expect(csv).toContain("ref,cast_name,note")
-    expect(csv).toContain('"GEN 1:1",,')
-    expect(csv).toContain('"GEN 1:2",,')
-  })
-
-  it("handles empty refs array", () => {
-    const csv = generateLabelTemplate([])
-    expect(csv).toContain("ref,cast_name,note")
-  })
-
-  it("escapes double quotes in refs", () => {
-    const csv = generateLabelTemplate(['REF "1"'])
-    expect(csv).toContain('"REF ""1"""')
   })
 })
 

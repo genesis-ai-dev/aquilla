@@ -173,10 +173,13 @@ function SelectItem({
   className,
   children,
   multiline = false,
+  leading,
   ...props
 }: SelectPrimitive.Item.Props & {
   /** Allow wrapped secondary copy under the primary label (e.g. RoleSelect). */
   multiline?: boolean
+  /** Extra control outside ItemText (e.g. a preview button). Not shown on the trigger. */
+  leading?: React.ReactNode
 }) {
   return (
     <SelectPrimitive.Item
@@ -191,6 +194,7 @@ function SelectItem({
       )}
       {...props}
     >
+      {leading}
       <SelectPrimitive.ItemText
         data-slot="select-item-text"
         className={cn(

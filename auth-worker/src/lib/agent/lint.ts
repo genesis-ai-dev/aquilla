@@ -17,11 +17,27 @@ export interface LintRule {
    *  the approved/forbidden renderings here — which is the only place a model
    *  can learn them, so the contextual performer prompts from this, not `name`. */
   description?: string
+  /** AQU-609: `"lane"`-scoped rules apply only to their `lane`; any other
+   *  scope (or none, for legacy rows) applies in every lane. Passed through
+   *  verbatim from the SPA's `TranslationRule` in project settings JSON. */
+  scope?: string
+  /** Target-language lane a `scope === "lane"` rule is pinned to; `''` = the
+   *  project-default lane. */
+  lane?: string
   enabled: boolean
   check:
     | { type: "source-requires-target"; sourcePattern: string; targetPattern: string }
     | { type: "target-forbids"; targetPattern: string }
     | { type: string; [k: string]: unknown }
+}
+
+/**
+ * AQU-609: restrict a rules array to the given target-language lane (`''` =
+ * the project-default lane). Mirror of `rulesForLane` in the SPA's
+ * `src/lib/rules/rule-engine.ts` — keep the predicates identical.
+ */
+export function rulesForLane(rules: LintRule[], lane: string): LintRule[] {
+  return rules.filter((r) => r.scope !== "lane" || (r.lane ?? "") === lane)
 }
 
 export interface LintHit {

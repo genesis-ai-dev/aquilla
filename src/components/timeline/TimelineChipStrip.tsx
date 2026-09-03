@@ -25,6 +25,10 @@ import { uiSlotRef } from "@/lib/ui-slots"
 import type { CellData } from "@/hooks/useCells"
 import type { CameraState } from "@/lib/sync/cells-read-types"
 import { useT } from "@/lib/i18n/I18nProvider"
+import {
+  TranscribeSelectionControls,
+  type TranscribeSelectionControlsProps,
+} from "./TranscribeSelectionControls"
 
 /** The current dub chip's own numbers, computed by TimelineEditor (this
  *  component never reads lane geometry). Null when there is no measured dub. */
@@ -281,6 +285,7 @@ export function MediaTextHeader({
   headingLabel,
   castName: castNameOverride,
   cameraState: cameraStateOverride,
+  transcribe,
 }: {
   cell: CellData | null
   /**
@@ -308,6 +313,19 @@ export function MediaTextHeader({
   castName?: string | null
   /** Ditto for the camera, merged to "mixed" when the linked lines disagree. */
   cameraState?: CameraState | null
+  /**
+   * AQU-646 stage 3e: the section-scoped transcribe controls, which used to be
+   * a full-width row of their own under the lanes.
+   *
+   * NULL WHEN NOTHING IS SELECTED, and that is the whole point of the move
+   * (Sam, 2026-08-25) — the old row was permanently on screen advertising a
+   * greyed-out button. The caller owns the selection, so the caller decides;
+   * this header just gives them somewhere to sit.
+   *
+   * They live HERE rather than on the timeline because they act on CELLS. The
+   * timing readout below acts on chips and stays where it is.
+   */
+  transcribe?: TranscribeSelectionControlsProps | null
 }) {
   const t = useT()
   const isDialogue = (cell?.medium ?? "media") === "media"
@@ -347,6 +365,9 @@ export function MediaTextHeader({
           {t("editor.timeline.chipCamera")} <b className="font-semibold text-foreground">{cameraState}</b>
         </Pill>
       )}
+      {/* Before the nav, which carries `ms-auto` — so these sit next to the
+          label and the navigator stays pinned to the right wall. */}
+      {transcribe && <TranscribeSelectionControls {...transcribe} />}
       <StripNavSlot />
     </div>
   )

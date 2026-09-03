@@ -47,11 +47,8 @@ test("comments page empty state, filters, search, and resolved surface session",
 
   const uniqueText = `unique-search-token-${Date.now()}`
   await test.step("post a comment then Filters expand, collapse, and sort", async () => {
-    const row = ws.cellRow(0)
-    await row.scrollIntoViewIfNeeded()
-    await row.hover()
-    const addCommentBtn = row.locator('button[aria-label="Add comment"]')
-    await expect(addCommentBtn).toBeVisible({ timeout: 5_000 })
+    // AQU-200: comments live behind the rail's ⋯ overflow.
+    const addCommentBtn = await ws.openRowAction(ws.cellRow(0), "Add comment")
     await addCommentBtn.click()
 
     const drawer = alice.locator('[data-testid="comments-drawer"]')
@@ -143,11 +140,8 @@ test("comments page empty state, filters, search, and resolved surface session",
 
   await test.step("Show resolved checkbox reveals resolved threads", async () => {
     // Cell 0 already has an open comment from earlier steps — use a fresh cell.
-    const row = ws.cellRow(2)
-    await row.scrollIntoViewIfNeeded()
-    await row.hover()
-    const addCommentBtn = row.locator('button[aria-label="Add comment"]')
-    await expect(addCommentBtn).toBeVisible({ timeout: 5_000 })
+    // AQU-200: comments live behind the rail's ⋯ overflow.
+    const addCommentBtn = await ws.openRowAction(ws.cellRow(2), "Add comment")
     await addCommentBtn.click()
 
     const commentText = `resolved-comment-${Date.now()}`

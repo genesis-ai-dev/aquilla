@@ -350,6 +350,28 @@ export class Workspace {
     await sparkle.click({ force: true })
   }
 
+  /**
+   * AQU-200: the rail keeps only the AI-generate group as direct buttons —
+   * comments, history, record, play, TTS and footnote live behind a single
+   * `⋯`. Reveal the row's rail, open that overflow, and return the named
+   * action. The popup is portalled to the body, so the returned locator is
+   * page-scoped, NOT row-scoped: only one row's overflow is ever open.
+   */
+  async openRowAction(row: Locator, ariaLabel: string): Promise<Locator> {
+    await row.scrollIntoViewIfNeeded()
+    await row.hover()
+    const rail = row.locator('[data-slot="cell-action-rail"]')
+    await expect(rail).toHaveAttribute("data-revealed", "true", { timeout: 5_000 })
+    const overflow = rail.locator('[data-slot="cell-action-rail-overflow"]')
+    await expect(overflow).toBeVisible({ timeout: 5_000 })
+    // force for the same reason as the sparkle above: the unrevealed rail
+    // wrapper can still intercept the hit-test if idle-hide races the click.
+    await overflow.click({ force: true })
+    const action = this.page.locator(`button[aria-label="${ariaLabel}"]`).first()
+    await expect(action).toBeVisible({ timeout: 5_000 })
+    return action
+  }
+
   async waitForEditor(expectedCellId?: string): Promise<void> {
     // Seeded fixture ids are UUIDs, so they are safe in this quoted attribute
     // selector. Passing the expected id prevents a file navigation from being

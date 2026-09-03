@@ -31,7 +31,7 @@ import { fileURLToPath } from "node:url"
 import type { Page } from "@playwright/test"
 import { extractMarkdownStrings } from "../../src/lib/parsers/markdown"
 import { readPersistedSession } from "./auth-state"
-import { createProjectServerSide } from "./frontier-api"
+import { createProjectServerSide, updateProjectSettings } from "./frontier-api"
 import { postIdempotentJson } from "./idempotent-request"
 import { Workspace } from "./page-objects/Workspace"
 
@@ -95,11 +95,22 @@ export async function readSeededFileEvents(
  * written by ensureAuthState; pass `session.jwt` or re-read the sidecar). */
 export async function seedProjectWithFile(
   jwt: string,
-  opts: { name?: string; fixturePath?: string } = {},
+  opts: { name?: string; fixturePath?: string; steeringContext?: boolean } = {},
 ): Promise<SeededProject> {
   const projectId = randomUUID()
   const projectName = opts.name ?? `Seeded ${projectId.slice(0, 8)}`
   await createProjectServerSide(jwt, { id: projectId, name: projectName })
+  // A seeded project stands in for one a team has actually set up: autopilot
+  // refuses to start without both languages and an answered brief question
+  // (AQU-827). Pass `steeringContext: false` to seed the unconfigured project
+  // a spec covering that gate needs.
+  if (opts.steeringContext !== false) {
+    await updateProjectSettings(jwt, projectId, {
+      sourceLanguage: "en",
+      targetLanguage: "sw",
+      translationBrief: { parameters: { purpose: "Seeded fixture project" } },
+    })
+  }
 
   const fileId = randomUUID()
   const fixturePath = opts.fixturePath ?? DEFAULT_FIXTURE

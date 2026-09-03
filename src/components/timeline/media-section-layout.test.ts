@@ -22,11 +22,7 @@ import {
   writeStoredCollapsedSections,
   type CollapsedSections,
 } from "./media-section-layout"
-import {
-  VIDEO_PANE_MAX_SHARE,
-  VIDEO_PANE_MIN_WIDTH,
-  VIDEO_PANE_TABLE_MIN_WIDTH,
-} from "./video-pane-layout"
+import { VIDEO_PANE_MIN_WIDTH, VIDEO_PANE_TABLE_MIN_WIDTH } from "./video-pane-layout"
 import { MEDIA_BODY_MIN_HEIGHT, TIMELINE_PANE_MIN_HEIGHT } from "./timeline-pane-layout"
 
 const ALL = ["timeline", "video", "text"] as const
@@ -155,13 +151,22 @@ describe("mediaPanelConstraints", () => {
     expect(c).toEqual({ timeline: {}, body: {}, video: {}, table: {} })
   })
 
-  it("reproduces today's layout when nothing is collapsed", () => {
+  it("keeps every floor when nothing is collapsed", () => {
     const c = constraints([])
     expect(c.timeline.minSize).toBe(TIMELINE_PANE_MIN_HEIGHT)
     expect(c.body.minSize).toBe(MEDIA_BODY_MIN_HEIGHT)
     expect(c.video.minSize).toBe(VIDEO_PANE_MIN_WIDTH)
-    expect(c.video.maxSize).toBe(VIDEO_PANE_MAX_SHARE)
     expect(c.table.minSize).toBe(VIDEO_PANE_TABLE_MIN_WIDTH)
+  })
+
+  it("gives the video no ceiling in any state", () => {
+    // The old 58% cap was what made the table impossible to fold by drag: the
+    // shared divider ran out of road ~230px before the table's snap point.
+    // Folding is the route to a bigger picture now; the table's own floor is
+    // the stop.
+    for (const collapsed of [[], ["timeline"], ["text"], ["timeline", "text"]] as CollapsedSections[]) {
+      expect(constraints(collapsed).video.maxSize).toBe("100%")
+    }
   })
 
   it("pins a collapsed section to the rail instead of leaving it collapsible", () => {
@@ -177,36 +182,19 @@ describe("mediaPanelConstraints", () => {
     }
   })
 
-  it("leaves the two draggable sections collapsible while they are open", () => {
-    // Dragging a divider shut is how you collapse the timeline and the video,
-    // so while open they keep the flag and a rail-sized collapsedSize for the
-    // library to snap to.
-    for (const section of ["timeline", "video"] as const) {
+  it("leaves every open section collapsible, with a rail-sized collapsedSize", () => {
+    // Dragging a divider shut is how you fold a section, so while open each
+    // keeps the flag and a rail-sized collapsedSize for the library to snap
+    // to. The table included: it holds at its floor and folds once the pointer
+    // is past the midpoint, exactly like the other two.
+    for (const section of ["timeline", "video", "table"] as const) {
       const c = constraints([])[section]
       expect(c.collapsible).toBe(true)
       expect(c.collapsedSize).toBe(MEDIA_RAIL_PX)
     }
   })
 
-  it("never makes the table collapsible — it is the last panel, so no drag reaches it", () => {
-    expect(constraints([]).table.collapsible).toBeUndefined()
-    expect(constraints(["video"]).table.collapsible).toBeUndefined()
-  })
-
-  it("relaxes the video's ceiling in the same render that rails the table", () => {
-    // 58% exists to stop the picture eating the table. With the table railed
-    // there is no table to protect, and the cap would be the one thing
-    // refusing the space the collapse just freed.
-    expect(constraints(["text"]).video.maxSize).toBe("100%")
-    expect(constraints(["text"]).video.minSize).toBe(VIDEO_PANE_MIN_WIDTH)
-  })
-
-  it("keeps the video's ceiling everywhere the table is still open", () => {
-    const cases: CollapsedSections[] = [[], ["timeline"]]
-    for (const collapsed of cases) {
-      expect(constraints(collapsed).video.maxSize).toBe(VIDEO_PANE_MAX_SHARE)
-    }
-    // And a railed video has no share of its own to cap.
+  it("pins a railed video to the rail, ceiling and all", () => {
     expect(constraints(["video"]).video.maxSize).toBe(MEDIA_RAIL_PX)
   })
 

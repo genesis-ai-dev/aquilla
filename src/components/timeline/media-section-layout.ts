@@ -18,11 +18,7 @@
 // so "the body" below means the video and the table together — the row that
 // shares one separator.
 
-import {
-  VIDEO_PANE_MAX_SHARE,
-  VIDEO_PANE_MIN_WIDTH,
-  VIDEO_PANE_TABLE_MIN_WIDTH,
-} from "./video-pane-layout"
+import { VIDEO_PANE_MIN_WIDTH, VIDEO_PANE_TABLE_MIN_WIDTH } from "./video-pane-layout"
 import {
   MEDIA_BODY_MIN_HEIGHT,
   TIMELINE_PANE_MAX_SHARE,
@@ -231,13 +227,13 @@ const RAIL_PINNED: MediaPanelConstraints = { minSize: MEDIA_RAIL_PX, maxSize: ME
  * neighbouring `ResizableHandle` is disabled to match, so it stops announcing
  * itself as an adjustable control that cannot move.
  *
- * The one cap that must move is the video's. `58%` exists to stop the picture
- * eating the table; with the table railed there is no table to protect, and the
- * cap would be the only thing refusing the space the collapse just freed. It is
- * relaxed IN THE SAME RENDER as the pin — narrowing it back while the table is
- * still railed produces a layout summing to 110%, which flexbox normalises into
- * a table below its own floor and an `onResize` that writes that bogus width
- * into the remembered video width.
+ * The video has NO ceiling, in any state. It used to be capped at 58% of the
+ * row, which stopped the picture eating the table when dragging the video
+ * wider was the only way to get a bigger picture. That cap was also the reason
+ * the table could never be folded by dragging: its only divider is the one it
+ * shares with the video, and the cap stopped the drag ~230px before the table
+ * reached its snap point. Folding is the route to a bigger picture now, so the
+ * table's own floor is the stop and the cap is gone (Sam, 2026-09-03).
  */
 export function mediaPanelConstraints(input: {
   collapsed: CollapsedSections
@@ -267,22 +263,24 @@ export function mediaPanelConstraints(input: {
       ? RAIL_PINNED
       : {
           minSize: VIDEO_PANE_MIN_WIDTH,
-          maxSize: textCollapsed ? "100%" : VIDEO_PANE_MAX_SHARE,
+          maxSize: "100%",
           collapsible: true,
           collapsedSize: MEDIA_RAIL_PX,
         },
-    // The table is NOT collapsible while open, and that is deliberate rather
-    // than an omission. It is the last panel of its group, so its only
-    // separator is on its left and dragging that grows the video into its own
-    // cap long before the table reaches a collapse threshold — the gesture
-    // cannot reach it. Leaving `collapsible` on would buy nothing and would
-    // hand the library licence to snap the table shut on its own on a very
-    // narrow window. The button collapses it by pinning; the library's own
-    // validation clamps it to the rail on the next commit, with no imperative
-    // call at all. With the video railed the table simply takes the residual,
-    // which is how "collapsing the video gives its space to the text" happens
-    // without a rule for it.
-    table: textCollapsed ? RAIL_PINNED : { minSize: VIDEO_PANE_TABLE_MIN_WIDTH },
+    // The table folds by drag like the other two: it holds at its floor and
+    // snaps to the rail once the pointer is past the midpoint between floor
+    // and rail. That pull is ~250px, longer than the video's ~90px, because
+    // the floor is taller — and the floor is Sam's, it protects the table's
+    // legibility at rest, so it stays. With the video railed the table simply
+    // takes the residual, which is how "collapsing the video gives its space
+    // to the text" happens without a rule for it.
+    table: textCollapsed
+      ? RAIL_PINNED
+      : {
+          minSize: VIDEO_PANE_TABLE_MIN_WIDTH,
+          collapsible: true,
+          collapsedSize: MEDIA_RAIL_PX,
+        },
   }
 }
 

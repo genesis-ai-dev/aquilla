@@ -49,6 +49,8 @@ function renderTable(
     role?: number
     defaultLabels?: Record<string, string>
     jwt?: string | null
+    viewerUsername?: string | null
+    layout?: "page" | "embedded"
   } = {},
 ) {
   const roleByProjectId = new Map<string, CloudProjectSummary["role"]>(
@@ -66,6 +68,8 @@ function renderTable(
         orgId={1}
         jwt={opts.jwt === undefined ? "jwt" : opts.jwt}
         author="anna"
+        viewerUsername={opts.viewerUsername ?? null}
+        layout={opts.layout ?? "page"}
       />
     </MemoryRouter>,
   )
@@ -350,5 +354,47 @@ describe("units done column", () => {
   it("shows no flag when every unit is on time", () => {
     renderTable([baseProject({ id: "p1", unitsTotal: 66, unitsDone: 5, unitsOverdue: 0 })])
     expect(screen.queryByTestId("project-table-units-overdue")).toBeNull()
+  })
+})
+
+describe("PM column self marker (AQU-1027)", () => {
+  const rows = () => [
+    baseProject({ id: "gospels", name: "Gospels", pm: { id: 5, username: "anna" } }),
+    baseProject({ id: "ruth", name: "Ruth", pm: { id: 6, username: "mark" } }),
+    baseProject({ id: "acts", name: "Acts", pm: null }),
+  ]
+
+  it("marks only the rows the viewer manages", () => {
+    renderTable(rows(), { viewerUsername: "anna" })
+
+    const marks = screen.getAllByTestId("project-pm-you")
+    expect(marks).toHaveLength(1)
+    // The marker sits beside the PM's name, not on its own.
+    expect(marks[0].closest("td")?.textContent).toContain("anna")
+  })
+
+  it("matches the viewer when the stored PM name differs in case", () => {
+    const cased = rows().map((p) =>
+      p.id === "gospels" ? { ...p, pm: { id: 5, username: "Anna" } } : p,
+    )
+    renderTable(cased, { viewerUsername: "anna" })
+    expect(screen.getAllByTestId("project-pm-you")).toHaveLength(1)
+  })
+
+  it("marks nothing when nobody is signed in", () => {
+    renderTable(rows(), { viewerUsername: null })
+    expect(screen.queryAllByTestId("project-pm-you")).toHaveLength(0)
+  })
+
+  it("marks nothing when the viewer manages none of the rows", () => {
+    renderTable(rows(), { viewerUsername: "zoe" })
+    expect(screen.queryAllByTestId("project-pm-you")).toHaveLength(0)
+  })
+
+  // Deliberate non-goal: the embedded all-orgs table drops the PM column
+  // entirely, so there is no PM cell to mark. Pinned so it is not "fixed".
+  it("is absent in embedded layout, which has no PM column at all", () => {
+    renderTable(rows(), { viewerUsername: "anna", layout: "embedded" })
+    expect(screen.queryAllByTestId("project-pm-you")).toHaveLength(0)
   })
 })

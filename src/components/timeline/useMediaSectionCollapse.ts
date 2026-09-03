@@ -185,14 +185,37 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
    * pointer-up and nowhere else, which is the round-2 rule and the reason
    * this is a separate handler rather than a second caller of the same one.
    */
+  const pointerFrameRef = useRef<number | null>(null)
+
   const notePointerLayout = useCallback(() => {
-    const sizes: Partial<Record<MediaSectionId, number | null>> = {}
-    for (const id of present) {
-      if (effective.includes(id)) continue
-      sizes[id] = safeSizePx(id)
-    }
-    setPreviewRail((prev) => railPreviewSections(sizes, effective, present, prev))
+    if (typeof window === "undefined") return
+    // One read per frame, and on the NEXT frame rather than this one. The
+    // library reports a layout from inside the pointermove handler, straight
+    // after writing it to its own store — but the panel's width comes from a
+    // style React has not rendered yet, so measuring here returns the size
+    // from the move BEFORE this one. That lag is invisible in the middle of a
+    // drag and fatal at the end of one: the move that snaps a panel to the
+    // rail is usually the last, and its correction would never be read.
+    if (pointerFrameRef.current !== null) return
+    pointerFrameRef.current = window.requestAnimationFrame(() => {
+      pointerFrameRef.current = null
+      const sizes: Partial<Record<MediaSectionId, number | null>> = {}
+      for (const id of present) {
+        if (effective.includes(id)) continue
+        sizes[id] = safeSizePx(id)
+      }
+      setPreviewRail((prev) => railPreviewSections(sizes, effective, present, prev))
+    })
   }, [effective, present, safeSizePx])
+
+  useEffect(
+    () => () => {
+      if (pointerFrameRef.current !== null && typeof window !== "undefined") {
+        window.cancelAnimationFrame(pointerFrameRef.current)
+      }
+    },
+    [],
+  )
 
   const collapse = useCallback(
     (id: MediaSectionId) => {
@@ -346,7 +369,12 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
       // chose, and the rail would then reopen the picture to fill the row.
       // The gesture is over, so nothing is being previewed any more. Batched
       // with the commit below, so the real rail replaces the preview in one
-      // paint rather than flashing the crushed content between them.
+      // paint rather than flashing the crushed content between them. Any frame
+      // still owing is dropped: its measurement predates this commit.
+      if (pointerFrameRef.current !== null && typeof window !== "undefined") {
+        window.cancelAnimationFrame(pointerFrameRef.current)
+        pointerFrameRef.current = null
+      }
       setPreviewRail((prev) => (prev.length === 0 ? prev : NO_PREVIEW))
 
       const foldedNow = new Set<MediaSectionId>()

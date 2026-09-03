@@ -3905,6 +3905,7 @@ export function ProjectWorkspace() {
           topK: limit,
           validatedOnly: true,
           excludeCellId: excludeId,
+          targetLang: activeLane,
         })
         return res.results.map((r) => ({
           cellId: r.cellId,
@@ -3920,7 +3921,7 @@ export function ProjectWorkspace() {
         return []
       }
     },
-    [project?.id, activeFileId, getTokenForFile],
+    [project?.id, activeFileId, getTokenForFile, activeLane],
   )
 
   const branchingSearchPassages = useCallback(
@@ -3942,6 +3943,7 @@ export function ProjectWorkspace() {
           topK: hits,
           radius,
           validatedOnly: true,
+          targetLang: activeLane,
         })
         // Map server `Passage` → existing `PassageHit` shape. Drops
         // `hitCellId` (derivable from cells.find(c => c.hit)) and
@@ -3960,7 +3962,7 @@ export function ProjectWorkspace() {
         return []
       }
     },
-    [project?.id, activeFileId, getTokenForFile],
+    [project?.id, activeFileId, getTokenForFile, activeLane],
   )
 
   const commitCompletedCell = useCallback(async (cell: CellData, text: string, author: string, provenance: AiDraftProvenance) => {
@@ -4183,6 +4185,7 @@ export function ProjectWorkspace() {
     // lane-aware derivation as the editor project + file metadata.
     project?.completionSettings, project?.sourceLanguage || "", activeLaneTargetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell, rules, getActiveCells, project?.translationBrief?.l1Summary ?? undefined,
     project?.draftContext ?? DEFAULT_DRAFT_CONTEXT,
+    activeLane,
   )
 
   // AQU-620: adapter so the editor's per-cell AI action can request a plain

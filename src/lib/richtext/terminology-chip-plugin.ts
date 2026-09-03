@@ -15,7 +15,7 @@ import { Plugin, PluginKey } from "@tiptap/pm/state"
 import { Decoration, DecorationSet } from "@tiptap/pm/view"
 import type { Node as PMNode } from "@tiptap/pm/model"
 import { Extension } from "@tiptap/core"
-import type { Concept } from "@/lib/terminology/types"
+import type { Concept, RenderingStatus } from "@/lib/terminology/types"
 import { buildTermRegex } from "@/lib/terminology/match"
 import { buildUsfmPlainTextMap } from "@/lib/richtext/usfm-plain-text"
 
@@ -51,6 +51,26 @@ export function findTermMatches(text: string, term: string): Array<{ start: numb
  *  - an inline decoration wrapping each match (adds `position:relative` host span)
  *  - a widget decoration at the match start rendering the chip
  */
+/**
+ * The tint a concept's chip carries: the status of its best-ranked rendering,
+ * using the same `preferred > admitted > forbidden` precedence TermLookupPopover
+ * sorts renderings by, so the chip and the popover never disagree about which
+ * guidance a term carries.
+ *
+ * A concept whose renderings are *all* forbidden offers the translator no
+ * acceptable option, so its chip reads red. A concept with no renderings at all
+ * carries no guidance yet, so it reads neutral (`admitted`, a muted grey) rather
+ * than claiming a preference it does not have.
+ *
+ * Exported so the precedence can be unit-tested without ProseMirror.
+ */
+export function conceptChipStatus(concept: Concept): RenderingStatus {
+  if (concept.renderings.some((r) => r.status === "preferred")) return "preferred"
+  if (concept.renderings.some((r) => r.status === "admitted")) return "admitted"
+  if (concept.renderings.some((r) => r.status === "forbidden")) return "forbidden"
+  return "admitted"
+}
+
 export function buildTerminologyChipDecorationSet(
   doc: PMNode,
   concepts: Concept[],
@@ -66,6 +86,7 @@ export function buildTerminologyChipDecorationSet(
   const decorations: Decoration[] = []
 
   for (const concept of activeConcepts) {
+    const chipStatus = conceptChipStatus(concept)
     const matches = findTermMatches(plainText, concept.sourceTerm)
     for (const match of matches) {
       const from = plainToPm[match.start]
@@ -92,10 +113,15 @@ export function buildTerminologyChipDecorationSet(
           const host = document.createElement("span")
           host.className = "term-chip-host"
           const chip = document.createElement("span")
-          chip.className = `term-chip term-chip-preferred`
+          chip.className = `term-chip term-chip-${chipStatus}`
           chip.setAttribute("data-source-term", concept.sourceTerm)
-          chip.setAttribute("aria-label", `Managed term: ${concept.sourceTerm}`)
-          chip.setAttribute("title", `Managed term: ${concept.sourceTerm}`)
+          chip.setAttribute("data-status", chipStatus)
+          // The tint is the only visual carrier of status, so it is spelled out
+          // in the accessible name too — a colour-only signal is invisible to
+          // screen readers and to anyone who cannot distinguish the two dots.
+          const label = `Managed term: ${concept.sourceTerm} (${chipStatus})`
+          chip.setAttribute("aria-label", label)
+          chip.setAttribute("title", label)
           // Dot rendered via CSS content/background, text is empty
           host.appendChild(chip)
           return host

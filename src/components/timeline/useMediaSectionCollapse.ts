@@ -131,16 +131,57 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
     [freeze, onBeforeCollapseText, present],
   )
 
-  const storedSizeFor = useCallback(
-    (id: MediaSectionId): number => {
-      if (id === "timeline") return readStoredTimelinePaneHeight(fileId ?? "")
-      if (id === "video") return readStoredVideoPaneWidth()
-      // The table has no remembered size of its own — it has always been
-      // "whatever is left". Its frozen width is that same number, captured the
-      // moment it closed.
-      return frozenRef.current.text?.width ?? 0
-    },
+  /**
+   * Which panel to resize to put a section back, and to what.
+   *
+   * THE TABLE IS NEVER RESIZED. It has no remembered size of its own — it has
+   * always been "whatever is left" — so reopening the text section means
+   * putting the PICTURE back to its remembered width and letting the table
+   * take the residual, exactly as it does when nothing is collapsed. Resizing
+   * the table instead leaves the video holding the width it borrowed while the
+   * table was railed: it grows to fill the row under the relaxed cap, and when
+   * the cap comes back it merely clamps to 58% rather than returning to the
+   * 288px the reader chose.
+   */
+  const restoreTargetFor = useCallback(
+    (id: MediaSectionId): { panel: MediaSectionId; px: number } =>
+      id === "timeline"
+        ? { panel: "timeline", px: readStoredTimelinePaneHeight(fileId ?? "") }
+        : { panel: "video", px: readStoredVideoPaneWidth() },
     [fileId],
+  )
+
+  /**
+   * Resize a panel, tolerating the one moment it cannot be done.
+   *
+   * `resize()` THROWS ("Layout not found for Panel …") when the group has not
+   * laid out yet — and because the throw happens inside a React effect it does
+   * not merely fail, it unmounts the whole media lens. That state is reachable
+   * on the first commit after the lens opens: the panels register in a layout
+   * effect, but the group only builds its layout on the render that
+   * registration schedules, which is after this parent's effects have run.
+   *
+   * Nothing is lost by skipping it there. On mount every panel already takes
+   * its `defaultSize`, which is the same stored number this would apply.
+   */
+  const applySize = useCallback((id: MediaSectionId, px: number) => {
+    if (px <= 0) return
+    try {
+      panelRefs[id].current?.resize(px)
+    } catch {
+      /* group not laid out yet — defaultSize already covers this commit */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- panel refs are stable
+  }, [])
+
+  /** Re-apply a section's remembered size — used on a file switch. */
+  const restoreStoredSize = useCallback(
+    (id: MediaSectionId) => {
+      if (effective.includes(id)) return
+      const { panel, px } = restoreTargetFor(id)
+      applySize(panel, px)
+    },
+    [applySize, effective, restoreTargetFor],
   )
 
   const expand = useCallback(
@@ -151,15 +192,14 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
       // still-pinned panel, which does nothing at all.
       flushSync(() => setCollapsed((prev) => expandSection(prev, id)))
       delete frozenRef.current[id]
-      const px = storedSizeFor(id)
-      if (px > 0) panelRefs[id].current?.resize(px)
+      const { panel, px } = restoreTargetFor(id)
+      applySize(panel, px)
       // `resize`, never `expand()`. The library only remembers an expand-to
       // size after an IMPERATIVE collapse, and re-registration wipes it in any
       // case — so `expand()` would reopen the section at its bare minimum
       // rather than the size the reader left it at.
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- panel refs are stable
-    [storedSizeFor],
+    [applySize, restoreTargetFor],
   )
 
   /**
@@ -189,6 +229,7 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
     collapse,
     expand,
     noteResize,
+    restoreStoredSize,
     /** Should this measurement be written back as the section's size? */
     canPersist: (id: MediaSectionId) => shouldPersistSize(effective, id),
   }

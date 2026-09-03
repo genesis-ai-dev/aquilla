@@ -7920,12 +7920,11 @@ export function ProjectWorkspace() {
     // for silently stopped being per file the moment anyone visited the text
     // lens.
     if (!activeFileId || !timelineStacked) return
-    // A collapsed timeline is pinned to its rail, so resizing it here would
-    // be a no-op at best — and on the file where the reader left it shut, a
-    // height restored underneath the rail is exactly the desync the pin
-    // exists to prevent. The rail's own button reopens it.
-    if (mediaSections.isCollapsed("timeline")) return
-    timelinePanelRef.current?.resize(readStoredTimelinePaneHeight(activeFileId))
+    // `restoreStoredSize` skips a collapsed section — a height restored under
+    // its rail is exactly the desync the pin exists to prevent — and tolerates
+    // the first commit, where the group has not laid out yet and `resize`
+    // would throw rather than no-op.
+    mediaSections.restoreStoredSize("timeline")
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the panel ref is stable
   }, [activeFileId, timelineStacked, mediaSections.collapsed])
 

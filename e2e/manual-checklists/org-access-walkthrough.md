@@ -16,7 +16,7 @@
 
 ---
 
-## Part 1 — Org membership grants project visibility
+## Part 1 — Org Contributor does not grant project visibility (AQU-435 / AQU-1107)
 
 ### 1.1 Alice creates a project
 
@@ -31,19 +31,26 @@
 - [ ] Navigate to Projects (`/projects`)
 - [ ] **Expected**: "Manual Test Project" is NOT visible. Bob sees an empty list or only his own projects.
 
-### 1.3 Alice invites Bob to the org
+### 1.3 Alice invites Bob to the org as Contributor
 
 Using the org admin UI (or API):
 
 - [ ] As Alice, navigate to Org Settings → Members
-- [ ] Add Bob (`bob@example.test`) as Contributor
+- [ ] Open "Add a member". **Expected**: the role picker defaults to Contributor, and the dialog states that Contributor cannot see projects until added to a project or team.
+- [ ] Add Bob (`bob@example.test`) as Contributor (keep the default)
 - [ ] **Expected**: Bob appears in the member list with "Contributor" role
 
-### 1.4 Bob sees the project after invite
+### 1.4 Bob still does not see the project
 
 - [ ] In Bob's browser window, reload the Projects page (`/projects`)
-- [ ] **Expected**: "Manual Test Project" now appears in Bob's list
-- [ ] **Expected**: Bob's role indicator shows "Contributor" or equivalent
+- [ ] **Expected**: "Manual Test Project" is still NOT in Bob's list (org Contributor is not a grant path)
+- [ ] **Expected**: Opening `/project/<id>` directly is refused (403 / not found)
+
+### 1.5 Alice adds Bob to the project (or a team)
+
+- [ ] As Alice, add Bob to "Manual Test Project" as Contributor (or attach a team Bob is on)
+- [ ] In Bob's browser, reload Projects
+- [ ] **Expected**: "Manual Test Project" now appears. Bob does **not** see Alice's other org projects.
 
 ---
 
@@ -71,7 +78,7 @@ Using the org admin UI (or API):
 
 - [ ] As Alice, navigate to Org Settings → Members → Bob → View Access
 - [ ] **Expected**: For "Manual Test Project", effective role shows "project_lead" (500) with path "group"
-  (max-wins: group 500 beats org-contributor 400)
+  (max-wins: group 500 beats the direct contributor grant; org-contributor contributes nothing)
 
 ---
 
@@ -82,7 +89,7 @@ Using the org admin UI (or API):
 - [ ] As Alice, navigate to Translators team → Members → remove Bob
 - [ ] **Expected**: Bob no longer in team member list
 - [ ] Reload Bob's Projects page
-- [ ] **Expected**: Bob still sees "Manual Test Project" (org-contributor path still active)
+- [ ] **Expected**: Bob still sees "Manual Test Project" (direct project membership from 1.5 still active)
 - [ ] **Expected**: Bob's role on the project reverts to "Contributor" (no longer "Project Lead")
 
 ### 3.2 Revoke Bob's org membership entirely
@@ -117,18 +124,18 @@ This section needs a third user (Carol).
 ### 4.1 Add Carol to org as viewer
 
 - [ ] As Alice, invite Carol to the org with role "Viewer"
-- [ ] **Expected**: Carol sees all org projects (org-viewer path gives broad visibility — OPQ-1 behavior)
+- [ ] **Expected**: Carol sees **no** org projects (AQU-435: Viewer/Contributor org membership is not a grant path)
 
 ### 4.2 Add Carol to Translators team
 
 - [ ] As Alice, add Carol to the Translators team
-- [ ] **Expected**: Carol's effective role on "Manual Test Project" is now "Project Lead" (group beats org-viewer)
+- [ ] **Expected**: Carol's effective role on "Manual Test Project" is now "Project Lead" (group grant; org-viewer contributes nothing)
 
 ### 4.3 Detach project from team
 
 - [ ] As Alice, remove "Manual Test Project" from the Translators team
-- [ ] **Expected**: Carol still sees the project (org-viewer path active)
-- [ ] **Expected**: Carol's role reverts to "Viewer" (group path gone)
+- [ ] **Expected**: Carol no longer sees the project (no surviving org-viewer path — AQU-435)
+- [ ] **Expected**: Direct URL `/project/<id>` is 403 / not found
 
 ### 4.4 Remove Carol from org
 

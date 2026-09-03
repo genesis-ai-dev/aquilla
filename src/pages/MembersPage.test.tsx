@@ -465,5 +465,12 @@ describe("MembersPage — Teams-style roster table", () => {
     expect(screen.getByRole("dialog", { name: /add a member/i })).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: /add members/i })).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: /invite by email/i })).toBeInTheDocument()
+    // AQU-1107: default org-add is Contributor, and the dialog states that
+    // that role does not open projects until a project/team grant exists.
+    expect(screen.getByRole("combobox", { name: /^role$/i })).toHaveTextContent(/contributor/i)
+    expect(
+      screen.getByText(/cannot see or open projects until they are added to a specific project or team/i),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/only maintainer and owner can see every project/i)).toBeInTheDocument()
   })
 })

@@ -1,0 +1,229 @@
+// AQU-1119. Everything the media lens's collapse rules decide, tested where a
+// unit test can actually reach it.
+//
+// This file carries more weight than usual: NOTHING in the suite renders
+// ProjectWorkspace, so the panel group these constraints feed is only ever
+// exercised by a browser pass. Its sibling video-pane-layout.test.ts says the
+// same thing about its own gate, and for the same reason.
+
+import { beforeEach, describe, expect, it } from "vitest"
+import {
+  MEDIA_RAIL_PX,
+  canCollapseSection,
+  collapseSection,
+  expandSection,
+  isRailSized,
+  isSeparatorDisabled,
+  mediaPanelConstraints,
+  presentSections,
+  readStoredCollapsedSections,
+  reconcilePresence,
+  writeStoredCollapsedSections,
+  type CollapsedSections,
+} from "./media-section-layout"
+import {
+  VIDEO_PANE_MAX_SHARE,
+  VIDEO_PANE_MIN_WIDTH,
+  VIDEO_PANE_TABLE_MIN_WIDTH,
+} from "./video-pane-layout"
+import { MEDIA_BODY_MIN_HEIGHT, TIMELINE_PANE_MIN_HEIGHT } from "./timeline-pane-layout"
+
+const ALL = ["timeline", "video", "text"] as const
+const NO_VIDEO = ["timeline", "text"] as const
+
+describe("presentSections", () => {
+  it("has nothing to collapse outside the media lens", () => {
+    expect(presentSections({ timelineStacked: false, hasVideo: true })).toEqual([])
+  })
+
+  it("drops the video when the pane is gated off", () => {
+    expect(presentSections({ timelineStacked: true, hasVideo: false })).toEqual(["timeline", "text"])
+  })
+})
+
+describe("the body always keeps one section open", () => {
+  it("swaps the partner back rather than emptying the body", () => {
+    // Video collapsed, then text: the body would have nothing left, so the
+    // video returns. This is Sam's "collapsing the third uncollapses a
+    // different one", and the one it picks is the one you collapsed last.
+    const after = collapseSection(["video"], "text", [...ALL])
+    expect(after).toEqual(["text"])
+  })
+
+  it("swaps in the other direction too", () => {
+    expect(collapseSection(["text"], "video", [...ALL])).toEqual(["video"])
+  })
+
+  it("never leaves all three collapsed", () => {
+    const after = collapseSection(["video", "timeline"], "text", [...ALL])
+    expect(after).toEqual(["timeline", "text"])
+    expect(after).not.toContain("video")
+  })
+
+  it("refuses to collapse the text when there is no video to hand the row to", () => {
+    // A file with no linked film has a one-panel body. Railing it would leave
+    // the horizontal group with nothing to fill it, so the control is simply
+    // not offered.
+    expect(canCollapseSection([], "text", [...NO_VIDEO])).toBe(false)
+    expect(collapseSection([], "text", [...NO_VIDEO])).toEqual([])
+  })
+
+  it("still lets the timeline collapse on a file with no video", () => {
+    expect(canCollapseSection([], "timeline", [...NO_VIDEO])).toBe(true)
+    expect(collapseSection([], "timeline", [...NO_VIDEO])).toEqual(["timeline"])
+  })
+})
+
+describe("reducers are idempotent by reference", () => {
+  // Load-bearing: every constraint change re-registers the panels and fires
+  // onResize again, so a reducer that allocated a fresh array each time would
+  // drive a render loop through the resize seam.
+  it("returns the same array when collapsing what is already collapsed", () => {
+    const state: CollapsedSections = ["video"]
+    expect(collapseSection(state, "video", [...ALL])).toBe(state)
+  })
+
+  it("returns the same array when expanding what is already open", () => {
+    const state: CollapsedSections = ["video"]
+    expect(expandSection(state, "timeline")).toBe(state)
+  })
+
+  it("returns the same array when presence has not changed", () => {
+    const state: CollapsedSections = ["timeline"]
+    expect(reconcilePresence(state, [...ALL])).toBe(state)
+  })
+})
+
+describe("reconcilePresence", () => {
+  it("drops a section that no longer exists", () => {
+    expect(reconcilePresence(["video", "timeline"], [...NO_VIDEO])).toEqual(["timeline"])
+  })
+
+  it("gives the body back a section when losing the video would empty it", () => {
+    // Timeline and text collapsed, video visible — then the film is unlinked
+    // or the file switches to Free timing. Without this the only section left
+    // would be the collapsed table: an empty workspace.
+    expect(reconcilePresence(["timeline", "text"], [...NO_VIDEO])).toEqual(["timeline"])
+  })
+})
+
+describe("isRailSized", () => {
+  it("accepts the rail and a couple of pixels of rounding", () => {
+    expect(isRailSized(MEDIA_RAIL_PX)).toBe(true)
+    expect(isRailSized(MEDIA_RAIL_PX + 2)).toBe(true)
+  })
+
+  it("rejects every real expanded size", () => {
+    expect(isRailSized(MEDIA_RAIL_PX + 3)).toBe(false)
+    // The smallest floor in the lens, so nothing legitimate comes near.
+    expect(isRailSized(TIMELINE_PANE_MIN_HEIGHT)).toBe(false)
+  })
+})
+
+describe("mediaPanelConstraints", () => {
+  const constraints = (collapsed: CollapsedSections, hasVideo = true) =>
+    mediaPanelConstraints({ collapsed, timelineStacked: true, hasVideo })
+
+  it("leaves every panel unconstrained outside the media lens", () => {
+    const c = mediaPanelConstraints({ collapsed: [], timelineStacked: false, hasVideo: true })
+    expect(c).toEqual({ timeline: {}, body: {}, video: {}, table: {} })
+  })
+
+  it("reproduces today's layout when nothing is collapsed", () => {
+    const c = constraints([])
+    expect(c.timeline.minSize).toBe(TIMELINE_PANE_MIN_HEIGHT)
+    expect(c.body.minSize).toBe(MEDIA_BODY_MIN_HEIGHT)
+    expect(c.video.minSize).toBe(VIDEO_PANE_MIN_WIDTH)
+    expect(c.video.maxSize).toBe(VIDEO_PANE_MAX_SHARE)
+    expect(c.table.minSize).toBe(VIDEO_PANE_TABLE_MIN_WIDTH)
+  })
+
+  it("pins a collapsed section to the rail instead of making it collapsible", () => {
+    // min === max is the whole mechanism: it gives the solver one fixed point,
+    // so drag, Enter, Home/End, arrow keys and double-click all become inert
+    // and cannot move the layout behind React's back.
+    for (const section of ALL) {
+      const key = section === "text" ? "table" : section
+      const c = constraints([section])
+      expect(c[key]).toEqual({ minSize: MEDIA_RAIL_PX, maxSize: MEDIA_RAIL_PX })
+    }
+  })
+
+  it("relaxes the video's ceiling in the same render that rails the table", () => {
+    // 58% exists to stop the picture eating the table. With the table railed
+    // there is no table to protect, and the cap would be the one thing
+    // refusing the space the collapse just freed.
+    expect(constraints(["text"]).video.maxSize).toBe("100%")
+    expect(constraints(["text"]).video.minSize).toBe(VIDEO_PANE_MIN_WIDTH)
+  })
+
+  it("keeps the video's ceiling everywhere the table is still open", () => {
+    const cases: CollapsedSections[] = [[], ["timeline"]]
+    for (const collapsed of cases) {
+      expect(constraints(collapsed).video.maxSize).toBe(VIDEO_PANE_MAX_SHARE)
+    }
+    // And a railed video has no share of its own to cap.
+    expect(constraints(["video"]).video.maxSize).toBe(MEDIA_RAIL_PX)
+  })
+
+  it("leaves the table free to take the residual when the video is railed", () => {
+    const c = constraints(["video"])
+    expect(c.table.minSize).toBe(VIDEO_PANE_TABLE_MIN_WIDTH)
+    expect(c.table.maxSize).toBeUndefined()
+  })
+})
+
+describe("isSeparatorDisabled", () => {
+  it("disables a handle that cannot move", () => {
+    expect(isSeparatorDisabled(["timeline"], "timeline-body")).toBe(true)
+    expect(isSeparatorDisabled(["video"], "video-table")).toBe(true)
+    expect(isSeparatorDisabled(["text"], "video-table")).toBe(true)
+  })
+
+  it("leaves a live handle alone", () => {
+    expect(isSeparatorDisabled(["timeline"], "video-table")).toBe(false)
+    expect(isSeparatorDisabled([], "timeline-body")).toBe(false)
+  })
+})
+
+describe("per-file persistence", () => {
+  beforeEach(() => {
+    localStorage.removeItem("aquilla:mediaSectionsCollapsed:f1")
+    localStorage.removeItem("aquilla:mediaSectionsCollapsed:f2")
+  })
+
+  it("round-trips a set, order and all", () => {
+    writeStoredCollapsedSections("f1", ["video", "timeline"])
+    expect(readStoredCollapsedSections("f1")).toEqual(["video", "timeline"])
+  })
+
+  it("keeps files apart", () => {
+    writeStoredCollapsedSections("f1", ["video"])
+    expect(readStoredCollapsedSections("f2")).toEqual([])
+  })
+
+  it("removes the key rather than storing the default", () => {
+    writeStoredCollapsedSections("f1", ["video"])
+    writeStoredCollapsedSections("f1", [])
+    expect(localStorage.getItem("aquilla:mediaSectionsCollapsed:f1")).toBeNull()
+  })
+
+  it("reads nothing collapsed from anything malformed", () => {
+    for (const junk of ["", "not-a-section", "video,nonsense", "[]"]) {
+      localStorage.setItem("aquilla:mediaSectionsCollapsed:f1", junk)
+      const read = readStoredCollapsedSections("f1")
+      expect(read.every((id) => ALL.includes(id))).toBe(true)
+    }
+  })
+
+  it("de-duplicates, because the order is what carries recency", () => {
+    localStorage.setItem("aquilla:mediaSectionsCollapsed:f1", "video,video,timeline")
+    expect(readStoredCollapsedSections("f1")).toEqual(["video", "timeline"])
+  })
+
+  it("does not invent a key with no file", () => {
+    writeStoredCollapsedSections(null, ["video"])
+    expect(localStorage.getItem("aquilla:mediaSectionsCollapsed:null")).toBeNull()
+    expect(readStoredCollapsedSections(undefined)).toEqual([])
+  })
+})

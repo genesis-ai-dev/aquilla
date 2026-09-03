@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import { render, screen, waitFor, fireEvent, within } from "@testing-library/react"
 import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
+import { toast } from "@/components/ui/toast"
 import { ProjectOverview, deriveProjectStatus } from "./ProjectOverview"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { ROLE } from "@/lib/frontier/roles"
@@ -21,6 +22,9 @@ vi.mock("@/lib/frontier/orgs", () => ({
   listOrgMembers: vi.fn(async () => []),
 }))
 vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
+vi.mock("@/components/ui/toast", () => ({
+  toast: { add: vi.fn(), close: vi.fn(), update: vi.fn(), promise: vi.fn() },
+}))
 vi.mock("./ProjectAutopilotPanel", () => ({
   ProjectAutopilotPanel: ({ canStart }: { canStart: boolean }) => (
     <div data-testid="project-autopilot-panel-mock" data-can-start={String(canStart)} />
@@ -1582,15 +1586,21 @@ describe("ProjectOverview CSV export (AQU-500)", () => {
     })
   }
 
+  async function openFileListActions() {
+    const trigger = await screen.findByRole("button", { name: "File list actions" })
+    fireEvent.click(trigger)
+    return trigger
+  }
+
   it("shows the export controls when the org's export permission allows it", async () => {
     useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), canExport: true })
     useFiles([fileWith("f1", "Genesis.usfm")])
 
     renderOverview()
 
-    const copy = await screen.findByTestId("export-csv-copy")
-    const download = screen.getByTestId("export-csv-download")
-    expect(copy.closest("[data-slot='button-group']")).toBe(download.closest("[data-slot='button-group']"))
+    await openFileListActions()
+    expect(await screen.findByRole("menuitem", { name: "Copy CSV" })).toBeInTheDocument()
+    expect(screen.getByRole("menuitem", { name: "Download CSV" })).toBeInTheDocument()
   })
 
   it("hides the export controls when the caller is below the org's export floor", async () => {
@@ -1600,6 +1610,7 @@ describe("ProjectOverview CSV export (AQU-500)", () => {
     renderOverview()
 
     await waitFor(() => expect(screen.getAllByTestId("file-row").length).toBe(1))
+    expect(screen.queryByRole("button", { name: "File list actions" })).not.toBeInTheDocument()
     expect(screen.queryByTestId("export-csv-copy")).not.toBeInTheDocument()
     expect(screen.queryByTestId("export-csv-download")).not.toBeInTheDocument()
     expect(screen.queryByTestId("download-originals-zip")).not.toBeInTheDocument()
@@ -1617,6 +1628,7 @@ describe("ProjectOverview CSV export (AQU-500)", () => {
     // not file-list-fetch order — proving the export reads the sorted array.
     await pickSelectOption(/sort files by/i, /^alphabetical$/i)
 
+    await openFileListActions()
     fireEvent.click(screen.getByTestId("export-csv-copy"))
 
     await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledTimes(1))
@@ -1626,6 +1638,11 @@ describe("ProjectOverview CSV export (AQU-500)", () => {
       "Alpha.usfm,5,2,10,100",
       "Zeta.usfm,5,2,10,100",
     ])
+    expect(toast.add).toHaveBeenCalledWith({
+      type: "success",
+      title: "CSV copied to clipboard",
+    })
+    expect(screen.queryByRole("menuitem", { name: "Copied" })).not.toBeInTheDocument()
   })
 
   it("filtering by name narrows what gets exported", async () => {
@@ -1638,6 +1655,7 @@ describe("ProjectOverview CSV export (AQU-500)", () => {
     fireEvent.change(screen.getByLabelText(/filter files by name/i), { target: { value: "gen" } })
     await waitFor(() => expect(screen.getAllByTestId("file-row").length).toBe(1))
 
+    await openFileListActions()
     fireEvent.click(screen.getByTestId("export-csv-copy"))
 
     await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledTimes(1))
@@ -1655,6 +1673,7 @@ describe("ProjectOverview CSV export (AQU-500)", () => {
     renderOverview()
     await waitFor(() => expect(screen.getAllByTestId("file-row").length).toBe(1))
 
+    await openFileListActions()
     fireEvent.click(screen.getByTestId("export-csv-download"))
 
     expect(downloadBlob).toHaveBeenCalledTimes(1)
@@ -1672,8 +1691,8 @@ describe("ProjectOverview CSV export (AQU-500)", () => {
 
     renderOverview()
 
-    expect(await screen.findByTestId("download-originals-zip")).toBeInTheDocument()
-    expect(screen.getByTestId("download-originals-zip").tagName).toBe("BUTTON")
+    await openFileListActions()
+    expect(await screen.findByRole("menuitem", { name: "Download all originals" })).toBeInTheDocument()
     const original = screen.getByTestId("download-original-file")
     expect(original.tagName).toBe("BUTTON")
     expect(original).toHaveAttribute("aria-label", "Download original Genesis.usfm")
@@ -1686,7 +1705,8 @@ describe("ProjectOverview CSV export (AQU-500)", () => {
 
     renderOverview()
     await waitFor(() => expect(screen.getAllByTestId("file-row").length).toBe(1))
-    expect(screen.queryByTestId("download-originals-zip")).not.toBeInTheDocument()
+    await openFileListActions()
+    expect(screen.queryByRole("menuitem", { name: "Download all originals" })).not.toBeInTheDocument()
     expect(screen.queryByTestId("download-original-file")).not.toBeInTheDocument()
   })
 })

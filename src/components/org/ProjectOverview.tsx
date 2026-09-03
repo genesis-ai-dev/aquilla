@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { useParams, useNavigate, useLocation, Link } from "react-router-dom"
-import { MoreHorizontal, ChevronRight, Copy, Check, Download, Search, SlidersHorizontal, Archive, PlayCircle, PauseCircle, Settings, Pencil } from "lucide-react"
+import { MoreHorizontal, ChevronRight, Copy, Download, Search, SlidersHorizontal, Archive, PlayCircle, PauseCircle, Settings, Pencil } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { DateTooltip } from "@/components/ui/date-tooltip"
@@ -8,7 +8,8 @@ import { ExpandableName } from "@/components/ui/expandable-name"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { Button, buttonVariants } from "@/components/ui/button"
-import { ButtonGroup } from "@/components/ui/button-group"
+import { OverflowMenu, type OverflowMenuItem } from "@/components/OverflowMenu"
+import { toast } from "@/components/ui/toast"
 import { orgProjectsPath, projectSettingsPath } from "@/lib/navigation/org-paths"
 import { Spinner } from "@/components/ui/spinner"
 import { useOpenWorkspace } from "@/hooks/useOpenWorkspace"
@@ -652,11 +653,6 @@ export function ProjectOverview() {
   const [fileSortMode, setFileSortMode] = useState<FileSortMode>("last-updated")
   const [fileNameFilter, setFileNameFilter] = useState("")
   const fileSortItems = FILE_SORT_MODES.map((m) => ({ value: m.value, label: t(m.labelKey) }))
-
-  // AQU-500: transient "copied" feedback for the CSV-export control, mirroring
-  // the copy-affordance pattern used elsewhere (e.g. ChatMarkdown's code-block
-  // copy button).
-  const [csvCopied, setCsvCopied] = useState(false)
 
   // AQU-493/AQU-517: compact progress rollup, lazily fetched per file on
   // first expand. `undefined` = not yet fetched; loaded values choose between
@@ -1607,8 +1603,7 @@ export function ProjectOverview() {
                   const csv = progressRowsToCsv(sorted)
                   try {
                     await navigator.clipboard.writeText(csv)
-                    setCsvCopied(true)
-                    setTimeout(() => setCsvCopied(false), 1500)
+                    toast.add({ type: "success", title: t("org.projectOverview.copyCsvCopied") })
                   } catch (e) {
                     setError(e instanceof Error ? e.message : t("org.projectOverview.copyCsvFailed"))
                   }
@@ -1618,6 +1613,50 @@ export function ProjectOverview() {
                   const csv = progressRowsToCsv(sorted)
                   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
                   downloadBlob(blob, progressCsvFilename(project?.name ?? "project"))
+                }
+
+                const fileListActions: OverflowMenuItem[] = []
+                if (sorted.length > 0) {
+                  fileListActions.push(
+                    {
+                      id: "copy-csv",
+                      label: t("org.projectOverview.copyCsv"),
+                      icon: Copy,
+                      onClick: () => { void handleCopyCsv() },
+                      testId: "export-csv-copy",
+                    },
+                    {
+                      id: "download-csv",
+                      label: t("org.projectOverview.downloadCsv"),
+                      icon: Download,
+                      onClick: handleDownloadCsv,
+                      testId: "export-csv-download",
+                    },
+                  )
+                }
+                if (hasAnyOriginal && jwt) {
+                  if (fileListActions.length > 0) {
+                    fileListActions.push({ id: "originals-separator", type: "separator" })
+                  }
+                  fileListActions.push({
+                    id: "download-originals",
+                    label: t("org.projectOverview.downloadOriginals"),
+                    icon: Download,
+                    testId: "download-originals-zip",
+                    onClick: () => {
+                      const fileId = project?.files[0]?.id ?? files[0]?.fileId
+                      if (!fileId) {
+                        setError(t("org.projectOverview.noFilesToExport"))
+                        return
+                      }
+                      void downloadImportedOriginalsZip({
+                        projectId: id,
+                        projectName: project?.name ?? "project",
+                        jwt,
+                        fileId,
+                      })
+                    },
+                  })
                 }
 
                 return (
@@ -1640,15 +1679,15 @@ export function ProjectOverview() {
                     {/*
                       SWARM-TODO(AQU-500): verify live — as a role WITH the org's
                       export permission, open a Scripture project overview,
-                      change the file sort/filter (AQU-499), then click "Copy
-                      CSV" and paste into a spreadsheet: confirm the rows/columns
-                      match on-screen (file, filled, approved, total, words) in
-                      the same order as the table, and that a file name with a
-                      comma/quote lands in one cell correctly. Click "Download
-                      CSV" and confirm the .csv opens with the same rows. Then,
-                      as a role WITHOUT the org's export permission (org
-                      settings → exportMinRole set above that role), confirm
-                      neither Copy CSV nor Download CSV control renders.
+                      change the file sort/filter (AQU-499), open the file-list
+                      ⋯ menu, then click "Copy CSV" and paste into a spreadsheet:
+                      confirm the rows/columns match on-screen (file, filled,
+                      approved, total, words) in the same order as the table, and
+                      that a file name with a comma/quote lands in one cell
+                      correctly. Click "Download CSV" and confirm the .csv opens
+                      with the same rows. Then, as a role WITHOUT the org's
+                      export permission (org settings → exportMinRole set above
+                      that role), confirm the file-list ⋯ menu does not render.
                     */}
                     {/*
                       SWARM-TODO(AQU-499): verify live — open a Scripture
@@ -1690,59 +1729,15 @@ export function ProjectOverview() {
                           </SelectGroup>
                         </SelectContent>
                       </Select>
-                      {orgSettings.canExport && (hasAnyOriginal || sorted.length > 0) && (
-                        <div className="ms-auto flex flex-wrap items-center gap-2">
-                          {hasAnyOriginal && jwt && (
-                            <AppTooltip content={t("org.projectOverview.downloadOriginalsTooltip")}>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                data-testid="download-originals-zip"
-                                onClick={() => {
-                                  const fileId = project?.files[0]?.id ?? files[0]?.fileId
-                                  if (!fileId) {
-                                    setError(t("org.projectOverview.noFilesToExport"))
-                                    return
-                                  }
-                                  void downloadImportedOriginalsZip({
-                                    projectId: id,
-                                    projectName: project?.name ?? "project",
-                                    jwt,
-                                    fileId,
-                                  })
-                                }}
-                              >
-                                <Download data-icon="inline-start" />
-                                {t("org.projectOverview.downloadOriginals")}
-                              </Button>
-                            </AppTooltip>
-                          )}
-                          {sorted.length > 0 && (
-                            <ButtonGroup className="shadow-xs">
-                              <AppTooltip content={t("org.projectOverview.copyCsvTooltip")}>
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  onClick={() => void handleCopyCsv()}
-                                  data-testid="export-csv-copy"
-                                >
-                                  {csvCopied ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
-                                  {csvCopied ? t("nav.version.copiedLabel") : t("org.projectOverview.copyCsv")}
-                                </Button>
-                              </AppTooltip>
-                              <AppTooltip content={t("org.projectOverview.downloadCsvTooltip")}>
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  onClick={handleDownloadCsv}
-                                  data-testid="export-csv-download"
-                                >
-                                  <Download data-icon="inline-start" />
-                                  {t("org.projectOverview.downloadCsv")}
-                                </Button>
-                              </AppTooltip>
-                            </ButtonGroup>
-                          )}
+                      {orgSettings.canExport && fileListActions.length > 0 && (
+                        <div className="ms-auto">
+                          <OverflowMenu
+                            items={fileListActions}
+                            triggerVariant="outline"
+                            triggerSize="icon"
+                            ariaLabel={t("org.projectOverview.fileListActionsAria")}
+                            testId="file-list-actions"
+                          />
                         </div>
                       )}
                     </div>

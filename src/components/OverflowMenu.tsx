@@ -24,6 +24,7 @@ export interface OverflowMenuItem {
   onCheckedChange?: (checked: boolean) => void
   disabled?: boolean
   destructive?: boolean
+  testId?: string
 }
 
 interface Props {
@@ -70,6 +71,7 @@ function OverflowMenuPanel({ items }: { items: OverflowMenuItem[] }) {
               key={item.id}
               checked={item.checked}
               disabled={item.disabled}
+              data-testid={item.testId}
               onCheckedChange={(checked) => item.onCheckedChange?.(checked)}
             >
               {item.icon && <item.icon className="h-4 w-4" />}
@@ -81,6 +83,7 @@ function OverflowMenuPanel({ items }: { items: OverflowMenuItem[] }) {
               key={item.id}
               disabled={item.disabled}
               variant={item.destructive ? "destructive" : "default"}
+              data-testid={item.testId}
               onClick={item.onClick}
             >
               {item.icon && <item.icon className="h-4 w-4" />}

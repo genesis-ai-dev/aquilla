@@ -386,8 +386,10 @@ export const org = defineNamespace({
     "org.projectOverview.filesHeadingTruncated": "Files (top {cap} of {total})",
     "org.projectOverview.filesHeadingCount": "Files ({count})",
     "org.projectOverview.filesListAria": "File list",
+    "org.projectOverview.fileListActionsAria": "File list actions",
     "org.projectOverview.copyCsvTooltip": "Copy the file list below as CSV",
     "org.projectOverview.copyCsv": "Copy CSV",
+    "org.projectOverview.copyCsvCopied": "CSV copied to clipboard",
     "org.projectOverview.downloadCsvTooltip": "Download the file list below as a .csv file",
     "org.projectOverview.downloadCsv": "Download CSV",
     "org.projectOverview.downloadOriginals": "Download all originals",
@@ -1439,6 +1441,14 @@ export const org = defineNamespace({
       },
       "org.projectOverview.sortFilesByAria": {
         description: "Accessible name for the dropdown that chooses the sort order of the per-file breakdown list.",
+      },
+      "org.projectOverview.fileListActionsAria": {
+        description:
+          "Accessible name for the icon-only overflow (⋯) button beside the file-list filter/sort controls. Distinct from org.projectOverview.moreActionsAria, which names the project-header overflow.",
+      },
+      "org.projectOverview.copyCsvCopied": {
+        description:
+          "Success toast shown after Copy CSV writes the filtered file list to the clipboard. The menu item itself stays labeled Copy CSV.",
       },
       "org.projectOverview.filesListAria": {
         description:

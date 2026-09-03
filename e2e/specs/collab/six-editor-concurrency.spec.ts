@@ -38,11 +38,9 @@ import { Workspace } from "../../helpers/page-objects/Workspace"
 
 const EDITOR_COUNT = 6
 const EXTRA_USERS = ["dave", "erin", "frank"] as const
-/** Blur → POST /events 200, including Playwright protocol delay across six
- * Chromium contexts. Server-side `/events` stays well under 1s when the
- * AQU-1005 two-cursor path is healthy; a seq-lock convoy behind a whole-Bible
- * import chunk is tens of seconds to minutes. Stay under that without making
- * success depend on machine speed. */
+/** POST /events HTTP round-trip (resource timing). A seq-lock convoy behind
+ * a whole-Bible import chunk is tens of seconds to minutes; healthy writes
+ * stay well under that even with six editors and the import in flight. */
 const WRITE_BUDGET_MS = 8_000
 /** Events ack → text visible in a different open editor. Matches the
  * two-cursor smoke (`concurrent-edit.smoke.spec.ts`) 15s round-trip. */
@@ -154,10 +152,13 @@ test("six editors commit distinct cells while a whole-BSB helloao import is in f
       }),
     )
 
+    const writeSummary = writeResults
+      .map((result, i) => `${names[i]}=${result.writeMs}ms`)
+      .join(", ")
     for (const [i, result] of writeResults.entries()) {
       expect(
         result.writeMs,
-        `${names[i]} cell-write POST /events took ${result.writeMs}ms (budget ${WRITE_BUDGET_MS}ms)`,
+        `${names[i]} cell-write POST /events took ${result.writeMs}ms (budget ${WRITE_BUDGET_MS}ms; ${writeSummary})`,
       ).toBeLessThan(WRITE_BUDGET_MS)
     }
 

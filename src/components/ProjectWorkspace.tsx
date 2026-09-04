@@ -2832,7 +2832,11 @@ export function ProjectWorkspace() {
       //
       // The cells are still consulted for the OTHER axis — writing a camera
       // pick must not blank the name — but never for the axis being decided.
-      const views = readAtVersion(cellStoreVersion, () => cellStore.getAllCellViews())
+      // AQU-1147: read the store fresh at call time (no version dependency) —
+      // this only ever runs from a user click, so there's no memoization to
+      // keep in sync and no reason to make this component re-render on every
+      // commit just so this handler's closure stays "current."
+      const views = cellStore.getAllCellViews()
       const textById = new Map(views.map((c) => [c.id, c]))
       const nameOf = (c: { metadata?: Record<string, unknown> | null } | undefined) =>
         c?.metadata && typeof c.metadata.cast_name === "string" ? c.metadata.cast_name : ""
@@ -2894,7 +2898,6 @@ export function ProjectWorkspace() {
       audioCueSibling?.id,
       audioCues,
       cellStore,
-      cellStoreVersion,
       currentUsername,
       getTokenForProjectFile,
       refreshAudioCues,
@@ -2931,7 +2934,8 @@ export function ProjectWorkspace() {
     frozenAgreement.current = characterAgreement
     setCharacterWrite({ done: 0, total: entries.length, phase: "writing" })
     const toastId = toast.add({ type: "loading", title: `Undoing ${entries.length} decisions…`, timeout: 0 })
-    const views = readAtVersion(cellStoreVersion, () => cellStore.getAllCellViews())
+    // AQU-1147: fresh read at call time, no version dependency (see handleResolveCharacter).
+    const views = cellStore.getAllCellViews()
     const textById = new Map(views.map((c) => [c.id, c]))
     const cueById = new Map((audioCues ?? []).map((c) => [c.id, c]))
     const nameOf = (c: { metadata?: Record<string, unknown> | null } | undefined) =>
@@ -2984,7 +2988,6 @@ export function ProjectWorkspace() {
     audioCueSibling?.id,
     audioCues,
     cellStore,
-    cellStoreVersion,
     currentUsername,
     getTokenForProjectFile,
     refreshAudioCues,
@@ -3310,13 +3313,14 @@ export function ProjectWorkspace() {
     if (!activeFileId) return
     await runCharacterClear({
       fileId: activeFileId,
-      cells: readAtVersion(cellStoreVersion, () => cellStore.getAllCellViews()),
+      // AQU-1147: fresh read at call time, no version dependency (see handleResolveCharacter).
+      cells: cellStore.getAllCellViews(),
       noun: "subtitle lines",
       after: () => {
         revalidateCells()
       },
     })
-  }, [activeFileId, cellStore, cellStoreVersion, runCharacterClear, revalidateCells])
+  }, [activeFileId, cellStore, runCharacterClear, revalidateCells])
 
   /** The sheet keyed to the HEARD lines. Clearing this side degrades gently:
    *  `resolveCueCharacter` prefers a cue's own name and falls back to the
@@ -3435,8 +3439,9 @@ export function ProjectWorkspace() {
       setCueLinksPending(true)
       try {
         toast.update(importToastId, { type: "loading", title: `Imported ${uploaded.cellCount} audio cues — pairing them with the subtitles…` })
+        // AQU-1147: fresh read at call time, no version dependency (see handleResolveCharacter).
         const plans = autoLinkable(planCueLinks({
-          textCells: readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()),
+          textCells: cellStore.getAllSummaries(),
           audioCues: uploaded.cues,
         }))
         for (const plan of plans) {
@@ -3480,7 +3485,7 @@ export function ProjectWorkspace() {
           ? `Imported ${uploaded.cellCount} audio cues, and paired ${linkCount} of them with subtitle lines.`
           : `Imported ${uploaded.cellCount} audio cues.` })
     },
-    [project?.id, activeFile, audioCueSiblings, currentUsername, getTokenForFile, getTokenForProjectFile, refresh, refreshCueLinks, cellStore, cellStoreVersion],
+    [project?.id, activeFile, audioCueSiblings, currentUsername, getTokenForFile, getTokenForProjectFile, refresh, refreshCueLinks, cellStore],
   )
 
   /**
@@ -3627,9 +3632,10 @@ export function ProjectWorkspace() {
             // Only what may be written without asking. A cross-script or
             // weak-wording match is surfaced in the review drawer instead —
             // nothing verified what those two lines say.
+            // AQU-1147: fresh read at call time, no version dependency (see handleResolveCharacter).
             wanted: autoLinkable(
               planCueLinks({
-                textCells: readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()),
+                textCells: cellStore.getAllSummaries(),
                 audioCues: cuesAfter,
               }),
             ),
@@ -3687,7 +3693,7 @@ export function ProjectWorkspace() {
     },
     [
       project?.id, activeFile, audioCueSibling, audioCues, cueLinks, currentUsername,
-      getTokenForProjectFile, refreshAudioCues, refreshCueLinks, cellStore, cellStoreVersion,
+      getTokenForProjectFile, refreshAudioCues, refreshCueLinks, cellStore,
     ],
   )
 
@@ -5377,9 +5383,10 @@ export function ProjectWorkspace() {
     setCheckOpen(true)
     setCheckRunning(true)
     try {
+      // AQU-1147: fresh read at call time, no version dependency (see handleResolveCharacter).
       const result = await runDeterministicCheck({
         fileId: activeFileId,
-        cells: readAtVersion(cellStoreVersion, getActiveCells),
+        cells: getActiveCells(),
         rules,
         concepts: project?.terminology ?? [],
       })
@@ -5390,7 +5397,7 @@ export function ProjectWorkspace() {
     } finally {
       setCheckRunning(false)
     }
-  }, [activeFileId, checkRunning, cellStoreVersion, getActiveCells, rules, project?.terminology])
+  }, [activeFileId, checkRunning, getActiveCells, rules, project?.terminology])
 
   // A check run describes one file's cells; switching files invalidates it.
   useEffect(() => {
@@ -5426,9 +5433,10 @@ export function ProjectWorkspace() {
       workspaceTabs.openFile(a.fileId)
       return
     }
-    const idx = readAtVersion(cellStoreVersion, () => resolveScopeLabelIndex(a.scopeLabel))
+    // AQU-1147: fresh read at call time, no version dependency (see handleResolveCharacter).
+    const idx = resolveScopeLabelIndex(a.scopeLabel)
     editorRef.current?.scrollToCellIndex(idx >= 0 ? idx : 0)
-  }, [activeFileId, cellStoreVersion, resolveScopeLabelIndex, setActiveLane, workspaceTabs])
+  }, [activeFileId, resolveScopeLabelIndex, setActiveLane, workspaceTabs])
 
   // Consume a parked assignment scroll once the target file's cells have
   // loaded (AQU-690; mirrors the presence-peer deferred jump).
@@ -7814,11 +7822,12 @@ export function ProjectWorkspace() {
     if (!project?.id || !activeFile || !audioCueSibling || !audioCues) return
     setCueLinksPending(true)
     try {
+      // AQU-1147: fresh read at call time, no version dependency (see handleResolveCharacter).
       const diff = diffCueLinks({
         current: cueLinks,
         wanted: autoLinkable(
           planCueLinks({
-            textCells: readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()),
+            textCells: cellStore.getAllSummaries(),
             audioCues,
           }),
         ),
@@ -7853,7 +7862,7 @@ export function ProjectWorkspace() {
     }
   }, [
     project?.id, activeFile, audioCueSibling, audioCues, cueLinks, currentUsername,
-    getTokenForProjectFile, refreshCueLinks, cellStore, cellStoreVersion,
+    getTokenForProjectFile, refreshCueLinks, cellStore,
   ])
 
   /** The subtitle rows a take on this cell counts towards. Without audio cues

@@ -221,6 +221,15 @@ export async function listOrgMembersWithUsers(
   }))
 }
 
+export const ORG_ACTIVITY_DEBOUNCE_MS = 5 * 60 * 1000
+/** Isolate-local "(orgId:userId) → last bump ms". */
+const orgActivityBumpedAt = new Map<string, number>()
+
+/** Test hook: forget every isolate-local bump timestamp. */
+export function clearOrgActivityDebounce(): void {
+  orgActivityBumpedAt.clear()
+}
+
 /**
  * Bump org_members.last_active_at for (userId, orgId), debounced to once per
  * 5 minutes per pair. Fire-and-forget: a failed write doesn't fail the
@@ -232,6 +241,15 @@ export async function bumpOrgActivity(
   orgId: number | null,
 ): Promise<void> {
   if (orgId == null) return
+  // Perf (2026-09): the WHERE clause below only debounced the ROW; the UPDATE
+  // statement itself still ran on every /orgs/me. Skip the statement entirely
+  // when this isolate bumped the pair within the window. Another isolate may
+  // still issue a no-op UPDATE — the WHERE clause remains the row guard.
+  const key = `${orgId}:${userId}`
+  const now = Date.now()
+  const last = orgActivityBumpedAt.get(key)
+  if (last != null && now - last < ORG_ACTIVITY_DEBOUNCE_MS) return
+  orgActivityBumpedAt.set(key, now)
   try {
     await env.AQUILLA_PG.prepare(
       `UPDATE org_members

@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from "vitest"
-import { handleCellsReadRequest, resetChainCacheForTests, type CellsReadEnv } from "../events/cells-read-route"
+import { describe, it, expect } from "vitest"
+import { handleCellsReadRequest, type CellsReadEnv } from "../events/cells-read-route"
 import { handleRebuildProjectionRequest } from "../events/rebuild"
 import { buildEventProjectionStmts, type PersistedEvent } from "../events/event-projection"
 import { type CellRow } from "./helpers/in-memory-db"
@@ -7,11 +7,6 @@ import { makeTestDb, type Seed } from "./helpers/pg-test-db"
 import { makeTestToken } from "./helpers/auth"
 
 const SECRET = "cells-read-secret"
-
-// The chain cache is module-level (isolate-local) and keyed on
-// projectId + ETag; every test here uses proj-a/file-x, often with an
-// identical zero watermark, so reset it so tests stay independent.
-beforeEach(resetChainCacheForTests)
 
 function envWith(db: AquillaDb) {
   return { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }

@@ -45,25 +45,6 @@
 // query execution wraps in a mini-transaction to make SET LOCAL effective.
 // This is correct with Hyperdrive connection pooling: the SET LOCAL is
 // never visible to a different request's connection.
-//
-// Connection lifetime (isolate-level pool)
-// ----------------------------------------
-// Workers call `getPostgres(connectionString)` — ONE postgres.js pool per
-// isolate per Hyperdrive connection string, created lazily on first use and
-// never closed on the request path. Reasons:
-//   • postgres.js keys its prepared-statement cache per client connection; a
-//     per-request client threw that cache away every request, so `prepare`
-//     never warmed and every parameterised query paid Describe⇆ first.
-//   • pool/socket acquisition ran on every request, including WS upgrades
-//     and 404s.
-// Lifetime is bounded by postgres.js itself: `idle_timeout` closes sockets
-// that sit unused, `max_lifetime` recycles old ones, and the isolate's own
-// eviction drops the whole Map. Hyperdrive is a transaction-mode pooler and
-// RESETs origin connections between transactions, so SET LOCAL (transaction
-// scoped) can't leak across requests that happen to share a client socket —
-// see the "shared pool does not leak identity" test.
-// `makePostgres()` still returns an OWNED handle (scripts, tests) that the
-// caller must `close()`.
 
 import postgres from "postgres"
 
@@ -137,7 +118,7 @@ export interface PgRunOpts {
 export interface PgExecutor {
   run(sql: string, params: unknown[], opts?: PgRunOpts): Promise<{ rows: Record<string, unknown>[]; rowCount: number }>
   begin<T>(fn: (tx: PgExecutor) => Promise<T>): Promise<T>
-  /** End an OWNED postgres.js client; absent for the shared pool and PGlite tests. */
+  /** Release the underlying connection (postgres.js per-request); no-op for PGlite tests. */
   close?(): Promise<void>
 }
 
@@ -335,8 +316,7 @@ export class PostgresDb implements AquillaDb {
    *  cache by inferred param types + text and per connection, so a mismatch
    *  (fresh pooled connection, or a bool/Date param changing the inferred
    *  types) just degrades that wave to the serial drain — correct, only
-   *  slower — and the next wave pipelines again. Pipelined statements always
-   *  prepare (explicit opts bypass the shouldPrepare gate). */
+   *  slower — and the next wave pipelines again. */
   async batchPipelined<T = Record<string, unknown>>(stmts: AquillaStatement[]): Promise<AquillaResult<T>[]> {
     // postgres.js max_pipeline is 100; execute() past the window stalls the
     // connection into the serial drain, so cap waves at it.
@@ -387,61 +367,27 @@ export class PostgresDb implements AquillaDb {
     return { count: rowCount, duration: 0 }
   }
 
-  /** End an owned client (makePostgres). No-op on the isolate-shared handle. */
+  /** Release the connection — call via ctx.waitUntil() after the response. */
   async close() {
     await this.executor.close?.()
   }
 }
 
 /** postgres.js → PgExecutor (prod path; over Hyperdrive's connection string). */
-function fromPostgresJs(sql: postgres.Sql, owned: boolean): PgExecutor {
+function fromPostgresJs(sql: postgres.Sql): PgExecutor {
   const wrap = (s: postgres.Sql): PgExecutor => ({
     async run(query, params, opts) {
-      const prepare = opts?.prepare ?? shouldPrepare(query, params.length)
-      const rows = (await s.unsafe(query, params as never[], { prepare })) as unknown as Record<string, unknown>[] & { count?: number }
+      const rows = (await s.unsafe(query, params as never[], opts?.prepare ? { prepare: true } : undefined)) as unknown as Record<string, unknown>[] & { count?: number }
       return { rows, rowCount: rows.count ?? rows.length }
     },
     begin: (fn) => s.begin((tx) => fn(wrap(tx as unknown as postgres.Sql))) as Promise<never>,
-    // Only an OWNED client may be ended; the isolate-shared pool outlives
-    // every request, so its close() is a no-op.
-    close: owned ? () => sql.end({ timeout: 5 }) : undefined,
+    close: () => sql.end({ timeout: 5 }),
   })
   return wrap(sql)
 }
 
-/** Longest SQL text we prepare. Prod has ~280 distinct `INSERT INTO cells …`
- *  variants generated per row-count (multi-row VALUES lists); those are long,
- *  rarely repeat exactly, and would crowd the cache with one-shot entries. */
-export const PREPARE_MAX_SQL_LENGTH = 2048
-/** Cap on distinct SQL texts prepared per isolate. postgres.js's own statement
- *  cache (per connection) is unbounded, so the bound has to live here: once
- *  the registry is full, new texts run unprepared (one extra Describe RTT,
- *  no server-side statement). */
-export const PREPARE_MAX_STATEMENTS = 256
-
-const preparedTexts = new Set<string>()
-
-/** Decide whether a plain-path statement is issued as a NAMED prepared
- *  statement (see PgRunOpts.prepare). Explicit opts win (batchPipelined always
- *  prepares); this is the default for everything else. Registry is by SQL
- *  text only — postgres.js keys per (text + inferred param types) but the
- *  shim's `?`→`$n` texts are stable, so text is a fine proxy. Exported for
- *  tests; `registry` defaults to the module-level set. */
-export function shouldPrepare(sql: string, paramCount: number, registry: Set<string> = preparedTexts): boolean {
-  if (paramCount === 0) return false // no Describe cost to save; keeps DDL/exec out of the cache
-  if (sql.length > PREPARE_MAX_SQL_LENGTH) return false
-  if (registry.has(sql)) return true
-  if (registry.size >= PREPARE_MAX_STATEMENTS) return false
-  registry.add(sql)
-  return true
-}
-
-/** Test hook: forget every SQL text the prepare gate has admitted. */
-export function resetPrepareRegistry(): void {
-  preparedTexts.clear()
-}
-
-/** Per-request pool size (owned `makePostgres` handles). The events route fans out SIX prefetch SELECTs in
+/** Build an Aquilla database handle from a Postgres connection string (prod). */
+/** Per-request pool size. The events route fans out SIX prefetch SELECTs in
  *  one Promise.all (route.ts PERF-2) — at max=5 the sixth always queued behind
  *  a full pool, i.e. one guaranteed extra round-trip on every flush. 8 covers
  *  that fan-out with headroom for the concurrent membership/settings reads
@@ -451,21 +397,9 @@ export function resetPrepareRegistry(): void {
  *  local to the Worker isolate and bounded by the request's lifetime. */
 export const DEFAULT_POOL_MAX = 8
 
-/** The isolate-shared pool serves every in-flight request in the isolate at
- *  once, so it gets more headroom than a per-request client: two concurrent
- *  event flushes (6-way fan-out each) still fit without queueing. Hyperdrive
- *  pools the origin side; these are cheap client sockets to the Hyperdrive
- *  edge, opened lazily and reclaimed by `idle_timeout`. */
-export const SHARED_POOL_MAX = 16
-/** Seconds a pooled socket may sit unused before postgres.js closes it. Long
- *  enough to survive normal request gaps in a warm isolate, short enough that
- *  a quiet isolate holds no sockets. */
-export const SHARED_POOL_IDLE_TIMEOUT_S = 30
-
-function postgresClient(connectionString: string, max: number, shared: boolean): postgres.Sql {
-  return postgres(connectionString, {
+export function makePostgres(connectionString: string, max = DEFAULT_POOL_MAX): PostgresDb {
+  const sql = postgres(connectionString, {
     max,
-    ...(shared ? { idle_timeout: SHARED_POOL_IDLE_TIMEOUT_S, connect_timeout: 10 } : {}),
     fetch_types: false, // recommended through Hyperdrive's pooling
     types: {
       bigint: { to: 20, from: [20], parse: (x: string) => Number(x), serialize: (x: number | bigint) => String(x) },
@@ -476,24 +410,5 @@ function postgresClient(connectionString: string, max: number, shared: boolean):
       timestamp: { to: 1114, from: [1114, 1184], parse: (x: string) => x, serialize: (x: string) => x },
     },
   })
-}
-
-/** Build an OWNED Postgres handle (scripts, tests, ad-hoc tooling). The caller
- *  must `close()` it. Workers should use `getPostgres()` instead. */
-export function makePostgres(connectionString: string, max = DEFAULT_POOL_MAX): PostgresDb {
-  return new PostgresDb(fromPostgresJs(postgresClient(connectionString, max, false), true))
-}
-
-const sharedPools = new Map<string, PostgresDb>()
-
-/** The isolate-level handle for a Hyperdrive connection string: created on
- *  first use, reused by every later request in this isolate, never closed by
- *  callers (`close()` is a no-op). See "Connection lifetime" at the top. */
-export function getPostgres(connectionString: string): PostgresDb {
-  let db = sharedPools.get(connectionString)
-  if (!db) {
-    db = new PostgresDb(fromPostgresJs(postgresClient(connectionString, SHARED_POOL_MAX, true), false))
-    sharedPools.set(connectionString, db)
-  }
-  return db
+  return new PostgresDb(fromPostgresJs(sql))
 }

@@ -106,7 +106,7 @@ import {
 
 type HonoEnv = { Bindings: Env; Variables: Variables }
 
-import { getPostgres } from "../../db/shim/postgres"
+import { makePostgres } from "../../db/shim/postgres"
 import { shipLog, shipErrorResponse } from "./posthog-logs"
 
 const app = new Hono<HonoEnv>()
@@ -346,9 +346,9 @@ app.onError((err, c) => {
 })
 
 // Postgres (Neon) is the only datastore. Serve AQUILLA_PG via the Postgres
-// shim over the isolate-shared pool (db/shim/postgres.ts getPostgres). The
-// handle is injected via a fresh env COPY ({ ...env, AQUILLA_PG: shim }) —
-// never by mutating the shared isolate-wide `env`. Mutating it (the old middleware) let concurrent requests
+// shim. The shim + its connection are created PER REQUEST and injected via a
+// fresh env COPY ({ ...env, AQUILLA_PG: shim }) — never by mutating the shared
+// isolate-wide `env`. Mutating it (the old middleware) let concurrent requests
 // clobber each other's DB handle, causing "Cannot perform I/O on behalf of a
 // different request" 500s under the assignments fan-out. Mirrors sync-worker.
 //
@@ -389,23 +389,30 @@ app.fetch = (async (request: Request, env: Env, ctx: ExecutionContext): Promise<
       { status: 500 },
     )
   }
-  // Isolate-shared pool (db/shim/postgres.ts getPostgres): never closed here,
-  // so it is safe for SSE bodies and background loops that outlive the
-  // Response. Drop HYPERDRIVE so the prefix-strip middleware's re-entrant
-  // app.fetch reuses this handle (via reqEnv.AQUILLA_PG).
+  const shim = makePostgres(env.HYPERDRIVE.connectionString)
+  // Drop HYPERDRIVE so the prefix-strip middleware's re-entrant app.fetch reuses
+  // this shim (via reqEnv.AQUILLA_PG) instead of opening a second connection.
+  // PG_CONNECTION_STRING: streaming routes (routes/agent.ts) must open their
+  // own connection — the request-scoped shim below is closed as soon as the
+  // Response returns, which is BEFORE an SSE stream body finishes.
   const reqEnv = {
     ...env,
-    AQUILLA_PG: getPostgres(env.HYPERDRIVE.connectionString) as unknown as AquillaDb,
+    AQUILLA_PG: shim as unknown as AquillaDb,
     HYPERDRIVE: undefined,
+    PG_CONNECTION_STRING: env.HYPERDRIVE.connectionString,
     requestMemo: createRequestMemo(),
   }
-  return baseFetch(request, reqEnv, ctx)
+  try {
+    return await baseFetch(request, reqEnv, ctx)
+  } finally {
+    ctx.waitUntil(shim.close())
+  }
 }) as typeof app.fetch
 
 // Cron (wrangler.toml [triggers], every 5 minutes): flush Monday board links
 // whose push was debounced (dirty_at set), oldest first, capped at 20 per run.
 // The scheduled entrypoint doesn't pass through the fetch wrapper above, so it
-// resolves the isolate-shared Postgres handle the same way.
+// builds its own request-scoped Postgres shim the same way.
 const scheduled = async (
   _controller: ScheduledController,
   env: Env,
@@ -420,16 +427,20 @@ const scheduled = async (
   }
 
   let runEnv = env
+  let shim: ReturnType<typeof makePostgres> | null = null
   if (!env.AQUILLA_PG) {
     if (!env.HYPERDRIVE) {
       console.error("[monday cron] HYPERDRIVE not bound — skipping flush")
       return
     }
-    runEnv = { ...env, AQUILLA_PG: getPostgres(env.HYPERDRIVE.connectionString) as unknown as AquillaDb, HYPERDRIVE: undefined }
+    shim = makePostgres(env.HYPERDRIVE.connectionString)
+    runEnv = { ...env, AQUILLA_PG: shim as unknown as AquillaDb, HYPERDRIVE: undefined }
   }
-  // Adopted contextual runs keep driving after this handler returns on the
-  // shared pool; ctx.waitUntil keeps the isolate alive for them.
-  {
+  // Adopted contextual runs keep driving after this handler returns, on the
+  // SAME connection (selfTickLoop only opens its own when PG_CONNECTION_STRING
+  // is configured). The close below must wait for them.
+  let sweepDone: Promise<void> = Promise.resolve()
+  try {
     const flushed = await flushDirtyLinks(runEnv, 20)
     if (flushed > 0) console.log(`[monday cron] flushed ${flushed} dirty link(s)`)
     // revoked_tokens hygiene lives here now, off the request path (it used to
@@ -440,6 +451,7 @@ const scheduled = async (
     // here must never take the Monday flush down with it.
     try {
       const sweep = await sweepStrandedContextualRuns(runEnv)
+      sweepDone = sweep.done
       if (sweep.adopted > 0) {
         console.log(`[contextual cron] resumed ${sweep.adopted} stranded run(s)`)
         ctx.waitUntil(sweep.done)
@@ -447,6 +459,8 @@ const scheduled = async (
     } catch (err) {
       console.error("[contextual cron] sweep failed:", err)
     }
+  } finally {
+    if (shim) ctx.waitUntil(sweepDone.then(() => shim!.close()))
   }
 }
 

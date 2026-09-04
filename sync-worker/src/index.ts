@@ -75,7 +75,7 @@ export { ProjectSync } from "./project-do"
 // Inert legacy DO class — kept exported so deploys don't trip the
 // "script does not export class 'FileSync'" guard. See file-sync-legacy.ts.
 export { FileSync } from "./file-sync-legacy"
-import { getPostgres } from "../../db/shim/postgres"
+import { makePostgres } from "../../db/shim/postgres"
 import { migrateFenceResponse } from "./lib/migrate-fence"
 import { shipLog, shipErrorResponse } from "./posthog-logs"
 import { deploymentEnvironmentError, unauthenticatedBypassError } from "./environment-guard"
@@ -97,8 +97,8 @@ declare global {
        *  envs that don't run the audio import. */
       LFS_SRC?: R2Bucket
       /** The events + projections store. NOT a D1 binding — it is the
-       *  D1-compatible Postgres (Neon) shim over the isolate-shared pool,
-       *  injected at the top of `fetch` from HYPERDRIVE. Typed as `AquillaDb` only because the ~80
+       *  D1-compatible Postgres (Neon) shim, injected per-request at the top of
+       *  `fetch` from HYPERDRIVE. Typed as `AquillaDb` only because the ~80
        *  routes speak the D1 `.prepare()/.batch()` API against the shim. */
       AQUILLA_PG?: AquillaDb
       /** Postgres (Neon) via Hyperdrive — the sole datastore. Required: when
@@ -255,8 +255,8 @@ const worker = {
     }
 
     // Postgres (Neon) is the only datastore. Serve AQUILLA_PG via the
-    // D1-compatible Postgres shim over the isolate-shared pool (never closed
-    // per request — see db/shim/postgres.ts). HYPERDRIVE is required — without it we fail fast instead of
+    // D1-compatible Postgres shim (per-request connection, closed after the
+    // response). HYPERDRIVE is required — without it we fail fast instead of
     // falling through to an empty local D1 (the D1→Neon cutover removed D1 as a
     // store; a missing binding is a deploy/config error, not a fallback).
     if (!env.HYPERDRIVE) {
@@ -265,7 +265,9 @@ const worker = {
         { status: 500 },
       )
     }
-    env = { ...env, AQUILLA_PG: getPostgres(env.HYPERDRIVE.connectionString) as unknown as AquillaDb }
+    const pgShim: { close(): Promise<void> } = makePostgres(env.HYPERDRIVE.connectionString)
+    env = { ...env, AQUILLA_PG: pgShim as unknown as AquillaDb }
+    try {
     const projectArchiveResponse = await handleProjectArchiveRequest(request, env, notifyProjectDo)
     if (projectArchiveResponse) return projectArchiveResponse
     // AQU-346: eject a removed member's live WS sessions + denylist their
@@ -429,6 +431,9 @@ const worker = {
     if (projectSyncResponse) return projectSyncResponse
 
     return new Response("not found", { status: 404 })
+    } finally {
+      ctx.waitUntil(pgShim.close())
+    }
   },
 }
 

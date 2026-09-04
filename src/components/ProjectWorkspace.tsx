@@ -375,6 +375,12 @@ import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useMyScopes } from "@/hooks/useMyScopes"
 import { isInMemberScope } from "@/lib/sync/member-scopes"
 import { clearSelection, getSelectedIds, setSelection } from "@/lib/audio/selection"
+import {
+  setVisibleCellIds as setEditorViewportVisibleCellIds,
+  setTrackedCellRef as setEditorViewportTrackedCellRef,
+  useVisibleCellIds as useEditorViewportVisibleCellIds,
+  useTrackedCellRef as useEditorViewportTrackedCellRef,
+} from "@/hooks/useEditorViewportStore"
 
 // Import runs inline in the workspace (upload + eBible corpus tabs). The
 // AD-11 plan carves import into a standalone apps/import Worker, but that
@@ -914,17 +920,20 @@ export function ProjectWorkspace() {
   const agentOpen = centerSurface === "agent"
   const [translateAsReadEnabled, setTranslateAsReadEnabled] = useTranslateAsReadPreference(projectId)
   const [translateAsReadActiveCellId, setTranslateAsReadActiveCellId] = useState<string | null>(null)
-  const [visibleCellIds, setVisibleCellIds] = useState<string[]>([])
+  // AQU-1016: visible-cell-ids used to be `useState` here — every virtualized
+  // scroll step re-rendered this whole shell. It now lives in a small
+  // external store (src/hooks/useEditorViewportStore.ts); the shell writes to
+  // it without triggering its own re-render, and this read subscribes only
+  // while translate-as-read is actually enabled (the sole consumer below —
+  // its own `available` gate no-ops the effect otherwise), so a scroll on
+  // the common "translate-as-read off" file causes zero extra shell renders.
+  const visibleCellIds = useEditorViewportVisibleCellIds(translateAsReadEnabled)
   const translateAsReadEnabledRef = useRef(false)
   translateAsReadEnabledRef.current = translateAsReadEnabled
   const translateAsReadAttemptsRef = useRef(new Map<string, string>())
   const translateAsReadRunRef = useRef(0)
   const handleVisibleCellIdsChange = useCallback((next: string[]) => {
-    setVisibleCellIds((current) => (
-      current.length === next.length && current.every((id, index) => id === next[index])
-        ? current
-        : next
-    ))
+    setEditorViewportVisibleCellIds(next)
   }, [])
   const editorReturnPath = useMemo(() => {
     if (!projectId) return null
@@ -5679,11 +5688,18 @@ export function ProjectWorkspace() {
   const [parallelBiblesOpen, setParallelBiblesOpen] = useState<boolean>(() =>
     projectId ? readParallelBiblesOpen(projectId) : false,
   )
-  const [trackedCellRef, setTrackedCellRef] = useState<string | null>(null)
+  // AQU-1016: was `useState` here — every scroll step re-rendered this whole
+  // shell to feed a value only the parallel-bibles panel reads. It now lives
+  // in the shared editor-viewport store (src/hooks/useEditorViewportStore.ts);
+  // writes below go straight to the store, and this read only subscribes
+  // (and thus only re-renders the shell) while a parallel-bibles panel is
+  // actually shown for the active file — the same gate the render sites use.
+  const parallelBiblesPanelActive = centerSurface === "editor" && !!activeFile && fileHasSections(activeFile)
+  const trackedCellRef = useEditorViewportTrackedCellRef(parallelBiblesPanelActive)
   // Drop the tracked ref when switching files so the previous file's verse
   // doesn't leak into the new file's panel (the new EditorTable re-fires).
   useEffect(() => {
-    setTrackedCellRef(null)
+    setEditorViewportTrackedCellRef(null)
   }, [activeFileId])
   const reconcilerRef = useRef<import("@/lib/sync/ws-reconciler").WsReconciler | null>(null)
   // FRO-288: Reactive reconciler state so useFocusLock can access it.
@@ -6157,7 +6173,7 @@ export function ProjectWorkspace() {
     setFocusedCellCanonicalRef(focusedCell?.group ?? null)
     // Parallel-bibles panel: navigating to a cell is a stronger "looking at"
     // signal than the scroll position — the panel follows whichever moved last.
-    if (focusedCell?.group) setTrackedCellRef(focusedCell.group)
+    if (focusedCell?.group) setEditorViewportTrackedCellRef(focusedCell.group)
     // FRO-288: focusLockState.claim() replaces the bare focus.claim send.
     // The hook sends focus.claim and starts the half-period renewal timer so
     // the 30s DO lease never silently expires mid-edit.
@@ -10913,7 +10929,7 @@ export function ProjectWorkspace() {
             staleCellIds={staleCellIds}
             upstreamStaleCellIds={upstreamStaleCellIds}
             assignmentsByCellId={assignmentsByCellId}
-            onVisibleRefChange={setTrackedCellRef}
+            onVisibleRefChange={setEditorViewportTrackedCellRef}
             onVisibleCellIdsChange={handleVisibleCellIdsChange}
             // Stacked mode already shows the toolbar in the media header row
             // above the timeline — don't render it twice. Chapter picker +

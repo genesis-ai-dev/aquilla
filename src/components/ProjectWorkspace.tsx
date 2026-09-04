@@ -5595,13 +5595,29 @@ export function ProjectWorkspace() {
               // visible until the handler's read lands. This is the dominant
               // edit-cycle cost: every commit + validate + auto-BT echo was
               // firing a redundant targeted GET (~5 of 8 per edit cycle).
-              if (!ownWrite) {
+              //
+              // AQU-1154 follow-up: "own write" means the same USERNAME, not
+              // this tab. A second tab of the same user (or a tab whose post-
+              // flush refetch failed) got no refetch at all and kept the old
+              // head, so its next commit chained on a stale parent and was
+              // refused as bumped. Refetch own echoes too unless this tab's
+              // store already holds the echoed event as the cell's head — the
+              // committing tab does after its post-flush read, so the common
+              // case still costs no extra GET.
+              const alreadyApplied = ownWrite && (() => {
+                const view = cellStore.getCellView(msg.cell!)
+                if (!view) return false
+                if (msg.kind?.startsWith("target.cell.")) return view.targetEventId === msg.id
+                if (msg.kind?.startsWith("source.cell.")) return view.sourceEventId === msg.id
+                return true
+              })()
+              if (!ownWrite || !alreadyApplied) {
                 revalidateCell(msg.cell)
                 // activeValidators (the validation pill) comes from the
                 // audit-stats projection, not /files/:fileId/cells — a remote
                 // validate/unvalidate must poke that read too, or the pill
                 // stays stale until the next full stats poll.
-                if (isValidationEvent(msg.kind)) {
+                if (!ownWrite && isValidationEvent(msg.kind)) {
                   revalidateCellStats(msg.cell)
                 }
               }

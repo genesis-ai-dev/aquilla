@@ -38,6 +38,18 @@ const B2: CellHistoryEntry = {
   isStale: true,
 }
 
+// An older on-chain (non-stale) version of the same cell. Distinct enough
+// from A2 (different author, >2 min earlier) that grouping keeps it separate.
+const A1: CellHistoryEntry = {
+  timestamp: "2026-07-01T09:50:00.000Z",
+  value: "A1",
+  source: "human",
+  author: "carol",
+  validated: false,
+  eventId: "evt-A1",
+  isStale: false,
+}
+
 const CELL = {
   id: "c1",
   fileId: "f1",
@@ -97,5 +109,64 @@ describe("HistoryDrawer bumped (stale-branch) entry", () => {
     )
     expect(screen.getByText("B2").closest("li")).toHaveTextContent("· bumped by a concurrent edit")
     expect(screen.queryByRole("button", { name: "Promote to current" })).toBeNull()
+  })
+})
+
+// AQU-1159: restoring is not only for bumped edits. Any older version a user
+// can see in the drawer is a value they may want back, and getting it back
+// must not require retyping it.
+describe("HistoryDrawer older on-chain entry", () => {
+  it("offers Restore on an older version, not on the current one, and hands back that entry", () => {
+    mockHook.mockReturnValue({ history: [A1, A2], isLoading: false, isError: false, revalidate: vi.fn() })
+    const onPromote = vi.fn()
+    render(
+      <HistoryDrawer
+        cell={CELL}
+        onClose={vi.fn()}
+        projectId="p1"
+        fileId="f1"
+        getTokenForFile={async () => "token"}
+        isSynced
+        onPromote={onPromote}
+      />,
+    )
+
+    const olderItem = screen.getByText("A1").closest("li")!
+    // An ordinary older version is not a warning: no stale wording.
+    expect(olderItem).not.toHaveTextContent("bumped by a concurrent edit")
+    expect(olderItem).not.toHaveTextContent("Promote to current")
+    expect(olderItem).toHaveTextContent("Restore this version")
+
+    const headItem = screen.getByText("A2").closest("li")!
+    expect(headItem).toHaveTextContent("· current")
+    expect(headItem).not.toHaveTextContent("Restore this version")
+    expect(headItem).not.toHaveTextContent("Promote to current")
+
+    fireEvent.click(screen.getByRole("button", { name: "Restore this version" }))
+    expect(olderItem).toHaveTextContent("Replace the current text with this version?")
+    fireEvent.click(screen.getByRole("button", { name: "Confirm" }))
+    expect(onPromote).toHaveBeenCalledTimes(1)
+    expect(onPromote).toHaveBeenCalledWith(expect.objectContaining({ eventId: "evt-A1", value: "A1" }))
+  })
+
+  it("offers no restore on an unsynced (pending) older entry", () => {
+    mockHook.mockReturnValue({
+      history: [{ ...A1, syncState: "pending" }, A2],
+      isLoading: false,
+      isError: false,
+      revalidate: vi.fn(),
+    })
+    render(
+      <HistoryDrawer
+        cell={CELL}
+        onClose={vi.fn()}
+        projectId="p1"
+        fileId="f1"
+        getTokenForFile={async () => "token"}
+        isSynced
+        onPromote={vi.fn()}
+      />,
+    )
+    expect(screen.getByText("A1").closest("li")).not.toHaveTextContent("Restore this version")
   })
 })

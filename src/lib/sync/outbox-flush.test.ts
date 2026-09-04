@@ -302,12 +302,20 @@ describe("flushOutboxBatch", () => {
         ],
       }),
     )
+    const onForbidden = vi.fn()
     const result = await flushOutboxBatch({
       getTokenForFile: TOKEN_FN,
       fetchImpl: fetchMock as unknown as typeof fetch,
+      onForbidden,
     })
 
     expect(result).toMatchObject({ quarantined: 1 })
+    expect(onForbidden).toHaveBeenCalledWith([expect.objectContaining({
+      id: "e1",
+      status: 403,
+      reason: "file 'f1' not in scope for cell.validate",
+      cellId: "cell-42",
+    })])
     // The quarantined record keeps status "failed" + the server's reason, which
     // is what the workspace banner (useForbiddenOutboxRecords) reads to explain
     // WHY the validate reverted — regardless of which flush path quarantined it.
@@ -329,12 +337,18 @@ describe("flushOutboxBatch", () => {
     await enqueueOutboxEvent(makeEvent("e1", "f1"))
     await enqueueOutboxEvent(makeEvent("e2", "f1"))
     const fetchMock = vi.fn()
+    const onForbidden = vi.fn()
     const result = await flushOutboxBatch({
       getTokenForFile: MINT_403_FN,
       fetchImpl: fetchMock as unknown as typeof fetch,
+      onForbidden,
     })
     expect(fetchMock).not.toHaveBeenCalled()
     expect(result).toMatchObject({ quarantined: 2, authError: false })
+    expect(onForbidden).toHaveBeenCalledWith([
+      expect.objectContaining({ id: "e1", status: 403 }),
+      expect.objectContaining({ id: "e2", status: 403 }),
+    ])
     // Records preserved (no data loss) but no longer pending → flusher advances.
     expect(await peekPendingOutboxBatch(10)).toHaveLength(0)
     expect(await outboxPendingCount()).toBe(2)
@@ -717,12 +731,17 @@ describe("flushOutboxBatch", () => {
     await enqueueOutboxEvent(makeEvent("e1", "f1", { projectId: "p" }))
 
     const fetchMock = vi.fn().mockResolvedValue(new Response("Forbidden", { status: 403 }))
+    const onForbidden = vi.fn()
     const result = await flushOutboxBatch({
       getTokenForFile: async () => ({ token: "tok", status: 200 }),
       fetchImpl: fetchMock as unknown as typeof fetch,
+      onForbidden,
     })
 
     expect(result).toMatchObject({ quarantined: 1, networkError: false })
+    expect(onForbidden).toHaveBeenCalledWith([
+      expect.objectContaining({ id: "e1", reason: "HTTP 403" }),
+    ])
     const pending = await peekPendingOutboxBatch(10)
     expect(pending).toHaveLength(0)
   })

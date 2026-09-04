@@ -24,7 +24,12 @@ import { readAtVersion, useActiveCellStore, useCellStoreVersion, type CellStore,
 import { useStaleSourceCells } from "@/hooks/useStaleSourceCells"
 import { triggerLinkSync } from "@/lib/sync/archive"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
-import { useCompletion, FALLBACK_COMPLETION_SETTINGS } from "@/hooks/useCompletion"
+import {
+  useCompletion,
+  FALLBACK_COMPLETION_SETTINGS,
+  type CompletedCellDraft,
+  type CommitCompletedCellsResult,
+} from "@/hooks/useCompletion"
 import { useTranslateAsReadPreference } from "@/hooks/useTranslateAsReadPreference"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
 import {
@@ -155,7 +160,7 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { emitCastAssign, emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, enqueueEvents } from "@/lib/sync/events-emit"
+import { emitCastAssign, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, enqueueEvents } from "@/lib/sync/events-emit"
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
 import { resolveTimingLocked } from "@/lib/sync/project-settings"
@@ -345,7 +350,10 @@ import {
   writeLocalBacktranslation,
   type BacktranslationRecord,
 } from "@/lib/completion/bt-record"
-import { normalizeProtectedCompletion } from "@/lib/idml/completion"
+import {
+  normalizeProtectedCompletion,
+  type NormalizedCompletion,
+} from "@/lib/idml/completion"
 import { hasIdmlMetadata, replaceProtectedIdmlText } from "@/lib/idml/protected-html"
 import {
   hasIdmlCellMetadata,
@@ -417,6 +425,19 @@ let _lastImportWrite: Promise<any> = Promise.resolve(undefined)
 const EMPTY_CELL_DATA: CellData[] = []
 const EMPTY_CHAPTER_HEALTH: BookHealthChapter[] = []
 const EMPTY_SCORED_PAIRS: ScoredPair[] = []
+
+type PreparedCompletionDraft = {
+  index: number
+  draft: CompletedCellDraft
+  liveCell: CellData
+  completed: NormalizedCompletion
+  parentId: string | null
+}
+
+type RetryCompletionDraft = PreparedCompletionDraft & {
+  rebasedParent: string
+  sourceEventId: string | null
+}
 
 // AQU-1104: the store keeps a summary's identity across commits for cells the
 // commit did not touch, so direction detection (a regex walk over every cell's
@@ -4181,6 +4202,291 @@ export function ProjectWorkspace() {
     revalidateCell(cell.id)
   }, [project?.id, project?.syncRole?.level, applyOptimisticTargetEdit, activeLane, laneCellKey, getActiveCell, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, refreshOutboxPending, revalidateCellStats, revalidateCell])
 
+  const commitCompletedCells = useCallback(async (
+    drafts: CompletedCellDraft[],
+  ): Promise<CommitCompletedCellsResult> => {
+    if (!project?.id || !canPerform("target.cell.commit", project.syncRole?.level ?? null)) {
+      const error = new Error("You do not have permission to commit target cells")
+      return drafts.map(() => ({ status: "rejected", reason: error }))
+    }
+    if (drafts.length === 0) return []
+
+    const results: CommitCompletedCellsResult = drafts.map(() => ({
+      status: "rejected",
+      reason: new Error("The draft could not be prepared"),
+    }))
+    const prepared: PreparedCompletionDraft[] = []
+    for (let index = 0; index < drafts.length; index++) {
+      const draft = drafts[index]
+      try {
+        const liveCell = getActiveCell(draft.cell.id) ?? draft.cell
+        const completed = normalizeProtectedCompletion(liveCell, draft.text)
+        const parentId = resolveTargetCommitParentId(liveCell)
+        prepared.push({ index, draft, liveCell, completed, parentId })
+        results[index] = { status: "fulfilled", value: undefined }
+      } catch (error) {
+        results[index] = { status: "rejected", reason: error }
+      }
+    }
+    if (prepared.length === 0) return results
+    const inputs = prepared.map(({ draft, liveCell, completed, parentId }) => ({
+      projectId: project.id,
+      fileId: draft.cell.fileId,
+      cellId: draft.cell.id,
+      parentId,
+      sourceEventId: liveCell.sourceEventId ?? null,
+      value: completed.value,
+      ...(completed.valueHtml ? { valueHtml: completed.valueHtml } : {}),
+      author: draft.author,
+      targetLang: activeLane,
+      aiSuggestion: true,
+      aiDraft: draft.provenance,
+    }))
+
+    const optimisticPatches = prepared.map(({ draft, completed }) => ({
+      cellId: draft.cell.id,
+      value: completed.value,
+      ...(completed.valueHtml ? { valueHtml: completed.valueHtml } : {}),
+    }))
+    const restorePatches: Array<{
+      cellId: string
+      value: string
+      valueHtml?: string
+    }> = prepared.map(({ draft, liveCell }) => ({
+      cellId: draft.cell.id,
+      value: liveCell.translated ?? "",
+      ...(liveCell.translatedHtml
+        ? { valueHtml: liveCell.translatedHtml }
+        : {}),
+    }))
+    // The outbox overlay disappears as soon as accepted rows leave IDB. Keep
+    // one direct store shadow per draft until the confirming delta replaces
+    // it, so the UI cannot flash back to the pre-response text.
+    applyOptimisticTargetEdits(optimisticPatches)
+
+    let eventIds: string[]
+    try {
+      // enqueueOutboxEvents is atomic and notifies the pending-overlay reader
+      // once, so ten drafts become one optimistic store mutation. Keep the
+      // streaming previews mounted until the flush and confirming delta land.
+      eventIds = await emitTargetCellCommits(inputs)
+    } catch (error) {
+      applyOptimisticTargetEdits(restorePatches)
+      revalidateCells()
+      for (const item of prepared) {
+        results[item.index] = { status: "rejected", reason: error }
+      }
+      return results
+    }
+
+    const initialIndexByEventId = new Map(eventIds.map((eventId, index) => [eventId, index]))
+    for (let index = 0; index < eventIds.length; index++) {
+      const eventId = eventIds[index]
+      const cellId = prepared[index].draft.cell.id
+      pendingCompletionEventIdRef.current.set(laneCellKey(cellId), eventId)
+      rememberPendingTargetCommit(cellId, eventId, prepared[index].parentId)
+    }
+
+    const staleIndexes = new Set<number>()
+    const rejectedIndexes = new Map<number, Error>()
+    const noteRejectedEntries = (
+      entries: Array<{ id: string; status: number; reason: string }>,
+    ) => {
+      for (const entry of entries) {
+        const preparedIndex = initialIndexByEventId.get(entry.id)
+        if (preparedIndex === undefined) continue
+        rejectedIndexes.set(
+          preparedIndex,
+          new Error(entry.reason || `The server refused this draft (${entry.status})`),
+        )
+      }
+    }
+    await flushOutboxBatch({
+      getTokenForFile: getTokenForProjectFile,
+      onStaleSiblings: (entries) => {
+        for (const entry of entries) {
+          const index = initialIndexByEventId.get(entry.id)
+          if (index !== undefined) staleIndexes.add(index)
+        }
+      },
+      onRejected: noteRejectedEntries,
+      onForbidden: noteRejectedEntries,
+    })
+    await refreshOutboxPending()
+
+    if (rejectedIndexes.size > 0) {
+      const rejectedPatches: typeof restorePatches = []
+      for (const [preparedIndex, error] of rejectedIndexes) {
+        const item = prepared[preparedIndex]
+        const key = laneCellKey(item.draft.cell.id)
+        pendingCompletionEventIdRef.current.delete(key)
+        pendingTargetCommitHeadsRef.current.delete(key)
+        results[item.index] = { status: "rejected", reason: error }
+        rejectedPatches.push(restorePatches[preparedIndex])
+      }
+      applyOptimisticTargetEdits(rejectedPatches)
+    }
+    if (
+      staleIndexes.size > 0 &&
+      [...staleIndexes].some((preparedIndex) => !rejectedIndexes.has(preparedIndex))
+    ) {
+      const stalePrepared: PreparedCompletionDraft[] = []
+      for (const preparedIndex of staleIndexes) {
+        if (!rejectedIndexes.has(preparedIndex)) {
+          stalePrepared.push(prepared[preparedIndex])
+        }
+      }
+      for (const { draft } of stalePrepared) {
+        const key = laneCellKey(draft.cell.id)
+        pendingCompletionEventIdRef.current.delete(key)
+        pendingTargetCommitHeadsRef.current.delete(key)
+      }
+
+      try {
+        // One authoritative read supplies the current parents for every stale
+        // draft in this model response. Retry only cells whose head advanced;
+        // an unchanged head would dead-letter identically.
+        const fileId = stalePrepared[0].draft.cell.fileId
+        const mint = await getTokenForProjectFile(project.id, fileId)
+        const staleCellIds = stalePrepared.map(({ draft }) => draft.cell.id)
+        const rows = mint.token
+          ? await fetchCellsByIds(
+            project.id,
+            fileId,
+            staleCellIds,
+            mint.token,
+            activeLane || undefined,
+          )
+          : []
+        const retryItems: RetryCompletionDraft[] = []
+        for (const item of stalePrepared) {
+          const targetRow = rows.find((row) => (
+            row.cellId === item.draft.cell.id &&
+            row.side === "target" &&
+            (row.targetLang ?? "") === activeLane
+          ))
+          const sourceRow = rows.find((row) => (
+            row.cellId === item.draft.cell.id && row.side === "source"
+          ))
+          const rebasedParent = targetRow?.eventId ?? sourceRow?.eventId ?? null
+          if (!rebasedParent || rebasedParent === item.parentId) {
+            results[item.index] = {
+              status: "rejected",
+              reason: new Error("The draft was outdated by another change and was not saved"),
+            }
+            continue
+          }
+          retryItems.push({
+            ...item,
+            rebasedParent,
+            sourceEventId: sourceRow?.eventId ?? item.liveCell.sourceEventId ?? null,
+          })
+        }
+
+        if (retryItems.length > 0) {
+          applyOptimisticTargetEdits(retryItems.map((item) => ({
+            cellId: item.draft.cell.id,
+            value: item.completed.value,
+            ...(item.completed.valueHtml
+              ? { valueHtml: item.completed.valueHtml }
+              : {}),
+          })))
+          const retryEventIds = await emitTargetCellCommits(retryItems.map((item) => ({
+            projectId: project.id,
+            fileId: item.draft.cell.fileId,
+            cellId: item.draft.cell.id,
+            parentId: item.rebasedParent,
+            sourceEventId: item.sourceEventId,
+            value: item.completed.value,
+            ...(item.completed.valueHtml ? { valueHtml: item.completed.valueHtml } : {}),
+            author: item.draft.author,
+            targetLang: activeLane,
+            aiSuggestion: true,
+            aiDraft: item.draft.provenance,
+          })))
+          const retryIndexByEventId = new Map(
+            retryEventIds.map((eventId, index) => [eventId, retryItems[index].index]),
+          )
+          for (let index = 0; index < retryEventIds.length; index++) {
+            const item = retryItems[index]
+            const eventId = retryEventIds[index]
+            pendingCompletionEventIdRef.current.set(laneCellKey(item.draft.cell.id), eventId)
+            rememberPendingTargetCommit(item.draft.cell.id, eventId, item.rebasedParent)
+          }
+          const retryRejectedIndexes = new Map<number, Error>()
+          const noteRetryRejected = (
+            entries: Array<{ id: string; status: number; reason: string }>,
+          ) => {
+            for (const entry of entries) {
+              const index = retryIndexByEventId.get(entry.id)
+              if (index === undefined) continue
+              retryRejectedIndexes.set(
+                index,
+                new Error(entry.reason || `The server refused this draft (${entry.status})`),
+              )
+            }
+          }
+          await flushOutboxBatch({
+            getTokenForFile: getTokenForProjectFile,
+            onStaleSiblings: (entries) => {
+              for (const entry of entries) {
+                const index = retryIndexByEventId.get(entry.id)
+                if (index === undefined) continue
+                results[index] = {
+                  status: "rejected",
+                  reason: new Error("The draft was outdated by another change and was not saved"),
+                }
+              }
+            },
+            onRejected: noteRetryRejected,
+            onForbidden: noteRetryRejected,
+          })
+          await refreshOutboxPending()
+          for (const [index, error] of retryRejectedIndexes) {
+            const item = prepared.find((candidate) => candidate.index === index)
+            if (!item) continue
+            const key = laneCellKey(item.draft.cell.id)
+            pendingCompletionEventIdRef.current.delete(key)
+            pendingTargetCommitHeadsRef.current.delete(key)
+            cellStore.clearOptimisticForCell(item.draft.cell.id)
+            results[index] = { status: "rejected", reason: error }
+          }
+        }
+      } catch (error) {
+        for (const preparedIndex of staleIndexes) {
+          const item = prepared[preparedIndex]
+          const key = laneCellKey(item.draft.cell.id)
+          pendingCompletionEventIdRef.current.delete(key)
+          pendingTargetCommitHeadsRef.current.delete(key)
+          cellStore.clearOptimisticForCell(item.draft.cell.id)
+          results[item.index] = { status: "rejected", reason: error }
+        }
+      }
+    }
+
+    // One file-level delta consumes the complete server sequence range and
+    // applies every confirmed draft with one replaceRows/emit cycle. Refresh
+    // audit stats as one projection read too; N targeted reads would feed N
+    // successive audit maps back through CellStore.setRuntime.
+    revalidateCells()
+    revalidateAuditStats()
+    return results
+  }, [
+    activeLane,
+    applyOptimisticTargetEdits,
+    cellStore,
+    getActiveCell,
+    getTokenForProjectFile,
+    laneCellKey,
+    project?.id,
+    project?.syncRole?.level,
+    refreshOutboxPending,
+    rememberPendingTargetCommit,
+    resolveTargetCommitParentId,
+    revalidateAuditStats,
+    revalidateCells,
+  ])
+
   /**
    * AD-2 sibling promotion: emit a new target-cell commit whose parentId is
    * the current chain head (historyCell.targetEventId). This makes the
@@ -4236,6 +4542,7 @@ export function ProjectWorkspace() {
     project?.completionSettings, project?.sourceLanguage || "", activeLaneTargetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell, rules, getActiveCells, project?.translationBrief?.l1Summary ?? undefined,
     project?.draftContext ?? DEFAULT_DRAFT_CONTEXT,
     activeLane,
+    commitCompletedCells,
   )
 
   // AQU-620: adapter so the editor's per-cell AI action can request a plain
@@ -5433,12 +5740,21 @@ export function ProjectWorkspace() {
     if (!project?.id || !frontierSession?.jwt) return
     let cancelled = false
     let reconciler: import("@/lib/sync/ws-reconciler").WsReconciler | null = null
+    let appliedRefreshScheduler:
+      import("@/lib/sync/ws-reconciler").ScopedRefreshScheduler | null = null
     void (async () => {
-      const { createWsReconciler, isOwnWriteEcho, isValidationEvent, createLinkUpstreamChangedHandler, createReconnectResyncHandler, fileInventoryChanged } =
+      const { createWsReconciler, createScopedRefreshScheduler, isOwnWriteEcho, createLinkUpstreamChangedHandler, createReconnectResyncHandler, fileInventoryChanged } =
         await import("@/lib/sync/ws-reconciler")
       const { syncWorkerHttpOrigin } = await import("@/lib/sync/sync-worker-url")
       if (cancelled || !project?.id) return
       const pid = project.id
+      appliedRefreshScheduler = createScopedRefreshScheduler({
+        currentScope: () => {
+          const fileId = activeFileIdRef.current
+          return fileId ? { projectId: pid, fileId } : null
+        },
+        refresh: () => revalidateCellsRef.current(),
+      })
       // FRO-479: link.upstream-changed frames → refetch staleness immediately
       // (cheap GET, reflects the frame as soon as possible), and — debounced —
       // AWAIT the mirror sync, then revalidate BOTH staleness and cells.
@@ -5580,21 +5896,20 @@ export function ProjectWorkspace() {
               // remain visually stale after the progress count turns green.
               // The committing handler's earlier refresh can race the app-shell
               // outbox drain; this frame only arrives after projection commits.
-              if (msg.kind === "cell.validate" || msg.kind === "cell.unvalidate") {
+              if (
+                msg.file === activeFileIdRef.current &&
+                (msg.kind === "cell.validate" || msg.kind === "cell.unvalidate")
+              ) {
                 revalidateCellStats(msg.cell)
               }
-              // Targeted single-cell refetch — avoids re-streaming every
-              // cell in the file for one remote change. Falls back to a
-              // full revalidate inside useCells on error.
+              // Applied-event frames are lossy refresh hints. The scheduler
+              // below groups a burst, then the active store consumes the
+              // complete server-sequence delta in one derivation pass.
               //
               // Skip it for our OWN writes: the committing handler already
-              // pulled the authoritative row after its outbox flush, so the
-              // echo's refetch is pure duplication (and the in-flight coalescer
-              // misses it because the handler's refetch is gated behind the
-              // flush — see isOwnWriteEcho). The FRO-247 shadow keeps the value
-              // visible until the handler's read lands. This is the dominant
-              // edit-cycle cost: every commit + validate + auto-BT echo was
-              // firing a redundant targeted GET (~5 of 8 per edit cycle).
+              // pulled authoritative state after its outbox flush, so the
+              // echo's refresh is pure duplication. The FRO-247 shadow keeps
+              // the value visible until the handler's read lands.
               //
               // AQU-1154 follow-up: "own write" means the same USERNAME, not
               // this tab. A second tab of the same user (or a tab whose post-
@@ -5612,13 +5927,14 @@ export function ProjectWorkspace() {
                 return true
               })()
               if (!ownWrite || !alreadyApplied) {
-                revalidateCell(msg.cell)
-                // activeValidators (the validation pill) comes from the
-                // audit-stats projection, not /files/:fileId/cells — a remote
-                // validate/unvalidate must poke that read too, or the pill
-                // stays stale until the next full stats poll.
-                if (!ownWrite && isValidationEvent(msg.kind)) {
-                  revalidateCellStats(msg.cell)
+                // A model response or collaborator burst arrives as several
+                // frames. Consume the file's server-sequence range once so
+                // the store derives and emits once for the whole burst.
+                if (msg.file) {
+                  appliedRefreshScheduler?.schedule({
+                    projectId: msg.project,
+                    fileId: msg.file,
+                  })
                 }
               }
               // Audio attachment events project into cell_audio (not cells);
@@ -5637,7 +5953,10 @@ export function ProjectWorkspace() {
               // and fall through to the legacy "always banner on focused cell"
               // path so the user can still tell something happened.
               if (ownWrite) return
-              if (focusedCellIdRef.current === msg.cell) {
+              if (
+                msg.file === activeFileIdRef.current &&
+                focusedCellIdRef.current === msg.cell
+              ) {
                 setCellsWithRemoteChange((cur) => {
                   if (cur.has(msg.cell!)) return cur
                   const next = new Set(cur)
@@ -5791,14 +6110,13 @@ export function ProjectWorkspace() {
       clearPresenceStaleTimer()
       reconcilerRef.current = null
       setLiveReconciler(null)
+      appliedRefreshScheduler?.dispose()
       reconciler?.close()
     }
   }, [
     project?.id,
     frontierSession?.jwt,
     getTokenForFile,
-    revalidateCells,
-    revalidateCell,
     revalidateCellStats,
     currentUsername,
     refresh,

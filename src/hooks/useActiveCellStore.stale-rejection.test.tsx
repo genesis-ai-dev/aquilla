@@ -31,12 +31,16 @@ vi.mock("@/lib/sync/cells-cache", async (importOriginal) => {
   return {
     ...actual,
     readCellsCache: vi.fn(async () => null),
-    writeCellsCache: vi.fn(async () => undefined),
+    scheduleCellsCacheWrite: vi.fn(),
+    flushCellsCacheWrites: vi.fn(async () => undefined),
   }
 })
 
 import { fetchCellsByIds, fetchCellsDelta, streamFileCells } from "@/lib/sync/cells-read"
-import { writeCellsCache } from "@/lib/sync/cells-cache"
+import {
+  flushCellsCacheWrites,
+  scheduleCellsCacheWrite,
+} from "@/lib/sync/cells-cache"
 import { CellStore, useActiveCellStore } from "./useActiveCellStore"
 import { flushOutboxBatch, subscribeStaleSiblings } from "@/lib/sync/outbox-flush"
 import { enqueueOutboxEvent, resetOutboxConnectionForTests } from "@/lib/sync/outbox"
@@ -44,7 +48,8 @@ import { enqueueOutboxEvent, resetOutboxConnectionForTests } from "@/lib/sync/ou
 const streamMock = vi.mocked(streamFileCells)
 const byIdsMock = vi.mocked(fetchCellsByIds)
 const deltaMock = vi.mocked(fetchCellsDelta)
-const writeCacheMock = vi.mocked(writeCellsCache)
+const writeCacheMock = vi.mocked(scheduleCellsCacheWrite)
+const flushCacheMock = vi.mocked(flushCellsCacheWrites)
 
 function row(cellId: string, side: "source" | "target", value: string, over: Partial<CellRow> = {}): CellRow {
   return {
@@ -91,6 +96,19 @@ function renderStore() {
       getToken: async () => "jwt",
       enabled: true,
     }),
+  )
+}
+
+function renderSwitchableStore() {
+  return renderHook(
+    ({ fileId }: { fileId: string }) => useActiveCellStore({
+      projectId: "p1",
+      fileId,
+      username: "alice",
+      getToken: async () => "jwt",
+      enabled: true,
+    }),
+    { initialProps: { fileId: "f1" } },
   )
 }
 
@@ -248,6 +266,20 @@ describe("I3: queue, don't drop", () => {
 })
 
 describe("I4: cache hygiene", () => {
+  it("flushes the previous file on switch and all pending writes on page hide", async () => {
+    const { result, rerender, unmount } = renderSwitchableStore()
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    flushCacheMock.mockClear()
+
+    rerender({ fileId: "f2" })
+    await waitFor(() => expect(flushCacheMock).toHaveBeenCalledWith("p1", "f1"))
+
+    flushCacheMock.mockClear()
+    act(() => window.dispatchEvent(new Event("pagehide")))
+    expect(flushCacheMock).toHaveBeenCalledWith()
+    unmount()
+  })
+
   it("skips the cells-cache write while an optimistic shadow exists, and writes once it is gone", async () => {
     const { result } = renderStore()
     await waitFor(() => expect(writeCacheMock).toHaveBeenCalledTimes(1))

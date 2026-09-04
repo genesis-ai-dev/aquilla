@@ -3,12 +3,14 @@ import {
   buildProjectWsUrl,
   createLinkUpstreamChangedHandler,
   createReconnectResyncHandler,
+  createScopedRefreshScheduler,
   createWsReconciler,
   fileInventoryChanged,
   isOwnWriteEcho,
   isValidationEvent,
   parseProjectWsMessage,
   type ProjectWsServerMessage,
+  type ScopedRefreshScope,
 } from "./ws-reconciler"
 import {
   applyRemoteFrame,
@@ -140,6 +142,22 @@ describe("parseProjectWsMessage", () => {
       }),
     )
     expect(msg).toMatchObject({ t: "event.applied", by: "alice" })
+  })
+
+  it("preserves external origin before own-write classification", () => {
+    const msg = parseProjectWsMessage(JSON.stringify({
+      t: "event.applied",
+      id: "evt-agent",
+      kind: "cell.backtranslation.set",
+      project: "p",
+      file: "f",
+      cell: "c",
+      by: "alice",
+      via: "external",
+    }))
+
+    expect(msg).toMatchObject({ t: "event.applied", via: "external" })
+    expect(msg && msg.t === "event.applied" && isOwnWriteEcho(msg, "alice")).toBe(false)
   })
 
   it("parses event.stale", () => {
@@ -751,6 +769,103 @@ describe("fileInventoryChanged (AQU-744 staged-import reveal)", () => {
 
   it("stays progress-only for a known file without the signal", () => {
     expect(fileInventoryChanged(frame("f1", false), new Set(["f1", "f2"]))).toBe(false)
+  })
+})
+
+describe("createScopedRefreshScheduler (AQU-1145 applied-event bursts)", () => {
+  let activeScope: ScopedRefreshScope | null
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    activeScope = { projectId: "p1", fileId: "f1" }
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  function setup() {
+    const refresh = vi.fn()
+    const scheduler = createScopedRefreshScheduler({
+      currentScope: () => activeScope,
+      refresh,
+    })
+    return { refresh, scheduler }
+  }
+
+  it("collapses a same-scope burst into one fixed-window refresh", async () => {
+    const { refresh, scheduler } = setup()
+
+    for (let i = 0; i < 10; i++) {
+      scheduler.schedule({ projectId: "p1", fileId: "f1" })
+      await vi.advanceTimersByTimeAsync(4)
+    }
+    expect(refresh).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(10)
+    expect(refresh).toHaveBeenCalledTimes(1)
+    expect(refresh).toHaveBeenCalledWith({ projectId: "p1", fileId: "f1" })
+  })
+
+  it("starts a second window instead of starving under continuous events", async () => {
+    const { refresh, scheduler } = setup()
+
+    scheduler.schedule({ projectId: "p1", fileId: "f1" })
+    await vi.advanceTimersByTimeAsync(50)
+    expect(refresh).toHaveBeenCalledTimes(1)
+
+    scheduler.schedule({ projectId: "p1", fileId: "f1" })
+    await vi.advanceTimersByTimeAsync(49)
+    expect(refresh).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(refresh).toHaveBeenCalledTimes(2)
+  })
+
+  it("drops a queued refresh when the active file changes before flush", async () => {
+    const { refresh, scheduler } = setup()
+
+    scheduler.schedule({ projectId: "p1", fileId: "f1" })
+    activeScope = { projectId: "p1", fileId: "f2" }
+    await vi.advanceTimersByTimeAsync(50)
+
+    expect(refresh).not.toHaveBeenCalled()
+  })
+
+  it("replaces a stale file window with a window for the new active file", async () => {
+    const { refresh, scheduler } = setup()
+
+    scheduler.schedule({ projectId: "p1", fileId: "f1" })
+    await vi.advanceTimersByTimeAsync(25)
+    activeScope = { projectId: "p1", fileId: "f2" }
+    scheduler.schedule({ projectId: "p1", fileId: "f2" })
+
+    await vi.advanceTimersByTimeAsync(25)
+    expect(refresh).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(25)
+    expect(refresh).toHaveBeenCalledTimes(1)
+    expect(refresh).toHaveBeenCalledWith({ projectId: "p1", fileId: "f2" })
+  })
+
+  it("ignores events outside the active project or file", async () => {
+    const { refresh, scheduler } = setup()
+
+    scheduler.schedule({ projectId: "p2", fileId: "f1" })
+    scheduler.schedule({ projectId: "p1", fileId: "f2" })
+    await vi.advanceTimersByTimeAsync(100)
+
+    expect(refresh).not.toHaveBeenCalled()
+  })
+
+  it("dispose cancels pending work and rejects future schedules", async () => {
+    const { refresh, scheduler } = setup()
+
+    scheduler.schedule({ projectId: "p1", fileId: "f1" })
+    scheduler.dispose()
+    await vi.advanceTimersByTimeAsync(100)
+    scheduler.schedule({ projectId: "p1", fileId: "f1" })
+    await vi.advanceTimersByTimeAsync(100)
+
+    expect(refresh).not.toHaveBeenCalled()
   })
 })
 

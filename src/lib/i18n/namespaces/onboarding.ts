@@ -359,6 +359,13 @@ export const onboarding = defineNamespace({
     "onboarding.preferences.appearance.groupLabel": "Theme",
     "onboarding.preferences.appearance.themeDescription":
       "Follow your system appearance or choose a theme for this device.",
+    "onboarding.preferences.fontSize.groupLabel": "App font size",
+    "onboarding.preferences.fontSize.rowDescription":
+      "The overall size of menus, sidebars, and settings. Editor cell text is set separately in a file's View settings.",
+    "onboarding.preferences.fontSize.small": "Small",
+    "onboarding.preferences.fontSize.default": "Default",
+    "onboarding.preferences.fontSize.large": "Large",
+    "onboarding.preferences.fontSize.extraLarge": "Extra Large",
 
     // — LanguageSection — group label reuses `language.label` (identical text)
     "onboarding.preferences.language.rowDescription":

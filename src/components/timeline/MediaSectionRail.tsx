@@ -52,11 +52,27 @@ const GLYPH: Record<MediaSectionId, { fold: LucideIcon; open: LucideIcon }> = {
  *
  * 41, not 40: every row carries a 1px rule (`border-t` on the two headers,
  * `border-b` on the toolbar) and min-height is border-box, so 40px of row
- * plus its rule is what the two naturally-tall rows already measure. The
- * rail's glyph cell carries a transparent rule so the same arithmetic puts
- * its chevron on the headers' pixel row.
+ * plus its rule is what the two naturally-tall rows already measure.
+ *
+ * Paired with RAIL_GLYPH_INSET below, which has to be re-derived by hand if
+ * this number ever moves.
  */
 export const MEDIA_HEADER_ROW = "min-h-[41px]"
+
+/**
+ * How far down a side rail its glyph sits.
+ *
+ * 14px, which is where a header puts its own: MEDIA_HEADER_ROW's 41 is a 1px
+ * rule over 40px of content, and centring a 14px glyph in that leaves 13 above
+ * it. So the chevron lands on the same pixel row railed or open, which is the
+ * whole point of the two numbers agreeing.
+ *
+ * PADDING, not a full-height centring box. The box was the obvious way to say
+ * this and it left 13px of dead air UNDER the glyph too, which the name then
+ * had to start below — so the gap between the chevron and "Video" measured
+ * 19px against the header's 10, and read as a mistake. Sam, 2026-09-03.
+ */
+const RAIL_GLYPH_INSET = "pt-[14px]"
 
 const EXPAND_KEY = {
   video: "editor.timeline.expandVideoAria",
@@ -119,7 +135,9 @@ export function MediaSectionRail({
     // must not be reachable behind this. The panel marks it inert.
     "absolute inset-0 z-10 flex bg-background text-muted-foreground",
     orientation === "vertical"
-      ? "flex-col items-center justify-start gap-1.5 border-e border-border"
+      ? // gap-2.5 is the header's own gap between its heading and its chevron,
+        // measured glyph-edge to text-edge: the same 10px, turned on its side.
+        "flex-col items-center justify-start gap-2.5 border-e border-border"
       : // Left-justified against the toolbar's own `px-3`, so the name and the
         // chevron do not move at all when the timeline folds.
         "flex-row items-center justify-start gap-2 border-b border-border ps-3",
@@ -130,11 +148,11 @@ export function MediaSectionRail({
         {/* The glyph keeps the height it has in the section's own header
             instead of dropping to the middle of the strip: folding a section
             moves its content out of the way, not its controls (Sam,
-            2026-09-03, twice — first the middle, then a few pixels high).
-            Every header row is MEDIA_HEADER_ROW tall and centres the control,
-            and this cell is the same box down to the 1px top border, so the
-            chevron lands on the same pixel row railed or open. */}
-        <span className={cn(MEDIA_HEADER_ROW, "flex shrink-0 items-center border-t border-transparent")}>
+            2026-09-03, three times over — first the middle, then a few pixels
+            high, then too far from the name beneath it). RAIL_GLYPH_INSET is
+            where a header puts its own control, so the chevron lands on the
+            same pixel row railed or open. */}
+        <span className={cn(RAIL_GLYPH_INSET, "flex shrink-0 items-center")}>
           <Open className="h-3.5 w-3.5 shrink-0" />
         </span>
         {/* Down the strip, in the Parallel Bibles edge tab's own dress. */}

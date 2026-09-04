@@ -158,6 +158,8 @@ describe("parseProjectWsMessage", () => {
 
     expect(msg).toMatchObject({ t: "event.applied", via: "external" })
     expect(msg && msg.t === "event.applied" && isOwnWriteEcho(msg, "alice")).toBe(false)
+  })
+
   it("passes serverSeq + rows through on event.applied so the client can apply without a refetch", () => {
     const rows = [
       { cellId: "c", side: "source", value: "In the beginning", eventId: "S0" },

@@ -11,6 +11,7 @@ import { isLockedTimingEvent, isUserInsertedCell, resolveTimingLocked } from './
 import { resolveAllowLineCreation } from './line-creation-authority'
 import { isGatedTrackPatch, resolveAllowTrackEditing } from './track-editing-authority'
 import { laneOfEvent } from './event-projection'
+import { makeRequestCache, type RequestCache } from './request-cache'
 
 /** Sentinel fileId used by project-scoped comment.* events in the outbox. */
 export const PROJECT_SENTINEL_FILE_ID = '__project__'
@@ -150,14 +151,22 @@ export async function authorize<K extends EventKind>(
   raw: RawEvent<K>,
   secret: string | undefined,
   /**
-   * AQU-496: optional DB handle for the self-assign carve-out below. Only
-   * `assignment.create` ever reads it (one org_settings lookup, memoized
-   * nowhere — callers batching many events should expect one query per
-   * below-floor assignment.create). Omitting `db` simply disables the
-   * carve-out (falls back to the static PROJECT_LEAD floor) rather than
-   * erroring — every existing caller/test that doesn't pass it keeps working.
+   * AQU-496: optional DB handle for the settings-gated carve-outs below
+   * (self-assign, timing lock, line creation, track editing). Reads go
+   * through `cache` when one is supplied, so a batch pays one lookup per
+   * settings row rather than one per event. Omitting `db` simply disables the
+   * carve-outs (falls back to the static floors) rather than erroring — every
+   * existing caller/test that doesn't pass it keeps working.
    */
   db?: AquillaDb,
+  /**
+   * Per-request memo for the settings rows the carve-outs below read
+   * (request-cache.ts). The events route builds one per request and passes
+   * it for every event in the batch so each row is read at most once;
+   * without it, each call gets a throwaway cache — one read per call, the
+   * pre-memo behaviour every existing caller/test relies on.
+   */
+  cache?: RequestCache,
 ): Promise<AuthorizeResult<K>> {
   // 1. Secret must be configured — misconfigured deployment, not a client error.
   if (!secret) {
@@ -202,6 +211,7 @@ export async function authorize<K extends EventKind>(
   if (!raw.fileId) {
     return { ok: false, status: 400, reason: 'event missing fileId' }
   }
+  const settings = db != null ? (cache ?? makeRequestCache(db)) : undefined
 
   // 4. Verify JWT — fileId is now guaranteed to be a real string.
   const authResult = await verifyTokenForDoc(
@@ -233,7 +243,7 @@ export async function authorize<K extends EventKind>(
       db != null &&
       tokenClaims.role >= ROLE.CONTRIBUTOR &&
       isSelfAssignCreate(raw as RawEvent<EventKind>, tokenClaims.userId) &&
-      (await resolveAllowSelfAssignment(db, raw.projectId))
+      (await resolveAllowSelfAssignment(db, raw.projectId, settings))
     if (!selfAssignOk) {
       return { ok: false, status: 403, reason: `role too low for ${raw.kind}` }
     }
@@ -252,7 +262,7 @@ export async function authorize<K extends EventKind>(
   // the self-assign carve-out above — every existing caller and test that does
   // not pass one keeps working.
   if (db != null && tokenClaims.role < ROLE.MAINTAINER && isLockedTimingEvent(raw.kind, raw.payload)) {
-    if (await resolveTimingLocked(db, raw.projectId)) {
+    if (await resolveTimingLocked(db, raw.projectId, settings)) {
       // Sam's exemption: a line someone added here never came from the client's
       // file, so it has no imported timing to corrupt and stays movable.
       const exempt =
@@ -289,7 +299,7 @@ export async function authorize<K extends EventKind>(
       raw.kind === 'source.cell.delete' ||
       raw.kind === 'source.cell.reorder')
   ) {
-    if (!(await resolveAllowLineCreation(db, raw.projectId))) {
+    if (!(await resolveAllowLineCreation(db, raw.projectId, settings))) {
       return { ok: false, status: 403, reason: 'adding lines is not enabled for this project' }
     }
     if (raw.kind === 'source.cell.delete') {
@@ -324,7 +334,7 @@ export async function authorize<K extends EventKind>(
   // isGatedTrackPatch for the three clauses that separate them, and why
   // `patch: null` needs a clause of its own.
   if (db != null && raw.kind === 'file.track.set' && isGatedTrackPatch(raw.payload)) {
-    if (!(await resolveAllowTrackEditing(db, raw.projectId))) {
+    if (!(await resolveAllowTrackEditing(db, raw.projectId, settings))) {
       return { ok: false, status: 403, reason: 'timeline track editing is not enabled for this project' }
     }
   }

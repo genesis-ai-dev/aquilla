@@ -29,6 +29,7 @@ vi.mock("@legendapp/list/react", async () => {
         ListFooterComponent,
         ListHeaderComponent,
         extraData,
+        maintainVisibleContentPosition,
       }: {
         data?: unknown[]
         renderItem?: (props: {
@@ -41,6 +42,7 @@ vi.mock("@legendapp/list/react", async () => {
         ListFooterComponent?: React.ComponentType | React.ReactElement | null
         ListHeaderComponent?: React.ComponentType | React.ReactElement | null
         extraData?: unknown
+        maintainVisibleContentPosition?: boolean
       },
       ref,
     ) {
@@ -64,7 +66,11 @@ vi.mock("@legendapp/list/react", async () => {
       const items = data ?? []
       return React.createElement(
         "div",
-        { "data-testid": "legend-list-mock" },
+        {
+          "data-testid": "legend-list-mock",
+          "data-maintain-visible-content-position":
+            maintainVisibleContentPosition ? "true" : "false",
+        },
         asNode(ListHeaderComponent),
         items.map((item, index) =>
           React.createElement(

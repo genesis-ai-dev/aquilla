@@ -131,7 +131,12 @@ function VirtualizedDataTableBody<TData>({
                 keyExtractor={(row) => row.id}
                 estimatedItemSize={estimatedItemSize}
                 recycleItems={false}
-                maintainVisibleContentPosition
+                // Do not set maintainVisibleContentPosition. That flag is for
+                // chat-style inserts: it pins the currently visible *item* (by
+                // id) when `data` changes. A column sort reorders the same ids,
+                // so the list would scroll to keep the old first row on screen
+                // and the scrollbar thumb jumps. Append-at-end load-more does
+                // not need it; pixel scroll already stays put.
                 onEndReached={onEndReached ? () => onEndReached() : undefined}
                 onEndReachedThreshold={0.4}
                 ListFooterComponent={footer}

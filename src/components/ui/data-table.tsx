@@ -42,7 +42,10 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import { DataTableColumnHeader } from "@/components/ui/data-table-column-header"
+import {
+  DataTableColumnHeader,
+  DataTableSortingContext,
+} from "@/components/ui/data-table-column-header"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import { MoreHorizontal, Search } from "lucide-react"
@@ -141,11 +144,14 @@ function DataTableColGroup<TData>({
 
 function DataTableHeaderTable<TData>({
   table,
+  sorting,
   dense,
   tableClassName,
   sticky,
 }: {
   table: TanStackTable<TData>
+  /** Reactive sort so the compiler cannot freeze this header against a stable `table`. */
+  sorting: SortingState
   dense: boolean
   tableClassName?: string
   sticky?: boolean
@@ -154,6 +160,7 @@ function DataTableHeaderTable<TData>({
   return (
     <table
       data-slot="table"
+      data-sorting={sorting.map((item) => `${item.id}:${item.desc ? "desc" : "asc"}`).join(",")}
       className={cn(
         "w-full caption-bottom text-sm",
         widths && "table-fixed",
@@ -495,13 +502,14 @@ function DataTable<TData, TValue>({
     ) : null
 
   return (
-    <div
-      className={cn(
-        "flex w-full min-w-0 flex-col",
-        fillHeight && "min-h-0 flex-1",
-        dense ? "gap-2.5" : "gap-3",
-      )}
-    >
+    <DataTableSortingContext.Provider value={sorting}>
+      <div
+        className={cn(
+          "flex w-full min-w-0 flex-col",
+          fillHeight && "min-h-0 flex-1",
+          dense ? "gap-2.5" : "gap-3",
+        )}
+      >
       {(searchPlaceholder || toolbarNode) && (
         <div className="flex shrink-0 flex-wrap items-center gap-3">
           {searchPlaceholder ? (
@@ -564,6 +572,7 @@ function DataTable<TData, TValue>({
             header={
               <DataTableHeaderTable
                 table={table}
+                sorting={sorting}
                 dense={dense}
                 tableClassName={tableClassName}
                 sticky
@@ -671,7 +680,8 @@ function DataTable<TData, TValue>({
           </Table>
         )}
       </div>
-    </div>
+      </div>
+      </DataTableSortingContext.Provider>
   )
 }
 

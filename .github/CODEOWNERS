@@ -1,0 +1,16 @@
+# Security-sensitive infrastructure & deployment config.
+#
+# These files can grant platform-admin access (ADMIN_EMAILS in wrangler.toml),
+# change what a CI job or self-hosted runner can reach, or alter the sandbox
+# container's privileges — a plain merge is enough to take effect, with no
+# additional approval step. Added after the Sep 4, 2026 infra pen-test found
+# an admin-allowlist grant (commit 27afb72b) land as an ordinary, unreviewed
+# commit. Require the repo owner's review on these specifically so changes to
+# them get a deliberate look, without adding review overhead anywhere else.
+# (AQU pen-test: Infrastructure & deployment security review — Sep 4, 2026)
+
+**/wrangler.toml                   @ryderwishart
+/agent-worker/Dockerfile           @ryderwishart
+/.github/workflows/                @ryderwishart
+/scripts/hetzner-ci/               @ryderwishart
+/docs/DEPLOYMENT-ENVIRONMENTS.md   @ryderwishart

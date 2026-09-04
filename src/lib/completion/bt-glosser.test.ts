@@ -214,6 +214,102 @@ describe("buildGlosser — repetition guard (BUG-BT-5)", () => {
   })
 })
 
+// ── AQU-203: function words must not win the argmax ──────────────────────────
+
+describe("buildGlosser — frequency normalization (AQU-203)", () => {
+  /**
+   * Regression: ranking on RAW co-occurrence made the winner for any target
+   * phrase whichever source phrase was most frequent in the corpus overall.
+   * Function words co-occur with everything, so "the" beat the content word
+   * that actually aligned. Reported from Project 503, Genesis 1:1: a Spanish
+   * target back-translated as "the God created the, the, the".
+   *
+   * This corpus is the shape that produced it — "the" appears in more pairs
+   * (and more times per pair) than "god", so raw counts put "the" ahead of
+   * "god" as the gloss for "dios" (9 observations vs 5).
+   */
+  const corpus = [
+    {
+      source: "In the beginning God created the heavens and the earth",
+      target: "En el principio Dios creó los cielos y la tierra",
+    },
+    {
+      source: "And God said let there be light and there was light",
+      target: "Y Dios dijo sea la luz y fue la luz",
+    },
+    {
+      source: "And God saw the light that it was good",
+      target: "Y Dios vio la luz que era buena",
+    },
+    {
+      source: "And God called the light day and the darkness he called night",
+      target: "Y Dios llamó a la luz día y a las tinieblas llamó noche",
+    },
+    {
+      source: "And the earth was without form and void",
+      target: "Y la tierra estaba desordenada y vacía",
+    },
+    {
+      source: "And the Spirit of God moved upon the face of the waters",
+      target: "Y el Espíritu de Dios se movía sobre la faz de las aguas",
+    },
+    {
+      source: "And the evening and the morning were the first day",
+      target: "Y fue la tarde y la mañana el primer día",
+    },
+  ]
+
+  it("glosses a content word to its aligned source, not to the most frequent function word", () => {
+    const glosser = buildGlosser(corpus)
+    // "dios" co-occurs with "god" in 5 pairs and with "the" in 4 — but "the"
+    // occurs multiple times per sentence, so raw counting picked "the".
+    expect(glosser.gloss("dios")).toBe("god")
+  })
+
+  it("back-translates a corpus sentence without collapsing into function words", () => {
+    const glosser = buildGlosser(corpus)
+    const result = glosser.gloss("En el principio Dios creó los cielos y la tierra")
+    const tokens = result.split(/\s+/).filter(Boolean)
+
+    // The content words must survive.
+    expect(result).toContain("god")
+    expect(result).toContain("beginning")
+
+    // And the output must not be mostly one function word: the reported bug
+    // ("the God created the, the, the") was >40% "the".
+    const theCount = tokens.filter((t) => t === "the").length
+    expect(theCount).toBeLessThan(tokens.length / 3)
+  })
+
+  it("does not let a phrase that co-occurs with everything win a specific alignment", () => {
+    // "ubiquitous" appears in every source; "cat" only in the pair with "gato".
+    const pairs = [
+      { source: "ubiquitous cat", target: "gato" },
+      { source: "ubiquitous dog", target: "perro" },
+      { source: "ubiquitous bird", target: "pájaro" },
+      { source: "ubiquitous fish", target: "pez" },
+    ]
+    const glosser = buildGlosser(pairs)
+    // The specific content word must be present, and the phrase that co-occurs
+    // with every target must not win on its own.
+    expect(glosser.gloss("gato")).toContain("cat")
+    expect(glosser.gloss("gato")).not.toBe("ubiquitous")
+    expect(glosser.gloss("perro")).toContain("dog")
+    expect(glosser.gloss("perro")).not.toBe("ubiquitous")
+  })
+
+  it("counts a repeated source phrase once per pair, not once per occurrence", () => {
+    // "of" appears 3× in the first source and 0× elsewhere; "book" appears once.
+    // Per-occurrence counting made "of" a 3× stronger candidate than "book".
+    const pairs = [
+      { source: "the book of the son of the king of israel", target: "libro" },
+      { source: "of of of", target: "otro" },
+    ]
+    const glosser = buildGlosser(pairs)
+    expect(glosser.gloss("libro")).not.toBe("of")
+  })
+})
+
 // The model collapses each target phrase's candidates to its single argmax for
 // memory (the decoder only ever reads the best-scoring source). These guard
 // that the argmax actually survives the collapse — i.e. the WINNER is kept, not

@@ -21,7 +21,7 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
   {
     // AQU-1169: app-wide font size is device-scoped like theme; the persist-reload
     // journey is the cross-layer contract (boot script + Preferences control).
-    source: /^(?:src\/(?:pages\/Preferences|branding\/FontSize)|index\.html$)/,
+    source: /^(?:src\/(?:pages\/Preferences|branding\/FontSize|lib\/store\/file-view-prefs)|index\.html$)/,
     sentinels: ["e2e/specs/orgs/preferences-persist-reload.smoke.spec.ts"],
   },
   {

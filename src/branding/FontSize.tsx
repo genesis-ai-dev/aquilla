@@ -2,10 +2,10 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import type { ReactNode } from "react"
 
 /**
- * App-wide UI scale (AQU-1169). Sets the document root font-size so rem-based
- * chrome (sidebars, headers, dialogs, settings) scales together. Default leaves
- * the root unset so today's sizes stay exact. Per-file editor cell text is
- * pixel-based and is intentionally not scaled here (AQU-1170).
+ * App-wide UI scale (AQU-1169 / AQU-1170). Sets the document root font-size so
+ * rem-based chrome (sidebars, headers, dialogs, settings) scales together.
+ * Untouched editor cell text uses the same ratio against its 14px default;
+ * an explicit per-file View-settings size stays at that exact px.
  *
  * Pixel map matches Linear's live Preferences client:
  * Small 14 / Default unset (16) / Large 18 / Extra Large 20.
@@ -20,6 +20,22 @@ export const FONT_SIZE_ROOT_PX: Record<FontSizeScale, number | null> = {
   default: null,
   large: 18,
   "extra-large": 20,
+}
+
+/** Browser default root font-size in px, used when the app scale is Default. */
+export const FONT_SIZE_BROWSER_ROOT_PX = 16
+
+/** Untouched per-file source/target cell size at app scale Default (AQU-251). */
+export const DEFAULT_CELL_FONT_SIZE_PX = 14
+
+/**
+ * Default editor cell text for a file whose View settings were never customized.
+ * Same ratio as the root scale, rounded to a whole px so the View-settings
+ * stepper can start from the size the user actually sees.
+ */
+export function scaledDefaultCellFontSizePx(scale: FontSizeScale): number {
+  const root = FONT_SIZE_ROOT_PX[scale] ?? FONT_SIZE_BROWSER_ROOT_PX
+  return Math.round((DEFAULT_CELL_FONT_SIZE_PX * root) / FONT_SIZE_BROWSER_ROOT_PX)
 }
 
 export const FONT_SIZE_STORAGE_KEY = "aquilla-font-size"
@@ -76,4 +92,10 @@ export function useFontSizeScale(): FontSizeContextValue {
   const ctx = useContext(FontSizeContext)
   if (!ctx) throw new Error("useFontSizeScale must be used within FontSizeProvider")
   return ctx
+}
+
+/** App font-size scale, or Default when no provider is mounted (unit tests). */
+export function useOptionalFontSizeScale(): FontSizeScale {
+  const ctx = useContext(FontSizeContext)
+  return ctx?.scale ?? "default"
 }

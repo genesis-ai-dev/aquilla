@@ -8,9 +8,16 @@
  * Key schema: `aq.file-view-prefs.v1`
  *
  * AQU-251: per-file font size control.
+ * AQU-1170: untouched files follow the app-wide font-size scale; an explicit
+ * per-file size keeps absolute priority.
  */
 
 import { useSyncExternalStore } from "react"
+import {
+  scaledDefaultCellFontSizePx,
+  useOptionalFontSizeScale,
+  type FontSizeScale,
+} from "@/branding/FontSize"
 
 const STORAGE_KEY = "aq.file-view-prefs.v1"
 
@@ -26,7 +33,6 @@ export interface FileViewPrefs {
 
 type PrefMap = Record<string, FileViewPrefs>
 
-const DEFAULT_FONT_SIZE = 14
 export const MIN_FONT_SIZE = 11
 export const MAX_FONT_SIZE = 22
 export const FONT_SIZE_STEP = 1
@@ -111,18 +117,24 @@ export interface ResolvedFontSizes {
 
 /**
  * Resolve per-side font sizes from raw prefs. Each side falls back to the
- * legacy single `fontSize` (pre-split prefs), then to DEFAULT_FONT_SIZE —
- * so a file sized before the source/target split keeps its size on both sides.
+ * legacy single `fontSize` (pre-split prefs), then to the app-scale default
+ * (14px at Default) — so a file sized before the source/target split keeps
+ * its size on both sides, and an untouched file tracks the app font size.
  */
-export function resolveFontSizes(prefs: FileViewPrefs): ResolvedFontSizes {
+export function resolveFontSizes(
+  prefs: FileViewPrefs,
+  appScale: FontSizeScale = "default",
+): ResolvedFontSizes {
+  const fallback = scaledDefaultCellFontSizePx(appScale)
   return {
-    source: prefs.sourceFontSize ?? prefs.fontSize ?? DEFAULT_FONT_SIZE,
-    target: prefs.targetFontSize ?? prefs.fontSize ?? DEFAULT_FONT_SIZE,
+    source: prefs.sourceFontSize ?? prefs.fontSize ?? fallback,
+    target: prefs.targetFontSize ?? prefs.fontSize ?? fallback,
   }
 }
 
-/** Resolved source/target font sizes for a file (DEFAULT_FONT_SIZE when unset). */
+/** Resolved source/target font sizes for a file (app-scale default when unset). */
 export function useFileFontSizes(fileId: string | null | undefined): ResolvedFontSizes {
   const prefs = useFileViewPref(fileId)
-  return resolveFontSizes(prefs)
+  const appScale = useOptionalFontSizeScale()
+  return resolveFontSizes(prefs, appScale)
 }

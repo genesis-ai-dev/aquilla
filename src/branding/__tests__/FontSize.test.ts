@@ -9,6 +9,7 @@ import {
   FontSizeProvider,
   isFontSizeScale,
   readStoredFontSizeScale,
+  scaledDefaultCellFontSizePx,
 } from "../FontSize"
 
 afterEach(() => {
@@ -22,6 +23,13 @@ describe("font-size scale map", () => {
     expect(FONT_SIZE_ROOT_PX.default).toBeNull()
     expect(FONT_SIZE_ROOT_PX.large).toBe(18)
     expect(FONT_SIZE_ROOT_PX["extra-large"]).toBe(20)
+  })
+
+  it("scales the untouched 14px cell default with the same root ratio", () => {
+    expect(scaledDefaultCellFontSizePx("small")).toBe(12)
+    expect(scaledDefaultCellFontSizePx("default")).toBe(14)
+    expect(scaledDefaultCellFontSizePx("large")).toBe(16)
+    expect(scaledDefaultCellFontSizePx("extra-large")).toBe(18)
   })
 
   it("keeps the index.html boot script in lockstep with the runtime map", () => {

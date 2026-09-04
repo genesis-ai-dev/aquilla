@@ -82,6 +82,7 @@ describe("changed-file E2E impact selection", () => {
     for (const file of [
       "src/branding/FontSize.tsx",
       "src/pages/Preferences.tsx",
+      "src/lib/store/file-view-prefs.ts",
       "index.html",
     ]) {
       expect(selectAffectedE2E([file], specs).specs, file).toContain(

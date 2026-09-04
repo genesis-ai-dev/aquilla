@@ -84,6 +84,19 @@ describe("ViewSettingsMenu popover", () => {
 
     expect(handlers.onSourceDirectionModeChange).toHaveBeenCalledWith("rtl")
   })
+
+  it("steps font size from the scaled Large default (AQU-1170)", () => {
+    const handlers = renderViewSettings({ sourceFontSize: 16, targetFontSize: 16 })
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    expect(screen.getAllByText("16px")).toHaveLength(2)
+
+    fireEvent.click(screen.getByRole("button", { name: "Increase target font size" }))
+    expect(handlers.onTargetFontSizeChange).toHaveBeenCalledWith(17)
+
+    fireEvent.click(screen.getByRole("button", { name: "Decrease source font size" }))
+    expect(handlers.onSourceFontSizeChange).toHaveBeenCalledWith(15)
+  })
 })
 
 describe("ViewSettingsMenu direction display", () => {

@@ -1603,6 +1603,22 @@ export function ProjectWorkspace() {
   const revalidateCellsRef = useRef<() => void>(() => {})
   revalidateCellsRef.current = revalidateCells
 
+  // A validation-threshold change re-projects `cells.validated` on the server
+  // WITHOUT cell events (db/shared/projects.ts validationProjectionStmts), so
+  // a `?since=` delta cannot see it. Whether the change was made here or by a
+  // remote maintainer (DO `project.settings.updated` → settings re-GET →
+  // fresh validationCount on the project record), drop the delta watermark
+  // once and read one authoritative snapshot. Skipped on mount — the initial
+  // read is a full stream already.
+  const lastValidationCountRef = useRef<number | null>(null)
+  useEffect(() => {
+    const prev = lastValidationCountRef.current
+    lastValidationCountRef.current = validationCount
+    if (prev === null || prev === validationCount) return
+    cellStore.setMaxServerSeq(null)
+    revalidateCellsRef.current()
+  }, [validationCount, cellStore])
+
   // Autopilot drafts: the WebSocket burst is the fast path, this is the
   // authoritative one. Called on file open, and whenever a burst reports it
   // carried only part of a wave. Failing soft is deliberate — a missing
@@ -5187,6 +5203,10 @@ export function ProjectWorkspace() {
   const confidenceOverlayActive = healthCalculationsEnabled
     && confidenceOverlayEnabled
     && Boolean(project?.id && activeFileId && frontierSession?.jwt)
+  // Reactive version of focusedCellIdRef (declared further down) for the agent
+  // panel's context wiring and for confidence scoring, which skips the cell
+  // being edited until focus leaves it.
+  const [focusedCellId, setFocusedCellId] = useState<string | null>(null)
   const confidence = useCellConfidence({
     projectId: project?.id,
     fileId: activeFileId ?? undefined,
@@ -5194,6 +5214,7 @@ export function ProjectWorkspace() {
     cells: cellSummaries,
     enabled: confidenceOverlayActive,
     perHopDecay: project?.decaySettings?.perHopDecay,
+    focusedCellId,
   })
   const effectiveHealthMap = useMemo(() => {
     if (!confidenceOverlayActive) return healthMap
@@ -5552,8 +5573,8 @@ export function ProjectWorkspace() {
   const cellLockHoldersRef = useRef<Map<string, string>>(new Map())
   const [cellsWithRemoteChange, setCellsWithRemoteChange] = useState<Set<string>>(() => new Set())
   const focusedCellIdRef = useRef<string | null>(null)
-  // Reactive version of focusedCellIdRef for the agent panel's context wiring.
-  const [focusedCellId, setFocusedCellId] = useState<string | null>(null)
+  // Reactive `focusedCellId` (the mirror of focusedCellIdRef) is declared
+  // above useCellConfidence, which needs it as an input.
 
   const agentWorkbenchWorkspace = useMemo(() => {
     const scopeAvailable = Boolean(activeFileId && activeFile)
@@ -5856,7 +5877,7 @@ export function ProjectWorkspace() {
             if (editingCellId) focusLockClaimRef.current?.(editingCellId)
             // Skips the first open (the initial read is already in flight);
             // every reconnect after that closes the missed-broadcast gap.
-            handleReconnectResync()
+            handleReconnectResync.handleOpen()
             // The project relay is intentionally lossy. A reconnect may have
             // missed terminal progress or staged-draft frames, so reconcile
             // both mirrors from their durable sources for the exact scope
@@ -5872,6 +5893,7 @@ export function ProjectWorkspace() {
           },
           onClose() {
             if (cancelled) return
+            handleReconnectResync.handleClose()
             if (presenceStaleTimerRef.current !== null) return
             presenceStaleTimerRef.current = setTimeout(() => {
               presenceStaleTimerRef.current = null
@@ -6039,11 +6061,12 @@ export function ProjectWorkspace() {
                 // The next normal sidebar refresh retries a transient token or
                 // network failure.
               })
-              // Settings projection changes `cells.validated` without adding
-              // cell events, so a `?since=` delta would be empty. Drop the
-              // watermark to make the active editor read one authoritative
-              // snapshot and keep row validation UI in sync.
-              cellStore.setMaxServerSeq(null)
+              // Only a validationCount change re-projects `cells.validated`
+              // server-side without cell events (db/shared/projects.ts), and
+              // the threshold effect near revalidateCellsRef handles that by
+              // dropping the watermark for one authoritative snapshot. Every
+              // other setting keeps the `?since=` cursor: a cheap delta, not a
+              // full re-stream of the open file on every connected client.
               revalidateCellsRef.current()
             } else if (msg.t === "contextual.activity") {
               // Slice D2: live contextual-run progress. The run-store is a

@@ -274,7 +274,9 @@ export function createWsReconciler(
   options: WsReconcilerOptions,
   handlers: WsReconcilerHandlers = {},
 ): WsReconciler {
-  const minBackoff = options.minBackoffMs ?? 250
+  // 1s floor + jitter: a sync-worker redeploy drops every socket at once, and
+  // a 250ms floor had the whole fleet reconnecting (and resyncing) in lockstep.
+  const minBackoff = options.minBackoffMs ?? 1_000
   const maxBackoff = options.maxBackoffMs ?? 30_000
   const Ctor =
     options.webSocketCtor ?? (globalThis as { WebSocket?: typeof WebSocket }).WebSocket
@@ -305,7 +307,8 @@ export function createWsReconciler(
   function scheduleReconnect(): void {
     if (closed) return
     if (reconnectTimer !== null) return
-    const delay = backoffMs
+    // Up to +25% jitter so clients dropped together don't retry together.
+    const delay = Math.round(backoffMs * (1 + Math.random() * 0.25))
     backoffMs = Math.min(maxBackoff, Math.max(minBackoff, backoffMs * 2))
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null
@@ -873,14 +876,54 @@ export function createScopedRefreshScheduler(
  * The resync itself is a `?since=` delta in the read path, so the recovery
  * costs one small request per reconnect — not a full re-stream.
  */
-export function createReconnectResyncHandler(onResync: () => void): () => void {
+export interface ReconnectResyncHandler {
+  /** Wire to the reconciler's `onOpen`. */
+  handleOpen(): void
+  /** Wire to the reconciler's `onClose`. */
+  handleClose(): void
+}
+
+export interface ReconnectResyncOptions {
+  /**
+   * A socket that was down for less than this is reopened WITHOUT a resync.
+   * Safe because the client's `?since=` cursor is a server sequence that only
+   * advances from a delta/full read's own response (`maxServerSeq`) — never
+   * from a WS frame — so any `event.applied` missed during a blip still sits
+   * above the cursor and rides along on the next soft revalidate (own commit,
+   * focus return, the next longer reconnect). The cost of skipping is delayed
+   * visibility of a peer's write that landed in that sub-3s window, not loss.
+   */
+  minDownMs?: number
+  /** Injectable clock for tests. */
+  now?(): number
+}
+
+const RECONNECT_RESYNC_MIN_DOWN_MS = 3_000
+
+export function createReconnectResyncHandler(
+  onResync: () => void,
+  options: ReconnectResyncOptions = {},
+): ReconnectResyncHandler {
+  const minDownMs = options.minDownMs ?? RECONNECT_RESYNC_MIN_DOWN_MS
+  const now = options.now ?? (() => Date.now())
   let opened = false
-  return () => {
-    if (!opened) {
-      opened = true
-      return
-    }
-    onResync()
+  let closedAt: number | null = null
+  return {
+    handleClose() {
+      if (closedAt === null) closedAt = now()
+    },
+    handleOpen() {
+      const downFor = closedAt === null ? null : now() - closedAt
+      closedAt = null
+      if (!opened) {
+        opened = true
+        return
+      }
+      // No close was observed (e.g. reconnect() swapped the socket) → the gap
+      // length is unknown; resync to be safe.
+      if (downFor !== null && downFor < minDownMs) return
+      onResync()
+    },
   }
 }
 

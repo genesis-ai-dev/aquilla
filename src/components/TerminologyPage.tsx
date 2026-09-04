@@ -798,7 +798,11 @@ export function TerminologyPage() {
   }, [project?.id, project?.name, project?.origin])
 
   const cellsEnabled = Boolean(project?.id && projectFiles.length > 0)
-  const { files: projectFileCells } = useProjectCells({
+  const {
+    files: projectFileCells,
+    revalidate: revalidateCells,
+    applyOptimisticTargetEdit,
+  } = useProjectCells({
     projectId: id ?? null,
     projectFiles,
     getToken,
@@ -1125,8 +1129,13 @@ export function TerminologyPage() {
         projectId={id!}
         username={username}
         onClose={() => setDrillDownConcept(null)}
-        onCellCommitted={() => {}}
-        onOptimisticEdit={() => {}}
+        // AQU-206: an inline fix has to survive its own sync. The optimistic
+        // shadow carries the row from keystroke to server ack (the outbox
+        // overlay drops out the moment the flusher accepts the write), and the
+        // revalidate pulls the authoritative projection so the verdict — which
+        // is derived on read from `translated` — settles on real data.
+        onCellCommitted={revalidateCells}
+        onOptimisticEdit={applyOptimisticTargetEdit}
         canManageTermbase={canManageTermbase}
         onPromoteRendering={handlePromoteRendering}
       />

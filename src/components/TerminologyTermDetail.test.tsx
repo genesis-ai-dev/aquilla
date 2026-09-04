@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, within } from "@testing-library/react"
 import { TerminologyTermDetail } from "./TerminologyTermDetail"
 import type { Concept } from "@/lib/terminology/types"
 import type { CellData } from "@/hooks/useCells"
@@ -61,5 +61,55 @@ describe("TerminologyTermDetail", () => {
     renderDetail({ cells: [cell()], onJumpToCell })
     fireEvent.click(screen.getByRole("button", { name: /go to rom 3:24/i }))
     expect(onJumpToCell).toHaveBeenCalledWith({ cellId: "cell-1", fileId: "file-1" })
+  })
+})
+
+// AQU-206 AC3: the verdict is derived on read from the row's current target,
+// so correcting an infringing rendering flips the row without a refetch of the
+// concept itself.
+describe("TerminologyTermDetail verdicts", () => {
+  const FORBIDDEN: Concept = {
+    ...CONCEPT,
+    renderings: [
+      { rendering: "favor", status: "preferred" },
+      { rendering: "gracia barata", status: "forbidden" },
+    ],
+  }
+
+  /** The verdict chip on the occurrence row carrying the source snippet. */
+  const rowVerdict = () => {
+    const row = screen.getByText("by grace alone").closest("li")
+    if (!row) throw new Error("occurrence row not found")
+    return within(row).getByText(/^(enforced|infringed|n\/a)$/i).textContent
+  }
+
+  it("marks an occurrence infringed while it carries a forbidden rendering", () => {
+    renderDetail({
+      concept: FORBIDDEN,
+      cells: [cell({ translated: "por gracia barata" })],
+    })
+    expect(rowVerdict()).toBe("infringed")
+  })
+
+  it("re-derives the verdict when the target is corrected", () => {
+    const { rerender } = renderDetail({
+      concept: FORBIDDEN,
+      cells: [cell({ translated: "por gracia barata" })],
+    })
+    expect(rowVerdict()).toBe("infringed")
+
+    rerender(
+      <TerminologyTermDetail
+        concept={FORBIDDEN}
+        cells={[cell({ translated: "por favor solo" })]}
+        canEdit
+        projectId="p1"
+        username="tester"
+        onClose={vi.fn()}
+        onCellCommitted={vi.fn()}
+        onOptimisticEdit={vi.fn()}
+      />,
+    )
+    expect(rowVerdict()).toBe("enforced")
   })
 })

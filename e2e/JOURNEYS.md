@@ -41,6 +41,7 @@ not a micro-spec farm.
 | AI | Sparkle fills a cell | `e2e/specs/ai/completion.smoke.spec.ts` |
 | Collab | File propagates alice → bob | `e2e/specs/collab/file-propagation.smoke.spec.ts` |
 | Collab | Concurrent cell edit propagates alice → bob | `e2e/specs/collab/concurrent-edit.smoke.spec.ts` |
+| Collab | Same-cell concurrent edits on a throttled (3G-like) network converge, keep both edits in history, stay stable, and the bumped edit is promotable | `e2e/specs/collab/concurrent-edit-throttled.smoke.spec.ts` |
 | Collab | Member presence indicators | `e2e/specs/collab/member-presence-popover.smoke.spec.ts` |
 | Collab | BT edit locked for reviewer | `e2e/specs/collab/bt-edit-locked-for-reviewer.smoke.spec.ts` |
 | Collab | Cross-user comment | `e2e/specs/collab/cross-user-comment.smoke.spec.ts` |

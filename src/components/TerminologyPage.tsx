@@ -952,10 +952,16 @@ export function TerminologyPage() {
   // concepts (an import), emit one event per concept.
   const author = frontierSession?.username || project?.username || "local"
 
-  /** Re-read the projection after a write so the list reflects the server. */
-  async function afterWrite() {
+  /**
+   * Re-read the projection after a write so the list reflects the server.
+   *
+   * useCallback, not a bare function: the memoized handlers below depend on
+   * it, and a fresh identityper render would either bust their memos or (worse)
+   * be silently omitted from their dependency arrays.
+   */
+  const afterWrite = useCallback(async () => {
     await refreshConcepts()
-  }
+  }, [refreshConcepts])
 
   // ── Export helpers ─────────────────────────────────────────────────────────
 
@@ -1074,7 +1080,7 @@ export function TerminologyPage() {
         setError(err instanceof Error ? err.message : "Promote failed")
       }
     },
-    [project, canManageTermbase, concepts],
+    [project, canManageTermbase, concepts, author, afterWrite],
   )
 
   // Promote a predicted equivalent to an admitted (alternate) rendering on the
@@ -1117,7 +1123,7 @@ export function TerminologyPage() {
         setError(err instanceof Error ? err.message : "Promote failed")
       }
     },
-    [project],
+    [project, author, afterWrite, concepts],
   )
 
   // ── Review queue handlers ─────────────────────────────────────────────────
@@ -1161,9 +1167,7 @@ export function TerminologyPage() {
         setError(err instanceof Error ? err.message : "Could not update renderings")
       }
     },
-    // `author` and `afterWrite` are declared in the component body above and
-    // are stable for the life of a project.
-    [project, author],
+    [project, author, afterWrite],
   )
 
   // ── Merge handler ─────────────────────────────────────────────────────────

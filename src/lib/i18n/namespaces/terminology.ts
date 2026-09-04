@@ -491,6 +491,26 @@ export const terminology = defineNamespace({
           "1-based position among the concept's renderings.",
         placeholders: { position: "1-based position of this rendering in the list." },
       },
+      "terminology.termDetail.addRenderingAria": {
+        description:
+          "Accessible name for the text input on the term detail page where a new rendering is typed.",
+      },
+      "terminology.termDetail.cycleStatusAria": {
+        description:
+          "Accessible name for the button on the term detail page that cycles one rendering's " +
+          "status (required / allowed / forbidden); {rendering} is the rendering text and " +
+          "{status} its current status word.",
+        placeholders: {
+          rendering: "The rendering's text as typed by the translator.",
+          status: "The rendering's current status label (required, allowed, or forbidden).",
+        },
+      },
+      "terminology.termDetail.removeRenderingAria": {
+        description:
+          "Accessible name for the button on the term detail page that removes one rendering; " +
+          "{rendering} is the rendering text.",
+        placeholders: { rendering: "The rendering's text as typed by the translator." },
+      },
       "terminology.row.collapseRenderingsAria": {
         description: "Accessible name for the row expander toggle when it is open.",
       },

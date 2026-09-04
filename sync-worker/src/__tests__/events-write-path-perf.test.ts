@@ -84,6 +84,128 @@ async function post(db: AquillaDb, events: unknown[], role = ROLE.CONTRIBUTOR): 
   return (await res!.json()) as EventsResponse
 }
 
+const sqlOf = (s: AquillaStatement): string => (s as unknown as { _sql(): string })._sql()
+
+/**
+ * Wrap a real (PGlite-backed) shim so every batch call is recorded with the
+ * SQL texts it carried. `batchPipelined` is exposed only when `pipelined` is
+ * set, so a test can also model a shim that lacks it. `failBatch(n)` makes
+ * the n-th batch call reject (recompute-failure leg).
+ */
+function recordingDb(
+  t: TestDb,
+  opts: { pipelined: boolean; failBatch?: number } = { pipelined: true },
+) {
+  const batches: Array<{ via: 'batch' | 'batchPipelined'; sql: string[] }> = []
+  const record = (via: 'batch' | 'batchPipelined', stmts: AquillaStatement[]) => {
+    batches.push({ via, sql: stmts.map(sqlOf) })
+    if (opts.failBatch === batches.length) throw new Error('simulated recompute failure')
+  }
+  const db: AquillaDb = {
+    prepare: (q) => t.db.prepare(q),
+    exec: (q) => t.db.exec(q),
+    close: () => t.db.close(),
+    batch: async (stmts) => {
+      record('batch', stmts)
+      return t.db.batch(stmts)
+    },
+    ...(opts.pipelined
+      ? {
+          batchPipelined: async (stmts: AquillaStatement[]) => {
+            record('batchPipelined', stmts)
+            return t.db.batchPipelined!(stmts)
+          },
+        }
+      : {}),
+  }
+  return { db, batches }
+}
+
+const isWriteTxn = (sql: string[]) => sql.some((s) => s.includes('INSERT INTO events'))
+const isCountersRecompute = (s: string) => s.includes('UPDATE files SET cell_count')
+const isProgressRecompute = (s: string) => s.includes('INSERT INTO file_section_progress')
+
+let t: TestDb | undefined
+afterEach(async () => {
+  await t?.close()
+  t = undefined
+})
+
+describe('POST /events — chunk commit is pipelined', () => {
+  it('commits the chunk through batchPipelined when the shim offers it, and still flags the in-flight chain loser', async () => {
+    const td = (t = await makeTestDb())
+    const { db, batches } = recordingDb(td)
+    await post(db, [commit('evt-c1', null, 'base')])
+    // Two siblings of one parent in ONE request: both pass the prefetched
+    // pre-check, one loses inside the transaction. flagChainLosers reads that
+    // loser off results[i].meta.changes — so the pipelined result array must
+    // keep batch()'s exact index/shape contract or this silently stops firing.
+    const r = await post(db, [commit('evt-c2', 'evt-c1', 'alice wins'), commit('evt-c3', 'evt-c1', 'bob loses')])
+    expect(r.rejected).toEqual([])
+    expect(r.accepted.map((a) => a.id)).toEqual(['evt-c2', 'evt-c3'])
+    expect(r.stale).toEqual([{ id: 'evt-c3', fileId: FILE, cellId: 'cell-1' }])
+
+    const writeTxns = batches.filter((b) => isWriteTxn(b.sql))
+    expect(writeTxns.length).toBeGreaterThan(0)
+    for (const b of writeTxns) expect(b.via).toBe('batchPipelined')
+  })
+
+  it('falls back to batch() when the shim has no batchPipelined', async () => {
+    const td = (t = await makeTestDb())
+    const { db, batches } = recordingDb(td, { pipelined: false })
+    const r = await post(db, [commit('evt-c1', null, 'base')])
+    expect(r.accepted).toEqual([{ id: 'evt-c1' }])
+    expect(batches.filter((b) => isWriteTxn(b.sql)).every((b) => b.via === 'batch')).toBe(true)
+  })
+})
+
+describe('POST /events — counter recompute runs after the write transaction', () => {
+  it('keeps the full-file aggregate scans out of the transaction that holds the cell row locks', async () => {
+    const td = (t = await makeTestDb({ files: [{ id: FILE, project_id: PROJECT, name: 'x' }] }))
+    const { db, batches } = recordingDb(td)
+    await post(db, [commit('evt-c1', null, 'one'), commit('evt-c2', null, 'two', 'cell-2')])
+
+    const [writeTxn, ...rest] = batches
+    expect(isWriteTxn(writeTxn.sql)).toBe(true)
+    expect(writeTxn.sql.some(isCountersRecompute)).toBe(false)
+    expect(writeTxn.sql.some(isProgressRecompute)).toBe(false)
+
+    // Exactly ONE recompute batch for the one (file, chunk), carrying exactly
+    // one files-counters recompute — same once-per-(file, chunk) coalescing as
+    // before, just in its own short transaction after the commit.
+    const recomputes = rest.filter((b) => b.sql.some(isCountersRecompute))
+    expect(recomputes).toHaveLength(1)
+    expect(recomputes[0].sql.filter(isCountersRecompute)).toHaveLength(1)
+    expect(recomputes[0].sql.some(isProgressRecompute)).toBe(true)
+
+    // And the counters are right by the time the response is built — the
+    // recompute is awaited in the request, not fired into waitUntil.
+    const files = await td.rows<{ id: string; cell_count: number; filled_count: number }>('files')
+    expect(files.map((f) => [f.id, f.cell_count, f.filled_count])).toEqual([[FILE, 2, 2]])
+  })
+
+  it('a failed recompute is logged loudly but the committed events stay accepted', async () => {
+    const td = (t = await makeTestDb())
+    // Batch #1 is the write transaction, batch #2 the recompute.
+    const { db } = recordingDb(td, { pipelined: true, failBatch: 2 })
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const r = await post(db, [commit('evt-c1', null, 'base')])
+      expect(r.accepted).toEqual([{ id: 'evt-c1' }])
+      expect(r.rejected).toEqual([])
+      // The event really is durable — the failure was only the follow-up.
+      const events = await td.rows<{ id: string }>('events')
+      expect(events.map((e) => e.id)).toEqual(['evt-c1'])
+      expect(error).toHaveBeenCalledWith(
+        expect.stringContaining('counter recompute failed'),
+        expect.anything(),
+      )
+    } finally {
+      error.mockRestore()
+    }
+  })
+})
+
 describe('authorize() — settings reads are memoized per request', () => {
   /** Counting fake: one row each in projects / org_settings / project_settings. */
   function countingDb() {

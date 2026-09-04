@@ -261,6 +261,12 @@ export class ProjectPresenceStore {
     this.updateCellSnapshot(cellId)
   }
 
+  /** Raw per-user snapshots (no drafts) — for lock-holder derivation and the
+   *  focus-lock hook, which still consume the full-roster frame shape. */
+  getUserSnapshots(): PresenceUserSnapshot[] {
+    return Array.from(this.users.values())
+  }
+
   getPeers(): ProjectPresencePeer[] {
     return this.rosterSnapshot
   }

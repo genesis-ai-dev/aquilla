@@ -432,3 +432,59 @@ describe("unpackBroadcastBody", () => {
     expect(unpackBroadcastBody(archived)).toEqual([archived])
   })
 })
+
+describe("unpackBroadcastBody — additive event.applied fields", () => {
+  // POST /events now inlines `serverSeq` + the cell's projected `rows` on
+  // event.applied. The DO relays frames as-is (JSON.stringify of the unpacked
+  // message), so the only place a field could be dropped is here — pin it.
+  const enriched = (id: string): ProjectDoServerMessage => ({
+    t: "event.applied",
+    id,
+    kind: "target.cell.commit",
+    project: "p1",
+    file: "f1",
+    cell: "c1",
+    by: "alice",
+    serverSeq: 42,
+    rows: [
+      {
+        cellId: "c1",
+        side: "target",
+        targetLang: "",
+        value: "hello",
+        valueHtml: null,
+        type: null,
+        canonicalRef: null,
+        anchorCellId: null,
+        eventId: id,
+        sourceEventId: null,
+        lastEditor: "alice",
+        lastEditAt: 1,
+        validated: false,
+        aiDrafted: false,
+        aiDraft: null,
+        wordCount: 1,
+        endorsementCount: 0,
+        startMs: null,
+        endMs: null,
+        medium: null,
+        sequenceIndex: null,
+        transcription: null,
+        cameraState: null,
+        metadata: null,
+      },
+    ],
+  })
+
+  it("passes serverSeq and rows through untouched on a single-message body", () => {
+    const [frame] = unpackBroadcastBody(enriched("e1"))
+    expect(frame).toEqual(enriched("e1"))
+    // The DO sends JSON.stringify(frame) — nothing may be lost on the wire.
+    expect(JSON.parse(JSON.stringify(frame))).toEqual(enriched("e1"))
+  })
+
+  it("passes serverSeq and rows through untouched inside a broadcast.batch envelope", () => {
+    const body = { t: "broadcast.batch", messages: [enriched("e1"), enriched("e2")] }
+    expect(unpackBroadcastBody(body)).toEqual([enriched("e1"), enriched("e2")])
+  })
+})

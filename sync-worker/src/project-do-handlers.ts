@@ -9,6 +9,7 @@
 
 import type { OutboxRawEvent, OutboxEventKind } from "./project-do-types"
 import type { ContextualFrame } from "./contextual-frames"
+import type { CellRowOut } from "./events/cell-row-serialize"
 
 /** Default lease in ms. */
 export const PROJECT_DO_DEFAULT_LEASE_MS = 30_000
@@ -54,6 +55,15 @@ export interface ServerEventApplied {
    * commit made no local outbox write, so the echo refetch is the only way
    * the approving human's editor learns the result. */
   via?: "external"
+  /** `events.server_seq` of this event. Present on chain-mutating and
+   * validation cell events (additive — older workers omit it). */
+  serverSeq?: number
+  /** The cell's CURRENT projected rows (both sides, all lanes) AFTER this
+   * event's transaction committed, serialised exactly as the by-ids read
+   * (GET …/cells?cellIds=) returns them, so clients can apply them without a
+   * follow-up refetch. Omitted when a single request touched more than
+   * `EVENT_APPLIED_ROWS_MAX_CELLS` cells (clients fall back to refetch). */
+  rows?: CellRowOut[]
 }
 export interface ServerEventStale {
   t: "event.stale"

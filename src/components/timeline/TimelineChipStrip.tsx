@@ -21,7 +21,7 @@ import { VolumeX } from "lucide-react"
 import { fmtClock } from "./format"
 import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
 import { AppTooltip } from "@/components/ui/tooltip"
-import { MediaSectionCollapseButton } from "./MediaSectionRail"
+import { MEDIA_HEADER_ROW, MediaSectionCollapseButton } from "./MediaSectionRail"
 import { uiSlotRef } from "@/lib/ui-slots"
 import type { CellData } from "@/hooks/useCells"
 import type { CameraState } from "@/lib/sync/cells-read-types"
@@ -354,7 +354,9 @@ export function MediaTextHeader({
   return (
     <div
       data-testid="tl-dialogue-header"
-      className="flex items-center gap-2 border-t border-border bg-muted/20 px-4 py-1.5"
+      // MEDIA_HEADER_ROW: one height with the video header beside this and the
+      // rail that replaces it, so the collapse control never changes row.
+      className={`flex items-center gap-2 border-t border-border bg-muted/20 px-4 py-1.5 ${MEDIA_HEADER_ROW}`}
     >
       {/* Same heading treatment as the toolbar's "Timeline" and the video
           pane's "Video" — a section label, not a data pill. It still names the

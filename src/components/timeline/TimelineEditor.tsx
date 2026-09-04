@@ -68,7 +68,7 @@ import { chipOverlaps, MIN_ADDABLE_SPAN_SEC } from "@/lib/timeline/lane-timing"
 import { resolveCueCharacter, formatCueCharacter } from "@/lib/timeline/cue-character"
 import { buildTimelineLayout, type TimelineLayout } from "@/lib/timeline/layout"
 import { gutterWidthPx, loadGutterCollapsed, saveGutterCollapsed } from "@/lib/timeline/gutter-width"
-import { MediaSectionCollapseButton } from "./MediaSectionRail"
+import { MEDIA_HEADER_ROW, MediaSectionCollapseButton } from "./MediaSectionRail"
 import {
   deriveTracksForFile,
   type TimelineTrack,
@@ -3490,7 +3490,9 @@ export function TimelineEditor({
       }
     >
       {/* toolbar */}
-      <div className="flex shrink-0 items-center gap-2 border-b border-border bg-muted/30 px-3 py-1.5">
+      <div
+        className={`flex shrink-0 items-center gap-2 border-b border-border bg-muted/30 px-3 py-1.5 ${MEDIA_HEADER_ROW}`}
+      >
         <span className="text-xs font-medium text-muted-foreground">{t("editor.timeline.title")}</span>
         {/* AQU-1119: beside the heading, like the gutter's own toggle sits in
             the gutter — a control that folds a region belongs on that region's

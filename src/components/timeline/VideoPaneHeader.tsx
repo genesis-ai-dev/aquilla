@@ -17,7 +17,8 @@
 // ProjectWorkspace around the media-video/media-table panels).
 
 import { useT } from "@/lib/i18n/I18nProvider"
-import { MediaSectionCollapseButton } from "./MediaSectionRail"
+import { cn } from "@/lib/utils"
+import { MEDIA_HEADER_ROW, MediaSectionCollapseButton } from "./MediaSectionRail"
 
 export interface VideoPaneHeaderProps {
   src: string
@@ -40,7 +41,13 @@ export function VideoPaneHeader({ src, onCollapse }: VideoPaneHeaderProps) {
   return (
     <div
       data-testid="video-pane-header"
-      className="flex shrink-0 items-center gap-2 border-t border-border bg-muted/20 px-4 py-1.5"
+      className={cn(
+        "flex shrink-0 items-center gap-2 border-t border-border bg-muted/20 px-4 py-1.5",
+        // The same row height as the text header beside it and the rail that
+        // replaces it. Its own tallest child, the name pill, made it 5px
+        // shorter than the text header, so the two never quite lined up.
+        MEDIA_HEADER_ROW,
+      )}
     >
       <span className="text-xs font-medium text-muted-foreground">{t("editor.timeline.videoPaneTitle")}</span>
       {/* Beside the heading, pointing the way the section folds — the gutter's

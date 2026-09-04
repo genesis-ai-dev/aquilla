@@ -42,6 +42,22 @@ const GLYPH: Record<MediaSectionId, { fold: LucideIcon; open: LucideIcon }> = {
   text: { fold: ChevronsRight, open: ChevronsLeft },
 }
 
+/**
+ * The height of every section header row — the timeline's toolbar, the
+ * video's and the text's — and of the rail cell that stands in for one. One
+ * number so the three rows line up beside each other and a control sits on
+ * the same pixel row whether its section is open or folded. Before this the
+ * rows were whatever their tallest child made them (35.5px, 41px, 41px) and
+ * the rail guessed.
+ *
+ * 41, not 40: every row carries a 1px rule (`border-t` on the two headers,
+ * `border-b` on the toolbar) and min-height is border-box, so 40px of row
+ * plus its rule is what the two naturally-tall rows already measure. The
+ * rail's glyph cell carries a transparent rule so the same arithmetic puts
+ * its chevron on the headers' pixel row.
+ */
+export const MEDIA_HEADER_ROW = "min-h-[41px]"
+
 const EXPAND_KEY = {
   video: "editor.timeline.expandVideoAria",
   timeline: "editor.timeline.expandTimelineAria",
@@ -59,13 +75,11 @@ export interface MediaSectionRailProps {
   /** Vertical for the side rails (video, text); horizontal for the timeline. */
   orientation: "vertical" | "horizontal"
   /**
-   * Shown beside the glyph. Only the timeline passes one: its rail is a 40px
-   * strip across the whole width, so the section's name still fits, and
-   * keeping it is what makes the strip read as the toolbar with its tools
-   * taken away rather than as an anonymous bar. A 40px-WIDE rail has room for
-   * nothing but the glyph, so the video and text rails stay wordless — which
-   * is also what keeps this component's "carries no text" contract true for
-   * the two headers whose textContent is asserted.
+   * The section's name, kept on the rail. On the timeline's strip it sits
+   * beside the glyph exactly as it does in the toolbar; on the side rails it
+   * runs down the strip under the glyph, the way the Parallel Bibles edge
+   * tab carries "Bibles" (Sam, 2026-09-03). The name is what makes a rail
+   * read as the section folded rather than as an anonymous bar.
    */
   label?: string
   /**
@@ -95,22 +109,35 @@ export function MediaSectionRail({
     // must not be reachable behind this. The panel marks it inert.
     "absolute inset-0 z-10 flex bg-background text-muted-foreground",
     orientation === "vertical"
-      ? // The glyph holds the same height it has in the section's own header
-        // (`py-1.5`) instead of dropping to the middle of the strip: folding a
-        // section moves its content out of the way, not its controls. Sam,
-        // 2026-09-03. Centred across a 40px strip because there is no room to
-        // reproduce the header's inset, which sits past a whole label.
-        "flex-col items-center justify-start border-e border-border pt-1.5"
+      ? "flex-col items-center justify-start gap-1.5 border-e border-border"
       : // Left-justified against the toolbar's own `px-3`, so the name and the
         // chevron do not move at all when the timeline folds.
         "flex-row items-center justify-start gap-2 border-b border-border ps-3",
   )
-  const content = (
-    <>
-      {label && <span className="text-xs font-medium">{label}</span>}
-      <Open className="h-3.5 w-3.5 shrink-0" />
-    </>
-  )
+  const content =
+    orientation === "vertical" ? (
+      <>
+        {/* The glyph keeps the height it has in the section's own header
+            instead of dropping to the middle of the strip: folding a section
+            moves its content out of the way, not its controls (Sam,
+            2026-09-03, twice — first the middle, then a few pixels high).
+            Every header row is MEDIA_HEADER_ROW tall and centres the control,
+            and this cell is the same box down to the 1px top border, so the
+            chevron lands on the same pixel row railed or open. */}
+        <span className={cn(MEDIA_HEADER_ROW, "flex shrink-0 items-center border-t border-transparent")}>
+          <Open className="h-3.5 w-3.5 shrink-0" />
+        </span>
+        {/* Down the strip, in the Parallel Bibles edge tab's own dress. */}
+        {label && (
+          <span className="text-sm font-semibold tracking-wide [writing-mode:vertical-rl]">{label}</span>
+        )}
+      </>
+    ) : (
+      <>
+        {label && <span className="text-xs font-medium">{label}</span>}
+        <Open className="h-3.5 w-3.5 shrink-0" />
+      </>
+    )
 
   if (preview) {
     return (

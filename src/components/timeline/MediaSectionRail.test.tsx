@@ -56,9 +56,17 @@ describe("MediaSectionRail", () => {
     expect(screen.getByRole("button", { name: "Show the timeline" })).toBe(rail)
   })
 
-  it("carries no text on a 40px-wide rail", () => {
-    // Nothing is passed, so nothing is shown — the side rails have room for
-    // the glyph and nothing else.
+  it("runs the section's name down a side rail, like the Bibles edge tab", () => {
+    render(
+      <MediaSectionRail section="video" orientation="vertical" label="Video" onExpand={() => {}} />,
+    )
+    const rail = screen.getByTestId("media-rail-video")
+    expect(rail).toHaveTextContent("Video")
+    // Still named for the action, not the section — the name is scenery.
+    expect(screen.getByRole("button", { name: "Show the video" })).toBe(rail)
+  })
+
+  it("shows only the glyph when no name is passed", () => {
     render(<MediaSectionRail section="video" orientation="vertical" onExpand={() => {}} />)
     expect(screen.getByTestId("media-rail-video")).toHaveTextContent("")
   })

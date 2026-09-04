@@ -10551,7 +10551,8 @@ export function ProjectWorkspace() {
                       <MediaSectionRail
                         section="video"
                         orientation="vertical"
-                        preview={mediaSections.isPreviewingRail("video")}
+                        label={t("editor.timeline.videoPaneTitle")}
+                      preview={mediaSections.isPreviewingRail("video")}
                         onExpand={() => mediaSections.expand("video")}
                       />
                     )}
@@ -10686,6 +10687,7 @@ export function ProjectWorkspace() {
                 <MediaSectionRail
                   section="text"
                   orientation="vertical"
+                  label={t("editor.timeline.textPaneTitle")}
                   preview={mediaSections.isPreviewingRail("text")}
                   onExpand={() => mediaSections.expand("text")}
                 />

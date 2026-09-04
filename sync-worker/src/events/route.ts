@@ -280,12 +280,13 @@ interface StaleEntry {
 
 // ── Request-scoped prefetches (PERF-2) ─────────────────────────────────────
 // The per-event loop used to issue 1–3 serial SELECTs per event (idempotency,
-// AD-2 chain pre-check, F5 source pin) — ~2N+ Hyperdrive round-trips per
-// flush. All of these reads see only state committed BEFORE this request
-// (pending statements commit after the loop), so hoisting them into one
-// batched SELECT per concern is semantics-preserving. The only window that
-// moves is against concurrent EXTERNAL writers, which the pre-checks never
-// arbitrated anyway — the in-transaction chain claim (chain-claims.ts) does.
+// AD-2 chain pre-check, F5 source pin, foreign-comment ownership,
+// self-validation last-editor) — ~2N+ Hyperdrive round-trips per flush. All
+// of these reads see only state committed BEFORE this request (pending
+// statements commit after the loop), so hoisting them into one batched
+// SELECT per concern is semantics-preserving. The only window that moves is
+// against concurrent EXTERNAL writers, which the pre-checks never arbitrated
+// anyway — the in-transaction chain claim (chain-claims.ts) does.
 
 /** Which of `ids` already exist in `events` — one SELECT per request. */
 async function readExistingEventIds(
@@ -498,6 +499,61 @@ async function prefetchLiveMirrorLocks(
 }
 
 /**
+ * Author of each `comments` row named by `commentIds`, in ONE SELECT. Backs
+ * the foreign-comment-ownership check (comment.edit/delete/resolve,
+ * cell.unvalidate with targetUsername) that previously issued one SELECT
+ * per event.
+ */
+async function prefetchCommentAuthors(
+  db: AquillaDb,
+  commentIds: ReadonlySet<string>,
+): Promise<Map<string, string>> {
+  const authors = new Map<string, string>()
+  if (commentIds.size === 0) return authors
+  const list = [...commentIds]
+  const placeholders = list.map(() => '?').join(', ')
+  const { results } = await db
+    .prepare(`SELECT comment_id, author_id FROM comments WHERE comment_id IN (${placeholders})`)
+    .bind(...list)
+    .all<{ comment_id: string; author_id: string }>()
+  for (const r of results) authors.set(r.comment_id, r.author_id)
+  return authors
+}
+
+/**
+ * `last_editor` of each target cell in `cells`, in ONE SELECT. Backs the
+ * FRO-189 self-validation check (cell.validate with allowSelfValidation
+ * disabled) that previously issued one SELECT per event. Fetched for every
+ * cell.validate candidate regardless of the project's allowSelfValidation
+ * setting — a superset read is cheap and the setting isn't known until the
+ * per-event loop reads readProjectSettings (memoized separately).
+ */
+async function prefetchLastEditors(
+  db: AquillaDb,
+  cells: readonly CellKey[],
+): Promise<Map<string, string | null>> {
+  const editors = new Map<string, string | null>()
+  if (cells.length === 0) return editors
+
+  const placeholders = cells.map(() => '(?, ?, ?)').join(', ')
+  const binds: unknown[] = []
+  for (const c of cells) binds.push(c.projectId, c.fileId, c.cellId)
+
+  const { results } = await db
+    .prepare(
+      `SELECT project_id, file_id, cell_id, last_editor FROM cells
+       WHERE side = 'target' AND (project_id, file_id, cell_id) IN (${placeholders})`,
+    )
+    .bind(...binds)
+    .all<{ project_id: string; file_id: string; cell_id: string; last_editor: string | null }>()
+
+  for (const r of results) {
+    editors.set(cellKeyOf(r.project_id, r.file_id, r.cell_id), r.last_editor)
+  }
+  return editors
+}
+
+/**
  * POST /events
  *
  * Body: { events: RawEvent[] }
@@ -662,8 +718,14 @@ export async function handleEventsWriteRequest(
   const candidateIds = new Set<string>()
   const chainCells = new Map<string, CellKey>()
   const sourceCommitCells = new Map<string, CellKey>()
+  const validateCells = new Map<string, CellKey>()
+  const foreignCommentIds = new Set<string>()
   for (const e of rawEvents) {
     if (typeof e.id === 'string') candidateIds.add(e.id)
+    if (isForeignCommentKind(e.kind)) {
+      const p = e.payload as { commentId?: string } | undefined
+      if (typeof p?.commentId === 'string') foreignCommentIds.add(p.commentId)
+    }
     if (
       typeof e.projectId !== 'string' ||
       typeof e.fileId !== 'string' ||
@@ -683,13 +745,22 @@ export async function handleEventsWriteRequest(
     if (e.kind === 'source.cell.commit') {
       sourceCommitCells.set(key, { projectId: e.projectId, fileId: e.fileId, cellId: e.cellId })
     }
+    // FRO-189 self-validation check (see prefetchLastEditors) — fetched for
+    // every candidate regardless of the project's allowSelfValidation
+    // setting, which isn't known until the per-event loop below.
+    if (e.kind === 'cell.validate') {
+      validateCells.set(key, { projectId: e.projectId, fileId: e.fileId, cellId: e.cellId })
+    }
   }
-  const [existingIds, chainWinners, cellHeads, liveMirrorLocks] = await Promise.all([
-    readExistingEventIds(db, candidateIds),
-    prefetchChainWinners(db, [...chainCells.values()]),
-    prefetchCellHeads(db, [...chainCells.values()]),
-    prefetchLiveMirrorLocks(db, [...sourceCommitCells.values()]),
-  ])
+  const [existingIds, chainWinners, cellHeads, liveMirrorLocks, commentAuthors, lastEditors] =
+    await Promise.all([
+      readExistingEventIds(db, candidateIds),
+      prefetchChainWinners(db, [...chainCells.values()]),
+      prefetchCellHeads(db, [...chainCells.values()]),
+      prefetchLiveMirrorLocks(db, [...sourceCommitCells.values()]),
+      prefetchCommentAuthors(db, foreignCommentIds),
+      prefetchLastEditors(db, [...validateCells.values()]),
+    ])
 
   // PERF-2: project_settings is read at most once per (request, project).
   // No event kind mutates project_settings (its only writers are the
@@ -952,14 +1023,9 @@ export async function handleEventsWriteRequest(
     if (isForeignCommentKind(rawEvent.kind)) {
       const p = rawEvent.payload as { commentId?: string }
       if (p.commentId) {
-        const commentRow = await db
-          .prepare(
-            `SELECT author_id FROM comments WHERE comment_id = ? LIMIT 1`,
-          )
-          .bind(p.commentId)
-          .first<{ author_id: string }>()
+        const authorId = commentAuthors.get(p.commentId)
 
-        if (commentRow && commentRow.author_id !== callerUsername) {
+        if (authorId !== undefined && authorId !== callerUsername) {
           // Foreign comment mutation — floor per FOREIGN_COMMENT_ROLE
           // (AQU-999): maintainer for edit/delete, contributor for resolve.
           const foreignFloor = requiredRoleForForeignComment(rawEvent.kind)
@@ -973,8 +1039,9 @@ export async function handleEventsWriteRequest(
             continue
           }
         }
-        // If commentRow is null the comment doesn't exist; projection will no-op,
-        // which is the correct behaviour (idempotent delete of a missing row).
+        // If authorId is undefined the comment doesn't exist; projection will
+        // no-op, which is the correct behaviour (idempotent delete of a
+        // missing row).
       }
     }
 
@@ -1063,15 +1130,10 @@ export async function handleEventsWriteRequest(
 
         // 3. Self-validation check.
         if (allowSelfValidation === false && rawEvent.fileId && rawEvent.cellId) {
-          const cellRow = await db
-            .prepare(
-              `SELECT last_editor FROM cells
-               WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'target'
-               LIMIT 1`,
-            )
-            .bind(rawEvent.projectId, rawEvent.fileId, rawEvent.cellId)
-            .first<{ last_editor: string | null }>()
-          if (cellRow && cellRow.last_editor === callerUsername) {
+          const lastEditor = lastEditors.get(
+            cellKeyOf(rawEvent.projectId, rawEvent.fileId, rawEvent.cellId),
+          )
+          if (lastEditor === callerUsername) {
             rejected.push({
               id: rawEvent.id ?? '(unknown)',
               status: 403,

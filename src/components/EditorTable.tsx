@@ -1823,20 +1823,36 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // cell and stays gap-free even when front matter, introductions, or other
   // paratextual cells sit before/among the content. Scripture files number by
   // canonical verse ref and don't consult this map.
+  // AQU-1146: per-cell "does this cell get a sequential number" is a
+  // structural fact (type + import metadata) that never changes on an
+  // ordinary target edit — cache it per cell, keyed by the store's per-cell
+  // version (same idiom as `ribbonInputCache` in ribbon-inputs.ts), so a
+  // commit that touches a handful of cells re-derives only those cells
+  // instead of re-resolving every cell view in the file. The ordinal count
+  // itself is still one cheap linear pass — only the `getCellView` +
+  // metadata check is skipped for unchanged cells.
+  const sequentialEntryCacheRef = useRef<Map<string, { version: number; isNumbered: boolean }>>(new Map())
   const sequentialNumberByCellId = useMemo(() =>
     readAtVersion(cellStoreVersion, () => {
+      const cache = sequentialEntryCacheRef.current
+      const nextCache = new Map<string, { version: number; isNumbered: boolean }>()
       const map = new Map<string, number>()
       let ordinal = 0
       for (const id of displayCellIds) {
-        const view = cellStore.getCellView(id)
-        if (!view) continue
-        if (
-          view.type === "paratext"
-          || view.type === "heading"
-          || importDisplayLabel(view.metadata) === null
-        ) continue
-        map.set(id, ++ordinal)
+        const version = cellStore.getCellVersion(id)
+        let entry = cache.get(id)
+        if (!entry || entry.version !== version) {
+          const view = cellStore.getCellView(id)
+          const isNumbered = view != null
+            && view.type !== "paratext"
+            && view.type !== "heading"
+            && importDisplayLabel(view.metadata) !== null
+          entry = { version, isNumbered }
+        }
+        nextCache.set(id, entry)
+        if (entry.isNumbered) map.set(id, ++ordinal)
       }
+      sequentialEntryCacheRef.current = nextCache
       return map
     }),
   [cellStore, cellStoreVersion, displayCellIds])
@@ -1864,20 +1880,38 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // boolean from the `completing` map (any member cell mid-draft ⇒ the
   // button disables/pulses, and a click can't re-fire while a previous
   // click's fan-out is still running).
+  // AQU-1146: same per-cell version cache idiom as sequentialNumberByCellId
+  // above. `fileId`/`paragraphStart` are structural (import-time) facts;
+  // `validated` changes on an ordinary commit but is cheap to carry in the
+  // same cached entry, which also means the draftable-count pass below reads
+  // it from the cache instead of calling `getCellView` a second time per
+  // group member.
+  const paragraphEntryCacheRef = useRef<
+    Map<string, { version: number; fileId: string; paragraphStart?: boolean; validated: boolean }>
+  >(new Map())
   const paragraphGroupInfoByCellId = useMemo(() =>
     readAtVersion(cellStoreVersion, () => {
-      const map = new Map<string, { size: number; draftableCount: number; memberIds: string[] }>()
+      const cache = paragraphEntryCacheRef.current
+      const nextCache = new Map<string, { version: number; fileId: string; paragraphStart?: boolean; validated: boolean }>()
       const orderedCells: { id: string; fileId: string; paragraphStart?: boolean }[] = []
       for (const id of displayCellIds) {
-        const view = cellStore.getCellView(id)
-        if (!view) continue
-        orderedCells.push({ id: view.id, fileId: view.fileId, paragraphStart: view.paragraphStart })
+        const version = cellStore.getCellVersion(id)
+        let entry = cache.get(id)
+        if (!entry || entry.version !== version) {
+          const view = cellStore.getCellView(id)
+          if (!view) continue
+          entry = { version, fileId: view.fileId, paragraphStart: view.paragraphStart, validated: view.status === "validated" }
+        }
+        nextCache.set(id, entry)
+        orderedCells.push({ id, fileId: entry.fileId, paragraphStart: entry.paragraphStart })
       }
+      paragraphEntryCacheRef.current = nextCache
+      const map = new Map<string, { size: number; draftableCount: number; memberIds: string[] }>()
       for (const group of deriveParagraphs(orderedCells)) {
         if (group.length <= 1) continue
         let draftableCount = 0
         for (const id of group) {
-          if (cellStore.getCellView(id)?.status !== "validated") draftableCount++
+          if (!nextCache.get(id)?.validated) draftableCount++
         }
         map.set(group[0], { size: group.length, draftableCount, memberIds: group })
       }
@@ -2109,6 +2143,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           const paragraphGroupInfo = cell.paragraphStart === true
             ? paragraphGroupInfoByCellId.get(cell.id)
             : undefined
+          // AQU-1146: resolved here (once per rendered row) instead of inside
+          // MemoizedRow so the row's props stay per-cell scalars — see
+          // `MemoizedRowProps.paragraphGroupInFlight`.
+          const paragraphGroupInFlight = paragraphGroupInfo?.memberIds?.some((id) => {
+            const state = completing.get(id)
+            return state === "searching" || state === "generating"
+          }) ?? false
           // AQU-646: the row's STRUCTURAL controls — add a line into the
           // silence after it, take an empty added line back. One map lookup and
           // one predicate call per row; no scans.
@@ -2204,10 +2245,10 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onAckRemoteChange={onAckRemoteChange}
           isCompletionConfigured={isCompletionConfigured}
           isCompletionAvailable={isCompletionAvailable}
-          examples={examples}
-          completing={completing}
-          errors={errors}
-          previews={previews}
+          cellExamples={examples.get(cell.id) ?? EMPTY_EXAMPLES}
+          completingState={completing.get(cell.id)}
+          cellError={errors.get(cell.id)}
+          previewText={previews.get(cell.id)}
           healthRibbonPoint={healthRibbonByCellId.get(cell.id) ?? HEALTH_DISABLED_POINT}
           infractions={infractions}
           ruleMap={ruleMap}
@@ -2215,7 +2256,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onCompleteParagraph={onCompleteParagraph}
           paragraphGroupSize={paragraphGroupInfo?.size}
           paragraphDraftableCount={paragraphGroupInfo?.draftableCount}
-          paragraphGroupMemberIds={paragraphGroupInfo?.memberIds}
+          paragraphGroupInFlight={paragraphGroupInFlight}
           isBacktranslationConfigured={isBacktranslationConfigured}
           backtranslating={backtranslating}
           backtranslationErrors={backtranslationErrors}
@@ -2865,10 +2906,15 @@ interface MemoizedRowProps {
   onAckRemoteChange?: (cellId: string) => void
   isCompletionConfigured: boolean
   isCompletionAvailable: boolean
-  examples: Map<string, ScoredPair[]>
-  completing: Map<string, string>
-  errors: Map<string, string>
-  previews: Map<string, string>
+  /** AQU-1146: per-cell slice of the table's `examples` map, resolved by the
+   *  parent so this row's props are scalars — the map's identity changes on
+   *  every batch commit, and a `Map` prop would defeat `React.memo` on every
+   *  row even when only one cell's entry changed. Same reasoning for
+   *  `completingState`, `cellError`, and `previewText` below. */
+  cellExamples: ScoredPair[]
+  completingState?: string
+  cellError?: string
+  previewText?: string
   healthRibbonPoint: HealthRibbonPoint
   infractions: Map<string, RuleInfraction[]>
   ruleMap: Map<string, TranslationRule>
@@ -2886,12 +2932,11 @@ interface MemoizedRowProps {
    *  "N of M" copy and the button's hide-when-nothing-to-draft gate. Set
    *  alongside `paragraphGroupSize`. */
   paragraphDraftableCount?: number
-  /** p1-paragraph-ui-wiring (coordinator follow-up): every cell id in this
-   *  cell's paragraph group (including itself) — MemoizedRow-only, used to
-   *  derive `paragraphGroupInFlight` from the `completing` map. Never
-   *  forwarded to EditorRow (which gets the derived boolean instead, keeping
-   *  its prop surface a stable scalar). */
-  paragraphGroupMemberIds?: string[]
+  /** p1-paragraph-ui-wiring (coordinator follow-up): true while ANY cell in
+   *  this row's paragraph group is actively completing. AQU-1146: resolved
+   *  by the parent (from the `completing` map and the group's member ids) so
+   *  this row's prop is a stable scalar instead of the whole map. */
+  paragraphGroupInFlight: boolean
   isBacktranslationConfigured?: boolean
   backtranslating?: Set<string>
   backtranslationErrors?: Map<string, string>
@@ -2966,7 +3011,7 @@ interface MemoizedRowProps {
 
 const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   const {
-    cell, linkedTakes, examples, completing, errors, previews, healthRibbonPoint, infractions,
+    cell, linkedTakes, cellExamples, completingState, cellError, previewText, healthRibbonPoint, infractions,
     backtranslating, backtranslationErrors, cellOpenCommentCount,
     rowIndex, contentNumber, gridCols, castGutter, ttsSettings,
     onDragStart: onDragStartParent, onDragEnter: onDragEnterParent,
@@ -2990,7 +3035,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     onDeactivateEditor,
     project, username, activeLane, editable, canValidate, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable,
     ruleMap, onCompleteSingle, onCompleteParagraph, paragraphGroupSize,
-    paragraphDraftableCount, paragraphGroupMemberIds,
+    paragraphDraftableCount, paragraphGroupInFlight,
     isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation, getStatisticalBt,
     getFootnoteDetails,
     onSeekToCue, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled,
@@ -3016,7 +3061,6 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     const key = cellId.slice(0, 8)
     rowRenders.set(key, (rowRenders.get(key) ?? 0) + 1)
   }
-  const cellExamples = useMemo(() => examples.get(cellId) ?? EMPTY_EXAMPLES, [examples, cellId])
   const highlights = useMemo(() => buildHighlightsFromExamples(cellExamples), [cellExamples])
   const cellInfractions = useMemo(() => infractions.get(cellId) ?? EMPTY_INFRACTIONS, [infractions, cellId])
 
@@ -3025,37 +3069,26 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     [cellInfractions, cell.waivers],
   )
 
-  const completingState = completing.get(cellId)
   const isLoading = completingState === "searching" || completingState === "generating"
-  // p1-paragraph-ui-wiring (coordinator follow-up): true while ANY cell in
-  // this row's paragraph group is ACTIVELY completing — not just this row's
-  // own (a validated start cell never gets one post-skip, so relying on
-  // `isLoading` alone would let a second click re-fire completeParagraph
-  // mid-fan-out). Only paragraph-start rows with a >1-cell group carry
-  // `paragraphGroupMemberIds`; every other row's guard is trivially false.
-  // Matches `isLoading`'s value check above (searching/generating only) —
-  // presence alone is wrong: a stuck "error" entry (none of useCompletion's
-  // three catch paths clear it) would otherwise permanently disable/pulse
-  // the button for that group.
-  const paragraphGroupInFlight = useMemo(
-    () => paragraphGroupMemberIds?.some((id) => {
-      const state = completing.get(id)
-      return state === "searching" || state === "generating"
-    }) ?? false,
-    [paragraphGroupMemberIds, completing],
-  )
+  // p1-paragraph-ui-wiring (coordinator follow-up): `paragraphGroupInFlight`
+  // is true while ANY cell in this row's paragraph group is ACTIVELY
+  // completing — not just this row's own (a validated start cell never gets
+  // one post-skip, so relying on `isLoading` alone would let a second click
+  // re-fire completeParagraph mid-fan-out). AQU-1146: resolved by the parent
+  // from the full `completing` map + the group's member ids, and handed to
+  // this row as a stable boolean prop (see `MemoizedRowProps`).
   // Streaming preview text — populated chunk-by-chunk by useCompletion's
   // onChunk handler. We surface it in the target column so the user sees
   // tokens arrive in real time instead of waiting for the LLM to finish
   // AND the commit-to-outbox chain to land (which adds a network hop).
-  const completionPreview = previews.get(cellId)
+  const completionPreview = previewText
   const loadingPhase: "searching" | "generating" | null =
     completingState === "searching"
       ? "searching"
       : completingState === "generating"
         ? "generating"
         : null
-  const error = errors.get(cellId)
+  const error = cellError
   const isBacktranslating = backtranslating?.has(cellId)
   const backtranslationError = backtranslationErrors?.get(cellId)
   const openCommentCount = cellOpenCommentCount?.get(cellId) ?? 0

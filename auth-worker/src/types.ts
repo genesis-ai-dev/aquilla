@@ -153,10 +153,6 @@ export interface Env {
   /** Contextual pipeline deep-tier (verifier) model override. Default: the
    *  resolved draft (mid) model. */
   CONTEXTUAL_DEEP_MODEL?: string
-  /** Injected by index.ts (never configured): raw Postgres connection string
-   *  so streaming routes can open a connection that outlives the Response. */
-  PG_CONNECTION_STRING?: string
-
   // ── Monday.com integration (routes/monday.ts, lib/monday/*) ──────────────
   /** Monday OAuth app client id (plain var, [vars] in wrangler.toml). */
   MONDAY_CLIENT_ID?: string

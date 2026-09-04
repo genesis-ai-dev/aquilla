@@ -37,7 +37,6 @@ import { aquiferSearch, aquiferReadPage, type AquiferCitation } from "../lib/aqu
 import { isBibleResourcesEnabled } from "../lib/aquifer/gate"
 import { buildSystemPrompt } from "../lib/agent/schema-card"
 import { insertAgentRun, finishAgentRun, listAgentRuns } from "../lib/agent/runs"
-import { makePostgres } from "../../../db/shim/postgres"
 import {
   type HarnessFrame,
   resolveRunCostCapCents,
@@ -555,12 +554,10 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
     storedUntrusted = session?.untrustedActive ?? false
   }
 
-  // The request-scoped AQUILLA_PG shim is closed when this Response returns
-  // (index.ts finally) — before the SSE body finishes. The run owns its own
-  // connection for the loop's lifetime; tests (no PG_CONNECTION_STRING)
-  // keep using the injected AQUILLA_PG.
-  const runShim = c.env.PG_CONNECTION_STRING ? makePostgres(c.env.PG_CONNECTION_STRING) : null
-  const env: Env = runShim ? { ...c.env, AQUILLA_PG: runShim as unknown as Env["AQUILLA_PG"] } : c.env
+  // AQUILLA_PG is the isolate-shared pool (never closed per request), so the
+  // run can keep using it after this Response returns while the SSE body
+  // streams.
+  const env: Env = c.env
   const signal = c.req.raw.signal
   const runId = crypto.randomUUID()
   const lastUserMessage = [...body.messages].reverse().find((m) => m.role === "user")
@@ -596,13 +593,6 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
             controller.close()
           } catch {
             /* already closed */
-          }
-          if (runShim) {
-            try {
-              await runShim.close()
-            } catch {
-              /* connection already gone */
-            }
           }
         })
     },

@@ -14,10 +14,10 @@
 //
 // v1 execution (documented deviation): no Workflows binding — POST /runs kicks
 // selfTickLoop via executionCtx.waitUntil; the loop drives lib/contextual/tick
-// runOneTick until the run pauses/parks/fails or a safety cap, on its OWN
-// makePostgres connection (the request-scoped AQUILLA_PG shim closes when the
-// Response returns — same gotcha as routes/agent.ts). All run state lives in
-// Postgres, so a dropped loop resumes exactly where it stopped.
+// runOneTick until the run pauses/parks/fails or a safety cap, on the
+// isolate-shared AQUILLA_PG pool (never closed per request, so it outlives the
+// Response). All run state lives in Postgres, so a dropped loop resumes
+// exactly where it stopped.
 
 import { Hono, type Context } from "hono"
 import { zValidator } from "@hono/zod-validator"
@@ -31,7 +31,7 @@ import { creditGuard } from "../lib/credits"
 import { wordCapBody, wordGuard } from "../lib/billing/words"
 import { makeCostMeter } from "../lib/cost-meter"
 import { notifySyncWorkerOfContextualActivity } from "../services/sync-worker-notify"
-import { makePostgres, type AquillaDb } from "../../../db/shim/postgres"
+import { type AquillaDb } from "../../../db/shim/postgres"
 import {
   getFileSegmentation,
   setFileSegmentation,
@@ -305,16 +305,15 @@ function leaseAwareLlm(
   }
 }
 
-/** Run waves until the run stops continuing or the safety cap. Owns its own
- *  PG connection (env.AQUILLA_PG dies with the Response); never throws. */
+/** Run waves until the run stops continuing or the safety cap. Runs on the
+ *  isolate-shared env.AQUILLA_PG pool; never throws. */
 async function selfTickLoop(
   env: Env,
   projectId: string,
   runId: string,
   concurrency?: number,
 ): Promise<void> {
-  const shim = env.PG_CONNECTION_STRING ? makePostgres(env.PG_CONNECTION_STRING) : null
-  const db: AquillaDb = (shim as unknown as AquillaDb) ?? env.AQUILLA_PG
+  const db: AquillaDb = env.AQUILLA_PG
   const notify = async (frame: ContextualProgressFrame) =>
     notifySyncWorkerOfContextualActivity(env, projectId, frame)
   // Dev cost meter (AQU pricing exercise): one row per model call, flushed
@@ -414,13 +413,6 @@ async function selfTickLoop(
     // Drain before the connection closes — a return/throw above skips the
     // per-wave flush, and those rows are the tail of the run.
     await meter.flush()
-    if (shim) {
-      try {
-        await shim.close()
-      } catch {
-        /* already closed */
-      }
-    }
   }
 }
 
@@ -483,11 +475,10 @@ export interface SweepResult {
   /**
    * Settles when every adopted run's loop finishes.
    *
-   * The caller MUST keep its Postgres connection alive until this resolves.
-   * `selfTickLoop` only opens its own connection when `PG_CONNECTION_STRING`
-   * is configured; otherwise it borrows `env.AQUILLA_PG`, and the cron closes
-   * that in its `finally`. Without this handle the sweep would adopt runs and
-   * then yank the connection out from under them — worse than not sweeping,
+   * The caller MUST keep the isolate alive (ctx.waitUntil) until this
+   * resolves: `selfTickLoop` runs on the shared `env.AQUILLA_PG` pool.
+   * Without this handle the sweep would adopt runs and then let the isolate
+   * go idle out from under them — worse than not sweeping,
    * because the adoption already refreshed their heartbeats.
    */
   done: Promise<void>

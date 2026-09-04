@@ -40,7 +40,7 @@ import {
 import type { OutboxRawEvent } from "./project-do-types"
 import { mondayNotifyProject, notifyMondayProgress } from "./monday-notify"
 import { mirrorSync, type MirrorSyncResult } from "./events/link-sync"
-import { makePostgres } from "../../db/shim/postgres"
+import { getPostgres } from "../../db/shim/postgres"
 import { serviceBearerMatches } from "./lib/service-auth"
 
 const LEASE_SWEEP_INTERVAL_MS = 5_000
@@ -181,17 +181,16 @@ export class ProjectSync extends DurableObject<DOEnv> {
       if (!projectId) {
         return new Response("missing project query param", { status: 400 })
       }
-      // Test seam takes priority; otherwise build a short-lived PG connection
-      // from HYPERDRIVE (this DO instance's own env, not the request-scoped
-      // synthesized AQUILLA_PG the worker's top-level fetch uses).
-      const db = this.env.AQUILLA_PG ?? (this.env.HYPERDRIVE && makePostgres(this.env.HYPERDRIVE.connectionString))
+      // Test seam takes priority; otherwise use the isolate-shared PG pool
+      // from HYPERDRIVE (this DO instance's own env, not the synthesized
+      // AQUILLA_PG the worker's top-level fetch uses).
+      const db = this.env.AQUILLA_PG ?? (this.env.HYPERDRIVE && getPostgres(this.env.HYPERDRIVE.connectionString))
       if (!db) {
         return new Response("HYPERDRIVE binding not configured", { status: 500 })
       }
       if (!this.linkSyncInFlight) {
         this.linkSyncInFlight = mirrorSync(db as AquillaDb, projectId).finally(() => {
           this.linkSyncInFlight = null
-          if (!this.env.AQUILLA_PG) void (db as { close(): Promise<void> }).close?.()
         })
       }
       try {

@@ -453,6 +453,44 @@ function parseAppliedRows(raw: unknown): CellRow[] | undefined {
 }
 
 /**
+ * Parse one `event.applied` frame from an already-decoded object. Shared by
+ * the WS message parser and the `POST /events` response's `applied[]` (the
+ * server serialises both from the same builder, so the author's own flush
+ * lands rows through exactly the path a peer's echo does).
+ */
+export function parseAppliedEventFrame(
+  obj: unknown,
+): Extract<ProjectWsServerMessage, { t: "event.applied" }> | null {
+  if (!obj || typeof obj !== "object") return null
+  const m = obj as Record<string, unknown>
+  if (
+    typeof m.id !== "string" ||
+    typeof m.kind !== "string" ||
+    typeof m.project !== "string"
+  ) {
+    return null
+  }
+  // Minimal shape check on the optional projected rows. Any malformed entry
+  // drops the WHOLE field (never a partial row set — replaceRowsForCell
+  // would treat a missing side as a deletion); the handler then refetches.
+  const rows = parseAppliedRows(m.rows)
+  return {
+    t: "event.applied",
+    id: m.id,
+    kind: m.kind as OutboxEventKind,
+    project: m.project,
+    ...(typeof m.file === "string" ? { file: m.file } : {}),
+    ...(typeof m.cell === "string" ? { cell: m.cell } : {}),
+    ...(typeof m.by === "string" ? { by: m.by } : {}),
+    ...(m.via === "external" ? { via: "external" as const } : {}),
+    ...(typeof m.serverSeq === "number" && Number.isFinite(m.serverSeq)
+      ? { serverSeq: m.serverSeq }
+      : {}),
+    ...(rows ? { rows } : {}),
+  }
+}
+
+/**
  * Defensive parse of an incoming WS frame. Returns null on malformed input
  * (the caller treats this as a parse error and emits onError).
  */
@@ -466,33 +504,7 @@ export function parseProjectWsMessage(raw: string): ProjectWsServerMessage | nul
   if (!obj || typeof obj !== "object") return null
   const m = obj as Record<string, unknown>
   const t = m.t
-  if (t === "event.applied") {
-    if (
-      typeof m.id !== "string" ||
-      typeof m.kind !== "string" ||
-      typeof m.project !== "string"
-    ) {
-      return null
-    }
-    // Minimal shape check on the optional projected rows. Any malformed entry
-    // drops the WHOLE field (never a partial row set — replaceRowsForCell
-    // would treat a missing side as a deletion); the handler then refetches.
-    const rows = parseAppliedRows(m.rows)
-    return {
-      t: "event.applied",
-      id: m.id,
-      kind: m.kind as OutboxEventKind,
-      project: m.project,
-      ...(typeof m.file === "string" ? { file: m.file } : {}),
-      ...(typeof m.cell === "string" ? { cell: m.cell } : {}),
-      ...(typeof m.by === "string" ? { by: m.by } : {}),
-      ...(m.via === "external" ? { via: "external" as const } : {}),
-      ...(typeof m.serverSeq === "number" && Number.isFinite(m.serverSeq)
-        ? { serverSeq: m.serverSeq }
-        : {}),
-      ...(rows ? { rows } : {}),
-    }
-  }
+  if (t === "event.applied") return parseAppliedEventFrame(m)
   if (t === "event.stale") {
     if (typeof m.id !== "string" || typeof m.reason !== "string") return null
     return { t: "event.stale", id: m.id, reason: m.reason }

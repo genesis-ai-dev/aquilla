@@ -210,8 +210,9 @@ import {
   type ProjectPresencePeer,
   type TargetPresenceSelection,
 } from "@/lib/sync/presence-store"
-import { flushOutboxBatch, subscribeStaleSiblings, type ForbiddenEntry } from "@/lib/sync/outbox-flush"
+import { flushOutboxBatch, subscribeStaleSiblings, subscribeAppliedEvents, type ForbiddenEntry } from "@/lib/sync/outbox-flush"
 import { createLiveApplier } from "@/lib/sync/live-apply"
+import { createFlushAppliedTracker } from "@/lib/sync/flush-applied"
 import { acknowledgeOutboxEvents, getOutboxRecords } from "@/lib/sync/outbox"
 import { forbiddenBannerMessage } from "@/lib/sync/forbidden-copy"
 import { useForbiddenOutboxRecords } from "@/hooks/useForbiddenOutboxRecords"
@@ -1310,21 +1311,6 @@ export function ProjectWorkspace() {
   // out-of-scope cells (no guaranteed-403) rather than silently reverting.
   const myScopes = useMyScopes(project?.id ?? null)
 
-  // Server-backed (Postgres) audit stats for the active file with the client outbox applied
-  // on top — pending commits/validates show up immediately, before the next
-  // 30s refetch. Source of truth for project-wide validation views.
-  const auditStatsEnabled = Boolean(project?.id && activeFileId && frontierSession?.jwt)
-  const {
-    byCellId: auditStatsByCellId,
-    revalidate: revalidateAuditStats,
-    revalidateCellStats,
-  } = useCellsAuditStatsWithOverlay({
-    enabled: auditStatsEnabled,
-    fileId: activeFileId,
-    getTokenForFile,
-  })
-
-  const validationCount = project ? readValidationCount(project) : 1
   // AQU-538: the active target lane. Declared here (above useActiveCellStore)
   // because the store's cell list is lane-filtered on this value. Persisted
   // per-project; N=1 is always `''` (no switcher rendered, byte-identical).
@@ -1335,6 +1321,23 @@ export function ProjectWorkspace() {
   useEffect(() => {
     setActiveLaneState(projectId ? readPersistedActiveLane(projectId) : "")
   }, [projectId])
+  // Server-backed (Postgres) audit stats for the active file with the client outbox applied
+  // on top — pending commits/validates show up immediately, before the next
+  // 30s refetch. Source of truth for project-wide validation views.
+  const auditStatsEnabled = Boolean(project?.id && activeFileId && frontierSession?.jwt)
+  const {
+    byCellId: auditStatsByCellId,
+    revalidate: revalidateAuditStats,
+    revalidateCellStats,
+    applyCommittedCellStats,
+  } = useCellsAuditStatsWithOverlay({
+    enabled: auditStatsEnabled,
+    fileId: activeFileId,
+    getTokenForFile,
+    lane: activeLane,
+  })
+
+  const validationCount = project ? readValidationCount(project) : 1
   // AQU-538: useActiveCellStore serves the ACTUAL workspace cell list; it now
   // filters target rows to `activeLane` (same `(r.targetLang ?? '') === lane`
   // rule as useCells) before the one-target-per-cell pairing. N=1 is
@@ -1508,6 +1511,34 @@ export function ProjectWorkspace() {
     [cellStore, revalidateCell],
   )
   useEffect(() => { liveApplier.reset() }, [liveApplier, activeFileId])
+
+  // Own writes: the POST /events response carries the same frames as the WS
+  // broadcast (`applied[]`). Land them through liveApplier and derive the
+  // audit-stats entry, so a commit costs ONE request — the POST — and the
+  // handlers below skip their by-ids + audit-stats GETs (`confirmCommitted`).
+  // Subscribed tab-wide because most inline "flush now" calls and the
+  // app-shell drain never pass `onApplied`.
+  const flushAppliedTracker = useMemo(
+    () => createFlushAppliedTracker({
+      liveApplier,
+      isActive: (pid, fid) => pid === project?.id && fid === activeFileIdRef.current,
+      applyCommittedCellStats,
+    }),
+    [liveApplier, project?.id, applyCommittedCellStats],
+  )
+  useEffect(() => { flushAppliedTracker.reset() }, [flushAppliedTracker, activeFileId])
+  useEffect(
+    () => subscribeAppliedEvents((frames) => flushAppliedTracker.onFrames(frames)),
+    [flushAppliedTracker],
+  )
+  /** Post-flush confirmation for a single committed cell: refetch only what
+   *  the POST response did not already land (older server, >cap batch,
+   *  validate/unvalidate stats). */
+  const confirmCommitted = useCallback((cellId: string, eventId?: string) => {
+    const { refetchCell, refetchStats } = flushAppliedTracker.confirm(cellId, eventId)
+    if (refetchStats) revalidateCellStats(cellId)
+    if (refetchCell) revalidateCell(cellId)
+  }, [flushAppliedTracker, revalidateCellStats, revalidateCell])
 
   const getPendingTargetEventId = useCallback((cellId: string) => {
     return pendingTargetCommitHeadsRef.current.get(laneCellKey(cellId))?.eventId ?? null
@@ -4266,14 +4297,12 @@ export function ProjectWorkspace() {
       revalidateCell(cell.id)
       throw new Error("The draft was outdated by another change to this cell and was not saved — try again")
     }
-    // Targeted: we just changed exactly one cell. Pull only that row's stats
-    // and cell data back (its authoritative event_id becomes the next
-    // commit's parent) instead of re-fetching stats for all ~30k cells in
-    // the file. The optimistic shadow keeps the value visible until this
-    // confirms; the WS event.applied also pokes the same cell (coalesced).
-    revalidateCellStats(cell.id)
-    revalidateCell(cell.id)
-  }, [project?.id, project?.syncRole?.level, applyOptimisticTargetEdit, activeLane, laneCellKey, getActiveCell, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, refreshOutboxPending, revalidateCellStats, revalidateCell])
+    // Targeted: we just changed exactly one cell. The POST response normally
+    // landed its row + stats already (flushAppliedTracker); otherwise pull
+    // only that row's stats and cell data back (its authoritative event_id
+    // becomes the next commit's parent) instead of re-fetching the file.
+    confirmCommitted(cell.id, eventId)
+  }, [project?.id, project?.syncRole?.level, applyOptimisticTargetEdit, activeLane, laneCellKey, getActiveCell, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, refreshOutboxPending, revalidateCellStats, revalidateCell, confirmCommitted])
 
   const commitCompletedCells = useCallback(async (
     drafts: CompletedCellDraft[],
@@ -4602,10 +4631,9 @@ export function ProjectWorkspace() {
     rememberPendingTargetCommit(cell.id, eventId, parentId)
     await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
     await refreshOutboxPending()
-    // Single-cell promotion — targeted refetch (see commitCompletedCell).
-    revalidateCellStats(cell.id)
-    revalidateCell(cell.id)
-  }, [project?.id, historyCellId, getActiveCell, applyOptimisticTargetEdit, activeLane, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, currentUsername, refreshOutboxPending, revalidateCellStats, revalidateCell])
+    // Single-cell promotion — confirm from the POST response (see commitCompletedCell).
+    confirmCommitted(cell.id, eventId)
+  }, [project?.id, historyCellId, getActiveCell, applyOptimisticTargetEdit, activeLane, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, currentUsername, refreshOutboxPending, confirmCommitted])
 
   const { completeSingle, prepareSingleEvidence, completeBatch, completeParagraph, clearCellError, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
     // AQU-538/AQU-602: when a non-default lane is active, its tag IS the target
@@ -4657,14 +4685,11 @@ export function ProjectWorkspace() {
     async (_eventIds: string[], cellIds: string[]) => {
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       await refreshOutboxPending()
-      // Targeted: the agent only touched cellIds — pull just those rows'
-      // stats instead of the whole file's (see commitCompletedCell).
-      for (const cellId of cellIds) {
-        revalidateCellStats(cellId)
-        revalidateCell(cellId)
-      }
+      // Targeted: the agent only touched cellIds — confirm each from the
+      // POST response, refetching only what it did not land.
+      for (const cellId of cellIds) confirmCommitted(cellId)
     },
-    [getTokenForProjectFile, refreshOutboxPending, revalidateCellStats, revalidateCell],
+    [getTokenForProjectFile, refreshOutboxPending, confirmCommitted],
   )
 
   // ── Back-translation: LLM generation on demand ─────────────────────────────
@@ -6695,8 +6720,7 @@ export function ProjectWorkspace() {
     rememberPendingTargetCommit(cell.id, eventId, parentId)
     await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
     await refreshOutboxPending()
-    revalidateCellStats(cell.id)
-    revalidateCell(cell.id)
+    confirmCommitted(cell.id, eventId)
   }, [
     project?.id,
     project?.syncRole?.level,
@@ -6709,8 +6733,7 @@ export function ProjectWorkspace() {
     currentUsername,
     getTokenForProjectFile,
     refreshOutboxPending,
-    revalidateCellStats,
-    revalidateCell,
+    confirmCommitted,
   ])
 
   ensureTargetRowForTakeRef.current = (cellId: string) => void ensureTargetRowForTake(cellId)
@@ -6753,8 +6776,7 @@ export function ProjectWorkspace() {
     rememberPendingTargetCommit(cell.id, eventId, parentId)
     await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
     await refreshOutboxPending()
-    revalidateCellStats(cell.id)
-    revalidateCell(cell.id)
+    confirmCommitted(cell.id, eventId)
   }, [
     project?.id,
     project?.syncRole?.level,
@@ -6766,8 +6788,7 @@ export function ProjectWorkspace() {
     currentUsername,
     getTokenForProjectFile,
     refreshOutboxPending,
-    revalidateCellStats,
-    revalidateCell,
+    confirmCommitted,
   ])
 
   const validatedEvidenceVersion = useMemo(() => (
@@ -6950,9 +6971,8 @@ export function ProjectWorkspace() {
     rememberPendingTargetCommit(cell.id, eventId, parentId)
     await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
     await refreshOutboxPending()
-    // Single-cell edit — targeted refetch (see commitCompletedCell).
-    revalidateCellStats(cell.id)
-    revalidateCell(cell.id)
+    // Single-cell edit — confirm from the POST response (see commitCompletedCell).
+    confirmCommitted(cell.id, eventId)
   }, [
     project?.id,
     project?.syncRole?.level,
@@ -6965,8 +6985,7 @@ export function ProjectWorkspace() {
     currentUsername,
     getTokenForProjectFile,
     refreshOutboxPending,
-    revalidateCellStats,
-    revalidateCell,
+    confirmCommitted,
   ])
 
   const handleTrayFootnoteSave = useCallback((cellId: string, footnoteIndex: number, newText: string) => {
@@ -9508,13 +9527,13 @@ export function ProjectWorkspace() {
     // cellId (older call sites).
     const changed = cellId ?? pendingEdit?.cellId
     if (changed) {
-      revalidateCellStats(changed)
-      revalidateCell(changed)
+      // Common case (own commit, rows on the POST response): no GET at all.
+      confirmCommitted(changed, committedEventId)
     } else {
       revalidateAuditStats()
       revalidateCells()
     }
-  }, [getTokenForProjectFile, rememberPendingTargetCommit, refreshOutboxPending, revalidateAuditStats, revalidateCellStats, revalidateCell, revalidateCells])
+  }, [getTokenForProjectFile, rememberPendingTargetCommit, refreshOutboxPending, revalidateAuditStats, confirmCommitted, revalidateCells])
 
   // Target edits made beside the agent use the editor's normal commit chain;
   // the workbench is another view of the document, not a separate draft store.

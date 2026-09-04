@@ -55,6 +55,8 @@ interface ViewSettingsMenuProps {
   directionWarningScope?: string | null
   cellLabelsEnabled: boolean
   tnSidebarEnabled: boolean
+  /** Per-browser switch for health ribbons, rule checks and the confidence overlay. */
+  healthCalculationsEnabled?: boolean
   /** AQU-317: USFM \f...\f* footnote display mode. */
   footnoteViewMode?: FootnoteViewMode
   /** When approved target renderings receive the quiet key-term highlight. */
@@ -70,6 +72,7 @@ interface ViewSettingsMenuProps {
   onSourceFontSizeChange: (v: number) => void
   onTargetFontSizeChange: (v: number) => void
   onTnSidebarChange: (v: boolean) => void
+  onHealthCalculationsChange?: (v: boolean) => void
   onFootnoteViewModeChange?: (v: FootnoteViewMode) => void
   onTargetKeyTermHighlightModeChange?: (v: TargetKeyTermHighlightMode) => void
 }
@@ -92,6 +95,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
   directionWarningScope,
   cellLabelsEnabled,
   tnSidebarEnabled,
+  healthCalculationsEnabled = true,
   footnoteViewMode = "off",
   targetKeyTermHighlightMode = "never",
   sourceFontSize,
@@ -103,6 +107,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
   onSourceFontSizeChange,
   onTargetFontSizeChange,
   onTnSidebarChange,
+  onHealthCalculationsChange,
   onFootnoteViewModeChange,
   onTargetKeyTermHighlightModeChange,
 }, ref) {
@@ -296,6 +301,14 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
               checked={tnSidebarEnabled}
               onCheckedChange={onTnSidebarChange}
             />
+            {onHealthCalculationsChange && (
+              <SwitchRow
+                id="view-show-health-indicators"
+                label={t("editor.view.showHealthIndicators")}
+                checked={healthCalculationsEnabled}
+                onCheckedChange={onHealthCalculationsChange}
+              />
+            )}
           </FieldGroup>
 
           {onTargetKeyTermHighlightModeChange && (

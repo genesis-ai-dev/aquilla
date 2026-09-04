@@ -916,6 +916,81 @@ export class Workspace {
     return ((await this.targetColumn(index).textContent()) ?? "").trim()
   }
 
+  /** The mounted rich-text editor for a target cell (absent while the row
+   * shows its read view). TipTap mirrors read-only into
+   * `contenteditable="false"`, so this is the observable for "another user
+   * holds the focus lock" while the editor stays mounted. */
+  targetEditor(index: number): Locator {
+    return this.editableTarget(index)
+  }
+
+  /** True when the target column is currently blocked by another user's
+   * focus lock: either the mounted editor went `contenteditable="false"` or
+   * the read view carries `aria-readonly="true"`. */
+  async isTargetLockedByOther(index: number): Promise<boolean> {
+    const column = this.targetColumn(index)
+    const blocked = column.locator(
+      '.ProseMirror[contenteditable="false"], [data-target-read-view][aria-readonly="true"]',
+    )
+    return (await blocked.count()) > 0
+  }
+
+  /** Replace the text of an ALREADY active editor in place (no blur, no
+   * commit wait) — the idle debounce commits it. Callers pace themselves on
+   * the resulting `POST /events` request. */
+  async replaceActiveTargetText(index: number, text: string): Promise<void> {
+    const target = this.editableTarget(index)
+    await expect(target).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+    await target.fill(text)
+  }
+
+  /** Leave the active editor by clicking sidebar chrome. Unlike editCell this
+   * does not wait for a commit — the value may already be committed by the
+   * idle debounce, in which case blur only releases the focus lock. */
+  async blurEditor(): Promise<void> {
+    await this.page.locator("aside").click()
+  }
+
+  private actionRail(index: number): Locator {
+    return this.cellRow(index).locator('[data-slot="cell-action-rail"]')
+  }
+
+  /** Open the per-cell "Edit history" drawer from the row's action rail. The
+   * rail springs out on row hover (data-revealed) — same reveal handshake as
+   * clickSparkleOnFirstCell. */
+  async openHistoryDrawer(index: number): Promise<void> {
+    const row = this.cellRow(index)
+    await row.scrollIntoViewIfNeeded()
+    await row.hover()
+    await expect(this.actionRail(index)).toHaveAttribute("data-revealed", "true", { timeout: 5_000 })
+    const button = row.getByRole("button", { name: "Edit history" }).first()
+    await expect(button).toBeVisible()
+    // The unrevealed rail wrapper can intercept the hit-test if idle-hide
+    // races the click; the button is already asserted visible.
+    await button.click({ force: true })
+    await expect(this.page.getByRole("heading", { name: /^Edit history/ })).toBeVisible()
+  }
+
+  /** A history-drawer revision card whose shown (terminal) value is `text`. */
+  historyEntry(text: string): Locator {
+    return this.page.locator("ol > li").filter({ hasText: text })
+  }
+
+  /** A history card flagged "bumped by a concurrent edit" (stale branch)
+   * showing `text`. */
+  bumpedHistoryEntry(text: string): Locator {
+    return this.historyEntry(text).filter({ hasText: "bumped by a concurrent edit" })
+  }
+
+  /** "Promote to current" → Confirm on the bumped card showing `text`. The
+   * promoted value is emitted as a new commit chained on the current head. */
+  async promoteBumpedHistoryEntry(text: string): Promise<void> {
+    const entry = this.bumpedHistoryEntry(text)
+    await expect(entry).toHaveCount(1)
+    await entry.getByRole("button", { name: "Promote to current" }).click()
+    await entry.getByRole("button", { name: "Confirm" }).click()
+  }
+
   /**
    * AQU-602: the lane switcher is the TARGET language tag in the editor's
    * column header (`data-testid="lane-switcher"`). It renders as a dropdown

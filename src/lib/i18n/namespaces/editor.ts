@@ -360,6 +360,7 @@ export const editor = defineNamespace({
     "editor.view.showLineNumbers": "Show line numbers",
     "editor.view.showCellLabels": "Show cell labels",
     "editor.view.showTranslationNotes": "Show translation notes",
+    "editor.view.showHealthIndicators": "Show health indicators",
     "editor.view.targetKeyTerms": "Target key terms",
     "editor.view.targetKeyTermsAlways": "Always",
     "editor.view.targetKeyTermsFocused": "Focused cell only",
@@ -483,6 +484,8 @@ export const editor = defineNamespace({
     }),
     "editor.history.promote": "Promote to current",
     "editor.history.promoteConfirm": "Make this the current value?",
+    "editor.history.restore": "Restore this version",
+    "editor.history.restoreConfirm": "Replace the current text with this version?",
     "editor.history.showIntermediate": "Show intermediate edits",
     "editor.history.hideIntermediate": "Hide intermediate edits",
 
@@ -1340,7 +1343,15 @@ export const editor = defineNamespace({
 
     // — Per-file sync status chip (WS connection to the sync-worker) ————
     "editor.sync.live": "Live",
-    "editor.sync.liveTooltip": "Live — changes are syncing to Cloudflare and across devices",
+    "editor.sync.liveTooltip": "Live — all changes are saved to the server and syncing across devices",
+    "editor.sync.syncing": "Syncing",
+    "editor.sync.syncingTooltip": "Syncing — some changes are still being sent to the server",
+    "editor.sync.retrying": "Retrying",
+    "editor.sync.retryingTooltip":
+      "Retrying — the last attempt to send your changes failed. Edits are saved locally and will be retried.",
+    "editor.sync.reconnecting": "Reconnecting",
+    "editor.sync.reconnectingTooltip":
+      "Reconnecting — the live connection dropped. Edits are saved locally; changes from others may be delayed.",
     "editor.sync.connecting": "Connecting",
     "editor.sync.connectingTooltip": "Connecting to the sync server…",
     "editor.sync.offline": "Offline",
@@ -2615,6 +2626,13 @@ export const editor = defineNamespace({
           "resource. Not the user's own comments.",
         maxLength: 32,
       },
+      "editor.view.showHealthIndicators": {
+        description:
+          "Label of the switch that turns the per-row health ribbon, rule " +
+          "infractions, and the confidence overlay on or off. Turning it off " +
+          "lightens the editor on very large files. Applies to this browser only.",
+        maxLength: 32,
+      },
       "editor.view.targetKeyTerms": {
         description:
           "Section heading for the setting that controls subtle highlights on approved " +
@@ -3160,6 +3178,18 @@ export const editor = defineNamespace({
       "editor.history.promoteConfirm": {
         description:
           "Inline confirmation question shown after clicking Promote, with Confirm " +
+          "and Cancel beside it. A question, so keep the question mark.",
+      },
+      "editor.history.restore": {
+        description:
+          "Link on an older (non-current, non-stale) history entry that makes that " +
+          "entry's text the cell's current value again, as a new edit. Imperative. " +
+          "Nothing is deleted; the newer edits stay in the history.",
+        maxLength: 26,
+      },
+      "editor.history.restoreConfirm": {
+        description:
+          "Inline confirmation question shown after clicking Restore, with Confirm " +
           "and Cancel beside it. A question, so keep the question mark.",
       },
       "editor.history.showIntermediate": {
@@ -4873,6 +4903,34 @@ export const editor = defineNamespace({
       },
       "editor.sync.liveTooltip": {
         description: "Tooltip/aria-label of the sync chip in the editor.sync.live state.",
+      },
+      "editor.sync.syncing": {
+        description:
+          "Label of the sync status chip while queued local edits are still being " +
+          "sent to the server and no attempt has failed yet. A state adjective " +
+          "beside a colored dot.",
+        maxLength: 12,
+      },
+      "editor.sync.syncingTooltip": {
+        description: "Tooltip/aria-label of the sync chip in the editor.sync.syncing state.",
+      },
+      "editor.sync.retrying": {
+        description:
+          "Label of the sync status chip when queued local edits exist and the last " +
+          "attempt to send them failed; the app keeps retrying automatically.",
+        maxLength: 12,
+      },
+      "editor.sync.retryingTooltip": {
+        description: "Tooltip/aria-label of the sync chip in the editor.sync.retrying state.",
+      },
+      "editor.sync.reconnecting": {
+        description:
+          "Label of the sync status chip when the browser is online but the live " +
+          "websocket connection to the sync server is currently closed and being re-established.",
+        maxLength: 14,
+      },
+      "editor.sync.reconnectingTooltip": {
+        description: "Tooltip/aria-label of the sync chip in the editor.sync.reconnecting state.",
       },
       "editor.sync.connecting": {
         description:

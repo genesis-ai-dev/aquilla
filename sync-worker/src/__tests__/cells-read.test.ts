@@ -1166,6 +1166,75 @@ describe("AQU-1160: chain-order cache", () => {
     )
   })
 
+  it("hits across distinct AquillaDb instances — production builds a fresh db per request (perf/cells-chain-cache)", async () => {
+    // sync-worker/src/index.ts constructs a brand-new PostgresDb via
+    // makePostgres() for EVERY request. A cache keyed on db-instance
+    // identity therefore never hits in production: each page re-runs the
+    // full-file SELECT. Model that here with two wrapper objects over the
+    // same underlying store — distinct identities, identical data.
+    const N = 300
+    const { db } = await makeTestDb({ cells: makeLinearChain(N) })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const limit = 10
+
+    /** A NEW object per call (never the same identity twice), recording the
+     *  row count of every `.all()` it serves. */
+    const freshDb = (counts: number[]): AquillaDb => ({
+      prepare(sql: string) {
+        let bound = db.prepare(sql)
+        const wrapper = {
+          bind(...args: unknown[]) {
+            bound = bound.bind(...args)
+            return wrapper
+          },
+          async all<T>() {
+            const res = await bound.all<T>()
+            counts.push(res.results.length)
+            return res
+          },
+          async run<T>() {
+            return bound.run<T>()
+          },
+          async first<T>(colName?: string) {
+            return bound.first<T>(colName)
+          },
+          async raw<T>() {
+            return bound.raw<T>()
+          },
+        }
+        return wrapper
+      },
+    }) as unknown as AquillaDb
+
+    const firstCounts: number[] = []
+    const firstRes = (await handleCellsReadRequest(
+      new Request(`https://w/api/v1/projects/proj-a/files/file-x/cells?side=target&limit=${limit}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      { AQUILLA_PG: freshDb(firstCounts), SYNC_SECRET_KEY: SECRET },
+    ))!
+    const firstBody = (await firstRes.json()) as { cells: Array<{ cellId: string }>; nextCursor: string }
+    // Page 1 is the unavoidable miss: it paid the full-file cost.
+    expect(Math.max(...firstCounts)).toBe(N)
+
+    const secondCounts: number[] = []
+    const secondRes = (await handleCellsReadRequest(
+      new Request(
+        `https://w/api/v1/projects/proj-a/files/file-x/cells?side=target&limit=${limit}&cursor=${encodeURIComponent(firstBody.nextCursor)}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      ),
+      { AQUILLA_PG: freshDb(secondCounts), SYNC_SECRET_KEY: SECRET },
+    ))!
+    const secondBody = (await secondRes.json()) as { cells: Array<{ cellId: string }>; total: number }
+    expect(secondBody.cells.map((c) => c.cellId)).toEqual(
+      Array.from({ length: limit }, (_, i) => `lc${(limit + i).toString().padStart(5, "0")}`),
+    )
+    expect(secondBody.total).toBe(N)
+    // Page 2 came through a DIFFERENT db instance and must still be a cache
+    // hit: no query on this request may return anything near the whole file.
+    expect(Math.max(...secondCounts)).toBeLessThanOrEqual(limit)
+  })
+
   it("AC2: cache-hit pages reproduce the exact anchor-chain order the uncached walk produces (ties + orphans + multi-root)", async () => {
     // Same shape as the two AQU-931 oracle tests above, concatenated into one
     // file: a sibling tie, an orphaned sub-chain, and two orphan roots.

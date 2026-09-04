@@ -254,10 +254,20 @@ describe('parseRealtimeMessage — invalid inputs return null', () => {
 // ---------------------------------------------------------------------------
 
 describe('PROJECTION_TABLES', () => {
-  it('contains exactly 10 entries, matching the ProjectionTable union arity', () => {
+  it('contains exactly 11 entries', () => {
     // If you add a new ProjectionTable variant, update PROJECTION_TABLES too.
-    // This test catches the drift.
-    const expectedArity = 10 // events | cells | files | cell_validators | cell_waivers | cell_audio | comments | cell_backtranslations | assignments | assignment_cells
-    expect(PROJECTION_TABLES.size).toBe(expectedArity)
+    //
+    // NOTE, and it is the reason this test's old name was a lie: this asserts
+    // a HAND-COUNTED number, not the union's arity — nothing here reads the
+    // type. It therefore does NOT catch drift; it only catches a change to the
+    // Set. `cell_links` has been in the ProjectionTable union and absent from
+    // this Set since it shipped, and this test passed the whole time. That gap
+    // is PRE-EXISTING and deliberately not fixed here (adding it would change
+    // which frames the realtime path accepts, which is a separate decision) —
+    // see the note raised with AQU-1006's terminology work.
+    //
+    // 'concepts' (AQU-1006 follow-up) took the count from 10 to 11.
+    const expectedEntries = 11 // events | cells | files | cell_validators | cell_waivers | cell_audio | comments | cell_backtranslations | assignments | assignment_cells | concepts
+    expect(PROJECTION_TABLES.size).toBe(expectedEntries)
   })
 })

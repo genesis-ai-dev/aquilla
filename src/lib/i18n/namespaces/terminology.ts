@@ -187,6 +187,15 @@ export const terminology = defineNamespace({
     "terminology.termDetail.noOccurrences": "No occurrences found in the loaded cells.",
     "terminology.termDetail.columnRef": "Ref",
     "terminology.termDetail.loadingExamples": "Loading examples…",
+    "terminology.termDetail.addRenderingPlaceholder": "Add rendering…",
+    "terminology.termDetail.addRenderingAria": "Add a rendering to this term",
+    "terminology.termDetail.addRenderingButton": "Add",
+    "terminology.termDetail.renderingEditHint":
+      "Click a rendering to change required / allowed / forbidden, or remove it.",
+    "terminology.termDetail.cycleStatusTitle": "Change status",
+    "terminology.termDetail.cycleStatusAria":
+      "{rendering} is {status} — change status",
+    "terminology.termDetail.removeRenderingAria": "Remove rendering {rendering}",
     "terminology.termDetail.goToCellAria": "Go to {ref}",
     "terminology.termDetail.enforcedCount": plural({
       one: "{count} enforced",

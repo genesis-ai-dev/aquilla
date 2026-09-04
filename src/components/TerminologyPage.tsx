@@ -1143,6 +1143,29 @@ export function TerminologyPage() {
     }
   }
 
+  // AQU-1006 follow-up: replace a concept's rendering list from the detail
+  // page — add, remove, or change required / allowed / forbidden. One
+  // `term.update` per change; renderings replace wholesale because they have
+  // no per-item identity to merge on.
+  const handleRenderingsChange = useCallback(
+    async (conceptId: string, renderings: TermRendering[]) => {
+      if (!project) return
+      try {
+        await emitTermUpdate({ projectId: project.id, conceptId, renderings, author })
+        await afterWrite()
+        // Keep the open drill-down in step with what was just written.
+        setDrillDownConcept((prev) =>
+          prev && prev.id === conceptId ? { ...prev, renderings } : prev,
+        )
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Could not update renderings")
+      }
+    },
+    // `author` and `afterWrite` are declared in the component body above and
+    // are stable for the life of a project.
+    [project, author],
+  )
+
   // ── Merge handler ─────────────────────────────────────────────────────────
 
   async function handleMerge(mergeIds: string[], survivorId: string) {
@@ -1224,6 +1247,7 @@ export function TerminologyPage() {
         onOptimisticEdit={() => {}}
         canManageTermbase={canManageTermbase}
         onPromoteRendering={handlePromoteRendering}
+        onRenderingsChange={handleRenderingsChange}
       />
     )
   }

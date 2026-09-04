@@ -18,10 +18,14 @@ import {
   type LinkMediaCommand,
   type PatchSettingsCommand,
   type PlanImportCommand,
+  type ProjectLifecycleCommand,
+  type RenameFileCommand,
   type SetTranslationCommand,
   type UpdateProjectSettingsCommand,
 } from './commands'
 import { changedPolicyKeys, preparePatchSettings, previewSettingValue } from './commands-patch-settings'
+import { isProjectLifecycleCommand, prepareProjectLifecycle } from './commands-project-lifecycle'
+import { renameFileToEmitEvents } from './commands-rename-file'
 import { prepareEmitEvents } from './emit-events-engine'
 import { resolveCellStates, type CellPrecondition } from './preconditions'
 import { uuidv7 } from './uuid'
@@ -162,6 +166,23 @@ export async function prepareChangesetCore(
     return preparePatchSettings(db, cred, projectId, id, autonomyMode, patchSettings, env)
   }
 
+  // Project lifecycle (AQU-1182): RenameProject / ArchiveProject /
+  // UnarchiveProject — receipt-only row writes, sole command per changeset. They
+  // MUST precede the generic role gate below: that gate resolves the role with
+  // resolveProjectRoleShared, which denies every archived project, so an
+  // UnarchiveProject would be permission_denied by construction. Their module
+  // resolves the archived-tolerant role instead (the same resolver auth-worker's
+  // own archive endpoints use) and enforces the per-kind UI floor itself.
+  const lifecycle = validated.commands.find(
+    (c): c is ProjectLifecycleCommand => isProjectLifecycleCommand(c),
+  )
+  if (lifecycle) {
+    if (validated.commands.length !== 1) {
+      return errorResponse('validation_failed', `${lifecycle.kind} must be the only command in a changeset`)
+    }
+    return prepareProjectLifecycle(db, cred, projectId, id, autonomyMode, lifecycle, env)
+  }
+
   // Live role/membership gate (§2 — resolve the caller's CURRENT role on every
   // call, never a role baked into the credential). Scope alone (checked above)
   // does not imply membership: a non-member with a project-scoped credential
@@ -186,6 +207,33 @@ export async function prepareChangesetCore(
       return errorResponse('validation_failed', 'EmitEvents must be the only command in a changeset')
     }
     return prepareEmitEvents(db, cred, projectId, id, autonomyMode, emitEvents, env, resolvedRole.level)
+  }
+
+  // RenameFile (AQU-1182): sugar over a single `file.rename` event. Desugar into
+  // the equivalent EmitEvents command and hand it to that engine — one compile
+  // path, one set of existence checks, one prepare-time id ledger. The role gate
+  // above already enforced file.rename's floor (requiredRoleForCommand returns
+  // it verbatim), so the plan an agent could not commit is refused here too.
+  const renameFiles = validated.commands.filter(
+    (c): c is RenameFileCommand => c.kind === 'RenameFile',
+  )
+  if (renameFiles.length > 0) {
+    if (renameFiles.length !== validated.commands.length) {
+      return errorResponse(
+        'validation_failed',
+        'RenameFile cannot be mixed with other command kinds in one changeset',
+      )
+    }
+    return prepareEmitEvents(
+      db,
+      cred,
+      projectId,
+      id,
+      autonomyMode,
+      renameFileToEmitEvents(renameFiles),
+      env,
+      resolvedRole.level,
+    )
   }
 
   // PlanImport is a whole-file operation, not a per-cell batch — it takes its

@@ -24,10 +24,27 @@ import {
   validateEmitEventsCommand,
   type EmitEventsCommand,
 } from './commands-emit-events'
+import {
+  renameFileFloor,
+  validateRenameFileCommand,
+  type RenameFileCommand,
+} from './commands-rename-file'
+import {
+  projectLifecycleFloor,
+  validateProjectLifecycleCommand,
+  type ProjectLifecycleCommand,
+} from './commands-project-lifecycle'
 
 export type { PlanImportCell, PlanImportManifest, PlanImportVariant } from './import-manifest'
 export type { PatchSettingsCommand, PatchSettingsOp } from './commands-patch-settings'
 export type { EmitEventsCommand, EmitEventInput } from './commands-emit-events'
+export type { RenameFileCommand } from './commands-rename-file'
+export type {
+  ArchiveProjectCommand,
+  ProjectLifecycleCommand,
+  RenameProjectCommand,
+  UnarchiveProjectCommand,
+} from './commands-project-lifecycle'
 export { cellKey, laneCellKey } from './cell-keys'
 
 /** Set (or update) a single cell's translation. Compiles to target.cell.commit. */
@@ -109,6 +126,8 @@ export type Command =
   | LinkMediaCommand
   | PatchSettingsCommand
   | EmitEventsCommand
+  | RenameFileCommand
+  | ProjectLifecycleCommand
 
 /** Hard cap on source cells per PlanImport changeset. Above this the plan is
  *  rejected with validation_failed — the manifest-in-R2 pattern for larger
@@ -440,6 +459,20 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
       if (cmd) commands.push(cmd)
       return
     }
+    if (c.kind === 'RenameFile') {
+      const cmd = validateRenameFileCommand(c, index, issues)
+      if (cmd) commands.push(cmd)
+      return
+    }
+    if (
+      c.kind === 'RenameProject' ||
+      c.kind === 'ArchiveProject' ||
+      c.kind === 'UnarchiveProject'
+    ) {
+      const cmd = validateProjectLifecycleCommand(c, index, issues)
+      if (cmd) commands.push(cmd)
+      return
+    }
     if (c.kind === 'LinkMedia') {
       if (!isNonEmptyString(c.fileId)) {
         issues.push({ index, message: 'LinkMedia.fileId must be a non-empty string' })
@@ -505,6 +538,22 @@ export function requiredRoleForCommand(c: Command): number {
   if (c.kind === 'LinkMedia') {
     // Compiles to cell.audio.attach + cell.audio.select (both CONTRIBUTOR).
     return Math.max(REQUIRED_ROLE['cell.audio.attach'], REQUIRED_ROLE['cell.audio.select'])
+  }
+  // AQU-1182 RenameFile: desugars to one file.rename event, so its floor IS
+  // file.rename's perimeter floor (the UI's own floor for renaming a file).
+  if (c.kind === 'RenameFile') {
+    return renameFileFloor()
+  }
+  // AQU-1182 project lifecycle: receipt-only row writes taking their own
+  // prepare/commit path, where the floor is re-resolved live. This static value
+  // is the honest index-filtering floor (rename MAINTAINER, archive/unarchive
+  // OWNER) and mirrors the UI floors for the same actions.
+  if (
+    c.kind === 'RenameProject' ||
+    c.kind === 'ArchiveProject' ||
+    c.kind === 'UnarchiveProject'
+  ) {
+    return projectLifecycleFloor(c)
   }
   return REQUIRED_ROLE['target.cell.commit']
 }

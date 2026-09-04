@@ -30,6 +30,18 @@ export interface ChangesetWarning {
  *  callers can never claim it via headers. */
 export type ProvenanceChannel = 'mcp' | 'rest' | 'app'
 
+/** Command kinds that apply a plain row write instead of events, and so carry a
+ *  provenance-stamp receipt (ReceiptOnlyReceipt) rather than an event-id list.
+ *  The summary names the kind so the human on /approve/:id sees WHICH lifecycle
+ *  op they are approving instead of an empty "No changes summarized." box. */
+export type ReceiptOnlyCommandKind =
+  | 'CreateProject'
+  | 'UpdateProjectSettings'
+  | 'PatchSettings'
+  | 'RenameProject'
+  | 'ArchiveProject'
+  | 'UnarchiveProject'
+
 /** Per-kind effect line for an EmitEvents changeset. `testimony` marks
  *  validation kinds (cell.validate / cell.unvalidate) so review UIs render
  *  per-item confirmation and bulk auto-apply excludes them. */
@@ -59,9 +71,14 @@ export interface ChangesetSummary {
    *  command kind, so the human on /approve/:id sees WHICH lifecycle op they're
    *  approving instead of an empty "No changes summarized." box (design §2 /
    *  blind-approval fix). */
-  command?: 'CreateProject' | 'UpdateProjectSettings' | 'PatchSettings'
-  /** CreateProject: the project name being created. */
+  command?: ReceiptOnlyCommandKind
+  /** CreateProject: the project name being created. RenameProject: the new
+   *  name. ArchiveProject / UnarchiveProject: the project's current name, so
+   *  the approval box names what is being trashed or restored. */
   projectName?: string
+  /** RenameProject: the name being replaced, so the approval box reads as a
+   *  before → after rather than a bare new label. */
+  previousProjectName?: string
   /** CreateProject: the definitive new project id. */
   newProjectId?: string
   /** CreateProject: the target org id as a string, or 'personal' for org-less. */
@@ -154,10 +171,10 @@ export interface ReceiptOnlyReceipt {
   credentialId: string
   channel: ProvenanceChannel
   changesetId: string
-  command: 'CreateProject' | 'UpdateProjectSettings' | 'PatchSettings'
+  command: ReceiptOnlyCommandKind
   appliedAt: string
-  /** CreateProject: the created project id. UpdateProjectSettings /
-   *  PatchSettings: the updated project id. */
+  /** CreateProject: the created project id. Every other receipt-only command:
+   *  the project id it wrote. */
   projectId: string
   /** UpdateProjectSettings / PatchSettings: the new settings version after the
    *  write. */

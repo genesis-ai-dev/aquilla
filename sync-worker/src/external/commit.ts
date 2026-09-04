@@ -19,10 +19,12 @@ import {
   type LinkMediaCommand,
   type PatchSettingsCommand,
   type PlanImportCommand,
+  type ProjectLifecycleCommand,
   type SetTranslationCommand,
   type UpdateProjectSettingsCommand,
 } from './commands'
 import { changedPolicyKeys, commitPatchSettings } from './commands-patch-settings'
+import { commitProjectLifecycle, isProjectLifecycleCommand } from './commands-project-lifecycle'
 import { commitEmitEvents } from './emit-events-engine'
 import {
   buildProvenance,
@@ -210,6 +212,16 @@ export async function commitChangesetCore(
   )
   if (patchSettingsCmd) {
     return commitPatchSettings(db, cred, cs, patchSettingsCmd, channel)
+  }
+  // AQU-1182 project lifecycle: receipt-only like the above, with archived-
+  // tolerant role resolution (the generic precheck below denies every archived
+  // project, which would make UnarchiveProject uncommittable) and its own
+  // per-kind UI floor. Its module re-runs the full guard sequence.
+  const lifecycleCmd = cs.commands.find(
+    (c): c is ProjectLifecycleCommand => isProjectLifecycleCommand(c),
+  )
+  if (lifecycleCmd) {
+    return commitProjectLifecycle(db, env, cred, cs, lifecycleCmd, channel, ctx)
   }
 
   // ── Live role/membership precheck (§2) ────────────────────────────────────

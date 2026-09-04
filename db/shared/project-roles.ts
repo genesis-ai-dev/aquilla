@@ -88,6 +88,33 @@ export async function resolveProjectRoleShared(
   projectId: string,
   adminEmails?: string,
 ): Promise<{ level: number; source: string } | null> {
+  return resolveProjectRoleSharedInternal(db, user, projectId, adminEmails, false)
+}
+
+/**
+ * Same as resolveProjectRoleShared, but resolves even when `archived_at` is
+ * set. Mirrors auth-worker's resolveProjectRoleIncludingArchived, which the
+ * archive / unarchive / rename endpoints use: an owner still owns a trashed
+ * project, and unarchiving one is impossible if the resolver denies every
+ * archived row. Use ONLY on lifecycle paths that must reach a trashed project;
+ * ordinary read/write authority stays on resolveProjectRoleShared.
+ */
+export async function resolveProjectRoleIncludingArchivedShared(
+  db: AquillaDb,
+  user: { id: string; email?: string | null },
+  projectId: string,
+  adminEmails?: string,
+): Promise<{ level: number; source: string } | null> {
+  return resolveProjectRoleSharedInternal(db, user, projectId, adminEmails, true)
+}
+
+async function resolveProjectRoleSharedInternal(
+  db: AquillaDb,
+  user: { id: string; email?: string | null },
+  projectId: string,
+  adminEmails: string | undefined,
+  includeArchived: boolean,
+): Promise<{ level: number; source: string } | null> {
   const project = await db
     .prepare(`SELECT id, org_id, created_by, archived_at FROM projects WHERE id = ?`)
     .bind(projectId)
@@ -99,7 +126,7 @@ export async function resolveProjectRoleShared(
     }>()
 
   if (!project) return null
-  if (project.archived_at) return null
+  if (project.archived_at && !includeArchived) return null
 
   // All four grant-path queries run in parallel — independent reads. Each is
   // wrapped so a single missing/pending-migration table degrades that path to

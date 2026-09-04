@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest"
-import { handleCellsReadRequest, type CellsReadEnv } from "../events/cells-read-route"
+import { describe, it, expect, beforeEach } from "vitest"
+import { handleCellsReadRequest, resetChainCacheForTests, type CellsReadEnv } from "../events/cells-read-route"
 import { handleRebuildProjectionRequest } from "../events/rebuild"
 import { buildEventProjectionStmts, type PersistedEvent } from "../events/event-projection"
 import { type CellRow } from "./helpers/in-memory-db"
@@ -7,6 +7,11 @@ import { makeTestDb, type Seed } from "./helpers/pg-test-db"
 import { makeTestToken } from "./helpers/auth"
 
 const SECRET = "cells-read-secret"
+
+// The chain cache is module-level (isolate-local) and keyed on
+// projectId + ETag; every test here uses proj-a/file-x, often with an
+// identical zero watermark, so reset it so tests stay independent.
+beforeEach(resetChainCacheForTests)
 
 function envWith(db: AquillaDb) {
   return { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }
@@ -1066,11 +1071,9 @@ describe("project incarnation (AQU-943)", () => {
  *  number of rows without depending on internal query shapes. */
 function countingEnv(db: AquillaDb): { env: CellsReadEnv; counts: number[] } {
   const counts: number[] = []
-  // Monkey-patch `db.prepare` IN PLACE rather than wrapping it in a new
-  // object: the chain cache is intentionally scoped per AquillaDb instance
-  // identity (a WeakMap — see chainCacheFor in cells-read-route.ts), so a
-  // fresh wrapper object would look like an unrelated db to the cache and
-  // never see entries populated through the original `db` reference.
+  // Monkey-patches `db.prepare` in place. (The chain cache is module-level
+  // and keyed on projectId + ETag, so instance identity no longer matters —
+  // see the cross-instance test below.)
   const originalPrepare = db.prepare.bind(db)
   db.prepare = (sql: string) => {
     let bound = originalPrepare(sql)

@@ -5872,7 +5872,10 @@ export function ProjectWorkspace() {
           },
         },
         {
-          onOpen() {
+          onOpen({ connId }) {
+            // Presence rows are per socket; the store hides only THIS socket's
+            // row, so a second tab (or a colleague on the same account) shows.
+            presenceStore.setSelfConnId(connId)
             if (cancelled) return
             clearPresenceStaleTimer()
             sendPresenceUpdate({
@@ -6125,7 +6128,7 @@ export function ProjectWorkspace() {
               // the lock-holder map and the focus-lock feed from the store's
               // snapshots, which still have the full-roster shape.
               if (msg.t === "presence.diff") presenceStore.applyPresenceDiff(msg.user)
-              else presenceStore.applyPresenceLeft(msg.userId)
+              else presenceStore.applyPresenceLeft(msg.connId)
               const users = presenceStore.getUserSnapshots()
               focusLockFeedFrameRef.current({ t: "presence", users })
               const next = applyPresenceFrame(users, currentUsername)
@@ -6135,7 +6138,7 @@ export function ProjectWorkspace() {
             } else if (msg.t === "presence.draft") {
               // Cell-scoped: notifies only that cell's subscribers (EditorRow's
               // useCellPresence), never the workspace root.
-              presenceStore.applyPresenceDraft(msg.userId, msg.cellId, msg.draftText, msg.ts)
+              presenceStore.applyPresenceDraft(msg.connId, msg.cellId, msg.draftText, msg.ts)
             } else if (msg.t === "lock.claimed") {
               presenceStore.applyLockClaimed(msg.cellId, msg.by.userId)
               // FRO-288: forward lock.claimed to the hook so it can update

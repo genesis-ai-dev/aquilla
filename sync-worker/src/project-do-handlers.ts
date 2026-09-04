@@ -16,6 +16,13 @@ export const PROJECT_DO_DEFAULT_LEASE_MS = 30_000
 export const PROJECT_DO_MAX_PRESENCE_DRAFT_LENGTH = 16_384
 
 export interface PresenceState {
+  /**
+   * Stable id of the WebSocket connection this row belongs to. Presence is
+   * keyed per CONNECTION, not per user: two tabs (or two people sharing one
+   * test account) are two rows carrying the same `userId`. Clients filter
+   * "self" by their own connId, never by username.
+   */
+  connId: string
   userId: string
   /** Lock-bearing: the cell this user holds the edit lease on (focus.claim). */
   focusedCell?: string
@@ -91,10 +98,11 @@ export interface ServerPresenceDiff {
   t: "presence.diff"
   user: PresenceState
 }
-/** A user's presence was removed (last connection closed). */
+/** One connection's presence was removed (that socket closed). */
 export interface ServerPresenceLeft {
   t: "presence.left"
   userId: string
+  connId: string
 }
 /**
  * Live draft text for a remote caret. The DO rate-limits this per user
@@ -103,6 +111,7 @@ export interface ServerPresenceLeft {
 export interface ServerPresenceDraft {
   t: "presence.draft"
   userId: string
+  connId: string
   cellId: string
   draftText: string
   ts: number
@@ -318,7 +327,38 @@ export function parseProjectDoClientMessage(raw: string): ProjectDoClientMessage
   return null
 }
 
+/**
+ * Accept the client's connId when it is a sane opaque token and not already
+ * held by a live socket; otherwise mint one. A collision can only come from a
+ * buggy/malicious client — never merge two sockets onto one presence row.
+ */
+export function resolveConnId(
+  requested: string | null,
+  connections: ReadonlyMap<unknown, { connId: string }>,
+): string {
+  if (requested && /^[A-Za-z0-9_-]{8,64}$/.test(requested)) {
+    let taken = false
+    for (const c of connections.values()) {
+      if (c.connId === requested) {
+        taken = true
+        break
+      }
+    }
+    if (!taken) return requested
+  }
+  return crypto.randomUUID()
+}
+
 // ── Lock state transitions (pure) ─────────────────────────────────────────
+
+/**
+ * Who is acting: the socket (`connId`, presence key) and the verified user
+ * behind it (`userId`, lock owner). Locks stay per USER — see applyDisconnect.
+ */
+export interface PresenceIdentity {
+  connId: string
+  userId: string
+}
 
 export interface LockTransitionResult {
   /** New locks map. */
@@ -375,6 +415,7 @@ function samePresence(a: PresenceState | undefined, b: PresenceState | undefined
   if (!a && !b) return true
   if (!a || !b) return false
   return (
+    a.connId === b.connId &&
     a.userId === b.userId &&
     a.focusedCell === b.focusedCell &&
     a.viewingCell === b.viewingCell &&
@@ -401,6 +442,7 @@ function presenceDiff(user: PresenceState): ServerPresenceDiff {
 
 function clearFocusedPresence(cur: PresenceState, now: number): PresenceState {
   return {
+    connId: cur.connId,
     userId: cur.userId,
     ...(cur.currentFileId ? { currentFileId: cur.currentFileId } : {}),
     // Losing the lease does not move the user: they are still on that row.
@@ -429,10 +471,11 @@ function clearFocusedPresence(cur: PresenceState, now: number): PresenceState {
 export function applyFocusClaim(
   locks: ReadonlyMap<string, LockState>,
   presence: ReadonlyMap<string, PresenceState>,
-  userId: string,
+  who: PresenceIdentity,
   msg: ClientFocusClaim,
   now: number,
 ): LockTransitionResult {
+  const { connId, userId } = who
   const leaseMs = msg.leaseMs ?? PROJECT_DO_DEFAULT_LEASE_MS
   const nextLocks = clone(locks)
   const nextPresence = clone(presence)
@@ -456,7 +499,7 @@ export function applyFocusClaim(
     userId,
     expiresAt: now + leaseMs,
   })
-  const cur = nextPresence.get(userId) ?? { userId, ts: now }
+  const cur = nextPresence.get(connId) ?? { connId, userId, ts: now }
   const { selection, ...rest } = cur
   const nextUser: PresenceState = {
     ...rest,
@@ -464,7 +507,7 @@ export function applyFocusClaim(
     ...(cur.focusedCell === msg.cellId && selection ? { selection } : {}),
     ts: now,
   }
-  nextPresence.set(userId, nextUser)
+  nextPresence.set(connId, nextUser)
   return {
     locks: nextLocks,
     presence: nextPresence,
@@ -479,14 +522,14 @@ export function applyFocusClaim(
 export function applyFocusRenew(
   locks: ReadonlyMap<string, LockState>,
   presence: ReadonlyMap<string, PresenceState>,
-  userId: string,
+  who: PresenceIdentity,
   msg: ClientFocusRenew,
   now: number,
   leaseMs: number = PROJECT_DO_DEFAULT_LEASE_MS,
 ): LockTransitionResult {
   const nextLocks = clone(locks)
   const lock = nextLocks.get(msg.cellId)
-  if (lock && lock.userId === userId) {
+  if (lock && lock.userId === who.userId) {
     nextLocks.set(msg.cellId, { ...lock, expiresAt: now + leaseMs })
   }
   return { locks: nextLocks, presence: new Map(presence), emit: [], emitTo: [] }
@@ -495,10 +538,11 @@ export function applyFocusRenew(
 export function applyFocusRelease(
   locks: ReadonlyMap<string, LockState>,
   presence: ReadonlyMap<string, PresenceState>,
-  userId: string,
+  who: PresenceIdentity,
   msg: ClientFocusRelease,
   now: number,
 ): LockTransitionResult {
+  const { connId, userId } = who
   const nextLocks = clone(locks)
   const nextPresence = clone(presence)
   const lock = nextLocks.get(msg.cellId)
@@ -509,10 +553,13 @@ export function applyFocusRelease(
   const emit: ProjectDoServerMessage[] = [
     { t: "lock.released", cellId: msg.cellId, by: { userId, ts: now } },
   ]
-  const cur = nextPresence.get(userId)
+  // Only the releasing socket's row loses focusedCell. A sibling tab of the
+  // same user that is still in the cell keeps its row and re-claims the
+  // lease itself on the lock.released echo (client AQU-1154 path).
+  const cur = nextPresence.get(connId)
   if (cur && cur.focusedCell === msg.cellId) {
     const cleared = clearFocusedPresence(cur, now)
-    nextPresence.set(userId, cleared)
+    nextPresence.set(connId, cleared)
     emit.push(presenceDiff(cleared))
   }
   return { locks: nextLocks, presence: nextPresence, emit, emitTo: [] }
@@ -520,13 +567,14 @@ export function applyFocusRelease(
 
 export function applyPresenceUpdate(
   presence: ReadonlyMap<string, PresenceState>,
-  userId: string,
+  who: PresenceIdentity,
   msg: ClientPresenceUpdate,
   now: number,
 ): { presence: Map<string, PresenceState>; emit: ProjectDoServerMessage[] } {
+  const { connId, userId } = who
   const nextPresence = clone(presence)
-  const before = nextPresence.get(userId)
-  const next: PresenceState = { ...(before ?? { userId, ts: now }), userId, ts: now }
+  const before = nextPresence.get(connId)
+  const next: PresenceState = { ...(before ?? { connId, userId, ts: now }), connId, userId, ts: now }
 
   if ("currentFileId" in msg) {
     if (typeof msg.currentFileId === "string") {
@@ -562,7 +610,7 @@ export function applyPresenceUpdate(
     return { presence: nextPresence, emit: [] }
   }
 
-  nextPresence.set(userId, next)
+  nextPresence.set(connId, next)
   const emit: ProjectDoServerMessage[] = [presenceDiff(next)]
   const draftText = next.selection?.draftText
   if (
@@ -573,6 +621,7 @@ export function applyPresenceUpdate(
     emit.push({
       t: "presence.draft",
       userId,
+      connId,
       cellId: next.focusedCell,
       draftText,
       ts: now,
@@ -582,7 +631,7 @@ export function applyPresenceUpdate(
 }
 
 /**
- * Per-user trailing throttle for `presence.draft` frames: the first draft in
+ * Per-connection trailing throttle for `presence.draft` frames: the first draft in
  * a window goes out immediately; anything else arriving inside the window is
  * held and only the LATEST one is flushed when the window ends. In-memory
  * only (timers die with the DO instance, like the rest of its state).
@@ -601,81 +650,71 @@ export class PresenceDraftThrottle {
   ) {}
 
   push(frame: ServerPresenceDraft): void {
-    const open = this.windows.get(frame.userId)
+    const open = this.windows.get(frame.connId)
     if (open) {
       open.pending = frame
       return
     }
     this.send(frame)
-    this.arm(frame.userId)
+    this.arm(frame.connId)
   }
 
-  /** Drop any held draft + timer for a user (disconnect). */
-  clear(userId: string): void {
-    const open = this.windows.get(userId)
+  /** Drop any held draft + timer for a connection (disconnect). */
+  clear(connId: string): void {
+    const open = this.windows.get(connId)
     if (!open) return
     clearTimeout(open.timer)
-    this.windows.delete(userId)
+    this.windows.delete(connId)
   }
 
-  private arm(userId: string): void {
+  private arm(connId: string): void {
     const timer = setTimeout(() => {
-      const open = this.windows.get(userId)
+      const open = this.windows.get(connId)
       if (!open) return
       if (open.pending) {
         const frame = open.pending
         open.pending = null
         this.send(frame)
-        this.arm(userId)
+        this.arm(connId)
       } else {
-        this.windows.delete(userId)
+        this.windows.delete(connId)
       }
     }, this.windowMs)
-    this.windows.set(userId, { timer, pending: null })
+    this.windows.set(connId, { timer, pending: null })
   }
 }
 
 /**
- * On WS close: drop the user's presence + release all locks they held.
+ * On WS close: drop THIS connection's presence row (always — presence is
+ * per-connection) and release the user's locks only when no other socket of
+ * theirs remains.
  *
  * Multi-tab safety: focus-locks are per-user (not per-connection) — a lock
  * claimed from tab A must survive tab B closing. Pass `remainingConnectionsForUser`
  * (number of OTHER connections the DO still has open for this userId after
- * removing the closing one). When > 0, we leave locks and presence intact
- * so the other tabs can keep editing without losing their claimed cells.
+ * removing the closing one). When > 0, locks stay intact so the other tabs
+ * can keep editing without losing their claimed cells.
  */
 export function applyDisconnect(
   locks: ReadonlyMap<string, LockState>,
   presence: ReadonlyMap<string, PresenceState>,
-  userId: string,
+  who: PresenceIdentity,
   now: number,
   remainingConnectionsForUser = 0,
 ): LockTransitionResult {
-  // If other tabs still hold a connection for this user, do not release locks
-  // or presence — they are per-user, not per-connection.
-  if (remainingConnectionsForUser > 0) {
-    return {
-      locks: clone(locks),
-      presence: clone(presence),
-      emit: [],
-      emitTo: [],
-    }
-  }
+  const { connId, userId } = who
   const nextLocks = clone(locks)
   const nextPresence = clone(presence)
-  const hadPresence = nextPresence.delete(userId)
-  const released: string[] = []
-  for (const [cellId, lock] of nextLocks) {
-    if (lock.userId !== userId) continue
-    nextLocks.delete(cellId)
-    released.push(cellId)
+  const hadPresence = nextPresence.delete(connId)
+  const emit: ProjectDoServerMessage[] = []
+  if (remainingConnectionsForUser === 0) {
+    for (const [cellId, lock] of nextLocks) {
+      if (lock.userId !== userId) continue
+      nextLocks.delete(cellId)
+      emit.push({ t: "lock.released", cellId, by: { userId, ts: now } })
+    }
   }
-  const emit: ProjectDoServerMessage[] = released.map((cellId) => ({
-    t: "lock.released",
-    cellId,
-    by: { userId, ts: now },
-  }))
-  if (hadPresence) emit.push({ t: "presence.left", userId })
+  if (hadPresence) emit.push({ t: "presence.left", userId, connId })
   return { locks: nextLocks, presence: nextPresence, emit, emitTo: [] }
 }
 
@@ -699,10 +738,12 @@ export function sweepExpiredLeases(
       cellId,
       by: { userId: lock.userId, ts: now },
     })
-    const cur = nextPresence.get(lock.userId)
-    if (cur?.focusedCell === cellId) {
+    // Locks are per user; every socket of that user sitting in the cell
+    // loses its focusedCell.
+    for (const [connId, cur] of nextPresence) {
+      if (cur.userId !== lock.userId || cur.focusedCell !== cellId) continue
       const cleared = clearFocusedPresence(cur, now)
-      nextPresence.set(lock.userId, cleared)
+      nextPresence.set(connId, cleared)
       emit.push(presenceDiff(cleared))
     }
   }

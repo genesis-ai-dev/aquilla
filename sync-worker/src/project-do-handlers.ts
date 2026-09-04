@@ -70,9 +70,34 @@ export interface ServerEventStale {
   id: string
   reason: string
 }
+/**
+ * Full roster snapshot. Sent to a connection on connect. Never carries
+ * `selection.draftText` — live drafts travel in `presence.draft`.
+ */
 export interface ServerPresence {
   t: "presence"
   users: PresenceState[]
+}
+/** Exactly one user's presence changed. No `selection.draftText`. */
+export interface ServerPresenceDiff {
+  t: "presence.diff"
+  user: PresenceState
+}
+/** A user's presence was removed (last connection closed). */
+export interface ServerPresenceLeft {
+  t: "presence.left"
+  userId: string
+}
+/**
+ * Live draft text for a remote caret. The DO rate-limits this per user
+ * (see PresenceDraftThrottle) — coalesce: latest wins.
+ */
+export interface ServerPresenceDraft {
+  t: "presence.draft"
+  userId: string
+  cellId: string
+  draftText: string
+  ts: number
 }
 export interface ServerLockClaimed {
   t: "lock.claimed"
@@ -155,6 +180,9 @@ export type ProjectDoServerMessage =
   | ServerEventApplied
   | ServerEventStale
   | ServerPresence
+  | ServerPresenceDiff
+  | ServerPresenceLeft
+  | ServerPresenceDraft
   | ServerLockClaimed
   | ServerLockReleased
   | ServerProjectArchived
@@ -336,6 +364,22 @@ function samePresence(a: PresenceState | undefined, b: PresenceState | undefined
   )
 }
 
+/** Copy of a presence row with `selection.draftText` removed. */
+export function stripPresenceDraft(user: PresenceState): PresenceState {
+  if (!user.selection || user.selection.draftText === undefined) return user
+  const { draftText: _draft, ...selection } = user.selection
+  return { ...user, selection }
+}
+
+/** Full roster frame with every draft stripped (connect snapshot). */
+export function presenceSnapshot(presence: ReadonlyMap<string, PresenceState>): ServerPresence {
+  return { t: "presence", users: Array.from(presence.values(), stripPresenceDraft) }
+}
+
+function presenceDiff(user: PresenceState): ServerPresenceDiff {
+  return { t: "presence.diff", user: stripPresenceDraft(user) }
+}
+
 function clearFocusedPresence(cur: PresenceState, now: number): PresenceState {
   return {
     userId: cur.userId,
@@ -352,7 +396,7 @@ function clearFocusedPresence(cur: PresenceState, now: number): PresenceState {
  *     holder; the DO sends it synchronously to the requesting connection only.
  *     The claimer's optimistic UI can roll back immediately without waiting for
  *     a broadcast round-trip.
- *   - On GRANT → result.emit carries `lock.claimed` + `presence` broadcast to
+ *   - On GRANT → result.emit carries `lock.claimed` + `presence.diff` broadcast to
  *     ALL connections (including the claimer). Because the DO is single-threaded
  *     per-instance and processes messages sequentially, the grant is serialised —
  *     no two concurrent claims for the same cell can both succeed.
@@ -393,18 +437,19 @@ export function applyFocusClaim(
   })
   const cur = nextPresence.get(userId) ?? { userId, ts: now }
   const { selection, ...rest } = cur
-  nextPresence.set(userId, {
+  const nextUser: PresenceState = {
     ...rest,
     focusedCell: msg.cellId,
     ...(cur.focusedCell === msg.cellId && selection ? { selection } : {}),
     ts: now,
-  })
+  }
+  nextPresence.set(userId, nextUser)
   return {
     locks: nextLocks,
     presence: nextPresence,
     emit: [
       { t: "lock.claimed", cellId: msg.cellId, by: { userId, ts: now } },
-      { t: "presence", users: Array.from(nextPresence.values()) },
+      presenceDiff(nextUser),
     ],
     emitTo: [],
   }
@@ -440,19 +485,16 @@ export function applyFocusRelease(
     return { locks: nextLocks, presence: nextPresence, emit: [], emitTo: [] }
   }
   nextLocks.delete(msg.cellId)
+  const emit: ProjectDoServerMessage[] = [
+    { t: "lock.released", cellId: msg.cellId, by: { userId, ts: now } },
+  ]
   const cur = nextPresence.get(userId)
   if (cur && cur.focusedCell === msg.cellId) {
-    nextPresence.set(userId, clearFocusedPresence(cur, now))
+    const cleared = clearFocusedPresence(cur, now)
+    nextPresence.set(userId, cleared)
+    emit.push(presenceDiff(cleared))
   }
-  return {
-    locks: nextLocks,
-    presence: nextPresence,
-    emit: [
-      { t: "lock.released", cellId: msg.cellId, by: { userId, ts: now } },
-      { t: "presence", users: Array.from(nextPresence.values()) },
-    ],
-    emitTo: [],
-  }
+  return { locks: nextLocks, presence: nextPresence, emit, emitTo: [] }
 }
 
 export function applyPresenceUpdate(
@@ -496,9 +538,75 @@ export function applyPresenceUpdate(
   }
 
   nextPresence.set(userId, next)
-  return {
-    presence: nextPresence,
-    emit: [{ t: "presence", users: Array.from(nextPresence.values()) }],
+  const emit: ProjectDoServerMessage[] = [presenceDiff(next)]
+  const draftText = next.selection?.draftText
+  if (
+    draftText !== undefined &&
+    next.focusedCell &&
+    draftText !== before?.selection?.draftText
+  ) {
+    emit.push({
+      t: "presence.draft",
+      userId,
+      cellId: next.focusedCell,
+      draftText,
+      ts: now,
+    })
+  }
+  return { presence: nextPresence, emit }
+}
+
+/**
+ * Per-user trailing throttle for `presence.draft` frames: the first draft in
+ * a window goes out immediately; anything else arriving inside the window is
+ * held and only the LATEST one is flushed when the window ends. In-memory
+ * only (timers die with the DO instance, like the rest of its state).
+ */
+export const PRESENCE_DRAFT_THROTTLE_MS = 150
+
+export class PresenceDraftThrottle {
+  private readonly windows = new Map<
+    string,
+    { timer: ReturnType<typeof setTimeout>; pending: ServerPresenceDraft | null }
+  >()
+
+  constructor(
+    private readonly send: (frame: ServerPresenceDraft) => void,
+    private readonly windowMs: number = PRESENCE_DRAFT_THROTTLE_MS,
+  ) {}
+
+  push(frame: ServerPresenceDraft): void {
+    const open = this.windows.get(frame.userId)
+    if (open) {
+      open.pending = frame
+      return
+    }
+    this.send(frame)
+    this.arm(frame.userId)
+  }
+
+  /** Drop any held draft + timer for a user (disconnect). */
+  clear(userId: string): void {
+    const open = this.windows.get(userId)
+    if (!open) return
+    clearTimeout(open.timer)
+    this.windows.delete(userId)
+  }
+
+  private arm(userId: string): void {
+    const timer = setTimeout(() => {
+      const open = this.windows.get(userId)
+      if (!open) return
+      if (open.pending) {
+        const frame = open.pending
+        open.pending = null
+        this.send(frame)
+        this.arm(userId)
+      } else {
+        this.windows.delete(userId)
+      }
+    }, this.windowMs)
+    this.windows.set(userId, { timer, pending: null })
   }
 }
 
@@ -530,7 +638,7 @@ export function applyDisconnect(
   }
   const nextLocks = clone(locks)
   const nextPresence = clone(presence)
-  nextPresence.delete(userId)
+  const hadPresence = nextPresence.delete(userId)
   const released: string[] = []
   for (const [cellId, lock] of nextLocks) {
     if (lock.userId !== userId) continue
@@ -542,11 +650,14 @@ export function applyDisconnect(
     cellId,
     by: { userId, ts: now },
   }))
-  emit.push({ t: "presence", users: Array.from(nextPresence.values()) })
+  if (hadPresence) emit.push({ t: "presence.left", userId })
   return { locks: nextLocks, presence: nextPresence, emit, emitTo: [] }
 }
 
-/** Sweep expired leases. Returns the leases that were dropped. */
+/**
+ * Sweep expired leases. Emits `lock.released` per dropped lease plus a
+ * `presence.diff` for each user whose focused cell was cleared by it.
+ */
 export function sweepExpiredLeases(
   locks: ReadonlyMap<string, LockState>,
   presence: ReadonlyMap<string, PresenceState>,
@@ -558,15 +669,17 @@ export function sweepExpiredLeases(
   for (const [cellId, lock] of next) {
     if (lock.expiresAt > now) continue
     next.delete(cellId)
-    const cur = nextPresence.get(lock.userId)
-    if (cur?.focusedCell === cellId) {
-      nextPresence.set(lock.userId, clearFocusedPresence(cur, now))
-    }
     emit.push({
       t: "lock.released",
       cellId,
       by: { userId: lock.userId, ts: now },
     })
+    const cur = nextPresence.get(lock.userId)
+    if (cur?.focusedCell === cellId) {
+      const cleared = clearFocusedPresence(cur, now)
+      nextPresence.set(lock.userId, cleared)
+      emit.push(presenceDiff(cleared))
+    }
   }
   return { locks: next, presence: nextPresence, emit }
 }

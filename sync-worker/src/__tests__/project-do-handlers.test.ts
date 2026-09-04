@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest"
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest"
 import {
   applyDisconnect,
   applyFocusClaim,
@@ -6,12 +6,16 @@ import {
   applyFocusRenew,
   applyPresenceUpdate,
   parseProjectDoClientMessage,
+  PresenceDraftThrottle,
+  presenceSnapshot,
+  PRESENCE_DRAFT_THROTTLE_MS,
   PROJECT_DO_DEFAULT_LEASE_MS,
   sweepExpiredLeases,
   unpackBroadcastBody,
   type LockState,
   type PresenceState,
   type ProjectDoServerMessage,
+  type ServerPresenceDraft,
 } from "../project-do-handlers"
 import type { OutboxRawEvent } from "../project-do-types"
 
@@ -87,7 +91,7 @@ describe("parseProjectDoClientMessage", () => {
 })
 
 describe("applyFocusClaim", () => {
-  it("claims when the cell is unheld and broadcasts lock.claimed + presence", () => {
+  it("claims when the cell is unheld and broadcasts lock.claimed + presence.diff", () => {
     const r = applyFocusClaim(
       emptyLocks(),
       emptyPresence(),
@@ -106,7 +110,12 @@ describe("applyFocusClaim", () => {
       cellId: "c",
       by: { userId: "alice", ts: 1000 },
     })
-    expect(r.emit.some((m) => m.t === "presence")).toBe(true)
+    // Only the claimant's row goes out — never the whole roster.
+    expect(r.emit.find((m) => m.t === "presence.diff")).toEqual({
+      t: "presence.diff",
+      user: { userId: "alice", focusedCell: "c", ts: 1000 },
+    })
+    expect(r.emit.some((m) => m.t === "presence")).toBe(false)
     expect(r.emitTo).toHaveLength(0)
   })
 
@@ -182,7 +191,92 @@ describe("applyPresenceUpdate", () => {
       ts: 1_000,
     })
     expect(r.emit).toHaveLength(1)
-    expect(r.emit[0]?.t).toBe("presence")
+    expect(r.emit[0]).toEqual({
+      t: "presence.diff",
+      user: {
+        userId: "alice",
+        currentFileId: "file-1",
+        focusedCell: "cell-1",
+        selection: { side: "target", anchor: 1, head: 4 },
+        ts: 1_000,
+      },
+    })
+  })
+
+  // Full-roster rebroadcasts made every keystroke cost O(users × 16 KB) for
+  // every peer; the diff carries only the changed user and the draft text is
+  // split off into its own (rate-limited) frame.
+  it("emits one draft-free presence.diff plus one presence.draft when draftText is set", () => {
+    const presence = new Map<string, PresenceState>([
+      ["alice", { userId: "alice", focusedCell: "cell-1", ts: 1 }],
+      ["bob", { userId: "bob", focusedCell: "cell-9", ts: 1 }],
+    ])
+    const r = applyPresenceUpdate(
+      presence,
+      "alice",
+      {
+        t: "presence.update",
+        selection: { side: "target", anchor: 3, head: 3, draftText: "In the beginning" },
+      },
+      2_000,
+    )
+    // The server keeps the draft so a later identical update is a no-op…
+    expect(r.presence.get("alice")?.selection?.draftText).toBe("In the beginning")
+    // …but the diff frame never carries it.
+    expect(r.emit).toEqual([
+      {
+        t: "presence.diff",
+        user: {
+          userId: "alice",
+          focusedCell: "cell-1",
+          selection: { side: "target", anchor: 3, head: 3 },
+          ts: 2_000,
+        },
+      },
+      {
+        t: "presence.draft",
+        userId: "alice",
+        cellId: "cell-1",
+        draftText: "In the beginning",
+        ts: 2_000,
+      },
+    ])
+  })
+
+  it("moving the caret without changing the draft emits presence.diff only", () => {
+    const presence = new Map<string, PresenceState>([
+      ["alice", {
+        userId: "alice",
+        focusedCell: "cell-1",
+        selection: { side: "target", anchor: 3, head: 3, draftText: "same" },
+        ts: 1,
+      }],
+    ])
+    const r = applyPresenceUpdate(
+      presence,
+      "alice",
+      { t: "presence.update", selection: { side: "target", anchor: 4, head: 4, draftText: "same" } },
+      2_000,
+    )
+    expect(r.emit.map((m) => m.t)).toEqual(["presence.diff"])
+  })
+
+  it("emits nothing when the update changes nothing", () => {
+    const presence = new Map<string, PresenceState>([
+      ["alice", {
+        userId: "alice",
+        focusedCell: "cell-1",
+        selection: { side: "target", anchor: 3, head: 3, draftText: "same" },
+        ts: 2_000,
+      }],
+    ])
+    const r = applyPresenceUpdate(
+      presence,
+      "alice",
+      { t: "presence.update", selection: { side: "target", anchor: 3, head: 3, draftText: "same" } },
+      2_000,
+    )
+    expect(r.emit).toEqual([])
   })
 
   it("does not grant focus from presence.update alone", () => {
@@ -223,6 +317,81 @@ describe("applyPresenceUpdate", () => {
   })
 })
 
+describe("presenceSnapshot", () => {
+  it("returns the full roster with every draftText stripped (connect snapshot)", () => {
+    const presence = new Map<string, PresenceState>([
+      ["alice", {
+        userId: "alice",
+        focusedCell: "cell-1",
+        selection: { side: "target", anchor: 0, head: 2, draftText: "x".repeat(10_000) },
+        ts: 1,
+      }],
+      ["bob", { userId: "bob", currentFileId: "file-1", ts: 2 }],
+    ])
+    expect(presenceSnapshot(presence)).toEqual({
+      t: "presence",
+      users: [
+        {
+          userId: "alice",
+          focusedCell: "cell-1",
+          selection: { side: "target", anchor: 0, head: 2 },
+          ts: 1,
+        },
+        { userId: "bob", currentFileId: "file-1", ts: 2 },
+      ],
+    })
+  })
+})
+
+describe("PresenceDraftThrottle", () => {
+  beforeEach(() => vi.useFakeTimers())
+  afterEach(() => vi.useRealTimers())
+
+  const draft = (userId: string, draftText: string, ts: number): ServerPresenceDraft => ({
+    t: "presence.draft",
+    userId,
+    cellId: "cell-1",
+    draftText,
+    ts,
+  })
+
+  it("sends the first draft immediately and only the LATEST of those inside the window", () => {
+    const sent: ServerPresenceDraft[] = []
+    const throttle = new PresenceDraftThrottle((f) => sent.push(f))
+    throttle.push(draft("alice", "a", 1))
+    throttle.push(draft("alice", "ab", 2))
+    throttle.push(draft("alice", "abc", 3))
+    expect(sent.map((f) => f.draftText)).toEqual(["a"])
+    vi.advanceTimersByTime(PRESENCE_DRAFT_THROTTLE_MS - 1)
+    expect(sent).toHaveLength(1)
+    vi.advanceTimersByTime(1)
+    // "ab" was superseded inside the window and never goes out.
+    expect(sent.map((f) => f.draftText)).toEqual(["a", "abc"])
+    // A quiet window afterwards closes the throttle; the next draft is immediate again.
+    vi.advanceTimersByTime(PRESENCE_DRAFT_THROTTLE_MS)
+    throttle.push(draft("alice", "abcd", 4))
+    expect(sent.map((f) => f.draftText)).toEqual(["a", "abc", "abcd"])
+  })
+
+  it("rate-limits per user, not globally", () => {
+    const sent: ServerPresenceDraft[] = []
+    const throttle = new PresenceDraftThrottle((f) => sent.push(f))
+    throttle.push(draft("alice", "a", 1))
+    throttle.push(draft("bob", "b", 1))
+    expect(sent.map((f) => f.userId)).toEqual(["alice", "bob"])
+  })
+
+  it("clear() drops the held draft on disconnect", () => {
+    const sent: ServerPresenceDraft[] = []
+    const throttle = new PresenceDraftThrottle((f) => sent.push(f))
+    throttle.push(draft("alice", "a", 1))
+    throttle.push(draft("alice", "ab", 2))
+    throttle.clear("alice")
+    vi.advanceTimersByTime(PRESENCE_DRAFT_THROTTLE_MS * 2)
+    expect(sent.map((f) => f.draftText)).toEqual(["a"])
+  })
+})
+
 describe("applyFocusRenew", () => {
   it("extends the lease for the holder", () => {
     const locks = new Map<string, LockState>([
@@ -241,7 +410,7 @@ describe("applyFocusRenew", () => {
 })
 
 describe("applyFocusRelease", () => {
-  it("releases the holder's lock + broadcasts lock.released + presence", () => {
+  it("releases the holder's lock + broadcasts lock.released + presence.diff", () => {
     const locks = new Map<string, LockState>([
       ["c", { cellId: "c", userId: "alice", expiresAt: 5_000 }],
     ])
@@ -251,7 +420,11 @@ describe("applyFocusRelease", () => {
     const r = applyFocusRelease(locks, presence, "alice", { t: "focus.release", cellId: "c" }, 6_000)
     expect(r.locks.has("c")).toBe(false)
     expect(r.presence.get("alice")?.focusedCell).toBeUndefined()
-    expect(r.emit.some((m) => m.t === "lock.released")).toBe(true)
+    expect(r.emit.map((m) => m.t)).toEqual(["lock.released", "presence.diff"])
+    expect(r.emit[1]).toEqual({
+      t: "presence.diff",
+      user: { userId: "alice", ts: 6_000 },
+    })
   })
   it("no-ops when caller is not the holder", () => {
     const locks = new Map<string, LockState>([
@@ -283,6 +456,9 @@ describe("applyDisconnect", () => {
     expect(r.presence.has("bob")).toBe(true)
     const released = r.emit.filter((m) => m.t === "lock.released")
     expect(released).toHaveLength(2)
+    // Peers drop the row from a one-user frame; bob's row is not re-sent.
+    expect(r.emit.at(-1)).toEqual({ t: "presence.left", userId: "alice" })
+    expect(r.emit.some((m) => m.t === "presence")).toBe(false)
   })
 
   // RACE-6: closing one tab must NOT release locks/presence when another tab
@@ -302,7 +478,7 @@ describe("applyDisconnect", () => {
     // Presence must survive
     expect(r.presence.has("alice")).toBe(true)
     // No broadcasts
-    expect(r.emit.filter((m) => m.t === "lock.released")).toHaveLength(0)
+    expect(r.emit).toHaveLength(0)
   })
 
   it("multi-tab: closing the last tab releases all locks and presence", () => {
@@ -393,7 +569,18 @@ describe("sweepExpiredLeases", () => {
       ts: 5_000,
     })
     expect(r.presence.get("carol")?.focusedCell).toBe("c")
-    expect(r.emit).toHaveLength(2)
+    // lock.released + presence.diff per expired lease whose holder was
+    // focused on it; the diff carries the cleared row, never a draft.
+    expect(r.emit.map((m) => m.t)).toEqual([
+      "lock.released",
+      "presence.diff",
+      "lock.released",
+      "presence.diff",
+    ])
+    expect(r.emit[3]).toEqual({
+      t: "presence.diff",
+      user: { userId: "bob", currentFileId: "file-1", ts: 5_000 },
+    })
   })
 })
 

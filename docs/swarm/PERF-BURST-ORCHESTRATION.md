@@ -55,6 +55,14 @@ Dev team will test on the dev environment. Gate for push+deploy to `dev` / dev.a
 - 2026-09-04 · WS-1147 · `swarm/aqu-1147` · merge after `a1acd5c94` · `tsc -b` clean · covered by the combined run below · no smoke. **Scaled down** per the profile: only the eight handlers that carried `cellStoreVersion` for nothing; the ~20-memo extraction and render-count probes were dropped. The parallel `origin/agent/AQU-1147-workspace-version-derivations` (`eec110d25`, six handlers) is a strict subset of this and can be deleted.
 - 2026-09-04 · WS-1016 · `swarm/aqu-1016` · merge after `58c28a51c` · `tsc -b` clean · 33 files / 189 tests green across EditorTable + ProjectWorkspace + useEditorViewportStore · no smoke.
 
+**Full unit suite, merged `dev` (2026-09-04):** 1008 files / 10,657 tests, 6 files
+failing. Each was re-run in isolation against the pre-merge baseline `0fd61d9e3`:
+`no-duplicates.test.ts` (i18n catalog exception for a key that no longer exists) and
+both `ContextualRunPill` cases fail there too — **pre-existing, not from this work**.
+`RecordingVideoSurface`, `AgentWorkbench`, `ProjectsList`, `TeamDetail` pass 3/3 in
+isolation on BOTH trees — timing flakes under full-suite parallel load. No regression
+attributable to 1146/1147/1016/1160.
+
 **Verification debt (honest):** none of the four was verified on the live dev
 stack, and `pnpm test:e2e:smoke` was NOT run — the operator waived both for this
 pass. §0's live-UI and smoke boxes are therefore still open, and the dev team's

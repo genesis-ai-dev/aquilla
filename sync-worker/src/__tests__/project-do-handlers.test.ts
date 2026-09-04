@@ -279,6 +279,64 @@ describe("applyPresenceUpdate", () => {
     expect(r.emit).toEqual([])
   })
 
+  it("drops an unchanged repeat even when its timestamp moved on", () => {
+    // Heartbeat-style re-sends and resumed tabs replay the same state with a
+    // fresh ts; fanning each out as presence.diff is pure bandwidth waste.
+    const presence = new Map<string, PresenceState>([
+      ["alice", {
+        userId: "alice",
+        currentFileId: "file-1",
+        viewingCell: "cell-1",
+        ts: 1_000,
+      }],
+    ])
+    const r = applyPresenceUpdate(
+      presence,
+      "alice",
+      { t: "presence.update", currentFileId: "file-1", viewingCell: "cell-1" },
+      5_000,
+    )
+    expect(r.emit).toEqual([])
+  })
+
+  it("sets and clears viewingCell without a lock, and broadcasts a presence.diff", () => {
+    // A viewer/reviewer, or a contributor whose claim was denied, still shows
+    // up on the row they are looking at — viewingCell is not lease-gated.
+    const r1 = applyPresenceUpdate(
+      emptyPresence(),
+      "viewer",
+      { t: "presence.update", currentFileId: "file-1", viewingCell: "cell-7" },
+      1_000,
+    )
+    expect(r1.presence.get("viewer")).toEqual({
+      userId: "viewer",
+      currentFileId: "file-1",
+      viewingCell: "cell-7",
+      ts: 1_000,
+    })
+    expect(r1.emit).toEqual([
+      { t: "presence.diff", user: { userId: "viewer", currentFileId: "file-1", viewingCell: "cell-7", ts: 1_000 } },
+    ])
+    const r2 = applyPresenceUpdate(r1.presence, "viewer", { t: "presence.update", viewingCell: null }, 2_000)
+    expect(r2.presence.get("viewer")).toEqual({ userId: "viewer", currentFileId: "file-1", ts: 2_000 })
+    expect(r2.emit.map((m) => m.t)).toEqual(["presence.diff"])
+  })
+
+  it("keeps viewingCell when the lease is released or swept", () => {
+    const claimed = applyFocusClaim(
+      emptyLocks(),
+      new Map<string, PresenceState>([["alice", { userId: "alice", viewingCell: "cell-1", ts: 1 }]]),
+      "alice",
+      { t: "focus.claim", cellId: "cell-1", leaseMs: 1_000 },
+      1_000,
+    )
+    expect(claimed.presence.get("alice")).toMatchObject({ focusedCell: "cell-1", viewingCell: "cell-1" })
+    const released = applyFocusRelease(claimed.locks, claimed.presence, "alice", { t: "focus.release", cellId: "cell-1" }, 2_000)
+    expect(released.presence.get("alice")).toEqual({ userId: "alice", viewingCell: "cell-1", ts: 2_000 })
+    const swept = sweepExpiredLeases(claimed.locks, claimed.presence, 10_000)
+    expect(swept.presence.get("alice")).toEqual({ userId: "alice", viewingCell: "cell-1", ts: 10_000 })
+  })
+
   it("does not grant focus from presence.update alone", () => {
     const r = applyPresenceUpdate(
       emptyPresence(),

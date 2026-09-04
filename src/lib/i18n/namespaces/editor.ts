@@ -1157,6 +1157,10 @@ export const editor = defineNamespace({
     "editor.row.editorAria": "{ref} — {state}",
     "editor.row.selectedTooltip": "Selected. Drag up or down to extend the range.",
     "editor.row.selectTooltip": "Select cell. Drag up or down to select a range.",
+    // -- CellPresenceBadges: per-row live-collaborator chips --
+    "editor.presence.viewing": "viewing",
+    "editor.presence.editing": "editing",
+    "editor.presence.typing": "typing…",
     "editor.row.selectedAria": "Selected cell. Drag to extend selection.",
     "editor.row.selectAria": "Select cell. Drag to select a range.",
     "editor.state.empty": "empty",
@@ -4180,6 +4184,21 @@ export const editor = defineNamespace({
         description:
           "Tooltip on the selection checkbox when the row is NOT selected: what a " +
           "click does, then what a drag does.",
+      },
+      "editor.presence.viewing": {
+        description:
+          "Tiny lowercase state word after a collaborator's name on a cell row and " +
+          "in the online-peers list: they have the row selected but hold no edit lock.",
+      },
+      "editor.presence.editing": {
+        description:
+          "Tiny lowercase state word after a collaborator's name on a cell row and " +
+          "in the online-peers list: they hold the edit lock on that cell.",
+      },
+      "editor.presence.typing": {
+        description:
+          "Tiny lowercase state word after a collaborator's name on a cell row while " +
+          "their live draft text is changing (last change within ~2 seconds).",
       },
       "editor.row.selectedAria": {
         description:

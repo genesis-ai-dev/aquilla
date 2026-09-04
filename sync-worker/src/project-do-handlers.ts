@@ -17,7 +17,15 @@ export const PROJECT_DO_MAX_PRESENCE_DRAFT_LENGTH = 16_384
 
 export interface PresenceState {
   userId: string
+  /** Lock-bearing: the cell this user holds the edit lease on (focus.claim). */
   focusedCell?: string
+  /**
+   * Non-lock-bearing "where I am": the row the user has selected/focused in
+   * the grid, whether or not they hold (or can hold) its edit lease. Set
+   * freely by `presence.update` so viewers, reviewers and contributors whose
+   * claim was denied are still visible on the cell they are looking at.
+   */
+  viewingCell?: string
   currentFileId?: string
   selection?: PresenceSelection
   ts: number
@@ -246,6 +254,7 @@ export interface ClientPresenceUpdate {
   t: "presence.update"
   currentFileId?: string | null
   focusedCell?: string | null
+  viewingCell?: string | null
   selection?: PresenceSelection | null
 }
 export type ProjectDoClientMessage =
@@ -290,6 +299,10 @@ export function parseProjectDoClientMessage(raw: string): ProjectDoClientMessage
     if ("focusedCell" in m) {
       if (m.focusedCell !== null && typeof m.focusedCell !== "string") return null
       out.focusedCell = m.focusedCell
+    }
+    if ("viewingCell" in m) {
+      if (m.viewingCell !== null && typeof m.viewingCell !== "string") return null
+      out.viewingCell = m.viewingCell
     }
     if ("selection" in m) {
       if (m.selection !== null && !isPresenceSelection(m.selection)) return null
@@ -352,14 +365,20 @@ function sameSelection(a: PresenceSelection | undefined, b: PresenceSelection | 
   )
 }
 
+/**
+ * Content equality, deliberately ignoring `ts`: every presence.update stamps
+ * `ts = now`, so comparing it made this always false and turned each
+ * unchanged repeat (selection re-sends, resumed tabs) into a fan-out
+ * `presence.diff` to every peer.
+ */
 function samePresence(a: PresenceState | undefined, b: PresenceState | undefined): boolean {
   if (!a && !b) return true
   if (!a || !b) return false
   return (
     a.userId === b.userId &&
     a.focusedCell === b.focusedCell &&
+    a.viewingCell === b.viewingCell &&
     a.currentFileId === b.currentFileId &&
-    a.ts === b.ts &&
     sameSelection(a.selection, b.selection)
   )
 }
@@ -384,6 +403,8 @@ function clearFocusedPresence(cur: PresenceState, now: number): PresenceState {
   return {
     userId: cur.userId,
     ...(cur.currentFileId ? { currentFileId: cur.currentFileId } : {}),
+    // Losing the lease does not move the user: they are still on that row.
+    ...(cur.viewingCell ? { viewingCell: cur.viewingCell } : {}),
     ts: now,
   }
 }
@@ -524,6 +545,10 @@ export function applyPresenceUpdate(
       delete next.focusedCell
       delete next.selection
     }
+  }
+  if ("viewingCell" in msg) {
+    if (typeof msg.viewingCell === "string") next.viewingCell = msg.viewingCell
+    else delete next.viewingCell
   }
   if ("selection" in msg) {
     if (msg.selection && next.focusedCell) {

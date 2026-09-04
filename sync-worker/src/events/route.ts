@@ -52,6 +52,7 @@ import {
   fullProgressRecomputeStmts,
   sectionsProgressRecomputeStmt,
 } from './progress-projection'
+import { makeRequestCache } from './request-cache'
 
 // Max statements per batch() transaction — a conservative self-imposed cap (Postgres has no hard limit; keeps any single transaction bounded).
 const BATCH_LIMIT = 100
@@ -831,32 +832,26 @@ export async function handleEventsWriteRequest(
       prefetchLastEditors(db, [...validateCells.values()]),
     ])
 
-  // PERF-2: project_settings is read at most once per (request, project).
-  // No event kind mutates project_settings (its only writers are the
-  // migrate-settings route and auth-worker), so the memo cannot serve a
-  // stale read to any event in this batch. Read/parse failures memoize as
-  // null — the same per-event fallback as before (validate: skip
-  // enforcement; harmonize: hard floor).
-  const settingsCache = new Map<string, Record<string, unknown> | null>()
+  // PERF-2: project_settings is read at most once per (request, project) —
+  // and, since perf/events-write-path, that ONE memo is shared with the
+  // authority carve-outs inside authorize() (request-cache.ts), which used to
+  // re-read the same row per event. No event kind mutates project_settings /
+  // org_settings / projects.org_id (their only writers are the
+  // migrate-settings route and auth-worker), so the memo cannot serve a stale
+  // read to any event in this batch. Read/parse failures read as null — the
+  // same per-event fallback as before (validate: skip enforcement;
+  // harmonize: hard floor).
+  const requestCache = makeRequestCache(db)
   const readProjectSettings = async (
     projectId: string,
   ): Promise<Record<string, unknown> | null> => {
-    if (settingsCache.has(projectId)) return settingsCache.get(projectId) ?? null
-    let parsed: Record<string, unknown> | null = null
     try {
-      const row = await db
-        .prepare(`SELECT settings FROM project_settings WHERE project_id = ?`)
-        .bind(projectId)
-        .first<{ settings: string | null }>()
-      if (row?.settings) {
-        parsed = JSON.parse(row.settings) as Record<string, unknown>
-      }
+      return await requestCache.projectSettings(projectId)
     } catch {
       // Settings load failure is non-fatal — callers fall back to their
       // defaults rather than blocking the batch.
+      return null
     }
-    settingsCache.set(projectId, parsed)
-    return parsed
   }
 
   // FRO-346: live membership re-check, once per (project, user) per request.
@@ -879,7 +874,7 @@ export async function handleEventsWriteRequest(
 
   for (const [eventIndex, rawEvent] of rawEvents.entries()) {
     // Authorize.
-    const authResult = await authorize(token, rawEvent, env.SYNC_SECRET_KEY, db)
+    const authResult = await authorize(token, rawEvent, env.SYNC_SECRET_KEY, db, requestCache)
     if (!authResult.ok) {
       rejected.push({
         id: rawEvent.id ?? '(unknown)',
@@ -1330,17 +1325,30 @@ export async function handleEventsWriteRequest(
     interface PendingChunk {
       entries: PendingEntry[]
       stmts: AquillaStatement[]
+      /** QW-10 recompute statements — run in a SECOND batch after `stmts` commit. */
+      recompute: AquillaStatement[]
     }
 
     const chunks: PendingChunk[] = []
-    let currentChunk: PendingChunk = { entries: [], stmts: [] }
+    let currentChunk: PendingChunk = { entries: [], stmts: [], recompute: [] }
 
     // QW-10: the deferred file-counter recompute runs once per (file, chunk),
-    // appended when the chunk is sealed so it commits in the SAME transaction
-    // as the chunk's events — committed chunks always leave correct counters,
-    // exactly like the old per-event recompute, at 1/N the aggregate scans.
-    // (A sealed chunk may exceed BATCH_LIMIT by the handful of per-file
-    // recomputes; the limit is a self-imposed soft cap, not a Postgres one.)
+    // built when the chunk is sealed — 1/N the aggregate scans of the old
+    // per-event recompute.
+    //
+    // perf/events-write-path: it runs in its OWN transaction, immediately
+    // after the chunk's write transaction commits (same request, awaited
+    // before the broadcast — never waitUntil), rather than inside it. The
+    // recompute is a full-file aggregate scan over `cells`; carrying it inside
+    // the write transaction meant the events/cells row locks stayed held for
+    // the whole scan, which on prod showed up as 200ms+ lock waits and
+    // deadlocks on single-row commits. The contract is therefore: counters
+    // are consistent by the time this request RESPONDS (and broadcasts), not
+    // by the time the events commit. The window between the two is only
+    // observable to a concurrent reader, who would see counters at most one
+    // chunk behind — and that reader's own next commit recomputes them again.
+    // A recompute failure is logged loudly and does not un-accept the events
+    // (they are durably committed); the next commit on the file self-heals.
     const sealChunk = (chunk: PendingChunk): void => {
       const counterFiles = new Map<string, {
         projectId: string
@@ -1365,13 +1373,13 @@ export async function handleEventsWriteRequest(
       }
       const recomputeTs = Date.now()
       for (const f of counterFiles.values()) {
-        chunk.stmts.push(fileCountersRecomputeStmt(db, f.projectId, f.fileId, recomputeTs))
+        chunk.recompute.push(fileCountersRecomputeStmt(db, f.projectId, f.fileId, recomputeTs))
         if (f.fullSections) {
-          chunk.stmts.push(...fullProgressRecomputeStmts(db, f.projectId, f.fileId, recomputeTs))
+          chunk.recompute.push(...fullProgressRecomputeStmts(db, f.projectId, f.fileId, recomputeTs))
         } else {
-          chunk.stmts.push(fileProgressRecomputeStmt(db, f.projectId, f.fileId, recomputeTs))
+          chunk.recompute.push(fileProgressRecomputeStmt(db, f.projectId, f.fileId, recomputeTs))
           if (f.cellIds.size > 0) {
-            chunk.stmts.push(
+            chunk.recompute.push(
               sectionsProgressRecomputeStmt(db, f.projectId, f.fileId, recomputeTs, [...f.cellIds]),
             )
           }
@@ -1400,7 +1408,7 @@ export async function handleEventsWriteRequest(
         currentChunk.stmts.length + eventStmts.length > BATCH_LIMIT
       ) {
         sealChunk(currentChunk)
-        currentChunk = { entries: [], stmts: [] }
+        currentChunk = { entries: [], stmts: [], recompute: [] }
       }
 
       currentChunk.entries.push(entry)
@@ -1420,7 +1428,9 @@ export async function handleEventsWriteRequest(
     // the batch result's row count for that statement is 0. Without this the
     // client would treat "accepted" as "saved" (the old silent-loss bug).
     // Reading the row count back from the same transaction is race-free:
-    // no later request can change what THIS write did.
+    // no later request can change what THIS write did. (The recompute
+    // statements are NOT in this batch — see sealChunk — so `results` indexes
+    // line up with `chunk.stmts` exactly as the per-entry offsets assume.)
     const flagChainLosers = (
       chunk: PendingChunk,
       results: ReadonlyArray<{ meta: { changes: number } }>,
@@ -1440,11 +1450,32 @@ export async function handleEventsWriteRequest(
       }
     }
 
+    // Pipelined when the shim offers it (postgres.js over Hyperdrive): the
+    // chunk's statements stream in waves instead of one round-trip each, and
+    // the transaction — and the row locks it holds — is open for a fraction of
+    // the time. Same atomicity and result order/shape as batch() (see
+    // db/shim/postgres.ts batchPipelined), which flagChainLosers relies on.
+    const runBatch = (stmts: AquillaStatement[]) =>
+      db.batchPipelined ? db.batchPipelined(stmts) : db.batch(stmts)
+
     try {
       for (const chunk of chunks) {
-        const results = await db.batch(chunk.stmts)
+        const results = await runBatch(chunk.stmts)
         flagChainLosers(chunk, results)
         committedEntries.push(...chunk.entries)
+        if (chunk.recompute.length > 0) {
+          try {
+            await runBatch(chunk.recompute)
+          } catch (recomputeErr) {
+            // The events are committed; only the derived counters are behind.
+            // Loud, because a silent miss here is a counter drift nobody can
+            // trace back — but not fatal, and NOT reported as a rejection.
+            console.error(
+              `[events] file counter recompute failed after commit (${chunk.entries.length} events accepted; counters self-heal on the next commit):`,
+              recomputeErr,
+            )
+          }
+        }
       }
     } catch (err) {
       const committed = new Set(committedEntries.map((entry) => entry.id))

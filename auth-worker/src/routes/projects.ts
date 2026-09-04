@@ -39,6 +39,7 @@ import {
   ALL_ROLE_LEVELS,
   isCanonicalRoleLevel,
   isLinkRoleLevel,
+  forgetProjectRole,
   ORG_WIDE_ACCESS_FLOOR,
   resolveProjectRole,
   resolveProjectRoleIncludingArchived,
@@ -1223,6 +1224,9 @@ projects.delete("/:projectId/members/:userId", authMiddleware, async (c) => {
   )
     .bind(projectId, targetUserId)
     .run()
+  // The per-request memo may hold the pre-delete role (an owner removing
+  // their own direct row resolved it above as the caller).
+  forgetProjectRole(c.env, projectId, targetUserId)
 
   // AQU-346: when NO grant path survives the delete (AD-12: org / group /
   // creator paths are additive and unaffected by removing the direct row),

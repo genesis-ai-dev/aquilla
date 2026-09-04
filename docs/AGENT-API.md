@@ -535,8 +535,11 @@ The command layer is now the **shared write spine for both agent surfaces** (see
   command, one op per key; `POLICY_SETTINGS_KEYS` are never agent-writable) and `EmitEvents`
   (≤200 role-allowed events per sole-command changeset from `ALLOWED_EMIT_KINDS`: comments,
   waives, validations (testimony-flagged), back-translation, repin, file rename/delete/restore,
-  assignments incl. reassign; head pins are server-resolved, whole-plan rejection on any bad
-  reference). `UpdateProjectSettings` is deprecated and now rejects policy-key changes.
+  assignments incl. reassign, and terminology `term.create|update|delete|approve|reject`
+  (AQU-1179 — project-level, binding writes gated by the org's termbase floor); head pins are
+  server-resolved, whole-plan rejection on any bad reference; the effect summary carries a
+  plain-language `label` per kind for the human approval page).
+  `UpdateProjectSettings` is deprecated and now rejects policy-key changes.
 - **Session principal** — the in-app agent stages changesets through the same engine via
   session sync-token routes (`/api/v1/changesets/:projectId[...]` on the sync host), with
   `credential_id = 'session'`, forced ask mode, `channel: "app"` provenance, and the existing

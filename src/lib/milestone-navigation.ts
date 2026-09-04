@@ -82,8 +82,8 @@ export function deriveMilestoneNavigation(
       resolved[index] = isScriptureMilestone(seed)
         ? seed
         : structural
-          ? nextScripture[index] ?? previous ?? fallback[index]!
-          : previous ?? nextScripture[index] ?? fallback[index]!
+          ? nextScripture[index] ?? previous ?? fallback[index]
+          : previous ?? nextScripture[index] ?? fallback[index]
     }
   } else if (seeds.some(Boolean)) {
     const nextSeed: (ImportMilestone | undefined)[] = new Array(cells.length)
@@ -107,11 +107,11 @@ export function deriveMilestoneNavigation(
       resolved[index] = current
         ?? (index < firstSeedIndex ? startMilestone : undefined)
         ?? nextSeed[index]
-        ?? fallback[index]!
+        ?? fallback[index]
     }
   } else {
     for (let index = 0; index < cells.length; index += 1) {
-      resolved[index] = fallback[index]!
+      resolved[index] = fallback[index]
     }
   }
 
@@ -123,7 +123,7 @@ export function deriveMilestoneNavigation(
     cellIds: string[]
   }>()
   cells.forEach((cell, index) => {
-    const assignment = resolved[index]!
+    const assignment = resolved[index]
     milestoneByCellId.set(cell.id, assignment)
     const existing = groups.get(assignment.key)
     if (existing) {

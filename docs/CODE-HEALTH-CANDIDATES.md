@@ -138,11 +138,16 @@ future pass (verify each still applies — code moves):
     flaky, not a regression), `pnpm lint` problem list byte-identical to baseline once
     accounting for an unrelated `packages/idml-roundtrip/dist` build-artifact warning
     (see new entry below), no test file touched.
-  - `src/lib/milestone-navigation.ts` (5 sites: ~85, 86, 110, 114, 126)
-  - `src/lib/biblica/treasure-hunt/notes.ts:173`, `note-rules.ts` (~179, 205),
-    `reach4life/notes.ts:153`
-  - `src/lib/idml/completion.ts` (~334, 466), `src/lib/migrate/idml.ts` (~336, 417),
-    `src/lib/migrate/map.ts:245`
+  - **Status**: done in the 2026-09-04 run — `src/lib/milestone-navigation.ts` (5 sites:
+    85, 86, 110, 114, 126), `src/lib/biblica/treasure-hunt/notes.ts:173`, `note-rules.ts`
+    (179, 180, 205), `reach4life/notes.ts:153`, `src/lib/idml/completion.ts` (334, 466),
+    `src/lib/migrate/idml.ts` (336, 417), `src/lib/migrate/map.ts:245` — 14 sites across 7
+    files, all confirmed array-index or regex-match-group accesses with a guard/loop bound
+    already proving the index in range, same no-`noUncheckedIndexedAccess` no-op story.
+    `npx tsc -b --force` clean, targeted `pnpm test` on all 7 files' colocated specs green
+    (92/92), full `pnpm test` failure list byte-identical to baseline (0 failures both
+    times — this run's baseline was fully green, unlike some earlier runs), no test file
+    touched.
   - `src/lib/export/exporters/vtt.ts` (~209, 210, 243), `src/lib/export/audio-bwf.ts:85`,
     `src/lib/export/audio-by-character.ts:326`, `src/lib/audio/whisper-worker.ts:186`
   - `src/hooks/useActiveCellStore.ts:1366`, `src/components/MultiProjectInviteDialog.tsx:126`,

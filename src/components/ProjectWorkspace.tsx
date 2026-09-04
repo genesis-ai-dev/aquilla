@@ -3865,6 +3865,7 @@ export function ProjectWorkspace() {
   )
   const {
     comments: allProjectComments,
+    counts: commentCounts,
     addComment: addCommentEvent,
     resolveThread: resolveCommentThread,
     refresh: refreshComments,
@@ -3872,6 +3873,9 @@ export function ProjectWorkspace() {
     projectId: project?.id ?? null,
     getToken: getTokenForFile,
     author: currentUsername,
+    // The open file's threads load first; the rest of the project pages in
+    // behind them, so the editor's per-cell markers never wait on history.
+    priorityFileId: activeFileId,
   })
 
   // AQU-599: per-cell "has comment" indicator. useHealth also exposes a
@@ -7489,7 +7493,11 @@ export function ProjectWorkspace() {
       // Pinned below Comments: Terminology and Recently deleted stay visible.
       // Unpinned items (none today) still collapse into "More".
       { id: "comments", labelKey: "common.comments" as const, icon: MessagesSquare, pinned: true,
-        badge: Array.from(openCommentCount.values()).reduce((a, b) => a + b, 0),
+        // Open-thread total from the worker's counts aggregate — independent
+        // of how much of the comment list has paged in. Health's per-file
+        // count is the fallback until the first aggregate lands.
+        badge: commentCounts?.unresolved
+          ?? Array.from(openCommentCount.values()).reduce((a, b) => a + b, 0),
         onClick: () => openOverlay("comments") },
       { id: "terminology", labelKey: "nav.sidebarSection.terminology" as const, icon: BookOpen, pinned: true,
         onClick: () => openOverlay("terminology") },
@@ -7506,7 +7514,7 @@ export function ProjectWorkspace() {
         : []),
     ]
     return items
-  }, [openCommentCount, currentRoleLevel, openOverlay])
+  }, [commentCounts, openCommentCount, currentRoleLevel, openOverlay])
 
   // AQU-646 P0: cells from the store never carry audio attachments — only
   // mergeCellsWithAudio adds them (EditorTable and VoicePlaybackBar each merge

@@ -227,11 +227,39 @@ documented convention.
 Act-mode credentials skip steps 2–3 entirely: `confirm_changeset` / `POST .../commit` applies
 immediately.
 
-Polling: an agent may call `get_changeset` between steps 2 and 4 to observe `status` transition
-from `staged` to `committed` once a human has approved *and* the agent has re-called confirm —
-approval alone does not commit; the agent's own confirm call is still required. A changeset may
-also transiently read `committing` — the mid-apply state a commit sets before flipping to
-`committed` (§4.1 "commit idempotency" below); treat it the same as `staged` and poll again.
+**Waiting for the human (AQU-1177).** Between steps 2 and 4, prefer `wait_for_changeset` (MCP)
+or `GET .../changesets/:id/wait?timeoutMs=` (REST) over a `get_changeset` poll loop: the server
+holds the request until something actually happens, so the agent learns about an approval within
+about a second instead of on its next poll, and spends one rate-limit slot per call rather than
+one per poll. It returns when **either**
+
+- a human approval is recorded (`approved: true` — call confirm now; the confirmation's own
+  15-minute TTL is already running), **or**
+- the status leaves `staged` (a rejection shows as `discarded`; also `committed`, `expired`,
+  `stale`, `superseded`).
+
+`timeoutMs` defaults to 25 s and is capped at 60 s; `0` means "check now, don't block". A budget
+that runs out returns `timedOut: true` with the current changeset — a normal outcome, not an
+error: just call again.
+
+Note the arm that a naive poll gets wrong: **approval does not change the changeset's status.**
+The approve route mints a `changeset_confirmations` row and leaves the changeset `staged` until
+the agent commits it, so code watching only for `status !== 'staged'` will sleep straight through
+the event it is waiting for. `wait_for_changeset` checks both arms.
+
+Polling remains available: `get_changeset` observes the same `status`, which transitions to
+`committed` once a human has approved *and* the agent has re-called confirm — approval alone does
+not commit; the agent's own confirm call is still required. A changeset may also transiently read
+`committing` — the mid-apply state a commit sets before flipping to `committed` (§4.1 "commit
+idempotency" below); treat it the same as `staged` and poll again.
+
+**Finding your plans again.** `list_changesets` (MCP) or `GET .../changesets?status=&limit=&cursor=`
+(REST) lists the changesets **the calling credential staged**, newest first — what is still
+awaiting a human, what expired unattended, what already committed — so an agent that lost its
+`changesetId` (crash, new session, context trimmed) can pick the work back up instead of
+re-preparing it. Scoping is per credential, matching the per-item rule on `GET .../changesets/:id`:
+a PAT never sees a sibling agent's plans, and a PAT scoped to another project gets
+`403 scope_denied`.
 
 **`CreateProject` is ask-mode only, by construction.** `prepare` **forces every `CreateProject`
 changeset to ask-mode**, whatever the credential's or request's mode — an org-scoped `act`
@@ -272,7 +300,9 @@ CONTRIBUTOR=400, PROJECT_LEAD=500, MAINTAINER=600).
 | `GET /api/v1/external/projects/:projectId/artifacts/:artifactId/content` | `aqk_` | VIEWER | Raw bytes. |
 | `GET /api/v1/external/projects/:projectId/artifacts/:artifactId/inspect` | `aqk_` | VIEWER | Lightweight format sniff (first 64KB): `usfm`, `xliff`, `tmx`, `json`, `csv`, `tsv`, `plaintext`. Audio artifacts return size + content type only — no duration/waveform sniffing. |
 | `POST /api/v1/external/projects/:projectId/changesets` | `aqk_` | Per command kind — see §4.1 | Prepare (stage) a changeset. Body `{ commands: [...], id?, autonomyMode? }`. |
+| `GET /api/v1/external/projects/:projectId/changesets` | `aqk_` | VIEWER + credential scope | List the changesets this credential staged, newest first. Query `status`, `limit` (≤100), `cursor`. Returns `{ changesets, nextCursor }`. |
 | `GET /api/v1/external/projects/:projectId/changesets/:id` | `aqk_` | — (must be the staging credential) | Fetch status/summary/digest/receipt + `approvalUrl`. |
+| `GET /api/v1/external/projects/:projectId/changesets/:id/wait` | `aqk_` | — (must be the staging credential) | Long-poll until approved or no longer `staged`. Query `timeoutMs` (default 25 000, max 60 000, `0` = don't block). Returns `{ changeset, approved, timedOut, waitedMs }`. |
 | `POST /api/v1/external/projects/:projectId/changesets/:id/commit` | `aqk_` | — (must be the staging credential) | Commit (ask requires a consumed confirmation; act auto-confirms). Idempotent on `committed` **and safe to retry from `committing`** (§4.1). |
 | `POST /api/v1/external/projects/:projectId/changesets/:id/discard` | `aqk_` | — (must be the staging credential) | Discard a staged/stale/expired changeset. Cannot discard `committed` **or `committing`** (a mid-apply plan must not be stranded). |
 
@@ -442,7 +472,10 @@ discarded plans" is **not yet implemented** — treat it as aspirational, not sh
 | --- | --- | --- |
 | Max artifact upload size | 25 MB | `MAX_ARTIFACT_BYTES`, `sync-worker/src/external/artifacts-route.ts` |
 | Max cells per `PlanImport` | 5,000 | `PLAN_IMPORT_MAX_CELLS`, `sync-worker/src/external/commands.ts` |
-| Changeset TTL (staged → auto-expires) | 1 hour | `CHANGESET_TTL_MS`, `sync-worker/src/external/prepare.ts` |
+| Changeset TTL, act mode (staged → auto-expires) | 1 hour | `CHANGESET_TTL_MS`, `sync-worker/src/external/stage.ts` |
+| Changeset TTL, ask mode (staged → auto-expires) | 24 hours — an ask-mode plan waits on a *human*, so the deadline is raised rather than the clock paused (AQU-1177); `expiresAt` always means exactly what it says | `CHANGESET_ASK_TTL_MS`, `sync-worker/src/external/stage.ts` |
+| `wait_for_changeset` long-poll budget | 25 s default, 60 s max | `WAIT_DEFAULT_TIMEOUT_MS` / `WAIT_MAX_TIMEOUT_MS`, `sync-worker/src/external/changeset-wait.ts` |
+| Changeset list page size | 25 default, 100 max | `EXTERNAL_LIST_DEFAULT_LIMIT` / `EXTERNAL_LIST_MAX_LIMIT`, `sync-worker/src/external/store.ts` |
 | Ask-mode confirmation TTL | 15 minutes | `CONFIRMATION_TTL_MS`, `auth-worker/src/routes/changeset-approvals.ts` |
 | Internal sync-token lifetime (implementation detail, not caller-facing) | 300 seconds | `INTERNAL_TOKEN_TTL_SECONDS`, `sync-worker/src/external/token-bridge.ts` |
 | Max commands per `SetTranslation` changeset | none enforced | `validateCommands` has no hard cap; `get_capabilities.limits.maxCommandsPerChangeset` reports `null` for this reason |

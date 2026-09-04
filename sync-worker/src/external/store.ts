@@ -161,6 +161,55 @@ export async function listChangesetsForProject(
   return results.map(rowToStored)
 }
 
+/** Default / max page size for the EXTERNAL (PAT) changeset list (AQU-1177 §1).
+ *  Separate from LIST_CHANGESETS_MAX: the session inbox is a ranked, capped
+ *  human view over one fixed scan window, whereas this is a plain cursor-paged
+ *  feed an agent walks to completion, so it pages in SQL rather than ranking in
+ *  memory and cannot silently truncate the tail. */
+export const EXTERNAL_LIST_DEFAULT_LIMIT = 25
+export const EXTERNAL_LIST_MAX_LIMIT = 100
+
+/**
+ * One page of a project's changesets, newest-first, filtered in SQL.
+ *
+ * Over-fetches one row past `limit` purely to answer "is there a next page?"
+ * without a second COUNT query; the extra row is dropped before returning.
+ * `credentialId` narrows to the rows one PAT created — the external surface's
+ * visibility rule (changesets-route.ts handleGet), which unlike the session
+ * surface's role floor is a stored-column comparison and so belongs in SQL.
+ */
+export async function listChangesetsPage(
+  db: AquillaDb,
+  projectId: string,
+  opts: { status?: string; credentialId?: string; offset: number; limit: number },
+): Promise<{ rows: StoredChangeset[]; hasMore: boolean }> {
+  const binds: unknown[] = [projectId]
+  let filters = ''
+  if (opts.credentialId !== undefined) {
+    filters += ' AND credential_id = ?'
+    binds.push(opts.credentialId)
+  }
+  if (opts.status !== undefined) {
+    filters += ' AND status = ?'
+    binds.push(opts.status)
+  }
+  binds.push(opts.limit + 1, opts.offset)
+  const { results } = await db
+    .prepare(
+      `SELECT id, project_id, created_by_user_id, credential_id, autonomy_mode,
+              status, commands, preconditions, summary, digest, receipt,
+              confirmation_id, created_at, expires_at, committed_at
+         FROM changesets
+        WHERE project_id = ?${filters}
+        ORDER BY created_at DESC, id DESC
+        LIMIT ? OFFSET ?`,
+    )
+    .bind(...binds)
+    .all<ChangesetRow>()
+  const hasMore = results.length > opts.limit
+  return { rows: results.slice(0, opts.limit).map(rowToStored), hasMore }
+}
+
 /** Shape a changeset for API responses — no secret fields exist, but this keeps
  *  the wire shape stable and camelCased. */
 export function changesetToResponse(cs: StoredChangeset): Record<string, unknown> {

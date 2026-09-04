@@ -195,7 +195,7 @@ describe('MCP transport', () => {
 })
 
 describe('MCP tools/list', () => {
-  it('returns all 13 tools each with an input schema', async () => {
+  it('returns all 15 tools each with an input schema', async () => {
     const env = makeEnv(tdb.db)
     const token = await credToken(tdb)
     const res = await rpc(env, token, { jsonrpc: '2.0', id: 2, method: 'tools/list' })
@@ -204,12 +204,12 @@ describe('MCP tools/list', () => {
     expect(names).toEqual(
       [
         'confirm_changeset', 'discard_changeset', 'get_capabilities', 'get_changeset',
-        'get_identity_and_scope', 'get_project', 'list_projects', 'prepare_import',
-        'prepare_translations', 'preview_import', 'read_content', 'read_history',
-        'search_project',
+        'get_identity_and_scope', 'get_project', 'list_changesets', 'list_projects',
+        'prepare_import', 'prepare_translations', 'preview_import', 'read_content',
+        'read_history', 'search_project', 'wait_for_changeset',
       ].sort(),
     )
-    expect(body.result.tools).toHaveLength(13)
+    expect(body.result.tools).toHaveLength(15)
     for (const tool of body.result.tools) {
       expect(typeof tool.description).toBe('string')
       expect(tool.description.length).toBeGreaterThan(20)
@@ -457,6 +457,82 @@ describe('MCP tools/call — changesets', () => {
     })
     const discarded = toolPayload(((await discardRes.json()) as any).result).payload as any
     expect(discarded.status).toBe('discarded')
+  })
+
+  // AQU-1177: the changeset lifecycle is reachable over MCP, not only REST.
+  // The rules themselves (credential scoping, status filtering, the two-armed
+  // settle predicate) are covered at the REST layer in
+  // external-changeset-lifecycle.test.ts — these assert the MCP dispatch.
+  it('list_changesets pages this credential\'s plans with a status filter', async () => {
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb)
+
+    const ids: string[] = []
+    for (const value of ['one', 'two']) {
+      const res = await rpc(env, token, {
+        jsonrpc: '2.0', id: 21, method: 'tools/call',
+        params: {
+          name: 'prepare_translations',
+          arguments: { projectId: PROJECT, translations: [{ cellId: 'cell-1', fileId: FILE, value }] },
+        },
+      })
+      ids.push((toolPayload(((await res.json()) as any).result).payload as any).changesetId)
+    }
+
+    const listRes = await rpc(env, token, {
+      jsonrpc: '2.0', id: 22, method: 'tools/call',
+      params: { name: 'list_changesets', arguments: { projectId: PROJECT, status: 'staged', limit: 1 } },
+    })
+    const listed = toolPayload(((await listRes.json()) as any).result)
+    expect(listed.isError).toBe(false)
+    const page = listed.payload as any
+    expect(page.changesets).toHaveLength(1)
+    expect(page.changesets[0].changesetId).toBe(ids[1]) // newest first
+    expect(page.changesets[0].status).toBe('staged')
+    expect(page.changesets[0].approvalUrl).toBe(`https://aquilla.app/approve/${ids[1]}`)
+    expect(page.nextCursor).toBeTruthy()
+
+    const page2 = toolPayload(
+      ((await (
+        await rpc(env, token, {
+          jsonrpc: '2.0', id: 23, method: 'tools/call',
+          params: {
+            name: 'list_changesets',
+            arguments: { projectId: PROJECT, status: 'staged', limit: 1, cursor: page.nextCursor },
+          },
+        })
+      ).json()) as any).result,
+    ).payload as any
+    expect(page2.changesets[0].changesetId).toBe(ids[0])
+    expect(page2.nextCursor).toBeNull()
+  })
+
+  it('wait_for_changeset reports a pending plan as timedOut rather than an error', async () => {
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb, { userId: 1, username: 'alice', mode: 'ask' })
+    const prepRes = await rpc(env, token, {
+      jsonrpc: '2.0', id: 24, method: 'tools/call',
+      params: {
+        name: 'prepare_translations',
+        arguments: { projectId: PROJECT, translations: [{ cellId: 'cell-1', fileId: FILE, value: 'x' }] },
+      },
+    })
+    const prepPayload = toolPayload(((await prepRes.json()) as any).result).payload as any
+
+    const waitRes = await rpc(env, token, {
+      jsonrpc: '2.0', id: 25, method: 'tools/call',
+      params: {
+        name: 'wait_for_changeset',
+        arguments: { projectId: PROJECT, changesetId: prepPayload.changesetId, timeoutMs: 0 },
+      },
+    })
+    const waited = toolPayload(((await waitRes.json()) as any).result)
+    // Nobody approved yet — a normal outcome, so NOT an MCP error result.
+    expect(waited.isError).toBe(false)
+    const payload = waited.payload as any
+    expect(payload.timedOut).toBe(true)
+    expect(payload.approved).toBe(false)
+    expect(payload.status).toBe('staged')
   })
 })
 

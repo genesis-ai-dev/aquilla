@@ -242,6 +242,40 @@ describe("parseProjectWsMessage", () => {
     }))).toBeNull()
   })
 
+  it("parses presence.diff / presence.left / presence.draft", () => {
+    expect(parseProjectWsMessage(JSON.stringify({
+      t: "presence.diff",
+      user: {
+        userId: "alice", focusedCell: "c1", currentFileId: "file-1",
+        selection: { side: "target", anchor: 2, head: 5 }, ts: 100,
+      },
+    }))).toEqual({
+      t: "presence.diff",
+      user: {
+        userId: "alice", focusedCell: "c1", currentFileId: "file-1",
+        selection: { side: "target", anchor: 2, head: 5 }, ts: 100,
+      },
+    })
+    expect(parseProjectWsMessage(JSON.stringify({ t: "presence.left", userId: "alice" })))
+      .toEqual({ t: "presence.left", userId: "alice" })
+    expect(parseProjectWsMessage(JSON.stringify({
+      t: "presence.draft", userId: "alice", cellId: "c1", draftText: "hello", ts: 7,
+    }))).toEqual({ t: "presence.draft", userId: "alice", cellId: "c1", draftText: "hello", ts: 7 })
+
+    // Strict field validation — same posture as the full-roster frame.
+    expect(parseProjectWsMessage(JSON.stringify({ t: "presence.diff", user: { userId: "alice" } }))).toBeNull()
+    expect(parseProjectWsMessage(JSON.stringify({
+      t: "presence.diff", user: { userId: "alice", ts: 1, selection: { side: "source" } },
+    }))).toBeNull()
+    expect(parseProjectWsMessage(JSON.stringify({ t: "presence.left" }))).toBeNull()
+    expect(parseProjectWsMessage(JSON.stringify({
+      t: "presence.draft", userId: "alice", cellId: "c1", ts: 7,
+    }))).toBeNull()
+    expect(parseProjectWsMessage(JSON.stringify({
+      t: "presence.draft", userId: "alice", cellId: "c1", draftText: "x".repeat(16_385), ts: 7,
+    }))).toBeNull()
+  })
+
   it("parses lock.claimed + lock.released", () => {
     const claim = parseProjectWsMessage(
       JSON.stringify({ t: "lock.claimed", cellId: "c", by: { userId: "alice", ts: 7 } }),

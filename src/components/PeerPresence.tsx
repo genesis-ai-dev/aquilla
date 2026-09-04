@@ -3,17 +3,26 @@ import { InitialsAvatar } from "@/components/InitialsAvatar"
 import { AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { AppTooltip } from "@/components/ui/tooltip"
-import type { ProjectPresencePeer } from "@/lib/sync/presence-store"
+import {
+  usePresencePeers,
+  type ProjectPresencePeer,
+  type ProjectPresenceStore,
+} from "@/lib/sync/presence-store"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 interface PeerPresenceProps {
-  peers: ProjectPresencePeer[]
+  /** Pre-resolved roster. Prefer `store` so only this component re-renders on roster changes. */
+  peers?: ProjectPresencePeer[]
+  /** Subscribes to the roster here, keeping the workspace root out of the render loop. */
+  store?: ProjectPresenceStore | null
   onJumpToPeer?: (peer: ProjectPresencePeer) => void
 }
 
-export function PeerPresence({ peers, onJumpToPeer }: PeerPresenceProps) {
+export function PeerPresence({ peers: peersProp, store, onJumpToPeer }: PeerPresenceProps) {
   const t = useT()
   const [showPopover, setShowPopover] = useState(false)
+  const storePeers = usePresencePeers(store ?? null)
+  const peers = peersProp ?? storePeers
 
   if (peers.length === 0) return null
 

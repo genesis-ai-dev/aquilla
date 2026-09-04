@@ -84,6 +84,11 @@ export type ProjectWsServerMessage =
     }
   | { t: "event.stale"; id: string; reason: string }
   | { t: "presence"; users: PresenceUser[] }
+  /** Exactly one user's roster-visible state changed (no `selection.draftText`). */
+  | { t: "presence.diff"; user: PresenceUser }
+  | { t: "presence.left"; userId: string }
+  /** Live draft text for one cell; server coalesces to ≤1 per user per 150 ms. */
+  | { t: "presence.draft"; userId: string; cellId: string; draftText: string; ts: number }
   | { t: "lock.claimed"; cellId: string; by: { userId: string; ts: number } }
   | { t: "lock.released"; cellId: string; by: { userId: string; ts: number } }
   | { t: "project.archived"; project: string; archivedAt?: string; deletedBy?: string }
@@ -460,21 +465,33 @@ export function parseProjectWsMessage(raw: string): ProjectWsServerMessage | nul
     if (!Array.isArray(m.users)) return null
     const users: PresenceUser[] = []
     for (const u of m.users) {
-      if (!u || typeof u !== "object") return null
-      const r = u as Record<string, unknown>
-      if (typeof r.userId !== "string" || typeof r.ts !== "number") return null
-      // A present-but-invalid selection (wrong shape, oversized draft) marks
-      // the whole frame malformed — same strictness as the other fields.
-      if (r.selection !== undefined && !isTargetPresenceSelection(r.selection)) return null
-      users.push({
-        userId: r.userId,
-        ts: r.ts,
-        ...(typeof r.focusedCell === "string" ? { focusedCell: r.focusedCell } : {}),
-        ...(typeof r.currentFileId === "string" ? { currentFileId: r.currentFileId } : {}),
-        ...(r.selection !== undefined ? { selection: r.selection } : {}),
-      })
+      const user = parsePresenceUser(u)
+      if (!user) return null
+      users.push(user)
     }
     return { t: "presence", users }
+  }
+  if (t === "presence.diff") {
+    const user = parsePresenceUser(m.user)
+    if (!user) return null
+    return { t: "presence.diff", user }
+  }
+  if (t === "presence.left") {
+    if (typeof m.userId !== "string") return null
+    return { t: "presence.left", userId: m.userId }
+  }
+  if (t === "presence.draft") {
+    if (
+      typeof m.userId !== "string" ||
+      typeof m.cellId !== "string" ||
+      typeof m.draftText !== "string" ||
+      m.draftText.length > MAX_PRESENCE_DRAFT_LENGTH ||
+      typeof m.ts !== "number" ||
+      !Number.isFinite(m.ts)
+    ) {
+      return null
+    }
+    return { t: "presence.draft", userId: m.userId, cellId: m.cellId, draftText: m.draftText, ts: m.ts }
   }
   if (t === "lock.claimed" || t === "lock.released") {
     if (typeof m.cellId !== "string" || !m.by || typeof m.by !== "object") return null
@@ -687,6 +704,22 @@ function parseContextualFrame(value: unknown): ContextualActivityFrame | null {
     }
   }
   return null
+}
+
+function parsePresenceUser(u: unknown): PresenceUser | null {
+  if (!u || typeof u !== "object") return null
+  const r = u as Record<string, unknown>
+  if (typeof r.userId !== "string" || typeof r.ts !== "number") return null
+  // A present-but-invalid selection (wrong shape, oversized draft) marks
+  // the whole frame malformed — same strictness as the other fields.
+  if (r.selection !== undefined && !isTargetPresenceSelection(r.selection)) return null
+  return {
+    userId: r.userId,
+    ts: r.ts,
+    ...(typeof r.focusedCell === "string" ? { focusedCell: r.focusedCell } : {}),
+    ...(typeof r.currentFileId === "string" ? { currentFileId: r.currentFileId } : {}),
+    ...(r.selection !== undefined ? { selection: r.selection } : {}),
+  }
 }
 
 function isTargetPresenceSelection(value: unknown): value is TargetPresenceSelection {

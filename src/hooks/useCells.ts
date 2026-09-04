@@ -22,6 +22,7 @@ import { peekOutboxBatch, subscribeToOutbox } from "@/lib/sync/outbox"
 import { formatVttTime } from "@/lib/video/vtt-generator"
 import { decodeHtmlEntities } from "@/lib/html-entities"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
+import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
 
 // AQU-538 (slice 2): one source, N target lanes; `''` is the default lane.
 // SWARM-TODO(AQU-538): slice 1 adds `targetLang` to `CellRow` in
@@ -1142,24 +1143,11 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   // doFetch(true) goes through the `?since=` delta path whenever a watermark
   // exists, so alt-tabbing back to a Bible-sized book costs one tiny request
   // instead of ~60 full pages (PERF-4).
+  // The WHEN is shared across every read hook (one wave per focus return,
+  // rate-limited) — see window-focus-revalidate.ts.
   useEffect(() => {
     if (typeof window === "undefined") return
-    function onFocus() { void doFetch(true) }
-    function onVis() {
-      if (typeof document !== "undefined" && document.visibilityState === "visible") {
-        void doFetch(true)
-      }
-    }
-    window.addEventListener("focus", onFocus)
-    if (typeof document !== "undefined") {
-      document.addEventListener("visibilitychange", onVis)
-    }
-    return () => {
-      window.removeEventListener("focus", onFocus)
-      if (typeof document !== "undefined") {
-        document.removeEventListener("visibilitychange", onVis)
-      }
-    }
+    return subscribeWindowRegainedFocus(() => { void doFetch(true) })
   }, [doFetch])
 
   const revalidate = useCallback(() => {

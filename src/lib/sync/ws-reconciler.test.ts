@@ -946,37 +946,72 @@ describe("createScopedRefreshScheduler (AQU-1145 applied-event bursts)", () => {
 describe("createReconnectResyncHandler (AQU-845 missed-broadcast recovery)", () => {
   it("does not resync on the first open — the initial read is already in flight", () => {
     const onResync = vi.fn()
-    const onOpen = createReconnectResyncHandler(onResync)
+    const h = createReconnectResyncHandler(onResync)
 
-    onOpen()
+    h.handleOpen()
 
     expect(onResync).not.toHaveBeenCalled()
   })
 
-  it("resyncs on every reopen after the first", () => {
+  it("resyncs on every reopen after the first when the gap length is unknown", () => {
     const onResync = vi.fn()
-    const onOpen = createReconnectResyncHandler(onResync)
+    const h = createReconnectResyncHandler(onResync)
 
-    onOpen() // initial connect
-    onOpen() // reconnect after a sync-worker redeploy
+    h.handleOpen() // initial connect
+    h.handleOpen() // reconnect after a sync-worker redeploy (no close observed)
     expect(onResync).toHaveBeenCalledTimes(1)
 
-    onOpen() // and again after the next drop
-    onOpen()
+    h.handleOpen() // and again after the next drop
+    h.handleOpen()
     expect(onResync).toHaveBeenCalledTimes(3)
   })
 
   it("keeps each project's reconciler on its own first-open ledger", () => {
     const a = vi.fn()
     const b = vi.fn()
-    const onOpenA = createReconnectResyncHandler(a)
-    const onOpenB = createReconnectResyncHandler(b)
+    const hA = createReconnectResyncHandler(a)
+    const hB = createReconnectResyncHandler(b)
 
-    onOpenA()
-    onOpenA()
-    onOpenB()
+    hA.handleOpen()
+    hA.handleOpen()
+    hB.handleOpen()
 
     expect(a).toHaveBeenCalledTimes(1)
     expect(b).not.toHaveBeenCalled()
+  })
+
+  it("skips the resync for a blip shorter than minDownMs — the ?since= cursor catches up on the next read", () => {
+    let t = 0
+    const onResync = vi.fn()
+    const h = createReconnectResyncHandler(onResync, { minDownMs: 3_000, now: () => t })
+
+    h.handleOpen() // initial
+    t = 10_000
+    h.handleClose()
+    t = 12_000 // down 2s
+    h.handleOpen()
+    expect(onResync).not.toHaveBeenCalled()
+
+    t = 20_000
+    h.handleClose()
+    t = 23_000 // down exactly 3s → resync
+    h.handleOpen()
+    expect(onResync).toHaveBeenCalledTimes(1)
+  })
+
+  it("measures the gap from the FIRST close when several closes precede one reopen", () => {
+    let t = 0
+    const onResync = vi.fn()
+    const h = createReconnectResyncHandler(onResync, { minDownMs: 3_000, now: () => t })
+
+    h.handleOpen()
+    t = 10_000
+    h.handleClose()
+    t = 12_500
+    h.handleClose() // a failed reconnect attempt closing again
+    t = 13_500 // 3.5s since the socket first dropped
+    h.handleOpen()
+
+    expect(onResync).toHaveBeenCalledTimes(1)
   })
 })

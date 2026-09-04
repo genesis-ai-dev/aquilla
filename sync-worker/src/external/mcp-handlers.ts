@@ -105,20 +105,23 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
       '4. prepare_translations — stage your writes as a changeset. Nothing is applied yet. Returns { changesetId, digest, summary, mode, approvalUrl? }.',
       '5. confirm_changeset with that changesetId + digest. act mode: applies immediately. ask mode: first show the approvalUrl to a human and wait for them to approve in their browser, then call confirm_changeset — until then it returns confirmation_required and applies nothing.',
     ],
-    // All five domain command kinds now ship (Agent API v1.1). PlanImport
-    // stages via the dedicated preview_import / prepare_import tools (or raw
-    // REST PlanImport cells); prepare_translations's `commands` argument still
-    // does not accept it. CreateProject / UpdateProjectSettings / LinkMedia
-    // stage through the SAME prepare_translations / confirm_changeset tools as
-    // SetTranslation, via that `commands` argument — see projectLifecycle and
-    // linkMedia below for their per-kind rules.
+    // FROZEN legacy field (Agent API v1.1) — the five kinds stageable through
+    // prepare_translations's `commands` argument, kept byte-stable for callers
+    // that branch on it. It is NOT the live command list: newer kinds
+    // (PatchSettings, EmitEvents) are published in `commands.index` below and
+    // documented by describe_command. PlanImport stages via the dedicated
+    // preview_import / prepare_import tools (or raw REST PlanImport cells);
+    // `commands` still does not accept it. CreateProject /
+    // UpdateProjectSettings / LinkMedia stage through the SAME
+    // prepare_translations / confirm_changeset tools as SetTranslation — see
+    // projectLifecycle and linkMedia below for their per-kind rules;
+    // PatchSettings has its own patch_settings tool (see projectSettings).
     commandKinds: ['SetTranslation', 'PlanImport', 'CreateProject', 'UpdateProjectSettings', 'LinkMedia'],
     // AQU-926 command registry: the role-agnostic catalog index (every
-    // agent-reachable command, incl. the newer PatchSettings / EmitEvents).
-    // Static floors only — dynamic checks (org overrides, per-event floors)
-    // run at prepare. Full per-command params docs are served by the in-app
-    // harness's describe_command tool; a matching MCP tool is planned (P3) —
-    // do not invent one from this index.
+    // agent-reachable command). Static floors only — dynamic checks (org
+    // overrides, per-key/per-event floors) run at prepare. Full per-command
+    // params docs come from the describe_command tool, which serves this same
+    // shared catalog on both the MCP and in-app surfaces.
     commands: {
       index: COMMAND_CATALOG.filter((c) => c.agentReachable).map((c) => ({
         kind: c.kind,
@@ -128,8 +131,27 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
       })),
       note:
         'Commands stage via prepare_translations `commands` (or REST .../changesets) and ' +
-        'commit via confirm_changeset. describe_command (in-app agent harness) serves each ' +
-        "command's full parameter doc; it is not yet an MCP tool.",
+        'commit via confirm_changeset. Call describe_command({ kind }) for any command\'s ' +
+        'full parameter doc — params, floors, gotchas, worked example — before hand-building ' +
+        'one. EmitEvents is REST-only for now (POST .../changesets); every other ' +
+        'agent-reachable kind is stageable over MCP.',
+    },
+    projectSettings: {
+      readTool: 'get_project_settings',
+      patchTool: 'patch_settings',
+      note:
+        'Read settings + their live version with get_project_settings, then change specific ' +
+        'keys with patch_settings { projectId, ops: [{ key, value }], ifMatchVersion } — a ' +
+        'field-scoped write: keys you do not name stay byte-identical. `ifMatchVersion` must ' +
+        'equal the live version at prepare AND commit (plan_stale on drift), so always read ' +
+        'before you patch. Floors: `terminology` needs the org termbase-edit floor (default ' +
+        'PROJECT_LEAD 500), every other key MAINTAINER 600. Policy keys governing agent ' +
+        'oversight itself (agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, ' +
+        'validationCount, validationCountAudio, allowSelfValidation, harmonize_min_role, ' +
+        'contributeToGlobalTm) are NEVER writable by an agent (permission_denied). ' +
+        'PatchSettings must be the sole command in its changeset, and — like every write — ' +
+        'applies only at confirm_changeset. Prefer it over the deprecated whole-blob ' +
+        'UpdateProjectSettings, which can clobber keys you never read.',
     },
     planImport: {
       stagingChannels: ['rest', 'mcp'],
@@ -195,7 +217,7 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
         'target per lane. Omitting the lane everywhere uses the default lane (the project\'s ' +
         'single targetLanguage) — existing single-language callers need no changes.',
       workflow: [
-        '1. Register the lanes once: stage UpdateProjectSettings with settings.targetLanes: ["es", "pt"] (merge into the existing settings blob — the write replaces it — and pass the live ifMatchVersion).',
+        '1. Register the lanes once: get_project_settings for the live version, then patch_settings { ops: [{ key: "targetLanes", value: ["es", "pt"] }], ifMatchVersion } — a field-scoped write, so the rest of the settings blob is untouched.',
         '2. Write per lane: each SetTranslation entry takes an optional laneId ("es" or "pt"). An unregistered laneId is rejected at prepare with validation_failed.',
         '3. Read per lane: read_content takes an optional lane argument — target cells are filtered to that lane (source cells are always included). Omit it to get every lane (each target row carries its targetLang).',
         '4. Importing a file can seed several lanes at once: PlanImport cells take variants: [{ laneId, content }] (REST-only).',
@@ -340,6 +362,52 @@ async function readHistory(
   return runRead(env, token, `${encodeURIComponent(projectId)}/cells/${encodeURIComponent(cellId)}/history`)
 }
 
+/** MCP mirror of REST GET .../projects/:projectId/settings (AQU-1176) — the
+ *  version read that makes patch_settings' ifMatchVersion usable. */
+async function readProjectSettings(
+  env: ExternalEnv,
+  token: string,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const projectId = str(args, 'projectId')
+  if (!projectId) return fail('validation_failed', 'projectId is required')
+  return runRead(env, token, `${encodeURIComponent(projectId)}/settings`)
+}
+
+// ── catalog lookup ───────────────────────────────────────────────────────────
+
+/** describe_command (AQU-1176): the MCP counterpart of the in-app agent
+ *  harness's describe_command, served from the SAME shared catalog
+ *  (db/shared/command-catalog.ts) so the two surfaces cannot document
+ *  different shapes for one command. Pure metadata — no credential, no DB. */
+function describeCommandTool(args: Record<string, unknown>): McpToolResult {
+  const kind = str(args, 'kind')
+  const agentReachable = COMMAND_CATALOG.filter((c) => c.agentReachable)
+  if (!kind) {
+    return fail(
+      'validation_failed',
+      `kind is required — one of: ${agentReachable.map((c) => c.kind).join(', ')}`,
+    )
+  }
+  const entry = agentReachable.find((c) => c.kind === kind)
+  if (!entry) {
+    return fail(
+      'validation_failed',
+      `unknown command kind "${kind}" — valid kinds: ${agentReachable.map((c) => c.kind).join(', ')}`,
+    )
+  }
+  return ok({
+    kind: entry.kind,
+    title: entry.title,
+    tier: entry.tier,
+    minRoleLevel: entry.minRoleLevel,
+    oneLiner: entry.oneLiner,
+    // The static floor above filters the index; prepare still applies the
+    // dynamic checks (org overrides, per-key/per-event floors).
+    params: entry.paramsDoc,
+  })
+}
+
 // ── delegated changesets ─────────────────────────────────────────────────────
 
 interface PrepareBody {
@@ -392,8 +460,22 @@ async function prepareTranslations(
     return fail('validation_failed', 'translations or commands must be a non-empty array')
   }
 
+  return stageCommands(env, token, projectId, commands, str(args, 'changesetId'), ctx)
+}
+
+/** Stage `commands` through the REST changesets route and shape the shared
+ *  prepare response every staging tool returns. The route's validateCommands
+ *  stays the single source of truth for per-kind shape/floor/scope rules — no
+ *  staging tool re-derives any of it. */
+async function stageCommands(
+  env: ExternalEnv,
+  token: string,
+  projectId: string,
+  commands: Record<string, unknown>[],
+  changesetId: string | undefined,
+  ctx?: Pick<ExecutionContext, 'waitUntil'>,
+): Promise<McpToolResult> {
   const body: Record<string, unknown> = { commands }
-  const changesetId = str(args, 'changesetId')
   if (changesetId) body.id = changesetId
 
   const req = new Request(`${EXTERNAL_BASE}/${encodeURIComponent(projectId)}/changesets`, {
@@ -421,6 +503,37 @@ async function prepareTranslations(
           nextStep: 'act mode: call confirm_changeset with this changesetId and digest to commit.',
         }),
   })
+}
+
+/** patch_settings (AQU-1176): the dedicated MCP door onto the PatchSettings
+ *  command. Only the argument marshalling lives here — per-key floors, the
+ *  policy-key denial, the sole-command rule, and the ifMatchVersion guard are
+ *  all enforced server-side by commands-patch-settings.ts at prepare/commit. */
+async function patchSettings(
+  env: ExternalEnv,
+  token: string,
+  args: Record<string, unknown>,
+  ctx?: Pick<ExecutionContext, 'waitUntil'>,
+): Promise<McpToolResult> {
+  const projectId = str(args, 'projectId')
+  if (!projectId) return fail('validation_failed', 'projectId is required')
+  if (!Array.isArray(args.ops) || args.ops.length === 0) {
+    return fail('validation_failed', 'ops must be a non-empty array of { key, value }')
+  }
+  if (typeof args.ifMatchVersion !== 'number') {
+    return fail(
+      'validation_failed',
+      'ifMatchVersion is required (a number) — read it from get_project_settings',
+    )
+  }
+
+  const command = {
+    kind: 'PatchSettings',
+    projectId,
+    ops: args.ops,
+    ifMatchVersion: args.ifMatchVersion,
+  }
+  return stageCommands(env, token, projectId, [command], str(args, 'changesetId'), ctx)
 }
 
 // ── delegated import parsing (preview_import / prepare_import) ───────────────
@@ -622,8 +735,14 @@ export async function callTool(
       return readContent(env, token, args)
     case 'read_history':
       return readHistory(env, token, args)
+    case 'get_project_settings':
+      return readProjectSettings(env, token, args)
+    case 'describe_command':
+      return describeCommandTool(args)
     case 'prepare_translations':
       return prepareTranslations(env, token, args, ctx)
+    case 'patch_settings':
+      return patchSettings(env, token, args, ctx)
     case 'preview_import':
       return runParseArtifact(env, token, args, false)
     case 'prepare_import':

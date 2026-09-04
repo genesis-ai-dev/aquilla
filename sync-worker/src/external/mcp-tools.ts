@@ -74,6 +74,88 @@ export const MCP_TOOLS: McpToolDef[] = [
     },
   },
   {
+    name: 'get_project_settings',
+    description:
+      'Read a project\'s settings blob and its LIVE settings version (AQU-1176). Returns ' +
+      '{ projectId, settings, version, updatedAt }. Call this BEFORE patch_settings: ' +
+      '`version` is the value you pass as that tool\'s ifMatchVersion, and `settings` shows ' +
+      'you the keys that already exist so you replace the right one. A project with no ' +
+      'settings row yet reads as {} at version 0 (patch against 0 to create it). Needs ' +
+      'VIEWER; scope errors mirror every other project read (not_found / scope_denied / ' +
+      'permission_denied). Args: projectId.',
+    inputSchema: {
+      type: 'object',
+      properties: { ...projectIdProp },
+      required: ['projectId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'describe_command',
+    description:
+      'Look up one changeset command\'s full parameter doc from the shared command catalog ' +
+      '— params, floors, gotchas, and a worked example — so you stage a correct plan instead ' +
+      'of guessing its shape. Takes no credential context and reads nothing from the ' +
+      'project, so it is free to call. Args: kind (e.g. "PatchSettings", "SetTranslation", ' +
+      '"LinkMedia", "EmitEvents", "CreateProject", "PlanImport"). An unknown kind returns ' +
+      'validation_failed listing the valid kinds; get_capabilities.commands.index has the ' +
+      'same list with each command\'s tier and static role floor.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        kind: { type: 'string', description: 'Command kind to describe, e.g. "PatchSettings".' },
+      },
+      required: ['kind'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'patch_settings',
+    description:
+      'Stage a FIELD-SCOPED project-settings change as a changeset (AQU-926 PatchSettings) — ' +
+      'the safe replacement for the deprecated whole-blob UpdateProjectSettings: keys you ' +
+      'do not name are left byte-identical, so you cannot clobber settings you never read. ' +
+      'Args: projectId, ops (array of { key, value } — top-level settings keys only; each op ' +
+      'replaces that key\'s value wholesale; one op per key, duplicates are rejected), ' +
+      'ifMatchVersion (the version from get_project_settings — stale values return ' +
+      'plan_stale at prepare AND again at commit), changesetId (optional UUIDv7 for ' +
+      'idempotency). JSON cannot express undefined, so a key cannot be deleted — write null. ' +
+      'Floors: `terminology` needs the org termbase-edit floor (default PROJECT_LEAD 500); ' +
+      'every other key needs MAINTAINER 600. The policy keys that govern agent oversight ' +
+      'itself (agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, ' +
+      'validationCount, validationCountAudio, allowSelfValidation, harmonize_min_role, ' +
+      'contributeToGlobalTm) are NEVER writable through any agent surface — an op naming one ' +
+      'returns permission_denied. PatchSettings must be the SOLE command in its changeset. ' +
+      'Returns { changesetId, summary, digest, mode, approvalUrl? } exactly like ' +
+      'prepare_translations — nothing is applied until confirm_changeset (ask mode: a human ' +
+      'approves at the approvalUrl first).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        ops: {
+          type: 'array',
+          description: 'Top-level settings keys to replace.',
+          items: {
+            type: 'object',
+            properties: {
+              key: { type: 'string', description: 'Top-level settings key, e.g. "targetLanes".' },
+              value: { description: 'Any JSON value; replaces that key wholesale.' },
+            },
+            required: ['key', 'value'],
+          },
+        },
+        ifMatchVersion: {
+          type: 'number',
+          description: 'Live settings version from get_project_settings.',
+        },
+        changesetId: { type: 'string', description: 'Optional client-supplied UUIDv7 for idempotency.' },
+      },
+      required: ['projectId', 'ops', 'ifMatchVersion'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'search_project',
     description:
       'Full-text search a project\'s cells (the read/grep primitive). Returns matching ' +

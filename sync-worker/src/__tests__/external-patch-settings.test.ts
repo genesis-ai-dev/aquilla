@@ -15,6 +15,7 @@ vi.mock('partyserver', () => ({
 }))
 
 import { handleExternalChangesetsRequest } from '../external/changesets-route'
+import { handleExternalReadRequest } from '../external/read-routes'
 import { POLICY_SETTINGS_KEYS } from '../external/commands-patch-settings'
 import { mintApiToken } from '../../../db/shared/api-credentials'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
@@ -216,6 +217,69 @@ describe('UpdateProjectSettings — policy guard re-check at commit (AQU-926)', 
     expect(rows[0].version).toBe(1)
     const cs = await tdb.rows<{ status: string }>('changesets')
     expect(cs[0].status).toBe('staged')
+  })
+})
+
+// AQU-1176: GET .../settings is the read that makes ifMatchVersion usable —
+// this is the whole loop an agent actually runs (read the live version, patch
+// ONE key with it, commit) asserted end to end.
+describe('PatchSettings — read-then-patch round trip', () => {
+  it('patching one key with the version from GET /settings leaves every other key byte-identical', async () => {
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+
+    const readRes = (await handleExternalReadRequest(
+      new Request(`https://w/api/v1/external/projects/${PROJECT}/settings`, {
+        headers: { Authorization: `Bearer ${maintainer.token}` },
+      }),
+      env,
+    ))!
+    expect(readRes.status).toBe(200)
+    const before = (await readRes.json()) as {
+      settings: Record<string, unknown>
+      version: number
+    }
+
+    const { res, body } = await prepare(
+      env,
+      maintainer.token,
+      patchCmd([{ key: 'brief', value: 'Translate plainly.' }], before.version),
+    )
+    expect(res.status).toBe(200)
+    const { res: commitRes } = await commit(env, maintainer.token, body.changeset.id)
+    expect(commitRes.status).toBe(200)
+
+    const afterRes = (await handleExternalReadRequest(
+      new Request(`https://w/api/v1/external/projects/${PROJECT}/settings`, {
+        headers: { Authorization: `Bearer ${maintainer.token}` },
+      }),
+      env,
+    ))!
+    const after = (await afterRes.json()) as {
+      settings: Record<string, unknown>
+      version: number
+    }
+
+    expect(after.settings.brief).toBe('Translate plainly.')
+    expect(after.version).toBe(before.version + 1)
+    // Byte-identical for everything the ops did not name.
+    for (const key of Object.keys(before.settings)) {
+      expect(JSON.stringify(after.settings[key]), key).toBe(JSON.stringify(before.settings[key]))
+    }
+  })
+
+  it('a stale ifMatchVersion (guessed instead of read) is rejected, not applied', async () => {
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+    const { res, body } = await prepare(
+      env,
+      maintainer.token,
+      patchCmd([{ key: 'brief', value: 'nope' }], 99),
+    )
+    expect(res.status).toBe(409)
+    expect(body.error.code).toBe('plan_stale')
+    const rows = await tdb.rows<{ settings: string }>('project_settings')
+    expect(JSON.parse(rows[0].settings).brief).toBeUndefined()
   })
 })
 

@@ -60,10 +60,11 @@ function apiMap(): Record<string, unknown> {
       'GET /api/v1/external/projects/:projectId/files/:fileId/cells': 'Read a file’s cells (source + target). Supports since/limit/cursor, and lane=<tag> to filter targets to one target-language lane (see multiLanguage).',
       'GET /api/v1/external/projects/:projectId/search?q=': 'Full-text search cells. Optional side=source|target.',
       'GET /api/v1/external/projects/:projectId/cells/:cellId/history': 'Append-only event history for one cell.',
+      'GET /api/v1/external/projects/:projectId/settings': 'Project settings blob + its live version: { projectId, settings, version, updatedAt }. Read this before staging a PatchSettings command — `version` is the ifMatchVersion that command requires. No settings row yet reads as {} at version 0.',
       'POST /api/v1/external/projects/:projectId/artifacts': 'Upload raw bytes (max 25MB). Headers: x-artifact-name (required), content-type, x-artifact-kind (source|audio).',
       'GET /api/v1/external/projects/:projectId/artifacts/:artifactId': 'Artifact metadata (/content for bytes, /inspect for a format sniff).',
       'POST /api/v1/external/projects/:projectId/artifacts/:artifactId/parse': 'Parse a source artifact with the built-in importers. Default = preview { fileName, fileType, totalCells, sampleCells, warnings }; body { "stage": true } also stages a PlanImport changeset linking the artifact. See "importing" below.',
-      'POST /api/v1/external/projects/:projectId/changesets': 'Prepare (stage) a changeset. Body { commands: [...], id?, autonomyMode? }. Command kinds: SetTranslation, PlanImport, CreateProject, UpdateProjectSettings, LinkMedia.',
+      'POST /api/v1/external/projects/:projectId/changesets': 'Prepare (stage) a changeset. Body { commands: [...], id?, autonomyMode? }. Command kinds: SetTranslation, PlanImport, CreateProject, PatchSettings, UpdateProjectSettings, LinkMedia, EmitEvents. See "settings" below for the PatchSettings shape; the MCP describe_command tool serves every kind\'s full parameter doc.',
       'GET /api/v1/external/projects/:projectId/changesets/:id': 'Changeset status/summary/digest/receipt/approvalUrl.',
       'POST /api/v1/external/projects/:projectId/changesets/:id/commit': 'Commit a prepared changeset. Idempotent; safe to retry.',
       'POST /api/v1/external/projects/:projectId/changesets/:id/discard': 'Discard a staged changeset.',
@@ -86,11 +87,22 @@ function apiMap(): Record<string, unknown> {
       unsupportedFormats:
         'docx, pptx, doc, html, xliff, tmx, usx, idml, paratext-project, zip need DOM/browser parsers and are not yet server-parseable — import them through the in-app Import dialog, or parse them yourself and stage raw PlanImport cells (POST .../changesets with a PlanImport command). A multi-book USFM artifact parses into one file per book; stage each book separately via resultIndex.',
     },
+    settings: {
+      note:
+        'Project settings are read with GET .../projects/:projectId/settings and changed with the PatchSettings command — a FIELD-SCOPED write: keys you do not name are left byte-identical, so you can never clobber settings you have not read. Prefer it over UpdateProjectSettings (deprecated whole-blob replace).',
+      workflow: [
+        `1. GET ${EXTERNAL_ROOT}/projects/:projectId/settings → { projectId, settings, version, updatedAt }.`,
+        `2. POST ${EXTERNAL_ROOT}/projects/:projectId/changesets with { "commands": [{ "kind": "PatchSettings", "projectId": "...", "ops": [{ "key": "targetLanes", "value": ["es", "pt"] }], "ifMatchVersion": <that version> }] } — one op per key (duplicates rejected); top-level keys only; each op replaces its key's value wholesale. JSON cannot carry undefined, so write null rather than deleting a key.`,
+        '3. Commit as usual (ask mode: a human approves at the approvalUrl first). `ifMatchVersion` is re-checked at commit — a racing writer surfaces as plan_stale, so re-read and re-prepare.',
+      ],
+      rules:
+        'PatchSettings must be the SOLE command in its changeset. Floors: `terminology` needs the org termbase-edit floor (default PROJECT_LEAD 500); every other key needs MAINTAINER 600. The policy keys that govern agent oversight itself — agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, validationCount, validationCountAudio, allowSelfValidation, harmonize_min_role, contributeToGlobalTm — are NEVER writable through any agent surface (permission_denied), and UpdateProjectSettings is likewise rejected if its blob would change one.',
+    },
     multiLanguage: {
       note:
         'A project can hold MULTIPLE target languages at once via target-language lanes. A lane is a language tag (e.g. "es", "pt") registered in the project settings array settings.targetLanes; every cell keeps one shared source plus one independent target per lane. Omitting the lane everywhere uses the default lane — single-language callers need no changes. Preconditions/drift are lane-scoped: edits to the same cell in different lanes never invalidate each other\'s changesets.',
       workflow: [
-        `1. Register the lanes once: stage { "kind": "UpdateProjectSettings", "projectId": "...", "settings": { ...existing settings, "targetLanes": ["es", "pt"] }, "ifMatchVersion": <live version> } (the write replaces the whole settings blob — merge, don't overwrite).`,
+        `1. Register the lanes once: GET .../settings for the live version, then stage { "kind": "PatchSettings", "projectId": "...", "ops": [{ "key": "targetLanes", "value": ["es", "pt"] }], "ifMatchVersion": <that version> } — field-scoped, so the rest of the settings blob is untouched (see "settings" above).`,
         '2. Write per lane: add "laneId": "es" (or "pt") to each SetTranslation command. An unregistered laneId is rejected at prepare with validation_failed.',
         `3. Read per lane: GET .../files/:fileId/cells?lane=es returns source cells plus only that lane's target cells; omit lane for all lanes (each target row carries its targetLang).`,
         '4. Importing a file can seed several lanes at once: each PlanImport cell takes "variants": [{ "laneId": "es", "content": "..." }, { "laneId": "pt", "content": "..." }].',

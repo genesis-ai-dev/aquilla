@@ -33,7 +33,7 @@
  *   { t: "focus.claim", cellId, leaseMs?: number }
  *   { t: "focus.renew", cellId }
  *   { t: "focus.release", cellId }
- *   { t: "presence.update", currentFileId?, focusedCell?, selection? }
+ *   { t: "presence.update", currentFileId?, focusedCell?, viewingCell?, selection? }
  *
  * This file is the *client*. The server-side DO ships in
  * `sync-worker/src/project-do.ts`. Both must remain wire-compatible.
@@ -61,7 +61,10 @@ const MAX_PRESENCE_DRAFT_LENGTH = 16_384
 
 export interface PresenceUser {
   userId: string
+  /** Lock-bearing: the cell this user holds the edit lease on. */
   focusedCell?: string
+  /** Non-lock-bearing: the row the user has selected, lease or not. */
+  viewingCell?: string
   currentFileId?: string
   selection?: TargetPresenceSelection
   ts: number
@@ -189,6 +192,7 @@ export type ProjectWsClientMessage =
       t: "presence.update"
       currentFileId?: string | null
       focusedCell?: string | null
+      viewingCell?: string | null
       selection?: TargetPresenceSelection | null
     }
 
@@ -746,6 +750,7 @@ function parsePresenceUser(u: unknown): PresenceUser | null {
     userId: r.userId,
     ts: r.ts,
     ...(typeof r.focusedCell === "string" ? { focusedCell: r.focusedCell } : {}),
+    ...(typeof r.viewingCell === "string" ? { viewingCell: r.viewingCell } : {}),
     ...(typeof r.currentFileId === "string" ? { currentFileId: r.currentFileId } : {}),
     ...(r.selection !== undefined ? { selection: r.selection } : {}),
   }

@@ -101,6 +101,7 @@ import {
   resolveSidebarAgentClick,
   reconcileContextualAfterRealtimeOpen,
   reconcileContextualDraftsAfterAppliedEvent,
+  buildGlosserSeeds,
 } from "./project-workspace-helpers"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
 import { ParallelPassagesPanel, type ParallelPanelMode, type ParallelPanelScope, type ReplaceAllPayload } from "./ParallelPassagesPanel"
@@ -364,7 +365,7 @@ import {
 import { shouldAutoValidateHumanEdit } from "@/lib/review/auto-validation"
 import { addConcept } from "@/lib/terminology/store"
 import type { Concept, ConceptDraft } from "@/lib/terminology/types"
-import { buildGlosser, type BtSeed, type Glosser } from "@/lib/completion/bt-glosser"
+import { buildGlosser, type Glosser } from "@/lib/completion/bt-glosser"
 import { memMark } from "@/lib/perf-log"
 import { buildAlignmentModel, type AlignmentModel } from "@/lib/completion/interlinear"
 import { resolveBtTargetEventId } from "@/lib/completion/bt-auto"
@@ -1463,6 +1464,10 @@ export function ProjectWorkspace() {
     corpusCells: readonly CellSummary[]
     backtranslationCache: Map<string, BacktranslationRecord>
     terminology: ProjectRecord["terminology"] | undefined
+    // AQU-207: confirmed/invalidated interlinear alignments seed the glosser
+    // too, so they belong in the cache key — otherwise a confirmation hands
+    // back the stale pre-confirmation glosser.
+    alignmentSeeds: ProjectRecord["alignmentSeeds"] | undefined
     glosser: Glosser
   } | null>(null)
   const alignmentModelCacheRef = useRef<{
@@ -4732,12 +4737,14 @@ export function ProjectWorkspace() {
   // Keep it cached for feature paths that actually need BT generation.
   const getGlosser = useCallback((): Glosser => {
     const terminology = project?.terminology
+    const alignmentSeeds = project?.alignmentSeeds
     const cached = glosserCacheRef.current
     if (
       cached &&
       cached.corpusCells === corpusCells &&
       cached.backtranslationCache === backtranslationCache &&
-      cached.terminology === terminology
+      cached.terminology === terminology &&
+      cached.alignmentSeeds === alignmentSeeds
     ) {
       return cached.glosser
     }
@@ -4745,45 +4752,23 @@ export function ProjectWorkspace() {
     const pairs = corpusCells
       .filter((c) => c.original?.trim() && c.translated?.trim())
       .map((c) => ({ source: c.original!, target: c.translated }))
-    // High-weight seeds from previous user-corrected BTs stored in the cache.
-    // Corrected BTs (saved via onSaveBacktranslation) are re-fed as seeds so
-    // future glosses reflect the reviewer's intent.
-    const seeds: BtSeed[] = []
-    const corpusByCellId = new Map(corpusCells.map((c) => [c.id, c]))
-    for (const record of backtranslationCache.values()) {
-      const cell = corpusByCellId.get(record.cellId)
-      if (!cell?.translated) continue
-      if (record.targetEventId && cell.targetEventId && record.targetEventId !== cell.targetEventId) {
-        continue
-      }
-      seeds.push({
-        source: record.btText,
-        target: record.forText || cell.translated,
-        weight: record.polished === false ? 5 : 2,
-      })
-    }
-    // Seed from project termbase: active concepts feed preferred/admitted/forbidden
-    // renderings into the glosser so terminology constraints propagate to BTs.
-    for (const concept of project?.terminology ?? []) {
-      if (concept.status !== "active") continue
-      for (const rendering of concept.renderings) {
-        const weight =
-          rendering.status === "preferred" ? 3 :
-          rendering.status === "admitted" ? 1 :
-          -3 // forbidden
-        seeds.push({ source: concept.sourceTerm, target: rendering.rendering, weight })
-      }
-    }
+    const seeds = buildGlosserSeeds({
+      corpusCells,
+      backtranslationCache,
+      terminology,
+      alignmentSeeds,
+    })
     const g = buildGlosser(pairs, seeds)
     memMark(`glosser.build(${pairs.length}p)`)
     glosserCacheRef.current = {
       corpusCells,
       backtranslationCache,
       terminology,
+      alignmentSeeds,
       glosser: g,
     }
     return g
-  }, [corpusCells, backtranslationCache, project?.terminology])
+  }, [corpusCells, backtranslationCache, project?.terminology, project?.alignmentSeeds])
 
   // Build the interlinear alignment model lazily. It is only used inside an
   // expanded row's BT tab, so constructing it on workspace open just burns heap

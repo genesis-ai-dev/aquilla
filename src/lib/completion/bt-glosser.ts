@@ -24,6 +24,47 @@ export interface Glosser {
   gloss(target: string): string
 }
 
+/**
+ * AQU-207: weight given to one confirmed interlinear alignment when it is fed
+ * back into the glosser as a seed.
+ *
+ * Calibrated against the other seed sources in the workspace so an explicit
+ * per-token confirmation outranks an "admitted" rendering (1) but stays below a
+ * "preferred" one (3) — a single word link is a narrower claim than a termbase
+ * entry. `buildAlignmentModel` multiplies every seed by `SEED_MULTIPLIER`, so
+ * the effective score contribution is ±10 against a corpus observation of ~1.
+ */
+export const ALIGNMENT_SEED_BT_WEIGHT = 2
+
+/**
+ * AQU-207: adapt confirmed/invalidated interlinear alignments into glosser seeds.
+ *
+ * `AlignmentSeed` and `BtSeed` describe the same relation with different field
+ * names — `srcToken`/`tgtToken` vs `source`/`target` — and both are oriented
+ * source-language → target-language, so the mapping is positional, not a swap.
+ * Sign carries through: a confirmed link boosts the alignment, an invalidated
+ * one penalizes it.
+ *
+ * This is the seam that makes a confirm in the interlinear panel actually move
+ * subsequent statistical BT output; without it the seeds only ever fed
+ * `interlinear.ts`'s own model and the BT ignored the user's corrections.
+ */
+export function btSeedsFromAlignmentSeeds(
+  seeds: readonly import("./interlinear").AlignmentSeed[],
+): BtSeed[] {
+  const out: BtSeed[] = []
+  for (const seed of seeds) {
+    if (seed.weight === 0) continue
+    if (!seed.srcToken?.trim() || !seed.tgtToken?.trim()) continue
+    out.push({
+      source: seed.srcToken,
+      target: seed.tgtToken,
+      weight: seed.weight * ALIGNMENT_SEED_BT_WEIGHT,
+    })
+  }
+  return out
+}
+
 // ── Internal types ────────────────────────────────────────────────────────────
 
 interface Alignment {

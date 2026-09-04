@@ -38,6 +38,20 @@ vi.mock("@/hooks/useProjectCells", () => ({
 const patchSettings = vi.fn().mockResolvedValue({ kind: "ok" })
 let mockProject: ProjectRecord
 let mockProjectLoading = false
+// AQU-1006 follow-up: concepts come from the sync-worker projection via
+// useConcepts, not from `project.terminology`. These tests keep seeding
+// `mockProject.terminology` as their fixture and this mock feeds that same
+// array through the new hook, so each test's INTENT is unchanged — only the
+// transport moved.
+vi.mock("@/hooks/useConcepts", () => ({
+  useConcepts: vi.fn(() => ({
+    concepts: mockProject?.terminology ?? [],
+    isLoading: false,
+    error: null,
+    refresh: vi.fn(async () => {}),
+  })),
+}))
+
 vi.mock("@/hooks/useProject", () => ({
   useProject: vi.fn(() => ({
     project: mockProject,

@@ -160,7 +160,7 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { emitCastAssign, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, enqueueEvents } from "@/lib/sync/events-emit"
+import { emitCastAssign, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, enqueueEvents } from "@/lib/sync/events-emit"
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
 import { resolveTimingLocked } from "@/lib/sync/project-settings"
@@ -362,8 +362,8 @@ import {
   validateIdmlEditorCommit,
 } from "@/lib/richtext/idml-editor"
 import { shouldAutoValidateHumanEdit } from "@/lib/review/auto-validation"
-import { addConcept } from "@/lib/terminology/store"
-import type { Concept, ConceptDraft } from "@/lib/terminology/types"
+import { useConcepts } from "@/hooks/useConcepts"
+import type { ConceptDraft } from "@/lib/terminology/types"
 import { buildGlosser, type BtSeed, type Glosser } from "@/lib/completion/bt-glosser"
 import { memMark } from "@/lib/perf-log"
 import { buildAlignmentModel, type AlignmentModel } from "@/lib/completion/interlinear"
@@ -1201,6 +1201,21 @@ export function ProjectWorkspace() {
     project?.origin?.kind === "git" ? project?.origin.gitlabProjectId : undefined,
   ])
 
+  // AQU-1006 follow-up: this project's concepts, read from the sync-worker
+  // projection. `project.terminology` (the settings-blob key) is retired — it
+  // could only express "here is the entire termbase", so every add rewrote the
+  // whole array from a stale snapshot and concurrent adds destroyed each other.
+  //
+  // Declared HIGH in the component, directly after `getTokenForFile`, because
+  // `editorProject` below folds these concepts onto the record it hands the
+  // editor. `refreshConcepts` runs after each term.* write acks so blots track
+  // the termbase without a reload.
+  const { concepts: localConcepts, refresh: refreshConcepts } = useConcepts({
+    projectId: project?.id ?? null,
+    getToken: getTokenForFile,
+    tokenReady: !!frontierSession?.jwt,
+  })
+
   // Project-AWARE fetcher for the outbox flusher. The outbox is global across
   // every project the user touches, so the flusher must mint a token for each
   // event's OWN projectId — not the workspace's active project. Minting against
@@ -1814,15 +1829,25 @@ export function ProjectWorkspace() {
     deepLinkLaneAppliedRef.current = true
     if (resolved !== null) setActiveLane(resolved)
   }, [projectId, project, searchParams, availableLanes, setActiveLane])
+  // AQU-1006 follow-up: `terminology` on this record is now sourced from the
+  // CONCEPTS PROJECTION, never from project settings.
+  //
+  // This is the one adapter seam where the projection re-enters the record the
+  // editor already threads six layers deep to its rows (EditorRow reads
+  // `project.terminology` for the term-lookup popover and the blots). Folding
+  // it on here — rather than adding a parallel `concepts` prop to every layer
+  // — keeps EditorTable's internal contract untouched.
+  //
+  // THE FIELD IS READ-ONLY FROM HERE DOWN. Nothing may write it: every
+  // terminology mutation is a `term.*` event (see events-emit.ts). Writing
+  // this array back through patchSettings is precisely the bug this change set
+  // removed.
   const editorProject = useMemo<ProjectRecord | null>(() => {
     if (!project) return null
     const sourceLanguage = activeSourceLanguage ?? project.sourceLanguage
     const targetLanguage = activeLaneTargetLanguage ?? project.targetLanguage
-    if (sourceLanguage === project.sourceLanguage && targetLanguage === project.targetLanguage) {
-      return project
-    }
-    return { ...project, sourceLanguage, targetLanguage }
-  }, [activeSourceLanguage, activeLaneTargetLanguage, project])
+    return { ...project, sourceLanguage, targetLanguage, terminology: localConcepts }
+  }, [activeSourceLanguage, activeLaneTargetLanguage, project, localConcepts])
   const fileMeta = useFileMeta(activeFileId, activeSourceLanguage, activeLaneTargetLanguage, {
     sourceTextDirection: activeFile?.sourceTextDirection,
     targetTextDirection: activeFile?.targetTextDirection,
@@ -3862,6 +3887,7 @@ export function ProjectWorkspace() {
     // AQU-609: every consumer of this instance's `rules` evaluates against the
     // active lane's cell view, so lane-scoped rules for other lanes drop here.
     activeLane,
+    localConcepts,
   )
   const {
     comments: allProjectComments,
@@ -4731,7 +4757,9 @@ export function ProjectWorkspace() {
   // target-ngram x source-ngram graph even when the user only wanted to scroll.
   // Keep it cached for feature paths that actually need BT generation.
   const getGlosser = useCallback((): Glosser => {
-    const terminology = project?.terminology
+    // AQU-1006 follow-up: from the concepts projection, not the retired
+    // `project.terminology` settings key.
+    const terminology = localConcepts
     const cached = glosserCacheRef.current
     if (
       cached &&
@@ -4764,7 +4792,7 @@ export function ProjectWorkspace() {
     }
     // Seed from project termbase: active concepts feed preferred/admitted/forbidden
     // renderings into the glosser so terminology constraints propagate to BTs.
-    for (const concept of project?.terminology ?? []) {
+    for (const concept of localConcepts) {
       if (concept.status !== "active") continue
       for (const rendering of concept.renderings) {
         const weight =
@@ -4783,7 +4811,7 @@ export function ProjectWorkspace() {
       glosser: g,
     }
     return g
-  }, [corpusCells, backtranslationCache, project?.terminology])
+  }, [corpusCells, backtranslationCache, localConcepts])
 
   // Build the interlinear alignment model lazily. It is only used inside an
   // expanded row's BT tab, so constructing it on workspace open just burns heap
@@ -4931,7 +4959,7 @@ export function ProjectWorkspace() {
         // controlled-vocabulary source headwords for the renderings the
         // translator chose. The service derives the relevant hints from
         // the cell's source text; behavior is unchanged when nothing matches.
-        concepts: project?.terminology ?? [],
+        concepts: localConcepts,
         sourceText: effectiveSourceText(cell),
       })
       if (!btText.trim()) throw new Error("The model returned an empty back-translation.")
@@ -4942,7 +4970,7 @@ export function ProjectWorkspace() {
     } finally {
       setBacktranslatingState((prev) => { const n = new Set(prev); n.delete(cellId); return n })
     }
-  }, [isBacktranslationConfigured, project?.completionSettings, project?.sourceLanguage, project?.targetLanguage, project?.terminology, frontierSession, persistBt, backtranslationCache, corpusCells, getGlosser])
+  }, [isBacktranslationConfigured, project?.completionSettings, project?.sourceLanguage, project?.targetLanguage, localConcepts, frontierSession, persistBt, backtranslationCache, corpusCells, getGlosser])
 
   /**
    * On-demand statistical gloss for the BT tab's collapsed "statistical
@@ -4975,17 +5003,29 @@ export function ProjectWorkspace() {
       id: `term-save:${crypto.randomUUID()}`,
     })
     try {
-      const payload: Omit<Concept, "id" | "createdAt"> = {
+      // AQU-1006 follow-up: ONE `term.create` event, not a whole-termbase
+      // PATCH. The previous implementation rebuilt `project.terminology` from
+      // this component's snapshot and wrote the entire array back, so a
+      // concurrent add by anyone else was silently overwritten — the 2026-09-04
+      // outage. The concept id is minted here and is the projection's primary
+      // key, which also makes a retried outbox flush idempotent.
+      const conceptId = crypto.randomUUID()
+      await emitTermCreate({
+        projectId: project.id,
+        conceptId,
         sourceTerm: trimmed,
         renderings: rendering ? [{ rendering, status: "preferred" }] : [],
+        // No rendering means nothing to enforce, so the concept lands as a
+        // SUGGESTION. This is also why "I added a term and no blot appeared"
+        // was the demo's other complaint: a draft compiles to zero rules
+        // (see compileConceptsToRules). The popover now says so explicitly.
         status: rendering ? "active" : "draft",
-        createdBy: currentUsername,
         ...(draft.caseSensitive ? { caseSensitive: true } : {}),
-      }
-      const updated = addConcept(project, payload)
-      const created = (updated.terminology ?? []).at(-1)
-      const failure = describePatchFailure(await patchSettings({ terminology: updated.terminology ?? [] }))
-      if (failure) throw new Error(failure)
+        author: currentUsername,
+      })
+      const created = { id: conceptId }
+      // Re-read the projection so the new term's blot appears without a reload.
+      await refreshConcepts()
       toast.update(toastId, {
         type: "success",
         title: t("terminology.addConcept.savedToast", { term: trimmed }),
@@ -5005,7 +5045,7 @@ export function ProjectWorkspace() {
         title: err instanceof Error ? err.message : t("terminology.addConcept.saveFailed"),
       })
     }
-  }, [project, currentUsername, patchSettings, t, navigate])
+  }, [project, currentUsername, refreshConcepts, t, navigate])
 
   // AQU-754 follow-up: when the caller is on a synced project below the
   // terminology write floor, open the add-term popover pre-blocked (inputs
@@ -5433,7 +5473,7 @@ export function ProjectWorkspace() {
         fileId: activeFileId,
         cells: getActiveCells(),
         rules,
-        concepts: project?.terminology ?? [],
+        concepts: localConcepts,
       })
       // Bail if the active file changed mid-run — don't clobber the new file's
       // state with this (now stale) file's findings.
@@ -5442,7 +5482,7 @@ export function ProjectWorkspace() {
     } finally {
       setCheckRunning(false)
     }
-  }, [activeFileId, checkRunning, getActiveCells, rules, project?.terminology])
+  }, [activeFileId, checkRunning, getActiveCells, rules, localConcepts])
 
   // A check run describes one file's cells; switching files invalidates it.
   useEffect(() => {

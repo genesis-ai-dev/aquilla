@@ -21,7 +21,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 
-import { WAV_SAMPLE_RATE } from "@/lib/audio/recording-limits"
+import { getOutputContext, resetOutputContextForTests } from "@/lib/audio/output-context"
 
 /** Ticks before zero. Exported because the film's rolling lead-in has to cover
  *  exactly this much runway — the picture reaches the line's first frame as the
@@ -36,33 +36,23 @@ export interface UseCountdown {
   cancel: () => void
 }
 
-// ONE context for every beep, opened on the first and NEVER closed. It used to
-// be a context per beep, closed when its tone ended — three open/close cycles
-// of the output device inside the three seconds before every take. Opening and
-// closing audio contexts is what makes the browser/OS reconfigure the shared
-// audio device, and on combined input/output hardware (headsets) that churn
-// reaches the MICROPHONE: measured in a take as a degraded head, a hard gap
-// and a fade-in that ate the operator's first word. Pinned to the capture rate
-// so this context can never be the rate disagreement that forces the restart.
-let beepCtx: AudioContext | null = null
+// The beep context now lives in lib/audio/output-context — SAME context, same
+// never-closed lifetime, same capture-rate pinning, just shared. The reasoning
+// that produced those rules (device churn reaching the mic and eating the head
+// of a take) is written out there. Sharing it also means the context is usually
+// created at first PLAYBACK, minutes before any mic opens, rather than being
+// constructed during the countdown with the mic already hot.
 
 /** The singleton outlives any one test's AudioContext fake — a test that
  *  counts beeps must drop it first, or it beeps into an earlier test's fake. */
 export function resetCountdownBeepContextForTests(): void {
-  beepCtx = null
+  resetOutputContextForTests()
 }
 
 function beepOnce(freq: number, durationMs: number) {
   try {
-    if (!beepCtx || beepCtx.state === "closed") {
-      const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
-      try {
-        beepCtx = new Ctx({ sampleRate: WAV_SAMPLE_RATE })
-      } catch {
-        beepCtx = new Ctx()
-      }
-    }
-    const ctx = beepCtx
+    const ctx = getOutputContext()
+    if (!ctx) return
     if (ctx.state === "suspended") void ctx.resume()
     const osc = ctx.createOscillator()
     const gain = ctx.createGain()

@@ -74,11 +74,6 @@
       "count": 1
     }
   },
-  "src/components/EditorTable.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 7
-    }
-  },
   "src/components/ErrorBoundary.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 4
@@ -111,7 +106,7 @@
   },
   "src/components/ImportDialog.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 27
+      "count": 25
     }
   },
   "src/components/InactiveProjectBanner.tsx": {
@@ -232,11 +227,6 @@
   "src/components/ProjectSettings/SourceLinkSection.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 5
-    }
-  },
-  "src/components/ProjectWorkspace.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 9
     }
   },
   "src/components/RuleEditor.tsx": {
@@ -417,11 +407,6 @@
   "src/components/import/GoogleDrivePanel.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 4
-    }
-  },
-  "src/components/import/LabelImportPanel.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 2
     }
   },
   "src/components/import/MaculaPanel.tsx": {

@@ -26,6 +26,7 @@ import {
   type Concept,
 } from "../lib/contextual/project-context"
 import { computeContextReadiness } from "../lib/contextual/readiness"
+import { rulesForLane } from "../lib/agent/lint"
 
 const db = env.AQUILLA_PG
 
@@ -350,5 +351,36 @@ describe("computeContextReadiness", () => {
       expect(item.detail.length).toBeGreaterThan(20)
       expect(item.label.length).toBeGreaterThan(0)
     }
+  })
+})
+
+// AQU-609: lane-scoped rules cross the SPA→worker boundary as plain settings
+// JSON. WHY: the SPA writes `scope: "lane"` + `lane` on TranslationRule; if
+// parsing dropped those fields or the tick-side filter mismatched the client
+// predicate, a French-only rule would either lint every lane's drafts (false
+// violations) or none (silent non-enforcement).
+describe("lane-scoped authored rules (AQU-609)", () => {
+  it("passes scope/lane through loadProjectContext and rulesForLane filters by run lane", async () => {
+    await seedSettings("proj-ctx-lanes", {
+      targetLanes: ["fr", "es"],
+      rules: [
+        // Real producer shapes: what RuleEditor/useRules write into settings.
+        { id: "all", name: "Everywhere", enabled: true, severity: "minor", source: "user", scope: "project", check: { type: "target-forbids", targetPattern: "x" } },
+        { id: "fr-only", name: "French only", enabled: true, severity: "minor", source: "user", scope: "lane", lane: "fr", check: { type: "target-forbids", targetPattern: "y" } },
+        { id: "default-only", name: "Default lane only", enabled: true, severity: "minor", source: "user", scope: "lane", lane: "", check: { type: "target-forbids", targetPattern: "z" } },
+      ],
+    })
+
+    const ctx = await loadProjectContext(db, "proj-ctx-lanes")
+    // Parsing must not strip the scoping fields.
+    expect(ctx.authoredRules.map((r) => [r.id, r.scope, r.lane])).toEqual([
+      ["all", "project", undefined],
+      ["fr-only", "lane", "fr"],
+      ["default-only", "lane", ""],
+    ])
+
+    expect(rulesForLane(ctx.authoredRules, "fr").map((r) => r.id)).toEqual(["all", "fr-only"])
+    expect(rulesForLane(ctx.authoredRules, "es").map((r) => r.id)).toEqual(["all"])
+    expect(rulesForLane(ctx.authoredRules, "").map((r) => r.id)).toEqual(["all", "default-only"])
   })
 })

@@ -41,6 +41,8 @@ not a micro-spec farm.
 | AI | Sparkle fills a cell | `e2e/specs/ai/completion.smoke.spec.ts` |
 | Collab | File propagates alice → bob | `e2e/specs/collab/file-propagation.smoke.spec.ts` |
 | Collab | Concurrent cell edit propagates alice → bob | `e2e/specs/collab/concurrent-edit.smoke.spec.ts` |
+| Collab | Same-cell concurrent edits on a throttled (3G-like) network converge, keep both edits in history, stay stable, and the bumped edit is promotable | `e2e/specs/collab/concurrent-edit-throttled.smoke.spec.ts` |
+| Collab | One editor's successive commits chain linearly (same focus session, across a reload, and from a second tab of the same user) so ordinary typing is never refused as bumped | `e2e/specs/collab/commit-chain-linear.smoke.spec.ts` |
 | Collab | Member presence indicators | `e2e/specs/collab/member-presence-popover.smoke.spec.ts` |
 | Collab | BT edit locked for reviewer | `e2e/specs/collab/bt-edit-locked-for-reviewer.smoke.spec.ts` |
 | Collab | Cross-user comment | `e2e/specs/collab/cross-user-comment.smoke.spec.ts` |
@@ -120,6 +122,10 @@ UI chrome that used to be one smoke file per click is covered under
 - Back-translation generation, editing, stale/provenance, and statistical-pairs comparison (`BacktranslationPanel.test.tsx`); the cross-user edit lock remains in the smoke keep-list
 - Admin console tab clicks, formatting Ctrl+B alone, breadcrumb-only nav
 - Milestone split-view toggle (one whole division at a time vs continuous file) and pager (`ChapterNavigator.test.tsx`, `EditorTable.splitMilestones.test.tsx`)
+- Clone-voice button on a source cell opens the New voice modal in place without switching to the Voices dock tab (`CloneVoiceModalHost.test.tsx`, `CellVoicePanel.chip.test.tsx`)
+- New-voice Kokoro speaker dropdown grouped by project target language, with a playable sample per voice (`NewVoiceModal.test.tsx`)
+- AI model consent dialog: Just Kokoro starts that model's download (Enable all is not required) (`AiModelConsentDialog.test.tsx`)
+- Mobile sidebar sheet chrome (org + editor dock): header PanelLeft opens a left sheet — RTL in `AppShell.test.tsx`. Org navigate-and-close also has `e2e/specs/orgs/mobile-sidebar-sheet.smoke.spec.ts`
 
 When you change one of these surfaces, update the matching `*.test.tsx`. If RTL
 is missing, add it — then delete any leftover smoke, do not park it as non-smoke.

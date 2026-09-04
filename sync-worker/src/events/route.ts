@@ -25,17 +25,19 @@ import type { RealtimeMessage, ProjectionTable } from './realtime'
 import { authorize } from './authorize'
 import { dispatchEvent, type DispatchOutcome } from './dispatch'
 import { allocateSeqRange, buildSettleSeqRangeStmt } from './event-insert'
+import { CELL_ROW_COLUMNS, mapCellRow, type CellRowOut, type CellRowRaw } from './cell-row-serialize'
 import {
   CHAIN_MUTATING_KINDS,
   fileCountersRecomputeStmt,
+  isChainArbitrated,
   isChainMutatingKind,
+  laneOfEvent,
   type PersistedEvent,
 } from './event-projection'
 import {
   GENESIS_PARENT_KEY,
   eventQualifiedParentKey,
   qualifyParentKeyBase,
-  readClaimWinners,
   slotKey,
   type ChainSlot,
 } from './chain-claims'
@@ -234,6 +236,72 @@ async function notifyLiveDownstreamsOfUpstreamChanges(
   await Promise.all(sends)
 }
 
+/**
+ * Cell-content kinds whose `event.applied` frame carries `serverSeq` + the
+ * cell's current projected `rows`: the chain-mutating kinds (create / commit /
+ * delete / reorder on either side) plus the validation pair, which flips
+ * `cells.validated` without advancing the chain head.
+ */
+function isEventAppliedRowsKind(kind: string): boolean {
+  return isChainMutatingKind(kind) || kind === 'cell.validate' || kind === 'cell.unvalidate'
+}
+
+/** Above this many distinct cells in one request, `rows` is omitted from every
+ * frame (clients fall back to the by-ids refetch) — bounds the DO payload. */
+export const EVENT_APPLIED_ROWS_MAX_CELLS = 200
+
+function cellRowsKey(project: string, file: string, cell: string): string {
+  return `${project}|${file}|${cell}`
+}
+
+/**
+ * ONE query for the current projected rows of every cell touched by the
+ * committed cell-content events. Returns null when nothing qualifies (no
+ * SELECT runs) or when the request exceeded EVENT_APPLIED_ROWS_MAX_CELLS.
+ * Rows for an event that lost its chain slot are still the cell's CURRENT
+ * head — that is what the client should converge on.
+ */
+async function readEventAppliedRows(
+  db: AquillaDb,
+  entries: ReadonlyArray<{ eventFrame: { kind: string; project: string; file?: string; cell?: string } }>,
+): Promise<Map<string, CellRowOut[]> | null> {
+  const slots = new Map<string, [string, string, string]>()
+  for (const { eventFrame: f } of entries) {
+    if (!f.file || !f.cell || !isEventAppliedRowsKind(f.kind)) continue
+    slots.set(cellRowsKey(f.project, f.file, f.cell), [f.project, f.file, f.cell])
+  }
+  if (slots.size === 0) return null
+  if (slots.size > EVENT_APPLIED_ROWS_MAX_CELLS) {
+    console.warn(
+      `[events/route] event.applied rows omitted: ${slots.size} cells > ${EVENT_APPLIED_ROWS_MAX_CELLS} cap`,
+    )
+    return null
+  }
+  const tuples = [...slots.values()]
+  const placeholders = tuples.map(() => '(?, ?, ?)').join(', ')
+  const out = new Map<string, CellRowOut[]>()
+  try {
+    const result = await db
+      .prepare(
+        `SELECT ${CELL_ROW_COLUMNS}, project_id, file_id FROM cells WHERE (project_id, file_id, cell_id) IN (${placeholders})`,
+      )
+      .bind(...tuples.flat())
+      .all<CellRowRaw & { project_id: string; file_id: string }>()
+    for (const raw of result.results) {
+      const key = cellRowsKey(raw.project_id, raw.file_id, raw.cell_id)
+      const bucket = out.get(key)
+      const mapped = mapCellRow(raw)
+      if (bucket) bucket.push(mapped)
+      else out.set(key, [mapped])
+    }
+  } catch (err) {
+    // Best-effort: without rows the client refetches exactly as before.
+    console.warn('[events/route] event.applied rows read failed:', err)
+    return null
+  }
+  return out
+}
+
 export interface EventsRouteEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
@@ -279,12 +347,13 @@ interface StaleEntry {
 
 // ── Request-scoped prefetches (PERF-2) ─────────────────────────────────────
 // The per-event loop used to issue 1–3 serial SELECTs per event (idempotency,
-// AD-2 chain pre-check, F5 source pin) — ~2N+ Hyperdrive round-trips per
-// flush. All of these reads see only state committed BEFORE this request
-// (pending statements commit after the loop), so hoisting them into one
-// batched SELECT per concern is semantics-preserving. The only window that
-// moves is against concurrent EXTERNAL writers, which the pre-checks never
-// arbitrated anyway — the in-transaction chain claim (chain-claims.ts) does.
+// AD-2 chain pre-check, F5 source pin, foreign-comment ownership,
+// self-validation last-editor) — ~2N+ Hyperdrive round-trips per flush. All
+// of these reads see only state committed BEFORE this request (pending
+// statements commit after the loop), so hoisting them into one batched
+// SELECT per concern is semantics-preserving. The only window that moves is
+// against concurrent EXTERNAL writers, which the pre-checks never arbitrated
+// anyway — the in-transaction chain claim (chain-claims.ts) does.
 
 /** Which of `ids` already exist in `events` — one SELECT per request. */
 async function readExistingEventIds(
@@ -403,18 +472,32 @@ async function prefetchChainWinners(
   return winners
 }
 
+/** Key of one `cells` row's chain head: (project, file, cell, side, lane). */
+function headKeyOf(
+  projectId: string,
+  fileId: string,
+  cellId: string,
+  kind: string,
+  payload: unknown,
+): string {
+  const side = kind.startsWith('source.') ? 'source' : 'target'
+  return `${cellKeyOf(projectId, fileId, cellId)}\0${side}\0${laneOfEvent(kind, payload)}`
+}
+
 /**
- * Current source-side `cells.event_id` per (project, file, cell) — the
- * batched F5 stale-source pre-check (advisory UX only: pinned commits are
- * accepted + projected regardless; the flag just drives the client's
- * "source changed" banner).
+ * Current `cells.event_id` per (project, file, cell, side, lane) for every
+ * cell touched by a chain-mutating event in this request, in ONE SELECT.
+ * Keyed by `headKeyOf()`. Drives (a) the AQU-1154 head compare-and-swap
+ * pre-check and (b) the F5 stale-source pre-check (source side, lane '' —
+ * advisory UX only: pinned commits are accepted + projected regardless; the
+ * flag just drives the client's "source changed" banner).
  */
-async function prefetchSourceEventIds(
+async function prefetchCellHeads(
   db: AquillaDb,
   cells: readonly CellKey[],
 ): Promise<Map<string, string>> {
-  const sources = new Map<string, string>()
-  if (cells.length === 0) return sources
+  const heads = new Map<string, string>()
+  if (cells.length === 0) return heads
 
   const placeholders = cells.map(() => '(?, ?, ?)').join(', ')
   const binds: unknown[] = []
@@ -422,17 +505,26 @@ async function prefetchSourceEventIds(
 
   const { results } = await db
     .prepare(
-      `SELECT project_id, file_id, cell_id, event_id FROM cells
-       WHERE side = 'source'
-         AND (project_id, file_id, cell_id) IN (${placeholders})`,
+      `SELECT project_id, file_id, cell_id, side, target_lang, event_id FROM cells
+       WHERE (project_id, file_id, cell_id) IN (${placeholders})`,
     )
     .bind(...binds)
-    .all<{ project_id: string; file_id: string; cell_id: string; event_id: string }>()
+    .all<{
+      project_id: string
+      file_id: string
+      cell_id: string
+      side: string
+      target_lang: string
+      event_id: string
+    }>()
 
   for (const r of results) {
-    sources.set(cellKeyOf(r.project_id, r.file_id, r.cell_id), r.event_id)
+    heads.set(
+      `${cellKeyOf(r.project_id, r.file_id, r.cell_id)}\0${r.side}\0${r.target_lang}`,
+      r.event_id,
+    )
   }
-  return sources
+  return heads
 }
 
 /**
@@ -471,6 +563,61 @@ async function prefetchLiveMirrorLocks(
     locked.add(cellKeyOf(r.project_id, r.file_id, r.cell_id))
   }
   return locked
+}
+
+/**
+ * Author of each `comments` row named by `commentIds`, in ONE SELECT. Backs
+ * the foreign-comment-ownership check (comment.edit/delete/resolve,
+ * cell.unvalidate with targetUsername) that previously issued one SELECT
+ * per event.
+ */
+async function prefetchCommentAuthors(
+  db: AquillaDb,
+  commentIds: ReadonlySet<string>,
+): Promise<Map<string, string>> {
+  const authors = new Map<string, string>()
+  if (commentIds.size === 0) return authors
+  const list = [...commentIds]
+  const placeholders = list.map(() => '?').join(', ')
+  const { results } = await db
+    .prepare(`SELECT comment_id, author_id FROM comments WHERE comment_id IN (${placeholders})`)
+    .bind(...list)
+    .all<{ comment_id: string; author_id: string }>()
+  for (const r of results) authors.set(r.comment_id, r.author_id)
+  return authors
+}
+
+/**
+ * `last_editor` of each target cell in `cells`, in ONE SELECT. Backs the
+ * FRO-189 self-validation check (cell.validate with allowSelfValidation
+ * disabled) that previously issued one SELECT per event. Fetched for every
+ * cell.validate candidate regardless of the project's allowSelfValidation
+ * setting — a superset read is cheap and the setting isn't known until the
+ * per-event loop reads readProjectSettings (memoized separately).
+ */
+async function prefetchLastEditors(
+  db: AquillaDb,
+  cells: readonly CellKey[],
+): Promise<Map<string, string | null>> {
+  const editors = new Map<string, string | null>()
+  if (cells.length === 0) return editors
+
+  const placeholders = cells.map(() => '(?, ?, ?)').join(', ')
+  const binds: unknown[] = []
+  for (const c of cells) binds.push(c.projectId, c.fileId, c.cellId)
+
+  const { results } = await db
+    .prepare(
+      `SELECT project_id, file_id, cell_id, last_editor FROM cells
+       WHERE side = 'target' AND (project_id, file_id, cell_id) IN (${placeholders})`,
+    )
+    .bind(...binds)
+    .all<{ project_id: string; file_id: string; cell_id: string; last_editor: string | null }>()
+
+  for (const r of results) {
+    editors.set(cellKeyOf(r.project_id, r.file_id, r.cell_id), r.last_editor)
+  }
+  return editors
 }
 
 /**
@@ -602,6 +749,8 @@ export async function handleEventsWriteRequest(
     stmtStart: number
     stmtCount: number
     eventFrame: Extract<RealtimeMessage, { t: 'event' }>
+    /** `events.server_seq` assigned to this event (seqBase + slot). */
+    serverSeq: number
     dirtyEntry?: { project: string; file: string; tables: Set<ProjectionTable> }
     /** Verified author (JWT claims, not the client-supplied event field) —
      * broadcast as `by` so clients can suppress own-write banners. */
@@ -618,6 +767,9 @@ export async function handleEventsWriteRequest(
     /** AD-2 chain slot claimed by this event (chain-mutating winners of the
      * pre-check only) — read back after commit to flag in-flight losers. */
     chainSlot?: ChainSlot
+    /** Index (relative to stmtStart) of the claim + head-CAS gated cells
+     * write; 0 rows after commit means the event lost and is stale. */
+    headStmtIndex?: number
     /** File whose counter recompute was deferred (QW-10) — coalesced to one
      * recompute per (file, chunk). */
     counterFile?: { projectId: string; fileId: string }
@@ -634,10 +786,15 @@ export async function handleEventsWriteRequest(
   // later rejects is a harmless read.
   const candidateIds = new Set<string>()
   const chainCells = new Map<string, CellKey>()
-  const sourcePinCells = new Map<string, CellKey>()
   const sourceCommitCells = new Map<string, CellKey>()
+  const validateCells = new Map<string, CellKey>()
+  const foreignCommentIds = new Set<string>()
   for (const e of rawEvents) {
     if (typeof e.id === 'string') candidateIds.add(e.id)
+    if (isForeignCommentKind(e.kind)) {
+      const p = e.payload as { commentId?: string } | undefined
+      if (typeof p?.commentId === 'string') foreignCommentIds.add(p.commentId)
+    }
     if (
       typeof e.projectId !== 'string' ||
       typeof e.fileId !== 'string' ||
@@ -646,14 +803,10 @@ export async function handleEventsWriteRequest(
       continue
     }
     const key = cellKeyOf(e.projectId, e.fileId, e.cellId)
+    // target.cell.commit (the F5 source-pin check's kind) is chain-mutating,
+    // so the head prefetch below also covers it.
     if (isChainMutatingKind(e.kind)) {
       chainCells.set(key, { projectId: e.projectId, fileId: e.fileId, cellId: e.cellId })
-    }
-    if (e.kind === 'target.cell.commit') {
-      const p = e.payload as { sourceEventId?: string | null } | null | undefined
-      if (p?.sourceEventId) {
-        sourcePinCells.set(key, { projectId: e.projectId, fileId: e.fileId, cellId: e.cellId })
-      }
     }
     // FRO-476: local source.cell.commit is the kind the live-mode lock
     // rejects (see prefetchLiveMirrorLocks). source.cell.mirror is exempt —
@@ -661,13 +814,22 @@ export async function handleEventsWriteRequest(
     if (e.kind === 'source.cell.commit') {
       sourceCommitCells.set(key, { projectId: e.projectId, fileId: e.fileId, cellId: e.cellId })
     }
+    // FRO-189 self-validation check (see prefetchLastEditors) — fetched for
+    // every candidate regardless of the project's allowSelfValidation
+    // setting, which isn't known until the per-event loop below.
+    if (e.kind === 'cell.validate') {
+      validateCells.set(key, { projectId: e.projectId, fileId: e.fileId, cellId: e.cellId })
+    }
   }
-  const [existingIds, chainWinners, sourceEventIds, liveMirrorLocks] = await Promise.all([
-    readExistingEventIds(db, candidateIds),
-    prefetchChainWinners(db, [...chainCells.values()]),
-    prefetchSourceEventIds(db, [...sourcePinCells.values()]),
-    prefetchLiveMirrorLocks(db, [...sourceCommitCells.values()]),
-  ])
+  const [existingIds, chainWinners, cellHeads, liveMirrorLocks, commentAuthors, lastEditors] =
+    await Promise.all([
+      readExistingEventIds(db, candidateIds),
+      prefetchChainWinners(db, [...chainCells.values()]),
+      prefetchCellHeads(db, [...chainCells.values()]),
+      prefetchLiveMirrorLocks(db, [...sourceCommitCells.values()]),
+      prefetchCommentAuthors(db, foreignCommentIds),
+      prefetchLastEditors(db, [...validateCells.values()]),
+    ])
 
   // PERF-2: project_settings is read at most once per (request, project).
   // No event kind mutates project_settings (its only writers are the
@@ -825,32 +987,32 @@ export async function handleEventsWriteRequest(
     // (The previous 17-kind deny-list here was verified equivalent for every
     // existing EventKind before collapsing.)
     const isChainMutating = isChainMutatingKind(rawEvent.kind)
-    // Strict AD-2 first-child-of-parent for every chain-mutating event,
-    // commits included. Per the spec (03-data-model.md §AD-2): the first
-    // commit accepted at a given parent_id wins the chain slot; later
-    // siblings — including offline edits that flush long after a concurrent
-    // online edit has projected — land in `events` but do NOT advance the
-    // projection. The losing event is reported via `staleIds` so the client
-    // outbox can surface "your edit was bumped" and offer a promote-from-
-    // history affordance, rather than silently overwriting the newer winner.
+    // Chain-mutating events are a compare-and-swap on the cell's head
+    // (AQU-1154, invariant I1): the event advances the projection iff its
+    // parentId IS the current `cells.event_id` for its side/lane — or the
+    // row does not exist yet (a cell's first target commit chains on the
+    // SOURCE head). Everything else — a sibling that lost, AND anything
+    // chained on a loser — lands in `events` but does NOT advance the
+    // projection, and is reported via `stale` so the client outbox can
+    // surface "your edit was bumped" and revalidate, rather than silently
+    // overwriting the newer winner.
     //
-    // The previous code special-cased *.cell.commit as last-write-wins to
-    // avoid silently dropping a single editor's own re-commit when their
-    // parentId was briefly stale. The cost — a reconnected offline edit
-    // clobbering a newer online edit — contradicted the AD-2 invariant.
-    // The recovery path is the same as the multi-user case: the stale
-    // signal flows to the client, which prompts the user to rebase.
+    // First-child-of-parent (the chain_claims slot) is kept as well: it is
+    // what arbitrates two in-flight siblings of one parent, and it keeps a
+    // claim-less "ghost" event's slot blocked until a rebuild surfaces it.
+    // But first-child alone let a stale branch climb back onto the head —
+    // B1 loses to A1, B's client keeps chaining on B1, and B2 found the
+    // (cell, B1) slot free and overwrote A1 — so the head check is the rule.
     //
-    // NOTE (RACE-2): this lookup is only the PRE-check — it catches siblings
-    // that already committed (including pre-chain_claims history, where no
-    // claim row exists to arbitrate). Two IN-FLIGHT requests can both pass
-    // it; the atomic chain_claims row taken inside the handler's transaction
-    // is the real arbiter (see chain-claims.ts), and the post-commit
-    // read-back below flags the claim loser as stale. PERF-2: the committed
-    // winners were prefetched in one SELECT (prefetchChainWinners) — same
-    // decision rule as the old per-event isWinningChild(): the candidate
-    // wins iff its slot has no committed winner or the winner is itself.
+    // NOTE (RACE-2): this is only the PRE-check against the committed state
+    // (winners + heads prefetched in one SELECT each — prefetchChainWinners /
+    // prefetchCellHeads). Two IN-FLIGHT requests can both pass it; the real
+    // arbiter is the transaction: the atomic chain_claims row plus the
+    // `cells.event_id = parentId` CAS on the projection write itself
+    // (event-projection.ts), and the row count of that write is read back
+    // after commit to flag the loser as stale.
     let updateProjection = true
+    let headKey: string | undefined
     if (isChainMutating && candidate.fileId && candidate.cellId) {
       // Side/lane-qualified slot — MUST match the qualification the claim
       // insert (handlers/cell-events.ts) and isWinningChild use, or a second
@@ -865,6 +1027,20 @@ export async function handleEventsWriteRequest(
         }),
       )
       updateProjection = winner === undefined || winner === candidate.id
+
+      headKey = headKeyOf(
+        candidate.projectId,
+        candidate.fileId,
+        candidate.cellId,
+        candidate.kind,
+        candidate.payload,
+      )
+      // A parent-null delete is a tombstone (AQU-931): it extends no chain
+      // and applies regardless of the head.
+      if (isChainArbitrated(candidate.kind, candidate.parentId)) {
+        const head = cellHeads.get(headKey)
+        if (head !== undefined && head !== candidate.parentId) updateProjection = false
+      }
     }
     // A chain-mutating event that does NOT advance the projection is a stale
     // sibling: it's still logged + 200-accepted, but the caller's change had
@@ -876,6 +1052,13 @@ export async function handleEventsWriteRequest(
         fileId: rawEvent.fileId ?? null,
         cellId: rawEvent.cellId ?? null,
       })
+    } else if (headKey !== undefined) {
+      // Track the head THIS request will have advanced to, so a same-batch
+      // chain C1 (parent H) → C2 (parent C1) passes: C1 moves the head
+      // earlier in the same transaction (statement order). A delete removes
+      // the row, so the next event on that key applies regardless of parent.
+      if (candidate.kind.endsWith('.delete')) cellHeads.delete(headKey)
+      else cellHeads.set(headKey, candidate.id)
     }
 
     // F5: AD-9 sourceEventId staleness validation for target.cell.commit.
@@ -886,8 +1069,8 @@ export async function handleEventsWriteRequest(
     if (rawEvent.kind === 'target.cell.commit' && rawEvent.fileId && rawEvent.cellId) {
       const tp = rawEvent.payload as { sourceEventId?: string | null }
       if (tp.sourceEventId) {
-        const currentSourceEventId = sourceEventIds.get(
-          cellKeyOf(rawEvent.projectId, rawEvent.fileId, rawEvent.cellId),
+        const currentSourceEventId = cellHeads.get(
+          `${cellKeyOf(rawEvent.projectId, rawEvent.fileId, rawEvent.cellId)}\0source\0`,
         )
         if (currentSourceEventId && currentSourceEventId !== tp.sourceEventId) {
           staleSourceEntries.push({
@@ -909,14 +1092,9 @@ export async function handleEventsWriteRequest(
     if (isForeignCommentKind(rawEvent.kind)) {
       const p = rawEvent.payload as { commentId?: string }
       if (p.commentId) {
-        const commentRow = await db
-          .prepare(
-            `SELECT author_id FROM comments WHERE comment_id = ? LIMIT 1`,
-          )
-          .bind(p.commentId)
-          .first<{ author_id: string }>()
+        const authorId = commentAuthors.get(p.commentId)
 
-        if (commentRow && commentRow.author_id !== callerUsername) {
+        if (authorId !== undefined && authorId !== callerUsername) {
           // Foreign comment mutation — floor per FOREIGN_COMMENT_ROLE
           // (AQU-999): maintainer for edit/delete, contributor for resolve.
           const foreignFloor = requiredRoleForForeignComment(rawEvent.kind)
@@ -930,8 +1108,9 @@ export async function handleEventsWriteRequest(
             continue
           }
         }
-        // If commentRow is null the comment doesn't exist; projection will no-op,
-        // which is the correct behaviour (idempotent delete of a missing row).
+        // If authorId is undefined the comment doesn't exist; projection will
+        // no-op, which is the correct behaviour (idempotent delete of a
+        // missing row).
       }
     }
 
@@ -1020,15 +1199,10 @@ export async function handleEventsWriteRequest(
 
         // 3. Self-validation check.
         if (allowSelfValidation === false && rawEvent.fileId && rawEvent.cellId) {
-          const cellRow = await db
-            .prepare(
-              `SELECT last_editor FROM cells
-               WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'target'
-               LIMIT 1`,
-            )
-            .bind(rawEvent.projectId, rawEvent.fileId, rawEvent.cellId)
-            .first<{ last_editor: string | null }>()
-          if (cellRow && cellRow.last_editor === callerUsername) {
+          const lastEditor = lastEditors.get(
+            cellKeyOf(rawEvent.projectId, rawEvent.fileId, rawEvent.cellId),
+          )
+          if (lastEditor === callerUsername) {
             rejected.push({
               id: rawEvent.id ?? '(unknown)',
               status: 403,
@@ -1141,10 +1315,12 @@ export async function handleEventsWriteRequest(
       stmtStart: stmtsBefore,
       stmtCount: pendingStmts.length - stmtsBefore,
       eventFrame: outcome.result.eventFrame,
+      serverSeq,
       dirtyEntry,
       author: authResult.event.claims.username,
       viaExternal: authResult.event.claims.src === 'external',
       chainSlot: outcome.result.chainSlot,
+      headStmtIndex: outcome.result.headStmtIndex,
       counterFile: outcome.result.counterFile,
     })
   }
@@ -1237,22 +1413,22 @@ export async function handleEventsWriteRequest(
 
     const committedEntries: PendingEntry[] = []
 
-    // M1-2: after commit, read the chain claims back and flag any event that
-    // lost an IN-FLIGHT sibling race (both passed the pre-check; the claim
-    // arbitrated inside the transaction). The loser's event is committed to
-    // the log but its projection writes were gated no-ops — without this the
+    // M1-2 / AQU-1154: after each chunk commits, flag any event that lost
+    // an IN-FLIGHT race (it passed the pre-check, but inside the transaction
+    // another event took its chain claim or moved the head first). Its event
+    // row is committed to the log but its gated cells write was a no-op —
+    // the batch result's row count for that statement is 0. Without this the
     // client would treat "accepted" as "saved" (the old silent-loss bug).
-    const flagClaimLosers = async (entries: PendingEntry[]): Promise<void> => {
-      const contenders = entries.filter((e) => e.chainSlot && !staleEntries.has(e.id))
-      if (contenders.length === 0) return
-      try {
-        const winners = await readClaimWinners(
-          db,
-          contenders.map((e) => e.chainSlot!),
-        )
-        for (const e of contenders) {
-          const winner = winners.get(slotKey(e.chainSlot!))
-          if (winner !== undefined && winner !== e.id) {
+    // Reading the row count back from the same transaction is race-free:
+    // no later request can change what THIS write did.
+    const flagChainLosers = (
+      chunk: PendingChunk,
+      results: ReadonlyArray<{ meta: { changes: number } }>,
+    ): void => {
+      let offset = 0
+      for (const e of chunk.entries) {
+        if (e.headStmtIndex !== undefined && !staleEntries.has(e.id)) {
+          if (results[offset + e.headStmtIndex]?.meta.changes === 0) {
             staleEntries.set(e.id, {
               id: e.id,
               fileId: e.eventFrame.file ?? null,
@@ -1260,21 +1436,17 @@ export async function handleEventsWriteRequest(
             })
           }
         }
-      } catch (err) {
-        // Best-effort: a read-back failure only suppresses the stale banner;
-        // the gated projection already arbitrated the data correctly. Don't
-        // fail an otherwise-committed request.
-        console.warn('[events/route] chain-claims read-back failed:', err)
+        offset += e.stmtCount
       }
     }
 
     try {
       for (const chunk of chunks) {
-        await db.batch(chunk.stmts)
+        const results = await db.batch(chunk.stmts)
+        flagChainLosers(chunk, results)
         committedEntries.push(...chunk.entries)
       }
     } catch (err) {
-      await flagClaimLosers(committedEntries)
       const committed = new Set(committedEntries.map((entry) => entry.id))
       for (const entry of pendingEntries) {
         if (committed.has(entry.id)) {
@@ -1304,8 +1476,6 @@ export async function handleEventsWriteRequest(
     for (const entry of committedEntries) {
       accepted.push({ id: entry.id })
     }
-
-    await flagClaimLosers(committedEntries)
 
     // Comment notifications — fire-and-forget via ctx.waitUntil so they
     // never delay the response. Only fires for comment.create events.
@@ -1389,12 +1559,19 @@ export async function handleEventsWriteRequest(
         if (list) list.push(entry)
         else byProject.set(project, [entry])
       }
+      // Inline each committed cell's CURRENT projected rows (post-commit) on
+      // its event.applied frame so clients apply the head directly instead
+      // of a GET …/cells?cellIds= round-trip per frame. ONE SELECT for every
+      // cell this request touched; skipped when none qualify.
+      const rowsByCell = await readEventAppliedRows(db, committedEntries)
       const doFanOut: Promise<void>[] = []
       for (const [project, entries] of byProject) {
         const id = env.ProjectSync.idFromName(project)
         const stub = env.ProjectSync.get(id)
         const messages = entries.map((entry) => {
           const frame = entry.eventFrame
+          const carriesRows =
+            frame.file !== undefined && frame.cell !== undefined && isEventAppliedRowsKind(frame.kind)
           return {
             t: 'event.applied',
             id: frame.id,
@@ -1409,6 +1586,13 @@ export async function handleEventsWriteRequest(
             // browser to treat the frame as remote (no local outbox write
             // exists to have already refetched). See PendingEntry.viaExternal.
             ...(entry.viaExternal ? { via: 'external' as const } : {}),
+            // Additive: server_seq + current rows for cell-content events.
+            // `rows` is omitted (not empty) when the request exceeded the
+            // per-request cell cap — clients then refetch as before.
+            ...(carriesRows ? { serverSeq: entry.serverSeq } : {}),
+            ...(carriesRows && rowsByCell
+              ? { rows: rowsByCell.get(cellRowsKey(frame.project, frame.file!, frame.cell!)) ?? [] }
+              : {}),
           }
         })
         // PERF-8: ONE __broadcast subrequest per (project, request) — the

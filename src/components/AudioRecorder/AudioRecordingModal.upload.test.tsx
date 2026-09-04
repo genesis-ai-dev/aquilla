@@ -47,9 +47,10 @@ vi.mock("@/lib/audio/voice-generate-helpers", () => ({ generateCellVoice: vi.fn(
 // happy-dom will never load, and every upload here would sit for its full 15s
 // timeout before the attach event fires.
 vi.mock("@/lib/import", () => ({ probeDurationMsSafe: vi.fn(async () => 1000) }))
+const injectAttach = vi.hoisted(() => vi.fn())
 vi.mock("@/lib/audio/audio-attachments-bus", () => ({
   notifyAudioAttachmentsChanged: vi.fn(),
-  injectOptimisticAudioAttachment: vi.fn(),
+  injectOptimisticAudioAttachment: (...args: unknown[]) => injectAttach(...args),
   injectOptimisticAudioRemove: vi.fn(),
 }))
 const emitAttach = vi.hoisted(() => vi.fn(async (..._args: unknown[]) => "evt-attach"))
@@ -88,19 +89,24 @@ const cell = {
 
 const onTakeSaved = vi.fn()
 
-function renderModal() {
-  return render(
+function modalEl(targetSlot?: string) {
+  return (
     <AudioRecordingModal
       open
       project={project}
       cells={[cell]}
       activeCellId="c1"
       username="sam"
+      targetSlot={targetSlot}
       onActiveCellChange={() => {}}
       onTakeSaved={onTakeSaved}
       onClose={() => {}}
-    />,
+    />
   )
+}
+
+function renderModal(targetSlot?: string) {
+  return render(modalEl(targetSlot))
 }
 
 /** Drive the hidden input the way a file picker does — `files` is read-only, so
@@ -117,6 +123,7 @@ describe("AudioRecordingModal — upload a file", () => {
     recorderState.value = { kind: "idle" }
     attachmentsState.byCellId = new Map()
     emitAttach.mockClear()
+    injectAttach.mockClear()
     uploadSpy.mockClear()
     onTakeSaved.mockClear()
   })
@@ -166,6 +173,64 @@ describe("AudioRecordingModal — upload a file", () => {
     expect(screen.getByTestId("rec-start")).toBeEnabled()
     expect(screen.getByTestId("rec-generate-tts")).toBeEnabled()
     expect(screen.getByTestId("rec-upload")).toBeEnabled()
+  })
+
+  // ── The review's blocker (2026-08-27) ─────────────────────────────────────
+  //
+  // Stage 3 gave `attachAudioFileToCell` a `slot` and threaded it into the
+  // EMIT, but left `slot: "recording"` hard-coded in the optimistic shadow a
+  // few lines below. An upload aimed at an added track therefore painted onto
+  // the DEFAULT dub row — stealing its selection — and could never be
+  // confirmed, because `shadowConfirmed` looks the selection up by slot and
+  // finds the default row's own take there. The emit half was always right,
+  // which is exactly why only asserting the emit (as the case above does)
+  // could not see it.
+  const TRACK_SLOT = "01a04395-3ed1-7c6b-9f2e-6d5a1c0b8e42"
+
+  it("an upload to an added track reaches BOTH the event and the optimistic take on that track's slot", async () => {
+    renderModal(TRACK_SLOT)
+    pick(new File(["bytes"], "line.wav", { type: "audio/wav" }))
+
+    await waitFor(() => expect(emitAttach).toHaveBeenCalled())
+    expect(emitAttach.mock.calls[0][0]).toMatchObject({ cellId: "c1", slot: TRACK_SLOT })
+    // THE HALF THAT WAS BROKEN. Without it the take appears on the default row.
+    await waitFor(() => expect(injectAttach).toHaveBeenCalled())
+    expect(injectAttach.mock.calls[0][2]).toMatchObject({ slot: TRACK_SLOT })
+    // …and the two must agree, or the shadow can never confirm against the row
+    // the server actually wrote.
+    const injected = injectAttach.mock.calls[0][2] as { slot: string }
+    const emitted = emitAttach.mock.calls[0][0] as { slot: string }
+    expect(injected.slot).toBe(emitted.slot)
+  })
+
+  it("the default dub row is still the answer when no track is named", async () => {
+    renderModal()
+    pick(new File(["bytes"], "line.wav", { type: "audio/wav" }))
+
+    await waitFor(() => expect(injectAttach).toHaveBeenCalled())
+    expect(injectAttach.mock.calls[0][2]).toMatchObject({ slot: "recording" })
+    expect(emitAttach.mock.calls[0][0]).toMatchObject({ slot: "recording" })
+  })
+
+  // Reopening the recorder on a different track re-aims the upload. This holds
+  // today through a two-hop coincidence — `recordingTakes` is memoised on
+  // `ownSlots`, which is memoised on `targetSlot`, so the upload callback is
+  // rebuilt whenever the track changes — which is exactly why it is worth
+  // pinning: nothing about the upload path states that dependency itself, and
+  // the day someone decouples the takes list from the track this is the test
+  // that notices. (The review read the missing `targetSlot` dependency as a
+  // live stale-closure bug; it is not one, for the reason above. The name is
+  // listed in that array now regardless, as an honest dependency.)
+  it("follows the track the modal was REOPENED on, not the one it first opened on", async () => {
+    const { rerender } = renderModal("trk-first")
+    // Only the target track changes — no new takes, no cell change — so a
+    // callback that is not rebuilt on `targetSlot` keeps the stale one.
+    rerender(modalEl("trk-second"))
+    pick(new File(["bytes"], "line.wav", { type: "audio/wav" }))
+
+    await waitFor(() => expect(emitAttach).toHaveBeenCalled())
+    expect(emitAttach.mock.calls[0][0]).toMatchObject({ slot: "trk-second" })
+    expect(injectAttach.mock.calls[0][2]).toMatchObject({ slot: "trk-second" })
   })
 
   it("offline: the upload button is disabled", () => {

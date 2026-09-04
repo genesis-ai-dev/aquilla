@@ -221,14 +221,7 @@ export interface CellCommitInput {
   replaceString?: string
 }
 
-/**
- * Emit a `target.cell.commit` event — translator-side commit on blur, idle,
- * or lock release. The caller supplies the current chain head; the returned
- * eventId becomes the next parent for follow-up commits.
- */
-export async function emitTargetCellCommit(
-  input: CellCommitInput,
-): Promise<string> {
+function noteTargetCellCommit(input: CellCommitInput): void {
   // AQU-267: once-per-session first-commit funnel event.
   if (!_firstCommitFired) {
     _firstCommitFired = true
@@ -241,15 +234,49 @@ export async function emitTargetCellCommit(
   // Model A/B: the AI auto-commit carries the draft's actual per-cell text —
   // attach it to the pending assignment so later gestures can measure edit
   // distance against it. A human commit on such a cell is the "edited"
-  // outcome, with the distance from draft to this new text; the entry stays
-  // so further polish keeps refining the distance until validation. No-op for
-  // cells without a pending assignment (see lib/ab/feedback.ts).
+  // outcome. No-op for cells without a pending assignment.
   if (input.aiSuggestion) {
     noteAbDraftText(input.fileId, input.cellId, input.value)
   } else {
     reportAbOutcome(input.fileId, input.cellId, "edited", input.value)
   }
-  const parentId = input.parentId
+}
+
+function targetCellCommitEventInput(
+  input: CellCommitInput,
+): BuildEventInput<"target.cell.commit"> {
+  return {
+    kind: "target.cell.commit",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: input.parentId ?? null,
+    author: input.author,
+    payload: {
+      value: input.value,
+      ...(input.valueHtml !== undefined ? { valueHtml: input.valueHtml } : {}),
+      ...(input.sourceEventId !== undefined
+        ? { sourceEventId: input.sourceEventId }
+        : {}),
+      ...(input.targetLang ? { targetLang: input.targetLang } : {}),
+      ...(input.aiSuggestion ? { ai_suggestion: true } : {}),
+      ...(input.aiSuggestion && input.aiDraft ? { ai_draft: input.aiDraft } : {}),
+      ...(input.searchQuery !== undefined ? { search_query: input.searchQuery } : {}),
+      ...(input.replaceString !== undefined ? { replace_string: input.replaceString } : {}),
+    },
+    clientTs: input.clientTs,
+  }
+}
+
+/**
+ * Emit a `target.cell.commit` event — translator-side commit on blur, idle,
+ * or lock release. The caller supplies the current chain head; the returned
+ * eventId becomes the next parent for follow-up commits.
+ */
+export async function emitTargetCellCommit(
+  input: CellCommitInput,
+): Promise<string> {
+  noteTargetCellCommit(input)
   // A first-time commit on a cell that has never been written before is a
   // genesis target write — but in our model, the cell came from the source
   // side first, so even the first target.cell.commit has a chain head (the
@@ -260,30 +287,21 @@ export async function emitTargetCellCommit(
   //
   // Once we wire useCells against `cells.event_id` (2c-β), parentId is
   // always concrete here.
-  const { eventId } = await enqueueEvent({
-    kind: "target.cell.commit",
-    projectId: input.projectId,
-    fileId: input.fileId,
-    cellId: input.cellId,
-    parentId: parentId ?? null,
-    author: input.author,
-    payload: {
-      value: input.value,
-      ...(input.valueHtml !== undefined ? { valueHtml: input.valueHtml } : {}),
-      ...(input.sourceEventId !== undefined
-        ? { sourceEventId: input.sourceEventId }
-        : {}),
-      // AQU-538: '' (default lane) is omitted so default-lane events stay
-      // byte-identical to pre-lane events (idempotency ids, replay, history).
-      ...(input.targetLang ? { targetLang: input.targetLang } : {}),
-      ...(input.aiSuggestion ? { ai_suggestion: true } : {}),
-      ...(input.aiSuggestion && input.aiDraft ? { ai_draft: input.aiDraft } : {}),
-      ...(input.searchQuery !== undefined ? { search_query: input.searchQuery } : {}),
-      ...(input.replaceString !== undefined ? { replace_string: input.replaceString } : {}),
-    },
-    clientTs: input.clientTs,
-  })
+  const { eventId } = await enqueueEvent(targetCellCommitEventInput(input))
   return eventId
+}
+
+/**
+ * Enqueue a model response's cell commits atomically. Each cell retains its
+ * own event id and chain parent, while IndexedDB performs one transaction and
+ * the outbox overlay receives one notification for the complete burst.
+ */
+export async function emitTargetCellCommits(
+  inputs: CellCommitInput[],
+): Promise<string[]> {
+  for (const input of inputs) noteTargetCellCommit(input)
+  const events = await enqueueEvents(inputs.map(targetCellCommitEventInput))
+  return events.map(({ eventId }) => eventId)
 }
 
 export interface CellValidateInput {
@@ -423,7 +441,8 @@ export interface CellAudioAttachInput {
   cellId: string
   audioId: string
   url: string
-  slot: "recording" | "generatedVoice"
+  /** Open string (AQU-646): a track id addresses an extra target track. */
+  slot: string
   mimeType?: string
   voiceId?: string
   referenceAudioId?: string
@@ -541,6 +560,49 @@ export async function emitCellAudioTrim(input: CellAudioTrimInput): Promise<stri
   return eventId
 }
 
+export interface CellAudioPlaceInput {
+  projectId: string
+  fileId: string
+  cellId: string
+  audioId: string
+  /** Offset in ms from the LINE's own start. Negative is legal (a take that
+   *  leads its line), `0` is a real placement, and `null` clears it back to the
+   *  line's start. */
+  targetOffsetMs: number | null
+  author: string
+  clientTs?: number
+}
+
+/**
+ * Emit a `cell.audio.place` — where ONE take sits against the line it performs,
+ * and nothing else. (AQU-646 stage 3)
+ *
+ * The sibling of `emitCellAudioTrim` above, and it exists for the same reason
+ * that one does: a placement had to become expressible on the TAKE rather than
+ * on the cell. It used to ride `cell.lane.retime`, which writes the anchor into
+ * the CELL's metadata — exact while a line could hold one dub, and wrong the
+ * moment extra target tracks let two takes share a line, because dragging one
+ * chip would move the other.
+ *
+ * ITS OWN KIND, never a field on attach: absence has to keep meaning exactly
+ * one thing ("never placed by hand"), and on an attach it would also mean "this
+ * attach had no opinion" — the ambiguity that cost every take its trim window
+ * once already.
+ */
+export async function emitCellAudioPlace(input: CellAudioPlaceInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "cell.audio.place",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: null,
+    author: input.author,
+    payload: { audioId: input.audioId, targetOffsetMs: input.targetOffsetMs },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
 export interface CellLinkSetInput {
   projectId: string
   /** The SUBTITLE side — rides the envelope, so per-file auth works. */
@@ -625,7 +687,8 @@ export interface CellAudioSelectInput {
   fileId: string
   cellId: string
   audioId: string
-  slot: "recording" | "generatedVoice"
+  /** Open string (AQU-646): a track id addresses an extra target track. */
+  slot: string
   author: string
   clientTs?: number
 }
@@ -790,6 +853,12 @@ export interface FileTrackSetInput {
     name?: string | null
     order?: number | null
     groupId?: string | null
+    /** A palette id from track-colors.ts; null clears back to the default
+     *  pair. Never colour values — see PersistedTrackPatch.color. */
+    color?: string | null
+    /** Which track's cells an added track's chips line up with. Set once, at
+     *  creation; the server refuses it on a reserved (derived) track id. */
+    sourceTrackId?: string | null
   } | null
   author: string
   clientTs?: number

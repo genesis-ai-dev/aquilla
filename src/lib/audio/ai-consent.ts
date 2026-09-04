@@ -103,9 +103,15 @@ export function requestAiModelConsent(model: AiModelInfo): Promise<boolean> {
     }
   }
   return new Promise<boolean>((resolve) => {
+    let settled = false
     pending = {
       model,
       resolve: (granted) => {
+        // Dialog close (focus-out / controlled `open` flip) can fire a second
+        // resolve after Accept. The first settle wins so a later cancel cannot
+        // deny coalesced waiters or skip storing consent.
+        if (settled) return
+        settled = true
         if (granted) storeConsent(model.id)
         pending = null
         notify()

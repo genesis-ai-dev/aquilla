@@ -8,10 +8,11 @@ import { cn } from "@/lib/utils"
  * Navigation rows for index / hub surfaces (Settings, Preferences). Instead of
  * dropping every form onto one page, these pages list their sections as large,
  * tappable rows — a leading icon tile, a title, an optional right-aligned hint
- * (a count or the current value, e.g. "System", "12", "Maintainer"), and a
- * chevron — that navigate into a focused detail sub-page. Same visual family as
- * the Section primitive in page.tsx: one bordered, rounded-lg card with the
- * border carrying the separation in both light and dark themes.
+ * (a count or the current value, e.g. "System", "12", "Maintainer"; hidden on
+ * small screens so the title keeps the row), and a chevron — that navigate into
+ * a focused detail sub-page. Same visual family as the Section primitive in
+ * page.tsx: one bordered, rounded-lg card with the border carrying the
+ * separation in both light and dark themes.
  */
 
 /**
@@ -42,8 +43,10 @@ function NavList({
 }
 
 /**
- * A single navigation row. `hint` sits to the right of the title (truncated so
- * a long value never crowds out the title) with a chevron trailing it.
+ * A single navigation row. `hint` sits to the right of the title from `sm` up
+ * (truncated so a long value never crowds out the title) with a chevron
+ * trailing it. Below `sm` the current value is omitted so icon, title, and
+ * chevron keep a usable tap target.
  */
 function NavRow({
   to,
@@ -83,7 +86,7 @@ function NavRow({
         ) : null}
       </span>
       {hint ? (
-        <span className="max-w-[45%] shrink-0 truncate text-sm text-muted-foreground tabular-nums">
+        <span className="hidden max-w-[45%] shrink-0 truncate text-sm text-muted-foreground tabular-nums sm:block">
           {hint}
         </span>
       ) : null}
@@ -99,7 +102,8 @@ function NavRow({
  * main area without relying on the header breadcrumb.
  *
  * Prefer `to` for plain navigation. Use `onClick` when the caller needs to
- * intercept (e.g. discard-unsaved confirmation) before leaving.
+ * intercept (e.g. discard-unsaved confirmation) before leaving. Hover padding
+ * stays even (`px-1.5`); `-ms-1.5` only outdents the chip to the page column.
  */
 function BackLink({
   to,
@@ -113,7 +117,7 @@ function BackLink({
   className?: string
 }) {
   const classes = cn(
-    "group -ms-1.5 inline-flex w-fit items-center gap-1 self-start rounded-md py-1 pe-1.5 ps-4 text-sm text-muted-foreground hover:bg-accent/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+    "group -ms-1.5 inline-flex w-fit items-center gap-1 self-start rounded-md px-1.5 py-1 text-sm text-muted-foreground hover:bg-accent/40 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
     className,
   )
   if (onClick) {

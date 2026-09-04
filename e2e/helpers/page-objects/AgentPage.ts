@@ -65,7 +65,7 @@ export class AgentPage {
   }
 
   async closeFullScreenWorkbench(): Promise<void> {
-    await this.page.getByRole("button", { name: "Close workbench" }).click()
+    await this.page.getByRole("button", { name: "Collapse Agent pane" }).click()
   }
 
   // ── Session + attachment ──────────────────────────────────────────────

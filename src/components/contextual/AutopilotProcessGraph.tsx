@@ -268,7 +268,6 @@ function GraphSvg({
           <AppTooltip
             key={node.id}
             delay={200}
-            side="bottom"
             content={<HoverBody inspect={inspect} t={t} />}
             className="max-w-xs"
           >

@@ -616,6 +616,19 @@ CREATE TABLE cell_audio (
     approved           INTEGER NOT NULL DEFAULT 0,
     approved_by        TEXT,
     approved_ts        BIGINT,
+    -- AQU-646 stage 3: where this take sits against the line it performs,
+    -- relative to the line's own start. Written only by cell.audio.place.
+    --
+    -- It used to live on the CELL (cells.metadata.target_offset_ms), which was
+    -- exact while a line could hold one dub. With extra target-audio tracks two
+    -- takes share a line, so a single anchor would make dragging one chip move
+    -- the other.
+    --
+    -- NULL means "never placed by hand", NOT "placed at zero" — zero is legal
+    -- and common. Readers fall back to the cell's metadata, which stays the
+    -- permanent home for every take that predates this column (rebuild replays
+    -- historical cell.lane.retime events into it forever).
+    target_offset_ms   BIGINT,
     PRIMARY KEY (project_id, file_id, cell_id, audio_id)
 );
 
@@ -772,6 +785,9 @@ CREATE INDEX idx_cell_validators_cell ON cell_validators(project_id, file_id, ce
 CREATE INDEX idx_cell_waivers_file ON cell_waivers(project_id, file_id);
 CREATE INDEX idx_cells_decay_drags ON cells(project_id, endorsement_count);
 CREATE INDEX idx_cells_file_order ON cells(project_id, file_id, side, anchor_cell_id);
+-- AQU-1160: backs the cell-page-read chain-cache's bounded page fetch
+-- ((side, target_lang, cell_id) tuple lookup) — see 0083_cells_scan_index.sql.
+CREATE INDEX idx_cells_file_scan ON cells(project_id, file_id, side, target_lang, cell_id);
 CREATE INDEX idx_cells_last_edit ON cells(project_id, file_id, side, last_edit_at);
 CREATE INDEX idx_cells_pair_lookup ON cells(project_id, cell_id, side);
 CREATE INDEX idx_cells_source_basis ON cells(source_event_id);

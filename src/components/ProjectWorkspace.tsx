@@ -24,7 +24,12 @@ import { readAtVersion, useActiveCellStore, useCellStoreVersion, type CellStore,
 import { useStaleSourceCells } from "@/hooks/useStaleSourceCells"
 import { triggerLinkSync } from "@/lib/sync/archive"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
-import { useCompletion, FALLBACK_COMPLETION_SETTINGS } from "@/hooks/useCompletion"
+import {
+  useCompletion,
+  FALLBACK_COMPLETION_SETTINGS,
+  type CompletedCellDraft,
+  type CommitCompletedCellsResult,
+} from "@/hooks/useCompletion"
 import { useTranslateAsReadPreference } from "@/hooks/useTranslateAsReadPreference"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
 import {
@@ -39,7 +44,11 @@ import type { ScoredPair } from "@/lib/search/dual-index"
 import type { PassageHit } from "@/hooks/useSearchIndex"
 import { useHealth } from "@/hooks/useHealth"
 import { needsAttentionFromConfidence, resolveDecayConfig } from "@/lib/health/decay-engine"
-import { buildHealthRibbon, preTranslationEvidence } from "@/lib/health/health-ribbon"
+import { buildHealthRibbon, type HealthRibbonPoint } from "@/lib/health/health-ribbon"
+import { ribbonInputFor, type RibbonEvidenceReaders } from "@/lib/health/ribbon-inputs"
+import { chapterHealthBuilderFor } from "@/lib/health/chapter-health"
+import { useHealthCalculationsEnabled, setHealthCalculationsEnabled } from "@/lib/health/kill-switch"
+import { resolveWorkbenchWindow } from "@/lib/agent/workbench-window"
 import { partitionInfractions } from "@/lib/rules/waivers"
 import { useCellConfidence } from "@/hooks/useCellConfidence"
 import { useRules } from "@/hooks/useRules"
@@ -86,6 +95,7 @@ import type { TimebaseCorrection } from "@/lib/import/timebase"
 import { resolveActiveSourceLanguage } from "./project-workspace-source-language"
 import {
   shouldPatchSystemPrompt,
+  trackDeleteGate,
   shouldSelfHealZeroFileLink,
   shouldApplyCheckResult,
   resolveSidebarAgentClick,
@@ -103,9 +113,25 @@ import { EditorTable, type AudioLensContext, type BacktranslationActionSource } 
 import { FootnotesTray } from "./footnotes/FootnoteInline"
 import { AudioRecordingModal } from "./AudioRecorder/AudioRecordingModal"
 import { VoiceSidebar } from "./voice/VoiceSidebar"
+import { CloneVoiceModalHost } from "./voice/CloneVoiceModalHost"
 import { VoicePlaybackBar } from "./voice/VoicePlaybackBar"
-import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying } from "@/lib/audio/play-queue"
-import { videoOwnsFile } from "@/lib/audio/transport"
+import { startQueue, getQueueState, seekQueueToTime, setQueueTimingMode,
+  setQueueTargetSlots, startQueueAtTime, pauseQueue, pauseAllPlayback, resumeQueue, queueClockIsFileTime, startExternalDubs, stopExternalDubs, updateExternalDubCells, tickExternalDubs, setExternalDubsPlaying } from "@/lib/audio/play-queue"
+import { pauseAllTransports } from "@/lib/audio/transport-pause"
+import { videoOwnsFile, virtualOwnsFile } from "@/lib/audio/transport"
+import { cellIdAtSec } from "@/lib/timeline/source-regions"
+import { clearVideoControllerIf, setVideoController } from "@/lib/timeline/video-controller"
+import {
+  getVirtualClockPlaying,
+  startVirtualClock,
+  stopVirtualClock,
+  useVirtualClockPlaying,
+  useVirtualClockSec,
+  virtualClockController,
+  virtualClockPause,
+  virtualClockPlay,
+  virtualClockSeek,
+} from "@/lib/timeline/virtual-clock"
 import { generateCombinedVoice, type CombinedVoiceResult } from "@/lib/audio/combined-voice"
 import { generateCellVoice } from "@/lib/audio/voice-generate-helpers"
 import { CombinedBoundaryEditor } from "./voice/CombinedBoundaryEditor"
@@ -114,18 +140,19 @@ import { RuleDrawer } from "./RuleDrawer"
 import { CommentsDrawer } from "./CommentsDrawer"
 import { HistoryDrawer } from "./HistoryDrawer"
 import { VideoPlayer, type VideoPlayerHandle } from "./VideoPlayer"
-import { VideoAttachmentDialog } from "./VideoAttachmentDialog"
 import { SharePanel } from "./SharePanel"
 import { extractCuesFromCells } from "@/lib/video/vtt-generator"
 import { useFileSync } from "@/hooks/useFileSync"
 import { useFileMeta } from "@/hooks/useFileMeta"
 import { useCellLabelsPreference } from "@/hooks/useCellLabelsPreference"
+import { useTargetKeyTermHighlightPreference } from "@/hooks/useTargetKeyTermHighlightPreference"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { eagerlyPrefetchPeaks } from "@/lib/audio/eager-peaks"
-import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynthAll, needsTranscription, needsSynthesis, takesNeedingMeasure, runMeasureAll } from "@/lib/audio/batch-audio"
-import { injectOptimisticAudioTrim, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
+import { runTranscribeAll as runBatchTranscribeAll, runSynthAll as runBatchSynthAll, needsTranscription, takesNeedingMeasure, runMeasureAll, type SynthTarget } from "@/lib/audio/batch-audio"
+import { injectOptimisticAudioTrim,
+  injectOptimisticAudioPlace, notifyAudioAttachmentsChanged } from "@/lib/audio/audio-attachments-bus"
 import { useOutbox } from "@/context/OutboxContext"
 import { useReconcileOnDrain } from "@/hooks/useReconcileOnDrain"
 import {
@@ -133,7 +160,7 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { emitCastAssign, emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, enqueueEvents } from "@/lib/sync/events-emit"
+import { emitCastAssign, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, enqueueEvents } from "@/lib/sync/events-emit"
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
 import { resolveTimingLocked } from "@/lib/sync/project-settings"
@@ -155,10 +182,21 @@ import { sequenceBetween } from "@/lib/timeline/derive"
 import { isLineEmpty, isUserAddedLine, userLineOrigin } from "@/lib/timeline/user-lines"
 import { MIN_ADDABLE_SPAN_SEC, targetOffsetMsFor } from "@/lib/timeline/lane-timing"
 import { audioIdSeededWith } from "@/lib/audio/upload"
-import { buildLinkedTakes } from "@/lib/audio/linked-takes"
+import {
+  buildLinkedTakes,
+  divergentVoiceTargets,
+  joinCueText,
+  primaryAudioHome,
+  resolveAudioHomes,
+  resolveSynthTargets,
+  type SynthTargetPlan,
+} from "@/lib/audio/linked-takes"
 import { deriveSourceRegions, insertSlotsByCell, EMPTY_INSERT_SLOTS } from "@/lib/timeline/source-regions"
 import { deriveTracksForFile } from "@/lib/timeline/tracks"
+import { nextFolderName } from "@/lib/timeline/track-names"
 import { applyPendingOrders, renormaliseOrders, settledPendingOrders } from "@/lib/timeline/track-reorder"
+import { folderIdsOf, folderMembers, orderForScopeAppend, trackScope } from "@/lib/timeline/track-groups"
+import { RECORDING_SLOT, slotForTrack } from "@/lib/timeline/track-slots"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { isBulkValidationEligible } from "@/lib/review/review-eligibility"
 import { TimelineEditor } from "@/components/timeline/TimelineEditor"
@@ -169,23 +207,25 @@ import { useFocusLock } from "@/hooks/useFocusLock"
 import type { WsReconciler } from "@/lib/sync/ws-reconciler"
 import {
   createProjectPresenceStore,
-  usePresencePeers,
   type ProjectPresencePeer,
   type TargetPresenceSelection,
 } from "@/lib/sync/presence-store"
-import { flushOutboxBatch, type ForbiddenEntry } from "@/lib/sync/outbox-flush"
-import { acknowledgeOutboxEvents } from "@/lib/sync/outbox"
+import { flushOutboxBatch, subscribeStaleSiblings, type ForbiddenEntry } from "@/lib/sync/outbox-flush"
+import { createLiveApplier } from "@/lib/sync/live-apply"
+import { acknowledgeOutboxEvents, getOutboxRecords } from "@/lib/sync/outbox"
 import { forbiddenBannerMessage } from "@/lib/sync/forbidden-copy"
 import { useForbiddenOutboxRecords } from "@/hooks/useForbiddenOutboxRecords"
 import { invalidateCellHistory } from "@/lib/sync/history-invalidation"
 import { runDiarization, findFileClip, type DiarizationPhase } from "@/lib/diarization/run-diarization"
 import { extractVoiceReference } from "@/lib/audio/reference-extract"
-import { getVoiceLibrary, newVoiceId, VOICE_PALETTE } from "@/lib/audio/voices"
+import { assignedCastVoiceId, getVoiceLibrary, newVoiceId, VOICE_PALETTE } from "@/lib/audio/voices"
 import { attachMediaFileToTimeline, attachMediaUrlToTimeline } from "@/lib/timeline/attach-media"
 import { useCellsAuditStatsWithOverlay } from "@/hooks/useCellsAuditStatsWithOverlay"
 import { useComments } from "@/hooks/useComments"
-import { Film, Bot, MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download, SplitSquareVertical } from "lucide-react"
+import { MessagesSquare, Settings as SettingsIcon, Lock, ClipboardList, Trash2, Undo2, Sparkles, BookOpen, Users, UserCheck, ArrowRight, PanelLeftClose, Mic, Plus, Pencil, FolderInput, Download, SplitSquareVertical } from "lucide-react"
 import { toast } from "@/components/ui/toast"
+import { setMicHeld } from "@/lib/audio/mic-hold"
+import { startOutputDeviceWatch } from "@/lib/audio/output-device-watch"
 import { AgentDockPanel } from "./AgentDockPanel"
 import { AgentWorkbench } from "./agent/AgentWorkbench"
 import type { ContextChip } from "@/lib/agent/context-chip"
@@ -201,7 +241,9 @@ import { InactiveProjectBanner } from "./InactiveProjectBanner"
 import { OfflineBanner } from "./OfflineBanner"
 import { useProjectLifecycle } from "@/hooks/useProjectLifecycle"
 import { restoreProject } from "@/lib/store/project-index"
-import { AppShell } from "./AppShell"
+import { AppShell, useIsLgUp } from "./AppShell"
+import { SignedOutWorkspace } from "./org/SignedOutWorkspace"
+import { OrgBreadcrumb } from "./org/OrgBreadcrumb"
 import { WorkspaceHeader } from "./WorkspaceHeader"
 import { DcsSyncBadgeMount } from "@/components/dcs/DcsSyncBadge"
 import { useEditorLensPreference } from "@/hooks/useEditorLensPreference"
@@ -238,6 +280,7 @@ import {
   TIMELINE_PANE_MIN_HEIGHT,
 } from "./timeline/timeline-pane-layout"
 import {
+  getVideoClockPlaying,
   setVideoClockSec,
   setVideoClockPlaying,
   useVideoClockPlaying,
@@ -257,6 +300,7 @@ import { useTimingModeAck } from "@/hooks/useTimingModeAck"
 import { PeerPresence } from "./PeerPresence"
 import { ViewSettingsMenu, type ViewSettingsMenuHandle } from "./ViewSettingsMenu"
 import type { OverflowMenuItem } from "./OverflowMenu"
+import { fileOptionsForAgentSurface } from "./editor-surface-toolbar"
 import { useFootnotesPreference } from "@/hooks/useFootnotesPreference"
 import type { VisibleFootnoteEntry } from "@/lib/footnotes/types"
 import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
@@ -282,7 +326,12 @@ import {
 } from "@/components/ui/select"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { readValidationCount } from "@/lib/progress/read-validation-count"
-import { resolveTextDirection, summarizeTextDirections } from "@/lib/text-direction"
+import {
+  detectStrongTextDirection,
+  resolveTextDirection,
+  summarizeDetectedDirections,
+  type TextDirection,
+} from "@/lib/text-direction"
 import { useSetupChecklist } from "@/hooks/useSetupChecklist"
 import { SetupChecklistDrawer } from "./onboarding/SetupChecklistDrawer"
 import { SystemPromptNudge } from "./onboarding/SystemPromptNudge"
@@ -301,7 +350,10 @@ import {
   writeLocalBacktranslation,
   type BacktranslationRecord,
 } from "@/lib/completion/bt-record"
-import { normalizeProtectedCompletion } from "@/lib/idml/completion"
+import {
+  normalizeProtectedCompletion,
+  type NormalizedCompletion,
+} from "@/lib/idml/completion"
 import { hasIdmlMetadata, replaceProtectedIdmlText } from "@/lib/idml/protected-html"
 import {
   hasIdmlCellMetadata,
@@ -310,7 +362,7 @@ import {
 } from "@/lib/richtext/idml-editor"
 import { shouldAutoValidateHumanEdit } from "@/lib/review/auto-validation"
 import { addConcept } from "@/lib/terminology/store"
-import type { Concept } from "@/lib/terminology/types"
+import type { Concept, ConceptDraft } from "@/lib/terminology/types"
 import { buildGlosser, type BtSeed, type Glosser } from "@/lib/completion/bt-glosser"
 import { memMark } from "@/lib/perf-log"
 import { buildAlignmentModel, type AlignmentModel } from "@/lib/completion/interlinear"
@@ -323,6 +375,12 @@ import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useMyScopes } from "@/hooks/useMyScopes"
 import { isInMemberScope } from "@/lib/sync/member-scopes"
 import { clearSelection, getSelectedIds, setSelection } from "@/lib/audio/selection"
+import {
+  setVisibleCellIds as setEditorViewportVisibleCellIds,
+  setTrackedCellRef as setEditorViewportTrackedCellRef,
+  useVisibleCellIds as useEditorViewportVisibleCellIds,
+  useTrackedCellRef as useEditorViewportTrackedCellRef,
+} from "@/hooks/useEditorViewportStore"
 
 // Import runs inline in the workspace (upload + eBible corpus tabs). The
 // AD-11 plan carves import into a standalone apps/import Worker, but that
@@ -371,6 +429,37 @@ const PROJECT_MEMORY_PATH_RE = /^\/project\/[^/]+\/memory(\/[^/]+)?$/
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _lastImportWrite: Promise<any> = Promise.resolve(undefined)
 const EMPTY_CELL_DATA: CellData[] = []
+const EMPTY_CHAPTER_HEALTH: BookHealthChapter[] = []
+const EMPTY_SCORED_PAIRS: ScoredPair[] = []
+
+type PreparedCompletionDraft = {
+  index: number
+  draft: CompletedCellDraft
+  liveCell: CellData
+  completed: NormalizedCompletion
+  parentId: string | null
+}
+
+type RetryCompletionDraft = PreparedCompletionDraft & {
+  rebasedParent: string
+  sourceEventId: string | null
+}
+
+// AQU-1104: the store keeps a summary's identity across commits for cells the
+// commit did not touch, so direction detection (a regex walk over every cell's
+// markup) is cached per summary object instead of re-run per commit.
+const directionBySummary = new WeakMap<CellSummary, { source: TextDirection | null; target: TextDirection | null }>()
+function summaryDirections(summary: CellSummary): { source: TextDirection | null; target: TextDirection | null } {
+  let directions = directionBySummary.get(summary)
+  if (!directions) {
+    directions = {
+      source: detectStrongTextDirection(summary.originalHtml ?? summary.original),
+      target: detectStrongTextDirection(summary.translatedHtml ?? summary.translated),
+    }
+    directionBySummary.set(summary, directions)
+  }
+  return directions
+}
 
 function projectRecordsEquivalent(a: ProjectRecord | null, b: ProjectRecord | null): boolean {
   if (a === b) return true
@@ -582,12 +671,6 @@ export function ProjectWorkspace() {
     )
     return pending.length > 0 ? [...base, ...pending] : base
   }, [hydratedProject?.files, optimisticFiles, optimisticRenames, optimisticDeletes])
-
-  // AQU-314: id+name pairs for the Cell-labels import panel's file picker.
-  const labelPickerFiles = useMemo(
-    () => projectFiles.map((f) => ({ id: f.id, name: f.name })),
-    [projectFiles],
-  )
 
   // AQU-744: current visible file ids, readable from the long-lived WS
   // message handler without re-subscribing on every inventory change. A
@@ -837,20 +920,21 @@ export function ProjectWorkspace() {
   const agentOpen = centerSurface === "agent"
   const [translateAsReadEnabled, setTranslateAsReadEnabled] = useTranslateAsReadPreference(projectId)
   const [translateAsReadActiveCellId, setTranslateAsReadActiveCellId] = useState<string | null>(null)
-  const [visibleCellIds, setVisibleCellIds] = useState<string[]>([])
+  // AQU-1016: visible-cell-ids used to be `useState` here — every virtualized
+  // scroll step re-rendered this whole shell. It now lives in a small
+  // external store (src/hooks/useEditorViewportStore.ts); the shell writes to
+  // it without triggering its own re-render, and this read subscribes only
+  // while translate-as-read is actually enabled (the sole consumer below —
+  // its own `available` gate no-ops the effect otherwise), so a scroll on
+  // the common "translate-as-read off" file causes zero extra shell renders.
+  const visibleCellIds = useEditorViewportVisibleCellIds(translateAsReadEnabled)
   const translateAsReadEnabledRef = useRef(false)
   translateAsReadEnabledRef.current = translateAsReadEnabled
   const translateAsReadAttemptsRef = useRef(new Map<string, string>())
   const translateAsReadRunRef = useRef(0)
   const handleVisibleCellIdsChange = useCallback((next: string[]) => {
-    setVisibleCellIds((current) => (
-      current.length === next.length && current.every((id, index) => id === next[index])
-        ? current
-        : next
-    ))
+    setEditorViewportVisibleCellIds(next)
   }, [])
-  const [editorHeaderNavTarget, setEditorHeaderNavTarget] = useState<HTMLDivElement | null>(null)
-
   const editorReturnPath = useMemo(() => {
     if (!projectId) return null
     if (centerSurface === "editor") return workspaceReturnPath(projectId, activeFileId)
@@ -887,6 +971,12 @@ export function ProjectWorkspace() {
   const [parallelScope, setParallelScope] = useState<ParallelPanelScope>("project")
   // FRO-308: left dock active tab (null = collapsed rail only)
   const [dockTab, setDockTab] = useState<DockTab | null>("files")
+  const lgUp = useIsLgUp()
+  // The mobile sheet is an overlay, not a rail — keep a tab selected so the
+  // sheet opens onto the files list instead of a 40px icon strip.
+  useEffect(() => {
+    if (!lgUp && dockTab === null) setDockTab("files")
+  }, [lgUp, dockTab])
   // Agent editor tab is in the strip while the workbench is open. Minimize
   // and the tab's × dismiss it. Switching to a file tab leaves the surface
   // but keeps the tab until then.
@@ -945,12 +1035,15 @@ export function ProjectWorkspace() {
   useEffect(() => {
     writeAgentTabOpen(projectId, agentTabOpen)
   }, [projectId, agentTabOpen])
-  const openAgentTab = useCallback(() => {
+  const [agentExpandedFromDock, setAgentExpandedFromDock] = useState(false)
+  const openAgentTab = useCallback((origin?: "sidebar" | "editor") => {
+    if (origin) setAgentExpandedFromDock(origin === "sidebar")
     setAgentTabOpen(true)
     openOverlay("agent")
   }, [openOverlay])
   const closeAgentTab = useCallback(() => {
     setAgentTabOpen(false)
+    setAgentExpandedFromDock(false)
     if (centerSurface === "agent" && projectId) {
       navigate(editorReturnPath ?? `/project/${projectId}/editor`)
     }
@@ -961,18 +1054,27 @@ export function ProjectWorkspace() {
   const [pendingChip, setPendingChip] = useState<ContextChip | null>(null)
   const handleAskAiFromSelection = useCallback((chip: ContextChip) => {
     setPendingChip(chip)
-    openAgentTab()
+    openAgentTab("editor")
   }, [openAgentTab])
   // FRO-309: expanded search results overlay in the main area
   const [searchExpandedQuery, setSearchExpandedQuery] = useState<string | null>(null)
   const [aiSetupOpen, setAiSetupOpen] = useState(false)
   const [recordingCellId, setRecordingCellId] = useState<string | null>(null)
+  /**
+   * AQU-646 stage 3: WHICH TRACK the recorder is recording into.
+   *
+   * The default dub row's slot, unless the mic was pressed on an added track's
+   * lane. Held beside the cell id rather than derived, because by the time the
+   * take is saved the pointer is long gone and nothing else remembers which
+   * lane it came from.
+   */
+  const [recordingSlot, setRecordingSlot] = useState<string>(RECORDING_SLOT)
   /** A line that has just been created and is waiting for its row to exist so
    *  the timeline and the table can both land on it. */
   const [pendingNewCell, setPendingNewCell] = useState<{ cellId: string; thenRecord: boolean } | null>(null)
-  // "Make a character from this voice" dialog (Cast studio). Owned here so the
-  // per-cell control in the editor's source column can open it seeded to a
-  // specific line's take, and the rail's button can open it for a manual pick.
+  // "Clone voice from this take" dialog. Owned here (not inside the Voices
+  // dock tab) so the per-cell control can open NewVoiceModal in place even
+  // when the left dock is on Files or collapsed.
   const [makeCharacterOpen, setMakeCharacterOpen] = useState(false)
   const [makeCharacterSeedCellId, setMakeCharacterSeedCellId] = useState<string | null>(null)
   // FRO-192: Assign… modal
@@ -987,10 +1089,11 @@ export function ProjectWorkspace() {
   // After "Voice together" synthesizes one combined clip, hold its result so
   // the manual boundary editor can open for the user to mark per-line slices.
   const [combinedEditor, setCombinedEditor] = useState<CombinedVoiceResult | null>(null)
-  // Text vs Audio lens — the same editor over the same cells. Audio mode swaps
-  // the left rail's body for the Cast studio (VoiceSidebar: cast roster + the
-  // "make a character" dialog) and replaces each cell's SOURCE column with that
-  // line's voice controls (CellVoicePanel); all other audio chrome lives there.
+  // Text vs Audio lens — the same editor over the same cells. Audio mode
+  // surfaces the Cast studio in the Voices dock tab (VoiceSidebar) and
+  // replaces each cell's SOURCE column with that line's voice controls
+  // (CellVoicePanel). Cloning from a cell opens NewVoiceModal at the
+  // workspace root, not inside the dock.
   const [lens, setLens] = useEditorLensPreference(projectId ?? "")
   // ISSUE-3 fix: /project/:id/voice deep-link activates audio lens on mount,
   // and surfaces the Voices dock tab (where the voice controls now live).
@@ -1041,7 +1144,6 @@ export function ProjectWorkspace() {
     () => createProjectPresenceStore(currentUsername),
     [currentUsername, project?.id],
   )
-  const presencePeers = usePresencePeers(presenceStore)
   const jwtRef = useRef<string | null>(null)
   useEffect(() => {
     jwtRef.current = frontierSession?.jwt ?? null
@@ -1279,6 +1381,16 @@ export function ProjectWorkspace() {
   /** Maps whatever id asked for the recorder onto the cell it should open on.
    *  Null ⇒ nothing to record here (a subtitle line no cue performs). */
   const openRecordingTargetRef = useRef<(cellId: string) => string | null>((id) => id)
+  /** AQU-646 stage 3f: where a row's audio belongs — the cell itself, the heard
+   *  lines performing it, or nowhere. Same dependency-ordering escape as the
+   *  resolver above: the editor-actions context is assembled long before the
+   *  cue links are built, and rows need this to be identity-stable. */
+  const audioHomeRef = useRef<(cell: CellData) => readonly CellData[] | null>((cell) => [cell])
+  /** AQU-646: the resolved bulk-synth plan, for the action closure below (which
+   *  is memoised above where the plan is computed). NOT the old placeholder
+   *  resolver — that one answered before the cue links loaded and its answer
+   *  stuck; this only ever holds the real, fully-resolved array. */
+  const synthTargetsRef = useRef<SynthTargetPlan[]>([])
   /** How many takes are attached to the CURRENT audio cues. Read by the import
    *  handler, which is declared above the attachment read it needs. */
   const cueTakeCountRef = useRef<() => number>(() => 0)
@@ -1369,6 +1481,16 @@ export function ProjectWorkspace() {
     [applyOptimisticTargetEdit],
   )
 
+  // Live sync: event.applied frames now carry the cell's projected rows and
+  // server_seq (sync-worker route), so the client applies them straight into
+  // the store — no per-cell GET, no range refresh — with a per-cell seq guard.
+  // Frames without rows fall through to the existing refresh path.
+  const liveApplier = useMemo(
+    () => createLiveApplier({ store: cellStore, revalidateCell }),
+    [cellStore, revalidateCell],
+  )
+  useEffect(() => { liveApplier.reset() }, [liveApplier, activeFileId])
+
   const getPendingTargetEventId = useCallback((cellId: string) => {
     return pendingTargetCommitHeadsRef.current.get(laneCellKey(cellId))?.eventId ?? null
   }, [laneCellKey])
@@ -1386,6 +1508,29 @@ export function ProjectWorkspace() {
   const rememberPendingTargetCommit = useCallback((cellId: string, eventId: string, parentId: string | null) => {
     pendingTargetCommitHeadsRef.current.set(laneCellKey(cellId), { eventId, parentId })
   }, [laneCellKey])
+
+  // I2: a stale sibling is a REJECTION of this client's commit, not a save.
+  // Left alone, the losing writer keeps its optimistic shadow (which makes
+  // mergeProtectedRows discard every server row for the cell) and keeps the
+  // losing event id as the parent of its next commit — so it never sees the
+  // winner and every follow-up commit is stale too. Drop the shadow, forget
+  // the pending head (the next commit chains on `cell.targetEventId`, the
+  // real head), and pull the winner's row. The banner stays as the route to
+  // History / promote. Subscribed tab-wide because the inline "flush now"
+  // after a commit does not go through useOutboxFlusher's callback.
+  useEffect(() => {
+    if (!activeFileId) return
+    return subscribeStaleSiblings((entries) => {
+      for (const entry of entries) {
+        if (!entry.cellId || entry.fileId !== activeFileId) continue
+        const key = laneCellKey(entry.cellId)
+        pendingTargetCommitHeadsRef.current.delete(key)
+        pendingCompletionEventIdRef.current.delete(key)
+        cellStore.clearOptimisticForCell(entry.cellId)
+        revalidateCell(entry.cellId)
+      }
+    })
+  }, [activeFileId, cellStore, laneCellKey, revalidateCell])
 
   useEffect(() => {
     if (pendingTargetCommitHeadsRef.current.size === 0) return
@@ -1664,19 +1809,21 @@ export function ProjectWorkspace() {
     targetTextDirection: activeFile?.targetTextDirection,
   })
   const activeFileDirectionSummary = useMemo(() => {
-    function* sourceValues() {
-      for (const summary of cellSummaries) yield summary.originalHtml ?? summary.original
+    function* sourceDirections() {
+      for (const summary of cellSummaries) yield summaryDirections(summary).source
     }
-    function* targetValues() {
-      for (const summary of cellSummaries) yield summary.translatedHtml ?? summary.translated
+    function* targetDirections() {
+      for (const summary of cellSummaries) yield summaryDirections(summary).target
     }
     return {
-      source: summarizeTextDirections(sourceValues()),
-      target: summarizeTextDirections(targetValues()),
+      source: summarizeDetectedDirections(sourceDirections()),
+      target: summarizeDetectedDirections(targetDirections()),
     }
   }, [cellSummaries])
   const [cellLabelsEnabled, setCellLabelsEnabled] = useCellLabelsPreference(projectId!)
   const [footnoteViewMode, setFootnoteViewMode] = useFootnotesPreference(projectId!)
+  const [targetKeyTermHighlightMode, setTargetKeyTermHighlightMode] =
+    useTargetKeyTermHighlightPreference(projectId!)
   const [visibleFootnotes, setVisibleFootnotes] = useState<VisibleFootnoteEntry[]>([])
   const visibleFootnotesKeyRef = useRef("")
   // FRO-251: per-file, per-side font sizes — adjusted from the View settings
@@ -1969,7 +2116,10 @@ export function ProjectWorkspace() {
       const att = cell?.attachments?.[audioId]
       if (!owner || !cell || !att) return
       const takeFileId = owner.fileId
-      const slot = audioId === cell.selectedAudioId ? "recording" : "generatedVoice"
+      // AQU-646: read the clip's slot; infer only when it is absent. Drives the
+      // optimistic overlay's "newest shadow per slot" bookkeeping, which puts
+      // the shadow in the wrong slot if this guesses.
+      const slot = att.slot ?? (audioId === cell.selectedAudioId ? "recording" : "generatedVoice")
       // 2026-08-14: a trim is its own event now, not a re-attach echoing back
       // every field it isn't changing. That echo was where trims got lost —
       // absence meant both "clear it" and "not my business" — and it also
@@ -2036,7 +2186,7 @@ export function ProjectWorkspace() {
   // with its line — the callers still hand an absolute anchor, and this is the
   // one place that converts.
   const handleRetimeTarget = useCallback(
-    async (cellId: string, anchorSec: number) => {
+    async (cellId: string, anchorSec: number, audioId: string) => {
       if (!project?.id || !activeFileId) return
       // Without the cell we'd have no start to measure against, and defaulting
       // it to 0 would quietly persist an absolute value into an offset field.
@@ -2047,25 +2197,60 @@ export function ProjectWorkspace() {
       // targetOffsetMsFor carries the old "never before file zero" floor into
       // the offset domain; enforced here, at the single persistence point.
       const targetOffsetMs = targetOffsetMsFor(cell, anchorSec)
-      if (takeFileId === activeFileId) {
-        applyOptimisticCellTiming(cellId, { metadata: { target_offset_ms: targetOffsetMs } })
-      } else {
+
+      // AQU-646 stage 3: THE PLACEMENT GOES ON THE TAKE, not on the line.
+      //
+      // It used to ride `cell.lane.retime`, which writes the anchor into the
+      // CELL's metadata. That was exact while a line could hold one dub; with
+      // extra target-audio tracks two takes share a line, so a per-cell anchor
+      // would make dragging one chip move the other. The per-cell rungs stay as
+      // the permanent fallback for every take made before this event existed —
+      // see `targetAnchorSec`.
+      // The resolver already merged this cell's attachments (raw store cells
+      // carry none), which is the same lookup the trim path above does.
+      const att = cell.attachments?.[audioId]
+      // EMIT FIRST, BIND THE OVERLAY TO IT (2026-08-27). Every sibling write
+      // hands its overlay the emit promise so the outbox record can vouch for
+      // it — "pending" keeps it alive indefinitely, "failed" repaints it as
+      // not-saved (the AQU-924 rule). This one didn't, so a dragged chip ran
+      // on the 15-second unbound timer instead: offline it sprang back while
+      // its event sat queued and healthy, and a rejected placement disappeared
+      // without a word. `emitCellAudioPlace` only builds the event and queues
+      // it durably — nothing has gone to the network yet — so starting it
+      // before the paint costs nothing.
+      const placeP = emitCellAudioPlace({
+        projectId: project.id,
+        fileId: takeFileId,
+        cellId,
+        audioId,
+        targetOffsetMs,
+        author: currentUsername,
+      })
+      if (att) {
+        injectOptimisticAudioPlace(takeFileId, cellId, {
+          audioId,
+          url: att.url,
+          slot: att.slot ?? (audioId === cell.selectedAudioId ? "recording" : "generatedVoice"),
+          mimeType: null,
+          voiceId: att.voiceId ?? null,
+          referenceAudioId: att.referenceAudioId ?? null,
+          durationMs: att.durationMs ?? null,
+          trimStartMs: att.trimStartMs ?? null,
+          trimEndMs: att.trimEndMs ?? null,
+          targetOffsetMs,
+        }, placeP)
+      } else if (takeFileId !== activeFileId) {
         // A cue cell is not in this file's store, so the store's optimistic
         // path cannot reach it — and its file is read once and never
         // revalidated, so without this the chip springs back until a reload.
         setCueAnchorOverridesRef.current(cellId, targetOffsetMs)
       }
-      await emitCellLaneRetime({
-        projectId: project.id,
-        fileId: takeFileId,
-        cellId,
-        targetOffsetMs,
-        author: currentUsername,
-      })
+
+      await placeP
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       revalidateCells()
     },
-    [project?.id, activeFileId, currentUsername, applyOptimisticCellTiming, getTokenForProjectFile, revalidateCells],
+    [project?.id, activeFileId, currentUsername, getTokenForProjectFile, revalidateCells],
   )
 
   // Timeline editor: set/clear the file's core video URL. coreMediaUrl lives on
@@ -2225,6 +2410,63 @@ export function ProjectWorkspace() {
     projectId: project?.id ?? null,
     fileId: audioCueSibling ? (activeFileId ?? null) : null,
   })
+
+  // AQU-646 (2026-08-27): THE CUE CELLS ARE RESOLVED HERE, beside the links
+  // they belong with, and not 4,800 lines below where they used to sit.
+  //
+  // The menu counts (`audioCounts`) and everything else that has to answer
+  // "what would a bulk run actually do" are declared between there and here,
+  // so they could not name these values as dependencies — they read a REF
+  // instead, and therefore kept whatever answer the first render produced,
+  // before the cue read had landed. The count promised to match the run and
+  // silently did not. Moving the block up is what lets those consumers list
+  // real dependencies; it depends on nothing declared after `cueLinks`, and
+  // no early return sits between, so hook order is unchanged.
+  // ── Stage 4: takes live on the AUDIO CUES, not the subtitle rows ─────────
+  // Forced by the data model, not chosen: `cell_audio.selected` is per (cell,
+  // slot), so a cell holds ONE selected recording — and on episode 101, 93
+  // subtitle lines are performed as two or more heard lines. Those lines could
+  // never hold their takes.
+  //
+  // The cue sibling's CELLS stay frozen and outside live sync (useAudioCueCells
+  // is a one-shot read — they are a transcript of a finished film and no event
+  // ever edits them). Only their ATTACHMENTS are live, which is exactly what
+  // this second per-file read gives us.
+  const { byCellId: cueAudioByCellId } = useFileAudioAttachments(
+    project?.id ?? null,
+    audioCueSibling?.id ?? null,
+  )
+  // Dragging a take on a cue: the anchor the drag writes lands in the CUE
+  // cell's metadata, and useAudioCueCells reads its file ONCE (frozen
+  // transcript, no live sync, nothing to invalidate). Without a local overlay
+  // the chip would spring back to where it started and only move after a
+  // reload. Server truth still wins on the next mount — this only covers the
+  // gap between the drag and that read.
+  const [cueAnchorOverrides, setCueAnchorOverrides] = useState<ReadonlyMap<string, number>>(
+    new Map(),
+  )
+  setCueAnchorOverridesRef.current = (cellId, offsetMs) =>
+    setCueAnchorOverrides((prev) => new Map(prev).set(cellId, offsetMs))
+  const audioCueCells = useMemo(() => {
+    if (!audioCues) return null
+    const merged = mergeCellsWithAudio(audioCues, cueAudioByCellId)
+    if (cueAnchorOverrides.size === 0) return merged
+    return merged.map((c) => {
+      const offset = cueAnchorOverrides.get(c.id)
+      return offset === undefined
+        ? c
+        : { ...c, metadata: { ...(c.metadata ?? {}), target_offset_ms: offset } }
+    })
+  }, [audioCues, cueAudioByCellId, cueAnchorOverrides])
+  cueTakeCountRef.current = () => {
+    let n = 0
+    for (const entry of cueAudioByCellId.values()) {
+      // Only live clips count. A tombstoned attachment is already gone, and
+      // refusing an import over one would be a dead end with no way out.
+      n += Object.keys(entry.attachments).length > 0 ? 1 : 0
+    }
+    return n
+  }
   /**
    * Toggle one pairing by hand (linking mode). Paints first, then emits — the
    * event can sit in the outbox for a while and the chip has to answer the
@@ -2608,7 +2850,11 @@ export function ProjectWorkspace() {
       //
       // The cells are still consulted for the OTHER axis — writing a camera
       // pick must not blank the name — but never for the axis being decided.
-      const views = readAtVersion(cellStoreVersion, () => cellStore.getAllCellViews())
+      // AQU-1147: read the store fresh at call time (no version dependency) —
+      // this only ever runs from a user click, so there's no memoization to
+      // keep in sync and no reason to make this component re-render on every
+      // commit just so this handler's closure stays "current."
+      const views = cellStore.getAllCellViews()
       const textById = new Map(views.map((c) => [c.id, c]))
       const nameOf = (c: { metadata?: Record<string, unknown> | null } | undefined) =>
         c?.metadata && typeof c.metadata.cast_name === "string" ? c.metadata.cast_name : ""
@@ -2670,7 +2916,6 @@ export function ProjectWorkspace() {
       audioCueSibling?.id,
       audioCues,
       cellStore,
-      cellStoreVersion,
       currentUsername,
       getTokenForProjectFile,
       refreshAudioCues,
@@ -2707,7 +2952,8 @@ export function ProjectWorkspace() {
     frozenAgreement.current = characterAgreement
     setCharacterWrite({ done: 0, total: entries.length, phase: "writing" })
     const toastId = toast.add({ type: "loading", title: `Undoing ${entries.length} decisions…`, timeout: 0 })
-    const views = readAtVersion(cellStoreVersion, () => cellStore.getAllCellViews())
+    // AQU-1147: fresh read at call time, no version dependency (see handleResolveCharacter).
+    const views = cellStore.getAllCellViews()
     const textById = new Map(views.map((c) => [c.id, c]))
     const cueById = new Map((audioCues ?? []).map((c) => [c.id, c]))
     const nameOf = (c: { metadata?: Record<string, unknown> | null } | undefined) =>
@@ -2760,7 +3006,6 @@ export function ProjectWorkspace() {
     audioCueSibling?.id,
     audioCues,
     cellStore,
-    cellStoreVersion,
     currentUsername,
     getTokenForProjectFile,
     refreshAudioCues,
@@ -3086,13 +3331,14 @@ export function ProjectWorkspace() {
     if (!activeFileId) return
     await runCharacterClear({
       fileId: activeFileId,
-      cells: readAtVersion(cellStoreVersion, () => cellStore.getAllCellViews()),
+      // AQU-1147: fresh read at call time, no version dependency (see handleResolveCharacter).
+      cells: cellStore.getAllCellViews(),
       noun: "subtitle lines",
       after: () => {
         revalidateCells()
       },
     })
-  }, [activeFileId, cellStore, cellStoreVersion, runCharacterClear, revalidateCells])
+  }, [activeFileId, cellStore, runCharacterClear, revalidateCells])
 
   /** The sheet keyed to the HEARD lines. Clearing this side degrades gently:
    *  `resolveCueCharacter` prefers a cue's own name and falls back to the
@@ -3211,8 +3457,9 @@ export function ProjectWorkspace() {
       setCueLinksPending(true)
       try {
         toast.update(importToastId, { type: "loading", title: `Imported ${uploaded.cellCount} audio cues — pairing them with the subtitles…` })
+        // AQU-1147: fresh read at call time, no version dependency (see handleResolveCharacter).
         const plans = autoLinkable(planCueLinks({
-          textCells: readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()),
+          textCells: cellStore.getAllSummaries(),
           audioCues: uploaded.cues,
         }))
         for (const plan of plans) {
@@ -3256,7 +3503,7 @@ export function ProjectWorkspace() {
           ? `Imported ${uploaded.cellCount} audio cues, and paired ${linkCount} of them with subtitle lines.`
           : `Imported ${uploaded.cellCount} audio cues.` })
     },
-    [project?.id, activeFile, audioCueSiblings, currentUsername, getTokenForFile, getTokenForProjectFile, refresh, refreshCueLinks, cellStore, cellStoreVersion],
+    [project?.id, activeFile, audioCueSiblings, currentUsername, getTokenForFile, getTokenForProjectFile, refresh, refreshCueLinks, cellStore],
   )
 
   /**
@@ -3403,9 +3650,10 @@ export function ProjectWorkspace() {
             // Only what may be written without asking. A cross-script or
             // weak-wording match is surfaced in the review drawer instead —
             // nothing verified what those two lines say.
+            // AQU-1147: fresh read at call time, no version dependency (see handleResolveCharacter).
             wanted: autoLinkable(
               planCueLinks({
-                textCells: readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()),
+                textCells: cellStore.getAllSummaries(),
                 audioCues: cuesAfter,
               }),
             ),
@@ -3463,7 +3711,7 @@ export function ProjectWorkspace() {
     },
     [
       project?.id, activeFile, audioCueSibling, audioCues, cueLinks, currentUsername,
-      getTokenForProjectFile, refreshAudioCues, refreshCueLinks, cellStore, cellStoreVersion,
+      getTokenForProjectFile, refreshAudioCues, refreshCueLinks, cellStore,
     ],
   )
 
@@ -3498,19 +3746,25 @@ export function ProjectWorkspace() {
     toast.add({ type: "success", title: "Removed the audio cues. The Source audio track is gone." })
   }, [project?.id, audioCueSiblings, currentUsername, getTokenForProjectFile, refresh])
 
-  const [videoDialogOpen, setVideoDialogOpen] = useState(false)
   // Nothing reads this any more (round 8 removed the dead cue clock below), but
   // the player it belongs to comes back with the event grammar in v1.x, so the
   // wire stays rather than being re-derived from scratch then.
   const [, setCurrentVideoTime] = useState(0)
   const videoPlayerRef = useRef<VideoPlayerHandle>(null)
   // Phase 2c-gamma: video attachments lived on Y.Doc meta. Disabled here so
-  // the editor still renders for subtitle files; the attach/play workflow
-  // comes back via the event grammar in v1.x.
-  const videoAttachment: { videoStartOffset?: number; videoUrl?: string } = {}
+  // the editor still renders for subtitle files; the PLAYER comes back via the
+  // event grammar in v1.x — which is why `videoSrc` and the cue extraction
+  // below stay parked rather than being re-derived from scratch then.
+  //
+  // AQU-646 stage 6I (Sam, 2026-08-27): THE ATTACH HALF DOES NOT COME BACK,
+  // and it is gone. `VideoAttachmentDialog` was still reachable from the ⋯
+  // menu on every subtitle file, offering a URL field and a file upload over a
+  // `current` that was permanently empty and an `onSave` that was a literal
+  // no-op — "it opens up a little modal that claims to let you upload video and
+  // it does not." Linking a film is `LinkVideoUrlDialog`'s job and always was;
+  // this was a second, broken door to the same room. The dialog, its test and
+  // its i18n went with the menu item.
   const videoSrc: string | null = null
-  const blobUnavailable = false
-  const saveVideo: (..._: unknown[]) => void = () => {}
 
   // Live cues for the VideoPlayer's overlay (bypasses iframe CC). We drive
   // rendering from cell data directly so edits appear immediately without a
@@ -3519,8 +3773,6 @@ export function ProjectWorkspace() {
     if (!isSubtitleFile || !videoSrc || cellSummaries.length === 0) return []
     return readAtVersion(cellStoreVersion, () => extractCuesFromCells(cellStore.getAllCellViews()))
   }, [cellStore, cellStoreVersion, cellSummaries.length, isSubtitleFile, videoSrc])
-
-  const videoStartOffset = videoAttachment.videoStartOffset ?? 0
 
   // AQU-646 round 8: `activeCueIndex` and the 500ms effect that fed it to
   // scrollToCellIndex are GONE. Three things were wrong with them at once.
@@ -3587,6 +3839,10 @@ export function ProjectWorkspace() {
     refresh,
     patchSettings as Parameters<typeof useRules>[2],
     orgRules,
+    undefined,
+    // AQU-609: every consumer of this instance's `rules` evaluates against the
+    // active lane's cell view, so lane-scoped rules for other lanes drop here.
+    activeLane,
   )
   const {
     comments: allProjectComments,
@@ -3744,6 +4000,7 @@ export function ProjectWorkspace() {
           topK: limit,
           validatedOnly: true,
           excludeCellId: excludeId,
+          targetLang: activeLane,
         })
         return res.results.map((r) => ({
           cellId: r.cellId,
@@ -3759,7 +4016,7 @@ export function ProjectWorkspace() {
         return []
       }
     },
-    [project?.id, activeFileId, getTokenForFile],
+    [project?.id, activeFileId, getTokenForFile, activeLane],
   )
 
   const branchingSearchPassages = useCallback(
@@ -3781,6 +4038,7 @@ export function ProjectWorkspace() {
           topK: hits,
           radius,
           validatedOnly: true,
+          targetLang: activeLane,
         })
         // Map server `Passage` → existing `PassageHit` shape. Drops
         // `hitCellId` (derivable from cells.find(c => c.hit)) and
@@ -3799,7 +4057,7 @@ export function ProjectWorkspace() {
         return []
       }
     },
-    [project?.id, activeFileId, getTokenForFile],
+    [project?.id, activeFileId, getTokenForFile, activeLane],
   )
 
   const commitCompletedCell = useCallback(async (cell: CellData, text: string, author: string, provenance: AiDraftProvenance) => {
@@ -3968,6 +4226,291 @@ export function ProjectWorkspace() {
     revalidateCell(cell.id)
   }, [project?.id, project?.syncRole?.level, applyOptimisticTargetEdit, activeLane, laneCellKey, getActiveCell, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, refreshOutboxPending, revalidateCellStats, revalidateCell])
 
+  const commitCompletedCells = useCallback(async (
+    drafts: CompletedCellDraft[],
+  ): Promise<CommitCompletedCellsResult> => {
+    if (!project?.id || !canPerform("target.cell.commit", project.syncRole?.level ?? null)) {
+      const error = new Error("You do not have permission to commit target cells")
+      return drafts.map(() => ({ status: "rejected", reason: error }))
+    }
+    if (drafts.length === 0) return []
+
+    const results: CommitCompletedCellsResult = drafts.map(() => ({
+      status: "rejected",
+      reason: new Error("The draft could not be prepared"),
+    }))
+    const prepared: PreparedCompletionDraft[] = []
+    for (let index = 0; index < drafts.length; index++) {
+      const draft = drafts[index]
+      try {
+        const liveCell = getActiveCell(draft.cell.id) ?? draft.cell
+        const completed = normalizeProtectedCompletion(liveCell, draft.text)
+        const parentId = resolveTargetCommitParentId(liveCell)
+        prepared.push({ index, draft, liveCell, completed, parentId })
+        results[index] = { status: "fulfilled", value: undefined }
+      } catch (error) {
+        results[index] = { status: "rejected", reason: error }
+      }
+    }
+    if (prepared.length === 0) return results
+    const inputs = prepared.map(({ draft, liveCell, completed, parentId }) => ({
+      projectId: project.id,
+      fileId: draft.cell.fileId,
+      cellId: draft.cell.id,
+      parentId,
+      sourceEventId: liveCell.sourceEventId ?? null,
+      value: completed.value,
+      ...(completed.valueHtml ? { valueHtml: completed.valueHtml } : {}),
+      author: draft.author,
+      targetLang: activeLane,
+      aiSuggestion: true,
+      aiDraft: draft.provenance,
+    }))
+
+    const optimisticPatches = prepared.map(({ draft, completed }) => ({
+      cellId: draft.cell.id,
+      value: completed.value,
+      ...(completed.valueHtml ? { valueHtml: completed.valueHtml } : {}),
+    }))
+    const restorePatches: Array<{
+      cellId: string
+      value: string
+      valueHtml?: string
+    }> = prepared.map(({ draft, liveCell }) => ({
+      cellId: draft.cell.id,
+      value: liveCell.translated ?? "",
+      ...(liveCell.translatedHtml
+        ? { valueHtml: liveCell.translatedHtml }
+        : {}),
+    }))
+    // The outbox overlay disappears as soon as accepted rows leave IDB. Keep
+    // one direct store shadow per draft until the confirming delta replaces
+    // it, so the UI cannot flash back to the pre-response text.
+    applyOptimisticTargetEdits(optimisticPatches)
+
+    let eventIds: string[]
+    try {
+      // enqueueOutboxEvents is atomic and notifies the pending-overlay reader
+      // once, so ten drafts become one optimistic store mutation. Keep the
+      // streaming previews mounted until the flush and confirming delta land.
+      eventIds = await emitTargetCellCommits(inputs)
+    } catch (error) {
+      applyOptimisticTargetEdits(restorePatches)
+      revalidateCells()
+      for (const item of prepared) {
+        results[item.index] = { status: "rejected", reason: error }
+      }
+      return results
+    }
+
+    const initialIndexByEventId = new Map(eventIds.map((eventId, index) => [eventId, index]))
+    for (let index = 0; index < eventIds.length; index++) {
+      const eventId = eventIds[index]
+      const cellId = prepared[index].draft.cell.id
+      pendingCompletionEventIdRef.current.set(laneCellKey(cellId), eventId)
+      rememberPendingTargetCommit(cellId, eventId, prepared[index].parentId)
+    }
+
+    const staleIndexes = new Set<number>()
+    const rejectedIndexes = new Map<number, Error>()
+    const noteRejectedEntries = (
+      entries: Array<{ id: string; status: number; reason: string }>,
+    ) => {
+      for (const entry of entries) {
+        const preparedIndex = initialIndexByEventId.get(entry.id)
+        if (preparedIndex === undefined) continue
+        rejectedIndexes.set(
+          preparedIndex,
+          new Error(entry.reason || `The server refused this draft (${entry.status})`),
+        )
+      }
+    }
+    await flushOutboxBatch({
+      getTokenForFile: getTokenForProjectFile,
+      onStaleSiblings: (entries) => {
+        for (const entry of entries) {
+          const index = initialIndexByEventId.get(entry.id)
+          if (index !== undefined) staleIndexes.add(index)
+        }
+      },
+      onRejected: noteRejectedEntries,
+      onForbidden: noteRejectedEntries,
+    })
+    await refreshOutboxPending()
+
+    if (rejectedIndexes.size > 0) {
+      const rejectedPatches: typeof restorePatches = []
+      for (const [preparedIndex, error] of rejectedIndexes) {
+        const item = prepared[preparedIndex]
+        const key = laneCellKey(item.draft.cell.id)
+        pendingCompletionEventIdRef.current.delete(key)
+        pendingTargetCommitHeadsRef.current.delete(key)
+        results[item.index] = { status: "rejected", reason: error }
+        rejectedPatches.push(restorePatches[preparedIndex])
+      }
+      applyOptimisticTargetEdits(rejectedPatches)
+    }
+    if (
+      staleIndexes.size > 0 &&
+      [...staleIndexes].some((preparedIndex) => !rejectedIndexes.has(preparedIndex))
+    ) {
+      const stalePrepared: PreparedCompletionDraft[] = []
+      for (const preparedIndex of staleIndexes) {
+        if (!rejectedIndexes.has(preparedIndex)) {
+          stalePrepared.push(prepared[preparedIndex])
+        }
+      }
+      for (const { draft } of stalePrepared) {
+        const key = laneCellKey(draft.cell.id)
+        pendingCompletionEventIdRef.current.delete(key)
+        pendingTargetCommitHeadsRef.current.delete(key)
+      }
+
+      try {
+        // One authoritative read supplies the current parents for every stale
+        // draft in this model response. Retry only cells whose head advanced;
+        // an unchanged head would dead-letter identically.
+        const fileId = stalePrepared[0].draft.cell.fileId
+        const mint = await getTokenForProjectFile(project.id, fileId)
+        const staleCellIds = stalePrepared.map(({ draft }) => draft.cell.id)
+        const rows = mint.token
+          ? await fetchCellsByIds(
+            project.id,
+            fileId,
+            staleCellIds,
+            mint.token,
+            activeLane || undefined,
+          )
+          : []
+        const retryItems: RetryCompletionDraft[] = []
+        for (const item of stalePrepared) {
+          const targetRow = rows.find((row) => (
+            row.cellId === item.draft.cell.id &&
+            row.side === "target" &&
+            (row.targetLang ?? "") === activeLane
+          ))
+          const sourceRow = rows.find((row) => (
+            row.cellId === item.draft.cell.id && row.side === "source"
+          ))
+          const rebasedParent = targetRow?.eventId ?? sourceRow?.eventId ?? null
+          if (!rebasedParent || rebasedParent === item.parentId) {
+            results[item.index] = {
+              status: "rejected",
+              reason: new Error("The draft was outdated by another change and was not saved"),
+            }
+            continue
+          }
+          retryItems.push({
+            ...item,
+            rebasedParent,
+            sourceEventId: sourceRow?.eventId ?? item.liveCell.sourceEventId ?? null,
+          })
+        }
+
+        if (retryItems.length > 0) {
+          applyOptimisticTargetEdits(retryItems.map((item) => ({
+            cellId: item.draft.cell.id,
+            value: item.completed.value,
+            ...(item.completed.valueHtml
+              ? { valueHtml: item.completed.valueHtml }
+              : {}),
+          })))
+          const retryEventIds = await emitTargetCellCommits(retryItems.map((item) => ({
+            projectId: project.id,
+            fileId: item.draft.cell.fileId,
+            cellId: item.draft.cell.id,
+            parentId: item.rebasedParent,
+            sourceEventId: item.sourceEventId,
+            value: item.completed.value,
+            ...(item.completed.valueHtml ? { valueHtml: item.completed.valueHtml } : {}),
+            author: item.draft.author,
+            targetLang: activeLane,
+            aiSuggestion: true,
+            aiDraft: item.draft.provenance,
+          })))
+          const retryIndexByEventId = new Map(
+            retryEventIds.map((eventId, index) => [eventId, retryItems[index].index]),
+          )
+          for (let index = 0; index < retryEventIds.length; index++) {
+            const item = retryItems[index]
+            const eventId = retryEventIds[index]
+            pendingCompletionEventIdRef.current.set(laneCellKey(item.draft.cell.id), eventId)
+            rememberPendingTargetCommit(item.draft.cell.id, eventId, item.rebasedParent)
+          }
+          const retryRejectedIndexes = new Map<number, Error>()
+          const noteRetryRejected = (
+            entries: Array<{ id: string; status: number; reason: string }>,
+          ) => {
+            for (const entry of entries) {
+              const index = retryIndexByEventId.get(entry.id)
+              if (index === undefined) continue
+              retryRejectedIndexes.set(
+                index,
+                new Error(entry.reason || `The server refused this draft (${entry.status})`),
+              )
+            }
+          }
+          await flushOutboxBatch({
+            getTokenForFile: getTokenForProjectFile,
+            onStaleSiblings: (entries) => {
+              for (const entry of entries) {
+                const index = retryIndexByEventId.get(entry.id)
+                if (index === undefined) continue
+                results[index] = {
+                  status: "rejected",
+                  reason: new Error("The draft was outdated by another change and was not saved"),
+                }
+              }
+            },
+            onRejected: noteRetryRejected,
+            onForbidden: noteRetryRejected,
+          })
+          await refreshOutboxPending()
+          for (const [index, error] of retryRejectedIndexes) {
+            const item = prepared.find((candidate) => candidate.index === index)
+            if (!item) continue
+            const key = laneCellKey(item.draft.cell.id)
+            pendingCompletionEventIdRef.current.delete(key)
+            pendingTargetCommitHeadsRef.current.delete(key)
+            cellStore.clearOptimisticForCell(item.draft.cell.id)
+            results[index] = { status: "rejected", reason: error }
+          }
+        }
+      } catch (error) {
+        for (const preparedIndex of staleIndexes) {
+          const item = prepared[preparedIndex]
+          const key = laneCellKey(item.draft.cell.id)
+          pendingCompletionEventIdRef.current.delete(key)
+          pendingTargetCommitHeadsRef.current.delete(key)
+          cellStore.clearOptimisticForCell(item.draft.cell.id)
+          results[item.index] = { status: "rejected", reason: error }
+        }
+      }
+    }
+
+    // One file-level delta consumes the complete server sequence range and
+    // applies every confirmed draft with one replaceRows/emit cycle. Refresh
+    // audit stats as one projection read too; N targeted reads would feed N
+    // successive audit maps back through CellStore.setRuntime.
+    revalidateCells()
+    revalidateAuditStats()
+    return results
+  }, [
+    activeLane,
+    applyOptimisticTargetEdits,
+    cellStore,
+    getActiveCell,
+    getTokenForProjectFile,
+    laneCellKey,
+    project?.id,
+    project?.syncRole?.level,
+    refreshOutboxPending,
+    rememberPendingTargetCommit,
+    resolveTargetCommitParentId,
+    revalidateAuditStats,
+    revalidateCells,
+  ])
+
   /**
    * AD-2 sibling promotion: emit a new target-cell commit whose parentId is
    * the current chain head (historyCell.targetEventId). This makes the
@@ -4022,6 +4565,8 @@ export function ProjectWorkspace() {
     // lane-aware derivation as the editor project + file metadata.
     project?.completionSettings, project?.sourceLanguage || "", activeLaneTargetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell, rules, getActiveCells, project?.translationBrief?.l1Summary ?? undefined,
     project?.draftContext ?? DEFAULT_DRAFT_CONTEXT,
+    activeLane,
+    commitCompletedCells,
   )
 
   // AQU-620: adapter so the editor's per-cell AI action can request a plain
@@ -4396,35 +4941,57 @@ export function ProjectWorkspace() {
     return norm(gloss) === norm(translatedText) ? "" : gloss
   }, [getGlosser])
 
-  // Add-from-selection: create a DRAFT concept from a source-side selection in
-  // the editor and persist it via the same project-settings sync path the
-  // terminology page uses. Renderings start empty — the translator fills them
-  // in later from the Terminology page.
-  const handleAddConceptFromSelection = useCallback(async (sourceTerm: string) => {
+  // Add-from-selection: create a concept from a source-side selection in the
+  // editor. A rendering in the payload activates the concept immediately;
+  // otherwise it lands as a draft. Progress is toasted so the popover can close.
+  const handleAddConceptFromSelection = useCallback(async (draft: ConceptDraft) => {
     if (!project) return
-    const trimmed = sourceTerm.trim()
+    const trimmed = draft.sourceTerm.trim()
     if (!trimmed) return
-    const draft: Omit<Concept, "id" | "createdAt"> = {
-      sourceTerm: trimmed,
-      renderings: [],
-      status: "draft",
-      createdBy: currentUsername,
+    const rendering = draft.rendering?.trim()
+    const toastId = toast.add({
+      type: "loading",
+      title: t("terminology.addConcept.savingToast"),
+      timeout: 0,
+      id: `term-save:${crypto.randomUUID()}`,
+    })
+    try {
+      const payload: Omit<Concept, "id" | "createdAt"> = {
+        sourceTerm: trimmed,
+        renderings: rendering ? [{ rendering, status: "preferred" }] : [],
+        status: rendering ? "active" : "draft",
+        createdBy: currentUsername,
+        ...(draft.caseSensitive ? { caseSensitive: true } : {}),
+      }
+      const updated = addConcept(project, payload)
+      const created = (updated.terminology ?? []).at(-1)
+      const failure = describePatchFailure(await patchSettings({ terminology: updated.terminology ?? [] }))
+      if (failure) throw new Error(failure)
+      toast.update(toastId, {
+        type: "success",
+        title: t("terminology.addConcept.savedToast", { term: trimmed }),
+        timeout: 8000,
+        actionProps: created
+          ? {
+              children: t("terminology.addConcept.viewEntry"),
+              onClick: () => {
+                navigate(`/project/${project.id}/terminology?concept=${encodeURIComponent(created.id)}`)
+              },
+            }
+          : undefined,
+      })
+    } catch (err) {
+      toast.update(toastId, {
+        type: "error",
+        title: err instanceof Error ? err.message : t("terminology.addConcept.saveFailed"),
+      })
     }
-    const updated = addConcept(project, draft)
-    // AQU-754: patchSettings never rejects — it resolves a PatchOutcome. The
-    // prior code ignored it, so an "add concept" from the editor silently
-    // no-op'd whenever the write was rejected (below Maintainer, offline,
-    // version conflict, or a 5xx) — the same silent-failure the Terminology
-    // page hit in AQU-749. Surface it so AddConceptDialog keeps the dialog open
-    // and shows why, instead of closing as if the concept was saved.
-    const failure = describePatchFailure(await patchSettings({ terminology: updated.terminology ?? [] }))
-    if (failure) throw new Error(failure)
-  }, [project, currentUsername, patchSettings])
+  }, [project, currentUsername, patchSettings, t, navigate])
 
   // AQU-754 follow-up: when the caller is on a synced project below the
-  // termbase write floor, open AddConceptDialog pre-blocked (input + Create
-  // draft disabled, reason shown, Cancel active) instead of letting them type
-  // a draft that patchSettings is guaranteed to reject. serverRoleLevel is the
+  // terminology write floor, open the add-term popover pre-blocked (inputs
+  // disabled, reason shown, Cancel active) instead of letting them type a
+  // draft that patchSettings is guaranteed to reject. serverRoleLevel is the
   // server-resolved role (null = unsynced/local-only project, which saves
   // locally and must stay writable).
   const addConceptBlockedReason =
@@ -4540,6 +5107,7 @@ export function ProjectWorkspace() {
     })
   }, [clearCellError])
 
+  const healthCalculationsEnabled = useHealthCalculationsEnabled()
   const requiredValidations = project ? readValidationCount(project) : 1
   const healthFileCells = useMemo(() => {
     const map = new Map<string, readonly CellSummary[]>()
@@ -4549,10 +5117,12 @@ export function ProjectWorkspace() {
 
   // AD-14: health derives from decay (endorsement_count). The legacy
   // four-sub-score "composite-health" path is retired.
+  // Per-browser off switch (lib/health/kill-switch.ts), exposed in the
+  // editor's view settings for users on very large files.
   const health = useHealth(
     healthFileCells,
     rules,
-    { decaySettings: project?.decaySettings, requiredValidations },
+    { decaySettings: project?.decaySettings, requiredValidations, enabled: healthCalculationsEnabled },
   )
   // AQU-599: cellOpenCommentCount from useHealth is intentionally not consumed
   // here — see liveCellOpenCommentCount above (health's copy is empty in Phase
@@ -4614,7 +5184,8 @@ export function ProjectWorkspace() {
       return true
     }
   }, [])
-  const confidenceOverlayActive = confidenceOverlayEnabled
+  const confidenceOverlayActive = healthCalculationsEnabled
+    && confidenceOverlayEnabled
     && Boolean(project?.id && activeFileId && frontierSession?.jwt)
   const confidence = useCellConfidence({
     projectId: project?.id,
@@ -4632,34 +5203,33 @@ export function ProjectWorkspace() {
     return confidence.healthMap
   }, [confidenceOverlayActive, healthMap, confidence.healthMap])
 
+  // AQU-1104: built incrementally. Every commit bumps the store version, and
+  // rebuilding this map from all summaries (a fresh Map plus an object per
+  // cell) was one of the per-commit whole-file walks behind the "Draft all"
+  // lag on a 31k-cell file. The builder keeps identities for unchanged cells
+  // and chapters, so the sidebar's chapter grid also skips re-rendering.
+  const chapterHealthBuilder = useMemo(() => chapterHealthBuilderFor(cellStore), [cellStore])
   const activeChapterHealth = useMemo<BookHealthChapter[]>(() => {
-    if (!activeFileId) return []
+    if (!activeFileId) return EMPTY_CHAPTER_HEALTH
     return readAtVersion(cellStoreVersion, () => {
-      const summaries = new Map(cellSummaries.map((cell) => [cell.id, cell]))
-      return cellStore.getNavigationIndex().map((chapter) => ({
-        key: chapter.key,
-        label: chapter.label,
-        translated: chapter.translated,
-        validated: chapter.validated,
-        total: chapter.total,
-        cells: chapter.cellIds.flatMap((cellId) => {
-          const cell = summaries.get(cellId)
-          if (!cell) return []
-          const stage = cell.status === "validated"
-            ? "validated" as const
-            : cell.status === "empty" || !cell.translated.trim()
-              ? "untranslated" as const
-              : "automatic" as const
-          return [{
-            id: cellId,
-            stage,
-            health: stage === "validated" ? 100 : effectiveHealthMap.get(cellId),
-            hasIssue: (infractions.get(cellId)?.length ?? 0) > 0,
-          }]
-        }),
-      }))
+      // Summaries sit in store order, so the store's index is a direct lookup;
+      // the id check guards the (never observed) case of a skipped row, falling
+      // back to a map built once for this pass.
+      let summaryById: Map<string, CellSummary> | null = null
+      const getSummary = (cellId: string): CellSummary | undefined => {
+        const index = cellStore.findIndexByCellId(cellId)
+        const direct = index >= 0 ? cellSummaries[index] : undefined
+        if (direct && direct.id === cellId) return direct
+        summaryById ??= new Map(cellSummaries.map((cell) => [cell.id, cell]))
+        return summaryById.get(cellId)
+      }
+      return chapterHealthBuilder.build(cellStore.getNavigationIndex(), {
+        getSummary,
+        health: (cellId) => effectiveHealthMap.get(cellId),
+        hasIssue: (cellId) => (infractions.get(cellId)?.length ?? 0) > 0,
+      })
     })
-  }, [activeFileId, cellStore, cellStoreVersion, cellSummaries, effectiveHealthMap, infractions])
+  }, [activeFileId, cellStore, cellStoreVersion, cellSummaries, chapterHealthBuilder, effectiveHealthMap, infractions])
 
   // AD-14: the four-sub-score breakdown popover is retired. The project ring
   // shows decay-derived health; the "biggest drags" popover redesign (cells
@@ -4832,9 +5402,10 @@ export function ProjectWorkspace() {
     setCheckOpen(true)
     setCheckRunning(true)
     try {
+      // AQU-1147: fresh read at call time, no version dependency (see handleResolveCharacter).
       const result = await runDeterministicCheck({
         fileId: activeFileId,
-        cells: readAtVersion(cellStoreVersion, getActiveCells),
+        cells: getActiveCells(),
         rules,
         concepts: project?.terminology ?? [],
       })
@@ -4845,7 +5416,7 @@ export function ProjectWorkspace() {
     } finally {
       setCheckRunning(false)
     }
-  }, [activeFileId, checkRunning, cellStoreVersion, getActiveCells, rules, project?.terminology])
+  }, [activeFileId, checkRunning, getActiveCells, rules, project?.terminology])
 
   // A check run describes one file's cells; switching files invalidates it.
   useEffect(() => {
@@ -4881,9 +5452,10 @@ export function ProjectWorkspace() {
       workspaceTabs.openFile(a.fileId)
       return
     }
-    const idx = readAtVersion(cellStoreVersion, () => resolveScopeLabelIndex(a.scopeLabel))
+    // AQU-1147: fresh read at call time, no version dependency (see handleResolveCharacter).
+    const idx = resolveScopeLabelIndex(a.scopeLabel)
     editorRef.current?.scrollToCellIndex(idx >= 0 ? idx : 0)
-  }, [activeFileId, cellStoreVersion, resolveScopeLabelIndex, setActiveLane, workspaceTabs])
+  }, [activeFileId, resolveScopeLabelIndex, setActiveLane, workspaceTabs])
 
   // Consume a parked assignment scroll once the target file's cells have
   // loaded (AQU-690; mirrors the presence-peer deferred jump).
@@ -4964,20 +5536,6 @@ export function ProjectWorkspace() {
     return () => document.removeEventListener("keydown", handler)
   }, [activeFileId, hasUnfinished, handleJumpNextUnfinished])
 
-  // Legacy sync status shim. AD-1 live coordination uses the project
-  // WebSocket below; this hook only feeds the existing status indicator.
-  const { status: fileSyncStatus } = useFileSync({
-    doc,
-    projectId: project?.id ?? null,
-    fileId: activeFileId || null,
-    username: currentUsername,
-    enabled: Boolean(project && activeFileId),
-    session: frontierSession,
-    projectName: project?.name ?? null,
-    gitlabProjectId:
-      project?.origin?.kind === "git" ? project.origin.gitlabProjectId : null,
-  })
-
   // Phase 2c-gamma: cross-collaborator settings sync was piggybacked on the
   // active file's Y.Doc meta; that broadcast channel is gone. Settings still
   // persist locally and via the project record fetch.
@@ -4987,8 +5545,10 @@ export function ProjectWorkspace() {
   // The outbox flusher (above) ships writes; this connection drives reads.
   const [cellLockHolders, setCellLockHolders] = useState<Map<string, string>>(() => new Map())
   // RACE-5: ref that mirrors cellLockHolders, updated synchronously on each WS
-  // frame so handleEditorCommit (checkLockHolder) always reads the latest state
-  // rather than a stale React closure captured at the last render.
+  // frame so checkLockHolder (agent commit path, translate-as-read) always
+  // reads the latest state rather than a stale React closure captured at the
+  // last render. Human commits no longer consult it (AQU-1154): the lock is
+  // advisory and the server head check is the arbiter.
   const cellLockHoldersRef = useRef<Map<string, string>>(new Map())
   const [cellsWithRemoteChange, setCellsWithRemoteChange] = useState<Set<string>>(() => new Set())
   const focusedCellIdRef = useRef<string | null>(null)
@@ -5000,7 +5560,10 @@ export function ProjectWorkspace() {
     const sourceLanguage = activeFile?.sourceLanguage || project?.sourceLanguage
     const targetLanguage = activeLaneTargetLanguage || activeFile?.targetLanguage || project?.targetLanguage
 
-    if (!scopeAvailable) {
+    // AQU-1104: the workbench is mounted only on the agent surface, yet this
+    // memo re-ran on every cell commit and walked every cell view in the file.
+    // Off the agent surface nothing reads it, so return the empty shape.
+    if (!scopeAvailable || !agentOpen) {
       return {
         cells: [],
         fileName: activeFile?.name,
@@ -5014,40 +5577,33 @@ export function ProjectWorkspace() {
     }
 
     // Keep rendering bounded around the focused cell for very large files.
-    const allCells = readAtVersion(cellStoreVersion, getActiveCells).filter(
-      (cell) => cell.fileId === activeFileId,
-    )
-    const healthRibbonByCellId = buildHealthRibbon(allCells.map((cell) => {
-      const stage = cell.status === "validated"
-        ? "validated" as const
-        : cell.status === "empty" || !cell.translated.trim()
-          ? "untranslated" as const
-          : "automatic" as const
-      const preTranslation = stage === "untranslated"
-        ? preTranslationEvidence(effectiveSourceText(cell), examples.get(cell.id) ?? [])
-        : null
-      return {
-        id: cell.id,
-        scope: `${cell.fileId}:${cell.group || cell.section || "document"}`,
-        stage,
-        rawScore: stage === "validated"
-          ? 100
-          : stage === "automatic"
-            ? effectiveHealthMap.get(cell.id)
-            : preTranslation?.score,
-        evidenceWeight: preTranslation?.evidenceWeight ?? 1,
-      }
-    }))
+    // The ribbon kernel reaches only a few dozen cells, so reading a padded
+    // window around the focus reproduces the full-file ribbon for every cell
+    // shown without deriving every view in the file (see workbench-window.ts).
+    const { order, window, readCells } = readAtVersion(cellStoreVersion, () => {
+      const order = cellStore.getCellIds()
+      const focusIndex = focusedCellId ? Math.max(0, cellStore.findIndexByCellId(focusedCellId)) : 0
+      const window = resolveWorkbenchWindow(order.length, focusIndex)
+      const readCells = cellStore
+        .getCellsByIds(order.slice(window.readStart, window.readEnd))
+        .filter((cell) => cell.fileId === activeFileId)
+      return { order, window, readCells }
+    })
+    const ribbonReaders: RibbonEvidenceReaders<CellData> = {
+      sourceText: effectiveSourceText,
+      health: (cellId: string) => effectiveHealthMap.get(cellId),
+      examples: (cellId: string) => examples.get(cellId) ?? EMPTY_SCORED_PAIRS,
+    }
+    const healthRibbonByCellId = healthCalculationsEnabled
+      ? buildHealthRibbon(readCells.map((cell) => ribbonInputFor(cell.id, cell, ribbonReaders)))
+      : new Map<string, HealthRibbonPoint>()
     const ruleById = new Map(rules.map((rule) => [rule.id, rule]))
     const validationRequirement = project ? readValidationCount(project) : 1
     const decayConfig = resolveDecayConfig(project?.decaySettings, validationRequirement)
     const roleCanValidate = canPerform("cell.validate", project?.syncRole?.level ?? null)
-    const focusIndex = focusedCellId
-      ? Math.max(0, allCells.findIndex((cell) => cell.id === focusedCellId))
-      : 0
-    const windowSize = 80
-    const start = Math.max(0, Math.min(focusIndex - Math.floor(windowSize / 2), allCells.length - windowSize))
-    const cells = allCells.slice(start, start + windowSize).map((cell, index) => {
+    const shownIds = new Set(order.slice(window.start, window.end))
+    const start = window.start
+    const cells = readCells.filter((cell) => shownIds.has(cell.id)).map((cell, index) => {
       const healthRibbonPoint = healthRibbonByCellId.get(cell.id)
       const activeInfractions = partitionInfractions(infractions.get(cell.id) ?? [], cell.waivers).active
       const hasMajorHealthIssue = activeInfractions.some(
@@ -5093,7 +5649,7 @@ export function ProjectWorkspace() {
       sourceLanguage,
       targetLanguage,
       focusedCellId,
-      totalCells: allCells.length,
+      totalCells: order.length,
       scopeAvailable: true,
       loading: cellsLoading,
     }
@@ -5102,6 +5658,8 @@ export function ProjectWorkspace() {
     activeFile,
     activeLane,
     activeLaneTargetLanguage,
+    agentOpen,
+    cellStore,
     cellStoreVersion,
     cellsLoading,
     effectiveHealthMap,
@@ -5109,7 +5667,7 @@ export function ProjectWorkspace() {
     fileMeta.targetDirectionMode,
     fileMeta.targetTextDirection,
     focusedCellId,
-    getActiveCells,
+    healthCalculationsEnabled,
     infractions,
     myScopes,
     project,
@@ -5149,17 +5707,40 @@ export function ProjectWorkspace() {
   const [parallelBiblesOpen, setParallelBiblesOpen] = useState<boolean>(() =>
     projectId ? readParallelBiblesOpen(projectId) : false,
   )
-  const [trackedCellRef, setTrackedCellRef] = useState<string | null>(null)
+  // AQU-1016: was `useState` here — every scroll step re-rendered this whole
+  // shell to feed a value only the parallel-bibles panel reads. It now lives
+  // in the shared editor-viewport store (src/hooks/useEditorViewportStore.ts);
+  // writes below go straight to the store, and this read only subscribes
+  // (and thus only re-renders the shell) while a parallel-bibles panel is
+  // actually shown for the active file — the same gate the render sites use.
+  const parallelBiblesPanelActive = centerSurface === "editor" && !!activeFile && fileHasSections(activeFile)
+  const trackedCellRef = useEditorViewportTrackedCellRef(parallelBiblesPanelActive)
   // Drop the tracked ref when switching files so the previous file's verse
   // doesn't leak into the new file's panel (the new EditorTable re-fires).
   useEffect(() => {
-    setTrackedCellRef(null)
+    setEditorViewportTrackedCellRef(null)
   }, [activeFileId])
   const reconcilerRef = useRef<import("@/lib/sync/ws-reconciler").WsReconciler | null>(null)
   // FRO-288: Reactive reconciler state so useFocusLock can access it.
   // reconcilerRef is still the write target (set inside the async connect effect)
   // and is used by the claim/release callbacks declared below.
   const [liveReconciler, setLiveReconciler] = useState<WsReconciler | null>(null)
+  // AQU-1155: the status pill is a pure function of real signals — browser
+  // online state, the project WS socket, and the outbox queue/failure streak.
+  const { status: fileSyncStatus } = useFileSync({
+    doc,
+    projectId: project?.id ?? null,
+    fileId: activeFileId || null,
+    username: currentUsername,
+    enabled: Boolean(project && activeFileId),
+    session: frontierSession,
+    projectName: project?.name ?? null,
+    gitlabProjectId:
+      project?.origin?.kind === "git" ? project.origin.gitlabProjectId : null,
+    reconciler: liveReconciler,
+    pendingCount: Math.max(0, outboxPending - outboxFailed),
+    failureStreak: outboxFailures,
+  })
   // Read the current file list inside the WS connect path without making it a
   // reconnect trigger — otherwise every file-list change (e.g. each batch of a
   // large import landing) tears the socket down and recreates it.
@@ -5186,17 +5767,29 @@ export function ProjectWorkspace() {
   }) => {
     reconcilerRef.current?.send({ t: "presence.update", ...patch })
   }, [])
+  // AQU-1154: lets the WS onOpen handler (declared before the focus-lock hook
+  // below) re-claim the cell the user is still editing after a reconnect.
+  const focusLockClaimRef = useRef<((cellId: string) => void) | null>(null)
 
   useEffect(() => {
     if (!project?.id || !frontierSession?.jwt) return
     let cancelled = false
     let reconciler: import("@/lib/sync/ws-reconciler").WsReconciler | null = null
+    let appliedRefreshScheduler:
+      import("@/lib/sync/ws-reconciler").ScopedRefreshScheduler | null = null
     void (async () => {
-      const { createWsReconciler, isOwnWriteEcho, isValidationEvent, createLinkUpstreamChangedHandler, createReconnectResyncHandler, fileInventoryChanged } =
+      const { createWsReconciler, createScopedRefreshScheduler, isOwnWriteEcho, createLinkUpstreamChangedHandler, createReconnectResyncHandler, fileInventoryChanged } =
         await import("@/lib/sync/ws-reconciler")
       const { syncWorkerHttpOrigin } = await import("@/lib/sync/sync-worker-url")
       if (cancelled || !project?.id) return
       const pid = project.id
+      appliedRefreshScheduler = createScopedRefreshScheduler({
+        currentScope: () => {
+          const fileId = activeFileIdRef.current
+          return fileId ? { projectId: pid, fileId } : null
+        },
+        refresh: () => revalidateCellsRef.current(),
+      })
       // FRO-479: link.upstream-changed frames → refetch staleness immediately
       // (cheap GET, reflects the frame as soon as possible), and — debounced —
       // AWAIT the mirror sync, then revalidate BOTH staleness and cells.
@@ -5255,6 +5848,12 @@ export function ProjectWorkspace() {
               currentFileId: activeFileIdRef.current,
               selection: null,
             })
+            // AQU-1154: the DO released our lease + focusedCell when the old
+            // socket dropped. If the user is still in a cell, claim it again
+            // (focus.claim is the only frame that grants focusedCell) so peers
+            // keep seeing "X is editing" instead of taking the cell over.
+            const editingCellId = focusedCellIdRef.current
+            if (editingCellId) focusLockClaimRef.current?.(editingCellId)
             // Skips the first open (the initial read is already in flight);
             // every reconnect after that closes the missed-broadcast gap.
             handleReconnectResync()
@@ -5332,29 +5931,48 @@ export function ProjectWorkspace() {
               // remain visually stale after the progress count turns green.
               // The committing handler's earlier refresh can race the app-shell
               // outbox drain; this frame only arrives after projection commits.
-              if (msg.kind === "cell.validate" || msg.kind === "cell.unvalidate") {
+              if (
+                msg.file === activeFileIdRef.current &&
+                (msg.kind === "cell.validate" || msg.kind === "cell.unvalidate")
+              ) {
                 revalidateCellStats(msg.cell)
               }
-              // Targeted single-cell refetch — avoids re-streaming every
-              // cell in the file for one remote change. Falls back to a
-              // full revalidate inside useCells on error.
+              // Applied-event frames are lossy refresh hints. The scheduler
+              // below groups a burst, then the active store consumes the
+              // complete server-sequence delta in one derivation pass.
               //
               // Skip it for our OWN writes: the committing handler already
-              // pulled the authoritative row after its outbox flush, so the
-              // echo's refetch is pure duplication (and the in-flight coalescer
-              // misses it because the handler's refetch is gated behind the
-              // flush — see isOwnWriteEcho). The FRO-247 shadow keeps the value
-              // visible until the handler's read lands. This is the dominant
-              // edit-cycle cost: every commit + validate + auto-BT echo was
-              // firing a redundant targeted GET (~5 of 8 per edit cycle).
-              if (!ownWrite) {
-                revalidateCell(msg.cell)
-                // activeValidators (the validation pill) comes from the
-                // audit-stats projection, not /files/:fileId/cells — a remote
-                // validate/unvalidate must poke that read too, or the pill
-                // stays stale until the next full stats poll.
-                if (isValidationEvent(msg.kind)) {
-                  revalidateCellStats(msg.cell)
+              // pulled authoritative state after its outbox flush, so the
+              // echo's refresh is pure duplication. The FRO-247 shadow keeps
+              // the value visible until the handler's read lands.
+              //
+              // AQU-1154 follow-up: "own write" means the same USERNAME, not
+              // this tab. A second tab of the same user (or a tab whose post-
+              // flush refetch failed) got no refetch at all and kept the old
+              // head, so its next commit chained on a stale parent and was
+              // refused as bumped. Refetch own echoes too unless this tab's
+              // store already holds the echoed event as the cell's head — the
+              // committing tab does after its post-flush read, so the common
+              // case still costs no extra GET.
+              const alreadyApplied = ownWrite && (() => {
+                const view = cellStore.getCellView(msg.cell!)
+                if (!view) return false
+                if (msg.kind?.startsWith("target.cell.")) return view.targetEventId === msg.id
+                if (msg.kind?.startsWith("source.cell.")) return view.sourceEventId === msg.id
+                return true
+              })()
+              const liveResult = msg.file === activeFileIdRef.current
+                ? liveApplier.apply(msg)
+                : "refetch"
+              if (liveResult !== "applied" && (!ownWrite || !alreadyApplied)) {
+                // A model response or collaborator burst arrives as several
+                // frames. Consume the file's server-sequence range once so
+                // the store derives and emits once for the whole burst.
+                if (msg.file) {
+                  appliedRefreshScheduler?.schedule({
+                    projectId: msg.project,
+                    fileId: msg.file,
+                  })
                 }
               }
               // Audio attachment events project into cell_audio (not cells);
@@ -5373,7 +5991,10 @@ export function ProjectWorkspace() {
               // and fall through to the legacy "always banner on focused cell"
               // path so the user can still tell something happened.
               if (ownWrite) return
-              if (focusedCellIdRef.current === msg.cell) {
+              if (
+                msg.file === activeFileIdRef.current &&
+                focusedCellIdRef.current === msg.cell
+              ) {
                 setCellsWithRemoteChange((cur) => {
                   if (cur.has(msg.cell!)) return cur
                   const next = new Set(cur)
@@ -5464,6 +6085,23 @@ export function ProjectWorkspace() {
               if (sameStringMap(cellLockHoldersRef.current, next)) return
               cellLockHoldersRef.current = next
               setCellLockHolders(next)
+            } else if (msg.t === "presence.diff" || msg.t === "presence.left") {
+              // Diff presence (SYNC-LIVE): the DO no longer rebroadcasts the
+              // roster per update. Apply the diff to the store, then derive
+              // the lock-holder map and the focus-lock feed from the store's
+              // snapshots, which still have the full-roster shape.
+              if (msg.t === "presence.diff") presenceStore.applyPresenceDiff(msg.user)
+              else presenceStore.applyPresenceLeft(msg.userId)
+              const users = presenceStore.getUserSnapshots()
+              focusLockFeedFrameRef.current({ t: "presence", users })
+              const next = applyPresenceFrame(users, currentUsername)
+              if (sameStringMap(cellLockHoldersRef.current, next)) return
+              cellLockHoldersRef.current = next
+              setCellLockHolders(next)
+            } else if (msg.t === "presence.draft") {
+              // Cell-scoped: notifies only that cell's subscribers (EditorRow's
+              // useCellPresence), never the workspace root.
+              presenceStore.applyPresenceDraft(msg.userId, msg.cellId, msg.draftText, msg.ts)
             } else if (msg.t === "lock.claimed") {
               presenceStore.applyLockClaimed(msg.cellId, msg.by.userId)
               // FRO-288: forward lock.claimed to the hook so it can update
@@ -5527,14 +6165,13 @@ export function ProjectWorkspace() {
       clearPresenceStaleTimer()
       reconcilerRef.current = null
       setLiveReconciler(null)
+      appliedRefreshScheduler?.dispose()
       reconciler?.close()
     }
   }, [
     project?.id,
     frontierSession?.jwt,
     getTokenForFile,
-    revalidateCells,
-    revalidateCell,
     revalidateCellStats,
     currentUsername,
     refresh,
@@ -5564,6 +6201,7 @@ export function ProjectWorkspace() {
   })
   const focusLockFeedFrameRef = useRef(focusLockFeedFrame)
   useEffect(() => { focusLockFeedFrameRef.current = focusLockFeedFrame }, [focusLockFeedFrame])
+  useEffect(() => { focusLockClaimRef.current = focusLockState.claim }, [focusLockState.claim])
 
   const writeLocTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const handleClaimCell = useCallback((cellId: string) => {
@@ -5574,7 +6212,7 @@ export function ProjectWorkspace() {
     setFocusedCellCanonicalRef(focusedCell?.group ?? null)
     // Parallel-bibles panel: navigating to a cell is a stronger "looking at"
     // signal than the scroll position — the panel follows whichever moved last.
-    if (focusedCell?.group) setTrackedCellRef(focusedCell.group)
+    if (focusedCell?.group) setEditorViewportTrackedCellRef(focusedCell.group)
     // FRO-288: focusLockState.claim() replaces the bare focus.claim send.
     // The hook sends focus.claim and starts the half-period renewal timer so
     // the 30s DO lease never silently expires mid-edit.
@@ -5659,7 +6297,7 @@ export function ProjectWorkspace() {
     setDrawerRuleId(null); setCommentsCellId(null); setHistoryCellId(cellId)
   }, [])
   const handleAiSetupNeeded = useCallback(() => setAiSetupOpen(true), [])
-  const handleOpenRecording = useCallback((cellId: string) => {
+  const handleOpenRecording = useCallback((cellId: string, slot: string = RECORDING_SLOT) => {
     // Opening the recorder always pauses playback — queue and single-cell
     // clip both — so the mic never records over sounding audio. Module
     // functions, so deps stay [] and the editor-actions memo contract holds.
@@ -5672,6 +6310,7 @@ export function ProjectWorkspace() {
       return
     }
     setRecordingCellId(target)
+    setRecordingSlot(slot)
   }, [])
 
   /**
@@ -5829,18 +6468,27 @@ export function ProjectWorkspace() {
     ensureTargetRowForTakeRef.current(cellId)
   }, [])
 
+  /** Stable wrapper over the ref above — see `audioHomeRef`. */
+  const audioHomeFor = useCallback((cell: CellData) => audioHomeRef.current(cell), [])
+  const handleOpenTerminologyConcept = useCallback((conceptId: string) => {
+    navigate(
+      `/project/${projectId}/terminology?concept=${encodeURIComponent(conceptId)}`,
+    )
+  }, [navigate, projectId])
   const editorActionsValue = useMemo(() => ({
     onInfractionClick: handleInfractionClick,
     onOpenComments: handleOpenComments,
     onOpenHistory: handleOpenHistory,
+    onOpenTerminologyConcept: handleOpenTerminologyConcept,
     onAiSetupNeeded: handleAiSetupNeeded,
     onOpenRecording: handleOpenRecording,
     onMediaRowActivate: handleMediaRowActivate, // 2026-08-07: row click → timeline (stacked lens only)
     onAssignCastVoice: handleAssignCastVoice, // 2026-08-07: gutter picker (pure assignment)
     onClearCastVoice: handleClearCastVoice, // Matt's QA 2026-08-21: unassign without replacing
     onTakeSaved: handleTakeSaved, // AQU-646: a take gives a text-less line a target row
+    audioHomeFor, // AQU-646 stage 3f: where this row's audio belongs
     myScopes, // AQU-633: per-cell validate scope gate
-  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleTakeSaved, myScopes])
+  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleTakeSaved, audioHomeFor, myScopes])
 
   const handleAssignVoice = useCallback(async (cellId: string, voiceId: string) => {
     if (!audioProject || !frontierSession) return
@@ -6833,22 +7481,58 @@ export function ProjectWorkspace() {
     cellStore.setOwnTakeCellIds(ownTakeCellIds)
   }, [cellStore, ownTakeCellIds])
 
+  /** The link index in the shape every cue-aware resolver takes. */
+  const cueLinkArgs = useMemo(
+    () => ({
+      cueCells: audioCueCells,
+      cuesForText: cueLinks.cuesForText,
+      textForCue: cueLinks.textForCue,
+    }),
+    [audioCueCells, cueLinks],
+  )
+
+  /**
+   * EXACTLY what "generate a voice for every line" would do, resolved once and
+   * read by both the menu count and the run — so the number you confirm is the
+   * work that happens.
+   *
+   * 2026-08-27: this used to be a per-cell function behind a ref, because the
+   * cue data was declared thousands of lines below the count that needed it.
+   * The ref meant the count could not name its dependencies and kept the answer
+   * from before the cue read landed; the fan-out-per-subtitle inside it meant
+   * one heard line performing two subtitles was generated twice, into one slot,
+   * racing. Both are gone: the cue block moved up (see its note), and the rule
+   * itself is a pure, tested function that iterates DESTINATIONS.
+   */
+  const synthTargets = useMemo(() => {
+    if (!activeFileId) return []
+    const cells = mergeCellsWithAudio(readAtVersion(cellStoreVersion, getActiveCells), workspaceAudioByCellId)
+    return resolveSynthTargets(cells, cueLinkArgs)
+  }, [activeFileId, cellStoreVersion, getActiveCells, workspaceAudioByCellId, cueLinkArgs])
+  synthTargetsRef.current = synthTargets
+
   // AQU-646: real counts for the "Transcribe all" / "Synth all" menu items,
-  // sharing the exact filters the batch runners use (needsTranscription /
-  // needsSynthesis) so the menu count always matches what the run would do.
-  // getActiveCells() is merged with audio attachments; keyed on the store
-  // version so counts track edits/attaches live.
+  // sharing the exact filters the batch runners use so the menu count always
+  // matches what the run would do.
+  //
+  // BOTH NUMBERS ARE ABOUT DESTINATIONS. On a file with an audio-cue sibling
+  // the audio lives on the heard lines, not the subtitle rows — so counting
+  // subtitles over-counts a cue that performs several of them, and for
+  // transcription it is simply always zero, because no subtitle cell ever
+  // carries a `selectedAudioId` there. That zero hid "Transcribe all
+  // recordings" from the menu outright on exactly the files this branch is for.
   const audioCounts = useMemo(() => {
     if (!activeFileId) return { untranscribed: 0, unsynthesized: 0 }
-    const cells = mergeCellsWithAudio(readAtVersion(cellStoreVersion, getActiveCells), workspaceAudioByCellId)
+    // The cue list is already merged with its own file's attachments, and it
+    // includes the ~10 heard lines an episode that no subtitle is linked to —
+    // a take on one of those needs transcribing like any other.
+    const holders =
+      audioCueCells ??
+      mergeCellsWithAudio(readAtVersion(cellStoreVersion, getActiveCells), workspaceAudioByCellId)
     let untranscribed = 0
-    let unsynthesized = 0
-    for (const c of cells) {
-      if (needsTranscription(c)) untranscribed++
-      if (needsSynthesis(c)) unsynthesized++
-    }
-    return { untranscribed, unsynthesized }
-  }, [activeFileId, cellStoreVersion, getActiveCells, workspaceAudioByCellId])
+    for (const c of holders) if (needsTranscription(c)) untranscribed++
+    return { untranscribed, unsynthesized: synthTargets.length }
+  }, [activeFileId, cellStoreVersion, getActiveCells, workspaceAudioByCellId, audioCueCells, synthTargets])
 
   // Eager media strategy: prefetch every recording's waveform peaks into the
   // OPFS cache once the file is open, so even cells the user hasn't scrolled
@@ -6951,8 +7635,16 @@ export function ProjectWorkspace() {
       if (!activeFileId || !project) return
       // AQU-646 P0: merge attachments in — needsTranscription gates on
       // selectedAudioId, which raw store cells never carry.
-      const cells = mergeCellsWithAudio(getActiveCells(), workspaceAudioByCellId)
-      const fileId = activeFileId
+      //
+      // 2026-08-27: …and on a file with an audio-cue sibling the recordings are
+      // not on these cells at all. The subtitle rows never carry a
+      // `selectedAudioId`, so `needsTranscription` was false for every one of
+      // them and this ran over an EMPTY target list — silently, because the
+      // toast below is created lazily on the first progress call and a
+      // zero-target run never makes one. Same list the menu count uses, so the
+      // number offered and the work done cannot disagree.
+      const cells =
+        audioCueCells ?? mergeCellsWithAudio(getActiveCells(), workspaceAudioByCellId)
       void (async () => {
         // Same lazy toast as the mp3 auto-transcribe: created on the first
         // progress call, so a run with nothing to transcribe never leaves a
@@ -6990,7 +7682,11 @@ export function ProjectWorkspace() {
         await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
         await refreshOutboxPending()
         revalidateCells()
-        notifyAudioAttachmentsChanged(fileId)
+        // EVERY file the run touched, not just the one on screen: a cue file's
+        // transcripts land in the hidden sibling, and poking only the active id
+        // left them invisible until a reload. Same rule as
+        // `handleTranscribeSections`.
+        for (const id of new Set(cells.map((c) => c.fileId))) notifyAudioAttachmentsChanged(id)
         // Only if something was actually reported — see the lazy toast above.
         // A short count means the banner's Cancel was pressed mid-run.
         if (toastId !== null) {
@@ -7002,16 +7698,43 @@ export function ProjectWorkspace() {
     },
     runSynthAll: () => {
       if (!activeFileId || !project) return
+      // THE SAME ARRAY THE MENU COUNTED. `runBatchSynthAll` still takes a
+      // per-cell resolver for its other callers, so the already-resolved plan
+      // is handed back through it keyed by source — the run cannot drift from
+      // the number the confirmation dialog showed.
+      const targets = synthTargetsRef.current
+      const byFirstSource = new Map<string, SynthTarget[]>()
+      for (const t of targets) {
+        const key = t.voiceCellId
+        const list = byFirstSource.get(key)
+        const one = { cell: t.cell, text: t.text, voiceCellId: t.voiceCellId }
+        if (list) list.push(one)
+        else byFirstSource.set(key, [one])
+      }
       const cells = mergeCellsWithAudio(getActiveCells(), workspaceAudioByCellId)
       void runBatchSynthAll({
         cells,
         project,
         session: frontierSession ?? null,
         username: currentUsername,
+        resolveTargets: (c) => byFirstSource.get(c.id) ?? [],
+      }).then(() => {
+        // Sam, 2026-08-27: a heard line performed by lines with DIFFERENT
+        // characters is generated in the first one's voice — say which ones,
+        // afterwards, rather than silently picking.
+        const divergent = divergentVoiceTargets(targets, (id) =>
+          assignedCastVoiceId(project.ttsSettings, id),
+        )
+        if (divergent.length === 0) return
+        toast.add({
+          type: "info",
+          title: t("audio.tts.mixedCharacters", { count: divergent.length }),
+          description: t("audio.tts.mixedCharactersDetail"),
+        })
       })
     },
     navigate,
-  }), [activeFileId, completeBatch, getActiveCells, cellSummaries, project, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, revalidateCells, workspaceAudioByCellId])
+  }), [activeFileId, completeBatch, getActiveCells, cellSummaries, project, frontierSession, currentUsername, activeLane, navigate, openImportFlow, openExportFlow, getTokenForProjectFile, refreshOutboxPending, revalidateAuditStats, revalidateCell, revalidateCells, workspaceAudioByCellId, audioCueCells, t])
 
   // AQU-661: the dynamic primary-action button was removed; its actions now live
   // in the ⋯ overflow menu. This preserves the button's confirmation flow —
@@ -7040,65 +7763,32 @@ export function ProjectWorkspace() {
     project?.id ?? null,
     timelineEditorVisible ? activeFileId : null,
   )
-  // ── Stage 4: takes live on the AUDIO CUES, not the subtitle rows ─────────
-  // Forced by the data model, not chosen: `cell_audio.selected` is per (cell,
-  // slot), so a cell holds ONE selected recording — and on episode 101, 93
-  // subtitle lines are performed as two or more heard lines. Those lines could
-  // never hold their takes.
-  //
-  // The cue sibling's CELLS stay frozen and outside live sync (useAudioCueCells
-  // is a one-shot read — they are a transcript of a finished film and no event
-  // ever edits them). Only their ATTACHMENTS are live, which is exactly what
-  // this second per-file read gives us.
-  const { byCellId: cueAudioByCellId } = useFileAudioAttachments(
-    project?.id ?? null,
-    audioCueSibling?.id ?? null,
-  )
-  // Dragging a take on a cue: the anchor the drag writes lands in the CUE
-  // cell's metadata, and useAudioCueCells reads its file ONCE (frozen
-  // transcript, no live sync, nothing to invalidate). Without a local overlay
-  // the chip would spring back to where it started and only move after a
-  // reload. Server truth still wins on the next mount — this only covers the
-  // gap between the drag and that read.
-  const [cueAnchorOverrides, setCueAnchorOverrides] = useState<ReadonlyMap<string, number>>(
-    new Map(),
-  )
-  setCueAnchorOverridesRef.current = (cellId, offsetMs) =>
-    setCueAnchorOverrides((prev) => new Map(prev).set(cellId, offsetMs))
-  const audioCueCells = useMemo(() => {
-    if (!audioCues) return null
-    const merged = mergeCellsWithAudio(audioCues, cueAudioByCellId)
-    if (cueAnchorOverrides.size === 0) return merged
-    return merged.map((c) => {
-      const offset = cueAnchorOverrides.get(c.id)
-      return offset === undefined
-        ? c
-        : { ...c, metadata: { ...(c.metadata ?? {}), target_offset_ms: offset } }
-    })
-  }, [audioCues, cueAudioByCellId, cueAnchorOverrides])
-  cueTakeCountRef.current = () => {
-    let n = 0
-    for (const entry of cueAudioByCellId.values()) {
-      // Only live clips count. A tombstoned attachment is already gone, and
-      // refusing an import over one would be a dead end with no way out.
-      n += Object.keys(entry.attachments).length > 0 ? 1 : 0
-    }
-    return n
-  }
 
   // Which cell the recorder should OPEN on, given whatever id asked for it.
   // The timeline's Target row already hands over a cue id; the dialogue table's
   // mic hands over a subtitle row, which has no take of its own any more, so it
   // opens the first cue that performs that line. One rule serves both because
   // the test is "is this already a cue?" rather than "who is calling?".
-  openRecordingTargetRef.current = (cellId: string) => {
-    if (!audioCueCells) return cellId
-    if (audioCueCells.some((c) => c.id === cellId)) return cellId
-    const cues = cueLinks.cuesForText.get(cellId) ?? []
-    if (cues.length === 0) return null
-    const order = new Map(audioCueCells.map((c, i) => [c.id, i]))
-    // "First" by position on the film, not by the order the edges came back in.
-    return [...cues].sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0))[0]
+  // AQU-646 stage 3f: DELEGATED, not reimplemented. This was the de-facto
+  // authority on "where does a new take go", and two other surfaces answered
+  // the same question for themselves and got it wrong — so the answer moved to
+  // one tested place and this takes the first of what it returns. Behaviour is
+  // unchanged, which `linked-takes.test.ts` pins case for case.
+  openRecordingTargetRef.current = (cellId: string) =>
+    primaryAudioHome(cellId, { cueCells: audioCueCells, cuesForText: cueLinks.cuesForText })
+
+  // The same authority, shaped for the table's per-row controls. They get the
+  // CELLS rather than ids because the voice button replays an existing clip
+  // before it generates a new one, and that lookup reads attachments which live
+  // on the cue.
+  audioHomeRef.current = (cell: CellData) => {
+    const homes = resolveAudioHomes(cell.id, {
+      cueCells: audioCueCells,
+      cuesForText: cueLinks.cuesForText,
+    })
+    if (homes.kind === "self") return [cell]
+    if (homes.kind === "none") return null
+    return homes.cells
   }
 
   /**
@@ -7179,11 +7869,12 @@ export function ProjectWorkspace() {
     if (!project?.id || !activeFile || !audioCueSibling || !audioCues) return
     setCueLinksPending(true)
     try {
+      // AQU-1147: fresh read at call time, no version dependency (see handleResolveCharacter).
       const diff = diffCueLinks({
         current: cueLinks,
         wanted: autoLinkable(
           planCueLinks({
-            textCells: readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()),
+            textCells: cellStore.getAllSummaries(),
             audioCues,
           }),
         ),
@@ -7218,7 +7909,7 @@ export function ProjectWorkspace() {
     }
   }, [
     project?.id, activeFile, audioCueSibling, audioCues, cueLinks, currentUsername,
-    getTokenForProjectFile, refreshCueLinks, cellStore, cellStoreVersion,
+    getTokenForProjectFile, refreshCueLinks, cellStore,
   ])
 
   /** The subtitle rows a take on this cell counts towards. Without audio cues
@@ -7240,21 +7931,37 @@ export function ProjectWorkspace() {
       // is all we can offer, and it is offered as reference rather than as
       // words to say.
       if (textIds.length === 0) {
-        return { text: "", reference: transcript, castName: null, cameraState: null }
+        // `linkedCount: 0` is what lets a caller tell "nothing is linked to this
+        // line" from "the linked subtitle isn't translated yet" — two different
+        // problems with two different fixes, which the TTS button used to
+        // report with one string.
+        return {
+          text: "",
+          reference: transcript,
+          castName: null,
+          cameraState: null,
+          linkedCount: 0,
+          voiceCellId: null,
+          sharedWith: 1,
+        }
       }
-      const byId = new Map(cellSummaries.map((c) => [c.id, c]))
-      const linked = textIds
-        .map((id) => byId.get(id))
-        .filter((c): c is (typeof cellSummaries)[number] => Boolean(c))
-        .sort((a, b) => (a.startTime ?? 0) - (b.startTime ?? 0))
-      const text = linked
-        .map((c) => c.translated?.trim())
-        .filter((t): t is string => Boolean(t))
-        .join(" ")
+      // ONE JOIN, SHARED WITH THE BULK RUN (`joinCueText`). What the performer
+      // reads here and what "generate a voice for all" makes this line say have
+      // to be the same string; two copies of the rule would let them drift, and
+      // the drift would be silent.
+      const byId = new Map(cellSummaries.map((c) => [c.id, c as unknown as CellData]))
+      const { text, linked } = joinCueText(textIds, byId)
       // Only worth showing the transcript when the subtitle is SHARED with
       // other cues — that is the only case where the performer has to work out
       // which part of the line in front of them belongs to this take.
-      const shared = textIds.some((id) => (cueLinks.cuesForText.get(id) ?? []).length > 1)
+      // How many heard lines share the busiest of this cue's subtitles. 1 when
+      // nothing is shared, which is ~92% of lines (measured: 7.9% of subtitles
+      // are split). `shared` below is just this asked as a yes/no.
+      const sharedWith = Math.max(
+        1,
+        ...textIds.map((id) => (cueLinks.cuesForText.get(id) ?? []).length),
+      )
+      const shared = sharedWith > 1
       // Who says this, and is the camera on them. The character sheet is keyed
       // to the SUBTITLE cells, so it reaches a cue only through these links —
       // and only off the cell VIEWS, since the summaries sorted above carry no
@@ -7274,6 +7981,21 @@ export function ProjectWorkspace() {
         reference: shared ? transcript : null,
         castName: formatCueCharacter(character.names),
         cameraState: character.cameraState ?? null,
+        linkedCount: textIds.length,
+        // AQU-646 stage 3g: a generated voice speaks the WHOLE subtitle onto
+        // this one cue, so when the subtitle is split the clip says more than
+        // this line covers and the other heard lines stay silent. The recorder
+        // says so before you press.
+        sharedWith,
+        // WHOSE VOICE SPEAKS IT. Cast assignments are keyed by cell id and are
+        // made on the SUBTITLE cells, so a cue appears in `castAssignments` only
+        // when an audio character sheet was imported — otherwise every
+        // generated dub would come out in the project default whoever is
+        // talking. The VTT export already resolves names across these links for
+        // exactly this reason. First in film order, matching the sort above and
+        // the way `primaryAudioHome` picks a cue: a two-speaker cue has to pick
+        // one voice, and picking the first is at least predictable.
+        voiceCellId: linked[0]?.id ?? null,
       }
     },
     [audioCueCells, cueLinks, cellSummaries, castByCellId],
@@ -7329,6 +8051,7 @@ export function ProjectWorkspace() {
     dockTab === "voices" ||
     timelineEditorVisible ||
     lens === "audio" ||
+    makeCharacterOpen ||
     drawerRuleId !== null ||
     recordingCellId !== null ||
     exportOpen ||
@@ -7351,13 +8074,48 @@ export function ProjectWorkspace() {
   // per-section trim scope from AQU-782 is honoured for free. `force` because
   // the user named these sections: an existing transcript is a re-run, not a
   // no-op, which is how the per-cell Transcribe button already behaves.
+  /**
+   * AQU-646 stage 3f: WHICH CELLS HOLD THIS SECTION'S RECORDINGS.
+   *
+   * On a file with an audio-cue sibling a take hangs off the heard line that
+   * performs the subtitle, so a subtitle cell never carries one. Transcribe
+   * asked the subtitle and found nothing, which is why the button was greyed
+   * out over lines that plainly had audio.
+   *
+   * ONE FUNCTION, READ BY BOTH HALVES. The timeline decides what to ENABLE from
+   * it and this handler decides what to RUN from it, so the two cannot disagree
+   * about a section — which is the failure mode that would otherwise show up as
+   * "the button is lit and the run does nothing".
+   *
+   * `linkedTakesByCell` only holds cues that actually carry a take, which is
+   * exactly the eligibility rule; it is empty with no cue sibling, so every
+   * other arrangement falls through to the cell itself and is unchanged.
+   */
+  const takeCellsFor = useCallback(
+    (cellId: string): readonly CellData[] => {
+      const linked = linkedTakesByCell.get(cellId)
+      if (linked && linked.length > 0) return linked.map((t) => t.cell)
+      const own = audioMergedCells.find((c) => c.id === cellId)
+      return own ? [own] : []
+    },
+    [linkedTakesByCell, audioMergedCells],
+  )
+
+
   const handleTranscribeSections = useCallback(
     (cellIds: string[]) => {
       if (!activeFileId || !project || cellIds.length === 0) return
-      const wanted = new Set(cellIds)
-      const cells = audioMergedCells.filter((c) => wanted.has(c.id))
+      // Resolved, then de-duplicated by id: two subtitles performed by ONE
+      // heard line would otherwise transcribe the same take twice, racing each
+      // other for the same attachment.
+      const cells = [
+        ...new Map(cellIds.flatMap((id) => takeCellsFor(id)).map((c) => [c.id, c])).values(),
+      ]
       if (cells.length === 0) return
-      const fileId = activeFileId
+      // EVERY FILE THE RUN ACTUALLY TOUCHED, not just the one on screen. The
+      // takes live in the cue sibling, so notifying only the active file leaves
+      // the timeline showing pre-transcription state until a reload.
+      const touchedFileIds = [...new Set(cells.map((c) => c.fileId))]
       void (async () => {
         await runBatchTranscribeAll({
           cells,
@@ -7372,11 +8130,11 @@ export function ProjectWorkspace() {
         await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
         await refreshOutboxPending()
         revalidateCells()
-        notifyAudioAttachmentsChanged(fileId)
+        for (const id of touchedFileIds) notifyAudioAttachmentsChanged(id)
       })()
     },
     [
-      activeFileId, project, audioMergedCells, frontierSession,
+      activeFileId, project, takeCellsFor, frontierSession,
       getTokenForProjectFile, refreshOutboxPending, revalidateCells,
     ],
   )
@@ -7539,6 +8297,18 @@ export function ProjectWorkspace() {
   // way, as the timing mode beside it. The gate is "don't pass the callback":
   // below the floor the gutter has no grip, no grab cursor and no tab stop.
   const canReorderTracks = (serverRoleLevel ?? project?.syncRole?.level ?? 0) >= ROLE.MAINTAINER
+  // AQU-646 stage 2: RESTRUCTURING is doubly gated — the same maintainer floor
+  // AND the project's `allowTrackEditing` setting, which is off unless somebody
+  // turned it on. Two independent conditions, and the server checks both
+  // separately (track-editing-authority.ts), so this is the affordance rather
+  // than the permission.
+  //
+  // RENAME AND REORDER ARE DELIBERATELY NOT IN HERE. Both already ship, and a
+  // new setting defaulting to off must not silently take an existing capability
+  // away from every project that has one — so they stay on `canReorderTracks`'
+  // clearance alone. That split is why the editor takes `onRenameTrack` as its
+  // own prop instead of folding it into `trackEditing`.
+  const canEditTracks = canReorderTracks && (project?.allowTrackEditing ?? false)
   // Flow A (file-scoped): switching a file that HAS a linked video to Free
   // timing hides the video — confirm before emitting. Holds the FILE the
   // warning was raised for, not a bare flag, so the confirm can only ever
@@ -7561,6 +8331,27 @@ export function ProjectWorkspace() {
    * same round, because one half of "remembered per file" behaving differently
    * from the other is what reads as a bug rather than as a limitation.
    */
+  // AQU-646: tell the audio layer the recorder is open, so nothing goes and
+  // touches the output device while a take is possible. Mirrors the same
+  // `recordingCellId !== null` that suspends the film below — deliberately the
+  // recorder's whole open span, not just a running take, because `holdMic`
+  // keeps the mic and its capture graph alive between takes.
+  useEffect(() => {
+    setMicHeld(recordingCellId !== null)
+  }, [recordingCellId])
+
+  // AQU-646: stop playback when the audio output device changes under it —
+  // headphones in or out. The watcher decides for itself whether the OUTPUT
+  // actually changed (the browser event also fires for microphones and
+  // webcams), and stays silent when it cannot tell.
+  useEffect(() => {
+    return startOutputDeviceWatch({
+      isPlaying: () => getQueueState().kind === "playing" || getVideoClockPlaying(),
+      onPaused: () =>
+        toast.add({ type: "info", title: t("editor.timeline.outputDeviceChangedToast") }),
+    })
+  }, [t])
+
   const timelinePanelRef = usePanelRef()
   useEffect(() => {
     if (!activeFileId) return
@@ -7629,6 +8420,71 @@ export function ProjectWorkspace() {
   useEffect(() => {
     setExternalDubsPlaying(videoDubPlaying)
   }, [videoDubPlaying])
+
+  // ── AQU-646 stage 3h: A TRANSPORT FOR FILES WITH NO MASTER ───────────────
+  //
+  // Sam, 2026-08-25: a VTT imported on its own has timings but no film and no
+  // imported recording, so nothing wrote the playhead and pressing play did
+  // nothing at all. The dub engine above is already clock-agnostic — the film
+  // drives it by calling `tickExternalDubs` once per tick — so what was missing
+  // was a CLOCK, not a player, and this drives the very same four calls.
+  //
+  // The duration is the end of the last cue over the cells that actually hold
+  // takes, which is also what decides whether this applies: no timings, no
+  // timeline to run a playhead along.
+  const timelineDurationSec = useMemo(
+    () =>
+      dubDriverCells.reduce(
+        (end, c) => (typeof c.endTime === "number" && Number.isFinite(c.endTime) ? Math.max(end, c.endTime) : end),
+        0,
+      ),
+    [dubDriverCells],
+  )
+  const virtualIsTransport = virtualOwnsFile(
+    videoIsTransport,
+    audioMergedCells.some((c) => queueClockIsFileTime(c)),
+    timelineDurationSec,
+  )
+  useEffect(() => {
+    if (!virtualIsTransport) {
+      stopVirtualClock()
+      return
+    }
+    startVirtualClock(timelineDurationSec)
+    return () => stopVirtualClock()
+  }, [virtualIsTransport, timelineDurationSec])
+  // REGISTERED AS THE CONTROLLER, which is what keeps the playback bar's six
+  // `drivesVideo ? controller : queue` branches two-way instead of three. That
+  // store already means "the non-queue transport currently driving" — see
+  // `transport-pause.ts`, which pauses through it when the recorder opens, so
+  // a transport that skipped registering would keep playing under a take.
+  useEffect(() => {
+    if (!virtualIsTransport) return
+    setVideoController(virtualClockController)
+    return () => clearVideoControllerIf(virtualClockController)
+  }, [virtualIsTransport])
+  const virtualSec = useVirtualClockSec()
+  const virtualPlaying = useVirtualClockPlaying()
+  // The same driver, the same cells, the same four calls the picture makes.
+  useEffect(() => {
+    if (!virtualIsTransport || !project?.id || !frontierSession) return
+    startExternalDubs({ cells: dubDriverCells, projectId: project.id, session: frontierSession })
+    return () => stopExternalDubs()
+    // Cells are refreshed by the shared effect above, not here — restarting the
+    // driver on every take would cut a dub off mid-word.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [virtualIsTransport, project?.id, frontierSession])
+  useEffect(() => {
+    if (virtualIsTransport && virtualSec != null) tickExternalDubs(virtualSec)
+  }, [virtualIsTransport, virtualSec])
+  useEffect(() => {
+    if (virtualIsTransport) setExternalDubsPlaying(virtualPlaying)
+  }, [virtualIsTransport, virtualPlaying])
+  /** Which line the playhead is on, for the bar's caption and the table follow. */
+  const virtualSoundingCellId = useMemo(
+    () => (virtualIsTransport && virtualSec != null ? cellIdAtSec(dubDriverCells, virtualSec) : null),
+    [virtualIsTransport, virtualSec, dubDriverCells],
+  )
 
   // A REMOTE mode change gets an acknowledged heads-up — deferred while the
   // user is in the text view or has the recorder open (a cell transition
@@ -7801,7 +8657,20 @@ export function ProjectWorkspace() {
       // only place that persists. (The two agree: in a list sorted by `order`, a
       // row sharing a value with the insertion point is always one of its
       // immediate neighbours, which is exactly what orderForDrop compares.)
-      const tied = serverTimelineTracks.some((t) => t.id !== trackId && t.order === order)
+      //
+      // AQU-646 stage 2: BOTH THE TEST AND THE UNTANGLING ARE SCOPE-LOCAL NOW.
+      // `order` ranks a track among its own siblings — the top-level rows, or
+      // the members of one folder — so two tracks in different folders sharing
+      // a number is normal and says nothing. Asked globally, this would fire on
+      // an ordinary drag and renumber the whole file for no reason; renormalised
+      // globally, it would renumber tracks in folders the user never touched.
+      const folderIds = folderIdsOf(serverTimelineTracks)
+      const moved = serverTimelineTracks.find((t) => t.id === trackId)
+      if (!moved) return
+      const scope = trackScope(moved, folderIds)
+      const siblings = serverTimelineTracks.filter((t) => trackScope(t, folderIds) === scope)
+
+      const tied = siblings.some((t) => t.id !== trackId && t.order === order)
       if (!tied) {
         void applyTrackOrder(activeFileId, [{ trackId, order }])
         return
@@ -7811,18 +8680,476 @@ export function ProjectWorkspace() {
       // carrying their PERSISTED numbers — not the pending one — so a row that
       // happens to already sit at its index emits nothing, while the dragged row
       // (whose new number has never been stored) always does.
-      const intended = applyPendingOrders(serverTimelineTracks, new Map([[trackId, order]]))
-      const stored = new Map(serverTimelineTracks.map((t) => [t.id, t.order]))
+      const intended = applyPendingOrders(siblings, new Map([[trackId, order]]))
+      const stored = new Map(siblings.map((t) => [t.id, t.order]))
       const changes = renormaliseOrders(intended.map((t) => ({ ...t, order: stored.get(t.id) ?? t.order })))
       void applyTrackOrder(activeFileId, changes)
     },
     [activeFileId, serverTimelineTracks, applyTrackOrder],
+  )
+
+  // ── AQU-646 stage 2: the rest of track editing ───────────────────────────
+  //
+  // ONE PRIVATE EMITTER, INTENT-NAMED WRAPPERS OVER IT. Components never
+  // assemble a raw patch — that is what keeps the allow-listed payload shape in
+  // one place as it grows, and it is what `emitFileTrackSet`'s own doc comment
+  // asked for when it shipped dormant.
+  //
+  // EVERY PATCH CARRIES ONLY THE FIELDS ITS VERB OWNS. The server merges field
+  // by field into jsonb, so naming a field is CLAIMING it: send a whole track
+  // and a collaborator's rename landing in the same second is silently
+  // overwritten by whatever this client last read. That rule is why there is no
+  // generic `patchTrack(trackId, patch)` here.
+  const applyTrackPatch = useCallback(
+    async (trackId: string, patch: Parameters<typeof emitFileTrackSet>[0]["patch"], failure: string) => {
+      if (!project?.id || !activeFileId) return
+      try {
+        await emitFileTrackSet({
+          projectId: project.id,
+          fileId: activeFileId,
+          trackId,
+          patch,
+          author: currentUsername,
+        })
+        await flushOutboxBatch({
+          getTokenForFile: getTokenForProjectFile,
+          // A per-event 4xx arrives inside a 200 and the flusher drops it. The
+          // 403 this surfaces is the one that matters here: the project's
+          // track-editing setting being off, which the UI believed was on
+          // because it read a stale settings blob.
+          onRejected: (entries) => {
+            const mine = entries.filter((r) => r.kind === "file.track.set" && r.fileId === activeFileId)
+            if (mine.length === 0) return
+            toast.add({ type: "error", title: `${failure} ${mine[0].reason}` })
+          },
+        })
+        refresh()
+      } catch (e) {
+        toast.add({ type: "error", title: e instanceof Error ? `${failure} ${e.message}` : failure })
+      }
+    },
+    [project?.id, activeFileId, currentUsername, getTokenForProjectFile, refresh],
+  )
+
+  /**
+   * The same thing for SEVERAL tracks — AQU-646 stage 2b, where the menu acts
+   * on a selection.
+   *
+   * ONE `enqueueEvents` CALL, never a loop of `applyTrackPatch`. One IDB
+   * transaction means one notify, one overlay rebuild and one flush, so a bulk
+   * recolour lands as a single change rather than three flickers — and a
+   * partial failure leaves the rest in the durable outbox instead of stranding
+   * half of it.
+   */
+  const applyTrackPatches = useCallback(
+    async (
+      changes: ReadonlyArray<{ trackId: string; patch: Parameters<typeof emitFileTrackSet>[0]["patch"] }>,
+      failure: string,
+    ) => {
+      if (!project?.id || !activeFileId || changes.length === 0) return
+      try {
+        await enqueueEvents(
+          changes.map((c) => ({
+            kind: "file.track.set" as const,
+            projectId: project.id,
+            fileId: activeFileId,
+            parentId: null,
+            author: currentUsername,
+            payload: { trackId: c.trackId, patch: c.patch },
+          })),
+        )
+        await flushOutboxBatch({
+          getTokenForFile: getTokenForProjectFile,
+          onRejected: (entries) => {
+            const mine = entries.filter((r) => r.kind === "file.track.set" && r.fileId === activeFileId)
+            if (mine.length === 0) return
+            toast.add({ type: "error", title: `${failure} ${mine[0].reason}` })
+          },
+        })
+        refresh()
+      } catch (e) {
+        toast.add({ type: "error", title: e instanceof Error ? `${failure} ${e.message}` : failure })
+      }
+    },
+    [project?.id, activeFileId, currentUsername, getTokenForProjectFile, refresh],
+  )
+
+  const handleRenameTrack = useCallback(
+    (trackId: string, name: string) => {
+      void applyTrackPatch(trackId, { name }, "Couldn't rename the track:")
+    },
+    [applyTrackPatch],
+  )
+
+  const handleAddTrack = useCallback(
+    (spec: { kind: "audio" | "folder"; name: string; sourceTrackId?: string | null }): string => {
+      // A NEW TRACK GOES AT THE BOTTOM OF THE TOP LEVEL. Not into whichever
+      // folder happens to be open, and not at the top: a new row appearing
+      // above the ones somebody is working on moves everything they were
+      // looking at. `orderForScopeAppend` measures the top-level scope only,
+      // which is the whole reason it takes a scope.
+      const order = orderForScopeAppend(serverTimelineTracks, null)
+      const trackId = uuidv7()
+      void applyTrackPatch(
+        trackId,
+        {
+          kind: spec.kind,
+          name: spec.name,
+          order,
+          // Only on an audio track, and only when there is something to align
+          // to. The server refuses it on a derived id, and a folder has no
+          // alignment at all.
+          ...(spec.kind === "audio" && spec.sourceTrackId ? { sourceTrackId: spec.sourceTrackId } : {}),
+        },
+        "Couldn't add the track:",
+      )
+      return trackId
+    },
+    [applyTrackPatch, serverTimelineTracks],
+  )
+
+  /**
+   * ONE VALUE PER TRACK, not one value for the list — stage 3c.
+   *
+   * Colour is two independent axes now, so setting the recorded-take tone
+   * across a selection has to keep each track's own generated-voice tone. The
+   * menu works those strings out (it is the side that knows the palette) and
+   * hands them over already paired with their track; this stays one enqueue, so
+   * a bulk recolour is still one write that lands or fails together.
+   */
+  const handleSetTrackColor = useCallback(
+    (updates: ReadonlyArray<{ trackId: string; color: string | null }>) => {
+      void applyTrackPatches(
+        updates.map(({ trackId, color }) => ({ trackId, patch: { color } })),
+        "Couldn't change the colour:",
+      )
+    },
+    [applyTrackPatches],
+  )
+
+  /**
+   * BOTH FIELDS IN ONE PATCH, and this is the one place the one-field-per-verb
+   * rule bends — because the two ARE one verb. A track changing scope needs a
+   * rank among its new siblings, and its old number is a rank in a different
+   * scope entirely; splitting them into two events would leave the track half
+   * moved if the second were refused.
+   *
+   * The orders ascend from the first free slot so a run of tracks keeps the
+   * sequence it had rather than all landing on one number.
+   */
+  const handleLeaveFolder = useCallback(
+    (trackIds: readonly string[]) => {
+      const firstFree = orderForScopeAppend(serverTimelineTracks, null)
+      void applyTrackPatches(
+        trackIds.map((trackId, i) => ({ trackId, patch: { groupId: null, order: firstFree + i } })),
+        "Couldn't take the track out of its folder:",
+      )
+    },
+    [applyTrackPatches, serverTimelineTracks],
+  )
+
+  /**
+   * Sam, 2026-08-24: a folder is made FROM tracks, never picked from a list of
+   * destinations.
+   *
+   * The folder takes the place of the TOPMOST selected track, so the block
+   * lands where the person was already looking rather than at the bottom of the
+   * file. Its members are then numbered 0..n-1 inside it, in the order they
+   * appeared — a folder's `order` is scoped to its own contents, so those
+   * numbers say nothing about where the folder itself sits.
+   *
+   * The new id is returned so the caller can open the rename on it: a folder
+   * called "Folder" is not a name, and asking for one immediately is the
+   * difference between naming it and meaning to.
+   */
+  /**
+   * A drag that crossed a folder wall. Stage 2b.
+   *
+   * BOTH FIELDS IN ONE PATCH, like every other scope change here — a track
+   * arriving in a folder needs a rank among its new siblings, and splitting the
+   * two into separate events would leave it half-moved if the second were
+   * refused.
+   *
+   * A TIE IS RESOLVED BY APPENDING, not by renormalising the target scope. The
+   * resolver hands out midpoints, and a midpoint can only collide when the two
+   * neighbours already share a number; putting the track at the end of that
+   * scope is a free, unambiguous slot and costs one write instead of N. The
+   * user can drag it where they meant afterwards — which is the ungated
+   * gesture, so it is always available.
+   */
+  const handleMoveTrackToScope = useCallback(
+    (trackId: string, groupId: string | null, order: number) => {
+      if (!Number.isFinite(order)) return
+      const folderIds = folderIdsOf(serverTimelineTracks)
+      const tied = serverTimelineTracks.some(
+        (t) => t.id !== trackId && trackScope(t, folderIds) === groupId && t.order === order,
+      )
+      const settled = tied ? orderForScopeAppend(serverTimelineTracks, groupId) : order
+      void applyTrackPatch(trackId, { groupId, order: settled }, "Couldn't move the track:")
+    },
+    [applyTrackPatch, serverTimelineTracks],
+  )
+
+  const handleCreateFolderFrom = useCallback(
+    (trackIds: readonly string[]): string => {
+      const folderId = uuidv7()
+      const chosen = new Set(trackIds)
+      const members = serverTimelineTracks.filter((tr) => chosen.has(tr.id))
+      const topMost = members.length > 0 ? members[0] : null
+      const folderIds = folderIdsOf(serverTimelineTracks)
+      // Where the block goes: the topmost member's own slot when it is already
+      // top-level, otherwise the bottom. A folder cannot be created inside a
+      // folder, so a member that lives in one contributes no position.
+      const order =
+        topMost && trackScope(topMost, folderIds) === null
+          ? topMost.order
+          : orderForScopeAppend(serverTimelineTracks, null)
+
+      void applyTrackPatches(
+        [
+          {
+            trackId: folderId,
+            // The STORED name, in English whatever the creator's UI language —
+            // see `nextFolderName`. The menu LABEL stays translated.
+            patch: { kind: "folder", name: nextFolderName(serverTimelineTracks), order },
+          },
+          ...members.map((member, i) => ({
+            trackId: member.id,
+            patch: { groupId: folderId, order: i },
+          })),
+        ],
+        "Couldn't make the folder:",
+      )
+      return folderId
+    },
+    [applyTrackPatches, serverTimelineTracks],
+  )
+
+  const handleDeleteTrack = useCallback(
+    (trackIds: readonly string[]) => {
+      if (!project?.id || !activeFileId || trackIds.length === 0) return
+      const chosen = new Set(trackIds)
+      const doomed = serverTimelineTracks.filter((t) => chosen.has(t.id))
+      if (doomed.length === 0) return
+
+      // THE ROW FIRST, AND THE TAKES ONLY IF IT WENT (Sam, 2026-08-27).
+      //
+      // This used to emit both in ONE enqueue, takes first, on the reasoning
+      // that a single IDB transaction makes "interrupted" mean "the outbox
+      // still holds the rest". That is true of interruption and wrong about
+      // REFUSAL. The two halves are authorized differently: `cell.audio.remove`
+      // is contributor-level, while deleting the row is `file.track.set`, gated
+      // behind the project's `allowTrackEditing` setting. The worker authorizes
+      // each event on its own and answers with a mixed accepted/rejected list,
+      // so with that setting off the server took the removals and refused the
+      // row — the recordings were gone, the track came back on `refresh()`, and
+      // nothing said why, because the flusher quarantines a 403 BEFORE the
+      // `rejected` list that feeds `onRejected`, so the handler written for
+      // exactly this 403 could never fire.
+      //
+      // So it is two phases now, and the gated one goes first. Nothing is
+      // removed until the row's deletion is known to have landed — a refusal,
+      // or an answer we never got, costs the user nothing.
+      //
+      // Soft-deleted, the same way removing a take from a cell has always
+      // worked — hidden from every read path and replayed as gone. Not a purge
+      // of the stored bytes, and the confirmation says "delete" meaning exactly
+      // what every other delete in this app means.
+      //
+      // THE PER-FILE AUDIO READ IS THE ONLY HONEST SOURCE for which clips are
+      // on a track. Timeline cells carry no attachments; this read does, it is
+      // already filtered to the live ones (`deleted = 0`), and — the part that
+      // makes this possible at all — it carries each clip's SLOT, which has
+      // been the binding for "which track a take belongs to" since the contract
+      // shipped (`cell_audio.slot` is unconstrained TEXT; an added track
+      // addresses its takes by its own id).
+      //
+      // Stage 2b: several tracks at once, so the slots are gathered into a SET
+      // and the attachment scan runs once. Looping the whole read per track
+      // would be N passes over every cell in the file for no reason.
+      const doomedSlots = new Set(
+        doomed.filter((t) => t.kind !== "folder").map((t) => slotForTrack(t.id)),
+      )
+      // AQU-646 stage 6D: BOTH FILES, and each removal remembers which one it
+      // came from.
+      //
+      // This used to scan `timelineAudioByCellId` alone and emit every removal
+      // against `activeFileId`. On a file with an audio-cue sibling that is the
+      // wrong map AND the wrong file: takes are written against the cue cells
+      // in the sibling, so the scan found nothing, the confirmation said the
+      // track was empty, and the delete dropped the track row while leaving its
+      // recordings alive in a slot no track would ever address again. Sam did
+      // exactly that to two tracks on 2026-08-27.
+      //
+      // The two maps are disjoint by cell id — one is this file's audio read,
+      // the other the sibling's — so a clip is gathered once and only once.
+      const removals: Array<{ cellId: string; audioId: string; fileId: string }> = []
+      if (doomedSlots.size > 0) {
+        const sources: Array<[typeof timelineAudioByCellId, string | null]> = [
+          [timelineAudioByCellId, activeFileId],
+          [cueAudioByCellId, audioCueSibling?.id ?? null],
+        ]
+        for (const [map, fileId] of sources) {
+          if (!fileId) continue
+          for (const [cellId, entry] of map) {
+            for (const [audioId, att] of Object.entries(entry.attachments)) {
+              if (!doomedSlots.has(att.slot)) continue
+              removals.push({ cellId, audioId, fileId })
+            }
+          }
+        }
+      }
+
+      // A FOLDER'S MEMBERS ARE EJECTED, NOT DELETED. A folder is an arrangement
+      // of tracks, not a container that owns them — deleting it must not take a
+      // week of somebody's recordings with it. Their new top-level orders are
+      // computed here, ascending from the end, so they land below the existing
+      // rows in the sequence they had inside the folder.
+      //
+      // A member that is ITSELF being deleted is not ejected — it would be a
+      // patch putting a track back at the top level one event before the patch
+      // that removes it.
+      const members = doomed
+        .filter((t) => t.kind === "folder")
+        .flatMap((t) => folderMembers(serverTimelineTracks, t.id))
+        .filter((m) => !chosen.has(m.id))
+      const firstFreeOrder = orderForScopeAppend(serverTimelineTracks, null)
+
+      void (async () => {
+        try {
+          // ── PHASE 1: the structural, gated half ──────────────────────────
+          // Ejecting a folder's members writes `groupId`, and deleting a row is
+          // `patch: null` — both gated, so they stand or fall together and
+          // belong in the same phase.
+          const gated = await enqueueEvents([
+            ...members.map((member, i) => ({
+              kind: "file.track.set" as const,
+              projectId: project.id,
+              fileId: activeFileId,
+              parentId: null,
+              author: currentUsername,
+              payload: { trackId: member.id, patch: { groupId: null, order: firstFreeOrder + i } },
+            })),
+            ...doomed.map((t) => ({
+              kind: "file.track.set" as const,
+              projectId: project.id,
+              fileId: activeFileId,
+              parentId: null,
+              author: currentUsername,
+              payload: { trackId: t.id, patch: null },
+            })),
+          ])
+
+          // DID IT ACTUALLY LAND? Read the outbox back rather than the flush's
+          // counters: the flusher sends the oldest file's slice, which need not
+          // be ours, and a 403 never reaches `onRejected`. A record that is GONE
+          // was accepted; one still present was either refused (`failed`) or
+          // never sent. A couple of passes covers an unrelated batch queued
+          // ahead of ours without turning this into a spin.
+          const gatedIds = gated.map((g) => g.eventId)
+          let left = gatedIds.length > 0 ? await getOutboxRecords(gatedIds) : []
+          for (let pass = 0; pass < 3 && left.length > 0; pass += 1) {
+            if (left.every((r) => r.status === "failed")) break
+            const res = await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+            left = await getOutboxRecords(gatedIds)
+            // No progress at all means offline or auth — another pass would
+            // only repeat it.
+            if (res.accepted === 0 && res.quarantined === 0) break
+          }
+          await refreshOutboxPending()
+
+          const gate = trackDeleteGate(left)
+          if (!gate.proceed) {
+            // NOTHING IS REMOVED. The recordings are still on a track that is
+            // still there, which is a state the user can act on — unlike a
+            // silent half-delete.
+            toast.add({
+              type: "error",
+              title: gate.refused
+                ? `The track wasn't deleted: ${gate.reason ?? "not permitted"}`
+                : "The track couldn't be deleted just now — its recordings were left alone.",
+            })
+            refresh()
+            return
+          }
+
+          // ── PHASE 2: the recordings, now that the row is really gone ──────
+          if (removals.length > 0) {
+            await enqueueEvents(
+              removals.map((r) => ({
+                kind: "cell.audio.remove" as const,
+                projectId: project.id,
+                // The file the CELL lives in — not the active one. A take on a
+                // cue belongs to the sibling, and an event aimed at the wrong
+                // file projects onto nothing.
+                fileId: r.fileId,
+                cellId: r.cellId,
+                parentId: null,
+                author: currentUsername,
+                payload: { audioId: r.audioId },
+              })),
+            )
+            await flushOutboxBatch({
+              getTokenForFile: getTokenForProjectFile,
+              // The row is already gone, so there is nothing to put back. Say
+              // how far it got and refresh, so what is on screen is what is on
+              // the server.
+              onRejected: (entries) => {
+                if (entries.length === 0) return
+                toast.add({
+                  type: "error",
+                  title: `The track was deleted, but some of its recordings were not: ${entries[0].reason}`,
+                })
+              },
+            })
+          }
+          refresh()
+        } catch (e) {
+          toast.add({
+            type: "error",
+            title: e instanceof Error ? `Couldn't delete the track: ${e.message}` : "Couldn't delete the track.",
+          })
+        }
+      })()
+    },
+    [
+      project?.id,
+      activeFileId,
+      currentUsername,
+      timelineAudioByCellId,
+      cueAudioByCellId,
+      audioCueSibling?.id,
+      serverTimelineTracks,
+      getTokenForProjectFile,
+      refreshOutboxPending,
+      refresh,
+    ],
   )
   // The transport speaks file seconds in dubbing and programme seconds in
   // audio-first, so it has to know which before anything seeks.
   useEffect(() => {
     setQueueTimingMode(timingMode)
   }, [timingMode])
+
+  /**
+   * AQU-646 stage 3: which target tracks the queue should sound.
+   *
+   * Published the same way the timing mode is, and for the same reason: the
+   * queue's overlay planner runs from eight call sites, none of which has any
+   * other business knowing what a track is. One setter beats eight threaded
+   * parameters — and it is also what sizes the overlay pool, so a file with
+   * three tracks stops evicting its own dubs.
+   */
+  const targetSlots = useMemo(
+    () =>
+      serverTimelineTracks
+        .filter((tr) => tr.kind === "target-audio" || tr.kind === "audio")
+        .map((tr) => slotForTrack(tr.id)),
+    [serverTimelineTracks],
+  )
+  useEffect(() => {
+    setQueueTargetSlots(targetSlots)
+  }, [targetSlots])
 
   // Smooth-playback layer 1: while the Media lens is open, quietly stock the
   // on-device byte cache with the open file's dub clips (nearest the selection
@@ -7884,9 +9211,64 @@ export function ProjectWorkspace() {
   // which is harmless only because the pane is keyed by file id — a fragile
   // thing to rely on when the toggle effect deliberately depends on the nonce
   // alone.
-  useEffect(() => { setVideoSeek(null); setVideoToggle(null) }, [activeFileId])
+  /**
+   * AQU-646 stage 5: is the playhead being dragged right now?
+   *
+   * A ref, not state: it is read inside a seek that fires many times a second
+   * and it must never cause a render of its own.
+   *
+   * THE FLAG MUST NOT STICK, IN EITHER DIRECTION, and both failures are ugly.
+   * Stuck TRUE and every later seek skips the queue for the rest of the
+   * session — click a chip, press play, and the queue starts somewhere else.
+   * Stuck FALSE and a scrub cues the queue on every throttled tick, which mints
+   * tokens, opens elements, and raises a user-facing missing-clip toast for
+   * every gone take it crosses. So it is cleared from the release, from a
+   * cancel, from the editor's own unmount, and here on a file switch.
+   */
+  const scrubbingRef = useRef(false)
+  useEffect(() => { scrubbingRef.current = false; setVideoSeek(null); setVideoToggle(null) }, [activeFileId])
+  const handleTimelineScrubStart = useCallback(() => {
+    scrubbingRef.current = true
+    // `pauseAllTransports`, not `pauseAllPlayback`: the latter is queue-only and
+    // deliberately does not reach the picture. This one covers the queue, the
+    // single-cell clip, a standalone film AND the virtual clock (which
+    // registers into the same controller store) — and its own doc block
+    // explains why it must never touch `setExternalDubsPlaying`, which is a
+    // derived write that wedges false for the session.
+    //
+    // Nothing resumes on release. That is the house rule the video pane already
+    // states for its own pauses, and Sam's ruling — picture only — would be
+    // violated the instant an auto-resume started sound under a stopped hand.
+    pauseAllTransports()
+  }, [])
+  const handleTimelineScrubEnd = useCallback(() => { scrubbingRef.current = false }, [])
   const handleTimelineSeekToTime = useCallback((sec: number) => {
+    // AQU-646 stage 3h: A FILE WITH TIMINGS AND NO MASTER — the virtual clock
+    // is the transport, so the seek ends here, exactly as it ends at the
+    // picture below. Without this arm the call fell through to the queue,
+    // which has nothing to play on this file and quietly dropped it — so every
+    // gesture that funnels through the editor's seekTo (ruler clicks, chip
+    // clicks, selecting a cell in the table, Cmd/Ctrl+Enter) moved the
+    // editor's LOCAL clock and nothing else. Paused, that looked like it
+    // worked until play snapped the head back; playing, the next tick
+    // overwrote it within 50ms. One desync, many symptoms.
+    if (virtualIsTransport) {
+      virtualClockSeek(Math.max(0, sec))
+      return
+    }
     setVideoSeek((prev) => ({ sec: Math.max(0, sec), nonce: (prev?.nonce ?? 0) + 1 }))
+    // AQU-646 stage 5: A SCRUB MOVES THE PICTURE AND NOTHING ELSE (Sam).
+    //
+    // Placed AFTER the stamp so the frame still follows the hand, and BEFORE
+    // the video-transport return below so a SLAVED film is covered too. It
+    // earns its keep twice over: it is what keeps the drag silent, and it is
+    // what stops the slaved arrangement issuing two element seeks per tick —
+    // this nonce, plus the queue's own corrective on the tick that follows.
+    //
+    // The virtual arm above is deliberately NOT suppressed: it is the only
+    // thing that moves the head on a film-less file, and it is already silent
+    // because the scrub paused the transport before the first move.
+    if (scrubbingRef.current) return
     // ROUND 6 — the picture is the transport, so the seek ends here.
     //
     // This function was written for audio files, where an explicit seek should
@@ -7920,7 +9302,7 @@ export function ProjectWorkspace() {
       sec,
       { play: false },
     )
-  }, [project?.id, audioMergedCells, frontierSession, videoIsTransport])
+  }, [project?.id, audioMergedCells, frontierSession, videoIsTransport, virtualIsTransport])
 
   // Round 7 (SUB-44): Space in the media lens — the transport bar's 3-state
   // toggle against the QUEUE: playing → pause, paused → resume, idle → start
@@ -7937,6 +9319,15 @@ export function ProjectWorkspace() {
     // there and should get it.
     if (videoIsTransport) {
       setVideoToggle((prev) => ({ nonce: (prev?.nonce ?? 0) + 1 }))
+      return
+    }
+    // Stage 3h: the virtual clock gets the press the same way the picture
+    // does — toggle from wherever the head is, no special start rule. "Play
+    // from the selected cell" still happens the natural way: selecting a cell
+    // seeks the head there first, so Space plays from it.
+    if (virtualIsTransport) {
+      if (getVirtualClockPlaying()) virtualClockPause()
+      else virtualClockPlay()
       return
     }
     if (!project?.id) return
@@ -7963,7 +9354,7 @@ export function ProjectWorkspace() {
     const ctx = { cells: audioMergedCells, projectId: project.id, session: frontierSession }
     if (from >= 0) startQueue(ctx, from, true)
     else startQueueAtTime(ctx, 0, { play: true })
-  }, [project?.id, audioMergedCells, frontierSession, timelineSelectedCellId, videoIsTransport])
+  }, [project?.id, audioMergedCells, frontierSession, timelineSelectedCellId, videoIsTransport, virtualIsTransport])
 
   // AQU-654: count outstanding (non-waived) LQA/validation infractions on the
   // active file. Export never hard-blocks on these — the count only drives a
@@ -8241,16 +9632,6 @@ export function ProjectWorkspace() {
     }
 
     const contextual: OverflowMenuItem[] = [
-      ...(isSubtitleFile
-        ? [{
-            id: "attach-video",
-            // Reuses the video-attachment dialog's own title (this item opens
-            // it) rather than minting a duplicate "Attach video" string.
-            label: t("editor.video.title"),
-            icon: Film,
-            onClick: () => setVideoDialogOpen(true),
-          }]
-        : []),
       ...(suggestions.length > 0 && (suggestionsDismissed || project?.suggestionsDismissedAt)
         ? [{
             id: "redetect-suggestions",
@@ -8355,7 +9736,6 @@ export function ProjectWorkspace() {
     handleReinviteSuggestions,
     handleWorkspaceAction,
     hasUnfinished,
-    isSubtitleFile,
     lens,
     openExportFlow,
     project,
@@ -8375,18 +9755,9 @@ export function ProjectWorkspace() {
   if (status === "loading") return <WorkspaceSkeleton />
   if (status === "no-session") {
     return (
-      <div className="p-8 text-muted-foreground">
-        <RichMessage
-          k="workspace.status.notOnDevice"
-          values={{
-            signIn: (
-              <button className="underline" onClick={goToProjects}>
-                {t("auth.login.submitDefault")}
-              </button>
-            ),
-          }}
-        />
-      </div>
+      <SignedOutWorkspace
+        header={<OrgBreadcrumb section={project?.name ?? t("common.project")} orgId={project?.orgId} />}
+      />
     )
   }
   // RES-5: distinguish server-unreachable from a genuinely missing project.
@@ -8673,7 +10044,7 @@ export function ProjectWorkspace() {
         switchLens(l)
         if (l === "audio") setDockTab("voices")
       }}
-      onAgentSelect={openAgentTab}
+      onAgentSelect={() => openAgentTab("editor")}
       timeOrdered={activeFile ? fileOrderedBy(activeFile) === "time" : false}
       checkOpen={checkOpen}
       checkRunning={checkRunning}
@@ -8703,7 +10074,11 @@ export function ProjectWorkspace() {
           cellLabelsEnabled={cellLabelsEnabled}
           footnoteViewMode={footnoteViewMode}
           onFootnoteViewModeChange={setFootnoteViewMode}
+          targetKeyTermHighlightMode={targetKeyTermHighlightMode}
+          onTargetKeyTermHighlightModeChange={setTargetKeyTermHighlightMode}
           tnSidebarEnabled={tnSidebarVisible}
+          healthCalculationsEnabled={healthCalculationsEnabled}
+          onHealthCalculationsChange={setHealthCalculationsEnabled}
           sourceFontSize={fontSizes.source}
           targetFontSize={fontSizes.target}
           onLineNumbersChange={fileMeta.setLineNumbersEnabled}
@@ -8736,7 +10111,7 @@ export function ProjectWorkspace() {
         railCollapsed={dockTab === null}
         dockStorageKey={projectId}
         logoAccessory={
-          dockTab !== null ? (
+          dockTab !== null && lgUp ? (
             <AppTooltip content={t("workspace.sidebar.collapse")} side="bottom">
               <Button
                 type="button"
@@ -8772,7 +10147,7 @@ export function ProjectWorkspace() {
               project ? (
                 <div className="flex h-full min-h-0 flex-col overflow-hidden p-2">
                   <VoiceSidebar
-                    cells={legacyCells}
+                    cells={audioMergedCells}
                     project={audioProject ?? project}
                     projectId={project.id}
                     tts={tts}
@@ -8780,12 +10155,6 @@ export function ProjectWorkspace() {
                     username={currentUsername}
                     targetLanguage={project.targetLanguage}
                     fileId={activeFileId}
-                    cloneOpen={makeCharacterOpen}
-                    onCloneOpenChange={(open) => {
-                      setMakeCharacterOpen(open)
-                      if (!open) setMakeCharacterSeedCellId(null)
-                    }}
-                    cloneSeedCellId={makeCharacterSeedCellId}
                   />
                 </div>
               ) : undefined
@@ -8902,7 +10271,7 @@ export function ProjectWorkspace() {
                 pendingChip={pendingChip}
                 onPendingChipConsumed={() => setPendingChip(null)}
                 credits={jwt && projectOrg ? { jwt, orgId: projectOrg.id, orgRoleLevel: projectOrg.role.level } : null}
-                onExpand={openAgentTab}
+                onExpand={() => openAgentTab("sidebar")}
                 expanded={centerSurface === "agent"}
               />
             }
@@ -8947,13 +10316,6 @@ export function ProjectWorkspace() {
             surfaceLabel={workspaceBreadcrumb.surfaceLabel}
             editorHref={workspaceBreadcrumb.editorHref}
           >
-            {centerSurface === "editor" && activeFileId ? (
-              <div
-                ref={setEditorHeaderNavTarget}
-                className="flex min-w-0 max-w-[min(58vw,52rem)] items-center"
-                data-editor-header-navigation=""
-              />
-            ) : null}
             {/* AQU-615: Door43 upstream-sync badge — visible hint that source
                 cells are managed by a DCS link. Self-gated: renders nothing
                 when project_settings has no dcsUpstream cursor. */}
@@ -8964,9 +10326,9 @@ export function ProjectWorkspace() {
                 onClick={openProjectSettings}
               />
             )}
-
             {/* AQU-661: file-scoped actions live in the chapter-row File options
-                menu; Import is a header button. */}
+                menu; Import + Settings stay as header buttons on this
+                breadcrumb row. */}
           </WorkspaceHeader>
         }
         aboveCard={
@@ -8984,7 +10346,6 @@ export function ProjectWorkspace() {
                 ? [{
                     id: "agent",
                     label: t("nav.dock.agentTab"),
-                    icon: Bot,
                     active: centerSurface === "agent",
                     onActivate: () => openOverlay("agent"),
                     onClose: closeAgentTab,
@@ -9055,11 +10416,6 @@ export function ProjectWorkspace() {
             <div className="px-3 py-1 empty:hidden">
               <CompletionBulkProgressBanner />
             </div>
-            {isSubtitleFile && blobUnavailable && !videoAttachment.videoUrl && (
-              <div className="bg-amber-50 px-4 py-2 text-xs text-amber-700 dark:bg-amber-950 dark:text-amber-400">
-                {t("workspace.videoUnavailable")}
-              </div>
-            )}
             {/* F6: stale-sibling dead-letter banner. Clicking "View in
                 history" routes to the affected cell's history drawer where
                 the stale commit is preserved as a branch off its parent and
@@ -9175,7 +10531,10 @@ export function ProjectWorkspace() {
               ref={videoPlayerRef}
               src={videoSrc}
               cues={videoCues}
-              startOffset={videoStartOffset}
+              // Was `videoAttachment.videoStartOffset ?? 0`; the attachment it
+              // read is gone (stage 6I) and this player is parked behind a
+              // hardcoded-null `videoSrc`, so it never mounts to read it.
+              startOffset={0}
               onTimeUpdate={setCurrentVideoTime}
             />
           ) : undefined
@@ -9232,8 +10591,18 @@ export function ProjectWorkspace() {
               onPendingChipConsumed: () => setPendingChip(null),
             }}
             credits={jwt && projectOrg ? { jwt, orgId: projectOrg.id, orgRoleLevel: projectOrg.role.level } : null}
-            onClose={closeAgentTab}
+            onCollapse={agentExpandedFromDock ? closeAgentTab : undefined}
             onChooseFile={() => setDockTab("files")}
+            editorMode={{
+              lens,
+              timeOrdered: activeFile ? fileOrderedBy(activeFile) === "time" : false,
+              onLensChange: (next) => {
+                switchLens(next)
+                if (next === "audio") setDockTab("voices")
+                closeAgentTab()
+              },
+            }}
+            fileMenuItems={fileOptionsForAgentSurface(fileMenuItems)}
             onJumpToCell={(fileId, cellId) =>
               navigate(`/project/${projectId}/editor/file/${fileId}?cellId=${encodeURIComponent(cellId)}`)
             }
@@ -9292,7 +10661,7 @@ export function ProjectWorkspace() {
               />
             )}
             {timelineStacked ? (
-              <div className="relative flex shrink-0 items-center justify-end gap-3 border-b border-border bg-background/90 py-2 ps-2 pe-2 backdrop-blur-xl">
+              <div className="relative flex shrink-0 items-center justify-end gap-2 border-b border-border bg-background/90 p-2 backdrop-blur-xl">
                 {fileChapterToolbar}
               </div>
             ) : null}
@@ -9340,6 +10709,10 @@ export function ProjectWorkspace() {
                     onCueActivated={handleCueActivated}
                     activateRequest={timelineActivateRequest}
                     coreMediaUrl={activeFile.coreMediaUrl ?? null}
+                    // AQU-646 stage 6B: the trim handles are withheld when the
+                    // thing playing would ignore a dub's trims — and the
+                    // virtual transport honours them, exactly as the film does.
+                    virtualIsTransport={virtualIsTransport}
                     editable={!isReadOnly}
                     fileId={activeFile.id}
                     onRetimeSubtitle={handleRetimeSubtitle}
@@ -9396,6 +10769,8 @@ export function ProjectWorkspace() {
                       void handleToggleCueLink(textCellId, cueCellId, linked)
                     }}
                     onSeekToTime={handleTimelineSeekToTime}
+                    onScrubStart={handleTimelineScrubStart}
+                    onScrubEnd={handleTimelineScrubEnd}
                     tracks={timelineTracks}
                     timingMode={timingMode}
                     onChangeTimingMode={canEditTimingMode ? handleChangeTimingMode : undefined}
@@ -9413,6 +10788,9 @@ export function ProjectWorkspace() {
                     // a viewer/reviewer must not be offered the row at all —
                     // the same gate `legacyMeasure` uses below.
                     onTranscribeSections={isReadOnly ? undefined : handleTranscribeSections}
+                    // The SAME function the run reads, so what the button
+                    // enables and what the run touches can never disagree.
+                    takeCellsFor={takeCellsFor}
                     session={frontierSession ?? null}
                     audioByCellId={timelineAudioByCellId}
                     legacyMeasure={
@@ -9425,6 +10803,25 @@ export function ProjectWorkspace() {
                         : undefined
                     }
                     onReorderTrack={canReorderTracks ? handleReorderTrack : undefined}
+                    // AQU-646 stage 2. Rename rides the reorder clearance
+                    // alone; everything that RESTRUCTURES also needs the
+                    // project's allowTrackEditing setting. Withholding the
+                    // callback withholds the whole affordance — see the props'
+                    // own comments in TimelineEditor for why absent, not
+                    // disabled.
+                    onRenameTrack={canReorderTracks ? handleRenameTrack : undefined}
+                    trackEditing={
+                      canEditTracks
+                        ? {
+                            onAdd: handleAddTrack,
+                            onSetColor: handleSetTrackColor,
+                            onLeaveFolder: handleLeaveFolder,
+                            onMoveToScope: handleMoveTrackToScope,
+                            onCreateFolderFrom: handleCreateFolderFrom,
+                            onDelete: handleDeleteTrack,
+                          }
+                        : undefined
+                    }
                     onLinkingModeChange={(on) => {
                       setCueLinkDrawerOpen(on)
                       if (on) {
@@ -9504,6 +10901,7 @@ export function ProjectWorkspace() {
             showFootnotesInline={footnoteViewMode === "inline"}
             footnotePanelActive={footnoteViewMode !== "off"}
             footnoteViewMode={footnoteViewMode}
+            targetKeyTermHighlightMode={targetKeyTermHighlightMode}
             onVisibleFootnotesChange={footnoteViewMode === "tray" ? handleVisibleFootnotesChange : undefined}
             username={currentUsername}
             activeLane={activeLane}
@@ -9570,16 +10968,15 @@ export function ProjectWorkspace() {
             onReleaseCell={handleReleaseCell}
             onTargetPresenceSelection={handleTargetPresenceSelection}
             onAckRemoteChange={handleAckRemoteChange}
-            checkLockHolder={checkLockHolder}
             staleCellIds={staleCellIds}
             upstreamStaleCellIds={upstreamStaleCellIds}
             assignmentsByCellId={assignmentsByCellId}
-            onVisibleRefChange={setTrackedCellRef}
+            onVisibleRefChange={setEditorViewportTrackedCellRef}
             onVisibleCellIdsChange={handleVisibleCellIdsChange}
             // Stacked mode already shows the toolbar in the media header row
-            // above the timeline — don't render it twice.
+            // above the timeline — don't render it twice. Chapter picker +
+            // file options live in the in-editor row above Source/Target.
             chapterNavTrailing={timelineStacked ? undefined : fileChapterToolbar ?? undefined}
-            chapterNavPortalTarget={editorHeaderNavTarget}
           />
               </div>
               </div>
@@ -9795,7 +11192,7 @@ export function ProjectWorkspace() {
                 className={showAudioToolbar ? "px-0 py-0.5" : undefined}
                 left={
                   <div className="flex min-w-0 items-center gap-1.5">
-                    <PeerPresence peers={presencePeers} onJumpToPeer={handleJumpToPresencePeer} />
+                    <PeerPresence store={presenceStore} onJumpToPeer={handleJumpToPresencePeer} />
                     <SyncStatusIndicator status={fileSyncStatus} />
                     <OutboxSyncIndicator
                       pendingCount={Math.max(0, outboxPending - outboxFailed)}
@@ -9835,6 +11232,11 @@ export function ProjectWorkspace() {
                   startCellId={timelineSelectedCellId}
                   coreMediaUrl={activeFile?.coreMediaUrl ?? null}
                   videoPaneOnScreen={showVideoPane}
+                  // AQU-646 stage 3h: what the bar reads on a file with timings
+                  // and no master. 0 everywhere else, which is every ordinary
+                  // arrangement and leaves the bar exactly as it was.
+                  timelineDurationSec={timelineDurationSec}
+                  virtualSoundingCellId={virtualSoundingCellId}
                   below={
                     <>
                       {syncStatus}
@@ -9923,6 +11325,13 @@ export function ProjectWorkspace() {
           // and the take's window all follow the cue's own timing.
           cells={audioCueCells ?? legacyCells}
           activeCellId={recordingCellId}
+          // Where the take lands. "recording" for the default dub row, so its
+          // behaviour is byte-for-byte unchanged; an added track's own id when
+          // the mic was pressed on that track's lane.
+          targetSlot={recordingSlot}
+          // …and the file's tracks, so the takes list can be grouped under a
+          // heading per track (Sam, 2026-08-24).
+          timelineTracks={serverTimelineTracks}
           username={currentUsername}
           readAloudFor={audioCueCells ? resolveCueReadAloud : undefined}
           // The take goes to the cue sibling; the PICTURE belongs to the file
@@ -10003,31 +11412,7 @@ export function ProjectWorkspace() {
           ttsSettings={tts.settings}
           onCastUpdated={(patch) => tts.saveTts(patch)}
           existingFiles={project.files}
-          projectFiles={labelPickerFiles}
-          activeFileId={activeFileId}
           excludeFrontMatter={project.importExcludeFrontMatter}
-          onLabelsImported={(r) => {
-            if (r.applied === 0) {
-              toast.add({
-                type: "warning",
-                title: t("workspace.labelPicker.noLabelsAppliedToast", { fileName: r.fileName }),
-              })
-            } else if (r.unmatched > 0) {
-              toast.add({
-                type: "warning",
-                title: t("workspace.labelPicker.partiallyAppliedToast", {
-                  applied: r.applied,
-                  total: r.applied + r.unmatched,
-                  fileName: r.fileName,
-                }),
-              })
-            } else {
-              toast.add({
-                type: "success",
-                title: t("workspace.labelPicker.appliedToast", { applied: r.applied, fileName: r.fileName }),
-              })
-            }
-          }}
           patchDcsCursor={async (cursor) => {
             // Pin the project to the imported Door43 release (spec §8). Server
             // floor is MAINTAINER(600); a below-floor caller gets a blocked
@@ -10058,6 +11443,9 @@ export function ProjectWorkspace() {
         <ExportDialog
           open={exportOpen}
           onOpenChange={setExportOpen}
+          // AQU-646 stage 4: per line writes a folder per track, and the mere
+          // existence of an added one puts a notice on the by-character option.
+          timelineTracks={timelineTracks}
           canExport={canExportByOrgPolicy}
           cells={legacyCells}
           // WHERE THE TAKES ACTUALLY ARE, and — the part the first fix got
@@ -10136,14 +11524,27 @@ export function ProjectWorkspace() {
         onAfterReplace={rebuildSearchIndex}
         onReplaceAll={handleReplaceAll}
       />
+      {project && (
+        <CloneVoiceModalHost
+          open={makeCharacterOpen}
+          onClose={() => {
+            setMakeCharacterOpen(false)
+            setMakeCharacterSeedCellId(null)
+          }}
+          seedCellId={makeCharacterSeedCellId}
+          tts={tts}
+          projectId={project.id}
+          fileId={activeFileId}
+          session={frontierSession ?? null}
+          targetLanguage={project.targetLanguage}
+          cells={audioMergedCells}
+          roleLevel={project.syncRole?.level ?? null}
+        />
+      )}
       <SharePanel
         open={shareOpen} onOpenChange={setShareOpen}
         projectId={projectId!}
         onSharesChanged={refreshChecklistShares}
-      />
-      <VideoAttachmentDialog
-        open={videoDialogOpen} onOpenChange={setVideoDialogOpen}
-        current={videoAttachment} onSave={saveVideo}
       />
       {/* AQU-661: confirmation for workspace actions folded from the removed
           primary-action dropdown into the ⋯ overflow menu. */}

@@ -3,6 +3,7 @@ import {
   EMPTY_SELECTION,
   applySelect,
   readSelectMods,
+  readTrackSelectMods,
   selectedIdsInOrder,
   type TimelineSelection,
 } from "./selection"
@@ -100,5 +101,56 @@ describe("selectedIdsInOrder", () => {
     // Switching files must not leave an invisible section in the batch scope.
     expect(selectedIdsInOrder(sel("a", "gone"), ORDER)).toEqual(["a"])
     expect(selectedIdsInOrder(sel("gone"), ORDER)).toEqual([])
+  })
+})
+
+// ── AQU-646 stage 2b: the same fold, driving TRACK selection ────────────────
+//
+// `applySelect` and `selectedIdsInOrder` are reused verbatim for tracks — they
+// never look at a cell, only at ids and an order — so what needs pinning here
+// is the ONE thing that differs, which is the modifier read.
+
+describe("readTrackSelectMods — ctrl is not the additive modifier on a Mac", () => {
+  const applePlatform = (value: string) => {
+    const nav = globalThis.navigator as Navigator & { userAgentData?: { platform?: string } }
+    const original = Object.getOwnPropertyDescriptor(Navigator.prototype, "platform")
+    Object.defineProperty(nav, "platform", { value, configurable: true })
+    return () => {
+      delete (nav as unknown as Record<string, unknown>).platform
+      if (original) Object.defineProperty(Navigator.prototype, "platform", original)
+    }
+  }
+
+  it("⌘ toggles on every platform", () => {
+    for (const platform of ["MacIntel", "Win32"]) {
+      const restore = applePlatform(platform)
+      expect(readTrackSelectMods({ metaKey: true, ctrlKey: false, shiftKey: false })).toEqual({ toggle: true })
+      restore()
+    }
+  })
+
+  it("shift ranges, and wins over ⌘ — the more specific intent", () => {
+    expect(readTrackSelectMods({ metaKey: false, ctrlKey: false, shiftKey: true })).toEqual({ range: true })
+    expect(readTrackSelectMods({ metaKey: true, ctrlKey: false, shiftKey: true })).toEqual({ range: true })
+  })
+
+  // THE WHOLE REASON THIS FUNCTION EXISTS. macOS synthesises `contextmenu` from
+  // ctrl + primary click, and that is how the track menu opens. If ctrl also
+  // toggled the selection, one gesture would open a menu AND change the
+  // selection underneath it.
+  it("ignores ctrl on an Apple platform, where it is the context-menu gesture", () => {
+    const restore = applePlatform("MacIntel")
+    expect(readTrackSelectMods({ metaKey: false, ctrlKey: true, shiftKey: false })).toBeUndefined()
+    restore()
+  })
+
+  it("…but keeps ctrl working everywhere else, where there is no collision", () => {
+    const restore = applePlatform("Win32")
+    expect(readTrackSelectMods({ metaKey: false, ctrlKey: true, shiftKey: false })).toEqual({ toggle: true })
+    restore()
+  })
+
+  it("a plain click is undefined, not an all-false object", () => {
+    expect(readTrackSelectMods({ metaKey: false, ctrlKey: false, shiftKey: false })).toBeUndefined()
   })
 })

@@ -5,7 +5,7 @@
 
 import { describe, it, expect } from "vitest"
 import type { PortfolioProject } from "@/lib/frontier/portfolio"
-import { displayLanes, withOptimisticLane } from "./project-lanes"
+import { displayLanes, laneChipLabel, resolveDefaultLaneLabel, withOptimisticLane } from "./project-lanes"
 
 function baseProject(overrides: Partial<PortfolioProject> = {}): PortfolioProject {
   return {
@@ -23,6 +23,45 @@ function baseProject(overrides: Partial<PortfolioProject> = {}): PortfolioProjec
     ...overrides,
   }
 }
+
+describe("resolveDefaultLaneLabel (AQU-606)", () => {
+  it("labels a migrated project's default lane with the project-level target language", () => {
+    // The exact regression: the lanes migration leaves the project's target on
+    // project settings and its files with no per-file hint, so hint-only
+    // resolution rendered the generic "Default" placeholder instead of "French".
+    const p = baseProject({ targetLanguage: "French" })
+    expect(resolveDefaultLaneLabel(p, undefined)).toBe("French")
+    expect(laneChipLabel("", resolveDefaultLaneLabel(p, undefined))).toBe("French")
+  })
+
+  it("prefers the project-level target language over a stale per-file hint", () => {
+    const p = baseProject({ targetLanguage: "French" })
+    expect(resolveDefaultLaneLabel(p, "Spanish")).toBe("French")
+  })
+
+  it("falls back to the per-file hint when the project has no target set", () => {
+    const p = baseProject({ targetLanguage: null })
+    expect(resolveDefaultLaneLabel(p, "Spanish")).toBe("Spanish")
+  })
+
+  it("returns '' when neither source is set, so the chip shows the placeholder", () => {
+    const p = baseProject()
+    expect(resolveDefaultLaneLabel(p, undefined)).toBe("")
+    expect(laneChipLabel("", resolveDefaultLaneLabel(p, undefined), "No target set")).toBe(
+      "No target set",
+    )
+  })
+
+  it("treats whitespace-only values as unset on both sources", () => {
+    expect(resolveDefaultLaneLabel(baseProject({ targetLanguage: "   " }), "  ")).toBe("")
+    expect(resolveDefaultLaneLabel(baseProject({ targetLanguage: "  " }), " Spanish ")).toBe("Spanish")
+  })
+
+  it("never relabels a named lane", () => {
+    const p = baseProject({ targetLanguage: "French" })
+    expect(laneChipLabel("es", resolveDefaultLaneLabel(p, undefined))).toBe("es")
+  })
+})
 
 describe("withOptimisticLane (AQU-605)", () => {
   it("appends the new lane as a chip while keeping the default lane", () => {

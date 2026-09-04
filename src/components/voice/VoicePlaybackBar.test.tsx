@@ -21,11 +21,31 @@ vi.mock("@/hooks/useFrontierSession", () => ({
 // selectors). We only assert which index Play hands the queue (AQU-666).
 vi.mock("@/lib/audio/play-queue", async (importActual) => {
   const actual = await importActual<typeof import("@/lib/audio/play-queue")>()
-  return { ...actual, startQueue: vi.fn() }
+  return { ...actual, startQueue: vi.fn(), setQueueRate: vi.fn() }
+})
+
+// A film owns the clock. `useVideoController` is how the bar reaches it, and
+// `useTransportForFile` is what reports WHO is driving — both stubbed so the
+// speed test can put the bar in the film-driven state without a video element.
+const videoController = vi.hoisted(() => ({ setRate: vi.fn(), setVolume: vi.fn() }))
+const transportSource = vi.hoisted(() => ({ value: "queue" as "queue" | "video" }))
+vi.mock("@/lib/timeline/video-controller", async (importActual) => {
+  const actual = await importActual<typeof import("@/lib/timeline/video-controller")>()
+  return { ...actual, useVideoController: () => videoController }
+})
+vi.mock("@/hooks/useTransportForFile", async (importActual) => {
+  const actual = await importActual<typeof import("@/hooks/useTransportForFile")>()
+  return {
+    ...actual,
+    useTransportForFile: (args: Parameters<typeof actual.useTransportForFile>[0]) => ({
+      ...actual.useTransportForFile(args),
+      source: transportSource.value,
+    }),
+  }
 })
 
 import { VoicePlaybackBar } from "./VoicePlaybackBar"
-import { startQueue } from "@/lib/audio/play-queue"
+import { startQueue, setQueueRate } from "@/lib/audio/play-queue"
 import { pushAudioShortcutOverride } from "@/lib/audio/audio-coordinator"
 import type { CellData } from "@/hooks/useCells"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -147,5 +167,51 @@ describe("VoicePlaybackBar", () => {
         expect(startQueue).toHaveBeenCalledTimes(1)
       })
     })
+  })
+})
+
+// ── Speed reaches the takes, not just whoever owns the clock ────────────────
+//
+// The dubs always fire through the queue's overlay pool no matter which engine
+// owns the clock, and that pool takes its speed from the QUEUE's rate. The bar
+// used to hand the rate to one engine or the other — `drivesVideo ?
+// videoController.setRate : setQueueRate` — so on a film the picture sped up
+// and every take went on playing at 1x internally: it fired on cue (firing
+// reads the clock) and then drifted within itself. Sam verified it live on a
+// real film before this was fixed.
+describe("VoicePlaybackBar — playback speed", () => {
+  const pickSpeed = (label: string) => {
+    fireEvent.click(screen.getByText("1x"))
+    fireEvent.click(screen.getByText(label))
+  }
+
+  beforeEach(() => {
+    transportSource.value = "queue"
+    videoController.setRate.mockClear()
+    vi.mocked(setQueueRate).mockClear()
+  })
+
+  it("tells the queue, so the dub overlays actually change speed", () => {
+    render(<VoicePlaybackBar cells={[cell()]} projectId="p1" session={null} settings={undefined} />)
+    pickSpeed("1.5x")
+    expect(setQueueRate).toHaveBeenCalledWith(1.5)
+  })
+
+  it("tells BOTH the film and the queue when the film owns the clock", () => {
+    transportSource.value = "video"
+    render(<VoicePlaybackBar cells={[cell()]} projectId="p1" session={null} settings={undefined} />)
+    pickSpeed("1.5x")
+    // The picture…
+    expect(videoController.setRate).toHaveBeenCalledWith(1.5)
+    // …and the takes playing over it. This is the assertion the old
+    // `? :` failed: it reached exactly one of these two.
+    expect(setQueueRate).toHaveBeenCalledWith(1.5)
+  })
+
+  it("leaves the film alone when the queue owns the clock", () => {
+    render(<VoicePlaybackBar cells={[cell()]} projectId="p1" session={null} settings={undefined} />)
+    pickSpeed("0.75x")
+    expect(setQueueRate).toHaveBeenCalledWith(0.75)
+    expect(videoController.setRate).not.toHaveBeenCalled()
   })
 })

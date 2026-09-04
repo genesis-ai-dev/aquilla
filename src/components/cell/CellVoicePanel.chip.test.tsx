@@ -76,6 +76,27 @@ describe("CellVoicePanel take tools", () => {
     expect(screen.getByRole("button", { name: "Volume" })).toHaveClass("size-7")
   })
 
+  it("asks the host to open the clone-from-take modal", async () => {
+    const user = userEvent.setup()
+    const onMakeCharacter = vi.fn()
+    renderWithTooltips(
+      <CellVoicePanel
+        cell={cell}
+        project={project}
+        projectId="proj-1"
+        settings={settings}
+        voices={voices}
+        session={{ jwt: "x" } as unknown as never}
+        username="tester"
+        onAssign={() => {}}
+        onAfterGenerate={() => {}}
+        onMakeCharacter={onMakeCharacter}
+      />,
+    )
+    await user.click(screen.getByRole("button", { name: /clone/i }))
+    expect(onMakeCharacter).toHaveBeenCalledTimes(1)
+  })
+
   it("opens the volume popover from the take-tools row", async () => {
     const user = userEvent.setup()
     renderChip()

@@ -126,3 +126,38 @@ export async function reconcileContextualDraftsAfterAppliedEvent(args: {
   ) return
   await args.refreshDrafts(draftScope)
 }
+
+/**
+ * What the outbox says happened to a track deletion, and therefore whether its
+ * recordings may now be removed. (AQU-646, 2026-08-27)
+ *
+ * Deleting a track is two writes with two different authorities: removing its
+ * takes is `cell.audio.remove` at contributor level, while removing the row is
+ * `file.track.set` behind the project's `allowTrackEditing` setting. The worker
+ * authorizes each event on its own and answers with a mixed accepted/rejected
+ * list, so emitting both together let the server take the recordings and refuse
+ * the row — and say nothing, because the flusher quarantines a 403 before the
+ * `rejected` list that feeds `onRejected`.
+ *
+ * So the row goes first and this reads the outbox back to see whether it
+ * landed. Reading the records rather than the flush's counters is deliberate:
+ * the flusher sends the oldest file's slice, which need not be the one we
+ * queued, and its `quarantined` count says nothing about WHICH events it
+ * covered. A record that is GONE was accepted; one still present was refused
+ * (`failed`) or never sent (`pending`).
+ *
+ * `proceed` is false for BOTH of those. An answer we never got is not
+ * permission to delete somebody's recordings — the honest resting state is a
+ * track that still exists, still holding them.
+ */
+export function trackDeleteGate(
+  remaining: readonly { status: "pending" | "failed"; lastError: { reason: string } | null }[],
+): { proceed: boolean; refused: boolean; reason: string | null } {
+  if (remaining.length === 0) return { proceed: true, refused: false, reason: null }
+  const refused = remaining.find((r) => r.status === "failed")
+  return {
+    proceed: false,
+    refused: refused != null,
+    reason: refused?.lastError?.reason ?? null,
+  }
+}

@@ -1,217 +1,190 @@
 /**
- * Tests for AddConceptDialog (AQU-260).
+ * Tests for AddConceptPopover (AQU-260 / AQU-1006).
  *
- * Covers:
- *   - Dialog pre-fills with the provided sourceTerm
- *   - Confirm calls onConfirm with the (possibly edited) term
- *   - Cancel calls onCancel and does NOT call onConfirm
- *   - Empty / whitespace-only term prevents submission
- *   - Dialog re-fills when sourceTerm changes while open
+ * The control is a popover on the source-selection toolbar — not a modal.
+ * Persistence (loading / success / error) is toasted by the caller; this
+ * surface closes as soon as submit is accepted.
  */
 
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
-import { AddConceptDialog } from "./AddConceptDialog"
+import userEvent from "@testing-library/user-event"
+import { AddConceptPopover } from "./AddConceptDialog"
 
-function renderDialog(props: Partial<Parameters<typeof AddConceptDialog>[0]> = {}) {
+function renderPopover(props: Partial<Parameters<typeof AddConceptPopover>[0]> = {}) {
   const defaults = {
-    open: true,
     sourceTerm: "spirit",
     onConfirm: vi.fn(),
-    onCancel: vi.fn(),
+    children: <button type="button">Add to terminology</button>,
   }
-  return render(<AddConceptDialog {...defaults} {...props} />)
+  return render(<AddConceptPopover {...defaults} {...props} />)
 }
 
-describe("AddConceptDialog", () => {
-  // ── Not rendered when closed ───────────────────────────────────────────────
+async function openPopover() {
+  fireEvent.click(screen.getByRole("button", { name: /add to terminology/i }))
+  return screen.findByLabelText(/source term for new concept/i)
+}
 
-  it("does not render content when open=false", () => {
-    renderDialog({ open: false })
+describe("AddConceptPopover", () => {
+  it("does not render the form until opened", () => {
+    renderPopover()
     expect(screen.queryByLabelText(/source term for new concept/i)).not.toBeInTheDocument()
   })
 
-  // ── Pre-fills with sourceTerm ──────────────────────────────────────────────
-
-  it("pre-fills the input with the provided sourceTerm", () => {
-    renderDialog({ sourceTerm: "grace" })
-    const input = screen.getByLabelText(/source term for new concept/i)
+  it("pre-fills the source term from the selection", async () => {
+    renderPopover({ sourceTerm: "grace" })
+    const input = await openPopover()
     expect((input as HTMLInputElement).value).toBe("grace")
   })
 
-  // ── Confirm path ───────────────────────────────────────────────────────────
-
-  it("calls onConfirm with the current term when Create draft is clicked", async () => {
+  it("keeps the prefilled term if the live selection clears while the popover is open", async () => {
+    // Opening the popover focuses the source-term input, which collapses the
+    // browser selection. The parent then passes sourceTerm="" — the field
+    // must keep the term captured at open, not empty out.
     const onConfirm = vi.fn()
-    renderDialog({ sourceTerm: "faith", onConfirm })
+    const trigger = <button type="button">Add to terminology</button>
+    const { rerender } = render(
+      <AddConceptPopover sourceTerm="Holy Spirit" onConfirm={onConfirm}>
+        {trigger}
+      </AddConceptPopover>,
+    )
+    const input = await openPopover()
+    expect((input as HTMLInputElement).value).toBe("Holy Spirit")
 
-    fireEvent.click(screen.getByRole("button", { name: /create draft concept/i }))
+    rerender(
+      <AddConceptPopover sourceTerm="" onConfirm={onConfirm}>
+        {trigger}
+      </AddConceptPopover>,
+    )
+    expect((screen.getByLabelText(/source term for new concept/i) as HTMLInputElement).value).toBe(
+      "Holy Spirit",
+    )
+  })
+
+  it("calls onConfirm with the source term and closes", async () => {
+    const onConfirm = vi.fn()
+    renderPopover({ sourceTerm: "faith", onConfirm })
+    await openPopover()
+
+    fireEvent.click(screen.getByRole("button", { name: /add term/i }))
 
     await waitFor(() => {
       expect(onConfirm).toHaveBeenCalledOnce()
-      expect(onConfirm).toHaveBeenCalledWith("faith")
+      expect(onConfirm).toHaveBeenCalledWith({ sourceTerm: "faith" })
     })
+    expect(screen.queryByLabelText(/source term for new concept/i)).not.toBeInTheDocument()
   })
 
   it("trims whitespace from the term before calling onConfirm", async () => {
     const onConfirm = vi.fn()
-    renderDialog({ sourceTerm: "  love  ", onConfirm })
-
-    fireEvent.click(screen.getByRole("button", { name: /create draft concept/i }))
-
+    renderPopover({ sourceTerm: "  love  ", onConfirm })
+    await openPopover()
+    fireEvent.click(screen.getByRole("button", { name: /add term/i }))
     await waitFor(() => {
-      expect(onConfirm).toHaveBeenCalledWith("love")
+      expect(onConfirm).toHaveBeenCalledWith({ sourceTerm: "love" })
     })
   })
 
-  it("calls onConfirm with edited text when user changes the input", async () => {
+  it("calls onConfirm with edited text when the user changes the input", async () => {
     const onConfirm = vi.fn()
-    renderDialog({ sourceTerm: "spirit", onConfirm })
-
-    const input = screen.getByLabelText(/source term for new concept/i)
+    renderPopover({ sourceTerm: "spirit", onConfirm })
+    const input = await openPopover()
     fireEvent.change(input, { target: { value: "Holy Spirit" } })
-    fireEvent.click(screen.getByRole("button", { name: /create draft concept/i }))
-
+    fireEvent.click(screen.getByRole("button", { name: /add term/i }))
     await waitFor(() => {
-      expect(onConfirm).toHaveBeenCalledWith("Holy Spirit")
+      expect(onConfirm).toHaveBeenCalledWith({ sourceTerm: "Holy Spirit" })
     })
   })
 
-  it("submits on Enter key in the input", async () => {
+  it("includes an optional rendering and a caseSensitive flag", async () => {
     const onConfirm = vi.fn()
-    renderDialog({ sourceTerm: "peace", onConfirm })
-
-    const input = screen.getByLabelText(/source term for new concept/i)
-    fireEvent.keyDown(input, { key: "Enter" })
-
+    const user = userEvent.setup()
+    renderPopover({ sourceTerm: "grace", onConfirm })
+    await openPopover()
+    await user.type(screen.getByLabelText(/rendering for new concept/i), "favor")
+    await user.click(screen.getByRole("checkbox", { name: /case insensitive/i }))
+    await user.click(screen.getByRole("button", { name: /add term/i }))
     await waitFor(() => {
-      expect(onConfirm).toHaveBeenCalledWith("peace")
+      expect(onConfirm).toHaveBeenCalledWith({
+        sourceTerm: "grace",
+        rendering: "favor",
+        caseSensitive: true,
+      })
     })
   })
 
-  // ── Cancel path ────────────────────────────────────────────────────────────
-
-  it("calls onCancel when Cancel is clicked without calling onConfirm", () => {
+  it("submits on Enter in the rendering field", async () => {
     const onConfirm = vi.fn()
-    const onCancel = vi.fn()
-    renderDialog({ onConfirm, onCancel })
+    renderPopover({ sourceTerm: "peace", onConfirm })
+    await openPopover()
+    fireEvent.keyDown(screen.getByLabelText(/rendering for new concept/i), { key: "Enter" })
+    await waitFor(() => {
+      expect(onConfirm).toHaveBeenCalledWith({ sourceTerm: "peace" })
+    })
+  })
 
+  it("closes on Cancel without calling onConfirm", async () => {
+    const onConfirm = vi.fn()
+    const onOpenChange = vi.fn()
+    renderPopover({ onConfirm, onOpenChange })
+    await openPopover()
     fireEvent.click(screen.getByRole("button", { name: /cancel/i }))
-
-    expect(onCancel).toHaveBeenCalledOnce()
     expect(onConfirm).not.toHaveBeenCalled()
+    expect(onOpenChange).toHaveBeenCalledWith(false)
+    expect(screen.queryByLabelText(/source term for new concept/i)).not.toBeInTheDocument()
   })
 
-  // ── Empty term validates on submit ─────────────────────────────────────────
-
-  it("shows validation when Create draft is clicked with empty term", async () => {
+  it("shows validation when Add term is clicked with an empty term", async () => {
     const onConfirm = vi.fn()
-    renderDialog({ sourceTerm: "", onConfirm })
-    fireEvent.submit(document.getElementById("add-concept-form")!)
+    renderPopover({ sourceTerm: "", onConfirm })
+    await openPopover()
+    fireEvent.click(screen.getByRole("button", { name: /add term/i }))
     await waitFor(() => {
       expect(screen.getByText(/source term is required/i)).toBeInTheDocument()
     })
     expect(onConfirm).not.toHaveBeenCalled()
+    expect(screen.getByLabelText(/source term for new concept/i)).toBeInTheDocument()
   })
 
   it("shows validation when term is whitespace only", async () => {
     const onConfirm = vi.fn()
-    renderDialog({ sourceTerm: "   ", onConfirm })
-    const input = screen.getByLabelText(/source term for new concept/i)
+    renderPopover({ sourceTerm: "   ", onConfirm })
+    const input = await openPopover()
     fireEvent.change(input, { target: { value: "   " } })
-    fireEvent.submit(document.getElementById("add-concept-form")!)
+    fireEvent.click(screen.getByRole("button", { name: /add term/i }))
     await waitFor(() => {
       expect(screen.getByText(/source term is required/i)).toBeInTheDocument()
     })
     expect(onConfirm).not.toHaveBeenCalled()
   })
 
-  // ── AQU-754: failed saves surface, dialog stays open (no silent no-op) ───────
-
-  it("surfaces the error and keeps the input mounted when onConfirm rejects", async () => {
-    // Mirrors the editor path: onConfirm persists via patchSettings and throws
-    // when the write is rejected (e.g. below Maintainer). The dialog must show
-    // why and stay open, not close as if the concept was saved.
-    const onConfirm = vi.fn().mockRejectedValue(
-      new Error("You need the Maintainer role or higher to change the term base."),
-    )
-    const onCancel = vi.fn()
-    renderDialog({ sourceTerm: "grace", onConfirm, onCancel })
-
-    fireEvent.click(screen.getByRole("button", { name: /create draft concept/i }))
-
-    await waitFor(() => {
-      expect(screen.getByRole("alert")).toHaveTextContent(/maintainer role or higher/i)
-    })
-    // Dialog is still interactive (input present) and did not auto-cancel.
-    expect(screen.getByLabelText(/source term for new concept/i)).toBeInTheDocument()
-    expect(onCancel).not.toHaveBeenCalled()
-  })
-
-  it("re-enables the Create draft button after a rejected save (no stuck Saving…)", async () => {
-    // Regression: the button label read form.state.isSubmitting directly in
-    // render, which is not reactive — after a rejected save it stayed stuck on
-    // "Saving…" forever. It must return to an enabled "Create draft".
-    const onConfirm = vi.fn().mockRejectedValue(new Error("nope"))
-    renderDialog({ sourceTerm: "grace", onConfirm })
-
-    const submitBtn = screen.getByRole("button", { name: /create draft concept/i })
-    fireEvent.click(submitBtn)
-
-    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument())
-    await waitFor(() => {
-      expect(submitBtn).toHaveTextContent("Create draft")
-      expect(submitBtn).toBeEnabled()
-    })
-  })
-
-  // ── Blocked below the termbase write floor ─────────────────────────────────
-
-  it("disables the input and Create draft and shows the reason when blockedReason is set", async () => {
+  it("disables the inputs and Add term when blockedReason is set", async () => {
     const onConfirm = vi.fn()
-    renderDialog({
+    renderPopover({
       onConfirm,
       blockedReason: "You need the Maintainer role or higher to change the term base.",
     })
+    await openPopover()
 
     expect(screen.getByRole("alert")).toHaveTextContent(/maintainer role or higher/i)
     expect(screen.getByLabelText(/source term for new concept/i)).toBeDisabled()
-    expect(screen.getByRole("button", { name: /create draft concept/i })).toBeDisabled()
+    expect(screen.getByRole("button", { name: /add term/i })).toBeDisabled()
 
-    // Even a programmatic form submit must not reach onConfirm. Flush the
-    // async handleSubmit before asserting the negative.
-    fireEvent.submit(document.getElementById("add-concept-form")!)
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    fireEvent.click(screen.getByRole("button", { name: /add term/i }))
     expect(onConfirm).not.toHaveBeenCalled()
   })
 
-  it("keeps Cancel active while blocked so the user can close the dialog", () => {
-    const onCancel = vi.fn()
-    renderDialog({
-      onCancel,
+  it("keeps Cancel active while blocked so the user can close the popover", async () => {
+    const onOpenChange = vi.fn()
+    renderPopover({
+      onOpenChange,
       blockedReason: "You need the Maintainer role or higher to change the term base.",
     })
+    await openPopover()
 
     const cancelBtn = screen.getByRole("button", { name: /cancel/i })
     expect(cancelBtn).toBeEnabled()
     fireEvent.click(cancelBtn)
-    expect(onCancel).toHaveBeenCalledOnce()
-  })
-
-  it("clears a prior error when the user re-submits successfully", async () => {
-    const onConfirm = vi
-      .fn()
-      .mockRejectedValueOnce(new Error("You're offline — reconnect to save term base changes."))
-      .mockResolvedValueOnce(undefined)
-    renderDialog({ sourceTerm: "peace", onConfirm })
-
-    fireEvent.click(screen.getByRole("button", { name: /create draft concept/i }))
-    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument())
-
-    fireEvent.click(screen.getByRole("button", { name: /create draft concept/i }))
-    await waitFor(() => {
-      expect(screen.queryByRole("alert")).not.toBeInTheDocument()
-    })
-    expect(onConfirm).toHaveBeenCalledTimes(2)
+    expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 })

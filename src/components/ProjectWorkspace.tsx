@@ -39,7 +39,11 @@ import type { ScoredPair } from "@/lib/search/dual-index"
 import type { PassageHit } from "@/hooks/useSearchIndex"
 import { useHealth } from "@/hooks/useHealth"
 import { needsAttentionFromConfidence, resolveDecayConfig } from "@/lib/health/decay-engine"
-import { buildHealthRibbon, preTranslationEvidence } from "@/lib/health/health-ribbon"
+import { buildHealthRibbon, type HealthRibbonPoint } from "@/lib/health/health-ribbon"
+import { ribbonInputFor, type RibbonEvidenceReaders } from "@/lib/health/ribbon-inputs"
+import { chapterHealthBuilderFor } from "@/lib/health/chapter-health"
+import { HEALTH_CALCULATIONS_ENABLED } from "@/lib/health/kill-switch"
+import { resolveWorkbenchWindow } from "@/lib/agent/workbench-window"
 import { partitionInfractions } from "@/lib/rules/waivers"
 import { useCellConfidence } from "@/hooks/useCellConfidence"
 import { useRules } from "@/hooks/useRules"
@@ -202,7 +206,7 @@ import {
   type ProjectPresencePeer,
   type TargetPresenceSelection,
 } from "@/lib/sync/presence-store"
-import { flushOutboxBatch, type ForbiddenEntry } from "@/lib/sync/outbox-flush"
+import { flushOutboxBatch, subscribeStaleSiblings, type ForbiddenEntry } from "@/lib/sync/outbox-flush"
 import { acknowledgeOutboxEvents, getOutboxRecords } from "@/lib/sync/outbox"
 import { forbiddenBannerMessage } from "@/lib/sync/forbidden-copy"
 import { useForbiddenOutboxRecords } from "@/hooks/useForbiddenOutboxRecords"
@@ -317,7 +321,12 @@ import {
 } from "@/components/ui/select"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { readValidationCount } from "@/lib/progress/read-validation-count"
-import { resolveTextDirection, summarizeTextDirections } from "@/lib/text-direction"
+import {
+  detectStrongTextDirection,
+  resolveTextDirection,
+  summarizeDetectedDirections,
+  type TextDirection,
+} from "@/lib/text-direction"
 import { useSetupChecklist } from "@/hooks/useSetupChecklist"
 import { SetupChecklistDrawer } from "./onboarding/SetupChecklistDrawer"
 import { SystemPromptNudge } from "./onboarding/SystemPromptNudge"
@@ -406,6 +415,24 @@ const PROJECT_MEMORY_PATH_RE = /^\/project\/[^/]+\/memory(\/[^/]+)?$/
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _lastImportWrite: Promise<any> = Promise.resolve(undefined)
 const EMPTY_CELL_DATA: CellData[] = []
+const EMPTY_CHAPTER_HEALTH: BookHealthChapter[] = []
+const EMPTY_SCORED_PAIRS: ScoredPair[] = []
+
+// AQU-1104: the store keeps a summary's identity across commits for cells the
+// commit did not touch, so direction detection (a regex walk over every cell's
+// markup) is cached per summary object instead of re-run per commit.
+const directionBySummary = new WeakMap<CellSummary, { source: TextDirection | null; target: TextDirection | null }>()
+function summaryDirections(summary: CellSummary): { source: TextDirection | null; target: TextDirection | null } {
+  let directions = directionBySummary.get(summary)
+  if (!directions) {
+    directions = {
+      source: detectStrongTextDirection(summary.originalHtml ?? summary.original),
+      target: detectStrongTextDirection(summary.translatedHtml ?? summary.translated),
+    }
+    directionBySummary.set(summary, directions)
+  }
+  return directions
+}
 
 function projectRecordsEquivalent(a: ProjectRecord | null, b: ProjectRecord | null): boolean {
   if (a === b) return true
@@ -1443,6 +1470,29 @@ export function ProjectWorkspace() {
     pendingTargetCommitHeadsRef.current.set(laneCellKey(cellId), { eventId, parentId })
   }, [laneCellKey])
 
+  // I2: a stale sibling is a REJECTION of this client's commit, not a save.
+  // Left alone, the losing writer keeps its optimistic shadow (which makes
+  // mergeProtectedRows discard every server row for the cell) and keeps the
+  // losing event id as the parent of its next commit — so it never sees the
+  // winner and every follow-up commit is stale too. Drop the shadow, forget
+  // the pending head (the next commit chains on `cell.targetEventId`, the
+  // real head), and pull the winner's row. The banner stays as the route to
+  // History / promote. Subscribed tab-wide because the inline "flush now"
+  // after a commit does not go through useOutboxFlusher's callback.
+  useEffect(() => {
+    if (!activeFileId) return
+    return subscribeStaleSiblings((entries) => {
+      for (const entry of entries) {
+        if (!entry.cellId || entry.fileId !== activeFileId) continue
+        const key = laneCellKey(entry.cellId)
+        pendingTargetCommitHeadsRef.current.delete(key)
+        pendingCompletionEventIdRef.current.delete(key)
+        cellStore.clearOptimisticForCell(entry.cellId)
+        revalidateCell(entry.cellId)
+      }
+    })
+  }, [activeFileId, cellStore, laneCellKey, revalidateCell])
+
   useEffect(() => {
     if (pendingTargetCommitHeadsRef.current.size === 0) return
     // cellSummaries reflect the ACTIVE lane, so only this lane's keys can be
@@ -1720,15 +1770,15 @@ export function ProjectWorkspace() {
     targetTextDirection: activeFile?.targetTextDirection,
   })
   const activeFileDirectionSummary = useMemo(() => {
-    function* sourceValues() {
-      for (const summary of cellSummaries) yield summary.originalHtml ?? summary.original
+    function* sourceDirections() {
+      for (const summary of cellSummaries) yield summaryDirections(summary).source
     }
-    function* targetValues() {
-      for (const summary of cellSummaries) yield summary.translatedHtml ?? summary.translated
+    function* targetDirections() {
+      for (const summary of cellSummaries) yield summaryDirections(summary).target
     }
     return {
-      source: summarizeTextDirections(sourceValues()),
-      target: summarizeTextDirections(targetValues()),
+      source: summarizeDetectedDirections(sourceDirections()),
+      target: summarizeDetectedDirections(targetDirections()),
     }
   }, [cellSummaries])
   const [cellLabelsEnabled, setCellLabelsEnabled] = useCellLabelsPreference(projectId!)
@@ -3905,6 +3955,7 @@ export function ProjectWorkspace() {
           topK: limit,
           validatedOnly: true,
           excludeCellId: excludeId,
+          targetLang: activeLane,
         })
         return res.results.map((r) => ({
           cellId: r.cellId,
@@ -3920,7 +3971,7 @@ export function ProjectWorkspace() {
         return []
       }
     },
-    [project?.id, activeFileId, getTokenForFile],
+    [project?.id, activeFileId, getTokenForFile, activeLane],
   )
 
   const branchingSearchPassages = useCallback(
@@ -3942,6 +3993,7 @@ export function ProjectWorkspace() {
           topK: hits,
           radius,
           validatedOnly: true,
+          targetLang: activeLane,
         })
         // Map server `Passage` → existing `PassageHit` shape. Drops
         // `hitCellId` (derivable from cells.find(c => c.hit)) and
@@ -3960,7 +4012,7 @@ export function ProjectWorkspace() {
         return []
       }
     },
-    [project?.id, activeFileId, getTokenForFile],
+    [project?.id, activeFileId, getTokenForFile, activeLane],
   )
 
   const commitCompletedCell = useCallback(async (cell: CellData, text: string, author: string, provenance: AiDraftProvenance) => {
@@ -4183,6 +4235,7 @@ export function ProjectWorkspace() {
     // lane-aware derivation as the editor project + file metadata.
     project?.completionSettings, project?.sourceLanguage || "", activeLaneTargetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell, rules, getActiveCells, project?.translationBrief?.l1Summary ?? undefined,
     project?.draftContext ?? DEFAULT_DRAFT_CONTEXT,
+    activeLane,
   )
 
   // AQU-620: adapter so the editor's per-cell AI action can request a plain
@@ -4732,10 +4785,12 @@ export function ProjectWorkspace() {
 
   // AD-14: health derives from decay (endorsement_count). The legacy
   // four-sub-score "composite-health" path is retired.
+  // Kill switch: see lib/health/kill-switch.ts — health/rule work is
+  // suspected of driving client memory spikes and is off until cleared.
   const health = useHealth(
     healthFileCells,
     rules,
-    { decaySettings: project?.decaySettings, requiredValidations },
+    { decaySettings: project?.decaySettings, requiredValidations, enabled: HEALTH_CALCULATIONS_ENABLED },
   )
   // AQU-599: cellOpenCommentCount from useHealth is intentionally not consumed
   // here — see liveCellOpenCommentCount above (health's copy is empty in Phase
@@ -4797,7 +4852,8 @@ export function ProjectWorkspace() {
       return true
     }
   }, [])
-  const confidenceOverlayActive = confidenceOverlayEnabled
+  const confidenceOverlayActive = HEALTH_CALCULATIONS_ENABLED
+    && confidenceOverlayEnabled
     && Boolean(project?.id && activeFileId && frontierSession?.jwt)
   const confidence = useCellConfidence({
     projectId: project?.id,
@@ -4815,34 +4871,33 @@ export function ProjectWorkspace() {
     return confidence.healthMap
   }, [confidenceOverlayActive, healthMap, confidence.healthMap])
 
+  // AQU-1104: built incrementally. Every commit bumps the store version, and
+  // rebuilding this map from all summaries (a fresh Map plus an object per
+  // cell) was one of the per-commit whole-file walks behind the "Draft all"
+  // lag on a 31k-cell file. The builder keeps identities for unchanged cells
+  // and chapters, so the sidebar's chapter grid also skips re-rendering.
+  const chapterHealthBuilder = useMemo(() => chapterHealthBuilderFor(cellStore), [cellStore])
   const activeChapterHealth = useMemo<BookHealthChapter[]>(() => {
-    if (!activeFileId) return []
+    if (!activeFileId) return EMPTY_CHAPTER_HEALTH
     return readAtVersion(cellStoreVersion, () => {
-      const summaries = new Map(cellSummaries.map((cell) => [cell.id, cell]))
-      return cellStore.getNavigationIndex().map((chapter) => ({
-        key: chapter.key,
-        label: chapter.label,
-        translated: chapter.translated,
-        validated: chapter.validated,
-        total: chapter.total,
-        cells: chapter.cellIds.flatMap((cellId) => {
-          const cell = summaries.get(cellId)
-          if (!cell) return []
-          const stage = cell.status === "validated"
-            ? "validated" as const
-            : cell.status === "empty" || !cell.translated.trim()
-              ? "untranslated" as const
-              : "automatic" as const
-          return [{
-            id: cellId,
-            stage,
-            health: stage === "validated" ? 100 : effectiveHealthMap.get(cellId),
-            hasIssue: (infractions.get(cellId)?.length ?? 0) > 0,
-          }]
-        }),
-      }))
+      // Summaries sit in store order, so the store's index is a direct lookup;
+      // the id check guards the (never observed) case of a skipped row, falling
+      // back to a map built once for this pass.
+      let summaryById: Map<string, CellSummary> | null = null
+      const getSummary = (cellId: string): CellSummary | undefined => {
+        const index = cellStore.findIndexByCellId(cellId)
+        const direct = index >= 0 ? cellSummaries[index] : undefined
+        if (direct && direct.id === cellId) return direct
+        summaryById ??= new Map(cellSummaries.map((cell) => [cell.id, cell]))
+        return summaryById.get(cellId)
+      }
+      return chapterHealthBuilder.build(cellStore.getNavigationIndex(), {
+        getSummary,
+        health: (cellId) => effectiveHealthMap.get(cellId),
+        hasIssue: (cellId) => (infractions.get(cellId)?.length ?? 0) > 0,
+      })
     })
-  }, [activeFileId, cellStore, cellStoreVersion, cellSummaries, effectiveHealthMap, infractions])
+  }, [activeFileId, cellStore, cellStoreVersion, cellSummaries, chapterHealthBuilder, effectiveHealthMap, infractions])
 
   // AD-14: the four-sub-score breakdown popover is retired. The project ring
   // shows decay-derived health; the "biggest drags" popover redesign (cells
@@ -5147,20 +5202,6 @@ export function ProjectWorkspace() {
     return () => document.removeEventListener("keydown", handler)
   }, [activeFileId, hasUnfinished, handleJumpNextUnfinished])
 
-  // Legacy sync status shim. AD-1 live coordination uses the project
-  // WebSocket below; this hook only feeds the existing status indicator.
-  const { status: fileSyncStatus } = useFileSync({
-    doc,
-    projectId: project?.id ?? null,
-    fileId: activeFileId || null,
-    username: currentUsername,
-    enabled: Boolean(project && activeFileId),
-    session: frontierSession,
-    projectName: project?.name ?? null,
-    gitlabProjectId:
-      project?.origin?.kind === "git" ? project.origin.gitlabProjectId : null,
-  })
-
   // Phase 2c-gamma: cross-collaborator settings sync was piggybacked on the
   // active file's Y.Doc meta; that broadcast channel is gone. Settings still
   // persist locally and via the project record fetch.
@@ -5170,8 +5211,10 @@ export function ProjectWorkspace() {
   // The outbox flusher (above) ships writes; this connection drives reads.
   const [cellLockHolders, setCellLockHolders] = useState<Map<string, string>>(() => new Map())
   // RACE-5: ref that mirrors cellLockHolders, updated synchronously on each WS
-  // frame so handleEditorCommit (checkLockHolder) always reads the latest state
-  // rather than a stale React closure captured at the last render.
+  // frame so checkLockHolder (agent commit path, translate-as-read) always
+  // reads the latest state rather than a stale React closure captured at the
+  // last render. Human commits no longer consult it (AQU-1154): the lock is
+  // advisory and the server head check is the arbiter.
   const cellLockHoldersRef = useRef<Map<string, string>>(new Map())
   const [cellsWithRemoteChange, setCellsWithRemoteChange] = useState<Set<string>>(() => new Set())
   const focusedCellIdRef = useRef<string | null>(null)
@@ -5183,7 +5226,10 @@ export function ProjectWorkspace() {
     const sourceLanguage = activeFile?.sourceLanguage || project?.sourceLanguage
     const targetLanguage = activeLaneTargetLanguage || activeFile?.targetLanguage || project?.targetLanguage
 
-    if (!scopeAvailable) {
+    // AQU-1104: the workbench is mounted only on the agent surface, yet this
+    // memo re-ran on every cell commit and walked every cell view in the file.
+    // Off the agent surface nothing reads it, so return the empty shape.
+    if (!scopeAvailable || !agentOpen) {
       return {
         cells: [],
         fileName: activeFile?.name,
@@ -5197,40 +5243,33 @@ export function ProjectWorkspace() {
     }
 
     // Keep rendering bounded around the focused cell for very large files.
-    const allCells = readAtVersion(cellStoreVersion, getActiveCells).filter(
-      (cell) => cell.fileId === activeFileId,
-    )
-    const healthRibbonByCellId = buildHealthRibbon(allCells.map((cell) => {
-      const stage = cell.status === "validated"
-        ? "validated" as const
-        : cell.status === "empty" || !cell.translated.trim()
-          ? "untranslated" as const
-          : "automatic" as const
-      const preTranslation = stage === "untranslated"
-        ? preTranslationEvidence(effectiveSourceText(cell), examples.get(cell.id) ?? [])
-        : null
-      return {
-        id: cell.id,
-        scope: `${cell.fileId}:${cell.group || cell.section || "document"}`,
-        stage,
-        rawScore: stage === "validated"
-          ? 100
-          : stage === "automatic"
-            ? effectiveHealthMap.get(cell.id)
-            : preTranslation?.score,
-        evidenceWeight: preTranslation?.evidenceWeight ?? 1,
-      }
-    }))
+    // The ribbon kernel reaches only a few dozen cells, so reading a padded
+    // window around the focus reproduces the full-file ribbon for every cell
+    // shown without deriving every view in the file (see workbench-window.ts).
+    const { order, window, readCells } = readAtVersion(cellStoreVersion, () => {
+      const order = cellStore.getCellIds()
+      const focusIndex = focusedCellId ? Math.max(0, cellStore.findIndexByCellId(focusedCellId)) : 0
+      const window = resolveWorkbenchWindow(order.length, focusIndex)
+      const readCells = cellStore
+        .getCellsByIds(order.slice(window.readStart, window.readEnd))
+        .filter((cell) => cell.fileId === activeFileId)
+      return { order, window, readCells }
+    })
+    const ribbonReaders: RibbonEvidenceReaders<CellData> = {
+      sourceText: effectiveSourceText,
+      health: (cellId: string) => effectiveHealthMap.get(cellId),
+      examples: (cellId: string) => examples.get(cellId) ?? EMPTY_SCORED_PAIRS,
+    }
+    const healthRibbonByCellId = HEALTH_CALCULATIONS_ENABLED
+      ? buildHealthRibbon(readCells.map((cell) => ribbonInputFor(cell.id, cell, ribbonReaders)))
+      : new Map<string, HealthRibbonPoint>()
     const ruleById = new Map(rules.map((rule) => [rule.id, rule]))
     const validationRequirement = project ? readValidationCount(project) : 1
     const decayConfig = resolveDecayConfig(project?.decaySettings, validationRequirement)
     const roleCanValidate = canPerform("cell.validate", project?.syncRole?.level ?? null)
-    const focusIndex = focusedCellId
-      ? Math.max(0, allCells.findIndex((cell) => cell.id === focusedCellId))
-      : 0
-    const windowSize = 80
-    const start = Math.max(0, Math.min(focusIndex - Math.floor(windowSize / 2), allCells.length - windowSize))
-    const cells = allCells.slice(start, start + windowSize).map((cell, index) => {
+    const shownIds = new Set(order.slice(window.start, window.end))
+    const start = window.start
+    const cells = readCells.filter((cell) => shownIds.has(cell.id)).map((cell, index) => {
       const healthRibbonPoint = healthRibbonByCellId.get(cell.id)
       const activeInfractions = partitionInfractions(infractions.get(cell.id) ?? [], cell.waivers).active
       const hasMajorHealthIssue = activeInfractions.some(
@@ -5276,7 +5315,7 @@ export function ProjectWorkspace() {
       sourceLanguage,
       targetLanguage,
       focusedCellId,
-      totalCells: allCells.length,
+      totalCells: order.length,
       scopeAvailable: true,
       loading: cellsLoading,
     }
@@ -5285,6 +5324,8 @@ export function ProjectWorkspace() {
     activeFile,
     activeLane,
     activeLaneTargetLanguage,
+    agentOpen,
+    cellStore,
     cellStoreVersion,
     cellsLoading,
     effectiveHealthMap,
@@ -5292,7 +5333,6 @@ export function ProjectWorkspace() {
     fileMeta.targetDirectionMode,
     fileMeta.targetTextDirection,
     focusedCellId,
-    getActiveCells,
     infractions,
     myScopes,
     project,
@@ -5343,6 +5383,22 @@ export function ProjectWorkspace() {
   // reconcilerRef is still the write target (set inside the async connect effect)
   // and is used by the claim/release callbacks declared below.
   const [liveReconciler, setLiveReconciler] = useState<WsReconciler | null>(null)
+  // AQU-1155: the status pill is a pure function of real signals — browser
+  // online state, the project WS socket, and the outbox queue/failure streak.
+  const { status: fileSyncStatus } = useFileSync({
+    doc,
+    projectId: project?.id ?? null,
+    fileId: activeFileId || null,
+    username: currentUsername,
+    enabled: Boolean(project && activeFileId),
+    session: frontierSession,
+    projectName: project?.name ?? null,
+    gitlabProjectId:
+      project?.origin?.kind === "git" ? project.origin.gitlabProjectId : null,
+    reconciler: liveReconciler,
+    pendingCount: Math.max(0, outboxPending - outboxFailed),
+    failureStreak: outboxFailures,
+  })
   // Read the current file list inside the WS connect path without making it a
   // reconnect trigger — otherwise every file-list change (e.g. each batch of a
   // large import landing) tears the socket down and recreates it.
@@ -5369,6 +5425,9 @@ export function ProjectWorkspace() {
   }) => {
     reconcilerRef.current?.send({ t: "presence.update", ...patch })
   }, [])
+  // AQU-1154: lets the WS onOpen handler (declared before the focus-lock hook
+  // below) re-claim the cell the user is still editing after a reconnect.
+  const focusLockClaimRef = useRef<((cellId: string) => void) | null>(null)
 
   useEffect(() => {
     if (!project?.id || !frontierSession?.jwt) return
@@ -5438,6 +5497,12 @@ export function ProjectWorkspace() {
               currentFileId: activeFileIdRef.current,
               selection: null,
             })
+            // AQU-1154: the DO released our lease + focusedCell when the old
+            // socket dropped. If the user is still in a cell, claim it again
+            // (focus.claim is the only frame that grants focusedCell) so peers
+            // keep seeing "X is editing" instead of taking the cell over.
+            const editingCellId = focusedCellIdRef.current
+            if (editingCellId) focusLockClaimRef.current?.(editingCellId)
             // Skips the first open (the initial read is already in flight);
             // every reconnect after that closes the missed-broadcast gap.
             handleReconnectResync()
@@ -5530,13 +5595,29 @@ export function ProjectWorkspace() {
               // visible until the handler's read lands. This is the dominant
               // edit-cycle cost: every commit + validate + auto-BT echo was
               // firing a redundant targeted GET (~5 of 8 per edit cycle).
-              if (!ownWrite) {
+              //
+              // AQU-1154 follow-up: "own write" means the same USERNAME, not
+              // this tab. A second tab of the same user (or a tab whose post-
+              // flush refetch failed) got no refetch at all and kept the old
+              // head, so its next commit chained on a stale parent and was
+              // refused as bumped. Refetch own echoes too unless this tab's
+              // store already holds the echoed event as the cell's head — the
+              // committing tab does after its post-flush read, so the common
+              // case still costs no extra GET.
+              const alreadyApplied = ownWrite && (() => {
+                const view = cellStore.getCellView(msg.cell!)
+                if (!view) return false
+                if (msg.kind?.startsWith("target.cell.")) return view.targetEventId === msg.id
+                if (msg.kind?.startsWith("source.cell.")) return view.sourceEventId === msg.id
+                return true
+              })()
+              if (!ownWrite || !alreadyApplied) {
                 revalidateCell(msg.cell)
                 // activeValidators (the validation pill) comes from the
                 // audit-stats projection, not /files/:fileId/cells — a remote
                 // validate/unvalidate must poke that read too, or the pill
                 // stays stale until the next full stats poll.
-                if (isValidationEvent(msg.kind)) {
+                if (!ownWrite && isValidationEvent(msg.kind)) {
                   revalidateCellStats(msg.cell)
                 }
               }
@@ -5747,6 +5828,7 @@ export function ProjectWorkspace() {
   })
   const focusLockFeedFrameRef = useRef(focusLockFeedFrame)
   useEffect(() => { focusLockFeedFrameRef.current = focusLockFeedFrame }, [focusLockFeedFrame])
+  useEffect(() => { focusLockClaimRef.current = focusLockState.claim }, [focusLockState.claim])
 
   const writeLocTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const handleClaimCell = useCallback((cellId: string) => {
@@ -10510,7 +10592,6 @@ export function ProjectWorkspace() {
             onReleaseCell={handleReleaseCell}
             onTargetPresenceSelection={handleTargetPresenceSelection}
             onAckRemoteChange={handleAckRemoteChange}
-            checkLockHolder={checkLockHolder}
             staleCellIds={staleCellIds}
             upstreamStaleCellIds={upstreamStaleCellIds}
             assignmentsByCellId={assignmentsByCellId}

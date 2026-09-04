@@ -1,7 +1,7 @@
 // Typed fetch wrapper for the AD-13 passages route.
 //
 //   GET /api/v1/projects/:projectId/branching-search/passages
-//     ?q=<text>[&topK=N][&radius=N][&validatedOnly=true][&excludeCellId=<uuid>]
+//     ?q=<text>[&topK=N][&radius=N][&validatedOnly=true][&excludeCellId=<uuid>][&targetLang=<lane>]
 //
 // Same retrieval as `branching-search-read.ts` (flat results); this one
 // expands each hit ±radius cells from the same file so the AI batch path
@@ -45,6 +45,8 @@ export interface BranchingSearchPassagesArgs {
   radius?: number
   validatedOnly?: boolean
   excludeCellId?: string
+  /** Lane tag (`activeLane`). Always sent, including `""` for the default lane. */
+  targetLang?: string
   signal?: AbortSignal
 }
 
@@ -57,6 +59,7 @@ export async function fetchBranchingSearchPassages(
   if (args.radius !== undefined) qs.set("radius", String(args.radius))
   if (args.validatedOnly) qs.set("validatedOnly", "true")
   if (args.excludeCellId) qs.set("excludeCellId", args.excludeCellId)
+  qs.set("targetLang", args.targetLang ?? "")
 
   const url =
     `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(args.projectId)}` +

@@ -1,11 +1,11 @@
 /**
  * Split-into-milestones view: the table can page one chapter/section at a
- * time instead of listing every cell in the file. The toggle lives next to
- * the existing prev/picker/next navigator; the arrows then turn the page.
+ * time instead of listing every cell in the file. The switch lives in
+ * ⋯ → Editor settings; the arrows then turn the page.
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { act, render, screen, fireEvent } from "@testing-library/react"
 import { QueryClientProvider, QueryClient } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 import { EditorTable } from "./EditorTable"
@@ -160,24 +160,19 @@ describe("EditorTable — split into milestones", () => {
     setMilestoneSplit(false)
   })
 
-  it("lists every cell until the toggle pages one chapter at a time", () => {
+  it("lists every cell until the settings preference pages one chapter at a time", () => {
     renderTable()
 
-    expect(screen.getByRole("button", { name: "Split into milestones" })).toHaveAttribute(
-      "aria-pressed",
-      "false",
-    )
+    expect(screen.queryByRole("button", { name: "Split into milestones" })).toBeNull()
     expect(cellRow("cell-ch1-a")).toBeTruthy()
     expect(cellRow("cell-ch1-b")).toBeTruthy()
     expect(cellRow("cell-ch2-a")).toBeTruthy()
     expect(cellRow("cell-ch2-b")).toBeTruthy()
 
-    fireEvent.click(screen.getByRole("button", { name: "Split into milestones" }))
+    act(() => {
+      setMilestoneSplit(true)
+    })
 
-    expect(screen.getByRole("button", { name: "Split into milestones" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    )
     expect(cellRow("cell-ch1-a")).toBeTruthy()
     expect(cellRow("cell-ch1-b")).toBeTruthy()
     expect(cellRow("cell-ch2-a")).toBeNull()
@@ -185,8 +180,8 @@ describe("EditorTable — split into milestones", () => {
   })
 
   it("turns the page with the next-chapter arrow while split is on", () => {
+    setMilestoneSplit(true)
     renderTable()
-    fireEvent.click(screen.getByRole("button", { name: "Split into milestones" }))
     fireEvent.click(screen.getByRole("button", { name: "Next chapter" }))
 
     expect(cellRow("cell-ch1-a")).toBeNull()
@@ -289,7 +284,9 @@ describe("EditorTable — split into milestones", () => {
       </QueryClientProvider>,
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Split into milestones" }))
+    act(() => {
+      setMilestoneSplit(true)
+    })
 
     expect(cellRow("cell-box-1")).toBeTruthy()
     expect(cellRow("cell-box-50")).toBeTruthy()
@@ -305,16 +302,14 @@ describe("EditorTable — split into milestones", () => {
     expect(screen.getByRole("button", { name: "Next section" })).toBeDisabled()
   })
 
-  it("restores the continuous file when the toggle is turned off", () => {
+  it("restores the continuous file when the preference is turned off", () => {
+    setMilestoneSplit(true)
     renderTable()
-    fireEvent.click(screen.getByRole("button", { name: "Split into milestones" }))
     fireEvent.click(screen.getByRole("button", { name: "Next chapter" }))
-    fireEvent.click(screen.getByRole("button", { name: "Split into milestones" }))
+    act(() => {
+      setMilestoneSplit(false)
+    })
 
-    expect(screen.getByRole("button", { name: "Split into milestones" })).toHaveAttribute(
-      "aria-pressed",
-      "false",
-    )
     expect(cellRow("cell-ch1-a")).toBeTruthy()
     expect(cellRow("cell-ch1-b")).toBeTruthy()
     expect(cellRow("cell-ch2-a")).toBeTruthy()

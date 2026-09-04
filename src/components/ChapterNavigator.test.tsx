@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import {
   MilestoneNavigator,
-  MilestoneSplitToggle,
   VOCABULARIES,
   type MilestoneNavigationItem,
 } from "./ChapterNavigator"
@@ -536,24 +535,5 @@ describe("MilestoneNavigator label keys (finding 3)", () => {
       target: { value: "zzz" },
     })
     expect(screen.getByText("No stories found.")).toBeInTheDocument()
-  })
-})
-
-describe("MilestoneSplitToggle", () => {
-  it("names the control and reports whether paging is on", () => {
-    const onPressedChange = vi.fn()
-    const { rerender } = render(
-      <MilestoneSplitToggle pressed={false} onPressedChange={onPressedChange} />,
-    )
-    const toggle = screen.getByRole("button", { name: "Split into milestones" })
-    expect(toggle).toHaveAttribute("aria-pressed", "false")
-    fireEvent.click(toggle)
-    expect(onPressedChange).toHaveBeenCalledWith(true)
-
-    rerender(<MilestoneSplitToggle pressed onPressedChange={onPressedChange} />)
-    expect(screen.getByRole("button", { name: "Split into milestones" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    )
   })
 })

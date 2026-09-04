@@ -2232,18 +2232,18 @@ export const editor = defineNamespace({
       },
       "editor.milestone.splitAria": {
         description:
-          "Screen-reader name of the icon-only toggle beside the prev / picker / " +
-          "next group. It switches the table between a continuous list of every " +
-          "cell and a paged view that shows only the current division. Icon-only, " +
-          "so this string is the only name it has. Pressed means the paged view " +
-          "is on.",
+          "Label of the switch in ⋯ → Editor settings. It switches the table " +
+          "between a continuous list of every cell and a paged view that shows " +
+          "only the current division. On means the paged view is active. A " +
+          "switch label, so it names the thing being toggled on.",
+        maxLength: 28,
         screenshot: "editor-table",
       },
       "editor.milestone.splitHint": {
         description:
-          "Tooltip on that same toggle. Says what the pressed state does, and that " +
-          "the arrows then turn the page. 'Division' stays generic because the " +
-          "unit differs by file type (chapter, slide, section…).",
+          "Tooltip explaining that same switch: what the on state does, and that " +
+          "the chapter/section arrows then turn the page. 'Division' stays " +
+          "generic because the unit differs by file type (chapter, slide, section…).",
         screenshot: "editor-table",
       },
       "editor.milestone.chapter.moveBetween": {

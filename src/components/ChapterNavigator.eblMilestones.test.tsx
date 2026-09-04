@@ -12,7 +12,7 @@
  * navigator, mirroring how EditorTable builds its items.
  */
 
-import React, { useState } from "react"
+import { useState } from "react"
 import { describe, it, expect, beforeAll, afterEach } from "vitest"
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { MilestoneNavigator, type MilestoneNavigationItem } from "./ChapterNavigator"
@@ -36,7 +36,7 @@ beforeAll(async () => {
   const { strings } = await extractEblStrings(await makeEblIdml(), parseIdml)
   const navigation = deriveMilestoneNavigation(strings.map((string, index) => ({
     id: `cell-${index}`,
-    original: string.value,
+    original: string.original,
     metadata: { aquillaImport: { milestone: string.milestone } },
   })))
 

@@ -10,11 +10,9 @@ import {
 } from "react"
 import { observeElementRect, useVirtualizer } from "@tanstack/react-virtual"
 import { Combobox as ComboboxPrimitive } from "@base-ui/react/combobox"
-import { ChevronLeft, ChevronRight, CheckIcon, CornerDownRight, SquareSplitVertical } from "lucide-react"
+import { ChevronLeft, ChevronRight, CheckIcon, CornerDownRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
-import { Toggle } from "@/components/ui/toggle"
-import { AppTooltip } from "@/components/ui/tooltip"
 import {
   Combobox,
   ComboboxContent,
@@ -413,31 +411,6 @@ function VirtualizedMilestoneList({
 
 /** Keep collapsed inner borders at full strength; fade only the chevron, harder than Button's 50%. */
 const STEP_BUTTON_CLASS = "disabled:opacity-100 disabled:[&>svg]:opacity-30"
-
-export function MilestoneSplitToggle({
-  pressed,
-  onPressedChange,
-}: {
-  pressed: boolean
-  onPressedChange: (next: boolean) => void
-}) {
-  const t = useT()
-  const label = t("editor.milestone.splitAria")
-  return (
-    <AppTooltip content={t("editor.milestone.splitHint")}>
-      <Toggle
-        variant="outline"
-        pressed={pressed}
-        onPressedChange={(next) => onPressedChange(next)}
-        aria-label={label}
-        data-testid="milestone-split-toggle"
-        className="size-8 shrink-0 px-0"
-      >
-        <SquareSplitVertical />
-      </Toggle>
-    </AppTooltip>
-  )
-}
 
 export function MilestoneNavigator({
   items,

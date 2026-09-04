@@ -127,9 +127,9 @@ import {
 } from "./cell/EditorCellContent"
 import { TargetDraftActions, TargetReferenceActions } from "./cell/TargetCellActions"
 import { TargetValidationControl } from "./cell/TargetValidationControl"
-import { MilestoneNavigator, MilestoneSplitToggle, type MilestoneNavigationItem } from "./ChapterNavigator"
+import { MilestoneNavigator, type MilestoneNavigationItem } from "./ChapterNavigator"
 import { cellIdsForMilestonePage } from "@/lib/milestone-navigation"
-import { getMilestoneSplit, setMilestoneSplit, useMilestoneSplit } from "@/lib/store/milestone-split-pref"
+import { getMilestoneSplit, useMilestoneSplit } from "@/lib/store/milestone-split-pref"
 import { EDITOR_SURFACE_TOOLBAR_CLASS } from "./editor-surface-toolbar"
 import { CellVoicePanel } from "./cell/CellVoicePanel"
 // CellAudioRecordButton: getUnsupportedReason used by the rail mic denied-help
@@ -2047,31 +2047,40 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     programmaticListScroll(index, { viewPosition: 0, animated: true, follow: "release" })
   }, [audioFileId, idmlMilestoneNavigation, milestoneNavigation, programmaticListScroll, splitByMilestone])
 
-  const handleSplitByMilestoneChange = useCallback((next: boolean) => {
-    const visibleId = displayCellIdsRef.current[chapterVisibleIndex ?? firstVisibleIndex]
-    if (visibleId) pendingJumpCellIdRef.current = visibleId
-    if (next && visibleId) {
-      const key = milestoneKeyByCellId.get(visibleId) ?? milestoneNavigation[0]?.key
-      const subsectionKey = idmlMilestoneNavigation
-        ? subsectionKeyByCellId.get(visibleId)
-        : undefined
-      if (key) {
-        setChapterNavigationSelection({
-          fileId: audioFileId,
-          label: key,
-          ...(subsectionKey ? { subsectionKey } : {}),
-        })
-      }
+  // Settings can flip the split pref while this table is still mounted
+  // (the settings dialog sits over the editor). Pin the current visible
+  // cell's division before paint so paging does not jump to the first
+  // milestone.
+  useLayoutEffect(() => {
+    if (!splitByMilestone || !audioFileId) return
+    const selected = chapterNavigationSelection?.fileId === audioFileId
+      ? chapterNavigationSelection
+      : null
+    if (selected?.label && milestoneNavigation.some((entry) => entry.key === selected.label)) {
+      return
     }
-    setMilestoneSplit(next)
+    const visibleId = fileCellIds[chapterVisibleIndex ?? firstVisibleIndex]
+    const key = (visibleId && milestoneKeyByCellId.get(visibleId)) ?? milestoneNavigation[0]?.key
+    if (!key) return
+    const subsectionKey = idmlMilestoneNavigation && visibleId
+      ? subsectionKeyByCellId.get(visibleId)
+      : undefined
+    if (visibleId) pendingJumpCellIdRef.current = visibleId
+    setChapterNavigationSelection({
+      fileId: audioFileId,
+      label: key,
+      ...(subsectionKey ? { subsectionKey } : {}),
+    })
   }, [
     audioFileId,
+    chapterNavigationSelection,
     chapterVisibleIndex,
+    fileCellIds,
     firstVisibleIndex,
     idmlMilestoneNavigation,
     milestoneKeyByCellId,
     milestoneNavigation,
-    subsectionKeyByCellId,
+    splitByMilestone,
   ])
 
   useLayoutEffect(() => {
@@ -2514,12 +2523,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   const showMilestoneNav = !castGutter && milestoneNavigationItems.length > 0 && Boolean(activeChapterLabel)
   const showStripNav = castGutter && milestoneNavigationItems.length > 0 && Boolean(activeChapterLabel)
-  const splitToggle = milestoneNavigationItems.length > 1 ? (
-    <MilestoneSplitToggle
-      pressed={splitByMilestone}
-      onPressedChange={handleSplitByMilestoneChange}
-    />
-  ) : null
   // The strip registers its slot by name — it is itself portaled into the
   // media band (one commit after this table), so the old one-shot
   // querySelector in a mount effect would run too early and never retry.
@@ -2552,7 +2555,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             </div>
           </div>
         ) : null}
-        {showMilestoneNav ? splitToggle : null}
         {chapterNavTrailing ? (
           <div
             className={cn(
@@ -2581,7 +2583,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 onSelect={handleChapterSelect}
                 pageByMilestone={splitByMilestone}
               />
-              {splitToggle}
             </div>,
             stripNavSlot,
           )

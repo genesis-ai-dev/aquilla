@@ -3493,7 +3493,9 @@ export function TimelineEditor({
       <div
         className={`flex shrink-0 items-center gap-2 border-b border-border bg-muted/30 px-3 py-1.5 ${MEDIA_HEADER_ROW}`}
       >
-        <span className="text-xs font-medium text-muted-foreground">{t("editor.timeline.title")}</span>
+        <span className="text-sm font-semibold tracking-wide text-muted-foreground">
+            {t("editor.timeline.title")}
+          </span>
         {/* AQU-1119: beside the heading, like the gutter's own toggle sits in
             the gutter — a control that folds a region belongs on that region's
             name, not in the corner. Withheld entirely when the workspace

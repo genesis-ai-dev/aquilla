@@ -363,7 +363,7 @@ export function MediaTextHeader({
           KIND of the current chip (a subtitle chip reads "Subtitle"), and falls
           back to the section's own name when nothing is selected so the header
           doesn't blink in and out. */}
-      <span className="shrink-0 text-xs font-medium text-muted-foreground">
+      <span className="shrink-0 text-sm font-semibold tracking-wide text-muted-foreground">
         {headingLabel ?? (isDialogue ? t("editor.timeline.chipHeadingDialogue") : t("editor.timeline.chipHeadingSubtitle"))}
       </span>
       {/* AQU-1119: beside the heading, pointing the way the section folds —

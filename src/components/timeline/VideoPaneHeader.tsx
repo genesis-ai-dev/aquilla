@@ -49,7 +49,9 @@ export function VideoPaneHeader({ src, onCollapse }: VideoPaneHeaderProps) {
         MEDIA_HEADER_ROW,
       )}
     >
-      <span className="text-xs font-medium text-muted-foreground">{t("editor.timeline.videoPaneTitle")}</span>
+      <span className="text-sm font-semibold tracking-wide text-muted-foreground">
+        {t("editor.timeline.videoPaneTitle")}
+      </span>
       {/* Beside the heading, pointing the way the section folds — the gutter's
           own idiom. Icon-only and no taller than the name pill, per the note
           at the top of this file: a browser pass and a unit test both read

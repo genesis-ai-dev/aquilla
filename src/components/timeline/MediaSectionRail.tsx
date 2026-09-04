@@ -134,7 +134,7 @@ export function MediaSectionRail({
       </>
     ) : (
       <>
-        {label && <span className="text-xs font-medium">{label}</span>}
+        {label && <span className="text-sm font-semibold tracking-wide">{label}</span>}
         <Open className="h-3.5 w-3.5 shrink-0" />
       </>
     )

@@ -37,6 +37,12 @@ export interface EmitEventsSummaryEntry {
   kind: string
   count: number
   testimony: boolean
+  /** Plain-language effect line for the approval page (AQU-1179) — what the
+   *  change does to the project, in a sentence a non-developer can consent to.
+   *  Computed server-side (emitKindEffectLabel) so every reviewing surface says
+   *  the same thing; absent on changesets staged before AQU-1179, where the UI
+   *  falls back to `kind × count`. */
+  label?: string
 }
 
 /** Server-computed effect summary — facts come from the plan, not the agent.
@@ -122,7 +128,7 @@ export interface PlannedEventIds {
    *  id plus any payload ids minted at prepare (comment.create's commentId /
    *  assignment.create's assignmentId when the caller omitted them), so a
    *  crash-retry re-posts IDENTICAL ids and payloads. */
-  emitEvents?: { eventId: string; commentId?: string; assignmentId?: string }[]
+  emitEvents?: { eventId: string; commentId?: string; assignmentId?: string; conceptId?: string }[]
   /** LinkMedia: one entry per attach command — the target (fileId, cellId), the
    *  audio artifact id, and the minted cell.audio.attach + cell.audio.select
    *  event ids. A crash-and-retry re-posts these IDENTICAL ids, so the /events

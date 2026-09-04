@@ -216,8 +216,14 @@ function ApprovalSummaryView({
   onReject: () => void
 }) {
   const { locale, t } = useI18n()
-  const { warnings, settingsChanges, ...facts } = data.summary
+  const { warnings, settingsChanges, events, ...facts } = data.summary
   const factEntries = Object.entries(facts).filter(([, v]) => typeof v === "number" || typeof v === "string")
+  // AQU-1179: EmitEvents changesets carry their effect as a per-kind array,
+  // which the scalar filter above drops — so before this they rendered as
+  // "no changes summarized" and a reviewer approved a blank plan. Each entry
+  // arrives with a server-computed plain-language `label`; older changesets
+  // (staged before the label existed) fall back to `kind × count`.
+  const eventEntries = Array.isArray(events) ? events : []
   const settingsEntries =
     settingsChanges && typeof settingsChanges === "object"
       ? Object.entries(settingsChanges).filter(([, v]) => typeof v === "string")
@@ -240,10 +246,17 @@ function ApprovalSummaryView({
 
       <div className="rounded-md border bg-muted/30 p-3 space-y-1.5">
         <p className="text-sm font-medium">{t("agent.changeset.whatWillBeApplied")}</p>
-        {factEntries.length === 0 && settingsEntries.length === 0 ? (
+        {factEntries.length === 0 && settingsEntries.length === 0 && eventEntries.length === 0 ? (
           <p className="text-xs text-muted-foreground">{t("agent.changeset.noChangesSummarized")}</p>
         ) : (
           <ul className="space-y-0.5 text-xs text-muted-foreground">
+            {eventEntries.map((entry) => (
+              <li key={entry.kind}>
+                <span className="font-medium text-foreground">
+                  {entry.label ?? `${entry.kind} × ${entry.count}`}
+                </span>
+              </li>
+            ))}
             {factEntries.map(([key, value]) => (
               <li key={key}>
                 {humanizeKey(key)}: <span className="font-medium text-foreground">{String(value)}</span>

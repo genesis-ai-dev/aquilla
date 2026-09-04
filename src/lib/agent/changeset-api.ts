@@ -65,6 +65,9 @@ export interface ChangesetSummaryEvent {
   kind: string
   count: number
   testimony?: boolean
+  /** Server-computed plain-language effect line (AQU-1179). Absent on
+   *  changesets staged before it — render `kind × count` then. */
+  label?: string
 }
 
 export interface ChangesetApprovalSummary {

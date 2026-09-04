@@ -22,6 +22,7 @@ import { handleFileTimingSet } from './handlers/file-timing-set'
 import { handleFileTrackSet } from './handlers/file-track-set'
 import { handleFileDelete, handleFileRestore } from './handlers/file-delete-restore'
 import { handleCommentEvent, type CommentEventKind } from './handlers/comment-events'
+import { handleTermEvent, type TermEventKind } from './handlers/term-events'
 import { handleAssignmentEvent, type AssignmentEventKind } from './handlers/assignment-events'
 import type { DispatchOutcome } from './handlers/types'
 
@@ -178,6 +179,21 @@ export function dispatchEvent(
         serverTs,
         opts.serverSeq,
       )
+
+    case 'term.create':
+    case 'term.update':
+    case 'term.delete':
+    case 'term.approve':
+    case 'term.reject':
+      return {
+        ok: true,
+        result: handleTermEvent(
+          db,
+          authed as AuthorizedEvent<TermEventKind>,
+          serverTs,
+          opts.serverSeq,
+        ),
+      }
 
     case 'comment.create':
     case 'comment.edit':

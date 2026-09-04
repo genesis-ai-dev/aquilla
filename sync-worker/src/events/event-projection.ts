@@ -306,7 +306,7 @@ export function buildBulkSourceCellCreateStmt(
 }
 
 /** Caller hint: which projection tables this event will touch. */
-export type ProjectionTouches = 'cells' | 'cell_validators' | 'cell_waivers' | 'files' | 'cell_audio' | 'comments' | 'cell_backtranslations' | 'cell_links'
+export type ProjectionTouches = 'cells' | 'cell_validators' | 'cell_waivers' | 'files' | 'cell_audio' | 'comments' | 'cell_backtranslations' | 'cell_links' | 'concepts'
 
 /**
  * Apply one event to the projection (without the AD-2 sibling guard — the
@@ -1589,6 +1589,131 @@ case 'cell.audio.attach': {
           .bind(event.fileId, event.projectId),
       )
       return ['files']
+    }
+
+    // ── Terminology concepts (AQU-1006 follow-up) ───────────────────────
+    //
+    // Every case here writes ONE concept, named by `conceptId` in the payload.
+    // That is the whole reason these events exist: the settings blob they
+    // replace could only express "here is the entire termbase", so a writer
+    // working from a stale array silently deleted everyone else's entries.
+    // No statement below may ever widen to `WHERE project_id = ?` alone.
+    case 'term.create': {
+      const p = event.payload as EventPayloads['term.create']
+      stmts.push(
+        db
+          .prepare(
+            // ON CONFLICT DO NOTHING, matching comment.create: the concept id
+            // is client-minted, so a retried outbox flush or a rebuild replay
+            // is an idempotent no-op rather than a duplicate concept.
+            `INSERT INTO concepts (
+              concept_id, project_id, source_term, renderings, notes,
+              status, case_sensitive, created_by, created_at, updated_at, deleted_at
+            ) VALUES (?, ?, ?, ?::text::jsonb, ?, ?, ?, ?, ?, ?, NULL)
+            ON CONFLICT(concept_id) DO NOTHING`,
+          )
+          .bind(
+            p.conceptId,
+            event.projectId,
+            p.sourceTerm,
+            JSON.stringify(p.renderings ?? []),
+            p.notes ?? null,
+            p.status,
+            p.caseSensitive ? 1 : 0,
+            event.author,
+            event.serverTs,
+            event.serverTs,
+          ),
+      )
+      return ['concepts']
+    }
+
+    case 'term.update': {
+      const p = event.payload as EventPayloads['term.update']
+      // COALESCE-per-column, not a whole-row UPDATE. An absent payload key
+      // leaves that column alone, so two people editing different fields of
+      // the same concept both survive — the per-field analogue of why this
+      // table exists at all. `renderings` is the deliberate exception: a
+      // rendering list has no per-item identity to merge on, so it replaces
+      // wholesale when present and is left untouched when absent.
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE concepts SET
+               source_term    = COALESCE(?, source_term),
+               renderings     = COALESCE(?::text::jsonb, renderings),
+               notes          = COALESCE(?, notes),
+               case_sensitive = COALESCE(?, case_sensitive),
+               updated_at     = ?
+             WHERE concept_id = ? AND project_id = ? AND deleted_at IS NULL`,
+          )
+          .bind(
+            p.sourceTerm ?? null,
+            p.renderings === undefined ? null : JSON.stringify(p.renderings),
+            p.notes ?? null,
+            p.caseSensitive === undefined ? null : p.caseSensitive ? 1 : 0,
+            event.serverTs,
+            p.conceptId,
+            event.projectId,
+          ),
+      )
+      return ['concepts']
+    }
+
+    case 'term.delete': {
+      const p = event.payload as EventPayloads['term.delete']
+      // Soft-delete. The concept stays for the audit trail; the read route and
+      // the partial index both filter on deleted_at IS NULL.
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE concepts SET deleted_at = ?, updated_at = ?
+             WHERE concept_id = ? AND project_id = ? AND deleted_at IS NULL`,
+          )
+          .bind(event.serverTs, event.serverTs, p.conceptId, event.projectId),
+      )
+      return ['concepts']
+    }
+
+    case 'term.approve': {
+      const p = event.payload as EventPayloads['term.approve']
+      // Only a draft is promotable. Guarding on status here (rather than
+      // setting 'active' unconditionally) means an approve that races a
+      // reject cannot resurrect a deprecated concept.
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE concepts SET status = 'active', updated_at = ?
+             WHERE concept_id = ? AND project_id = ?
+               AND status = 'draft' AND deleted_at IS NULL`,
+          )
+          .bind(event.serverTs, p.conceptId, event.projectId),
+      )
+      return ['concepts']
+    }
+
+    case 'term.reject': {
+      const p = event.payload as EventPayloads['term.reject']
+      if (p.mode === 'deprecate') {
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE concepts SET status = 'deprecated', updated_at = ?
+               WHERE concept_id = ? AND project_id = ? AND deleted_at IS NULL`,
+            )
+            .bind(event.serverTs, p.conceptId, event.projectId),
+        )
+      } else {
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE concepts SET deleted_at = ?, updated_at = ?
+               WHERE concept_id = ? AND project_id = ? AND deleted_at IS NULL`,
+            )
+            .bind(event.serverTs, event.serverTs, p.conceptId, event.projectId),
+        )
+      }
+      return ['concepts']
     }
 
     case 'comment.create': {

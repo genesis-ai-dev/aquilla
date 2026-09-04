@@ -1035,7 +1035,11 @@ describe('POST /events — event.applied carries serverSeq + the cell\'s project
     expect('serverSeq' in frames[0]).toBe(false)
     expect('rows' in frames[0]).toBe(false)
     const rowsSelects = prepareSpy.mock.calls.filter(([sql]) =>
-      String(sql).includes('WHERE (project_id, file_id, cell_id) IN'),
+      // Match ONLY the event.applied rows SELECT. Other batched pre-checks
+      // (prefetchCellHeads, AQU-1154) also read cells by the same tuple-IN
+      // shape; the trailing `, project_id, file_id` column pair is unique to
+      // the rows read.
+      String(sql).includes(', project_id, file_id FROM cells WHERE (project_id, file_id, cell_id) IN'),
     )
     expect(rowsSelects).toHaveLength(0)
   })
@@ -1052,7 +1056,11 @@ describe('POST /events — event.applied carries serverSeq + the cell\'s project
     await handleEventsWriteRequest(await makeRequest(events, token), env)
 
     const rowsSelects = prepareSpy.mock.calls.filter(([sql]) =>
-      String(sql).includes('WHERE (project_id, file_id, cell_id) IN'),
+      // Match ONLY the event.applied rows SELECT. Other batched pre-checks
+      // (prefetchCellHeads, AQU-1154) also read cells by the same tuple-IN
+      // shape; the trailing `, project_id, file_id` column pair is unique to
+      // the rows read.
+      String(sql).includes(', project_id, file_id FROM cells WHERE (project_id, file_id, cell_id) IN'),
     )
     expect(rowsSelects).toHaveLength(1)
     const frames = applied()

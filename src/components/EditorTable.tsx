@@ -58,6 +58,7 @@ import { StaleSourceIndicator } from "./StaleSourceIndicator"
 import { HealthRibbon } from "./HealthRibbon"
 import { type HealthRibbonPoint } from "@/lib/health/health-ribbon"
 import { ribbonInputCacheFor, type RibbonInputCache } from "@/lib/health/ribbon-inputs"
+import { HEALTH_CALCULATIONS_ENABLED } from "@/lib/health/kill-switch"
 import { TranslatedEditor, type FootnoteInsertionAnchor, type TranslatedEditorHandle } from "./TranslatedEditor"
 import { TimelineAddMedia } from "./TimelineAddMedia"
 import { CellTtsButton } from "./CellTtsButton"
@@ -545,6 +546,10 @@ function SynthStatusBadge({
 // steady reference when the cell has no entry — otherwise every render would
 // mint a fresh [] and break React.memo for every row.
 const EMPTY_EXAMPLES: ScoredPair[] = []
+// Kill switch (lib/health/kill-switch.ts): with health off, every row shares
+// this one point so row memoization holds and no ribbon is rendered.
+const EMPTY_RIBBON: Map<string, HealthRibbonPoint> = new Map()
+const HEALTH_DISABLED_POINT: HealthRibbonPoint = { id: "health-disabled", stage: "untranslated", evidenceWeight: 1 }
 const EMPTY_INFRACTIONS: RuleInfraction[] = []
 const EMPTY_HIGHLIGHTS: ReturnType<typeof buildHighlightsFromExamples> = []
 const EMPTY_EXTRACTED_FOOTNOTES: ExtractedFootnote[] = []
@@ -1194,6 +1199,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // comparable within one store, so a new store gets a fresh cache.
   const ribbonInputCache = useMemo<RibbonInputCache>(() => ribbonInputCacheFor(cellStore), [cellStore])
   const healthRibbonByCellId = useMemo(() =>
+    !HEALTH_CALCULATIONS_ENABLED ? EMPTY_RIBBON :
     readAtVersion(cellStoreVersion, () => ribbonInputCache.ribbon<CellData>(displayCellIds, {
       getCellVersion: cellStore.getCellVersion,
       getCell: (id) => cellStore.getCellView(id),
@@ -2202,7 +2208,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           completing={completing}
           errors={errors}
           previews={previews}
-          healthRibbonPoint={healthRibbonByCellId.get(cell.id)!}
+          healthRibbonPoint={healthRibbonByCellId.get(cell.id) ?? HEALTH_DISABLED_POINT}
           infractions={infractions}
           ruleMap={ruleMap}
           onCompleteSingle={onCompleteSingle}
@@ -6051,13 +6057,13 @@ function EditorRow({
           )}
           fontSize={targetFontSize}
           busy={isSynthBusy}
-          leading={(
+          leading={HEALTH_CALCULATIONS_ENABLED ? (
             <HealthRibbon
               point={healthRibbonPoint}
               hasMajorIssue={hasMajorInfraction}
               hasIssue={hasAnyIssue}
             />
-          )}
+          ) : undefined}
           header={(
             <>
             {showCellLabel && (

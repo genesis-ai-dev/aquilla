@@ -17,6 +17,11 @@ import { CellStore } from "@/hooks/useActiveCellStore"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { CellRow } from "@/lib/sync/cells-read-types"
 
+// The ribbon is behind the health kill switch (lib/health/kill-switch.ts,
+// off by default while client memory spikes are investigated). These tests
+// cover the ribbon itself, so force the switch on.
+vi.mock("@/lib/health/kill-switch", () => ({ HEALTH_CALCULATIONS_ENABLED: true }))
+
 vi.mock("@/hooks/useMicPermission", () => ({
   useMicPermission: () => ({ micDenied: true }),
 }))

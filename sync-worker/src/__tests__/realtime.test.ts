@@ -250,24 +250,29 @@ describe('parseRealtimeMessage — invalid inputs return null', () => {
 })
 
 // ---------------------------------------------------------------------------
-// PROJECTION_TABLES sanity — Set size must match union arity
+// PROJECTION_TABLES exhaustiveness — Set contents must match the union
 // ---------------------------------------------------------------------------
 
 describe('PROJECTION_TABLES', () => {
-  it('contains exactly 11 entries', () => {
-    // If you add a new ProjectionTable variant, update PROJECTION_TABLES too.
-    //
-    // NOTE, and it is the reason this test's old name was a lie: this asserts
-    // a HAND-COUNTED number, not the union's arity — nothing here reads the
-    // type. It therefore does NOT catch drift; it only catches a change to the
-    // Set. `cell_links` has been in the ProjectionTable union and absent from
-    // this Set since it shipped, and this test passed the whole time. That gap
-    // is PRE-EXISTING and deliberately not fixed here (adding it would change
-    // which frames the realtime path accepts, which is a separate decision) —
-    // see the note raised with AQU-1006's terminology work.
-    //
-    // 'concepts' (AQU-1006 follow-up) took the count from 10 to 11.
-    const expectedEntries = 11 // events | cells | files | cell_validators | cell_waivers | cell_audio | comments | cell_backtranslations | assignments | assignment_cells | concepts
-    expect(PROJECTION_TABLES.size).toBe(expectedEntries)
+  it('contains exactly the members of the ProjectionTable union', () => {
+    // Type-to-runtime bridge: the compiler rejects this object if a union
+    // member is missing (and rejects an extra key), so adding a variant to
+    // ProjectionTable without listing it here fails to compile; adding it
+    // here without updating PROJECTION_TABLES fails the assertion below.
+    const ALL: Record<ProjectionTable, true> = {
+      events: true,
+      cells: true,
+      files: true,
+      cell_validators: true,
+      cell_waivers: true,
+      cell_audio: true,
+      comments: true,
+      cell_backtranslations: true,
+      assignments: true,
+      assignment_cells: true,
+      cell_links: true,
+      concepts: true,
+    }
+    expect([...PROJECTION_TABLES].sort()).toEqual(Object.keys(ALL).sort())
   })
 })

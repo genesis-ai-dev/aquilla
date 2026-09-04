@@ -12,7 +12,9 @@ export type ProjectionTable = 'events' | 'cells' | 'files' | 'cell_validators' |
 
 // Single source of truth for valid ProjectionTable runtime values. The Set
 // and the type must stay in sync — adding a new table requires updating both.
-// The exhaustiveness sanity test in realtime.test.ts catches drift.
+// The exhaustiveness test in realtime.test.ts declares a
+// `Record<ProjectionTable, true>`, so the compiler forces every union member
+// to be listed there and the assertion compares that key set to this Set.
 const PROJECTION_TABLES: ReadonlySet<string> = new Set<ProjectionTable>([
   'events',
   'cells',
@@ -24,6 +26,7 @@ const PROJECTION_TABLES: ReadonlySet<string> = new Set<ProjectionTable>([
   'cell_backtranslations',
   'assignments',
   'assignment_cells',
+  'cell_links',
   'concepts',
 ])
 

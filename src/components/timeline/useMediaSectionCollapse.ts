@@ -28,19 +28,25 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { flushSync } from "react-dom"
 import { usePanelRef } from "react-resizable-panels"
 import {
+  canFullscreen,
   collapseSection,
   expandSection,
   isRailSized,
+  isSectionFullscreen,
   isSeparatorDisabled,
   MEDIA_RAIL_PX,
   mediaPanelConstraints,
   presentSections,
   railPreviewSections,
   readStoredCollapsedSections,
+  readStoredFullscreen,
   reconcilePresence,
+  sectionsToFoldForFullscreen,
   shouldPersistSize,
   writeStoredCollapsedSections,
+  writeStoredFullscreen,
   type CollapsedSections,
+  type FullscreenMemory,
   type MediaSectionId,
 } from "./media-section-layout"
 import { readStoredTimelinePaneHeight, writeStoredTimelinePaneHeight } from "./timeline-pane-layout"
@@ -80,6 +86,14 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
    * what to paint; never read by any decision. See `railPreviewSections`.
    */
   const [previewRail, setPreviewRail] = useState<CollapsedSections>(NO_PREVIEW)
+  /**
+   * The arrangement to come back to when a section stops being full screen,
+   * and whose press it belongs to. NOT what makes a section full screen —
+   * that is derived from the folded set — only the shortcut for undoing it.
+   */
+  const [fullscreen, setFullscreen] = useState<FullscreenMemory | null>(() =>
+    timelineStacked ? readStoredFullscreen(fileId, presentSections({ timelineStacked, hasVideo })) : null,
+  )
   const frozenRef = useRef<Partial<Record<MediaSectionId, FrozenBox>>>({})
   const contentRefs = useRef<Partial<Record<MediaSectionId, HTMLElement | null>>>({})
 
@@ -100,20 +114,28 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
   // the only section, collapsed, and the workspace empty.
   const effective = reconcilePresence(collapsed, present)
 
+  // A memory naming a section that has gone — the film was unlinked under a
+  // full-screen video — is ignored rather than acted on. Storage is left
+  // alone for the same reason reconcilePresence leaves it alone: re-linking
+  // the film should bring the arrangement back.
+  const memory = fullscreen && present.includes(fullscreen.section) ? fullscreen : null
+
   // Per-file, read on switch. `defaultSize` is read once at mount and these
   // panels never remount, so nothing else would re-apply it.
   useEffect(() => {
     if (!timelineStacked) return
     setCollapsed(readStoredCollapsedSections(fileId))
+    setFullscreen(readStoredFullscreen(fileId, presentSections({ timelineStacked, hasVideo })))
     frozenRef.current = {}
-  }, [fileId, timelineStacked])
+  }, [fileId, hasVideo, timelineStacked])
 
   // Written on change. Gated on the lens so a trip through the text lens can
   // never clear what the reader set up in the media lens.
   useEffect(() => {
     if (!timelineStacked) return
     writeStoredCollapsedSections(fileId, effective)
-  }, [fileId, timelineStacked, effective])
+    writeStoredFullscreen(fileId, memory)
+  }, [fileId, timelineStacked, effective, memory])
 
   /**
    * The last size each section measured while OPEN, kept from every resize
@@ -234,6 +256,10 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
       // frame in which the partner still measures 40px and could be misread
       // as folded. Verified against the library's solver, not assumed.
       setCollapsed((prev) => collapseSection(prev, id, present))
+      // Any fold that is not part of entering full screen ends it: the memory
+      // belongs to that one gesture. Entering re-sets it after its own loop,
+      // and React's batching makes that last write win.
+      setFullscreen(null)
     },
     [freeze, onBeforeCollapseText, present],
   )
@@ -297,7 +323,14 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
       // open constraints BEFORE it is told what size to be, and a passive
       // effect from this commit would run a render too early — resizing a
       // still-pinned panel, which does nothing at all.
-      flushSync(() => setCollapsed((prev) => expandSection(prev, id)))
+      flushSync(() => {
+        setCollapsed((prev) => expandSection(prev, id))
+        // Opening anything ends full screen. The derived glyph would say so
+        // anyway — this section being open means its neighbour is no longer
+        // alone — but the memory goes too, so a later press captures the
+        // arrangement the reader is actually looking at.
+        setFullscreen(null)
+      })
       delete frozenRef.current[id]
       const { panel, px } = restoreTargetFor(id)
       applySize(panel, px)
@@ -317,6 +350,56 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
       // rather than the size the reader left it at.
     },
     [applySize, present, restoreTargetFor, safeIsCollapsed],
+  )
+
+  /**
+   * Give one section the whole lens.
+   *
+   * No new folding machinery: this loops the ordinary `collapse` over the
+   * sections still open, so freezing each box, blurring the editor before the
+   * text closes over it, the swap-rule guard and the effect that drives a
+   * panel to its rail all apply untouched — and the tail of the folded list
+   * still carries recency, so a later chevron press on the full-screen
+   * section hands the body back to the right partner.
+   *
+   * The memory is written after the loop. Each `collapse` clears it, which is
+   * exactly the rule; batching means this write is the one that lands.
+   */
+  const enterFullscreen = useCallback(
+    (id: MediaSectionId) => {
+      const fold = sectionsToFoldForFullscreen(effective, id, present)
+      if (fold.length === 0) return
+      for (const s of fold) collapse(s)
+      setFullscreen({ section: id, restore: effective })
+    },
+    [collapse, effective, present],
+  )
+
+  /**
+   * Put the other sections back.
+   *
+   * Loops the ordinary `expand`, which already does the `flushSync`, the
+   * remembered-size restore, the frozen-box cleanup and the "this row refused
+   * to fit it, leave it folded" check. Reopening the video is what puts the
+   * table back too, so the order here is only the canonical one.
+   *
+   * With no memory it opens everything. That is the fallback that makes the
+   * derived glyph safe: fold two sections by hand and the third genuinely IS
+   * full screen, so its button offers to undo that — and this is an honest
+   * answer to a press nobody recorded.
+   */
+  const exitFullscreen = useCallback(
+    (id: MediaSectionId) => {
+      const target = reconcilePresence(
+        memory && memory.section === id ? memory.restore : NO_PREVIEW,
+        present,
+      )
+      for (const s of ["timeline", "video", "text"] as const) {
+        if (effective.includes(s) && !target.includes(s)) expand(s)
+      }
+      setFullscreen(null)
+    },
+    [effective, expand, memory, present],
   )
 
   /**
@@ -520,6 +603,12 @@ export function useMediaSectionCollapse(input: UseMediaSectionCollapseInput) {
     },
     /** Painted like a rail, but not folded — a drag is still holding it. */
     isPreviewingRail: (id: MediaSectionId) => previewRail.includes(id),
+    /** Is this section alone on screen, its neighbours all folded? */
+    isFullscreen: (id: MediaSectionId) => isSectionFullscreen(effective, id, present),
+    /** May it be? False for the timeline, which cannot empty the body. */
+    canFullscreen: (id: MediaSectionId) => canFullscreen(effective, id, present),
+    enterFullscreen,
+    exitFullscreen,
     /**
      * Is a rail painted over this section, folded or merely held there? The
      * two look identical, which is the point; only `isCollapsed` decides

@@ -11,6 +11,7 @@ import { useMediaSectionCollapse } from "./useMediaSectionCollapse"
 import { MEDIA_RAIL_PX } from "./media-section-layout"
 
 const KEY = (fileId: string) => `aquilla:mediaSectionsCollapsed:${fileId}`
+const FULL = (fileId: string) => `aquilla:mediaSectionFullscreen:${fileId}`
 
 const setup = (over: Partial<Parameters<typeof useMediaSectionCollapse>[0]> = {}) =>
   renderHook((props: Parameters<typeof useMediaSectionCollapse>[0]) => useMediaSectionCollapse(props), {
@@ -193,5 +194,97 @@ describe("useMediaSectionCollapse", () => {
     act(() => result.current.collapse("video"))
     expect(result.current.separatorDisabled("video-table")).toBe(true)
     expect(result.current.separatorDisabled("timeline-body")).toBe(false)
+  })
+
+  describe("full screen", () => {
+    it("folds everything else, and is only full screen once they are down", () => {
+      const { result } = setup()
+      expect(result.current.isFullscreen("video")).toBe(false)
+      act(() => result.current.enterFullscreen("video"))
+      expect(result.current.collapsed).toEqual(["timeline", "text"])
+      expect(result.current.isFullscreen("video")).toBe(true)
+      expect(result.current.isFullscreen("text")).toBe(false)
+    })
+
+    it("puts back exactly what was there before it was pressed", () => {
+      // The timeline was already folded, so it stays folded — only the text,
+      // which this gesture took away, comes back.
+      const { result } = setup()
+      act(() => result.current.collapse("timeline"))
+      act(() => result.current.enterFullscreen("video"))
+      expect(result.current.collapsed).toEqual(["timeline", "text"])
+      act(() => result.current.exitFullscreen("video"))
+      expect(result.current.collapsed).toEqual(["timeline"])
+    })
+
+    it("opens everything when nobody recorded a press", () => {
+      // Two chevrons leave the video genuinely full screen, so its button
+      // offers to undo that. With no memory the honest answer is everything.
+      const { result } = setup()
+      act(() => result.current.collapse("timeline"))
+      act(() => result.current.collapse("text"))
+      expect(result.current.isFullscreen("video")).toBe(true)
+      act(() => result.current.exitFullscreen("video"))
+      expect(result.current.collapsed).toEqual([])
+    })
+
+    it("forgets the arrangement as soon as anything else opens a section", () => {
+      const { result } = setup()
+      act(() => result.current.collapse("timeline"))
+      act(() => result.current.enterFullscreen("video"))
+      // A rail click on the text: full screen is over, and pressing the
+      // button again must capture what is on screen NOW, not what was.
+      act(() => result.current.expand("text"))
+      expect(result.current.isFullscreen("video")).toBe(false)
+      act(() => result.current.exitFullscreen("video"))
+      expect(result.current.collapsed).toEqual([])
+    })
+
+    it("forgets it when a chevron folds something instead", () => {
+      const { result } = setup()
+      act(() => result.current.enterFullscreen("video"))
+      act(() => result.current.collapse("video"))
+      // The swap rule handed the body back to the text; nothing is full
+      // screen, and the memory went with the gesture that ended it.
+      expect(result.current.isFullscreen("video")).toBe(false)
+      expect(localStorage.getItem(FULL("f1"))).toBeNull()
+    })
+
+    it("refuses the timeline, which cannot empty the body", () => {
+      const { result } = setup()
+      expect(result.current.canFullscreen("timeline")).toBe(false)
+      expect(result.current.canFullscreen("video")).toBe(true)
+      act(() => result.current.enterFullscreen("timeline"))
+      expect(result.current.collapsed).toEqual([])
+    })
+
+    it("survives a reload, and still knows what to put back", () => {
+      localStorage.setItem(KEY("f1"), "timeline,text")
+      localStorage.setItem(FULL("f1"), "video|timeline")
+      const { result } = setup()
+      expect(result.current.isFullscreen("video")).toBe(true)
+      act(() => result.current.exitFullscreen("video"))
+      expect(result.current.collapsed).toEqual(["timeline"])
+    })
+
+    it("remembers per file, and does not bleed across a switch", () => {
+      const { result, rerender } = setup()
+      act(() => result.current.enterFullscreen("video"))
+      expect(localStorage.getItem(FULL("f1"))).toBe("video|")
+      rerender({ fileId: "f2", timelineStacked: true, hasVideo: true })
+      expect(result.current.collapsed).toEqual([])
+      expect(result.current.isFullscreen("video")).toBe(false)
+      expect(localStorage.getItem(FULL("f2"))).toBeNull()
+    })
+
+    it("ignores a memory whose section has gone", () => {
+      // A full-screen video, then the film is unlinked. The body is handed
+      // back to the text and nothing acts on a memory naming the picture.
+      localStorage.setItem(KEY("f1"), "timeline,text")
+      localStorage.setItem(FULL("f1"), "video|")
+      const { result } = setup({ hasVideo: false })
+      expect(result.current.collapsed).toEqual(["timeline"])
+      expect(result.current.isFullscreen("video")).toBe(false)
+    })
   })
 })

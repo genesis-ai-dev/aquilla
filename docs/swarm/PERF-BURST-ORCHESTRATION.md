@@ -33,8 +33,8 @@ Ordering intent: 1146 → 1147 (prod profile gate first) → 1016 → 1160; 1160
 | 1 | WS-1146 | EditorTable incremental memos + per-cell row props | `EditorTable.tsx` only; disjoint from 1145 and 1160 |
 | 1 | WS-1160 | Bounded server cell-page reads | `sync-worker/src/events/cells-read-route.ts` + migration; disjoint from all client work |
 | 1 | WS-PROF | **Gate for 1147**: production-build Draft-all/commit-burst profile on a whole-Bible file (dev stack, live-UI slot) | 1147 AC #1 requires the profile before implementation; also fulfils the "one agent on the real UI" rule |
-| 2 | WS-1147 | ProjectWorkspace shell de-subscription (scaled by WS-PROF) | edits `ProjectWorkspace.tsx`; serialized behind 1146 (EditorTable prop boundary) and 1145 (same file) |
-| 3 | WS-1016 | Scroll path (`trackedCellRef`/`visibleCellIds`) + validate→health recompute | same file as 1147; lands on its merged result |
+| 1 (accelerated 2026-09-04 06:07Z) | WS-1147 | ProjectWorkspace shell de-subscription | operator asked to speed up: profile gate waived, dispatched concurrently with region ownership inside `ProjectWorkspace.tsx` (version memos = 1147; scroll state, validate handlers, useHealth = 1016) |
+| 1 (accelerated) | WS-1016 | Scroll path (`trackedCellRef`/`visibleCellIds`) + validate→health recompute | concurrent with 1147; merged serially with union protocol |
 
 ## §3 Workstream registry
 | WS | Issue | Status | Branch / worktree | Owns | Notes |
@@ -42,8 +42,11 @@ Ordering intent: 1146 → 1147 (prod profile gate first) → 1016 → 1160; 1160
 | WS-1146 | AQU-1146 | Dispatched | `swarm/aqu-1146` / `.worktrees/aqu-1146` | `src/components/EditorTable.tsx`, `src/components/EditorTable.*.test.tsx` | store API read-only (`getCellVersion`, `readAtVersion`) |
 | WS-1160 | AQU-1160 | Dispatched | `swarm/aqu-1160` / `.worktrees/aqu-1160` | `sync-worker/src/events/cells-read-route.ts`, `sync-worker/src/__tests__/cells-read.test.ts`, `read-routes.test.ts`, `db/postgres/migrations/0083_*.sql`, `db/postgres/schema.sql`, comments in `src/lib/sync/cells-read.ts` | salvage index/paging from reverted `ef249e914` |
 | WS-PROF | AQU-1147 gate | Dispatched | none (read-only; uses root dev stack + `pnpm build`/`vite preview`) | `docs/swarm/PERF-BURST-PROFILE.md` | records numbers on AQU-1147 |
-| WS-1147 | AQU-1147 | Todo (queued, wave 2) | — | `src/components/ProjectWorkspace.tsx`, new hooks under `src/hooks/`, `ProjectWorkspace.*.test.ts` | |
-| WS-1016 | AQU-1016 | Todo (queued, wave 3) | — | `ProjectWorkspace.tsx` scroll state, `EditorTable.tsx` scroll callbacks, health recompute scheduling | |
+| WS-1147 | AQU-1147 | Dispatched 06:07Z | `swarm/aqu-1147` / `.worktrees/aqu-1147` | `src/components/ProjectWorkspace.tsx`, new hooks under `src/hooks/`, `ProjectWorkspace.*.test.ts` | |
+| WS-1016 | AQU-1016 | Dispatched 06:07Z | `swarm/aqu-1016` / `.worktrees/aqu-1016` | `ProjectWorkspace.tsx` scroll state, `EditorTable.tsx` scroll callbacks, health recompute scheduling | |
+
+## §1b Release plan (operator, 2026-09-04)
+Dev team will test on the dev environment. Gate for push+deploy to `dev` / dev.aquilla.app: `pnpm build` + affected Vitest + worker tests + `pnpm test:e2e:affected`; full `test:e2e:smoke` runs AFTER deploy in the background and is reported honestly. Deploy command: `pnpm run deploy:aquilla:dev` (verifies branch `dev`).
 
 ## §M Merge log
 <!-- date · WS · branch · sha · build · vitest · targeted smoke · notes -->

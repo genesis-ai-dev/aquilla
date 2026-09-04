@@ -4,6 +4,8 @@
 // Postgres TRUNCATE ... RESTART IDENTITY CASCADE handles FK order for us.)
 import { beforeAll, afterEach } from "vitest"
 import { initTestSchema, resetTestDb } from "./helpers/pg-test-env"
+import { clearSessionCache } from "../lib/session-cache"
+import { clearOrgActivityDebounce } from "../services/org-permissions"
 
 beforeAll(async () => {
   await initTestSchema()
@@ -11,4 +13,7 @@ beforeAll(async () => {
 
 afterEach(async () => {
   await resetTestDb()
+  // Isolate-memory caches would otherwise outlive the truncated rows.
+  clearSessionCache()
+  clearOrgActivityDebounce()
 })

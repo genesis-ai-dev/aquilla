@@ -39,7 +39,7 @@ import {
   ALL_ROLE_LEVELS,
   isCanonicalRoleLevel,
   isLinkRoleLevel,
-  LINK_ROLE_ALLOWED,
+  forgetProjectRole,
   ORG_WIDE_ACCESS_FLOOR,
   resolveProjectRole,
   resolveProjectRoleIncludingArchived,
@@ -1224,6 +1224,9 @@ projects.delete("/:projectId/members/:userId", authMiddleware, async (c) => {
   )
     .bind(projectId, targetUserId)
     .run()
+  // The per-request memo may hold the pre-delete role (an owner removing
+  // their own direct row resolved it above as the caller).
+  forgetProjectRole(c.env, projectId, targetUserId)
 
   // AQU-346: when NO grant path survives the delete (AD-12: org / group /
   // creator paths are additive and unaffected by removing the direct row),
@@ -1724,9 +1727,5 @@ projects.delete("/:projectId/invites/:token", authMiddleware, async (c) => {
   const removed = typeof changes === "number" ? changes > 0 : true
   return c.json({ removed })
 })
-
-// Re-export the canonical link-role list so tests that imported it from the
-// old projects-invites module continue to work.
-export { LINK_ROLE_ALLOWED }
 
 export default projects

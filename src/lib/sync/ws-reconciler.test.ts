@@ -3,12 +3,14 @@ import {
   buildProjectWsUrl,
   createLinkUpstreamChangedHandler,
   createReconnectResyncHandler,
+  createScopedRefreshScheduler,
   createWsReconciler,
   fileInventoryChanged,
   isOwnWriteEcho,
   isValidationEvent,
   parseProjectWsMessage,
   type ProjectWsServerMessage,
+  type ScopedRefreshScope,
 } from "./ws-reconciler"
 import {
   applyRemoteFrame,
@@ -142,6 +144,57 @@ describe("parseProjectWsMessage", () => {
     expect(msg).toMatchObject({ t: "event.applied", by: "alice" })
   })
 
+  it("preserves external origin before own-write classification", () => {
+    const msg = parseProjectWsMessage(JSON.stringify({
+      t: "event.applied",
+      id: "evt-agent",
+      kind: "cell.backtranslation.set",
+      project: "p",
+      file: "f",
+      cell: "c",
+      by: "alice",
+      via: "external",
+    }))
+
+    expect(msg).toMatchObject({ t: "event.applied", via: "external" })
+    expect(msg && msg.t === "event.applied" && isOwnWriteEcho(msg, "alice")).toBe(false)
+  })
+
+  it("passes serverSeq + rows through on event.applied so the client can apply without a refetch", () => {
+    const rows = [
+      { cellId: "c", side: "source", value: "In the beginning", eventId: "S0" },
+      { cellId: "c", side: "target", value: "En el principio", eventId: "E1" },
+    ]
+    const msg = parseProjectWsMessage(
+      JSON.stringify({
+        t: "event.applied",
+        id: "evt-1",
+        kind: "target.cell.commit",
+        project: "p",
+        file: "f",
+        cell: "c",
+        serverSeq: 42,
+        rows,
+      }),
+    )
+    expect(msg).toMatchObject({ t: "event.applied", serverSeq: 42, rows })
+  })
+
+  it("drops malformed rows (and non-numeric serverSeq) rather than applying a partial row set", () => {
+    const parse = (rows: unknown, serverSeq: unknown = 42) =>
+      parseProjectWsMessage(
+        JSON.stringify({ t: "event.applied", id: "e", kind: "target.cell.commit", project: "p", cell: "c", serverSeq, rows }),
+      )
+    // One bad entry → whole field gone; the handler falls back to a refetch.
+    expect(parse([{ cellId: "c", side: "target" }, { side: "target" }])).not.toHaveProperty("rows")
+    expect(parse([{ cellId: "c", side: "sideways" }])).not.toHaveProperty("rows")
+    expect(parse([null])).not.toHaveProperty("rows")
+    expect(parse("not-an-array")).not.toHaveProperty("rows")
+    expect(parse([{ cellId: "c", side: "target" }], "42")).not.toHaveProperty("serverSeq")
+    // The frame itself still parses — rows are additive, never load-bearing.
+    expect(parse([null])).toMatchObject({ t: "event.applied", cell: "c" })
+  })
+
   it("parses event.stale", () => {
     expect(
       parseProjectWsMessage(
@@ -221,6 +274,40 @@ describe("parseProjectWsMessage", () => {
         selection: { side: "target", anchor: 0, head: 0, draftText: "x".repeat(16_385) },
         ts: 100,
       }],
+    }))).toBeNull()
+  })
+
+  it("parses presence.diff / presence.left / presence.draft", () => {
+    expect(parseProjectWsMessage(JSON.stringify({
+      t: "presence.diff",
+      user: {
+        userId: "alice", focusedCell: "c1", currentFileId: "file-1",
+        selection: { side: "target", anchor: 2, head: 5 }, ts: 100,
+      },
+    }))).toEqual({
+      t: "presence.diff",
+      user: {
+        userId: "alice", focusedCell: "c1", currentFileId: "file-1",
+        selection: { side: "target", anchor: 2, head: 5 }, ts: 100,
+      },
+    })
+    expect(parseProjectWsMessage(JSON.stringify({ t: "presence.left", userId: "alice" })))
+      .toEqual({ t: "presence.left", userId: "alice" })
+    expect(parseProjectWsMessage(JSON.stringify({
+      t: "presence.draft", userId: "alice", cellId: "c1", draftText: "hello", ts: 7,
+    }))).toEqual({ t: "presence.draft", userId: "alice", cellId: "c1", draftText: "hello", ts: 7 })
+
+    // Strict field validation — same posture as the full-roster frame.
+    expect(parseProjectWsMessage(JSON.stringify({ t: "presence.diff", user: { userId: "alice" } }))).toBeNull()
+    expect(parseProjectWsMessage(JSON.stringify({
+      t: "presence.diff", user: { userId: "alice", ts: 1, selection: { side: "source" } },
+    }))).toBeNull()
+    expect(parseProjectWsMessage(JSON.stringify({ t: "presence.left" }))).toBeNull()
+    expect(parseProjectWsMessage(JSON.stringify({
+      t: "presence.draft", userId: "alice", cellId: "c1", ts: 7,
+    }))).toBeNull()
+    expect(parseProjectWsMessage(JSON.stringify({
+      t: "presence.draft", userId: "alice", cellId: "c1", draftText: "x".repeat(16_385), ts: 7,
     }))).toBeNull()
   })
 
@@ -754,6 +841,103 @@ describe("fileInventoryChanged (AQU-744 staged-import reveal)", () => {
   })
 })
 
+describe("createScopedRefreshScheduler (AQU-1145 applied-event bursts)", () => {
+  let activeScope: ScopedRefreshScope | null
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+    activeScope = { projectId: "p1", fileId: "f1" }
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  function setup() {
+    const refresh = vi.fn()
+    const scheduler = createScopedRefreshScheduler({
+      currentScope: () => activeScope,
+      refresh,
+    })
+    return { refresh, scheduler }
+  }
+
+  it("collapses a same-scope burst into one fixed-window refresh", async () => {
+    const { refresh, scheduler } = setup()
+
+    for (let i = 0; i < 10; i++) {
+      scheduler.schedule({ projectId: "p1", fileId: "f1" })
+      await vi.advanceTimersByTimeAsync(4)
+    }
+    expect(refresh).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(10)
+    expect(refresh).toHaveBeenCalledTimes(1)
+    expect(refresh).toHaveBeenCalledWith({ projectId: "p1", fileId: "f1" })
+  })
+
+  it("starts a second window instead of starving under continuous events", async () => {
+    const { refresh, scheduler } = setup()
+
+    scheduler.schedule({ projectId: "p1", fileId: "f1" })
+    await vi.advanceTimersByTimeAsync(50)
+    expect(refresh).toHaveBeenCalledTimes(1)
+
+    scheduler.schedule({ projectId: "p1", fileId: "f1" })
+    await vi.advanceTimersByTimeAsync(49)
+    expect(refresh).toHaveBeenCalledTimes(1)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(refresh).toHaveBeenCalledTimes(2)
+  })
+
+  it("drops a queued refresh when the active file changes before flush", async () => {
+    const { refresh, scheduler } = setup()
+
+    scheduler.schedule({ projectId: "p1", fileId: "f1" })
+    activeScope = { projectId: "p1", fileId: "f2" }
+    await vi.advanceTimersByTimeAsync(50)
+
+    expect(refresh).not.toHaveBeenCalled()
+  })
+
+  it("replaces a stale file window with a window for the new active file", async () => {
+    const { refresh, scheduler } = setup()
+
+    scheduler.schedule({ projectId: "p1", fileId: "f1" })
+    await vi.advanceTimersByTimeAsync(25)
+    activeScope = { projectId: "p1", fileId: "f2" }
+    scheduler.schedule({ projectId: "p1", fileId: "f2" })
+
+    await vi.advanceTimersByTimeAsync(25)
+    expect(refresh).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(25)
+    expect(refresh).toHaveBeenCalledTimes(1)
+    expect(refresh).toHaveBeenCalledWith({ projectId: "p1", fileId: "f2" })
+  })
+
+  it("ignores events outside the active project or file", async () => {
+    const { refresh, scheduler } = setup()
+
+    scheduler.schedule({ projectId: "p2", fileId: "f1" })
+    scheduler.schedule({ projectId: "p1", fileId: "f2" })
+    await vi.advanceTimersByTimeAsync(100)
+
+    expect(refresh).not.toHaveBeenCalled()
+  })
+
+  it("dispose cancels pending work and rejects future schedules", async () => {
+    const { refresh, scheduler } = setup()
+
+    scheduler.schedule({ projectId: "p1", fileId: "f1" })
+    scheduler.dispose()
+    await vi.advanceTimersByTimeAsync(100)
+    scheduler.schedule({ projectId: "p1", fileId: "f1" })
+    await vi.advanceTimersByTimeAsync(100)
+
+    expect(refresh).not.toHaveBeenCalled()
+  })
+})
+
 // AQU-845: the project DO broadcasts `event.applied` live and never replays it,
 // so every frame that lands while a client's socket is down is lost to that
 // client. Without a resync on reopen, a peer's committed cell renders blank
@@ -762,37 +946,72 @@ describe("fileInventoryChanged (AQU-744 staged-import reveal)", () => {
 describe("createReconnectResyncHandler (AQU-845 missed-broadcast recovery)", () => {
   it("does not resync on the first open — the initial read is already in flight", () => {
     const onResync = vi.fn()
-    const onOpen = createReconnectResyncHandler(onResync)
+    const h = createReconnectResyncHandler(onResync)
 
-    onOpen()
+    h.handleOpen()
 
     expect(onResync).not.toHaveBeenCalled()
   })
 
-  it("resyncs on every reopen after the first", () => {
+  it("resyncs on every reopen after the first when the gap length is unknown", () => {
     const onResync = vi.fn()
-    const onOpen = createReconnectResyncHandler(onResync)
+    const h = createReconnectResyncHandler(onResync)
 
-    onOpen() // initial connect
-    onOpen() // reconnect after a sync-worker redeploy
+    h.handleOpen() // initial connect
+    h.handleOpen() // reconnect after a sync-worker redeploy (no close observed)
     expect(onResync).toHaveBeenCalledTimes(1)
 
-    onOpen() // and again after the next drop
-    onOpen()
+    h.handleOpen() // and again after the next drop
+    h.handleOpen()
     expect(onResync).toHaveBeenCalledTimes(3)
   })
 
   it("keeps each project's reconciler on its own first-open ledger", () => {
     const a = vi.fn()
     const b = vi.fn()
-    const onOpenA = createReconnectResyncHandler(a)
-    const onOpenB = createReconnectResyncHandler(b)
+    const hA = createReconnectResyncHandler(a)
+    const hB = createReconnectResyncHandler(b)
 
-    onOpenA()
-    onOpenA()
-    onOpenB()
+    hA.handleOpen()
+    hA.handleOpen()
+    hB.handleOpen()
 
     expect(a).toHaveBeenCalledTimes(1)
     expect(b).not.toHaveBeenCalled()
+  })
+
+  it("skips the resync for a blip shorter than minDownMs — the ?since= cursor catches up on the next read", () => {
+    let t = 0
+    const onResync = vi.fn()
+    const h = createReconnectResyncHandler(onResync, { minDownMs: 3_000, now: () => t })
+
+    h.handleOpen() // initial
+    t = 10_000
+    h.handleClose()
+    t = 12_000 // down 2s
+    h.handleOpen()
+    expect(onResync).not.toHaveBeenCalled()
+
+    t = 20_000
+    h.handleClose()
+    t = 23_000 // down exactly 3s → resync
+    h.handleOpen()
+    expect(onResync).toHaveBeenCalledTimes(1)
+  })
+
+  it("measures the gap from the FIRST close when several closes precede one reopen", () => {
+    let t = 0
+    const onResync = vi.fn()
+    const h = createReconnectResyncHandler(onResync, { minDownMs: 3_000, now: () => t })
+
+    h.handleOpen()
+    t = 10_000
+    h.handleClose()
+    t = 12_500
+    h.handleClose() // a failed reconnect attempt closing again
+    t = 13_500 // 3.5s since the socket first dropped
+    h.handleOpen()
+
+    expect(onResync).toHaveBeenCalledTimes(1)
   })
 })

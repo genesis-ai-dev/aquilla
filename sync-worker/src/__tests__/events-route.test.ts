@@ -10,7 +10,8 @@ vi.mock('partyserver', () => ({
   }),
 }))
 
-import { handleEventsWriteRequest } from '../events/route'
+import { handleEventsWriteRequest, EVENT_APPLIED_ROWS_MAX_CELLS } from '../events/route'
+import { handleCellsReadRequest } from '../events/cells-read-route'
 import { handleRebuildProjectionRequest } from '../events/rebuild'
 import { makeTestDb } from './helpers/pg-test-db'
 import { makeTestToken } from './helpers/auth'
@@ -877,5 +878,222 @@ describe('POST /events — ProjectSync event.applied fan-out', () => {
     const applied = bodies.filter((b) => b.t === 'event.applied')
     expect(applied.length).toBe(1)
     expect('via' in applied[0]).toBe(false)
+  })
+})
+
+// ── event.applied carries serverSeq + projected rows ───────────────────
+
+describe('POST /events — event.applied carries serverSeq + the cell\'s projected rows', () => {
+  // The WHY: every event.applied used to cost the receiving client a
+  // GET …/cells?cellIds= round-trip before it could render the change. The
+  // server already knows the cell's post-commit projection, so it inlines the
+  // rows (byte-identical to the by-ids read — the client stores whichever it
+  // received without telling them apart) plus the event's server_seq.
+  function makeProjectSyncEnv(db: AquillaDb) {
+    const bodies: Array<Record<string, unknown>> = []
+    const stubFetch = vi.fn().mockImplementation(async (_url: unknown, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)))
+      return new Response(JSON.stringify({ ok: true }), { status: 200 })
+    })
+    const env = {
+      ...makeEnv(db),
+      ProjectSync: {
+        idFromName: vi.fn().mockReturnValue({ id: 'do-id' }),
+        get: vi.fn().mockReturnValue({ fetch: stubFetch }),
+      } as unknown as DurableObjectNamespace,
+    }
+    const applied = () =>
+      bodies.flatMap((b) =>
+        b.t === 'broadcast.batch' ? (b.messages as Array<Record<string, unknown>>) : [b],
+      ).filter((m) => m.t === 'event.applied')
+    return { env, bodies, applied }
+  }
+
+  async function readCellByIds(db: AquillaDb, cellId: string): Promise<unknown[]> {
+    const token = await makeTestToken(SECRET, { projectId: 'proj-a', fileId: 'file-x' })
+    const res = (await handleCellsReadRequest(
+      new Request(`https://w/api/v1/projects/proj-a/files/file-x/cells?cellIds=${cellId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      makeEnv(db) as { AQUILLA_PG: AquillaDb; SYNC_SECRET_KEY: string },
+    ))!
+    expect(res.status).toBe(200)
+    return ((await res.json()) as { cells: unknown[] }).cells
+  }
+
+  const bySideLane = (rows: unknown[]) =>
+    [...(rows as Array<{ side: string; targetLang: string }>)].sort((a, b) =>
+      `${a.side}|${a.targetLang}`.localeCompare(`${b.side}|${b.targetLang}`),
+    )
+
+  it('a committed target.cell.commit frame carries serverSeq and rows whose target row is the new head', async () => {
+    const token = await makeToken({ role: 500, username: 'alice' })
+    const { db, snapshot } = await makeTestDb()
+    // Seed both sides so `rows` has to carry the source row too.
+    await handleEventsWriteRequest(
+      await makeRequest([sourceCreate(), targetCreate()], token),
+      makeEnv(db),
+    )
+    const { env, applied } = makeProjectSyncEnv(db)
+
+    const res = await handleEventsWriteRequest(await makeRequest([targetCommit()], token), env)
+    expect(res?.status).toBe(200)
+
+    const frames = applied()
+    expect(frames).toHaveLength(1)
+    const frame = frames[0]
+    expect(frame.id).toBe('evt-commit-001')
+
+    const stored = (await snapshot()).events.find((e) => e.id === 'evt-commit-001')!
+    expect(frame.serverSeq).toBe(Number(stored.server_seq))
+
+    const rows = frame.rows as Array<{ side: string; eventId: string; value: string }>
+    expect(rows.map((r) => r.side).sort()).toEqual(['source', 'target'])
+    const target = rows.find((r) => r.side === 'target')!
+    expect(target.eventId).toBe('evt-commit-001')
+    expect(target.value).toBe('updated')
+
+    // Byte-identical to what GET …/cells?cellIds=cell-1 returns for the same cell.
+    const viaRead = await readCellByIds(db, 'cell-1')
+    expect(JSON.stringify(bySideLane(rows))).toBe(JSON.stringify(bySideLane(viaRead)))
+  })
+
+  it('a cell.validate frame carries rows reflecting the flipped validated flag', async () => {
+    const token = await makeToken({ role: 400 })
+    const reviewerToken = await makeToken({ role: 300, username: 'reviewer-bob' })
+    const { db } = await makeTestDb()
+    await handleEventsWriteRequest(await makeRequest([targetCreate()], token), makeEnv(db))
+    const { env, applied } = makeProjectSyncEnv(db)
+
+    await handleEventsWriteRequest(
+      await makeRequest([validate({ payload: { editEventId: 'evt-create-001' } })], reviewerToken),
+      env,
+    )
+
+    const frames = applied()
+    expect(frames).toHaveLength(1)
+    expect(typeof frames[0].serverSeq).toBe('number')
+    const rows = frames[0].rows as Array<{ side: string; validated: boolean; eventId: string }>
+    expect(rows).toHaveLength(1)
+    expect(rows[0].validated).toBe(true)
+    // Validation does not advance the chain head.
+    expect(rows[0].eventId).toBe('evt-create-001')
+  })
+
+  it('a chain-slot loser still receives the cell\'s CURRENT rows (the winner\'s head)', async () => {
+    // Rows describe the projection, not the losing event — the client must
+    // converge on the head, and refetching would have returned the same.
+    const token = await makeToken({ role: 400 })
+    const { db } = await makeTestDb()
+    await handleEventsWriteRequest(await makeRequest([targetCreate()], token), makeEnv(db))
+    const { env, applied } = makeProjectSyncEnv(db)
+
+    await handleEventsWriteRequest(
+      await makeRequest(
+        [
+          targetCommit({ id: 'evt-winner', payload: { value: 'first' } }),
+          targetCommit({ id: 'evt-loser', payload: { value: 'second' } }),
+        ],
+        token,
+      ),
+      env,
+    )
+
+    const frames = applied()
+    expect(frames.map((f) => f.id)).toEqual(['evt-winner', 'evt-loser'])
+    const loserRows = frames[1].rows as Array<{ eventId: string; value: string }>
+    expect(loserRows).toHaveLength(1)
+    // route.ts docs: `*.cell.commit` projects last-write-wins.
+    const viaRead = (await readCellByIds(db, 'cell-1')) as Array<{ eventId: string; value: string }>
+    expect(loserRows[0].eventId).toBe(viaRead[0].eventId)
+    expect(loserRows[0].value).toBe(viaRead[0].value)
+  })
+
+  it('non-cell events keep the legacy frame shape and trigger no cells SELECT', async () => {
+    const token = await makeToken({ role: 600 })
+    const { db } = await makeTestDb()
+    const { env, applied } = makeProjectSyncEnv(db)
+    const prepareSpy = vi.spyOn(db, 'prepare')
+
+    const fileCreate = {
+      id: 'evt-file-001',
+      schemaVersion: 1,
+      kind: 'file.create',
+      projectId: 'proj-a',
+      fileId: 'file-x',
+      cellId: null,
+      parentId: null,
+      author: 'alice',
+      payload: { name: 'Genesis', fileType: 'codex' },
+      clientTs: 1000,
+    }
+    const res = await handleEventsWriteRequest(await makeRequest([fileCreate], token), env)
+    expect(res?.status).toBe(200)
+
+    const frames = applied()
+    expect(frames).toHaveLength(1)
+    expect('serverSeq' in frames[0]).toBe(false)
+    expect('rows' in frames[0]).toBe(false)
+    const rowsSelects = prepareSpy.mock.calls.filter(([sql]) =>
+      // Match ONLY the event.applied rows SELECT. Other batched pre-checks
+      // (prefetchCellHeads, AQU-1154) also read cells by the same tuple-IN
+      // shape; the trailing `, project_id, file_id` column pair is unique to
+      // the rows read.
+      String(sql).includes(', project_id, file_id FROM cells WHERE (project_id, file_id, cell_id) IN'),
+    )
+    expect(rowsSelects).toHaveLength(0)
+  })
+
+  it('fetches every touched cell\'s rows with ONE query per request', async () => {
+    const token = await makeToken({ role: 400 })
+    const { db } = await makeTestDb()
+    const { env, applied } = makeProjectSyncEnv(db)
+    const prepareSpy = vi.spyOn(db, 'prepare')
+
+    const events = ['c1', 'c2', 'c3'].map((c) =>
+      targetCreate({ id: `evt-${c}`, cellId: c, payload: { cellId: c, value: `v-${c}` } }),
+    )
+    await handleEventsWriteRequest(await makeRequest(events, token), env)
+
+    const rowsSelects = prepareSpy.mock.calls.filter(([sql]) =>
+      // Match ONLY the event.applied rows SELECT. Other batched pre-checks
+      // (prefetchCellHeads, AQU-1154) also read cells by the same tuple-IN
+      // shape; the trailing `, project_id, file_id` column pair is unique to
+      // the rows read.
+      String(sql).includes(', project_id, file_id FROM cells WHERE (project_id, file_id, cell_id) IN'),
+    )
+    expect(rowsSelects).toHaveLength(1)
+    const frames = applied()
+    expect(frames).toHaveLength(3)
+    for (const f of frames) {
+      const rows = f.rows as Array<{ cellId: string; value: string }>
+      expect(rows).toHaveLength(1)
+      expect(rows[0].cellId).toBe(f.cell)
+      expect(rows[0].value).toBe(`v-${f.cell}`)
+    }
+  })
+
+  it(`omits rows (but keeps serverSeq) when one request touches more than ${EVENT_APPLIED_ROWS_MAX_CELLS} cells`, async () => {
+    // Bounds the DO fan-out payload; clients fall back to the by-ids refetch.
+    const token = await makeToken({ role: 400 })
+    const { db } = await makeTestDb()
+    const { env, applied } = makeProjectSyncEnv(db)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const events = Array.from({ length: EVENT_APPLIED_ROWS_MAX_CELLS + 1 }, (_, i) =>
+      targetCreate({ id: `evt-bulk-${i}`, cellId: `bulk-${i}`, payload: { cellId: `bulk-${i}`, value: 'x' } }),
+    )
+    const res = await handleEventsWriteRequest(await makeRequest(events, token), env)
+    expect(res?.status).toBe(200)
+
+    const frames = applied()
+    expect(frames).toHaveLength(EVENT_APPLIED_ROWS_MAX_CELLS + 1)
+    for (const f of frames) {
+      expect(typeof f.serverSeq).toBe('number')
+      expect('rows' in f).toBe(false)
+    }
+    const capWarnings = warn.mock.calls.filter(([msg]) => String(msg).includes('event.applied rows omitted'))
+    expect(capWarnings).toHaveLength(1)
+    warn.mockRestore()
   })
 })

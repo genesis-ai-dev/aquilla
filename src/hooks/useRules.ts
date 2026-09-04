@@ -20,6 +20,8 @@ import type { Concept } from "@/lib/terminology/types"
  */
 type PatchSharedFn = (partial: ProjectWideSettings) => Promise<unknown>
 
+const EMPTY_RULES: TranslationRule[] = []
+
 export function useRules(
   project: ProjectRecord | null,
   refresh: () => void,
@@ -44,7 +46,10 @@ export function useRules(
    */
   lane?: string,
 ) {
-  const userRules = project?.rules || []
+  // AQU-1104: a fresh `[]` per render gave `rules` a new identity on every
+  // workspace render for projects without rules, which re-ran every consumer
+  // memo (useHealth's checkRules pass, ~700 times in one scroll session).
+  const userRules = project?.rules ?? EMPTY_RULES
   const algorithmicChecks = project?.algorithmicChecks
   const penalties: RulePenalties = project?.rulePenalties || { major: 15, minor: 5 }
   const terminology = project?.terminology

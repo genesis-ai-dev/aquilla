@@ -693,6 +693,28 @@ CREATE TABLE comments (
     created_for_translated TEXT
 );
 
+-- ─────────────────────────── terminology concepts ──────────────────────
+-- AQU-1006 follow-up. Projection of `term.*` events; see
+-- db/postgres/migrations/0084_concepts.sql for the rationale.
+
+CREATE TABLE concepts (
+    concept_id     TEXT PRIMARY KEY,
+    project_id     TEXT NOT NULL,
+    source_term    TEXT NOT NULL,
+    renderings     JSONB NOT NULL DEFAULT '[]'::jsonb,
+    notes          TEXT,
+    status         TEXT NOT NULL DEFAULT 'draft',
+    case_sensitive INTEGER NOT NULL DEFAULT 0,
+    created_by     TEXT,
+    created_at     BIGINT NOT NULL,
+    updated_at     BIGINT NOT NULL,
+    deleted_at     BIGINT
+);
+
+CREATE INDEX concepts_project_live_idx
+    ON concepts (project_id)
+    WHERE deleted_at IS NULL;
+
 -- ─────────────────────────── assignments + misc ─────────────────────────
 
 CREATE TABLE assignments (
@@ -785,6 +807,9 @@ CREATE INDEX idx_cell_validators_cell ON cell_validators(project_id, file_id, ce
 CREATE INDEX idx_cell_waivers_file ON cell_waivers(project_id, file_id);
 CREATE INDEX idx_cells_decay_drags ON cells(project_id, endorsement_count);
 CREATE INDEX idx_cells_file_order ON cells(project_id, file_id, side, anchor_cell_id);
+-- AQU-1160: backs the cell-page-read chain-cache's bounded page fetch
+-- ((side, target_lang, cell_id) tuple lookup) — see 0083_cells_scan_index.sql.
+CREATE INDEX idx_cells_file_scan ON cells(project_id, file_id, side, target_lang, cell_id);
 CREATE INDEX idx_cells_last_edit ON cells(project_id, file_id, side, last_edit_at);
 CREATE INDEX idx_cells_pair_lookup ON cells(project_id, cell_id, side);
 CREATE INDEX idx_cells_source_basis ON cells(source_event_id);

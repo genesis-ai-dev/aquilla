@@ -9,6 +9,7 @@
 
 import type { OutboxRawEvent, OutboxEventKind } from "./project-do-types"
 import type { ContextualFrame } from "./contextual-frames"
+import type { CellRowOut } from "./events/cell-row-serialize"
 
 /** Default lease in ms. */
 export const PROJECT_DO_DEFAULT_LEASE_MS = 30_000
@@ -16,7 +17,15 @@ export const PROJECT_DO_MAX_PRESENCE_DRAFT_LENGTH = 16_384
 
 export interface PresenceState {
   userId: string
+  /** Lock-bearing: the cell this user holds the edit lease on (focus.claim). */
   focusedCell?: string
+  /**
+   * Non-lock-bearing "where I am": the row the user has selected/focused in
+   * the grid, whether or not they hold (or can hold) its edit lease. Set
+   * freely by `presence.update` so viewers, reviewers and contributors whose
+   * claim was denied are still visible on the cell they are looking at.
+   */
+  viewingCell?: string
   currentFileId?: string
   selection?: PresenceSelection
   ts: number
@@ -54,15 +63,49 @@ export interface ServerEventApplied {
    * commit made no local outbox write, so the echo refetch is the only way
    * the approving human's editor learns the result. */
   via?: "external"
+  /** `events.server_seq` of this event. Present on chain-mutating and
+   * validation cell events (additive — older workers omit it). */
+  serverSeq?: number
+  /** The cell's CURRENT projected rows (both sides, all lanes) AFTER this
+   * event's transaction committed, serialised exactly as the by-ids read
+   * (GET …/cells?cellIds=) returns them, so clients can apply them without a
+   * follow-up refetch. Omitted when a single request touched more than
+   * `EVENT_APPLIED_ROWS_MAX_CELLS` cells (clients fall back to refetch). */
+  rows?: CellRowOut[]
 }
 export interface ServerEventStale {
   t: "event.stale"
   id: string
   reason: string
 }
+/**
+ * Full roster snapshot. Sent to a connection on connect. Never carries
+ * `selection.draftText` — live drafts travel in `presence.draft`.
+ */
 export interface ServerPresence {
   t: "presence"
   users: PresenceState[]
+}
+/** Exactly one user's presence changed. No `selection.draftText`. */
+export interface ServerPresenceDiff {
+  t: "presence.diff"
+  user: PresenceState
+}
+/** A user's presence was removed (last connection closed). */
+export interface ServerPresenceLeft {
+  t: "presence.left"
+  userId: string
+}
+/**
+ * Live draft text for a remote caret. The DO rate-limits this per user
+ * (see PresenceDraftThrottle) — coalesce: latest wins.
+ */
+export interface ServerPresenceDraft {
+  t: "presence.draft"
+  userId: string
+  cellId: string
+  draftText: string
+  ts: number
 }
 export interface ServerLockClaimed {
   t: "lock.claimed"
@@ -145,6 +188,9 @@ export type ProjectDoServerMessage =
   | ServerEventApplied
   | ServerEventStale
   | ServerPresence
+  | ServerPresenceDiff
+  | ServerPresenceLeft
+  | ServerPresenceDraft
   | ServerLockClaimed
   | ServerLockReleased
   | ServerProjectArchived
@@ -208,6 +254,7 @@ export interface ClientPresenceUpdate {
   t: "presence.update"
   currentFileId?: string | null
   focusedCell?: string | null
+  viewingCell?: string | null
   selection?: PresenceSelection | null
 }
 export type ProjectDoClientMessage =
@@ -252,6 +299,10 @@ export function parseProjectDoClientMessage(raw: string): ProjectDoClientMessage
     if ("focusedCell" in m) {
       if (m.focusedCell !== null && typeof m.focusedCell !== "string") return null
       out.focusedCell = m.focusedCell
+    }
+    if ("viewingCell" in m) {
+      if (m.viewingCell !== null && typeof m.viewingCell !== "string") return null
+      out.viewingCell = m.viewingCell
     }
     if ("selection" in m) {
       if (m.selection !== null && !isPresenceSelection(m.selection)) return null
@@ -314,22 +365,46 @@ function sameSelection(a: PresenceSelection | undefined, b: PresenceSelection | 
   )
 }
 
+/**
+ * Content equality, deliberately ignoring `ts`: every presence.update stamps
+ * `ts = now`, so comparing it made this always false and turned each
+ * unchanged repeat (selection re-sends, resumed tabs) into a fan-out
+ * `presence.diff` to every peer.
+ */
 function samePresence(a: PresenceState | undefined, b: PresenceState | undefined): boolean {
   if (!a && !b) return true
   if (!a || !b) return false
   return (
     a.userId === b.userId &&
     a.focusedCell === b.focusedCell &&
+    a.viewingCell === b.viewingCell &&
     a.currentFileId === b.currentFileId &&
-    a.ts === b.ts &&
     sameSelection(a.selection, b.selection)
   )
+}
+
+/** Copy of a presence row with `selection.draftText` removed. */
+export function stripPresenceDraft(user: PresenceState): PresenceState {
+  if (!user.selection || user.selection.draftText === undefined) return user
+  const { draftText: _draft, ...selection } = user.selection
+  return { ...user, selection }
+}
+
+/** Full roster frame with every draft stripped (connect snapshot). */
+export function presenceSnapshot(presence: ReadonlyMap<string, PresenceState>): ServerPresence {
+  return { t: "presence", users: Array.from(presence.values(), stripPresenceDraft) }
+}
+
+function presenceDiff(user: PresenceState): ServerPresenceDiff {
+  return { t: "presence.diff", user: stripPresenceDraft(user) }
 }
 
 function clearFocusedPresence(cur: PresenceState, now: number): PresenceState {
   return {
     userId: cur.userId,
     ...(cur.currentFileId ? { currentFileId: cur.currentFileId } : {}),
+    // Losing the lease does not move the user: they are still on that row.
+    ...(cur.viewingCell ? { viewingCell: cur.viewingCell } : {}),
     ts: now,
   }
 }
@@ -342,7 +417,7 @@ function clearFocusedPresence(cur: PresenceState, now: number): PresenceState {
  *     holder; the DO sends it synchronously to the requesting connection only.
  *     The claimer's optimistic UI can roll back immediately without waiting for
  *     a broadcast round-trip.
- *   - On GRANT → result.emit carries `lock.claimed` + `presence` broadcast to
+ *   - On GRANT → result.emit carries `lock.claimed` + `presence.diff` broadcast to
  *     ALL connections (including the claimer). Because the DO is single-threaded
  *     per-instance and processes messages sequentially, the grant is serialised —
  *     no two concurrent claims for the same cell can both succeed.
@@ -383,18 +458,19 @@ export function applyFocusClaim(
   })
   const cur = nextPresence.get(userId) ?? { userId, ts: now }
   const { selection, ...rest } = cur
-  nextPresence.set(userId, {
+  const nextUser: PresenceState = {
     ...rest,
     focusedCell: msg.cellId,
     ...(cur.focusedCell === msg.cellId && selection ? { selection } : {}),
     ts: now,
-  })
+  }
+  nextPresence.set(userId, nextUser)
   return {
     locks: nextLocks,
     presence: nextPresence,
     emit: [
       { t: "lock.claimed", cellId: msg.cellId, by: { userId, ts: now } },
-      { t: "presence", users: Array.from(nextPresence.values()) },
+      presenceDiff(nextUser),
     ],
     emitTo: [],
   }
@@ -430,19 +506,16 @@ export function applyFocusRelease(
     return { locks: nextLocks, presence: nextPresence, emit: [], emitTo: [] }
   }
   nextLocks.delete(msg.cellId)
+  const emit: ProjectDoServerMessage[] = [
+    { t: "lock.released", cellId: msg.cellId, by: { userId, ts: now } },
+  ]
   const cur = nextPresence.get(userId)
   if (cur && cur.focusedCell === msg.cellId) {
-    nextPresence.set(userId, clearFocusedPresence(cur, now))
+    const cleared = clearFocusedPresence(cur, now)
+    nextPresence.set(userId, cleared)
+    emit.push(presenceDiff(cleared))
   }
-  return {
-    locks: nextLocks,
-    presence: nextPresence,
-    emit: [
-      { t: "lock.released", cellId: msg.cellId, by: { userId, ts: now } },
-      { t: "presence", users: Array.from(nextPresence.values()) },
-    ],
-    emitTo: [],
-  }
+  return { locks: nextLocks, presence: nextPresence, emit, emitTo: [] }
 }
 
 export function applyPresenceUpdate(
@@ -473,6 +546,10 @@ export function applyPresenceUpdate(
       delete next.selection
     }
   }
+  if ("viewingCell" in msg) {
+    if (typeof msg.viewingCell === "string") next.viewingCell = msg.viewingCell
+    else delete next.viewingCell
+  }
   if ("selection" in msg) {
     if (msg.selection && next.focusedCell) {
       next.selection = msg.selection
@@ -486,9 +563,75 @@ export function applyPresenceUpdate(
   }
 
   nextPresence.set(userId, next)
-  return {
-    presence: nextPresence,
-    emit: [{ t: "presence", users: Array.from(nextPresence.values()) }],
+  const emit: ProjectDoServerMessage[] = [presenceDiff(next)]
+  const draftText = next.selection?.draftText
+  if (
+    draftText !== undefined &&
+    next.focusedCell &&
+    draftText !== before?.selection?.draftText
+  ) {
+    emit.push({
+      t: "presence.draft",
+      userId,
+      cellId: next.focusedCell,
+      draftText,
+      ts: now,
+    })
+  }
+  return { presence: nextPresence, emit }
+}
+
+/**
+ * Per-user trailing throttle for `presence.draft` frames: the first draft in
+ * a window goes out immediately; anything else arriving inside the window is
+ * held and only the LATEST one is flushed when the window ends. In-memory
+ * only (timers die with the DO instance, like the rest of its state).
+ */
+export const PRESENCE_DRAFT_THROTTLE_MS = 150
+
+export class PresenceDraftThrottle {
+  private readonly windows = new Map<
+    string,
+    { timer: ReturnType<typeof setTimeout>; pending: ServerPresenceDraft | null }
+  >()
+
+  constructor(
+    private readonly send: (frame: ServerPresenceDraft) => void,
+    private readonly windowMs: number = PRESENCE_DRAFT_THROTTLE_MS,
+  ) {}
+
+  push(frame: ServerPresenceDraft): void {
+    const open = this.windows.get(frame.userId)
+    if (open) {
+      open.pending = frame
+      return
+    }
+    this.send(frame)
+    this.arm(frame.userId)
+  }
+
+  /** Drop any held draft + timer for a user (disconnect). */
+  clear(userId: string): void {
+    const open = this.windows.get(userId)
+    if (!open) return
+    clearTimeout(open.timer)
+    this.windows.delete(userId)
+  }
+
+  private arm(userId: string): void {
+    const timer = setTimeout(() => {
+      const open = this.windows.get(userId)
+      if (!open) return
+      if (open.pending) {
+        const frame = open.pending
+        open.pending = null
+        this.send(frame)
+        this.arm(userId)
+      } else {
+        this.windows.delete(userId)
+      }
+    }, this.windowMs)
+    this.windows.set(userId, { timer, pending: null })
   }
 }
 
@@ -520,7 +663,7 @@ export function applyDisconnect(
   }
   const nextLocks = clone(locks)
   const nextPresence = clone(presence)
-  nextPresence.delete(userId)
+  const hadPresence = nextPresence.delete(userId)
   const released: string[] = []
   for (const [cellId, lock] of nextLocks) {
     if (lock.userId !== userId) continue
@@ -532,11 +675,14 @@ export function applyDisconnect(
     cellId,
     by: { userId, ts: now },
   }))
-  emit.push({ t: "presence", users: Array.from(nextPresence.values()) })
+  if (hadPresence) emit.push({ t: "presence.left", userId })
   return { locks: nextLocks, presence: nextPresence, emit, emitTo: [] }
 }
 
-/** Sweep expired leases. Returns the leases that were dropped. */
+/**
+ * Sweep expired leases. Emits `lock.released` per dropped lease plus a
+ * `presence.diff` for each user whose focused cell was cleared by it.
+ */
 export function sweepExpiredLeases(
   locks: ReadonlyMap<string, LockState>,
   presence: ReadonlyMap<string, PresenceState>,
@@ -548,15 +694,17 @@ export function sweepExpiredLeases(
   for (const [cellId, lock] of next) {
     if (lock.expiresAt > now) continue
     next.delete(cellId)
-    const cur = nextPresence.get(lock.userId)
-    if (cur?.focusedCell === cellId) {
-      nextPresence.set(lock.userId, clearFocusedPresence(cur, now))
-    }
     emit.push({
       t: "lock.released",
       cellId,
       by: { userId: lock.userId, ts: now },
     })
+    const cur = nextPresence.get(lock.userId)
+    if (cur?.focusedCell === cellId) {
+      const cleared = clearFocusedPresence(cur, now)
+      nextPresence.set(lock.userId, cleared)
+      emit.push(presenceDiff(cleared))
+    }
   }
   return { locks: next, presence: nextPresence, emit }
 }

@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { RuleWaiver } from "@/lib/parsers/types"
 import { syncWorkerHttpOrigin } from "@/lib/sync/sync-worker-url"
+import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
 
 export interface CellAuditStats {
   cellId: string
@@ -167,22 +168,7 @@ export function useCellsAuditStats(opts: UseCellsAuditStatsOptions): UseCellsAud
 
   useEffect(() => {
     if (typeof window === "undefined") return
-    function onFocus() { void doFetch() }
-    function onVis() {
-      if (typeof document !== "undefined" && document.visibilityState === "visible") {
-        void doFetch()
-      }
-    }
-    window.addEventListener("focus", onFocus)
-    if (typeof document !== "undefined") {
-      document.addEventListener("visibilitychange", onVis)
-    }
-    return () => {
-      window.removeEventListener("focus", onFocus)
-      if (typeof document !== "undefined") {
-        document.removeEventListener("visibilitychange", onVis)
-      }
-    }
+    return subscribeWindowRegainedFocus(() => { void doFetch() })
   }, [doFetch])
 
   const revalidate = useCallback(() => {

@@ -7,6 +7,7 @@ import {
 } from "./lib/e2e-run-mode"
 
 const specs = [
+  "e2e/specs/ai/completion.smoke.spec.ts",
   "e2e/specs/auth/login-account-setup-status.smoke.spec.ts",
   "e2e/specs/auth/session-expired-banner.smoke.spec.ts",
   "e2e/specs/collab/concurrent-edit.smoke.spec.ts",
@@ -53,6 +54,19 @@ describe("changed-file E2E impact selection", () => {
         "e2e/specs/auth/session-expired-banner.smoke.spec.ts",
         "e2e/specs/orgs/account-switcher.smoke.spec.ts",
       ])
+    }
+  })
+
+  it("maps branching-search retrieval to the AI completion journey", () => {
+    for (const file of [
+      "sync-worker/src/lib/branching-search/corpus.ts",
+      "sync-worker/src/events/branching-search-route.ts",
+      "src/lib/sync/branching-search-read.ts",
+      "src/lib/sync/branching-search-passages-read.ts",
+    ]) {
+      expect(selectAffectedE2E([file], specs).specs, file).toContain(
+        "e2e/specs/ai/completion.smoke.spec.ts",
+      )
     }
   })
 

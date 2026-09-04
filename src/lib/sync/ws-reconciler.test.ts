@@ -158,6 +158,39 @@ describe("parseProjectWsMessage", () => {
 
     expect(msg).toMatchObject({ t: "event.applied", via: "external" })
     expect(msg && msg.t === "event.applied" && isOwnWriteEcho(msg, "alice")).toBe(false)
+  it("passes serverSeq + rows through on event.applied so the client can apply without a refetch", () => {
+    const rows = [
+      { cellId: "c", side: "source", value: "In the beginning", eventId: "S0" },
+      { cellId: "c", side: "target", value: "En el principio", eventId: "E1" },
+    ]
+    const msg = parseProjectWsMessage(
+      JSON.stringify({
+        t: "event.applied",
+        id: "evt-1",
+        kind: "target.cell.commit",
+        project: "p",
+        file: "f",
+        cell: "c",
+        serverSeq: 42,
+        rows,
+      }),
+    )
+    expect(msg).toMatchObject({ t: "event.applied", serverSeq: 42, rows })
+  })
+
+  it("drops malformed rows (and non-numeric serverSeq) rather than applying a partial row set", () => {
+    const parse = (rows: unknown, serverSeq: unknown = 42) =>
+      parseProjectWsMessage(
+        JSON.stringify({ t: "event.applied", id: "e", kind: "target.cell.commit", project: "p", cell: "c", serverSeq, rows }),
+      )
+    // One bad entry → whole field gone; the handler falls back to a refetch.
+    expect(parse([{ cellId: "c", side: "target" }, { side: "target" }])).not.toHaveProperty("rows")
+    expect(parse([{ cellId: "c", side: "sideways" }])).not.toHaveProperty("rows")
+    expect(parse([null])).not.toHaveProperty("rows")
+    expect(parse("not-an-array")).not.toHaveProperty("rows")
+    expect(parse([{ cellId: "c", side: "target" }], "42")).not.toHaveProperty("serverSeq")
+    // The frame itself still parses — rows are additive, never load-bearing.
+    expect(parse([null])).toMatchObject({ t: "event.applied", cell: "c" })
   })
 
   it("parses event.stale", () => {

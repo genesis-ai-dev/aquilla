@@ -40,6 +40,7 @@
  */
 
 import type { OutboxRawEvent, OutboxEventKind } from "./outbox-types"
+import type { CellRow } from "./cells-read-types"
 import type { TargetPresenceSelection } from "./presence-store"
 import type {
   ContextualFrame,
@@ -81,6 +82,13 @@ export type ProjectWsServerMessage =
        *  no local outbox write, so they are never own-write echoes — even
        *  when `by` matches this client's identity. */
       via?: "external"
+      /** `events.server_seq` of this event. Additive; paired with `rows`. */
+      serverSeq?: number
+      /** The cell's CURRENT projected rows (both sides, all lanes), serialised
+       *  exactly as GET …/files/:f/cells?cellIds=<id> returns them. When
+       *  present with `serverSeq`, the client lands them directly
+       *  (src/lib/sync/live-apply.ts) instead of refetching. */
+      rows?: CellRow[]
     }
   | { t: "event.stale"; id: string; reason: string }
   | { t: "presence"; users: PresenceUser[] }
@@ -424,6 +432,19 @@ export function createWsReconciler(
 
 // ── Wire-format helpers ───────────────────────────────────────────────────
 
+/** `event.applied.rows` guard: every entry must at least be an object with a
+ *  string `cellId` and a valid `side`; otherwise the whole field is dropped. */
+function parseAppliedRows(raw: unknown): CellRow[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  for (const r of raw) {
+    if (!r || typeof r !== "object") return undefined
+    const o = r as Record<string, unknown>
+    if (typeof o.cellId !== "string") return undefined
+    if (o.side !== "source" && o.side !== "target") return undefined
+  }
+  return raw as CellRow[]
+}
+
 /**
  * Defensive parse of an incoming WS frame. Returns null on malformed input
  * (the caller treats this as a parse error and emits onError).
@@ -446,6 +467,10 @@ export function parseProjectWsMessage(raw: string): ProjectWsServerMessage | nul
     ) {
       return null
     }
+    // Minimal shape check on the optional projected rows. Any malformed entry
+    // drops the WHOLE field (never a partial row set — replaceRowsForCell
+    // would treat a missing side as a deletion); the handler then refetches.
+    const rows = parseAppliedRows(m.rows)
     return {
       t: "event.applied",
       id: m.id,
@@ -455,6 +480,10 @@ export function parseProjectWsMessage(raw: string): ProjectWsServerMessage | nul
       ...(typeof m.cell === "string" ? { cell: m.cell } : {}),
       ...(typeof m.by === "string" ? { by: m.by } : {}),
       ...(m.via === "external" ? { via: "external" as const } : {}),
+      ...(typeof m.serverSeq === "number" && Number.isFinite(m.serverSeq)
+        ? { serverSeq: m.serverSeq }
+        : {}),
+      ...(rows ? { rows } : {}),
     }
   }
   if (t === "event.stale") {

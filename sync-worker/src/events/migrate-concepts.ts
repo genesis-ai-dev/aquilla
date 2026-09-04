@@ -28,6 +28,7 @@
 // The blob key is cleared only AFTER the rows are in, and clearing is itself
 // tolerant of having already happened.
 
+import type { AquillaDb, AquillaStatement } from '../../../db/shim/postgres'
 import { buildEventInsertStmt } from './event-insert'
 import { allocateSeqRange } from './event-insert'
 

@@ -15,8 +15,13 @@ import {
   isRailSized,
   isSeparatorDisabled,
   mediaPanelConstraints,
+  canFullscreen,
+  isSectionFullscreen,
   presentSections,
   railPreviewSections,
+  readStoredFullscreen,
+  sectionsToFoldForFullscreen,
+  writeStoredFullscreen,
   readStoredCollapsedSections,
   reconcilePresence,
   shouldPersistSize,
@@ -174,6 +179,115 @@ describe("railPreviewSections", () => {
   it("gives a fresh array when the drag crosses the snap point", () => {
     const prev = preview({ text: 900 })
     expect(preview({ text: MEDIA_RAIL_PX }, [], ALL, prev)).toEqual(["text"])
+  })
+})
+
+describe("full screen", () => {
+  type Id = "timeline" | "video" | "text"
+  const full = (collapsed: CollapsedSections, id: Id, present: readonly Id[] = ALL) =>
+    isSectionFullscreen(collapsed, id, [...present])
+  const can = (collapsed: CollapsedSections, id: Id, present: readonly Id[] = ALL) =>
+    canFullscreen(collapsed, id, [...present])
+
+  it("is full screen only when everything else on screen is folded", () => {
+    expect(full(["timeline", "text"], "video")).toBe(true)
+    expect(full(["timeline"], "video")).toBe(false)
+    expect(full([], "video")).toBe(false)
+  })
+
+  it("is never full screen while it is itself folded", () => {
+    // Its neighbours are down and so is it — the lens is showing the partner
+    // the swap rule handed back, not this section.
+    expect(full(["video", "timeline"], "video")).toBe(false)
+  })
+
+  it("counts only the sections that exist", () => {
+    // No film: folding the timeline is all it takes for the text to have the
+    // lens, and the button should say so.
+    expect(full(["timeline"], "text", NO_VIDEO)).toBe(true)
+  })
+
+  it("reads true for an arrangement nobody asked for", () => {
+    // Fold the timeline and the text by hand and the video IS full screen.
+    // The glyph is derived, so it tells the truth rather than tracking presses.
+    expect(full(["text", "timeline"], "video")).toBe(true)
+  })
+
+  it("refuses the timeline, which cannot empty the body", () => {
+    // Its full screen would fold both body sections at once, and a flex row
+    // has to be filled by something. Its own ticket.
+    expect(can([], "timeline")).toBe(false)
+    expect(can([], "video")).toBe(true)
+    expect(can([], "text")).toBe(true)
+  })
+
+  it("refuses a folded section, and one with nothing to fold", () => {
+    expect(can(["video"], "video")).toBe(false)
+    // A lens with one section in it has nothing to hand the space to.
+    expect(can([], "text", ["text"])).toBe(false)
+  })
+
+  it("folds only what is still open, in the canonical order", () => {
+    expect(sectionsToFoldForFullscreen([], "video", [...ALL])).toEqual(["timeline", "text"])
+    expect(sectionsToFoldForFullscreen(["timeline"], "video", [...ALL])).toEqual(["text"])
+    expect(sectionsToFoldForFullscreen([], "text", [...NO_VIDEO])).toEqual(["timeline"])
+  })
+
+  it("has nothing to fold for a section that cannot take the lens", () => {
+    expect(sectionsToFoldForFullscreen([], "timeline", [...ALL])).toEqual([])
+  })
+})
+
+describe("the remembered arrangement", () => {
+  beforeEach(() => {
+    localStorage.removeItem("aquilla:mediaSectionFullscreen:f1")
+    localStorage.removeItem("aquilla:mediaSectionFullscreen:f2")
+  })
+
+  it("round-trips the section and what was folded before it", () => {
+    writeStoredFullscreen("f1", { section: "video", restore: ["timeline"] })
+    expect(readStoredFullscreen("f1", [...ALL])).toEqual({ section: "video", restore: ["timeline"] })
+  })
+
+  it("round-trips an empty restore, which means everything was open", () => {
+    writeStoredFullscreen("f1", { section: "text", restore: [] })
+    expect(readStoredFullscreen("f1", [...ALL])).toEqual({ section: "text", restore: [] })
+  })
+
+  it("removes the key rather than storing the default", () => {
+    writeStoredFullscreen("f1", { section: "video", restore: [] })
+    writeStoredFullscreen("f1", null)
+    expect(localStorage.getItem("aquilla:mediaSectionFullscreen:f1")).toBeNull()
+  })
+
+  it("keeps files apart", () => {
+    writeStoredFullscreen("f1", { section: "video", restore: [] })
+    expect(readStoredFullscreen("f2", [...ALL])).toBeNull()
+  })
+
+  it("ignores a memory for a section that is not on screen", () => {
+    // The film was unlinked since. Storage is left alone — re-linking it
+    // should bring the arrangement back — but nothing acts on it meanwhile.
+    writeStoredFullscreen("f1", { section: "video", restore: [] })
+    expect(readStoredFullscreen("f1", [...NO_VIDEO])).toBeNull()
+  })
+
+  it("reads nothing from anything malformed", () => {
+    for (const raw of ["", "video", "nonsense|timeline", "|timeline", "video timeline"]) {
+      localStorage.setItem("aquilla:mediaSectionFullscreen:f1", raw)
+      expect(readStoredFullscreen("f1", [...ALL])).toBeNull()
+    }
+  })
+
+  it("drops members it does not recognise from the remembered set", () => {
+    localStorage.setItem("aquilla:mediaSectionFullscreen:f1", "video|timeline,gutter")
+    expect(readStoredFullscreen("f1", [...ALL])).toEqual({ section: "video", restore: ["timeline"] })
+  })
+
+  it("does not invent a key with no file", () => {
+    writeStoredFullscreen(null, { section: "video", restore: [] })
+    expect(readStoredFullscreen(null, [...ALL])).toBeNull()
+    expect(Object.keys(localStorage).filter((k) => k.includes("Fullscreen"))).toEqual([])
   })
 })
 

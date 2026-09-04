@@ -201,6 +201,80 @@ export function expandSection(
 }
 
 /**
+ * Is this section the only one on screen — folded neighbours all round?
+ *
+ * DERIVED, never stored, and that is the whole design of full screen. The
+ * button's glyph reads off this, so it cannot claim a state the layout is not
+ * in, and every route that changes the arrangement — a chevron, a rail, a
+ * drag, a window fold, a film being unlinked — updates it for nothing. What IS
+ * stored is only the arrangement to go back to, and that is a hint rather than
+ * a source of truth (see `FullscreenMemory`).
+ *
+ * A consequence worth stating: folding the timeline and the text by hand
+ * leaves the video genuinely full screen, so its button shows the restore
+ * glyph even though nobody pressed it. That is honest, and pressing it opens
+ * everything, which is what `exitFullscreen`'s empty fallback is for.
+ */
+export function isSectionFullscreen(
+  collapsed: CollapsedSections,
+  id: MediaSectionId,
+  present: MediaSectionId[],
+): boolean {
+  if (!present.includes(id) || collapsed.includes(id)) return false
+  return present.every((s) => s === id || collapsed.includes(s))
+}
+
+/**
+ * May this section take the whole lens?
+ *
+ * Not the timeline. Its full screen would mean folding BOTH body sections at
+ * once, and the body is a flex row that something has to fill — the one
+ * arrangement the layout cannot hold (see `bodyOpenAfter`). Folding the body
+ * row as a single unit is a real feature and a separate ticket; until then the
+ * timeline simply has no such control, rather than one that fails. Sam,
+ * 2026-09-03.
+ */
+export function canFullscreen(
+  collapsed: CollapsedSections,
+  id: MediaSectionId,
+  present: MediaSectionId[],
+): boolean {
+  if (id === "timeline") return false
+  if (!present.includes(id) || collapsed.includes(id)) return false
+  return present.length > 1
+}
+
+/**
+ * What has to fold for this section to take the lens, in the canonical order.
+ *
+ * Already-folded sections are skipped, so pressing full screen when one
+ * neighbour is down folds only the other — and the caller's per-section
+ * collapse work (freezing the box, blurring the editor) runs once each rather
+ * than for sections that are already away.
+ */
+export function sectionsToFoldForFullscreen(
+  collapsed: CollapsedSections,
+  id: MediaSectionId,
+  present: MediaSectionId[],
+): MediaSectionId[] {
+  if (!canFullscreen(collapsed, id, present)) return []
+  return ALL.filter((s) => s !== id && present.includes(s) && !collapsed.includes(s))
+}
+
+/**
+ * The arrangement to come back to, and whose press it belongs to.
+ *
+ * It belongs to the GESTURE: pressing full screen records the folded set as it
+ * was at that instant, and any later change that is not the matching press
+ * throws it away. That is what makes "open another section and it just ends"
+ * work without a rule of its own.
+ */
+export interface FullscreenMemory {
+  section: MediaSectionId
+  restore: CollapsedSections
+}
+
+/**
  * Drop sections that have stopped existing, and re-apply the invariant.
  *
  * The case that matters: the video is collapsed and the timeline is collapsed,
@@ -365,6 +439,19 @@ const KEY_PREFIX = "aquilla:mediaSectionsCollapsed:"
 
 const keyFor = (fileId: string) => `${KEY_PREFIX}${fileId}`
 
+/**
+ * A stored comma list back into sections, keeping only what this build knows.
+ *
+ * De-duplicates defensively: the order carries recency, so a repeated id would
+ * make "most recently collapsed" ambiguous. Shared with the full-screen key,
+ * whose remembered set is the same kind of list.
+ */
+function parseSectionList(saved: string): CollapsedSections {
+  if (!saved) return EMPTY
+  const ids = saved.split(",").filter((s): s is MediaSectionId => ALL.includes(s as MediaSectionId))
+  return ids.filter((id, i) => ids.indexOf(id) === i)
+}
+
 /** Nothing collapsed for anything that is not an explicit, well-formed list —
  *  private mode, a cleared store, a value from a future build. That default is
  *  the state that hides nothing from anybody. */
@@ -373,10 +460,7 @@ export function readStoredCollapsedSections(fileId: string | null | undefined): 
   try {
     const saved = localStorage.getItem(keyFor(fileId))
     if (!saved) return EMPTY
-    const ids = saved.split(",").filter((s): s is MediaSectionId => ALL.includes(s as MediaSectionId))
-    // De-duplicate defensively: the order carries recency, so a repeated id
-    // would make "most recently collapsed" ambiguous.
-    return ids.filter((id, i) => ids.indexOf(id) === i)
+    return parseSectionList(saved)
   } catch {
     return EMPTY
   }
@@ -394,6 +478,63 @@ export function writeStoredCollapsedSections(
     // gutter and folder state beside it.
     if (collapsed.length > 0) localStorage.setItem(keyFor(fileId), collapsed.join(","))
     else localStorage.removeItem(keyFor(fileId))
+  } catch {
+    /* private mode — just won't persist */
+  }
+}
+
+// The full-screen memory rides in its own key rather than a new format for the
+// one above: that key's parsing is covered by its own tests and is already in
+// people's browsers, and a section being folded is true whether or not
+// anything asked for it. Reading them separately also means a corrupt memory
+// costs the reader nothing — the arrangement still comes back, only the
+// "put it back" shortcut is gone.
+const FULLSCREEN_PREFIX = "aquilla:mediaSectionFullscreen:"
+
+const fullscreenKeyFor = (fileId: string) => `${FULLSCREEN_PREFIX}${fileId}`
+
+/**
+ * Read the remembered arrangement, or nothing at all.
+ *
+ * Strict, in the same spirit as the folded set: an unrecognised section, a
+ * section that is not on screen right now, or anything that is not
+ * `section|a,b` at all reads as no memory. `present` is taken so a memory
+ * naming the video survives in storage but is ignored on a file whose film has
+ * been unlinked — re-linking it should bring the arrangement back rather than
+ * punishing a trip through Free timing, the same reasoning `reconcilePresence`
+ * gives for not rewriting storage.
+ */
+export function readStoredFullscreen(
+  fileId: string | null | undefined,
+  present: MediaSectionId[],
+): FullscreenMemory | null {
+  if (!fileId) return null
+  try {
+    const saved = localStorage.getItem(fullscreenKeyFor(fileId))
+    if (!saved) return null
+    const bar = saved.indexOf("|")
+    if (bar < 0) return null
+    const section = saved.slice(0, bar) as MediaSectionId
+    if (!ALL.includes(section) || !present.includes(section)) return null
+    return { section, restore: parseSectionList(saved.slice(bar + 1)) }
+  } catch {
+    return null
+  }
+}
+
+export function writeStoredFullscreen(
+  fileId: string | null | undefined,
+  memory: FullscreenMemory | null,
+): void {
+  if (!fileId) return
+  try {
+    // Removed rather than written empty, like the folded set: no memory is the
+    // default, so storing it says nothing.
+    if (memory) {
+      localStorage.setItem(fullscreenKeyFor(fileId), `${memory.section}|${memory.restore.join(",")}`)
+    } else {
+      localStorage.removeItem(fullscreenKeyFor(fileId))
+    }
   } catch {
     /* private mode — just won't persist */
   }

@@ -40,6 +40,7 @@
  */
 
 import type { OutboxRawEvent, OutboxEventKind } from "./outbox-types"
+import type { CellRow } from "./cells-read-types"
 import type { TargetPresenceSelection } from "./presence-store"
 import type {
   ContextualFrame,
@@ -81,9 +82,21 @@ export type ProjectWsServerMessage =
        *  no local outbox write, so they are never own-write echoes — even
        *  when `by` matches this client's identity. */
       via?: "external"
+      /** `events.server_seq` of this event. Additive; paired with `rows`. */
+      serverSeq?: number
+      /** The cell's CURRENT projected rows (both sides, all lanes), serialised
+       *  exactly as GET …/files/:f/cells?cellIds=<id> returns them. When
+       *  present with `serverSeq`, the client lands them directly
+       *  (src/lib/sync/live-apply.ts) instead of refetching. */
+      rows?: CellRow[]
     }
   | { t: "event.stale"; id: string; reason: string }
   | { t: "presence"; users: PresenceUser[] }
+  /** Exactly one user's roster-visible state changed (no `selection.draftText`). */
+  | { t: "presence.diff"; user: PresenceUser }
+  | { t: "presence.left"; userId: string }
+  /** Live draft text for one cell; server coalesces to ≤1 per user per 150 ms. */
+  | { t: "presence.draft"; userId: string; cellId: string; draftText: string; ts: number }
   | { t: "lock.claimed"; cellId: string; by: { userId: string; ts: number } }
   | { t: "lock.released"; cellId: string; by: { userId: string; ts: number } }
   | { t: "project.archived"; project: string; archivedAt?: string; deletedBy?: string }
@@ -419,6 +432,19 @@ export function createWsReconciler(
 
 // ── Wire-format helpers ───────────────────────────────────────────────────
 
+/** `event.applied.rows` guard: every entry must at least be an object with a
+ *  string `cellId` and a valid `side`; otherwise the whole field is dropped. */
+function parseAppliedRows(raw: unknown): CellRow[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  for (const r of raw) {
+    if (!r || typeof r !== "object") return undefined
+    const o = r as Record<string, unknown>
+    if (typeof o.cellId !== "string") return undefined
+    if (o.side !== "source" && o.side !== "target") return undefined
+  }
+  return raw as CellRow[]
+}
+
 /**
  * Defensive parse of an incoming WS frame. Returns null on malformed input
  * (the caller treats this as a parse error and emits onError).
@@ -441,6 +467,10 @@ export function parseProjectWsMessage(raw: string): ProjectWsServerMessage | nul
     ) {
       return null
     }
+    // Minimal shape check on the optional projected rows. Any malformed entry
+    // drops the WHOLE field (never a partial row set — replaceRowsForCell
+    // would treat a missing side as a deletion); the handler then refetches.
+    const rows = parseAppliedRows(m.rows)
     return {
       t: "event.applied",
       id: m.id,
@@ -450,6 +480,10 @@ export function parseProjectWsMessage(raw: string): ProjectWsServerMessage | nul
       ...(typeof m.cell === "string" ? { cell: m.cell } : {}),
       ...(typeof m.by === "string" ? { by: m.by } : {}),
       ...(m.via === "external" ? { via: "external" as const } : {}),
+      ...(typeof m.serverSeq === "number" && Number.isFinite(m.serverSeq)
+        ? { serverSeq: m.serverSeq }
+        : {}),
+      ...(rows ? { rows } : {}),
     }
   }
   if (t === "event.stale") {
@@ -460,21 +494,33 @@ export function parseProjectWsMessage(raw: string): ProjectWsServerMessage | nul
     if (!Array.isArray(m.users)) return null
     const users: PresenceUser[] = []
     for (const u of m.users) {
-      if (!u || typeof u !== "object") return null
-      const r = u as Record<string, unknown>
-      if (typeof r.userId !== "string" || typeof r.ts !== "number") return null
-      // A present-but-invalid selection (wrong shape, oversized draft) marks
-      // the whole frame malformed — same strictness as the other fields.
-      if (r.selection !== undefined && !isTargetPresenceSelection(r.selection)) return null
-      users.push({
-        userId: r.userId,
-        ts: r.ts,
-        ...(typeof r.focusedCell === "string" ? { focusedCell: r.focusedCell } : {}),
-        ...(typeof r.currentFileId === "string" ? { currentFileId: r.currentFileId } : {}),
-        ...(r.selection !== undefined ? { selection: r.selection } : {}),
-      })
+      const user = parsePresenceUser(u)
+      if (!user) return null
+      users.push(user)
     }
     return { t: "presence", users }
+  }
+  if (t === "presence.diff") {
+    const user = parsePresenceUser(m.user)
+    if (!user) return null
+    return { t: "presence.diff", user }
+  }
+  if (t === "presence.left") {
+    if (typeof m.userId !== "string") return null
+    return { t: "presence.left", userId: m.userId }
+  }
+  if (t === "presence.draft") {
+    if (
+      typeof m.userId !== "string" ||
+      typeof m.cellId !== "string" ||
+      typeof m.draftText !== "string" ||
+      m.draftText.length > MAX_PRESENCE_DRAFT_LENGTH ||
+      typeof m.ts !== "number" ||
+      !Number.isFinite(m.ts)
+    ) {
+      return null
+    }
+    return { t: "presence.draft", userId: m.userId, cellId: m.cellId, draftText: m.draftText, ts: m.ts }
   }
   if (t === "lock.claimed" || t === "lock.released") {
     if (typeof m.cellId !== "string" || !m.by || typeof m.by !== "object") return null
@@ -687,6 +733,22 @@ function parseContextualFrame(value: unknown): ContextualActivityFrame | null {
     }
   }
   return null
+}
+
+function parsePresenceUser(u: unknown): PresenceUser | null {
+  if (!u || typeof u !== "object") return null
+  const r = u as Record<string, unknown>
+  if (typeof r.userId !== "string" || typeof r.ts !== "number") return null
+  // A present-but-invalid selection (wrong shape, oversized draft) marks
+  // the whole frame malformed — same strictness as the other fields.
+  if (r.selection !== undefined && !isTargetPresenceSelection(r.selection)) return null
+  return {
+    userId: r.userId,
+    ts: r.ts,
+    ...(typeof r.focusedCell === "string" ? { focusedCell: r.focusedCell } : {}),
+    ...(typeof r.currentFileId === "string" ? { currentFileId: r.currentFileId } : {}),
+    ...(r.selection !== undefined ? { selection: r.selection } : {}),
+  }
 }
 
 function isTargetPresenceSelection(value: unknown): value is TargetPresenceSelection {

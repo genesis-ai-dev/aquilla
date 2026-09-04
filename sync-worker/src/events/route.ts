@@ -25,6 +25,7 @@ import type { RealtimeMessage, ProjectionTable } from './realtime'
 import { authorize } from './authorize'
 import { dispatchEvent, type DispatchOutcome } from './dispatch'
 import { allocateSeqRange, buildSettleSeqRangeStmt } from './event-insert'
+import { CELL_ROW_COLUMNS, mapCellRow, type CellRowOut, type CellRowRaw } from './cell-row-serialize'
 import {
   CHAIN_MUTATING_KINDS,
   fileCountersRecomputeStmt,
@@ -233,6 +234,72 @@ async function notifyLiveDownstreamsOfUpstreamChanges(
   }
 
   await Promise.all(sends)
+}
+
+/**
+ * Cell-content kinds whose `event.applied` frame carries `serverSeq` + the
+ * cell's current projected `rows`: the chain-mutating kinds (create / commit /
+ * delete / reorder on either side) plus the validation pair, which flips
+ * `cells.validated` without advancing the chain head.
+ */
+function isEventAppliedRowsKind(kind: string): boolean {
+  return isChainMutatingKind(kind) || kind === 'cell.validate' || kind === 'cell.unvalidate'
+}
+
+/** Above this many distinct cells in one request, `rows` is omitted from every
+ * frame (clients fall back to the by-ids refetch) — bounds the DO payload. */
+export const EVENT_APPLIED_ROWS_MAX_CELLS = 200
+
+function cellRowsKey(project: string, file: string, cell: string): string {
+  return `${project}|${file}|${cell}`
+}
+
+/**
+ * ONE query for the current projected rows of every cell touched by the
+ * committed cell-content events. Returns null when nothing qualifies (no
+ * SELECT runs) or when the request exceeded EVENT_APPLIED_ROWS_MAX_CELLS.
+ * Rows for an event that lost its chain slot are still the cell's CURRENT
+ * head — that is what the client should converge on.
+ */
+async function readEventAppliedRows(
+  db: AquillaDb,
+  entries: ReadonlyArray<{ eventFrame: { kind: string; project: string; file?: string; cell?: string } }>,
+): Promise<Map<string, CellRowOut[]> | null> {
+  const slots = new Map<string, [string, string, string]>()
+  for (const { eventFrame: f } of entries) {
+    if (!f.file || !f.cell || !isEventAppliedRowsKind(f.kind)) continue
+    slots.set(cellRowsKey(f.project, f.file, f.cell), [f.project, f.file, f.cell])
+  }
+  if (slots.size === 0) return null
+  if (slots.size > EVENT_APPLIED_ROWS_MAX_CELLS) {
+    console.warn(
+      `[events/route] event.applied rows omitted: ${slots.size} cells > ${EVENT_APPLIED_ROWS_MAX_CELLS} cap`,
+    )
+    return null
+  }
+  const tuples = [...slots.values()]
+  const placeholders = tuples.map(() => '(?, ?, ?)').join(', ')
+  const out = new Map<string, CellRowOut[]>()
+  try {
+    const result = await db
+      .prepare(
+        `SELECT ${CELL_ROW_COLUMNS}, project_id, file_id FROM cells WHERE (project_id, file_id, cell_id) IN (${placeholders})`,
+      )
+      .bind(...tuples.flat())
+      .all<CellRowRaw & { project_id: string; file_id: string }>()
+    for (const raw of result.results) {
+      const key = cellRowsKey(raw.project_id, raw.file_id, raw.cell_id)
+      const bucket = out.get(key)
+      const mapped = mapCellRow(raw)
+      if (bucket) bucket.push(mapped)
+      else out.set(key, [mapped])
+    }
+  } catch (err) {
+    // Best-effort: without rows the client refetches exactly as before.
+    console.warn('[events/route] event.applied rows read failed:', err)
+    return null
+  }
+  return out
 }
 
 export interface EventsRouteEnv {
@@ -682,6 +749,8 @@ export async function handleEventsWriteRequest(
     stmtStart: number
     stmtCount: number
     eventFrame: Extract<RealtimeMessage, { t: 'event' }>
+    /** `events.server_seq` assigned to this event (seqBase + slot). */
+    serverSeq: number
     dirtyEntry?: { project: string; file: string; tables: Set<ProjectionTable> }
     /** Verified author (JWT claims, not the client-supplied event field) —
      * broadcast as `by` so clients can suppress own-write banners. */
@@ -1246,6 +1315,7 @@ export async function handleEventsWriteRequest(
       stmtStart: stmtsBefore,
       stmtCount: pendingStmts.length - stmtsBefore,
       eventFrame: outcome.result.eventFrame,
+      serverSeq,
       dirtyEntry,
       author: authResult.event.claims.username,
       viaExternal: authResult.event.claims.src === 'external',
@@ -1489,12 +1559,19 @@ export async function handleEventsWriteRequest(
         if (list) list.push(entry)
         else byProject.set(project, [entry])
       }
+      // Inline each committed cell's CURRENT projected rows (post-commit) on
+      // its event.applied frame so clients apply the head directly instead
+      // of a GET …/cells?cellIds= round-trip per frame. ONE SELECT for every
+      // cell this request touched; skipped when none qualify.
+      const rowsByCell = await readEventAppliedRows(db, committedEntries)
       const doFanOut: Promise<void>[] = []
       for (const [project, entries] of byProject) {
         const id = env.ProjectSync.idFromName(project)
         const stub = env.ProjectSync.get(id)
         const messages = entries.map((entry) => {
           const frame = entry.eventFrame
+          const carriesRows =
+            frame.file !== undefined && frame.cell !== undefined && isEventAppliedRowsKind(frame.kind)
           return {
             t: 'event.applied',
             id: frame.id,
@@ -1509,6 +1586,13 @@ export async function handleEventsWriteRequest(
             // browser to treat the frame as remote (no local outbox write
             // exists to have already refetched). See PendingEntry.viaExternal.
             ...(entry.viaExternal ? { via: 'external' as const } : {}),
+            // Additive: server_seq + current rows for cell-content events.
+            // `rows` is omitted (not empty) when the request exceeded the
+            // per-request cell cap — clients then refetch as before.
+            ...(carriesRows ? { serverSeq: entry.serverSeq } : {}),
+            ...(carriesRows && rowsByCell
+              ? { rows: rowsByCell.get(cellRowsKey(frame.project, frame.file!, frame.cell!)) ?? [] }
+              : {}),
           }
         })
         // PERF-8: ONE __broadcast subrequest per (project, request) — the

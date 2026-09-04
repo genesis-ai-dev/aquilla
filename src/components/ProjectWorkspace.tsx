@@ -207,11 +207,11 @@ import { useFocusLock } from "@/hooks/useFocusLock"
 import type { WsReconciler } from "@/lib/sync/ws-reconciler"
 import {
   createProjectPresenceStore,
-  usePresencePeers,
   type ProjectPresencePeer,
   type TargetPresenceSelection,
 } from "@/lib/sync/presence-store"
 import { flushOutboxBatch, subscribeStaleSiblings, type ForbiddenEntry } from "@/lib/sync/outbox-flush"
+import { createLiveApplier } from "@/lib/sync/live-apply"
 import { acknowledgeOutboxEvents, getOutboxRecords } from "@/lib/sync/outbox"
 import { forbiddenBannerMessage } from "@/lib/sync/forbidden-copy"
 import { useForbiddenOutboxRecords } from "@/hooks/useForbiddenOutboxRecords"
@@ -1135,7 +1135,6 @@ export function ProjectWorkspace() {
     () => createProjectPresenceStore(currentUsername),
     [currentUsername, project?.id],
   )
-  const presencePeers = usePresencePeers(presenceStore)
   const jwtRef = useRef<string | null>(null)
   useEffect(() => {
     jwtRef.current = frontierSession?.jwt ?? null
@@ -1472,6 +1471,16 @@ export function ProjectWorkspace() {
     },
     [applyOptimisticTargetEdit],
   )
+
+  // Live sync: event.applied frames now carry the cell's projected rows and
+  // server_seq (sync-worker route), so the client applies them straight into
+  // the store — no per-cell GET, no range refresh — with a per-cell seq guard.
+  // Frames without rows fall through to the existing refresh path.
+  const liveApplier = useMemo(
+    () => createLiveApplier({ store: cellStore, revalidateCell }),
+    [cellStore, revalidateCell],
+  )
+  useEffect(() => { liveApplier.reset() }, [liveApplier, activeFileId])
 
   const getPendingTargetEventId = useCallback((cellId: string) => {
     return pendingTargetCommitHeadsRef.current.get(laneCellKey(cellId))?.eventId ?? null
@@ -5926,7 +5935,10 @@ export function ProjectWorkspace() {
                 if (msg.kind?.startsWith("source.cell.")) return view.sourceEventId === msg.id
                 return true
               })()
-              if (!ownWrite || !alreadyApplied) {
+              const liveResult = msg.file === activeFileIdRef.current
+                ? liveApplier.apply(msg)
+                : "refetch"
+              if (liveResult !== "applied" && (!ownWrite || !alreadyApplied)) {
                 // A model response or collaborator burst arrives as several
                 // frames. Consume the file's server-sequence range once so
                 // the store derives and emits once for the whole burst.
@@ -6047,6 +6059,23 @@ export function ProjectWorkspace() {
               if (sameStringMap(cellLockHoldersRef.current, next)) return
               cellLockHoldersRef.current = next
               setCellLockHolders(next)
+            } else if (msg.t === "presence.diff" || msg.t === "presence.left") {
+              // Diff presence (SYNC-LIVE): the DO no longer rebroadcasts the
+              // roster per update. Apply the diff to the store, then derive
+              // the lock-holder map and the focus-lock feed from the store's
+              // snapshots, which still have the full-roster shape.
+              if (msg.t === "presence.diff") presenceStore.applyPresenceDiff(msg.user)
+              else presenceStore.applyPresenceLeft(msg.userId)
+              const users = presenceStore.getUserSnapshots()
+              focusLockFeedFrameRef.current({ t: "presence", users })
+              const next = applyPresenceFrame(users, currentUsername)
+              if (sameStringMap(cellLockHoldersRef.current, next)) return
+              cellLockHoldersRef.current = next
+              setCellLockHolders(next)
+            } else if (msg.t === "presence.draft") {
+              // Cell-scoped: notifies only that cell's subscribers (EditorRow's
+              // useCellPresence), never the workspace root.
+              presenceStore.applyPresenceDraft(msg.userId, msg.cellId, msg.draftText, msg.ts)
             } else if (msg.t === "lock.claimed") {
               presenceStore.applyLockClaimed(msg.cellId, msg.by.userId)
               // FRO-288: forward lock.claimed to the hook so it can update
@@ -11134,7 +11163,7 @@ export function ProjectWorkspace() {
                 className={showAudioToolbar ? "px-0 py-0.5" : undefined}
                 left={
                   <div className="flex min-w-0 items-center gap-1.5">
-                    <PeerPresence peers={presencePeers} onJumpToPeer={handleJumpToPresencePeer} />
+                    <PeerPresence store={presenceStore} onJumpToPeer={handleJumpToPresencePeer} />
                     <SyncStatusIndicator status={fileSyncStatus} />
                     <OutboxSyncIndicator
                       pendingCount={Math.max(0, outboxPending - outboxFailed)}

@@ -18,6 +18,7 @@ import type { FileProgressResponse, ProgressCounts } from "@/lib/progress/file-p
 import { deriveMilestoneNavigation } from "@/lib/milestone-navigation"
 import type { ImportMilestoneKind } from "../../shared/import-contract"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
+import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
 
 const EMPTY_STATS: ReadonlyMap<string, CellAuditStats> = new Map()
 const EMPTY_TAKES: ReadonlySet<string> = new Set()
@@ -1926,16 +1927,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
 
   useEffect(() => {
     if (typeof window === "undefined") return
-    function onFocus() { void doFetch(true) }
-    function onVis() {
-      if (typeof document !== "undefined" && document.visibilityState === "visible") void doFetch(true)
-    }
-    window.addEventListener("focus", onFocus)
-    if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVis)
-    return () => {
-      window.removeEventListener("focus", onFocus)
-      if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVis)
-    }
+    return subscribeWindowRegainedFocus(() => { void doFetch(true) })
   }, [doFetch])
 
   const revalidate = useCallback(() => {

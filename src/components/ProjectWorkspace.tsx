@@ -205,7 +205,7 @@ import {
   type ProjectPresencePeer,
   type TargetPresenceSelection,
 } from "@/lib/sync/presence-store"
-import { flushOutboxBatch, type ForbiddenEntry } from "@/lib/sync/outbox-flush"
+import { flushOutboxBatch, subscribeStaleSiblings, type ForbiddenEntry } from "@/lib/sync/outbox-flush"
 import { acknowledgeOutboxEvents, getOutboxRecords } from "@/lib/sync/outbox"
 import { forbiddenBannerMessage } from "@/lib/sync/forbidden-copy"
 import { useForbiddenOutboxRecords } from "@/hooks/useForbiddenOutboxRecords"
@@ -1468,6 +1468,29 @@ export function ProjectWorkspace() {
   const rememberPendingTargetCommit = useCallback((cellId: string, eventId: string, parentId: string | null) => {
     pendingTargetCommitHeadsRef.current.set(laneCellKey(cellId), { eventId, parentId })
   }, [laneCellKey])
+
+  // I2: a stale sibling is a REJECTION of this client's commit, not a save.
+  // Left alone, the losing writer keeps its optimistic shadow (which makes
+  // mergeProtectedRows discard every server row for the cell) and keeps the
+  // losing event id as the parent of its next commit — so it never sees the
+  // winner and every follow-up commit is stale too. Drop the shadow, forget
+  // the pending head (the next commit chains on `cell.targetEventId`, the
+  // real head), and pull the winner's row. The banner stays as the route to
+  // History / promote. Subscribed tab-wide because the inline "flush now"
+  // after a commit does not go through useOutboxFlusher's callback.
+  useEffect(() => {
+    if (!activeFileId) return
+    return subscribeStaleSiblings((entries) => {
+      for (const entry of entries) {
+        if (!entry.cellId || entry.fileId !== activeFileId) continue
+        const key = laneCellKey(entry.cellId)
+        pendingTargetCommitHeadsRef.current.delete(key)
+        pendingCompletionEventIdRef.current.delete(key)
+        cellStore.clearOptimisticForCell(entry.cellId)
+        revalidateCell(entry.cellId)
+      }
+    })
+  }, [activeFileId, cellStore, laneCellKey, revalidateCell])
 
   useEffect(() => {
     if (pendingTargetCommitHeadsRef.current.size === 0) return
@@ -5175,20 +5198,6 @@ export function ProjectWorkspace() {
     return () => document.removeEventListener("keydown", handler)
   }, [activeFileId, hasUnfinished, handleJumpNextUnfinished])
 
-  // Legacy sync status shim. AD-1 live coordination uses the project
-  // WebSocket below; this hook only feeds the existing status indicator.
-  const { status: fileSyncStatus } = useFileSync({
-    doc,
-    projectId: project?.id ?? null,
-    fileId: activeFileId || null,
-    username: currentUsername,
-    enabled: Boolean(project && activeFileId),
-    session: frontierSession,
-    projectName: project?.name ?? null,
-    gitlabProjectId:
-      project?.origin?.kind === "git" ? project.origin.gitlabProjectId : null,
-  })
-
   // Phase 2c-gamma: cross-collaborator settings sync was piggybacked on the
   // active file's Y.Doc meta; that broadcast channel is gone. Settings still
   // persist locally and via the project record fetch.
@@ -5198,8 +5207,10 @@ export function ProjectWorkspace() {
   // The outbox flusher (above) ships writes; this connection drives reads.
   const [cellLockHolders, setCellLockHolders] = useState<Map<string, string>>(() => new Map())
   // RACE-5: ref that mirrors cellLockHolders, updated synchronously on each WS
-  // frame so handleEditorCommit (checkLockHolder) always reads the latest state
-  // rather than a stale React closure captured at the last render.
+  // frame so checkLockHolder (agent commit path, translate-as-read) always
+  // reads the latest state rather than a stale React closure captured at the
+  // last render. Human commits no longer consult it (AQU-1154): the lock is
+  // advisory and the server head check is the arbiter.
   const cellLockHoldersRef = useRef<Map<string, string>>(new Map())
   const [cellsWithRemoteChange, setCellsWithRemoteChange] = useState<Set<string>>(() => new Set())
   const focusedCellIdRef = useRef<string | null>(null)
@@ -5368,6 +5379,22 @@ export function ProjectWorkspace() {
   // reconcilerRef is still the write target (set inside the async connect effect)
   // and is used by the claim/release callbacks declared below.
   const [liveReconciler, setLiveReconciler] = useState<WsReconciler | null>(null)
+  // AQU-1155: the status pill is a pure function of real signals — browser
+  // online state, the project WS socket, and the outbox queue/failure streak.
+  const { status: fileSyncStatus } = useFileSync({
+    doc,
+    projectId: project?.id ?? null,
+    fileId: activeFileId || null,
+    username: currentUsername,
+    enabled: Boolean(project && activeFileId),
+    session: frontierSession,
+    projectName: project?.name ?? null,
+    gitlabProjectId:
+      project?.origin?.kind === "git" ? project.origin.gitlabProjectId : null,
+    reconciler: liveReconciler,
+    pendingCount: Math.max(0, outboxPending - outboxFailed),
+    failureStreak: outboxFailures,
+  })
   // Read the current file list inside the WS connect path without making it a
   // reconnect trigger — otherwise every file-list change (e.g. each batch of a
   // large import landing) tears the socket down and recreates it.
@@ -5394,6 +5421,9 @@ export function ProjectWorkspace() {
   }) => {
     reconcilerRef.current?.send({ t: "presence.update", ...patch })
   }, [])
+  // AQU-1154: lets the WS onOpen handler (declared before the focus-lock hook
+  // below) re-claim the cell the user is still editing after a reconnect.
+  const focusLockClaimRef = useRef<((cellId: string) => void) | null>(null)
 
   useEffect(() => {
     if (!project?.id || !frontierSession?.jwt) return
@@ -5463,6 +5493,12 @@ export function ProjectWorkspace() {
               currentFileId: activeFileIdRef.current,
               selection: null,
             })
+            // AQU-1154: the DO released our lease + focusedCell when the old
+            // socket dropped. If the user is still in a cell, claim it again
+            // (focus.claim is the only frame that grants focusedCell) so peers
+            // keep seeing "X is editing" instead of taking the cell over.
+            const editingCellId = focusedCellIdRef.current
+            if (editingCellId) focusLockClaimRef.current?.(editingCellId)
             // Skips the first open (the initial read is already in flight);
             // every reconnect after that closes the missed-broadcast gap.
             handleReconnectResync()
@@ -5772,6 +5808,7 @@ export function ProjectWorkspace() {
   })
   const focusLockFeedFrameRef = useRef(focusLockFeedFrame)
   useEffect(() => { focusLockFeedFrameRef.current = focusLockFeedFrame }, [focusLockFeedFrame])
+  useEffect(() => { focusLockClaimRef.current = focusLockState.claim }, [focusLockState.claim])
 
   const writeLocTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const handleClaimCell = useCallback((cellId: string) => {
@@ -10535,7 +10572,6 @@ export function ProjectWorkspace() {
             onReleaseCell={handleReleaseCell}
             onTargetPresenceSelection={handleTargetPresenceSelection}
             onAckRemoteChange={handleAckRemoteChange}
-            checkLockHolder={checkLockHolder}
             staleCellIds={staleCellIds}
             upstreamStaleCellIds={upstreamStaleCellIds}
             assignmentsByCellId={assignmentsByCellId}

@@ -630,6 +630,13 @@ describe("OrgOverview / OrgProjects", () => {
     expect(screen.queryByTestId("pending-invitations")).not.toBeInTheDocument()
   })
 
+  it("keeps the overview projects scrollbar inside the card", async () => {
+    renderMemberOverview()
+    const table = await screen.findByTestId("org-overview-projects-table")
+    expect(table).toHaveClass("mx-0")
+    expect(table).not.toHaveClass("-mx-2")
+  })
+
   it("shows the project count in the rollup strip", async () => {
     renderMemberOverview()
     await waitFor(() => expect(screen.getByText("Avg translated")).toBeInTheDocument())

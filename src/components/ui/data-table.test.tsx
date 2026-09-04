@@ -195,6 +195,23 @@ describe("DataTable", () => {
     expect(shell.parentElement).toHaveClass("min-w-0")
   })
 
+  it("cancels negative horizontal margin so fillHeight scrollbars are not clipped", () => {
+    render(
+      <DataTable
+        columns={columns}
+        data={rows}
+        getRowId={(r) => String(r.id)}
+        fillHeight
+        className="-mx-2 overflow-visible"
+        testId="fill-table"
+      />,
+    )
+    const shell = screen.getByTestId("fill-table")
+    expect(shell).toHaveClass("mx-0")
+    expect(shell).not.toHaveClass("-mx-2")
+    expect(shell).not.toHaveClass("overflow-hidden")
+  })
+
   it("virtualizes fillHeight rows with LegendList while keeping names queryable", () => {
     render(
       <DataTable

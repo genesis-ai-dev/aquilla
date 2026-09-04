@@ -303,12 +303,12 @@ export function OrgOverview() {
                 headerClassName={cn(ADMIN_TABLE_SECTION_HEADER, "shrink-0")}
                 contentClassName={cn(
                   ADMIN_TABLE_SECTION_CONTENT,
-                  "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
+                  "flex min-h-0 min-w-0 flex-1 flex-col",
                 )}
               >
                 <div
                   id="org-overview-projects-table"
-                  className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+                  className="flex min-h-0 min-w-0 flex-1 flex-col"
                 >
                   <DataTable
                     columns={projectColumns}
@@ -316,7 +316,12 @@ export function OrgOverview() {
                     getRowId={(r) => r.project.id}
                     onRowClick={(r) => navigate(`/projects/${r.project.id}`)}
                     testId="org-overview-projects-table"
-                    className={ADMIN_TABLE_CLASS}
+                    className={cn(
+                      ADMIN_TABLE_CLASS,
+                      // Keep the -mx-2 bleed inside the card so the
+                      // fillHeight scrollbar is not clipped at the edge.
+                      "mx-0",
+                    )}
                     dense
                     fillHeight
                     emptyState={

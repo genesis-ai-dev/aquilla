@@ -548,12 +548,16 @@ function DataTable<TData, TValue>({
           "rounded-md border",
           className,
           // After `className` so fillHeight scroll wins over admin
-          // `overflow-visible` chrome. overflow-auto keeps sticky headers
-          // and lets wide columns scroll horizontally in the same port.
+          // `overflow-visible` / `-mx-2` chrome. mx-0 keeps the native
+          // scrollbar inside the card instead of clipping it to a sliver.
+          // Virtualized lists must not use overflow-hidden here — that
+          // clips LegendList's 0.75rem track. The bounded Section already
+          // contains the pane. overflow-auto keeps sticky headers and
+          // lets wide columns scroll horizontally in the same port.
           fillHeight
             ? virtualize
-              ? "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
-              : "min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain [&_thead]:sticky [&_thead]:top-0 [&_thead]:z-10 [&_thead]:bg-card"
+              ? "mx-0 flex min-h-0 min-w-0 flex-1 flex-col"
+              : "mx-0 min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain [&_thead]:sticky [&_thead]:top-0 [&_thead]:z-10 [&_thead]:bg-card"
             : "overflow-hidden",
         )}
         data-testid={testId}

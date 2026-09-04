@@ -116,7 +116,7 @@ function VirtualizedDataTableBody<TData>({
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <div
           ref={scrollerRef}
-          className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-auto"
+          className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-auto overflow-y-hidden"
         >
           <div
             className="flex h-full min-h-0 w-full flex-col"

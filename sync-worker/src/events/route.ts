@@ -52,6 +52,7 @@ import {
   fullProgressRecomputeStmts,
   sectionsProgressRecomputeStmt,
 } from './progress-projection'
+import { makeRequestCache } from './request-cache'
 
 // Max statements per batch() transaction — a conservative self-imposed cap (Postgres has no hard limit; keeps any single transaction bounded).
 const BATCH_LIMIT = 100
@@ -831,32 +832,26 @@ export async function handleEventsWriteRequest(
       prefetchLastEditors(db, [...validateCells.values()]),
     ])
 
-  // PERF-2: project_settings is read at most once per (request, project).
-  // No event kind mutates project_settings (its only writers are the
-  // migrate-settings route and auth-worker), so the memo cannot serve a
-  // stale read to any event in this batch. Read/parse failures memoize as
-  // null — the same per-event fallback as before (validate: skip
-  // enforcement; harmonize: hard floor).
-  const settingsCache = new Map<string, Record<string, unknown> | null>()
+  // PERF-2: project_settings is read at most once per (request, project) —
+  // and, since perf/events-write-path, that ONE memo is shared with the
+  // authority carve-outs inside authorize() (request-cache.ts), which used to
+  // re-read the same row per event. No event kind mutates project_settings /
+  // org_settings / projects.org_id (their only writers are the
+  // migrate-settings route and auth-worker), so the memo cannot serve a stale
+  // read to any event in this batch. Read/parse failures read as null — the
+  // same per-event fallback as before (validate: skip enforcement;
+  // harmonize: hard floor).
+  const requestCache = makeRequestCache(db)
   const readProjectSettings = async (
     projectId: string,
   ): Promise<Record<string, unknown> | null> => {
-    if (settingsCache.has(projectId)) return settingsCache.get(projectId) ?? null
-    let parsed: Record<string, unknown> | null = null
     try {
-      const row = await db
-        .prepare(`SELECT settings FROM project_settings WHERE project_id = ?`)
-        .bind(projectId)
-        .first<{ settings: string | null }>()
-      if (row?.settings) {
-        parsed = JSON.parse(row.settings) as Record<string, unknown>
-      }
+      return await requestCache.projectSettings(projectId)
     } catch {
       // Settings load failure is non-fatal — callers fall back to their
       // defaults rather than blocking the batch.
+      return null
     }
-    settingsCache.set(projectId, parsed)
-    return parsed
   }
 
   // FRO-346: live membership re-check, once per (project, user) per request.
@@ -879,7 +874,7 @@ export async function handleEventsWriteRequest(
 
   for (const [eventIndex, rawEvent] of rawEvents.entries()) {
     // Authorize.
-    const authResult = await authorize(token, rawEvent, env.SYNC_SECRET_KEY, db)
+    const authResult = await authorize(token, rawEvent, env.SYNC_SECRET_KEY, db, requestCache)
     if (!authResult.ok) {
       rejected.push({
         id: rawEvent.id ?? '(unknown)',

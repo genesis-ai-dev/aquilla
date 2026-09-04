@@ -29,6 +29,7 @@ import {
   verseMarkerOnlyNote,
 } from "@/lib/biblica/__fixtures__/biblica-idml"
 import { buildBulkCellsWithSpeakers } from "@/lib/import"
+import { normalizeProtectedCompletion } from "@/lib/idml/completion"
 import { extractBiblicaStudyNoteStrings } from "@/lib/parsers/biblica"
 import { exportIdml, IdmlWebExportError, type IdmlExportExecutor } from "./idml"
 
@@ -202,6 +203,43 @@ describe("IDML export of a note block that was imported as several cells", () =>
     // needs them to close Matthew's last verse.
     expect(story).toContain(`<Content>28:</Content>`)
     expect(story.match(/<Content>20<\/Content>/g)).toHaveLength(2)
+    expect(result.report).toMatchObject({ missing: 0, rejected: 0 })
+  })
+
+  // AQU-1174: the "source serif" apostrophe run is English typesetting glue.
+  // A model asked to translate its slot copies the apostrophe through, gluing a
+  // stray `'` onto translated words in the editor and in the exported story.
+  it("does not write the publisher's apostrophe glue onto translated words", async () => {
+    const { bytes, cells } = await importBiblicaCells([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "GEN")),
+      paragraph(
+        "p-n",
+        "intro%3aip",
+        run("$ID/[No character style]", "Israel")
+          + run("source%20serif", "ʼ")
+          + run("$ID/[No character style]", "s covenant history begins here."),
+      ),
+    ])
+    const cell = cells[0]!
+    expect(cell.original).toBe("Israelʼs covenant history begins here.")
+
+    // The draft the model returns: prose translated, glue slot copied verbatim.
+    const drafted = normalizeProtectedCompletion(
+      { id: cell.id, originalHtml: cell.originalHtml, metadata: cell.metadata },
+      cell.originalHtml!.replace(/>([^<>]+)</g, (match, text: string) =>
+        text === "ʼ" ? match : match.toUpperCase()),
+    )
+    cell.translated = drafted.value
+    cell.translatedHtml = drafted.valueHtml
+
+    const result = await exportIdml(bytes, cells, directExecutor)
+    const story = await storyOf(result.blob)
+
+    expect(story).toContain("<Content>ISRAEL</Content>")
+    expect(story).toContain("<Content>S COVENANT HISTORY BEGINS HERE.</Content>")
+    // The glue run keeps its element — IDML needs the anchor — but carries no
+    // apostrophe into the Marathi text.
+    expect(story).not.toContain("<Content>ʼ</Content>")
     expect(result.report).toMatchObject({ missing: 0, rejected: 0 })
   })
 

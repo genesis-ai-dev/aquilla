@@ -3,6 +3,7 @@ import {
   type IdmlDiagnostic,
   type IdmlFormatMetadataV2,
 } from "@aquilla/idml-roundtrip"
+import { clearBiblicaApostropheGlue } from "@/lib/biblica/apostrophe-glue"
 import { plainTextFromProtectedHtml } from "./protected-html"
 
 export interface IdmlCompletionCell {
@@ -159,6 +160,23 @@ export function normalizeProtectedCompletion(
       `The AI draft changed a protected IDML anchor in cell ${cell.id}; nothing was saved.`,
       validation.diagnostics,
     )
+  }
+  // AQU-1174: a model asked to translate a slot holding only the publisher's
+  // apostrophe glue copies it through, gluing a stray `'` onto translated
+  // words. Clearing the slot keeps its span — and so the anchor sequence — but
+  // leaves the English typesetting out of the target text.
+  const withoutGlue = clearBiblicaApostropheGlue(
+    cell.metadata,
+    cell.originalHtml,
+    normalizedHtml,
+    metadata,
+  )
+  if (withoutGlue !== normalizedHtml) {
+    const cleared = validateIdmlTranslation(cell.originalHtml, withoutGlue, metadata)
+    if (cleared.valid) {
+      normalizedHtml = withoutGlue
+      validation = cleared
+    }
   }
   const hasEditableText = metadata.editableSlotIndexes.some(
     (index) => (validation.slots[index] ?? "").trim().length > 0,

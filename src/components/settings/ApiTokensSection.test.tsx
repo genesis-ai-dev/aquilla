@@ -72,6 +72,7 @@ const ASK_CREDENTIAL: ApiCredential = {
   expiresAt: null,
   lastUsedAt: null,
   revokedAt: null,
+  pii: false,
 }
 
 const REVOKED_CREDENTIAL: ApiCredential = {
@@ -85,6 +86,7 @@ const REVOKED_CREDENTIAL: ApiCredential = {
   expiresAt: null,
   lastUsedAt: null,
   revokedAt: "2026-06-15T00:00:00.000Z",
+  pii: false,
 }
 
 // Base UI Select renders a combobox trigger; options live in a portaled
@@ -173,6 +175,7 @@ describe("ApiTokensSection", () => {
         expiresAt: null,
         lastUsedAt: null,
         revokedAt: null,
+        pii: false,
       },
     }
     mockMintCredential.mockResolvedValue(mintResult)
@@ -241,7 +244,7 @@ describe("ApiTokensSection", () => {
       credential: {
         id: "cred-x", name: "Dupe bot", mode: "ask", orgId: null, projectId: null,
         tokenPrefix: "aqk_once", createdAt: "2026-07-17T00:00:00.000Z",
-        expiresAt: null, lastUsedAt: null, revokedAt: null,
+        expiresAt: null, lastUsedAt: null, revokedAt: null, pii: false,
       },
     })
     await screen.findByText("aqk_once")
@@ -286,7 +289,7 @@ describe("ApiTokensSection", () => {
           id: "cred-3", name: "Deploy bot", mode: "act", orgId: null,
           projectId: "proj-maint", tokenPrefix: "aqk_fresh",
           createdAt: "2026-07-17T00:00:00.000Z", expiresAt: null,
-          lastUsedAt: null, revokedAt: null,
+          lastUsedAt: null, revokedAt: null, pii: false,
         },
       })
 

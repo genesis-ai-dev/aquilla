@@ -122,8 +122,43 @@ economics) lives in the AQU-533 comment thread, not here.
   exceeds the user's current role. Every command passes the same per-action permission
   checks as the in-app path.
 
+- **Carry an identity ceiling (`pii`, AQU-1180) — default off.** Everything this API
+  returns lands in whatever third-party AI console holds the token, including that
+  vendor's logs and retention, so collaborator identity is withheld unless a human
+  released it deliberately. See "Collaborator identity" below.
+
 Invariant: **the agent can never exceed the credential, and the credential can never
 exceed the user.**
+
+### Collaborator identity (AQU-1180)
+
+For translation teams in restricted regions, *who* produced a translation is a safety
+fact about a person, not a preference. An agent needs none of it to translate. So:
+
+| Layer | Default | Who can change it |
+| --- | --- | --- |
+| Author fields (`lastEditor` on cells, `author` on history) | stable per-project pseudonym `u_xxxxxxxx` | credential `pii` flag |
+| `GET /me` / `get_identity_and_scope` | `credentialId` + mode + scope; no `userId`/`username` | credential `pii` flag |
+| Project-wide | authorship exposed pseudonymously | project setting `agentAuthorship` |
+
+- **Pseudonyms are HMAC(SYNC_SECRET_KEY, projectId ‖ author)**, truncated to 8 hex. Stable
+  within a project, so an agent can group edits by person; distinct *across* projects, so
+  two agents comparing notes cannot re-identify anyone by intersecting ids. Machine authors
+  (`importer`, `system`, `agent`) pass through verbatim — pseudonymising them destroys
+  provenance and protects nobody.
+- **`pii: true` at mint** returns real identities. Requires **OWNER** of the credential's
+  scoped org/project (`permission_denied` otherwise), and an unscoped credential can never
+  carry it — there is no owner of "everything this user can reach" to make the call.
+- **`agentAuthorship: 'none'`** on a project drops author fields **entirely — absent, not
+  blanked**: a present-but-null `lastEditor` still discloses that an editor exists and is
+  being hidden. It overrides the credential flag, so a team's opt-out cannot be undone by
+  issuing a token. The key is in `POLICY_SETTINGS_KEYS`, so no agent surface can write it.
+- **Every read is attributable.** `agent_read_audit` records one row per read call
+  (credential, project, resource + id, row count) so an exposure found later traces back to
+  the token that pulled it.
+
+Implementation: `sync-worker/src/external/pii.ts` (the single scrub choke-point, applied at
+the external boundary — the internal SPA read path legitimately shows real names).
 
 Auth transport: personal access tokens for the initial developer preview; OAuth 2.1
 for broadly compatible remote MCP (connector directories) as a fast follow.

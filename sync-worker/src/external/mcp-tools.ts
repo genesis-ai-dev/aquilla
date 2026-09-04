@@ -44,10 +44,11 @@ export const MCP_TOOLS: McpToolDef[] = [
   {
     name: 'get_identity_and_scope',
     description:
-      'Return the identity and scope resolved from the calling credential: userId, ' +
-      'username, autonomy mode (ask|act), the org and/or project the credential is ' +
-      'scoped to (null means unscoped/any), and the credentialId. Use this to confirm ' +
-      'which user you are acting as and which resources you may touch. Takes no arguments.',
+      'Return the scope resolved from the calling credential: the credentialId, autonomy ' +
+      'mode (ask|act), and the org and/or project the credential is scoped to (null means ' +
+      'unscoped/any). Use this to confirm which resources you may touch. The human behind ' +
+      'the token (userId/username) is returned only if the credential was minted with pii ' +
+      'enabled — assume you do not know who you are acting as. Takes no arguments.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
   {
@@ -128,8 +129,9 @@ export const MCP_TOOLS: McpToolDef[] = [
     description:
       'Read the append-only event history for one cell (the git-log/blame primitive): every ' +
       'source and target event on that cell, newest first, with author, timestamps, kind, ' +
-      'and payload. Args: projectId, cellId. Use to understand who changed a translation and ' +
-      'why before overwriting it.',
+      'and payload. Args: projectId, cellId. Use to understand how a translation reached its ' +
+      'current state before overwriting it. `author` is a pseudonymous per-project id, not a ' +
+      'name, and is absent entirely on projects that set agentAuthorship: none.',
     inputSchema: {
       type: 'object',
       properties: {

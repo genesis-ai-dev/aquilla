@@ -108,7 +108,10 @@ describe('REST bootstrap: /me and /projects', () => {
     )
     expect(res!.status).toBe(200)
     const body = (await res!.json()) as any
-    expect(body.username).toBe('alice')
+    // AQU-1180: /me answers "which token", not "which human". A default
+    // credential must not carry the minting user's handle into an AI console.
+    expect(body.username).toBeUndefined()
+    expect(body.userId).toBeUndefined()
     expect(body.mode).toBe('ask')
     expect(body.credentialId).toBe(CRED_1)
     expect(body.hints.mode).toContain('approvalUrl')

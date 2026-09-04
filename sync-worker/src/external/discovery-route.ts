@@ -54,7 +54,7 @@ function apiMap(): Record<string, unknown> {
       `5. POST ${EXTERNAL_ROOT}/projects/:projectId/changesets/:id/commit — applies it (act mode). In ask mode this returns 428 confirmation_required: show the approvalUrl to a human, wait for their approval, then call commit again.`,
     ],
     endpoints: {
-      'GET /api/v1/external/me': 'Who am I: userId, username, mode, scope. Start here.',
+      'GET /api/v1/external/me': 'Which token am I: credentialId, autonomy mode, scope. Start here. Human identity (userId/username) is returned ONLY for a credential minted with pii enabled — see privacy below.',
       'GET /api/v1/external/projects': 'List accessible projects (up to 100).',
       'GET /api/v1/external/projects/:projectId/files': 'List a project’s files.',
       'GET /api/v1/external/projects/:projectId/files/:fileId/cells': 'Read a file’s cells (source + target). Supports since/limit/cursor, and lane=<tag> to filter targets to one target-language lane (see multiLanguage).',
@@ -68,6 +68,16 @@ function apiMap(): Record<string, unknown> {
       'POST /api/v1/external/projects/:projectId/changesets/:id/commit': 'Commit a prepared changeset. Idempotent; safe to retry.',
       'POST /api/v1/external/projects/:projectId/changesets/:id/discard': 'Discard a staged changeset.',
       'POST /api/v1/external/mcp': 'MCP server (JSON-RPC 2.0, streamable HTTP, same bearer token). Tools mirror the REST surface — see "mcp" below.',
+    },
+    privacy: {
+      note:
+        'Translator identity is not agent-readable by default (AQU-1180). Everything this API returns ends up in whatever AI console holds the token, so author fields are pseudonymous unless a human deliberately opted in.',
+      authorFields:
+        'Cell reads carry lastEditor and history events carry author. By default both are a stable per-project opaque id (e.g. "u_3f9ab21c"): you can tell that two edits came from the SAME person, and nothing else. The ids are per-project — the same translator is a different id in another project, so do not correlate across projects. Machine authors ("importer", "system", "agent") pass through under their real names.',
+      pii: 'A credential minted with pii enabled returns real usernames, and GET /me additionally returns userId + username. Only an OWNER of the credential\'s org/project can mint one, and it is off unless they asked for it.',
+      agentAuthorship:
+        'A project may set agentAuthorship: "none", in which case lastEditor and author are ABSENT from the payload entirely (the key is missing, not null) regardless of the token. Do not treat a missing author as a data error; the project has opted out of authorship exposure. This setting is not writable through any agent surface.',
+      auditing: 'Every read call is recorded against the calling credential (which project, which file or cell, how many rows).',
     },
     importing: {
       note:

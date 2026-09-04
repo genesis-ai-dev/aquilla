@@ -54,7 +54,8 @@ says "deprecated: prefer PatchSettings") · **PatchSettings** (structural, 500) 
   everything else 600 (MAINTAINER).
 - **POLICY_SETTINGS_KEYS** (exported const) always rejected with `permission_denied`:
   `agentMemoryAutonomy`, `validationRoleFloor`, `validationNamedUsers`, `validationCount`,
-  `validationCountAudio`, `allowSelfValidation`, `harmonize_min_role`, `contributeToGlobalTm`.
+  `validationCountAudio`, `allowSelfValidation`, `harmonize_min_role`, `contributeToGlobalTm`,
+  `agentAuthorship` (AQU-1180 — the switch that hides translator identity from agents).
 - `UpdateProjectSettings` (deprecated, kept): now rejects when any POLICY key's value would
   CHANGE vs the live blob (equal pass-through stays valid — existing round-trip callers keep
   working).

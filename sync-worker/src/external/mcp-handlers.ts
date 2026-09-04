@@ -224,8 +224,10 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
 
 function getIdentityAndScope(cred: ApiCredentialContext): McpToolResult {
   return ok({
-    userId: cred.userId,
-    username: cred.username,
+    // AQU-1180: byte-for-byte the same policy as REST GET /me — human identity
+    // only when the credential was minted `pii: true`. These two adapters must
+    // never disagree about what a token is allowed to learn.
+    ...(cred.pii === true ? { userId: cred.userId, username: cred.username } : {}),
     mode: cred.mode,
     orgId: cred.orgId,
     projectId: cred.projectId,

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import { handleCellsReadRequest, type CellsReadEnv } from "../events/cells-read-route"
 import { handleRebuildProjectionRequest } from "../events/rebuild"
 import { buildEventProjectionStmts, type PersistedEvent } from "../events/event-projection"
@@ -1204,6 +1204,10 @@ describe("AQU-1160: chain-order cache", () => {
       },
     }) as unknown as AquillaDb
 
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {})
+    const logged = (marker: string) =>
+      logSpy.mock.calls.filter(([line]) => String(line).includes(marker)).length
+
     const firstCounts: number[] = []
     const firstRes = (await handleCellsReadRequest(
       new Request(`https://w/api/v1/projects/proj-a/files/file-x/cells?side=target&limit=${limit}`, {
@@ -1214,6 +1218,8 @@ describe("AQU-1160: chain-order cache", () => {
     const firstBody = (await firstRes.json()) as { cells: Array<{ cellId: string }>; nextCursor: string }
     // Page 1 is the unavoidable miss: it paid the full-file cost.
     expect(Math.max(...firstCounts)).toBe(N)
+    expect(logged("[cells-read] chain-cache miss")).toBe(1)
+    expect(logged("[cells-read] chain-cache hit")).toBe(0)
 
     const secondCounts: number[] = []
     const secondRes = (await handleCellsReadRequest(
@@ -1231,6 +1237,10 @@ describe("AQU-1160: chain-order cache", () => {
     // Page 2 came through a DIFFERENT db instance and must still be a cache
     // hit: no query on this request may return anything near the whole file.
     expect(Math.max(...secondCounts)).toBeLessThanOrEqual(limit)
+    // ...and it says so at the same verbosity the miss path logs at.
+    expect(logged("[cells-read] chain-cache miss")).toBe(1)
+    expect(logged("[cells-read] chain-cache hit")).toBe(1)
+    logSpy.mockRestore()
   })
 
   it("AC2: cache-hit pages reproduce the exact anchor-chain order the uncached walk produces (ties + orphans + multi-root)", async () => {

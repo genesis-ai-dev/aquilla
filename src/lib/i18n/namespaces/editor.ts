@@ -746,6 +746,13 @@ export const editor = defineNamespace({
     "editor.timeline.expandTimelineAria": "Show the timeline",
     "editor.timeline.collapseTextAria": "Hide the text",
     "editor.timeline.expandTextAria": "Show the text",
+    // AQU-1119: the other control beside each body section's chevron. Where
+    // the chevron folds ITS OWN section, this one folds the others so this
+    // section has the lens to itself — one button in two states.
+    "editor.timeline.fullscreenVideoAria": "Fill the lens with the video",
+    "editor.timeline.restoreVideoAria": "Put the video back in its column",
+    "editor.timeline.fullscreenTextAria": "Fill the lens with the text",
+    "editor.timeline.restoreTextAria": "Put the text back in its column",
     "editor.timeline.folderExpandAria": "Show the tracks in {name}",
     "editor.timeline.folderCollapseAria": "Hide the tracks in {name}",
     "editor.timeline.trackMenuAria": "Track options for {name}",
@@ -1538,6 +1545,36 @@ export const editor = defineNamespace({
           "strip of one icon that is all that remains of the video section, " +
           "and which is itself the button that brings the picture back. The " +
           "name is only ever seen on hover, so it carries the whole label.",
+      },
+      "editor.timeline.fullscreenVideoAria": {
+        description:
+          "Screen-reader name and tooltip of the button beside the video " +
+          "header's collapse chevron, which folds the OTHER sections — the " +
+          "timeline and the text — so the picture has the whole media lens " +
+          "to itself. Not browser fullscreen: the app window is unchanged. " +
+          "Pairs with restoreVideoAria, which is the same button pressed.",
+      },
+      "editor.timeline.restoreVideoAria": {
+        description:
+          "Screen-reader name and tooltip of that same button once the video " +
+          "already has the lens to itself: pressing it puts the sections that " +
+          "were folded to make room back the way they were. 'Its column' is " +
+          "the video's normal place beside the text, not a table column.",
+      },
+      "editor.timeline.fullscreenTextAria": {
+        description:
+          "Screen-reader name and tooltip of the button beside the text " +
+          "header's collapse chevron, which folds the OTHER sections — the " +
+          "timeline and the video — so the cells have the whole media lens " +
+          "to themselves. Not browser fullscreen: the app window is " +
+          "unchanged. Pairs with restoreTextAria, the same button pressed.",
+      },
+      "editor.timeline.restoreTextAria": {
+        description:
+          "Screen-reader name and tooltip of that same button once the text " +
+          "already has the lens to itself: pressing it puts the sections that " +
+          "were folded to make room back the way they were. 'Its column' is " +
+          "the text's normal place beside the video.",
       },
       "editor.timeline.collapseTimelineAria": {
         description:

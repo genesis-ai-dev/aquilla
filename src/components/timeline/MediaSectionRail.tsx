@@ -24,7 +24,7 @@
 // is worth doing, but it is its own piece of work with its own review, not a
 // silent rider on a media-lens feature.
 
-import { ChevronsDown, ChevronsLeft, ChevronsRight, ChevronsUp } from "lucide-react"
+import { ChevronsDown, ChevronsLeft, ChevronsRight, ChevronsUp, Maximize2, Minimize2 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -62,6 +62,16 @@ const EXPAND_KEY = {
   video: "editor.timeline.expandVideoAria",
   timeline: "editor.timeline.expandTimelineAria",
   text: "editor.timeline.expandTextAria",
+} as const
+
+const FULLSCREEN_KEY = {
+  video: "editor.timeline.fullscreenVideoAria",
+  text: "editor.timeline.fullscreenTextAria",
+} as const
+
+const RESTORE_KEY = {
+  video: "editor.timeline.restoreVideoAria",
+  text: "editor.timeline.restoreTextAria",
 } as const
 
 const COLLAPSE_KEY = {
@@ -213,6 +223,61 @@ export function MediaSectionCollapseButton({
         )}
       >
         <Fold className="h-3.5 w-3.5 shrink-0" />
+      </button>
+    </AppTooltip>
+  )
+}
+
+export interface MediaSectionFullscreenButtonProps {
+  /** Only the body sections. The timeline cannot fold both of them at once. */
+  section: "video" | "text"
+  /** Is this section already alone on screen? Derived, never stored. */
+  isFullscreen: boolean
+  onToggle: () => void
+  className?: string
+}
+
+/**
+ * The other control beside a section's heading: where the chevron folds THIS
+ * section, this one folds the others so this section has the lens to itself.
+ *
+ * `Maximize2`/`Minimize2` rather than more chevrons — two glyph families for
+ * two different moves, and it is the pair this app already speaks: the audio
+ * recording modal uses exactly it to grow and shrink a film pane. It is NOT
+ * browser fullscreen; nothing here touches the Fullscreen API and the window
+ * is unchanged. See MediaVideoPane's note on why real fullscreen would have to
+ * be built on the wrapper field rather than the video element.
+ *
+ * `aria-pressed`, not `aria-expanded`: the chevron beside it is a disclosure,
+ * this is a two-state toggle of a layout mode. Wordless for the same reason
+ * the chevron is — the video header's textContent is asserted, and its height
+ * is in lockstep with the text header's.
+ */
+export function MediaSectionFullscreenButton({
+  section,
+  isFullscreen,
+  onToggle,
+  className,
+}: MediaSectionFullscreenButtonProps) {
+  const t = useT()
+  const Glyph = isFullscreen ? Minimize2 : Maximize2
+  const label = t(isFullscreen ? RESTORE_KEY[section] : FULLSCREEN_KEY[section])
+  return (
+    <AppTooltip content={label}>
+      <button
+        type="button"
+        aria-pressed={isFullscreen}
+        aria-label={label}
+        data-testid={`media-fullscreen-${section}`}
+        onClick={onToggle}
+        className={cn(
+          "inline-flex shrink-0 items-center justify-center rounded-sm p-0.5",
+          "text-muted-foreground transition-colors hover:text-foreground",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-500",
+          className,
+        )}
+      >
+        <Glyph className="h-3.5 w-3.5 shrink-0" />
       </button>
     </AppTooltip>
   )

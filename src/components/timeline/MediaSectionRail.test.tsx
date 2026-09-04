@@ -6,7 +6,11 @@
 import { describe, expect, it, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { MediaSectionCollapseButton, MediaSectionRail } from "./MediaSectionRail"
+import {
+  MediaSectionCollapseButton,
+  MediaSectionFullscreenButton,
+  MediaSectionRail,
+} from "./MediaSectionRail"
 
 describe("MediaSectionRail", () => {
   it("is one button per section, named for what it will do", () => {
@@ -107,5 +111,46 @@ describe("MediaSectionCollapseButton", () => {
     // lockstep, so this button has to stay wordless.
     render(<MediaSectionCollapseButton section="video" onCollapse={() => {}} />)
     expect(screen.getByTestId("media-collapse-video")).toHaveTextContent("")
+  })
+})
+
+describe("MediaSectionFullscreenButton", () => {
+  it("offers to fill the lens, and to undo that once it has", () => {
+    // One button in two states, named for what pressing it will DO — the
+    // glyph and the name swap together.
+    const { rerender } = render(
+      <MediaSectionFullscreenButton section="video" isFullscreen={false} onToggle={() => {}} />,
+    )
+    const button = screen.getByTestId("media-fullscreen-video")
+    expect(button).toHaveAccessibleName("Fill the lens with the video")
+    expect(button).toHaveAttribute("aria-pressed", "false")
+
+    rerender(
+      <MediaSectionFullscreenButton section="video" isFullscreen onToggle={() => {}} />,
+    )
+    expect(button).toHaveAccessibleName("Put the video back in its column")
+    expect(button).toHaveAttribute("aria-pressed", "true")
+  })
+
+  it("names the text section for itself", () => {
+    render(<MediaSectionFullscreenButton section="text" isFullscreen={false} onToggle={() => {}} />)
+    expect(screen.getByTestId("media-fullscreen-text")).toHaveAccessibleName(
+      "Fill the lens with the text",
+    )
+  })
+
+  it("toggles on a single click", () => {
+    const onToggle = vi.fn()
+    render(<MediaSectionFullscreenButton section="video" isFullscreen={false} onToggle={onToggle} />)
+    return userEvent.click(screen.getByTestId("media-fullscreen-video")).then(() => {
+      expect(onToggle).toHaveBeenCalledTimes(1)
+    })
+  })
+
+  it("carries no text of its own", () => {
+    // It sits in the video header, whose textContent is asserted to be "Video"
+    // plus the file name and nothing else.
+    render(<MediaSectionFullscreenButton section="video" isFullscreen={false} onToggle={() => {}} />)
+    expect(screen.getByTestId("media-fullscreen-video")).toHaveTextContent("")
   })
 })

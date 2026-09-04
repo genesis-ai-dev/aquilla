@@ -392,6 +392,15 @@ export interface TimelineEditorProps {
    */
   onCollapseSection?: () => void
   onCollapseTextSection?: () => void
+  /**
+   * AQU-1119: the text section's full-screen toggle, threaded through for the
+   * same reason its collapse control is — this component owns the header it
+   * portals into the table column's slot. The timeline itself gets no such
+   * control: its full screen would fold BOTH body sections, and the body is a
+   * flex row that something has to fill.
+   */
+  onToggleTextFullscreen?: () => void
+  isTextFullscreen?: boolean
   /** Needed by the missing-audio probe behind the chip strip's badge. */
   project?: ProjectRecord
   /** Fires when the highlighted section changes so a sibling transport (the
@@ -1014,6 +1023,8 @@ export function TimelineEditor({
   hideTimingMode = false,
   onCollapseSection,
   onCollapseTextSection,
+  onToggleTextFullscreen,
+  isTextFullscreen,
   project,
   onSelectCell,
   onTranscribeSections,
@@ -3092,6 +3103,8 @@ export function TimelineEditor({
     // beneath it — the same reasoning that keeps the gutter's toggle inside
     // the gutter.
     onCollapse: onCollapseTextSection,
+    onToggleFullscreen: onToggleTextFullscreen,
+    isFullscreen: isTextFullscreen,
     // AQU-646 stage 3e: the transcribe controls used to be a full-width row of
     // their own beneath the lanes, on screen whether or not there was anything
     // to transcribe. They sit in the text header now, and ONLY WHEN THERE IS A

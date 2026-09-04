@@ -10392,6 +10392,17 @@ export function ProjectWorkspace() {
                       // hold.
                       activeFile.coreMediaUrl ? () => mediaSections.collapse("text") : undefined
                     }
+                    // Full screen has its own gate. The text may take the
+                    // lens on a file with no film — folding the timeline is
+                    // all that takes — where collapsing it cannot.
+                    onToggleTextFullscreen={
+                      mediaSections.isFullscreen("text")
+                        ? () => mediaSections.exitFullscreen("text")
+                        : mediaSections.canFullscreen("text")
+                          ? () => mediaSections.enterFullscreen("text")
+                          : undefined
+                    }
+                    isTextFullscreen={mediaSections.isFullscreen("text")}
                     onOpenRecording={handleOpenRecording}
                     project={editorProject ?? project ?? undefined}
                     onSelectCell={setTimelineSelectedCellId}
@@ -10545,6 +10556,14 @@ export function ProjectWorkspace() {
                       onCollapse={
                         timelineStacked ? () => mediaSections.collapse("video") : undefined
                       }
+                      onToggleFullscreen={
+                        mediaSections.isFullscreen("video")
+                          ? () => mediaSections.exitFullscreen("video")
+                          : mediaSections.canFullscreen("video")
+                            ? () => mediaSections.enterFullscreen("video")
+                            : undefined
+                      }
+                      isFullscreen={mediaSections.isFullscreen("video")}
                     />
                     </div>
                     {mediaSections.showsRail("video") && (

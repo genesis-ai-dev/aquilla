@@ -127,6 +127,9 @@ export interface MediaVideoPaneProps {
   onChangeVideo?: () => void
   /** AQU-1119: collapse the video section to a rail. Absent means no button. */
   onCollapse?: () => void
+  /** AQU-1119: fold the OTHER sections so the picture has the lens to itself. */
+  onToggleFullscreen?: () => void
+  isFullscreen?: boolean
   sourceDirectionMode?: DirectionMode
   targetDirectionMode?: DirectionMode
   sourceTextDirection?: TextDirection
@@ -145,6 +148,8 @@ export function MediaVideoPane({
   onVideoDuration,
   onChangeVideo,
   onCollapse,
+  onToggleFullscreen,
+  isFullscreen,
   sourceDirectionMode = "auto",
   targetDirectionMode = "auto",
   sourceTextDirection = "ltr",
@@ -958,7 +963,12 @@ export function MediaVideoPane({
       data-video-state={slaved ? "slaved" : "standalone"}
       className="flex h-full min-h-0 flex-col overflow-hidden border-r border-border"
     >
-      <VideoPaneHeader src={src} onCollapse={onCollapse} />
+      <VideoPaneHeader
+        src={src}
+        onCollapse={onCollapse}
+        onToggleFullscreen={onToggleFullscreen}
+        isFullscreen={isFullscreen}
+      />
       {/* The black field fills everything under the header, and the picture is
           centred in it at the video's own proportions — leftover space becomes
           cinema bars instead of blank page. */}

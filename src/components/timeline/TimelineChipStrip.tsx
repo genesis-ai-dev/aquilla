@@ -21,7 +21,11 @@ import { VolumeX } from "lucide-react"
 import { fmtClock } from "./format"
 import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
 import { AppTooltip } from "@/components/ui/tooltip"
-import { MEDIA_HEADER_ROW, MediaSectionCollapseButton } from "./MediaSectionRail"
+import {
+  MEDIA_HEADER_ROW,
+  MediaSectionCollapseButton,
+  MediaSectionFullscreenButton,
+} from "./MediaSectionRail"
 import { uiSlotRef } from "@/lib/ui-slots"
 import type { CellData } from "@/hooks/useCells"
 import type { CameraState } from "@/lib/sync/cells-read-types"
@@ -288,6 +292,8 @@ export function MediaTextHeader({
   cameraState: cameraStateOverride,
   transcribe,
   onCollapse,
+  onToggleFullscreen,
+  isFullscreen = false,
 }: {
   cell: CellData | null
   /**
@@ -335,6 +341,12 @@ export function MediaTextHeader({
    * lens — and every existing test — rendering exactly what it did before.
    */
   onCollapse?: () => void
+  /**
+   * AQU-1119: fold the OTHER sections so the cells have the lens to
+   * themselves, and put them back. Absent handler, absent button.
+   */
+  onToggleFullscreen?: () => void
+  isFullscreen?: boolean
 }) {
   const t = useT()
   const isDialogue = (cell?.medium ?? "media") === "media"
@@ -370,6 +382,13 @@ export function MediaTextHeader({
           the gutter's own idiom, and where a reader looks for a disclosure
           control. Absent handler, absent button. */}
       {onCollapse && <MediaSectionCollapseButton section="text" onCollapse={onCollapse} />}
+      {onToggleFullscreen && (
+        <MediaSectionFullscreenButton
+          section="text"
+          isFullscreen={isFullscreen}
+          onToggle={onToggleFullscreen}
+        />
+      )}
       {castName && (
         <Pill>
           {t("editor.timeline.chipSpeaker")} <b className="font-semibold text-foreground">{castName}</b>

@@ -18,7 +18,11 @@
 
 import { useT } from "@/lib/i18n/I18nProvider"
 import { cn } from "@/lib/utils"
-import { MEDIA_HEADER_ROW, MediaSectionCollapseButton } from "./MediaSectionRail"
+import {
+  MEDIA_HEADER_ROW,
+  MediaSectionCollapseButton,
+  MediaSectionFullscreenButton,
+} from "./MediaSectionRail"
 
 export interface VideoPaneHeaderProps {
   src: string
@@ -28,9 +32,21 @@ export interface VideoPaneHeaderProps {
    * is nothing to collapse into.
    */
   onCollapse?: () => void
+  /**
+   * AQU-1119: fold the OTHER sections so the picture has the lens to itself,
+   * and put them back. Absent means no button, same rule as onCollapse.
+   */
+  onToggleFullscreen?: () => void
+  /** Whether it already has the lens. Derived by the workspace, never stored. */
+  isFullscreen?: boolean
 }
 
-export function VideoPaneHeader({ src, onCollapse }: VideoPaneHeaderProps) {
+export function VideoPaneHeader({
+  src,
+  onCollapse,
+  onToggleFullscreen,
+  isFullscreen = false,
+}: VideoPaneHeaderProps) {
   const t = useT()
   let basename = src
   try {
@@ -58,6 +74,13 @@ export function VideoPaneHeader({ src, onCollapse }: VideoPaneHeaderProps) {
           this header's textContent, and the row's height is kept in lockstep
           with the text header's opposite it. */}
       {onCollapse && <MediaSectionCollapseButton section="video" onCollapse={onCollapse} />}
+      {onToggleFullscreen && (
+        <MediaSectionFullscreenButton
+          section="video"
+          isFullscreen={isFullscreen}
+          onToggle={onToggleFullscreen}
+        />
+      )}
       <span className="inline-flex min-w-0 items-center rounded-md border border-border bg-background px-2 py-0.5 text-[11px] text-foreground/80">
         <span className="truncate font-mono">{basename}</span>
       </span>

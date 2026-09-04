@@ -13,6 +13,7 @@ import {
   type ProjectSettingsResponse,
 } from "@/lib/sync/project-settings"
 import posthog from "@/lib/posthog"
+import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
 
 // Floor aligned with the server's SETTINGS_WRITE_MIN_ROLE = ROLE.MAINTAINER (600).
 // Spec (01-personas-and-roles.md §Role ladder): "Invite / remove members; change
@@ -464,16 +465,7 @@ export function useProjectSettings(
   // useCells' "refetch on focus is the cheap drift mitigation" for settings.
   useEffect(() => {
     if (!projectId || !jwt) return
-    const revalidateOnVisible = () => {
-      if (typeof document !== "undefined" && document.visibilityState === "hidden") return
-      void refresh()
-    }
-    window.addEventListener("focus", revalidateOnVisible)
-    document.addEventListener("visibilitychange", revalidateOnVisible)
-    return () => {
-      window.removeEventListener("focus", revalidateOnVisible)
-      document.removeEventListener("visibilitychange", revalidateOnVisible)
-    }
+    return subscribeWindowRegainedFocus(() => { void refresh() })
   }, [projectId, jwt, refresh])
 
   // Server values overlay local for keys the server has set (non-empty row).

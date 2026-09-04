@@ -386,14 +386,27 @@ export function buildEventProjectionStmts(
   // AQU-927: one un-rounded ms value would otherwise reject the whole batch.
   const event = coerceIntegerMsPayload(rawEvent)
   // Gate fragments for chain-advancing cells writes. `gateWhere` suffixes an
-  // INSERT…SELECT row source; `gateAnd` extends an UPDATE/DELETE WHERE.
+  // INSERT…SELECT row source; `gateAnd` extends an UPDATE/DELETE WHERE;
+  // `gateConflictWhere` suffixes an UPSERT's ON CONFLICT DO UPDATE.
+  //
+  // AQU-1154 (invariant I1): besides holding the chain claim, the write is a
+  // compare-and-swap on the cell's CURRENT head — an existing row is only
+  // advanced when `cells.event_id` still equals this event's parentId. The
+  // claim alone is first-child-of-parent, which let a stale branch climb back
+  // onto the head (B1 loses to A1, then B2 chained on B1 found the (cell, B1)
+  // slot free and overwrote A1). A row that does not exist yet has no head to
+  // compare, so the INSERT path is claim-gated only (a cell's first target
+  // commit legitimately chains on the SOURCE head). The route reads each
+  // gated statement's row count back: 0 rows == lost the CAS == stale.
   const gate = opts?.chainGate
   const GATE_EXISTS =
     'EXISTS (SELECT 1 FROM chain_claims WHERE project_id = ? AND file_id = ? AND cell_id = ? AND parent_key = ? AND event_id = ?)'
+  const HEAD_CAS = 'cells.event_id = ?'
   const gateWhere = gate ? ` WHERE ${GATE_EXISTS}` : ''
-  const gateAnd = gate ? ` AND ${GATE_EXISTS}` : ''
+  const gateConflictWhere = gate ? ` WHERE ${HEAD_CAS}` : ''
+  const gateAnd = gate ? ` AND ${GATE_EXISTS} AND ${HEAD_CAS}` : ''
   const gateBinds: unknown[] = gate
-    ? [gate.projectId, gate.fileId, gate.cellId, gate.parentKey, event.id]
+    ? [gate.projectId, gate.fileId, gate.cellId, gate.parentKey, event.id, event.parentId]
     : []
 
   switch (event.kind) {
@@ -479,7 +492,7 @@ export function buildEventProjectionStmts(
               sequence_index = excluded.sequence_index,
               transcription  = excluded.transcription,
               camera_state   = excluded.camera_state,
-              metadata       = excluded.metadata`,
+              metadata       = excluded.metadata${gateConflictWhere}`,
           )
           .bind(
             event.projectId,
@@ -648,7 +661,7 @@ export function buildEventProjectionStmts(
                 validated         = 0,
                 endorsement_count = 0,
                 ai_drafted        = excluded.ai_drafted,
-                ai_draft          = excluded.ai_draft`,
+                ai_draft          = excluded.ai_draft${gateConflictWhere}`,
             )
             .bind(
               event.projectId,

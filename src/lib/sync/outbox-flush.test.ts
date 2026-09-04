@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { flushOutboxBatch } from "./outbox-flush"
+import { flushOutboxBatch, subscribeStaleSiblings } from "./outbox-flush"
 import {
   enqueueOutboxEvent,
   outboxPendingCount,
@@ -357,12 +357,20 @@ describe("flushOutboxBatch", () => {
         ],
       }),
     )
+    const onForbidden = vi.fn()
     const result = await flushOutboxBatch({
       getTokenForFile: TOKEN_FN,
       fetchImpl: fetchMock as unknown as typeof fetch,
+      onForbidden,
     })
 
     expect(result).toMatchObject({ quarantined: 1 })
+    expect(onForbidden).toHaveBeenCalledWith([expect.objectContaining({
+      id: "e1",
+      status: 403,
+      reason: "file 'f1' not in scope for cell.validate",
+      cellId: "cell-42",
+    })])
     // The quarantined record keeps status "failed" + the server's reason, which
     // is what the workspace banner (useForbiddenOutboxRecords) reads to explain
     // WHY the validate reverted — regardless of which flush path quarantined it.
@@ -384,12 +392,18 @@ describe("flushOutboxBatch", () => {
     await enqueueOutboxEvent(makeEvent("e1", "f1"))
     await enqueueOutboxEvent(makeEvent("e2", "f1"))
     const fetchMock = vi.fn()
+    const onForbidden = vi.fn()
     const result = await flushOutboxBatch({
       getTokenForFile: MINT_403_FN,
       fetchImpl: fetchMock as unknown as typeof fetch,
+      onForbidden,
     })
     expect(fetchMock).not.toHaveBeenCalled()
     expect(result).toMatchObject({ quarantined: 2, authError: false })
+    expect(onForbidden).toHaveBeenCalledWith([
+      expect.objectContaining({ id: "e1", status: 403 }),
+      expect.objectContaining({ id: "e2", status: 403 }),
+    ])
     // Records preserved (no data loss) but no longer pending → flusher advances.
     expect(await peekPendingOutboxBatch(10)).toHaveLength(0)
     expect(await outboxPendingCount()).toBe(2)
@@ -630,6 +644,69 @@ describe("flushOutboxBatch", () => {
     ])
   })
 
+  it("I2: stale[] entries also reach tab-wide subscribeStaleSiblings listeners (inline flushes pass no callback)", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        accepted: [{ id: "e1" }],
+        rejected: [],
+        stale: [{ id: "e1", fileId: "f1", cellId: "c1" }],
+      }),
+    )
+    const listener = vi.fn()
+    const unsub = subscribeStaleSiblings(listener)
+    try {
+      // No onStaleSiblings dep — the shape every inline "flush now" uses.
+      await flushOutboxBatch({ getTokenForFile: TOKEN_FN, fetchImpl: fetchMock as unknown as typeof fetch })
+    } finally {
+      unsub()
+    }
+    expect(listener).toHaveBeenCalledWith([{ id: "e1", fileId: "f1", cellId: "c1" }])
+    // Stale ids are still removed from the outbox (server logged them); the
+    // rejection is handled by the listener, not by a retry.
+    expect(await outboxPendingCount()).toBe(0)
+
+    // Unsubscribed listeners are not notified.
+    await enqueueOutboxEvent(makeEvent("e2", "f1"))
+    await flushOutboxBatch({ getTokenForFile: TOKEN_FN, fetchImpl: fetchMock as unknown as typeof fetch })
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  it("serializes concurrent callers per tab: the same pending rows are POSTed once, not twice", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+    await enqueueOutboxEvent(makeEvent("e2", "f1"))
+    let release!: () => void
+    const gate = new Promise<void>((r) => { release = r })
+    const fetchMock = vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
+      await gate
+      const ids = (JSON.parse(init.body as string).events as Array<{ id: string }>).map((e) => e.id)
+      return jsonResponse({ accepted: ids.map((id) => ({ id })), rejected: [] })
+    })
+    const deps = { getTokenForFile: TOKEN_FN, fetchImpl: fetchMock as unknown as typeof fetch }
+    // Two callers race (the useOutboxFlusher loop and an inline "flush now").
+    const a = flushOutboxBatch(deps)
+    const b = flushOutboxBatch(deps)
+    await new Promise((r) => setTimeout(r, 10))
+    // The second caller waited: only one POST is in flight.
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    release()
+    const [ra, rb] = await Promise.all([a, b])
+    expect(ra.accepted).toBe(2)
+    // The queued caller ran AFTER the first drained the queue and found nothing.
+    expect(rb).toMatchObject({ posted: 0, accepted: 0 })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(await outboxPendingCount()).toBe(0)
+  })
+
+  it("a flush that throws does not wedge the per-tab serialization for later callers", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+    const throwingToken = async (): Promise<TokenMintResult> => { throw new Error("mint exploded") }
+    await expect(flushOutboxBatch({ getTokenForFile: throwingToken })).rejects.toThrow("mint exploded")
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ accepted: [{ id: "e1" }], rejected: [] }))
+    const res = await flushOutboxBatch({ getTokenForFile: TOKEN_FN, fetchImpl: fetchMock as unknown as typeof fetch })
+    expect(res.accepted).toBe(1)
+  })
+
   // ── Cross-project scope: mint by the EVENT's projectId ────────────────────
 
   it("mints the sync-token with the EVENT's projectId, not a fixed workspace project", async () => {
@@ -709,12 +786,17 @@ describe("flushOutboxBatch", () => {
     await enqueueOutboxEvent(makeEvent("e1", "f1", { projectId: "p" }))
 
     const fetchMock = vi.fn().mockResolvedValue(new Response("Forbidden", { status: 403 }))
+    const onForbidden = vi.fn()
     const result = await flushOutboxBatch({
       getTokenForFile: async () => ({ token: "tok", status: 200 }),
       fetchImpl: fetchMock as unknown as typeof fetch,
+      onForbidden,
     })
 
     expect(result).toMatchObject({ quarantined: 1, networkError: false })
+    expect(onForbidden).toHaveBeenCalledWith([
+      expect.objectContaining({ id: "e1", reason: "HTTP 403" }),
+    ])
     const pending = await peekPendingOutboxBatch(10)
     expect(pending).toHaveLength(0)
   })

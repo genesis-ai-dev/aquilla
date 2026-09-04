@@ -63,6 +63,7 @@
 // module self-contained — needed the moment event-projection began importing
 // it, which pulled this file into the root graph for the first time.
 import type { AquillaDb } from '../../../db/shim/postgres'
+import { makeRequestCache, type RequestCache } from './request-cache'
 
 /**
  * The RESERVED track ids — a derived track's id IS its kind string.
@@ -147,20 +148,16 @@ export function isGatedTrackPatch(payload: unknown): boolean {
 export async function resolveAllowTrackEditing(
   db: AquillaDb,
   projectId: string,
+  // Per-request memo (request-cache.ts) — one project_settings read per
+  // request. Absent → a throwaway cache, old behaviour.
+  cache: RequestCache = makeRequestCache(db),
 ): Promise<boolean> {
   // THE QUERY IS INSIDE THE TRY — same perimeter discipline as its two
   // siblings: an exception here does not degrade to a 403, it escapes
   // `authorize` and 500s the whole batch, which can wedge a durable outbox on
   // one poisoned event. An unreachable settings row reads as OFF.
   try {
-    const row = await db
-      .prepare(`SELECT settings FROM project_settings WHERE project_id = ?`)
-      .bind(projectId)
-      .first<{ settings: string | null }>()
-
-    if (!row?.settings) return false
-
-    const parsed = JSON.parse(row.settings) as { allowTrackEditing?: unknown }
+    const parsed = await cache.projectSettings(projectId)
     return parsed?.allowTrackEditing === true
   } catch {
     return false

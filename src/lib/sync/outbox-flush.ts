@@ -121,19 +121,33 @@ export interface FlushDeps {
    *  about permissions, and a refused shape is a bug, not a permission
    *  problem. */
   onRejected?: (entries: RejectedEntry[]) => void
-  /** AQU-1068: the same chance to react, for a 403.
+  /** Called before a permanent 403 is quarantined. Foreground committers use
+   *  the exact event ids to clear optimistic state and avoid chaining future
+   *  writes onto a head the server refused.
    *
-   *  `onRejected` deliberately skips this class (see its note), which was fine
-   *  while every optimistic write was a value edit a refetch would correct. It
-   *  is not fine for a write that changes the SHAPE of the file: an optimistic
-   *  insert or removal carries a freshness floor, so no correcting fetch can
-   *  undo it, and the caller has to. A permission refusal is also the ONLY
-   *  status the cell-editing gate ever returns, so a rollback wired to
-   *  `onRejected` alone can never fire for the one case it exists for.
-   *
-   *  Fired after the records are quarantined, so the inspector still holds
-   *  them. */
-  onForbidden?: (entries: RejectedEntry[]) => void
+   *  AQU-1068: `onRejected` deliberately skips this class (see its note),
+   *  which was fine while every optimistic write was a value edit a refetch
+   *  would correct. It is not fine for a write that changes the SHAPE of the
+   *  file: an optimistic insert or removal carries a freshness floor, so no
+   *  correcting fetch can undo it, and the caller has to. A permission
+   *  refusal is also the ONLY status the cell-editing gate ever returns, so a
+   *  rollback wired to `onRejected` alone can never fire for the one case it
+   *  exists for. */
+  onForbidden?: (entries: ForbiddenEntry[]) => void
+}
+
+function forbiddenEntriesFor(
+  records: OutboxRecord[],
+  reason: string,
+): ForbiddenEntry[] {
+  return records.map((record) => ({
+    id: record.id,
+    status: 403,
+    reason,
+    kind: record.event.kind,
+    fileId: record.event.fileId ?? null,
+    cellId: record.event.cellId ?? null,
+  }))
 }
 
 function groupOldestFileFirst(records: OutboxRecord[]): OutboxRecord[] {
@@ -161,11 +175,7 @@ function groupOldestFileFirst(records: OutboxRecord[]): OutboxRecord[] {
   return same
 }
 
-/**
- * Flush one batch: oldest slice grouped by file of the oldest row.
- * Returns accepted count (0 if nothing to send or no token).
- */
-export async function flushOutboxBatch(deps: FlushDeps): Promise<{
+export type FlushOutboxResult = {
   posted: number
   accepted: number
   networkError: boolean
@@ -182,7 +192,43 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
   quarantined: number
   staleSiblingCount: number
   staleSourceCount: number
-}> {
+}
+
+type StaleSiblingsListener = (entries: StaleSiblingEntry[]) => void
+const staleSiblingsListeners = new Set<StaleSiblingsListener>()
+
+/**
+ * Tab-wide stale-sibling notification. `deps.onStaleSiblings` only reaches
+ * the caller that ran THIS flush, but a commit is usually posted by an inline
+ * "flush now" call (e.g. right after a cell commit) that never passes the
+ * callback — so a stale rejection of the user's own edit could go unseen by
+ * the workspace that owns the optimistic shadow. Every flush notifies these
+ * listeners (subject to the same `shouldSurface` gate) so the workspace can
+ * treat stale as a rejection regardless of which caller posted the batch.
+ */
+export function subscribeStaleSiblings(listener: StaleSiblingsListener): () => void {
+  staleSiblingsListeners.add(listener)
+  return () => { staleSiblingsListeners.delete(listener) }
+}
+
+// Per-tab serialization. Many inline `flushOutboxBatch` calls run outside the
+// Web Lock held by useOutboxFlusher, so two callers could peek the same
+// pending rows and POST them twice. Callers queue behind the running flush;
+// the queued run is a no-op when the earlier one drained the queue.
+let flushChain: Promise<unknown> = Promise.resolve()
+
+/**
+ * Flush one batch: oldest slice grouped by file of the oldest row.
+ * Returns accepted count (0 if nothing to send or no token).
+ * Serialized per tab — see `flushChain`.
+ */
+export function flushOutboxBatch(deps: FlushDeps): Promise<FlushOutboxResult> {
+  const run = flushChain.then(() => flushOutboxBatchUnserialized(deps))
+  flushChain = run.catch(() => undefined)
+  return run
+}
+
+async function flushOutboxBatchUnserialized(deps: FlushDeps): Promise<FlushOutboxResult> {
   const ownerVersion = deps.ownerScope ? null : getActiveOutboxOwnerVersion()
   const outboxScope: OutboxOwnerScope | undefined = deps.ownerScope
     ? { ownerKey: deps.ownerScope.ownerKey }
@@ -239,6 +285,10 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
       // different account/role. Re-auth won't fix it. Quarantine the batch and
       // let the flusher advance to the next file, exactly like a 403 on POST.
       if (shouldSurface()) {
+        deps.onForbidden?.(forbiddenEntriesFor(
+          batch,
+          "no access to this change's project",
+        ))
         posthog.capture(OUTBOX_QUARANTINED, {
           count: batch.length,
           reason: "token-mint-403",
@@ -304,6 +354,7 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
     // hiccup) — RES-2: stamp error WITHOUT burning the retry budget.
     if (res.status === 403) {
       if (shouldSurface()) {
+        deps.onForbidden?.(forbiddenEntriesFor(batch, "HTTP 403"))
         posthog.capture(OUTBOX_QUARANTINED, {
           count: batch.length,
           reason: "post-403",
@@ -366,7 +417,10 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
     // F6: surface stale sibling dead-letters to the caller so a toast can be
     // shown. The full entries (with fileId/cellId) flow through so the
     // caller can deep-link to the affected cells.
-    if (shouldSurface()) deps.onStaleSiblings?.(body.stale)
+    if (shouldSurface()) {
+      deps.onStaleSiblings?.(body.stale)
+      for (const listener of staleSiblingsListeners) listener(body.stale)
+    }
   }
   // F5: surface stale-source pins to the caller so a "source changed" hint can appear.
   if (body.staleSource && body.staleSource.length > 0) {
@@ -425,6 +479,16 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
     .map((r) => r.id)
   if (forbiddenIds.length > 0) {
     if (shouldSurface()) {
+      const forbiddenIdSet = new Set(forbiddenIds)
+      const records = batch.filter((record) => forbiddenIdSet.has(record.id))
+      deps.onForbidden?.(records.map((record) => ({
+        id: record.id,
+        status: 403,
+        reason: rejectionByid.get(record.id)?.reason ?? "forbidden",
+        kind: record.event.kind,
+        fileId: record.event.fileId ?? null,
+        cellId: record.event.cellId ?? null,
+      })))
       posthog.capture(OUTBOX_QUARANTINED, {
         count: forbiddenIds.length,
         reason: "server-rejected-403",
@@ -437,20 +501,6 @@ export async function flushOutboxBatch(deps: FlushDeps): Promise<{
       [id],
       rejectionByid.get(id) ?? { status: 403, reason: "forbidden" },
       outboxScope,
-    )
-  }
-  if (forbiddenIds.length > 0 && deps.onForbidden) {
-    // Read kind/fileId back off the batch, as the rejected path does — the
-    // server's array carries only id/status/reason.
-    const recordById = new Map(batch.map((r) => [r.id, r]))
-    deps.onForbidden(
-      forbiddenIds.map((id) => ({
-        id,
-        kind: recordById.get(id)?.event.kind ?? "",
-        status: rejectionByid.get(id)?.status ?? 403,
-        reason: rejectionByid.get(id)?.reason ?? "forbidden",
-        fileId: recordById.get(id)?.event.fileId ?? null,
-      })),
     )
   }
   const forbiddenSet = new Set(forbiddenIds)

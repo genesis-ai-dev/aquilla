@@ -33,13 +33,14 @@
  *   { t: "focus.claim", cellId, leaseMs?: number }
  *   { t: "focus.renew", cellId }
  *   { t: "focus.release", cellId }
- *   { t: "presence.update", currentFileId?, focusedCell?, selection? }
+ *   { t: "presence.update", currentFileId?, focusedCell?, viewingCell?, selection? }
  *
  * This file is the *client*. The server-side DO ships in
  * `sync-worker/src/project-do.ts`. Both must remain wire-compatible.
  */
 
 import type { OutboxRawEvent, OutboxEventKind } from "./outbox-types"
+import type { CellRow } from "./cells-read-types"
 import type { TargetPresenceSelection } from "./presence-store"
 import type {
   ContextualFrame,
@@ -60,7 +61,10 @@ const MAX_PRESENCE_DRAFT_LENGTH = 16_384
 
 export interface PresenceUser {
   userId: string
+  /** Lock-bearing: the cell this user holds the edit lease on. */
   focusedCell?: string
+  /** Non-lock-bearing: the row the user has selected, lease or not. */
+  viewingCell?: string
   currentFileId?: string
   selection?: TargetPresenceSelection
   ts: number
@@ -81,9 +85,21 @@ export type ProjectWsServerMessage =
        *  no local outbox write, so they are never own-write echoes — even
        *  when `by` matches this client's identity. */
       via?: "external"
+      /** `events.server_seq` of this event. Additive; paired with `rows`. */
+      serverSeq?: number
+      /** The cell's CURRENT projected rows (both sides, all lanes), serialised
+       *  exactly as GET …/files/:f/cells?cellIds=<id> returns them. When
+       *  present with `serverSeq`, the client lands them directly
+       *  (src/lib/sync/live-apply.ts) instead of refetching. */
+      rows?: CellRow[]
     }
   | { t: "event.stale"; id: string; reason: string }
   | { t: "presence"; users: PresenceUser[] }
+  /** Exactly one user's roster-visible state changed (no `selection.draftText`). */
+  | { t: "presence.diff"; user: PresenceUser }
+  | { t: "presence.left"; userId: string }
+  /** Live draft text for one cell; server coalesces to ≤1 per user per 150 ms. */
+  | { t: "presence.draft"; userId: string; cellId: string; draftText: string; ts: number }
   | { t: "lock.claimed"; cellId: string; by: { userId: string; ts: number } }
   | { t: "lock.released"; cellId: string; by: { userId: string; ts: number } }
   | { t: "project.archived"; project: string; archivedAt?: string; deletedBy?: string }
@@ -176,6 +192,7 @@ export type ProjectWsClientMessage =
       t: "presence.update"
       currentFileId?: string | null
       focusedCell?: string | null
+      viewingCell?: string | null
       selection?: TargetPresenceSelection | null
     }
 
@@ -261,7 +278,9 @@ export function createWsReconciler(
   options: WsReconcilerOptions,
   handlers: WsReconcilerHandlers = {},
 ): WsReconciler {
-  const minBackoff = options.minBackoffMs ?? 250
+  // 1s floor + jitter: a sync-worker redeploy drops every socket at once, and
+  // a 250ms floor had the whole fleet reconnecting (and resyncing) in lockstep.
+  const minBackoff = options.minBackoffMs ?? 1_000
   const maxBackoff = options.maxBackoffMs ?? 30_000
   const Ctor =
     options.webSocketCtor ?? (globalThis as { WebSocket?: typeof WebSocket }).WebSocket
@@ -292,7 +311,8 @@ export function createWsReconciler(
   function scheduleReconnect(): void {
     if (closed) return
     if (reconnectTimer !== null) return
-    const delay = backoffMs
+    // Up to +25% jitter so clients dropped together don't retry together.
+    const delay = Math.round(backoffMs * (1 + Math.random() * 0.25))
     backoffMs = Math.min(maxBackoff, Math.max(minBackoff, backoffMs * 2))
     reconnectTimer = setTimeout(() => {
       reconnectTimer = null
@@ -419,6 +439,19 @@ export function createWsReconciler(
 
 // ── Wire-format helpers ───────────────────────────────────────────────────
 
+/** `event.applied.rows` guard: every entry must at least be an object with a
+ *  string `cellId` and a valid `side`; otherwise the whole field is dropped. */
+function parseAppliedRows(raw: unknown): CellRow[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  for (const r of raw) {
+    if (!r || typeof r !== "object") return undefined
+    const o = r as Record<string, unknown>
+    if (typeof o.cellId !== "string") return undefined
+    if (o.side !== "source" && o.side !== "target") return undefined
+  }
+  return raw as CellRow[]
+}
+
 /**
  * Defensive parse of an incoming WS frame. Returns null on malformed input
  * (the caller treats this as a parse error and emits onError).
@@ -441,6 +474,10 @@ export function parseProjectWsMessage(raw: string): ProjectWsServerMessage | nul
     ) {
       return null
     }
+    // Minimal shape check on the optional projected rows. Any malformed entry
+    // drops the WHOLE field (never a partial row set — replaceRowsForCell
+    // would treat a missing side as a deletion); the handler then refetches.
+    const rows = parseAppliedRows(m.rows)
     return {
       t: "event.applied",
       id: m.id,
@@ -449,6 +486,11 @@ export function parseProjectWsMessage(raw: string): ProjectWsServerMessage | nul
       ...(typeof m.file === "string" ? { file: m.file } : {}),
       ...(typeof m.cell === "string" ? { cell: m.cell } : {}),
       ...(typeof m.by === "string" ? { by: m.by } : {}),
+      ...(m.via === "external" ? { via: "external" as const } : {}),
+      ...(typeof m.serverSeq === "number" && Number.isFinite(m.serverSeq)
+        ? { serverSeq: m.serverSeq }
+        : {}),
+      ...(rows ? { rows } : {}),
     }
   }
   if (t === "event.stale") {
@@ -459,21 +501,33 @@ export function parseProjectWsMessage(raw: string): ProjectWsServerMessage | nul
     if (!Array.isArray(m.users)) return null
     const users: PresenceUser[] = []
     for (const u of m.users) {
-      if (!u || typeof u !== "object") return null
-      const r = u as Record<string, unknown>
-      if (typeof r.userId !== "string" || typeof r.ts !== "number") return null
-      // A present-but-invalid selection (wrong shape, oversized draft) marks
-      // the whole frame malformed — same strictness as the other fields.
-      if (r.selection !== undefined && !isTargetPresenceSelection(r.selection)) return null
-      users.push({
-        userId: r.userId,
-        ts: r.ts,
-        ...(typeof r.focusedCell === "string" ? { focusedCell: r.focusedCell } : {}),
-        ...(typeof r.currentFileId === "string" ? { currentFileId: r.currentFileId } : {}),
-        ...(r.selection !== undefined ? { selection: r.selection } : {}),
-      })
+      const user = parsePresenceUser(u)
+      if (!user) return null
+      users.push(user)
     }
     return { t: "presence", users }
+  }
+  if (t === "presence.diff") {
+    const user = parsePresenceUser(m.user)
+    if (!user) return null
+    return { t: "presence.diff", user }
+  }
+  if (t === "presence.left") {
+    if (typeof m.userId !== "string") return null
+    return { t: "presence.left", userId: m.userId }
+  }
+  if (t === "presence.draft") {
+    if (
+      typeof m.userId !== "string" ||
+      typeof m.cellId !== "string" ||
+      typeof m.draftText !== "string" ||
+      m.draftText.length > MAX_PRESENCE_DRAFT_LENGTH ||
+      typeof m.ts !== "number" ||
+      !Number.isFinite(m.ts)
+    ) {
+      return null
+    }
+    return { t: "presence.draft", userId: m.userId, cellId: m.cellId, draftText: m.draftText, ts: m.ts }
   }
   if (t === "lock.claimed" || t === "lock.released") {
     if (typeof m.cellId !== "string" || !m.by || typeof m.by !== "object") return null
@@ -688,6 +742,23 @@ function parseContextualFrame(value: unknown): ContextualActivityFrame | null {
   return null
 }
 
+function parsePresenceUser(u: unknown): PresenceUser | null {
+  if (!u || typeof u !== "object") return null
+  const r = u as Record<string, unknown>
+  if (typeof r.userId !== "string" || typeof r.ts !== "number") return null
+  // A present-but-invalid selection (wrong shape, oversized draft) marks
+  // the whole frame malformed — same strictness as the other fields.
+  if (r.selection !== undefined && !isTargetPresenceSelection(r.selection)) return null
+  return {
+    userId: r.userId,
+    ts: r.ts,
+    ...(typeof r.focusedCell === "string" ? { focusedCell: r.focusedCell } : {}),
+    ...(typeof r.viewingCell === "string" ? { viewingCell: r.viewingCell } : {}),
+    ...(typeof r.currentFileId === "string" ? { currentFileId: r.currentFileId } : {}),
+    ...(r.selection !== undefined ? { selection: r.selection } : {}),
+  }
+}
+
 function isTargetPresenceSelection(value: unknown): value is TargetPresenceSelection {
   if (!value || typeof value !== "object") return false
   const v = value as Record<string, unknown>
@@ -702,7 +773,92 @@ function isTargetPresenceSelection(value: unknown): value is TargetPresenceSelec
   )
 }
 
-// ── AQU-845 reconnect resync ──────────────────────────────────────────────
+// ── AQU-1145 applied-event refresh coalescing ──
+
+export interface ScopedRefreshScope {
+  projectId: string
+  fileId: string
+}
+
+export interface ScopedRefreshSchedulerOptions {
+  /** Read at flush time so a delayed callback cannot refresh a newly opened
+   *  file with an event that belonged to the previous file. */
+  currentScope(): ScopedRefreshScope | null
+  refresh(scope: ScopedRefreshScope): void
+  /** Fixed collection window. Repeated schedules never extend it. */
+  windowMs?: number
+}
+
+export interface ScopedRefreshScheduler {
+  /** Queue one refresh when `scope` is the currently active scope. */
+  schedule(scope: ScopedRefreshScope): void
+  /** Cancel pending work and permanently stop this scheduler. */
+  dispose(): void
+}
+
+const SCOPED_REFRESH_DEFAULT_WINDOW_MS = 50
+
+function sameRefreshScope(
+  a: ScopedRefreshScope | null,
+  b: ScopedRefreshScope | null,
+): boolean {
+  return !!a && !!b && a.projectId === b.projectId && a.fileId === b.fileId
+}
+
+/**
+ * Collapse a burst of applied-event hints into one refresh for the active
+ * project/file. The window starts with the first hint and is never extended,
+ * so a continuous event stream still refreshes once per window.
+ *
+ * A scope change replaces any pending scope and starts a fresh window. The
+ * callback checks the live scope again before firing, which fences file
+ * switches that happen without another event arriving.
+ */
+export function createScopedRefreshScheduler(
+  options: ScopedRefreshSchedulerOptions,
+): ScopedRefreshScheduler {
+  const windowMs = Math.max(0, options.windowMs ?? SCOPED_REFRESH_DEFAULT_WINDOW_MS)
+  let timer: ReturnType<typeof setTimeout> | null = null
+  let pendingScope: ScopedRefreshScope | null = null
+  let disposed = false
+
+  const cancelTimer = (): void => {
+    if (timer === null) return
+    clearTimeout(timer)
+    timer = null
+  }
+
+  const startWindow = (scope: ScopedRefreshScope): void => {
+    pendingScope = scope
+    timer = setTimeout(() => {
+      timer = null
+      const scheduledScope = pendingScope
+      pendingScope = null
+      const activeScope = options.currentScope()
+      if (!disposed && activeScope && sameRefreshScope(scheduledScope, activeScope)) {
+        options.refresh(activeScope)
+      }
+    }, windowMs)
+  }
+
+  return {
+    schedule(scope): void {
+      if (disposed || !sameRefreshScope(scope, options.currentScope())) return
+      if (timer !== null && sameRefreshScope(scope, pendingScope)) return
+      // The user switched files and a frame for the new active file arrived
+      // before the old window elapsed. Never let the old callback survive.
+      cancelTimer()
+      startWindow(scope)
+    },
+    dispose(): void {
+      disposed = true
+      cancelTimer()
+      pendingScope = null
+    },
+  }
+}
+
+// ── AQU-845 reconnect resync ──
 
 /**
  * Build the handler ProjectWorkspace calls from `onOpen`.
@@ -725,14 +881,54 @@ function isTargetPresenceSelection(value: unknown): value is TargetPresenceSelec
  * The resync itself is a `?since=` delta in the read path, so the recovery
  * costs one small request per reconnect — not a full re-stream.
  */
-export function createReconnectResyncHandler(onResync: () => void): () => void {
+export interface ReconnectResyncHandler {
+  /** Wire to the reconciler's `onOpen`. */
+  handleOpen(): void
+  /** Wire to the reconciler's `onClose`. */
+  handleClose(): void
+}
+
+export interface ReconnectResyncOptions {
+  /**
+   * A socket that was down for less than this is reopened WITHOUT a resync.
+   * Safe because the client's `?since=` cursor is a server sequence that only
+   * advances from a delta/full read's own response (`maxServerSeq`) — never
+   * from a WS frame — so any `event.applied` missed during a blip still sits
+   * above the cursor and rides along on the next soft revalidate (own commit,
+   * focus return, the next longer reconnect). The cost of skipping is delayed
+   * visibility of a peer's write that landed in that sub-3s window, not loss.
+   */
+  minDownMs?: number
+  /** Injectable clock for tests. */
+  now?(): number
+}
+
+const RECONNECT_RESYNC_MIN_DOWN_MS = 3_000
+
+export function createReconnectResyncHandler(
+  onResync: () => void,
+  options: ReconnectResyncOptions = {},
+): ReconnectResyncHandler {
+  const minDownMs = options.minDownMs ?? RECONNECT_RESYNC_MIN_DOWN_MS
+  const now = options.now ?? (() => Date.now())
   let opened = false
-  return () => {
-    if (!opened) {
-      opened = true
-      return
-    }
-    onResync()
+  let closedAt: number | null = null
+  return {
+    handleClose() {
+      if (closedAt === null) closedAt = now()
+    },
+    handleOpen() {
+      const downFor = closedAt === null ? null : now() - closedAt
+      closedAt = null
+      if (!opened) {
+        opened = true
+        return
+      }
+      // No close was observed (e.g. reconnect() swapped the socket) → the gap
+      // length is unknown; resync to be safe.
+      if (downFor !== null && downFor < minDownMs) return
+      onResync()
+    },
   }
 }
 

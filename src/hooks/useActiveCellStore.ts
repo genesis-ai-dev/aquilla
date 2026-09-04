@@ -4,7 +4,13 @@ import { buildCellData } from "./useCells"
 import type { CellAuditStats } from "./useCellsAuditStats"
 import { streamFileCells, fetchCellsByIds, fetchCellsDelta } from "@/lib/sync/cells-read"
 import type { CellRow } from "@/lib/sync/cells-read-types"
-import { mergeCellsDelta, readCellsCache, walkAnchorChain, writeCellsCache } from "@/lib/sync/cells-cache"
+import {
+  flushCellsCacheWrites,
+  mergeCellsDelta,
+  readCellsCache,
+  scheduleCellsCacheWrite,
+  walkAnchorChain,
+} from "@/lib/sync/cells-cache"
 import { peekOutboxBatch, subscribeToOutbox } from "@/lib/sync/outbox"
 import { extractUsfmFootnotes, type ExtractedFootnote } from "@/lib/footnotes/extract"
 import { sortByLens } from "@/lib/timeline/derive"
@@ -13,6 +19,7 @@ import type { FileProgressResponse, ProgressCounts } from "@/lib/progress/file-p
 import { deriveMilestoneNavigation } from "@/lib/milestone-navigation"
 import type { ImportMilestoneKind } from "../../shared/import-contract"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
+import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
 
 const EMPTY_STATS: ReadonlyMap<string, CellAuditStats> = new Map()
 const EMPTY_TAKES: ReadonlySet<string> = new Set()
@@ -208,6 +215,8 @@ interface OptimisticEdit extends PendingOverlay {
   seq: number
 }
 
+const FETCH_RETRY_DELAYS_MS = [2000, 5000, 10000] as const
+
 function targetOverlayKey(cellId: string, targetLang: string): string {
   return `${cellId}\u0000${targetLang}`
 }
@@ -276,6 +285,14 @@ export class CellStore {
     details: CellFootnoteDetails
   }>()
   private derivedCache: DerivedCache = { baseVersion: -1, summaries: [], textPairs: [] }
+  private derivedIndexesDirty = true
+  // AQU-1104: a cell's view is a pure function of its per-cell version (the
+  // invariant editor rows already rely on through useCellView), so the built
+  // view and its summary are cached per version. A whole-file read after a
+  // commit then re-derives only the cells the commit touched, instead of
+  // rebuilding 30k views and summaries on every version bump.
+  private viewCache = new Map<string, { version: number; view: CellViewModel }>()
+  private summaryCache = new Map<string, { version: number; summary: CellSummary; textPair: CellTextPair }>()
 
   /**
    * AQU-646: which cells carry a recording of their own.
@@ -368,6 +385,8 @@ export class CellStore {
     this.projectEpoch = null
     this.writeSeq = 0
     this.footnoteCache = new Map()
+    this.viewCache = new Map()
+    this.summaryCache = new Map()
     this.rebuildDerivedIndexes()
     this.listVersion++
     this.fileVersion++
@@ -410,7 +429,8 @@ export class CellStore {
   }
   setMaxServerSeq(seq: number | null): void {
     this.maxServerSeq = seq
-    if (this.fileProgressSnapshot) {
+    // A pending rebuild reads maxServerSeq itself; only a built snapshot needs patching.
+    if (!this.derivedIndexesDirty && this.fileProgressSnapshot) {
       this.fileProgressSnapshot = { ...this.fileProgressSnapshot, revision: seq ?? 0 }
     }
   }
@@ -450,6 +470,7 @@ export class CellStore {
   }
 
   findIndexBySection(label: string): number {
+    this.ensureDerivedIndexes()
     const normalizedKey = legacySectionKey(label)
     const entry = this.navIndex.find((item) => (
       item.key === label || item.label === label || item.key === normalizedKey
@@ -459,17 +480,23 @@ export class CellStore {
 
   getSectionLabelForCellId(cellId: string | undefined | null): string {
     if (!cellId) return ""
+    this.ensureDerivedIndexes()
     return this.sectionLabelById.get(cellId) ?? ""
   }
 
   getNavigationIndex(displayCellIds?: readonly string[]): readonly CellNavigationEntry[] {
-    const navigation = displayCellIds
+    this.ensureDerivedIndexes()
+    // AQU-1104: the text lens displays the store's own order (getCellIdsForLens
+    // returns `this.order` itself), so the index built on every commit can be
+    // reused instead of walking all rows again for the same id list.
+    const navigation = displayCellIds && displayCellIds !== this.order
       ? this.buildNavigationIndex(displayCellIds).entries
       : this.navIndex
     return navigation.length === 0 ? EMPTY_NAVIGATION : navigation
   }
 
   getFileProgressSnapshot(): FileProgressResponse | null {
+    this.ensureDerivedIndexes()
     return this.fileProgressSnapshot
   }
 
@@ -478,6 +505,7 @@ export class CellStore {
   }
 
   getFootnoteOffsets(cellId: string): { source: number; target: number } {
+    this.ensureDerivedIndexes()
     return this.footnoteOffsets.get(cellId) ?? { source: 0, target: 0 }
   }
 
@@ -507,6 +535,9 @@ export class CellStore {
 
   getCellView(cellId: string): CellViewModel | null {
     if (!this.indexById.has(cellId)) return null
+    const version = this.cellVersionById.get(cellId) ?? 0
+    const cached = this.viewCache.get(cellId)
+    if (cached && cached.version === version) return cached.view
     const source = this.sourceById.get(cellId)
     const target = this.targetById.get(cellId)
     const cell = buildCellData(
@@ -520,6 +551,7 @@ export class CellStore {
     )
     this.applyContentOverlays(cell)
     this.applyOwnTake(cell)
+    this.viewCache.set(cellId, { version, view: cell })
     return cell
   }
 
@@ -617,11 +649,18 @@ export class CellStore {
   }
 
   getCellSummary(cellId: string): CellSummary | null {
+    return this.summaryEntry(cellId)?.summary ?? null
+  }
+
+  private summaryEntry(cellId: string): { version: number; summary: CellSummary; textPair: CellTextPair } | null {
     const index = this.indexById.get(cellId)
     if (index == null) return null
+    const version = this.cellVersionById.get(cellId) ?? 0
+    const cached = this.summaryCache.get(cellId)
+    if (cached && cached.version === version && cached.summary.index === index) return cached
     const view = this.getCellView(cellId)
     if (!view) return null
-    return {
+    const summary: CellSummary = {
       id: view.id,
       fileId: view.fileId,
       index,
@@ -653,6 +692,20 @@ export class CellStore {
       selectedGeneratedVoiceAudioId: view.selectedGeneratedVoiceAudioId,
       hasOwnTake: view.hasOwnTake,
     }
+    const entry = {
+      version,
+      summary,
+      textPair: {
+        cellId,
+        fileId: summary.fileId,
+        sourceText: summary.original,
+        targetText: summary.translated,
+        validated: summary.validated,
+        index,
+      },
+    }
+    this.summaryCache.set(cellId, entry)
+    return entry
   }
 
   /**
@@ -843,10 +896,7 @@ export class CellStore {
 
     for (const row of rows) {
       if (row.side === "source") {
-        if (!sourceById.has(row.cellId)) {
-          sourceOrder.push(row.cellId)
-          changedIds.add(row.cellId)
-        }
+        if (!sourceById.has(row.cellId)) sourceOrder.push(row.cellId)
         sourceById.set(row.cellId, row)
       } else {
         // AQU-538: only the active lane's target participates in the paired
@@ -857,8 +907,23 @@ export class CellStore {
         }
         if (!targetById.has(row.cellId)) targetOrder.push(row.cellId)
         targetById.set(row.cellId, row)
-        changedIds.add(row.cellId)
       }
+    }
+
+    // AQU-1104: bump only the cells whose rows changed. This used to mark
+    // every row as changed, so a delta refresh after each commit bumped all
+    // 30k cells of a whole-Bible file, re-rendered every subscribed row, and
+    // invalidated every cached view. The delta merge (mergeCellsDelta) keeps
+    // the same row object for a cell it did not touch, so identity is the
+    // test; a caller that rebuilds every row object still bumps every cell,
+    // which is the conservative side of the version/data invariant.
+    for (const id of sourceById.keys()) {
+      if (this.sourceById.get(id) !== sourceById.get(id) || this.targetById.get(id) !== targetById.get(id)) {
+        changedIds.add(id)
+      }
+    }
+    for (const id of targetById.keys()) {
+      if (!sourceById.has(id) && this.targetById.get(id) !== targetById.get(id)) changedIds.add(id)
     }
 
     const seen = new Set(sourceOrder)
@@ -867,13 +932,18 @@ export class CellStore {
       if (!seen.has(id)) order.push(id)
     }
 
-    if (!sameStringArray(order, this.order)) {
+    const orderChanged = !sameStringArray(order, this.order)
+    if (orderChanged) {
       for (const id of this.order) changedIds.add(id)
       for (const id of order) changedIds.add(id)
       this.listVersion++
     }
 
-    this.order = order
+    // AQU-1104: keep the array identity when the sequence is unchanged.
+    // useCellIds hands `this.order` to the editor as displayCellIds and only
+    // re-reads it on listVersion; a fresh array here made every
+    // getNavigationIndex(displayCellIds) call miss the store's own index.
+    this.order = orderChanged ? order : this.order
     this.sourceOrder = sourceOrder
     this.targetOrder = targetOrder
     this.sourceById = sourceById
@@ -883,6 +953,12 @@ export class CellStore {
     const liveIds = new Set(order)
     for (const id of this.footnoteCache.keys()) {
       if (!liveIds.has(id)) this.footnoteCache.delete(id)
+    }
+    for (const id of this.viewCache.keys()) {
+      if (!liveIds.has(id)) this.viewCache.delete(id)
+    }
+    for (const id of this.summaryCache.keys()) {
+      if (!liveIds.has(id)) this.summaryCache.delete(id)
     }
     if (opts.maxServerSeq !== undefined) this.maxServerSeq = opts.maxServerSeq
     this.rebuildDerivedIndexes()
@@ -985,7 +1061,10 @@ export class CellStore {
     return { rows: [...walkAnchorChain(sources), ...rest], discardedCellIds }
   }
 
-  setPendingOverlay(next: Map<string, PendingOverlay>): void {
+  setPendingState(
+    next: Map<string, PendingOverlay>,
+    nextProgressEventIds: readonly string[],
+  ): void {
     const activeLane = this.ctx.lane ?? ""
     const normalized = new Map<string, PendingOverlay>()
     for (const [cellId, overlay] of next) {
@@ -1004,20 +1083,32 @@ export class CellStore {
         && a.aiDraft?.generatedAt === b.aiDraft?.generatedAt
         && a.targetLang === b.targetLang,
     )
-    if (changed.size === 0) return
+    const uniqueProgress = [...new Set(nextProgressEventIds)]
+    const progressChanged = uniqueProgress.length !== this.pendingProgressEventIds.length
+      || uniqueProgress.some((eventId, index) => (
+        eventId !== this.pendingProgressEventIds[index]
+      ))
+    if (changed.size === 0 && !progressChanged) return
     this.pendingOverlay = normalized
-    this.bumpCells(changed)
-    this.rebuildDerivedIndexes()
-    this.emit(changed)
+    this.pendingProgressEventIds = uniqueProgress
+    if (changed.size > 0) {
+      this.bumpCells(changed)
+      this.rebuildDerivedIndexes()
+    }
+    // Whole-file selectors read getAllVersion(). Any derived overlay change
+    // must advance that snapshot too, even when the progress-id set happens
+    // to stay equal. One combined update still means one version bump.
+    this.fileVersion++
+    if (changed.size > 0) this.emit(changed)
+    else this.emitAll()
+  }
+
+  setPendingOverlay(next: Map<string, PendingOverlay>): void {
+    this.setPendingState(next, this.pendingProgressEventIds)
   }
 
   setPendingProgressEventIds(next: readonly string[]): void {
-    const unique = [...new Set(next)]
-    if (unique.length === this.pendingProgressEventIds.length
-      && unique.every((eventId, index) => eventId === this.pendingProgressEventIds[index])) return
-    this.pendingProgressEventIds = unique
-    this.fileVersion++
-    this.emitAll()
+    this.setPendingState(this.pendingOverlay, next)
   }
 
   clearOptimisticIfValue(cellId: string, value: string): boolean {
@@ -1029,6 +1120,32 @@ export class CellStore {
     this.rebuildDerivedIndexes()
     this.emit([cellId])
     return true
+  }
+
+  /**
+   * Drop a cell's optimistic shadow regardless of its value. Used when the
+   * server reports the shadow's commit as a stale sibling (I2: stale is a
+   * rejection): the losing text must stop protecting the row so the winner's
+   * projection can land on the next revalidate. `lane` undefined clears the
+   * cell's shadow in every lane (the stale entry carries no lane).
+   */
+  clearOptimisticForCell(cellId: string, lane?: string): boolean {
+    const keys: string[] = []
+    if (lane !== undefined) {
+      if (this.optimisticEdits.has(targetOverlayKey(cellId, lane))) keys.push(targetOverlayKey(cellId, lane))
+    } else {
+      for (const [key, shadow] of this.optimisticEdits) if (shadow.cellId === cellId) keys.push(key)
+    }
+    if (keys.length === 0) return false
+    for (const key of keys) this.optimisticEdits.delete(key)
+    this.bumpCells([cellId])
+    this.rebuildDerivedIndexes()
+    this.emit([cellId])
+    return true
+  }
+
+  hasOptimisticEdits(): boolean {
+    return this.optimisticEdits.size > 0
   }
 
   applyOptimisticTargetEdit(cellId: string, patch: PendingOverlay): void {
@@ -1464,6 +1581,7 @@ export class CellStore {
   }
 
   getMemorySnapshot(extra?: Record<string, unknown>): Record<string, unknown> {
+    this.ensureDerivedIndexes()
     let textBytes = 0
     let htmlBytes = 0
     for (const id of this.order) {
@@ -1532,24 +1650,35 @@ export class CellStore {
     const summaries: CellSummary[] = []
     const textPairs: CellTextPair[] = []
     for (const id of this.order) {
-      const summary = this.getCellSummary(id)
-      if (!summary) continue
-      summaries.push(summary)
-      textPairs.push({
-        cellId: id,
-        fileId: summary.fileId,
-        sourceText: summary.original,
-        targetText: summary.translated,
-        validated: summary.validated,
-        index: summary.index,
-      })
+      const entry = this.summaryEntry(id)
+      if (!entry) continue
+      summaries.push(entry.summary)
+      textPairs.push(entry.textPair)
     }
     this.derivedCache = { baseVersion: this.derivedVersion, summaries, textPairs }
   }
 
+  /**
+   * AQU-1104: every mutation used to rebuild the navigation index, the file
+   * and section progress, and the footnote offsets on the spot, walking all
+   * rows each time. One commit runs several mutations back to back
+   * (optimistic edit, pending overlay, server ack, shadow clearing, audit
+   * stats), so a 31k-cell file paid four to six full walks per commit. The
+   * rebuild is now deferred to the first read after the mutations settle.
+   */
   private rebuildDerivedIndexes(): void {
     this.derivedVersion++
     this.derivedCache = { baseVersion: -1, summaries: [], textPairs: [] }
+    this.derivedIndexesDirty = true
+  }
+
+  private ensureDerivedIndexes(): void {
+    if (!this.derivedIndexesDirty) return
+    this.derivedIndexesDirty = false
+    this.computeDerivedIndexes()
+  }
+
+  private computeDerivedIndexes(): void {
     const navigation = this.buildNavigationIndex(this.order)
     const footnoteOffsets = new Map<string, { source: number; target: number }>()
     const countsByScope = new Map<string, { source: number; target: number }>()
@@ -1769,49 +1898,6 @@ export interface UseActiveCellStoreResult {
   isError: boolean
 }
 
-/**
- * AQU-1068: the offline cache write, debounced.
- *
- * `writeCellsCache` serialises the WHOLE file — 31k rows on a Bible — and the
- * structured clone runs on the main thread. Four call sites fired it on every
- * confirming read, which is what most of the post-insert lag actually was: the
- * wire cost is a delta of two or three cells, the jank is here.
- *
- * Safe to defer: the cache is a rebuildable copy that carries its own
- * watermark, so a short staleness window costs a slightly larger delta on the
- * next cold open and nothing else. Flushed on pagehide/visibilitychange so a
- * closed tab still leaves a good cache behind.
- */
-const CACHE_WRITE_DEBOUNCE_MS = 2000
-type PendingCacheWrite = { pid: string; fid: string; rows: CellRow[]; seq?: number; epoch?: number }
-let pendingCacheWrite: PendingCacheWrite | null = null
-let cacheWriteTimer: ReturnType<typeof setTimeout> | null = null
-
-function flushCellsCacheWrite(): void {
-  if (cacheWriteTimer != null) { clearTimeout(cacheWriteTimer); cacheWriteTimer = null }
-  const p = pendingCacheWrite
-  pendingCacheWrite = null
-  if (p) void writeCellsCache(p.pid, p.fid, p.rows, p.seq, p.epoch)
-}
-
-function scheduleCellsCacheWrite(pid: string, fid: string, rows: CellRow[], seq?: number, epoch?: number): void {
-  // A newer snapshot supersedes an unwritten older one for the same file; a
-  // different file flushes first so its rows are never dropped.
-  if (pendingCacheWrite && (pendingCacheWrite.pid !== pid || pendingCacheWrite.fid !== fid)) flushCellsCacheWrite()
-  pendingCacheWrite = { pid, fid, rows, seq, epoch }
-  if (cacheWriteTimer != null) clearTimeout(cacheWriteTimer)
-  cacheWriteTimer = setTimeout(flushCellsCacheWrite, CACHE_WRITE_DEBOUNCE_MS)
-}
-
-if (typeof document !== "undefined") {
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "hidden") flushCellsCacheWrite()
-  })
-}
-if (typeof window !== "undefined") {
-  window.addEventListener("pagehide", flushCellsCacheWrite)
-}
-
 export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCellStoreResult {
   const {
     projectId,
@@ -1834,10 +1920,17 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
   const tokenFetcherRef = useRef(getToken)
   const generationRef = useRef(0)
   const inFlightRef = useRef(false)
-  const pendingSoftFetchRef = useRef(false)
   const tokenRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const tokenAttemptsRef = useRef(0)
   const cellFetchInFlightRef = useRef<Set<string>>(new Set())
+  // I3: queue, don't drop. A second event.applied for a cell while its GET is
+  // in flight marks it dirty; the in-flight fetch re-runs once when it lands.
+  const cellRevalidateDirtyRef = useRef<Set<string>>(new Set())
+  // Same idea for the file-level soft refetch (reconnect / focus resync).
+  const pendingSoftRefetchRef = useRef(false)
+  // Bounded retry after a delta/full fetch failure; fenced by generation.
+  const fetchRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const fetchRetryAttemptsRef = useRef(0)
 
   projectRef.current = projectId
   fileRef.current = fileId
@@ -1852,11 +1945,28 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     store.setRuntime({ projectId, fileId, username, requiredValidations, auditStats, lane })
   }, [auditStats, fileId, lane, projectId, requiredValidations, store, username])
 
+  // I4 cache hygiene: never persist optimistic values as server rows.
+  // `applyOptimisticTargetEdit` mutates the target row in place (value under
+  // the OLD eventId), so `toRows()` is only server-truthful while no shadow is
+  // live. Skipping the write is chosen over re-deriving server rows because
+  // the pre-edit row is not retained anywhere; the next shadow-free fetch
+  // refreshes the cache and a stale-but-honest cache is repaired by the delta
+  // on reload, whereas a poisoned one paints a rejected edit as saved.
+  const persistCellsCache = useCallback((pid: string, fid: string, maxServerSeq?: number, projectEpoch?: number) => {
+    if (store.hasOptimisticEdits()) return
+    scheduleCellsCacheWrite(pid, fid, store.toRows(), maxServerSeq, projectEpoch)
+  }, [store])
+
+  const doFetchRef = useRef<(soft?: boolean) => Promise<void>>(async () => {})
   const doFetch = useCallback(async (soft = false) => {
     const pid = projectRef.current
     const fid = fileRef.current
     const isEnabled = enabledRef.current
     const tokenFetcher = tokenFetcherRef.current
+    if (fetchRetryTimerRef.current) {
+      clearTimeout(fetchRetryTimerRef.current)
+      fetchRetryTimerRef.current = null
+    }
     if (!isEnabled || !pid || !fid) {
       store.reset(pid, fid)
       setIsLoading(false)
@@ -1871,11 +1981,13 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     // refetched. One flag, not a queue: every soft fetch means "catch up now",
     // so N requests collapse into one run after the current fetch finishes.
     if (soft && inFlightRef.current) {
-      pendingSoftFetchRef.current = true
+      pendingSoftRefetchRef.current = true
       return
     }
     const gen = ++generationRef.current
     inFlightRef.current = true
+    // A full fetch supersedes any queued soft one.
+    if (!soft) pendingSoftRefetchRef.current = false
     let usedCache = false
 
     if (!soft) {
@@ -1939,11 +2051,12 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
             const { rows: kept, discardedCellIds } = store.mergeProtectedRows(merged, deltaStartSeq)
             store.replaceRows(kept, { changedCellIds: result.changedCellIds, maxServerSeq: discardedCellIds.size > 0 ? since : nextWatermark })
             if (discardedCellIds.size > 0) nextWatermark = since
-            scheduleCellsCacheWrite(pid, fid, store.toRows(), nextWatermark, nextEpoch ?? undefined)
+            persistCellsCache(pid, fid, nextWatermark, nextEpoch ?? undefined)
           } else if (result.maxServerSeq !== since) {
             store.setMaxServerSeq(result.maxServerSeq)
-            scheduleCellsCacheWrite(pid, fid, store.toRows(), result.maxServerSeq, nextEpoch ?? undefined)
+            persistCellsCache(pid, fid, result.maxServerSeq, nextEpoch ?? undefined)
           }
+          fetchRetryAttemptsRef.current = 0
           setIsLoading(false)
           return
         }
@@ -2023,23 +2136,37 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
       const watermarkEpoch = watermark === null ? null : streamEpoch
       store.setMaxServerSeq(watermark)
       store.setProjectEpoch(watermarkEpoch)
-      scheduleCellsCacheWrite(pid, fid, store.toRows(), watermark ?? undefined, watermarkEpoch ?? undefined)
+      persistCellsCache(pid, fid, watermark ?? undefined, watermarkEpoch ?? undefined)
+      fetchRetryAttemptsRef.current = 0
       setIsLoading(false)
     } catch (err) {
       if (generationRef.current !== gen) return
       console.warn("[useActiveCellStore] fetch failed:", err)
       setIsError(true)
       setIsLoading(false)
+      // Bounded retry chain (3 attempts, 2s/5s/10s). Previously a failed
+      // delta/full fetch left the page on the cache paint with no retry. The
+      // timer is fenced by generation and cleared by any newer doFetch, and
+      // the attempt counter only resets on success, so it cannot loop.
+      const attempt = fetchRetryAttemptsRef.current
+      if (attempt < FETCH_RETRY_DELAYS_MS.length) {
+        fetchRetryAttemptsRef.current = attempt + 1
+        fetchRetryTimerRef.current = setTimeout(() => {
+          fetchRetryTimerRef.current = null
+          if (generationRef.current === gen) void doFetchRef.current(effectiveSoft)
+        }, FETCH_RETRY_DELAYS_MS[attempt])
+      }
     } finally {
       if (generationRef.current === gen) {
         inFlightRef.current = false
-        if (pendingSoftFetchRef.current) {
-          pendingSoftFetchRef.current = false
-          void doFetch(true)
+        if (pendingSoftRefetchRef.current) {
+          pendingSoftRefetchRef.current = false
+          void doFetchRef.current(true)
         }
       }
     }
-  }, [store])
+  }, [persistCellsCache, store])
+  doFetchRef.current = doFetch
 
   useEffect(() => {
     if (tokenRetryRef.current) {
@@ -2048,8 +2175,20 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     }
     store.reset(projectId, fileId)
     void doFetch()
+    return () => {
+      // A tab switch must persist the last complete tuple before the old
+      // file's store is reset for the next scope.
+      if (projectId && fileId) void flushCellsCacheWrites(projectId, fileId)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, fileId, enabled])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const flushAll = () => { void flushCellsCacheWrites() }
+    window.addEventListener("pagehide", flushAll)
+    return () => window.removeEventListener("pagehide", flushAll)
+  }, [])
 
   useEffect(() => {
     if (!enabled || !projectId || !fileId) {
@@ -2107,8 +2246,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
           targetLang: eventLane,
         })
       }
-      store.setPendingOverlay(next)
-      store.setPendingProgressEventIds(pendingProgressEventIds)
+      store.setPendingState(next, pendingProgressEventIds)
     }
     void refresh()
     const unsub = subscribeToOutbox(refresh)
@@ -2120,20 +2258,12 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
 
   useEffect(() => () => {
     if (tokenRetryRef.current) clearTimeout(tokenRetryRef.current)
+    if (fetchRetryTimerRef.current) clearTimeout(fetchRetryTimerRef.current)
   }, [])
 
   useEffect(() => {
     if (typeof window === "undefined") return
-    function onFocus() { void doFetch(true) }
-    function onVis() {
-      if (typeof document !== "undefined" && document.visibilityState === "visible") void doFetch(true)
-    }
-    window.addEventListener("focus", onFocus)
-    if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVis)
-    return () => {
-      window.removeEventListener("focus", onFocus)
-      if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVis)
-    }
+    return subscribeWindowRegainedFocus(() => { void doFetch(true) })
   }, [doFetch])
 
   const revalidate = useCallback(() => {
@@ -2148,14 +2278,13 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     const pid = projectRef.current
     const fid = fileRef.current
     if (!pid || !fid) return
-    scheduleCellsCacheWrite(
+    persistCellsCache(
       pid,
       fid,
-      store.toRows(),
       maxServerSeq ?? store.getMaxServerSeq() ?? undefined,
       store.getProjectEpoch() ?? undefined,
     )
-  }, [store])
+  }, [persistCellsCache, store])
 
   const revalidateCellRef = useRef<(cellId: string) => void>(() => {})
   const revalidateCell = useCallback((cellId: string) => {
@@ -2164,7 +2293,10 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     const isEnabled = enabledRef.current
     const tokenFetcher = tokenFetcherRef.current
     if (!isEnabled || !pid || !fid || !tokenFetcher) return
-    if (cellFetchInFlightRef.current.has(cellId)) return
+    if (cellFetchInFlightRef.current.has(cellId)) {
+      cellRevalidateDirtyRef.current.add(cellId)
+      return
+    }
     cellFetchInFlightRef.current.add(cellId)
     const gen = generationRef.current
     let exhaustedByDiscard = false
@@ -2195,8 +2327,9 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
         if (generationRef.current === gen) void doFetch(true)
       } finally {
         cellFetchInFlightRef.current.delete(cellId)
+        const dirty = cellRevalidateDirtyRef.current.delete(cellId)
         if (
-          exhaustedByDiscard &&
+          (exhaustedByDiscard || dirty) &&
           generationRef.current === gen &&
           projectRef.current === pid &&
           fileRef.current === fid

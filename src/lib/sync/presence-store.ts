@@ -15,7 +15,10 @@ export interface TargetPresenceSelection {
 
 export interface PresenceUserSnapshot {
   userId: string
+  /** Lock-bearing: the cell the user holds the edit lease on. */
   focusedCell?: string
+  /** Non-lock-bearing: the row the user is on (selected/reading), lease or not. */
+  viewingCell?: string
   currentFileId?: string
   selection?: TargetPresenceSelection
   ts: number
@@ -27,7 +30,9 @@ export interface ProjectPresencePeer {
   color: string
   currentFileId?: string
   focusedCell?: string
+  viewingCell?: string
   selection?: TargetPresenceSelection
+  /** True iff the peer holds the edit lease on `focusedCell`. */
   isEditing: boolean
   lastSeenAt: number
 }
@@ -37,6 +42,12 @@ export interface CellPresencePeer extends ProjectPresencePeer {
 }
 
 type Listener = () => void
+
+interface PresenceDraft {
+  cellId: string
+  draftText: string
+  ts: number
+}
 
 function sameSelection(
   a: TargetPresenceSelection | undefined,
@@ -58,6 +69,7 @@ function sameUser(a: PresenceUserSnapshot | undefined, b: PresenceUserSnapshot |
   return (
     a.userId === b.userId &&
     a.focusedCell === b.focusedCell &&
+    a.viewingCell === b.viewingCell &&
     a.currentFileId === b.currentFileId &&
     a.ts === b.ts &&
     sameSelection(a.selection, b.selection)
@@ -73,8 +85,14 @@ function sameRosterUser(
   return (
     a.userId === b.userId &&
     a.focusedCell === b.focusedCell &&
+    a.viewingCell === b.viewingCell &&
     a.currentFileId === b.currentFileId
   )
+}
+
+/** The row a user is on: the lease-held cell wins, else the selected row. */
+export function presentCellOf(user: Pick<PresenceUserSnapshot, "focusedCell" | "viewingCell">): string | undefined {
+  return user.focusedCell ?? user.viewingCell
 }
 
 function affectedCellIds(
@@ -83,7 +101,9 @@ function affectedCellIds(
 ): string[] {
   const ids = new Set<string>()
   if (before?.focusedCell) ids.add(before.focusedCell)
+  if (before?.viewingCell) ids.add(before.viewingCell)
   if (after?.focusedCell) ids.add(after.focusedCell)
+  if (after?.viewingCell) ids.add(after.viewingCell)
   return Array.from(ids)
 }
 
@@ -98,6 +118,12 @@ export class ProjectPresenceStore {
    */
   private readonly selfIds: Set<string>
   private users = new Map<string, PresenceUserSnapshot>()
+  /**
+   * Live draft text per user, delivered by `presence.draft` frames (and by the
+   * `selection.draftText` of a full snapshot). Kept out of `users` so a draft
+   * frame never touches roster-visible state — only the cell it belongs to.
+   */
+  private drafts = new Map<string, PresenceDraft>()
   private lockHolders = new Map<string, string>()
   private rosterListeners = new Set<Listener>()
   private cellListeners = new Map<string, Set<Listener>>()
@@ -131,10 +157,11 @@ export class ProjectPresenceStore {
   reset(): void {
     const affected = new Set<string>()
     for (const user of this.users.values()) {
-      if (user.focusedCell) affected.add(user.focusedCell)
+      for (const cellId of affectedCellIds(user, undefined)) affected.add(cellId)
     }
     for (const cellId of this.lockHolders.keys()) affected.add(cellId)
     this.users = new Map()
+    this.drafts = new Map()
     this.lockHolders = new Map()
     this.rosterSnapshot = EMPTY_PEERS
     this.cellSnapshots = new Map()
@@ -154,11 +181,13 @@ export class ProjectPresenceStore {
       if (!sameUser(old, user)) {
         for (const cellId of affectedCellIds(old, user)) affected.add(cellId)
       }
+      if (this.syncDraftFromSnapshot(user) && user.focusedCell) affected.add(user.focusedCell)
     }
 
     for (const [userId, old] of this.users) {
       if (next.has(userId)) continue
       rosterChanged = true
+      this.drafts.delete(userId)
       for (const cellId of affectedCellIds(old, undefined)) affected.add(cellId)
     }
 
@@ -168,6 +197,69 @@ export class ProjectPresenceStore {
       this.emitRoster()
     }
     for (const cellId of affected) this.updateCellSnapshot(cellId)
+  }
+
+  /**
+   * `presence.diff`: exactly one user changed. Roster listeners fire only when a
+   * roster-visible field changed (focusedCell / currentFileId / joined); cell
+   * listeners fire for the cells the user left and entered.
+   */
+  applyPresenceDiff(user: PresenceUserSnapshot): void {
+    const old = this.users.get(user.userId)
+    this.users.set(user.userId, user)
+    const draftChanged = this.syncDraftFromSnapshot(user)
+    if (!sameRosterUser(old, user)) {
+      this.rosterSnapshot = this.computePeers()
+      this.emitRoster()
+    }
+    if (sameUser(old, user) && !draftChanged) return
+    for (const cellId of affectedCellIds(old, user)) this.updateCellSnapshot(cellId)
+  }
+
+  /** `presence.left`: the user disconnected (all of their sockets are gone). */
+  applyPresenceLeft(userId: string): void {
+    const old = this.users.get(userId)
+    this.drafts.delete(userId)
+    if (!old) return
+    this.users.delete(userId)
+    this.rosterSnapshot = this.computePeers()
+    this.emitRoster()
+    for (const cellId of affectedCellIds(old, undefined)) this.updateCellSnapshot(cellId)
+  }
+
+  /**
+   * `presence.draft`: live draft text for one cell. Notifies ONLY that cell's
+   * listeners — never the roster — so typing peers do not re-render the
+   * workspace root. Exposed on the cell peer's `selection.draftText`.
+   */
+  applyPresenceDraft(userId: string, cellId: string, draftText: string, ts: number): void {
+    const previous = this.drafts.get(userId)
+    if (previous && previous.ts > ts) return
+    this.drafts.set(userId, { cellId, draftText, ts })
+    if (previous && previous.cellId !== cellId) this.updateCellSnapshot(previous.cellId)
+    this.updateCellSnapshot(cellId)
+  }
+
+  /**
+   * Mirror a snapshot/diff's selection into the drafts map: a user with no
+   * selection has no draft; a selection carrying `draftText` IS the draft; a
+   * selection without `draftText` (diffs strip it) leaves the live draft alone.
+   * Returns true when the stored draft changed.
+   */
+  private syncDraftFromSnapshot(user: PresenceUserSnapshot): boolean {
+    const previous = this.drafts.get(user.userId)
+    if (!user.selection) {
+      if (!previous) return false
+      this.drafts.delete(user.userId)
+      return true
+    }
+    const draftText = user.selection.draftText
+    if (draftText === undefined) return false
+    const cellId = user.focusedCell
+    if (!cellId) return false
+    if (previous && previous.cellId === cellId && previous.draftText === draftText) return false
+    this.drafts.set(user.userId, { cellId, draftText, ts: user.ts })
+    return true
   }
 
   applyLockClaimed(cellId: string, userId: string): void {
@@ -181,6 +273,12 @@ export class ProjectPresenceStore {
     if (!this.lockHolders.has(cellId)) return
     this.lockHolders.delete(cellId)
     this.updateCellSnapshot(cellId)
+  }
+
+  /** Raw per-user snapshots (no drafts) — for lock-holder derivation and the
+   *  focus-lock hook, which still consume the full-roster frame shape. */
+  getUserSnapshots(): PresenceUserSnapshot[] {
+    return Array.from(this.users.values())
   }
 
   getPeers(): ProjectPresencePeer[] {
@@ -208,7 +306,7 @@ export class ProjectPresenceStore {
 
     for (const user of this.users.values()) {
       if (this.isSelf(user.userId)) continue
-      if (user.focusedCell !== cellId) continue
+      if (presentCellOf(user) !== cellId) continue
       seen.add(user.userId)
       peers.push({ ...this.toPeer(user), cellId })
     }
@@ -263,10 +361,20 @@ export class ProjectPresenceStore {
       color: peerColor(user.userId),
       currentFileId: user.currentFileId,
       focusedCell: user.focusedCell,
-      selection: user.selection,
+      viewingCell: user.viewingCell,
+      selection: this.selectionWithDraft(user),
       isEditing: Boolean(user.focusedCell),
       lastSeenAt: user.ts,
     }
+  }
+
+  private selectionWithDraft(user: PresenceUserSnapshot): TargetPresenceSelection | undefined {
+    const selection = user.selection
+    if (!selection) return undefined
+    const draft = this.drafts.get(user.userId)
+    if (!draft || draft.cellId !== user.focusedCell) return selection
+    if (selection.draftText === draft.draftText) return selection
+    return { ...selection, draftText: draft.draftText }
   }
 
   private emitRoster(): void {

@@ -358,6 +358,11 @@ export async function fetchCellsByIds(
  * mid-stream — and because the server paginates by offset, a row that shifted
  * across a page boundary may have been skipped entirely (a torn snapshot), so
  * callers must NOT mint a `?since=` cursor from such a stream (audit B2).
+ * (AQU-1160: the server may now serve a page's rows from an ordered-id cache
+ * keyed by the same watermark instead of re-walking the file, but the cursor
+ * is still an offset into that ordering and the cache is invalidated exactly
+ * when the watermark changes — so this torn-snapshot reasoning, and the "no
+ * `?since=` cursor from a mid-stream watermark change" rule, are unaffected.)
  */
 export async function streamFileCells(
   projectId: string,

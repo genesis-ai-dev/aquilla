@@ -4,6 +4,7 @@ import {
   setPrimaryRendering,
   partitionConcepts,
   canEditTermbase,
+  canEditTermCells,
   resolveTermbaseEditFloor,
   DEFAULT_TERMBASE_EDIT_MIN_ROLE,
 } from "./glossary-view"
@@ -122,6 +123,34 @@ describe("canEditTermbase", () => {
   it("keeps the local-project and unknown-role escape hatches under any floor", () => {
     expect(canEditTermbase({ level: 100 }, false, 600)).toBe(true)
     expect(canEditTermbase(null, true, 600)).toBe(true)
+  })
+})
+
+// AQU-208 C3: the drill-down (C2) lets contributors fix target cells while the
+// termbase definitions stay with project_lead+. These two gates live on the
+// same page, so they are asserted against the same role ladder here.
+describe("canEditTermCells", () => {
+  it("lets a contributor (400) edit cells in the drill-down", () => {
+    expect(canEditTermCells({ level: 400 }, true)).toBe(true)
+  })
+  it("keeps the drill-down read-only for a viewer / commenter / reviewer", () => {
+    expect(canEditTermCells({ level: 100 }, true)).toBe(false)
+    expect(canEditTermCells({ level: 200 }, true)).toBe(false)
+    expect(canEditTermCells({ level: 300 }, true)).toBe(false)
+  })
+  it("allows a project_lead and above", () => {
+    expect(canEditTermCells({ level: 500 }, true)).toBe(true)
+    expect(canEditTermCells({ level: 700 }, true)).toBe(true)
+  })
+  it("keeps the local-project and unknown-role escape hatches", () => {
+    // Local (no origin): nothing to authorize against.
+    expect(canEditTermCells({ level: 100 }, false)).toBe(true)
+    // Cloud project whose cached record has no syncRole yet — optimistic, the
+    // same way canEditTermbase is, so the two gates on this page agree. The
+    // server (and the outbox's own role-policy mirror) still refuses a commit
+    // the caller may not make.
+    expect(canEditTermCells(null, true)).toBe(true)
+    expect(canEditTermCells(undefined, true)).toBe(true)
   })
 })
 

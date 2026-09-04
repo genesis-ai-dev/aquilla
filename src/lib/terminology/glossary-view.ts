@@ -6,6 +6,7 @@
  * These helpers derive/update that primary rendering and partition concepts by
  * lifecycle status. No side effects — callers persist via patchSettings.
  */
+import { canPerform } from "@/lib/sync/role-policy"
 import type { Concept, TermRendering } from "./types"
 
 /** The rendering shown in the row's target cell: first preferred, else first, else null. */
@@ -83,6 +84,28 @@ export function canEditTermbase(
   if (!hasOrigin) return true
   if (!syncRole) return true
   return syncRole.level >= resolveTermbaseEditFloor(minRole)
+}
+
+/**
+ * May the user edit target cells from the C2 drill-down (AQU-208)?
+ *
+ * The drill-down's inline editor commits through `emitTargetCellCommit`, the
+ * same path `EditorTable` uses, so it must ask the same question the editor
+ * asks: `canPerform("target.cell.commit", …)`. Sharing the role-policy mirror
+ * keeps the two surfaces from drifting when a floor moves, and inherits the
+ * mirror's fail-open rule — an unknown role is optimistically allowed and the
+ * server stays authoritative — which is also what `canEditTermbase` above
+ * does. Reading the level with `?? 0` instead (the shape this replaced) made
+ * the same page pessimistic about cells and optimistic about definitions, so a
+ * contributor whose cached project record had no `syncRole` yet saw the
+ * drill-down as read-only while the termbase controls were live.
+ */
+export function canEditTermCells(
+  syncRole?: { level: number } | null,
+  hasOrigin?: boolean,
+): boolean {
+  if (!hasOrigin) return true
+  return canPerform("target.cell.commit", syncRole?.level ?? null)
 }
 
 /** Clamp an org-configured termbase floor to the role ladder, else the default. */

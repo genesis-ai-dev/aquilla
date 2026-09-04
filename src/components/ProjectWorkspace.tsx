@@ -2811,7 +2811,11 @@ export function ProjectWorkspace() {
       //
       // The cells are still consulted for the OTHER axis — writing a camera
       // pick must not blank the name — but never for the axis being decided.
-      const views = readAtVersion(cellStoreVersion, () => cellStore.getAllCellViews())
+      // AQU-1147: read live, unversioned. A handler body runs at invocation
+      // time, so there is no memo for the compiler to key on a version — the
+      // only thing `cellStoreVersion` bought here was a fresh callback
+      // identity on every cell commit, re-rendering the drawer that holds it.
+      const views = cellStore.getAllCellViews()
       const textById = new Map(views.map((c) => [c.id, c]))
       const nameOf = (c: { metadata?: Record<string, unknown> | null } | undefined) =>
         c?.metadata && typeof c.metadata.cast_name === "string" ? c.metadata.cast_name : ""
@@ -2873,7 +2877,6 @@ export function ProjectWorkspace() {
       audioCueSibling?.id,
       audioCues,
       cellStore,
-      cellStoreVersion,
       currentUsername,
       getTokenForProjectFile,
       refreshAudioCues,
@@ -2910,7 +2913,8 @@ export function ProjectWorkspace() {
     frozenAgreement.current = characterAgreement
     setCharacterWrite({ done: 0, total: entries.length, phase: "writing" })
     const toastId = toast.add({ type: "loading", title: `Undoing ${entries.length} decisions…`, timeout: 0 })
-    const views = readAtVersion(cellStoreVersion, () => cellStore.getAllCellViews())
+    // AQU-1147: live, unversioned read — see `handleResolveCharacter` above.
+    const views = cellStore.getAllCellViews()
     const textById = new Map(views.map((c) => [c.id, c]))
     const cueById = new Map((audioCues ?? []).map((c) => [c.id, c]))
     const nameOf = (c: { metadata?: Record<string, unknown> | null } | undefined) =>
@@ -2963,7 +2967,6 @@ export function ProjectWorkspace() {
     audioCueSibling?.id,
     audioCues,
     cellStore,
-    cellStoreVersion,
     currentUsername,
     getTokenForProjectFile,
     refreshAudioCues,
@@ -3289,13 +3292,14 @@ export function ProjectWorkspace() {
     if (!activeFileId) return
     await runCharacterClear({
       fileId: activeFileId,
-      cells: readAtVersion(cellStoreVersion, () => cellStore.getAllCellViews()),
+      // AQU-1147: live, unversioned read — see `handleResolveCharacter` above.
+      cells: cellStore.getAllCellViews(),
       noun: "subtitle lines",
       after: () => {
         revalidateCells()
       },
     })
-  }, [activeFileId, cellStore, cellStoreVersion, runCharacterClear, revalidateCells])
+  }, [activeFileId, cellStore, runCharacterClear, revalidateCells])
 
   /** The sheet keyed to the HEARD lines. Clearing this side degrades gently:
    *  `resolveCueCharacter` prefers a cue's own name and falls back to the
@@ -3415,7 +3419,8 @@ export function ProjectWorkspace() {
       try {
         toast.update(importToastId, { type: "loading", title: `Imported ${uploaded.cellCount} audio cues — pairing them with the subtitles…` })
         const plans = autoLinkable(planCueLinks({
-          textCells: readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()),
+          // AQU-1147: live, unversioned read — see `handleResolveCharacter`.
+          textCells: cellStore.getAllSummaries(),
           audioCues: uploaded.cues,
         }))
         for (const plan of plans) {
@@ -3459,7 +3464,7 @@ export function ProjectWorkspace() {
           ? `Imported ${uploaded.cellCount} audio cues, and paired ${linkCount} of them with subtitle lines.`
           : `Imported ${uploaded.cellCount} audio cues.` })
     },
-    [project?.id, activeFile, audioCueSiblings, currentUsername, getTokenForFile, getTokenForProjectFile, refresh, refreshCueLinks, cellStore, cellStoreVersion],
+    [project?.id, activeFile, audioCueSiblings, currentUsername, getTokenForFile, getTokenForProjectFile, refresh, refreshCueLinks, cellStore],
   )
 
   /**
@@ -3608,7 +3613,8 @@ export function ProjectWorkspace() {
             // nothing verified what those two lines say.
             wanted: autoLinkable(
               planCueLinks({
-                textCells: readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()),
+                // AQU-1147: live, unversioned read — see `handleResolveCharacter`.
+                textCells: cellStore.getAllSummaries(),
                 audioCues: cuesAfter,
               }),
             ),
@@ -3666,7 +3672,7 @@ export function ProjectWorkspace() {
     },
     [
       project?.id, activeFile, audioCueSibling, audioCues, cueLinks, currentUsername,
-      getTokenForProjectFile, refreshAudioCues, refreshCueLinks, cellStore, cellStoreVersion,
+      getTokenForProjectFile, refreshAudioCues, refreshCueLinks, cellStore,
     ],
   )
 
@@ -7500,7 +7506,8 @@ export function ProjectWorkspace() {
         current: cueLinks,
         wanted: autoLinkable(
           planCueLinks({
-            textCells: readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()),
+            // AQU-1147: live, unversioned read — see `handleResolveCharacter`.
+            textCells: cellStore.getAllSummaries(),
             audioCues,
           }),
         ),
@@ -7535,7 +7542,7 @@ export function ProjectWorkspace() {
     }
   }, [
     project?.id, activeFile, audioCueSibling, audioCues, cueLinks, currentUsername,
-    getTokenForProjectFile, refreshCueLinks, cellStore, cellStoreVersion,
+    getTokenForProjectFile, refreshCueLinks, cellStore,
   ])
 
   /** The subtitle rows a take on this cell counts towards. Without audio cues

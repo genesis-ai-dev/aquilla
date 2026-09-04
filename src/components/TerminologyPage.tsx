@@ -956,7 +956,7 @@ export function TerminologyPage() {
    * Re-read the projection after a write so the list reflects the server.
    *
    * useCallback, not a bare function: the memoized handlers below depend on
-   * it, and a fresh identityper render would either bust their memos or (worse)
+   * it, and a fresh identity per render would either bust their memos or (worse)
    * be silently omitted from their dependency arrays.
    */
   const afterWrite = useCallback(async () => {

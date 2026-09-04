@@ -298,8 +298,11 @@ orgs.get("/:orgId", async (c) => {
   })
 })
 
+/** Cap on an explicit orgIds list. All-orgs omits orgIds and uses memberships. */
+export const PORTFOLIO_ORG_IDS_MAX = 500
+
 const portfolioBatchBody = z.object({
-  orgIds: z.array(z.number().int().positive()).max(100),
+  orgIds: z.array(z.number().int().positive()).max(PORTFOLIO_ORG_IDS_MAX).optional(),
   q: z.string().max(200).optional(),
   limit: z.number().int().positive().max(100).optional(),
   cursor: z.string().optional(),
@@ -309,11 +312,17 @@ const portfolioBatchBody = z.object({
 orgs.post("/portfolio", zValidator("json", portfolioBatchBody), async (c) => {
   const user = c.get("user")
   const { orgIds, q: qRaw, limit: limitNum, cursor: cursorRaw } = c.req.valid("json")
-  const uniqueOrgIds = [...new Set(orgIds)]
+  // AQU-756: an explicit list used to 400 at 101 orgs ("request was invalid
+  // for this org"). Omitted orgIds means every membership, so all-orgs does
+  // not have to POST the whole id list. An empty array still means none.
+  const fromMemberships = orgIds == null
+  const uniqueOrgIds = fromMemberships
+    ? (await listUserOrgs(c.env, user)).map((org) => org.id)
+    : [...new Set(orgIds)]
   if (uniqueOrgIds.length === 0) return c.json({ portfolios: [], nextCursor: null })
 
   const isAdmin = isPlatformAdminEmail(c.env, user.email)
-  if (!isAdmin) {
+  if (!isAdmin && !fromMemberships) {
     const placeholders = uniqueOrgIds.map(() => "?").join(", ")
     const allowed = await c.env.AQUILLA_PG.prepare(
       `SELECT org_id FROM org_members WHERE user_id = ? AND org_id IN (${placeholders})`,

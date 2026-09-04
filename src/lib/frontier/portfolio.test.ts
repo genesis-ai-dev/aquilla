@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { getPortfolio, getPortfolioPage, getPortfoliosPage, validatedPct, attentionRank, audioPct, audioValidatedPct, recordedMinutes, deadlineStatus, languagePairLabel, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "./portfolio"
+import { getPortfolio, getPortfolioPage, getPortfolios, getPortfoliosPage, PORTFOLIO_ORG_IDS_MAX, validatedPct, attentionRank, audioPct, audioValidatedPct, recordedMinutes, deadlineStatus, languagePairLabel, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "./portfolio"
 
 const ORIG = global.fetch
 
@@ -83,6 +83,20 @@ describe("getPortfolioPage / getPortfoliosPage", () => {
       projects: [{ ...project({ id: "p1", name: "Mark" }), orgId: 1 }],
       nextCursor: "p1:Mark",
     })
+  })
+
+  it("omits orgIds when the membership list exceeds the batch cap (AQU-756)", async () => {
+    let calledBody: unknown
+    global.fetch = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      calledBody = JSON.parse(String(init?.body))
+      return new Response(JSON.stringify({ portfolios: [], nextCursor: null }), { status: 200 })
+    }) as unknown as typeof fetch
+
+    const orgIds = Array.from({ length: PORTFOLIO_ORG_IDS_MAX + 1 }, (_, i) => i + 1)
+    await getPortfoliosPage("jwt", orgIds, { limit: 40 })
+    expect(calledBody).toEqual({ limit: 40 })
+    await getPortfolios("jwt", orgIds)
+    expect(calledBody).toEqual({})
   })
 })
 

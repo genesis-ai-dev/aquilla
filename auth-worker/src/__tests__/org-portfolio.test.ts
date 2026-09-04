@@ -309,6 +309,61 @@ describe("POST /api/v2/orgs/portfolio", () => {
     ])
     expect(batchedBody.nextCursor).toBeTruthy()
   })
+
+  it("accepts more than 100 membership orgIds so all-orgs dashboards do not 400 (AQU-756)", async () => {
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO organizations (id, name, owner_user_id)
+       SELECT g, 'Org ' || g, 1 FROM generate_series(1, 101) AS g`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO org_members (org_id, user_id, role_level, granted_by)
+       SELECT g, 1, 700, 1 FROM generate_series(1, 101) AS g`,
+    ).run()
+    const orgIds = Array.from({ length: 101 }, (_, i) => i + 1)
+    const res = await app.request(
+      "/api/v2/orgs/portfolio",
+      {
+        method: "POST",
+        headers: { ...authHeader(await jwtFor("wendi")), "Content-Type": "application/json" },
+        body: JSON.stringify({ orgIds }),
+      },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { portfolios: Array<{ orgId: number }> }
+    expect(body.portfolios).toHaveLength(101)
+  })
+
+  it("omitted orgIds rolls up every membership (AQU-756)", async () => {
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1), (2, 'Waha', 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1), (2, 1, 700, 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'John', 1, 1), ('pb', 'Luke', 2, 1)",
+    ).run()
+
+    const res = await app.request(
+      "/api/v2/orgs/portfolio",
+      {
+        method: "POST",
+        headers: { ...authHeader(await jwtFor("wendi")), "Content-Type": "application/json" },
+        body: JSON.stringify({ limit: 40 }),
+      },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      portfolios: Array<{ orgId: number; projects: Array<{ id: string }> }>
+    }
+    const byOrg = Object.fromEntries(body.portfolios.map((p) => [p.orgId, p.projects.map((r) => r.id)]))
+    expect(byOrg[1]).toEqual(["pa"])
+    expect(byOrg[2]).toEqual(["pb"])
+  })
 })
 
 // AQU-745: the org dashboard portfolio must not leak the name of every project

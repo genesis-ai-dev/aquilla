@@ -47,7 +47,7 @@ import { needsAttentionFromConfidence, resolveDecayConfig } from "@/lib/health/d
 import { buildHealthRibbon, type HealthRibbonPoint } from "@/lib/health/health-ribbon"
 import { ribbonInputFor, type RibbonEvidenceReaders } from "@/lib/health/ribbon-inputs"
 import { chapterHealthBuilderFor } from "@/lib/health/chapter-health"
-import { HEALTH_CALCULATIONS_ENABLED } from "@/lib/health/kill-switch"
+import { useHealthCalculationsEnabled, setHealthCalculationsEnabled } from "@/lib/health/kill-switch"
 import { resolveWorkbenchWindow } from "@/lib/agent/workbench-window"
 import { partitionInfractions } from "@/lib/rules/waivers"
 import { useCellConfidence } from "@/hooks/useCellConfidence"
@@ -5092,6 +5092,7 @@ export function ProjectWorkspace() {
     })
   }, [clearCellError])
 
+  const healthCalculationsEnabled = useHealthCalculationsEnabled()
   const requiredValidations = project ? readValidationCount(project) : 1
   const healthFileCells = useMemo(() => {
     const map = new Map<string, readonly CellSummary[]>()
@@ -5101,12 +5102,12 @@ export function ProjectWorkspace() {
 
   // AD-14: health derives from decay (endorsement_count). The legacy
   // four-sub-score "composite-health" path is retired.
-  // Kill switch: see lib/health/kill-switch.ts — health/rule work is
-  // suspected of driving client memory spikes and is off until cleared.
+  // Per-browser off switch (lib/health/kill-switch.ts), exposed in the
+  // editor's view settings for users on very large files.
   const health = useHealth(
     healthFileCells,
     rules,
-    { decaySettings: project?.decaySettings, requiredValidations, enabled: HEALTH_CALCULATIONS_ENABLED },
+    { decaySettings: project?.decaySettings, requiredValidations, enabled: healthCalculationsEnabled },
   )
   // AQU-599: cellOpenCommentCount from useHealth is intentionally not consumed
   // here — see liveCellOpenCommentCount above (health's copy is empty in Phase
@@ -5168,7 +5169,7 @@ export function ProjectWorkspace() {
       return true
     }
   }, [])
-  const confidenceOverlayActive = HEALTH_CALCULATIONS_ENABLED
+  const confidenceOverlayActive = healthCalculationsEnabled
     && confidenceOverlayEnabled
     && Boolean(project?.id && activeFileId && frontierSession?.jwt)
   const confidence = useCellConfidence({
@@ -5576,7 +5577,7 @@ export function ProjectWorkspace() {
       health: (cellId: string) => effectiveHealthMap.get(cellId),
       examples: (cellId: string) => examples.get(cellId) ?? EMPTY_SCORED_PAIRS,
     }
-    const healthRibbonByCellId = HEALTH_CALCULATIONS_ENABLED
+    const healthRibbonByCellId = healthCalculationsEnabled
       ? buildHealthRibbon(readCells.map((cell) => ribbonInputFor(cell.id, cell, ribbonReaders)))
       : new Map<string, HealthRibbonPoint>()
     const ruleById = new Map(rules.map((rule) => [rule.id, rule]))
@@ -5649,6 +5650,7 @@ export function ProjectWorkspace() {
     fileMeta.targetDirectionMode,
     fileMeta.targetTextDirection,
     focusedCellId,
+    healthCalculationsEnabled,
     infractions,
     myScopes,
     project,
@@ -10050,6 +10052,8 @@ export function ProjectWorkspace() {
           targetKeyTermHighlightMode={targetKeyTermHighlightMode}
           onTargetKeyTermHighlightModeChange={setTargetKeyTermHighlightMode}
           tnSidebarEnabled={tnSidebarVisible}
+          healthCalculationsEnabled={healthCalculationsEnabled}
+          onHealthCalculationsChange={setHealthCalculationsEnabled}
           sourceFontSize={fontSizes.source}
           targetFontSize={fontSizes.target}
           onLineNumbersChange={fileMeta.setLineNumbersEnabled}

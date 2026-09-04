@@ -58,7 +58,7 @@ import { StaleSourceIndicator } from "./StaleSourceIndicator"
 import { HealthRibbon } from "./HealthRibbon"
 import { type HealthRibbonPoint } from "@/lib/health/health-ribbon"
 import { ribbonInputCacheFor, type RibbonInputCache } from "@/lib/health/ribbon-inputs"
-import { HEALTH_CALCULATIONS_ENABLED } from "@/lib/health/kill-switch"
+import { useHealthCalculationsEnabled } from "@/lib/health/kill-switch"
 import { TranslatedEditor, type FootnoteInsertionAnchor, type TranslatedEditorHandle } from "./TranslatedEditor"
 import { TimelineAddMedia } from "./TimelineAddMedia"
 import { CellTtsButton } from "./CellTtsButton"
@@ -1198,8 +1198,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // The cache is keyed to the store instance: per-cell versions are only
   // comparable within one store, so a new store gets a fresh cache.
   const ribbonInputCache = useMemo<RibbonInputCache>(() => ribbonInputCacheFor(cellStore), [cellStore])
+  const healthCalculationsEnabled = useHealthCalculationsEnabled()
   const healthRibbonByCellId = useMemo(() =>
-    !HEALTH_CALCULATIONS_ENABLED ? EMPTY_RIBBON :
+    !healthCalculationsEnabled ? EMPTY_RIBBON :
     readAtVersion(cellStoreVersion, () => ribbonInputCache.ribbon<CellData>(displayCellIds, {
       getCellVersion: cellStore.getCellVersion,
       getCell: (id) => cellStore.getCellView(id),
@@ -1207,7 +1208,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       health: (id) => healthMap.get(id),
       examples: (id) => examples.get(id) ?? EMPTY_EXAMPLES,
     })),
-  [cellStore, cellStoreVersion, displayCellIds, examples, healthMap, ribbonInputCache])
+  [cellStore, cellStoreVersion, displayCellIds, examples, healthCalculationsEnabled, healthMap, ribbonInputCache])
 
   // FRO-251: per-file, per-side font size. Persisted in localStorage keyed by
   // fileId; adjusted from the View settings (eye) menu in the header.
@@ -4121,6 +4122,7 @@ function EditorRow({
   targetFootnoteNumberOffset,
 }: EditorRowProps) {
   const t = useT()
+  const healthCalculationsEnabled = useHealthCalculationsEnabled()
   // FRO perf cleanup: pure pass-through openers (never consumed by
   // EditorTable/MemoizedRow) come from context instead of the prop chain —
   // keeps them out of MemoizedRow's React.memo compare surface.
@@ -6057,7 +6059,7 @@ function EditorRow({
           )}
           fontSize={targetFontSize}
           busy={isSynthBusy}
-          leading={HEALTH_CALCULATIONS_ENABLED ? (
+          leading={healthCalculationsEnabled ? (
             <HealthRibbon
               point={healthRibbonPoint}
               hasMajorIssue={hasMajorInfraction}

@@ -360,6 +360,7 @@ export const editor = defineNamespace({
     "editor.view.showLineNumbers": "Show line numbers",
     "editor.view.showCellLabels": "Show cell labels",
     "editor.view.showTranslationNotes": "Show translation notes",
+    "editor.view.showHealthIndicators": "Show health indicators",
     "editor.view.targetKeyTerms": "Target key terms",
     "editor.view.targetKeyTermsAlways": "Always",
     "editor.view.targetKeyTermsFocused": "Focused cell only",
@@ -2623,6 +2624,13 @@ export const editor = defineNamespace({
           "Label of the switch that reveals the translation-notes sidebar — " +
           "published exegetical notes for the verse in focus, fetched from a notes " +
           "resource. Not the user's own comments.",
+        maxLength: 32,
+      },
+      "editor.view.showHealthIndicators": {
+        description:
+          "Label of the switch that turns the per-row health ribbon, rule " +
+          "infractions, and the confidence overlay on or off. Turning it off " +
+          "lightens the editor on very large files. Applies to this browser only.",
         maxLength: 32,
       },
       "editor.view.targetKeyTerms": {

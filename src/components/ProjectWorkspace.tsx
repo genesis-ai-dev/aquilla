@@ -6,7 +6,6 @@ import { useProject } from "@/hooks/useProject"
 import {
   broadcastProjectSettingsUpdated,
   describePatchFailure,
-  SETTINGS_EDIT_ROLE_FLOOR,
 } from "@/hooks/useProjectSettings"
 import { useNavHistoryTitle } from "@/context/NavHistoryContext"
 import { deriveNavTitleKey } from "@/lib/navigation/deriveTitle"
@@ -363,6 +362,7 @@ import {
 } from "@/lib/richtext/idml-editor"
 import { shouldAutoValidateHumanEdit } from "@/lib/review/auto-validation"
 import { useConcepts } from "@/hooks/useConcepts"
+import { resolveTermbaseEditFloor } from "@/lib/terminology/glossary-view"
 import type { ConceptDraft } from "@/lib/terminology/types"
 import { buildGlosser, type BtSeed, type Glosser } from "@/lib/completion/bt-glosser"
 import { memMark } from "@/lib/perf-log"
@@ -5015,11 +5015,16 @@ export function ProjectWorkspace() {
         conceptId,
         sourceTerm: trimmed,
         renderings: rendering ? [{ rendering, status: "preferred" }] : [],
-        // No rendering means nothing to enforce, so the concept lands as a
-        // SUGGESTION. This is also why "I added a term and no blot appeared"
-        // was the demo's other complaint: a draft compiles to zero rules
-        // (see compileConceptsToRules). The popover now says so explicitly.
-        status: rendering ? "active" : "draft",
+        // The popover's approve toggle decides this, not the presence of a
+        // rendering. It used to be `rendering ? active : draft`, which quietly
+        // enforced a term the moment someone typed a rendering and gave no way
+        // to propose one otherwise.
+        //
+        // Note an approved term with NO rendering is still unenforced — it
+        // compiles to zero rules (compileConceptsToRules) because there is
+        // nothing to check for. The popover says so at the point of entry;
+        // that silence was the demo's other complaint.
+        status: draft.approve ? "active" : "draft",
         ...(draft.caseSensitive ? { caseSensitive: true } : {}),
         author: currentUsername,
       })
@@ -5047,16 +5052,25 @@ export function ProjectWorkspace() {
     }
   }, [project, currentUsername, refreshConcepts, t, navigate])
 
-  // AQU-754 follow-up: when the caller is on a synced project below the
-  // terminology write floor, open the add-term popover pre-blocked (inputs
-  // disabled, reason shown, Cancel active) instead of letting them type a
-  // draft that patchSettings is guaranteed to reject. serverRoleLevel is the
-  // server-resolved role (null = unsynced/local-only project, which saves
-  // locally and must stay writable).
+  // AQU-1006 follow-up: terminology now has TWO authority levels, so this is
+  // two questions rather than one.
+  //
+  // SUGGESTING is contributor work — a draft compiles to no rules, so it binds
+  // nobody. It used to be blocked at the settings floor, which is why a
+  // translator who met an important word mid-verse could do nothing about it.
+  // APPROVING (adding the term enforced) keeps the org's configured termbase
+  // floor. Both are re-enforced server-side in termbase-authority.ts; this is
+  // only the affordance.
+  //
+  // serverRoleLevel is the server-resolved role — null means an unsynced,
+  // local-only project, which saves locally and must stay fully writable.
   const addConceptBlockedReason =
-    serverRoleLevel != null && serverRoleLevel < SETTINGS_EDIT_ROLE_FLOOR
+    serverRoleLevel != null && serverRoleLevel < ROLE.CONTRIBUTOR
       ? describePatchFailure({ kind: "blocked", reason: "role" })
       : null
+  const canApproveConcept =
+    serverRoleLevel == null ||
+    serverRoleLevel >= resolveTermbaseEditFloor(project?.termbaseEditMinRole)
 
   /** Called when a user manually saves an edited BT from the BT tab. */
   const saveBacktranslation = useCallback((cell: CellData, btText: string, polished: boolean) => {
@@ -11055,6 +11069,7 @@ export function ProjectWorkspace() {
             onProjectChanged={refresh}
             onAddConceptFromSelection={handleAddConceptFromSelection}
             addConceptBlockedReason={addConceptBlockedReason}
+            canApproveConcept={canApproveConcept}
             onAskAiFromSelection={handleAskAiFromSelection}
             onAttachMediaFile={handleAttachMediaFile}
             onAttachMediaUrl={handleAttachMediaUrl}

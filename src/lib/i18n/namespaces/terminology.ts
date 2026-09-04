@@ -344,6 +344,15 @@ export const terminology = defineNamespace({
     "terminology.addConcept.renderingPlaceholder": "Optional rendering",
     "terminology.addConcept.renderingAriaLabel": "Rendering for new concept",
     "terminology.addConcept.caseInsensitiveLabel": "Case insensitive",
+    "terminology.addConcept.approveLabel": "Approve now (enforce this term)",
+    "terminology.addConcept.approveEnforcedHint":
+      "This term will be checked against every translation right away.",
+    "terminology.addConcept.approveSuggestionHint":
+      "Saved as a suggestion for review. Suggestions are not checked until approved.",
+    "terminology.addConcept.approveNoPermissionHint":
+      "Saved as a suggestion — approving terms needs a higher role on this project.",
+    "terminology.addConcept.noRenderingNotEnforcedHint":
+      "Add a rendering to enforce this term — without one there is nothing to check for.",
     "terminology.addConcept.savingToast": "Saving term…",
     "terminology.addConcept.savedToast": "Added “{term}”",
     "terminology.addConcept.viewEntry": "View entry",

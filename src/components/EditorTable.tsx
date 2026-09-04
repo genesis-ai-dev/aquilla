@@ -799,6 +799,8 @@ interface EditorTableProps {
   /** Non-null when the user cannot write terminology (below Maintainer) —
    *  the add-term popover opens blocked with this reason instead of accepting input. */
   addConceptBlockedReason?: string | null
+  /** May this user APPROVE a term (enforce it), vs only suggest one? */
+  canApproveConcept?: boolean
   onAskAiFromSelection?: (chip: ContextChip) => void
   /** Called when the user drops a voice chip onto a cell's audio area.
    *  Parent should assign the voice then trigger TTS generation. */
@@ -872,7 +874,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   audioLens, castGutter = false, ttsSettings, onOpenAudioSetup,
   onAttachMediaFile, onAttachMediaUrl,
   orderedBy,
-  onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, onAskAiFromSelection, onAssignVoice,
+  onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onAskAiFromSelection, onAssignVoice,
   onCellCommitted,
   getPendingTargetEventId,
   onOptimisticEdit,
@@ -2301,6 +2303,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onProjectChanged={onProjectChanged}
           onAddConceptFromSelection={onAddConceptFromSelection}
           addConceptBlockedReason={addConceptBlockedReason}
+        canApproveConcept={canApproveConcept}
           onAskAiFromSelection={onAskAiFromSelection}
           onAssignVoice={onAssignVoice}
           onDragStart={handleDragStart}
@@ -2978,6 +2981,8 @@ interface MemoizedRowProps {
   /** Add-from-selection: create a terminology entry from selected source text. */
   onAddConceptFromSelection?: (draft: ConceptDraft) => void | Promise<void>
   addConceptBlockedReason?: string | null
+  /** May this user APPROVE a term (enforce it), vs only suggest one? */
+  canApproveConcept?: boolean
   onAskAiFromSelection?: (chip: ContextChip) => void
   onAssignVoice?: (cellId: string, voiceId: string) => void
   onDragStart: (cellId: string) => void
@@ -3051,7 +3056,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     getFootnoteDetails,
     onSeekToCue, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled,
     sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, isAnonymous,
-    onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, onAskAiFromSelection, onAssignVoice,
+    onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onAskAiFromSelection, onAssignVoice,
     audioLens, onOpenAudioSetup,
     onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
     onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
@@ -3200,6 +3205,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onProjectChanged={onProjectChanged}
         onAddConceptFromSelection={onAddConceptFromSelection}
         addConceptBlockedReason={addConceptBlockedReason}
+        canApproveConcept={canApproveConcept}
         onAskAiFromSelection={onAskAiFromSelection}
         onAssignVoice={onAssignVoice}
         onDragStart={handleDragStart}
@@ -3364,6 +3370,8 @@ interface EditorRowProps {
   /** Add-from-selection: create a terminology entry from selected source text. */
   onAddConceptFromSelection?: (draft: ConceptDraft) => void | Promise<void>
   addConceptBlockedReason?: string | null
+  /** May this user APPROVE a term (enforce it), vs only suggest one? */
+  canApproveConcept?: boolean
   onAskAiFromSelection?: (chip: ContextChip) => void
   onAssignVoice?: (cellId: string, voiceId: string) => void
   getTokenForFile?: (fileId: string) => Promise<string | null>
@@ -4146,7 +4154,7 @@ function EditorRow({
   onEscapeToGrid, onGridRowKeyNav,
   rowIndex, contentNumber, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols, castGutter, ttsSettings,
   isAnonymous, micDenied,
-  audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection, addConceptBlockedReason, onAskAiFromSelection,
+  audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onAskAiFromSelection,
   onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
   onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
   isStaleSource,
@@ -5945,6 +5953,7 @@ function EditorRow({
                 onAskAi={handleAskAiFromSelection}
                 onAddToTermbase={onAddConceptFromSelection ? handleCreateTerm : undefined}
                 addConceptBlockedReason={addConceptBlockedReason}
+        canApproveConcept={canApproveConcept}
                 onAddOpenChange={handleAddTermOpenChange}
                 onViewConcept={onOpenTerminologyConcept}
                 onToolbarMouseDown={handleToolbarMouseDown}

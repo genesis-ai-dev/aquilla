@@ -449,6 +449,7 @@ export function parseProjectWsMessage(raw: string): ProjectWsServerMessage | nul
       ...(typeof m.file === "string" ? { file: m.file } : {}),
       ...(typeof m.cell === "string" ? { cell: m.cell } : {}),
       ...(typeof m.by === "string" ? { by: m.by } : {}),
+      ...(m.via === "external" ? { via: "external" as const } : {}),
     }
   }
   if (t === "event.stale") {
@@ -702,7 +703,92 @@ function isTargetPresenceSelection(value: unknown): value is TargetPresenceSelec
   )
 }
 
-// ── AQU-845 reconnect resync ──────────────────────────────────────────────
+// ── AQU-1145 applied-event refresh coalescing ──
+
+export interface ScopedRefreshScope {
+  projectId: string
+  fileId: string
+}
+
+export interface ScopedRefreshSchedulerOptions {
+  /** Read at flush time so a delayed callback cannot refresh a newly opened
+   *  file with an event that belonged to the previous file. */
+  currentScope(): ScopedRefreshScope | null
+  refresh(scope: ScopedRefreshScope): void
+  /** Fixed collection window. Repeated schedules never extend it. */
+  windowMs?: number
+}
+
+export interface ScopedRefreshScheduler {
+  /** Queue one refresh when `scope` is the currently active scope. */
+  schedule(scope: ScopedRefreshScope): void
+  /** Cancel pending work and permanently stop this scheduler. */
+  dispose(): void
+}
+
+const SCOPED_REFRESH_DEFAULT_WINDOW_MS = 50
+
+function sameRefreshScope(
+  a: ScopedRefreshScope | null,
+  b: ScopedRefreshScope | null,
+): boolean {
+  return !!a && !!b && a.projectId === b.projectId && a.fileId === b.fileId
+}
+
+/**
+ * Collapse a burst of applied-event hints into one refresh for the active
+ * project/file. The window starts with the first hint and is never extended,
+ * so a continuous event stream still refreshes once per window.
+ *
+ * A scope change replaces any pending scope and starts a fresh window. The
+ * callback checks the live scope again before firing, which fences file
+ * switches that happen without another event arriving.
+ */
+export function createScopedRefreshScheduler(
+  options: ScopedRefreshSchedulerOptions,
+): ScopedRefreshScheduler {
+  const windowMs = Math.max(0, options.windowMs ?? SCOPED_REFRESH_DEFAULT_WINDOW_MS)
+  let timer: ReturnType<typeof setTimeout> | null = null
+  let pendingScope: ScopedRefreshScope | null = null
+  let disposed = false
+
+  const cancelTimer = (): void => {
+    if (timer === null) return
+    clearTimeout(timer)
+    timer = null
+  }
+
+  const startWindow = (scope: ScopedRefreshScope): void => {
+    pendingScope = scope
+    timer = setTimeout(() => {
+      timer = null
+      const scheduledScope = pendingScope
+      pendingScope = null
+      const activeScope = options.currentScope()
+      if (!disposed && activeScope && sameRefreshScope(scheduledScope, activeScope)) {
+        options.refresh(activeScope)
+      }
+    }, windowMs)
+  }
+
+  return {
+    schedule(scope): void {
+      if (disposed || !sameRefreshScope(scope, options.currentScope())) return
+      if (timer !== null && sameRefreshScope(scope, pendingScope)) return
+      // The user switched files and a frame for the new active file arrived
+      // before the old window elapsed. Never let the old callback survive.
+      cancelTimer()
+      startWindow(scope)
+    },
+    dispose(): void {
+      disposed = true
+      cancelTimer()
+      pendingScope = null
+    },
+  }
+}
+
+// ── AQU-845 reconnect resync ──
 
 /**
  * Build the handler ProjectWorkspace calls from `onOpen`.

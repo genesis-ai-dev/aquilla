@@ -121,6 +121,24 @@ export interface FlushDeps {
    *  about permissions, and a refused shape is a bug, not a permission
    *  problem. */
   onRejected?: (entries: RejectedEntry[]) => void
+  /** Called before a permanent 403 is quarantined. Foreground committers use
+   *  the exact event ids to clear optimistic state and avoid chaining future
+   *  writes onto a head the server refused. */
+  onForbidden?: (entries: ForbiddenEntry[]) => void
+}
+
+function forbiddenEntriesFor(
+  records: OutboxRecord[],
+  reason: string,
+): ForbiddenEntry[] {
+  return records.map((record) => ({
+    id: record.id,
+    status: 403,
+    reason,
+    kind: record.event.kind,
+    fileId: record.event.fileId ?? null,
+    cellId: record.event.cellId ?? null,
+  }))
 }
 
 function groupOldestFileFirst(records: OutboxRecord[]): OutboxRecord[] {
@@ -258,6 +276,10 @@ async function flushOutboxBatchUnserialized(deps: FlushDeps): Promise<FlushOutbo
       // different account/role. Re-auth won't fix it. Quarantine the batch and
       // let the flusher advance to the next file, exactly like a 403 on POST.
       if (shouldSurface()) {
+        deps.onForbidden?.(forbiddenEntriesFor(
+          batch,
+          "no access to this change's project",
+        ))
         posthog.capture(OUTBOX_QUARANTINED, {
           count: batch.length,
           reason: "token-mint-403",
@@ -323,6 +345,7 @@ async function flushOutboxBatchUnserialized(deps: FlushDeps): Promise<FlushOutbo
     // hiccup) — RES-2: stamp error WITHOUT burning the retry budget.
     if (res.status === 403) {
       if (shouldSurface()) {
+        deps.onForbidden?.(forbiddenEntriesFor(batch, "HTTP 403"))
         posthog.capture(OUTBOX_QUARANTINED, {
           count: batch.length,
           reason: "post-403",
@@ -447,6 +470,16 @@ async function flushOutboxBatchUnserialized(deps: FlushDeps): Promise<FlushOutbo
     .map((r) => r.id)
   if (forbiddenIds.length > 0) {
     if (shouldSurface()) {
+      const forbiddenIdSet = new Set(forbiddenIds)
+      const records = batch.filter((record) => forbiddenIdSet.has(record.id))
+      deps.onForbidden?.(records.map((record) => ({
+        id: record.id,
+        status: 403,
+        reason: rejectionByid.get(record.id)?.reason ?? "forbidden",
+        kind: record.event.kind,
+        fileId: record.event.fileId ?? null,
+        cellId: record.event.cellId ?? null,
+      })))
       posthog.capture(OUTBOX_QUARANTINED, {
         count: forbiddenIds.length,
         reason: "server-rejected-403",

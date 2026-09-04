@@ -4,7 +4,12 @@ import { buildCellData } from "./useCells"
 import type { CellAuditStats } from "./useCellsAuditStats"
 import { streamFileCells, fetchCellsByIds, fetchCellsDelta } from "@/lib/sync/cells-read"
 import type { CellRow } from "@/lib/sync/cells-read-types"
-import { mergeCellsDelta, readCellsCache, writeCellsCache } from "@/lib/sync/cells-cache"
+import {
+  flushCellsCacheWrites,
+  mergeCellsDelta,
+  readCellsCache,
+  scheduleCellsCacheWrite,
+} from "@/lib/sync/cells-cache"
 import { peekOutboxBatch, subscribeToOutbox } from "@/lib/sync/outbox"
 import { extractUsfmFootnotes, type ExtractedFootnote } from "@/lib/footnotes/extract"
 import { sortByLens } from "@/lib/timeline/derive"
@@ -963,7 +968,10 @@ export class CellStore {
     return { rows: out, discardedCellIds }
   }
 
-  setPendingOverlay(next: Map<string, PendingOverlay>): void {
+  setPendingState(
+    next: Map<string, PendingOverlay>,
+    nextProgressEventIds: readonly string[],
+  ): void {
     const activeLane = this.ctx.lane ?? ""
     const normalized = new Map<string, PendingOverlay>()
     for (const [cellId, overlay] of next) {
@@ -982,20 +990,32 @@ export class CellStore {
         && a.aiDraft?.generatedAt === b.aiDraft?.generatedAt
         && a.targetLang === b.targetLang,
     )
-    if (changed.size === 0) return
+    const uniqueProgress = [...new Set(nextProgressEventIds)]
+    const progressChanged = uniqueProgress.length !== this.pendingProgressEventIds.length
+      || uniqueProgress.some((eventId, index) => (
+        eventId !== this.pendingProgressEventIds[index]
+      ))
+    if (changed.size === 0 && !progressChanged) return
     this.pendingOverlay = normalized
-    this.bumpCells(changed)
-    this.rebuildDerivedIndexes()
-    this.emit(changed)
+    this.pendingProgressEventIds = uniqueProgress
+    if (changed.size > 0) {
+      this.bumpCells(changed)
+      this.rebuildDerivedIndexes()
+    }
+    // Whole-file selectors read getAllVersion(). Any derived overlay change
+    // must advance that snapshot too, even when the progress-id set happens
+    // to stay equal. One combined update still means one version bump.
+    this.fileVersion++
+    if (changed.size > 0) this.emit(changed)
+    else this.emitAll()
+  }
+
+  setPendingOverlay(next: Map<string, PendingOverlay>): void {
+    this.setPendingState(next, this.pendingProgressEventIds)
   }
 
   setPendingProgressEventIds(next: readonly string[]): void {
-    const unique = [...new Set(next)]
-    if (unique.length === this.pendingProgressEventIds.length
-      && unique.every((eventId, index) => eventId === this.pendingProgressEventIds[index])) return
-    this.pendingProgressEventIds = unique
-    this.fileVersion++
-    this.emitAll()
+    this.setPendingState(this.pendingOverlay, next)
   }
 
   clearOptimisticIfValue(cellId: string, value: string): boolean {
@@ -1616,7 +1636,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
   // on reload, whereas a poisoned one paints a rejected edit as saved.
   const persistCellsCache = useCallback((pid: string, fid: string, maxServerSeq?: number, projectEpoch?: number) => {
     if (store.hasOptimisticEdits()) return
-    void writeCellsCache(pid, fid, store.toRows(), maxServerSeq, projectEpoch)
+    scheduleCellsCacheWrite(pid, fid, store.toRows(), maxServerSeq, projectEpoch)
   }, [store])
 
   const doFetchRef = useRef<(soft?: boolean) => Promise<void>>(async () => {})
@@ -1818,8 +1838,20 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     }
     store.reset(projectId, fileId)
     void doFetch()
+    return () => {
+      // A tab switch must persist the last complete tuple before the old
+      // file's store is reset for the next scope.
+      if (projectId && fileId) void flushCellsCacheWrites(projectId, fileId)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, fileId, enabled])
+
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    const flushAll = () => { void flushCellsCacheWrites() }
+    window.addEventListener("pagehide", flushAll)
+    return () => window.removeEventListener("pagehide", flushAll)
+  }, [])
 
   useEffect(() => {
     if (!enabled || !projectId || !fileId) {
@@ -1877,8 +1909,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
           targetLang: eventLane,
         })
       }
-      store.setPendingOverlay(next)
-      store.setPendingProgressEventIds(pendingProgressEventIds)
+      store.setPendingState(next, pendingProgressEventIds)
     }
     void refresh()
     const unsub = subscribeToOutbox(refresh)

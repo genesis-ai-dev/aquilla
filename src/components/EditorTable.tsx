@@ -558,6 +558,9 @@ const EMPTY_CELL_FOOTNOTE_DETAILS: CellFootnoteDetails = {
 const SELECTION_DRAG_THRESHOLD_PX = 3
 const SELECTION_EDGE_SCROLL_ZONE_PX = 56
 const SELECTION_EDGE_SCROLL_STEP_PX = 22
+/** AQU-1154: how long a departed peer's last draft stays over a row whose own
+ *  text has not caught up yet. Bounds the overlay if their commit never lands. */
+export const REMOTE_DRAFT_HOLD_MS = 15_000
 
 export type { BacktranslationActionSource }
 
@@ -822,14 +825,6 @@ interface EditorTableProps {
    *  bounded to rows the user can currently see. */
   onVisibleCellIdsChange?: (cellIds: string[]) => void
   /**
-   * RACE-5: ref-backed lock check for commit-time enforcement. Reads the live
-   * lock map (updated synchronously on each WS frame) so a commit queued just
-   * after a `lock.claimed` frame arrives can't slip through a stale React render.
-   * Returns the holder userId/label, or null when the cell is free.
-   * Optional — when absent the existing `lockHolderLabel` prop is the only guard.
-   */
-  checkLockHolder?: (cellId: string) => string | null
-  /**
    * FRO-317: when true, USFM \f...\f* footnotes render as a distinct panel
    * immediately below each cell row. Editing is safe only for USFM files.
    */
@@ -880,7 +875,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   getTokenForFile,
   getAlignmentModel,
   onAlignmentSeedChange,
-  checkLockHolder,
   showFootnotesInline,
   footnotePanelActive,
   footnoteViewMode = "off",
@@ -2263,7 +2257,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onAlignmentSeedChange={onAlignmentSeedChange}
           sourceFontSize={sourceFontSize}
           targetFontSize={targetFontSize}
-          checkLockHolder={checkLockHolder}
           showFootnotesInline={showFootnotesInline}
           footnotePanelActive={footnotePanelActive}
           footnoteViewMode={footnoteViewMode}
@@ -2303,7 +2296,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     cellLockHolders,
     cellOpenCommentCount,
     cellsWithRemoteChange,
-    checkLockHolder,
     completing,
     displayCellIds,
     errors,
@@ -2948,8 +2940,6 @@ interface MemoizedRowProps {
   sourceFontSize?: number
   /** FRO-251: per-file target-column font size in px. Defaults to 14 when absent. */
   targetFontSize?: number
-  /** RACE-5: ref-backed live lock check — see EditorTableProps.checkLockHolder. */
-  checkLockHolder?: (cellId: string) => string | null
   /** FRO-317: when true, USFM \f...\f* footnotes render below each cell. */
   showFootnotesInline?: boolean
   /** True when inline/tray footnote detail is already visible elsewhere. */
@@ -3005,7 +2995,6 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
     isStaleSource,
     isUpstreamStaleSource,
-    checkLockHolder,
     showFootnotesInline,
     footnotePanelActive,
     footnoteViewMode = "off",
@@ -3185,7 +3174,6 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onAckRemoteChange={onAckRemoteChange}
         sourceFontSize={sourceFontSize}
         targetFontSize={targetFontSize}
-        checkLockHolder={checkLockHolder}
         showFootnotesInline={showFootnotesInline}
         footnotePanelActive={footnotePanelActive}
         footnoteViewMode={footnoteViewMode}
@@ -3333,8 +3321,6 @@ interface EditorRowProps {
   sourceFontSize?: number
   /** FRO-251: per-file target-column font size in px. Defaults to 14 when absent. */
   targetFontSize?: number
-  /** RACE-5: ref-backed live lock check — see EditorTableProps.checkLockHolder. */
-  checkLockHolder?: (cellId: string) => string | null
   /** FRO-317: when true, USFM \f...\f* footnotes render below the cell row. */
   showFootnotesInline?: boolean
   /** True when inline/tray footnote detail is already visible elsewhere. */
@@ -4119,7 +4105,6 @@ function EditorRow({
   onAlignmentSeedChange,
   sourceFontSize = 14,
   targetFontSize = 14,
-  checkLockHolder,
   showFootnotesInline,
   footnotePanelActive,
   footnoteViewMode = "off",
@@ -4168,6 +4153,42 @@ function EditorRow({
     }
     return latest?.selection?.draftText
   }, [remoteCellPresence])
+  // AQU-1154 (invariant I4: an overlay never replaces newer text with older).
+  // A peer's live draft is newer than this row's projection while they are in
+  // the cell, and it STAYS newer after they leave until their commit lands
+  // here — on a slow link that is seconds later. Snapping back to the row on
+  // blur showed the pre-edit text. So: an empty live draft never renders (the
+  // row wins), and the last non-empty draft is held after the peer leaves
+  // until this row's own text changes or a bounded timeout elapses.
+  const liveRemoteDraft = remoteDraftText || undefined
+  const [heldRemoteDraft, setHeldRemoteDraft] = useState<{
+    text: string
+    targetEventIdAtStart: string | null
+    translatedAtStart: string | null
+  } | null>(null)
+  useEffect(() => {
+    const targetEventId = cell.targetEventId ?? null
+    const translated = cell.translated ?? null
+    setHeldRemoteDraft((cur) => {
+      const rowChanged = cur !== null
+        && (cur.targetEventIdAtStart !== targetEventId || cur.translatedAtStart !== translated)
+      const base = rowChanged ? null : cur
+      if (liveRemoteDraft === undefined) return base
+      if (base && base.text === liveRemoteDraft) return base
+      return {
+        text: liveRemoteDraft,
+        targetEventIdAtStart: base?.targetEventIdAtStart ?? targetEventId,
+        translatedAtStart: base?.translatedAtStart ?? translated,
+      }
+    })
+  }, [liveRemoteDraft, cell.targetEventId, cell.translated])
+  const holdingRemoteDraft = liveRemoteDraft === undefined && heldRemoteDraft !== null
+  useEffect(() => {
+    if (!holdingRemoteDraft) return
+    const timer = setTimeout(() => setHeldRemoteDraft(null), REMOTE_DRAFT_HOLD_MS)
+    return () => clearTimeout(timer)
+  }, [holdingRemoteDraft])
+  const overlayDraftText = liveRemoteDraft ?? heldRemoteDraft?.text
   const [openRuleId, setOpenRuleId] = useState<string | null>(null)
   // AQU-664: hover ("wave over") a violation blot → preview its rule
   // explanation. Separate from the click path (openRuleId) so a light,
@@ -4197,6 +4218,8 @@ function EditorRow({
   // Controls the confirm dialog shown before creating the draft concept.
   const [addTermOpen, setAddTermOpen] = useState(false)
   const pendingTargetEventIdRef = useRef<string | null>(cell.targetEventId ?? null)
+  /** Id of the last target.cell.commit this row enqueued (null until one is). */
+  const lastCommittedEventIdRef = useRef<string | null>(null)
   // Source-edit affordance (project_lead+ on non-live projects). Editing the
   // SOURCE lane emits source.cell.commit — the template-owner correction that
   // propagates to downstream linked projects. `sourceDraft` is a LOCAL optimistic
@@ -4384,6 +4407,21 @@ function EditorRow({
     if (cell.targetEventId) pendingTargetEventIdRef.current = cell.targetEventId
   }, [cell.targetEventId])
 
+  // AQU-1154 (I2/I4): the local hold above only clears on exact value match.
+  // If the projected head moves to an event this row did NOT commit, our
+  // commit either lost the head compare-and-swap or was superseded — either
+  // way the server row is the newer truth, so drop the hold instead of
+  // painting the losing text forever. Declared after the pendingTargetEventId
+  // sync so the id we committed is read from its own ref, not that one.
+  useEffect(() => {
+    if (!localTargetDraft) return
+    const head = cell.targetEventId
+    const committed = lastCommittedEventIdRef.current
+    if (head && committed && head !== committed) {
+      setLocalTargetDraft(null)
+    }
+  }, [cell.targetEventId, localTargetDraft])
+
   const ruleSeverity = useMemo(() => {
     const m = new Map<string, "major" | "minor">()
     for (const [id, rule] of ruleMap) m.set(id, rule.severity)
@@ -4521,19 +4559,14 @@ function EditorRow({
       console.warn("[editor-commit] aborting: role too low for target.cell.commit")
       return false
     }
-    // RACE-5 — Lock re-check at commit time. Uses the ref-backed `checkLockHolder`
-    // (updated synchronously on every WS frame) as the authoritative source so
-    // a commit queued in the debounce window just after another user's
-    // `lock.claimed` arrives can't slip through a stale React render.
-    // `lockHolderLabel` (from the last render) is the fallback when offline
-    // or when `checkLockHolder` is not wired. Advisory: never blocks when the
-    // socket is down (offline edits still flow through; FWW handles conflicts).
-    const liveHolder = checkLockHolder?.(cell.id) ?? lockHolderLabel
-    if (liveHolder) {
-      console.warn("[editor-commit] aborting: lock held by", liveHolder)
-      void onCellCommitted?.(cell.id)
-      return false
-    }
+    // AQU-1154: the focus lock is advisory — it drives the read-only affordance
+    // and the "X is editing" label, never the write path. This used to abort
+    // the commit when presence said someone else held the cell, which silently
+    // threw away the user's text: a socket flap drops our lease server-side,
+    // the reconnect did not re-claim, a peer claimed, and our next idle/blur
+    // commit vanished with only a console.warn while our editor still showed
+    // it. The server head-check is the real arbiter; the commit always
+    // proceeds to the outbox and any loss surfaces through stale handling.
     const idmlCommitError = validateIdmlEditorCommit(idmlConfiguration, valueHtml)
     if (idmlCommitError) {
       setWriteError(idmlCommitError)
@@ -4549,11 +4582,15 @@ function EditorRow({
     setWriteError(null)
     // RACE-3/QW-2: use the last event id we enqueued for this cell as parentId
     // rather than the lagging projection value. The workspace-level getter
-    // survives Legend List row remounts; the row-local ref covers repeated
-    // commits while this exact row instance remains mounted.
+    // survives Legend List row remounts and is the one the workspace CLEARS
+    // when the server reports that pending commit stale (AQU-1154), so when
+    // it is wired the row-local ref must not be consulted — it would re-chain
+    // on the losing id. The row-local ref only covers hosts without a
+    // workspace getter.
     const parentId =
-      getPendingTargetEventId?.(cell.id) ??
-      pendingTargetEventIdRef.current ??
+      (getPendingTargetEventId
+        ? getPendingTargetEventId(cell.id)
+        : pendingTargetEventIdRef.current) ??
       cell.targetEventId ??
       cell.sourceEventId ??
       null
@@ -4574,6 +4611,7 @@ function EditorRow({
         targetLang: activeLane,
       })
       pendingTargetEventIdRef.current = eventId
+      lastCommittedEventIdRef.current = eventId
       // Restore codex behaviour: a direct human edit auto-validates the cell
       // ("a human has touched it"). The target.cell.commit above cleared any
       // prior validators (audit-stats-overlay resets activeValidators on every
@@ -4625,7 +4663,7 @@ function EditorRow({
       })
       return false
     }
-  }, [editable, canValidate, project.id, project.syncRole?.level, project.allowSelfValidation, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, checkLockHolder, idmlConfiguration, t])
+  }, [editable, canValidate, project.id, project.syncRole?.level, project.allowSelfValidation, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, onOptimisticEdit, idmlConfiguration, t])
 
   // AQU-618: run a single-cell AI generate/Replace, then return the translator
   // to the edited cell and confirm the save. Both entry points — the Replace
@@ -6141,9 +6179,9 @@ function EditorRow({
                         renderer so a new target-text variant inherits the mask
                         instead of having to remember it. */}
                     <div ref={targetReadContentRef} data-ph-mask>
-                      {remoteDraftText !== undefined ? (
+                      {overlayDraftText !== undefined ? (
                         <span data-remote-presence-draft>
-                          {remoteDraftText || "\u200b"}
+                          {overlayDraftText}
                         </span>
                       ) : idmlConfiguration && visibleTranslatedHtml ? (
                         <TargetIdmlHtml html={visibleTranslatedHtml} />

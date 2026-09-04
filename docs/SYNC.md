@@ -48,8 +48,12 @@ Important invariants:
 
 - The event ID is the idempotency key. Retrying the same event must not duplicate
   its effect.
-- Chain-mutating events use first-write-wins against the current parent. A stale
-  sibling returns `409` rather than silently overwriting accepted work.
+- Chain-mutating events are a compare-and-swap on the cell's current head: an
+  event advances the projection only if its `parentId` is the head for that
+  side/lane at commit time (or the row does not exist yet). A stale event is
+  still logged and `200`-accepted, but reported in the response `stale[]` and
+  never overwrites accepted work — so a client chaining on its own stale head
+  stays stale until it revalidates (AQU-1154).
 - The sync Worker is the single writer for the event log and its projections.
 - A successful write advances the durable projection before realtime broadcast.
 - The browser removes an outbox record only after the server accepts it. Rejected

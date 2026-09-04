@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { flushOutboxBatch } from "./outbox-flush"
+import { flushOutboxBatch, subscribeStaleSiblings } from "./outbox-flush"
 import {
   enqueueOutboxEvent,
   outboxPendingCount,
@@ -573,6 +573,69 @@ describe("flushOutboxBatch", () => {
     expect(onStaleSiblings).toHaveBeenCalledWith([
       { id: "e2", fileId: "f1", cellId: "c2" },
     ])
+  })
+
+  it("I2: stale[] entries also reach tab-wide subscribeStaleSiblings listeners (inline flushes pass no callback)", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        accepted: [{ id: "e1" }],
+        rejected: [],
+        stale: [{ id: "e1", fileId: "f1", cellId: "c1" }],
+      }),
+    )
+    const listener = vi.fn()
+    const unsub = subscribeStaleSiblings(listener)
+    try {
+      // No onStaleSiblings dep — the shape every inline "flush now" uses.
+      await flushOutboxBatch({ getTokenForFile: TOKEN_FN, fetchImpl: fetchMock as unknown as typeof fetch })
+    } finally {
+      unsub()
+    }
+    expect(listener).toHaveBeenCalledWith([{ id: "e1", fileId: "f1", cellId: "c1" }])
+    // Stale ids are still removed from the outbox (server logged them); the
+    // rejection is handled by the listener, not by a retry.
+    expect(await outboxPendingCount()).toBe(0)
+
+    // Unsubscribed listeners are not notified.
+    await enqueueOutboxEvent(makeEvent("e2", "f1"))
+    await flushOutboxBatch({ getTokenForFile: TOKEN_FN, fetchImpl: fetchMock as unknown as typeof fetch })
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  it("serializes concurrent callers per tab: the same pending rows are POSTed once, not twice", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+    await enqueueOutboxEvent(makeEvent("e2", "f1"))
+    let release!: () => void
+    const gate = new Promise<void>((r) => { release = r })
+    const fetchMock = vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
+      await gate
+      const ids = (JSON.parse(init.body as string).events as Array<{ id: string }>).map((e) => e.id)
+      return jsonResponse({ accepted: ids.map((id) => ({ id })), rejected: [] })
+    })
+    const deps = { getTokenForFile: TOKEN_FN, fetchImpl: fetchMock as unknown as typeof fetch }
+    // Two callers race (the useOutboxFlusher loop and an inline "flush now").
+    const a = flushOutboxBatch(deps)
+    const b = flushOutboxBatch(deps)
+    await new Promise((r) => setTimeout(r, 10))
+    // The second caller waited: only one POST is in flight.
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    release()
+    const [ra, rb] = await Promise.all([a, b])
+    expect(ra.accepted).toBe(2)
+    // The queued caller ran AFTER the first drained the queue and found nothing.
+    expect(rb).toMatchObject({ posted: 0, accepted: 0 })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(await outboxPendingCount()).toBe(0)
+  })
+
+  it("a flush that throws does not wedge the per-tab serialization for later callers", async () => {
+    await enqueueOutboxEvent(makeEvent("e1", "f1"))
+    const throwingToken = async (): Promise<TokenMintResult> => { throw new Error("mint exploded") }
+    await expect(flushOutboxBatch({ getTokenForFile: throwingToken })).rejects.toThrow("mint exploded")
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ accepted: [{ id: "e1" }], rejected: [] }))
+    const res = await flushOutboxBatch({ getTokenForFile: TOKEN_FN, fetchImpl: fetchMock as unknown as typeof fetch })
+    expect(res.accepted).toBe(1)
   })
 
   // ── Cross-project scope: mint by the EVENT's projectId ────────────────────

@@ -123,9 +123,10 @@ repository commands; unnamed profiles use local-only Worker names. See
 - **Source of truth:** the append-only `events` table in Postgres (owned by sync-worker).
   Every write is an event with a `parent_id` (prior winning event on the same
   `(project, file, cell)`); the projection (`cells`, `files`, `cell_validators`) lands as
-  events apply. Cell events are `source.*` (importer) or `target.*` (contributor). For v1
-  single-editor reliability, `*.cell.commit` projects **last-write-wins**; chain-mutating
-  events keep first-child.
+  events apply. Cell events are `source.*` (importer) or `target.*` (contributor). Chain-mutating
+  events (`*.cell.create|commit|delete|reorder`) are a **head compare-and-swap**: they project
+  only if `parentId` is the cell's current head for that side/lane; stale siblings are
+  logged, `200`-accepted, and reported in `stale[]` (AQU-1154).
 - **Reads (thin client, AD-3):** read hooks under `src/lib/sync/*-read.ts` fetch from
   sync-worker HTTP on demand (`useCells`, `useProject`, `useCellHistory`, …). Plain
   `useState` + race-guarded `useEffect` — React Query is installed but only `useQueryClient`

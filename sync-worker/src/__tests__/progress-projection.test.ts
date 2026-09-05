@@ -16,9 +16,9 @@ const SECRET = 'progress-secret'
 const PROJECT = 'project-progress'
 const FILE = 'file-progress'
 
-function source(cellId: string, canonicalRef: string) {
+function source(cellId: string, canonicalRef: string, type: string | null = 'verse') {
   return {
-    project_id: PROJECT, file_id: FILE, cell_id: cellId, side: 'source',
+    project_id: PROJECT, file_id: FILE, cell_id: cellId, side: 'source', type,
     value: `source ${cellId}`, canonical_ref: canonicalRef, event_id: `source-${cellId}`,
     last_editor: 'alice', last_edit_at: 1, validated: 0, endorsement_count: 0, word_count: 2,
   }
@@ -294,5 +294,105 @@ describe('file_section_progress time buckets (AQU-805)', () => {
       't:000000600000',
       't:000001200000',
     ])
+  })
+})
+
+// AQU-1083 — the structural subset, recorded alongside every existing number so
+// a reader that excludes headings subtracts rather than reprojects.
+describe('structural aggregates (AQU-1083)', () => {
+  const P = 'proj-struct-prog'
+  const F = 'file-struct-prog'
+
+  const src = (cellId: string, ref: string, type: string | null) => ({
+    project_id: P, file_id: F, cell_id: cellId, side: 'source', type,
+    value: `s ${cellId}`, canonical_ref: ref, event_id: `s-${cellId}`,
+    last_editor: 'alice', last_edit_at: 1, validated: 0, endorsement_count: 0, word_count: 2,
+  })
+  const tgt = (cellId: string, value: string, endorsements: number) => ({
+    project_id: P, file_id: F, cell_id: cellId, side: 'target', type: null,
+    value, canonical_ref: null, event_id: `t-${cellId}`,
+    last_editor: 'alice', last_edit_at: 2, validated: endorsements >= 2 ? 1 : 0,
+    endorsement_count: endorsements, word_count: value ? 1 : 0,
+  })
+
+  /** GEN 1: two verses (one filled at 2 endorsements, one empty) plus a chapter
+   *  heading and a book title — one filled at 3 endorsements, one empty. */
+  async function fixture() {
+    return makeTestDb({
+      files: [{ id: F, project_id: P, name: 'GEN', event_id: 'f-evt' }],
+      cells: [
+        src('v1', 'GEN 1:1', 'verse'), tgt('v1', 'uno', 2),
+        src('v2', 'GEN 1:2', 'verse'), tgt('v2', '', 0),
+        src('h1', 'GEN 1:h:1', 'heading'), tgt('h1', 'titulo', 3),
+        src('h2', 'GEN 1:h:2', 'paratext'), tgt('h2', '', 0),
+      ],
+    })
+  }
+
+  const read = async (db: AquillaDb, scope: string) =>
+    db.prepare(
+      `SELECT total_count, filled_count, validator_histogram,
+              structural_count, structural_filled_count, structural_validator_histogram
+         FROM file_section_progress
+        WHERE project_id = ? AND file_id = ? AND scope = ? AND target_lang = ''`,
+    ).bind(P, F, scope).first<Record<string, unknown>>()
+
+  it('records the structural subset on the file rollup', async () => {
+    const { db } = await fixture()
+    await fileProgressRecomputeStmt(db, P, F, 10).run()
+    const row = await read(db, 'file')
+    // The totals still count everything — that is what makes the policy a
+    // read-time subtraction rather than a reprojection.
+    expect(Number(row?.total_count)).toBe(4)
+    expect(Number(row?.filled_count)).toBe(2)
+    expect(Number(row?.structural_count)).toBe(2)
+    expect(Number(row?.structural_filled_count)).toBe(1)
+  })
+
+  it('keeps a structural histogram that subtracts from the real one bucket-wise', async () => {
+    const { db } = await fixture()
+    await fileProgressRecomputeStmt(db, P, F, 10).run()
+    const row = await read(db, 'file')
+    // Every cell: two empty at 0, one verse at 2, one heading at 3.
+    expect(row?.validator_histogram).toEqual({ '0': 2, '2': 1, '3': 1 })
+    // Structural only: one empty heading at 0, one filled title at 3.
+    expect(row?.structural_validator_histogram).toEqual({ '0': 1, '3': 1 })
+  })
+
+  it('records it per section too', async () => {
+    const { db } = await fixture()
+    await sectionsProgressRecomputeStmt(db, P, F, 10).run()
+    const row = await db.prepare(
+      `SELECT structural_count, structural_filled_count, structural_validator_histogram
+         FROM file_section_progress
+        WHERE project_id = ? AND scope = 'section' AND section_key = 'GEN 1'`,
+    ).bind(P).first<Record<string, unknown>>()
+    // Heading refs split to the same chapter prefix as verses, so they land in
+    // GEN 1's bucket — which is exactly why the chapter never read 100%.
+    expect(Number(row?.structural_count)).toBe(2)
+    expect(Number(row?.structural_filled_count)).toBe(1)
+    expect(row?.structural_validator_histogram).toEqual({ '0': 1, '3': 1 })
+  })
+
+  it('agrees with the full rebuild', async () => {
+    const { db } = await fixture()
+    await fileProgressRecomputeStmt(db, P, F, 10).run()
+    await sectionsProgressRecomputeStmt(db, P, F, 10).run()
+    const incremental = await read(db, 'file')
+    for (const stmt of fullProgressRecomputeStmts(db, P, F, 11)) await stmt.run()
+    expect(await read(db, 'file')).toEqual({ ...incremental })
+  })
+
+  it('treats an untyped cell as content, not structure', async () => {
+    // Media and cue imports write no type at all. A null-blind predicate would
+    // count them as structural and quietly drop them from the denominator.
+    const { db } = await makeTestDb({
+      files: [{ id: F, project_id: P, name: 'AUDIO', event_id: 'f-evt' }],
+      cells: [src('m1', 'CUE 1', null), tgt('m1', 'hola', 0)],
+    })
+    await fileProgressRecomputeStmt(db, P, F, 10).run()
+    const row = await read(db, 'file')
+    expect(Number(row?.total_count)).toBe(1)
+    expect(Number(row?.structural_count)).toBe(0)
   })
 })

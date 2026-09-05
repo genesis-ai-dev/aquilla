@@ -1,4 +1,5 @@
 import type { AquillaDb, AquillaStatement } from '../../../db/shim/postgres'
+import { structuralPredicateSql } from './structural-cells'
 
 export const MAX_VALIDATOR_HISTOGRAM_BUCKET = 15
 
@@ -58,6 +59,7 @@ export function fileProgressRecomputeStmt(
        SELECT lanes.lane AS lane,
               s.cell_id,
               CASE WHEN TRIM(COALESCE(t.value, '')) <> '' THEN 1 ELSE 0 END AS filled,
+              CASE WHEN ${structuralPredicateSql('s')} THEN 1 ELSE 0 END AS structural,
               LEAST(COALESCE(t.endorsement_count, 0), ${MAX_VALIDATOR_HISTOGRAM_BUCKET}) AS validator_bucket
          FROM cells s
          CROSS JOIN lanes
@@ -69,13 +71,16 @@ export function fileProgressRecomputeStmt(
           AND t.target_lang = lanes.lane
         WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
      ), buckets AS (
-       SELECT lane, validator_bucket, COUNT(*)::integer AS bucket_count
+       SELECT lane, validator_bucket, COUNT(*)::integer AS bucket_count,
+              COUNT(*) FILTER (WHERE structural = 1)::integer AS structural_bucket_count
          FROM paired
         GROUP BY lane, validator_bucket
      ), summary AS (
        SELECT lane,
               COUNT(*)::integer AS total_count,
-              COALESCE(SUM(filled), 0)::integer AS filled_count
+              COALESCE(SUM(filled), 0)::integer AS filled_count,
+              COALESCE(SUM(structural), 0)::integer AS structural_count,
+              COALESCE(SUM(filled) FILTER (WHERE structural = 1), 0)::integer AS structural_filled_count
          FROM paired
         GROUP BY lane
      ), watermark AS (
@@ -86,12 +91,20 @@ export function fileProgressRecomputeStmt(
      )
      INSERT INTO file_section_progress (
        project_id, file_id, scope, section_key, target_lang, total_count, filled_count,
-       validator_histogram, revision, updated_at
+       validator_histogram, structural_count, structural_filled_count,
+       structural_validator_histogram, revision, updated_at
      )
      SELECT ?, ?, 'file', '', summary.lane, summary.total_count, summary.filled_count,
             COALESCE(
               (SELECT jsonb_object_agg(validator_bucket::text, bucket_count)
                  FROM buckets WHERE buckets.lane = summary.lane),
+              '{}'::jsonb
+            ),
+            summary.structural_count, summary.structural_filled_count,
+            COALESCE(
+              (SELECT jsonb_object_agg(validator_bucket::text, structural_bucket_count)
+                 FROM buckets
+                WHERE buckets.lane = summary.lane AND structural_bucket_count > 0),
               '{}'::jsonb
             ),
             watermark.revision, ?
@@ -100,6 +113,9 @@ export function fileProgressRecomputeStmt(
        total_count = excluded.total_count,
        filled_count = excluded.filled_count,
        validator_histogram = excluded.validator_histogram,
+       structural_count = excluded.structural_count,
+       structural_filled_count = excluded.structural_filled_count,
+       structural_validator_histogram = excluded.structural_validator_histogram,
        revision = excluded.revision,
        updated_at = excluded.updated_at`,
   ).bind(
@@ -169,6 +185,7 @@ export function sectionsProgressRecomputeStmt(
        SELECT lanes.lane AS lane,
               ${sectionKeyExpr('s')} AS section_key,
               CASE WHEN TRIM(COALESCE(t.value, '')) <> '' THEN 1 ELSE 0 END AS filled,
+              CASE WHEN ${structuralPredicateSql('s')} THEN 1 ELSE 0 END AS structural,
               LEAST(COALESCE(t.endorsement_count, 0), ${MAX_VALIDATOR_HISTOGRAM_BUCKET}) AS validator_bucket
          FROM cells s
          CROSS JOIN lanes
@@ -186,14 +203,19 @@ export function sectionsProgressRecomputeStmt(
      ), summaries AS (
        SELECT lane, section_key,
               COUNT(*)::integer AS total_count,
-              COALESCE(SUM(filled), 0)::integer AS filled_count
+              COALESCE(SUM(filled), 0)::integer AS filled_count,
+              COALESCE(SUM(structural), 0)::integer AS structural_count,
+              COALESCE(SUM(filled) FILTER (WHERE structural = 1), 0)::integer AS structural_filled_count
          FROM filtered
         GROUP BY lane, section_key
      ), histograms AS (
        SELECT lane, section_key,
-              jsonb_object_agg(validator_bucket::text, bucket_count) AS validator_histogram
+              jsonb_object_agg(validator_bucket::text, bucket_count) AS validator_histogram,
+              jsonb_object_agg(validator_bucket::text, structural_bucket_count)
+                FILTER (WHERE structural_bucket_count > 0) AS structural_validator_histogram
          FROM (
-           SELECT lane, section_key, validator_bucket, COUNT(*)::integer AS bucket_count
+           SELECT lane, section_key, validator_bucket, COUNT(*)::integer AS bucket_count,
+                  COUNT(*) FILTER (WHERE structural = 1)::integer AS structural_bucket_count
              FROM filtered
             GROUP BY lane, section_key, validator_bucket
          ) bucket_counts
@@ -206,11 +228,14 @@ export function sectionsProgressRecomputeStmt(
      )
      INSERT INTO file_section_progress (
        project_id, file_id, scope, section_key, target_lang, total_count, filled_count,
-       validator_histogram, revision, updated_at
+       validator_histogram, structural_count, structural_filled_count,
+       structural_validator_histogram, revision, updated_at
      )
      SELECT ?, ?, 'section', summaries.section_key, summaries.lane,
             summaries.total_count, summaries.filled_count,
             COALESCE(histograms.validator_histogram, '{}'::jsonb),
+            summaries.structural_count, summaries.structural_filled_count,
+            COALESCE(histograms.structural_validator_histogram, '{}'::jsonb),
             watermark.revision, ?
        FROM summaries
        LEFT JOIN histograms USING (lane, section_key)
@@ -219,6 +244,9 @@ export function sectionsProgressRecomputeStmt(
        total_count = excluded.total_count,
        filled_count = excluded.filled_count,
        validator_histogram = excluded.validator_histogram,
+       structural_count = excluded.structural_count,
+       structural_filled_count = excluded.structural_filled_count,
+       structural_validator_histogram = excluded.structural_validator_histogram,
        revision = excluded.revision,
        updated_at = excluded.updated_at`,
   ).bind(...binds)
@@ -243,6 +271,7 @@ export function fullProgressRecomputeStmts(
          SELECT lanes.lane AS lane,
                 ${sectionKeyExpr('s')} AS section_key,
                 CASE WHEN TRIM(COALESCE(t.value, '')) <> '' THEN 1 ELSE 0 END AS filled,
+                CASE WHEN ${structuralPredicateSql('s')} THEN 1 ELSE 0 END AS structural,
                 LEAST(
                   COALESCE(t.endorsement_count, 0),
                   ${MAX_VALIDATOR_HISTOGRAM_BUCKET}
@@ -261,7 +290,9 @@ export function fullProgressRecomputeStmts(
                 'file'::text AS scope,
                 ''::text AS section_key,
                 COUNT(*)::integer AS total_count,
-                COALESCE(SUM(filled), 0)::integer AS filled_count
+                COALESCE(SUM(filled), 0)::integer AS filled_count,
+                COALESCE(SUM(structural), 0)::integer AS structural_count,
+                COALESCE(SUM(filled) FILTER (WHERE structural = 1), 0)::integer AS structural_filled_count
            FROM paired
           GROUP BY lane
          UNION ALL
@@ -269,7 +300,9 @@ export function fullProgressRecomputeStmts(
                 'section'::text AS scope,
                 section_key,
                 COUNT(*)::integer AS total_count,
-                COALESCE(SUM(filled), 0)::integer AS filled_count
+                COALESCE(SUM(filled), 0)::integer AS filled_count,
+                COALESCE(SUM(structural), 0)::integer AS structural_count,
+                COALESCE(SUM(filled) FILTER (WHERE structural = 1), 0)::integer AS structural_filled_count
            FROM paired
           WHERE section_key <> ''
           GROUP BY lane, section_key
@@ -277,21 +310,25 @@ export function fullProgressRecomputeStmts(
          SELECT lane,
                 ''::text AS section_key,
                 validator_bucket,
-                COUNT(*)::integer AS bucket_count
+                COUNT(*)::integer AS bucket_count,
+                COUNT(*) FILTER (WHERE structural = 1)::integer AS structural_bucket_count
            FROM paired
           GROUP BY lane, validator_bucket
          UNION ALL
          SELECT lane,
                 section_key,
                 validator_bucket,
-                COUNT(*)::integer AS bucket_count
+                COUNT(*)::integer AS bucket_count,
+                COUNT(*) FILTER (WHERE structural = 1)::integer AS structural_bucket_count
            FROM paired
           WHERE section_key <> ''
           GROUP BY lane, section_key, validator_bucket
        ), histograms AS (
          SELECT lane,
                 section_key,
-                jsonb_object_agg(validator_bucket::text, bucket_count) AS validator_histogram
+                jsonb_object_agg(validator_bucket::text, bucket_count) AS validator_histogram,
+                jsonb_object_agg(validator_bucket::text, structural_bucket_count)
+                  FILTER (WHERE structural_bucket_count > 0) AS structural_validator_histogram
            FROM bucket_counts
           GROUP BY lane, section_key
        ), watermark AS (
@@ -302,11 +339,14 @@ export function fullProgressRecomputeStmts(
        )
        INSERT INTO file_section_progress (
          project_id, file_id, scope, section_key, target_lang, total_count, filled_count,
-         validator_histogram, revision, updated_at
+         validator_histogram, structural_count, structural_filled_count,
+         structural_validator_histogram, revision, updated_at
        )
        SELECT ?, ?, summaries.scope, summaries.section_key, summaries.lane,
               summaries.total_count, summaries.filled_count,
               COALESCE(histograms.validator_histogram, '{}'::jsonb),
+              summaries.structural_count, summaries.structural_filled_count,
+              COALESCE(histograms.structural_validator_histogram, '{}'::jsonb),
               watermark.revision, ?
          FROM summaries
          LEFT JOIN histograms
@@ -316,6 +356,9 @@ export function fullProgressRecomputeStmts(
          total_count = excluded.total_count,
          filled_count = excluded.filled_count,
          validator_histogram = excluded.validator_histogram,
+         structural_count = excluded.structural_count,
+         structural_filled_count = excluded.structural_filled_count,
+         structural_validator_histogram = excluded.structural_validator_histogram,
          revision = excluded.revision,
          updated_at = excluded.updated_at`,
     ).bind(

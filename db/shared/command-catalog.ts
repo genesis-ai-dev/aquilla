@@ -115,6 +115,66 @@ Params: \`{ projectId, settings, ifMatchVersion }\` — replaces the ENTIRE sett
 Kept for compatibility. Rejected if any policy key's value would change (see PatchSettings for the list). New integrations should use PatchSettings.`,
   },
   {
+    kind: 'SetSource',
+    title: 'Set source text',
+    oneLiner: 'Correct a cell\u2019s SOURCE text (marks dependent targets stale).',
+    minRoleLevel: PROJECT_LEAD,
+    tier: 'structural',
+    agentReachable: true,
+    paramsDoc: `### SetSource
+Params: \`{ fileId, cellId, value, valueHtml? }\` \u2014 batchable with the other cell-field commands.
+Compiles to \`source.cell.commit\` through the /events perimeter. Floor is PROJECT_LEAD (500), a rung ABOVE SetTranslation \u2014 a source edit changes the text every translator works from.
+Gotchas:
+- The commit advances the source chain head, so every target pinned to the old head goes STALE (AD-9), exactly as a UI source edit does. That is the intended effect, not a side effect \u2014 review it before approving a batch.
+- The plan pins the cell's live source head at prepare; a source edit by anyone else in between makes the commit \`plan_stale\`.
+- SetSource and SetTranscription on the SAME cell merge into one event (they are one \`source.cell.commit\`); two SetSource writes to one cell are last-wins with a warning.
+Example: \`{ "kind": "SetSource", "fileId": "f1", "cellId": "c3", "value": "In the beginning\u2026" }\``,
+  },
+  {
+    kind: 'SetTranscription',
+    title: 'Set transcription',
+    oneLiner: 'Write a media cell\u2019s corrected transcript (leaves the filename intact).',
+    minRoleLevel: PROJECT_LEAD,
+    tier: 'structural',
+    agentReachable: true,
+    paramsDoc: `### SetTranscription
+Params: \`{ fileId, cellId, transcription }\`.
+Compiles to a transcript-only \`source.cell.commit\`. An imported media cell's \`value\` is the import FILENAME and stays put as provenance; the transcript is what export and AI actually read (AQU-847).
+Same PROJECT_LEAD (500) floor as SetSource \u2014 it is the same event kind, and it advances the source chain head, so dependent targets go stale.
+Example: \`{ "kind": "SetTranscription", "fileId": "f1", "cellId": "c3", "transcription": "and then he said\u2026" }\``,
+  },
+  {
+    kind: 'SetTiming',
+    title: 'Set timing',
+    oneLiner: 'Retime a cell\u2019s span and/or set a file\u2019s audio timing mode.',
+    minRoleLevel: CONTRIBUTOR,
+    tier: 'structural',
+    agentReachable: true,
+    paramsDoc: `### SetTiming
+Params: \`{ fileId, cellId?, startMs?, endMs?, timingMode? }\` \u2014 at least one of (startMs+endMs) or timingMode.
+\`startMs\`/\`endMs\` (both together, cellId required) compile to \`cell.retime\` (CONTRIBUTOR 400); \`timingMode\` ("dubbing" | "audioFirst" | null) compiles to \`file.timing.set\` for the whole FILE (MAINTAINER 600). A command carrying both needs the higher floor.
+Gotchas:
+- MILLISECONDS MUST BE INTEGERS. A fractional value is rejected at prepare with the offending number in the message (AQU-927: ms columns are BIGINT and one float used to fail every event in its flush). Round before sending; this surface will not round for you.
+- Projects default to TIMING LOCKED: while \`timingLocked\` is not exactly false, a retime needs MAINTAINER (600) unless the cell is a line someone added by hand. Prepare refuses rather than staging a plan you could not commit.
+- endMs must be >= startMs.
+Example: \`{ "kind": "SetTiming", "fileId": "f1", "cellId": "c3", "startMs": 2403, "endMs": 5120 }\``,
+  },
+  {
+    kind: 'SetTrackOverride',
+    title: 'Set track override',
+    oneLiner: 'Rename, reorder, group, recolour, add or delete a timeline track.',
+    minRoleLevel: MAINTAINER,
+    tier: 'structural',
+    agentReachable: true,
+    paramsDoc: `### SetTrackOverride
+Params: \`{ fileId, trackId, patch }\` \u2014 \`patch\` is \`{ kind?, name?, order?, groupId?, color?, sourceTrackId? }\` or \`null\` to DELETE the override entry. Inside a patch, null clears that one field; an absent key leaves it alone.
+Compiles to \`file.track.set\`, merged into \`files.meta.trackOverrides[trackId]\`. Track structure is file structure \u2014 MAINTAINER (600).
+Gotchas:
+- TWO GATES. Restructuring patches (anything beyond \`name\`/\`order\`, and every \`patch: null\` delete) additionally require the project's \`allowTrackEditing\` \u2014 with it off, even an OWNER is refused. Renames and reorders stay ungated. Turn it on with PatchSettings first.
+- \`trackId\` must match /^[A-Za-z0-9_-]{1,64}$/; the four derived ids (source-subtitles, source-audio, target-subtitles, target-audio) are reserved and cannot be given a \`kind\`.
+Example: \`{ "kind": "SetTrackOverride", "fileId": "f1", "trackId": "target-audio", "patch": { "name": "Dub \u2014 ES" } }\``,
+  },
+  {
     kind: 'EmitEvents',
     title: 'Emit events',
     oneLiner: 'Stage any allowed project events: comments, waives, validations, files, assignments.',

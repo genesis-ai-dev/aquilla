@@ -23,6 +23,8 @@ import {
 } from './commands'
 import { changedPolicyKeys, preparePatchSettings, previewSettingValue } from './commands-patch-settings'
 import { prepareEmitEvents } from './emit-events-engine'
+import { prepareCellFields } from './cell-fields-engine'
+import { isCellFieldCommand, CELL_FIELDS_MAX_COMMANDS, type CellFieldCommand } from './commands-cell-fields'
 import { resolveCellStates, type CellPrecondition } from './preconditions'
 import { uuidv7 } from './uuid'
 import { stageAndRespond } from './stage'
@@ -186,6 +188,30 @@ export async function prepareChangesetCore(
       return errorResponse('validation_failed', 'EmitEvents must be the only command in a changeset')
     }
     return prepareEmitEvents(db, cred, projectId, id, autonomyMode, emitEvents, env, resolvedRole.level)
+  }
+
+  // AQU-1183 cell-field family (SetSource / SetTranscription / SetTiming /
+  // SetTrackOverride): its own prepare path. These write EXISTING cell/file
+  // fields — two of them compile to the chain-mutating `source.cell.commit`,
+  // so the batch is normalized to one source event per cell (a mixed batch
+  // with SetTranslation would have two writers on one chain slot). The static
+  // max-floor gate just ran; the engine adds the live pins, existence checks
+  // and the two dynamic gates (timing lock, allowTrackEditing).
+  const cellFields: CellFieldCommand[] = validated.commands.filter(isCellFieldCommand)
+  if (cellFields.length > 0) {
+    if (cellFields.length !== validated.commands.length) {
+      return errorResponse(
+        'validation_failed',
+        'cell-field commands (SetSource, SetTranscription, SetTiming, SetTrackOverride) cannot be mixed with other command kinds in one changeset',
+      )
+    }
+    if (cellFields.length > CELL_FIELDS_MAX_COMMANDS) {
+      return errorResponse(
+        'validation_failed',
+        `too many cell-field commands in one changeset (max ${CELL_FIELDS_MAX_COMMANDS})`,
+      )
+    }
+    return prepareCellFields(db, cred, projectId, id, autonomyMode, cellFields, env, resolvedRole.level)
   }
 
   // PlanImport is a whole-file operation, not a per-cell batch — it takes its

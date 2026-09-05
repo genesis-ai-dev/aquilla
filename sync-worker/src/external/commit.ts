@@ -24,6 +24,8 @@ import {
 } from './commands'
 import { changedPolicyKeys, commitPatchSettings } from './commands-patch-settings'
 import { commitEmitEvents } from './emit-events-engine'
+import { commitCellFields } from './cell-fields-engine'
+import { isCellFieldCommand, type CellFieldCommand } from './commands-cell-fields'
 import {
   buildProvenance,
   receiptOnlyGates,
@@ -375,6 +377,19 @@ export async function commitChangesetCore(
   if (emitEvents) {
     return commitEmitEvents(
       request, env, db, cred, cs, emitEvents, confirmationId, channel,
+      cs.status === 'staged', ctx,
+    )
+  }
+
+  // ── AQU-1183 cell-field commands take their own compile/commit path ───────
+  // The shared gates above already re-checked expiry, the ask confirmation, and
+  // drift over the stored preconditions — which for this family pin the SOURCE
+  // chain head every source-side write chains on. The engine adds the existence
+  // re-checks and the compile.
+  const cellFields: CellFieldCommand[] = cs.commands.filter(isCellFieldCommand)
+  if (cellFields.length > 0) {
+    return commitCellFields(
+      request, env, db, cred, cs, cellFields, confirmationId, channel,
       cs.status === 'staged', ctx,
     )
   }

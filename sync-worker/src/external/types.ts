@@ -77,6 +77,14 @@ export interface ChangesetSummary {
   settingsChanges?: Record<string, string>
   /** EmitEvents: per-kind effect lines (kind, count, testimony flag). */
   events?: EmitEventsSummaryEntry[]
+  /** AQU-1183 cell-field commands — one flat counter per effect, so the
+   *  approval page's number/string filter renders each as its own line. Only
+   *  the non-zero ones are set. */
+  sourceEdits?: number
+  transcriptionsSet?: number
+  cellsRetimed?: number
+  timingModesSet?: number
+  trackOverridesSet?: number
   warnings: ChangesetWarning[]
 }
 
@@ -123,6 +131,11 @@ export interface PlannedEventIds {
    *  assignment.create's assignmentId when the caller omitted them), so a
    *  crash-retry re-posts IDENTICAL ids and payloads. */
   emitEvents?: { eventId: string; commentId?: string; assignmentId?: string }[]
+  /** AQU-1183 cell-field commands: the compiled event id per normalized
+   *  target, in the SAME order planCellFields emits them. Commit re-runs that
+   *  pure normalizer over the stored commands, so the two line up
+   *  index-for-index and a crash-retry re-posts IDENTICAL ids. */
+  cellFields?: PlannedCellFieldIds
   /** LinkMedia: one entry per attach command — the target (fileId, cellId), the
    *  audio artifact id, and the minted cell.audio.attach + cell.audio.select
    *  event ids. A crash-and-retry re-posts these IDENTICAL ids, so the /events
@@ -134,6 +147,20 @@ export interface PlannedEventIds {
     attachEventId: string
     selectEventId: string
   }[]
+}
+
+/** Prepare-time event ids for a cell-field changeset (AQU-1183). Lists, not
+ *  cellKey-keyed objects: cellKey's NUL separator is not a legal jsonb key. */
+export interface PlannedCellFieldIds {
+  /** One source.cell.commit per cell (SetSource and SetTranscription on the
+   *  same cell merge into ONE event — see commands-cell-fields.ts). */
+  sourceCommits?: { fileId: string; cellId: string; eventId: string }[]
+  /** One cell.retime per cell. */
+  retimes?: { fileId: string; cellId: string; eventId: string }[]
+  /** One file.timing.set per file. */
+  timingModes?: { fileId: string; eventId: string }[]
+  /** One file.track.set per (file, track). */
+  trackOverrides?: { fileId: string; trackId: string; eventId: string }[]
 }
 
 /** Execution receipt recorded on commit. */

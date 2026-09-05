@@ -46,7 +46,7 @@ function connectionString(): string {
   if (!host || !password) {
     throw new Error("Neon creds missing — run: set -a; . ./.env; set +a")
   }
-  return `postgres://${user}:${encodeURIComponent(password)}@${host}/${database}?sslmode=require`
+  return `postgres://${user}:${encodeURIComponent(password)}@${host}/${database}?sslmode=require` // secret-scan:allow — built from env vars, no literal credential
 }
 
 async function main(): Promise<void> {

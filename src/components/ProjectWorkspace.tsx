@@ -551,6 +551,14 @@ export function ProjectWorkspace() {
     roleLevel: serverRoleLevel,
     settingsFetched,
   } = useProject(projectId!)
+  // AQU-1083: the effective policy for this project — its own answer, else its
+  // org's (which rides on the project record), else count them. The footer
+  // below is the only progress surface that counts cells itself; every other
+  // one reads a number the server already resolved this against.
+  const countStructuralCells =
+    projectSettings?.settings?.countStructuralCells
+    ?? loadedProject?.orgCountStructuralCells
+    ?? true
   // Client-local overlays (corpusMarker, originalName, suggestionsDismissedAt,
   // aiSetupSkipped) live in IDB; merge them onto the server-fetched record on
   // load and after each local patch so rename suggestions don't loop on every
@@ -11283,6 +11291,7 @@ export function ProjectWorkspace() {
                 healthMap={healthMap}
                 staleSourceCount={staleCellIds.size}
                 onJumpToCell={jumpToCellId}
+                countStructural={countStructuralCells}
               />
             ) : null
 

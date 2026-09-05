@@ -385,6 +385,18 @@ export interface ProjectRecord {
    * every terminology write, so this is an affordance value, not authority.
    */
   termbaseEditMinRole?: number | null
+  /**
+   * AQU-1083: the ORG's default for whether structural cells — chapter
+   * headings, section titles, book names — count toward progress. Sent by the
+   * single-project endpoint for the same reason as the floor above: the
+   * project's own control offers "use the organization default" and cannot
+   * label that option without knowing what the default is, and a project lead
+   * may not be able to read org settings at all.
+   *
+   * Absent (older server, local-only project) ⇒ true, which is what every
+   * project did before this setting existed.
+   */
+  orgCountStructuralCells?: boolean | null
   sourceLanguage: string
   targetLanguage: string
   /**
@@ -455,6 +467,17 @@ export interface ProjectRecord {
   validationCount?: number
   /** Required distinct validators for audio. Clamped [1, 15]. Default 1. */
   validationCountAudio?: number
+  /**
+   * AQU-1083: does this project count structural cells — chapter headings,
+   * section titles, book names — as translatable content in its progress and
+   * completion numbers?
+   *
+   * ABSENT means "use the organization's default", which is the third state of
+   * the control. There is deliberately no stored value for it: a null would be
+   * a third thing the resolver has no meaning for. Absent on the org too means
+   * they count, which is what every project did before this existed.
+   */
+  countStructuralCells?: boolean
   /**
    * Minimum role level required to cast a validation vote.
    * "reviewer" (default) | "project_lead" | "maintainer"

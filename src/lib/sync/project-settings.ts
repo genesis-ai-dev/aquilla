@@ -36,6 +36,17 @@ export interface ProjectWideSettings {
   algorithmicChecks?: Partial<Record<BuiltinCheckId, AlgorithmicCheckOverride>>
   validationCount?: number
   validationCountAudio?: number
+  /**
+   * AQU-1083: does this project count structural cells — chapter headings,
+   * section titles, book names — toward its progress numbers?
+   *
+   * ABSENT means "use the organization's default", which is the third state of
+   * the control. Deliberately no stored value for it: null would be a third
+   * thing the resolver has no meaning for, so choosing the default deletes the
+   * key. Absent on the org too means they count, which is what every project
+   * did before this existed.
+   */
+  countStructuralCells?: boolean
   validationRoleFloor?: "reviewer" | "project_lead" | "maintainer"
   validationNamedUsers?: string[]
   allowSelfValidation?: boolean

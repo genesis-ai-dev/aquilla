@@ -1,6 +1,7 @@
 import type { CellSummary } from "@/hooks/useActiveCellStore"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
+import { isStructuralCell } from "@/lib/cells/structural"
 import { HealthRing } from "./HealthRing"
 import { DecayBreakdown } from "./DecayBreakdown"
 import { useI18n } from "@/lib/i18n/I18nProvider"
@@ -13,17 +14,32 @@ interface StatusBarProps {
   healthMap: Map<string, number>
   staleSourceCount?: number
   onJumpToCell?: (cellId: string) => void
+  /**
+   * AQU-1083: does this project count chapter headings and section titles as
+   * translatable content? Defaults to true, which is what every project did
+   * before the setting existed.
+   *
+   * This footer is the ONE progress surface that counts cells itself rather
+   * than reading a number the server computed, so it has to apply the policy
+   * by hand — otherwise it contradicts the sidebar bar for the same file.
+   */
+  countStructural?: boolean
   className?: string
 }
 
 export function StatusBar({
-  cells, projectHealth, healthMap, staleSourceCount, onJumpToCell, className,
+  cells, projectHealth, healthMap, staleSourceCount, onJumpToCell,
+  countStructural = true, className,
 }: StatusBarProps) {
   const { locale, t } = useI18n()
-  const total = cells.length
-  const empty = cells.filter((c) => c.status === "empty").length
-  const unvalidated = cells.filter((c) => c.status === "unvalidated").length
-  const validated = cells.filter((c) => c.status === "validated").length
+  // Counted, not filtered in place: the health breakdown below still lists
+  // every cell, because a heading whose health has decayed is still worth
+  // jumping to even when it does not count toward the percentage.
+  const counted = countStructural ? cells : cells.filter((c) => !isStructuralCell(c.type))
+  const total = counted.length
+  const empty = counted.filter((c) => c.status === "empty").length
+  const unvalidated = counted.filter((c) => c.status === "unvalidated").length
+  const validated = counted.filter((c) => c.status === "validated").length
   const translated = total - empty
   const fraction = total > 0 ? translated / total : 0
   // The ratio/percent run reorders under Arabic's bidi algorithm when this

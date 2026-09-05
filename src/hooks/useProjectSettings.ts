@@ -211,6 +211,11 @@ function localSettingsFrom(
   if (record.validationCount != null) out.validationCount = record.validationCount
   if (record.validationCountAudio != null)
     out.validationCountAudio = record.validationCountAudio
+  // AQU-1083. `!= null` rather than a truthiness test: `false` is a real
+  // answer here — it is the whole point of the setting — and absent means
+  // "inherit the org", which must stay absent rather than become `false`.
+  if (record.countStructuralCells != null)
+    out.countStructuralCells = record.countStructuralCells
   if (record.validationRoleFloor != null) out.validationRoleFloor = record.validationRoleFloor
   if (record.validationNamedUsers != null) out.validationNamedUsers = record.validationNamedUsers
   if (record.allowSelfValidation != null) out.allowSelfValidation = record.allowSelfValidation
@@ -358,6 +363,9 @@ export function useProjectSettings(
               : {}),
             ...(got.settings.validationCountAudio != null
               ? { validationCountAudio: got.settings.validationCountAudio }
+              : {}),
+            ...(got.settings.countStructuralCells != null
+              ? { countStructuralCells: got.settings.countStructuralCells }
               : {}),
             ...(got.settings.terminology != null
               ? { terminology: got.settings.terminology }

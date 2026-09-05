@@ -1565,6 +1565,22 @@ export const DEFAULT_TERMBASE_EDIT_MIN_ROLE = 500 // ROLE.PROJECT_LEAD
  * PROJECT_LEAD default when the org hasn't configured one, or configured a
  * value outside the role ladder).
  */
+/**
+ * AQU-1083: the org's default for whether structural cells — chapter headings,
+ * section titles, book names — count toward progress.
+ *
+ * TRUE unless an org says otherwise, which is what every project does today, so
+ * nothing moves when this ships. An org that wants its percentages to describe
+ * only translated content opts out, and a project may still override it.
+ */
+export const DEFAULT_COUNT_STRUCTURAL_CELLS = true
+
+export async function getOrgCountStructuralCells(env: Env, orgId: number): Promise<boolean> {
+  const settings = await loadOrgSettingsBlob(env, orgId)
+  const raw = (settings as Record<string, unknown>)?.countStructuralCells
+  return typeof raw === "boolean" ? raw : DEFAULT_COUNT_STRUCTURAL_CELLS
+}
+
 export async function getTermbaseEditMinRole(env: Env, orgId: number): Promise<number> {
   const settings = await loadOrgSettingsBlob(env, orgId)
   return extractRoleFloor(settings, "termbaseEditMinRole", DEFAULT_TERMBASE_EDIT_MIN_ROLE)

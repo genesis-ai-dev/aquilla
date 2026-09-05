@@ -49,10 +49,12 @@ import { getFileChapters, getMyAssignments, getProjectAssignmentRoster } from ".
 import {
   bumpOrgActivity,
   canViewRoster,
+  DEFAULT_COUNT_STRUCTURAL_CELLS,
   DEFAULT_TERMBASE_EDIT_MIN_ROLE,
   getEffectiveOrgRole,
   getOrCreateUserOrg,
   getRosterViewMinRole,
+  getOrgCountStructuralCells,
   getTermbaseEditMinRole,
   listEffectiveProjectMembers,
 } from "../services/org-permissions"
@@ -602,11 +604,22 @@ projects.get("/:projectId", authMiddleware, async (c) => {
       ? await getTermbaseEditMinRole(c.env, row.org_id)
       : DEFAULT_TERMBASE_EDIT_MIN_ROLE
 
+  // AQU-1083: the org's default for whether headings count toward progress,
+  // for the same reason as the floor above. The project's own control offers
+  // "use the organization default", and it cannot say what that default IS
+  // without this — a second org-settings fetch just to label one option would
+  // be absurd, and a project lead may not be able to read org settings at all.
+  const orgCountStructuralCells =
+    row.org_id != null
+      ? await getOrgCountStructuralCells(c.env, row.org_id)
+      : DEFAULT_COUNT_STRUCTURAL_CELLS
+
   return c.json({
     id: row.id,
     name: row.name,
     orgId: row.org_id,
     termbaseEditMinRole,
+    orgCountStructuralCells,
     archivedAt: row.archived_at,
     archivedBy: row.archived_by
       ? { id: row.archived_by, username: row.archived_by_username }

@@ -49,6 +49,19 @@ const SETTINGS_WRITE_MIN_ROLE = ROLE.MAINTAINER
 const TERMINOLOGY_KEY = "terminology"
 
 /**
+ * AQU-1083: this project's override for whether headings count toward
+ * progress. ABSENT means inherit the org's value — there is no third stored
+ * state, so "use the organization default" is expressed by deleting the key,
+ * not by writing null.
+ *
+ * Leads may set it. It decides how this project's own numbers are calculated,
+ * which is squarely the job of whoever runs the project, and it changes nothing
+ * about who may see or do anything.
+ */
+const COUNT_STRUCTURAL_KEY = "countStructuralCells"
+const COUNT_STRUCTURAL_MIN_ROLE = ROLE.PROJECT_LEAD
+
+/**
  * Top-level settings keys whose value differs between the stored blob and an
  * incoming write. Compared on the CHANGE, not on presence: the client patch
  * is a whole-object read-modify-write, so every write echoes back every key
@@ -134,22 +147,46 @@ projectSettings.on(
       // write access to AI config, health, languages, or anything else.
       const stored = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
       const changed = changedSettingsKeys(stored.settings, body.settings)
-      const terminologyOnly = changed.every((key) => key === TERMINOLOGY_KEY)
-      if (!terminologyOnly) {
+      // Each carve-out is key-exact and carries its own floor. A write that
+      // touches anything else — even alongside a permitted key — falls through
+      // to the maintainer 403, so widening one of these can never widen access
+      // to AI config, health, languages, or the rest.
+      const carveOutOnly = changed.every(
+        (key) => key === TERMINOLOGY_KEY || key === COUNT_STRUCTURAL_KEY,
+      )
+      if (!carveOutOnly) {
         return c.json(
           { error: `role >= maintainer (${SETTINGS_WRITE_MIN_ROLE}) required` },
           403,
         )
       }
-      const termbaseFloor = await getTermbaseEditMinRoleForProject(c.env, projectId)
-      if (role.level < termbaseFloor) {
+      if (changed.includes(TERMINOLOGY_KEY)) {
+        const termbaseFloor = await getTermbaseEditMinRoleForProject(c.env, projectId)
+        if (role.level < termbaseFloor) {
+          return c.json(
+            {
+              error: `role >= ${termbaseFloor} required to manage this project's termbase (org termbaseEditMinRole)`,
+            },
+            403,
+          )
+        }
+      }
+      if (changed.includes(COUNT_STRUCTURAL_KEY) && role.level < COUNT_STRUCTURAL_MIN_ROLE) {
         return c.json(
           {
-            error: `role >= ${termbaseFloor} required to manage this project's termbase (org termbaseEditMinRole)`,
+            error: `role >= project lead (${COUNT_STRUCTURAL_MIN_ROLE}) required to change whether headings count toward progress`,
           },
           403,
         )
       }
+    }
+
+    // Boolean or absent. Absent is "inherit the org", so there is no null case
+    // to accept — writing one would store a third state the resolver does not
+    // have a meaning for.
+    const rawCountStructural = (body.settings as Record<string, unknown>)[COUNT_STRUCTURAL_KEY]
+    if (rawCountStructural !== undefined && typeof rawCountStructural !== "boolean") {
+      return c.json({ error: `${COUNT_STRUCTURAL_KEY} must be a boolean` }, 400)
     }
 
     const queryVersion = parseIntOrNull(c.req.query("ifMatchVersion"))

@@ -85,6 +85,20 @@ const PERMISSION_POLICY_KEYS: Record<string, string> = {
  */
 const BOOLEAN_POLICY_KEYS = new Set(["allowSelfAssignment"])
 
+/**
+ * AQU-1083: do chapter headings and section titles count toward progress?
+ *
+ * Deliberately NOT in PERMISSION_POLICY_KEYS. That table is owner-only because
+ * every key in it decides who may see or do something; this one decides how a
+ * number is calculated. The ticket puts it with maintainers and owners, which
+ * is what the general settings gate above already gives — so the key needs no
+ * entry there, only validation.
+ *
+ * Unset means headings COUNT, which is what every project does today. A project
+ * may override it; absent on both means count them.
+ */
+const COUNT_STRUCTURAL_KEY = "countStructuralCells"
+
 interface OrgSettingsRow {
   org_id: number
   settings: string
@@ -267,6 +281,13 @@ orgSettings.on(
           400,
         )
       }
+    }
+
+    // Validated but not gated: a mistyped value would read as "unset" and move
+    // every percentage in the org with nothing on screen to explain it.
+    const rawCountStructural = body.settings[COUNT_STRUCTURAL_KEY]
+    if (rawCountStructural !== undefined && typeof rawCountStructural !== "boolean") {
+      return c.json({ error: `${COUNT_STRUCTURAL_KEY} must be a boolean` }, 400)
     }
 
     const queryVersion = parseIntOrNull(c.req.query("ifMatchVersion"))

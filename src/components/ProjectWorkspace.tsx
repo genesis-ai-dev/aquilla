@@ -33,6 +33,7 @@ import {
 import { useTranslateAsReadPreference } from "@/hooks/useTranslateAsReadPreference"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
 import { shouldPromptAiSetup } from "@/lib/completion/completion-service"
+import { useUserProviderOverride } from "@/lib/store/user-provider-override"
 import {
   hasMateriallyBetterEvidence,
   translateAsReadAction,
@@ -4589,7 +4590,10 @@ export function ProjectWorkspace() {
     commitCompletedCells,
   )
 
-  const sparkleReady = isConfigured && !shouldPromptAiSetup(project?.aiProviderChosen)
+  const userProviderOverride = useUserProviderOverride()
+  const sparkleReady =
+    isConfigured &&
+    !shouldPromptAiSetup(project?.aiProviderChosen, Boolean(userProviderOverride?.endpoint))
 
   // AQU-620: adapter so the editor's per-cell AI action can request a plain
   // draft (`onCompleteSingle(cell)`) or an explicit regenerate

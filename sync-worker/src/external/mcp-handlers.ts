@@ -19,6 +19,7 @@ import { approvalUrlFor, CHANGESET_TTL_MS } from './prepare'
 import { PLAN_IMPORT_MAX_CELLS } from './commands'
 import { MAX_ARTIFACT_BYTES, handleExternalArtifactsRequest } from './artifacts-route'
 import { SERVER_PARSEABLE_FILE_TYPES, CLIENT_ONLY_FORMATS } from './import-parse'
+import { uiOnlySection } from './ui-only'
 import { handleExternalReadRequest } from './read-routes'
 import { handleExternalChangesetsRequest } from './changesets-route'
 import { listProjectsForCredential } from './projects-list'
@@ -131,6 +132,10 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
         'commit via confirm_changeset. describe_command (in-app agent harness) serves each ' +
         "command's full parameter doc; it is not yet an MCP tool.",
     },
+    // AQU-1178: the permanent exclusions. Published from the same module the
+    // REST discovery map and the external 404 hints read, so the three cannot
+    // drift (sync-worker/src/external/ui-only.ts).
+    uiOnly: uiOnlySection(),
     planImport: {
       stagingChannels: ['rest', 'mcp'],
       mcpStagingTool: 'prepare_import',

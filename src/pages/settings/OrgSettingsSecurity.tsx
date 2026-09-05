@@ -1,7 +1,6 @@
 import { ExportPermissionsSection } from "@/components/settings/ExportPermissionsSection"
 import { AssignmentAuthoritySection } from "@/components/settings/AssignmentAuthoritySection"
 import { RosterProgressSection } from "@/components/settings/RosterProgressSection"
-import { StructuralCellsSection } from "@/components/settings/StructuralCellsSection"
 import { TermbaseEditSection } from "@/components/settings/TermbaseEditSection"
 import { SettingsGroup } from "@/components/ui/page"
 import { useActiveOrg } from "@/context/OrgContext"
@@ -29,10 +28,6 @@ export function OrgSettingsSecurity() {
         <ExportPermissionsSection orgSettings={orgSettings} canEdit={canEdit} />
         <AssignmentAuthoritySection orgSettings={orgSettings} canEdit={canEdit} />
         <TermbaseEditSection orgSettings={orgSettings} canEdit={canEdit} />
-        {/* AQU-1083: MAINTAINER gate, not the owner-only `canEdit` the rest of
-            this group uses. Every other switch here is a permission policy;
-            this one only decides how a percentage is calculated. */}
-        <StructuralCellsSection orgSettings={orgSettings} canEdit={orgSettings.canEdit} />
       </SettingsGroup>
     </OrgSettingsDetailPage>
   )

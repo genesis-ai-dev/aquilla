@@ -465,10 +465,11 @@ export const projectSettings = defineNamespace({
       "Whether chapter headings, section titles and book names count toward " +
       "this project's translation and validation percentages. Leaving them " +
       "out means a book reads 100% once every verse is done.",
-    "projectSettings.structuralCells.inheritCounting":
-      "Use the organization default (counting them)",
-    "projectSettings.structuralCells.inheritExcluding":
-      "Use the organization default (leaving them out)",
+    "projectSettings.structuralCells.inherit": "Organization default",
+    "projectSettings.structuralCells.currentlyCounting":
+      "The organization currently counts them",
+    "projectSettings.structuralCells.currentlyExcluding":
+      "The organization currently leaves them out",
     "projectSettings.structuralCells.count": "Count them",
     "projectSettings.structuralCells.exclude": "Leave them out",
     "projectSettings.structuralCells.saveFailed": "Could not save that change",

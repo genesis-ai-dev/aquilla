@@ -12,6 +12,7 @@ export const FLOOR_LABEL: Record<number, string> = {
 export const ORG_SETTINGS_SECTIONS = [
   "identity",
   "security",
+  "project-defaults",
   "billing",
   "providers",
   "monday",
@@ -29,6 +30,7 @@ export const ORG_SETTINGS_SECTION_ALIASES: Record<string, OrgSettingsSection> = 
 export const ORG_SETTINGS_SECTION_TITLES: Record<OrgSettingsSection, string> = {
   identity: "Identity",
   security: "Security",
+  "project-defaults": "Project defaults",
   billing: "Billing & usage",
   providers: "AI provider keys",
   monday: "Monday.com",
@@ -38,6 +40,8 @@ export const ORG_SETTINGS_SECTION_DESCRIPTIONS: Record<OrgSettingsSection, strin
   identity: "The organization's display name, shown across the workspace.",
   security:
     "Who can see members and who can export, assign, and manage terms.",
+  "project-defaults":
+    "Settings every project in this organization follows unless it chooses its own.",
   billing:
     "Explore / Field / Enterprise agent credits for this organization.",
   providers:

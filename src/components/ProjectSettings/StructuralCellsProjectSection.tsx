@@ -21,6 +21,7 @@ import { SettingsRow } from "@/components/ui/page"
 import {
   Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { ReactNode } from "react"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
@@ -48,15 +49,25 @@ export function StructuralCellsProjectSection({
   const choice: Choice = value === undefined ? "inherit" : value ? "count" : "exclude"
 
   const options = [
-    {
-      value: "inherit" as const,
-      label: orgDefault
-        ? t("projectSettings.structuralCells.inheritCounting")
-        : t("projectSettings.structuralCells.inheritExcluding"),
-    },
+    { value: "inherit" as const, label: t("projectSettings.structuralCells.inherit") },
     { value: "count" as const, label: t("projectSettings.structuralCells.count") },
     { value: "exclude" as const, label: t("projectSettings.structuralCells.exclude") },
   ]
+
+  // What "Organization default" currently resolves to. The option says only
+  // "Organization default" — spelling the answer into the label made it a
+  // sentence where its two siblings are two words (Sam, 2026-09-05) — so the
+  // answer rides alongside instead.
+  //
+  // On the TRIGGER, so it is readable without opening the menu. Not on the
+  // option as well: a tooltip inside an open select menu fights that menu's
+  // own portal and focus handling, and the trigger is where a reader looks
+  // anyway. And it is a real description, not only a hover — a tooltip is
+  // invisible to a keyboard or screen reader, which would leave those users
+  // an option that says nothing at all.
+  const currentDefault = orgDefault
+    ? t("projectSettings.structuralCells.currentlyCounting")
+    : t("projectSettings.structuralCells.currentlyExcluding")
 
   async function handleChange(next: Choice) {
     setBusy(true)
@@ -90,13 +101,29 @@ export function StructuralCellsProjectSection({
               value={choice}
               onValueChange={(v) => void handleChange((v ?? choice) as Choice)}
             >
-              <SelectTrigger
-                id="count-structural-cells"
-                className="w-64 bg-background"
-                aria-label={t("projectSettings.structuralCells.label")}
-              >
-                <SelectValue />
-              </SelectTrigger>
+              {/* A span owns the hover rather than the trigger itself. Making
+                  a control its own tooltip trigger races that control's
+                  pointer and focus handling — the same reason
+                  DisabledFieldTooltip beside this wraps in a span. */}
+              <Tooltip>
+                <TooltipTrigger
+                  delay={200}
+                  closeOnClick={false}
+                  render={<span className="block" />}
+                >
+                  <SelectTrigger
+                    id="count-structural-cells"
+                    className="w-52 bg-background"
+                    aria-label={t("projectSettings.structuralCells.label")}
+                    aria-describedby="count-structural-cells-default"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" align="center">
+                  {currentDefault}
+                </TooltipContent>
+              </Tooltip>
               <SelectContent>
                 <SelectGroup>
                   {options.map((o) => (
@@ -106,6 +133,10 @@ export function StructuralCellsProjectSection({
               </SelectContent>
             </Select>
           </DisabledFieldTooltip>
+          {/* Announced with the control rather than painted on hover only. */}
+          <span id="count-structural-cells-default" className="sr-only">
+            {currentDefault}
+          </span>
           {error && <FieldError className="text-xs">{error}</FieldError>}
         </div>
       }

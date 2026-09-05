@@ -5,6 +5,7 @@
 export { OrgSettingsIndex as Settings } from "./settings/OrgSettingsIndex"
 export { OrgSettingsIdentity } from "./settings/OrgSettingsIdentity"
 export { OrgSettingsSecurity } from "./settings/OrgSettingsSecurity"
+export { OrgSettingsProjectDefaults } from "./settings/OrgSettingsProjectDefaults"
 export { OrgSettingsBilling } from "./settings/OrgSettingsBilling"
 export { OrgSettingsProviders } from "./settings/OrgSettingsProviders"
 export { OrgSettingsMonday } from "./settings/OrgSettingsMonday"

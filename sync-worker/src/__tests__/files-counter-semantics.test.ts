@@ -20,6 +20,10 @@ vi.mock('partyserver', () => ({
 }))
 
 import { handleEventsWriteRequest } from '../events/route'
+import {
+  fileCountersRecomputeStmt,
+  projectFileCountersRecomputeStmt,
+} from '../events/event-projection'
 import { makeTestDb } from './helpers/pg-test-db'
 import { makeTestToken } from './helpers/auth'
 import type { RawEvent } from '../events/types'
@@ -266,5 +270,107 @@ describe('files.cell_count — COUNT(DISTINCT cell_id) across source + target', 
     const counts = await readFileCounts(db)
     // DISTINCT cell_id — still 1, not 2
     expect(Number(counts?.cell_count)).toBe(1)
+  })
+})
+
+// AQU-1083 — the structural subset of the same three counters. Seeded straight
+// into `cells` and run through the builder, because what is under test is the
+// SQL, not the event route above it.
+describe('files.structural_* — the heading/paratext subset (AQU-1083)', () => {
+  const P = 'proj-struct'
+  const F = 'file-struct'
+
+  const source = (cellId: string, type: string | null) => ({
+    project_id: P, file_id: F, cell_id: cellId, side: 'source',
+    value: `s ${cellId}`, type, event_id: `s-${cellId}`, last_edit_at: 1,
+    validated: 0, endorsement_count: 0, word_count: 2,
+  })
+  const target = (cellId: string, value: string, validated = 0) => ({
+    project_id: P, file_id: F, cell_id: cellId, side: 'target',
+    value, type: null, event_id: `t-${cellId}`, last_edit_at: 2,
+    validated, endorsement_count: validated, word_count: value ? 1 : 0,
+  })
+
+  /** Two verses (one filled+validated, one empty) and two structural cells
+   *  (one filled+validated, one empty), plus a typeless media row. */
+  async function fixture() {
+    return makeTestDb({
+      files: [{ id: F, project_id: P, name: 'GEN', event_id: 'f-evt' }],
+      cells: [
+        source('v1', 'verse'), target('v1', 'uno', 1),
+        source('v2', 'verse'), target('v2', ''),
+        source('h1', 'heading'), target('h1', 'titulo', 1),
+        source('h2', 'paratext'), target('h2', ''),
+        source('m1', null), target('m1', 'media'),
+      ],
+    })
+  }
+
+  async function counts(db: AquillaDb) {
+    return db
+      .prepare(
+        `SELECT cell_count, filled_count, approved_count,
+                structural_cell_count, structural_filled_count, structural_approved_count
+           FROM files WHERE id = ? AND project_id = ?`,
+      )
+      .bind(F, P)
+      .first<Record<string, number>>()
+  }
+
+  it('counts the structural subset without disturbing the totals', async () => {
+    const { db } = await fixture()
+    await fileCountersRecomputeStmt(db, P, F, 99).run()
+    const c = await counts(db)
+    // Totals are unchanged by AQU-1083: five cells, three filled, two validated.
+    expect(Number(c?.cell_count)).toBe(5)
+    expect(Number(c?.filled_count)).toBe(3)
+    expect(Number(c?.approved_count)).toBe(2)
+    // Of those, the heading and the paratext row.
+    expect(Number(c?.structural_cell_count)).toBe(2)
+    expect(Number(c?.structural_filled_count)).toBe(1)
+    expect(Number(c?.structural_approved_count)).toBe(1)
+  })
+
+  it('reads a cell\'s type from its SOURCE row, never its target', async () => {
+    // Target rows carry no type at all, so a naive filter would find nothing
+    // filled or approved — the whole point of resolving through the pair.
+    const { db } = await fixture()
+    await fileCountersRecomputeStmt(db, P, F, 99).run()
+    const c = await counts(db)
+    expect(Number(c?.structural_filled_count)).toBeGreaterThan(0)
+  })
+
+  it('leaves an untyped media cell out of the structural subset', async () => {
+    // Media and cue imports write no type at all. They are content, and a
+    // null-blind predicate would quietly drop them from the denominator.
+    const { db } = await fixture()
+    await fileCountersRecomputeStmt(db, P, F, 99).run()
+    const c = await counts(db)
+    expect(Number(c?.cell_count) - Number(c?.structural_cell_count)).toBe(3)
+  })
+
+  it('agrees with the per-project form the rebuild uses', async () => {
+    // Three copies of this SQL used to exist and one had already drifted. A
+    // rebuild that disagreed would silently restore headings to the totals of
+    // a project that had excluded them.
+    const { db } = await fixture()
+    await fileCountersRecomputeStmt(db, P, F, 99).run()
+    const perFile = await counts(db)
+    await db.prepare(`UPDATE files SET structural_cell_count = 0, cell_count = 0`).run()
+    await projectFileCountersRecomputeStmt(db, P, 99).run()
+    expect(await counts(db)).toEqual(perFile)
+  })
+
+  it('zeroes a file whose cells have all gone', async () => {
+    // Driven FROM files rather than from cells, so an emptied file is reset
+    // rather than left holding its last known numbers — which is what the
+    // rebuild depends on after it wipes the projection.
+    const { db } = await fixture()
+    await fileCountersRecomputeStmt(db, P, F, 99).run()
+    await db.prepare(`DELETE FROM cells WHERE project_id = ?`).bind(P).run()
+    await projectFileCountersRecomputeStmt(db, P, 99).run()
+    const c = await counts(db)
+    expect(Number(c?.cell_count)).toBe(0)
+    expect(Number(c?.structural_cell_count)).toBe(0)
   })
 })

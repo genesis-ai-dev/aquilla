@@ -12,6 +12,7 @@
 //
 // Idempotent: pure recompute from current cells, safe to call any number of times.
 
+import { projectFileCountersRecomputeStmt } from './event-projection'
 import { fullProgressRecomputeStmts } from './progress-projection'
 import { isAuthorizedAdminBearer } from '../lib/admin-auth'
 
@@ -45,18 +46,9 @@ export async function handleMigrateFinalizeRequest(
   if (typeof projectId !== 'string') return new Response('body must be { projectId }', { status: 400 })
 
   try {
-    const res = await env.AQUILLA_PG.prepare(
-      `UPDATE files SET
-        cell_count = (SELECT COUNT(DISTINCT cell_id) FROM cells WHERE project_id = files.project_id AND file_id = files.id),
-        approved_count = (SELECT COUNT(*) FROM cells WHERE project_id = files.project_id AND file_id = files.id AND validated = 1),
-        filled_count = (SELECT COUNT(*) FROM cells WHERE project_id = files.project_id AND file_id = files.id AND side = 'target' AND TRIM(value) != ''),
-        word_count = (SELECT COALESCE(SUM(word_count), 0) FROM cells WHERE project_id = files.project_id AND file_id = files.id AND side = 'target'),
-        last_edit_at = (SELECT MAX(last_edit_at) FROM cells WHERE project_id = files.project_id AND file_id = files.id),
-        updated_at = ?
-      WHERE project_id = ?`,
-    )
-      .bind(Date.now(), projectId)
-      .run()
+    // One shared builder with the live projection and the rebuild — see
+    // projectFileCountersRecomputeStmt for why three copies was a hazard.
+    const res = await projectFileCountersRecomputeStmt(env.AQUILLA_PG, projectId, Date.now()).run()
     const { results: files } = await env.AQUILLA_PG
       .prepare('SELECT id FROM files WHERE project_id = ?')
       .bind(projectId)

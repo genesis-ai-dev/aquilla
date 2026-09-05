@@ -169,31 +169,55 @@ export function laneOfEvent(kind: string, payload: unknown): string {
  *   word_count     — total target-side words (translation output)
  *   last_edit_at   — most recent cell edit on the file (also drives file sort)
  *
+ * AQU-1083 adds the structural_* trio: the same cell/filled/approved counts
+ * restricted to cells whose SOURCE row is a heading or paratext. Membership is
+ * a property of the source row, but filled and approved count TARGET rows whose
+ * own type is null, so every row resolves its type through the paired source
+ * via idx_cells_pair_lookup. They are maintained unconditionally — no counter
+ * here knows anything about the setting — so a reader that excludes structural
+ * cells subtracts, and the policy can be toggled without reprojecting.
+ *
+ * Driven FROM `files` rather than from `cells` so a file whose cells have all
+ * been deleted is still reset to zero. The per-project form relied on that.
+ *
  * NOTE: this is what was always meant by file-create's "counters are
  * maintained by the cell commit projection path" comment — that maintenance
  * never actually existed before, so every `files` row sat at cell_count=0.
  */
-export function fileCountersRecomputeStmt(
-  db: AquillaDb,
-  projectId: string,
-  fileId: string,
-  serverTs: number,
-): AquillaStatement {
-  return db
-    .prepare(
-      `WITH counters AS (
-         SELECT COUNT(DISTINCT cell_id)::integer AS cell_count,
-                COUNT(*) FILTER (WHERE validated = 1)::integer AS approved_count,
+function fileCountersSql(scope: 'file' | 'project'): string {
+  return `WITH counters AS (
+         SELECT f.id AS file_id,
+                COUNT(DISTINCT c.cell_id)::integer AS cell_count,
+                COUNT(*) FILTER (WHERE c.validated = 1)::integer AS approved_count,
                 COUNT(*) FILTER (
-                  WHERE side = 'target' AND TRIM(value) != ''
+                  WHERE c.side = 'target' AND TRIM(c.value) != ''
                 )::integer AS filled_count,
-                COALESCE(SUM(word_count) FILTER (WHERE side = 'target'), 0)::integer AS word_count,
-                MAX(last_edit_at) AS last_edit_at,
+                COALESCE(SUM(c.word_count) FILTER (WHERE c.side = 'target'), 0)::integer AS word_count,
+                MAX(c.last_edit_at) AS last_edit_at,
                 COUNT(*) FILTER (
-                  WHERE side = 'target' AND ai_drafted = 1
-                )::integer AS ai_drafted_count
-           FROM cells
-          WHERE project_id = ? AND file_id = ?
+                  WHERE c.side = 'target' AND c.ai_drafted = 1
+                )::integer AS ai_drafted_count,
+                COUNT(DISTINCT c.cell_id) FILTER (
+                  WHERE s.type IN ('heading', 'paratext')
+                )::integer AS structural_cell_count,
+                COUNT(*) FILTER (
+                  WHERE s.type IN ('heading', 'paratext')
+                    AND c.side = 'target' AND TRIM(c.value) != ''
+                )::integer AS structural_filled_count,
+                COUNT(*) FILTER (
+                  WHERE s.type IN ('heading', 'paratext') AND c.validated = 1
+                )::integer AS structural_approved_count
+           FROM files f
+           LEFT JOIN cells c
+             ON c.project_id = f.project_id
+            AND c.file_id = f.id
+           LEFT JOIN cells s
+             ON s.project_id = c.project_id
+            AND s.file_id = c.file_id
+            AND s.cell_id = c.cell_id
+            AND s.side = 'source'
+          WHERE f.project_id = ?${scope === 'file' ? ' AND f.id = ?' : ''}
+          GROUP BY f.id
        )
        UPDATE files SET cell_count = counters.cell_count,
          approved_count = counters.approved_count,
@@ -201,15 +225,40 @@ export function fileCountersRecomputeStmt(
          word_count = counters.word_count,
          last_edit_at = counters.last_edit_at,
          ai_drafted_count = counters.ai_drafted_count,
+         structural_cell_count = counters.structural_cell_count,
+         structural_filled_count = counters.structural_filled_count,
+         structural_approved_count = counters.structural_approved_count,
          updated_at = ?
         FROM counters
-       WHERE files.id = ? AND files.project_id = ?`,
-    )
-    .bind(
-      projectId, fileId,
-      serverTs,
-      fileId, projectId,
-    )
+       WHERE files.id = counters.file_id AND files.project_id = ?`
+}
+
+export function fileCountersRecomputeStmt(
+  db: AquillaDb,
+  projectId: string,
+  fileId: string,
+  serverTs: number,
+): AquillaStatement {
+  return db.prepare(fileCountersSql('file')).bind(projectId, fileId, serverTs, projectId)
+}
+
+/**
+ * The same counters for every file in a project, in one statement.
+ *
+ * Used by the rebuild and by POST /migrate/finalize, which both replay a whole
+ * project and defer per-event counter maintenance. Both used to carry their own
+ * hand-written copy of the SQL above — and one of them had already drifted,
+ * silently leaving `ai_drafted_count` behind. AQU-1083 would have made that
+ * worse in a way nobody would notice: a rebuild would have quietly restored
+ * headings to the totals a project had chosen to exclude. One builder, two
+ * scopes.
+ */
+export function projectFileCountersRecomputeStmt(
+  db: AquillaDb,
+  projectId: string,
+  serverTs: number,
+): AquillaStatement {
+  return db.prepare(fileCountersSql('project')).bind(projectId, serverTs, projectId)
 }
 
 /**

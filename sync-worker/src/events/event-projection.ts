@@ -206,7 +206,11 @@ function fileCountersSql(scope: 'file' | 'project'): string {
                 )::integer AS structural_filled_count,
                 COUNT(*) FILTER (
                   WHERE s.type IN ('heading', 'paratext') AND c.validated = 1
-                )::integer AS structural_approved_count
+                )::integer AS structural_approved_count,
+                COUNT(*) FILTER (
+                  WHERE s.type IN ('heading', 'paratext')
+                    AND c.side = 'target' AND c.ai_drafted = 1
+                )::integer AS structural_ai_drafted_count
            FROM files f
            LEFT JOIN cells c
              ON c.project_id = f.project_id
@@ -228,6 +232,7 @@ function fileCountersSql(scope: 'file' | 'project'): string {
          structural_cell_count = counters.structural_cell_count,
          structural_filled_count = counters.structural_filled_count,
          structural_approved_count = counters.structural_approved_count,
+         structural_ai_drafted_count = counters.structural_ai_drafted_count,
          updated_at = ?
         FROM counters
        WHERE files.id = counters.file_id AND files.project_id = ?`

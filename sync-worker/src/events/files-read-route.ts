@@ -207,11 +207,32 @@ export async function handleFilesReadRequest(
     return new Response(auth.reason, { status: auth.status })
   }
 
+  // Extracted verbatim from the approved_count expression below, because
+  // AQU-1083 needs the same threshold applied a second time to the structural
+  // histogram. (It parses the settings blob inline where a validation_count
+  // generated column exists — left alone here, noted in the PR.)
+  const validationThreshold =
+    "LEAST(15, GREATEST(1, CASE WHEN (ps.settings::jsonb->>'validationCount') ~ '^[0-9]+$' THEN (ps.settings::jsonb->>'validationCount')::integer ELSE 1 END))"
+  const validatedAbove = (histogram: string) =>
+    `COALESCE((SELECT SUM((entry.key::integer >= ${validationThreshold})::integer * entry.value::integer) FROM jsonb_each_text(${histogram}) entry), 0)`
+  // AQU-1083: the project's own answer, else its org's, else count them.
+  // Resolved from the STORED GENERATED columns — this is a cross-project
+  // listing, and parsing a multi-megabyte settings blob per row is exactly the
+  // read that timed the org dashboard out.
+  const excludeStructural = "COALESCE(ps.count_structural, os.count_structural) = 'false'"
+  const less = (amount: string) => `CASE WHEN ${excludeStructural} THEN ${amount} ELSE 0 END`
+
   const columns =
     "f.id, f.project_id, f.name, f.role, f.kind, f.anchor_file_id, f.event_id, f.meta, " +
-    "COALESCE(p.total_count, f.cell_count) AS cell_count, " +
-    "CASE WHEN p.file_id IS NULL THEN f.approved_count ELSE COALESCE((SELECT SUM((entry.key::integer >= LEAST(15, GREATEST(1, CASE WHEN (ps.settings::jsonb->>'validationCount') ~ '^[0-9]+$' THEN (ps.settings::jsonb->>'validationCount')::integer ELSE 1 END)))::integer * entry.value::integer) FROM jsonb_each_text(p.validator_histogram) entry), 0) END AS approved_count, " +
-    "COALESCE(p.filled_count, f.filled_count) AS filled_count, " +
+    // GREATEST(0, …) throughout: a file backfilled before its projection row
+    // existed can carry a structural count without a matching total, and a
+    // negative denominator would render as a nonsense percentage.
+    `GREATEST(0, COALESCE(p.total_count, f.cell_count) - ${less("COALESCE(p.structural_count, f.structural_cell_count)")}) AS cell_count, ` +
+    `CASE WHEN p.file_id IS NULL
+            THEN GREATEST(0, f.approved_count - ${less("f.structural_approved_count")})
+            ELSE GREATEST(0, ${validatedAbove("p.validator_histogram")} - ${less(validatedAbove("p.structural_validator_histogram"))})
+          END AS approved_count, ` +
+    `GREATEST(0, COALESCE(p.filled_count, f.filled_count) - ${less("COALESCE(p.structural_filled_count, f.structural_filled_count)")}) AS filled_count, ` +
     "f.word_count, f.last_edit_at, f.deleted_at"
   const joins =
     // AQU-538: file_section_progress now materializes one row per target lane.
@@ -219,7 +240,10 @@ export async function handleFilesReadRequest(
     // lane ('') so N=1 stays byte-identical and N>1 files don't fan out into
     // one listing row per lane.
     " LEFT JOIN file_section_progress p ON p.project_id = f.project_id AND p.file_id = f.id AND p.scope = 'file' AND p.section_key = '' AND p.target_lang = ''" +
-    " LEFT JOIN project_settings ps ON ps.project_id = f.project_id"
+    " LEFT JOIN project_settings ps ON ps.project_id = f.project_id" +
+    // AQU-1083: the org's default, for files whose project has no override.
+    " LEFT JOIN projects pr ON pr.id = f.project_id" +
+    " LEFT JOIN org_settings os ON os.org_id = pr.org_id"
 
   // ?trash=1 returns soft-deleted files only; default returns active files only.
   const trash = url.searchParams.get("trash") === "1"

@@ -1,4 +1,5 @@
 import { verifyTokenForProject } from '../auth'
+import { readCountStructuralCells, structuralPredicateSql } from './structural-cells'
 
 export interface ProgressReadEnv {
   AQUILLA_PG?: AquillaDb
@@ -11,6 +12,12 @@ interface ProgressRow {
   total_count: number | string
   filled_count: number | string
   validator_histogram: Record<string, number> | string | null
+  // AQU-1083: the structural subset of the three above, recorded by the
+  // projection whatever the policy says, so excluding headings is a
+  // subtraction here rather than a reprojection over there.
+  structural_count: number | string
+  structural_filled_count: number | string
+  structural_validator_histogram: Record<string, number> | string | null
   revision: number | string | bigint
 }
 
@@ -69,8 +76,21 @@ function parseHistogram(raw: ProgressRow['validator_histogram']): Map<number, nu
   return out
 }
 
-function counts(row: ProgressRow, validationCount: number): ProgressCounts {
+function counts(
+  row: ProgressRow,
+  validationCount: number,
+  countStructural: boolean,
+): ProgressCounts {
   const histogram = parseHistogram(row.validator_histogram)
+  if (!countStructural) {
+    // Bucket-wise, because the levels are cumulative on read: a validated
+    // chapter title would otherwise still be counted at every level below it.
+    for (const [bucket, amount] of parseHistogram(row.structural_validator_histogram)) {
+      const remaining = (histogram.get(bucket) ?? 0) - amount
+      if (remaining > 0) histogram.set(bucket, remaining)
+      else histogram.delete(bucket)
+    }
+  }
   const levelCap = Math.min(MAX_VALIDATION_LEVELS, Math.max(1, validationCount))
   const validationLevels = Array.from({ length: levelCap }, (_, index) => {
     const threshold = index + 1
@@ -78,9 +98,13 @@ function counts(row: ProgressRow, validationCount: number): ProgressCounts {
     for (const [bucket, amount] of histogram) if (bucket >= threshold) count += amount
     return count
   })
+  const structuralTotal = countStructural ? 0 : Number(row.structural_count) || 0
+  const structuralFilled = countStructural ? 0 : Number(row.structural_filled_count) || 0
   return {
-    totalCount: Number(row.total_count) || 0,
-    filledCount: Number(row.filled_count) || 0,
+    // Clamped at zero: an un-backfilled row has structural counts of 0, but a
+    // partially backfilled one must never report a negative denominator.
+    totalCount: Math.max(0, (Number(row.total_count) || 0) - structuralTotal),
+    filledCount: Math.max(0, (Number(row.filled_count) || 0) - structuralFilled),
     validatedCount: validationLevels[Math.min(levelCap, validationCount) - 1] ?? 0,
     validationLevels,
   }
@@ -165,6 +189,7 @@ export async function handleProgressReadRequest(
 
   if (sectionMatch) {
     const sectionKey = decodeURIComponent(sectionMatch[3]).trim()
+    const countStructural = await readCountStructuralCells(env.AQUILLA_PG, projectId)
     const [rowsResult, validationCount, revisionRow] = await Promise.all([
       env.AQUILLA_PG.prepare(
         `SELECT s.canonical_ref,
@@ -182,7 +207,8 @@ export async function handleProgressReadRequest(
                   WHEN POSITION(':' IN COALESCE(s.canonical_ref, '')) > 0
                     THEN SPLIT_PART(s.canonical_ref, ':', 1)
                   ELSE COALESCE(s.canonical_ref, '')
-                END) = ?`,
+                END) = ?
+            ${countStructural ? '' : `AND NOT (${structuralPredicateSql('s')})`}`,
       ).bind(lane, projectId, fileId, sectionKey).all<{
         canonical_ref: string | null
         target_value: string
@@ -198,7 +224,10 @@ export async function handleProgressReadRequest(
     // Default lane ('') keeps the legacy etag byte-for-byte; non-default lanes
     // append a lane segment so caches never cross lanes.
     const laneTag = lane ? `:lane:${encodeURIComponent(lane)}` : ''
-    const etag = `"progress:${fileId}:${encodeURIComponent(sectionKey)}:${revision}:v${validationCount}${laneTag}"`
+    // The policy is part of the cache key. Without it a reader who flips the
+    // switch keeps being served the arrangement they just changed away from.
+    const structuralTag = countStructural ? '' : ':nostruct'
+    const etag = `"progress:${fileId}:${encodeURIComponent(sectionKey)}:${revision}:v${validationCount}${structuralTag}${laneTag}"`
     if (request.headers.get('If-None-Match') === etag) {
       return new Response(null, { status: 304, headers: { ETag: etag, 'Cache-Control': 'private, no-cache' } })
     }
@@ -219,10 +248,13 @@ export async function handleProgressReadRequest(
     return Response.json(body, { headers: { ETag: etag, 'Cache-Control': 'private, no-cache' } })
   }
 
+  const countStructural = await readCountStructuralCells(env.AQUILLA_PG, projectId)
   const [rowsResult, validationCount] = await Promise.all([
     env.AQUILLA_PG
       .prepare(
-        `SELECT scope, section_key, total_count, filled_count, validator_histogram, revision
+        `SELECT scope, section_key, total_count, filled_count, validator_histogram,
+                structural_count, structural_filled_count, structural_validator_histogram,
+                revision
            FROM file_section_progress
           WHERE project_id = ? AND file_id = ? AND target_lang = ?`,
       )
@@ -237,6 +269,7 @@ export async function handleProgressReadRequest(
     const fallback = await env.AQUILLA_PG
       .prepare(
         `SELECT f.cell_count AS total_count, f.filled_count, f.approved_count,
+                f.structural_cell_count, f.structural_filled_count, f.structural_approved_count,
                 GREATEST(
                   COALESCE((SELECT MAX(server_seq) FROM events WHERE project_id = f.project_id AND file_id = f.id), 0),
                   COALESCE((SELECT rebuilt_seq FROM project_seq_counters WHERE project_id = f.project_id), 0)
@@ -244,12 +277,25 @@ export async function handleProgressReadRequest(
            FROM files f WHERE f.project_id = ? AND f.id = ?`,
       )
       .bind(projectId, fileId)
-      .first<{ total_count: number; filled_count: number; approved_count: number; revision: number }>()
+      .first<{
+        total_count: number; filled_count: number; approved_count: number
+        structural_cell_count: number; structural_filled_count: number
+        structural_approved_count: number; revision: number
+      }>()
     if (!fallback) return new Response('file not found', { status: 404 })
     const histogram = fallback.approved_count > 0 ? { [String(validationCount)]: fallback.approved_count } : {}
+    // The fallback fakes a histogram by parking every approved cell at the
+    // threshold, so the structural one has to be faked the same way or the
+    // subtraction would not line up on a bucket.
+    const structuralHistogram = fallback.structural_approved_count > 0
+      ? { [String(validationCount)]: fallback.structural_approved_count }
+      : {}
     rows = [{
       scope: 'file', section_key: '', total_count: fallback.total_count,
       filled_count: fallback.filled_count, validator_histogram: histogram,
+      structural_count: fallback.structural_cell_count,
+      structural_filled_count: fallback.structural_filled_count,
+      structural_validator_histogram: structuralHistogram,
       revision: fallback.revision,
     }]
     source = 'file-counter-fallback'
@@ -262,7 +308,8 @@ export async function handleProgressReadRequest(
   // sequence. Include the source so clients cannot retain an empty fallback
   // through a false 304 after projection rows appear.
   const laneTag = lane ? `:lane:${encodeURIComponent(lane)}` : ''
-  const etag = `"progress:${fileId}:${revision}:v${validationCount}:${source === 'projection' ? 'p' : 'f'}${laneTag}"`
+  const structuralTag = countStructural ? '' : ':nostruct'
+  const etag = `"progress:${fileId}:${revision}:v${validationCount}:${source === 'projection' ? 'p' : 'f'}${structuralTag}${laneTag}"`
   if (request.headers.get('If-None-Match') === etag) {
     return new Response(null, { status: 304, headers: { ETag: etag, 'Cache-Control': 'private, no-cache' } })
   }
@@ -271,11 +318,11 @@ export async function handleProgressReadRequest(
     fileId,
     revision,
     validationCount,
-    file: counts(fileRow, validationCount),
+    file: counts(fileRow, validationCount, countStructural),
     sections: rows
       .filter((row) => row.scope === 'section')
       .sort((a, b) => compareSections(a.section_key, b.section_key))
-      .map((row) => ({ key: row.section_key, ...counts(row, validationCount) })),
+      .map((row) => ({ key: row.section_key, ...counts(row, validationCount, countStructural) })),
     source,
   }
   return Response.json(body, { headers: { ETag: etag, 'Cache-Control': 'private, no-cache' } })

@@ -31,7 +31,11 @@ BEGIN;
 ALTER TABLE files
   ADD COLUMN IF NOT EXISTS structural_cell_count     INTEGER NOT NULL DEFAULT 0,
   ADD COLUMN IF NOT EXISTS structural_filled_count   INTEGER NOT NULL DEFAULT 0,
-  ADD COLUMN IF NOT EXISTS structural_approved_count INTEGER NOT NULL DEFAULT 0;
+  ADD COLUMN IF NOT EXISTS structural_approved_count INTEGER NOT NULL DEFAULT 0,
+  -- ai_drafted rides along because the dashboard divides it by the same total.
+  -- Shrink the denominator without shrinking this and a scripture project whose
+  -- headings were machine-drafted reads over 100% AI-drafted.
+  ADD COLUMN IF NOT EXISTS structural_ai_drafted_count INTEGER NOT NULL DEFAULT 0;
 
 -- Per-file and per-section progress, read by the editor and the drill-downs.
 -- The histogram mirrors validator_histogram's encoding exactly (keys are exact
@@ -71,7 +75,10 @@ WITH structural AS (
          )::integer AS filled_count,
          COUNT(*) FILTER (
            WHERE t.cell_id IS NOT NULL AND t.validated = 1
-         )::integer AS approved_count
+         )::integer AS approved_count,
+         COUNT(*) FILTER (
+           WHERE t.cell_id IS NOT NULL AND t.ai_drafted = 1
+         )::integer AS ai_drafted_count
     FROM cells s
     LEFT JOIN cells t
       ON t.project_id = s.project_id
@@ -83,15 +90,17 @@ WITH structural AS (
    GROUP BY s.project_id, s.file_id
 )
 UPDATE files f
-   SET structural_cell_count     = structural.cell_count,
-       structural_filled_count   = structural.filled_count,
-       structural_approved_count = structural.approved_count
+   SET structural_cell_count       = structural.cell_count,
+       structural_filled_count     = structural.filled_count,
+       structural_approved_count   = structural.approved_count,
+       structural_ai_drafted_count = structural.ai_drafted_count
   FROM structural
  WHERE structural.project_id = f.project_id
    AND structural.file_id    = f.id
-   AND (f.structural_cell_count     IS DISTINCT FROM structural.cell_count
-     OR f.structural_filled_count   IS DISTINCT FROM structural.filled_count
-     OR f.structural_approved_count IS DISTINCT FROM structural.approved_count);
+   AND (f.structural_cell_count       IS DISTINCT FROM structural.cell_count
+     OR f.structural_filled_count     IS DISTINCT FROM structural.filled_count
+     OR f.structural_approved_count   IS DISTINCT FROM structural.approved_count
+     OR f.structural_ai_drafted_count IS DISTINCT FROM structural.ai_drafted_count);
 
 -- file_section_progress is per target lane, so the structural aggregates are
 -- computed per lane too. `scope='file'` rows key on section_key = '' and

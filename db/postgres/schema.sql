@@ -493,6 +493,7 @@ CREATE TABLE files (
     structural_cell_count     INTEGER NOT NULL DEFAULT 0,
     structural_filled_count   INTEGER NOT NULL DEFAULT 0,
     structural_approved_count INTEGER NOT NULL DEFAULT 0,
+    structural_ai_drafted_count INTEGER NOT NULL DEFAULT 0,
     UNIQUE (id, project_id)
 );
 

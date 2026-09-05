@@ -1094,6 +1094,101 @@ const PORTFOLIO_VISIBILITY_PREDICATE = `(
                         AND om.role_level >= ${ORG_WIDE_ACCESS_FLOOR})
         )`
 
+/**
+ * AQU-1083: does this project count structural cells toward progress? Its own
+ * answer, else its org's, else yes.
+ *
+ * MAX() because the surrounding query groups by project and these join 1:1 —
+ * the same reason source_language is read that way. STORED generated columns,
+ * never the settings blob: parsing ~6 MB of JSON per fan-out row is what timed
+ * this dashboard out at 15 seconds in the first place.
+ */
+const PORTFOLIO_EXCLUDE_STRUCTURAL =
+  "COALESCE(MAX(ps.count_structural), MAX(os.count_structural)) = 'false'"
+
+/** `total − structural` when the policy excludes, floored at zero. */
+const lessStructural = (total: string, structural: string) =>
+  `GREATEST(0, ${total} - CASE WHEN ${PORTFOLIO_EXCLUDE_STRUCTURAL} THEN ${structural} ELSE 0 END)`
+
+/**
+ * The per-project cell rollups, shared by the single- and multi-org queries
+ * below. They were byte-identical copies; AQU-1083 had to touch every line of
+ * both, which is reason enough for there to be one.
+ *
+ * ai_drafted follows the policy for the same reason audio does: the client
+ * divides it by total_cells, so shrinking the denominator alone would let a
+ * scripture project whose headings were machine-drafted read over 100%.
+ */
+const PORTFOLIO_CELL_COLUMNS = `
+            ${lessStructural('COALESCE(SUM(f.cell_count), 0)', 'COALESCE(SUM(f.structural_cell_count), 0)')} AS total_cells,
+            ${lessStructural('COALESCE(SUM(f.approved_count), 0)', 'COALESCE(SUM(f.structural_approved_count), 0)')} AS validated_cells,
+            ${lessStructural('COALESCE(SUM(f.filled_count), 0)', 'COALESCE(SUM(f.structural_filled_count), 0)')} AS filled_cells,
+            ${lessStructural('COALESCE(SUM(f.ai_drafted_count), 0)', 'COALESCE(SUM(f.structural_ai_drafted_count), 0)')} AS ai_drafted_cells,`
+
+/** Shared join tail — the org default now has to reach the rollups too. */
+const PORTFOLIO_JOINS = `
+       LEFT JOIN files f ON f.project_id = p.id
+       LEFT JOIN project_settings ps ON ps.project_id = p.id
+       LEFT JOIN org_settings os ON os.org_id = p.org_id
+       LEFT JOIN au ON au.project_id = p.id`
+
+/**
+ * Audio coverage and validation, with structural cells dropped where a project
+ * excludes them.
+ *
+ * `audioPct` divides audio cells by the TEXT total while `audioValidatedPct`
+ * divides by the audio total, so leaving audio alone while the text denominator
+ * shrank would let a scripture project whose headings were voiced read over
+ * 100% covered. Bulk synthesis has no type filter, so those takes genuinely
+ * exist.
+ *
+ * `recorded_ms` never takes the exclusion: it measures work that was actually
+ * done rather than progress against a denominator — the same reasoning that
+ * keeps word counts out of this setting.
+ *
+ * Shape matters here. `cell_audio` keys on four columns where `cells` keys on
+ * five, so joining them directly fans out per side and per lane; COUNT(DISTINCT)
+ * would survive that but SUM would not, silently multiplying recorded_ms. And
+ * the structural cell ids are gathered ONCE per excluding project rather than
+ * probed per audio row — for every project that counts headings (all of them,
+ * until someone opts out) that CTE is empty and the join costs nothing. The
+ * previous shape of this query, three correlated subqueries over ~300k rows,
+ * is what caused the 15s dashboard timeout; this must not walk back into it.
+ */
+const portfolioAudioCte = (orgPredicate: string) => `
+     WITH policy AS (
+       SELECT p.id AS project_id,
+              COALESCE(ps.count_structural, os.count_structural) = 'false' AS excluded
+         FROM projects p
+         LEFT JOIN project_settings ps ON ps.project_id = p.id
+         LEFT JOIN org_settings os ON os.org_id = p.org_id
+        WHERE p.${orgPredicate}
+     ), structural_cells AS (
+       SELECT DISTINCT c.project_id, c.file_id, c.cell_id
+         FROM cells c
+         JOIN policy pol ON pol.project_id = c.project_id AND pol.excluded
+        WHERE c.side = 'source' AND c.type IN ('heading', 'paratext')
+     ), au AS MATERIALIZED (
+       SELECT ca.project_id,
+              COUNT(DISTINCT ca.cell_id) FILTER (WHERE NOT ca.structural) AS audio_cells,
+              COUNT(DISTINCT ca.cell_id) FILTER (
+                WHERE ca.selected = 1 AND ca.approved = 1 AND NOT ca.structural
+              ) AS validated_audio_cells,
+              COALESCE(SUM(ca.duration_ms) FILTER (WHERE ca.selected = 1), 0) AS recorded_ms
+         FROM (
+           SELECT a.project_id, a.cell_id, a.selected, a.approved, a.duration_ms,
+                  sc.cell_id IS NOT NULL AS structural
+             FROM cell_audio a
+             LEFT JOIN structural_cells sc
+               ON sc.project_id = a.project_id
+              AND sc.file_id = a.file_id
+              AND sc.cell_id = a.cell_id
+            WHERE a.deleted = 0
+              AND a.project_id IN (SELECT id FROM projects WHERE ${orgPredicate})
+         ) ca
+        GROUP BY ca.project_id
+     )`
+
 /** Per-project rollup over the org's non-archived projects (derive-on-read, one GROUP BY). */
 export async function getOrgPortfolio(
   env: Env,
@@ -1111,38 +1206,22 @@ export async function getOrgPortfolio(
   //    collapses the file fan-out without affecting the SUMs (same for the
   //    1:1 project_settings join).
   const rows = await env.AQUILLA_PG.prepare(
-    `WITH au AS MATERIALIZED (
-       SELECT ca.project_id,
-              COUNT(DISTINCT ca.cell_id) AS audio_cells,
-              COUNT(DISTINCT ca.cell_id) FILTER (WHERE ca.selected = 1 AND ca.approved = 1)
-                AS validated_audio_cells,
-              COALESCE(SUM(ca.duration_ms) FILTER (WHERE ca.selected = 1), 0) AS recorded_ms
-         FROM cell_audio ca
-        WHERE ca.deleted = 0
-          AND ca.project_id IN (SELECT id FROM projects WHERE org_id = ?)
-        GROUP BY ca.project_id
-     )
-     SELECT p.org_id AS org_id, p.id AS id, p.name AS name, p.deadline_at AS deadline_at,
-            COALESCE(SUM(f.cell_count), 0)          AS total_cells,
-            COALESCE(SUM(f.approved_count), 0)      AS validated_cells,
-            COALESCE(SUM(f.filled_count), 0)        AS filled_cells,
-            COALESCE(SUM(f.ai_drafted_count), 0)    AS ai_drafted_cells,
+    `${portfolioAudioCte('org_id = ?')}
+     SELECT p.org_id AS org_id, p.id AS id, p.name AS name, p.deadline_at AS deadline_at,${PORTFOLIO_CELL_COLUMNS}
             MAX(f.last_edit_at)                     AS last_edit_at,
             MAX(ps.source_language)                 AS source_language,
             MAX(ps.target_language)                 AS target_language,
             COALESCE(MAX(au.audio_cells), 0)           AS audio_cells,
             COALESCE(MAX(au.validated_audio_cells), 0) AS validated_audio_cells,
             COALESCE(MAX(au.recorded_ms), 0)           AS recorded_ms
-       FROM projects p
-       LEFT JOIN files f ON f.project_id = p.id
-       LEFT JOIN project_settings ps ON ps.project_id = p.id
-       LEFT JOIN au ON au.project_id = p.id
+       FROM projects p${PORTFOLIO_JOINS}
       WHERE p.org_id = ? AND p.archived_at IS NULL
         AND ${PORTFOLIO_VISIBILITY_PREDICATE}
       GROUP BY p.id, p.name
       ORDER BY LOWER(p.name)`,
   ).bind(
-    orgId, orgId,
+    // policy CTE, then the audio scope inside it, then the outer WHERE.
+    orgId, orgId, orgId,
     viewer.isAdmin ? 1 : 0, viewer.userId, viewer.userId, viewer.userId, viewer.userId,
   ).all<PortfolioDbRow>()
   const lanesByProject = await fetchPortfolioLanes(env, [orgId])
@@ -1210,38 +1289,22 @@ export async function getOrgPortfolios(
   // uses the small generated project_settings projections, so this no longer
   // transfers/parses hundreds of MB of full settings blobs for large accounts.
   const rows = await env.AQUILLA_PG.prepare(
-    `WITH au AS MATERIALIZED (
-       SELECT ca.project_id,
-              COUNT(DISTINCT ca.cell_id) AS audio_cells,
-              COUNT(DISTINCT ca.cell_id) FILTER (WHERE ca.selected = 1 AND ca.approved = 1)
-                AS validated_audio_cells,
-              COALESCE(SUM(ca.duration_ms) FILTER (WHERE ca.selected = 1), 0) AS recorded_ms
-         FROM cell_audio ca
-        WHERE ca.deleted = 0
-          AND ca.project_id IN (SELECT id FROM projects WHERE org_id IN (${placeholders}))
-        GROUP BY ca.project_id
-     )
-     SELECT p.org_id AS org_id, p.id AS id, p.name AS name, p.deadline_at AS deadline_at,
-            COALESCE(SUM(f.cell_count), 0)          AS total_cells,
-            COALESCE(SUM(f.approved_count), 0)      AS validated_cells,
-            COALESCE(SUM(f.filled_count), 0)        AS filled_cells,
-            COALESCE(SUM(f.ai_drafted_count), 0)    AS ai_drafted_cells,
+    `${portfolioAudioCte(`org_id IN (${placeholders})`)}
+     SELECT p.org_id AS org_id, p.id AS id, p.name AS name, p.deadline_at AS deadline_at,${PORTFOLIO_CELL_COLUMNS}
             MAX(f.last_edit_at)                     AS last_edit_at,
             MAX(ps.source_language)                 AS source_language,
             MAX(ps.target_language)                 AS target_language,
             COALESCE(MAX(au.audio_cells), 0)           AS audio_cells,
             COALESCE(MAX(au.validated_audio_cells), 0) AS validated_audio_cells,
             COALESCE(MAX(au.recorded_ms), 0)           AS recorded_ms
-       FROM projects p
-       LEFT JOIN files f ON f.project_id = p.id
-       LEFT JOIN project_settings ps ON ps.project_id = p.id
-       LEFT JOIN au ON au.project_id = p.id
+       FROM projects p${PORTFOLIO_JOINS}
       WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL
         AND ${PORTFOLIO_VISIBILITY_PREDICATE}
       GROUP BY p.org_id, p.id, p.name
       ORDER BY p.org_id, LOWER(p.name)`,
   ).bind(
-    ...uniqueOrgIds, ...uniqueOrgIds,
+    // policy CTE, then the audio scope inside it, then the outer WHERE.
+    ...uniqueOrgIds, ...uniqueOrgIds, ...uniqueOrgIds,
     viewer.isAdmin ? 1 : 0, viewer.userId, viewer.userId, viewer.userId, viewer.userId,
   ).all<PortfolioDbRow>()
   const lanesByProject = await fetchPortfolioLanes(env, uniqueOrgIds)

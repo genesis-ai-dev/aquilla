@@ -28,3 +28,36 @@ export function structuralPredicateSql(alias: string): string {
   const list = STRUCTURAL_CELL_TYPES.map((t) => `'${t}'`).join(', ')
   return `${alias}.type IN (${list})`
 }
+
+/**
+ * The effective policy for one project: its own value, else its org's, else
+ * "count them".
+ *
+ * Reads the STORED GENERATED columns rather than the settings blobs, which run
+ * to several megabytes each. That is not a micro-optimisation — reading the
+ * blob inline on a fan-out path is what timed the org dashboard out at fifteen
+ * seconds, and migration 0063 exists because of it.
+ *
+ * Absent reads as true at both levels, so a project that has never heard of
+ * this setting behaves exactly as it does today.
+ */
+export async function readCountStructuralCells(
+  db: { prepare(sql: string): { bind(...a: unknown[]): { first<T>(): Promise<T | null> } } },
+  projectId: string,
+): Promise<boolean> {
+  try {
+    const row = await db
+      .prepare(
+        `SELECT COALESCE(ps.count_structural, os.count_structural) AS effective
+           FROM projects p
+           LEFT JOIN project_settings ps ON ps.project_id = p.id
+           LEFT JOIN org_settings os ON os.org_id = p.org_id
+          WHERE p.id = ?`,
+      )
+      .bind(projectId)
+      .first<{ effective: string | null }>()
+    return row?.effective === 'false' ? false : true
+  } catch {
+    return true
+  }
+}

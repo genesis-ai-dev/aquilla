@@ -314,15 +314,28 @@ export async function handleProgressReadRequest(
     return new Response(null, { status: 304, headers: { ETag: etag, 'Cache-Control': 'private, no-cache' } })
   }
 
+  const sectionRows = rows.filter((row) => row.scope === 'section')
   const body: FileProgressResponse = {
     fileId,
     revision,
     validationCount,
     file: counts(fileRow, validationCount, countStructural),
-    sections: rows
-      .filter((row) => row.scope === 'section')
+    sections: sectionRows
       .sort((a, b) => compareSections(a.section_key, b.section_key))
-      .map((row) => ({ key: row.section_key, ...counts(row, validationCount, countStructural) })),
+      .map((row) => ({
+        key: row.section_key,
+        rawTotal: Number(row.total_count) || 0,
+        ...counts(row, validationCount, countStructural),
+      }))
+      // A section made ENTIRELY of structural cells — USFM front matter is one,
+      // its \h/\toc/\mt lines all sitting before chapter 1 — has nothing left
+      // in it once the policy excludes them. Without this the sidebar keeps a
+      // tile for that section reading 0%, which is a section that no longer
+      // exists reporting that no work has been done on it. Only the ones the
+      // subtraction emptied are dropped; a section that is empty under both
+      // policies is left exactly as it is today.
+      .filter((section) => section.totalCount > 0 || section.rawTotal === 0)
+      .map(({ rawTotal: _rawTotal, ...section }) => section),
     source,
   }
   return Response.json(body, { headers: { ETag: etag, 'Cache-Control': 'private, no-cache' } })

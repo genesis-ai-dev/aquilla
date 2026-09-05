@@ -396,3 +396,102 @@ describe('structural aggregates (AQU-1083)', () => {
     expect(Number(row?.structural_count)).toBe(0)
   })
 })
+
+// The projection above records the subset; this is the half that spends it —
+// the same stored rows read once under each policy. Proved against a real
+// imported Genesis (1540 cells, 7 of them USFM front matter) before it was
+// written down here.
+describe('GET file progress under the structural policy (AQU-1083)', () => {
+  const P = 'proj-struct-read'
+  const F = 'file-struct-read'
+
+  const src = (cellId: string, ref: string, type: string | null) => ({
+    project_id: P, file_id: F, cell_id: cellId, side: 'source', type,
+    value: `s ${cellId}`, canonical_ref: ref, event_id: `s-${cellId}`,
+    last_editor: 'alice', last_edit_at: 1, validated: 0, endorsement_count: 0, word_count: 2,
+  })
+  const tgt = (cellId: string, value: string) => ({
+    project_id: P, file_id: F, cell_id: cellId, side: 'target', type: null,
+    value, canonical_ref: null, event_id: `t-${cellId}`,
+    last_editor: 'alice', last_edit_at: 2, validated: 0,
+    endorsement_count: value ? 2 : 0, word_count: value ? 1 : 0,
+  })
+
+  /** A book shaped like the real thing: front matter in its own section, then
+   *  one chapter of verses. The title is translated and no verse is. */
+  async function fixture(countStructural: boolean | undefined) {
+    const db = await makeTestDb({
+      // Seeded in dependency order — org_settings is keyed to organizations.
+      organizations: [{ id: 1, name: 'Org', owner_user_id: 1 }],
+      projects: [{ id: P, name: 'Genesis', org_id: 1 }],
+      org_settings: [{ org_id: 1, settings: '{}', version: 1 }],
+      project_settings: [{
+        project_id: P,
+        settings: JSON.stringify(
+          countStructural === undefined ? {} : { countStructuralCells: countStructural },
+        ),
+        version: 1,
+      }],
+      files: [{ id: F, project_id: P, name: 'GEN', event_id: 'f-evt' }],
+      cells: [
+        src('t1', 'GEN:mt1:1', 'paratext'), tgt('t1', 'Génesis'),
+        src('t2', 'GEN:toc1:1', 'paratext'), tgt('t2', ''),
+        src('v1', 'GEN 1:1', 'verse'), tgt('v1', ''),
+        src('v2', 'GEN 1:2', 'verse'), tgt('v2', ''),
+      ],
+    })
+    await db.db.batch(fullProgressRecomputeStmts(db.db, P, F, 100))
+    return db.db
+  }
+
+  const get = async (db: AquillaDb) => {
+    const token = await makeTestToken(SECRET, { projectId: P, fileId: F })
+    const response = (await handleProgressReadRequest(new Request(
+      `https://worker/api/v1/projects/${P}/files/${F}/progress`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    ), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
+    return { response, body: await response.json() as FileProgressResponse }
+  }
+
+  it('counts the front matter when nothing has opted out', async () => {
+    const { body } = await get(await fixture(undefined))
+    expect(body.file).toMatchObject({ totalCount: 4, filledCount: 1 })
+    // Order is compareSections' business, not this test's — a chapterless key
+    // sorts after the numbered ones. What matters is that both are present.
+    expect([...body.sections.map((s) => s.key)].sort()).toEqual(['GEN', 'GEN 1'])
+  })
+
+  it('drops it from both halves of the ratio when the project opts out', async () => {
+    const { body } = await get(await fixture(false))
+    // Not just the denominator: the translated title has to leave the numerator
+    // too, or excluding headings makes the percentage climb.
+    expect(body.file).toMatchObject({ totalCount: 2, filledCount: 0 })
+  })
+
+  it('drops a section the exclusion empties rather than showing it at 0%', async () => {
+    // Front matter is its own section, so excluding it leaves that section with
+    // nothing in it. A tile reading 0% would be a section that no longer exists
+    // reporting that no work has been done on it.
+    const { body } = await get(await fixture(false))
+    expect(body.sections.map((s) => s.key)).toEqual(['GEN 1'])
+  })
+
+  it('gives the two policies different ETags', async () => {
+    // Same file, same revision. Without the policy in the tag, a client that
+    // cached one answer keeps painting it after the switch is flipped.
+    const counting = await get(await fixture(true))
+    const excluding = await get(await fixture(false))
+    expect(counting.response.headers.get('ETag')).not.toBe(
+      excluding.response.headers.get('ETag'),
+    )
+    expect(excluding.response.headers.get('ETag')).toContain(':nostruct')
+  })
+
+  it('falls back to the organization when the project has no answer', async () => {
+    const db = await fixture(undefined)
+    await db.prepare("UPDATE org_settings SET settings = ? WHERE org_id = 1")
+      .bind(JSON.stringify({ countStructuralCells: false })).run()
+    const { body } = await get(db)
+    expect(body.file).toMatchObject({ totalCount: 2, filledCount: 0 })
+  })
+})

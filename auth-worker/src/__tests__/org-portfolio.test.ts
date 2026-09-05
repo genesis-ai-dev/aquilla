@@ -280,6 +280,56 @@ describe("GET /api/v2/orgs/:orgId/portfolio", () => {
     expect(pa.totalCells).toBe(10)
     expect(pa.audioCells).toBe(2)
   })
+
+  it("AQU-1083: the per-lane breakdown subtracts the same cells as the headline", async () => {
+    // Caught on a real imported Genesis: the scalar totals dropped from 1540 to
+    // 1533 while the lane row under them still read 1540. The lane rollup is a
+    // separate query over file_section_progress and had no idea about the
+    // policy, so one project reported two different denominators at once.
+    await seedStructuralOrg(JSON.stringify({ countStructuralCells: false }), null)
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO file_section_progress
+         (project_id, file_id, scope, section_key, target_lang, total_count, filled_count,
+          validator_histogram, structural_count, structural_filled_count,
+          structural_validator_histogram, revision, updated_at)
+       VALUES ('pa','f1','file','', '', 10, 6, ?, 2, 1, ?, 1, 1500)`,
+    ).bind(
+      JSON.stringify({ "0": 4, "1": 6 }),
+      JSON.stringify({ "0": 1, "1": 1 }),
+    ).run()
+
+    const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor("wendi")) }, env)
+    const body = (await res.json()) as {
+      projects: Array<{ id: string; totalCells: number; filledCells: number; validatedCells: number
+                        lanes: Array<{ lane: string; totalCells: number; filledCells: number; validatedCells: number }> }>
+    }
+    const pa = body.projects.find((p) => p.id === "pa")!
+    expect(pa.lanes[0]).toMatchObject({ lane: "", totalCells: 8, filledCells: 5, validatedCells: 5 })
+    // And it agrees with the numbers printed beside it.
+    expect(pa.lanes[0].totalCells).toBe(pa.totalCells)
+    expect(pa.lanes[0].filledCells).toBe(pa.filledCells)
+  })
+
+  it("AQU-1083: a lane keeps its numbers when the project counts headings", async () => {
+    await seedStructuralOrg("{}", null)
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO file_section_progress
+         (project_id, file_id, scope, section_key, target_lang, total_count, filled_count,
+          validator_histogram, structural_count, structural_filled_count,
+          structural_validator_histogram, revision, updated_at)
+       VALUES ('pa','f1','file','', '', 10, 6, ?, 2, 1, ?, 1, 1500)`,
+    ).bind(
+      JSON.stringify({ "0": 4, "1": 6 }),
+      JSON.stringify({ "0": 1, "1": 1 }),
+    ).run()
+
+    const res = await app.request("/api/v2/orgs/1/portfolio", { headers: authHeader(await jwtFor("wendi")) }, env)
+    const body = (await res.json()) as {
+      projects: Array<{ id: string; lanes: Array<{ lane: string; totalCells: number; filledCells: number; validatedCells: number }> }>
+    }
+    expect(body.projects.find((p) => p.id === "pa")!.lanes[0])
+      .toMatchObject({ lane: "", totalCells: 10, filledCells: 6, validatedCells: 6 })
+  })
 })
 
 describe("POST /api/v2/orgs/portfolio", () => {
@@ -306,9 +356,13 @@ describe("POST /api/v2/orgs/portfolio", () => {
     // each project counts structural cells. Order is policy, then the audio
     // scope inside it, then the outer WHERE.
     expect(aggregateOrgBinds).toEqual([[2, 1, 2, 1, 2, 1, 0, 99, 99, 99, 99]])
-    const settingsQuery = preparedQueries.find((query) => query.includes("FROM project_settings ps"))
+    // Driven FROM projects and left-joined to its settings, so a project with
+    // no settings row still inherits the org's structural-cell answer.
+    const settingsQuery = preparedQueries.find((query) => query.includes("ps.target_lanes"))
     expect(settingsQuery).toContain("ps.validation_count")
     expect(settingsQuery).toContain("ps.target_lanes")
+    expect(settingsQuery).toContain("COALESCE(ps.count_structural, os.count_structural, 'true')")
+    // Still reads the generated columns rather than parsing the blob.
     expect(settingsQuery).not.toContain("ps.settings AS settings")
   })
 

@@ -953,12 +953,19 @@ interface LaneDbRow {
   filled_count: number | string
   validator_histogram: Record<string, number> | string | null
   updated_at: number | string | null
+  // AQU-1083: the structural subset of each of the three above, so a lane can
+  // subtract at read time exactly as the headline numbers beside it do.
+  structural_count: number | string | null
+  structural_filled_count: number | string | null
+  structural_validator_histogram: Record<string, number> | string | null
 }
 
 interface PortfolioSettingsDbRow {
   project_id: string
   validation_count: number | string | null
   target_lanes: unknown
+  /** AQU-1083 effective policy, already COALESCEd project → org → 'true'. */
+  count_structural?: string | null
 }
 
 /** Endorsement threshold at which a cell counts as validated, per the project's settings (default 1, cap 15). */
@@ -1002,21 +1009,38 @@ async function fetchPortfolioLanes(env: Env, orgIds: number[]): Promise<Map<stri
     env.AQUILLA_PG.prepare(
       `SELECT fsp.project_id AS project_id, fsp.target_lang AS target_lang,
               fsp.total_count AS total_count, fsp.filled_count AS filled_count,
-              fsp.validator_histogram AS validator_histogram, fsp.updated_at AS updated_at
+              fsp.validator_histogram AS validator_histogram, fsp.updated_at AS updated_at,
+              fsp.structural_count AS structural_count,
+              fsp.structural_filled_count AS structural_filled_count,
+              fsp.structural_validator_histogram AS structural_validator_histogram
          FROM file_section_progress fsp
          JOIN projects p ON p.id = fsp.project_id
         WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL AND fsp.scope = 'file'`,
     ).bind(...orgIds).all<LaneDbRow>(),
     env.AQUILLA_PG.prepare(
-      `SELECT ps.project_id AS project_id,
+      // Driven FROM projects, not from project_settings: a project that has
+      // never had a settings row still inherits its org's answer, and inner-
+      // joining the settings table hides exactly those projects. The columns
+      // this used to read come back null for them, which is what they meant
+      // before anyway (default threshold, no registered lanes).
+      `SELECT p.id AS project_id,
               ps.validation_count AS validation_count,
-              ps.target_lanes AS target_lanes
-         FROM project_settings ps
-         JOIN projects p ON p.id = ps.project_id
+              ps.target_lanes AS target_lanes,
+              COALESCE(ps.count_structural, os.count_structural, 'true') AS count_structural
+         FROM projects p
+         LEFT JOIN project_settings ps ON ps.project_id = p.id
+         LEFT JOIN org_settings os ON os.org_id = p.org_id
         WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL`,
     ).bind(...orgIds).all<PortfolioSettingsDbRow>(),
   ])
   const thresholds = readValidationCounts(settingsRows.results ?? [])
+  // AQU-1083: which projects leave structural cells out. Absent = count them,
+  // so a project with no settings row at all keeps today's numbers.
+  const excluding = new Set(
+    (settingsRows.results ?? [])
+      .filter((row) => row.count_structural === "false")
+      .map((row) => row.project_id),
+  )
   // Accumulate one lane entry per (project, target_lang).
   const acc = new Map<string, Map<string, PortfolioLane>>()
   for (const row of laneRows.results ?? []) {
@@ -1026,9 +1050,20 @@ async function fetchPortfolioLanes(env: Env, orgIds: number[]): Promise<Map<stri
     const lane = row.target_lang ?? ""
     let entry = lanes.get(lane)
     if (!entry) { entry = { lane, totalCells: 0, filledCells: 0, validatedCells: 0, lastEditAt: null }; lanes.set(lane, entry) }
-    entry.totalCells += Number(row.total_count) || 0
-    entry.filledCells += Number(row.filled_count) || 0
-    entry.validatedCells += validatedFromHistogram(row.validator_histogram, threshold)
+    // AQU-1083: subtract per file row, then clamp — a partially backfilled
+    // project must never contribute a negative number to the lane's sum.
+    const drop = excluding.has(row.project_id)
+    const structuralTotal = drop ? Number(row.structural_count) || 0 : 0
+    const structuralFilled = drop ? Number(row.structural_filled_count) || 0 : 0
+    const structuralValidated = drop
+      ? validatedFromHistogram(row.structural_validator_histogram, threshold)
+      : 0
+    entry.totalCells += Math.max(0, (Number(row.total_count) || 0) - structuralTotal)
+    entry.filledCells += Math.max(0, (Number(row.filled_count) || 0) - structuralFilled)
+    entry.validatedCells += Math.max(
+      0,
+      validatedFromHistogram(row.validator_histogram, threshold) - structuralValidated,
+    )
     const updatedAt = row.updated_at == null ? null : Number(row.updated_at)
     if (updatedAt != null && Number.isFinite(updatedAt)) {
       entry.lastEditAt = entry.lastEditAt == null ? updatedAt : Math.max(entry.lastEditAt, updatedAt)

@@ -2192,16 +2192,6 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         {searchGroupLabel("section-validation")}
         {sectionsToRender.some((s) => s.id === "section-validation") && (
           <div id="section-validation" className="flex flex-col gap-12">
-            {/* AQU-1083. Reads and writes the shared blob directly — see the
-                component's note on why it must not use the draft/baseline
-                machinery around it. */}
-            <StructuralCellsProjectSection
-              value={sharedSettingsBlob?.countStructuralCells}
-              orgDefault={project?.orgCountStructuralCells ?? true}
-              disabled={!canEditShared}
-              disabledTooltip={reasonCannotEdit}
-              onPatch={patchShared}
-            />
             <ValidationSettingsSection
               projectId={id}
               validationCount={validationCount}
@@ -2212,6 +2202,19 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               allowSelfValidation={allowSelfValidation}
               disabled={!canEditShared}
               disabledTooltip={sharedDisabledTooltip ?? undefined}
+              // AQU-1083: the last row of the validation card. Passed as a
+              // node rather than props because it patches the shared blob
+              // directly — see the component's own note for why it must not
+              // ride this page's draft/baseline state.
+              structuralCellsRow={
+                <StructuralCellsProjectSection
+                  value={sharedSettingsBlob?.countStructuralCells}
+                  orgDefault={project?.orgCountStructuralCells ?? true}
+                  disabled={!canEditShared}
+                  disabledTooltip={sharedDisabledTooltip ?? undefined}
+                  onPatch={patchShared}
+                />
+              }
               onChange={(u) => {
                 if (u.validationCount !== undefined) setValidationCount(u.validationCount)
                 if (u.validationCountAudio !== undefined) setValidationCountAudio(u.validationCountAudio)

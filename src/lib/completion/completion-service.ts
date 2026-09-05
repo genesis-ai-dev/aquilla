@@ -326,16 +326,11 @@ export function isCompletionConfigured(
 /**
  * The sparkle Set up AI dialog is a one-time chooser (Frontier / project key /
  * personal override). After they pick, this is false for that project.
- * A Preferences override already is a drafting path — don't hide Translate
- * with AI behind the chooser for those users (or e2e specs that inject it).
+ * A personal override does not skip the prompt — it is only the default
+ * selection when the chooser opens.
  */
-export function shouldPromptAiSetup(
-  aiProviderChosen: boolean | undefined,
-  hasPersonalOverride = false,
-): boolean {
-  if (aiProviderChosen === true) return false
-  if (hasPersonalOverride) return false
-  return true
+export function shouldPromptAiSetup(aiProviderChosen: boolean | undefined): boolean {
+  return aiProviderChosen !== true
 }
 
 export function buildPrompt(options: {

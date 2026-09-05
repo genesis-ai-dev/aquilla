@@ -112,6 +112,13 @@ describe("AiSetupDialog", () => {
     expect(screen.getByText(/openrouter\.ai/i)).toBeInTheDocument()
   })
 
+  it("selects the personal override by default when one is already saved", () => {
+    overrideState.current = { endpoint: "https://openrouter.ai/api/v1", apiKey: "sk-or-test" }
+    renderDialog()
+    expect(screen.getByRole("button", { name: /Personal override/i })).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByRole("button", { name: /Frontier AI/i })).toHaveAttribute("aria-pressed", "false")
+  })
+
   it("requires an API key when choosing this project's API key for OpenRouter", async () => {
     renderDialog()
     fireEvent.click(projectKeyOption())

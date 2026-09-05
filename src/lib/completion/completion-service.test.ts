@@ -482,12 +482,6 @@ describe("shouldPromptAiSetup", () => {
     expect(shouldPromptAiSetup(false)).toBe(true)
     expect(shouldPromptAiSetup(true)).toBe(false)
   })
-
-  it("skips the chooser when a personal override is already saved", () => {
-    expect(shouldPromptAiSetup(undefined, true)).toBe(false)
-    expect(shouldPromptAiSetup(false, true)).toBe(false)
-    expect(shouldPromptAiSetup(true, true)).toBe(false)
-  })
 })
 
 describe("complete", () => {

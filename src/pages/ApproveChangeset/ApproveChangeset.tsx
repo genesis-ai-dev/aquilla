@@ -216,8 +216,11 @@ function ApprovalSummaryView({
   onReject: () => void
 }) {
   const { locale, t } = useI18n()
-  const { warnings, settingsChanges, ...facts } = data.summary
+  const { warnings, settingsChanges, testimony, ...facts } = data.summary
   const factEntries = Object.entries(facts).filter(([, v]) => typeof v === "number" || typeof v === "string")
+  // AQU-1184: validations are testimony — the approver must see every cell and
+  // its current text, never just a count.
+  const testimonyEntries = Array.isArray(testimony) ? testimony : []
   const settingsEntries =
     settingsChanges && typeof settingsChanges === "object"
       ? Object.entries(settingsChanges).filter(([, v]) => typeof v === "string")
@@ -265,6 +268,30 @@ function ApprovalSummaryView({
           </div>
         )}
       </div>
+
+      {testimonyEntries.length > 0 && (
+        <div className="space-y-1.5">
+          <p className="text-sm font-medium">
+            {t("agent.changeset.testimonyHeading", { count: testimonyEntries.length })}
+          </p>
+          <div className="max-h-96 space-y-1.5 overflow-y-auto rounded-md border bg-muted/30 p-2">
+            <ul className="space-y-1.5 text-xs">
+              {testimonyEntries.map((entry, i) => (
+                <li key={`${entry.fileId}:${entry.cellId}:${entry.laneId ?? ""}:${i}`} className="space-y-0.5">
+                  <p className="font-mono text-[11px] text-muted-foreground">
+                    {entry.kind} · {entry.cellId}
+                    {entry.laneId ? ` · ${entry.laneId}` : ""}
+                  </p>
+                  <p className="text-foreground">
+                    {entry.text}
+                    {entry.truncated ? "…" : ""}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
 
       {data.changes && data.changes.items.length > 0 && (
         <div className="space-y-1.5">

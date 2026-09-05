@@ -39,6 +39,23 @@ export interface EmitEventsSummaryEntry {
   testimony: boolean
 }
 
+/** One staged validation/unvalidation, named cell by cell (AQU-1184 guardrail
+ *  2). A count alone ("3 cell.validate") is not an approvable plan: endorsing
+ *  a translation is testimony, so the approver has to see WHICH cells and
+ *  WHAT text they are putting their name to. Server-computed at prepare from
+ *  the live projection — never from anything the agent supplied. */
+export interface TestimonySummaryEntry {
+  kind: 'cell.validate' | 'cell.unvalidate'
+  fileId: string
+  cellId: string
+  /** Target-language lane (absent = the default lane). */
+  laneId?: string
+  /** The lane's current target text, truncated for display. */
+  text: string
+  /** True when `text` was cut at TESTIMONY_TEXT_MAX. */
+  truncated: boolean
+}
+
 /** Server-computed effect summary — facts come from the plan, not the agent.
  *  SetTranslation changesets populate translations*; PlanImport changesets
  *  populate filesCreated/sourceCellsAdded/artifactLinked. */
@@ -77,6 +94,11 @@ export interface ChangesetSummary {
   settingsChanges?: Record<string, string>
   /** EmitEvents: per-kind effect lines (kind, count, testimony flag). */
   events?: EmitEventsSummaryEntry[]
+  /** EmitEvents (AQU-1184): every staged cell.validate / cell.unvalidate,
+   *  named individually with the cell's current text. Rendered as its own
+   *  section on the approval page (an array, so the page's flat
+   *  number/string fact filter ignores it — the page reads it explicitly). */
+  testimony?: TestimonySummaryEntry[]
   warnings: ChangesetWarning[]
 }
 

@@ -367,6 +367,7 @@ export const audio = defineNamespace({
     "audio.aiError.modelNotAvailableTitle": "Model not available",
     "audio.aiError.tooLargeTitle": "Too much text for this model",
     "audio.aiError.geminiKeyRequiredTitle": "Gemini API key required",
+    "audio.aiError.openRouterKeyRequiredTitle": "OpenRouter API key required",
     "audio.aiError.geminiFailedTitle": "Gemini TTS failed",
     "audio.aiError.omnivoiceNotConfiguredTitle": "OmniVoice isn't configured",
     "audio.aiError.omnivoiceFailedTitle": "OmniVoice TTS failed",
@@ -1759,6 +1760,14 @@ export const audio = defineNamespace({
         description:
           "Popover heading when a Gemini-voice TTS request fails because no Gemini " +
           "API key is configured for the project.",
+      },
+      "audio.aiError.openRouterKeyRequiredTitle": {
+        description:
+          "Red-line / popover heading when text generation (the sparkle / draft " +
+          "path) fails because the hosted chat proxy has no OPENROUTER_API_KEY. " +
+          "Must never be worded as a Gemini or voice-engine problem — this is a " +
+          "text-generation credential, and the body tells the user to paste their " +
+          "own OpenRouter key under Custom provider (BYOK, not Aquilla usage).",
       },
       "audio.aiError.geminiFailedTitle": {
         description:

@@ -439,6 +439,12 @@ export interface ProjectRecord {
    * nagged as "not set up". Cleared when they opt back in from the step.
    */
   aiSetupSkipped?: boolean
+  /**
+   * Device-local: the user has picked how drafts run on this project
+   * (Frontier hosted, a project API key, or a personal override). The
+   * sparkle Set up AI dialog shows once until this is true.
+   */
+  aiProviderChosen?: boolean
   /** ISO timestamp set when the user dismisses the "your project is still using
    * default AI instructions" nudge, OR when they actually customize the system
    * prompt. Either way, we stop nagging. */

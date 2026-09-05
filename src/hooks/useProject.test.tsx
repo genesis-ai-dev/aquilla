@@ -5,6 +5,7 @@ import { describe, it, expect, vi, afterEach } from "vitest"
 import { renderHook, waitFor } from "@testing-library/react"
 import { useProject } from "./useProject"
 import { getProject } from "@/lib/store/project-index"
+import { PROJECT_LOCAL_UPDATED_EVENT } from "@/lib/store/project-local-events"
 
 const API = "https://api.frontier.example"
 
@@ -164,6 +165,63 @@ describe("useProject — thin-client fetch (Phase 2c-β)", () => {
       provider: "custom",
       endpoint: "https://openrouter.ai/api/v1",
       model: "google/gemma-4-31b-it:free",
+    })
+  })
+
+  it("re-overlays device-local completion settings when another route saves them", async () => {
+    global.fetch = vi.fn<typeof fetch>(async (input) => {
+      const url = typeof input === "string" ? input : (input as Request).url
+      if (url === `${API}/api/v2/projects/p-1`) {
+        return new Response(
+          JSON.stringify({
+            id: "p-1",
+            name: "Alpha",
+            gitlabProjectId: null,
+            archivedAt: null,
+            archivedBy: null,
+            role: { level: 700, name: "owner", source: "creator" },
+            files: [],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        )
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    }) as unknown as typeof fetch
+    mockedGetProject.mockResolvedValue(undefined)
+
+    const { result } = renderHook(() => useProject("p-1"))
+    await waitFor(() => expect(result.current.status).toBe("ready"))
+    expect(result.current.project?.completionSettings).toBeUndefined()
+
+    mockedGetProject.mockResolvedValue({
+      id: "p-1",
+      name: "Alpha",
+      sourceLanguage: "",
+      targetLanguage: "",
+      createdAt: "2026-06-14T00:00:00Z",
+      files: [],
+      members: [],
+      completionSettings: {
+        provider: "custom",
+        endpoint: "https://openrouter.ai/api/v1",
+        apiKey: "sk-or-user",
+        model: "",
+        maxTokens: 512,
+        temperature: 0.3,
+        systemPrompt: "",
+        llmHealthPenalty: 0.1,
+      },
+    })
+    window.dispatchEvent(new CustomEvent(PROJECT_LOCAL_UPDATED_EVENT, {
+      detail: { projectId: "p-1" },
+    }))
+
+    await waitFor(() => {
+      expect(result.current.project?.completionSettings).toMatchObject({
+        provider: "custom",
+        endpoint: "https://openrouter.ai/api/v1",
+        apiKey: "sk-or-user",
+      })
     })
   })
 

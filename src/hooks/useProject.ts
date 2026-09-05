@@ -21,6 +21,10 @@ import { useProjectSettings } from "@/hooks/useProjectSettings"
 import { buildCompletionSettings } from "@/hooks/useCompletionSettings"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
 import { getProject } from "@/lib/store/project-index"
+import {
+  PROJECT_LOCAL_UPDATED_EVENT,
+  type ProjectLocalUpdatedDetail,
+} from "@/lib/store/project-local-events"
 
 /**
  * Overlay synced project-wide settings onto the server-returned ProjectRecord.
@@ -98,11 +102,12 @@ async function overlayDeviceLocalSettings(record: ProjectRecord): Promise<Projec
     console.warn("[useProject] failed to read device-local project cache", err)
     return record
   }
-  if (!local?.completionSettings && !local?.experimentalFlags) return record
+  if (!local?.completionSettings && !local?.experimentalFlags && local?.aiProviderChosen === undefined) return record
   return {
     ...record,
     ...(local.completionSettings ? { completionSettings: local.completionSettings } : {}),
     ...(local.experimentalFlags ? { experimentalFlags: local.experimentalFlags } : {}),
+    ...(local.aiProviderChosen !== undefined ? { aiProviderChosen: local.aiProviderChosen } : {}),
   }
 }
 
@@ -149,6 +154,8 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
   // refresh()es after an assignment.
   const [pm, setPm] = useState<{ id: number; username: string } | null>(null)
   const hasLoaded = useRef(Boolean(initialProject))
+  const projectRef = useRef(project)
+  projectRef.current = project
   const { session, loading: sessionLoading } = useFrontierSession()
 
   const refresh = useCallback(() => {
@@ -215,6 +222,25 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
     const cleanup = refresh()
     return cleanup
   }, [refresh])
+
+  // Settings (and other routes) write device-local completionSettings via
+  // updateProject. Re-overlay IDB onto this instance so the editor sparkle
+  // gate sees Custom OpenRouter / BYOK immediately — a full server refresh
+  // is unnecessary and would race the IDB write.
+  useEffect(() => {
+    if (!enabled) return
+    const onLocalUpdated = (event: Event) => {
+      const id = (event as CustomEvent<ProjectLocalUpdatedDetail>).detail?.projectId
+      if (id !== projectId) return
+      const current = projectRef.current
+      if (!current) return
+      void overlayDeviceLocalSettings(current).then((next) => {
+        setProject(next)
+      })
+    }
+    window.addEventListener(PROJECT_LOCAL_UPDATED_EVENT, onLocalUpdated)
+    return () => window.removeEventListener(PROJECT_LOCAL_UPDATED_EVENT, onLocalUpdated)
+  }, [enabled, projectId])
 
   // Overlay synced settings (server-authoritative project-wide fields) onto
   // the hydrated record so existing consumers see merged values without any

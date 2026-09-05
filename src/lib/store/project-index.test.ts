@@ -60,6 +60,19 @@ describe("project-index", () => {
     expect(fetched!.name).toBe("Updated")
   })
 
+  it("broadcasts a device-local update so other useProject instances overlay IDB", async () => {
+    const project = makeProject({ id: "p-broadcast", name: "Original" })
+    await createProject(project)
+    const seen: string[] = []
+    const onUpdated = (event: Event) => {
+      seen.push((event as CustomEvent<{ projectId: string }>).detail.projectId)
+    }
+    window.addEventListener("aquilla:project-local-updated", onUpdated)
+    await updateProject({ ...project, name: "Updated" })
+    window.removeEventListener("aquilla:project-local-updated", onUpdated)
+    expect(seen).toEqual(["p-broadcast"])
+  })
+
   it("deletes a project", async () => {
     const project = makeProject({ id: "p1" })
     await createProject(project)
@@ -292,6 +305,12 @@ describe("mergeServerProjectWithLocalCache — client-local overlays", () => {
     const server = makeProject({ id: "s2" })
     const local = { ...server, aiSetupSkipped: false }
     expect(mergeServerProjectWithLocalCache(server, local).aiSetupSkipped).toBe(false)
+  })
+
+  it("carries the local aiProviderChosen flag onto the server record", () => {
+    const server = makeProject({ id: "s-chosen" })
+    const local = { ...server, aiProviderChosen: true }
+    expect(mergeServerProjectWithLocalCache(server, local).aiProviderChosen).toBe(true)
   })
 
   it("leaves aiSetupSkipped unset when the local cache has no opinion", () => {

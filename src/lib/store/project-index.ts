@@ -6,6 +6,7 @@ import {
   type ArchiveResult,
   type UnarchiveResult,
 } from "../sync/archive"
+import { broadcastProjectLocalUpdated } from "./project-local-events"
 
 interface CodexDB extends DBSchema {
   projects: {
@@ -133,6 +134,7 @@ export async function createProject(project: ProjectRecord): Promise<void> {
 export async function updateProject(project: ProjectRecord): Promise<void> {
   const db = await getDb()
   await db.put("projects", project)
+  broadcastProjectLocalUpdated(project.id)
 }
 
 /**
@@ -187,6 +189,9 @@ export function mergeServerProjectWithLocalCache(
     // server column; without this overlay every refetch drops it.
     ...(local.aiSetupSkipped !== undefined
       ? { aiSetupSkipped: local.aiSetupSkipped }
+      : {}),
+    ...(local.aiProviderChosen !== undefined
+      ? { aiProviderChosen: local.aiProviderChosen }
       : {}),
     // AQU-701: voice settings chosen in the setup checklist (provider, BYOK
     // gemini key) are written to the device-local record; carry them across

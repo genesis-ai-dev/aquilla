@@ -66,6 +66,23 @@ describe("chat /api/v1/chat/completions — allowlist guard", () => {
     expect(res.status).toBe(401)
   })
 
+  it("returns 500 when OPENROUTER_API_KEY is unset (AQU-1158)", async () => {
+    await seedUser(1158, "or-key-missing")
+    const jwt = await jwtFor("or-key-missing")
+    const testEnv = withEnvOverrides({ OPENROUTER_API_KEY: undefined })
+    const res = await app.request(
+      "/api/v1/chat/completions",
+      {
+        method: "POST",
+        headers: authHeader(jwt),
+        body: chatBody(ALLOWED_MODEL),
+      },
+      testEnv,
+    )
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: "OPENROUTER_API_KEY is not configured" })
+  })
+
   it("returns 400 for a non-allowlisted model", async () => {
     await seedUser(1, "alice")
     const jwt = await jwtFor("alice")

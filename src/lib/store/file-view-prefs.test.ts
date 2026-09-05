@@ -19,6 +19,8 @@ import {
   setFileViewPref,
   resolveFontSizes,
   useFileFontSizes,
+  clearFileFontSize,
+  isExplicitFileFontSize,
   MIN_FONT_SIZE,
   MAX_FONT_SIZE,
 } from "./file-view-prefs"
@@ -152,5 +154,27 @@ describe("app-wide font size vs per-file override (AQU-1170)", () => {
     )
     act(() => { result.current.font.setScale("large") })
     expect(result.current.sizes).toEqual({ source: 16, target: 13 })
+  })
+
+  it("clearFileFontSize returns a column to the app-scale default", () => {
+    setFileViewPref("file-reset-1170", { targetFontSize: 17 })
+    expect(isExplicitFileFontSize(getFileViewPref("file-reset-1170"), "target")).toBe(true)
+    expect(isExplicitFileFontSize(getFileViewPref("file-reset-1170"), "source")).toBe(false)
+    clearFileFontSize("file-reset-1170", "target")
+    const prefs = getFileViewPref("file-reset-1170")
+    expect(prefs.targetFontSize).toBeUndefined()
+    expect(isExplicitFileFontSize(prefs, "target")).toBe(false)
+    expect(resolveFontSizes(prefs, "extra-large")).toEqual({ source: 18, target: 18 })
+    expect(JSON.parse(localStorage.getItem("aq.file-view-prefs.v1") || "{}")["file-reset-1170"]).toBeUndefined()
+  })
+
+  it("clearFileFontSize keeps the other column when only a legacy fontSize is stored", () => {
+    setFileViewPref("file-legacy-reset-1170", { fontSize: 18 })
+    clearFileFontSize("file-legacy-reset-1170", "target")
+    const prefs = getFileViewPref("file-legacy-reset-1170")
+    expect(prefs.fontSize).toBeUndefined()
+    expect(prefs.targetFontSize).toBeUndefined()
+    expect(prefs.sourceFontSize).toBe(18)
+    expect(resolveFontSizes(prefs, "small")).toEqual({ source: 18, target: 12 })
   })
 })

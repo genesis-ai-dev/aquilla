@@ -25,11 +25,13 @@ export interface FileViewPrefs {
   /** Legacy single editor font size in px. Superseded by the per-side sizes
    *  below; kept as a read fallback so pre-split prefs keep working. */
   fontSize?: number
-  /** Source column font size in px (default: 14). */
+  /** Source column font size in px. Absent means follow the app font size. */
   sourceFontSize?: number
-  /** Target column font size in px (default: 14). */
+  /** Target column font size in px. Absent means follow the app font size. */
   targetFontSize?: number
 }
+
+export type FileFontSizeSide = "source" | "target"
 
 type PrefMap = Record<string, FileViewPrefs>
 
@@ -90,7 +92,8 @@ export function setFileViewPref(fileId: string, patch: FileViewPrefs): void {
   for (const key of Object.keys(next) as (keyof FileViewPrefs)[]) {
     if (next[key] === undefined) delete next[key]
   }
-  map[fileId] = next
+  if (Object.keys(next).length === 0) delete map[fileId]
+  else map[fileId] = next
   save(map)
   snapshotCache.set(fileId, Object.keys(next).length ? next : EMPTY)
   notify()
@@ -137,4 +140,51 @@ export function useFileFontSizes(fileId: string | null | undefined): ResolvedFon
   const prefs = useFileViewPref(fileId)
   const appScale = useOptionalFontSizeScale()
   return resolveFontSizes(prefs, appScale)
+}
+
+/** True when this column has a stored px and no longer tracks the app font size. */
+export function isExplicitFileFontSize(
+  prefs: FileViewPrefs,
+  side: FileFontSizeSide,
+): boolean {
+  if (side === "source") return prefs.sourceFontSize != null || prefs.fontSize != null
+  return prefs.targetFontSize != null || prefs.fontSize != null
+}
+
+export function useFileFontSizeExplicit(
+  fileId: string | null | undefined,
+): { source: boolean; target: boolean } {
+  const prefs = useFileViewPref(fileId)
+  return {
+    source: isExplicitFileFontSize(prefs, "source"),
+    target: isExplicitFileFontSize(prefs, "target"),
+  }
+}
+
+/**
+ * Drop a column's stored size so it follows the app font size again.
+ * A legacy shared `fontSize` is kept on the other column as a per-side value.
+ */
+export function clearFileFontSize(fileId: string, side: FileFontSizeSide): void {
+  const prefs = getFileViewPref(fileId)
+  if (!isExplicitFileFontSize(prefs, side)) return
+
+  if (side === "source") {
+    const keepTarget =
+      prefs.targetFontSize == null && prefs.fontSize != null ? prefs.fontSize : undefined
+    setFileViewPref(fileId, {
+      sourceFontSize: undefined,
+      fontSize: undefined,
+      ...(keepTarget != null ? { targetFontSize: keepTarget } : {}),
+    })
+    return
+  }
+
+  const keepSource =
+    prefs.sourceFontSize == null && prefs.fontSize != null ? prefs.fontSize : undefined
+  setFileViewPref(fileId, {
+    targetFontSize: undefined,
+    fontSize: undefined,
+    ...(keepSource != null ? { sourceFontSize: keepSource } : {}),
+  })
 }

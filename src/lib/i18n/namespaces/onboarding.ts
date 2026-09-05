@@ -361,7 +361,7 @@ export const onboarding = defineNamespace({
       "Follow your system appearance or choose a theme for this device.",
     "onboarding.preferences.fontSize.groupLabel": "App font size",
     "onboarding.preferences.fontSize.rowDescription":
-      "The overall size of menus, sidebars, settings, and editor cell text. A file's View settings can still override the cell size.",
+      "The overall size of menus, sidebars, settings, and editor cell text. A file's View settings can override the cell size; reset there to follow this size again.",
     "onboarding.preferences.fontSize.small": "Small",
     "onboarding.preferences.fontSize.default": "Default",
     "onboarding.preferences.fontSize.large": "Large",

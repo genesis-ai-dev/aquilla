@@ -374,6 +374,7 @@ export const editor = defineNamespace({
     "editor.view.directionOf": "{side} direction",
     "editor.view.decreaseFontSize": "Decrease {side} font size",
     "editor.view.increaseFontSize": "Increase {side} font size",
+    "editor.view.useAppFontSize": "Use app font size for {side}",
     "editor.view.directionMismatch":
       "{side} is forced {forced}, but content looks {detected}",
     "editor.view.dismissDirectionWarning": "Dismiss direction warning",
@@ -2720,6 +2721,17 @@ export const editor = defineNamespace({
         description:
           "Tooltip and screen-reader name of the 'A+' button that makes one " +
           "column's text one step larger. Imperative.",
+        placeholders: {
+          side:
+            "Which column, lower-cased by the app from editor.column.source / " +
+            "editor.column.target.",
+        },
+      },
+      "editor.view.useAppFontSize": {
+        description:
+          "Tooltip and screen-reader name of the button that drops a column's " +
+          "custom size so it follows the app-wide font size again. Shown only " +
+          "after A+ or A− has pinned that column. Imperative.",
         placeholders: {
           side:
             "Which column, lower-cased by the app from editor.column.source / " +

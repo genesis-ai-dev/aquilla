@@ -82,6 +82,7 @@ import {
 } from "@/lib/parsers/types"
 import { resolveTimingLocked } from "@/lib/sync/project-settings"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
+import { StructuralCellsProjectSection } from "./ProjectSettings/StructuralCellsProjectSection"
 import { ValidationSettingsSection } from "./ProjectSettings/ValidationSettingsSection"
 import { DecaySettingsSection } from "./ProjectSettings/DecaySettingsSection"
 import { AudioMediaStrategySection } from "./ProjectSettings/AudioMediaStrategySection"
@@ -2191,6 +2192,16 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         {searchGroupLabel("section-validation")}
         {sectionsToRender.some((s) => s.id === "section-validation") && (
           <div id="section-validation" className="flex flex-col gap-12">
+            {/* AQU-1083. Reads and writes the shared blob directly — see the
+                component's note on why it must not use the draft/baseline
+                machinery around it. */}
+            <StructuralCellsProjectSection
+              value={sharedSettingsBlob?.countStructuralCells}
+              orgDefault={project?.orgCountStructuralCells ?? true}
+              disabled={!canEditShared}
+              disabledTooltip={reasonCannotEdit}
+              onPatch={patchShared}
+            />
             <ValidationSettingsSection
               projectId={id}
               validationCount={validationCount}

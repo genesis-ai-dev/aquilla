@@ -24,6 +24,18 @@ import { defineNamespace } from "./types"
  */
 export const settings = defineNamespace({
   keys: {
+    // ── StructuralCellsSection (org settings → security) ── AQU-1083
+    "settings.structuralCells.label": "Count headings as translatable content",
+    "settings.structuralCells.description":
+      "When on, chapter headings, section titles and book names count toward " +
+      "translation and validation percentages, the same as any other line. " +
+      "When off, they are left out of both the completed count and the total, " +
+      "so a book reads 100% once every verse is done. Individual projects can " +
+      "override this.",
+    "settings.structuralCells.saveFailed": "Save failed",
+    "settings.structuralCells.blocked":
+      "Only org maintainers and owners can change how progress is counted.",
+
     // ── AssignmentAuthoritySection (org settings → security) ──
     "settings.assignmentAuthority.label": "Allow self-assignment",
     "settings.assignmentAuthority.description":

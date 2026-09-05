@@ -191,6 +191,17 @@ export interface UseOrgSettings {
    */
   allowSelfAssignment: boolean
   /**
+   * AQU-1083: do chapter headings and section titles count as translatable
+   * content in this org's progress numbers? Explicit org setting, or TRUE when
+   * unset — which is what every project did before the setting existed, so
+   * nothing moves for an org that never opts out. A project may override it.
+   *
+   * Unlike the keys above this is NOT a permission policy — it decides how a
+   * number is calculated rather than who may see or do anything — so it rides
+   * the general maintainer write gate, not the owner-only one.
+   */
+  countStructuralCells: boolean
+  /**
    * AQU-822: effective termbase-edit floor — the minimum role allowed to
    * manage a project's termbase in this org. Explicit org setting, or
    * PROJECT_LEAD (500) when unset. Server-enforced per write; the terminology
@@ -320,6 +331,9 @@ export function useOrgSettings(
 
   // AQU-496: effective self-assignment authority — explicit org setting, or
   // false (leads-only) when unset.
+  // `!== false` rather than `=== true`: unset must read as ON here, because
+  // counting headings is what every org does today.
+  const countStructuralCells = server?.settings?.countStructuralCells !== false
   const allowSelfAssignment = server?.settings?.allowSelfAssignment === true
     ? true
     : DEFAULT_ALLOW_SELF_ASSIGNMENT
@@ -440,6 +454,7 @@ export function useOrgSettings(
     canViewMemberProgress,
     memberProgressViewMinRole,
     allowSelfAssignment,
+    countStructuralCells,
     termbaseEditMinRole,
     refresh,
     patch,

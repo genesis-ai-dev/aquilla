@@ -61,6 +61,13 @@ export interface OrgWideSettings {
    */
   allowSelfAssignment?: boolean
   /**
+   * AQU-1083: the org-wide default for whether structural cells — chapter
+   * headings, section titles, book names — count toward progress. Unset means
+   * they DO, which is what every project did before this existed. A project
+   * may override it.
+   */
+  countStructuralCells?: boolean
+  /**
    * AQU-822: Minimum role level allowed to manage a project's termbase —
    * add, edit, delete, and archive concepts. Default (when absent) =
    * PROJECT_LEAD (500), the level the terminology UI has always shown the

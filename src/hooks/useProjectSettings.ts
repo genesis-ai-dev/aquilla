@@ -41,6 +41,22 @@ export function isTerminologyOnlyPatch(partial: ProjectWideSettings): boolean {
   return keys.length > 0 && keys.every((key) => key === TERMINOLOGY_KEY)
 }
 
+/** AQU-1083: the second key with a floor below maintainer. */
+export const COUNT_STRUCTURAL_KEY = "countStructuralCells"
+
+/**
+ * Is this patch only the structural-cells override?
+ *
+ * Mirrors the terminology carve-out above, and mirrors the server's, which is
+ * the point: this hook refuses a write it believes the server would reject, so
+ * a floor it does not know about shows up as a control that silently does
+ * nothing for exactly the role the feature was written for.
+ */
+export function isCountStructuralOnlyPatch(partial: ProjectWideSettings): boolean {
+  const keys = Object.keys(partial)
+  return keys.length > 0 && keys.every((key) => key === COUNT_STRUCTURAL_KEY)
+}
+
 /**
  * AQU-979: the same-tab convergence channel for project-wide settings.
  *
@@ -578,7 +594,9 @@ export function useProjectSettings(
 
     const requiredLevel = isTerminologyOnlyPatch(partial)
       ? resolveTermbaseEditFloor(termbaseEditMinRole)
-      : SETTINGS_EDIT_ROLE_FLOOR
+      : isCountStructuralOnlyPatch(partial)
+        ? ROLE.PROJECT_LEAD
+        : SETTINGS_EDIT_ROLE_FLOOR
     if (roleLevel < requiredLevel) {
       // Synced project below floor — do NOT apply locally; the server will
       // reject and we'd silently diverge (the original AQU-255 bug).

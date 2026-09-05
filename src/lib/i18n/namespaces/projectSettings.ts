@@ -459,6 +459,20 @@ export const projectSettings = defineNamespace({
     "projectSettings.validation.requiredAudioDisabledNote": "Enabled once audio translations exist.",
     "projectSettings.validation.minRoleLabel": "Minimum validator role",
     "projectSettings.validation.minRoleDescription": "Only users with at least this role can cast a validation vote. Defaults to reviewer.",
+    // ── StructuralCellsProjectSection ── AQU-1083
+    "projectSettings.structuralCells.label": "Count headings as translatable content",
+    "projectSettings.structuralCells.description":
+      "Whether chapter headings, section titles and book names count toward " +
+      "this project's translation and validation percentages. Leaving them " +
+      "out means a book reads 100% once every verse is done.",
+    "projectSettings.structuralCells.inheritCounting":
+      "Use the organization default (counting them)",
+    "projectSettings.structuralCells.inheritExcluding":
+      "Use the organization default (leaving them out)",
+    "projectSettings.structuralCells.count": "Count them",
+    "projectSettings.structuralCells.exclude": "Leave them out",
+    "projectSettings.structuralCells.saveFailed": "Could not save that change",
+
     "projectSettings.validation.allowSelfLabel": "Allow self-validation",
     "projectSettings.validation.allowSelfDescription": "When off, a contributor's vote on their own commit is ignored.",
     "projectSettings.validation.namedValidatorsLabel": "Named validators (optional)",

@@ -6,6 +6,7 @@ import {
   fetchOrgSettings,
   patchOrgSettings,
   postPromotionRequest,
+  resetCountStructuralOverrides,
   type OrgSettingsResponse,
   type OrgWideSettings,
   type OrgPatchResult,
@@ -202,6 +203,14 @@ export interface UseOrgSettings {
    */
   countStructuralCells: boolean
   /**
+   * AQU-1083: how many projects in this org set their own value and therefore
+   * ignore the default above. Zero means changing the default reaches
+   * everything, which is why zero suppresses the prompt entirely.
+   */
+  countStructuralOverrides: number
+  /** Put those projects back on the org default. Clears their own key. */
+  resetCountStructuralOverrides: () => Promise<{ ok: boolean; cleared: number; message?: string }>
+  /**
    * AQU-822: effective termbase-edit floor — the minimum role allowed to
    * manage a project's termbase in this org. Explicit org setting, or
    * PROJECT_LEAD (500) when unset. Server-enforced per write; the terminology
@@ -281,6 +290,21 @@ export function useOrgSettings(
     return got
   }, [orgId, jwt, writeServer])
 
+  /**
+   * AQU-1083: put every project back on the org's structural-cell default.
+   *
+   * Re-fetches afterwards rather than adjusting the count locally, because the
+   * server is the only thing that knows what it actually cleared — another
+   * maintainer may have opted a project out while this dialog was open.
+   */
+  const resetOverrides = useCallback(async () => {
+    if (!orgId || !jwt) return { ok: false, cleared: 0, message: "no session" }
+    const result = await resetCountStructuralOverrides(jwt, orgId)
+    if (result.kind === "error") return { ok: false, cleared: 0, message: result.message }
+    await refresh()
+    return { ok: true, cleared: result.cleared }
+  }, [orgId, jwt, refresh])
+
   useEffect(() => {
     if (!orgId) {
       writeServer(null)
@@ -334,6 +358,7 @@ export function useOrgSettings(
   // `!== false` rather than `=== true`: unset must read as ON here, because
   // counting headings is what every org does today.
   const countStructuralCells = server?.settings?.countStructuralCells !== false
+  const countStructuralOverrides = server?.countStructuralOverrides ?? 0
   const allowSelfAssignment = server?.settings?.allowSelfAssignment === true
     ? true
     : DEFAULT_ALLOW_SELF_ASSIGNMENT
@@ -455,6 +480,8 @@ export function useOrgSettings(
     memberProgressViewMinRole,
     allowSelfAssignment,
     countStructuralCells,
+    countStructuralOverrides,
+    resetCountStructuralOverrides: resetOverrides,
     termbaseEditMinRole,
     refresh,
     patch,

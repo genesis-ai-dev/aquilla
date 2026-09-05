@@ -1,4 +1,4 @@
-import { defineNamespace } from "./types"
+import { defineNamespace, plural } from "./types"
 
 /**
  * Preferences, personal/org/team settings surfaces.
@@ -35,6 +35,20 @@ export const settings = defineNamespace({
     "settings.structuralCells.saveFailed": "Save failed",
     "settings.structuralCells.blocked":
       "Only org maintainers and owners can change how progress is counted.",
+    "settings.structuralCells.resetFailed": "Could not update those projects",
+    "settings.structuralCells.resetTitle": plural({
+      one: "{count} project has its own setting",
+      other: "{count} projects have their own setting",
+    }, "count"),
+    "settings.structuralCells.resetDescription": plural({
+      one: "It will keep counting headings its own way and ignore this default. Reset it to follow the organization instead?",
+      other: "They will keep counting headings their own way and ignore this default. Reset them to follow the organization instead?",
+    }, "count"),
+    // Number-neutral: the title beside it is singular at a count of one, and
+    // "Leave them as they are" under "1 project has its own setting" reads
+    // like a bug.
+    "settings.structuralCells.resetKeep": "Leave unchanged",
+    "settings.structuralCells.resetConfirm": "Reset to the default",
 
     // ── AssignmentAuthoritySection (org settings → security) ──
     "settings.assignmentAuthority.label": "Allow self-assignment",
@@ -238,6 +252,22 @@ export const settings = defineNamespace({
       screenshot: "project-settings",
     },
     keys: {
+      "settings.structuralCells.resetTitle": {
+        description:
+          "Title of the dialog shown after an org maintainer changes the " +
+          "heading-counting default, when some projects have set their own " +
+          "value and will therefore ignore it. {count} is how many. Asked " +
+          "only when that number is above zero.",
+        placeholders: { count: "How many projects override the org default." },
+      },
+      "settings.structuralCells.resetDescription": {
+        description:
+          "Body of that same dialog, explaining that those projects keep " +
+          "their own answer unless reset. The confirm button clears their " +
+          "setting so they follow the organization again; the cancel button " +
+          "leaves them alone. Pluralized on the same count as the title, " +
+          "which it does not print — only 'it' versus 'them' changes.",
+      },
       "settings.personalProvider.trailingPathHint": {
         description:
           "Hint under the personal AI-provider endpoint field, rendered with " +

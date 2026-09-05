@@ -47,6 +47,7 @@ import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
+import { notifySyncWorkerOfProjectSettingsChange } from "../services/sync-worker-notify"
 import { ROLE } from "../types"
 import { getEffectiveOrgRole } from "../services/org-permissions"
 
@@ -195,11 +196,43 @@ orgSettings.get("/:orgId/settings", authMiddleware, async (c) => {
   if (role == null) return c.json({ error: "no access to org" }, 403)
 
   const response = await loadSettings(c.env, orgId)
+  // AQU-1083: how many projects have opted out of the org's structural-cell
+  // default. The Project defaults page needs it to know whether changing that
+  // default would silently miss anyone — a project with its own answer is
+  // deliberately deaf to this switch, and saying nothing about that is how the
+  // switch becomes a no-op nobody can see.
+  const overrides = await countStructuralOverrides(c.env, orgId)
   if (role < SETTINGS_WRITE_MIN_ROLE) {
-    return c.json({ ...response, settings: redactSecrets(response.settings) })
+    return c.json({
+      ...response,
+      settings: redactSecrets(response.settings),
+      countStructuralOverrides: overrides,
+    })
   }
-  return c.json(response)
+  return c.json({ ...response, countStructuralOverrides: overrides })
 })
+
+/** Projects in this org whose settings carry their own countStructuralCells. */
+async function countStructuralOverrides(
+  env: AuthHonoEnv["Bindings"],
+  orgId: number,
+): Promise<number> {
+  try {
+    // The STORED generated column, never the multi-MB settings blob.
+    const row = await env.AQUILLA_PG.prepare(
+      `SELECT COUNT(*)::int AS n
+         FROM project_settings ps
+         JOIN projects p ON p.id = ps.project_id
+        WHERE p.org_id = ? AND p.archived_at IS NULL
+          AND ps.count_structural IS NOT NULL`,
+    ).bind(orgId).first<{ n: number }>()
+    return Number(row?.n) || 0
+  } catch {
+    // A count is an affordance, not authority. Failing it must not take the
+    // whole settings page down; the prompt simply does not appear.
+    return 0
+  }
+}
 
 // ──────────────────────────────────────────────────────────────────────────
 // PUT/PATCH /api/v2/orgs/:orgId/settings
@@ -473,3 +506,89 @@ orgSettings.post(
 )
 
 export default orgSettings
+
+// ──────────────────────────────────────────────────────────────────────────
+// POST /api/v2/orgs/:orgId/settings/count-structural/reset-project-overrides
+//
+// AQU-1083. Clears the per-project countStructuralCells override from every
+// project in the org, putting them all back on the org default.
+//
+// CLEARS rather than stamps the new value in. Writing the value into each
+// project would leave them every one holding an explicit answer, permanently
+// deaf to the NEXT change of the org default — the same silent miss this
+// exists to fix, just deferred. Removing the key restores the inheritance,
+// so a later org change simply propagates and nobody is asked again until
+// somebody deliberately opts a project out.
+//
+// Key-specific on purpose. A general "reset any key across the org" endpoint
+// would be one typo away from wiping AI config or languages org-wide.
+// ──────────────────────────────────────────────────────────────────────────
+
+orgSettings.post(
+  "/:orgId/settings/count-structural/reset-project-overrides",
+  authMiddleware,
+  async (c) => {
+    const user = c.get("user")
+    const orgId = parseInt(c.req.param("orgId") ?? "", 10)
+    if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
+
+    const role = await getEffectiveOrgRole(c.env, orgId, user)
+    if (role == null) return c.json({ error: "no access to org" }, 403)
+    // The same gate as setting the org default itself: whoever may decide the
+    // default may decide that everyone follows it.
+    if (role < SETTINGS_WRITE_MIN_ROLE) {
+      return c.json(
+        { error: `org role >= maintainer (${SETTINGS_WRITE_MIN_ROLE}) required` },
+        403,
+      )
+    }
+
+    // Read the affected ids first so the sync worker can be told which rooms
+    // to refresh; the UPDATE itself does not report them.
+    const { results: affected } = await c.env.AQUILLA_PG.prepare(
+      `SELECT ps.project_id, ps.version
+         FROM project_settings ps
+         JOIN projects p ON p.id = ps.project_id
+        WHERE p.org_id = ? AND p.archived_at IS NULL
+          AND ps.count_structural IS NOT NULL`,
+    ).bind(orgId).all<{ project_id: string; version: number }>()
+
+    if (affected.length === 0) return c.json({ cleared: 0, projectIds: [] })
+
+    // One statement: the key is removed from the blob and the generated column
+    // recomputes itself. No ifMatchVersion — this is an org-level decision
+    // about projects the caller is not editing one at a time, and a client
+    // holding a stale version correctly gets a 409 on its next own write.
+    await c.env.AQUILLA_PG.prepare(
+      `UPDATE project_settings ps
+          SET settings = ((ps.settings::jsonb) - ?)::text,
+              version = ps.version + 1,
+              updated_at = now(),
+              updated_by = ?
+         FROM projects p
+        WHERE p.id = ps.project_id
+          AND p.org_id = ?
+          AND p.archived_at IS NULL
+          AND ps.count_structural IS NOT NULL`,
+    ).bind(COUNT_STRUCTURAL_KEY, user.id, orgId).run()
+
+    // Best-effort, exactly as the single-project write is: an editor open on
+    // one of these should re-read, but a failed notification must not fail
+    // the change that already landed.
+    const notify = Promise.all(
+      affected.map((row) =>
+        notifySyncWorkerOfProjectSettingsChange(c.env, row.project_id, Number(row.version) + 1),
+      ),
+    ).then(() => undefined)
+    try {
+      c.executionCtx.waitUntil(notify)
+    } catch {
+      void notify
+    }
+
+    return c.json({
+      cleared: affected.length,
+      projectIds: affected.map((row) => row.project_id),
+    })
+  },
+)

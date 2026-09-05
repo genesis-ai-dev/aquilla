@@ -73,6 +73,11 @@ export interface ChangesetApprovalSummary {
   settingsChanges?: Record<string, string>
   /** EmitEvents changesets: per-kind counts with testimony marks. */
   events?: ChangesetSummaryEvent[]
+  /** AQU-1185 membership changesets: one plain-language line per change
+   *  ("Add ana to p1 as contributor (400)"). Server-authored — the approver
+   *  must be able to see who, what role, and which project without reading
+   *  the command JSON. */
+  membershipChanges?: string[]
   [key: string]: unknown
 }
 

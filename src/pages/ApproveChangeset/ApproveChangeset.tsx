@@ -216,12 +216,17 @@ function ApprovalSummaryView({
   onReject: () => void
 }) {
   const { locale, t } = useI18n()
-  const { warnings, settingsChanges, ...facts } = data.summary
+  const { warnings, settingsChanges, membershipChanges, ...facts } = data.summary
   const factEntries = Object.entries(facts).filter(([, v]) => typeof v === "number" || typeof v === "string")
   const settingsEntries =
     settingsChanges && typeof settingsChanges === "object"
       ? Object.entries(settingsChanges).filter(([, v]) => typeof v === "string")
       : []
+  // AQU-1185: membership lines are server-authored plain language, listed
+  // one-per-change so a role grant is never approved blind.
+  const membershipEntries = Array.isArray(membershipChanges)
+    ? membershipChanges.filter((line): line is string => typeof line === "string")
+    : []
   const notStaged = data.status !== "staged"
   const working = actionPhase === "working"
 
@@ -240,7 +245,7 @@ function ApprovalSummaryView({
 
       <div className="rounded-md border bg-muted/30 p-3 space-y-1.5">
         <p className="text-sm font-medium">{t("agent.changeset.whatWillBeApplied")}</p>
-        {factEntries.length === 0 && settingsEntries.length === 0 ? (
+        {factEntries.length === 0 && settingsEntries.length === 0 && membershipEntries.length === 0 ? (
           <p className="text-xs text-muted-foreground">{t("agent.changeset.noChangesSummarized")}</p>
         ) : (
           <ul className="space-y-0.5 text-xs text-muted-foreground">
@@ -250,6 +255,18 @@ function ApprovalSummaryView({
               </li>
             ))}
           </ul>
+        )}
+        {membershipEntries.length > 0 && (
+          <div className="space-y-0.5 pt-1">
+            <p className="text-xs font-medium">{t("agent.changeset.membershipChanges")}</p>
+            <ul className="space-y-0.5 text-xs text-muted-foreground">
+              {membershipEntries.map((line, i) => (
+                <li key={i} className="font-medium text-foreground">
+                  {line}
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
         {settingsEntries.length > 0 && (
           <div className="space-y-0.5 pt-1">

@@ -24,10 +24,23 @@ import {
   validateEmitEventsCommand,
   type EmitEventsCommand,
 } from './commands-emit-events'
+import {
+  MEMBERSHIP_FLOOR,
+  isMembershipCommand,
+  validateMembershipCommand,
+  type MembershipCommand,
+} from './commands-membership'
 
 export type { PlanImportCell, PlanImportManifest, PlanImportVariant } from './import-manifest'
 export type { PatchSettingsCommand, PatchSettingsOp } from './commands-patch-settings'
 export type { EmitEventsCommand, EmitEventInput } from './commands-emit-events'
+export type {
+  InviteMemberCommand,
+  MembershipCommand,
+  RemoveMemberCommand,
+  SetRoleCommand,
+} from './commands-membership'
+export { isMembershipCommand } from './commands-membership'
 export { cellKey, laneCellKey } from './cell-keys'
 
 /** Set (or update) a single cell's translation. Compiles to target.cell.commit. */
@@ -109,6 +122,7 @@ export type Command =
   | LinkMediaCommand
   | PatchSettingsCommand
   | EmitEventsCommand
+  | MembershipCommand
 
 /** Hard cap on source cells per PlanImport changeset. Above this the plan is
  *  rejected with validation_failed — the manifest-in-R2 pattern for larger
@@ -440,6 +454,11 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
       if (cmd) commands.push(cmd)
       return
     }
+    if (isMembershipCommand(c as { kind: string })) {
+      const cmd = validateMembershipCommand(c, index, issues)
+      if (cmd) commands.push(cmd)
+      return
+    }
     if (c.kind === 'LinkMedia') {
       if (!isNonEmptyString(c.fileId)) {
         issues.push({ index, message: 'LinkMedia.fileId must be a non-empty string' })
@@ -505,6 +524,12 @@ export function requiredRoleForCommand(c: Command): number {
   if (c.kind === 'LinkMedia') {
     // Compiles to cell.audio.attach + cell.audio.select (both CONTRIBUTOR).
     return Math.max(REQUIRED_ROLE['cell.audio.attach'], REQUIRED_ROLE['cell.audio.select'])
+  }
+  // AQU-1185 membership commands: MAINTAINER, flat. Like the other receipt-only
+  // kinds they take their own prepare/commit path (which re-checks the grant and
+  // target caps live); this is the honest index-filtering floor.
+  if (isMembershipCommand(c)) {
+    return MEMBERSHIP_FLOOR
   }
   return REQUIRED_ROLE['target.cell.commit']
 }

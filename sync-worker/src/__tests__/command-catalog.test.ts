@@ -59,6 +59,9 @@ describe('command catalog — invariants', () => {
       UpdateProjectSettings: { kind: 'UpdateProjectSettings', projectId: 'p', settings: {}, ifMatchVersion: 0 },
       PatchSettings: { kind: 'PatchSettings', projectId: 'p', ops: [{ key: 'brief', value: 1 }], ifMatchVersion: 0 },
       EmitEvents: { kind: 'EmitEvents', events: [{ kind: 'comment.create', payload: { body: 'hi' } }] },
+      InviteMember: { kind: 'InviteMember', projectId: 'p', username: 'ana', role: 400 },
+      SetRole: { kind: 'SetRole', projectId: 'p', username: 'ana', role: 400 },
+      RemoveMember: { kind: 'RemoveMember', projectId: 'p', username: 'ana' },
     }
     for (const entry of COMMAND_CATALOG) {
       const sample = minimal[entry.kind]

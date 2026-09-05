@@ -132,6 +132,32 @@ describe("ApproveChangeset", () => {
     expect(screen.queryByText(/No changes summarized/i)).not.toBeInTheDocument()
   })
 
+  // AQU-1185: a role grant must never be approved blind — the page lists one
+  // plain-language line per membership change, straight from the server.
+  it("renders one line per change for a membership changeset", async () => {
+    const data = {
+      ...APPROVAL_DATA,
+      summary: {
+        command: "Membership",
+        projectId: "proj-1",
+        membershipChanges: [
+          "Add ana to proj-1 as contributor (400)",
+          "Remove pat from proj-1",
+        ],
+        warnings: [],
+      },
+    }
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(data), { status: 200 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    renderPage()
+
+    expect(await screen.findByText(/Membership changes/i)).toBeInTheDocument()
+    expect(screen.getByText("Add ana to proj-1 as contributor (400)")).toBeInTheDocument()
+    expect(screen.getByText("Remove pat from proj-1")).toBeInTheDocument()
+    expect(screen.queryByText(/No changes summarized/i)).not.toBeInTheDocument()
+  })
+
   it("renders per-cell before/after changes and a back-to-project link", async () => {
     const data = {
       ...APPROVAL_DATA,

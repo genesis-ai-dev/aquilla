@@ -22,6 +22,11 @@ import {
   type UpdateProjectSettingsCommand,
 } from './commands'
 import { changedPolicyKeys, preparePatchSettings, previewSettingValue } from './commands-patch-settings'
+import {
+  isMembershipCommand,
+  prepareMembership,
+  type MembershipCommand,
+} from './commands-membership'
 import { prepareEmitEvents } from './emit-events-engine'
 import { resolveCellStates, type CellPrecondition } from './preconditions'
 import { uuidv7 } from './uuid'
@@ -160,6 +165,26 @@ export async function prepareChangesetCore(
       return errorResponse('validation_failed', 'PatchSettings must be the only command in a changeset')
     }
     return preparePatchSettings(db, cred, projectId, id, autonomyMode, patchSettings, env)
+  }
+
+  // AQU-1185 membership (InviteMember / SetRole / RemoveMember): receipt-only,
+  // its own module owns the MAINTAINER floor plus the grant and target caps, and
+  // it FORCES ask-mode — so like the settings commands it skips the generic role
+  // gate below. Membership kinds may batch with each other (one approval covers
+  // one roster change) but never with another kind: the human on /approve must
+  // be reading a membership decision, not a membership decision buried in an
+  // import.
+  const membership = validated.commands.filter((c): c is MembershipCommand =>
+    isMembershipCommand(c),
+  )
+  if (membership.length > 0) {
+    if (membership.length !== validated.commands.length) {
+      return errorResponse(
+        'validation_failed',
+        'membership commands cannot be mixed with other command kinds in one changeset',
+      )
+    }
+    return prepareMembership(db, cred, projectId, id, membership, env)
   }
 
   // Live role/membership gate (§2 — resolve the caller's CURRENT role on every

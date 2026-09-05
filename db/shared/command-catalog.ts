@@ -131,6 +131,47 @@ Gotchas:
 - Every referenced cell/comment/file/assignment must exist at prepare — one bad reference rejects the whole plan (no silent skips).
 - payload shapes match the app's event vocabulary — call describe_command or docs before hand-building unfamiliar payloads.`,
   },
+  {
+    kind: 'InviteMember',
+    title: 'Invite member',
+    oneLiner: 'Grant a person direct access to the project at a role.',
+    minRoleLevel: MAINTAINER,
+    tier: 'governance',
+    agentReachable: true,
+    paramsDoc: `### InviteMember
+Params: \`{ projectId, username, role }\` — \`role\` is a canonical level (100 viewer · 200 commenter · 300 reviewer · 400 contributor · 500 project_lead · 600 maintainer · 700 owner).
+Requires project MAINTAINER (600). Always ask-mode: every membership change passes a human at /approve/:id regardless of the credential's mode.
+Gotchas:
+- You cannot grant a role above your own (permission_denied \`role_above_caller\`), act on yourself (\`self_target\`), or touch anyone whose effective role is >= yours unless you are OWNER (\`target_outranks_caller\`).
+- Fails with \`conflict\` when the person already holds a direct membership — use SetRole to change it.
+- Membership commands batch with each other (max 25, one person each) but never with other command kinds.
+Example: \`{ "kind": "InviteMember", "projectId": "p1", "username": "ana", "role": 400 }\``,
+  },
+  {
+    kind: 'SetRole',
+    title: 'Set member role',
+    oneLiner: 'Change an existing direct member’s project role.',
+    minRoleLevel: MAINTAINER,
+    tier: 'governance',
+    agentReachable: true,
+    paramsDoc: `### SetRole
+Params: \`{ projectId, username, role }\` — same role ladder, floor and caps as InviteMember, always ask-mode.
+Gotcha: fails with \`conflict\` when the person has no direct membership row (their access comes from the org, a group, or being the creator) — grant one with InviteMember instead.`,
+  },
+  {
+    kind: 'RemoveMember',
+    title: 'Remove member',
+    oneLiner: 'Drop a person’s direct project membership row.',
+    minRoleLevel: MAINTAINER,
+    tier: 'governance',
+    agentReachable: true,
+    paramsDoc: `### RemoveMember
+Params: \`{ projectId, username }\` — requires project MAINTAINER (600), always ask-mode.
+Removes the DIRECT membership row only. Org / group / creator grant paths are additive (AD-12) and still confer access — remove those at the org level.
+Gotchas:
+- The target cap applies: below OWNER you cannot remove anyone whose effective role is >= yours, and never yourself.
+- Fails with \`conflict\` when there is no direct membership row to remove.`,
+  },
 ] as const
 
 export function describeCommand(kind: string): CommandCatalogEntry | null {

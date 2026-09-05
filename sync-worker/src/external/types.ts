@@ -55,11 +55,11 @@ export interface ChangesetSummary {
   artifactLinked?: string
   /** LinkMedia: number of cells an audio artifact is attached to. */
   mediaLinked?: number
-  /** Receipt-only (CreateProject / UpdateProjectSettings / PatchSettings): the
-   *  command kind, so the human on /approve/:id sees WHICH lifecycle op they're
-   *  approving instead of an empty "No changes summarized." box (design §2 /
-   *  blind-approval fix). */
-  command?: 'CreateProject' | 'UpdateProjectSettings' | 'PatchSettings'
+  /** Receipt-only (CreateProject / UpdateProjectSettings / PatchSettings /
+   *  Membership): the command kind, so the human on /approve/:id sees WHICH
+   *  lifecycle op they're approving instead of an empty "No changes
+   *  summarized." box (design §2 / blind-approval fix). */
+  command?: 'CreateProject' | 'UpdateProjectSettings' | 'PatchSettings' | 'Membership'
   /** CreateProject: the project name being created. */
   projectName?: string
   /** CreateProject: the definitive new project id. */
@@ -77,6 +77,11 @@ export interface ChangesetSummary {
   settingsChanges?: Record<string, string>
   /** EmitEvents: per-kind effect lines (kind, count, testimony flag). */
   events?: EmitEventsSummaryEntry[]
+  /** AQU-1185 Membership: one plain-language line per membership change ("Add
+   *  alice to proj-a as contributor (400)"), rendered as its own list on the
+   *  approval page. A human approving a role grant must be able to read who,
+   *  what role, and which project without decoding the command JSON. */
+  membershipChanges?: string[]
   warnings: ChangesetWarning[]
 }
 
@@ -123,6 +128,11 @@ export interface PlannedEventIds {
    *  assignment.create's assignmentId when the caller omitted them), so a
    *  crash-retry re-posts IDENTICAL ids and payloads. */
   emitEvents?: { eventId: string; commentId?: string; assignmentId?: string }[]
+  /** AQU-1185 Membership: the resolved target user id per command, in command
+   *  order. Pinned at prepare so the commit writes the PERSON the human
+   *  approved — a username that has since been reassigned to another account
+   *  is drift (plan_stale), not a target. */
+  membership?: { username: string; userId: string }[]
   /** LinkMedia: one entry per attach command — the target (fileId, cellId), the
    *  audio artifact id, and the minted cell.audio.attach + cell.audio.select
    *  event ids. A crash-and-retry re-posts these IDENTICAL ids, so the /events
@@ -147,6 +157,19 @@ export interface ChangesetReceipt {
   fileId?: string
 }
 
+/** AQU-1185: one applied membership change, recorded on the receipt so the
+ *  audit trail is self-contained — the changeset row already carries the
+ *  credential id, and this says exactly what that credential did to whom. */
+export interface MembershipReceiptEntry {
+  kind: 'InviteMember' | 'SetRole' | 'RemoveMember'
+  userId: string
+  username: string
+  /** The role granted (absent for RemoveMember). */
+  role?: number
+  /** The target's direct role before the write; null when they had no row. */
+  previousRole: number | null
+}
+
 /** W2-A receipt for the receipt-only project-lifecycle commands (spec §2 D8).
  *  These apply a plain row write, not events, so the event-shaped
  *  ChangesetReceipt does not fit — the receipt is a provenance stamp instead. */
@@ -154,14 +177,16 @@ export interface ReceiptOnlyReceipt {
   credentialId: string
   channel: ProvenanceChannel
   changesetId: string
-  command: 'CreateProject' | 'UpdateProjectSettings' | 'PatchSettings'
+  command: 'CreateProject' | 'UpdateProjectSettings' | 'PatchSettings' | 'Membership'
   appliedAt: string
   /** CreateProject: the created project id. UpdateProjectSettings /
-   *  PatchSettings: the updated project id. */
+   *  PatchSettings / Membership: the affected project id. */
   projectId: string
   /** UpdateProjectSettings / PatchSettings: the new settings version after the
    *  write. */
   version?: number
+  /** Membership: every applied change, in command order. */
+  membership?: MembershipReceiptEntry[]
 }
 
 /** The full stored plan, as persisted in `changesets`. */

@@ -23,6 +23,11 @@ import {
   type UpdateProjectSettingsCommand,
 } from './commands'
 import { changedPolicyKeys, commitPatchSettings } from './commands-patch-settings'
+import {
+  commitMembership,
+  isMembershipCommand,
+  type MembershipCommand,
+} from './commands-membership'
 import { commitEmitEvents } from './emit-events-engine'
 import {
   buildProvenance,
@@ -210,6 +215,15 @@ export async function commitChangesetCore(
   )
   if (patchSettingsCmd) {
     return commitPatchSettings(db, cred, cs, patchSettingsCmd, channel)
+  }
+  // AQU-1185 membership: receipt-only, all-or-nothing, and its module re-runs
+  // the MAINTAINER floor plus the grant/target caps against the LIVE role graph
+  // before it writes a single row.
+  const membershipCmds = cs.commands.filter((c): c is MembershipCommand =>
+    isMembershipCommand(c),
+  )
+  if (membershipCmds.length > 0) {
+    return commitMembership(db, env, cred, cs, membershipCmds, channel, ctx)
   }
 
   // ── Live role/membership precheck (§2) ────────────────────────────────────

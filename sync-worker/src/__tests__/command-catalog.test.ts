@@ -59,6 +59,7 @@ describe('command catalog — invariants', () => {
       UpdateProjectSettings: { kind: 'UpdateProjectSettings', projectId: 'p', settings: {}, ifMatchVersion: 0 },
       PatchSettings: { kind: 'PatchSettings', projectId: 'p', ops: [{ key: 'brief', value: 1 }], ifMatchVersion: 0 },
       EmitEvents: { kind: 'EmitEvents', events: [{ kind: 'comment.create', payload: { body: 'hi' } }] },
+      DraftCells: { kind: 'DraftCells', fileId: 'f', cellIds: ['c'] },
     }
     for (const entry of COMMAND_CATALOG) {
       const sample = minimal[entry.kind]

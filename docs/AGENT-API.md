@@ -542,3 +542,40 @@ The command layer is now the **shared write spine for both agent surfaces** (see
   `credential_id = 'session'`, forced ask mode, `channel: "app"` provenance, and the existing
   `/api/v2/changesets/:id/approval|approve|reject` human gate; the SPA's live ChangesetCard
   commits after approval (per-item confirmation for testimony kinds).
+
+## Status addendum (2026-09-05, AQU-1186 — DraftCells)
+
+Parity epic AQU-1181 item 7: agents could only write text they wrote themselves, and had
+no way to tell a pending AI draft from a committed human value.
+
+- **New command — `DraftCells`** (`{ fileId, cellIds, laneId?, instructions? }`, sole
+  command, CONTRIBUTOR). Runs the **project's own copilot** over the named cells and stages
+  the result as one changeset. It is a *prepare-time expansion*: drafting happens once, at
+  prepare, and the generated text is materialized into ordinary `SetTranslation` commands
+  carrying server-minted `aiDraft` provenance — so the whole existing pipeline
+  (preconditions, digest, approval gate, provenance stamping, crash-retry id ledger)
+  applies unchanged, and the human approves text they can actually read. Committed cells
+  land `ai_drafted = 1`, identical to an in-app draft.
+- **Cost rails.** `cellIds` is explicit and non-empty — wildcards are rejected outright.
+  The per-changeset cap is the project's configured completion batch size
+  (`db/shared/completion-batch.ts`, mirroring AQU-586's `completionBatchSizeFor`: default
+  10, clamp 50); an over-cap request is rejected **naming the cap** and never reaches the
+  model. Spend meters through the existing credits system on the `agent` rail against the
+  project's org; an exhausted org returns `rate_limited` and **nothing is staged**.
+- **Where the model runs.** The drafting pipeline stays in auth-worker, which owns the
+  OpenRouter key, the model allowlist and the credit ledger. sync-worker calls
+  `POST /api/v1/ai/agent/internal/draft-cells` with the `SYNC_SECRET_KEY` shared secret
+  (the same server-to-server pattern as `monday/internal/push`). That endpoint returns
+  drafts and **never writes** — staging and the approval gate stay with the changeset
+  engine. `auth-worker/src/lib/agent/tools/draft.ts` now exposes `generateDrafts`
+  (generation only) with `executeDraft` layered on top, so the in-app agent tool and the
+  external command share one pipeline rather than two copies of the copilot.
+- **`aiDraft` in reads.** `aiDrafted` + `aiDraft` already ride the external cells read
+  (`GET .../files/:fileId/cells`, via `cells-read-route`'s serializer); they are now
+  pinned by a regression test so an agent can always distinguish a pending AI draft from
+  the committed value.
+- **Known divergence.** `completionBatchSize` is written by the SPA into the local project
+  record and is not yet synced into the server's `project_settings` blob, so the
+  server-side cap reads the default (10) until it is. The resolver accepts both
+  `completionSettings.completionBatchSize` and a top-level `completionBatchSize` so it
+  picks the value up the moment either lands.

@@ -131,6 +131,24 @@ Gotchas:
 - Every referenced cell/comment/file/assignment must exist at prepare — one bad reference rejects the whole plan (no silent skips).
 - payload shapes match the app's event vocabulary — call describe_command or docs before hand-building unfamiliar payloads.`,
   },
+  {
+    kind: 'DraftCells',
+    title: 'Draft cells',
+    oneLiner: 'Have the project’s own copilot draft named cells; stages as AI drafts.',
+    minRoleLevel: CONTRIBUTOR,
+    tier: 'prepared',
+    agentReachable: true,
+    paramsDoc: `### DraftCells
+Params: \`{ fileId, cellIds: [...], laneId?, instructions? }\` — sole command in its changeset.
+Asks the APP to draft instead of writing the text yourself, so the output carries this project's terminology, few-shot pairs and translation brief. Drafting runs once, at prepare; the generated text is materialized into \`target.cell.commit\` events marked \`ai_drafted\`, exactly like an in-app draft — so a human reviews it as AI work, and \`aiDraft\` is visible in cell reads until they edit or validate it.
+Gotchas:
+- \`cellIds\` is EXPLICIT and non-empty. Wildcards ("*", "all") are rejected — there is no "draft everything".
+- Cap per changeset = the project's configured completion batch size (default 10, max 50). Over-cap requests are rejected naming the cap; split the work across changesets.
+- Spend meters through the org's credit ledger on the agent rail. An exhausted org fails with \`rate_limited\` and NOTHING is staged.
+- No auto-commit: the result is a staged changeset like any other, subject to the same approval gate and one-hour expiry.
+- \`laneId\` must already be registered in the project's targetLanes; omit for the default lane.
+Example: \`{ "kind": "DraftCells", "fileId": "f1", "cellIds": ["c3", "c4", "c5"] }\``,
+  },
 ] as const
 
 export function describeCommand(kind: string): CommandCatalogEntry | null {

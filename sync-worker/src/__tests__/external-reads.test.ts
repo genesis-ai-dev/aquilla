@@ -186,6 +186,45 @@ describe("external read surface", () => {
       expect(body.data).toHaveLength(2)
       expect(body.data.map((c) => c.side).sort()).toEqual(["source", "target"])
     })
+
+    // AQU-1186: an agent must be able to tell a PENDING AI draft from a value a
+    // human committed, otherwise it re-drafts (or "confirms") the copilot's own
+    // untouched output. aiDrafted + aiDraft ride the same read as the value.
+    it("exposes aiDrafted + aiDraft provenance, distinct from the committed value", async () => {
+      const provenance = {
+        model: "anthropic/test-drafter",
+        provider: "platform",
+        promptVersion: "agent-draft-v3-staged-research",
+        exampleIds: [],
+        generatedAt: 1_700_000_000_000,
+        mode: "agent",
+        projectState: { sourceLanguage: "en", targetLanguage: "fr", approvedExampleCount: 0 },
+      }
+      await testDb.pg.query(
+        `UPDATE cells SET ai_drafted = 1, ai_draft = $1::jsonb
+          WHERE project_id = 'proj-a' AND file_id = 'file-x' AND cell_id = 'cell-1' AND side = 'target'`,
+        [JSON.stringify(provenance)],
+      )
+      const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
+      const res = await handleExternalReadRequest(
+        req("/api/v1/external/projects/proj-a/files/file-x/cells", token),
+        env(testDb),
+      )
+      expect(res!.status).toBe(200)
+      const body = (await res!.json()) as {
+        data: Array<{ side: string; value: string; aiDrafted?: boolean; aiDraft?: { model: string } | null }>
+      }
+      const target = body.data.find((c) => c.side === "target")!
+      expect(target.value).toBe("Au commencement")
+      expect(target.aiDrafted).toBe(true)
+      expect(target.aiDraft?.model).toBe("anthropic/test-drafter")
+
+      // A source cell (never AI-drafted) reports the same fields as absent/false,
+      // so the distinction is readable rather than inferred.
+      const source = body.data.find((c) => c.side === "source")!
+      expect(source.aiDrafted).toBe(false)
+      expect(source.aiDraft).toBeNull()
+    })
   })
 
   describe("cell history", () => {

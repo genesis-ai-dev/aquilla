@@ -416,6 +416,11 @@ export async function commitChangesetCore(
         // AQU-538: stamp the lane so the projection lands the commit on its
         // own (cell, target_lang) row and chain slot.
         ...(cmd.laneId ? { targetLang: cmd.laneId } : {}),
+        // AQU-1186: a DraftCells expansion carries the copilot's provenance,
+        // so the projection sets ai_drafted = 1 and the cell reads back as a
+        // pending AI draft — identical to an in-app draft. Only the server
+        // sets this (validateCommands drops a caller-supplied aiDraft).
+        ...(cmd.aiDraft ? { ai_suggestion: true as const, ai_draft: cmd.aiDraft } : {}),
         sourceEventId: pre.sourceEventId,
       },
       clientTs,

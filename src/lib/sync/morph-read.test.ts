@@ -60,7 +60,7 @@ describe("fetchCellMorph", () => {
     })
 
     expect(words).toEqual([word("c1", 1, "λογος")])
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit]
     expect(url).toContain("/projects/p%201/files/f%2F1/morph")
     expect(url).toContain("cellIds=c1%2Cc2")
     expect((init.headers as Record<string, string>).Authorization).toBe("Bearer tok")

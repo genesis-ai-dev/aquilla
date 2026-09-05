@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { Check, KeyRound, Sparkles, UserRound } from "lucide-react"
+import { KeyRound, Sparkles, UserRound } from "lucide-react"
 import { useLocation, useNavigate, useParams } from "react-router-dom"
 import {
   Dialog,
@@ -24,7 +24,6 @@ import {
   clearUserProviderOverride,
   useUserProviderOverride,
 } from "@/lib/store/user-provider-override"
-import { patchProject } from "@/lib/store/project-index"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { useT } from "@/lib/i18n/I18nProvider"
 
@@ -63,7 +62,7 @@ export function AiSetupDialog({ open, onOpenChange, project, onUpdated }: AiSetu
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const saveSettings = useSaveCompletionSettings(project.id, onUpdated)
+  const saveSettings = useSaveCompletionSettings(project, onUpdated)
 
   useEffect(() => {
     if (!open) return
@@ -71,13 +70,8 @@ export function AiSetupDialog({ open, onOpenChange, project, onUpdated }: AiSetu
     setError(null)
   }, [open, initialChoice])
 
-  async function markChosen(updated?: ProjectRecord) {
-    const next = await patchProject(project.id, (latest) => ({
-      ...latest,
-      ...(updated ?? {}),
-      aiProviderChosen: true,
-    }))
-    if (next) onUpdated(next)
+  async function persistChoice(overrides: Parameters<typeof saveSettings>[0]) {
+    await saveSettings(overrides, { aiProviderChosen: true })
   }
 
   async function handleContinue() {
@@ -98,12 +92,11 @@ export function AiSetupDialog({ open, onOpenChange, project, onUpdated }: AiSetu
       setBusy(true)
       try {
         // Clear a leftover project key so the global default can apply here.
-        await saveSettings({
+        await persistChoice({
           provider: "frontier",
           endpoint: FRONTIER_CHAT_URL,
           model: "",
         })
-        await markChosen()
         onOpenChange(false)
       } finally {
         setBusy(false)
@@ -122,13 +115,12 @@ export function AiSetupDialog({ open, onOpenChange, project, onUpdated }: AiSetu
       }
       setBusy(true)
       try {
-        await saveSettings({
+        await persistChoice({
           provider: "custom",
           endpoint: customEndpoint.trim(),
           model: customModel.trim(),
           ...(key ? { apiKey: key } : {}),
         })
-        await markChosen()
         onOpenChange(false)
       } finally {
         setBusy(false)
@@ -140,12 +132,11 @@ export function AiSetupDialog({ open, onOpenChange, project, onUpdated }: AiSetu
       // This chooser is exclusive: Frontier drafts must not still ride a
       // device-wide personal override.
       if (override) clearUserProviderOverride()
-      await saveSettings({
+      await persistChoice({
         provider: "frontier",
         endpoint: FRONTIER_CHAT_URL,
         model: "",
       })
-      await markChosen()
       onOpenChange(false)
     } finally {
       setBusy(false)
@@ -296,21 +287,14 @@ function ProviderOption({
       onClick={onClick}
       aria-pressed={selected}
       className={
-        "flex w-full items-start gap-3 rounded-lg border p-3 text-start transition-colors " +
+        "flex w-full items-start gap-3 rounded-lg border p-4 text-start transition-colors " +
         (selected
           ? "border-primary bg-primary/5"
           : "hover:bg-accent/40")
       }
     >
-      <div
-        className={
-          "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-lg border " +
-          (selected
-            ? "border-primary bg-primary text-primary-foreground"
-            : "border-muted-foreground/30 text-muted-foreground")
-        }
-      >
-        {selected ? <Check className="h-3 w-3" strokeWidth={3} /> : icon}
+      <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-muted-foreground/30 text-muted-foreground">
+        {icon}
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">

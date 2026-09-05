@@ -44,7 +44,7 @@ export function AiProviderStep({ project, onUpdated, onSaved }: AiProviderStepPr
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const saveSettings = useSaveCompletionSettings(project.id, onUpdated)
+  const saveSettings = useSaveCompletionSettings(project, onUpdated)
 
   async function handleSave() {
     if (selected === "frontier" && !session) {
@@ -64,12 +64,15 @@ export function AiProviderStep({ project, onUpdated, onSaved }: AiProviderStepPr
     setBusy(true)
     try {
       const isFrontier = selected === "frontier"
-      await saveSettings({
-        provider: isFrontier ? "frontier" : "custom",
-        endpoint: isFrontier ? FRONTIER_CHAT_URL : customEndpoint.trim(),
-        model: isFrontier ? "" : customModel.trim(),
-        ...(!isFrontier && customKey ? { apiKey: customKey } : {}),
-      })
+      await saveSettings(
+        {
+          provider: isFrontier ? "frontier" : "custom",
+          endpoint: isFrontier ? FRONTIER_CHAT_URL : customEndpoint.trim(),
+          model: isFrontier ? "" : customModel.trim(),
+          ...(!isFrontier && customKey ? { apiKey: customKey } : {}),
+        },
+        { aiProviderChosen: true },
+      )
       if (!isFrontier && customKey) setUserApiKey("completion", customKey)
       onSaved?.()
     } finally {

@@ -5,19 +5,6 @@ import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import type { ProjectRecord } from "@/lib/parsers/types"
 
 const saveSettings = vi.hoisted(() => vi.fn(async () => undefined))
-const patchProjectMock = vi.hoisted(() =>
-  vi.fn(async (_id: string, transform: (p: ProjectRecord) => ProjectRecord) =>
-    transform({
-      id: "dev-project",
-      name: "Dev Project",
-      sourceLanguage: "en",
-      targetLanguage: "fr",
-      createdAt: "2026-01-01T00:00:00Z",
-      files: [],
-      members: [],
-    }),
-  ),
-)
 const clearUserProviderOverride = vi.hoisted(() => vi.fn())
 const overrideState = vi.hoisted(() => ({ current: null as { endpoint: string; apiKey?: string } | null }))
 
@@ -35,10 +22,6 @@ vi.mock("@/hooks/useCompletionSettings", async (importOriginal) => {
     useSaveCompletionSettings: () => saveSettings,
   }
 })
-
-vi.mock("@/lib/store/project-index", () => ({
-  patchProject: patchProjectMock,
-}))
 
 vi.mock("@/lib/store/user-provider-override", () => ({
   useUserProviderOverride: () => overrideState.current,
@@ -98,7 +81,6 @@ function projectKeyOption() {
 
 beforeEach(() => {
   saveSettings.mockClear()
-  patchProjectMock.mockClear()
   clearUserProviderOverride.mockClear()
   overrideState.current = null
 })
@@ -116,10 +98,10 @@ describe("AiSetupDialog", () => {
     const { onOpenChange } = renderDialog()
     fireEvent.click(screen.getByRole("button", { name: "Continue" }))
     await waitFor(() => expect(saveSettings).toHaveBeenCalled())
-    expect(saveSettings).toHaveBeenCalledWith(expect.objectContaining({ provider: "frontier" }))
-    expect(patchProjectMock).toHaveBeenCalled()
-    const patched = await patchProjectMock.mock.results[0]?.value
-    expect(patched?.aiProviderChosen).toBe(true)
+    expect(saveSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: "frontier" }),
+      expect.objectContaining({ aiProviderChosen: true }),
+    )
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 
@@ -144,11 +126,14 @@ describe("AiSetupDialog", () => {
     fireEvent.change(screen.getByLabelText(/API key/i), { target: { value: "sk-or-user" } })
     fireEvent.click(screen.getByRole("button", { name: "Continue" }))
     await waitFor(() => expect(saveSettings).toHaveBeenCalled())
-    expect(saveSettings).toHaveBeenCalledWith(expect.objectContaining({
-      provider: "custom",
-      endpoint: "https://openrouter.ai/api/v1",
-      apiKey: "sk-or-user",
-    }))
+    expect(saveSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "custom",
+        endpoint: "https://openrouter.ai/api/v1",
+        apiKey: "sk-or-user",
+      }),
+      expect.objectContaining({ aiProviderChosen: true }),
+    )
     expect(onOpenChange).toHaveBeenCalledWith(false)
   })
 
@@ -159,10 +144,13 @@ describe("AiSetupDialog", () => {
     fireEvent.change(screen.getByLabelText(/API key/i), { target: { value: "sk-or-project" } })
     fireEvent.click(screen.getByRole("button", { name: "Continue" }))
     await waitFor(() => expect(saveSettings).toHaveBeenCalled())
-    expect(saveSettings).toHaveBeenCalledWith(expect.objectContaining({
-      provider: "custom",
-      apiKey: "sk-or-project",
-    }))
+    expect(saveSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "custom",
+        apiKey: "sk-or-project",
+      }),
+      expect.objectContaining({ aiProviderChosen: true }),
+    )
     expect(clearUserProviderOverride).not.toHaveBeenCalled()
   })
 
@@ -181,7 +169,10 @@ describe("AiSetupDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: /Personal override/i }))
     fireEvent.click(screen.getByRole("button", { name: "Continue" }))
     await waitFor(() => expect(saveSettings).toHaveBeenCalled())
-    expect(saveSettings).toHaveBeenCalledWith(expect.objectContaining({ provider: "frontier" }))
+    expect(saveSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: "frontier" }),
+      expect.objectContaining({ aiProviderChosen: true }),
+    )
     expect(clearUserProviderOverride).not.toHaveBeenCalled()
   })
 })

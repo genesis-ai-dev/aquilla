@@ -67,6 +67,7 @@ import { handleValidatorsReadRequest } from "./events/validators-read-route"
 import { handleBranchingSearchRequest } from "./events/branching-search-route"
 import { handleBranchingSearchPassagesRequest } from "./events/branching-search-passages-route"
 import { handleCommentsReadRequest } from "./events/comments-read-route"
+import { handleConceptsReadRequest } from "./events/concepts-read-route"
 import { handleCellBacktranslationsReadRequest } from "./events/cell-backtranslations-read-route"
 import { handleExternalReadRequest } from "./external/read-routes"
 import { handleExternalMcpRequest } from "./external/mcp-route"
@@ -344,6 +345,8 @@ const worker = {
     if (linkCursorBatchesResponse) return withCors(linkCursorBatchesResponse, request)
     const commentsReadResponse = await handleCommentsReadRequest(request, env)
     if (commentsReadResponse) return withCors(commentsReadResponse, request)
+    const conceptsReadResponse = await handleConceptsReadRequest(request, env)
+    if (conceptsReadResponse) return withCors(conceptsReadResponse, request)
     const btReadResponse = await handleCellBacktranslationsReadRequest(request, env)
     if (btReadResponse) return withCors(btReadResponse, request)
     const externalReadResponse = await handleExternalReadRequest(request, env)

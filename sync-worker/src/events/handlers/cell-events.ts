@@ -20,8 +20,9 @@
 // already exists) and sets updateProjection=false. For IN-FLIGHT races the
 // pre-check is a TOCTOU (audit RACE-2), so chain-mutating events also take
 // an atomic chain_claims row here and their cells writes are gated on
-// holding it (see chain-claims.ts). The route reads the claims back after
-// commit to flag losers as stale in the response.
+// holding it AND on the row's current head still being this event's parent
+// (head compare-and-swap, AQU-1154 — see event-projection.ts). The route
+// reads the gated write's row count after commit to flag losers as stale.
 
 import type { AuthorizedEvent } from '../authorize'
 import type { RealtimeMessage, ProjectionTable } from '../realtime'
@@ -129,6 +130,7 @@ export function handleCellEvent(
   // A parent-null cell delete is a tombstone, not a chain extension — it takes
   // no claim and projects ungated, matching rebuild's replay rule (AQU-931).
   let chainGate: ChainSlot | undefined
+  let headStmtIndex: number | undefined
   if (
     opts.updateProjection &&
     isChainArbitrated(event.kind, event.parentId ?? null) &&
@@ -145,6 +147,11 @@ export function handleCellEvent(
       parentKey: eventQualifiedParentKey(event.parentId, event.kind, event.payload),
     }
     stmts.push(buildChainClaimStmt(db, chainGate, event.id))
+    // The FIRST statement buildEventProjectionStmts pushes for every
+    // chain-arbitrated kind (create/commit/delete/reorder) is the gated
+    // cells write — the one whose row count tells the route whether this
+    // event actually advanced the head (AQU-1154).
+    headStmtIndex = stmts.length
   }
 
   if (opts.updateProjection) {
@@ -191,6 +198,7 @@ export function handleCellEvent(
     eventFrame,
     dirtyTables: projectionTablesFor(projectionTouches),
     chainSlot: chainGate,
+    headStmtIndex,
     counterFile,
   }
 }

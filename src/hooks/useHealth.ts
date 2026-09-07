@@ -36,7 +36,18 @@ interface HealthDispatchOptions {
     projectHealth: number | null
     fileHealth: Map<string, number>
   } | null
+  /**
+   * Kill switch (see `@/lib/health/kill-switch`). When false, decay health
+   * and rule checks are skipped entirely: healthMap/infractions come back
+   * empty and no per-cell caches are retained. File progress and comment
+   * counts (cheap, non-health) are still derived.
+   */
+  enabled?: boolean
 }
+
+const EMPTY_HEALTH_MAP: Map<string, number> = new Map()
+const EMPTY_INFRACTIONS: Map<string, RuleInfraction[]> = new Map()
+const DISABLED_DECAY = { healthMap: EMPTY_HEALTH_MAP, fileHealth: EMPTY_HEALTH_MAP, projectHealth: 0 }
 
 // ---------------------------------------------------------------------------
 // Structural-stability helpers. Every `computeHealthMap` call returns fresh
@@ -155,6 +166,7 @@ export function useHealth(
   options: HealthDispatchOptions = {},
 ): HealthStats {
   const requiredValidations = options.requiredValidations ?? 1
+  const enabled = options.enabled ?? true
   const decaySettingsKey = JSON.stringify(options.decaySettings ?? null) + `|${requiredValidations}`
 
   // AD-14: health (project / file / per-cell) derives from decay, computed
@@ -162,6 +174,7 @@ export function useHealth(
   // to the project's required-validations gate (see resolveDecayConfig) so a
   // validated cell reaches full health.
   const decay = useMemo(() => {
+    if (!enabled) return DISABLED_DECAY
     const end = perfMark("useHealth.computeDecayHealth")
     const settings = resolveDecayConfig(options.decaySettings, requiredValidations)
     const r = computeDecayHealth(fileCells, settings)
@@ -169,7 +182,7 @@ export function useHealth(
     memMark("useHealth.decay")
     return r
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fileCells, decaySettingsKey])
+  }, [fileCells, decaySettingsKey, enabled])
 
   // Rule / built-in-check violations — a SEPARATE sibling surface (AD-14), not
   // folded into health. Incremental: every commit revalidates the cells array
@@ -197,6 +210,10 @@ export function useHealth(
   }, [rules])
 
   const infractions = useMemo(() => {
+    if (!enabled) {
+      infractionsCacheRef.current = { rulesSig: "", byCell: new Map() }
+      return EMPTY_INFRACTIONS
+    }
     const end = perfMark("useHealth.checkRules")
     const cache = infractionsCacheRef.current
     const rulesChanged = cache.rulesSig !== rulesSig
@@ -226,7 +243,7 @@ export function useHealth(
     end()
     memMark("useHealth.checkRules")
     return result
-  }, [fileCells, enabledRules, rulesSig])
+  }, [fileCells, enabledRules, rulesSig, enabled])
 
   // File progress + open-comment counts.
   const aux = useMemo(() => deriveAuxStats(fileCells), [fileCells])

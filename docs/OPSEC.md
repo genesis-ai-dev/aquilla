@@ -36,6 +36,17 @@
 > credit-cap enforcement across concurrent chat requests, traced to its
 > mechanics but reported rather than fixed, since a correct fix means
 > redesigning the credit-guard/ledger interaction, not a same-day patch.
+> `docs/OPSEC-REVIEW-2026-08-31.md` is the most recent pass — the third on
+> auth & session management, taking up the invite-storage question 08-24
+> handed forward. It adds OPS-25 (the three public invite-preview routes each
+> hand-rolled a "best-effort caller" helper that checked only signature and
+> `exp`, skipping *both* the `jti` logout denylist and the
+> `password_changed_at` cutoff — now one shared `resolveSession` behind both
+> the required and optional auth paths, plus a drift guard) and OPS-26 (invite
+> tokens are **not** hashed at rest — see the D5 correction below — reported
+> rather than fixed, because three product surfaces deliberately re-display a
+> live invite token and hashing them is a product decision, not a port of
+> OPS-20's migration).
 
 _Standing OPSEC review of Aquilla's handling of sensitive data. Complements
 `docs/SECURITY-NOTES-2026-06-10.md` (application-security findings, June audit)
@@ -66,7 +77,7 @@ Ranked by what it would cost us if it leaked, not by volume.
 | D2 | **Unpublished translation drafts** — per-cell target text, comments, backtranslations | Postgres `cells`/`events`, R2 source blobs | Pre-publication scripture text for named languages. In restricted-access regions, *which* language is being worked on and *by whom* is the sensitive part, not the prose. |
 | D3 | **Translator identity + activity** — emails, usernames, org/project membership, presence, focus locks, `last_used_at` | Postgres; the `ProjectSync` DO in memory | Presence and focus-lock data is a working-hours and collaboration graph. Combined with D2 this answers "who is translating what, and when" — the question that makes this product a target rather than a curiosity. |
 | D4 | **Third-party credentials** — `OPENROUTER_API_KEY`, Monday client/signing secrets, GitLab admin token, Neon/Hyperdrive connection strings, R2 keys, `CLOUDFLARE_API_TOKEN`, Apple/Windows/Tauri signing keys | Worker secrets + GitHub Actions secrets | Direct financial loss (LLM spend), or — for the code-signing keys — the ability to ship a signed malicious desktop build. |
-| D5 | **Bearer tokens in circulation** — 30-day access JWTs, 15-minute sync tokens, `aqk_` Agent-API PATs, password-reset and email-verification tokens, invite tokens | Client IndexedDB / localStorage; `api_credentials`, `password_reset_tokens`, `email_verification_tokens` (all hashed — the latter two since migration 0080, OPS-20) | Each is a live credential. A password-reset token is account takeover on its own for 24 hours. Invite tokens ride in a URL path, which is the least protected place a bearer token can be — **and this row's "hashed" claim has not been checked against `project_invites`** (see OPS-20 follow-up). |
+| D5 | **Bearer tokens in circulation** — 30-day access JWTs, 15-minute sync tokens, `aqk_` Agent-API PATs, password-reset and email-verification tokens, invite tokens | Client IndexedDB / localStorage; `api_credentials`, `password_reset_tokens`, `email_verification_tokens` (hashed — the latter two since migration 0080, OPS-20); `project_invites`, `org_invites` (**plaintext** — OPS-26) | Each is a live credential. A password-reset token is account takeover on its own for 24 hours. Invite tokens ride in a URL path, which is the least protected place a bearer token can be — **and, checked on 2026-08-31, they are the exception to this row's "hashed" claim**: both invite tables store the raw token, so a DB read hands over working invite links (OPS-26, `docs/OPSEC-REVIEW-2026-08-31.md`). |
 | D6 | **Voice recordings and cloned voices** | R2 `aquilla-snapshots`, Modal services | Biometric-adjacent. A cloned voice is not revocable the way a password is. |
 | D7 | **User-supplied vendor API keys** (Gemini/TTS/completion) | Browser `localStorage`, org settings in Postgres | Someone else's credential that we chose to hold. |
 | D8 | **Session replays** | PostHog (third party) | Inputs are masked, but the page body is deliberately visible — so D2 draft text leaves our infrastructure by design. |

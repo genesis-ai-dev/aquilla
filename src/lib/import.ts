@@ -54,6 +54,7 @@ import { extractIdmlStrings } from "./parsers/idml"
 import { extractBiblicaStudyNoteStrings } from "./parsers/biblica"
 import { extractTreasureHuntStrings } from "./parsers/biblica-treasure-hunt"
 import { extractReach4LifeStrings } from "./parsers/biblica-reach4life"
+import { extractEblStrings } from "./parsers/biblica-ebl"
 import { extractHtmlStrings } from "./parsers/html"
 import { extractEpubImport, type EpubSpineMember } from "./parsers/epub"
 import { bulkUploadSource, type BulkImportCell } from "./sync/bulk-import"
@@ -1253,11 +1254,18 @@ export const TREASURE_HUNT_PROFILE_ID = "builtin:biblica-treasure-hunt"
 export const REACH4LIFE_PROFILE_ID = "builtin:biblica-reach4life"
 
 /**
+ * Equipping Biblical Leaders is a fourth template — a training programme's
+ * facilitator and participant guides, divided by topic and lesson rather than
+ * by book, and holding no published scripture to set anything around.
+ */
+export const EBL_PROFILE_ID = "builtin:biblica-ebl"
+
+/**
  * Which Biblica title an IDML package is. Nothing in the package identifies the
- * edition, and the three templates disagree about what a paragraph style means,
+ * edition, and the four templates disagree about what a paragraph style means,
  * so the person importing it says which one this is.
  */
-export type BiblicaEdition = "study-notes" | "treasure-hunt" | "reach4life"
+export type BiblicaEdition = "study-notes" | "treasure-hunt" | "reach4life" | "ebl"
 
 /**
  * Sidebar folder per edition, so a project holding more than one Biblica title
@@ -1268,6 +1276,7 @@ const BIBLICA_CORPUS_MARKERS: Readonly<Record<BiblicaEdition, string>> = {
   "study-notes": "Biblica Study Notes",
   "treasure-hunt": "Treasure Hunt Bible",
   reach4life: "Reach 4 Life",
+  ebl: "Equipping Biblical Leaders",
 }
 
 export type BiblicaImportPhase = "parse" | "save"
@@ -1398,6 +1407,7 @@ const BIBLICA_PROFILE_IDS: Readonly<Record<BiblicaEdition, string>> = {
   "study-notes": BIBLICA_NOTES_PROFILE_ID,
   "treasure-hunt": TREASURE_HUNT_PROFILE_ID,
   reach4life: REACH4LIFE_PROFILE_ID,
+  ebl: EBL_PROFILE_ID,
 }
 
 interface BiblicaParseOutcome {
@@ -1446,6 +1456,12 @@ async function parseBiblicaEdition(
       frontBackMatter: false,
     }
   }
+  if (edition === "ebl") {
+    // A guide is written material throughout, so nothing is skipped for being
+    // scripture and no one book owns the file.
+    const { strings } = await extractEblStrings(buffer, undefined, parseOptions)
+    return { strings, bookCodes: [], skippedScriptureCount: 0, frontBackMatter: false }
+  }
   const { strings, bookCodes, skipped, frontBackMatter } =
     await extractBiblicaStudyNoteStrings(buffer, undefined, parseOptions)
   return {
@@ -1473,10 +1489,17 @@ function emptyBiblicaImportMessage(edition: BiblicaEdition, fileName: string): s
       + "the `Metatext_BBI Bible Book Intros:*`, `Intros:*` and `Copyright:*` styles — check "
       + "that this is a Reach 4 Life package."
   }
+  if (edition === "ebl") {
+    // Nothing is filtered out by edition here, so an empty result means the
+    // package carried no text at all rather than the wrong template.
+    return `${fileName} parsed successfully but contained no text. An EBL guide imports `
+      + "every text-bearing paragraph, so this package holds only artwork — check that "
+      + "this is the guide rather than a cover or plate volume."
+  }
   return `${fileName} parsed successfully but contained no study notes. `
     + "Biblica notes live in `intro:*` paragraph styles — check that this is the notes "
-    + "document. If this is a Treasure Hunt Bible or a Reach 4 Life file, tick the matching "
-    + "box and import it again."
+    + "document. If this is a Treasure Hunt Bible, a Reach 4 Life or an EBL file, tick the "
+    + "matching box and import it again."
 }
 
 /** IDML is a UCF/ZIP package — reject anything that is not one before parsing. */

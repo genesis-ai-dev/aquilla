@@ -170,6 +170,13 @@ export function laneOfEvent(kind: string, payload: unknown): string {
  *   word_count     — total target-side words (translation output)
  *   last_edit_at   — most recent cell edit on the file (also drives file sort)
  *
+ * cell_count deliberately avoids COUNT(DISTINCT cell_id): that sorts the whole
+ * row set (value included, ~170 B/row) and spilled to disk on every
+ * 30K+-cell file under prod's 4 MB work_mem (4.6 GB temp over 8.6 days).
+ * GROUP BY cell_id over cells_pkey (project_id, file_id, cell_id, …) is an
+ * ordered Index Only Scan + Group — no sort at any work_mem. Guarded by
+ * __tests__/hot-query-plans.test.ts.
+ *
  * NOTE: this is what was always meant by file-create's "counters are
  * maintained by the cell commit projection path" comment — that maintenance
  * never actually existed before, so every `files` row sat at cell_count=0.
@@ -183,7 +190,11 @@ export function fileCountersRecomputeStmt(
   return db
     .prepare(
       `WITH counters AS (
-         SELECT COUNT(DISTINCT cell_id)::integer AS cell_count,
+         SELECT (SELECT COUNT(*) FROM (
+                   SELECT 1 FROM cells
+                    WHERE project_id = ? AND file_id = ?
+                    GROUP BY cell_id
+                 ) AS distinct_cells)::integer AS cell_count,
                 COUNT(*) FILTER (WHERE validated = 1)::integer AS approved_count,
                 COUNT(*) FILTER (
                   WHERE side = 'target' AND TRIM(value) != ''
@@ -207,6 +218,7 @@ export function fileCountersRecomputeStmt(
        WHERE files.id = ? AND files.project_id = ?`,
     )
     .bind(
+      projectId, fileId,
       projectId, fileId,
       serverTs,
       fileId, projectId,

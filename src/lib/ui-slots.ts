@@ -60,8 +60,3 @@ export function useUiSlot(name: string): HTMLElement | null {
     () => null,
   )
 }
-
-export function resetUiSlotsForTests(): void {
-  slots.clear()
-  notify()
-}

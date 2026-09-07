@@ -376,11 +376,6 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "Page heading of the Project Settings index. editor.navTitle.projectSettings " +
     "is the breadcrumb/nav label used while inside the editor to link TO " +
     "settings. A page naming itself vs a link naming its destination.",
-  "projectSettings.section.editor":
-    "Card heading for the settings group configuring the editor surface " +
-    "(chapter paging). editor.navTitle.editor is the editor's own nav-title/tab " +
-    "label when it is the active surface. A settings card naming the feature it " +
-    "configures vs a page naming itself are different grammatical roles.",
   "projectSettings.section.voice":
     "Card heading for this project's Voice/TTS API-key configuration. " +
     "editor.navTitle.voice is the editor's own audio-lens tab label. A settings " +
@@ -839,6 +834,15 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "loanword or fixed phrase. autopilot.graph.node.summarize shows 'Brief' as " +
     "the caption of the summarize STAGE in the autopilot pipeline graph — a " +
     "process-step label, not the document, and free to translate as 'summary'.",
+  "org.projectOverview.plan.statusNotStarted":
+    "Status of a PLANNING UNIT on the project dashboard's plan board \u2014 a " +
+    "book, episode or document nobody has put any content into yet. " +
+    "autopilot.status.notStarted is a value of the run-status enum for a " +
+    "background PROCESS that has not run; terminology.livingMemory.section." +
+    "brief.statusNone is the authoring state of one document. All three are " +
+    "'not started' in English and routinely take different verbs, participles " +
+    "or genders elsewhere \u2014 a unit of planned work, a job that has not " +
+    "fired, and an unwritten document are three different subjects.",
   "terminology.livingMemory.section.brief.statusNone":
     "Hint on the Living Memory index saying the brief document has not been " +
     "begun — an authoring state of a document. autopilot.status.notStarted is a " +

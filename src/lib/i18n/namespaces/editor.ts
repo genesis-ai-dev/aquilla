@@ -251,6 +251,9 @@ export const editor = defineNamespace({
     "editor.milestone.cellRange": "Cells {range}",
     "editor.milestone.percentTranslated": "{percent}% translated",
     "editor.milestone.percentValidated": "{percent}% validated",
+    "editor.milestone.splitAria": "Split into milestones",
+    "editor.milestone.splitHint":
+      "Show only the cells in the current division. Use the arrows to move to the next one.",
 
     "editor.milestone.chapter.moveBetween": "Move between chapters",
     "editor.milestone.chapter.previous": "Previous chapter",
@@ -360,6 +363,7 @@ export const editor = defineNamespace({
     "editor.view.showLineNumbers": "Show line numbers",
     "editor.view.showCellLabels": "Show cell labels",
     "editor.view.showTranslationNotes": "Show translation notes",
+    "editor.view.showHealthIndicators": "Show health indicators",
     "editor.view.targetKeyTerms": "Target key terms",
     "editor.view.targetKeyTermsAlways": "Always",
     "editor.view.targetKeyTermsFocused": "Focused cell only",
@@ -483,6 +487,8 @@ export const editor = defineNamespace({
     }),
     "editor.history.promote": "Promote to current",
     "editor.history.promoteConfirm": "Make this the current value?",
+    "editor.history.restore": "Restore this version",
+    "editor.history.restoreConfirm": "Replace the current text with this version?",
     "editor.history.showIntermediate": "Show intermediate edits",
     "editor.history.hideIntermediate": "Hide intermediate edits",
 
@@ -1175,6 +1181,10 @@ export const editor = defineNamespace({
     "editor.row.editorAria": "{ref} — {state}",
     "editor.row.selectedTooltip": "Selected. Drag up or down to extend the range.",
     "editor.row.selectTooltip": "Select cell. Drag up or down to select a range.",
+    // -- CellPresenceBadges: per-row live-collaborator chips --
+    "editor.presence.viewing": "viewing",
+    "editor.presence.editing": "editing",
+    "editor.presence.typing": "typing…",
     "editor.row.selectedAria": "Selected cell. Drag to extend selection.",
     "editor.row.selectAria": "Select cell. Drag to select a range.",
     "editor.state.empty": "empty",
@@ -1364,7 +1374,15 @@ export const editor = defineNamespace({
 
     // — Per-file sync status chip (WS connection to the sync-worker) ————
     "editor.sync.live": "Live",
-    "editor.sync.liveTooltip": "Live — changes are syncing to Cloudflare and across devices",
+    "editor.sync.liveTooltip": "Live — all changes are saved to the server and syncing across devices",
+    "editor.sync.syncing": "Syncing",
+    "editor.sync.syncingTooltip": "Syncing — some changes are still being sent to the server",
+    "editor.sync.retrying": "Retrying",
+    "editor.sync.retryingTooltip":
+      "Retrying — the last attempt to send your changes failed. Edits are saved locally and will be retried.",
+    "editor.sync.reconnecting": "Reconnecting",
+    "editor.sync.reconnectingTooltip":
+      "Reconnecting — the live connection dropped. Edits are saved locally; changes from others may be delayed.",
     "editor.sync.connecting": "Connecting",
     "editor.sync.connectingTooltip": "Connecting to the sync server…",
     "editor.sync.offline": "Offline",
@@ -2313,6 +2331,22 @@ export const editor = defineNamespace({
           percent: "Whole-number percentage, already rounded, without the % sign.",
         },
       },
+      "editor.milestone.splitAria": {
+        description:
+          "Label of the switch in ⋯ → Editor settings. It switches the table " +
+          "between a continuous list of every cell and a paged view that shows " +
+          "only the current division. On means the paged view is active. A " +
+          "switch label, so it names the thing being toggled on.",
+        maxLength: 28,
+        screenshot: "editor-table",
+      },
+      "editor.milestone.splitHint": {
+        description:
+          "Tooltip explaining that same switch: what the on state does, and that " +
+          "the chapter/section arrows then turn the page. 'Division' stays " +
+          "generic because the unit differs by file type (chapter, slide, section…).",
+        screenshot: "editor-table",
+      },
       "editor.milestone.chapter.moveBetween": {
         description: MILESTONE_MOVE_BETWEEN + MILESTONE_KIND_CHAPTER,
       },
@@ -2710,6 +2744,13 @@ export const editor = defineNamespace({
           "Label of the switch that reveals the translation-notes sidebar — " +
           "published exegetical notes for the verse in focus, fetched from a notes " +
           "resource. Not the user's own comments.",
+        maxLength: 32,
+      },
+      "editor.view.showHealthIndicators": {
+        description:
+          "Label of the switch that turns the per-row health ribbon, rule " +
+          "infractions, and the confidence overlay on or off. Turning it off " +
+          "lightens the editor on very large files. Applies to this browser only.",
         maxLength: 32,
       },
       "editor.view.targetKeyTerms": {
@@ -3257,6 +3298,18 @@ export const editor = defineNamespace({
       "editor.history.promoteConfirm": {
         description:
           "Inline confirmation question shown after clicking Promote, with Confirm " +
+          "and Cancel beside it. A question, so keep the question mark.",
+      },
+      "editor.history.restore": {
+        description:
+          "Link on an older (non-current, non-stale) history entry that makes that " +
+          "entry's text the cell's current value again, as a new edit. Imperative. " +
+          "Nothing is deleted; the newer edits stay in the history.",
+        maxLength: 26,
+      },
+      "editor.history.restoreConfirm": {
+        description:
+          "Inline confirmation question shown after clicking Restore, with Confirm " +
           "and Cancel beside it. A question, so keep the question mark.",
       },
       "editor.history.showIntermediate": {
@@ -4229,6 +4282,21 @@ export const editor = defineNamespace({
           "Tooltip on the selection checkbox when the row is NOT selected: what a " +
           "click does, then what a drag does.",
       },
+      "editor.presence.viewing": {
+        description:
+          "Tiny lowercase state word after a collaborator's name on a cell row and " +
+          "in the online-peers list: they have the row selected but hold no edit lock.",
+      },
+      "editor.presence.editing": {
+        description:
+          "Tiny lowercase state word after a collaborator's name on a cell row and " +
+          "in the online-peers list: they hold the edit lock on that cell.",
+      },
+      "editor.presence.typing": {
+        description:
+          "Tiny lowercase state word after a collaborator's name on a cell row while " +
+          "their live draft text is changing (last change within ~2 seconds).",
+      },
       "editor.row.selectedAria": {
         description:
           "Screen-reader name of the selection checkbox when the row is selected. " +
@@ -4970,6 +5038,34 @@ export const editor = defineNamespace({
       },
       "editor.sync.liveTooltip": {
         description: "Tooltip/aria-label of the sync chip in the editor.sync.live state.",
+      },
+      "editor.sync.syncing": {
+        description:
+          "Label of the sync status chip while queued local edits are still being " +
+          "sent to the server and no attempt has failed yet. A state adjective " +
+          "beside a colored dot.",
+        maxLength: 12,
+      },
+      "editor.sync.syncingTooltip": {
+        description: "Tooltip/aria-label of the sync chip in the editor.sync.syncing state.",
+      },
+      "editor.sync.retrying": {
+        description:
+          "Label of the sync status chip when queued local edits exist and the last " +
+          "attempt to send them failed; the app keeps retrying automatically.",
+        maxLength: 12,
+      },
+      "editor.sync.retryingTooltip": {
+        description: "Tooltip/aria-label of the sync chip in the editor.sync.retrying state.",
+      },
+      "editor.sync.reconnecting": {
+        description:
+          "Label of the sync status chip when the browser is online but the live " +
+          "websocket connection to the sync server is currently closed and being re-established.",
+        maxLength: 14,
+      },
+      "editor.sync.reconnectingTooltip": {
+        description: "Tooltip/aria-label of the sync chip in the editor.sync.reconnecting state.",
       },
       "editor.sync.connecting": {
         description:

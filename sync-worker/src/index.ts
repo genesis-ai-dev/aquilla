@@ -37,6 +37,7 @@ import { handleSessionChangesetsRequest } from "./external/session-routes"
 import { handleExternalArtifactsRequest } from "./external/artifacts-route"
 import { handleFilesReadRequest } from "./events/files-read-route"
 import { handleProgressReadRequest } from "./events/progress-read-route"
+import { handlePlanRequest } from "./events/plan-route"
 import { handleBulkImportRequest } from "./events/import-route"
 import { handleImportReconcileRequest } from "./events/import-reconcile-route"
 import { handleBulkMorphImportRequest } from "./events/import-morph-route"
@@ -66,6 +67,7 @@ import { handleValidatorsReadRequest } from "./events/validators-read-route"
 import { handleBranchingSearchRequest } from "./events/branching-search-route"
 import { handleBranchingSearchPassagesRequest } from "./events/branching-search-passages-route"
 import { handleCommentsReadRequest } from "./events/comments-read-route"
+import { handleConceptsReadRequest } from "./events/concepts-read-route"
 import { handleCellBacktranslationsReadRequest } from "./events/cell-backtranslations-read-route"
 import { handleExternalReadRequest } from "./external/read-routes"
 import { handleExternalMcpRequest } from "./external/mcp-route"
@@ -315,6 +317,10 @@ const worker = {
     if (filesReadResponse) return withCors(filesReadResponse, request)
     const progressReadResponse = await handleProgressReadRequest(request, env)
     if (progressReadResponse) return withCors(progressReadResponse, request)
+
+    // AQU-1092…1098: the project's plan board (units + target dates + Done).
+    const planResponse = await handlePlanRequest(request, env)
+    if (planResponse) return withCors(planResponse, request)
     const cellsReadResponse = await handleCellsReadRequest(request, env)
     if (cellsReadResponse) return withCors(cellsReadResponse, request)
     const cellConfidenceResponse = await handleCellConfidenceRequest(request, env)
@@ -339,6 +345,8 @@ const worker = {
     if (linkCursorBatchesResponse) return withCors(linkCursorBatchesResponse, request)
     const commentsReadResponse = await handleCommentsReadRequest(request, env)
     if (commentsReadResponse) return withCors(commentsReadResponse, request)
+    const conceptsReadResponse = await handleConceptsReadRequest(request, env)
+    if (conceptsReadResponse) return withCors(conceptsReadResponse, request)
     const btReadResponse = await handleCellBacktranslationsReadRequest(request, env)
     if (btReadResponse) return withCors(btReadResponse, request)
     const externalReadResponse = await handleExternalReadRequest(request, env)

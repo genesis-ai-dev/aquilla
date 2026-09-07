@@ -2,6 +2,7 @@ import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
 import app from "../index"
 import { jwtFor, authHeader } from "./helpers/db"
+import { clearSessionCache } from "../lib/session-cache"
 
 // [Pen test] Auth & session mgmt (2026-07-20): a password reset previously
 // did nothing to the access tokens already issued for the account — a
@@ -22,6 +23,11 @@ function register(username: string, email: string, password: string): Promise<Re
 }
 
 async function setPasswordChangedAt(username: string, iso: string): Promise<void> {
+  // Written straight to the DB (= from another isolate). The session cache
+  // would serve the pre-reset row until SESSION_CACHE_TTL_MS elapses — the
+  // documented window (lib/session-cache.ts). Clearing models that; the
+  // in-isolate eviction is covered in session-cache.test.ts.
+  clearSessionCache()
   await env.AQUILLA_PG.prepare("UPDATE users SET password_changed_at = ? WHERE username = ?")
     .bind(iso, username)
     .run()

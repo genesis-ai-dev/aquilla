@@ -587,3 +587,17 @@ describe("useOrgSettings — cross-instance sync of confirmed writes", () => {
     writer.unmount()
   })
 })
+
+describe("orgRules identity (AQU-1104)", () => {
+  it("keeps the same empty orgRules array across re-renders when the org has no rules", async () => {
+    mockFetchResponse = makeResponse()
+    const { result, rerender } = renderHook(() => useOrgSettings(1, 700))
+    const beforeFetch = result.current.orgRules
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    const afterFetch = result.current.orgRules
+    rerender()
+    expect(result.current.orgRules).toBe(afterFetch)
+    expect(afterFetch).toBe(beforeFetch)
+    expect(afterFetch).toEqual([])
+  })
+})

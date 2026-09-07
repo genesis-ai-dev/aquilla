@@ -5,6 +5,7 @@ import { v4 as uuid } from "uuid"
 import { Info, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog,
   DialogBody,
@@ -439,32 +440,37 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
               </summary>
               <form.Field
                 name="shape"
-                children={(field) => (
-                  <RadioGroup
-                    value={field.state.value}
-                    onValueChange={(value) => pickShape(value as ProjectShape)}
-                    className="gap-3 pt-1"
-                  >
-                    <label className="flex items-start gap-2.5 text-sm">
-                      <RadioGroupItem value="self-contained" className="mt-0.5" />
-                      <span>
-                        <RichMessage
-                          k="projectSettings.create.shapeSelfContained"
-                          values={{ name: <strong>{t("projectSettings.create.shapeSelfContainedName")}</strong> }}
+                children={(field) => {
+                  const linked = field.state.value === "linked-target"
+                  return (
+                    <div className="flex flex-col gap-2 pt-1">
+                      <label className="flex items-start gap-2.5 text-sm">
+                        <Checkbox
+                          className="mt-0.5"
+                          data-testid="create-shape-linked-target"
+                          checked={linked}
+                          onCheckedChange={(checked) =>
+                            pickShape(checked === true ? "linked-target" : "self-contained")
+                          }
                         />
-                      </span>
-                    </label>
-                    <label className="flex items-start gap-2.5 text-sm">
-                      <RadioGroupItem value="linked-target" className="mt-0.5" />
-                      <span>
-                        <RichMessage
-                          k="projectSettings.create.shapeLinkedTarget"
-                          values={{ name: <strong>{t("projectSettings.create.shapeLinkedTargetName")}</strong> }}
-                        />
-                      </span>
-                    </label>
-                  </RadioGroup>
-                )}
+                        <span>
+                          <RichMessage
+                            k="projectSettings.create.shapeLinkedTarget"
+                            values={{ name: <strong>{t("projectSettings.create.shapeLinkedTargetName")}</strong> }}
+                          />
+                        </span>
+                      </label>
+                      {!linked && (
+                        <FieldDescription>
+                          <RichMessage
+                            k="projectSettings.create.shapeSelfContained"
+                            values={{ name: <strong>{t("projectSettings.create.shapeSelfContainedName")}</strong> }}
+                          />
+                        </FieldDescription>
+                      )}
+                    </div>
+                  )
+                }}
               />
 
               <form.Subscribe

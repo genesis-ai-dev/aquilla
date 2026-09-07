@@ -309,4 +309,24 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     expect(screen.queryByText("Target language(s)")).toBeNull()
     expect(screen.queryByTestId("create-extra-lang-input")).toBeNull()
   })
+
+  it("toggles between the two shapes from the linked-target checkbox", () => {
+    render(<ProjectCreateDialog onCreated={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+    fireEvent.click(screen.getByText("Advanced: project shape"))
+
+    const toggle = () => screen.getByTestId("create-shape-linked-target")
+    expect(toggle().getAttribute("aria-checked")).toBe("false")
+    expect(screen.getByTestId("create-extra-lang-input")).toBeTruthy()
+
+    fireEvent.click(screen.getByText(/Linked target/i))
+    expect(toggle().getAttribute("aria-checked")).toBe("true")
+    expect(screen.queryByTestId("create-extra-lang-input")).toBeNull()
+
+    // Unchecking must return to self-contained rather than stranding the form
+    // in a shape with no target field.
+    fireEvent.click(screen.getByText(/Linked target/i))
+    expect(toggle().getAttribute("aria-checked")).toBe("false")
+    expect(screen.getByTestId("create-extra-lang-input")).toBeTruthy()
+  })
 })

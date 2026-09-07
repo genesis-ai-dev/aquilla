@@ -86,7 +86,7 @@ export const workspace = defineNamespace({
     // same sentence-case label for the same underlying value; the create dialog
     // already reuses projectSettings.create.* for the rest of its fields.
     "workspace.createDialog.targetChipsHint":
-      "Type a language and press Enter to add it. The first is the primary target; extras become additional lanes.",
+      "The first language is the project's primary target; each one you add below becomes its own lane.",
 
     // -- UsernameTypeahead --
     "workspace.typeahead.usernameModeTooltip": "Invite an existing Aquilla user",

@@ -2,9 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useForm } from "@tanstack/react-form"
 import { z } from "zod"
 import { v4 as uuid } from "uuid"
-import { Info, X } from "lucide-react"
+import { Info, Plus, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog,
@@ -16,7 +15,7 @@ import {
 } from "@/components/ui/dialog"
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { LanguageComboboxInput, useLanguageSuggestions } from "@/components/LanguageComboboxInput"
+import { LanguageComboboxInput } from "@/components/LanguageComboboxInput"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Spinner } from "@/components/ui/spinner"
 import {
@@ -33,7 +32,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 import { createProject } from "@/lib/store/project-index"
 import { createCloudProject } from "@/lib/sync/cloud-projects"
@@ -98,6 +97,14 @@ const FIELD_CLASS = "h-9 px-3"
 
 /** Same cap as LanguagesSection's lane registry (settings.targetLanes entries). */
 const MAX_EXTRA_LANGUAGE_LENGTH = 64
+
+/**
+ * Ceiling on how many lanes one create pass may add. Matches
+ * MAX_INVITE_SCOPE_LANES in auth-worker/src/services/invite-scopes.ts so a
+ * project can never hold more lanes than a single invite is able to scope
+ * somebody to.
+ */
+const MAX_TARGET_LANES = 50
 
 /**
  * AQU-538 creation fix (spec §5): the self-contained shape's target field
@@ -398,9 +405,9 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                             <form.Field
                               name="extraLanguages"
                               children={(extrasField) => (
-                                <TargetLanguageChips
+                                <TargetLanguageInputs
                                   // Remount when the dialog reopens so local
-                                  // chip/draft state can't leak across sessions.
+                                  // row state can't leak across sessions.
                                   key={open ? "open" : "closed"}
                                   onPrimaryChange={field.handleChange}
                                   onExtrasChange={extrasField.handleChange}
@@ -803,36 +810,41 @@ function AddAsLaneRecommendation({
 }
 
 /**
- * AQU-538 creation fix (spec §5): one chips field for all target languages on
- * the self-contained shape. Type → Enter commits a pill; the first pill is
- * the project's targetLanguage and the rest become settings.targetLanes after
- * create. An uncommitted draft still counts as the primary (so create works
- * without Enter).
+ * AQU-538 creation fix (spec §5): the self-contained shape's target field is
+ * one text box per lane, stacked, with a plus button that appends another.
+ * Box 0 is the project's targetLanguage; the rest become settings.targetLanes
+ * via the follow-up PATCH after create.
  *
- * Freeform tags (any label) stay the contract. This field is NOT a Base-UI
- * Combobox: its controlled inputValue/value dance cleared the draft on Enter
- * and raced our commit, so chips never stuck in the real browser. The plain
- * state below owns the draft, and AQU-988 layers `useLanguageSuggestions` on
- * top — a purely additive list that only writes back on an explicit pick, so
- * Enter on free-typed text still falls through to commitValue().
+ * Freeform tags (any label) stay the contract — AQU-988's suggestion list
+ * rides on each row through LanguageComboboxInput but never constrains what
+ * can be typed.
  */
-function validateTargetLanguageDraft(
+function validateTargetLanguage(
   candidate: string,
-  languages: string[],
+  earlier: string[],
+  t: TFunction,
 ): string | null {
   const trimmed = candidate.trim()
-  if (!trimmed) return "Enter a language tag."
+  // A blank row is what an unused box looks like, not an error: the plus
+  // button is what gates adding more, and blanks are dropped on submit.
+  if (!trimmed) return null
   if (trimmed.length > MAX_EXTRA_LANGUAGE_LENGTH) {
-    return `Must be ${MAX_EXTRA_LANGUAGE_LENGTH} characters or fewer.`
+    return t("projectSettings.create.extraLanguagesTooLongError", {
+      max: MAX_EXTRA_LANGUAGE_LENGTH,
+    })
   }
   const lower = trimmed.toLowerCase()
-  if (languages.some((l) => l.toLowerCase() === lower)) {
-    return "Already added."
+  if (earlier.some((l) => l.trim().toLowerCase() === lower)) {
+    return t("projectSettings.create.extraLanguagesAlreadyAddedError")
   }
   return null
 }
 
-function TargetLanguageChips({
+/** A target-language box. The id is stable across removals so React never
+ *  re-uses one row's DOM (and focus) for another row's value. */
+type LaneDraft = { id: number; value: string }
+
+function TargetLanguageInputs({
   onPrimaryChange,
   onExtrasChange,
   onBlur,
@@ -844,132 +856,105 @@ function TargetLanguageChips({
   invalid?: boolean
 }) {
   const t = useT()
-  const [chips, setChips] = useState<string[]>([])
-  const [draft, setDraft] = useState("")
-  const [error, setError] = useState<string | null>(null)
+  // Index 0 is the project's targetLanguage; 1..n are the additional lanes.
+  const [lanes, setLanes] = useState<LaneDraft[]>([{ id: 0, value: "" }])
+  const nextLaneId = useRef(1)
 
-  function syncForm(nextChips: string[], nextDraft: string) {
-    onPrimaryChange(nextChips[0] ?? nextDraft)
-    onExtrasChange(nextChips.slice(1))
-  }
-
-  function commitValue(candidate: string) {
-    const validationError = validateTargetLanguageDraft(candidate, chips)
-    if (validationError) {
-      setError(validationError)
-      return
+  function sync(next: LaneDraft[]) {
+    setLanes(next)
+    onPrimaryChange(next[0]?.value ?? "")
+    // Blank boxes and anything an earlier box already claimed are dropped
+    // instead of PATCHed; the offending row surfaces the error inline.
+    const claimed = new Set<string>()
+    const primary = (next[0]?.value ?? "").trim().toLowerCase()
+    if (primary) claimed.add(primary)
+    const extras: string[] = []
+    for (const lane of next.slice(1)) {
+      const trimmed = lane.value.trim()
+      if (!trimmed) continue
+      const lower = trimmed.toLowerCase()
+      if (claimed.has(lower)) continue
+      claimed.add(lower)
+      extras.push(trimmed)
     }
-    const nextChips = [...chips, candidate.trim()]
-    setChips(nextChips)
-    setDraft("")
-    setError(null)
-    syncForm(nextChips, "")
+    onExtrasChange(extras)
   }
 
-  function removeChip(lang: string) {
-    const nextChips = chips.filter((l) => l !== lang)
-    setChips(nextChips)
-    setError(null)
-    syncForm(nextChips, draft)
-  }
-
-  // Picking from the dropdown commits the language as a chip outright — the
-  // partially-typed draft it replaces is discarded, same as Enter would.
-  const { getInputProps, popup, focusInput } = useLanguageSuggestions({
-    query: draft,
-    exclude: chips,
-    onSelect: commitValue,
-  })
-
-  const chipInvalid = invalid || error != null
+  const values = lanes.map((l) => l.value)
+  const lastFilled = (values[values.length - 1] ?? "").trim().length > 0
+  const canAddMore = lanes.length < MAX_TARGET_LANES && lastFilled
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-2" data-testid="create-target-lang-inputs">
       <FieldDescription>
         {t("workspace.createDialog.targetChipsHint")}
       </FieldDescription>
-      <div
-        data-testid="create-target-lang-chips"
-        className={cn(
-          // Match ComboboxChips field chrome so this reads as one input.
-          "flex min-h-9 w-full flex-wrap items-center gap-1 rounded-lg border border-input bg-transparent bg-clip-padding px-3 py-1.5 text-sm transition-colors",
-          "focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/50",
-          "has-aria-invalid:border-destructive has-aria-invalid:ring-3 has-aria-invalid:ring-destructive/20",
-          "dark:bg-input/30 dark:has-aria-invalid:border-destructive/50 dark:has-aria-invalid:ring-destructive/40",
-          chips.length > 0 && "px-1.5",
-        )}
-        onMouseDown={(event) => {
-          // Clicking the field chrome focuses the input without stealing
-          // clicks from chip remove buttons.
-          const el = event.target as HTMLElement
-          if (el.tagName === "INPUT") return
-          if (el.closest("button")) return
-          event.preventDefault()
-          focusInput()
-        }}
-      >
-        {chips.map((lang) => (
-          <Badge
-            key={lang}
-            variant="secondary"
-            data-testid={`create-extra-lang-chip-${lang}`}
-            // Match ComboboxChip: muted surface + tighter radius so the pill
-            // separates from dark:bg-input/30 field chrome.
-            className="h-[calc(--spacing(5.25))] gap-1 rounded-sm bg-muted px-1.5 pr-0 text-xs font-medium text-foreground"
-          >
-            {lang}
-            <button
-              type="button"
-              aria-label={t("projectSettings.create.extraLanguagesRemoveAriaLabel", { lang })}
-              className="-ml-0.5 inline-flex size-5 items-center justify-center rounded-sm text-muted-foreground opacity-50 hover:opacity-100"
-              onClick={() => removeChip(lang)}
-            >
-              <X className="size-3" aria-hidden="true" />
-            </button>
-          </Badge>
-        ))}
-        <input
-          id="project-create-target"
-          data-testid="create-extra-lang-input"
-          name="aquilla-project-target-language"
-          autoComplete="off"
-          autoCorrect="off"
-          autoCapitalize="none"
-          spellCheck={false}
-          className="min-w-16 flex-1 bg-transparent outline-none placeholder:text-muted-foreground"
-          value={draft}
-          placeholder={
-            chips.length === 0
-              ? "French, conversational Swahili, zh-Hant…"
-              : "Add another…"
+
+      {lanes.map((lane, index) => {
+        const error = validateTargetLanguage(lane.value, values.slice(0, index), t)
+        return (
+          <div key={lane.id} className="flex flex-col gap-1">
+            <div className="flex items-center gap-2">
+              <LanguageComboboxInput
+                {...(index === 0 ? { id: "project-create-target" } : {})}
+                data-testid={
+                  index === 0
+                    ? "create-extra-lang-input"
+                    : `create-target-lang-input-${index}`
+                }
+                name="aquilla-project-target-language"
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="none"
+                spellCheck={false}
+                className={cn(FIELD_CLASS, "flex-1")}
+                value={lane.value}
+                exclude={values.filter((_, i) => i !== index)}
+                onBlur={index === 0 ? onBlur : undefined}
+                onValueChange={(next) =>
+                  sync(lanes.map((l, i) => (i === index ? { ...l, value: next } : l)))
+                }
+                placeholder={
+                  index === 0
+                    ? t("projectSettings.create.targetLanguagePlaceholder")
+                    : t("projectSettings.create.additionalTargetPlaceholder")
+                }
+                aria-invalid={(index === 0 && invalid) || error != null}
+              />
+              {index > 0 && (
+                <button
+                  type="button"
+                  aria-label={t("projectSettings.create.extraLanguagesRemoveAriaLabel", {
+                    lang: lane.value.trim() || String(index + 1),
+                  })}
+                  data-testid={`create-target-lang-remove-${index}`}
+                  className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-60 hover:bg-muted hover:opacity-100"
+                  onClick={() => sync(lanes.filter((_, i) => i !== index))}
+                >
+                  <X className="size-4" aria-hidden="true" />
+                </button>
+              )}
+            </div>
+            {error && <FieldError className="text-xs">{error}</FieldError>}
+          </div>
+        )
+      })}
+
+      <div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={!canAddMore}
+          data-testid="create-add-target-lang"
+          onClick={() =>
+            sync([...lanes, { id: nextLaneId.current++, value: "" }])
           }
-          aria-invalid={chipInvalid}
-          {...getInputProps({
-            onBlur,
-            onChange: (event) => {
-              const next = event.target.value
-              setDraft(next)
-              setError(null)
-              syncForm(chips, next)
-            },
-            onKeyDown: (event) => {
-              if (event.key === "Backspace" && draft === "" && chips.length > 0) {
-                event.preventDefault()
-                removeChip(chips[chips.length - 1]!)
-                return
-              }
-              if (event.key !== "Enter") return
-              // Always intercept Enter so the dialog form doesn't submit while
-              // committing (or rejecting) a chip.
-              event.preventDefault()
-              event.stopPropagation()
-              commitValue(draft)
-            },
-          })}
-        />
+        >
+          <Plus className="size-4" aria-hidden="true" />
+          {t("projectSettings.create.addTargetLanguageAction")}
+        </Button>
       </div>
-      {popup}
-      {error && <FieldError className="text-xs">{error}</FieldError>}
     </div>
   )
 }

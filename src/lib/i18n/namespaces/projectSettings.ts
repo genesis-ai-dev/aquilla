@@ -40,6 +40,8 @@ export const projectSettings = defineNamespace({
     "projectSettings.create.sourceLanguagePlaceholder": "English, Grade 7 English, es-419…",
     "projectSettings.create.targetLanguagesLabel": "Target language(s)",
     "projectSettings.create.targetLanguagePlaceholder": "French, conversational Swahili, zh-Hant…",
+    "projectSettings.create.additionalTargetPlaceholder": "Add another…",
+    "projectSettings.create.addTargetLanguageAction": "Add another language",
     "projectSettings.create.languageHintAriaLabel": "What can I enter here?",
     "projectSettings.create.languageHintTooltip":
       "Any label works — a BCP-47 tag, a language name, or a register description " +
@@ -763,6 +765,16 @@ export const projectSettings = defineNamespace({
         description:
           "Field label above the target-language input when the chosen project shape " +
           "is self-contained (multiple target lanes allowed).",
+      },
+      "projectSettings.create.additionalTargetPlaceholder": {
+        description:
+          "Placeholder in the second and subsequent target-language boxes of the " +
+          "create dialog, where the first box carries the full example placeholder.",
+      },
+      "projectSettings.create.addTargetLanguageAction": {
+        description:
+          "Label of the button under the target-language boxes in the create dialog " +
+          "that appends one more empty box (one per additional target lane).",
       },
       "projectSettings.create.languageHintAriaLabel": {
         description: "Accessible name of the small info-icon button beside a source/target language field that opens an explanatory tooltip.",

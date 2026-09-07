@@ -1,12 +1,12 @@
 // AQU-538 "creation fix" (spec §5 / QA-AQU538-LANES.md "UX gaps" #1): the
-// self-contained shape's target field is a single Combobox chips input.
-// Type → Enter → pill; first pill is targetLanguage, the rest become
-// settings.targetLanes via a follow-up PATCH. Source-only and linked-target
-// shapes stay single-field — see ProjectCreateDialog.linked.test.tsx /
+// self-contained shape's target field is one text box per lane, stacked, with
+// a plus button that appends another. Box 0 is targetLanguage, the rest become
+// settings.targetLanes via a follow-up PATCH. The linked-target shape stays
+// single-field — see ProjectCreateDialog.linked.test.tsx /
 // ProjectCreateDialog.addAsLane.test.tsx.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
+import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { ProjectCreateDialog } from "./ProjectCreateDialog"
 
 vi.mock("@/hooks/useFrontierSession", () => ({
@@ -69,17 +69,14 @@ const mockCreateProject = vi.mocked(createProject)
 const mockFetchProjectSettings = vi.mocked(fetchProjectSettings)
 const mockPatchProjectSettings = vi.mocked(patchProjectSettings)
 
-function targetLangInput() {
-  return screen.getByTestId("create-extra-lang-input")
+function targetLangInput(index = 0) {
+  return index === 0
+    ? screen.getByTestId("create-extra-lang-input")
+    : screen.getByTestId(`create-target-lang-input-${index}`)
 }
 
-/** Commit one or more target-language pills via type → Enter. */
-function commitTargetLanguages(...tags: string[]) {
-  const input = targetLangInput()
-  for (const tag of tags) {
-    fireEvent.change(input, { target: { value: tag } })
-    fireEvent.keyDown(input, { key: "Enter" })
-  }
+function addLaneButton() {
+  return screen.getByTestId("create-add-target-lang")
 }
 
 function openDialogWithBasics(opts?: { name?: string; source?: string; target?: string }) {
@@ -92,12 +89,15 @@ function openDialogWithBasics(opts?: { name?: string; source?: string; target?: 
   fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), {
     target: { value: opts?.source ?? "English" },
   })
-  // Commit the primary target as a pill so further Enter-adds become extras.
-  commitTargetLanguages(opts?.target ?? "French")
+  fireEvent.change(targetLangInput(), { target: { value: opts?.target ?? "French" } })
 }
 
+/** Append one box and fill it. Assumes every earlier box is already filled,
+ *  since the plus button stays disabled while the last one is blank. */
 function addExtraLanguage(tag: string) {
-  commitTargetLanguages(tag)
+  fireEvent.click(addLaneButton())
+  const extras = screen.getAllByTestId(/^create-target-lang-input-\d+$/)
+  fireEvent.change(extras[extras.length - 1]!, { target: { value: tag } })
 }
 
 describe("ProjectCreateDialog — self-contained target language chips (AQU-538)", () => {
@@ -127,50 +127,54 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     openDialogWithBasics()
     expect(screen.getByText("Target language(s)")).toBeTruthy()
     expect(targetLangInput()).toBeTruthy()
-    expect(screen.getByTestId("create-target-lang-chips")).toBeTruthy()
+    expect(screen.getByTestId("create-target-lang-inputs")).toBeTruthy()
   })
 
-  it("adds a chip on Enter for primary and extras", () => {
+  it("appends one box per language via the plus button", () => {
     openDialogWithBasics()
-    expect(screen.getByTestId("create-extra-lang-chip-French")).toBeTruthy()
+    expect(screen.queryAllByTestId(/^create-target-lang-input-\d+$/)).toHaveLength(0)
 
     addExtraLanguage("es")
-    expect(screen.getByTestId("create-extra-lang-chip-es")).toBeTruthy()
+    expect(targetLangInput(1)).toHaveProperty("value", "es")
 
-    fireEvent.change(targetLangInput(), { target: { value: "pt-BR" } })
-    fireEvent.keyDown(targetLangInput(), { key: "Enter" })
-    expect(screen.getByTestId("create-extra-lang-chip-pt-BR")).toBeTruthy()
+    addExtraLanguage("pt-BR")
+    expect(targetLangInput(2)).toHaveProperty("value", "pt-BR")
+    expect(targetLangInput()).toHaveProperty("value", "French")
   })
 
-  it("rejects a case-insensitive duplicate of an existing chip", () => {
+  it("flags a case-insensitive duplicate of an earlier box", () => {
     openDialogWithBasics()
     addExtraLanguage("es")
-
     addExtraLanguage("ES")
-    expect(screen.getAllByTestId("create-extra-lang-chip-es")).toHaveLength(1)
+
     expect(screen.getByText("Already added.")).toBeTruthy()
   })
 
-  it("rejects a duplicate of the primary target language (case-insensitive)", () => {
+  it("flags a duplicate of the primary target language (case-insensitive)", () => {
     openDialogWithBasics({ target: "French" })
-
     addExtraLanguage("french")
-    expect(screen.queryByTestId("create-extra-lang-chip-french")).toBeNull()
+
     expect(screen.getByText("Already added.")).toBeTruthy()
   })
 
-  it("rejects blank input on Enter", () => {
+  it("keeps the plus button disabled until the last box has a value", () => {
     openDialogWithBasics()
-    fireEvent.keyDown(targetLangInput(), { key: "Enter" })
-    expect(screen.getByText("Enter a language tag.")).toBeTruthy()
+    expect(addLaneButton()).toHaveProperty("disabled", false)
+
+    fireEvent.click(addLaneButton())
+    // The box just added is blank, so there is nothing to add another for.
+    expect(addLaneButton()).toHaveProperty("disabled", true)
+
+    fireEvent.change(targetLangInput(1), { target: { value: "es" } })
+    expect(addLaneButton()).toHaveProperty("disabled", false)
   })
 
-  it("removes a chip via its × button", () => {
+  it("removes a box via its × button", () => {
     openDialogWithBasics()
     addExtraLanguage("es")
-    const chip = screen.getByTestId("create-extra-lang-chip-es")
-    fireEvent.click(within(chip).getByRole("button", { name: /remove es/i }))
-    expect(screen.queryByTestId("create-extra-lang-chip-es")).toBeNull()
+
+    fireEvent.click(screen.getByTestId("create-target-lang-remove-1"))
+    expect(screen.queryAllByTestId(/^create-target-lang-input-\d+$/)).toHaveLength(0)
   })
 
   it("submit with 2 extras: creates the project, then PATCHes settings with both lanes using the fetched version", async () => {
@@ -226,7 +230,7 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     expect(mockPatchProjectSettings.mock.calls[0]![2]).not.toHaveProperty("targetLanes")
   })
 
-  it("allows create with a typed primary that was never Enter-committed as a pill", async () => {
+  it("creates with only the primary box filled and no lanes added", async () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
     fireEvent.change(screen.getByPlaceholderText("My Translation Project"), {
@@ -235,7 +239,6 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), {
       target: { value: "English" },
     })
-    // Type only — no Enter — so targetLanguage is live-synced from the draft.
     fireEvent.change(targetLangInput(), { target: { value: "Swahili" } })
     fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
 

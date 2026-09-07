@@ -63,6 +63,7 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
     'cell.lane.retime': { subtitleStartMs: 0, subtitleEndMs: 1000 },
     'file.video.set': { coreMediaUrl: 'https://cdn/v.mp4' },
     'file.timing.set': { timingMode: 'audioFirst' },
+    'file.corpus.set': { corpusMarker: 'Treasure Hunt Bible' },
     'file.track.set': { trackId: 'source-subtitles', patch: { name: 'Captions' } },
     'source.cell.mirror': {
       value: 'x',
@@ -83,7 +84,7 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
     kind,
     projectId: 'proj-a',
     fileId: 'file-x',
-    cellId: kind === 'file.create' || kind === 'file.rename' || kind === 'file.delete' || kind === 'file.restore' ? undefined : 'cell-1',
+    cellId: kind === 'file.create' || kind === 'file.rename' || kind === 'file.delete' || kind === 'file.restore' || kind === 'file.corpus.set' ? undefined : 'cell-1',
     parentId: null,
     author: 'alice',
     payload: payloads[kind],

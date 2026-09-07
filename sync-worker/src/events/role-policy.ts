@@ -94,6 +94,8 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   // editing flow — contributor-level, like target.* / cell.waive. It mutates
   // an existing row's display name, not the project's file inventory.
   'file.rename': ROLE.CONTRIBUTOR,
+  // Sidebar folder label — same class as file.rename (grouping, not inventory).
+  'file.corpus.set': ROLE.CONTRIBUTOR,
 
   // file.delete/file.restore are structural changes (soft-delete tombstone).
   // Require PROJECT_LEAD (500) — same as file.create and source.* imports.

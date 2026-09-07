@@ -13,6 +13,7 @@
 // project-membership check (identity mints tokens only for members).
 
 import { verifyTokenForProject } from "../auth"
+import { resolveCorpusMarker } from "./corpus-marker"
 
 export interface FilesReadEnv {
   AQUILLA_PG?: AquillaDb
@@ -84,6 +85,8 @@ interface FileSummary {
     string,
     { kind?: string; name?: string; order?: number; groupId?: string; color?: string; sourceTrackId?: string }
   > | null
+  /** Sidebar folder. Null when the file is ungrouped. */
+  corpusMarker: string | null
   cellCount: number
   approvedCount: number
   /** Target cells with content (TRIM(value) != ''): the "translated" count. */
@@ -124,6 +127,8 @@ function mapRow(row: FileRowRaw): FileSummary {
     timingMode?: string
     trackOverrides?: unknown
     aquillaImport?: { audioVtt?: { timebase?: unknown } }
+    corpusMarker?: unknown
+    parserVersion?: unknown
   } = {}
   try {
     meta = row.meta ? JSON.parse(row.meta) : {}
@@ -148,6 +153,7 @@ function mapRow(row: FileRowRaw): FileSummary {
     timingMode: meta.timingMode === 'dubbing' || meta.timingMode === 'audioFirst' ? meta.timingMode : null,
     audioVttTimebase: normalizeTimebase(meta.aquillaImport?.audioVtt?.timebase),
     trackOverrides: normalizeTrackOverrides(meta.trackOverrides),
+    corpusMarker: resolveCorpusMarker(meta) ?? null,
     cellCount: row.cell_count,
     approvedCount: row.approved_count,
     filledCount: row.filled_count,

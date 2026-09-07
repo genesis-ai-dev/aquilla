@@ -65,6 +65,7 @@ const REQUIRED_ROLE: Record<string, number> = {
 
   "file.create": ROLE.PROJECT_LEAD,
   "file.rename": ROLE.CONTRIBUTOR,
+  "file.corpus.set": ROLE.CONTRIBUTOR,
   "file.delete": ROLE.PROJECT_LEAD,
   "file.restore": ROLE.PROJECT_LEAD,
 

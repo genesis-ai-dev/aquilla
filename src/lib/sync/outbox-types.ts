@@ -53,6 +53,7 @@ export type OutboxEventKind =
   | "file.create"
   // File label rename (contributor-level; non-chain-mutating).
   | "file.rename"
+  | "file.corpus.set"
   // Soft-delete a file (project_lead+; non-chain-mutating).
   | "file.delete"
   // Restore a soft-deleted file (project_lead+; non-chain-mutating).
@@ -384,12 +385,15 @@ export interface OutboxEventPayloads {
     targetTextDirection?: "ltr" | "rtl"
     /** Timeline-segment-model order lens: 'time' | 'sequence'. */
     orderedBy?: string
+    corpusMarker?: string
   }
   // Rename a file's display label. Non-chain-mutating (parentId omitted).
-  // Mirrors sync-worker/src/events/types.ts. (Corpus/grouping marker is not
-  // server-backed yet — name only.)
   "file.rename": {
     name: string
+  }
+  // Set/clear the file's sidebar corpus group. Null clears it (Ungrouped).
+  "file.corpus.set": {
+    corpusMarker: string | null
   }
   // Soft-delete a file (project_lead+). Stamps `files.deleted_at`; cells and
   // audio are retained (R2 wipe deferred). Non-chain-mutating (parentId omitted).

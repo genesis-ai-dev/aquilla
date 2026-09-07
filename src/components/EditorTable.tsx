@@ -4461,6 +4461,12 @@ function EditorRow({
     () => resolveIdmlEditorConfiguration(cell.metadata, cell.originalHtml),
     [cell.metadata, cell.originalHtml],
   )
+  const idmlStyleCatalog = idmlConfiguration?.kind === "ready"
+    ? idmlConfiguration.context.styleCatalog
+    : undefined
+  const idmlParagraphStyleId = idmlConfiguration?.kind === "ready"
+    ? idmlConfiguration.context.paragraphStyleId
+    : undefined
   const canEditSourceForCell = canEditSource && !idmlConfiguration
   // AQU-847: an imported MEDIA section's `value` (→ `cell.original`) is the
   // import FILENAME; its real source text is the transcript. The read surface
@@ -6145,7 +6151,11 @@ function EditorRow({
                 className="w-full !px-0"
               />
             ) : (cell.medium !== "media" && (sourceDraft?.valueHtml || cell.originalHtml)) ? (
-              <SanitizedRichHtml html={sourceDraft?.valueHtml || cell.originalHtml || ""} />
+              <SanitizedRichHtml
+                html={sourceDraft?.valueHtml || cell.originalHtml || ""}
+                idmlStyleCatalog={idmlStyleCatalog}
+                idmlParagraphStyleId={idmlParagraphStyleId}
+              />
             ) : (
               <UsfmSourceText
                 // AQU-646: an imported media segment's stored `value` is the
@@ -6334,7 +6344,11 @@ function EditorRow({
                           {overlayDraftText}
                         </span>
                       ) : idmlConfiguration && visibleTranslatedHtml ? (
-                        <TargetIdmlHtml html={visibleTranslatedHtml} />
+                        <TargetIdmlHtml
+                          html={visibleTranslatedHtml}
+                          idmlStyleCatalog={idmlStyleCatalog}
+                          idmlParagraphStyleId={idmlParagraphStyleId}
+                        />
                       ) : targetHasRichFormatting && visibleTranslatedHtml ? (
                         <TargetRichHtml
                           html={visibleTranslatedHtml}

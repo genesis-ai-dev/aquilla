@@ -87,6 +87,7 @@ describe("EBL import", () => {
       fileType: "idml",
       kind: "idml",
       parserVersion: `${EBL_PROFILE_ID}@1`,
+      corpusMarker: "Equipping Biblical Leaders",
     })
     // A guide is about no single book, however much scripture it teaches.
     expect(bodies.find((body) => body.file)?.file?.bookCode).toBeUndefined()

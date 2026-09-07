@@ -5,11 +5,11 @@ import {
   selectBiblicaStudyNotes,
   type BiblicaNoteSection,
   type BiblicaStudyNoteSelection,
-} from "@/lib/biblica/study-notes"
+} from "@/lib/partner-integrations/biblica/study-notes"
 import { IDML_REJOIN_METADATA_KEY, idmlRejoinMetadata } from "@/lib/idml/rejoin"
-import type { ImportMilestone } from "../../../shared/import-contract"
-import { idmlUnitToTranslatableString, type IdmlParseExecutor } from "./idml"
-import type { TranslatableString } from "./types"
+import type { ImportMilestone } from "../../../../../shared/import-contract"
+import { idmlUnitToTranslatableString, type IdmlParseExecutor } from "@/lib/parsers/idml"
+import type { TranslatableString } from "@/lib/parsers/types"
 
 export interface BiblicaStudyNotesParseOptions {
   signal?: AbortSignal

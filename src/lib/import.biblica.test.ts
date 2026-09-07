@@ -11,7 +11,7 @@ import {
   paragraph,
   run,
   verseMarkerOnlyNote,
-} from "./biblica/__fixtures__/biblica-idml"
+} from "@/lib/partner-integrations/biblica/__fixtures__/biblica-idml"
 
 // The production path parses in a transferable Web Worker, which does not exist
 // in this runtime. Run the identical shared engine inline so the commit path is
@@ -29,7 +29,8 @@ vi.mock("@/lib/idml/idml-worker-client", async (importOriginal) => {
   }
 })
 
-const { importBiblicaStudyNotes, BIBLICA_NOTES_PROFILE_ID } = await import("./import")
+const { importBiblicaStudyNotes } = await import("@/lib/partner-integrations/biblica/import")
+const { BIBLICA_NOTES_PROFILE_ID } = await import("./import")
 
 afterEach(() => vi.unstubAllGlobals())
 

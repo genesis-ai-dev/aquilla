@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "projectIds": ["00000000-0000-0000-0000-000000000001"],
+  "scrub": { "emailDomain": "example.com", "keepDisplayNames": false },
+  "r2": {
+    "accountId": "YOUR_CLOUDFLARE_ACCOUNT_ID",
+    "bucket": "your-snapshots-bucket",
+    "prefix": "seed/",
+    "bundleName": "dev-seed.jsonl.zst"
+  }
+}

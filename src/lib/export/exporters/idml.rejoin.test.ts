@@ -27,9 +27,9 @@ import {
   paragraph,
   run,
   verseMarkerOnlyNote,
-} from "@/lib/biblica/__fixtures__/biblica-idml"
+} from "@/lib/partner-integrations/biblica/__fixtures__/biblica-idml"
 import { buildBulkCellsWithSpeakers } from "@/lib/import"
-import { extractBiblicaStudyNoteStrings } from "@/lib/parsers/biblica"
+import { extractBiblicaStudyNoteStrings } from "@/lib/partner-integrations/biblica/parsers/biblica"
 import { exportIdml, IdmlWebExportError, type IdmlExportExecutor } from "./idml"
 
 const directExecutor: IdmlExportExecutor = {

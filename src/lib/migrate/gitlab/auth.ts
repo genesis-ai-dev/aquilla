@@ -16,6 +16,22 @@
 
 export const DEFAULT_FRONTIER_API = "https://api.frontierrnd.com/api/v1"
 
+/** Which env-var path produced the credentials — surfaced in auth failures so a
+ *  401 from GitLab says WHICH secret to rotate. */
+export type CredentialSource = "direct-token" | "frontier-login"
+
+/** Human-readable name of the env vars behind a credential source. */
+export function describeCredentialSource(source: CredentialSource | undefined): string {
+  switch (source) {
+    case "direct-token":
+      return "FRONTIER_TOKEN + GITLAB_URL (direct GitLab token; takes precedence over FRONTIER_USERNAME/PASSWORD)"
+    case "frontier-login":
+      return "FRONTIER_USERNAME + FRONTIER_PASSWORD (Frontier password grant)"
+    default:
+      return "unknown credential path"
+  }
+}
+
 /** Resolved credentials usable against the self-hosted GitLab + git + LFS. */
 export interface GitLabCredentials {
   /** GitLab personal-access token (use as `Bearer` / `oauth2:<token>`). */
@@ -24,6 +40,8 @@ export interface GitLabCredentials {
   gitlabUrl: string
   /** Frontier API access token (kept for completeness; not needed downstream). */
   accessToken: string
+  /** Set by resolveCredentialsFromEnv / loginToFrontier; absent for hand-built creds. */
+  source?: CredentialSource
 }
 
 /** Raw shape returned by `POST ${apiEndpoint}/auth/token`. */
@@ -99,6 +117,7 @@ export async function loginToFrontier(
     gitlabToken: result.gitlab_token,
     gitlabUrl: trimTrailingSlash(result.gitlab_url),
     accessToken: result.access_token ?? "",
+    source: "frontier-login",
   }
 }
 
@@ -120,6 +139,7 @@ export async function resolveCredentialsFromEnv(
       gitlabToken: directToken,
       gitlabUrl: trimTrailingSlash(directUrl),
       accessToken: "",
+      source: "direct-token",
     }
   }
 

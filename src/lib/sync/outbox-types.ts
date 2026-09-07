@@ -16,6 +16,7 @@
  */
 
 import type { CameraState } from "@/lib/sync/cells-read-types"
+import type { TermRendering } from "@/lib/terminology/types"
 
 // ── Kind union (must mirror sync-worker/src/events/types.ts) ──────────────
 
@@ -62,6 +63,20 @@ export type OutboxEventKind =
   | "comment.edit"
   | "comment.delete"
   | "comment.resolve"
+  // Terminology concepts (project-level, non-chain-mutating). Carry the
+  // `__project__` sentinel fileId like comment.*; the concept id is in the
+  // payload. AQU-1006 follow-up — see sync-worker/src/events/types.ts for why
+  // these exist (the settings blob lost concurrent adds).
+  //
+  // TWO authority levels, enforced server-side by termbase-authority.ts:
+  // `term.create` with status 'draft' is a SUGGESTION any contributor may
+  // make; every other term write BINDS (it changes what the rule engine
+  // enforces for everyone) and needs the org's `termbaseEditMinRole`.
+  | "term.create"
+  | "term.update"
+  | "term.delete"
+  | "term.approve"
+  | "term.reject"
   // Assignments (project-level, non-chain-mutating; project-lead+). Carry a
   // fileId on the envelope for auth/routing like comment.*; scope is in the payload.
   | "assignment.create"
@@ -420,6 +435,37 @@ export interface OutboxEventPayloads {
   "comment.resolve": {
     commentId: string // top-level only; server noops on a reply id
     resolved: boolean
+  }
+
+  // ── Terminology concepts (project-level, non-chain-mutating) ────────────
+  "term.create": {
+    conceptId: string // client-generated uuid; the projection's primary key
+    sourceTerm: string
+    renderings: TermRendering[]
+    /** 'draft' = suggested, compiles to no rules; 'active' = enforced now. */
+    status: "active" | "draft" | "deprecated"
+    notes?: string
+    caseSensitive?: boolean
+  }
+  // Partial patch: only the keys present are written, so two people editing
+  // different fields of one concept both survive. `renderings` is replaced
+  // wholesale when present (a rendering has no stable id to merge on).
+  "term.update": {
+    conceptId: string
+    sourceTerm?: string
+    renderings?: TermRendering[]
+    notes?: string
+    caseSensitive?: boolean
+  }
+  "term.delete": {
+    conceptId: string // soft-delete: stamps deleted_at
+  }
+  "term.approve": {
+    conceptId: string // draft -> active
+  }
+  "term.reject": {
+    conceptId: string
+    mode: "delete" | "deprecate"
   }
 
   // ── Assignments (project-level, non-chain-mutating) ──────────────────────

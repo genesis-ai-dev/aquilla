@@ -16,6 +16,9 @@ export const audio = defineNamespace({
     "audio.newVoice.nameAriaLabel": "Voice name",
     "audio.newVoice.engineLabel": "Engine",
     "audio.newVoice.inworldVoiceLabel": "Voice",
+    "audio.newVoice.inworldVoiceLoading": "Loading voices…",
+    "audio.newVoice.inworldVoiceUnavailable":
+      "Couldn't load Inworld voices for these languages. Showing the built-in list.",
     "audio.newVoice.describeLabel": "Describe the voice",
     "audio.newVoice.describePlaceholder": "e.g. a warm older man, calm and clear",
     "audio.newVoice.kokoroLabel": "Voice",
@@ -470,8 +473,21 @@ export const audio = defineNamespace({
       "audio.newVoice.inworldVoiceLabel": {
         description:
           "Form label above the Inworld stock-voice dropdown on the TTS tab of " +
-          "the New Voice dialog. The options are Inworld's own proper names " +
-          "(Dennis, Sarah, …) — do not translate those values.",
+          "the New Voice dialog. Options are Inworld catalog names for the " +
+          "project's target-language lanes (Dennis, Alex, …) — do not translate " +
+          "those values. When the project has more than one language lane, each " +
+          "option also shows a language-code badge (en-US, es-ES) next to the name.",
+      },
+      "audio.newVoice.inworldVoiceLoading": {
+        description:
+          "Short status shown in the Inworld voice dropdown while the catalog is " +
+          "fetched from the hosted TTS worker.",
+      },
+      "audio.newVoice.inworldVoiceUnavailable": {
+        description:
+          "Helper under the Inworld voice dropdown when the live catalog could " +
+          "not be loaded (missing API key, network error, or no voices for the " +
+          "project's languages). The dropdown still lists a small built-in English set.",
       },
       "audio.newVoice.describeLabel": {
         description:

@@ -41,6 +41,8 @@ import type { CellData } from "@/hooks/useCells"
 import { PRESET_VOICES, upsertVoice } from "@/lib/audio/voices"
 import { providerInfo, resolveTtsProvider } from "@/lib/audio/tts-providers"
 import { NewVoiceModal } from "@/components/voice/NewVoiceModal"
+import { VoiceNameWithLanguage } from "@/components/voice/VoiceLanguageBadge"
+import { projectTargetLaneLanguages, showVoiceLanguageBadge } from "@/lib/audio/inworld-voices"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { ROLE } from "@/lib/frontier/roles"
 import { denialMessage } from "@/lib/permissions/denial"
@@ -55,6 +57,8 @@ export interface CastMemberStats {
 
 interface Props {
   targetLanguage?: string
+  targetLanes?: string[]
+  archivedLanes?: string[]
   settings: ProjectTtsSettings | undefined
   onSettingsChange: (next: Partial<ProjectTtsSettings>) => void | Promise<void>
   projectId?: string
@@ -84,7 +88,7 @@ type Editing =
   | { kind: "edit"; voice: Voice }
 
 export function VoiceLibraryPanel({
-  targetLanguage, settings, onSettingsChange, projectId, fileId, session,
+  targetLanguage, targetLanes, archivedLanes, settings, onSettingsChange, projectId, fileId, session,
   selectedVoiceId, onSelectVoice, castStats, cells, roleLevel,
 }: Props) {
   const t = useT()
@@ -94,6 +98,11 @@ export function VoiceLibraryPanel({
   const seededRef = useRef<string | null>(null)
   const [editing, setEditing] = useState<Editing>({ kind: "closed" })
   const [query, setQuery] = useState("")
+  const laneLanguages = useMemo(
+    () => projectTargetLaneLanguages({ targetLanguage, targetLanes, archivedLanes }),
+    [targetLanguage, targetLanes, archivedLanes],
+  )
+  const languageBadge = showVoiceLanguageBadge(laneLanguages)
 
   // AQU-365: character/voice writes flow through PUT/PATCH /settings, which
   // the server gates at maintainer (600). Fail-open (null roleLevel) for
@@ -212,6 +221,7 @@ export function VoiceLibraryPanel({
               key={voice.id}
               voice={voice}
               projectProvider={projectProvider}
+              showLanguageBadge={languageBadge}
               active={voice.id === selectedId}
               isDefault={voice.id === defaultVoiceId}
               stats={castStats?.get(voice.id)}
@@ -250,6 +260,8 @@ export function VoiceLibraryPanel({
           voice={editing.kind === "edit" ? editing.voice : null}
           provider={projectProvider}
           targetLanguage={targetLanguage}
+          targetLanes={targetLanes}
+          archivedLanes={archivedLanes}
           isDefault={editing.kind === "edit" ? editing.voice.id === defaultVoiceId : false}
           paletteIndex={voices.length}
           projectId={projectId}
@@ -306,12 +318,13 @@ function VoiceActionMenu({
  *  selected check · hover ⋯ menu. Click selects; drag assigns onto a line.
  *  Right-click (and the ⋯ button) open the same items as a file-tab row. */
 function VoiceRow({
-  voice, projectProvider, active, isDefault, stats, canEdit, onSelect, onEdit, onMakeDefault, onDelete,
+  voice, projectProvider, showLanguageBadge, active, isDefault, stats, canEdit, onSelect, onEdit, onMakeDefault, onDelete,
 }: {
   voice: Voice
   /** The project's configured TTS provider — the fallback for voices that
    *  don't carry their own (e.g. cast minted on import). */
   projectProvider: TtsProvider
+  showLanguageBadge: boolean
   active: boolean
   isDefault: boolean
   stats?: CastMemberStats
@@ -345,7 +358,13 @@ function VoiceRow({
     <>
       <VoiceAvatar voice={voice} size={28} />
       <span className="min-w-0 flex-1">
-        <span className="block truncate font-medium leading-tight">{voice.name}</span>
+        <span className="block truncate font-medium leading-tight">
+          <VoiceNameWithLanguage
+            name={voice.name}
+            language={voice.language}
+            showBadge={showLanguageBadge}
+          />
+        </span>
         <span className="block truncate text-[10px] leading-tight text-muted-foreground">
           <span className={cn("font-medium", voice.referenceAudioId && "text-emerald-600 dark:text-emerald-400")}>
             {engineLabel}

@@ -57,8 +57,14 @@ Do **not** put the key in `VITE_*`, the SPA, or auth-worker.
 | --- | --- | --- |
 | Synthesize | `POST` | `https://api.inworld.ai/tts/v1/voice` |
 | Instant clone | `POST` | `https://api.inworld.ai/voices/v1/voices:clone` |
+| List voices | `GET` | `https://api.inworld.ai/voices/v1/voices` |
 
 Auth header: `Authorization: Basic $INWORLD_API_KEY`.
+
+Aquilla proxies the catalog as `GET /api/v1/voice/tts/voices?projectId=&language=`
+(repeat `language` for each target-language lane). The picker shows every
+SYSTEM voice whose primary language matches a lane, and badges the language
+on each name when the project has more than one lane.
 
 Legacy project voices with `provider: "omnivoice"` are remapped to Inworld at
 runtime (same hosted path, same clone-from-reference flow).

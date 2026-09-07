@@ -9,6 +9,7 @@ import {
   defaultVoiceNameForProvider,
   effectiveTtsProvider,
   inferMmsLanguageCode,
+  isInworldVoiceName,
   isServerTtsProvider,
   normalizeVoiceForProvider,
   providerInfo,
@@ -128,5 +129,12 @@ describe("TTS provider normalization", () => {
   it("keeps an Inworld Instant Voice Cloning id", () => {
     const cloned: Voice = { ...geminiVoice, voiceName: "ws__narrator_20260907_120000z" }
     expect(normalizeVoiceForProvider(cloned, "inworld").voiceName).toBe("ws__narrator_20260907_120000z")
+  })
+
+  it("accepts live catalog ids such as Alex without treating Gemini names as Inworld", () => {
+    expect(isInworldVoiceName("Alex")).toBe(true)
+    expect(isInworldVoiceName("Kore")).toBe(false)
+    expect(isInworldVoiceName("af_bella")).toBe(false)
+    expect(normalizeVoiceForProvider({ ...geminiVoice, voiceName: "Alex" }, "inworld").voiceName).toBe("Alex")
   })
 })

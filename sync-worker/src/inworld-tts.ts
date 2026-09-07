@@ -7,6 +7,8 @@
 // Instant clone (https://docs.inworld.ai/api-reference/voiceAPI/voiceservice/clone-voice):
 //   POST https://api.inworld.ai/voices/v1/voices:clone
 //   { displayName, languageCode?, voiceSamples: [{ audioData: base64 }] }
+// List voices (https://docs.inworld.ai/api-reference/voiceAPI/voiceservice/list-voices):
+//   GET https://api.inworld.ai/voices/v1/voices?filter=source = "SYSTEM" AND lang_code = "en-US"
 //
 // AQU-1189: this is the commercial replacement for Modal OmniVoice (CC-BY-NC weights).
 
@@ -38,6 +40,18 @@ export interface CloneInworldArgs {
   audioBytes: ArrayBuffer
   language?: string
 }
+
+export interface InworldCatalogVoice {
+  voiceId: string
+  displayName: string
+  /** BCP-47 (en-US). Derived from Inworld's EN_US `langCode`. */
+  language: string
+  description?: string
+}
+
+const LIST_VOICES_PAGE_SIZE = 200
+const LIST_VOICES_MAX_PAGES = 3
+const SAFE_LANG_FILTER = /^[A-Za-z]{2,3}([-_][A-Za-z0-9]+)*$/
 
 const ISO_639_3_TO_BCP47: Record<string, string> = {
   ara: "ar",
@@ -81,6 +95,36 @@ export function toInworldLanguage(value: string | undefined): string | undefined
   }
   if (/^[a-z]{2}(-[a-z0-9]+)*$/i.test(normalized)) return normalized
   return undefined
+}
+
+/** Inworld list-voices `langCode` is upper-snake (`EN_US`); badges use BCP-47. */
+export function inworldLangCodeToBcp47(value: string | undefined): string | undefined {
+  if (!value) return undefined
+  const trimmed = value.trim()
+  if (!trimmed) return undefined
+  if (trimmed.includes("-")) return toInworldLanguage(trimmed) ?? trimmed
+  const parts = trimmed.split("_")
+  if (parts.length >= 2 && /^[A-Za-z]{2,3}$/.test(parts[0] ?? "")) {
+    return `${parts[0]!.toLowerCase()}-${parts.slice(1).join("-")}`
+  }
+  return toInworldLanguage(trimmed)
+}
+
+export function safeInworldLangFilterValue(language: string): string | undefined {
+  const mapped = toInworldLanguage(language)
+  if (mapped && SAFE_LANG_FILTER.test(mapped)) return mapped
+  return undefined
+}
+
+/** AIP-160 filter: system voices whose primary language matches any lane. */
+export function buildListVoicesFilter(languages: readonly string[]): string | null {
+  const codes = [...new Set(
+    languages.map(safeInworldLangFilterValue).filter((c): c is string => Boolean(c)),
+  )]
+  if (codes.length === 0) return null
+  const lang = codes.map((c) => `lang_code = "${c}"`).join(" OR ")
+  const source = `source = "SYSTEM"`
+  return codes.length === 1 ? `${source} AND ${lang}` : `${source} AND (${lang})`
 }
 
 export function bytesToBase64(bytes: ArrayBuffer): string {
@@ -229,4 +273,62 @@ export async function synthesizeInworldSpeech(
     ? fromTimestamps
     : wavDurationSeconds(wavBytes)
   return { wavBytes, durationSeconds }
+}
+
+export async function listInworldVoices(
+  config: InworldTtsConfig,
+  languages: readonly string[],
+): Promise<InworldCatalogVoice[]> {
+  const filter = buildListVoicesFilter(languages)
+  if (!filter) return []
+
+  const voices: InworldCatalogVoice[] = []
+  const seen = new Set<string>()
+  let pageToken = ""
+  for (let page = 0; page < LIST_VOICES_MAX_PAGES; page++) {
+    const params = new URLSearchParams({
+      filter,
+      pageSize: String(LIST_VOICES_PAGE_SIZE),
+      orderBy: "display_name",
+    })
+    if (pageToken) params.set("pageToken", pageToken)
+
+    let res: Response
+    try {
+      res = await fetch(`${inworldApiBase(config)}/voices/v1/voices?${params.toString()}`, {
+        method: "GET",
+        headers: { Authorization: inworldAuthHeader(config.apiKey) },
+      })
+    } catch (err) {
+      throw new Error(`Inworld voices unreachable: ${String(err)}`)
+    }
+    if (!res.ok) {
+      throw new Error(`Inworld list voices failed (${res.status}): ${await readInworldError(res)}`)
+    }
+    const json = (await res.json()) as {
+      voices?: Array<{
+        voiceId?: string
+        displayName?: string
+        langCode?: string
+        languageCode?: string
+        description?: string
+      }>
+      nextPageToken?: string
+    }
+    for (const row of json.voices ?? []) {
+      const voiceId = row.voiceId?.trim()
+      if (!voiceId || seen.has(voiceId)) continue
+      seen.add(voiceId)
+      const language = inworldLangCodeToBcp47(row.langCode ?? row.languageCode) ?? "und"
+      voices.push({
+        voiceId,
+        displayName: row.displayName?.trim() || voiceId,
+        language,
+        ...(row.description?.trim() ? { description: row.description.trim() } : {}),
+      })
+    }
+    pageToken = json.nextPageToken?.trim() ?? ""
+    if (!pageToken) break
+  }
+  return voices
 }

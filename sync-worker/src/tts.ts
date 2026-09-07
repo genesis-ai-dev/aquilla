@@ -15,12 +15,13 @@
 //           tts_usage_daily (see tts-budget.ts + migration 0041).
 
 import { audioObjectKey, isPathSafeId, r2KeyPrefix } from "./audio"
-import { verifyTokenForFile } from "./auth"
+import { verifyTokenForFile, verifyTokenForProject } from "./auth"
 import { runTtsGuard, recordTtsUsage } from "./tts-budget"
 import { recordCredit } from "./credits"
 import {
   INWORLD_MAX_TEXT_CHARS,
   cloneInworldVoice,
+  listInworldVoices,
   synthesizeInworldSpeech,
   type InworldTtsConfig,
 } from "./inworld-tts"
@@ -60,6 +61,7 @@ export interface TtsEnv {
 }
 
 const TTS_PATH = "/api/v1/voice/tts"
+const TTS_VOICES_PATH = "/api/v1/voice/tts/voices"
 
 function inworldConfig(env: TtsEnv): InworldTtsConfig | null {
   const apiKey = env.INWORLD_API_KEY?.trim()
@@ -90,6 +92,9 @@ export async function handleTtsRequest(
   env: TtsEnv,
 ): Promise<Response | null> {
   const url = new URL(request.url)
+  if (url.pathname === TTS_VOICES_PATH) {
+    return handleListTtsVoices(request, env, url)
+  }
   if (url.pathname !== TTS_PATH) return null
   if (request.method !== "POST") {
     return new Response("method not allowed", { status: 405 })
@@ -257,4 +262,47 @@ export async function handleTtsRequest(
     objectName,
     url: `frontier-audio://${objectName}`,
   })
+}
+
+/**
+ * GET /api/v1/voice/tts/voices?projectId=&language=en&language=es
+ *
+ * Returns Inworld SYSTEM voices whose primary language matches any of the
+ * project's target-language lanes. Auth is a project-scoped sync token.
+ */
+async function handleListTtsVoices(
+  request: Request,
+  env: TtsEnv,
+  url: URL,
+): Promise<Response> {
+  if (request.method !== "GET") {
+    return new Response("method not allowed", { status: 405 })
+  }
+  const config = inworldConfig(env)
+  if (!config) {
+    return new Response("TTS not configured", { status: 503 })
+  }
+  const projectId = url.searchParams.get("projectId")?.trim() ?? ""
+  if (!projectId || !isPathSafeId(projectId)) {
+    return new Response("missing or invalid projectId", { status: 400 })
+  }
+  const header = request.headers.get("Authorization") ?? ""
+  const token = header.startsWith("Bearer ") ? header.slice("Bearer ".length) : null
+  const verified = await verifyTokenForProject(token, projectId, env.SYNC_SECRET_KEY)
+  if (!verified.ok) {
+    return new Response(verified.reason, { status: verified.status })
+  }
+
+  const languages = [
+    ...url.searchParams.getAll("language"),
+    ...(url.searchParams.get("languages")?.split(",") ?? []),
+  ].map((v) => v.trim()).filter(Boolean)
+
+  try {
+    const voices = await listInworldVoices(config, languages)
+    return Response.json({ voices })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    return new Response(message, { status: 502 })
+  }
 }

@@ -5,6 +5,8 @@ import {
   wavDurationSeconds,
   bytesToBase64,
   base64ToBytes,
+  buildListVoicesFilter,
+  inworldLangCodeToBcp47,
 } from "../inworld-tts"
 
 describe("inworldAuthHeader", () => {
@@ -71,5 +73,24 @@ describe("base64 roundtrip", () => {
   it("survives bytesToBase64 → base64ToBytes", () => {
     const src = new Uint8Array([1, 2, 3, 250, 251, 252]).buffer
     expect(Array.from(new Uint8Array(base64ToBytes(bytesToBase64(src))))).toEqual([1, 2, 3, 250, 251, 252])
+  })
+})
+
+describe("list-voices filter", () => {
+  it("maps EN_US onto BCP-47 for badges", () => {
+    expect(inworldLangCodeToBcp47("EN_US")).toBe("en-US")
+    expect(inworldLangCodeToBcp47("es-ES")).toBe("es-ES")
+  })
+
+  it("builds an AIP-160 SYSTEM + lang_code filter for each lane", () => {
+    expect(buildListVoicesFilter(["eng"])).toBe('source = "SYSTEM" AND lang_code = "en-US"')
+    expect(buildListVoicesFilter(["en-US", "es"])).toBe(
+      'source = "SYSTEM" AND (lang_code = "en-US" OR lang_code = "es")',
+    )
+  })
+
+  it("returns null when no lane maps onto an Inworld language", () => {
+    expect(buildListVoicesFilter(["French"])).toBeNull()
+    expect(buildListVoicesFilter([])).toBeNull()
   })
 })

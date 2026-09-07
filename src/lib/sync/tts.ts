@@ -81,3 +81,39 @@ export async function synthesizeCellTts(
 
   return (await res.json()) as SynthesizeCellTtsResult
 }
+
+export interface InworldCatalogVoice {
+  voiceId: string
+  displayName: string
+  language: string
+  description?: string
+}
+
+/**
+ * GET /api/v1/voice/tts/voices — Inworld SYSTEM voices for the given
+ * target-language lanes. The sync token is project-scoped; fileId is only
+ * needed to mint it.
+ */
+export async function listInworldVoices(
+  args: { projectId: string; fileId: string; languages: readonly string[] },
+  getSyncToken: SyncTokenForFile,
+): Promise<InworldCatalogVoice[]> {
+  const token = await getSyncToken(args.projectId, args.fileId)
+  if (!token) throw new Error("listInworldVoices: no sync token")
+
+  const params = new URLSearchParams({ projectId: args.projectId })
+  for (const language of args.languages) {
+    const trimmed = language.trim()
+    if (trimmed) params.append("language", trimmed)
+  }
+
+  const res = await fetch(`${syncWorkerHttpOrigin()}/api/v1/voice/tts/voices?${params.toString()}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw errorFromHostedTts(res.status, text || res.statusText)
+  }
+  const json = (await res.json()) as { voices?: InworldCatalogVoice[] }
+  return Array.isArray(json.voices) ? json.voices : []
+}

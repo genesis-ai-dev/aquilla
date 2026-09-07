@@ -240,8 +240,14 @@ export interface Voice {
   provider?: TtsProvider
   /** Optional Gemini model override. */
   model?: string
-  /** Gemini prebuilt voice id (e.g. "Kore"). For Kokoro, the engine voice name. */
+  /** Gemini prebuilt voice id (e.g. "Kore"). For Kokoro, the engine voice name.
+   *  For Inworld, the catalog `voiceId` (Dennis, Alex, or an Instant Clone id). */
   voiceName?: string
+  /**
+   * BCP-47 language this Inworld stock voice was picked for (AQU-1189). Used
+   * to badge the name when a project has more than one target-language lane.
+   */
+  language?: string
   /** Spoken accent or oral reading tradition. */
   accent?: string
   /** Closest high-resource language whose pronunciation should be used as a fallback. */

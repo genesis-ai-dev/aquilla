@@ -42,7 +42,6 @@ import {
   DEFAULT_TTS_PROVIDER,
   GEMINI_TTS_VOICES,
   DEFAULT_GEMINI_VOICE,
-  INWORLD_TTS_VOICES,
   DEFAULT_INWORLD_VOICE,
   TTS_PROVIDER_INFOS,
   defaultVoiceNameForProvider,
@@ -53,6 +52,8 @@ import {
   effectiveTtsProvider,
   type TtsProviderInfo,
 } from "@/lib/audio/tts-providers"
+import { InworldVoiceField } from "@/components/voice/InworldVoiceField"
+import { projectTargetLaneLanguages } from "@/lib/audio/inworld-voices"
 import { HAS_EXTENDED_MMS_MODELS, POPULAR_MMS_LANGUAGES } from "@/lib/audio/mms-languages"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { audioMimeForExt } from "@/lib/audio/mime"
@@ -72,6 +73,9 @@ export interface NewVoiceModalProps {
   /** Project's configured TTS engine — seeds a new voice's engine. */
   provider?: TtsProvider
   targetLanguage?: string
+  /** Extra target-language lanes (not including the default). Archived lanes should already be omitted. */
+  targetLanes?: string[]
+  archivedLanes?: string[]
   isDefault: boolean
   /** Index used to pick a fresh palette color + base timbre for a new voice. */
   paletteIndex: number
@@ -158,7 +162,7 @@ function seedDraft(args: {
 }
 
 function NewVoiceModalBody({
-  onClose, voice, provider, targetLanguage, isDefault, paletteIndex, projectId, fileId,
+  onClose, voice, provider, targetLanguage, targetLanes, archivedLanes, isDefault, paletteIndex, projectId, fileId,
   session, cells, onSave, onDelete, onMakeDefault, initialMode, seedCellId,
 }: NewVoiceModalProps) {
   const t = useT()
@@ -167,6 +171,10 @@ function NewVoiceModalBody({
   const [mode, setMode] = useState<Mode>(lockedMode ?? initialMode ?? "tts")
 
   const projectProvider = effectiveTtsProvider(provider ?? DEFAULT_TTS_PROVIDER)
+  const catalogLanguages = useMemo(
+    () => projectTargetLaneLanguages({ targetLanguage, targetLanes, archivedLanes }),
+    [targetLanguage, targetLanes, archivedLanes],
+  )
   // Smart default: rotate Gemini's base timbre so a fresh voice sounds distinct
   // without making the user pick one.
   const rotatedGeminiVoice =
@@ -342,26 +350,14 @@ function NewVoiceModalBody({
               />
             )}
             {mode === "tts" && activeProvider === "inworld" && (
-              <Field>
-                <FieldLabel htmlFor="inworld-voice">{t("audio.newVoice.inworldVoiceLabel")}</FieldLabel>
-                <Select
-                  value={draft.voiceName && isInworldVoiceName(draft.voiceName) ? draft.voiceName : DEFAULT_INWORLD_VOICE}
-                  onValueChange={(v) => update({ voiceName: v || DEFAULT_INWORLD_VOICE })}
-                >
-                  <SelectTrigger id="inworld-voice" className="h-10">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      {INWORLD_TTS_VOICES.map((v) => (
-                        <SelectItem key={v.name} value={v.name}>
-                          {v.name}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-              </Field>
+              <InworldVoiceField
+                value={draft.voiceName}
+                onChange={(voiceId, language) => update({ voiceName: voiceId, language })}
+                targetLanguages={catalogLanguages}
+                projectId={projectId}
+                fileId={fileId}
+                session={session}
+              />
             )}
             {activeProvider === "gemini" && (
               <Field>

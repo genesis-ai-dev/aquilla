@@ -471,3 +471,58 @@ describe("POST /api/v1/voice/tts", () => {
     expect(res.status).toBe(404)
   })
 })
+
+describe("GET /api/v1/voice/tts/voices", () => {
+  it("503 when Inworld API key is not configured", async () => {
+    const { db } = makeStubDb()
+    const env = makeEnv(db, { INWORLD_API_KEY: undefined })
+    const token = await makeToken()
+    const res = (await call(
+      env,
+      new Request("https://w/api/v1/voice/tts/voices?projectId=p1&language=en", {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+    ))!
+    expect(res.status).toBe(503)
+  })
+
+  it("401 without a valid sync-token", async () => {
+    const { db } = makeStubDb()
+    const res = (await call(
+      makeEnv(db),
+      new Request("https://w/api/v1/voice/tts/voices?projectId=p1&language=en"),
+    ))!
+    expect(res.status).toBe(401)
+  })
+
+  it("lists SYSTEM voices for each requested language", async () => {
+    const { db } = makeStubDb()
+    const calls: string[] = []
+    globalThis.fetch = (async (url: string) => {
+      calls.push(String(url))
+      return Response.json({
+        voices: [
+          { voiceId: "Dennis", displayName: "Dennis", langCode: "EN_US" },
+          { voiceId: "Diego", displayName: "Diego", langCode: "ES_ES" },
+        ],
+      })
+    }) as unknown as typeof fetch
+
+    const token = await makeToken()
+    const res = (await call(
+      makeEnv(db),
+      new Request("https://w/api/v1/voice/tts/voices?projectId=p1&language=en&language=es", {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+    ))!
+    expect(res.status).toBe(200)
+    const json = await res.json() as { voices: Array<{ voiceId: string; language: string }> }
+    expect(json.voices.map((v) => v.voiceId)).toEqual(["Dennis", "Diego"])
+    expect(json.voices.map((v) => v.language)).toEqual(["en-US", "es-ES"])
+    const listed = new URL(calls[0]!)
+    expect(listed.pathname).toBe("/voices/v1/voices")
+    expect(listed.searchParams.get("filter")).toContain('lang_code = "en"')
+    expect(listed.searchParams.get("filter")).toContain('lang_code = "es"')
+    expect(listed.searchParams.get("filter")).toContain('source = "SYSTEM"')
+  })
+})

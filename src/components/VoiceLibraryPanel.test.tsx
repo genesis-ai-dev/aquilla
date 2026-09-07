@@ -71,11 +71,23 @@ describe("VoiceLibraryPanel (selector)", () => {
   })
 
   it("opens the unified modal from New voice, seeded with the project engine", () => {
-    setup({ provider: "kokoro" })
+    const onSettingsChange = vi.fn()
+    const narrator = makeVoice()
+    renderWithTooltips(
+      <VoiceLibraryPanel
+        projectId="dev-project"
+        targetLanguage="en"
+        targetLanes={["es"]}
+        settings={{ provider: "kokoro", voices: [narrator], defaultVoiceId: narrator.id }}
+        onSettingsChange={onSettingsChange}
+      />,
+    )
     fireEvent.click(screen.getByRole("button", { name: /New voice/ }))
     expect(screen.getByTestId("new-voice-modal")).toBeTruthy()
     expect(modalProps.last?.provider).toBe("kokoro")
     expect(modalProps.last?.voice).toBeNull()
+    expect(modalProps.last?.targetLanguage).toBe("en")
+    expect(modalProps.last?.targetLanes).toEqual(["es"])
   })
 
   it("labels each row with the voice's own engine, not Gemini", () => {
@@ -156,6 +168,46 @@ describe("VoiceLibraryPanel (selector)", () => {
     expect(check).toBeTruthy()
     expect(more).toBeTruthy()
     expect(check!.compareDocumentPosition(more!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it("badges voice names with their language when the project has multiple lanes", () => {
+    const onSettingsChange = vi.fn()
+    render(
+      <VoiceLibraryPanel
+        projectId="dev-project"
+        targetLanguage="en"
+        targetLanes={["es"]}
+        settings={{
+          provider: "inworld",
+          voices: [
+            makeVoice({ id: "v-en", name: "Dennis", provider: "inworld", voiceName: "Dennis", language: "en-US" }),
+            makeVoice({ id: "v-es", name: "Diego", provider: "inworld", voiceName: "Diego", language: "es-ES" }),
+          ],
+        }}
+        onSettingsChange={onSettingsChange}
+      />,
+    )
+    expect(screen.getByText("en-US")).toBeTruthy()
+    expect(screen.getByText("es-ES")).toBeTruthy()
+  })
+
+  it("does not badge voice names on a single-lane project", () => {
+    const onSettingsChange = vi.fn()
+    render(
+      <VoiceLibraryPanel
+        projectId="dev-project"
+        targetLanguage="en"
+        settings={{
+          provider: "inworld",
+          voices: [
+            makeVoice({ id: "v-en", name: "Dennis", provider: "inworld", voiceName: "Dennis", language: "en-US" }),
+          ],
+        }}
+        onSettingsChange={onSettingsChange}
+      />,
+    )
+    expect(screen.getByText("Dennis")).toBeTruthy()
+    expect(screen.queryByText("en-US")).toBeNull()
   })
 })
 

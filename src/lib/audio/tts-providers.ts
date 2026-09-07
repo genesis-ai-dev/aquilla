@@ -194,9 +194,14 @@ export function isGeminiVoiceName(value: string | undefined): boolean {
 export function isInworldVoiceName(value: string | undefined): boolean {
   if (!value) return false
   const trimmed = value.trim()
+  // Live catalog ids (Alex, Dennis, …) must not steal Gemini/Kokoro/MMS knobs.
+  if (isGeminiVoiceName(trimmed) || isKokoroVoiceName(trimmed) || isMmsLanguageCode(trimmed)) {
+    return false
+  }
   if (INWORLD_VOICE_NAMES.has(trimmed.toLowerCase())) return true
   // Instant Voice Cloning ids look like `workspace__display_timestamp`.
-  return trimmed.includes("__")
+  if (trimmed.includes("__")) return true
+  return /^[A-Za-z][\w-]{0,127}$/.test(trimmed)
 }
 
 export function isKokoroVoiceName(value: string | undefined): boolean {
@@ -239,6 +244,7 @@ export function normalizeVoiceForProvider(
     if (!isInworldVoiceName(next.voiceName)) next.voiceName = DEFAULT_INWORLD_VOICE
     return next
   }
+  delete next.language
   if (engine === "gemini") {
     if (!isGeminiVoiceName(next.voiceName)) next.voiceName = DEFAULT_GEMINI_VOICE
     return next

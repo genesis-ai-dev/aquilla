@@ -39,8 +39,10 @@ ALLOW_UNAUTHENTICATED="true"
 
 # Inworld TTS 2 Flash (AQU-1189) — the commercial hosted TTS / clone engine.
 # Paste the Portal API key as-is (the worker adds the Basic prefix).
+# Create a read-write key: https://platform.inworld.ai/  (or `inworld workspace add-key`)
+# Instant Voice Cloning needs write access on `voices`.
 # Docs: docs/INWORLD-TTS.md
-# INWORLD_API_KEY=""
+INWORLD_API_KEY=""
 # INWORLD_API_BASE="https://api.inworld.ai"
 # INWORLD_TTS_MODEL="inworld-tts-2-flash"
 # INWORLD_DEFAULT_VOICE="Dennis"

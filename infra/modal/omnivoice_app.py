@@ -20,10 +20,9 @@ Three synthesis modes (all via the same /synthesize route):
      characteristics (gender, age, pitch, style, accent, dialect).
   3. Auto voice — omit both `voice_ref` and `instruct`; the model picks.
 
-This endpoint is the GPU back-end for the workspace "Generate audio" feature
-(use-case 1) and also produces the base TTS that feeds the Seed-VC re-voice
-step (use-case 3). Auth: only the sync-worker holds `OMNIVOICE_TOKEN`; the
-browser never talks to Modal directly.
+Production "Generate audio" no longer calls this app (AQU-1189: Inworld).
+If you still run it for unpaid research, only the caller holds
+`OMNIVOICE_TOKEN`; the browser never talks to Modal directly.
 
 Design mirrors `infra/modal/seed_vc.py` exactly:
   - Model loaded ONCE in @modal.enter(); weights cached on a persistent Volume.

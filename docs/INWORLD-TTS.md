@@ -43,9 +43,11 @@ npx wrangler secret put INWORLD_API_KEY --env production
 ```
 
 `config/cloudflare-deployments.json` lists `INWORLD_API_KEY` as a required
-production secret. Optional model/endpoint overrides may be set as Worker vars
-(`INWORLD_API_BASE`, `INWORLD_TTS_MODEL`, `INWORLD_DEFAULT_VOICE`); they default
-to the values above.
+**production** secret. Put the same secret on `--env development` before
+hosted TTS will work on `dev.aquilla.app`. Optional model/endpoint overrides
+may be set as Worker vars (`INWORLD_API_BASE`, `INWORLD_TTS_MODEL`,
+`INWORLD_DEFAULT_VOICE`); they default to the values above. The put commands
+are also documented in `sync-worker/wrangler.toml`.
 
 Do **not** put the key in `VITE_*`, the SPA, or auth-worker.
 

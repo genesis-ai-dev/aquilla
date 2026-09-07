@@ -124,6 +124,21 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
     expect(screen.getByText(/What should become this project's source\?/i)).toBeTruthy()
   })
 
+  it("shows the upstream project name on the trigger after selection, not its UUID", async () => {
+    render(<ProjectCreateDialog onCreated={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+    fireEvent.click(screen.getByText("Advanced: project shape"))
+    fireEvent.click(screen.getByText(/Linked target/i))
+
+    await pickSelectOption(/Upstream project/i, /English Source/i)
+
+    const trigger = screen.getByRole("combobox", { name: /Upstream project/i })
+    await waitFor(() => {
+      expect(trigger.textContent).toMatch(/English Source/)
+      expect(trigger.textContent).not.toMatch(/upstream-1/)
+    })
+  })
+
   it("creates the project then links it to the chosen upstream with mode/consumes", async () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))

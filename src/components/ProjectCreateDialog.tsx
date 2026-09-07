@@ -468,7 +468,15 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                             <Field data-invalid={invalid}>
                               <FieldLabel htmlFor="upstream-project">{t("projectSettings.create.upstreamProjectLabel")}</FieldLabel>
                               <Select
-                                value={field.state.value}
+                                // Base UI SelectValue falls back to the raw
+                                // value (a project UUID) unless items maps
+                                // each value to its display label — the
+                                // dropdown Option text alone is not enough.
+                                items={upstreamOptions.map((p) => ({
+                                  value: p.id,
+                                  label: p.name,
+                                }))}
+                                value={field.state.value || null}
                                 onValueChange={(value) => field.handleChange(value ?? "")}
                               >
                                 <SelectTrigger id="upstream-project" aria-invalid={invalid}>
@@ -667,6 +675,7 @@ function AddAsLaneRecommendation({
     },
     [],
   )
+
 
   if (!upstreamProject) return null
 

@@ -297,20 +297,18 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     expect(screen.queryByText(/Source-only/i)).toBeNull()
   })
 
-  it("does not offer the multi-language chips UI on the linked-target shape", () => {
+  it("offers the same multi-lane boxes on the linked-target shape", () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
     fireEvent.click(screen.getByText("Advanced: project shape"))
     fireEvent.click(screen.getByText(/Linked target/i))
 
-    // The single "Target Language" field is still there (required by the
-    // shared schema for this shape) — just without the multi-entry list.
-    // AQU-832: this label now reuses projectSettings.info.targetLanguageLabel
-    // (Title Case, shared with the Project Info card) instead of a separate
-    // sentence-case duplicate, so the create dialog renders "Target Language".
-    expect(screen.getByText("Target Language")).toBeTruthy()
-    expect(screen.queryByText("Target language(s)")).toBeNull()
-    expect(screen.queryByTestId("create-extra-lang-input")).toBeNull()
+    // A linked target is the Biblica case — one upstream source, several
+    // languages — so it needs lanes at creation just as much as a
+    // self-contained project does.
+    expect(screen.getByText("Target language(s)")).toBeTruthy()
+    expect(screen.getByTestId("create-extra-lang-input")).toBeTruthy()
+    expect(screen.getByTestId("create-add-target-lang")).toBeTruthy()
   })
 
   it("toggles between the two shapes from the linked-target checkbox", () => {
@@ -320,16 +318,19 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
 
     const toggle = () => screen.getByTestId("create-shape-linked-target")
     expect(toggle().getAttribute("aria-checked")).toBe("false")
-    expect(screen.getByTestId("create-extra-lang-input")).toBeTruthy()
+    expect(screen.queryByText("Upstream project")).toBeNull()
 
+    // Checking reveals the upstream picker and leaves the lane boxes alone.
     fireEvent.click(screen.getByText(/Linked target/i))
     expect(toggle().getAttribute("aria-checked")).toBe("true")
-    expect(screen.queryByTestId("create-extra-lang-input")).toBeNull()
+    expect(screen.getByText("Upstream project")).toBeTruthy()
+    expect(screen.getByTestId("create-extra-lang-input")).toBeTruthy()
 
     // Unchecking must return to self-contained rather than stranding the form
-    // in a shape with no target field.
+    // in a shape that still demands an upstream.
     fireEvent.click(screen.getByText(/Linked target/i))
     expect(toggle().getAttribute("aria-checked")).toBe("false")
+    expect(screen.queryByText("Upstream project")).toBeNull()
     expect(screen.getByTestId("create-extra-lang-input")).toBeTruthy()
   })
 })

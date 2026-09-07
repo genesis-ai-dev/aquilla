@@ -209,7 +209,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
       }
 
       let extraLanguagesFailed = false
-      const extrasToApply = value.shape === "self-contained" ? value.extraLanguages : []
+      const extrasToApply = value.extraLanguages
 
       try {
         await createCloudProject(jwt, { id: project.id, name: project.name, orgId })
@@ -297,7 +297,6 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
 
   function pickShape(next: ProjectShape) {
     form.setFieldValue("shape", next)
-    if (next !== "self-contained") form.setFieldValue("extraLanguages", [])
   }
 
   return (
@@ -384,60 +383,36 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                 }}
               />
 
-              <form.Subscribe
-                selector={(state) => state.values.shape}
-                children={(shape) => (
-                  <form.Field
-                    name="targetLanguage"
-                    children={(field) => {
-                      const invalid = isFieldInvalid(field)
-                      return (
-                        <Field data-invalid={invalid}>
-                          <div className="flex items-center gap-1.5">
-                            <FieldLabel htmlFor="project-create-target">
-                              {shape === "self-contained"
-                                ? t("projectSettings.create.targetLanguagesLabel")
-                                : t("projectSettings.info.targetLanguageLabel")}
-                            </FieldLabel>
-                            <LanguageFieldHint />
-                          </div>
-                          {shape === "self-contained" ? (
-                            <form.Field
-                              name="extraLanguages"
-                              children={(extrasField) => (
-                                <TargetLanguageInputs
-                                  // Remount when the dialog reopens so local
-                                  // row state can't leak across sessions.
-                                  key={open ? "open" : "closed"}
-                                  onPrimaryChange={field.handleChange}
-                                  onExtrasChange={extrasField.handleChange}
-                                  onBlur={field.handleBlur}
-                                  invalid={invalid}
-                                />
-                              )}
-                            />
-                          ) : (
-                            <LanguageComboboxInput
-                              id="project-create-target"
-                              name="aquilla-project-target-language"
-                              autoComplete="off"
-                              autoCorrect="off"
-                              autoCapitalize="none"
-                              spellCheck={false}
-                              className={FIELD_CLASS}
-                              value={field.state.value}
-                              onBlur={field.handleBlur}
-                              onValueChange={field.handleChange}
-                              placeholder={t("projectSettings.create.targetLanguagePlaceholder")}
-                              aria-invalid={invalid}
-                            />
-                          )}
-                          {invalid && <FieldError errors={field.state.meta.errors} />}
-                        </Field>
-                      )
-                    }}
-                  />
-                )}
+              <form.Field
+                name="targetLanguage"
+                children={(field) => {
+                  const invalid = isFieldInvalid(field)
+                  return (
+                    <Field data-invalid={invalid}>
+                      <div className="flex items-center gap-1.5">
+                        <FieldLabel htmlFor="project-create-target">
+                          {t("projectSettings.create.targetLanguagesLabel")}
+                        </FieldLabel>
+                        <LanguageFieldHint />
+                      </div>
+                      <form.Field
+                        name="extraLanguages"
+                        children={(extrasField) => (
+                          <TargetLanguageInputs
+                            // Remount when the dialog reopens so local row
+                            // state can't leak across sessions.
+                            key={open ? "open" : "closed"}
+                            onPrimaryChange={field.handleChange}
+                            onExtrasChange={extrasField.handleChange}
+                            onBlur={field.handleBlur}
+                            invalid={invalid}
+                          />
+                        )}
+                      />
+                      {invalid && <FieldError errors={field.state.meta.errors} />}
+                    </Field>
+                  )
+                }}
               />
             </FieldGroup>
 

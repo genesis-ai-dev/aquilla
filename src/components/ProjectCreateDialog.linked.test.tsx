@@ -34,8 +34,26 @@ vi.mock("@/lib/sync/cloud-projects", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/sync/cloud-projects")>()
   return { ...actual, createCloudProject: vi.fn().mockResolvedValue(undefined) }
 })
+// fetchProjectSettings and PROJECT_SETTINGS_VERSION_INITIAL are only reached
+// when the form carries extra lanes, but they must exist on the mock or that
+// path throws on an undefined import rather than failing an assertion.
 vi.mock("@/lib/sync/project-settings", () => ({
-  patchProjectSettings: vi.fn().mockResolvedValue(undefined),
+  PROJECT_SETTINGS_VERSION_INITIAL: 0,
+  fetchProjectSettings: vi.fn().mockResolvedValue({
+    version: 2,
+    updatedAt: "2026-07-13T00:00:00.000Z",
+    updatedBy: { id: 1, username: "wendi" },
+    settings: { sourceLanguage: "English", targetLanguage: "French" },
+  }),
+  patchProjectSettings: vi.fn().mockResolvedValue({
+    kind: "ok",
+    value: {
+      version: 1,
+      updatedAt: "2026-07-13T00:00:00.000Z",
+      updatedBy: { id: 1, username: "wendi" },
+      settings: {},
+    },
+  }),
 }))
 vi.mock("@/lib/sync/archive", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/sync/archive")>()
@@ -55,10 +73,12 @@ vi.mock("@/lib/posthog", () => ({ default: { capture: vi.fn() } }))
 
 import { createCloudProject } from "@/lib/sync/cloud-projects"
 import { linkProjectSource, triggerLinkSync } from "@/lib/sync/archive"
+import { patchProjectSettings } from "@/lib/sync/project-settings"
 
 const mockCreateCloudProject = vi.mocked(createCloudProject)
 const mockLinkProjectSource = vi.mocked(linkProjectSource)
 const mockTriggerLinkSync = vi.mocked(triggerLinkSync)
+const mockPatchProjectSettings = vi.mocked(patchProjectSettings)
 
 // Base UI Select renders a combobox trigger; options live in a portaled
 // popup. Clicks on options don't reliably commit a selection under
@@ -83,6 +103,7 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
     mockCreateCloudProject.mockClear()
     mockLinkProjectSource.mockClear()
     mockTriggerLinkSync.mockClear()
+    mockPatchProjectSettings.mockClear()
     mockLinkProjectSource.mockResolvedValue({
       projectId: "new-proj", sourceProjectId: "upstream-1", mode: "live", consumes: "source",
       gate: "validated", previousSourceProjectId: null, seeded: true,
@@ -142,6 +163,37 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
     // QA-BUG-1: the server reported seeding succeeded — no client-side
     // self-heal needed.
     expect(mockTriggerLinkSync).not.toHaveBeenCalled()
+  })
+
+  it("applies extra target lanes on the linked-target shape too", async () => {
+    render(<ProjectCreateDialog onCreated={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+
+    fireEvent.change(screen.getByPlaceholderText("My Translation Project"), { target: { value: "Multilingual Linked" } })
+    fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), { target: { value: "English" } })
+    fireEvent.change(screen.getByTestId("create-extra-lang-input"), { target: { value: "French" } })
+
+    fireEvent.click(screen.getByTestId("create-add-target-lang"))
+    fireEvent.change(screen.getByTestId("create-target-lang-input-1"), { target: { value: "es" } })
+
+    fireEvent.click(screen.getByText("Advanced: project shape"))
+    fireEvent.click(screen.getByText(/Linked target/i))
+    await pickSelectOption(/Upstream project/i, /English Source/i)
+
+    fireEvent.click(screen.getByRole("button", { name: /Create & Link/i }))
+
+    await waitFor(() => {
+      expect(mockLinkProjectSource).toHaveBeenCalledTimes(1)
+    })
+
+    // The lanes PATCH used to be gated on the self-contained shape; a linked
+    // target is precisely the case that wants several of them.
+    await waitFor(() => {
+      const lanesCall = mockPatchProjectSettings.mock.calls.find(
+        (call) => (call[2] as { targetLanes?: string[] }).targetLanes,
+      )
+      expect(lanesCall?.[2]).toEqual({ targetLanes: ["es"] })
+    })
   })
 
   it("QA-BUG-1: self-heals client-side when the server reports seeding did NOT run (mode=live)", async () => {

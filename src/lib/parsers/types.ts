@@ -222,7 +222,8 @@ export const AUDIO_MEDIA_STRATEGY_LABELS: Record<AudioMediaStrategy, { nameKey: 
   },
 }
 
-export type TtsProvider = "omnivoice" | "gemini" | "kokoro" | "mms"
+/** `"omnivoice"` is a persisted legacy id — runtime remaps it to `"inworld"` (AQU-1189). */
+export type TtsProvider = "inworld" | "omnivoice" | "gemini" | "kokoro" | "mms"
 
 /**
  * A reusable voice in the project's voice library. Voice owns *all* the knobs
@@ -235,7 +236,7 @@ export interface Voice {
   name: string
   /** Hex color for the voice's chip/dot in the UI. */
   color?: string
-  /** Defaults to "omnivoice" when absent. Kokoro voices ignore everything below voiceName. */
+  /** Defaults to "inworld" when absent. Kokoro voices ignore everything below voiceName. */
   provider?: TtsProvider
   /** Optional Gemini model override. */
   model?: string
@@ -268,7 +269,7 @@ export interface Voice {
 }
 
 export interface ProjectTtsSettings {
-  /** "omnivoice" (hosted, no key) is the default. "gemini" is BYOK; "kokoro"/"mms" run locally. */
+  /** "inworld" (hosted Inworld TTS 2 Flash, no user key) is the default. "gemini" is BYOK; "kokoro"/"mms" run locally. Legacy `"omnivoice"` remaps to inworld. */
   provider?: TtsProvider
   /** Gemini API key for BYOK TTS. Stored in the local project record. */
   apiKey?: string

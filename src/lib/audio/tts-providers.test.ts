@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest"
 import {
   DEFAULT_GEMINI_VOICE,
+  DEFAULT_INWORLD_VOICE,
   DEFAULT_KOKORO_VOICE,
   DEFAULT_MMS_LANGUAGE,
   DEFAULT_TTS_PROVIDER,
   TTS_PROVIDER_INFOS,
   defaultVoiceNameForProvider,
+  effectiveTtsProvider,
   inferMmsLanguageCode,
+  isServerTtsProvider,
   normalizeVoiceForProvider,
+  providerInfo,
 } from "./tts-providers"
 import type { Voice } from "@/lib/parsers/types"
 
@@ -67,27 +71,27 @@ describe("TTS provider normalization", () => {
     expect(normalizeVoiceForProvider(kokoro, "gemini").voiceName).toBe(DEFAULT_GEMINI_VOICE)
   })
 
-  it("defaults to omnivoice", () => {
-    expect(DEFAULT_TTS_PROVIDER).toBe("omnivoice")
+  it("defaults to inworld", () => {
+    expect(DEFAULT_TTS_PROVIDER).toBe("inworld")
   })
 
   it("lists all four engines with cloud engines first", () => {
     expect(TTS_PROVIDER_INFOS.map((p) => p.id)).toEqual([
-      "omnivoice", "gemini", "kokoro", "mms",
+      "inworld", "gemini", "kokoro", "mms",
     ])
   })
 
   it("marks only cloud engines as cloning-capable", () => {
     const byId = Object.fromEntries(TTS_PROVIDER_INFOS.map((p) => [p.id, p]))
-    expect(byId.omnivoice.supportsCloning).toBe(true)
+    expect(byId.inworld.supportsCloning).toBe(true)
     expect(byId.gemini.supportsCloning).toBe(true)
     expect(byId.kokoro.supportsCloning).toBe(false)
     expect(byId.mms.supportsCloning).toBe(false)
   })
 
-  it("marks omnivoice as the only engine without named voices", () => {
+  it("gives every engine named voices, including Inworld", () => {
     const byId = Object.fromEntries(TTS_PROVIDER_INFOS.map((p) => [p.id, p]))
-    expect(byId.omnivoice.hasNamedVoices).toBe(false)
+    expect(byId.inworld.hasNamedVoices).toBe(true)
     expect(byId.gemini.hasNamedVoices).toBe(true)
     expect(byId.kokoro.hasNamedVoices).toBe(true)
     expect(byId.mms.hasNamedVoices).toBe(true)
@@ -95,17 +99,34 @@ describe("TTS provider normalization", () => {
 
   it("tags each engine with its run tier", () => {
     const byId = Object.fromEntries(TTS_PROVIDER_INFOS.map((p) => [p.id, p]))
-    expect(byId.omnivoice.tier).toBe("cloud")
+    expect(byId.inworld.tier).toBe("cloud")
     expect(byId.gemini.tier).toBe("cloud")
     expect(byId.kokoro.tier).toBe("device")
     expect(byId.mms.tier).toBe("device")
   })
 
-  it("gives omnivoice no base voice name", () => {
-    expect(defaultVoiceNameForProvider("omnivoice")).toBe("")
+  it("gives inworld the Dennis stock voice by default", () => {
+    expect(defaultVoiceNameForProvider("inworld")).toBe(DEFAULT_INWORLD_VOICE)
   })
 
-  it("clears the voice name when normalizing to omnivoice", () => {
-    expect(normalizeVoiceForProvider(geminiVoice, "omnivoice").voiceName).toBe("")
+  it("normalizes Gemini names onto Dennis when switching to inworld", () => {
+    expect(normalizeVoiceForProvider(geminiVoice, "inworld").voiceName).toBe(DEFAULT_INWORLD_VOICE)
+    expect(normalizeVoiceForProvider(geminiVoice, "inworld").provider).toBe("inworld")
+  })
+
+  it("remaps persisted omnivoice ids to inworld at runtime", () => {
+    expect(effectiveTtsProvider("omnivoice")).toBe("inworld")
+    expect(effectiveTtsProvider(undefined)).toBe("inworld")
+    expect(isServerTtsProvider("omnivoice")).toBe(true)
+    expect(isServerTtsProvider("inworld")).toBe(true)
+    expect(isServerTtsProvider("gemini")).toBe(false)
+    expect(providerInfo("omnivoice").id).toBe("inworld")
+    expect(normalizeVoiceForProvider(geminiVoice, "omnivoice").provider).toBe("inworld")
+    expect(defaultVoiceNameForProvider("omnivoice")).toBe(DEFAULT_INWORLD_VOICE)
+  })
+
+  it("keeps an Inworld Instant Voice Cloning id", () => {
+    const cloned: Voice = { ...geminiVoice, voiceName: "ws__narrator_20260907_120000z" }
+    expect(normalizeVoiceForProvider(cloned, "inworld").voiceName).toBe("ws__narrator_20260907_120000z")
   })
 })

@@ -1,12 +1,12 @@
-// OmniVoice TTS proxy: synthesize spoken audio for translated cells.
+// Hosted TTS proxy: synthesize spoken audio for translated cells via Inworld
+// TTS 2 Flash (AQU-1189). OmniVoice / Modal is not called from this worker.
 //
 // Mirrors voice-convert.ts in auth, R2 layout, and error-handling patterns.
-// The browser never talks to Modal directly — it can't hold the Modal secret.
+// The browser never talks to Inworld directly — it can't hold the API key.
 // This worker verifies the sync-token, pre-checks the user's daily seconds
-// budget, calls the OmniVoice Modal endpoint, writes the WAV to R2 as a
-// cell-audio object, records the actual seconds consumed, and returns an
-// audioId the client can attach to the cell or pass to /voice/convert as
-// sourceAudioId (use case 3).
+// budget, calls Inworld, writes the WAV to R2 as a cell-audio object, records
+// the actual seconds consumed, and returns an audioId the client can attach
+// to the cell or pass to /voice/convert as sourceAudioId (use case 3).
 //
 // Auth: sync-token JWT scoped to (projectId, fileId) via verifyTokenForFile,
 //       identical to /audio and /voice/convert.
@@ -18,15 +18,28 @@ import { audioObjectKey, isPathSafeId, r2KeyPrefix } from "./audio"
 import { verifyTokenForFile } from "./auth"
 import { runTtsGuard, recordTtsUsage } from "./tts-budget"
 import { recordCredit } from "./credits"
+import {
+  INWORLD_MAX_TEXT_CHARS,
+  cloneInworldVoice,
+  synthesizeInworldSpeech,
+  type InworldTtsConfig,
+} from "./inworld-tts"
 
 export interface TtsEnv {
   SNAPSHOTS: R2Bucket
   SYNC_SECRET_KEY?: string
   R2_KEY_PREFIX?: string
-  /** OmniVoice Modal endpoint, e.g. https://<acct>--omnivoice-web.modal.run */
-  OMNIVOICE_URL?: string
-  /** Shared secret matching the Modal `omnivoice-auth` secret's OMNIVOICE_TOKEN. */
-  OMNIVOICE_TOKEN?: string
+  /**
+   * Inworld Portal API key (base64 key:secret). Worker sends
+   * `Authorization: Basic $INWORLD_API_KEY`. See docs/INWORLD-TTS.md.
+   */
+  INWORLD_API_KEY?: string
+  /** Override Inworld API origin. Default https://api.inworld.ai */
+  INWORLD_API_BASE?: string
+  /** Override model id. Default inworld-tts-2-flash */
+  INWORLD_TTS_MODEL?: string
+  /** Stock voice when the request has no voiceId and no clone. Default Dennis. */
+  INWORLD_DEFAULT_VOICE?: string
   /** Per-user daily audio-seconds cap (default 36000 = 10 h while sizing). */
   TTS_USER_DAILY_SECONDS_LIMIT?: string
   /** "true" → enforce the cap with 429; anything else → log-only. */
@@ -48,11 +61,26 @@ export interface TtsEnv {
 
 const TTS_PATH = "/api/v1/voice/tts"
 
+function inworldConfig(env: TtsEnv): InworldTtsConfig | null {
+  const apiKey = env.INWORLD_API_KEY?.trim()
+  if (!apiKey) return null
+  return {
+    apiKey,
+    ...(env.INWORLD_API_BASE ? { apiBase: env.INWORLD_API_BASE } : {}),
+    ...(env.INWORLD_TTS_MODEL ? { modelId: env.INWORLD_TTS_MODEL } : {}),
+    ...(env.INWORLD_DEFAULT_VOICE ? { defaultVoiceId: env.INWORLD_DEFAULT_VOICE } : {}),
+  }
+}
+
+function inworldCloneCacheKey(env: TtsEnv, projectId: string, referenceAudioId: string): string {
+  return `${r2KeyPrefix(env)}projects/${projectId}/voices/${referenceAudioId}.inworld.json`
+}
+
 /**
  * POST /api/v1/voice/tts
  *
  * JSON body:
- *   { projectId, fileId, cellId?, text, referenceAudioId?, language? }
+ *   { projectId, fileId, cellId?, text, voiceId?, referenceAudioId?, language? }
  *
  * Returns { audioId, durationSeconds } on success.
  * Returns null when the path/method doesn't match (dispatcher falls through).
@@ -66,7 +94,8 @@ export async function handleTtsRequest(
   if (request.method !== "POST") {
     return new Response("method not allowed", { status: 405 })
   }
-  if (!env.OMNIVOICE_URL || !env.OMNIVOICE_TOKEN) {
+  const config = inworldConfig(env)
+  if (!config) {
     return new Response("TTS not configured", { status: 503 })
   }
   if (!env.AQUILLA_PG) {
@@ -79,6 +108,7 @@ export async function handleTtsRequest(
     fileId?: string
     cellId?: string
     text?: string
+    voiceId?: string
     referenceAudioId?: string
     language?: string
   }
@@ -88,7 +118,7 @@ export async function handleTtsRequest(
     return new Response("expected JSON body", { status: 400 })
   }
 
-  const { projectId, fileId, text, referenceAudioId, language } = body
+  const { projectId, fileId, text, voiceId, referenceAudioId, language } = body
   if (!projectId || !fileId || !text) {
     return new Response("missing projectId, fileId, or text", { status: 400 })
   }
@@ -98,14 +128,16 @@ export async function handleTtsRequest(
   if (!isPathSafeId(projectId) || !isPathSafeId(fileId)) {
     return new Response("invalid projectId or fileId", { status: 400 })
   }
-  // Bound text size — an authenticated caller could otherwise exhaust the GPU
-  // request timeout with a multi-MB payload.
-  if (text.length > 10_000) {
-    return new Response("text too long (max 10000 chars)", { status: 400 })
+  // Bound text size — Inworld's sync synthesize endpoint caps at 2000 chars.
+  if (text.length > INWORLD_MAX_TEXT_CHARS) {
+    return new Response(`text too long (max ${INWORLD_MAX_TEXT_CHARS} chars)`, { status: 400 })
   }
   // Sanitize the reference id before it becomes part of an R2 key.
   if (referenceAudioId !== undefined && !/^[\w.-]+$/.test(referenceAudioId)) {
     return new Response("invalid referenceAudioId", { status: 400 })
+  }
+  if (voiceId !== undefined && (voiceId.length > 200 || /[\r\n]/.test(voiceId))) {
+    return new Response("invalid voiceId", { status: 400 })
   }
 
   // Auth: sync-token scoped to (projectId, fileId), same as /audio.
@@ -123,7 +155,6 @@ export async function handleTtsRequest(
   const userId = verified.claims.userId
 
   // Resolve org_id from the project row. Mirrors export-floor.ts pattern.
-  // (sync-worker/src/events/export-floor.ts line 37)
   const db = env.AQUILLA_PG
   const projectRow = await db
     .prepare(`SELECT org_id FROM projects WHERE id = ?`)
@@ -138,62 +169,63 @@ export async function handleTtsRequest(
     return Response.json(guard.body, { status: guard.status })
   }
 
-  // Optionally resolve a reference clip for voice cloning.
-  let referenceBytes: ArrayBuffer | undefined
-  let referenceType = "audio/wav"
+  let inworldVoiceId = voiceId?.trim() || undefined
+
+  // Optionally resolve a reference clip and clone it once (cached in R2).
+  // A clone always wins over a stock voiceId — that's the zero-shot path.
   if (referenceAudioId) {
-    // Reference clips live project-scoped at the same path voice-convert uses.
-    const refKey = `${r2KeyPrefix(env)}projects/${projectId}/voices/${referenceAudioId}`
-    const refObj = await env.SNAPSHOTS.get(refKey)
-    if (!refObj) return new Response("reference audio not found", { status: 404 })
-    referenceBytes = await refObj.arrayBuffer()
-    referenceType = refObj.httpMetadata?.contentType || referenceType
+    const cacheKey = inworldCloneCacheKey(env, projectId, referenceAudioId)
+    let clonedVoiceId: string | undefined
+    const cached = await env.SNAPSHOTS.get(cacheKey)
+    if (cached) {
+      try {
+        const parsed = JSON.parse(await cached.text()) as { voiceId?: string }
+        if (parsed.voiceId) clonedVoiceId = parsed.voiceId
+      } catch {
+        // Corrupt sidecar — re-clone below.
+      }
+    }
+    if (!clonedVoiceId) {
+      const refKey = `${r2KeyPrefix(env)}projects/${projectId}/voices/${referenceAudioId}`
+      const refObj = await env.SNAPSHOTS.get(refKey)
+      if (!refObj) return new Response("reference audio not found", { status: 404 })
+      const referenceBytes = await refObj.arrayBuffer()
+      try {
+        clonedVoiceId = await cloneInworldVoice(config, {
+          displayName: referenceAudioId,
+          audioBytes: referenceBytes,
+          language,
+        })
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        return new Response(message, { status: 502 })
+      }
+      await env.SNAPSHOTS.put(cacheKey, JSON.stringify({ voiceId: clonedVoiceId }), {
+        httpMetadata: { contentType: "application/json" },
+      })
+    }
+    inworldVoiceId = clonedVoiceId
   }
 
-  // Call OmniVoice on Modal.
-  const modalBody = new FormData()
-  modalBody.append("text", text)
-  if (language) modalBody.append("language", language)
-  if (referenceBytes) {
-    modalBody.append(
-      "voice_ref",
-      new Blob([referenceBytes], { type: referenceType }),
-      "reference",
-    )
-  }
-
-  let modalRes: Response
+  let wavBytes: ArrayBuffer
+  let durationSeconds: number
   try {
-    modalRes = await fetch(`${env.OMNIVOICE_URL}/synthesize`, {
-      method: "POST",
-      headers: { "X-Auth-Token": env.OMNIVOICE_TOKEN },
-      body: modalBody,
+    const synth = await synthesizeInworldSpeech(config, {
+      text,
+      voiceId: inworldVoiceId,
+      language,
     })
+    wavBytes = synth.wavBytes
+    durationSeconds = Number.isFinite(synth.durationSeconds) ? Math.max(0, synth.durationSeconds) : 0
   } catch (err) {
-    return new Response(`TTS upstream unreachable: ${String(err)}`, { status: 502 })
+    const message = err instanceof Error ? err.message : String(err)
+    return new Response(message, { status: 502 })
   }
-  if (!modalRes.ok) {
-    const detail = await modalRes.text().catch(() => "")
-    return new Response(`TTS failed (${modalRes.status}): ${detail}`.trim(), { status: 502 })
-  }
-
-  const wavBytes = await modalRes.arrayBuffer()
-
-  // Parse the duration header (the metering unit). Guard against a malformed
-  // or absent value: Number("NaN"/"inf"/junk) or a negative would corrupt the
-  // audio_seconds counter (a NaN SUM permanently defeats the daily cap). Clamp
-  // to a finite, non-negative number.
-  const durationHeader = modalRes.headers.get("X-Audio-Duration-Seconds")
-  const parsedDuration = Number(durationHeader)
-  const durationSeconds =
-    durationHeader && Number.isFinite(parsedDuration) ? Math.max(0, parsedDuration) : 0
-  if (!durationHeader || !Number.isFinite(parsedDuration)) {
-    // Our own omnivoice.py always sets this header; a miss means a Modal
-    // contract/version drift. Metering can't account for this clip — surface it
-    // loudly (the spend control silently under-counts otherwise).
+  if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
     console.warn(
-      `[tts] missing/invalid X-Audio-Duration-Seconds (got ${JSON.stringify(durationHeader)}) — recording 0s for user ${userId} org ${orgId}`,
+      `[tts] Inworld clip had no parseable duration — recording 0s for user ${userId} org ${orgId}`,
     )
+    durationSeconds = 0
   }
 
   // Write WAV to R2 as a cell-audio object (same layout as voice-convert).

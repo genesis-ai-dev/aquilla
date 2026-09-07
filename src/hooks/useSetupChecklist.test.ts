@@ -35,7 +35,11 @@ describe("deriveAiModelsReady", () => {
     expect(deriveAiModelsReady({ provider: "gemini", apiKey: "   " }, { kokoro: ready, mms: ready })).toBe(false)
   })
 
-  it("hosted omnivoice: the explicit choice alone completes — no download or key needed", () => {
+  it("hosted inworld: the explicit choice alone completes — no download or key needed", () => {
+    expect(deriveAiModelsReady({ provider: "inworld" }, { kokoro: idle, mms: idle })).toBe(true)
+  })
+
+  it("legacy omnivoice choice still completes the hosted step", () => {
     expect(deriveAiModelsReady({ provider: "omnivoice" }, { kokoro: idle, mms: idle })).toBe(true)
   })
 })

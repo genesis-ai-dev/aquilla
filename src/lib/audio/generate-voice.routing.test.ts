@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 
 describe("generateAndAttachCellVoice routing", () => {
-  it("omnivoice voice uses the server TTS path, not client synth", async () => {
+  it("inworld voice uses the server TTS path, not client synth", async () => {
     vi.resetModules()
     const synthCellTts = vi.fn(async () => ({
       audioId: "audio-tts-1", durationSeconds: 1.2,
@@ -23,7 +23,7 @@ describe("generateAndAttachCellVoice routing", () => {
     }))
     vi.doMock("./voice-clone", () => ({ convertToCloneVoice: vi.fn() }))
     vi.doMock("./voices", () => ({
-      resolveVoice: () => ({ id: "v", name: "N", provider: "omnivoice" }),
+      resolveVoice: () => ({ id: "v", name: "N", provider: "inworld", voiceName: "Dennis" }),
     }))
     const { generateAndAttachCellVoice } = await import("./generate-voice")
     await generateAndAttachCellVoice({
@@ -33,6 +33,14 @@ describe("generateAndAttachCellVoice routing", () => {
       geminiContext: { targetLanguage: "es" },
     })
     expect(synthCellTts).toHaveBeenCalledTimes(1)
+    expect(synthCellTts).toHaveBeenCalledWith(
+      expect.objectContaining({
+        text: "hello",
+        language: "es",
+        voiceId: "Dennis",
+      }),
+      expect.any(Function),
+    )
     expect(synthForCell).not.toHaveBeenCalled()
     expect(emitAttach).toHaveBeenCalledWith(
       expect.objectContaining({ audioId: "audio-tts-1.wav", slot: "generatedVoice", durationMs: 1200 }),
@@ -56,7 +64,10 @@ describe("generateAndAttachCellVoice routing", () => {
     vi.doMock("./voices", () => ({
       resolveVoice: () => ({ id: "v", name: "N", provider: "gemini" }),
     }))
-    vi.doMock("./tts-providers", () => ({ resolveTtsProvider: () => "gemini" }))
+    vi.doMock("./tts-providers", () => ({
+      resolveTtsProvider: () => "gemini",
+      isServerTtsProvider: () => false,
+    }))
     vi.doMock("./opus-encode", () => ({
       canEncodeOpus: () => opts.canEncode,
       encodeMonoToWebmOpus: vi.fn(async () => ({

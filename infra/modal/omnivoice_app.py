@@ -1,4 +1,13 @@
 """
+NON-COMMERCIAL / UNPAID RESEARCH ONLY (AQU-1189).
+
+OmniVoice pretrained weights are CC-BY-NC. Aquilla's production TTS path is
+Inworld TTS 2 Flash (sync-worker → Inworld API). This Modal app must NOT be
+called from production or for paying orgs. Keep it only for unpaid internal
+research demos. See docs/INWORLD-TTS.md.
+
+---
+
 OmniVoice zero-shot text-to-speech / voice-design model, deployed on Modal as
 an authenticated HTTP endpoint. Supports 600+ languages; uses a diffusion-LM
 architecture with Whisper for reference ASR under the hood (zero-shot voice

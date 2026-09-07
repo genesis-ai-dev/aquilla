@@ -1,27 +1,35 @@
 // Map hosted TTS / clone-conversion HTTP failures onto Error messages that
 // name the engine that actually failed. The gutter tooltip shows
 // `err.message` raw; categorizeAiError then turns the same strings into a
-// titled popover so OmniVoice 503s never read as a missing Gemini key.
+// titled popover so Inworld 503s never read as a missing Gemini key.
 
-export const OMNIVOICE_NOT_CONFIGURED_BODY =
-  "This line uses OmniVoice, not Gemini. Hosted TTS isn't wired on this server — a Gemini API key will not fix it."
+export const HOSTED_TTS_NOT_CONFIGURED_BODY =
+  "This line uses Inworld TTS, not Gemini. Hosted TTS isn't wired on this server — a Gemini API key will not fix it."
 
-export const OMNIVOICE_FAILED_BODY =
-  "OmniVoice couldn't generate this line. This is not a Gemini key problem."
+export const HOSTED_TTS_FAILED_BODY =
+  "Inworld TTS couldn't generate this line. This is not a Gemini key problem."
+
+/** @deprecated AQU-1189 alias — prefer HOSTED_TTS_NOT_CONFIGURED_BODY */
+export const OMNIVOICE_NOT_CONFIGURED_BODY = HOSTED_TTS_NOT_CONFIGURED_BODY
+/** @deprecated AQU-1189 alias — prefer HOSTED_TTS_FAILED_BODY */
+export const OMNIVOICE_FAILED_BODY = HOSTED_TTS_FAILED_BODY
 
 export const SEED_VC_NOT_CONFIGURED_BODY =
-  "This clone voice needs Seed-VC after Gemini or a local engine. Voice conversion isn't wired on this server. An OmniVoice clone wouldn't need this step."
+  "This clone voice needs Seed-VC after Gemini or a local engine. Voice conversion isn't wired on this server. An Inworld clone wouldn't need this step."
 
 export const SEED_VC_FAILED_BODY =
   "Voice cloning (Seed-VC) couldn't convert this line. This is not a Gemini key problem."
 
-export function errorFromOmnivoiceTts(status: number, body: string): Error {
+export function errorFromHostedTts(status: number, body: string): Error {
   const detail = body.trim() || `HTTP ${status}`
   if (status === 503 && /tts not configured/i.test(detail)) {
-    return new Error(OMNIVOICE_NOT_CONFIGURED_BODY)
+    return new Error(HOSTED_TTS_NOT_CONFIGURED_BODY)
   }
-  return new Error(`OmniVoice TTS failed (${status}): ${detail}`)
+  return new Error(`Inworld TTS failed (${status}): ${detail}`)
 }
+
+/** @deprecated AQU-1189 — use errorFromHostedTts */
+export const errorFromOmnivoiceTts = errorFromHostedTts
 
 export function errorFromVoiceConvert(status: number, body: string): Error {
   const detail = body.trim() || `HTTP ${status}`

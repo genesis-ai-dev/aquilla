@@ -104,8 +104,8 @@ export function deriveAiModelsReady(
   if (provider === "gemini") return Boolean(ttsSettings.apiKey?.trim())
   if (provider === "kokoro") return models.kokoro.kind === "ready"
   if (provider === "mms") return models.mms.kind === "ready"
-  // Hosted providers (omnivoice) need no download or key — the explicit
-  // choice alone completes the step.
+  // Hosted providers (Inworld) need no download or key — the explicit
+  // choice alone completes the step. Legacy "omnivoice" remaps to inworld.
   return true
 }
 

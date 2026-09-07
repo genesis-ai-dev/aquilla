@@ -490,8 +490,8 @@ function SynthStatusBadge({
       error.category === "no-source-text" ||
       error.category === "git-project-unsupported" ||
       error.category === "sign-in-required" ||
-      error.category === "omnivoice-not-configured" ||
-      error.category === "omnivoice-failed" ||
+      error.category === "hosted-tts-not-configured" ||
+      error.category === "hosted-tts-failed" ||
       error.category === "seed-vc-not-configured" ||
       error.category === "seed-vc-failed" ||
       error.category === "gemini-failed"

@@ -19,7 +19,7 @@
 
 import { synthesizeForCell, setTtsStatus, ttsStatusKey } from "./tts"
 import { resolveCastVoice } from "./voices"
-import { resolveTtsProvider } from "./tts-providers"
+import { resolveTtsProvider, isServerTtsProvider } from "./tts-providers"
 import { buildAudioId, uploadCellAudio, fetchCellAudio } from "./upload"
 import { uploadLosslessSiblingBestEffort } from "./lossless-sibling"
 import { canEncodeOpus, encodeMonoToWebmOpus } from "./opus-encode"
@@ -35,7 +35,7 @@ import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord, ProjectTtsSettings } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 
-/** Keep the joined request a single, sane TTS call. */
+/** Keep the joined request a single, sane TTS call (Inworld sync cap is 2000 chars). */
 export const MAX_COMBINED_CELLS = 12
 export const MAX_COMBINED_CHARS = 2000
 
@@ -86,12 +86,13 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
   let truncated = false
   for (const c of ordered) {
     const t = c.translated.trim()
-    if (chosen.length >= MAX_COMBINED_CELLS || (chosen.length > 0 && chars + t.length > MAX_COMBINED_CHARS)) {
+    const nextLen = chars + t.length + (chosen.length > 0 ? SEPARATOR.length : 0)
+    if (chosen.length >= MAX_COMBINED_CELLS || (chosen.length > 0 && nextLen > MAX_COMBINED_CHARS)) {
       truncated = true
       break
     }
     chosen.push(c)
-    chars += t.length
+    chars = nextLen
   }
   if (chosen.length < 2) throw new Error("Selected lines are too long to voice together")
 
@@ -108,12 +109,12 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
     let audioId: string
     let ext: string
     let url: string
-    // Server-side branches (omnivoice, clone) return WAV; the client-synth
+    // Server-side branches (Inworld, clone) return WAV; the client-synth
     // branch overrides when it compresses.
     let combinedMime = "audio/wav"
 
-    if (provider === "omnivoice") {
-      // Server-side: one OmniVoice call for the whole joined clip; the worker
+    if (isServerTtsProvider(provider)) {
+      // Server-side: one Inworld call for the whole joined clip; the worker
       // stores it (native clone when a reference is set) and returns its id.
       onProgress?.("Synthesizing combined clip…")
       const result = await synthesizeCellTts(
@@ -123,6 +124,7 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
           cellId: chosen[0].id,
           text: joined,
           ...(project.targetLanguage ? { language: project.targetLanguage } : {}),
+          ...(voice.voiceName ? { voiceId: voice.voiceName } : {}),
           ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
         },
         getSyncToken,

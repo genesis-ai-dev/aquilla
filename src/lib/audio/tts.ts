@@ -19,6 +19,7 @@ import { getKokoroWorker, getMmsWorker, noteModelDownloading, noteModelDownloadS
 import {
   normalizeVoiceForProvider,
   resolveTtsProvider,
+  isServerTtsProvider,
 } from "./tts-providers"
 import { friendlyKokoroError } from "./phonemizer-browser-env"
 
@@ -103,9 +104,9 @@ export async function synthesizeToWavBlob(
   if (!cleanText) throw new Error("No text to synthesize.")
 
   const provider = opts.projectProvider ?? opts.voice.provider ?? "gemini"
-  if (provider === "omnivoice") {
+  if (isServerTtsProvider(provider)) {
     throw new Error(
-      "OmniVoice runs server-side — generate from a project cell, not the local synth path.",
+      "Inworld TTS runs server-side — generate from a project cell, not the local synth path.",
     )
   }
   const voice = normalizeVoiceForProvider(opts.voice, provider, {

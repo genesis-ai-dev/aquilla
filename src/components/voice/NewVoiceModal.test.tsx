@@ -2,7 +2,7 @@
  * NewVoiceModal.test.tsx — engine (TTS provider) selection during creation.
  *
  * The creation modal must honor the project's configured engine, not hardcode
- * Gemini: a Kokoro/MMS/OmniVoice project creates voices on that engine, and
+ * Gemini: a Kokoro/MMS/Inworld project creates voices on that engine, and
  * the user can switch engines per-voice. Regression guard for the f7abd8790
  * simplification that dropped the 4-engine picker.
  */
@@ -99,8 +99,8 @@ describe("NewVoiceModal engine selection", () => {
     vi.unstubAllGlobals()
   })
   it("offers all four engines", () => {
-    renderCreate({ provider: "omnivoice" })
-    for (const label of [/OmniVoice/, /Gemini/, /Kokoro/, /MMS/]) {
+    renderCreate({ provider: "inworld" })
+    for (const label of [/Inworld/, /Gemini/, /Kokoro/, /MMS/]) {
       expect(engineCard(label)).toBeTruthy()
     }
   })
@@ -124,7 +124,7 @@ describe("NewVoiceModal engine selection", () => {
   })
 
   it("lets the user switch engine before creating", () => {
-    const { onSave } = renderCreate({ provider: "omnivoice" })
+    const { onSave } = renderCreate({ provider: "inworld" })
     fireEvent.click(engineCard(/Gemini/))
     expect(engineCard(/Gemini/).getAttribute("aria-pressed")).toBe("true")
     create()
@@ -196,28 +196,34 @@ describe("NewVoiceModal engine selection", () => {
     expect(screen.getByText(/On-device Kokoro speaks English/)).toBeTruthy()
   })
 
-  it("defaults to omnivoice when no project provider is passed", () => {
+  it("defaults to inworld when no project provider is passed", () => {
     const { onSave } = renderCreate()
-    expect(engineCard(/OmniVoice/).getAttribute("aria-pressed")).toBe("true")
+    expect(engineCard(/Inworld/).getAttribute("aria-pressed")).toBe("true")
     create()
     const saved = (onSave as ReturnType<typeof vi.fn>).mock.calls[0][0] as Voice
-    expect(saved.provider).toBe("omnivoice")
-    expect(saved.voiceName).toBe("")
+    expect(saved.provider).toBe("inworld")
+    expect(saved.voiceName).toBe("Dennis")
+  })
+
+  it("remaps a persisted omnivoice project to the Inworld card", () => {
+    renderCreate({ provider: "omnivoice" })
+    expect(engineCard(/Inworld/).getAttribute("aria-pressed")).toBe("true")
+    expect(screen.queryByRole("button", { name: /OmniVoice/ })).toBeNull()
   })
 })
 
 describe("NewVoiceModal clone tab engines", () => {
   it("offers only cloud clone engines, not Kokoro or MMS", () => {
-    renderCreate({ provider: "omnivoice", initialMode: "clone" })
-    expect(engineCard(/OmniVoice/)).toBeTruthy()
+    renderCreate({ provider: "inworld", initialMode: "clone" })
+    expect(engineCard(/Inworld/)).toBeTruthy()
     expect(engineCard(/Gemini/)).toBeTruthy()
     expect(screen.queryByRole("button", { name: /Kokoro/ })).toBeNull()
     expect(screen.queryByRole("button", { name: /MMS/ })).toBeNull()
   })
 
-  it("remaps a Kokoro project default to OmniVoice on the clone tab", () => {
+  it("remaps a Kokoro project default to Inworld on the clone tab", () => {
     renderCreate({ provider: "kokoro", initialMode: "clone" })
-    expect(engineCard(/OmniVoice/).getAttribute("aria-pressed")).toBe("true")
+    expect(engineCard(/Inworld/).getAttribute("aria-pressed")).toBe("true")
     expect(screen.queryByRole("button", { name: /Kokoro/ })).toBeNull()
   })
 
@@ -228,7 +234,7 @@ describe("NewVoiceModal clone tab engines", () => {
   })
 
   it("lets the user pick Gemini as the clone engine and saves it", () => {
-    const { onSave } = renderCreate({ provider: "omnivoice", initialMode: "clone" })
+    const { onSave } = renderCreate({ provider: "inworld", initialMode: "clone" })
     fireEvent.click(engineCard(/Gemini/))
     fireEvent.click(screen.getByRole("button", { name: "Add reference" }))
     create("Keean")
@@ -237,11 +243,11 @@ describe("NewVoiceModal clone tab engines", () => {
     expect(saved.referenceAudioId).toBe("ref.webm")
   })
 
-  it("switching from the TTS tab remaps Kokoro to OmniVoice", () => {
+  it("switching from the TTS tab remaps Kokoro to Inworld", () => {
     renderCreate({ provider: "kokoro" })
     expect(engineCard(/Kokoro/).getAttribute("aria-pressed")).toBe("true")
     fireEvent.click(screen.getByRole("tab", { name: /Clone voice/ }))
-    expect(engineCard(/OmniVoice/).getAttribute("aria-pressed")).toBe("true")
+    expect(engineCard(/Inworld/).getAttribute("aria-pressed")).toBe("true")
     expect(screen.queryByRole("button", { name: /Kokoro/ })).toBeNull()
   })
 })

@@ -37,9 +37,15 @@ ALLOW_UNAUTHENTICATED="true"
 # DIARIZATION_PUBLIC_BASE=""
 # DIARIZATION_SHARED_SECRET=""
 
-# Modal-hosted voice-conversion services.
-# OMNIVOICE_URL=""
-# OMNIVOICE_TOKEN=""
+# Inworld TTS 2 Flash (AQU-1189) — the commercial hosted TTS / clone engine.
+# Paste the Portal API key as-is (the worker adds the Basic prefix).
+# Docs: docs/INWORLD-TTS.md
+# INWORLD_API_KEY=""
+# INWORLD_API_BASE="https://api.inworld.ai"
+# INWORLD_TTS_MODEL="inworld-tts-2-flash"
+# INWORLD_DEFAULT_VOICE="Dennis"
+
+# Modal-hosted voice-conversion (Seed-VC; still used for Gemini/local clones).
 # SEED_VC_URL=""
 # SEED_VC_TOKEN=""
 

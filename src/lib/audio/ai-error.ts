@@ -20,8 +20,8 @@
 
 import { t } from "@/lib/i18n/standalone"
 import {
-  OMNIVOICE_FAILED_BODY,
-  OMNIVOICE_NOT_CONFIGURED_BODY,
+  HOSTED_TTS_FAILED_BODY,
+  HOSTED_TTS_NOT_CONFIGURED_BODY,
   SEED_VC_FAILED_BODY,
   SEED_VC_NOT_CONFIGURED_BODY,
 } from "./tts-engine-error"
@@ -29,8 +29,8 @@ import {
 export type ErrorCategory =
   | "missing-gemini-key"
   | "gemini-failed"
-  | "omnivoice-not-configured"
-  | "omnivoice-failed"
+  | "hosted-tts-not-configured"
+  | "hosted-tts-failed"
   | "seed-vc-not-configured"
   | "seed-vc-failed"
   | "consent-denied"
@@ -139,29 +139,32 @@ export function categorizeAiError(rawMessage: string): ActionableError {
   }
 
   // Hosted TTS / clone conversion — name the engine BEFORE the Gemini-key
-  // heuristic. A local sync-worker 503 ("TTS not configured") is OmniVoice,
+  // heuristic. A local sync-worker 503 ("TTS not configured") is Inworld,
   // not a missing Google key; sending people to Gemini settings is a lie.
   if (
+    m.includes("this line uses inworld") ||
     m.includes("this line uses omnivoice") ||
     m.includes("tts not configured") ||
     (m.includes("voice/tts") && (status === 503 || m.includes("not configured")))
   ) {
     return {
-      category: "omnivoice-not-configured",
-      title: t("audio.aiError.omnivoiceNotConfiguredTitle"),
-      body: OMNIVOICE_NOT_CONFIGURED_BODY,
+      category: "hosted-tts-not-configured",
+      title: t("audio.aiError.inworldNotConfiguredTitle"),
+      body: HOSTED_TTS_NOT_CONFIGURED_BODY,
       raw,
     }
   }
   if (
+    m.includes("inworld tts failed") ||
+    m.includes("inworld tts couldn't generate") ||
     m.includes("omnivoice tts failed") ||
     m.includes("omnivoice couldn't generate") ||
     m.includes("voice/tts failed")
   ) {
     return {
-      category: "omnivoice-failed",
-      title: t("audio.aiError.omnivoiceFailedTitle"),
-      body: OMNIVOICE_FAILED_BODY,
+      category: "hosted-tts-failed",
+      title: t("audio.aiError.inworldFailedTitle"),
+      body: HOSTED_TTS_FAILED_BODY,
       raw,
     }
   }
@@ -194,7 +197,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
     return {
       category: "missing-gemini-key",
       title: t("audio.aiError.geminiKeyRequiredTitle"),
-      body: "Add a Gemini API key to use this Gemini voice, or switch the line to OmniVoice (hosted, no key) or a local engine (Kokoro or MMS).",
+      body: "Add a Gemini API key to use this Gemini voice, or switch the line to Inworld TTS (hosted, no key) or a local engine (Kokoro or MMS).",
       raw,
     }
   }
@@ -202,7 +205,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
     return {
       category: "gemini-failed",
       title: t("audio.aiError.geminiFailedTitle"),
-      body: "Gemini couldn't generate this line. Check the API key, or switch this voice to OmniVoice.",
+      body: "Gemini couldn't generate this line. Check the API key, or switch this voice to Inworld TTS.",
       raw,
     }
   }
@@ -232,7 +235,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
   // point: the server answers 503 for this, so with `extractStatus` finally
   // parsing brackets the branch below would call it `provider-unavailable` and
   // say "this is usually temporary — try again in a moment." It is not
-  // temporary and retrying will never fix it. Since OmniVoice is the DEFAULT
+  // temporary and retrying will never fix it. Since Inworld is the DEFAULT
   // engine, that would be the wrong advice on the single most likely voice
   // failure in the app.
   //

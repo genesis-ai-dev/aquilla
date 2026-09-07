@@ -1,13 +1,13 @@
 // NewVoiceModal — one modal, two ways to make a voice:
-//   • TTS voice — name it, pick the engine (OmniVoice / Gemini / Kokoro / MMS —
+//   • TTS voice — name it, pick the engine (Inworld / Gemini / Kokoro / MMS —
 //     seeded from the project's configured engine), and fill the engine's one
 //     knob (Gemini: describe how it sounds; Kokoro: pick a bundled speaker;
-//     MMS: language; OmniVoice: nothing). Gemini's base timbre stays a smart default (rotated
+//     MMS: language; Inworld: stock voice). Gemini's base timbre stays a smart default (rotated
 //     so each new voice sounds distinct).
-//   • Clone voice — name it, pick a cloud engine that can clone (OmniVoice /
+//   • Clone voice — name it, pick a cloud engine that can clone (Inworld /
 //     Gemini — Kokoro and MMS are on-device and cannot), and capture a short
 //     reference clip (record, upload, or reuse a take). Generation is re-voiced
-//     to match it. A local project default is remapped to OmniVoice on this tab.
+//     to match it. A local project default is remapped to Inworld on this tab.
 //
 // Editing an existing voice reuses this same modal, locked to the voice's kind
 // (TTS: all four engines; clone: cloud clone engines only).
@@ -42,11 +42,15 @@ import {
   DEFAULT_TTS_PROVIDER,
   GEMINI_TTS_VOICES,
   DEFAULT_GEMINI_VOICE,
+  INWORLD_TTS_VOICES,
+  DEFAULT_INWORLD_VOICE,
   TTS_PROVIDER_INFOS,
   defaultVoiceNameForProvider,
   isGeminiVoiceName,
+  isInworldVoiceName,
   normalizeVoiceForProvider,
   providerInfo,
+  effectiveTtsProvider,
   type TtsProviderInfo,
 } from "@/lib/audio/tts-providers"
 import { HAS_EXTENDED_MMS_MODELS, POPULAR_MMS_LANGUAGES } from "@/lib/audio/mms-languages"
@@ -134,15 +138,18 @@ function seedDraft(args: {
   rotatedGeminiVoice: string
 }): Voice {
   const { voice, projectProvider, targetLanguage, paletteIndex, initialMode, rotatedGeminiVoice } = args
-  const base: Voice = voice ?? {
-    id: newVoiceId(),
-    name: "",
-    color: VOICE_PALETTE[paletteIndex % VOICE_PALETTE.length],
-    provider: projectProvider,
-    voiceName: projectProvider === "gemini"
-      ? rotatedGeminiVoice
-      : defaultVoiceNameForProvider(projectProvider, { targetLanguage }),
-  }
+  const engine = effectiveTtsProvider(projectProvider)
+  const base: Voice = voice
+    ? { ...voice, provider: effectiveTtsProvider(voice.provider ?? engine) }
+    : {
+        id: newVoiceId(),
+        name: "",
+        color: VOICE_PALETTE[paletteIndex % VOICE_PALETTE.length],
+        provider: engine,
+        voiceName: engine === "gemini"
+          ? rotatedGeminiVoice
+          : defaultVoiceNameForProvider(engine, { targetLanguage }),
+      }
   const openingClone = Boolean(voice?.referenceAudioId) || initialMode === "clone"
   if (openingClone && !providerInfo(base.provider ?? projectProvider).supportsCloning) {
     return normalizeVoiceForProvider(base, DEFAULT_TTS_PROVIDER, { targetLanguage })
@@ -159,7 +166,7 @@ function NewVoiceModalBody({
   const lockedMode: Mode | null = voice ? (voice.referenceAudioId ? "clone" : "tts") : null
   const [mode, setMode] = useState<Mode>(lockedMode ?? initialMode ?? "tts")
 
-  const projectProvider = provider ?? DEFAULT_TTS_PROVIDER
+  const projectProvider = effectiveTtsProvider(provider ?? DEFAULT_TTS_PROVIDER)
   // Smart default: rotate Gemini's base timbre so a fresh voice sounds distinct
   // without making the user pick one.
   const rotatedGeminiVoice =
@@ -179,8 +186,7 @@ function NewVoiceModalBody({
   const [deleteOpen, setDeleteOpen] = useState(false)
 
   // Engine is per-voice; legacy voices without one follow the project default.
-  const activeProvider = draft.provider ?? projectProvider
-  const activeInfo = providerInfo(activeProvider)
+  const activeProvider = effectiveTtsProvider(draft.provider ?? projectProvider)
 
   const pickProvider = useCallback((next: TtsProvider) => {
     setDraft((d) => {
@@ -188,6 +194,9 @@ function NewVoiceModalBody({
       // Switching to Gemini keeps the rotated smart-default timbre.
       if (next === "gemini" && !isGeminiVoiceName(d.voiceName)) {
         normalized.voiceName = rotatedGeminiVoice
+      }
+      if (next === "inworld" && !isInworldVoiceName(d.voiceName)) {
+        normalized.voiceName = DEFAULT_INWORLD_VOICE
       }
       return normalized
     })
@@ -332,10 +341,27 @@ function NewVoiceModalBody({
                 onChange={(v) => update({ voiceName: v || undefined })}
               />
             )}
-            {mode === "tts" && activeProvider === "omnivoice" && (
-              <p className="text-xs text-muted-foreground">
-                {t("audio.newVoice.singleVoiceHint", { engine: activeInfo.title })}
-              </p>
+            {mode === "tts" && activeProvider === "inworld" && (
+              <Field>
+                <FieldLabel htmlFor="inworld-voice">{t("audio.newVoice.inworldVoiceLabel")}</FieldLabel>
+                <Select
+                  value={draft.voiceName && isInworldVoiceName(draft.voiceName) ? draft.voiceName : DEFAULT_INWORLD_VOICE}
+                  onValueChange={(v) => update({ voiceName: v || DEFAULT_INWORLD_VOICE })}
+                >
+                  <SelectTrigger id="inworld-voice" className="h-10">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      {INWORLD_TTS_VOICES.map((v) => (
+                        <SelectItem key={v.name} value={v.name}>
+                          {v.name}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              </Field>
             )}
             {activeProvider === "gemini" && (
               <Field>

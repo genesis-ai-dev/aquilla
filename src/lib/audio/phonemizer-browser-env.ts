@@ -129,7 +129,7 @@ export function friendlyKokoroError(raw: string): string {
     return "Kokoro's English voice data failed to load. Reload the page and try generating again."
   }
   if (/Invalid language identifier/i.test(collapsed)) {
-    return "Kokoro's on-device engine speaks English (American a* voices, British b* voices). Switch this line to OmniVoice, Gemini, or MMS for other languages."
+    return "Kokoro's on-device engine speaks English (American a* voices, British b* voices). Switch this line to Inworld TTS, Gemini, or MMS for other languages."
   }
   return raw
 }

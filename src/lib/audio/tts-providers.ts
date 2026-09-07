@@ -3,7 +3,7 @@ import { HAS_HOSTED_MMS_MODELS, USE_SHERPA_MMS_MODELS, isSupportedMmsLanguageCod
 import { defaultKokoroVoiceForLanguage, isBundledKokoroVoiceName } from "./kokoro-languages"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 
-export const DEFAULT_TTS_PROVIDER: TtsProvider = "omnivoice"
+export const DEFAULT_TTS_PROVIDER: TtsProvider = "inworld"
 
 // `descriptionKey` — not `description` — because this table is module scope:
 // `t()` resolves the active locale at CALL time (src/lib/i18n/standalone.ts),
@@ -49,10 +49,25 @@ export const DEFAULT_GEMINI_VOICE = "Kore"
 export { DEFAULT_KOKORO_VOICE } from "./kokoro-languages"
 export const DEFAULT_MMS_LANGUAGE = "eng"
 
+/** Inworld stock voices used as the hosted default catalog (AQU-1189).
+ *  Clone IDs from Instant Voice Cloning are accepted separately — they contain `__`. */
+export const INWORLD_TTS_VOICES: readonly { name: string; descriptionKey: MessageKey }[] = [
+  { name: "Dennis", descriptionKey: "audio.voice.warm" },
+  { name: "Sarah", descriptionKey: "audio.voice.friendly" },
+  { name: "Ashley", descriptionKey: "audio.voice.bright" },
+  { name: "Deborah", descriptionKey: "audio.voice.mature" },
+  { name: "Edward", descriptionKey: "audio.voice.firm" },
+  { name: "Hana", descriptionKey: "audio.voice.gentle" },
+  { name: "Olivia", descriptionKey: "audio.voice.clear" },
+  { name: "Priya", descriptionKey: "audio.voice.lively" },
+] as const
+export const DEFAULT_INWORLD_VOICE = "Dennis"
+export const INWORLD_TTS_MODEL = "inworld-tts-2-flash"
+
 export interface TtsProviderInfo {
   id: TtsProvider
   // `title` stays plain, untranslated English by design — it's the engine's
-  // display name (e.g. "OmniVoice", "Gemini TTS"), and its one consumer
+  // display name (e.g. "Inworld TTS", "Gemini TTS"), and its one consumer
   // (NewVoiceModal's audio.newVoice.singleVoiceHint placeholder) is documented
   // to keep it "already resolved in English by the app — a brand name, do not
   // translate the substituted value." shortTitle is likewise a display name.
@@ -65,7 +80,7 @@ export interface TtsProviderInfo {
   tier: "cloud" | "device"
   /** Whether a reference recording can clone a target timbre for this engine. */
   supportsCloning: boolean
-  /** Whether the engine exposes named base voices (false for OmniVoice). */
+  /** Whether the engine exposes named base voices. */
   hasNamedVoices: boolean
   /** A few words of value-prop for the engine card. */
   blurb: string
@@ -80,15 +95,15 @@ export interface TtsProviderInfo {
 
 export const TTS_PROVIDER_INFOS: readonly TtsProviderInfo[] = [
   {
-    id: "omnivoice",
-    title: "OmniVoice",
-    shortTitle: "OmniVoice",
+    id: "inworld",
+    title: "Inworld TTS",
+    shortTitle: "Inworld",
     tier: "cloud",
     supportsCloning: true,
-    hasNamedVoices: false,
+    hasNamedVoices: true,
     badge: "Recommended",
-    blurb: "Hosted neural voice — no setup or API key.",
-    hintKey: "audio.provider.omnivoiceHint",
+    blurb: "Hosted Inworld TTS 2 Flash — multilingual, clone from a reference clip.",
+    hintKey: "audio.provider.inworldHint",
   },
   {
     id: "gemini",
@@ -133,6 +148,7 @@ export const TTS_PROVIDER_INFOS: readonly TtsProviderInfo[] = [
 ] as const
 
 const GEMINI_VOICE_NAMES = new Set(GEMINI_TTS_VOICES.map((v) => v.name.toLowerCase()))
+const INWORLD_VOICE_NAMES = new Set(INWORLD_TTS_VOICES.map((v) => v.name.toLowerCase()))
 
 const ISO_639_TO_MMS: Record<string, string> = {
   ar: "ara", ara: "ara",
@@ -149,16 +165,38 @@ const ISO_639_TO_MMS: Record<string, string> = {
   yo: "yor", yor: "yor",
 }
 
+/**
+ * Legacy OmniVoice ids persist on existing projects/voices. Runtime treats them
+ * as Inworld so commercial orgs never hit the CC-BY-NC Modal path (AQU-1189).
+ */
+export function effectiveTtsProvider(provider: TtsProvider | undefined): TtsProvider {
+  if (!provider || provider === "omnivoice") return DEFAULT_TTS_PROVIDER
+  return provider
+}
+
+export function isServerTtsProvider(provider: TtsProvider | undefined): boolean {
+  return effectiveTtsProvider(provider) === "inworld"
+}
+
 export function providerInfo(provider: TtsProvider | undefined): TtsProviderInfo {
-  return TTS_PROVIDER_INFOS.find((p) => p.id === provider) ?? TTS_PROVIDER_INFOS[0]
+  const id = effectiveTtsProvider(provider)
+  return TTS_PROVIDER_INFOS.find((p) => p.id === id) ?? TTS_PROVIDER_INFOS[0]
 }
 
 export function resolveTtsProvider(settings: ProjectTtsSettings | undefined): TtsProvider {
-  return settings?.provider ?? DEFAULT_TTS_PROVIDER
+  return effectiveTtsProvider(settings?.provider)
 }
 
 export function isGeminiVoiceName(value: string | undefined): boolean {
   return Boolean(value && GEMINI_VOICE_NAMES.has(value.trim().toLowerCase()))
+}
+
+export function isInworldVoiceName(value: string | undefined): boolean {
+  if (!value) return false
+  const trimmed = value.trim()
+  if (INWORLD_VOICE_NAMES.has(trimmed.toLowerCase())) return true
+  // Instant Voice Cloning ids look like `workspace__display_timestamp`.
+  return trimmed.includes("__")
 }
 
 export function isKokoroVoiceName(value: string | undefined): boolean {
@@ -183,9 +221,10 @@ export function defaultVoiceNameForProvider(
   provider: TtsProvider,
   context: { targetLanguage?: string } = {},
 ): string {
-  if (provider === "omnivoice") return ""
-  if (provider === "kokoro") return defaultKokoroVoiceForLanguage(context.targetLanguage)
-  if (provider === "mms") return inferMmsLanguageCode(context.targetLanguage) ?? DEFAULT_MMS_LANGUAGE
+  const engine = effectiveTtsProvider(provider)
+  if (engine === "inworld") return DEFAULT_INWORLD_VOICE
+  if (engine === "kokoro") return defaultKokoroVoiceForLanguage(context.targetLanguage)
+  if (engine === "mms") return inferMmsLanguageCode(context.targetLanguage) ?? DEFAULT_MMS_LANGUAGE
   return DEFAULT_GEMINI_VOICE
 }
 
@@ -194,16 +233,17 @@ export function normalizeVoiceForProvider(
   provider: TtsProvider,
   context: { targetLanguage?: string } = {},
 ): Voice {
-  const next: Voice = { ...voice, provider }
-  if (provider === "omnivoice") {
-    next.voiceName = ""
+  const engine = effectiveTtsProvider(provider)
+  const next: Voice = { ...voice, provider: engine }
+  if (engine === "inworld") {
+    if (!isInworldVoiceName(next.voiceName)) next.voiceName = DEFAULT_INWORLD_VOICE
     return next
   }
-  if (provider === "gemini") {
+  if (engine === "gemini") {
     if (!isGeminiVoiceName(next.voiceName)) next.voiceName = DEFAULT_GEMINI_VOICE
     return next
   }
-  if (provider === "kokoro") {
+  if (engine === "kokoro") {
     if (!isKokoroVoiceName(next.voiceName)) {
       next.voiceName = defaultKokoroVoiceForLanguage(context.targetLanguage)
     }

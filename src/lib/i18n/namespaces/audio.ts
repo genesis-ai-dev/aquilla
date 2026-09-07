@@ -15,6 +15,7 @@ export const audio = defineNamespace({
     "audio.newVoice.namePlaceholder": "e.g. Narrator",
     "audio.newVoice.nameAriaLabel": "Voice name",
     "audio.newVoice.engineLabel": "Engine",
+    "audio.newVoice.inworldVoiceLabel": "Voice",
     "audio.newVoice.describeLabel": "Describe the voice",
     "audio.newVoice.describePlaceholder": "e.g. a warm older man, calm and clear",
     "audio.newVoice.kokoroLabel": "Voice",
@@ -24,7 +25,7 @@ export const audio = defineNamespace({
     "audio.newVoice.kokoroGenderFemale": "Female",
     "audio.newVoice.kokoroGenderMale": "Male",
     "audio.newVoice.kokoroEnglishOnlyHint":
-      "On-device Kokoro speaks English. Pick an American or British voice, or switch this line to OmniVoice, Gemini, or MMS.",
+      "On-device Kokoro speaks English. Pick an American or British voice, or switch this line to Inworld TTS, Gemini, or MMS.",
     "audio.newVoice.kokoroPlaySample": "Play {name} sample",
     "audio.newVoice.kokoroStopSample": "Stop {name} sample",
     "audio.newVoice.mmsLanguageLabel": "Language",
@@ -323,8 +324,10 @@ export const audio = defineNamespace({
     // NewVoiceModal. (Each engine's `title`/`shortTitle` stays plain English —
     // see audio.newVoice.singleVoiceHint's context note — so only the hint
     // sentence is keyed here.)
+    "audio.provider.inworldHint":
+      "Runs on our servers via Inworld TTS 2 Flash. No user API key; usage is cloud-metered. Supports voice cloning from a reference recording.",
     "audio.provider.omnivoiceHint":
-      "Runs on our servers. No key or download; usage is cloud-metered. Supports voice cloning from a reference recording.",
+      "Runs on our servers via Inworld TTS 2 Flash. No user API key; usage is cloud-metered. Supports voice cloning from a reference recording.",
     "audio.provider.geminiHint": "BYOK Google AI key. Promptable, high-quality voices.",
     "audio.provider.kokoroHint": "Runs in-browser after a one-time local model download.",
     "audio.provider.mmsHintSherpa": "Local browser voices loaded from the Sherpa-ONNX MMS mirror.",
@@ -368,8 +371,10 @@ export const audio = defineNamespace({
     "audio.aiError.tooLargeTitle": "Too much text for this model",
     "audio.aiError.geminiKeyRequiredTitle": "Gemini API key required",
     "audio.aiError.geminiFailedTitle": "Gemini TTS failed",
-    "audio.aiError.omnivoiceNotConfiguredTitle": "OmniVoice isn't configured",
-    "audio.aiError.omnivoiceFailedTitle": "OmniVoice TTS failed",
+    "audio.aiError.inworldNotConfiguredTitle": "Inworld TTS isn't configured",
+    "audio.aiError.inworldFailedTitle": "Inworld TTS failed",
+    "audio.aiError.omnivoiceNotConfiguredTitle": "Inworld TTS isn't configured",
+    "audio.aiError.omnivoiceFailedTitle": "Inworld TTS failed",
     "audio.aiError.seedVcNotConfiguredTitle": "Voice cloning isn't configured",
     "audio.aiError.seedVcFailedTitle": "Voice cloning failed",
     "audio.aiError.signInRequiredTitle": "Sign in required",
@@ -457,10 +462,16 @@ export const audio = defineNamespace({
       "audio.newVoice.engineLabel": {
         description:
           "Form label above the row of TTS engine choice cards. On the TTS tab " +
-          "this is all four engines (OmniVoice, Gemini, Kokoro, MMS). On the Clone " +
+          "this is all four engines (Inworld, Gemini, Kokoro, MMS). On the Clone " +
           "tab it is only the cloud engines that can clone a reference clip " +
-          "(OmniVoice, Gemini) — on-device engines are omitted, not shown disabled. " +
+          "(Inworld, Gemini) — on-device engines are omitted, not shown disabled. " +
           "'Engine' means which speech-synthesis backend generates this voice's audio.",
+      },
+      "audio.newVoice.inworldVoiceLabel": {
+        description:
+          "Form label above the Inworld stock-voice dropdown on the TTS tab of " +
+          "the New Voice dialog. The options are Inworld's own proper names " +
+          "(Dennis, Sarah, …) — do not translate those values.",
       },
       "audio.newVoice.describeLabel": {
         description:
@@ -507,7 +518,7 @@ export const audio = defineNamespace({
         description:
           "Helper under the Kokoro voice dropdown when the project's target language " +
           "is not English. Tells the user Kokoro only speaks English and names the " +
-          "other engines that can speak other languages. 'Kokoro', 'OmniVoice', " +
+          "other engines that can speak other languages. 'Kokoro', 'Inworld TTS', " +
           "'Gemini', and 'MMS' are engine names — do not translate them.",
       },
       "audio.newVoice.kokoroPlaySample": {
@@ -534,12 +545,12 @@ export const audio = defineNamespace({
       },
       "audio.newVoice.singleVoiceHint": {
         description:
-          "Explanatory sentence shown when the OmniVoice engine is selected, telling " +
-          "the user that engine offers only one built-in voice and pointing them to " +
-          "the Clone tab if they want it to sound like someone specific.",
+          "Explanatory sentence kept for engines that ship a single stock voice. " +
+          "Currently unused in the Inworld picker (which has named voices) but still " +
+          "in the catalog for Clone-tab copy that names the engine.",
         placeholders: {
           engine:
-            "The selected TTS engine's proper display name (e.g. 'OmniVoice'), " +
+            "The selected TTS engine's proper display name (e.g. 'Inworld TTS'), " +
             "already resolved in English by the app — a brand name, do not translate " +
             "the substituted value.",
         },
@@ -1601,11 +1612,16 @@ export const audio = defineNamespace({
       "audio.voice.lively": { description: "See audio.voice.bright — same class of key." },
       "audio.voice.knowledgeable": { description: "See audio.voice.bright — same class of key." },
       "audio.voice.warm": { description: "See audio.voice.bright — same class of key." },
+      "audio.provider.inworldHint": {
+        description:
+          "Tooltip on the Inworld TTS engine card in the TTS engine picker (New " +
+          "Voice dialog), explaining hosted Inworld TTS 2 Flash: no user API key, " +
+          "usage-metered, and it supports cloning from a reference clip.",
+      },
       "audio.provider.omnivoiceHint": {
         description:
-          "Tooltip on the OmniVoice engine card in the TTS engine picker (New " +
-          "Voice dialog), explaining what running 'on our servers' means: no API key " +
-          "or download, usage-metered, and it supports cloning from a reference clip.",
+          "Legacy alias of audio.provider.inworldHint kept so older catalogs still " +
+          "resolve. Same meaning: hosted Inworld TTS 2 Flash, no user key, clone-capable.",
       },
       "audio.provider.geminiHint": {
         description:
@@ -1764,24 +1780,34 @@ export const audio = defineNamespace({
         description:
           "Popover heading when Gemini TTS ran (a key was present) but the request " +
           "failed or returned no audio. Distinct from geminiKeyRequiredTitle — the " +
-          "engine is named so it is not confused with an OmniVoice failure.",
+          "engine is named so it is not confused with an Inworld TTS failure.",
+      },
+      "audio.aiError.inworldNotConfiguredTitle": {
+        description:
+          "Popover heading when hosted Inworld TTS is not wired on this server " +
+          "(typical for local pnpm dev: missing INWORLD_API_KEY in sync-worker/.dev.vars). " +
+          "Must not be read as a Gemini-key problem.",
+      },
+      "audio.aiError.inworldFailedTitle": {
+        description:
+          "Popover heading when Inworld TTS was configured but the synthesize " +
+          "call itself failed (upstream vendor error).",
       },
       "audio.aiError.omnivoiceNotConfiguredTitle": {
         description:
-          "Popover heading when hosted OmniVoice TTS is not wired on this server " +
-          "(typical for local pnpm dev: missing OMNIVOICE_URL / OMNIVOICE_TOKEN). " +
-          "Must not be read as a Gemini-key problem.",
+          "Legacy alias of audio.aiError.inworldNotConfiguredTitle. Same heading: " +
+          "hosted Inworld TTS is not wired on this server.",
       },
       "audio.aiError.omnivoiceFailedTitle": {
         description:
-          "Popover heading when OmniVoice TTS was configured but the synthesize " +
-          "call itself failed (Modal/upstream error).",
+          "Legacy alias of audio.aiError.inworldFailedTitle. Same heading: " +
+          "hosted Inworld TTS synthesize failed.",
       },
       "audio.aiError.seedVcNotConfiguredTitle": {
         description:
-          "Popover heading when a non-OmniVoice clone voice needs Seed-VC conversion " +
+          "Popover heading when a non-Inworld clone voice needs Seed-VC conversion " +
           "and the sync-worker has no SEED_VC_URL / SEED_VC_TOKEN. Distinct from " +
-          "omnivoiceNotConfiguredTitle — OmniVoice clones skip this step.",
+          "inworldNotConfiguredTitle — Inworld clones skip this step.",
       },
       "audio.aiError.seedVcFailedTitle": {
         description:

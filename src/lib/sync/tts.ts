@@ -1,4 +1,4 @@
-// Client lib for the OmniVoice TTS endpoint (sync-worker).
+// Client lib for the hosted Inworld TTS endpoint (sync-worker).
 //
 // Mirrors voice-clone.ts (convertToCloneVoice): uses syncWorkerHttpOrigin() for
 // the base URL and a sync token (scoped to projectId+fileId) for auth.
@@ -8,7 +8,7 @@
 //   (b) pass audioId as sourceAudioId to /api/v1/voice/convert (use case 3).
 
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
-import { errorFromOmnivoiceTts } from "@/lib/audio/tts-engine-error"
+import { errorFromHostedTts } from "@/lib/audio/tts-engine-error"
 import type { SyncTokenForFile } from "../audio/upload"
 
 export interface SynthesizeCellTtsArgs {
@@ -18,6 +18,8 @@ export interface SynthesizeCellTtsArgs {
   cellId?: string
   /** The text to synthesize. */
   text: string
+  /** Inworld stock voice id (e.g. "Dennis") or a previously cloned voiceId. */
+  voiceId?: string
   /** Reference clip id for voice cloning (from /api/v1/voice/reference/*). */
   referenceAudioId?: string
   /** BCP-47 language tag. */
@@ -59,6 +61,7 @@ export async function synthesizeCellTts(
     text: args.text,
   }
   if (args.cellId !== undefined) body.cellId = args.cellId
+  if (args.voiceId !== undefined) body.voiceId = args.voiceId
   if (args.referenceAudioId !== undefined) body.referenceAudioId = args.referenceAudioId
   if (args.language !== undefined) body.language = args.language
 
@@ -73,7 +76,7 @@ export async function synthesizeCellTts(
 
   if (!res.ok) {
     const text = await res.text().catch(() => "")
-    throw errorFromOmnivoiceTts(res.status, text || res.statusText)
+    throw errorFromHostedTts(res.status, text || res.statusText)
   }
 
   return (await res.json()) as SynthesizeCellTtsResult

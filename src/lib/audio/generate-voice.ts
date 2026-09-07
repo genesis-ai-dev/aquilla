@@ -14,7 +14,7 @@ import { canEncodeOpus, encodeMonoToWebmOpus } from "./opus-encode"
 import { decodeToMono48k, TARGET_RATE } from "./decode-mono"
 import { audioCachePutBlob } from "./bytes-cache"
 import { resolveVoice } from "./voices"
-import { resolveTtsProvider } from "./tts-providers"
+import { resolveTtsProvider, isServerTtsProvider } from "./tts-providers"
 import { buildAudioId, uploadCellAudio, fetchCellAudio } from "./upload"
 import { uploadLosslessSiblingBestEffort } from "./lossless-sibling"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
@@ -72,14 +72,15 @@ export async function generateAndAttachCellVoice(
 
   const voice = resolveVoice(args.projectTtsSettings, args.cellVoiceId)
   // Resolve the effective engine: a voice with no provider falls back to the
-  // project default (now OmniVoice), which must still route server-side.
+  // project default (Inworld; legacy "omnivoice" remaps), which must still
+  // route server-side.
   const provider = voice.provider ?? resolveTtsProvider(args.projectTtsSettings)
   const getSyncToken = audioSyncTokenFetcherForSession(args.session)
 
-  // OmniVoice is server-side: the sync-worker synthesizes, stores the clip in
+  // Inworld is server-side: the sync-worker synthesizes, stores the clip in
   // R2 (native voice-cloning when a reference is set), and returns its id —
   // no client synth, no upload, no Seed-VC. Branch out entirely.
-  if (provider === "omnivoice") {
+  if (isServerTtsProvider(provider)) {
     const result = await synthesizeCellTts(
       {
         projectId: args.projectId,
@@ -87,6 +88,7 @@ export async function generateAndAttachCellVoice(
         cellId: args.cellId,
         text,
         ...(args.geminiContext?.targetLanguage ? { language: args.geminiContext.targetLanguage } : {}),
+        ...(voice.voiceName ? { voiceId: voice.voiceName } : {}),
         ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
       },
       getSyncToken,
@@ -259,7 +261,7 @@ export async function generateAndAttachCellVoice(
     ...(args.label ? { label: args.label } : {}),
     author: args.username,
   })
-  // Round 8: shadow-inject (see the omnivoice branch's comment).
+  // Round 8: shadow-inject (see the hosted-TTS branch's comment).
   injectOptimisticAudioAttachment(args.fileId, args.cellId, {
     audioId: objectName,
     url,

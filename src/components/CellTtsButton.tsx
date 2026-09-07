@@ -27,7 +27,7 @@ import type {
 } from "@/lib/parsers/types"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import { resolveVoice, resolveCastVoice } from "@/lib/audio/voices"
-import { normalizeVoiceForProvider, resolveTtsProvider, providerInfo } from "@/lib/audio/tts-providers"
+import { normalizeVoiceForProvider, resolveTtsProvider, providerInfo, isServerTtsProvider } from "@/lib/audio/tts-providers"
 
 interface Props {
   cellId: string
@@ -301,13 +301,13 @@ export function CellTtsButton({
                 description: t("audio.tts.siblingFailedDetail"),
               })
             }
-          } else if (provider === "omnivoice") {
-            // OmniVoice has no client-side synth — there's nothing to preview
+          } else if (isServerTtsProvider(provider)) {
+            // Inworld has no client-side synth — there's nothing to preview
             // until the cell has durably-generated audio. Guide the user
             // instead of surfacing the internal server-only guard error.
             setTtsStatus(statusKey, {
               kind: "error",
-              message: "Generate audio on this line first to hear OmniVoice.",
+              message: "Generate audio on this line first to hear Inworld TTS.",
             })
             return
           } else {

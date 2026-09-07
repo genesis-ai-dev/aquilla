@@ -138,15 +138,24 @@ future pass (verify each still applies — code moves):
     flaky, not a regression), `pnpm lint` problem list byte-identical to baseline once
     accounting for an unrelated `packages/idml-roundtrip/dist` build-artifact warning
     (see new entry below), no test file touched.
-  - `src/lib/milestone-navigation.ts` (5 sites: ~85, 86, 110, 114, 126)
-  - `src/lib/biblica/treasure-hunt/notes.ts:173`, `note-rules.ts` (~179, 205),
-    `reach4life/notes.ts:153`
-  - `src/lib/idml/completion.ts` (~334, 466), `src/lib/migrate/idml.ts` (~336, 417),
-    `src/lib/migrate/map.ts:245`
-  - `src/lib/export/exporters/vtt.ts` (~209, 210, 243), `src/lib/export/audio-bwf.ts:85`,
-    `src/lib/export/audio-by-character.ts:326`, `src/lib/audio/whisper-worker.ts:186`
-  - `src/hooks/useActiveCellStore.ts:1366`, `src/components/MultiProjectInviteDialog.tsx:126`,
-    `src/lib/import/normalized-manifest.ts:471`
+  - **Status**: `src/lib/milestone-navigation.ts`, `src/lib/biblica/treasure-hunt/notes.ts`,
+    `src/lib/biblica/treasure-hunt/note-rules.ts`, `src/lib/biblica/reach4life/notes.ts`,
+    `src/lib/idml/completion.ts`, `src/lib/migrate/idml.ts`, `src/lib/migrate/map.ts`, and
+    `src/lib/export/exporters/vtt.ts` done in the 2026-09-07 run — all 17 array-index
+    non-null assertions across those 8 files removed (each site individually verified as a
+    loop invariant, a prior length guard, or a fixed-length array populated for every
+    index). `pnpm test` full-suite went from 1 pre-existing failure
+    (`RecordingVideoSurface.test.tsx`, a known timing flake — see the environment-note
+    section below) at baseline to 1016/1016 passing at final (the flake didn't reproduce
+    that run, consistent with intermittent), `pnpm lint` problem count byte-identical
+    (389: 13 errors, 376 warnings) once accounting for the `packages/idml-roundtrip/dist`
+    build-artifact noise below, no test file touched. Baseline and final were each run in
+    a fully isolated `git worktree`/checkout to rule out read races with the edits.
+  - **Remaining**: `src/lib/export/audio-bwf.ts:85`,
+    `src/lib/export/audio-by-character.ts:326`, `src/lib/audio/whisper-worker.ts:186`,
+    `src/hooks/useActiveCellStore.ts:1366`, `src/components/MultiProjectInviteDialog.tsx:126`,
+    `src/lib/import/normalized-manifest.ts:471` — 6 files, not attempted this run to stay
+    inside the ≤8-file budget.
 - **Proof needed when revisited**: same as this run — isolate with `npx tsc --noEmit -p
   tsconfig.app.json` scoped to the touched file(s) plus full `pnpm test`/`pnpm lint`
   byte-identical-failure-list comparison; no test files touched.

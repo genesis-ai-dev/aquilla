@@ -86,6 +86,7 @@ interface AgentContextPaneProps {
   cellLockHolders?: ReadonlyMap<string, string>
   onClaimCell?: (cellId: string) => void
   onReleaseCell?: (cellId: string) => void
+  onViewCell?: (cellId: string | null) => void
   onTargetPresenceSelection?: (cellId: string, selection: TargetPresenceSelection | null) => void
 }
 
@@ -119,6 +120,7 @@ export function AgentContextPane({
   cellLockHolders,
   onClaimCell,
   onReleaseCell,
+  onViewCell,
   onTargetPresenceSelection,
 }: AgentContextPaneProps) {
   const t = useT()
@@ -185,9 +187,14 @@ export function AgentContextPane({
                 )}
                 onMouseEnter={() => { if (!isSource) setActionCellId(cell.cellId) }}
                 onMouseLeave={() => { if (!isSource && activeEditingCellId !== cell.cellId) setActionCellId(null) }}
-                onFocusCapture={() => { if (!isSource) setActionCellId(cell.cellId) }}
+                onFocusCapture={() => {
+                  onViewCell?.(cell.cellId)
+                  if (!isSource) setActionCellId(cell.cellId)
+                }}
                 onBlurCapture={(event) => {
-                  if (isSource || event.currentTarget.contains(event.relatedTarget as Node | null)) return
+                  if (event.currentTarget.contains(event.relatedTarget as Node | null)) return
+                  onViewCell?.(null)
+                  if (isSource) return
                   if (activeEditingCellId !== cell.cellId) setActionCellId(null)
                 }}
               >

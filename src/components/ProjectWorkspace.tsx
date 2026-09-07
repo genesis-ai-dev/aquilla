@@ -207,6 +207,7 @@ import { useFocusLock } from "@/hooks/useFocusLock"
 import type { WsReconciler } from "@/lib/sync/ws-reconciler"
 import {
   createProjectPresenceStore,
+  presentCellOf,
   type ProjectPresencePeer,
   type TargetPresenceSelection,
 } from "@/lib/sync/presence-store"
@@ -472,6 +473,8 @@ function projectRecordsEquivalent(a: ProjectRecord | null, b: ProjectRecord | nu
 }
 
 const PRESENCE_LOCK_STALE_CLEAR_MS = 31_000
+/** Trailing throttle for row-selection presence (`viewingCell`). */
+const VIEWING_CELL_PRESENCE_THROTTLE_MS = 250
 
 function sameStringMap(a: ReadonlyMap<string, string>, b: ReadonlyMap<string, string>): boolean {
   if (a.size !== b.size) return false
@@ -1602,6 +1605,22 @@ export function ProjectWorkspace() {
   syncStaleSourceNowRef.current = syncStaleSourceNow
   const revalidateCellsRef = useRef<() => void>(() => {})
   revalidateCellsRef.current = revalidateCells
+
+  // A validation-threshold change re-projects `cells.validated` on the server
+  // WITHOUT cell events (db/shared/projects.ts validationProjectionStmts), so
+  // a `?since=` delta cannot see it. Whether the change was made here or by a
+  // remote maintainer (DO `project.settings.updated` → settings re-GET →
+  // fresh validationCount on the project record), drop the delta watermark
+  // once and read one authoritative snapshot. Skipped on mount — the initial
+  // read is a full stream already.
+  const lastValidationCountRef = useRef<number | null>(null)
+  useEffect(() => {
+    const prev = lastValidationCountRef.current
+    lastValidationCountRef.current = validationCount
+    if (prev === null || prev === validationCount) return
+    cellStore.setMaxServerSeq(null)
+    revalidateCellsRef.current()
+  }, [validationCount, cellStore])
 
   // Autopilot drafts: the WebSocket burst is the fast path, this is the
   // authoritative one. Called on file open, and whenever a burst reports it
@@ -5187,6 +5206,10 @@ export function ProjectWorkspace() {
   const confidenceOverlayActive = healthCalculationsEnabled
     && confidenceOverlayEnabled
     && Boolean(project?.id && activeFileId && frontierSession?.jwt)
+  // Reactive version of focusedCellIdRef (declared further down) for the agent
+  // panel's context wiring and for confidence scoring, which skips the cell
+  // being edited until focus leaves it.
+  const [focusedCellId, setFocusedCellId] = useState<string | null>(null)
   const confidence = useCellConfidence({
     projectId: project?.id,
     fileId: activeFileId ?? undefined,
@@ -5194,6 +5217,7 @@ export function ProjectWorkspace() {
     cells: cellSummaries,
     enabled: confidenceOverlayActive,
     perHopDecay: project?.decaySettings?.perHopDecay,
+    focusedCellId,
   })
   const effectiveHealthMap = useMemo(() => {
     if (!confidenceOverlayActive) return healthMap
@@ -5366,14 +5390,16 @@ export function ProjectWorkspace() {
     const targetFileId = peer.currentFileId ?? activeFileId
     if (!targetFileId) return
     if (targetFileId !== activeFileId) {
+      const peerCellId = presentCellOf(peer)
       pendingPresenceJumpRef.current = {
         fileId: targetFileId,
-        ...(peer.focusedCell ? { cellId: peer.focusedCell } : {}),
+        ...(peerCellId ? { cellId: peerCellId } : {}),
       }
       workspaceTabs.openFile(targetFileId)
       return
     }
-    if (peer.focusedCell) jumpToCellId(peer.focusedCell)
+    const peerCellId = presentCellOf(peer)
+    if (peerCellId) jumpToCellId(peerCellId)
   }, [activeFileId, jumpToCellId, workspaceTabs])
 
   useEffect(() => {
@@ -5552,8 +5578,8 @@ export function ProjectWorkspace() {
   const cellLockHoldersRef = useRef<Map<string, string>>(new Map())
   const [cellsWithRemoteChange, setCellsWithRemoteChange] = useState<Set<string>>(() => new Set())
   const focusedCellIdRef = useRef<string | null>(null)
-  // Reactive version of focusedCellIdRef for the agent panel's context wiring.
-  const [focusedCellId, setFocusedCellId] = useState<string | null>(null)
+  // Reactive `focusedCellId` (the mirror of focusedCellIdRef) is declared
+  // above useCellConfidence, which needs it as an input.
 
   const agentWorkbenchWorkspace = useMemo(() => {
     const scopeAvailable = Boolean(activeFileId && activeFile)
@@ -5763,6 +5789,7 @@ export function ProjectWorkspace() {
   const sendPresenceUpdate = useCallback((patch: {
     currentFileId?: string | null
     focusedCell?: string | null
+    viewingCell?: string | null
     selection?: TargetPresenceSelection | null
   }) => {
     reconcilerRef.current?.send({ t: "presence.update", ...patch })
@@ -5770,6 +5797,10 @@ export function ProjectWorkspace() {
   // AQU-1154: lets the WS onOpen handler (declared before the focus-lock hook
   // below) re-claim the cell the user is still editing after a reconnect.
   const focusLockClaimRef = useRef<((cellId: string) => void) | null>(null)
+  // The row this user is on (focus-pinned in the table), lease or not. Kept
+  // in a ref so a reconnect can re-announce it; the DO drops presence on close.
+  const viewingCellRef = useRef<string | null>(null)
+  const viewingCellTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     if (!project?.id || !frontierSession?.jwt) return
@@ -5846,6 +5877,7 @@ export function ProjectWorkspace() {
             clearPresenceStaleTimer()
             sendPresenceUpdate({
               currentFileId: activeFileIdRef.current,
+              viewingCell: viewingCellRef.current,
               selection: null,
             })
             // AQU-1154: the DO released our lease + focusedCell when the old
@@ -5856,7 +5888,7 @@ export function ProjectWorkspace() {
             if (editingCellId) focusLockClaimRef.current?.(editingCellId)
             // Skips the first open (the initial read is already in flight);
             // every reconnect after that closes the missed-broadcast gap.
-            handleReconnectResync()
+            handleReconnectResync.handleOpen()
             // The project relay is intentionally lossy. A reconnect may have
             // missed terminal progress or staged-draft frames, so reconcile
             // both mirrors from their durable sources for the exact scope
@@ -5872,6 +5904,7 @@ export function ProjectWorkspace() {
           },
           onClose() {
             if (cancelled) return
+            handleReconnectResync.handleClose()
             if (presenceStaleTimerRef.current !== null) return
             presenceStaleTimerRef.current = setTimeout(() => {
               presenceStaleTimerRef.current = null
@@ -6039,11 +6072,12 @@ export function ProjectWorkspace() {
                 // The next normal sidebar refresh retries a transient token or
                 // network failure.
               })
-              // Settings projection changes `cells.validated` without adding
-              // cell events, so a `?since=` delta would be empty. Drop the
-              // watermark to make the active editor read one authoritative
-              // snapshot and keep row validation UI in sync.
-              cellStore.setMaxServerSeq(null)
+              // Only a validationCount change re-projects `cells.validated`
+              // server-side without cell events (db/shared/projects.ts), and
+              // the threshold effect near revalidateCellsRef handles that by
+              // dropping the watermark for one authoritative snapshot. Every
+              // other setting keeps the `?since=` cursor: a cheap delta, not a
+              // full re-stream of the open file on every connected client.
               revalidateCellsRef.current()
             } else if (msg.t === "contextual.activity") {
               // Slice D2: live contextual-run progress. The run-store is a
@@ -6256,15 +6290,40 @@ export function ProjectWorkspace() {
       selection,
     })
   }, [sendPresenceUpdate])
+  // Non-lock-bearing "where I am": the focus-pinned row. Trailing-throttled
+  // so holding an arrow key through twenty rows sends a handful of frames,
+  // not twenty; the last position always lands. No draft text rides on it.
+  const handleViewCell = useCallback((cellId: string | null) => {
+    if (viewingCellRef.current === cellId) return
+    viewingCellRef.current = cellId
+    if (viewingCellTimerRef.current !== null) return
+    viewingCellTimerRef.current = setTimeout(() => {
+      viewingCellTimerRef.current = null
+      sendPresenceUpdate({
+        currentFileId: activeFileIdRef.current,
+        viewingCell: viewingCellRef.current,
+      })
+    }, VIEWING_CELL_PRESENCE_THROTTLE_MS)
+  }, [sendPresenceUpdate])
+  useEffect(() => () => {
+    if (viewingCellTimerRef.current !== null) clearTimeout(viewingCellTimerRef.current)
+  }, [])
+  /** Verse label for the peer roster: the cell's label, else its group ref. */
+  const resolvePresenceCellLabel = useCallback((cellId: string): string | undefined => {
+    const cell = getActiveCell(cellId)
+    return cell?.cellLabel || cell?.group || undefined
+  }, [getActiveCell])
   // Last-focused context is per-file: a cell from the previous file is stale
   // once the user opens another one.
   useEffect(() => {
     focusedCellIdRef.current = null
     setFocusedCellId(null)
     setFocusedCellCanonicalRef(null)
+    viewingCellRef.current = null
     sendPresenceUpdate({
       currentFileId: activeFileId,
       focusedCell: null,
+      viewingCell: null,
       selection: null,
     })
   }, [activeFileId, sendPresenceUpdate])
@@ -10660,6 +10719,7 @@ export function ProjectWorkspace() {
               cellLockHolders,
               onClaimCell: handleClaimCell,
               onReleaseCell: handleReleaseCell,
+              onViewCell: handleViewCell,
               onTargetPresenceSelection: handleTargetPresenceSelection,
               onVisibleCellIdsChange: handleVisibleCellIdsChange,
             }}
@@ -11000,6 +11060,7 @@ export function ProjectWorkspace() {
             cellsWithRemoteChange={cellsWithRemoteChange}
             onClaimCell={handleClaimCell}
             onReleaseCell={handleReleaseCell}
+            onViewCell={handleViewCell}
             onTargetPresenceSelection={handleTargetPresenceSelection}
             onAckRemoteChange={handleAckRemoteChange}
             staleCellIds={staleCellIds}
@@ -11226,7 +11287,11 @@ export function ProjectWorkspace() {
                 className={showAudioToolbar ? "px-0 py-0.5" : undefined}
                 left={
                   <div className="flex min-w-0 items-center gap-1.5">
-                    <PeerPresence store={presenceStore} onJumpToPeer={handleJumpToPresencePeer} />
+                    <PeerPresence
+                      store={presenceStore}
+                      onJumpToPeer={handleJumpToPresencePeer}
+                      resolveCellLabel={resolvePresenceCellLabel}
+                    />
                     <SyncStatusIndicator status={fileSyncStatus} />
                     <OutboxSyncIndicator
                       pendingCount={Math.max(0, outboxPending - outboxFailed)}

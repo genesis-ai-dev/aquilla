@@ -29,6 +29,8 @@
 // safeguard against accidents that has to be switched on protects nothing until
 // somebody remembers to switch it on.
 
+import { makeRequestCache, type RequestCache } from './request-cache'
+
 /**
  * Is this project's timeline locked?
  *
@@ -40,6 +42,9 @@
 export async function resolveTimingLocked(
   db: AquillaDb,
   projectId: string,
+  // Per-request memo (request-cache.ts) — one project_settings read per
+  // request, not per retime. Absent → a throwaway cache, old behaviour.
+  cache: RequestCache = makeRequestCache(db),
 ): Promise<boolean> {
   // THE QUERY IS INSIDE THE TRY, not just the parse. This runs on the event
   // perimeter: an exception here does not degrade to a 403, it escapes
@@ -48,15 +53,9 @@ export async function resolveTimingLocked(
   // the role mirror exists to prevent. An unreachable settings row must read as
   // LOCKED (nothing moves) rather than as an outage.
   try {
-    const row = await db
-      .prepare(`SELECT settings FROM project_settings WHERE project_id = ?`)
-      .bind(projectId)
-      .first<{ settings: string | null }>()
-
-    if (!row?.settings) return true
-
-    const parsed = JSON.parse(row.settings) as { timingLocked?: unknown }
-    return parsed?.timingLocked !== false
+    const parsed = await cache.projectSettings(projectId)
+    if (!parsed) return true
+    return parsed.timingLocked !== false
   } catch {
     return true
   }

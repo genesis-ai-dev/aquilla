@@ -109,6 +109,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { CellPresenceBadges } from "./CellPresenceBadges"
 import { isLaneArchived } from "@/components/project-lane-archive"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
@@ -702,6 +703,10 @@ interface EditorTableProps {
   /** Parent-managed focus claim/release (per-cell). */
   onClaimCell?: (cellId: string) => void
   onReleaseCell?: (cellId: string) => void
+  /** Fires with the row that owns keyboard/pointer focus (any surface in it),
+   *  or null when focus leaves the table. Non-lock-bearing presence: peers see
+   *  this user on the row even when they never activate the editor. */
+  onViewCell?: (cellId: string | null) => void
   onTargetPresenceSelection?: (cellId: string, selection: TargetPresenceSelection | null) => void
   /** Drop the "remote-changed-while-editing" flag for a cell. */
   onAckRemoteChange?: (cellId: string) => void
@@ -876,7 +881,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   cellLockHolders,
   presenceStore,
   cellsWithRemoteChange,
-  onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
+  onClaimCell, onReleaseCell, onViewCell, onTargetPresenceSelection, onAckRemoteChange,
   staleCellIds,
   upstreamStaleCellIds,
   getTokenForFile,
@@ -945,6 +950,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     // just left must not wipe it.
     setFocusedRailCellId((cur) => railFocusOwnerOnBlur(cur, cellId))
   }, [])
+  // The focus-pinned row IS "where this user is" — publish it as presence so
+  // colleagues see the row even before (or without) an editor activation.
+  useEffect(() => {
+    onViewCell?.(focusedRailCellId)
+  }, [focusedRailCellId, onViewCell])
   useEffect(() => {
     const handleDocumentFocusIn = (event: FocusEvent) => {
       const target = event.target
@@ -6227,6 +6237,7 @@ function EditorRow({
                 </span>
               </AppTooltip>
             )}
+            <CellPresenceBadges peers={remoteCellPresence} />
             {/* AQU-1041: no AI-draft tag here. The cell header renders the same
                 for a machine draft as for a human-typed one. The underlying
                 `cell.aiDrafted` provenance stays — the org overview's AI-drafted

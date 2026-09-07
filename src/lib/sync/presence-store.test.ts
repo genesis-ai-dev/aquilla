@@ -275,4 +275,35 @@ describe("ProjectPresenceStore", () => {
     })
     expect(store.getCellPresence("cell-1")[0]?.selection?.draftText).toBeUndefined()
   })
+
+  it("shows a peer on the row they merely view (no lock) and marks them not editing", () => {
+    // A viewer/reviewer, or a contributor whose lease claim was denied, has
+    // viewingCell but no focusedCell — the row must still show them.
+    const store = createProjectPresenceStore("me")
+    const cell = vi.fn()
+    store.subscribeCell("cell-3", cell)
+    store.applyPresenceDiff({ userId: "bob", currentFileId: "f", viewingCell: "cell-3", ts: 1 })
+    expect(cell).toHaveBeenCalledTimes(1)
+    expect(store.getCellPresence("cell-3")).toMatchObject([
+      { peerId: "bob", viewingCell: "cell-3", isEditing: false },
+    ])
+    expect(store.getPeers()).toMatchObject([{ peerId: "bob", viewingCell: "cell-3" }])
+
+    // Moving to another row clears the old one and lights the new one.
+    store.applyPresenceDiff({ userId: "bob", currentFileId: "f", viewingCell: "cell-4", ts: 2 })
+    expect(store.getCellPresence("cell-3")).toEqual([])
+    expect(store.getCellPresence("cell-4")).toMatchObject([{ peerId: "bob", isEditing: false }])
+  })
+
+  it("lets the lease-held cell win over viewingCell and never lists the peer twice", () => {
+    const store = createProjectPresenceStore("me")
+    store.applyPresenceDiff({
+      userId: "bob", focusedCell: "cell-1", viewingCell: "cell-1", ts: 1,
+    })
+    expect(store.getCellPresence("cell-1")).toMatchObject([{ peerId: "bob", isEditing: true }])
+    expect(store.getCellPresence("cell-1")).toHaveLength(1)
+    // Lease swept while the user stays on the row: still visible, no longer editing.
+    store.applyPresenceDiff({ userId: "bob", viewingCell: "cell-1", ts: 2 })
+    expect(store.getCellPresence("cell-1")).toMatchObject([{ peerId: "bob", isEditing: false }])
+  })
 })

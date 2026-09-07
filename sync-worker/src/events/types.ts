@@ -19,6 +19,18 @@
 //   4. (If it mutates the projection) a handler in handlers/.
 // TypeScript's exhaustiveness check enforces (1)–(3).
 
+/** Mirrors `RenderingStatus` in src/lib/terminology/types.ts. */
+export type TermRenderingStatusPayload = 'preferred' | 'admitted' | 'forbidden'
+
+/** Mirrors `TermRendering` in src/lib/terminology/types.ts. */
+export interface TermRenderingPayload {
+  rendering: string
+  status: TermRenderingStatusPayload
+}
+
+/** Mirrors `Concept['status']` in src/lib/terminology/types.ts. */
+export type ConceptStatusPayload = 'active' | 'draft' | 'deprecated'
+
 export type EventKind =
   // Source-side cell events (importer / admin only).
   | 'source.cell.create'
@@ -81,6 +93,25 @@ export type EventKind =
   | 'comment.edit'
   | 'comment.delete'
   | 'comment.resolve'
+  // Terminology concepts (non-chain-mutating; project-level).
+  //
+  // Concepts USED to live in the project_settings JSON blob, where every add
+  // PATCHed the whole `terminology` array rebuilt from the writer's stale
+  // snapshot — two people adding terms in the same minute silently destroyed
+  // each other's entries (observed live, 2026-09-04 demo: five attendees added
+  // terms, one survived). On the event log each write names ONE concept, so a
+  // concurrent add can no longer overwrite an array it never read.
+  //
+  // Project-level like `assignment.*`: the envelope carries `__project__` as
+  // fileId for auth/routing, and the concept id rides the payload.
+  | 'term.create'
+  | 'term.update'
+  | 'term.delete'
+  // Review-queue transitions. Separate kinds (rather than a `term.update` with
+  // a status field) so the audit log distinguishes "someone edited this term"
+  // from "someone approved it" — the approval trail is the point.
+  | 'term.approve'
+  | 'term.reject'
   // Back-translations (non-chain-mutating; contributor-level).
   // Does NOT move cells.event_id; does NOT affect validations or endorsements.
   | 'cell.backtranslation.set'
@@ -575,6 +606,42 @@ export interface EventPayloads {
   'comment.resolve': {
     commentId: string // top-level only; server noops on a reply id
     resolved: boolean
+  }
+
+  // ── Terminology concepts (non-chain-mutating, project-level) ───────────
+  // `conceptId` is client-generated (uuid) and is the projection's primary
+  // key, so a replayed/duplicated create is an idempotent upsert rather than a
+  // second concept.
+  'term.create': {
+    conceptId: string
+    sourceTerm: string
+    renderings: TermRenderingPayload[]
+    /** 'draft' = suggested, awaiting review; 'active' = enforced immediately. */
+    status: ConceptStatusPayload
+    notes?: string
+    caseSensitive?: boolean
+  }
+  // Partial patch. Only the keys present are written — absent keys keep their
+  // projected value, so two people editing DIFFERENT fields of the same
+  // concept both survive. `renderings` is the one exception: it is replaced
+  // wholesale, because a rendering list has no stable per-item id to merge on.
+  'term.update': {
+    conceptId: string
+    sourceTerm?: string
+    renderings?: TermRenderingPayload[]
+    notes?: string
+    caseSensitive?: boolean
+  }
+  'term.delete': {
+    conceptId: string // soft-delete: stamps deleted_at
+  }
+  'term.approve': {
+    conceptId: string // draft -> active
+  }
+  'term.reject': {
+    conceptId: string
+    /** 'deprecate' keeps the row for the record; 'delete' soft-deletes it. */
+    mode: 'delete' | 'deprecate'
   }
 
   // ── Back-translations (non-chain-mutating) ─────────────────────────────

@@ -182,7 +182,7 @@ export function useSetupChecklist(project: ProjectRecord | null) {
     if (!project) return
     if (session?.jwt) {
       try {
-        const members = await listProjectMembers(session.jwt, project.id)
+        const members = await listProjectMembers(session.jwt, project.id, { fresh: true })
         const others = (members ?? []).filter((m) => m.username !== session.username)
         setMemberCount(others.length)
       } catch {

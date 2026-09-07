@@ -71,6 +71,15 @@ const REQUIRED_ROLE: Record<string, number> = {
 
   // These are the SELF floors — the bar to touch your own comment. Acting on
   // someone else's carries a second, higher floor; see FOREIGN_COMMENT_ROLE.
+  // Terminology: CONTRIBUTOR buys a SUGGESTION (`term.create` status 'draft').
+  // Every binding write additionally needs the org's `termbaseEditMinRole`,
+  // which only the server can resolve — this client table is the optimistic
+  // floor, and the server is the authority (sync-worker termbase-authority.ts).
+  "term.create": ROLE.CONTRIBUTOR,
+  "term.update": ROLE.CONTRIBUTOR,
+  "term.delete": ROLE.CONTRIBUTOR,
+  "term.approve": ROLE.CONTRIBUTOR,
+  "term.reject": ROLE.CONTRIBUTOR,
   "comment.create": ROLE.COMMENTER,
   "comment.edit": ROLE.COMMENTER,
   "comment.delete": ROLE.COMMENTER,

@@ -15,7 +15,10 @@ export interface TargetPresenceSelection {
 
 export interface PresenceUserSnapshot {
   userId: string
+  /** Lock-bearing: the cell the user holds the edit lease on. */
   focusedCell?: string
+  /** Non-lock-bearing: the row the user is on (selected/reading), lease or not. */
+  viewingCell?: string
   currentFileId?: string
   selection?: TargetPresenceSelection
   ts: number
@@ -27,7 +30,9 @@ export interface ProjectPresencePeer {
   color: string
   currentFileId?: string
   focusedCell?: string
+  viewingCell?: string
   selection?: TargetPresenceSelection
+  /** True iff the peer holds the edit lease on `focusedCell`. */
   isEditing: boolean
   lastSeenAt: number
 }
@@ -64,6 +69,7 @@ function sameUser(a: PresenceUserSnapshot | undefined, b: PresenceUserSnapshot |
   return (
     a.userId === b.userId &&
     a.focusedCell === b.focusedCell &&
+    a.viewingCell === b.viewingCell &&
     a.currentFileId === b.currentFileId &&
     a.ts === b.ts &&
     sameSelection(a.selection, b.selection)
@@ -79,8 +85,14 @@ function sameRosterUser(
   return (
     a.userId === b.userId &&
     a.focusedCell === b.focusedCell &&
+    a.viewingCell === b.viewingCell &&
     a.currentFileId === b.currentFileId
   )
+}
+
+/** The row a user is on: the lease-held cell wins, else the selected row. */
+export function presentCellOf(user: Pick<PresenceUserSnapshot, "focusedCell" | "viewingCell">): string | undefined {
+  return user.focusedCell ?? user.viewingCell
 }
 
 function affectedCellIds(
@@ -89,7 +101,9 @@ function affectedCellIds(
 ): string[] {
   const ids = new Set<string>()
   if (before?.focusedCell) ids.add(before.focusedCell)
+  if (before?.viewingCell) ids.add(before.viewingCell)
   if (after?.focusedCell) ids.add(after.focusedCell)
+  if (after?.viewingCell) ids.add(after.viewingCell)
   return Array.from(ids)
 }
 
@@ -143,7 +157,7 @@ export class ProjectPresenceStore {
   reset(): void {
     const affected = new Set<string>()
     for (const user of this.users.values()) {
-      if (user.focusedCell) affected.add(user.focusedCell)
+      for (const cellId of affectedCellIds(user, undefined)) affected.add(cellId)
     }
     for (const cellId of this.lockHolders.keys()) affected.add(cellId)
     this.users = new Map()
@@ -292,7 +306,7 @@ export class ProjectPresenceStore {
 
     for (const user of this.users.values()) {
       if (this.isSelf(user.userId)) continue
-      if (user.focusedCell !== cellId) continue
+      if (presentCellOf(user) !== cellId) continue
       seen.add(user.userId)
       peers.push({ ...this.toPeer(user), cellId })
     }
@@ -347,6 +361,7 @@ export class ProjectPresenceStore {
       color: peerColor(user.userId),
       currentFileId: user.currentFileId,
       focusedCell: user.focusedCell,
+      viewingCell: user.viewingCell,
       selection: this.selectionWithDraft(user),
       isEditing: Boolean(user.focusedCell),
       lastSeenAt: user.ts,

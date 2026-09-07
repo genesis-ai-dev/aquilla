@@ -903,6 +903,12 @@ describe('isChainMutatingKind', () => {
     'comment.edit': false,
     'comment.delete': false,
     'comment.resolve': false,
+    // Terminology concepts are project-scoped and touch no cell chain.
+    'term.create': false,
+    'term.update': false,
+    'term.delete': false,
+    'term.approve': false,
+    'term.reject': false,
     'cell.backtranslation.set': false,
     'assignment.create': false,
     'assignment.reassign': false,

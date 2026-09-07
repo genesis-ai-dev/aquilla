@@ -89,6 +89,21 @@ describe("ExpandableFileList — OT/NT grouping on a fresh device (AQU-1084)", (
     expect(screen.queryByText("Ungrouped")).toBeNull()
   })
 
+  it("groups a migrated project (bare-code names, no bookCode, kind codex) and offers the jump", () => {
+    // The migrator stamps "codex" (outside the FileType union) and sets no
+    // bookCode; the rename banner skips that type, so no corpusMarker either.
+    const migrated = ["1CH", "MAT", "GEN", "REV"].map((code) =>
+      file(code, { type: "codex" as FileReference["type"] }),
+    )
+    renderList(migrated, { onRenameCorpus: vi.fn() })
+    expect(headerToggle("OT")).toHaveAttribute("aria-expanded", "true")
+    expect(headerToggle("NT")).toHaveAttribute("aria-expanded", "true")
+    expect(screen.queryByText("Ungrouped")).toBeNull()
+    expect(jumpButton("Old Testament")).toBeEnabled()
+    expect(jumpButton("New Testament")).toBeEnabled()
+    expect(screen.queryByRole("button", { name: "Rename OT" })).toBeNull()
+  })
+
   it("keeps files without a book code visible in Ungrouped", () => {
     renderList([...FRESH_BIBLE, file("readme", { type: "txt" })])
     expect(screen.getByText("Ungrouped")).toBeInTheDocument()

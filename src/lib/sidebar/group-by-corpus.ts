@@ -1,4 +1,4 @@
-import { compareByCanonicalBookOrder } from "@/lib/file-labeling/bible-book-names"
+import { compareByCanonicalBookOrder, bookCodeFromFileName } from "@/lib/file-labeling/bible-book-names"
 import { getTestament } from "@/lib/codex-editor/bible-books"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 
@@ -22,13 +22,34 @@ export interface CorpusGroup<T = unknown> {
   labelKey?: MessageKey
   /**
    * Set ONLY when at least one member landed here through the AQU-1084
-   * fallback (no `corpusMarker`; testament derived from `bookCode`) rather
-   * than through its own marker. `renameCorpus` matches on `corpusMarker`, so
+   * fallback (no `corpusMarker`; testament derived from `bookCode` or, for
+   * migrated files, from the file name) rather than through its own marker. `renameCorpus` matches on `corpusMarker`, so
    * renaming such a group would skip those members — callers hide the rename
    * affordance when this is set.
    */
   derived?: true
   files: T[]
+}
+
+/** The subset of a file the grouping reads. `type` is a plain string rather
+ *  than `FileType` because migrated Codex projects arrive with `"codex"`,
+ *  which the union does not name (see `src/lib/migrate/map.ts`). */
+export interface GroupableFile {
+  name: string
+  corpusMarker?: string
+  bookCode?: string
+  type?: string
+  hasScriptureContent?: boolean
+}
+
+// File types whose members may be Scripture books even when the record
+// carries no `bookCode`: the native Scripture formats, plus `"codex"`, the
+// kind the legacy-project migrator stamps on every non-IDML file. A file of
+// any other type that happens to be named "ACT" is not a Bible book.
+const NAME_FALLBACK_TYPES: ReadonlySet<string> = new Set(["usfm", "ebible", "helloao", "codex"])
+
+function mayBeScripture(file: GroupableFile): boolean {
+  return file.hasScriptureContent === true || (file.type !== undefined && NAME_FALLBACK_TYPES.has(file.type))
 }
 
 function normalize(marker: string): string {
@@ -52,17 +73,24 @@ function corpusFileCompare(label: string, a: { name: string }, b: { name: string
  * `src/lib/file-labeling/detect.ts`), which used to drop every Bible book
  * into "Ungrouped" exactly when a new user opened the project. When it is
  * absent, the server-backed `bookCode` still tells us the testament (AQU-1084).
+ *
+ * Projects migrated from legacy Codex carry neither: the migrator never sets
+ * `bookCode` (`src/lib/migrate/map.ts`) and the rename banner that would set
+ * `corpusMarker` skips their `"codex"` type. Their files are named by bare
+ * book code ("1CH"), so as a last resort the code is read off the file name,
+ * with the same rule the rename detector uses, for scripture-capable files
+ * only (PR #504 review, 2026-09-07).
  */
-function resolveMarker(file: { corpusMarker?: string; bookCode?: string }):
-  { marker: string; derived: boolean } | null {
+function resolveMarker(file: GroupableFile): { marker: string; derived: boolean } | null {
   const raw = file.corpusMarker?.trim()
   if (raw) return { marker: raw, derived: false }
-  const testament = file.bookCode ? getTestament(file.bookCode) : undefined
+  const code = file.bookCode || (mayBeScripture(file) ? bookCodeFromFileName(file.name) : undefined)
+  const testament = code ? getTestament(code) : undefined
   if (testament) return { marker: testament, derived: true }
   return null
 }
 
-export function groupByCorpus<T extends { name: string; corpusMarker?: string; bookCode?: string }>(
+export function groupByCorpus<T extends GroupableFile>(
   files: T[],
 ): CorpusGroup<T>[] {
   const groupsByKey = new Map<string, CorpusGroup<T>>()

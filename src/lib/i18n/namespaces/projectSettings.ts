@@ -47,11 +47,12 @@ export const projectSettings = defineNamespace({
       "Any label works — a BCP-47 tag, a language name, or a register description " +
       "(e.g. \"Grade 7 English\", \"conversational Swahili\").",
     "projectSettings.create.advancedShapeSummary": "Advanced: project shape",
-    "projectSettings.create.shapeSelfContainedName": "Self-contained",
-    "projectSettings.create.shapeSelfContained": "{name} — owns its source and target.",
-    "projectSettings.create.shapeLinkedTargetName": "Linked target",
+    "projectSettings.create.shapeSelfContainedName": "Self Contained (Default)",
+    "projectSettings.create.shapeSelfContained":
+      "{name} — this project owns both its source and its target.",
+    "projectSettings.create.shapeLinkedTargetName": "Linked Target",
     "projectSettings.create.shapeLinkedTarget":
-      "{name} — reads source from another project; owns only its target.",
+      "{name} — this project reads its source from another project and owns only its target.",
     "projectSettings.create.upstreamProjectLabel": "Upstream project",
     "projectSettings.create.upstreamProjectPlaceholder": "Choose a project to link from…",
     "projectSettings.create.linkModeLabel": "Clone or live?",

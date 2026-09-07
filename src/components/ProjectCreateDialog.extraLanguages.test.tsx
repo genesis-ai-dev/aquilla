@@ -311,25 +311,27 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     expect(screen.getByTestId("create-add-target-lang")).toBeTruthy()
   })
 
-  it("toggles between the two shapes from the linked-target checkbox", () => {
+  it("toggles between the two shapes from the project-shape radios", () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
     fireEvent.click(screen.getByText("Advanced: project shape"))
 
-    const toggle = () => screen.getByTestId("create-shape-linked-target")
-    expect(toggle().getAttribute("aria-checked")).toBe("false")
+    const selfContained = () => screen.getByTestId("create-shape-self-contained")
+    const linkedTarget = () => screen.getByTestId("create-shape-linked-target")
+
+    // Self Contained is the default.
+    expect(selfContained().getAttribute("data-checked")).toBe("")
     expect(screen.queryByText("Upstream project")).toBeNull()
 
-    // Checking reveals the upstream picker and leaves the lane boxes alone.
-    fireEvent.click(screen.getByText(/Linked target/i))
-    expect(toggle().getAttribute("aria-checked")).toBe("true")
+    fireEvent.click(screen.getByText(/Linked Target/i))
+    expect(linkedTarget().getAttribute("data-checked")).toBe("")
     expect(screen.getByText("Upstream project")).toBeTruthy()
     expect(screen.getByTestId("create-extra-lang-input")).toBeTruthy()
 
-    // Unchecking must return to self-contained rather than stranding the form
-    // in a shape that still demands an upstream.
-    fireEvent.click(screen.getByText(/Linked target/i))
-    expect(toggle().getAttribute("aria-checked")).toBe("false")
+    // Picking Self Contained again must clear the linked-target panel rather
+    // than stranding the form in a shape that still demands an upstream.
+    fireEvent.click(screen.getByText(/Self Contained/i))
+    expect(selfContained().getAttribute("data-checked")).toBe("")
     expect(screen.queryByText("Upstream project")).toBeNull()
     expect(screen.getByTestId("create-extra-lang-input")).toBeTruthy()
   })

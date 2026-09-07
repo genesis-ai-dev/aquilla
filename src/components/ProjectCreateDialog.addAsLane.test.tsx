@@ -157,6 +157,34 @@ describe("ProjectCreateDialog — add-as-lane recommendation (AQU-538 slice 3)",
     expect(within(panel).getAllByText(/English Source/i).length).toBeGreaterThan(0)
   })
 
+  it("scrolls the recommendation into view when it appears", async () => {
+    const scrollIntoView = vi.fn()
+    const previous = Element.prototype.scrollIntoView
+    // happy-dom does not implement Element.scrollIntoView; stub it so we can
+    // assert the mount-time nudge that keeps the panel from landing below
+    // the DialogBody fold.
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+      writable: true,
+    })
+
+    try {
+      await openLinkedTargetWithUpstream(/English Source/i)
+      expect(screen.getByTestId("add-as-lane-panel")).toBeTruthy()
+
+      await waitFor(() => {
+        expect(scrollIntoView).toHaveBeenCalled()
+      })
+    } finally {
+      Object.defineProperty(Element.prototype, "scrollIntoView", {
+        configurable: true,
+        value: previous,
+        writable: true,
+      })
+    }
+  })
+
   it("never shows the recommendation for the chain case (consumes=target)", async () => {
     await openLinkedTargetWithUpstream(/English Source/i)
 

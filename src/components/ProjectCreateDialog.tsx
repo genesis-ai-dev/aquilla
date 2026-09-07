@@ -665,6 +665,7 @@ function AddAsLaneRecommendation({
   const t = useT()
   const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle")
   const [message, setMessage] = useState<string | null>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
   // Auto-close is deferred so the success hint is actually perceivable
   // before the dialog disappears (an immediate onAdded() would batch with
   // the success setState and never paint the message).
@@ -676,6 +677,19 @@ function AddAsLaneRecommendation({
     [],
   )
 
+  // This panel mounts below the fold of DialogBody once "Its source" is
+  // chosen (with an upstream already picked). Users are already scrolled to
+  // what used to be the bottom, so without this nudge the recommendation is
+  // invisible and they have no reason to scroll further.
+  useEffect(() => {
+    if (!upstreamProject) return
+    const node = panelRef.current
+    if (!node) return
+    const frame = requestAnimationFrame(() => {
+      node.scrollIntoView({ behavior: "smooth", block: "nearest" })
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [upstreamProject])
 
   if (!upstreamProject) return null
 
@@ -758,6 +772,7 @@ function AddAsLaneRecommendation({
 
   return (
     <div
+      ref={panelRef}
       className="rounded-xl border border-primary/30 bg-primary/5 p-3"
       data-testid="add-as-lane-panel"
     >

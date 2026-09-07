@@ -51,6 +51,19 @@ interface IdmlGuardOptions {
   onRejected: (diagnostic: IdmlDiagnostic) => void
 }
 
+/** Style context the guard extension exposes so node views can render emphasis. */
+export interface IdmlGuardStorage {
+  styleCatalog?: IdmlStyleCatalog
+  paragraphStyleId?: string
+}
+
+declare module "@tiptap/core" {
+  interface Storage {
+    /** Present only when `createIdmlGuardExtension` is part of the editor. */
+    idmlTransactionGuard?: IdmlGuardStorage
+  }
+}
+
 /**
  * Returns a valid text-selection position inside an editable protected slot.
  * Empty inline slots have no ordinary text position for ProseMirror's click
@@ -883,7 +896,7 @@ export function createIdmlGuardExtension({ context, onRejected }: IdmlGuardOptio
   return Extension.create({
     name: "idmlTransactionGuard",
     priority: 10_000,
-    addStorage() {
+    addStorage(): IdmlGuardStorage {
       return {
         styleCatalog: context.styleCatalog,
         paragraphStyleId: context.paragraphStyleId,

@@ -2968,8 +2968,6 @@ export const my: Catalog = {
   "projectSettings.create.advancedShapeSummary": "အဆင့်မြင့်- ပရောဂျက် ပုံစံ",
   "projectSettings.create.shapeSelfContainedName": "ကိုယ်ပိုင်ပြည့်စုံ",
   "projectSettings.create.shapeSelfContained": "{name} — မိမိကိုယ်ပိုင် မူရင်းနှင့် ဘာသာပြန် ပိုင်ဆိုင်သည်။",
-  "projectSettings.create.shapeSourceOnlyName": "မူရင်းသီးသန့်",
-  "projectSettings.create.shapeSourceOnly": "{name} — အခြားသူများ ချိတ်ဆက်နိုင်သည့် စံမူရင်း။ ဘာသာပြန် မပါ။",
   "projectSettings.create.shapeLinkedTargetName": "ချိတ်ဆက်ထားသော ဘာသာပြန်",
   "projectSettings.create.shapeLinkedTarget": "{name} — အခြားပရောဂျက်မှ မူရင်းကို ဖတ်သည်; ၎င်း၏ ဘာသာပြန်ကိုသာ ပိုင်ဆိုင်သည်။",
   "projectSettings.create.upstreamProjectLabel": "အထက်ပိုင်း ပရောဂျက်",

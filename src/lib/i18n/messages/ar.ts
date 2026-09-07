@@ -2971,8 +2971,6 @@ export const ar: Catalog = {
   "projectSettings.create.advancedShapeSummary": "متقدم: شكل المشروع",
   "projectSettings.create.shapeSelfContainedName": "مكتفٍ ذاتيًا",
   "projectSettings.create.shapeSelfContained": "{name} — يملك مصدره وهدفه.",
-  "projectSettings.create.shapeSourceOnlyName": "مصدر فقط",
-  "projectSettings.create.shapeSourceOnly": "{name} — مصدر معتمد يربط به الآخرون. بلا هدف.",
   "projectSettings.create.shapeLinkedTargetName": "هدف مرتبط",
   "projectSettings.create.shapeLinkedTarget": "{name} — يقرأ المصدر من مشروع آخر؛ يملك هدفه فقط.",
   "projectSettings.create.upstreamProjectLabel": "المشروع الأصلي",

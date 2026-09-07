@@ -286,14 +286,12 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     expect(screen.getByText("Create New Project")).toBeTruthy()
   })
 
-  it("does not offer the multi-language chips UI on the source-only shape", () => {
+  it("no longer offers the retired source-only shape", () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
     fireEvent.click(screen.getByText("Advanced: project shape"))
-    fireEvent.click(screen.getByText(/Source-only/i))
 
-    expect(screen.queryByTestId("create-extra-lang-input")).toBeNull()
-    expect(screen.queryByText("Target language(s)")).toBeNull()
+    expect(screen.queryByText(/Source-only/i)).toBeNull()
   })
 
   it("does not offer the multi-language chips UI on the linked-target shape", () => {

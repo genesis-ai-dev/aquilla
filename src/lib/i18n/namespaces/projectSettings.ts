@@ -47,9 +47,6 @@ export const projectSettings = defineNamespace({
     "projectSettings.create.advancedShapeSummary": "Advanced: project shape",
     "projectSettings.create.shapeSelfContainedName": "Self-contained",
     "projectSettings.create.shapeSelfContained": "{name} — owns its source and target.",
-    "projectSettings.create.shapeSourceOnlyName": "Source-only",
-    "projectSettings.create.shapeSourceOnly":
-      "{name} — a canonical source others link against. No target.",
     "projectSettings.create.shapeLinkedTargetName": "Linked target",
     "projectSettings.create.shapeLinkedTarget":
       "{name} — reads source from another project; owns only its target.",
@@ -772,21 +769,15 @@ export const projectSettings = defineNamespace({
       },
       "projectSettings.create.shapeSelfContained": {
         description:
-          "One of three radio-option descriptions under 'Advanced: project shape'. " +
+          "One of two radio-option descriptions under 'Advanced: project shape'. " +
           "The bold name is a separate translated+styled placeholder so word order " +
           "can move per locale.",
         placeholders: {
           name: "The bold shape name, already translated via projectSettings.create.shapeSelfContainedName and wrapped in <strong> by the caller.",
         },
       },
-      "projectSettings.create.shapeSourceOnly": {
-        description: "Second project-shape radio-option description; see shapeSelfContained.",
-        placeholders: {
-          name: "The bold shape name, already translated via projectSettings.create.shapeSourceOnlyName and wrapped in <strong> by the caller.",
-        },
-      },
       "projectSettings.create.shapeLinkedTarget": {
-        description: "Third project-shape radio-option description; see shapeSelfContained.",
+        description: "Second project-shape radio-option description; see shapeSelfContained.",
         placeholders: {
           name: "The bold shape name, already translated via projectSettings.create.shapeLinkedTargetName and wrapped in <strong> by the caller.",
         },

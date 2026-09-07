@@ -2970,8 +2970,6 @@ export const th: Catalog = {
   "projectSettings.create.advancedShapeSummary": "ขั้นสูง: รูปแบบโปรเจกต์",
   "projectSettings.create.shapeSelfContainedName": "แบบครบในตัว",
   "projectSettings.create.shapeSelfContained": "{name} — มีต้นฉบับและฉบับแปลเป็นของตัวเอง",
-  "projectSettings.create.shapeSourceOnlyName": "เฉพาะต้นฉบับ",
-  "projectSettings.create.shapeSourceOnly": "{name} — ต้นฉบับหลักที่โปรเจกต์อื่นเชื่อมโยงอ้างอิง ไม่มีฉบับแปล",
   "projectSettings.create.shapeLinkedTargetName": "ฉบับแปลที่เชื่อมโยง",
   "projectSettings.create.shapeLinkedTarget": "{name} — อ่านต้นฉบับจากโปรเจกต์อื่น มีเฉพาะฉบับแปลเป็นของตัวเอง",
   "projectSettings.create.upstreamProjectLabel": "โปรเจกต์ต้นทาง",

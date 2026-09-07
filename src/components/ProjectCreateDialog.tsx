@@ -61,10 +61,15 @@ interface ProjectCreateDialogProps {
 }
 
 /**
- * Three project shapes per AD-9:
+ * Two project shapes per AD-9:
  *  - self-contained: owns its source and target (default).
- *  - source-only:    targetLanguage left blank; exists to be linked-against.
  *  - linked-target:  reads source from another project (shape recorded locally).
+ *
+ * The source-only shape was retired from creation: a project that exists only
+ * to be linked against is now just a self-contained project whose targets go
+ * unused. The server still tolerates a blank `targetLanguage` (AD-9), so
+ * pre-existing source-only projects keep working — this only removes the
+ * affordance for minting new ones.
  *
  * AQU-478: "linked-target" now actually links (previously the shape was
  * recorded locally with no server-side link). See the "linked-target"
@@ -81,7 +86,7 @@ interface ProjectCreateDialogProps {
  *   5. Open Project Settings → "Source link" section → confirm it shows
  *      the mode/consumes/gate/cursor badges (not just the upstream id).
  */
-type ProjectShape = "self-contained" | "source-only" | "linked-target"
+type ProjectShape = "self-contained" | "linked-target"
 
 /**
  * Per-field overrides for this dialog: a touch taller with more horizontal
@@ -117,13 +122,13 @@ const projectSchema = z
     // Self-contained shape only (spec §5): extras beyond the primary target,
     // applied as settings.targetLanes after create. Ignored for other shapes.
     extraLanguages: z.array(z.string()),
-    shape: z.enum(["self-contained", "source-only", "linked-target"]),
+    shape: z.enum(["self-contained", "linked-target"]),
     upstreamProjectId: optionalString,
     linkMode: z.enum(["clone", "live"]),
     linkConsumes: z.enum(["source", "target"]),
   })
   .superRefine((data, ctx) => {
-    if (data.shape !== "source-only" && !data.targetLanguage.trim()) {
+    if (!data.targetLanguage.trim()) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "Target language is required",
@@ -189,7 +194,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
         id: draftProjectId.current,
         name: value.name.trim(),
         sourceLanguage: value.sourceLanguage.trim(),
-        targetLanguage: value.shape === "source-only" ? "" : value.targetLanguage.trim(),
+        targetLanguage: value.targetLanguage.trim(),
         createdAt: new Date().toISOString(),
         files: [],
         members: [{ userId: session.username, role: "owner" }],
@@ -284,7 +289,6 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
 
   function pickShape(next: ProjectShape) {
     form.setFieldValue("shape", next)
-    if (next === "source-only") form.setFieldValue("targetLanguage", "")
     if (next !== "self-contained") form.setFieldValue("extraLanguages", [])
   }
 
@@ -374,58 +378,58 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
 
               <form.Subscribe
                 selector={(state) => state.values.shape}
-                children={(shape) =>
-                  shape !== "source-only" ? (
-                    <form.Field
-                      name="targetLanguage"
-                      children={(field) => {
-                        const invalid = isFieldInvalid(field)
-                        return (
-                          <Field data-invalid={invalid}>
-                            <div className="flex items-center gap-1.5">
-                              <FieldLabel htmlFor="project-create-target">
-                                {shape === "self-contained" ? "Target language(s)" : "Target Language"}
-                              </FieldLabel>
-                              <LanguageFieldHint />
-                            </div>
-                            {shape === "self-contained" ? (
-                              <form.Field
-                                name="extraLanguages"
-                                children={(extrasField) => (
-                                  <TargetLanguageChips
-                                    // Remount when the dialog reopens so local
-                                    // chip/draft state can't leak across sessions.
-                                    key={open ? "open" : "closed"}
-                                    onPrimaryChange={field.handleChange}
-                                    onExtrasChange={extrasField.handleChange}
-                                    onBlur={field.handleBlur}
-                                    invalid={invalid}
-                                  />
-                                )}
-                              />
-                            ) : (
-                              <LanguageComboboxInput
-                                id="project-create-target"
-                                name="aquilla-project-target-language"
-                                autoComplete="off"
-                                autoCorrect="off"
-                                autoCapitalize="none"
-                                spellCheck={false}
-                                className={FIELD_CLASS}
-                                value={field.state.value}
-                                onBlur={field.handleBlur}
-                                onValueChange={field.handleChange}
-                                placeholder={t("projectSettings.create.targetLanguagePlaceholder")}
-                                aria-invalid={invalid}
-                              />
-                            )}
-                            {invalid && <FieldError errors={field.state.meta.errors} />}
-                          </Field>
-                        )
-                      }}
-                    />
-                  ) : null
-                }
+                children={(shape) => (
+                  <form.Field
+                    name="targetLanguage"
+                    children={(field) => {
+                      const invalid = isFieldInvalid(field)
+                      return (
+                        <Field data-invalid={invalid}>
+                          <div className="flex items-center gap-1.5">
+                            <FieldLabel htmlFor="project-create-target">
+                              {shape === "self-contained"
+                                ? t("projectSettings.create.targetLanguagesLabel")
+                                : t("projectSettings.info.targetLanguageLabel")}
+                            </FieldLabel>
+                            <LanguageFieldHint />
+                          </div>
+                          {shape === "self-contained" ? (
+                            <form.Field
+                              name="extraLanguages"
+                              children={(extrasField) => (
+                                <TargetLanguageChips
+                                  // Remount when the dialog reopens so local
+                                  // chip/draft state can't leak across sessions.
+                                  key={open ? "open" : "closed"}
+                                  onPrimaryChange={field.handleChange}
+                                  onExtrasChange={extrasField.handleChange}
+                                  onBlur={field.handleBlur}
+                                  invalid={invalid}
+                                />
+                              )}
+                            />
+                          ) : (
+                            <LanguageComboboxInput
+                              id="project-create-target"
+                              name="aquilla-project-target-language"
+                              autoComplete="off"
+                              autoCorrect="off"
+                              autoCapitalize="none"
+                              spellCheck={false}
+                              className={FIELD_CLASS}
+                              value={field.state.value}
+                              onBlur={field.handleBlur}
+                              onValueChange={field.handleChange}
+                              placeholder={t("projectSettings.create.targetLanguagePlaceholder")}
+                              aria-invalid={invalid}
+                            />
+                          )}
+                          {invalid && <FieldError errors={field.state.meta.errors} />}
+                        </Field>
+                      )
+                    }}
+                  />
+                )}
               />
             </FieldGroup>
 
@@ -447,15 +451,6 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                         <RichMessage
                           k="projectSettings.create.shapeSelfContained"
                           values={{ name: <strong>{t("projectSettings.create.shapeSelfContainedName")}</strong> }}
-                        />
-                      </span>
-                    </label>
-                    <label className="flex items-start gap-2.5 text-sm">
-                      <RadioGroupItem value="source-only" className="mt-0.5" />
-                      <span>
-                        <RichMessage
-                          k="projectSettings.create.shapeSourceOnly"
-                          values={{ name: <strong>{t("projectSettings.create.shapeSourceOnlyName")}</strong> }}
                         />
                       </span>
                     </label>

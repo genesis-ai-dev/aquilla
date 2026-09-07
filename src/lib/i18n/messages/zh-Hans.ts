@@ -3376,8 +3376,6 @@ export const zh_Hans: Catalog = {
   "projectSettings.create.advancedShapeSummary": "高级：项目形态",
   "projectSettings.create.shapeSelfContainedName": "自成一体",
   "projectSettings.create.shapeSelfContained": "{name} — 同时拥有自己的来源与目标。",
-  "projectSettings.create.shapeSourceOnlyName": "仅来源",
-  "projectSettings.create.shapeSourceOnly": "{name} — 供其他项目链接的权威来源。没有目标。",
   "projectSettings.create.shapeLinkedTargetName": "链接目标",
   "projectSettings.create.shapeLinkedTarget": "{name} — 从另一个项目读取来源；只拥有自己的目标。",
   "projectSettings.create.upstreamProjectLabel": "上游项目",

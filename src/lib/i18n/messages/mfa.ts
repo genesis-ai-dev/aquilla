@@ -2965,8 +2965,6 @@ export const mfa: Catalog = {
   "projectSettings.create.advancedShapeSummary": "Lanjutan: bentuk projek",
   "projectSettings.create.shapeSelfContainedName": "Berdikari",
   "projectSettings.create.shapeSelfContained": "{name} — memiliki sumber dan sasarannya sendiri.",
-  "projectSettings.create.shapeSourceOnlyName": "Sumber sahaja",
-  "projectSettings.create.shapeSourceOnly": "{name} — sumber kanonik yang dipautkan oleh projek lain. Tiada sasaran.",
   "projectSettings.create.shapeLinkedTargetName": "Sasaran terpaut",
   "projectSettings.create.shapeLinkedTarget": "{name} — membaca sumber daripada projek lain; hanya memiliki sasarannya sendiri.",
   "projectSettings.create.upstreamProjectLabel": "Projek hulu",

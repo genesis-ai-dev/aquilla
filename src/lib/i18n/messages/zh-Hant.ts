@@ -3376,8 +3376,6 @@ export const zh_Hant: Catalog = {
   "projectSettings.create.advancedShapeSummary": "進階：專案形態",
   "projectSettings.create.shapeSelfContainedName": "自成一體",
   "projectSettings.create.shapeSelfContained": "{name} — 同時擁有自己的來源與目標。",
-  "projectSettings.create.shapeSourceOnlyName": "僅來源",
-  "projectSettings.create.shapeSourceOnly": "{name} — 供其他專案連結的權威來源。沒有目標。",
   "projectSettings.create.shapeLinkedTargetName": "連結目標",
   "projectSettings.create.shapeLinkedTarget": "{name} — 從另一個專案讀取來源；只擁有自己的目標。",
   "projectSettings.create.upstreamProjectLabel": "上游專案",

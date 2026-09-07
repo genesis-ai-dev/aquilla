@@ -24,6 +24,7 @@ import type { ChainSlot } from './chain-claims'
 import { eventQualifiedParentKey } from './chain-claims'
 import { ROLE } from './role-policy'
 import { trackPatchRequiresExisting } from './track-editing-authority'
+import { usableCorpusMarker } from './corpus-marker'
 
 // A single event row as it lives in Postgres. JSON.parse on `payload` is the
 // caller's responsibility — `payload` here is already an object.
@@ -1501,6 +1502,8 @@ case 'cell.audio.attach': {
       if (p.r2Key) langMeta.r2Key = p.r2Key
       if (p.importFormat) langMeta.importFormat = p.importFormat
       if (p.parserVersion) langMeta.parserVersion = p.parserVersion
+      const corpusMarker = usableCorpusMarker(p.corpusMarker)
+      if (corpusMarker) langMeta.corpusMarker = corpusMarker
       stmts.push(
         db
           .prepare(
@@ -2085,6 +2088,15 @@ case 'cell.audio.attach': {
       return ['files']
     }
 
+    case 'file.corpus.set': {
+      const p = event.payload as EventPayloads['file.corpus.set']
+      if (!event.fileId) {
+        throw new Error(`file.corpus.set event ${event.id} is missing fileId`)
+      }
+      stmts.push(buildFileCorpusSetStmt(db, event.projectId, event.fileId, event.id, p.corpusMarker))
+      return ['files']
+    }
+
     case 'file.track.set': {
       // Per-track presentation overrides — rebuild path; the dispatch path
       // (handlers/file-track-set.ts) uses the same shared SQL builder.
@@ -2351,12 +2363,39 @@ case 'cell.audio.attach': {
 }
 
 /**
- * Shared meta-merge for the file's audio timing mode. Same shape as
- * buildFileVideoSetStmt below (one files.meta JSON key, merged or removed);
- * used by both the live handler (handlers/file-timing-set.ts) and the rebuild
- * projection case. Null clears the key — the file falls back to the
- * project-level default.
+ * Shared meta-merge for the file's sidebar corpus group. Same shape as
+ * buildFileTimingSetStmt (one files.meta JSON key, merged or removed).
+ * Null / blank clears the key — the file lands in Ungrouped.
  */
+export function buildFileCorpusSetStmt(
+  db: AquillaDb,
+  projectId: string,
+  fileId: string,
+  eventId: string,
+  corpusMarker: string | null,
+): AquillaStatement {
+  const NOW = "(extract(epoch from now()) * 1000)::bigint"
+  const usable = usableCorpusMarker(corpusMarker)
+  if (usable == null) {
+    return db
+      .prepare(
+        `UPDATE files
+            SET meta = (COALESCE(NULLIF(meta, ''), '{}')::jsonb - 'corpusMarker')::text,
+                event_id = ?, updated_at = ${NOW}
+          WHERE id = ? AND project_id = ?`,
+      )
+      .bind(eventId, fileId, projectId)
+  }
+  return db
+    .prepare(
+      `UPDATE files
+          SET meta = (COALESCE(NULLIF(meta, ''), '{}')::jsonb || jsonb_build_object('corpusMarker', ?::text))::text,
+              event_id = ?, updated_at = ${NOW}
+        WHERE id = ? AND project_id = ?`,
+    )
+    .bind(usable, eventId, fileId, projectId)
+}
+
 export function buildFileTimingSetStmt(
   db: AquillaDb,
   projectId: string,

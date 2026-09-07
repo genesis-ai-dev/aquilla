@@ -159,7 +159,7 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { emitCastAssign, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, enqueueEvents } from "@/lib/sync/events-emit"
+import { emitCastAssign, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitFileRename, emitFileCorpusSet, emitFileDelete, emitFileRestore, emitCellValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, enqueueEvents } from "@/lib/sync/events-emit"
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
 import { resolveTimingLocked } from "@/lib/sync/project-settings"
@@ -7355,13 +7355,17 @@ export function ProjectWorkspace() {
       return map
     })
     setClientProject(next)
-    // Persist corpus/originalName locally (server file.rename only carries name).
+    // Persist corpus/originalName locally; file.rename carries the label,
+    // file.corpus.set carries the sidebar folder.
     await updateProject(next)
     const nameChanges = effective.filter((s) => s.currentName !== s.suggestedName)
-    if (nameChanges.length > 0) {
+    const corpusChanges = effective.filter((s) =>
+      s.suggestedCorpus !== undefined && s.suggestedCorpus !== s.currentCorpus,
+    )
+    if (nameChanges.length > 0 || corpusChanges.length > 0) {
       try {
-        await Promise.all(
-          nameChanges.map((s) =>
+        await Promise.all([
+          ...nameChanges.map((s) =>
             emitFileRename({
               projectId: project.id,
               fileId: s.fileId,
@@ -7369,12 +7373,20 @@ export function ProjectWorkspace() {
               author: currentUsername,
             }),
           ),
-        )
+          ...corpusChanges.map((s) =>
+            emitFileCorpusSet({
+              projectId: project.id,
+              fileId: s.fileId,
+              corpusMarker: s.suggestedCorpus ?? null,
+              author: currentUsername,
+            }),
+          ),
+        ])
       } catch (e) {
         // AQU-374: a failed enqueue must not masquerade as success. Roll back the
         // optimistic overlay + local record and surface the error instead of
         // showing the "Applied renames." toast.
-        console.error("[rename] file.rename emit failed during suggestion apply", e)
+        console.error("[rename] file.rename / file.corpus.set emit failed during suggestion apply", e)
         setOptimisticRenames((current) => {
           const map = new Map(current)
           for (const s of effective) map.delete(s.fileId)
@@ -7405,9 +7417,12 @@ export function ProjectWorkspace() {
           setClientProject(reverted)
           void updateProject(reverted)
           const undoNameChanges = applied.filter((s) => s.currentName !== s.suggestedName)
-          if (undoNameChanges.length > 0) {
-            void Promise.all(
-              undoNameChanges.map((s) =>
+          const undoCorpusChanges = applied.filter((s) =>
+            s.suggestedCorpus !== undefined && s.suggestedCorpus !== s.currentCorpus,
+          )
+          if (undoNameChanges.length > 0 || undoCorpusChanges.length > 0) {
+            void Promise.all([
+              ...undoNameChanges.map((s) =>
                 emitFileRename({
                   projectId: p.id,
                   fileId: s.fileId,
@@ -7415,7 +7430,15 @@ export function ProjectWorkspace() {
                   author: currentUsername,
                 }),
               ),
-            ).then(() => refresh())
+              ...undoCorpusChanges.map((s) =>
+                emitFileCorpusSet({
+                  projectId: p.id,
+                  fileId: s.fileId,
+                  corpusMarker: s.currentCorpus ?? null,
+                  author: currentUsername,
+                }),
+              ),
+            ]).then(() => refresh())
           }
           setOptimisticRenames((current) => {
             const next = new Map(current)
@@ -7437,9 +7460,20 @@ export function ProjectWorkspace() {
 
   const handleRenameCorpus = useCallback(async (oldMarker: string, newMarker: string) => {
     if (!project) return
+    const members = project.files.filter((f) => f.corpusMarker === oldMarker)
     await patchProject(project.id, (p) => renameCorpus(p, oldMarker, newMarker))
-    refresh()
-  }, [project, refresh])
+    const nextMarker = newMarker.trim() || null
+    void Promise.all(
+      members.map((f) =>
+        emitFileCorpusSet({
+          projectId: project.id,
+          fileId: f.id,
+          corpusMarker: nextMarker,
+          author: currentUsername,
+        }),
+      ),
+    ).then(() => refresh())
+  }, [project, currentUsername, refresh])
 
   const handleDismissBanner = useCallback(async () => {
     setSuggestionsDismissed(true)
@@ -12108,7 +12142,12 @@ export function ProjectWorkspace() {
           onSave={async (next) => {
             if (!project) return
             await patchProject(project.id, (p) => moveFileToCorpus(p, moveTargetId, next))
-            refresh()
+            void emitFileCorpusSet({
+              projectId: project.id,
+              fileId: moveTargetId,
+              corpusMarker: next.trim() || null,
+              author: currentUsername,
+            }).then(() => refresh())
             setMoveTargetId(null)
           }}
         />

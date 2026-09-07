@@ -7,8 +7,14 @@ import {
   type IdmlDiagnostic,
   type IdmlFormatMetadataV2,
   type IdmlProtectedTokenKind,
+  type IdmlStyleCatalog,
 } from "@aquilla/idml-roundtrip"
+import {
+  idmlParagraphStyleFromMetadata,
+  idmlStyleCatalogFromMetadata,
+} from "@/lib/idml/style-catalog"
 import { sanitizeIdmlEditorHtml } from "@/lib/richtext/editor-content"
+import { decorateIdmlStyleElement } from "@/lib/richtext/idml-style-display"
 import { t } from "@/lib/i18n/standalone"
 
 export const IDML_PARAGRAPH_NODE_NAME = "idmlParagraph"
@@ -27,6 +33,8 @@ const IDML_TOKEN_KINDS = new Set<IdmlProtectedTokenKind>([
 export interface IdmlEditorContext {
   sourceHtml: string
   metadata: IdmlFormatMetadataV2
+  styleCatalog?: IdmlStyleCatalog
+  paragraphStyleId?: string
 }
 
 export type IdmlEditorConfiguration =
@@ -420,7 +428,17 @@ export function resolveIdmlEditorConfiguration(
   if (!proof.valid) {
     return { kind: "error", error: diagnosticMessage(proof.diagnostics[0]) }
   }
-  return { kind: "ready", context: { sourceHtml, metadata } }
+  const styleCatalog = idmlStyleCatalogFromMetadata(cellMetadata)
+  const paragraphStyleId = idmlParagraphStyleFromMetadata(cellMetadata)
+  return {
+    kind: "ready",
+    context: {
+      sourceHtml,
+      metadata,
+      ...(styleCatalog ? { styleCatalog } : {}),
+      ...(paragraphStyleId ? { paragraphStyleId } : {}),
+    },
+  }
 }
 
 function emptyEditableSlots(sourceHtml: string, metadata: IdmlFormatMetadataV2): string {
@@ -504,18 +522,6 @@ function integerAttribute(element: HTMLElement, name: string): number | false {
 function exactAttributes(element: HTMLElement, expected: ReadonlySet<string>): boolean {
   return [...element.attributes].every((attribute) => expected.has(attribute.name))
     && [...expected].every((name) => element.hasAttribute(name))
-}
-
-function decorateIdmlStyleBoundary(element: HTMLElement, characterStyle: string): void {
-  element.className = "idml-style-boundary"
-  const normalized = characterStyle.toLowerCase()
-  element.style.fontWeight = /(?:bold|black|heavy)/.test(normalized) ? "700" : ""
-  element.style.fontStyle = /(?:italic|oblique)/.test(normalized) ? "italic" : ""
-  const decorations = [
-    /underline/.test(normalized) ? "underline" : "",
-    /(?:strike|strikethrough)/.test(normalized) ? "line-through" : "",
-  ].filter(Boolean)
-  element.style.textDecoration = decorations.join(" ")
 }
 
 const IdmlParagraph = TiptapNode.create({
@@ -604,7 +610,7 @@ const IdmlSlot = TiptapNode.create({
   },
 
   addNodeView() {
-    return ({ node }) => {
+    return ({ node, editor }) => {
       const dom = document.createElement("span")
       const render = (currentNode: ProseMirrorNode) => {
         const slot = currentNode.attrs.slot
@@ -614,7 +620,12 @@ const IdmlSlot = TiptapNode.create({
         dom.setAttribute("data-idml-protected", "slot")
         if (currentNode.attrs.editable === false) dom.setAttribute("contenteditable", "false")
         else dom.removeAttribute("contenteditable")
-        decorateIdmlStyleBoundary(dom, characterStyle)
+        decorateIdmlStyleElement(
+          dom,
+          characterStyle,
+          editor.storage.idmlTransactionGuard?.styleCatalog,
+          editor.storage.idmlTransactionGuard?.paragraphStyleId,
+        )
       }
       render(node)
       return {
@@ -872,6 +883,12 @@ export function createIdmlGuardExtension({ context, onRejected }: IdmlGuardOptio
   return Extension.create({
     name: "idmlTransactionGuard",
     priority: 10_000,
+    addStorage() {
+      return {
+        styleCatalog: context.styleCatalog,
+        paragraphStyleId: context.paragraphStyleId,
+      }
+    },
     addProseMirrorPlugins() {
       return [new Plugin({
         filterTransaction(transaction) {

@@ -19,6 +19,7 @@ import { handleFileCreate } from './handlers/file-create'
 import { handleFileRename } from './handlers/file-rename'
 import { handleFileVideoSet } from './handlers/file-video-set'
 import { handleFileTimingSet } from './handlers/file-timing-set'
+import { handleFileCorpusSet } from './handlers/file-corpus-set'
 import { handleFileTrackSet } from './handlers/file-track-set'
 import { handleFileDelete, handleFileRestore } from './handlers/file-delete-restore'
 import { handleCommentEvent, type CommentEventKind } from './handlers/comment-events'
@@ -165,6 +166,17 @@ export function dispatchEvent(
         result: handleFileTimingSet(
           db,
           authed as AuthorizedEvent<'file.timing.set'>,
+          serverTs,
+          opts.serverSeq,
+        ),
+      }
+
+    case 'file.corpus.set':
+      return {
+        ok: true,
+        result: handleFileCorpusSet(
+          db,
+          authed as AuthorizedEvent<'file.corpus.set'>,
           serverTs,
           opts.serverSeq,
         ),

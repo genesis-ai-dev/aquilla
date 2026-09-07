@@ -42,6 +42,7 @@ import {
   resolveElementPath,
 } from "./xml.js"
 import type { XmlDocument, XmlElement } from "./xml.js"
+import { extractIdmlStyleCatalogFromDocument } from "./style-catalog.js"
 
 const IDML_MIMETYPE = "application/vnd.adobe.indesign-idml-package"
 const DEFAULT_CHARACTER_STYLE = "CharacterStyle/$ID/[No character style]"
@@ -915,6 +916,9 @@ async function parseIdmlInternal(
     units,
     manifest,
     diagnostics,
+    styleCatalog: extractIdmlStyleCatalogFromDocument(
+      loaded.members.get("Resources/Styles.xml")?.xml,
+    ),
   })
   return { result, loaded }
 }

@@ -1,6 +1,7 @@
 import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
 import app from "../index"
+import { sha256Hex } from "../../../db/shared/api-credentials"
 
 // End-to-end coverage for the account-recovery path. The /reset-password PAGE
 // (AQU-270) and the SPA edge fallback already make the email link reachable;
@@ -19,14 +20,21 @@ function register(username: string, email: string, password: string): Promise<Re
   return reqJson("/api/v2/auth/register", { username, email, password })
 }
 
+/** Plant a reset token in the shape the route actually writes: digest only
+ *  (OPS-20/OPS-27). The plaintext is never stored, so a test that needs a
+ *  usable token has to hash it in the same way the handler will.
+ *
+ *  Until 2026-09-07 this helper seeded PLAINTEXT rows, which meant every test
+ *  below reached the verify/reset handlers through 0080's `token_hash IS NULL`
+ *  compatibility arm rather than the digest lookup that production uses. */
 async function seedToken(username: string, token: string, expiresAt: string): Promise<void> {
   const u = await env.AQUILLA_PG.prepare("SELECT id FROM users WHERE username = ?")
     .bind(username)
     .first<{ id: number }>()
   await env.AQUILLA_PG.prepare(
-    "INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES (?, ?, ?)",
+    "INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES (?, ?, ?)",
   )
-    .bind(u!.id, token, expiresAt)
+    .bind(u!.id, await sha256Hex(token), expiresAt)
     .run()
 }
 
@@ -148,33 +156,44 @@ describe("password reset — request (AQU-675: never creates an account)", () =>
   // 24-hour account-takeover credential; it must not be readable from the
   // table, so a snapshot/replica/support query of password_reset_tokens is not
   // a set of live takeover links.
-  it("stores the reset token as a digest, never as plaintext (OPS-20)", async () => {
+  // Since OPS-27 (migration 0087) the guarantee is structural: there is no
+  // column a plaintext reset token could be written to. Assert the schema as
+  // well as the value, so re-adding the column fails here rather than
+  // silently restoring a readable-credential table.
+  it("stores the reset token as a digest, with no plaintext column to leak (OPS-20/OPS-27)", async () => {
     await register("ops20user", "ops20user@example.com", "old-password-1")
     await reqJson("/api/v2/auth/password-reset/request", { email: "ops20user@example.com" })
 
     const row = await env.AQUILLA_PG.prepare(
-      `SELECT t.token, t.token_hash FROM password_reset_tokens t
+      `SELECT t.token_hash FROM password_reset_tokens t
        JOIN users u ON u.id = t.user_id WHERE u.username = 'ops20user'`,
-    ).first<{ token: string | null; token_hash: string | null }>()
+    ).first<{ token_hash: string | null }>()
 
     expect(row).toBeTruthy()
-    expect(row!.token).toBeNull()
     expect(row!.token_hash).toMatch(/^[0-9a-f]{64}$/)
+
+    const plaintextColumn = await env.AQUILLA_PG.prepare(
+      `SELECT column_name FROM information_schema.columns
+        WHERE table_name = 'password_reset_tokens' AND column_name = 'token'`,
+    ).first<{ column_name: string }>()
+    expect(plaintextColumn).toBeNull()
   })
 
-  // [Pen test] Auth & session mgmt (2026-08-24), OPS-20. Rollover coverage:
-  // a link already in someone's inbox when 0080 deployed still resolves.
-  // Delete this together with the plaintext arm in routes/auth.ts once the
-  // 24-hour window has passed.
-  it("still accepts a pre-0080 plaintext token row (rollover)", async () => {
-    await register("ops20legacy", "ops20legacy@example.com", "old-password-1")
-    await seedToken("ops20legacy", "legacy-plaintext-token-1", soon())
+  // [Pen test] Auth & session mgmt (2026-09-07), OPS-27. The rollover test
+  // that used to sit here ("still accepts a pre-0080 plaintext token row")
+  // was deleted with the compatibility arm it covered: the 24-hour window
+  // closed on 2026-08-25, and migration 0087 dropped the column it read.
+  // Its replacement is the assertion below — a row with no digest match is
+  // rejected, which is now the only shape a plaintext row could take.
+  it("rejects a reset token that has no matching digest (post-OPS-27)", async () => {
+    await register("ops27user", "ops27user@example.com", "old-password-1")
+    await seedToken("ops27user", "the-real-token-1", soon())
 
     const res = await reqJson("/api/v2/auth/password-reset/verify", {
-      token: "legacy-plaintext-token-1",
-      username: "ops20legacy",
+      token: "not-the-real-token-1",
+      username: "ops27user",
     })
-    expect(res.status).toBe(200)
+    expect(res.status).toBe(400)
   })
 
   // [Pen test] Auth & session mgmt (2026-08-24), OPS-19. The whole handler

@@ -12,7 +12,7 @@ interface ProgressRow {
   filled_count: number | string
   validator_histogram: Record<string, number> | string | null
   revision: number | string | bigint
-  // AQU-1098: written by the projection since 0083. Absent on the synthetic
+  // AQU-1098: written by the projection since 0088. Absent on the synthetic
   // rows plan-route builds, which carry their own audio numbers.
   audio_count?: number | string | null
   audio_validated_count?: number | string | null

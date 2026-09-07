@@ -154,7 +154,7 @@ describe('GET file progress', () => {
   })
 
   it('carries per-chapter audio counts, so the inspector need not fetch twice', async () => {
-    // AQU-1098: the projection has written audio_count since 0083, but this
+    // AQU-1098: the projection has written audio_count since 0088, but this
     // route never selected it, so a chapter list could only ever show text.
     const { db, pg } = await fixture()
     await pg.query(

@@ -83,7 +83,7 @@ export async function handleExternalMcpRequest(
   if (!token) {
     return externalError('permission_denied', `missing Authorization header — ${AUTH_HINT}`, 401)
   }
-  const cred = await validateApiCredential(env.AQUILLA_PG, token)
+  const cred = await validateApiCredential(env.AQUILLA_PG, token, request.headers.get('CF-Connecting-IP'))
   if (!cred) {
     return externalError(
       'permission_denied',

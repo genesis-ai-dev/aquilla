@@ -15,8 +15,9 @@
  *   { t: "event.stale", id, reason }
  *       Server rejected an incoming event as a stale sibling (parent-chain
  *       mismatch). Outbox uses this to dead-letter.
- *   { t: "presence", users: [{ userId, focusedCell?, currentFileId?, selection?, ts }] }
- *       Roster snapshot. Sent on connect + on roster change.
+ *   { t: "presence", users: [{ connId, userId, focusedCell?, currentFileId?, selection?, ts }] }
+ *       Roster snapshot, one row per CONNECTION (a user with two tabs is two
+ *       rows). Sent on connect; later changes arrive as presence.diff/left.
  *   { t: "lock.claimed", cellId, by: { userId, ts } }
  *   { t: "lock.released", cellId, by: { userId, ts } }
  *       Focus-lock transitions by another user.
@@ -60,6 +61,13 @@ export type ContextualActivityFrame = ContextualFrame | ContextualDraftsFrame
 const MAX_PRESENCE_DRAFT_LENGTH = 16_384
 
 export interface PresenceUser {
+  /**
+   * Per-socket presence key stamped by the DO. Two tabs (or two people on a
+   * shared test account) carry the same `userId` under different connIds.
+   * Absent only from pre-connId sync workers — the parser then falls back to
+   * `userId` so legacy rosters still key one row per user.
+   */
+  connId: string
   userId: string
   /** Lock-bearing: the cell this user holds the edit lease on. */
   focusedCell?: string
@@ -97,9 +105,10 @@ export type ProjectWsServerMessage =
   | { t: "presence"; users: PresenceUser[] }
   /** Exactly one user's roster-visible state changed (no `selection.draftText`). */
   | { t: "presence.diff"; user: PresenceUser }
-  | { t: "presence.left"; userId: string }
-  /** Live draft text for one cell; server coalesces to ≤1 per user per 150 ms. */
-  | { t: "presence.draft"; userId: string; cellId: string; draftText: string; ts: number }
+  /** One socket left. `connId` falls back to `userId` on pre-connId workers. */
+  | { t: "presence.left"; userId: string; connId: string }
+  /** Live draft text for one cell; server coalesces to ≤1 per connection per 150 ms. */
+  | { t: "presence.draft"; userId: string; connId: string; cellId: string; draftText: string; ts: number }
   | { t: "lock.claimed"; cellId: string; by: { userId: string; ts: number } }
   | { t: "lock.released"; cellId: string; by: { userId: string; ts: number } }
   | { t: "project.archived"; project: string; archivedAt?: string; deletedBy?: string }
@@ -199,8 +208,12 @@ export type ProjectWsClientMessage =
 export interface WsReconcilerHandlers {
   /** Fires for every parsed server frame. */
   onMessage?(msg: ProjectWsServerMessage): void
-  /** Fires when the WS reaches OPEN state (after each successful reconnect). */
-  onOpen?(): void
+  /**
+   * Fires when the WS reaches OPEN state (after each successful reconnect),
+   * before any frame from that socket. `connId` is this socket's presence key
+   * (fresh per connect) — the presence store filters "self" by it.
+   */
+  onOpen?(info: { connId: string }): void
   /** Fires on close, before backoff. */
   onClose?(ev: CloseEvent): void
   /** Fires on parse errors or websocket errors. Non-fatal. */
@@ -230,6 +243,8 @@ export interface WsReconcilerOptions {
 export interface WsReconciler {
   /** Currently connected (WebSocket.OPEN). */
   isConnected(): boolean
+  /** Presence key of the current (or most recent) socket; null before the first connect. */
+  getConnId(): string | null
   /** Send a client message. Returns true iff the WS is OPEN and the frame queued. */
   send(msg: ProjectWsClientMessage): boolean
   /** Force a reconnect; clears the current socket and re-runs the connect path. */
@@ -253,6 +268,7 @@ export function buildProjectWsUrl(
   projectId: string,
   token: string | null,
   userId?: string | null,
+  connId?: string | null,
 ): string {
   const wsBase = baseUrl
     .replace(/^https?:\/\//, (m) => (m === "https://" ? "wss://" : "ws://"))
@@ -265,8 +281,21 @@ export function buildProjectWsUrl(
   // presence entry is not filtered out and ends up as a self-held focus lock
   // that blocks commits. Auth mode ignores this param (uses claims.username).
   if (userId) params.push(`user=${encodeURIComponent(userId)}`)
+  // Per-socket presence key (see newConnId). Old workers ignore it.
+  if (connId) params.push(`connId=${encodeURIComponent(connId)}`)
   const suffix = params.length ? `?${params.join("&")}` : ""
   return `${wsBase}/parties/project-sync/${encodeURIComponent(projectId)}${suffix}`
+}
+
+/**
+ * Fresh presence key for one socket session. Matches the DO's accepted shape
+ * (`/^[A-Za-z0-9_-]{8,64}$/`); a collision with a live socket makes the DO
+ * mint its own id instead, so this must be random, not derived from identity.
+ */
+export function newConnId(): string {
+  const c = (globalThis as { crypto?: Crypto }).crypto
+  if (c?.randomUUID) return c.randomUUID()
+  return `c-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`
 }
 
 /**
@@ -290,6 +319,7 @@ export function createWsReconciler(
   const host: WsHostShape = { Send: Ctor, Open: Ctor.OPEN }
 
   let socket: WebSocket | null = null
+  let connId: string | null = null
   let closed = false
   let backoffMs = minBackoff
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
@@ -342,8 +372,15 @@ export function createWsReconciler(
     }
 
     let ws: WebSocket
+    const socketConnId = newConnId()
     try {
-      const url = buildProjectWsUrl(options.baseUrl, options.projectId, token, options.userId)
+      const url = buildProjectWsUrl(
+        options.baseUrl,
+        options.projectId,
+        token,
+        options.userId,
+        socketConnId,
+      )
       ws = new host.Send(url)
     } catch (err) {
       const e = err instanceof Error ? err : new Error(String(err))
@@ -352,10 +389,11 @@ export function createWsReconciler(
       return
     }
     socket = ws
+    connId = socketConnId
 
     ws.onopen = () => {
       backoffMs = minBackoff
-      safeEmit(() => handlers.onOpen?.())
+      safeEmit(() => handlers.onOpen?.({ connId: socketConnId }))
     }
     ws.onmessage = (ev: MessageEvent) => {
       let parsed: ProjectWsServerMessage | null = null
@@ -394,6 +432,9 @@ export function createWsReconciler(
   return {
     isConnected(): boolean {
       return socket !== null && socket.readyState === host.Open
+    },
+    getConnId(): string | null {
+      return connId
     },
     send(msg: ProjectWsClientMessage): boolean {
       if (!socket || socket.readyState !== host.Open) return false
@@ -453,6 +494,44 @@ function parseAppliedRows(raw: unknown): CellRow[] | undefined {
 }
 
 /**
+ * Parse one `event.applied` frame from an already-decoded object. Shared by
+ * the WS message parser and the `POST /events` response's `applied[]` (the
+ * server serialises both from the same builder, so the author's own flush
+ * lands rows through exactly the path a peer's echo does).
+ */
+export function parseAppliedEventFrame(
+  obj: unknown,
+): Extract<ProjectWsServerMessage, { t: "event.applied" }> | null {
+  if (!obj || typeof obj !== "object") return null
+  const m = obj as Record<string, unknown>
+  if (
+    typeof m.id !== "string" ||
+    typeof m.kind !== "string" ||
+    typeof m.project !== "string"
+  ) {
+    return null
+  }
+  // Minimal shape check on the optional projected rows. Any malformed entry
+  // drops the WHOLE field (never a partial row set — replaceRowsForCell
+  // would treat a missing side as a deletion); the handler then refetches.
+  const rows = parseAppliedRows(m.rows)
+  return {
+    t: "event.applied",
+    id: m.id,
+    kind: m.kind as OutboxEventKind,
+    project: m.project,
+    ...(typeof m.file === "string" ? { file: m.file } : {}),
+    ...(typeof m.cell === "string" ? { cell: m.cell } : {}),
+    ...(typeof m.by === "string" ? { by: m.by } : {}),
+    ...(m.via === "external" ? { via: "external" as const } : {}),
+    ...(typeof m.serverSeq === "number" && Number.isFinite(m.serverSeq)
+      ? { serverSeq: m.serverSeq }
+      : {}),
+    ...(rows ? { rows } : {}),
+  }
+}
+
+/**
  * Defensive parse of an incoming WS frame. Returns null on malformed input
  * (the caller treats this as a parse error and emits onError).
  */
@@ -466,33 +545,7 @@ export function parseProjectWsMessage(raw: string): ProjectWsServerMessage | nul
   if (!obj || typeof obj !== "object") return null
   const m = obj as Record<string, unknown>
   const t = m.t
-  if (t === "event.applied") {
-    if (
-      typeof m.id !== "string" ||
-      typeof m.kind !== "string" ||
-      typeof m.project !== "string"
-    ) {
-      return null
-    }
-    // Minimal shape check on the optional projected rows. Any malformed entry
-    // drops the WHOLE field (never a partial row set — replaceRowsForCell
-    // would treat a missing side as a deletion); the handler then refetches.
-    const rows = parseAppliedRows(m.rows)
-    return {
-      t: "event.applied",
-      id: m.id,
-      kind: m.kind as OutboxEventKind,
-      project: m.project,
-      ...(typeof m.file === "string" ? { file: m.file } : {}),
-      ...(typeof m.cell === "string" ? { cell: m.cell } : {}),
-      ...(typeof m.by === "string" ? { by: m.by } : {}),
-      ...(m.via === "external" ? { via: "external" as const } : {}),
-      ...(typeof m.serverSeq === "number" && Number.isFinite(m.serverSeq)
-        ? { serverSeq: m.serverSeq }
-        : {}),
-      ...(rows ? { rows } : {}),
-    }
-  }
+  if (t === "event.applied") return parseAppliedEventFrame(m)
   if (t === "event.stale") {
     if (typeof m.id !== "string" || typeof m.reason !== "string") return null
     return { t: "event.stale", id: m.id, reason: m.reason }
@@ -514,7 +567,8 @@ export function parseProjectWsMessage(raw: string): ProjectWsServerMessage | nul
   }
   if (t === "presence.left") {
     if (typeof m.userId !== "string") return null
-    return { t: "presence.left", userId: m.userId }
+    const connId = typeof m.connId === "string" ? m.connId : m.userId
+    return { t: "presence.left", userId: m.userId, connId }
   }
   if (t === "presence.draft") {
     if (
@@ -527,7 +581,8 @@ export function parseProjectWsMessage(raw: string): ProjectWsServerMessage | nul
     ) {
       return null
     }
-    return { t: "presence.draft", userId: m.userId, cellId: m.cellId, draftText: m.draftText, ts: m.ts }
+    const connId = typeof m.connId === "string" ? m.connId : m.userId
+    return { t: "presence.draft", userId: m.userId, connId, cellId: m.cellId, draftText: m.draftText, ts: m.ts }
   }
   if (t === "lock.claimed" || t === "lock.released") {
     if (typeof m.cellId !== "string" || !m.by || typeof m.by !== "object") return null
@@ -750,6 +805,7 @@ function parsePresenceUser(u: unknown): PresenceUser | null {
   // the whole frame malformed — same strictness as the other fields.
   if (r.selection !== undefined && !isTargetPresenceSelection(r.selection)) return null
   return {
+    connId: typeof r.connId === "string" ? r.connId : r.userId,
     userId: r.userId,
     ts: r.ts,
     ...(typeof r.focusedCell === "string" ? { focusedCell: r.focusedCell } : {}),

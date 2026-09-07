@@ -19,6 +19,11 @@
 //   npx tsx scripts/migrate-all.ts --only 47               # dry-run ONE (canary)
 //   npx tsx scripts/migrate-all.ts --only 47 --apply       # write ONE to prod
 //   npx tsx scripts/migrate-all.ts --apply                 # full sweep
+//
+// Every --apply needs R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY: it takes the
+// cross-machine run lock (_migrate/audio-migrate-state.lock in aquilla-snapshots)
+// and exits 2 if another --apply is in progress anywhere. Never run --apply
+// from a crontab; the nightly GitHub workflow (audio-delta-sync.yml) owns it.
 //   npx tsx scripts/migrate-all.ts --audio-fast --only 47  # one project, dry-run
 //   npx tsx scripts/migrate-all.ts --audio-fast --apply    # fast audio (all takes)
 //   flags: --search <term>  --limit N  --target local|remote (default remote/prod)
@@ -33,7 +38,11 @@ import path from "node:path"
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { randomUUID } from "node:crypto"
-import { resolveCredentialsFromEnv, type GitLabCredentials } from "../src/lib/migrate/gitlab/auth"
+import {
+  resolveCredentialsFromEnv,
+  describeCredentialSource,
+  type GitLabCredentials,
+} from "../src/lib/migrate/gitlab/auth"
 import {
   discoverCodexProjects,
   getProjectById,
@@ -49,6 +58,8 @@ import type { AudioImport } from "../src/lib/migrate/audio"
 import { buildOidIndex, planCellAudio, buildCellAudioEvents } from "../src/lib/migrate/audio-copy"
 import { discoverPointers } from "../src/lib/migrate/gitlab/lfs"
 import { R2Client, gitlabLfsKey, audioDestKey } from "../src/lib/migrate/r2-s3"
+import { RunLock, LockHeldError } from "../src/lib/migrate/run-lock"
+import os from "node:os"
 import { mapComments } from "../src/lib/migrate/comments"
 import { buildCastAdditions, castLikeSpeakers } from "../src/lib/import/cast-from-speakers"
 import type { ProjectTtsSettings } from "../src/lib/parsers/types"
@@ -144,6 +155,29 @@ type MigState = Record<
 >
 let STATE: MigState = {}
 let FORCE = false
+// Reserved (non-project) key in the state file: hash of the last APPLIED
+// org/team plan, so an unchanged plan skips the /migrate/groups upsert.
+const GROUP_SYNC_KEY = "_groupSync"
+interface GroupSyncState {
+  planHash: string
+  syncedAt: string
+}
+function readGroupSyncState(): GroupSyncState | undefined {
+  const v = (STATE as Record<string, unknown>)[GROUP_SYNC_KEY] as Partial<GroupSyncState> | undefined
+  return v && typeof v.planHash === "string" && typeof v.syncedAt === "string" ? (v as GroupSyncState) : undefined
+}
+function writeGroupSyncState(v: GroupSyncState): void {
+  ;(STATE as Record<string, unknown>)[GROUP_SYNC_KEY] = v
+}
+// Cross-machine mutex for --apply, alongside the state object in R2
+// (_migrate/audio-migrate-state.json → _migrate/audio-migrate-state.lock).
+const LOCK_KEY = process.env.MIGRATE_LOCK_KEY ?? "_migrate/audio-migrate-state.lock"
+const LOCK_TTL_MS = 30 * 60_000
+const LOCK_HEARTBEAT_MS = 5 * 60_000
+function lockHolder(): string {
+  const run = process.env.GITHUB_RUN_ID ? `gh-run-${process.env.GITHUB_RUN_ID}` : os.hostname()
+  return `${run}#${process.pid}`
+}
 function loadState(): MigState {
   try {
     return JSON.parse(fs.readFileSync(STATE_FILE, "utf8")) as MigState
@@ -833,39 +867,96 @@ async function main() {
     console.error("SYNC_SECRET_KEY not set. Run: set -a; . ./.env; set +a")
     process.exit(1)
   }
-  if (args.audioFast && args.apply) {
+  let lock: RunLock | null = null
+  if (args.apply) {
     const ak = process.env.R2_ACCESS_KEY_ID
     const sk = process.env.R2_SECRET_ACCESS_KEY
     if (!ak || !sk) {
-      console.error("R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY required for --audio-fast (add to .env).")
+      console.error(
+        "R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY required for --apply (the run lock lives in R2; add to .env).",
+      )
       process.exit(1)
     }
     R2 = new R2Client({ accountId: R2_ACCOUNT_ID, accessKeyId: ak, secretAccessKey: sk })
-    console.log(
-      `R2 CopyObject: ${LFS_BUCKET} → ${DEST_BUCKET}  (concurrency ${COPY_CONCURRENCY}, account ${R2_ACCOUNT_ID.slice(0, 8)}…)`,
-    )
+    if (args.audioFast) {
+      console.log(
+        `R2 CopyObject: ${LFS_BUCKET} → ${DEST_BUCKET}  (concurrency ${COPY_CONCURRENCY}, account ${R2_ACCOUNT_ID.slice(0, 8)}…)`,
+      )
+    }
+    const client = R2
+    lock = new RunLock({
+      store: {
+        get: (k) => client.getObject(DEST_BUCKET, k),
+        put: (k, body, o) => client.putObject(DEST_BUCKET, k, body, o),
+        delete: (k) => client.deleteObject(DEST_BUCKET, k),
+      },
+      key: LOCK_KEY,
+      holder: lockHolder(),
+      ttlMs: LOCK_TTL_MS,
+    })
+    try {
+      await lock.acquire()
+    } catch (e) {
+      if (e instanceof LockHeldError) {
+        console.error(`✗ ${e.message}`)
+        process.exit(2)
+      }
+      throw e
+    }
+    console.log(`Run lock acquired: ${DEST_BUCKET}/${LOCK_KEY} (holder ${lockHolder()}, lease ${LOCK_TTL_MS / 60_000}m)`)
   }
+  const held = lock
+  const beat = held
+    ? setInterval(() => void held.heartbeat().catch((e) => console.warn(`  ! lock heartbeat failed: ${String(e)}`)), LOCK_HEARTBEAT_MS)
+    : null
+  beat?.unref()
+  // A cancelled Action / Ctrl-C must not leave the lease behind for 30 minutes.
+  const onSignal = (sig: NodeJS.Signals) => {
+    void (held ? held.release() : Promise.resolve()).finally(() => process.exit(sig === "SIGINT" ? 130 : 143))
+  }
+  process.once("SIGINT", onSignal)
+  process.once("SIGTERM", onSignal)
+  try {
+    await run(args)
+  } finally {
+    if (beat) clearInterval(beat)
+    await held?.release()
+  }
+}
+
+async function run(args: Args) {
   const creds = await resolveCredentialsFromEnv(process.env)
   CREDS = creds
   STATE = loadState()
   FORCE = args.force
   console.log(
-    `GitLab: ${creds.gitlabUrl}   target: ${args.remote ? "REMOTE/prod" : "local"}   ${args.audioFast ? "AUDIO-FAST" : args.audio ? "AUDIO" : "content"}   ${args.apply ? "APPLY" : "dry-run"}${args.force ? "   FORCE" : ""}`,
+    `GitLab: ${creds.gitlabUrl} (${describeCredentialSource(creds.source)})   target: ${args.remote ? "REMOTE/prod" : "local"}   ${args.audioFast ? "AUDIO-FAST" : args.audio ? "AUDIO" : "content"}   ${args.apply ? "APPLY" : "dry-run"}${args.force ? "   FORCE" : ""}`,
   )
   let placeIdx = new Map<string, Placement>()
   let orgMap = new Map<string, OrgRow>()
   let teamMap = new Map<string, number>()
   if (!args.audio && !args.audioFast) {
     console.log("Syncing org/team structure to Neon from the GitLab group tree…")
-    const gs = await syncGroupsToNeon(creds, { syncBase: SYNC, headers: authHeaders() }, { apply: args.apply })
+    const prev = readGroupSyncState()
+    const gs = await syncGroupsToNeon(
+      creds,
+      { syncBase: SYNC, headers: authHeaders() },
+      { apply: args.apply, lastPlanHash: prev?.planHash, force: args.force },
+    )
     placeIdx = gs.placeIdx
+    if (args.apply && !gs.skipped) {
+      writeGroupSyncState({ planHash: gs.planHash, syncedAt: new Date().toISOString() })
+      saveState()
+    }
     if (gs.plan.conflicts.length) {
       const unresolved = gs.plan.conflicts.filter((c) => c.kind === "unresolved-user").length
       const noOwner = gs.plan.conflicts.filter((c) => c.kind === "no-owner").length
       console.log(`  ⚠ group conflicts: ${noOwner} no-owner, ${unresolved} unresolved-user (those memberships skipped)`)
     }
     console.log(
-      `  ${placeIdx.size} groups indexed; ${gs.plan.orgs.length} orgs / ${gs.plan.teams.length} teams ${args.apply ? "upserted" : "planned (dry-run)"} to Neon`,
+      `  ${placeIdx.size} groups indexed; ${gs.plan.orgs.length} orgs / ${gs.plan.teams.length} teams ${
+        gs.skipped ? `unchanged since ${prev?.syncedAt} (plan hash match — upsert skipped)` : args.apply ? "upserted" : "planned (dry-run)"
+      } to Neon`,
     )
     // Re-read full maps from Neon (now incl. any orgs just created) — fetchOrgTeamMaps
     // also carries owner_user_id, which the project upsert needs.

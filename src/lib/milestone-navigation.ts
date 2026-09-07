@@ -144,6 +144,31 @@ export function deriveMilestoneNavigation(
   }
 }
 
+export interface MilestonePageEntry {
+  key: string
+  cellIds: readonly string[]
+  subsections?: readonly { key: string; cellIds: readonly string[] }[]
+}
+
+/**
+ * Cells that belong on one navigator destination. Split-into-milestones view
+ * always asks for the whole division. A subsection key is the picker jump
+ * into a 50-cell range of a long IDML story, used only in continuous view.
+ */
+export function cellIdsForMilestonePage(
+  navigation: readonly MilestonePageEntry[],
+  milestoneKey: string,
+  subsectionKey?: string,
+): readonly string[] | undefined {
+  const entry = navigation.find((item) => item.key === milestoneKey)
+  if (!entry) return undefined
+  if (subsectionKey) {
+    const subsection = entry.subsections?.find((item) => item.key === subsectionKey)
+    if (subsection) return subsection.cellIds
+  }
+  return entry.cellIds
+}
+
 function legacyMilestoneSeed(cell: MilestoneNavigationCell): ImportMilestone | undefined {
   const persisted = readImportMilestone(cell.metadata)
   if (persisted) return persisted

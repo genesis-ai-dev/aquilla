@@ -181,7 +181,10 @@ Status pipeline:
 
 Rules:
 
-1. **Pick up work from `Todo`** → assign it to your name and set **`Dispatched`** (work begun).
+1. **Pick up work from `Todo`** → set **`Dispatched`** (work begun). **Keep the existing
+   assignee** — whoever held the issue in `Todo` owns it through the whole lifecycle; never
+   reassign it to yourself/the runner. Only if it's unassigned, assign it to your name so
+   the claim is visible.
 2. When the fix is committed but not yet deployed → **`Fixed`**.
 3. When the fix is deployed to the **dev branch** for dev-team validation → **`Dev Verification Needed`**.
 4. Once development validation passes and the functionality remains testable on

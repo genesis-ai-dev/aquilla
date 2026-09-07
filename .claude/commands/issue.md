@@ -76,7 +76,9 @@ If the issue is in `Backlog` or `Todo`:
   `origin/main` on this issue's suggested branch (`get_issue` → `gitBranchName`) and work
   there. Never pile this ticket onto another ticket's branch/working copy (see AGENTS.md →
   "One ticket = one branch = one worktree").
-- Assign it to the user (`assignee: "me"`).
+- **Keep the existing assignee** — whoever held the issue in `Todo` keeps it through
+  `Fixed` and beyond; never reassign it to yourself/the runner. Only if it's unassigned,
+  claim it (`assignee: "me"`).
 - Move it to **`Dispatched`** (work has begun).
 - Restate the issue's acceptance/repro in one line so the goal is explicit.
 - **Flag spec impact (note only, don't edit yet).** Skim the relevant spec file(s) in

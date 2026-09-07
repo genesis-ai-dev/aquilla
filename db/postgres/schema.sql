@@ -829,7 +829,9 @@ CREATE INDEX idx_diarization_jobs_file ON diarization_jobs(project_id, file_id);
 CREATE INDEX idx_events_file_seq ON events(project_id, file_id, server_seq);
 CREATE INDEX idx_events_parent_lookup ON events(project_id, file_id, cell_id, parent_id);
 CREATE INDEX idx_events_project ON events(project_id, server_ts);
-CREATE UNIQUE INDEX idx_events_project_seq ON events(project_id, server_seq);
+-- 0085/0086: covering (INCLUDE id) so the /migrate/event-ids cursor query is an
+-- Index Only Scan instead of a heap fetch per row / bitmap+sort on later pages.
+CREATE UNIQUE INDEX idx_events_project_seq_id ON events(project_id, server_seq) INCLUDE (id);
 CREATE INDEX idx_file_source_blobs_project ON file_source_blobs(project_id);
 CREATE INDEX idx_files_anchor_file ON files(anchor_file_id) WHERE anchor_file_id IS NOT NULL;
 CREATE INDEX idx_files_last_edit ON files(project_id, last_edit_at);

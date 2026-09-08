@@ -6768,7 +6768,8 @@ export function ProjectWorkspace() {
       // ONE batch, create first, so there is never a tick where the row exists
       // at the tail. The two chain-mutating events sit on different cells, so
       // neither waits on the other's head. source.cell.reorder carries the
-      // same CONTRIBUTOR floor as source.cell.create and rides the same
+      // same static floor as source.cell.create (COMMENTER since the review
+      // round widened the tier list) and rides the same
       // `cellEditingFloor` gate on the server (Sam, 2026-08-21 — the
       // day this batch silently died for a contributor because the reorder
       // still floored at PROJECT_LEAD and enqueueEvents throws per input,

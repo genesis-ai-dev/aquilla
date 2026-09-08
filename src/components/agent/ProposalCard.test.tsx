@@ -138,7 +138,7 @@ describe("rendering", () => {
     expect(screen.getByRole("button", { name: "Apply" })).toBeEnabled()
   })
 
-  it("gates source.cell.create at CONTRIBUTOR now — the server arbitrates the setting (AQU-890 → 2026-08-21)", () => {
+  it("gates source.cell.create at the static mirror floor — the server arbitrates the setting (AQU-890 → 2026-08-21)", () => {
     // The static floor is the lowest reachable one; the project's
     // admit contributors; whether THIS project has opted in is the server's
     // per-event call (sync-worker cell-editing-authority.ts), not a fact the

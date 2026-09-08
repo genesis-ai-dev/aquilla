@@ -26,8 +26,11 @@ export { ROLE }
  * AQU-890: the two `*.cell.create` kinds are genesis events — they mint a new
  * row rather than advancing an existing chain. They carry no extra gate here:
  * `canApply` reads their floors straight out of the shared role-policy mirror
- * (source.cell.create → project_lead, target.cell.create → contributor), which
- * is the same floor the native add-row affordance answers to.
+ * (source.cell.create → commenter since AQU-1068's review round widened the
+ * `cellEditingFloor` tier list, target.cell.create → contributor), which is
+ * the same floor the native add-row affordance answers to. That mirror is the
+ * LOWEST reachable floor, not the operative one: whether this project admits
+ * the caller at all is the tier gate's per-event call on the server.
  */
 export const SUPPORTED_APPLY_KINDS = [
   "target.cell.commit",

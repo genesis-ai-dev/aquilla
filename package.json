@@ -103,7 +103,8 @@
     "neon:backfill:progress:prod": "tsx scripts/neon-target.ts production backfill-progress",
     "migrate:users": "tsx scripts/migrate-users.ts",
     "neon:refresh:dev": "tsx scripts/refresh-neon-branch.ts dev",
-    "neon:refresh-dev": "pnpm neon:refresh:dev"
+    "neon:refresh-dev": "pnpm neon:refresh:dev",
+    "migrate:daemon": "tsx scripts/migrate-daemon/main.ts"
   },
   "dependencies": {
     "@aquilla/idml-roundtrip": "workspace:2.0.3",

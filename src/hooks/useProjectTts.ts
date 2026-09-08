@@ -14,7 +14,12 @@ import { loadProjectTts, saveProjectTts } from "@/lib/store/project-tts-store"
 import {
   assignedCastVoiceId, getVoiceLibrary, resolveVoice,
 } from "@/lib/audio/voices"
-import { migrateOmnivoiceTtsSettings } from "@/lib/audio/omnivoice-migrate"
+import {
+  migrateOmnivoiceTtsSettings,
+  omnivoiceMigrationProperties,
+} from "@/lib/audio/omnivoice-migrate"
+import { OMNIVOICE_VOICES_MIGRATED } from "@/lib/event-names"
+import posthog from "@/lib/posthog"
 import type { CastMemberStats } from "@/components/VoiceLibraryPanel"
 import type { CellSummary } from "@/hooks/useActiveCellStore"
 import type { ProjectTtsSettings, Voice } from "@/lib/parsers/types"
@@ -99,6 +104,17 @@ export function useProjectTts(
     if (!rawNeedsWrite && !serverNeedsWrite) return
     if (migratedForRef.current === projectId) return
     migratedForRef.current = projectId
+    const source = rawNeedsWrite && serverNeedsWrite
+      ? "both"
+      : rawNeedsWrite
+        ? "local"
+        : "server"
+    const before = rawNeedsWrite ? rawSettings : serverSettings
+    posthog.capture(OMNIVOICE_VOICES_MIGRATED, {
+      project_id: projectId,
+      source,
+      ...omnivoiceMigrationProperties(before, { targetLanguage }),
+    })
     void saveTts(settings)
   }, [projectId, rawSettings, serverSettings, settings, targetLanguage, saveTts])
 

@@ -3,6 +3,7 @@ import { DEFAULT_INWORLD_VOICE } from "./tts-providers"
 import {
   migrateOmnivoiceTtsSettings,
   migrateOmnivoiceVoice,
+  omnivoiceMigrationProperties,
   ttsSettingsNeedOmnivoiceMigration,
 } from "./omnivoice-migrate"
 import type { ProjectTtsSettings, Voice } from "@/lib/parsers/types"
@@ -102,6 +103,38 @@ describe("migrateOmnivoiceTtsSettings", () => {
     expect(next?.voices?.[1]).toEqual(settings.voices?.[1])
     expect(next?.voices?.[2]).toMatchObject({
       id: "v3", provider: "inworld", language: "fr-FR", referenceAudioId: "r.wav",
+    })
+  })
+})
+
+describe("omnivoiceMigrationProperties", () => {
+  it("counts rewritten voices and maps language tags, skipping Gemini", () => {
+    expect(omnivoiceMigrationProperties({
+      provider: "omnivoice",
+      voices: [
+        { id: "v1", name: "Narrator", language: "eng" },
+        { id: "v2", name: "Mary", provider: "gemini", voiceName: "Kore" },
+        omnivoiceVoice({ id: "v3", name: "Clone", language: "French", referenceAudioId: "r.wav" }),
+      ],
+    }, { targetLanguage: "fra" })).toEqual({
+      project_provider_migrated: true,
+      voice_count: 2,
+      cloned_voice_count: 1,
+      from_languages: ["eng", "French"],
+      to_languages: ["en-US", "fr-FR"],
+    })
+  })
+
+  it("is empty when nothing is OmniVoice", () => {
+    expect(omnivoiceMigrationProperties({
+      provider: "inworld",
+      voices: [{ id: "v", name: "N", provider: "inworld", voiceName: "Dennis", language: "en-US" }],
+    })).toEqual({
+      project_provider_migrated: false,
+      voice_count: 0,
+      cloned_voice_count: 0,
+      from_languages: [],
+      to_languages: [],
     })
   })
 })

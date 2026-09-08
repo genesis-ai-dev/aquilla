@@ -86,3 +86,41 @@ export function migrateOmnivoiceTtsSettings(
     ...(nextVoices !== settings.voices ? { voices: nextVoices } : {}),
   }
 }
+
+export interface OmnivoiceMigrationProperties {
+  project_provider_migrated: boolean
+  voice_count: number
+  cloned_voice_count: number
+  from_languages: string[]
+  to_languages: string[]
+}
+
+function uniqueLanguages(voices: Voice[]): string[] {
+  const seen = new Set<string>()
+  for (const voice of voices) {
+    const tag = voice.language?.trim()
+    if (tag) seen.add(tag)
+  }
+  return [...seen]
+}
+
+/** Counts and language tags for the PostHog event fired when we persist. */
+export function omnivoiceMigrationProperties(
+  before: ProjectTtsSettings | undefined,
+  context: { targetLanguage?: string } = {},
+): OmnivoiceMigrationProperties {
+  const projectProvider = before?.provider
+  const migrated = (before?.voices ?? []).filter((voice) =>
+    shouldMigrateVoice(voice, projectProvider),
+  )
+  const after = migrated.map((voice) =>
+    migrateOmnivoiceVoice(voice, { projectProvider, targetLanguage: context.targetLanguage }),
+  )
+  return {
+    project_provider_migrated: projectProvider === "omnivoice",
+    voice_count: migrated.length,
+    cloned_voice_count: migrated.filter((voice) => Boolean(voice.referenceAudioId)).length,
+    from_languages: uniqueLanguages(migrated),
+    to_languages: uniqueLanguages(after),
+  }
+}

@@ -2,6 +2,11 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { act, renderHook, waitFor } from "@testing-library/react"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
 
+const mockCapture = vi.hoisted(() => vi.fn())
+vi.mock("@/lib/posthog", () => ({
+  default: { capture: mockCapture },
+}))
+
 vi.mock("@/lib/store/project-index", () => ({
   patchProject: vi.fn(async () => {}),
 }))
@@ -10,6 +15,7 @@ import { useProjectTts } from "./useProjectTts"
 import { loadProjectTts } from "@/lib/store/project-tts-store"
 import { patchProject } from "@/lib/store/project-index"
 import { DEFAULT_INWORLD_VOICE } from "@/lib/audio/tts-providers"
+import { OMNIVOICE_VOICES_MIGRATED } from "@/lib/event-names"
 
 const PROJECT_ID = "proj-omnivoice-migrate"
 
@@ -17,6 +23,7 @@ describe("useProjectTts OmniVoice persist (AQU-1189)", () => {
   beforeEach(() => {
     localStorage.clear()
     vi.mocked(patchProject).mockClear()
+    mockCapture.mockClear()
   })
 
   it("rewrites omnivoice settings to inworld and stores the Inworld language", async () => {
@@ -42,6 +49,16 @@ describe("useProjectTts OmniVoice persist (AQU-1189)", () => {
     expect(onSyncTts.mock.calls[0][0].provider).toBe("inworld")
     expect(loadProjectTts(PROJECT_ID)?.provider).toBe("inworld")
     expect(loadProjectTts(PROJECT_ID)?.voices?.[0].language).toBe("en-US")
+    expect(mockCapture).toHaveBeenCalledTimes(1)
+    expect(mockCapture).toHaveBeenCalledWith(OMNIVOICE_VOICES_MIGRATED, {
+      project_id: PROJECT_ID,
+      source: "both",
+      project_provider_migrated: true,
+      voice_count: 1,
+      cloned_voice_count: 0,
+      from_languages: ["eng"],
+      to_languages: ["en-US"],
+    })
   })
 
   it("does not persist when settings are already inworld", async () => {
@@ -54,5 +71,6 @@ describe("useProjectTts OmniVoice persist (AQU-1189)", () => {
     await act(async () => {})
     expect(onSyncTts).not.toHaveBeenCalled()
     expect(loadProjectTts(PROJECT_ID)).toBeUndefined()
+    expect(mockCapture).not.toHaveBeenCalled()
   })
 })

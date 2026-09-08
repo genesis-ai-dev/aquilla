@@ -110,18 +110,20 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
     })
   })
 
-  it("shows the upstream picker + clone/live + consumes choice only for the linked-target shape", async () => {
+  it("shows the live intro + upstream picker + corpus choice for the linked-target shape", async () => {
     render(<ProjectCreateDialog onCreated={vi.fn()} />)
     fireEvent.click(screen.getByRole("button", { name: /new project/i }))
-    expect(screen.queryAllByText(/Upstream project/i)).toHaveLength(0)
-
-    // Open the advanced disclosure and pick "linked-target".
+    // Self-contained Advanced shows the optional clone path, not the live one.
     fireEvent.click(screen.getByText("Advanced: project shape"))
+    expect(screen.getByText(/import a/i)).toBeTruthy()
+    expect(screen.queryByText(/creating a/i)).toBeNull()
+
     fireEvent.click(screen.getByText(/Linked target/i))
 
+    expect(screen.getByText(/creating a/i)).toBeTruthy()
     expect(screen.getByRole("combobox", { name: /Upstream project/i })).toBeTruthy()
-    expect(screen.getByText(/Clone or live\?/i)).toBeTruthy()
-    expect(screen.getByText(/What should become this project's source\?/i)).toBeTruthy()
+    expect(screen.queryByText(/Clone or live\?/i)).toBeNull()
+    expect(screen.getByText(/Which corpus should become this project's source\?/i)).toBeTruthy()
   })
 
   it("shows the upstream project name on the trigger after selection, not its UUID", async () => {
@@ -152,8 +154,8 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
 
     await pickSelectOption(/Upstream project/i, /English Source/i)
 
-    // Consumes defaults to "source"; mode defaults to "live" — leave as-is
-    // and submit.
+    // Corpus choice is no longer prefilled — pick "Its Source" explicitly.
+    fireEvent.click(screen.getByRole("radio", { name: /^Its Source/i }))
     fireEvent.click(screen.getByRole("button", { name: /Create & Link/i }))
 
     await waitFor(() => {
@@ -195,6 +197,7 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
     fireEvent.click(screen.getByText(/Linked target/i))
     await pickSelectOption(/Upstream project/i, /English Source/i)
 
+    fireEvent.click(screen.getByRole("radio", { name: /^Its Source/i }))
     fireEvent.click(screen.getByRole("button", { name: /Create & Link/i }))
 
     await waitFor(() => {
@@ -228,6 +231,7 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
     fireEvent.click(screen.getByText(/Linked target/i))
 
     await pickSelectOption(/Upstream project/i, /English Source/i)
+    fireEvent.click(screen.getByRole("radio", { name: /^Its Source/i }))
     fireEvent.click(screen.getByRole("button", { name: /Create & Link/i }))
 
     await waitFor(() => {
@@ -256,5 +260,24 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
     await waitFor(() => {
       expect(screen.getByText(/choose an upstream project/i)).toBeInTheDocument()
     })
+  })
+
+  it("shows validation when corpus choice is missing for linked-target", async () => {
+    render(<ProjectCreateDialog onCreated={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+    fireEvent.change(screen.getByPlaceholderText("My Translation Project"), { target: { value: "X" } })
+    fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), { target: { value: "English" } })
+    fireEvent.change(screen.getByPlaceholderText(/French, conversational Swahili/i), { target: { value: "French" } })
+    fireEvent.click(screen.getByText("Advanced: project shape"))
+    fireEvent.click(screen.getByText(/Linked target/i))
+    await pickSelectOption(/Upstream project/i, /English Source/i)
+
+    fireEvent.submit(document.getElementById("project-create-form")!)
+    await waitFor(() => {
+      expect(
+        screen.getByText(/Choose which corpus should become this project's source/i),
+      ).toBeInTheDocument()
+    })
+    expect(mockCreateCloudProject).not.toHaveBeenCalled()
   })
 })

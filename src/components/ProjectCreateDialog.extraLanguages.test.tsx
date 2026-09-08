@@ -123,11 +123,51 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     })
   })
 
-  it("relabels the field 'Target language(s)' on the default self-contained shape", () => {
+  it("relabels the field 'Target Language' on the default self-contained shape", () => {
     openDialogWithBasics()
-    expect(screen.getByText("Target language(s)")).toBeTruthy()
+    expect(screen.getByText("Target Language")).toBeTruthy()
     expect(targetLangInput()).toBeTruthy()
     expect(screen.getByTestId("create-target-lang-inputs")).toBeTruthy()
+  })
+
+  it("pluralizes target copy when a second language is entered and reverts when it is removed", () => {
+    openDialogWithBasics()
+    fireEvent.click(screen.getByText("Advanced: project shape"))
+
+    expect(screen.getByText("Target Language")).toBeTruthy()
+    expect(
+      screen.getByText(/owns both its source and its target\./),
+    ).toBeTruthy()
+    expect(
+      screen.getByTestId("create-shape-linked-target").closest("label")?.textContent,
+    ).toMatch(/Linked Target/)
+    expect(
+      screen.getByTestId("create-shape-linked-target").closest("label")?.textContent,
+    ).not.toMatch(/Linked Targets/)
+
+    addExtraLanguage("es")
+
+    expect(screen.getByText("Target Languages")).toBeTruthy()
+    expect(screen.queryByText("Target Language")).toBeNull()
+    expect(
+      screen.getByText(/owns both its source and its targets\./),
+    ).toBeTruthy()
+    expect(
+      screen.getByTestId("create-shape-linked-target").closest("label")?.textContent,
+    ).toMatch(/Linked Targets/)
+
+    fireEvent.click(screen.getByTestId("create-target-lang-remove-1"))
+
+    expect(screen.getByText("Target Language")).toBeTruthy()
+    expect(
+      screen.getByText(/owns both its source and its target\./),
+    ).toBeTruthy()
+    expect(
+      screen.getByTestId("create-shape-linked-target").closest("label")?.textContent,
+    ).toMatch(/Linked Target/)
+    expect(
+      screen.getByTestId("create-shape-linked-target").closest("label")?.textContent,
+    ).not.toMatch(/Linked Targets/)
   })
 
   it("appends one box per language via the plus button", () => {
@@ -306,7 +346,7 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     // A linked target is the Biblica case — one upstream source, several
     // languages — so it needs lanes at creation just as much as a
     // self-contained project does.
-    expect(screen.getByText("Target language(s)")).toBeTruthy()
+    expect(screen.getByText("Target Language")).toBeTruthy()
     expect(screen.getByTestId("create-extra-lang-input")).toBeTruthy()
     expect(screen.getByTestId("create-add-target-lang")).toBeTruthy()
   })
@@ -319,20 +359,24 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     const selfContained = () => screen.getByTestId("create-shape-self-contained")
     const linkedTarget = () => screen.getByTestId("create-shape-linked-target")
 
-    // Self Contained is the default.
+    // Self Contained is the default — clone intro + optional upstream are shown.
     expect(selfContained().getAttribute("data-checked")).toBe("")
-    expect(screen.queryByText("Upstream project")).toBeNull()
+    expect(screen.getByText(/import a/i)).toBeTruthy()
+    expect(screen.getByText("Upstream project")).toBeTruthy()
+    // Corpus choice stays hidden until an upstream is picked on self-contained.
+    expect(screen.queryByText(/Which corpus should become/i)).toBeNull()
 
     fireEvent.click(screen.getByText(/Linked Target/i))
     expect(linkedTarget().getAttribute("data-checked")).toBe("")
+    expect(screen.getByText(/creating a/i)).toBeTruthy()
     expect(screen.getByText("Upstream project")).toBeTruthy()
+    expect(screen.getByText(/Which corpus should become/i)).toBeTruthy()
     expect(screen.getByTestId("create-extra-lang-input")).toBeTruthy()
 
-    // Picking Self Contained again must clear the linked-target panel rather
-    // than stranding the form in a shape that still demands an upstream.
     fireEvent.click(screen.getByText(/Self Contained/i))
     expect(selfContained().getAttribute("data-checked")).toBe("")
-    expect(screen.queryByText("Upstream project")).toBeNull()
+    expect(screen.getByText(/import a/i)).toBeTruthy()
+    expect(screen.getByText("Upstream project")).toBeTruthy()
     expect(screen.getByTestId("create-extra-lang-input")).toBeTruthy()
   })
 })

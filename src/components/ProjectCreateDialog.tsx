@@ -115,11 +115,25 @@ const MAX_TARGET_LANES = 50
 const EXTRA_LANGUAGES_WARNING =
   "Project created; adding extra languages failed — add them in Settings → Languages."
 
-/** AQU-478: clone vs live — "a checkbox, not a fork" per the design spec §9.2. */
+/** How many filled target-language boxes govern create-dialog copy inflection.
+ *  Empty extra boxes don't count; an unused form still reads as singular. */
+function filledTargetLaneCount(
+  targetLanguage: string,
+  extraLanguages: readonly string[],
+): number {
+  const extras = extraLanguages.filter((tag) => tag.trim().length > 0).length
+  const primary = targetLanguage.trim() ? 1 : 0
+  return Math.max(primary + extras, 1)
+}
+
+/** AQU-478: clone vs live — implied by shape (self-contained → clone when
+ *  an upstream is chosen; linked-target → live). Kept as a type for the
+ *  linkProjectSource call rather than a user-facing radio. */
 type LinkMode = "clone" | "live"
 /** Which upstream lane becomes this project's source: sibling-language case
- *  ("use its source") vs chain case ("use its translations"). */
-type LinkConsumes = "source" | "target"
+ *  ("Its Source") vs chain case ("One of its Targets"). Empty until the user
+ *  picks — never prefilled. */
+type LinkConsumes = "source" | "target" | ""
 
 const projectSchema = z
   .object({
@@ -131,8 +145,7 @@ const projectSchema = z
     extraLanguages: z.array(z.string()),
     shape: z.enum(["self-contained", "linked-target"]),
     upstreamProjectId: optionalString,
-    linkMode: z.enum(["clone", "live"]),
-    linkConsumes: z.enum(["source", "target"]),
+    linkConsumes: z.union([z.enum(["source", "target"]), z.literal("")]),
   })
   .superRefine((data, ctx) => {
     if (!data.targetLanguage.trim()) {
@@ -142,11 +155,23 @@ const projectSchema = z
         path: ["targetLanguage"],
       })
     }
-    if (data.shape === "linked-target" && !data.upstreamProjectId) {
+    const upstream = data.upstreamProjectId.trim()
+    if (data.shape === "linked-target" && !upstream) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "Choose an upstream project",
         path: ["upstreamProjectId"],
+      })
+    }
+    // Corpus choice is required whenever linking is active: always for
+    // linked-target, and for self-contained only once an upstream is picked
+    // (empty upstream = plain self-contained create).
+    const linking = data.shape === "linked-target" || !!upstream
+    if (linking && data.linkConsumes !== "source" && data.linkConsumes !== "target") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Choose which corpus should become this project's source",
+        path: ["linkConsumes"],
       })
     }
   })
@@ -183,8 +208,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
       extraLanguages: [] as string[],
       shape: "self-contained" as ProjectShape,
       upstreamProjectId: "",
-      linkMode: "live" as LinkMode,
-      linkConsumes: "source" as LinkConsumes,
+      linkConsumes: "" as LinkConsumes,
     },
     validators: { onSubmit: projectSchema },
     onSubmit: async ({ value }) => {
@@ -209,6 +233,12 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
 
       let extraLanguagesFailed = false
       const extrasToApply = value.extraLanguages
+      const upstreamId = value.upstreamProjectId.trim()
+      // Self-contained + upstream → one-time clone; linked-target → live.
+      // No upstream on self-contained → plain create, no link call.
+      const willLink = !!upstreamId
+      const linkMode: LinkMode = value.shape === "linked-target" ? "live" : "clone"
+      const linkConsumes = value.linkConsumes === "target" ? "target" : "source"
 
       try {
         await createCloudProject(jwt, { id: project.id, name: project.name, orgId })
@@ -221,13 +251,13 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
           console.warn("[project-create] settings write failed (non-fatal):", err)
         }
 
-        if (value.shape === "linked-target" && value.upstreamProjectId) {
+        if (willLink) {
           const linkResult = await linkProjectSource(jwt, project.id, {
-            sourceProjectId: value.upstreamProjectId,
-            mode: value.linkMode,
-            consumes: value.linkConsumes,
+            sourceProjectId: upstreamId,
+            mode: linkMode,
+            consumes: linkConsumes,
           })
-          if (linkResult.seeded === false && value.linkMode === "live") {
+          if (linkResult.seeded === false && linkMode === "live") {
             await triggerLinkSync(jwt, project.id)
           }
         }
@@ -264,6 +294,9 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
         source_language: project.sourceLanguage,
         target_language: project.targetLanguage,
         extra_target_languages: extrasToApply.length,
+        ...(willLink
+          ? { link_mode: linkMode, link_consumes: linkConsumes, upstream_project_id: upstreamId }
+          : {}),
       })
       onCreated(project)
       form.reset()
@@ -296,6 +329,9 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
 
   function pickShape(next: ProjectShape) {
     form.setFieldValue("shape", next)
+    // Shape change clears the corpus answer so a leftover pick from the other
+    // shape can't silently satisfy the new path's required choice.
+    form.setFieldValue("linkConsumes", "")
   }
 
   return (
@@ -389,9 +425,22 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                   return (
                     <Field data-invalid={invalid}>
                       <div className="flex items-center gap-1.5">
-                        <FieldLabel htmlFor="project-create-target">
-                          {t("projectSettings.create.targetLanguagesLabel")}
-                        </FieldLabel>
+                        <form.Subscribe
+                          selector={(state) =>
+                            filledTargetLaneCount(
+                              state.values.targetLanguage,
+                              state.values.extraLanguages,
+                            )
+                          }
+                        >
+                          {(targetLaneCount) => (
+                            <FieldLabel htmlFor="project-create-target">
+                              {targetLaneCount === 1
+                                ? t("projectSettings.info.targetLanguageLabel")
+                                : t("projectSettings.create.targetLanguagesLabel")}
+                            </FieldLabel>
+                          )}
+                        </form.Subscribe>
                         <LanguageFieldHint />
                       </div>
                       <form.Field
@@ -422,46 +471,95 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
               <form.Field
                 name="shape"
                 children={(field) => (
-                  <RadioGroup
-                    value={field.state.value}
-                    onValueChange={(value) => pickShape(value as ProjectShape)}
-                    className="gap-3 pt-1"
+                  <form.Subscribe
+                    selector={(state) =>
+                      filledTargetLaneCount(
+                        state.values.targetLanguage,
+                        state.values.extraLanguages,
+                      )
+                    }
                   >
-                    <label className="flex items-start gap-2.5 text-sm">
-                      <RadioGroupItem
-                        value="self-contained"
-                        className="mt-0.5"
-                        data-testid="create-shape-self-contained"
-                      />
-                      <span>
-                        <RichMessage
-                          k="projectSettings.create.shapeSelfContained"
-                          values={{ name: <strong>{t("projectSettings.create.shapeSelfContainedName")}</strong> }}
-                        />
-                      </span>
-                    </label>
-                    <label className="flex items-start gap-2.5 text-sm">
-                      <RadioGroupItem
-                        value="linked-target"
-                        className="mt-0.5"
-                        data-testid="create-shape-linked-target"
-                      />
-                      <span>
-                        <RichMessage
-                          k="projectSettings.create.shapeLinkedTarget"
-                          values={{ name: <strong>{t("projectSettings.create.shapeLinkedTargetName")}</strong> }}
-                        />
-                      </span>
-                    </label>
-                  </RadioGroup>
+                    {(targetLaneCount) => (
+                      <RadioGroup
+                        value={field.state.value}
+                        onValueChange={(value) => pickShape(value as ProjectShape)}
+                        className="gap-3 pt-1"
+                      >
+                        <label className="flex items-start gap-2.5 text-sm">
+                          <RadioGroupItem
+                            value="self-contained"
+                            className="mt-0.5"
+                            data-testid="create-shape-self-contained"
+                          />
+                          <span>
+                            <RichMessage
+                              k="projectSettings.create.shapeSelfContained"
+                              count={targetLaneCount}
+                              values={{ name: <strong>{t("projectSettings.create.shapeSelfContainedName")}</strong> }}
+                            />
+                          </span>
+                        </label>
+                        <label className="flex items-start gap-2.5 text-sm">
+                          <RadioGroupItem
+                            value="linked-target"
+                            className="mt-0.5"
+                            data-testid="create-shape-linked-target"
+                          />
+                          <span>
+                            <RichMessage
+                              k="projectSettings.create.shapeLinkedTarget"
+                              count={targetLaneCount}
+                              values={{
+                                name: (
+                                  <strong>
+                                    {t("projectSettings.create.shapeLinkedTargetName", {
+                                      count: targetLaneCount,
+                                    })}
+                                  </strong>
+                                ),
+                              }}
+                            />
+                          </span>
+                        </label>
+                      </RadioGroup>
+                    )}
+                  </form.Subscribe>
                 )}
               />
 
               <form.Subscribe
-                selector={(state) => state.values.shape}
-                children={(shape) =>
-                  shape === "linked-target" ? (
+                selector={(state) =>
+                  [state.values.shape, state.values.upstreamProjectId] as const
+                }
+                children={([shape, upstreamProjectId]) => {
+                  const showCorpusChoice =
+                    shape === "linked-target" || !!upstreamProjectId.trim()
+                  // Add-as-lane only for the live linked-target sibling case —
+                  // a self-contained clone of "Its Source" is a real project,
+                  // not a lane recommendation.
+                  const showAddAsLane =
+                    shape === "linked-target" && !!upstreamProjectId.trim()
+
+                  return (
                     <div className="mt-3 flex flex-col gap-3 border-t pt-3">
+                      <p className="text-sm text-muted-foreground">
+                        {shape === "linked-target" ? (
+                          <RichMessage
+                            k="projectSettings.create.liveIntro"
+                            values={{
+                              mode: <strong>live</strong>,
+                            }}
+                          />
+                        ) : (
+                          <RichMessage
+                            k="projectSettings.create.cloneIntro"
+                            values={{
+                              mode: <strong>Cloned</strong>,
+                            }}
+                          />
+                        )}
+                      </p>
+
                       <form.Field
                         name="upstreamProjectId"
                         children={(field) => {
@@ -479,7 +577,13 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                                   label: p.name,
                                 }))}
                                 value={field.state.value || null}
-                                onValueChange={(value) => field.handleChange(value ?? "")}
+                                onValueChange={(value) => {
+                                  field.handleChange(value ?? "")
+                                  // Clearing the upstream on self-contained
+                                  // drops the corpus question; reset its answer
+                                  // so a stale pick can't satisfy a later link.
+                                  if (!value) form.setFieldValue("linkConsumes", "")
+                                }}
                               >
                                 <SelectTrigger id="upstream-project" aria-invalid={invalid}>
                                   <SelectValue placeholder={t("projectSettings.create.upstreamProjectPlaceholder")} />
@@ -500,100 +604,98 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                         }}
                       />
 
-                      <form.Field
-                        name="linkMode"
-                        children={(field) => (
-                          <Field>
-                            <FieldLabel>{t("projectSettings.create.linkModeLabel")}</FieldLabel>
-                            <RadioGroup
-                              value={field.state.value}
-                              onValueChange={(value) => field.handleChange(value as LinkMode)}
-                              className="gap-2"
-                            >
-                              <label className="flex items-start gap-2.5 text-sm">
-                                <RadioGroupItem value="live" className="mt-0.5" />
-                                <span>
-                                  <RichMessage
-                                    k="projectSettings.create.linkModeLive"
-                                    values={{ name: <strong>{t("projectSettings.sourceLink.modeLive")}</strong> }}
-                                  />
-                                </span>
-                              </label>
-                              <label className="flex items-start gap-2.5 text-sm">
-                                <RadioGroupItem value="clone" className="mt-0.5" />
-                                <span>
-                                  <RichMessage
-                                    k="projectSettings.create.linkModeClone"
-                                    values={{ name: <strong>{t("projectSettings.sourceLink.modeClone")}</strong> }}
-                                  />
-                                </span>
-                              </label>
-                            </RadioGroup>
-                          </Field>
-                        )}
-                      />
+                      {showCorpusChoice ? (
+                        <form.Field
+                          name="linkConsumes"
+                          children={(field) => {
+                            const invalid = isFieldInvalid(field)
+                            return (
+                              <Field data-invalid={invalid}>
+                                <FieldLabel>{t("projectSettings.create.linkConsumesLabel")}</FieldLabel>
+                                <form.Subscribe
+                                  selector={(state) =>
+                                    filledTargetLaneCount(
+                                      state.values.targetLanguage,
+                                      state.values.extraLanguages,
+                                    )
+                                  }
+                                >
+                                  {(targetLaneCount) => (
+                                    <RadioGroup
+                                      // null = nothing selected (never prefill).
+                                      value={field.state.value || null}
+                                      onValueChange={(value) =>
+                                        field.handleChange((value ?? "") as LinkConsumes)
+                                      }
+                                      className="gap-2"
+                                    >
+                                      <label className="flex items-start gap-2.5 text-sm">
+                                        <RadioGroupItem value="source" className="mt-0.5" />
+                                        <span>
+                                          <RichMessage
+                                            k="projectSettings.create.linkConsumesSource"
+                                            count={targetLaneCount}
+                                            values={{
+                                              name: (
+                                                <strong>
+                                                  {t("projectSettings.create.linkConsumesSourceName")}
+                                                </strong>
+                                              ),
+                                            }}
+                                          />
+                                        </span>
+                                      </label>
+                                      <label className="flex items-start gap-2.5 text-sm">
+                                        <RadioGroupItem value="target" className="mt-0.5" />
+                                        <span>
+                                          <RichMessage
+                                            k="projectSettings.create.linkConsumesTarget"
+                                            values={{
+                                              name: (
+                                                <strong>
+                                                  {t("projectSettings.create.linkConsumesTargetName")}
+                                                </strong>
+                                              ),
+                                            }}
+                                          />
+                                        </span>
+                                      </label>
+                                    </RadioGroup>
+                                  )}
+                                </form.Subscribe>
+                                {invalid && <FieldError errors={field.state.meta.errors} />}
+                              </Field>
+                            )
+                          }}
+                        />
+                      ) : null}
 
-                      <form.Field
-                        name="linkConsumes"
-                        children={(field) => (
-                          <Field>
-                            <FieldLabel>{t("projectSettings.create.linkConsumesLabel")}</FieldLabel>
-                            <RadioGroup
-                              value={field.state.value}
-                              onValueChange={(value) => field.handleChange(value as LinkConsumes)}
-                              className="gap-2"
-                            >
-                              <label className="flex items-start gap-2.5 text-sm">
-                                <RadioGroupItem value="source" className="mt-0.5" />
-                                <span>
-                                  <RichMessage
-                                    k="projectSettings.create.linkConsumesSource"
-                                    values={{ name: <strong>{t("projectSettings.create.linkConsumesSourceName")}</strong> }}
-                                  />
-                                </span>
-                              </label>
-                              <label className="flex items-start gap-2.5 text-sm">
-                                <RadioGroupItem value="target" className="mt-0.5" />
-                                <span>
-                                  <RichMessage
-                                    k="projectSettings.create.linkConsumesTarget"
-                                    values={{ name: <strong>{t("projectSettings.create.linkConsumesTargetName")}</strong> }}
-                                  />
-                                </span>
-                              </label>
-                            </RadioGroup>
-                          </Field>
-                        )}
-                      />
-
-                      <form.Subscribe
-                        selector={(state) =>
-                          [
-                            state.values.linkConsumes,
-                            state.values.upstreamProjectId,
-                            state.values.targetLanguage,
-                          ] as const
-                        }
-                        children={([consumes, upstreamProjectId, targetLanguage]) =>
-                          consumes === "source" && upstreamProjectId ? (
-                            <AddAsLaneRecommendation
-                              jwt={session?.jwt}
-                              upstreamProject={
-                                upstreamOptions.find((p) => p.id === upstreamProjectId) ?? null
-                              }
-                              targetLanguage={targetLanguage}
-                              onAdded={() => {
-                                form.reset()
-                                clearSubmitError()
-                                setOpen(false)
-                              }}
-                            />
-                          ) : null
-                        }
-                      />
+                      {showAddAsLane ? (
+                        <form.Subscribe
+                          selector={(state) =>
+                            [state.values.linkConsumes, state.values.targetLanguage] as const
+                          }
+                          children={([consumes, targetLanguage]) =>
+                            consumes === "source" ? (
+                              <AddAsLaneRecommendation
+                                jwt={session?.jwt}
+                                upstreamProject={
+                                  upstreamOptions.find((p) => p.id === upstreamProjectId) ?? null
+                                }
+                                targetLanguage={targetLanguage}
+                                onAdded={() => {
+                                  form.reset()
+                                  clearSubmitError()
+                                  setOpen(false)
+                                }}
+                              />
+                            ) : null
+                          }
+                        />
+                      ) : null}
                     </div>
-                  ) : null
-                }
+                  )
+                }}
               />
             </details>
 
@@ -613,24 +715,35 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
           </DialogBody>
 
           <form.Subscribe
-            // Track isSubmitting alongside shape: subscribing to shape alone
-            // left the button reading a stale isSubmitting, so it never
-            // disabled or showed the spinner during a slow create and each
-            // extra click created another project (AQU-711).
-            selector={(state) => [state.values.shape, state.isSubmitting] as const}
-            children={([shape, isSubmitting]) => (
-              <Button
-                type="submit"
-                form="project-create-form"
-                disabled={isSubmitting}
-                className="h-9 w-full shrink-0"
-              >
-                {isSubmitting && <Spinner data-icon="inline-start" />}
-                {isSubmitting
-                  ? (shape === "linked-target" ? "Creating & linking…" : "Creating…")
-                  : (shape === "linked-target" ? "Create & Link" : "Create Project")}
-              </Button>
-            )}
+            // Track isSubmitting alongside whether this create will link:
+            // subscribing to shape alone left the button reading a stale
+            // isSubmitting, so it never disabled or showed the spinner during
+            // a slow create and each extra click created another project
+            // (AQU-711).
+            selector={(state) =>
+              [
+                state.values.shape,
+                state.values.upstreamProjectId,
+                state.isSubmitting,
+              ] as const
+            }
+            children={([shape, upstreamProjectId, isSubmitting]) => {
+              const willLink =
+                shape === "linked-target" || !!upstreamProjectId.trim()
+              return (
+                <Button
+                  type="submit"
+                  form="project-create-form"
+                  disabled={isSubmitting}
+                  className="h-9 w-full shrink-0"
+                >
+                  {isSubmitting && <Spinner data-icon="inline-start" />}
+                  {isSubmitting
+                    ? (willLink ? "Creating & linking…" : "Creating…")
+                    : (willLink ? "Create & Link" : "Create Project")}
+                </Button>
+              )
+            }}
           />
         </form>
       </DialogContent>
@@ -787,17 +900,19 @@ function AddAsLaneRecommendation({
           }}
         />
       </p>
-      <Button
-        type="button"
-        variant="secondary"
-        className="mt-2.5"
-        data-testid="add-as-lane-btn"
-        disabled={!canAttempt || status === "loading"}
-        onClick={() => void handleAddAsLane()}
-      >
-        {status === "loading" && <Spinner data-icon="inline-start" />}
-        {status === "loading" ? "Adding lane…" : `Add as lane on ${upstreamProject.name}`}
-      </Button>
+      <div className="mt-2.5 flex justify-center">
+        <Button
+          type="button"
+          variant="default"
+          className="font-bold"
+          data-testid="add-as-lane-btn"
+          disabled={!canAttempt || status === "loading"}
+          onClick={() => void handleAddAsLane()}
+        >
+          {status === "loading" && <Spinner data-icon="inline-start" />}
+          {status === "loading" ? "Adding lane…" : `Add as lane on ${upstreamProject.name}`}
+        </Button>
+      </div>
       {message && status === "error" && (
         <FieldError className="mt-2 text-xs">{message}</FieldError>
       )}

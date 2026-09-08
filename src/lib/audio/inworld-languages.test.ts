@@ -8,6 +8,7 @@ import {
   languageForVoiceDescription,
   needsInworldLanguagePicker,
   toInworldLanguage,
+  toInworldLanguageLoose,
 } from "./inworld-languages"
 
 describe("toInworldLanguage", () => {
@@ -34,6 +35,34 @@ describe("toInworldLanguage", () => {
     expect(toInworldLanguage("auto")).toBeUndefined()
     expect(toInworldLanguage("")).toBeUndefined()
     expect(toInworldLanguage(undefined)).toBeUndefined()
+  })
+})
+
+describe("toInworldLanguageLoose", () => {
+  it("canonicalizes ISO-639-3 and bare primary tags onto listed Inworld codes", () => {
+    expect(toInworldLanguageLoose("eng")).toBe("en-US")
+    expect(toInworldLanguageLoose("en")).toBe("en-US")
+    expect(toInworldLanguageLoose("spa")).toBe("es-ES")
+    expect(toInworldLanguageLoose("fra")).toBe("fr-FR")
+    expect(toInworldLanguageLoose("fr")).toBe("fr-FR")
+  })
+
+  it("keeps an already-regional Inworld tag", () => {
+    expect(toInworldLanguageLoose("en-GB")).toBe("en-GB")
+    expect(toInworldLanguageLoose("pt-BR")).toBe("pt-BR")
+  })
+
+  it("maps catalog display names", () => {
+    expect(toInworldLanguageLoose("French")).toBe("fr-FR")
+    expect(toInworldLanguageLoose("spanish")).toBe("es-ES")
+  })
+
+  it("leaves unmapped labels alone", () => {
+    expect(toInworldLanguageLoose("Grade 7 English")).toBeUndefined()
+    expect(toInworldLanguageLoose("Tok Pisin")).toBeUndefined()
+    expect(toInworldLanguageLoose("auto")).toBeUndefined()
+    expect(toInworldLanguageLoose("")).toBeUndefined()
+    expect(toInworldLanguageLoose(undefined)).toBeUndefined()
   })
 })
 

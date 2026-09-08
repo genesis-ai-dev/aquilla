@@ -76,6 +76,51 @@ export function toInworldLanguage(value: string | undefined): string | undefined
   return undefined
 }
 
+/**
+ * Prefer a stock Inworld tag (`en-US`, `fr-FR`) when the mapped code is only
+ * a primary language (`en`, `fr`). Exact listed tags (`en-GB`) stay as-is.
+ */
+export function preferListedInworldLanguage(code: string): string {
+  const mapped = toInworldLanguage(code) ?? code.trim()
+  if (!mapped) return code
+  const listedExact = INWORLD_LANGUAGE_CODES.find((c) => c.toLowerCase() === mapped.toLowerCase())
+  if (listedExact) return listedExact
+  const primary = mapped.split("-")[0]?.toLowerCase()
+  if (!primary) return mapped
+  const fromIso = Object.values(ISO_639_3_TO_BCP47).find((c) => {
+    const lower = c.toLowerCase()
+    return lower === primary || lower.startsWith(`${primary}-`)
+  })
+  if (fromIso) {
+    const listedIso = INWORLD_LANGUAGE_CODES.find((c) => c.toLowerCase() === fromIso.toLowerCase())
+    if (listedIso) return listedIso
+  }
+  const listedFamily = INWORLD_LANGUAGE_CODES.find((c) => {
+    const lower = c.toLowerCase()
+    return lower === primary || lower.startsWith(`${primary}-`)
+  })
+  return listedFamily ?? mapped
+}
+
+/**
+ * Persist-time mapping for OmniVoice → Inworld: ISO-639-3, BCP-47, 2-letter
+ * codes, and catalog display names (`French` → `fr-FR`). Unmapped labels
+ * (`Grade 7 English`) return undefined so the caller can keep the original.
+ */
+export function toInworldLanguageLoose(value: string | undefined): string | undefined {
+  const direct = toInworldLanguage(value)
+  if (direct) return preferListedInworldLanguage(direct)
+  const trimmed = value?.trim()
+  if (!trimmed) return undefined
+  const folded = foldLanguageLabel(trimmed)
+  const catalog = LANGUAGES.find(
+    (entry) => foldLanguageLabel(entry.name) === folded || foldLanguageLabel(entry.code) === folded,
+  )
+  if (!catalog) return undefined
+  const mapped = toInworldLanguage(catalog.code)
+  return mapped ? preferListedInworldLanguage(mapped) : undefined
+}
+
 export function needsInworldLanguagePicker(lanes: readonly string[]): boolean {
   const nonempty = lanes.map((lane) => lane.trim()).filter(Boolean)
   if (nonempty.length === 0) return false

@@ -126,5 +126,9 @@ BCP-47 tag. The chosen code is stored on the voice and sent with catalog fetch
 and synthesize, alongside any lanes that already mapped. Lanes that are all
 ISO/BCP-47 codes skip the dropdown.
 
-Legacy project voices with `provider: "omnivoice"` are remapped to Inworld at
-runtime (same hosted path, same clone-from-reference flow).
+Legacy project voices with `provider: "omnivoice"` are rewritten to Inworld
+the first time a project is opened (`useProjectTts`): the stored provider
+becomes `inworld`, OmniVoice language tags (`eng`, `French`, `en`) become
+Inworld BCP-47 (`en-US`, `fr-FR`), and empty catalog names become Dennis.
+Runtime still remaps unread copies so generate never hits Modal (same hosted
+path, same clone-from-reference flow).

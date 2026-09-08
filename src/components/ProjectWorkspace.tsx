@@ -1702,6 +1702,7 @@ export function ProjectWorkspace() {
     project?.ttsSettings,
     cellSummaries,
     (profiles) => { void patchSettings({ ttsSettings: profiles }) },
+    project?.targetLanguage,
   )
   const audioProject = useMemo(
     () => (project ? { ...project, ttsSettings: tts.settings } : null),

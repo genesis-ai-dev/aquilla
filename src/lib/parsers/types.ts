@@ -222,7 +222,11 @@ export const AUDIO_MEDIA_STRATEGY_LABELS: Record<AudioMediaStrategy, { nameKey: 
   },
 }
 
-/** `"omnivoice"` is a persisted legacy id — runtime remaps it to `"inworld"` (AQU-1189). */
+/**
+ * `"omnivoice"` is a persisted legacy id. Opening a project rewrites it to
+ * `"inworld"` (language tags included); runtime still remaps unread copies
+ * so generate never hits Modal (AQU-1189).
+ */
 export type TtsProvider = "inworld" | "omnivoice" | "gemini" | "kokoro" | "mms"
 
 /**
@@ -300,7 +304,7 @@ export interface Voice {
 }
 
 export interface ProjectTtsSettings {
-  /** "inworld" (hosted Inworld TTS 2, no user key) is the default. "gemini" is BYOK; "kokoro"/"mms" run locally. Legacy `"omnivoice"` remaps to inworld. */
+  /** "inworld" (hosted Inworld TTS 2, no user key) is the default. "gemini" is BYOK; "kokoro"/"mms" run locally. Legacy `"omnivoice"` is rewritten to inworld on load and remapped at runtime. */
   provider?: TtsProvider
   /** Gemini API key for BYOK TTS. Stored in the local project record. */
   apiKey?: string

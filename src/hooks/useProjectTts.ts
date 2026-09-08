@@ -14,6 +14,7 @@ import { loadProjectTts, saveProjectTts } from "@/lib/store/project-tts-store"
 import {
   assignedCastVoiceId, getVoiceLibrary, resolveVoice,
 } from "@/lib/audio/voices"
+import { migrateOmnivoiceTtsSettings } from "@/lib/audio/omnivoice-migrate"
 import type { CastMemberStats } from "@/components/VoiceLibraryPanel"
 import type { CellSummary } from "@/hooks/useActiveCellStore"
 import type { ProjectTtsSettings, Voice } from "@/lib/parsers/types"
@@ -40,6 +41,8 @@ export function useProjectTts(
    *  sync across devices. Fire-and-forget; localStorage stays the durable
    *  client-owned source. */
   onSyncTts?: (tts: Omit<ProjectTtsSettings, "apiKey">) => void,
+  /** Project target-language lane — fills OmniVoice voices that stored no tag. */
+  targetLanguage?: string,
 ): ProjectTtsApi {
   // Read durable settings synchronously from localStorage on first render (lazy
   // init), so a reload sees the saved voice library immediately. Falls back to
@@ -50,18 +53,25 @@ export function useProjectTts(
 
   // Re-read when the project changes (lazy init only runs for the first one).
   const loadedForRef = useRef<string | null | undefined>(projectId)
+  const migratedForRef = useRef<string | null>(null)
   useEffect(() => {
     if (loadedForRef.current === projectId) return
     loadedForRef.current = projectId
+    migratedForRef.current = null
     setLocalTts(projectId ? loadProjectTts(projectId) : undefined)
   }, [projectId])
 
-  const settings = localTts ?? serverSettings
+  const rawSettings = localTts ?? serverSettings
+  const settings = useMemo(
+    () => migrateOmnivoiceTtsSettings(rawSettings, { targetLanguage }),
+    [rawSettings, targetLanguage],
+  )
 
   const saveTts = useCallback(
     async (overrides: Partial<ProjectTtsSettings>) => {
       if (!projectId) return
-      const next = { ...(localTts ?? serverSettings ?? {}), ...overrides } as ProjectTtsSettings
+      const merged = { ...(localTts ?? serverSettings ?? {}), ...overrides } as ProjectTtsSettings
+      const next = migrateOmnivoiceTtsSettings(merged, { targetLanguage }) ?? merged
       setLocalTts(next)
       // Source of truth: durable, client-owned, survives reload + pulls.
       saveProjectTts(projectId, next)
@@ -76,8 +86,21 @@ export function useProjectTts(
         onSyncTts(profiles)
       }
     },
-    [projectId, localTts, serverSettings, onSyncTts],
+    [projectId, localTts, serverSettings, onSyncTts, targetLanguage],
   )
+
+  // AQU-1189: persist OmniVoice → Inworld once per project open so stored JSON
+  // matches the runtime remap (including language tags). Runtime remap still
+  // covers a blocked/offline save.
+  useEffect(() => {
+    if (!projectId || !settings) return
+    const rawNeedsWrite = migrateOmnivoiceTtsSettings(rawSettings, { targetLanguage }) !== rawSettings
+    const serverNeedsWrite = migrateOmnivoiceTtsSettings(serverSettings, { targetLanguage }) !== serverSettings
+    if (!rawNeedsWrite && !serverNeedsWrite) return
+    if (migratedForRef.current === projectId) return
+    migratedForRef.current = projectId
+    void saveTts(settings)
+  }, [projectId, rawSettings, serverSettings, settings, targetLanguage, saveTts])
 
   const assignCells = useCallback(
     (cellIds: Iterable<string>, voiceId: string) => {

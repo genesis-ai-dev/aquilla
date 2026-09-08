@@ -52,7 +52,7 @@ services/migrate-daemon/
   main.ts            CLI: daemon | once [--only <gitlabId>] [--kind content|audio] [--dry-run]
                           | status | reconcile | seed-ledger [--only]
   config.ts          env + defaults (pacing, paths, concurrency)
-  db.ts              SQLite (better-sqlite3, WAL) at $MIGRATE_HOME/state.db; schema + migrations
+  db.ts              SQLite (better-sqlite3, WAL) at $MIGRATE_HOME/daemon.db; schema + migrations
   http.ts            retrying clients for sync-worker (/migrate/*) and GitLab
   pacer.ts           token bucket + adaptive chunk size + circuit breaker
   notify.ts          Discord digest + PostHog events
@@ -127,6 +127,13 @@ every project.
   manual `migrate-all.ts --apply` elsewhere).
 - Release gate: parity diff (event ids + payload hashes) between `migrate-all.ts` dry-run and
   the daemon's `once --dry-run` for all 419 clean projects must be empty.
+
+**Accepted semantic change.** `migrate-all.ts` ran the orphan pass (retract deleted cells,
+re-anchor moved ones) over every file on every sweep. The daemon skips a file whose bytes
+hash unchanged, so that file's orphan pass is skipped too and projection drift can persist
+between pushes. This is accepted: the weekly ledger reseed force-re-materializes every `ok`
+project, which runs the orphan pass on every file regardless of hash, so drift is reconciled
+within 7 days (and immediately with `once --only <id> --force`).
 
 ### Retries and failure handling
 

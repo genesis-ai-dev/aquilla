@@ -46,7 +46,7 @@ export class DaemonDb {
   constructor(file: string) {
     if (file !== ":memory:") fs.mkdirSync(path.dirname(file), { recursive: true })
     this.d = new DatabaseSync(file)
-    this.d.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;")
+    this.d.exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")
     this.d.exec(SCHEMA)
   }
   close(): void { this.d.close() }
@@ -85,9 +85,6 @@ export class DaemonDb {
     }
     const r = this.d.prepare(`INSERT INTO jobs (project_id, kind, sha, stage, created_at, updated_at) VALUES (?,?,?,'detected',?,?)`).run(projectId, kind, sha, now, now)
     return this.getJob(Number(r.lastInsertRowid))!
-  }
-  claim(stage: JobStage, now = Date.now()): JobRow | undefined {
-    return this.d.prepare(`SELECT * FROM jobs WHERE stage=? AND next_run_at<=? ORDER BY created_at ASC, id ASC LIMIT 1`).get(stage, now) as JobRow | undefined
   }
   advance(jobId: number, to: JobStage, patch: { plan_path?: string } = {}): void {
     if (patch.plan_path !== undefined) this.d.prepare(`UPDATE jobs SET stage=?, plan_path=?, error=NULL, updated_at=? WHERE id=?`).run(to, patch.plan_path, Date.now(), jobId)

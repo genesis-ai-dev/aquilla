@@ -32,14 +32,28 @@ byte-identical to `migrate-all.ts` for the same checkout — only the scheduling
 and memory shape differ (see `CONTENT_LOGIC_VERSION`, which must match on both
 sides). Advances to `planned`.
 
+**Accepted semantic change — unchanged files skip the orphan pass.** In steady
+state a file whose bytes hash the same as the recorded `files.content_hash` is
+skipped entirely, which means its orphan pass (retracting cells deleted
+upstream, re-anchoring moved ones) does not run. `migrate-all.ts` ran that pass
+on every file, every sweep. Projection drift is therefore possible between
+pushes — a cell prod holds that the checkout no longer has. It is reconciled
+within 7 days: the weekly ledger reseed force-re-materializes every `ok`
+project (`forceNext`), which runs the orphan pass on every file regardless of
+hash. `--force` does the same on demand for one project.
+
 **push** (`stages/push.ts`) — the daemon's single writer: one project, one paced
 chunk at a time via the `Pacer`. **Durability contract**: the local ledger is
 written *after* prod acks a chunk ("write-after-ack"), so a crash or a failing
 chunk leaves the ledger a strict prefix of what prod holds — never a superset —
 and a retry only re-plans the remainder; no event is silently skipped. After each
-push, prod's own event count is compared against the ledger's (count-verify); a
-mismatch throws away the local ledger mirror for that project and reseeds it from
-prod before retrying. If the **second** push attempt after a reseed still fails
+push, prod's own event count is compared against the ledger's (count-verify).
+Prod's count includes **human-authored** events that never came from a
+migration, so only a *deficit* is treated as drift: `remote < local` means prod
+is missing events the ledger claims landed, and the local mirror is thrown away
+and reseeded from prod before retrying. `remote >= local` verifies, and a
+surplus is logged as "non-migrate events" — expected in any project people have
+worked in. If the **second** push attempt after a reseed still fails
 verification, the job fails outright (into backoff) rather than looping forever —
 this is the "second unverified push fails into backoff" behavior: a mismatch that
 survives one full reseed-and-retry indicates something structural (concurrent
@@ -65,6 +79,14 @@ the box), or `tsx scripts/migrate-daemon/main.ts <command>` directly.
   `migrate-all.ts --apply`) unless `DRY_RUN=1`. This is what the systemd unit
   runs.
 
+  **`--dry-run` / `DRY_RUN=1` runs WITHOUT the R2 run lock.** It never writes to
+  prod, but it does fetch, materialize and read prod (event ids, counts,
+  projections) — so a dry run adds read-only load and can run concurrently with
+  a real writer. Conversely, at cutover the **Mac crontab entry that runs
+  `migrate-all --apply` every 15 minutes must be removed**: it contends for the
+  same lease and will start failing with `LockHeldError` once the daemon holds
+  it.
+
 - **`once [--only <gitlab-id>] [--dry-run] [--force]`** — drains every ready job
   once and exits. `--only` first registers/looks up a single GitLab project id
   before draining (used for the canary). `--force` forces re-materialization
@@ -88,6 +110,9 @@ the box), or `tsx scripts/migrate-daemon/main.ts <command>` directly.
   kv inbox_cursor: 2026-09-08T13:00:00.000Z
   kv reconcile_hwm: 2026-09-08T12:45:00.000Z
   kv last_full_reseed: 1757296800000
+  kv reseed_failed_ids: [913]
+  kv reseed_next_attempt: 1757300400000
+  clones: 452 checkout(s), 61.30 GB (not pruned for projects deleted in GitLab)
   ```
 
 - **`reconcile`** — runs a one-off full GitLab activity reconcile (same logic the
@@ -103,11 +128,16 @@ the box), or `tsx scripts/migrate-daemon/main.ts <command>` directly.
 
 Everything lives under `MIGRATE_HOME` (`~/aquilla-migrate` on the box):
 
-- `state.db` — SQLite: project/job state, the local event ledger, KV cursors
-  (`inbox_cursor`, `reconcile_hwm`, `last_full_reseed`).
+- `daemon.db` — SQLite: project/job state, the local event ledger, KV cursors
+  (`inbox_cursor`, `reconcile_hwm`, `last_full_reseed`, `reseed_next_attempt`,
+  `reseed_failed_ids`, and per-project `reseed_done:<gitlab-id>` markers).
 - `clones/<gitlab-id>/` — working-copy git checkouts, one per project.
 - `plans/<gitlab-id>/<sha>.ndjson` — materialized event plans, newest per
-  project used by the push stage and by the parity gate.
+  project used by the push stage and by the parity gate. Only the newest plan
+  per project is kept: materialize prunes older shas as it writes, and the
+  scheduler deletes the file once its job reaches `done`. A plan therefore only
+  survives on disk while its job is unfinished (a dry-run leaves it at
+  `planned`, so `--dry-run` runs do accumulate one plan per project).
 - `daemon.log` — stdout of the systemd unit (`StandardOutput=append:...`),
   rotated by `/etc/logrotate.d/aquilla-migrate` (weekly, 8 rotations,
   compressed, copytruncate so the daemon's open file handle stays valid).
@@ -145,7 +175,7 @@ Everything lives under `MIGRATE_HOME` (`~/aquilla-migrate` on the box):
   crash-looping the service.
 
 - **Read status**: `pnpm migrate:daemon status` (from `~/aquilla` on the box, or
-  point `MIGRATE_HOME` at a copy of `state.db` from elsewhere).
+  point `MIGRATE_HOME` at a copy of `daemon.db` from elsewhere).
 
 - **Re-seed a ledger**: `pnpm migrate:daemon seed-ledger --only <gitlab-id>`
   (single project) or without `--only` (every `ok` project) — use after a
@@ -154,6 +184,14 @@ Everything lives under `MIGRATE_HOME` (`~/aquilla-migrate` on the box):
 - **Force one project**: `pnpm migrate:daemon once --only <gitlab-id> [--force]`.
   Used for the canary and for manually pushing a project the daemon hasn't
   gotten to yet.
+
+- **Disk growth**: `status` reports the clones directory's checkout count and
+  total size. Clones are **never pruned automatically** — a project deleted or
+  renamed away in GitLab leaves its `clones/<gitlab-id>/` behind forever (a
+  follow-up; deleting it by hand is safe, the daemon re-clones on demand).
+  Clone flags are deliberately unchanged (no `--filter=blob:none`): LFS and
+  attachment behaviour must not shift under the migration. Plans, by contrast,
+  are pruned (see Files on disk).
 
 - **Tail logs**: `tail -f ~/aquilla-migrate/daemon.log` on the box, or
   `journalctl -u aquilla-migrate -f` for the unit's own lifecycle events
@@ -192,7 +230,7 @@ fresh ledger (see Task 12 / `scripts/migrate-daemon/parity.ts`):
 
 ```bash
 # 1. Old sweep script's dry-run event stream, per project, into <oldDir>
-tsx scripts/migrate-all.ts --apply=false --dump-plan <oldDir>
+tsx scripts/migrate-all.ts --dump-plan <oldDir>   # omit --apply for dry-run
 
 # 2. Daemon's materialized plans, against an EMPTY ledger so nothing is
 #    delta-filtered out on either side, with a frozen clock so both sides

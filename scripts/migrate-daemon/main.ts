@@ -2,6 +2,7 @@
 // holds the same R2 run lock `scripts/migrate-all.ts --apply` takes — the two
 // are mutually exclusive writers against the same prod project set.
 import os from "node:os"
+import fs from "node:fs"
 import path from "node:path"
 import process from "node:process"
 import { pathToFileURL } from "node:url"
@@ -211,8 +212,27 @@ function cmdStatus(config: DaemonConfig): void {
   })
   console.log(`pacer (fresh — live pacer state is per-process): ${JSON.stringify(pacer.snapshot())}`)
   console.log(`ledger rows: ${projects.reduce((n, p) => n + db.ledgerCount(p.gitlab_id), 0)}`)
-  for (const k of ["inbox_cursor", "reconcile_hwm", "last_full_reseed"]) console.log(`kv ${k}: ${db.kvGet(k) ?? "(unset)"}`)
+  for (const k of ["inbox_cursor", "reconcile_hwm", "last_full_reseed", "reseed_failed_ids", "reseed_next_attempt"]) {
+    console.log(`kv ${k}: ${db.kvGet(k) ?? "(unset)"}`)
+  }
+  const clones = dirUsage(path.join(config.home, "clones"))
+  console.log(`clones: ${clones.count} checkout(s), ${(clones.bytes / 1e9).toFixed(2)} GB (not pruned for projects deleted in GitLab)`)
   db.close()
+}
+
+/** Top-level checkout count plus recursive byte size of the clones root. */
+function dirUsage(dir: string): { count: number; bytes: number } {
+  if (!fs.existsSync(dir)) return { count: 0, bytes: 0 }
+  const walk = (d: string): number => {
+    let n = 0
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const full = path.join(d, e.name)
+      if (e.isDirectory()) n += walk(full)
+      else if (e.isFile()) { try { n += fs.statSync(full).size } catch { /* raced */ } }
+    }
+    return n
+  }
+  return { count: fs.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory()).length, bytes: walk(dir) }
 }
 
 async function cmdReconcile(config: DaemonConfig): Promise<void> {

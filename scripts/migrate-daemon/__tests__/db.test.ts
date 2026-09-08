@@ -15,15 +15,17 @@ describe("DaemonDb jobs", () => {
     expect(db.getJob(a.id)?.sha).toBe("sha2")
     expect(db.listJobs("detected")).toHaveLength(1)
   })
-  it("claim returns the oldest ready job at a stage and none when next_run_at is in the future", () => {
+  it("holds a failed job back by its backoff while siblings stay ready", () => {
+    // The scheduler picks ready jobs itself (listJobs + next_run_at filter);
+    // what the db owes it is a correct next_run_at.
     const db = new DaemonDb(":memory:")
     proj(db, 1); proj(db, 2)
-    db.enqueue(1, "content", "s"); db.enqueue(2, "content", "s")
-    const first = db.claim("detected")
-    expect(first?.project_id).toBe(1)
-    db.fail(first!.id, "boom", 1000)
-    expect(db.getJob(first!.id)?.next_run_at).toBe(1000 + JOB_BACKOFF_MS[0])
-    expect(db.claim("detected", 1000)?.project_id).toBe(2)
+    const first = db.enqueue(1, "content", "s")
+    db.enqueue(2, "content", "s")
+    db.fail(first.id, "boom", 1000)
+    expect(db.getJob(first.id)?.next_run_at).toBe(1000 + JOB_BACKOFF_MS[0])
+    const ready = db.listJobs("detected").filter((j) => j.next_run_at <= 1000)
+    expect(ready.map((j) => j.project_id)).toEqual([2])
   })
   it("fail escalates backoff and never drops the job", () => {
     const db = new DaemonDb(":memory:")

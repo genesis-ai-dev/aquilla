@@ -47,7 +47,9 @@ corepack prepare pnpm@10.19.0 --activate
 
 echo "==> Dependencies"
 cd "$REPO_DIR"
-pnpm install --frozen-lockfile
+# --ignore-scripts: onnxruntime-node's postinstall downloads a native binary and
+# fails on the box, and the daemon needs no native postinstall to run.
+pnpm install --frozen-lockfile --ignore-scripts
 
 echo "==> State directory"
 mkdir -p "$MIGRATE_HOME"

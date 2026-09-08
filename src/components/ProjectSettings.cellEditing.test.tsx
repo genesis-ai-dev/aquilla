@@ -8,6 +8,13 @@
 // never set it (the default is refusal, not a rank); a stored tier round-trips
 // into the control; changing it patches `cellEditingFloor` and nothing else;
 // and the retired checkbox is gone from the Timeline card.
+//
+// The tier list is the product's standard permission ladder (Matthew's review,
+// approved by Sam 2026-09-08), not the bespoke phrases it shipped with, so the
+// labels asserted here are the same words the Members panel uses. Two of the
+// rungs — Commenter and Reviewer — are only real because the static floor for
+// source.cell.create/delete/reorder dropped to COMMENTER underneath the tier
+// gate; see sync-worker/src/__tests__/authorize-cell-editing.test.ts.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { screen } from "@testing-library/react"
@@ -152,15 +159,21 @@ beforeEach(() => {
 describe("ProjectSettings — who can add and remove cells (AQU-1068)", () => {
   it("shows No one for a project that never set it — the default is refusal, not a rank", () => {
     renderSettings(PANE)
-    expect(screen.getByTestId("settings-cell-editing-floor")).toHaveTextContent("No one")
+    // "No one" is not a role, so it has no FLOOR_LABEL entry and the trigger
+    // falls back to the full row text — which is where the "default" note is.
+    expect(screen.getByTestId("settings-cell-editing-floor")).toHaveTextContent("No one — default")
   })
 
   it("reads back a stored tier", () => {
     currentProject = makeProject({ cellEditingFloor: "project_lead" } as Partial<ProjectRecord>)
     renderSettings(PANE)
-    expect(screen.getByTestId("settings-cell-editing-floor")).toHaveTextContent(
-      "Maintainers and project leads",
-    )
+    expect(screen.getByTestId("settings-cell-editing-floor")).toHaveTextContent("Project lead")
+  })
+
+  it("reads back a tier below contributor — the rungs the static floor drop made real", () => {
+    currentProject = makeProject({ cellEditingFloor: "commenter" } as Partial<ProjectRecord>)
+    renderSettings(PANE)
+    expect(screen.getByTestId("settings-cell-editing-floor")).toHaveTextContent("Commenter")
   })
 
   it("saves the chosen tier as cellEditingFloor, and touches nothing else", async () => {
@@ -168,7 +181,7 @@ describe("ProjectSettings — who can add and remove cells (AQU-1068)", () => {
     renderSettings(PANE)
 
     await user.click(screen.getByTestId("settings-cell-editing-floor"))
-    await user.click(await screen.findByRole("option", { name: "Maintainers" }))
+    await user.click(await screen.findByRole("option", { name: "Maintainer (600)" }))
     await user.click(screen.getByRole("button", { name: /save changes/i }))
 
     expect(patchSpy).toHaveBeenCalledTimes(1)
@@ -177,17 +190,47 @@ describe("ProjectSettings — who can add and remove cells (AQU-1068)", () => {
     expect(Object.keys(sent)).toEqual(["cellEditingFloor"])
   })
 
-  it("offers the four tiers in order, reset default first", async () => {
+  it("saves a below-contributor tier — the new rungs reach the wire, not just the list", async () => {
+    const user = userEvent.setup()
+    renderSettings(PANE)
+
+    await user.click(screen.getByTestId("settings-cell-editing-floor"))
+    await user.click(await screen.findByRole("option", { name: "Reviewer (300)" }))
+    await user.click(screen.getByRole("button", { name: /save changes/i }))
+
+    const sent = patchSpy.mock.calls[0][0] as Record<string, unknown>
+    expect(sent.cellEditingFloor).toBe("reviewer")
+  })
+
+  it("offers the six tiers in order, reset default first then up the ladder", async () => {
     const user = userEvent.setup()
     renderSettings(PANE)
     await user.click(screen.getByTestId("settings-cell-editing-floor"))
     const labels = (await screen.findAllByRole("option")).map((o) => o.textContent)
     expect(labels).toEqual([
-      "No one",
-      "Maintainers",
-      "Maintainers and project leads",
-      "Anyone who can edit",
+      "No one — default",
+      "Commenter (200)",
+      "Reviewer (300)",
+      "Contributor (400)",
+      "Project lead (500)",
+      "Maintainer (600)",
     ])
+  })
+
+  it("shows the short role word in the closed trigger, the ladder line in the open row", async () => {
+    // The two-tier labelling copied from RosterProgressSection: FLOOR_LABEL for
+    // the trigger, the message key for the row. Collapse the two and the
+    // trigger reads "Contributor (400)" in a 16rem box.
+    const user = userEvent.setup()
+    currentProject = makeProject({ cellEditingFloor: "contributor" } as Partial<ProjectRecord>)
+    renderSettings(PANE)
+
+    const trigger = screen.getByTestId("settings-cell-editing-floor")
+    expect(trigger).toHaveTextContent("Contributor")
+    expect(trigger.textContent).not.toContain("(400)")
+
+    await user.click(trigger)
+    expect(await screen.findByRole("option", { name: "Contributor (400)" })).toBeInTheDocument()
   })
 
   it("locks the control for a member below the settings floor", () => {

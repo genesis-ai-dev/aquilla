@@ -423,8 +423,15 @@ export interface ProjectRecord {
   setupChecklistDismissed?: boolean
   /** AQU-1068: who may add and remove cells here? Absent (and "none") means
    *  nobody, whatever their rank — see ProjectWideSettings.cellEditingFloor
-   *  for the full rationale, and `resolveCellEditingFloor` for the mapping. */
-  cellEditingFloor?: "none" | "maintainer" | "project_lead" | "contributor"
+   *  for the full rationale, and `resolveCellEditingFloor` for the mapping.
+   *
+   *  Structurally the same union as `CellEditingTier` in
+   *  `@/lib/sync/project-settings`, spelled out rather than imported to keep
+   *  this module out of a type cycle with that one. Narrowing it below that
+   *  union does not merely drift — `useProject`'s `assign()` copies the synced
+   *  value straight into this field, so a rung missing here is a compile
+   *  error, which is what keeps the two honest. */
+  cellEditingFloor?: "none" | "commenter" | "reviewer" | "contributor" | "project_lead" | "maintainer"
   /** AQU-646 stage 2: may this project's timelines be restructured — tracks
    *  added, deleted, foldered, recoloured? Off unless turned on; a SECOND gate
    *  on top of the maintainer floor, so with it off the write is refused even

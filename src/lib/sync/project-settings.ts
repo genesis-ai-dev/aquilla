@@ -18,6 +18,28 @@ import type { DraftContextSettings } from "@/lib/completion/draft-context"
 export const PROJECT_SETTINGS_VERSION_INITIAL = 0
 
 /**
+ * AQU-1068: the stored `cellEditingFloor` vocabulary — "none" plus the rungs of
+ * the standard role ladder this floor may be set to.
+ *
+ * Exported because ProjectSettings.tsx used to repeat the union literally in
+ * two annotations, and a widening that reached only one of them would compile
+ * in a rung the control could never actually hold. `ProjectRecord` still
+ * spells it out (a type cycle for one alias is a poor trade) but cannot drift
+ * narrower: `useProject`'s `assign()` copies this field into it.
+ *
+ * Deliberately NOT sourced from `db/shared/cell-editing-floor.ts`: the client
+ * cannot import server code, which is why this file carries a copy of the
+ * mapping at all — see that module's header.
+ */
+export type CellEditingTier =
+  | "none"
+  | "commenter"
+  | "reviewer"
+  | "contributor"
+  | "project_lead"
+  | "maintainer"
+
+/**
  * The synced subset of project-wide fields. Mirrors the server's settings
  * JSON. Top-level keys only — replacing `rules` replaces the whole array.
  *
@@ -46,8 +68,10 @@ export interface ProjectWideSettings {
    * Supersedes AQU-646's `allowLineCreation` boolean, which asked the same
    * question of one surface (the timeline's silences) and could only answer
    * yes-or-no. Cell editing is now a project-wide capability with a role
-   * FLOOR: "maintainer" admits 600 and up, "project_lead" 500 and up,
-   * "contributor" 400 and up.
+   * FLOOR, named with the product's standard permission ladder so a project
+   * admin picks the same words here they picked on the Members panel:
+   * "maintainer" admits 600 and up, "project_lead" 500, "contributor" 400,
+   * "reviewer" 300, "commenter" 200.
    *
    * "none" — the default, and what an absent key means — admits NOBODY, and
    * that includes an owner. This is a "whether", not a "who": a project that
@@ -66,7 +90,7 @@ export interface ProjectWideSettings {
    * lands on "none" like everyone else, and a maintainer picks a tier when
    * they want the affordance back (Sam, 2026-08-29).
    */
-  cellEditingFloor?: "none" | "maintainer" | "project_lead" | "contributor"
+  cellEditingFloor?: CellEditingTier
   /**
    * AQU-646 stage 2: may this project's timelines be RESTRUCTURED — tracks
    * added and deleted, grouped into folders, recoloured?
@@ -241,6 +265,10 @@ export function resolveCellEditingFloor(
       return ROLE.PROJECT_LEAD
     case "contributor":
       return ROLE.CONTRIBUTOR
+    case "reviewer":
+      return ROLE.REVIEWER
+    case "commenter":
+      return ROLE.COMMENTER
     default:
       return null
   }

@@ -621,7 +621,22 @@ describe('POST /events — lane/side-qualified chain slots (route pre-check)', (
 describe('POST /events — AD-9 source_event_id pin', () => {
   it('target.cell.commit writes payload.sourceEventId into cells.source_event_id', async () => {
     const token = await makeToken()
-    const { db, snapshot } = await makeTestDb()
+    // The source row the pin names has to be there: a pinned commit whose
+    // source row is ABSENT is now refused outright (AQU-1068, below), so a
+    // free-floating pin no longer reaches the projection at all.
+    const { db, snapshot } = await makeTestDb({
+      cells: [
+        {
+          project_id: 'proj-a',
+          file_id: 'file-x',
+          cell_id: 'cell-1',
+          side: 'source',
+          target_lang: '',
+          value: 'source text',
+          event_id: 'src-pin-99',
+        },
+      ],
+    })
 
     await handleEventsWriteRequest(
       await makeRequest([targetCreate({ id: 'evt-create-001' })], token),
@@ -638,7 +653,7 @@ describe('POST /events — AD-9 source_event_id pin', () => {
     })
     await handleEventsWriteRequest(await makeRequest([commit], token), makeEnv(db))
 
-    const cell = (await snapshot()).cells[0]
+    const cell = (await snapshot()).cells.find((c) => c.side === 'target')!
     expect(cell.source_event_id).toBe('src-pin-99')
   })
 
@@ -655,6 +670,204 @@ describe('POST /events — AD-9 source_event_id pin', () => {
     )
     const cell = (await snapshot()).cells[0]
     expect(cell.source_event_id).toBeNull()
+  })
+})
+
+// ── AQU-1068: a pinned draft that lands after its cell is gone ─────────
+
+describe('POST /events — target.cell.commit whose source cell was removed', () => {
+  // Matthew, on 3G: he asked the AI to draft a cell, deleted a cell while that
+  // draft was still generating, and the draft POSTed after the delete landed.
+  // The projection's target commit upserts without checking for a source row,
+  // so the late draft re-created the cell as a target-only row — which the
+  // client appends to the END of the file (joinSourceAndTarget). His
+  // translation "jumped to the second last cell", unrecoverably.
+  //
+  // The cell is IMPORTED — seeded straight into `cells` the way the import
+  // route lands one, with no `source.cell.create` in the log. That is the cell
+  // AQU-1068 newly lets somebody remove, and the one a translator is drafting
+  // against. Removing it needs the project opted in AND maintainer rank
+  // (cell-editing-authority.ts), so the seed does both.
+  const SOURCE_HEAD = 'evt-src-imported'
+  const importedCell = () =>
+    makeTestDb({
+      project_settings: [
+        { project_id: 'proj-a', settings: JSON.stringify({ cellEditingFloor: 'maintainer' }) },
+      ],
+      cells: [
+        {
+          project_id: 'proj-a',
+          file_id: 'file-x',
+          cell_id: 'cell-1',
+          side: 'source',
+          target_lang: '',
+          value: 'source text',
+          event_id: SOURCE_HEAD,
+        },
+      ],
+    })
+
+  // The PARENTED shape, which is what the in-app remove actually sends
+  // (`handleRemoveLine` passes `parentId: plan.eventId`). A parent is what puts
+  // a chain gate on the projection, so this is the only shape that exercises
+  // the gated cascade — and until the review round that cascade was broken
+  // (its gate named a `cells` column inside DELETEs against other tables, which
+  // Postgres refuses outright), so a removal 500'd and every test here had to
+  // use the parent-less tombstone instead. Keep it parented: a refusal that is
+  // only ever proven against a shape no user can produce proves nothing.
+  const sourceDelete = (
+    overrides: Partial<RawEvent<'source.cell.delete'>> = {},
+  ): RawEvent<'source.cell.delete'> => ({
+    id: 'evt-src-delete',
+    schemaVersion: 1,
+    kind: 'source.cell.delete',
+    projectId: 'proj-a',
+    fileId: 'file-x',
+    cellId: 'cell-1',
+    parentId: SOURCE_HEAD,
+    author: 'alice',
+    payload: {},
+    clientTs: 4000,
+    ...overrides,
+  })
+
+  /** The draft that arrives too late. The pin is the source head the client
+   *  read off the row when it asked for the translation. */
+  const lateDraft = (overrides: Partial<RawEvent<'target.cell.commit'>> = {}) =>
+    targetCommit({
+      id: 'evt-late-draft',
+      parentId: SOURCE_HEAD,
+      payload: { value: 'AI translation', sourceEventId: SOURCE_HEAD },
+      ...overrides,
+    })
+
+  it('refuses the pinned draft with 409 when the delete landed in an EARLIER request', async () => {
+    const maintainer = await makeToken({ role: 600 })
+    const translator = await makeToken()
+    const { db, snapshot } = await importedCell()
+
+    await handleEventsWriteRequest(await makeRequest([sourceDelete()], maintainer), makeEnv(db))
+    expect((await snapshot()).cells).toHaveLength(0)
+
+    const res = (await handleEventsWriteRequest(
+      await makeRequest([lateDraft()], translator),
+      makeEnv(db),
+    ))!
+    const body = (await res.json()) as any
+    expect(body.accepted).toHaveLength(0)
+    expect(body.rejected).toHaveLength(1)
+    expect(body.rejected[0].id).toBe('evt-late-draft')
+    expect(body.rejected[0].status).toBe(409)
+    expect(body.rejected[0].reason).toMatch(/no source cell/)
+    // THE BUG: this used to be one orphaned target row, rendered at the tail
+    // of the file with nothing to undo it.
+    expect((await snapshot()).cells).toHaveLength(0)
+  })
+
+  it('refuses it too when the delete is EARLIER IN THE SAME BATCH', async () => {
+    // One flush can carry both: the head-tracking pass drops the source key
+    // from the request's prefetched heads as it walks the delete, so the
+    // commit behind it sees the same absence a separate request would.
+    const maintainer = await makeToken({ role: 600 })
+    const { db, snapshot } = await importedCell()
+
+    const res = (await handleEventsWriteRequest(
+      await makeRequest([sourceDelete(), lateDraft()], maintainer),
+      makeEnv(db),
+    ))!
+    const body = (await res.json()) as any
+    expect(body.accepted.map((a: any) => a.id)).toEqual(['evt-src-delete'])
+    expect(body.rejected).toHaveLength(1)
+    expect(body.rejected[0].id).toBe('evt-late-draft')
+    expect(body.rejected[0].status).toBe(409)
+    expect(body.rejected[0].reason).toMatch(/no source cell/)
+    expect((await snapshot()).cells).toHaveLength(0)
+  })
+
+  it('still accepts a commit with NO pin and no source row — target-only is a supported shape', async () => {
+    // The guard against widening the refusal. Same world as the test above —
+    // the source row is gone — and the ONLY difference is the missing
+    // `sourceEventId`. Target rows with no source beside them are a shape this
+    // codebase counts (progress-projection.ts) and serves (cells-read-route.ts),
+    // and a legitimate one carries no pin, so "no source row" alone must never
+    // be the predicate.
+    const maintainer = await makeToken({ role: 600 })
+    const translator = await makeToken()
+    const { db, snapshot } = await importedCell()
+
+    await handleEventsWriteRequest(await makeRequest([sourceDelete()], maintainer), makeEnv(db))
+
+    const res = (await handleEventsWriteRequest(
+      await makeRequest([lateDraft({ payload: { value: 'target-only draft' } })], translator),
+      makeEnv(db),
+    ))!
+    const body = (await res.json()) as any
+    expect(body.rejected).toHaveLength(0)
+    expect(body.accepted.map((a: any) => a.id)).toEqual(['evt-late-draft'])
+
+    const cells = (await snapshot()).cells
+    expect(cells).toHaveLength(1)
+    expect(cells[0].side).toBe('target')
+    expect(cells[0].value).toBe('target-only draft')
+  })
+
+  it('leaves an ordinary pinned commit on a live cell alone', async () => {
+    const translator = await makeToken()
+    const { db, snapshot } = await importedCell()
+
+    const res = (await handleEventsWriteRequest(
+      await makeRequest([lateDraft()], translator),
+      makeEnv(db),
+    ))!
+    const body = (await res.json()) as any
+    expect(body.rejected).toHaveLength(0)
+    expect(body.accepted.map((a: any) => a.id)).toEqual(['evt-late-draft'])
+    // The pin still matches the source head, so it is not stale either.
+    expect(body.staleSource).toHaveLength(0)
+
+    const cells = (await snapshot()).cells
+    expect(cells.map((c: any) => c.side).sort()).toEqual(['source', 'target'])
+    const target = cells.find((c: any) => c.side === 'target')!
+    expect(target.value).toBe('AI translation')
+    expect(target.source_event_id).toBe(SOURCE_HEAD)
+  })
+
+  // THE BOUNDARY THE REFUSAL SITS ON, and the one nothing pinned.
+  //
+  // The 409 above and this advisory flag read the SAME `cellHeads` entry, one
+  // line apart: absent means the source row is GONE (refuse), different means
+  // it has merely MOVED ON (accept, and flag so the client can offer
+  // "source changed — please re-confirm"). Nothing in the suite asserted the
+  // second half, so folding the two conditions together — an easy edit to
+  // make, since they now share a lookup — would have turned every advisory
+  // hint into a hard refusal with the whole suite still green. The client
+  // treats 409 as permanent and DROPS the event, so that mistake would delete
+  // the work of any translator who commits against a source line somebody
+  // edited a moment earlier.
+  it('a pin that is merely STALE is accepted and flagged, never refused', async () => {
+    const translator = await makeToken()
+    const { db, snapshot } = await importedCell()
+
+    // The source row advanced after the translator read it.
+    await db
+      .prepare("UPDATE cells SET event_id = 'evt-src-edited' WHERE side = 'source'")
+      .bind()
+      .run()
+
+    const res = (await handleEventsWriteRequest(
+      await makeRequest([lateDraft()], translator),
+      makeEnv(db),
+    ))!
+    const body = (await res.json()) as any
+    expect(body.rejected).toHaveLength(0)
+    expect(body.accepted.map((a: any) => a.id)).toEqual(['evt-late-draft'])
+    expect(body.staleSource).toEqual([
+      { id: 'evt-late-draft', currentSourceEventId: 'evt-src-edited' },
+    ])
+
+    // Accepted AND projected — the translator's work is not lost.
+    const target = (await snapshot()).cells.find((c: any) => c.side === 'target')!
+    expect(target.value).toBe('AI translation')
   })
 })
 
@@ -767,9 +980,24 @@ describe('POST /events — PERF-2 batched pre-checks', () => {
     return events
   }
 
+  /** One source row per cell in the batch, whose `event_id` IS the pin the
+   *  commit carries. Without them every pinned commit is refused as a draft
+   *  for a removed cell (AQU-1068), and with a mismatched id every one comes
+   *  back flagged stale — neither of which is what this test is measuring. */
+  const sourceRowsFor = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      project_id: 'proj-a',
+      file_id: 'file-x',
+      cell_id: `cell-${i}`,
+      side: 'source',
+      target_lang: '',
+      value: `s${i}`,
+      event_id: `pin-${i}`,
+    }))
+
   async function statementsFor(n: number): Promise<number> {
     const token = await makeToken()
-    const { db } = await makeTestDb()
+    const { db } = await makeTestDb({ cells: sourceRowsFor(n) })
     // Settings row present so the validate path actually reads settings.
     await db
       .prepare(

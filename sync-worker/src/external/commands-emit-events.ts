@@ -78,7 +78,7 @@ export interface EmitEventsCommand {
 export function emitEventsFloor(cmd: EmitEventsCommand): number {
   let floor = 0
   for (const e of cmd.events) {
-    // AQU-1068: source.cell.create/delete/reorder sit at CONTRIBUTOR in the
+    // AQU-1068: source.cell.create/delete/reorder sit at COMMENTER in the
     // static table because the operative gate is the project's
     // `cellEditingFloor`, applied per event in authorize.ts. This floor is a
     // PREPARE-TIME fail-fast only — it stops a caller staging a changeset they

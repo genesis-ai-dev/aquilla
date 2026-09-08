@@ -422,6 +422,36 @@ export function buildEventProjectionStmts(
     ? [gate.projectId, gate.fileId, gate.cellId, gate.parentKey, event.id, event.parentId]
     : []
 
+  // The same gate, for a statement that is NOT against `cells`.
+  //
+  // `HEAD_CAS` names a `cells` column, so it is only legal in a statement whose
+  // own target is that table. AQU-1068's dependent cleanup (validators, takes,
+  // pairings, comments, waivers, back-translations, morph rows) is not, and
+  // pasting `gateAnd` onto it produced `missing FROM-clause entry for table
+  // "cells"` — a hard Postgres error that failed the whole transaction, so a
+  // parented `source.cell.delete` 500'd and the removal was lost. Every in-app
+  // removal sends a parent, so this broke the feature outright; it survived
+  // 1,700 green tests because every cascade test builds a parent-less event,
+  // where `gate` is undefined and both fragments are empty strings.
+  //
+  // The head check is preserved as a SUBQUERY instead: same predicate, legal
+  // anywhere. It has to be, or a delete that lost the CAS would still strip a
+  // surviving cell of everything hanging off it. That is why these statements
+  // are emitted BEFORE the `cells` DELETE — they run in batch order, so the row
+  // whose head they are testing is still there when they ask.
+  const HEAD_EXISTS =
+    'EXISTS (SELECT 1 FROM cells WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = ? AND target_lang = ? AND event_id = ?)'
+  const dependentGateAnd = gate ? ` AND ${GATE_EXISTS} AND ${HEAD_EXISTS}` : ''
+  /** Binds for `dependentGateAnd`. The side and lane are the caller's, so the
+   *  subquery tests the SAME row the accompanying `cells` write does. */
+  const dependentGateBindsFor = (side: string, lane: string): unknown[] =>
+    gate
+      ? [
+          gate.projectId, gate.fileId, gate.cellId, gate.parentKey, event.id,
+          gate.projectId, gate.fileId, gate.cellId, side, lane, event.parentId,
+        ]
+      : []
+
   switch (event.kind) {
     case 'source.cell.create':
     case 'target.cell.create': {
@@ -866,19 +896,11 @@ export function buildEventProjectionStmts(
       // Source deletes bind lane '' (source rows always live on '').
       const side = event.kind === 'target.cell.delete' ? 'target' : 'source'
       const lane = laneOfEvent(event.kind, event.payload)
+      const dependentGateBinds = dependentGateBindsFor(side, lane)
 
       // FTS5 maintenance (pre-DML): remove the indexed value BEFORE deleting
       // the cells row so the OLD value is still readable for the 'delete'
       // command.
-
-      stmts.push(
-        db
-          .prepare(
-            `DELETE FROM cells
-             WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = ? AND target_lang = ?${gateAnd}`,
-          )
-          .bind(event.projectId, event.fileId, event.cellId, side, lane, ...gateBinds),
-      )
 
       // AQU-1068: TAKE THE CELL'S DEPENDENTS WITH IT.
       //
@@ -896,20 +918,53 @@ export function buildEventProjectionStmts(
       // orphans would come back the first time somebody rebuilt. Replaying
       // these is safe: deleting what is already gone is a no-op.
       //
-      // Gated on `${gateAnd}` like the cells write above: a delete that LOST
-      // its chain slot must not strip the surviving cell of its dependents.
+      // Gated exactly as the `cells` DELETE below is — a delete that LOST its
+      // chain slot must not strip the surviving cell of its dependents — but
+      // through `dependentGateAnd`, which expresses the head check as a
+      // subquery because these statements do not target `cells` (see the
+      // fragment's own note). They are emitted BEFORE that DELETE so the row
+      // they are testing still exists when they run.
       const dependentBinds = [event.projectId, event.fileId, event.cellId]
       if (event.kind === 'source.cell.delete') {
-        // The whole cell is going. Every lane's validators go with it — the
-        // target rows are removed by their own per-lane events, but their
-        // validator rows are keyed on the cell and would outlive them.
+        // THE TRANSLATIONS GO WITH THE SOURCE, in every lane.
+        //
+        // The client used to batch one `target.cell.delete` per lane beside
+        // this event, and that was wrong twice over.
+        //
+        // Correctness: those deletes are parent-less tombstones, so they apply
+        // unconditionally — while THIS event still has to win its chain slot.
+        // A source delete that went stale therefore left the cell in place and
+        // took its translations anyway.
+        //
+        // Permissions: `target.cell.delete` floors at CONTRIBUTOR and is not
+        // governed by `cellEditingFloor`, so once the tier list grew Commenter
+        // and Reviewer rungs (AQU-1068 review), a person the project had
+        // explicitly admitted could add a cell and then not remove one —
+        // `enqueueEvents` threw before writing anything, so the row left the
+        // screen with no request sent and no rollback. Making the removal a
+        // source-side act throughout puts the whole cascade under the one
+        // gate that is supposed to govern it.
+        //
+        // Bound by cell only: every lane's row goes, which is what deleting
+        // the cell means. A single lane is still removed on its own by its own
+        // `target.cell.delete`, and that path is untouched.
+        stmts.push(
+          db
+            .prepare(
+              `DELETE FROM cells
+               WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = 'target'${dependentGateAnd}`,
+            )
+            .bind(...dependentBinds, ...dependentGateBinds),
+        )
+        // The whole cell is going, so every lane's validators go with it —
+        // they are keyed on the cell and would outlive the rows above.
         stmts.push(
           db
             .prepare(
               `DELETE FROM cell_validators
-               WHERE project_id = ? AND file_id = ? AND cell_id = ?${gateAnd}`,
+               WHERE project_id = ? AND file_id = ? AND cell_id = ?${dependentGateAnd}`,
             )
-            .bind(...dependentBinds, ...gateBinds),
+            .bind(...dependentBinds, ...dependentGateBinds),
         )
         // Takes: SOFT-deleted, the same shape `cell.audio.remove` uses (a
         // `deleted` flag, not a DELETE). The R2 bytes outlive the row either
@@ -919,9 +974,9 @@ export function buildEventProjectionStmts(
           db
             .prepare(
               `UPDATE cell_audio SET deleted = 1, selected = 0
-               WHERE project_id = ? AND file_id = ? AND cell_id = ?${gateAnd}`,
+               WHERE project_id = ? AND file_id = ? AND cell_id = ?${dependentGateAnd}`,
             )
-            .bind(...dependentBinds, ...gateBinds),
+            .bind(...dependentBinds, ...dependentGateBinds),
         )
         // Pairings: TOMBSTONED (`linked = 0`), not deleted, because that is
         // what unlinking means here — the schema comment on cell_links spells
@@ -933,7 +988,7 @@ export function buildEventProjectionStmts(
               `UPDATE cell_links SET linked = 0
                WHERE project_id = ?
                  AND ((from_file_id = ? AND from_cell_id = ?)
-                   OR (to_file_id = ? AND to_cell_id = ?))${gateAnd}`,
+                   OR (to_file_id = ? AND to_cell_id = ?))${dependentGateAnd}`,
             )
             .bind(
               event.projectId,
@@ -941,7 +996,7 @@ export function buildEventProjectionStmts(
               event.cellId,
               event.fileId,
               event.cellId,
-              ...gateBinds,
+              ...dependentGateBinds,
             ),
         )
         // Comments: soft-deleted exactly as `comment.delete` does it, so a
@@ -952,25 +1007,25 @@ export function buildEventProjectionStmts(
             .prepare(
               `UPDATE comments SET body = '', deleted_at = ?, updated_at = ?
                WHERE project_id = ? AND file_id = ? AND cell_id = ?
-                 AND scope_kind = 'cell' AND deleted_at IS NULL${gateAnd}`,
+                 AND scope_kind = 'cell' AND deleted_at IS NULL${dependentGateAnd}`,
             )
-            .bind(event.serverTs, event.serverTs, ...dependentBinds, ...gateBinds),
+            .bind(event.serverTs, event.serverTs, ...dependentBinds, ...dependentGateBinds),
         )
         stmts.push(
           db
             .prepare(
               `DELETE FROM cell_waivers
-               WHERE project_id = ? AND file_id = ? AND cell_id = ?${gateAnd}`,
+               WHERE project_id = ? AND file_id = ? AND cell_id = ?${dependentGateAnd}`,
             )
-            .bind(...dependentBinds, ...gateBinds),
+            .bind(...dependentBinds, ...dependentGateBinds),
         )
         stmts.push(
           db
             .prepare(
               `DELETE FROM cell_backtranslations
-               WHERE project_id = ? AND file_id = ? AND cell_id = ?${gateAnd}`,
+               WHERE project_id = ? AND file_id = ? AND cell_id = ?${dependentGateAnd}`,
             )
-            .bind(...dependentBinds, ...gateBinds),
+            .bind(...dependentBinds, ...dependentGateBinds),
         )
         // Morph analysis is written by the /import-morph route, never by an
         // event — so this DELETE is its only cleanup path anywhere. Harmless
@@ -979,9 +1034,9 @@ export function buildEventProjectionStmts(
           db
             .prepare(
               `DELETE FROM cell_word_morph
-               WHERE project_id = ? AND file_id = ? AND cell_id = ?${gateAnd}`,
+               WHERE project_id = ? AND file_id = ? AND cell_id = ?${dependentGateAnd}`,
             )
-            .bind(...dependentBinds, ...gateBinds),
+            .bind(...dependentBinds, ...dependentGateBinds),
         )
       } else {
         // A target delete removes ONE lane. Only that lane's validators go;
@@ -990,11 +1045,22 @@ export function buildEventProjectionStmts(
           db
             .prepare(
               `DELETE FROM cell_validators
-               WHERE project_id = ? AND file_id = ? AND cell_id = ? AND target_lang = ?${gateAnd}`,
+               WHERE project_id = ? AND file_id = ? AND cell_id = ? AND target_lang = ?${dependentGateAnd}`,
             )
-            .bind(...dependentBinds, lane, ...gateBinds),
+            .bind(...dependentBinds, lane, ...dependentGateBinds),
         )
       }
+
+      // LAST, deliberately: every statement above tests this row's head with
+      // `HEAD_EXISTS`, and they run in batch order.
+      stmts.push(
+        db
+          .prepare(
+            `DELETE FROM cells
+             WHERE project_id = ? AND file_id = ? AND cell_id = ? AND side = ? AND target_lang = ?${gateAnd}`,
+          )
+          .bind(event.projectId, event.fileId, event.cellId, side, lane, ...gateBinds),
+      )
 
       if (!opts?.deferFileCounters)
         stmts.push(fileCountersRecomputeStmt(db, event.projectId, event.fileId, event.serverTs))

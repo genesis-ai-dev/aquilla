@@ -340,7 +340,9 @@ describe('buildEventProjectionStmts — *.cell.delete', () => {
     const { db, recorded } = makeD1Stub()
     const stmts: AquillaStatement[] = []
     buildEventProjectionStmts(db, makeEvent('target.cell.delete', {}), stmts)
-    const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false'))
+    // AQU-1068 review round: the cells DELETE is emitted LAST, after the
+    // dependent cleanup that tests its head — so select it, don't index it.
+    const cellsStmts = recorded.filter(r => r.sql.startsWith('DELETE FROM cells'))
     expect(cellsStmts[0].sql).toContain('DELETE FROM cells')
     expect(cellsStmts[0].sql).toContain('side = ?')
     // AQU-538: trailing bind is the target lane ('' = default).
@@ -351,7 +353,9 @@ describe('buildEventProjectionStmts — *.cell.delete', () => {
     const { db, recorded } = makeD1Stub()
     const stmts: AquillaStatement[] = []
     buildEventProjectionStmts(db, makeEvent('source.cell.delete', {}), stmts)
-    const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false'))
+    // Two now: the cascade's lane rows (literal side = 'target') and the
+    // source row itself (parameterised side = ?).
+    const cellsStmts = recorded.filter(r => r.sql.startsWith('DELETE FROM cells') && !r.sql.includes("side = 'target'"))
     // AQU-538: source rows always live on the default lane ('').
     expect(cellsStmts[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'source', ''])
   })
@@ -360,7 +364,7 @@ describe('buildEventProjectionStmts — *.cell.delete', () => {
     const { db, recorded } = makeD1Stub()
     const stmts: AquillaStatement[] = []
     buildEventProjectionStmts(db, makeEvent('target.cell.delete', { targetLang: 'fr' }), stmts)
-    const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false'))
+    const cellsStmts = recorded.filter(r => r.sql.startsWith('DELETE FROM cells'))
     expect(cellsStmts[0].sql).toContain('target_lang = ?')
     expect(cellsStmts[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'target', 'fr'])
   })
@@ -417,8 +421,16 @@ describe('buildEventProjectionStmts — side scoping (regression: target edits m
       const stmts: AquillaStatement[] = []
       buildEventProjectionStmts(db, makeEvent(kind, payload), stmts)
 
-      // First non-FTS statement is the cells mutation for these kinds.
-      const cellsStmts = recorded.filter(r => !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false'))
+      // The cells mutation, wherever it sits. AQU-1068's dependent cleanup
+      // runs BEFORE the delete (it tests the row's head), so this can no
+      // longer be "the first non-FTS statement".
+      const cellsStmts = recorded.filter(r =>
+        /^(DELETE FROM|UPDATE|INSERT INTO) cells\b/.test(r.sql)
+        && !r.sql.includes('cells_fts') && !r.sql.includes('WHERE false')
+        // AQU-1068: a source delete also drops the cell's lane rows as part of
+        // its cascade. That statement is deliberately side-literal 'target';
+        // the event's OWN side-scoped mutation is the parameterised one.
+        && !(r.sql.startsWith('DELETE FROM cells') && r.sql.includes("side = 'target'")))
       const sql = cellsStmts[0].sql
       // Three accepted forms, all of which keep the mutation scoped to one side:
       //  1. a literal `side = 'target'` / `side = 'source'` WHERE clause
@@ -970,6 +982,115 @@ describe('source.cell.delete — dependent cleanup', () => {
 
   const sqlFor = (recorded: RecordedStmt[], table: string) =>
     recorded.filter((r) => r.sql.includes(table))
+
+  /**
+   * The same cleanup for a delete that carries a PARENT — i.e. every removal
+   * the app itself makes (`handleRemoveLine` sends `parentId: plan.eventId`).
+   * A parent is what puts a `chainGate` on the projection, and the gate is
+   * where this cascade and dev's AQU-1154 head compare-and-swap collided.
+   */
+  function gatedDeleteStmts(kind: 'source.cell.delete' | 'target.cell.delete', payload: unknown = {}) {
+    const { db, recorded } = makeD1Stub()
+    const stmts: AquillaStatement[] = []
+    buildEventProjectionStmts(
+      db,
+      makeEvent(kind, payload, { parentId: 'evt-parent' }),
+      stmts,
+      { chainGate: { projectId: 'proj-1', fileId: 'file-a', cellId: 'cell-1', parentKey: 'evt-parent' } },
+    )
+    return recorded
+  }
+
+  // AQU-1068 review round. THE BUG THIS CATCHES BROKE REMOVAL OUTRIGHT.
+  //
+  // The gate is two predicates: a `chain_claims` EXISTS, which is a
+  // self-contained subquery, and a head compare-and-swap that names a `cells`
+  // column. Pasting the pair onto the dependent-cleanup statements — which run
+  // against cell_validators, cell_audio, cell_links, comments, cell_waivers,
+  // cell_backtranslations and cell_word_morph — produced SQL referring to a
+  // table not in its own FROM clause. Postgres rejects that outright, the
+  // transaction fails, and the removal is lost with a 500.
+  //
+  // It reached a build Matthew tested and survived the whole suite, because
+  // every other case here builds a PARENT-LESS event: no parent, no gate, both
+  // fragments empty, collision invisible. That is the hole these two close.
+  it('never names a cells column in a statement that is not against cells', () => {
+    const offenders = gatedDeleteStmts('source.cell.delete')
+      .filter((r) => r.sql.includes('cells.') && !/^(DELETE FROM|UPDATE|INSERT INTO) cells\b/.test(r.sql))
+      .map((r) => r.sql.slice(0, 60))
+    expect(offenders).toEqual([])
+  })
+
+  it('still gates every dependent statement on the claim AND the head', () => {
+    // Losing the gate would be the opposite bug: a delete that lost its chain
+    // slot stripping the surviving cell of everything hanging off it.
+    // The cells DELETE plus the seven dependent statements — not the file
+    // counters recompute, which is a whole-file aggregate and never gated.
+    const gated = gatedDeleteStmts('source.cell.delete')
+      .filter((r) => /^(DELETE FROM|UPDATE) (cells|cell_|comments)/.test(r.sql))
+    expect(gated.length).toBeGreaterThan(1)
+    for (const stmt of gated) {
+      expect(stmt.sql).toContain('FROM chain_claims')
+      // The head check, as a column on `cells` for the cells write itself and
+      // as a subquery for everything else.
+      expect(stmt.sql).toMatch(/cells\.event_id = \?|FROM cells WHERE/)
+    }
+  })
+
+  it('runs the dependent cleanup BEFORE the cells row is deleted', () => {
+    // The dependents test the head with a subquery, so they have to ask while
+    // the row is still there. Batch order is the guarantee.
+    const sqls = gatedDeleteStmts('source.cell.delete').map((r) => r.sql)
+    const sourceDelete = sqls.findIndex((sql) => sql.startsWith('DELETE FROM cells') && !sql.includes("side = 'target'"))
+    const lastDependent = sqls
+      .map((sql) => /^(DELETE FROM|UPDATE) (cell_|comments)/.test(sql)
+        || (sql.startsWith('DELETE FROM cells') && sql.includes("side = 'target'")))
+      .lastIndexOf(true)
+    expect(sourceDelete).toBeGreaterThan(lastDependent)
+  })
+
+  it("a target delete's cleanup tests the TARGET row's head, not the source's", () => {
+    // The gate must follow the row the accompanying write targets, or a lane
+    // delete would be gated on a row it is not touching.
+    const validators = gatedDeleteStmts('target.cell.delete', { targetLang: 'fr' })
+      .filter((r) => r.sql.includes('cell_validators'))
+    expect(validators).toHaveLength(1)
+    expect(validators[0].args).toContain('target')
+    expect(validators[0].args).toContain('fr')
+  })
+
+  // AQU-1068 review round: the translations are the SOURCE delete's business.
+  //
+  // The client used to batch a parent-less `target.cell.delete` per lane beside
+  // this event. Those applied unconditionally while this one still had to win
+  // its chain slot, so a stale removal took the translations and left the cell
+  // — and `target.cell.delete` floors at CONTRIBUTOR outside `cellEditingFloor`,
+  // which made removal impossible for the tiers below it.
+  it('takes every lane of translations with the source row', () => {
+    const rows = sqlFor(deleteStmts('source.cell.delete'), 'DELETE FROM cells')
+    const targets = rows.filter((r) => r.sql.includes("side = 'target'"))
+    expect(targets).toHaveLength(1)
+    // Bound by cell only — no target_lang term, so every lane goes.
+    expect(targets[0].sql).not.toContain('target_lang')
+    expect(targets[0].args).toEqual(['proj-1', 'file-a', 'cell-1'])
+  })
+
+  it('gates that translation delete exactly like the source row it follows', () => {
+    const targets = gatedDeleteStmts('source.cell.delete')
+      .filter((r) => r.sql.startsWith('DELETE FROM cells') && r.sql.includes("side = 'target'"))
+    expect(targets).toHaveLength(1)
+    expect(targets[0].sql).toContain('FROM chain_claims')
+    expect(targets[0].sql).toContain('FROM cells WHERE')
+  })
+
+  it('a LANE delete still removes only its own lane', () => {
+    // The per-lane path is untouched: clearing one translation is not the same
+    // act as removing the cell.
+    const rows = sqlFor(deleteStmts('target.cell.delete', { targetLang: 'fr' }), 'DELETE FROM cells')
+    expect(rows).toHaveLength(1)
+    expect(rows[0].sql).toContain('target_lang = ?')
+    expect(rows[0].args).toEqual(['proj-1', 'file-a', 'cell-1', 'target', 'fr'])
+  })
 
   it('clears every lane of validators for the cell', () => {
     const rows = sqlFor(deleteStmts('source.cell.delete'), 'cell_validators')

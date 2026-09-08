@@ -36,17 +36,33 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   // direct re-imports. The import-bot service account is provisioned at
   // OWNER level out of band.
   //
-  // AQU-1068: create/delete/reorder sit at CONTRIBUTOR because this table is
+  // AQU-1068: create/delete/reorder sit at COMMENTER because this table is
   // the LOWEST reachable floor, not the operative one — reorder included
   // because it is the chain bookkeeping riding every add and remove batch.
   // The real gate is the project's `cellEditingFloor`, applied in authorize.ts:
   // all three are refused outright unless the project opted in, and a delete
   // additionally needs MAINTAINER unless it is a cell a person added by
   // hand (cell-editing-authority.ts).
-  'source.cell.create': ROLE.CONTRIBUTOR,
+  //
+  // LOWERED FROM CONTRIBUTOR (Matthew's review, approved by Sam 2026-09-08)
+  // when the tier list grew Commenter and Reviewer rungs. This floor sits
+  // UNDER the tier gate, so at CONTRIBUTOR those two rungs were unreachable
+  // by construction: a project could name them and the event would still be
+  // refused a step earlier, which is a setting that lies.
+  //
+  // Nothing is opened up by dropping it, for two independent reasons. The
+  // tier gate refuses EVERYONE — an owner included — while the setting is
+  // unset, and "none" is the default and the meaning of an absent or
+  // unreadable settings row, so a project has to opt in before this floor is
+  // ever the deciding term. And the external API surface, which is exempt
+  // from the tier gate, does not consult this table for these three kinds at
+  // all: `emitEventsFloor` (external/commands-emit-events.ts) hard-codes
+  // PROJECT_LEAD for create/delete/reorder precisely so lowering the static
+  // floor cannot reach it.
+  'source.cell.create': ROLE.COMMENTER,
   'source.cell.commit': ROLE.PROJECT_LEAD,
-  'source.cell.delete': ROLE.CONTRIBUTOR,
-  'source.cell.reorder': ROLE.CONTRIBUTOR,
+  'source.cell.delete': ROLE.COMMENTER,
+  'source.cell.reorder': ROLE.COMMENTER,
   'source.cell.metadata.patch': ROLE.PROJECT_LEAD,
   'source.cell.reanchor': ROLE.PROJECT_LEAD,
 

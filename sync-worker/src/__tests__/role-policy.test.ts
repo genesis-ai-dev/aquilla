@@ -21,23 +21,30 @@ describe("requiredRoleFor — target.* (translator)", () => {
 })
 
 describe("requiredRoleFor — source.* (importer / admin)", () => {
-  // AQU-1068: create/delete sit at CONTRIBUTOR because this table is the
+  // AQU-1068: create/delete sit at COMMENTER because this table is the
   // LOWEST reachable floor, not the operative one — the project's
   // `cellEditingFloor` is the real gate (see authorize-cell-editing.test.ts).
-  it("returns CONTRIBUTOR for source.cell.create — the conditional floor lives in authorize", () => {
-    expect(requiredRoleFor('source.cell.create')).toBe(ROLE.CONTRIBUTOR)
+  //
+  // Lowered from CONTRIBUTOR when the tier list was rebuilt on the product's
+  // standard ladder (Matthew's review, Sam approved 2026-09-08). The floor sits
+  // UNDER the tier gate, so while it was CONTRIBUTOR the new Commenter and
+  // Reviewer tiers could not admit anyone at all. Raising it back is what these
+  // three assertions exist to catch: nothing else would fail, the two tiers
+  // would simply stop working.
+  it("returns COMMENTER for source.cell.create — the conditional floor lives in authorize", () => {
+    expect(requiredRoleFor('source.cell.create')).toBe(ROLE.COMMENTER)
   })
 
   it("returns PROJECT_LEAD for source.cell.commit", () => {
     expect(requiredRoleFor('source.cell.commit')).toBe(ROLE.PROJECT_LEAD)
   })
 
-  it("returns CONTRIBUTOR for source.cell.delete — the user-inserted guard lives in authorize", () => {
-    expect(requiredRoleFor('source.cell.delete')).toBe(ROLE.CONTRIBUTOR)
+  it("returns COMMENTER for source.cell.delete — the user-inserted guard lives in authorize", () => {
+    expect(requiredRoleFor('source.cell.delete')).toBe(ROLE.COMMENTER)
   })
 
-  it("returns CONTRIBUTOR for source.cell.reorder — it rides every add/remove batch", () => {
-    expect(requiredRoleFor('source.cell.reorder')).toBe(ROLE.CONTRIBUTOR)
+  it("returns COMMENTER for source.cell.reorder — it rides every add/remove batch", () => {
+    expect(requiredRoleFor('source.cell.reorder')).toBe(ROLE.COMMENTER)
   })
 })
 

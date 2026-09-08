@@ -1,8 +1,15 @@
 import { ROLE } from "@/lib/frontier/roles"
 
-/** Short role labels for floor hints and compact Security-page selects. */
+/** Short role labels for floor hints and compact Security-page selects.
+ *
+ *  AQU-1068 added commenter and reviewer: the project-settings cell-editing
+ *  floor is the first floor control offered the full ladder, and a rung with
+ *  no entry here falls back to its dropdown-row sentence, which is too long
+ *  for a closed trigger. */
 export const FLOOR_LABEL: Record<number, string> = {
   [ROLE.VIEWER]: "Viewer",
+  [ROLE.COMMENTER]: "Commenter",
+  [ROLE.REVIEWER]: "Reviewer",
   [ROLE.CONTRIBUTOR]: "Contributor",
   [ROLE.PROJECT_LEAD]: "Project lead",
   [ROLE.MAINTAINER]: "Maintainer",

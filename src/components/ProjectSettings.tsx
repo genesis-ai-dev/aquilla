@@ -104,7 +104,8 @@ import { SettingsNav, type SettingsSection } from "./ProjectSettings/SettingsNav
 import { BackLink, NavList, NavRow } from "@/components/ui/nav-list"
 import { readValidationCount, readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import { setUserApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
-import type { ProjectWideSettings } from "@/lib/sync/project-settings"
+import type { CellEditingTier, ProjectWideSettings } from "@/lib/sync/project-settings"
+import { FLOOR_LABEL } from "@/pages/settings/constants"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { PERMISSION_DOCS_URL } from "@/components/PermissionDeniedAlert"
 import { resolveRoleName, ROLE } from "@/lib/frontier/roles"
@@ -138,20 +139,36 @@ const SHOW_TERMBASE_SHARING_IN_SETTINGS = false
 /**
  * AQU-1068: the cell-editing tiers, in the order they are offered.
  *
- * The reset default leads, matching every other floor control on this page.
- * The labels are DESCRIPTIVE, not role names resolved through
- * `resolveRoleName` — "Maintainers and project leads" says who is admitted far
- * more plainly to a project admin than a bare "Project lead" naming a floor,
- * and "No one" is not a role at all.
+ * The reset default leads, matching every other floor control on this page;
+ * the rest climb the ladder, matching RosterProgressSection and
+ * TermbaseEditSection.
+ *
+ * The labels used to be DESCRIPTIVE — "Maintainers and project leads", "Anyone
+ * who can edit" — on the theory that they said who is admitted more plainly
+ * than a bare rank. Matthew's review overruled that (Sam approved, 2026-09-08):
+ * an admin who has just set someone's role on the Members panel should not have
+ * to work out which bespoke phrase covers that rank, so this is the standard
+ * ladder, spelled the standard way, and only "No one" — which is not a role —
+ * keeps a phrase of its own.
+ *
+ * `level` is what makes the two-tier labelling work, exactly as in
+ * RosterProgressSection: FLOOR_LABEL supplies the short word for the closed
+ * trigger and the message key the fuller row in the open list. "No one" has no
+ * level and therefore no FLOOR_LABEL entry, so it shows its row text in both.
  */
 const CELL_EDITING_FLOOR_OPTIONS: readonly {
-  value: "none" | "maintainer" | "project_lead" | "contributor"
+  value: CellEditingTier
+  /** Ladder level this tier admits, or null for "none" — which is a refusal,
+   *  not a rank, and so has no place on the ladder. */
+  level: number | null
   labelKey: MessageKey
 }[] = [
-  { value: "none", labelKey: "projectSettings.cellEditing.optionNone" },
-  { value: "maintainer", labelKey: "projectSettings.cellEditing.optionMaintainer" },
-  { value: "project_lead", labelKey: "projectSettings.cellEditing.optionProjectLead" },
-  { value: "contributor", labelKey: "projectSettings.cellEditing.optionContributor" },
+  { value: "none", level: null, labelKey: "projectSettings.cellEditing.optionNone" },
+  { value: "commenter", level: ROLE.COMMENTER, labelKey: "projectSettings.cellEditing.optionCommenter" },
+  { value: "reviewer", level: ROLE.REVIEWER, labelKey: "projectSettings.cellEditing.optionReviewer" },
+  { value: "contributor", level: ROLE.CONTRIBUTOR, labelKey: "projectSettings.cellEditing.optionContributor" },
+  { value: "project_lead", level: ROLE.PROJECT_LEAD, labelKey: "projectSettings.cellEditing.optionProjectLead" },
+  { value: "maintainer", level: ROLE.MAINTAINER, labelKey: "projectSettings.cellEditing.optionMaintainer" },
 ]
 
 // Well-known OpenAI-compatible providers. Exactly one of `label`/`labelKey` is
@@ -248,7 +265,7 @@ interface Baseline {
   validationNamedUsers: string[]
   allowSelfValidation: boolean
   /** AQU-646: may people add lines into the timeline's silences? */
-  cellEditingFloor: "none" | "maintainer" | "project_lead" | "contributor"
+  cellEditingFloor: CellEditingTier
   /** AQU-646 stage 2: may this project's timelines be restructured? */
   allowTrackEditing: boolean
   timingLocked: boolean
@@ -485,7 +502,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const [validationRoleFloor, setValidationRoleFloor] = useState<"reviewer" | "project_lead" | "maintainer">("reviewer")
   const [validationNamedUsers, setValidationNamedUsers] = useState<string[]>([])
   const [allowSelfValidation, setAllowSelfValidation] = useState(true)
-  const [cellEditingFloor, setCellEditingFloor] = useState<"none" | "maintainer" | "project_lead" | "contributor">("none")
+  const [cellEditingFloor, setCellEditingFloor] = useState<CellEditingTier>("none")
   const [allowTrackEditing, setAllowTrackEditing] = useState(false)
   const [timingLocked, setTimingLocked] = useState(true)
   // AQU-186: harmonize_min_role — project_lead floor, configurable up to maintainer.
@@ -1651,7 +1668,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 control={
                   <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
                     <Select
-                      items={CELL_EDITING_FLOOR_OPTIONS.map((o) => ({ value: o.value, label: t(o.labelKey) }))}
+                      items={CELL_EDITING_FLOOR_OPTIONS.map((o) => ({
+                        value: o.value,
+                        label: (o.level != null ? FLOOR_LABEL[o.level] : undefined) ?? t(o.labelKey),
+                      }))}
                       disabled={!canEditShared}
                       value={cellEditingFloor}
                       onValueChange={(value) =>

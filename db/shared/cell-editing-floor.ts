@@ -12,12 +12,29 @@
 const MAINTAINER = 600
 const PROJECT_LEAD = 500
 const CONTRIBUTOR = 400
+const REVIEWER = 300
+const COMMENTER = 200
 
-/** Stored tier -> the role level it admits. "none" is deliberately absent. */
+/**
+ * Stored tier -> the role level it admits. "none" is deliberately absent.
+ *
+ * The rungs are the product's standard permission ladder (Matthew's review,
+ * approved by Sam 2026-09-08) rather than a bespoke set, so a project admin
+ * picks the same names here they picked on the Members panel.
+ *
+ * COMMENTER and REVIEWER are only REAL because the static floor for
+ * `source.cell.create` / `.delete` / `.reorder` in both role-policy tables
+ * dropped to COMMENTER at the same time. That floor sits UNDER this tier gate:
+ * while it was CONTRIBUTOR, choosing either of these two tiers would have
+ * admitted nobody the old list could not already admit — the event would have
+ * been refused a step earlier and the setting would have silently lied.
+ */
 const FLOOR_BY_TIER: Record<string, number> = {
   maintainer: MAINTAINER,
   project_lead: PROJECT_LEAD,
   contributor: CONTRIBUTOR,
+  reviewer: REVIEWER,
+  commenter: COMMENTER,
 }
 
 /**

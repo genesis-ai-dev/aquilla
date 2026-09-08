@@ -217,10 +217,19 @@ export const projectSettings = defineNamespace({
       "Puts buttons on each row to insert or remove cells. Removing one also removes its " +
       "translations, recordings and comments; removing an imported cell always needs a " +
       "maintainer.",
-    "projectSettings.cellEditing.optionNone": "No one",
-    "projectSettings.cellEditing.optionMaintainer": "Maintainers",
-    "projectSettings.cellEditing.optionProjectLead": "Maintainers and project leads",
-    "projectSettings.cellEditing.optionContributor": "Anyone who can edit",
+    // Open-dropdown option text for the cell-editing floor select. FLOOR_LABEL
+    // (src/pages/settings/constants.ts) supplies the shorter closed-trigger
+    // word for each rung; "No one" is not a role, so it has no FLOOR_LABEL
+    // entry and shows this string in both places. AQU-1068 (Matthew's review):
+    // these were bespoke phrases ("Maintainers and project leads", "Anyone who
+    // can edit") and are now the product's standard ladder, so a project admin
+    // reads the same names here as on the Members panel.
+    "projectSettings.cellEditing.optionNone": "No one — default",
+    "projectSettings.cellEditing.optionCommenter": "Commenter (200)",
+    "projectSettings.cellEditing.optionReviewer": "Reviewer (300)",
+    "projectSettings.cellEditing.optionContributor": "Contributor (400)",
+    "projectSettings.cellEditing.optionProjectLead": "Project lead (500)",
+    "projectSettings.cellEditing.optionMaintainer": "Maintainer (600)",
     // model → projectSettings.advancedLlm.modelLabel
     "projectSettings.field.temperature": "temperature",
     "projectSettings.field.healthPenalty": "health penalty",
@@ -1045,6 +1054,47 @@ export const projectSettings = defineNamespace({
         placeholders: {
           percent: "The current penalty as a whole-number percentage, e.g. '10'.",
         },
+      },
+      "projectSettings.cellEditing.optionNone": {
+        description:
+          "First option in the 'Who can add and remove cells' dropdown, and the " +
+          "value every project starts on. It is not a role — it means nobody at " +
+          "all, including the project's owner. Keep the 'default' note: it is " +
+          "what tells an admin this list has never been touched. Translate the " +
+          "word 'default'; the dash is an em dash separating the two halves.",
+      },
+      "projectSettings.cellEditing.optionCommenter": {
+        description:
+          "Role option in the 'Who can add and remove cells' dropdown, naming the " +
+          "lowest rank that may be granted the affordance. Translate the role " +
+          "name exactly as common.role.commenter is translated — this list must " +
+          "read identically to the Members panel. The number in brackets is the " +
+          "role's level on the permission ladder: data, never translated.",
+      },
+      "projectSettings.cellEditing.optionReviewer": {
+        description:
+          "Role option in the 'Who can add and remove cells' dropdown. Translate " +
+          "the role name exactly as common.role.reviewer is translated; the " +
+          "bracketed number is the role's ladder level, data, never translated.",
+      },
+      "projectSettings.cellEditing.optionContributor": {
+        description:
+          "Role option in the 'Who can add and remove cells' dropdown. Translate " +
+          "the role name exactly as common.role.contributor is translated; the " +
+          "bracketed number is the role's ladder level, data, never translated.",
+      },
+      "projectSettings.cellEditing.optionProjectLead": {
+        description:
+          "Role option in the 'Who can add and remove cells' dropdown. Translate " +
+          "the role name exactly as common.role.projectLead is translated; the " +
+          "bracketed number is the role's ladder level, data, never translated.",
+      },
+      "projectSettings.cellEditing.optionMaintainer": {
+        description:
+          "Role option in the 'Who can add and remove cells' dropdown, and the " +
+          "strictest rank the setting can name. Translate the role name exactly " +
+          "as common.role.maintainer is translated; the bracketed number is the " +
+          "role's ladder level, data, never translated.",
       },
       "projectSettings.harmonization.defaultRoleSuffix": {
         description:

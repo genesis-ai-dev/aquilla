@@ -324,9 +324,10 @@ export async function authorize<K extends EventKind>(
   // restructures its files, not merely *who* may. A clearance term here would
   // open the back door the gate exists to close.
   //
-  // The static floors in role-policy.ts stay CONTRIBUTOR on purpose: imports
-  // (`POST /import`, lead-gated in its own route) and the in-app agent emit
-  // these same kinds, and a raised static floor would break them.
+  // The static floors in role-policy.ts stay LOW on purpose — COMMENTER since
+  // the tier list grew rungs below contributor: imports (`POST /import`,
+  // lead-gated in its own route) and the in-app agent emit these same kinds,
+  // and a raised static floor would break them.
   //
   // THE EXTERNAL API SURFACE IS EXEMPT, and that is not a hole — it is the
   // behaviour this path already had. The predecessor block skipped everyone at

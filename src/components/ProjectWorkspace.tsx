@@ -2159,15 +2159,28 @@ export function ProjectWorkspace() {
       // Take it off screen NOW; the flush and the confirming read follow. The
       // snapshot is what puts it back if the server refuses.
       const removed = cellStore.applyOptimisticSourceRemove(cellId)
-      // One batch, in order: re-point the row that pointed at this one, drop
-      // any target rows, then the source row itself. The two chain-mutating
-      // events sit on DIFFERENT cells, so neither waits on the other's head.
+      // Two events: re-point the row that pointed at this one, then delete the
+      // source row. They sit on DIFFERENT cells, so neither waits on the
+      // other's head.
       //
-      // A SOURCE-LESS row (see getRemovalPlan) sends only the target deletes:
-      // there is no source row to delete and nothing anchored to it to mend,
-      // and a delete naming a source row the server does not have would be a
-      // no-op that still claimed a chain slot.
-      const emitted = await enqueueEvents([
+      // THE TRANSLATIONS ARE NOT LISTED HERE any more. This used to batch one
+      // parent-less `target.cell.delete` per lane, which applied
+      // unconditionally while the source delete beside it still had to win its
+      // chain slot — so a stale removal took the translations and left the
+      // cell. The server's cascade now drops every lane's target row as part
+      // of `source.cell.delete`, under the same gate, so the two can no longer
+      // disagree. It also keeps the whole removal inside the one permission
+      // (`cellEditingFloor`) that is supposed to govern it: `target.cell.delete`
+      // floors at CONTRIBUTOR and is not tier-gated, so listing it here made
+      // removal impossible for the Commenter and Reviewer tiers this round
+      // added — the throw came before anything was enqueued, so the row left
+      // the screen with no request and no rollback.
+      //
+      // A SOURCE-LESS row (see getRemovalPlan) is the exception: there is no
+      // source event to carry the cascade, so its lanes are named explicitly.
+      let emitted: Awaited<ReturnType<typeof enqueueEvents>>
+      try {
+        emitted = await enqueueEvents([
         ...(plan.successor
           ? [
               {
@@ -2181,17 +2194,16 @@ export function ProjectWorkspace() {
               },
             ]
           : []),
-        ...plan.targetLangs.map((lang) => ({
-          kind: "target.cell.delete" as const,
-          projectId: project.id!,
-          fileId: activeFileId,
-          cellId,
-          parentId: null,
-          author: currentUsername,
-          payload: lang ? { targetLang: lang } : {},
-        })),
         ...(plan.sourceless
-          ? []
+          ? plan.targetLangs.map((lang) => ({
+              kind: "target.cell.delete" as const,
+              projectId: project.id!,
+              fileId: activeFileId,
+              cellId,
+              parentId: null,
+              author: currentUsername,
+              payload: lang ? { targetLang: lang } : {},
+            }))
           : [
               {
                 kind: "source.cell.delete" as const,
@@ -2203,7 +2215,18 @@ export function ProjectWorkspace() {
                 payload: {},
               },
             ]),
-      ])
+        ])
+      } catch (err) {
+        // `enqueueEvents` mirrors the role floors and throws on the FIRST input
+        // it refuses, before writing any of them — so nothing was queued, no
+        // flush will run, and neither refusal callback can fire. Without this
+        // the row simply stayed gone from the screen while the server kept it,
+        // behind a freshness floor no refetch could clear, and with no message.
+        console.error("[handleRemoveLine] refused before enqueue:", err)
+        cellStore.rollbackOptimisticSourceChange(cellId, removed)
+        toast.add({ type: "error", title: t("editor.removeCell.failedToast") })
+        return
+      }
       const staleIds = new Set<string>()
       await flushOutboxBatch({
         getTokenForFile: getTokenForProjectFile,

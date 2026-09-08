@@ -19,7 +19,7 @@ import type { RawEvent } from "../events/types"
 
 const SECRET = "test-secret-value-for-cell-editing"
 
-type Tier = "none" | "maintainer" | "project_lead" | "contributor"
+type Tier = "none" | "commenter" | "reviewer" | "contributor" | "project_lead" | "maintainer"
 
 /** project_settings -> the tier; cells -> the user-inserted delete guard. */
 function makeDb(options: { tier?: Tier | null; userInserted?: boolean }): AquillaDb {
@@ -186,9 +186,41 @@ describe("the tier is a role floor", () => {
     expect(result.ok).toBe(true)
   })
 
-  it("still refuses a viewer at the lowest tier — the static floor holds underneath", async () => {
+  // The two rungs below contributor, added when the list was rebuilt on the
+  // product's standard ladder (Matthew's review, Sam approved 2026-09-08).
+  // They only mean anything because the static floor in role-policy.ts dropped
+  // to COMMENTER at the same time — at CONTRIBUTOR the check at the top of
+  // authorize() refused these callers before the tier was ever consulted, so
+  // the two tiers would have been options that admitted nobody.
+  it("admits a commenter at the commenter tier", async () => {
     const result = await authorize(
-      await tokenFor(ROLE.VIEWER), ev("source.cell.create"), SECRET, makeDb({ tier: "contributor" }),
+      await tokenFor(ROLE.COMMENTER), ev("source.cell.create"), SECRET, makeDb({ tier: "commenter" }),
+    )
+    expect(result.ok).toBe(true)
+  })
+
+  it("refuses that same commenter at the reviewer tier — the tier really is a floor", async () => {
+    const result = await authorize(
+      await tokenFor(ROLE.COMMENTER), ev("source.cell.create"), SECRET, makeDb({ tier: "reviewer" }),
+    )
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.reason).toMatch(/role too low/)
+  })
+
+  it("admits a reviewer at the reviewer tier", async () => {
+    const result = await authorize(
+      await tokenFor(ROLE.REVIEWER), ev("source.cell.create"), SECRET, makeDb({ tier: "reviewer" }),
+    )
+    expect(result.ok).toBe(true)
+  })
+
+  it("still refuses a viewer at the LOWEST tier — the static floor holds underneath", async () => {
+    // A viewer is below the tier as well, so this only proves the static floor
+    // while the tier is the lowest one that exists. That is now "commenter"
+    // (200), which is exactly the static floor — so the caller refused here is
+    // refused by role-policy.ts, before the settings row is read at all.
+    const result = await authorize(
+      await tokenFor(ROLE.VIEWER), ev("source.cell.create"), SECRET, makeDb({ tier: "commenter" }),
     )
     expect(result.ok).toBe(false)
   })
@@ -197,6 +229,19 @@ describe("the tier is a role floor", () => {
     // Same convention as the timing lock and the self-assign carve-out.
     const result = await authorize(await tokenFor(ROLE.CONTRIBUTOR), ev("source.cell.create"), SECRET)
     expect(result.ok).toBe(true)
+  })
+
+  it("that fallback floor is COMMENTER, not CONTRIBUTOR — a commenter passes it", async () => {
+    // With the tier gate skipped, what is left is role-policy.ts alone. This
+    // is the assertion that fails if the static floor is ever put back up:
+    // the commenter and reviewer tiers would stop admitting anyone.
+    const result = await authorize(await tokenFor(ROLE.COMMENTER), ev("source.cell.create"), SECRET)
+    expect(result.ok).toBe(true)
+  })
+
+  it("...and a VIEWER still does not pass it — the floor dropped, it did not vanish", async () => {
+    const result = await authorize(await tokenFor(ROLE.VIEWER), ev("source.cell.create"), SECRET)
+    expect(result.ok).toBe(false)
   })
 })
 

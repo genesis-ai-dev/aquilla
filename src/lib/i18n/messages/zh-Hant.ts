@@ -1541,7 +1541,6 @@ export const zh_Hant: Catalog = {
   "audio.voice.lively": "活潑",
   "audio.voice.knowledgeable": "博學",
   "audio.voice.warm": "溫暖",
-  "audio.provider.omnivoiceHint": "在我們的伺服器上執行。不需要金鑰或下載；用量以雲端計量。支援以參考錄音複製語音。",
   "audio.provider.geminiHint": "需自備 Google AI 金鑰。可用文字描述調整，語音品質高。",
   "audio.provider.kokoroHint": "一次性下載本機模型後，即可在瀏覽器中執行。",
   "audio.provider.mmsHintSherpa": "從 Sherpa-ONNX MMS 鏡像載入的瀏覽器本機語音。",

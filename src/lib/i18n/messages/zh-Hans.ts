@@ -1541,7 +1541,6 @@ export const zh_Hans: Catalog = {
   "audio.voice.lively": "活泼",
   "audio.voice.knowledgeable": "博学",
   "audio.voice.warm": "温暖",
-  "audio.provider.omnivoiceHint": "在我们的服务器上运行。不需要密钥或下载；用量以云端计量。支持以参考录音复制语音。",
   "audio.provider.geminiHint": "需自备 Google AI 密钥。可用文字描述调整，语音质量高。",
   "audio.provider.kokoroHint": "一次性下载本机模型后，即可在浏览器中运行。",
   "audio.provider.mmsHintSherpa": "从 Sherpa-ONNX MMS 镜像加载的浏览器本机语音。",

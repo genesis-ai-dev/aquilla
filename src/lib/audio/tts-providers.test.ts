@@ -90,7 +90,6 @@ describe("TTS provider normalization", () => {
     const hint = audio.keys["audio.provider.inworldHint"]
     expect(hint).toMatch(/TTS 2 Flash/)
     expect(hint).toMatch(/Highest uses Inworld TTS 2/)
-    expect(audio.keys["audio.provider.omnivoiceHint"]).toBe(hint)
   })
 
   it("marks only cloud engines as cloning-capable", () => {

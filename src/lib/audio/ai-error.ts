@@ -143,7 +143,6 @@ export function categorizeAiError(rawMessage: string): ActionableError {
   // not a missing Google key; sending people to Gemini settings is a lie.
   if (
     m.includes("this line uses inworld") ||
-    m.includes("this line uses omnivoice") ||
     m.includes("tts not configured") ||
     (m.includes("voice/tts") && (status === 503 || m.includes("not configured")))
   ) {
@@ -157,8 +156,6 @@ export function categorizeAiError(rawMessage: string): ActionableError {
   if (
     m.includes("inworld tts failed") ||
     m.includes("inworld tts couldn't generate") ||
-    m.includes("omnivoice tts failed") ||
-    m.includes("omnivoice couldn't generate") ||
     m.includes("voice/tts failed")
   ) {
     return {

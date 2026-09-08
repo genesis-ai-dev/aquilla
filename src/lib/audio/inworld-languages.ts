@@ -103,9 +103,9 @@ export function preferListedInworldLanguage(code: string): string {
 }
 
 /**
- * Persist-time mapping for OmniVoice → Inworld: ISO-639-3, BCP-47, 2-letter
- * codes, and catalog display names (`French` → `fr-FR`). Unmapped labels
- * (`Grade 7 English`) return undefined so the caller can keep the original.
+ * Loose persist-time mapping: ISO-639-3, BCP-47, 2-letter codes, and catalog
+ * display names (`French` → `fr-FR`). Unmapped labels (`Grade 7 English`)
+ * return undefined so the caller can keep the original.
  */
 export function toInworldLanguageLoose(value: string | undefined): string | undefined {
   const direct = toInworldLanguage(value)

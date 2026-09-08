@@ -18,8 +18,6 @@
 // Supported languages:
 //   GET https://api.inworld.ai/voices/v1/supportedLanguages
 //
-// AQU-1189: this is the commercial replacement for Modal OmniVoice (CC-BY-NC weights).
-
 export const DEFAULT_INWORLD_API_BASE = "https://api.inworld.ai"
 export const DEFAULT_INWORLD_TTS_MODEL = "inworld-tts-2-flash"
 export const INWORLD_TTS_MODEL_HIGHEST = "inworld-tts-2"

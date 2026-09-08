@@ -92,9 +92,7 @@ describe("categorizeAiError — the audio failures (AQU-646 stage 4c)", () => {
   // THE ORDERING TEST. Inworld is the default engine and answers 503 for
   // this, so the moment brackets parse, the generic 5xx branch would claim it
   // and tell the user to try again in a moment — advice that can never come
-  // true, on the most likely voice failure there is. (AQU-1189 renamed the
-  // category from omnivoice-not-configured to hosted-tts-not-configured; the
-  // ordering guarantee is the same.)
+  // true, on the most likely voice failure there is.
   it("calls an unconfigured voice service what it is, not a temporary outage", () => {
     const result = categorizeAiError("voice/tts failed (503): TTS not configured")
     expect(result.category).toBe("hosted-tts-not-configured")
@@ -139,13 +137,6 @@ describe("categorizeAiError — names the TTS engine that failed", () => {
     const result = categorizeAiError(raw)
     expect(result.category).toBe("hosted-tts-not-configured")
     expect(result.title).toBe("Inworld TTS isn't configured")
-  })
-
-  it("still recognizes a leftover OmniVoice error string as hosted TTS", () => {
-    const raw =
-      "This line uses OmniVoice, not Gemini. Hosted TTS isn't wired on this server — a Gemini API key will not fix it."
-    const result = categorizeAiError(raw)
-    expect(result.category).toBe("hosted-tts-not-configured")
   })
 
   it("names Inworld on a later upstream failure", () => {

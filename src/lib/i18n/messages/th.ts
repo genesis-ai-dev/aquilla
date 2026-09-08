@@ -1267,7 +1267,6 @@ export const th: Catalog = {
   "audio.voice.lively": "ชีวชีวะ",
   "audio.voice.knowledgeable": "มีความรู้",
   "audio.voice.warm": "อบอุ่น",
-  "audio.provider.omnivoiceHint": "ทำงานบนเซิร์ฟเวอร์ของเรา ไม่มีคีย์หรือการดาวน์โหลด การใช้งานวัดแบบคลาวด์ สนับสนุนการโคลนเสียงจากการบันทึกอ้างอิง",
   "audio.provider.geminiHint": "BYOK Google AI key เสียงที่เขียนได้คุณภาพสูง",
   "audio.provider.kokoroHint": "ทำงานในเบราว์เซอร์หลังจากการดาวน์โหลดโมเดลในเครื่องครั้งเดียว",
   "audio.provider.mmsHintSherpa": "เสียงเบราว์เซอร์ในเครื่องที่โหลดจากมิเรอร์ Sherpa-ONNX MMS",

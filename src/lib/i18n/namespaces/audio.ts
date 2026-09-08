@@ -419,8 +419,6 @@ export const audio = defineNamespace({
     // sentence is keyed here.)
     "audio.provider.inworldHint":
       "Runs on our servers. Standard uses Inworld TTS 2 Flash; Highest uses Inworld TTS 2. No user API key; usage is cloud-metered. Supports voice cloning from a reference recording.",
-    "audio.provider.omnivoiceHint":
-      "Runs on our servers. Standard uses Inworld TTS 2 Flash; Highest uses Inworld TTS 2. No user API key; usage is cloud-metered. Supports voice cloning from a reference recording.",
     "audio.provider.geminiHint": "BYOK Google AI key. Promptable, high-quality voices.",
     "audio.provider.kokoroHint": "Runs in-browser after a one-time local model download.",
     "audio.provider.mmsHintSherpa": "Local browser voices loaded from the Sherpa-ONNX MMS mirror.",
@@ -466,8 +464,6 @@ export const audio = defineNamespace({
     "audio.aiError.geminiFailedTitle": "Gemini TTS failed",
     "audio.aiError.inworldNotConfiguredTitle": "Inworld TTS isn't configured",
     "audio.aiError.inworldFailedTitle": "Inworld TTS failed",
-    "audio.aiError.omnivoiceNotConfiguredTitle": "Inworld TTS isn't configured",
-    "audio.aiError.omnivoiceFailedTitle": "Inworld TTS failed",
     "audio.aiError.seedVcNotConfiguredTitle": "Voice cloning isn't configured",
     "audio.aiError.seedVcFailedTitle": "Voice cloning failed",
     "audio.aiError.signInRequiredTitle": "Sign in required",
@@ -2145,11 +2141,6 @@ export const audio = defineNamespace({
           "(faster) and Highest is TTS 2. No user API key, usage-metered, and it " +
           "supports cloning from a reference clip.",
       },
-      "audio.provider.omnivoiceHint": {
-        description:
-          "Legacy alias of audio.provider.inworldHint kept so older catalogs still " +
-          "resolve. Same meaning: hosted Inworld TTS 2 and Flash, no user key, clone-capable.",
-      },
       "audio.provider.geminiHint": {
         description:
           "Tooltip on the Gemini engine card in the TTS engine picker. 'BYOK' = " +
@@ -2319,16 +2310,6 @@ export const audio = defineNamespace({
         description:
           "Popover heading when Inworld TTS was configured but the synthesize " +
           "call itself failed (upstream vendor error).",
-      },
-      "audio.aiError.omnivoiceNotConfiguredTitle": {
-        description:
-          "Legacy alias of audio.aiError.inworldNotConfiguredTitle. Same heading: " +
-          "hosted Inworld TTS is not wired on this server.",
-      },
-      "audio.aiError.omnivoiceFailedTitle": {
-        description:
-          "Legacy alias of audio.aiError.inworldFailedTitle. Same heading: " +
-          "hosted Inworld TTS synthesize failed.",
       },
       "audio.aiError.seedVcNotConfiguredTitle": {
         description:

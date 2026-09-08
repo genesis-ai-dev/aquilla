@@ -1271,7 +1271,6 @@ export const mfa: Catalog = {
   "audio.voice.lively": "Meriah",
   "audio.voice.knowledgeable": "Berpengetahuan",
   "audio.voice.warm": "Hangat",
-  "audio.provider.omnivoiceHint": "Berjalan di pelayan kami. Tiada kunci atau muat turun; penggunaan diukur awan. Menyokong duplikasi suara daripada perakaman rujukan.",
   "audio.provider.geminiHint": "Kunci Google AI BYOK. Suara yang boleh diminta, berkualiti tinggi.",
   "audio.provider.kokoroHint": "Berjalan dalam pelayar selepas satu kali muat turun model setempat.",
   "audio.provider.mmsHintSherpa": "Suara pelayar setempat dimuatkan daripada cermin Sherpa-ONNX MMS.",

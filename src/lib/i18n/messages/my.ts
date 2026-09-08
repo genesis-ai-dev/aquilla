@@ -1268,7 +1268,6 @@ export const my: Catalog = {
   "audio.voice.lively": "ရှင်သန်",
   "audio.voice.knowledgeable": "အသိအမြင်ရည်ရွယ်",
   "audio.voice.warm": "နွေးထွေး",
-  "audio.provider.omnivoiceHint": "ကျွန်ုပ်တို့၏ဆာဗာများတွင် လည်ပတ်သည်။ သော့သို့မဟုတ် ဆွဲချခြင်းမလိုအပ်။ အသုံးပြုမှုကို cloud-meter ကဖြင့်သုံးသပ်သည်။ အသံကုန်းအကူးပြောင်းခြင်းကို ထောက်ခံသည်။",
   "audio.provider.geminiHint": "သင့်ကိုယ်ပိုင် Google AI key။ အဆင့်မြင့်သောအသံများ။",
   "audio.provider.kokoroHint": "တစ်ကြိမ်သည်သည်ဆွဲချခြင်းပြီးနောက် အဝါကစ်ပြင်သစ်ရှိ လည်ပတ်သည်။",
   "audio.provider.mmsHintSherpa": "Sherpa-ONNX MMS အကျင့်မှ အဝါကစ်ပြင်သစ်အသံများ။",

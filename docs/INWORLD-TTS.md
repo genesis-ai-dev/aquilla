@@ -2,9 +2,7 @@
 
 Aquilla's default cloud TTS / zero-shot clone engine is **Inworld TTS 2**
 (`inworld-tts-2`). New voices default to Highest quality; Standard selects
-Flash (`inworld-tts-2-flash`). OmniVoice weights are CC-BY-NC and must not run
-for paying orgs. The Modal OmniVoice app (`infra/modal/omnivoice_app.py`) is
-**non-commercial / unpaid-research only** and is not called by sync-worker.
+Flash (`inworld-tts-2-flash`).
 
 ## Where to put the API key
 
@@ -128,7 +126,7 @@ ISO/BCP-47 codes skip the dropdown.
 
 Legacy project voices with `provider: "omnivoice"` are rewritten to Inworld
 the first time a project is opened (`useProjectTts`): the stored provider
-becomes `inworld`, OmniVoice language tags (`eng`, `French`, `en`) become
+becomes `inworld`, leftover language tags (`eng`, `French`, `en`) become
 Inworld BCP-47 (`en-US`, `fr-FR`), and empty catalog names become Dennis.
-Runtime still remaps unread copies so generate never hits Modal (same hosted
-path, same clone-from-reference flow).
+Runtime still remaps unread copies so generate uses the hosted Inworld path
+(same clone-from-reference flow).

@@ -1,9 +1,9 @@
 // One-time persist of legacy OmniVoice TTS settings onto Inworld (AQU-1189).
 //
 // Runtime still remaps `omnivoice` → `inworld` (`effectiveTtsProvider`) so a
-// blocked/offline save cannot strand generate on Modal. This rewrite is what
-// actually clears the stored id: project provider, per-voice provider, and
-// language tags OmniVoice stored as ISO-639-3 / display names.
+// blocked/offline save cannot strand generate on a leftover stored id. This
+// rewrite is what actually clears the stored id: project provider, per-voice
+// provider, and language tags stored as ISO-639-3 / display names.
 
 import type { ProjectTtsSettings, TtsProvider, Voice } from "@/lib/parsers/types"
 import { toInworldLanguageLoose } from "./inworld-languages"

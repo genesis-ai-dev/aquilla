@@ -1,7 +1,6 @@
 // AQU-360 — the per-cell "Generate audio" hover must name the ENGINE that
 // generation will actually use (the resolved voice's provider, falling back
-// to the project's configured provider) — not a stale/hardcoded engine name
-// like "Omni voice" that was never configured.
+// to the project's configured provider) — not a stale/hardcoded engine name.
 
 import { describe, it, expect, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
@@ -32,7 +31,6 @@ describe("CellTtsButton hover label (AQU-360)", () => {
     renderButton({ provider: "mms", voices: [{ id: "v1", name: "Narrator", color: "#000" }], defaultVoiceId: "v1" })
     const btn = screen.getByRole("button")
     expect(btn.getAttribute("aria-label")).toContain("MMS")
-    expect(btn.getAttribute("aria-label")).not.toContain("Omni")
     expect(btn.getAttribute("aria-label")).not.toContain("Gemini")
   })
 
@@ -43,7 +41,7 @@ describe("CellTtsButton hover label (AQU-360)", () => {
 
   it("honors a voice's own provider over the project default", () => {
     renderButton({
-      provider: "omnivoice",
+      provider: "inworld",
       voices: [{ id: "v1", name: "Kid", color: "#000", provider: "kokoro", voiceName: "af_heart" }],
       defaultVoiceId: "v1",
     })

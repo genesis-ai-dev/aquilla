@@ -130,7 +130,7 @@ describe("VoiceLibraryPanel (selector)", () => {
   it("still labels a voice with its own explicit provider, ignoring the project default", () => {
     const onSettingsChange = vi.fn()
     const kokoroVoice = makeVoice({ id: "v-kokoro", name: "Kid", provider: "kokoro", voiceName: "af_heart" })
-    const settings: ProjectTtsSettings = { provider: "omnivoice", voices: [kokoroVoice] }
+    const settings: ProjectTtsSettings = { provider: "inworld", voices: [kokoroVoice] }
     render(
       <VoiceLibraryPanel
         projectId="dev-project"

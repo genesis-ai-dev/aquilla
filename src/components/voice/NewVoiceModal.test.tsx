@@ -381,21 +381,21 @@ const lineTakeCell = {
 
 describe("NewVoiceModal clone reference source tabs", () => {
   it("splits record/upload and reuse-from-a-line into tabs", () => {
-    renderCreate({ provider: "omnivoice", initialMode: "clone" })
+    renderCreate({ provider: "inworld", initialMode: "clone" })
     expect(screen.getByRole("tab", { name: "Reference audio" })).toBeTruthy()
     expect(screen.getByRole("tab", { name: "From a line" })).toBeTruthy()
     expect(screen.getByRole("button", { name: "Add reference" })).toBeTruthy()
   })
 
   it("shows an empty state on From a line when the file has no takes", () => {
-    renderCreate({ provider: "omnivoice", initialMode: "clone" })
+    renderCreate({ provider: "inworld", initialMode: "clone" })
     fireEvent.click(screen.getByRole("tab", { name: "From a line" }))
     expect(screen.getByText(/No line audio yet/)).toBeTruthy()
   })
 
   it("opens From a line when seeded from a cell take", () => {
     renderCreate({
-      provider: "omnivoice",
+      provider: "inworld",
       initialMode: "clone",
       cells: [lineTakeCell],
       seedCellId: "cell-1",
@@ -415,7 +415,7 @@ describe("NewVoiceModal clone reference source tabs", () => {
       attachments: { [`a${i}`]: { url: `frontier-audio://a${i}.webm` } },
     })) as unknown as CellData[]
     renderCreate({
-      provider: "omnivoice",
+      provider: "inworld",
       initialMode: "clone",
       cells,
       seedCellId: "cell-11",
@@ -427,7 +427,7 @@ describe("NewVoiceModal clone reference source tabs", () => {
 
   it("marks the chosen line with a check and generated takes with a sparkle", () => {
     renderCreate({
-      provider: "omnivoice",
+      provider: "inworld",
       initialMode: "clone",
       cells: [
         lineTakeCell,
@@ -462,7 +462,7 @@ describe("NewVoiceModal clone reference source tabs", () => {
     vi.mocked(uploadVoiceReference).mockResolvedValue(undefined)
 
     const { onSave } = renderCreate({
-      provider: "omnivoice",
+      provider: "inworld",
       initialMode: "clone",
       cells: [lineTakeCell],
       seedCellId: "cell-1",
@@ -487,7 +487,7 @@ describe("NewVoiceModal clone reference source tabs", () => {
     vi.mocked(uploadVoiceReference).mockReturnValue(new Promise<void>((resolve) => { finishUpload = resolve }))
 
     renderCreate({
-      provider: "omnivoice",
+      provider: "inworld",
       initialMode: "clone",
       cells: [lineTakeCell],
       seedCellId: "cell-1",
@@ -505,7 +505,7 @@ describe("NewVoiceModal clone reference source tabs", () => {
 
   it("shows a selectable error when lifting a take has no project context", () => {
     renderCreate({
-      provider: "omnivoice",
+      provider: "inworld",
       initialMode: "clone",
       cells: [lineTakeCell],
       seedCellId: "cell-1",

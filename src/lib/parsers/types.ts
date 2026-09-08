@@ -225,7 +225,7 @@ export const AUDIO_MEDIA_STRATEGY_LABELS: Record<AudioMediaStrategy, { nameKey: 
 /**
  * `"omnivoice"` is a persisted legacy id. Opening a project rewrites it to
  * `"inworld"` (language tags included); runtime still remaps unread copies
- * so generate never hits Modal (AQU-1189).
+ * so generate uses hosted Inworld (AQU-1189).
  */
 export type TtsProvider = "inworld" | "omnivoice" | "gemini" | "kokoro" | "mms"
 

@@ -74,8 +74,7 @@ export async function generateAndAttachCellVoice(
 
   const voice = resolveVoice(args.projectTtsSettings, args.cellVoiceId)
   // Resolve the effective engine: a voice with no provider falls back to the
-  // project default (Inworld; legacy "omnivoice" remaps), which must still
-  // route server-side.
+  // project default (Inworld), which must still route server-side.
   const provider = voice.provider ?? resolveTtsProvider(args.projectTtsSettings)
   const getSyncToken = audioSyncTokenFetcherForSession(args.session)
 

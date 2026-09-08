@@ -136,7 +136,7 @@ declare global {
       SEED_VC_TOKEN?: string
       /**
        * Inworld Portal API key for hosted TTS 2 Flash (AQU-1189).
-       * See docs/INWORLD-TTS.md. OmniVoice Modal is not used in production.
+       * See docs/INWORLD-TTS.md.
        */
       INWORLD_API_KEY?: string
       INWORLD_API_BASE?: string

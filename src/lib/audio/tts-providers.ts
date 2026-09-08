@@ -171,10 +171,7 @@ const ISO_639_TO_MMS: Record<string, string> = {
   yo: "yor", yor: "yor",
 }
 
-/**
- * Legacy OmniVoice ids persist on existing projects/voices. Runtime treats them
- * as Inworld so commercial orgs never hit the CC-BY-NC Modal path (AQU-1189).
- */
+/** Unset and leftover `"omnivoice"` ids resolve to Inworld (AQU-1189). */
 export function effectiveTtsProvider(provider: TtsProvider | undefined): TtsProvider {
   if (!provider || provider === "omnivoice") return DEFAULT_TTS_PROVIDER
   return provider

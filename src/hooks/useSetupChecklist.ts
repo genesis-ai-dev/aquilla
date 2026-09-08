@@ -105,7 +105,7 @@ export function deriveAiModelsReady(
   if (provider === "kokoro") return models.kokoro.kind === "ready"
   if (provider === "mms") return models.mms.kind === "ready"
   // Hosted providers (Inworld) need no download or key — the explicit
-  // choice alone completes the step. Legacy "omnivoice" remaps to inworld.
+  // choice alone completes the step.
   return true
 }
 

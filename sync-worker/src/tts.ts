@@ -1,5 +1,5 @@
 // Hosted TTS proxy: synthesize spoken audio for translated cells via Inworld
-// TTS 2 Flash (AQU-1189). OmniVoice / Modal is not called from this worker.
+// TTS 2 Flash (AQU-1189).
 //
 // Mirrors voice-convert.ts in auth, R2 layout, and error-handling patterns.
 // The browser never talks to Inworld directly — it can't hold the API key.

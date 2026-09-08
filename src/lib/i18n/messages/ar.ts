@@ -1268,7 +1268,6 @@ export const ar: Catalog = {
   "audio.voice.lively": "حيوي",
   "audio.voice.knowledgeable": "عارف",
   "audio.voice.warm": "دافئ",
-  "audio.provider.omnivoiceHint": "يعمل على خوادمنا. بدون مفتاح أو تنزيل؛ الاستخدام يُقاس سحابيًا. يدعم استنساخ الصوت من تسجيل مرجعي.",
   "audio.provider.geminiHint": "مفتاح Google AI خاص بك. أصوات قابلة للتحكم وعالية الجودة.",
   "audio.provider.kokoroHint": "يعمل في المتصفح بعد تنزيل نموذج محلي لمرة واحدة.",
   "audio.provider.mmsHintSherpa": "أصوات محلية في المتصفح محملة من مرآة Sherpa-ONNX MMS.",

@@ -1,9 +1,9 @@
 // @vitest-environment node
-import { describe, it, expect, beforeEach, afterEach } from "vitest"
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
-import { parseArgs } from "../main"
+import { parseArgs, withLock, type ProcLike } from "../main"
 import { Scheduler, type SchedulerCtx, type StageFns } from "../loop"
 import { Digest } from "../notify"
 import { DaemonDb, type ProjectRow } from "../db"
@@ -13,6 +13,7 @@ import type { GitLabClient, GitLabProjectLite, SyncClient } from "../http"
 import type { GitLabCredentials } from "../../../src/lib/migrate/gitlab/auth"
 import type { MaterializeResult } from "../stages/materialize"
 import type { PushResult } from "../stages/push"
+import type { RunLock } from "../../../src/lib/migrate/run-lock"
 
 describe("parseArgs", () => {
   it("defaults to the daemon command", () => {
@@ -229,5 +230,114 @@ describe("Scheduler.runForever", () => {
     // No further claims happened after abort — the in-flight push is the only call.
     expect(pushCalls).toBe(1)
     expect(db.getJob(job.id)?.stage).toBe("done")
+  })
+})
+
+describe("withLock", () => {
+  function fakeLock(): RunLock & { acquire: ReturnType<typeof vi.fn>; heartbeat: ReturnType<typeof vi.fn>; release: ReturnType<typeof vi.fn> } {
+    return {
+      acquire: vi.fn(async () => {}),
+      heartbeat: vi.fn(async () => {}),
+      release: vi.fn(async () => {}),
+    } as unknown as RunLock & { acquire: ReturnType<typeof vi.fn>; heartbeat: ReturnType<typeof vi.fn>; release: ReturnType<typeof vi.fn> }
+  }
+
+  function fakeProc(): ProcLike & { handlers: Map<NodeJS.Signals, (sig: NodeJS.Signals) => void>; exit: ReturnType<typeof vi.fn> } {
+    const handlers = new Map<NodeJS.Signals, (sig: NodeJS.Signals) => void>()
+    return {
+      handlers,
+      on: vi.fn((event: NodeJS.Signals, listener: (sig: NodeJS.Signals) => void) => { handlers.set(event, listener) }),
+      off: vi.fn((event: NodeJS.Signals) => { handlers.delete(event) }),
+      exit: vi.fn(() => undefined as never),
+    }
+  }
+
+  it("drains on signal, releases the lock exactly once, then exits 130", async () => {
+    const lock = fakeLock()
+    const proc = fakeProc()
+    let resolveDrain: () => void = () => {}
+    const drainGate = new Promise<void>((resolve) => { resolveDrain = resolve })
+
+    let signalSeen = false
+    const done = withLock(
+      loadConfig(ENV, { home: root }),
+      async () => { await drainGate },
+      { lock, proc, onSignal: () => { signalSeen = true } },
+    )
+
+    await new Promise((r) => setTimeout(r, 0))
+    const sigint = proc.handlers.get("SIGINT")
+    expect(sigint).toBeDefined()
+    sigint!("SIGINT")
+
+    // Signal received (onSignal invoked), but the drain (fn) hasn't resolved yet — no release/exit yet.
+    await new Promise((r) => setTimeout(r, 10))
+    expect(signalSeen).toBe(true)
+    expect(lock.release).not.toHaveBeenCalled()
+    expect(proc.exit).not.toHaveBeenCalled()
+
+    resolveDrain()
+    await done
+    expect(lock.release).toHaveBeenCalledTimes(1)
+    expect(proc.exit).not.toHaveBeenCalled() // no signal-triggered hard exit path here; fn returned normally
+  })
+
+  it("second signal during drain hard-exits immediately, release called at most once", async () => {
+    const lock = fakeLock()
+    const proc = fakeProc()
+    let resolveDrain: () => void = () => {}
+    const drainGate = new Promise<void>((resolve) => { resolveDrain = resolve })
+
+    void withLock(
+      loadConfig(ENV, { home: root }),
+      async () => { await drainGate },
+      { lock, proc, onSignal: () => {} },
+    )
+
+    await new Promise((r) => setTimeout(r, 0))
+    const sigint = proc.handlers.get("SIGINT")!
+    sigint("SIGINT") // first signal -> starts draining, onSignal is a no-op so drainGate never resolves on its own
+    await new Promise((r) => setTimeout(r, 5))
+    sigint("SIGINT") // second signal -> hard exit
+
+    await new Promise((r) => setTimeout(r, 10))
+    expect(proc.exit).toHaveBeenCalledWith(130)
+    expect(lock.release).toHaveBeenCalledTimes(1)
+
+    resolveDrain()
+  })
+
+  it("normal completion releases the lock exactly once, removes handlers, and never exits", async () => {
+    const lock = fakeLock()
+    const proc = fakeProc()
+
+    await withLock(loadConfig(ENV, { home: root }), async () => {}, { lock, proc })
+
+    expect(lock.release).toHaveBeenCalledTimes(1)
+    expect(proc.off).toHaveBeenCalledWith("SIGINT", expect.any(Function))
+    expect(proc.off).toHaveBeenCalledWith("SIGTERM", expect.any(Function))
+    expect(proc.exit).not.toHaveBeenCalled()
+  })
+
+  it("keeps heartbeating the lock while draining", async () => {
+    vi.useFakeTimers()
+    try {
+      const lock = fakeLock()
+      const proc = fakeProc()
+      let resolveDrain: () => void = () => {}
+      const drainGate = new Promise<void>((resolve) => { resolveDrain = resolve })
+
+      const done = withLock(loadConfig(ENV, { home: root }), async () => { await drainGate }, { lock, proc })
+
+      await vi.advanceTimersByTimeAsync(5 * 60_000)
+      expect(lock.heartbeat).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(5 * 60_000)
+      expect(lock.heartbeat).toHaveBeenCalledTimes(2)
+
+      resolveDrain()
+      await done
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

@@ -104,17 +104,30 @@ function acquireLock(config: DaemonConfig): RunLock | null {
  * heartbeat keeps running and the lock is released exactly once, after `fn`
  * resolves. A second signal during that drain force-exits right away.
  */
-async function withLock(
+export interface ProcLike {
+  on(event: NodeJS.Signals, listener: (sig: NodeJS.Signals) => void): unknown
+  off(event: NodeJS.Signals, listener: (sig: NodeJS.Signals) => void): unknown
+  exit(code?: number): never
+}
+
+export async function withLock(
   config: DaemonConfig,
   fn: (release: () => Promise<void>) => Promise<void>,
-  opts: { onSignal?: (sig: NodeJS.Signals) => void } = {},
+  opts: {
+    onSignal?: (sig: NodeJS.Signals) => void
+    /** Test seam: override the acquired lock (bypasses R2/config.dryRun). `undefined` uses `acquireLock(config)`. */
+    lock?: RunLock | null
+    /** Test seam: override signal wiring and process.exit. Defaults to the real `process`. */
+    proc?: ProcLike
+  } = {},
 ): Promise<void> {
-  const lock = acquireLock(config)
+  const proc: ProcLike = opts.proc ?? (process as unknown as ProcLike)
+  const lock = opts.lock !== undefined ? opts.lock : acquireLock(config)
   if (lock) {
     try {
       await lock.acquire()
     } catch (e) {
-      if (e instanceof LockHeldError) { console.error(`✗ ${e.message}`); process.exit(2) }
+      if (e instanceof LockHeldError) { console.error(`✗ ${e.message}`); proc.exit(2) }
       throw e
     }
     log(`run lock acquired: ${DEST_BUCKET}/${LOCK_KEY} (holder ${lockHolder()}, lease ${LOCK_TTL_MS / 60_000}m)`)
@@ -127,7 +140,7 @@ async function withLock(
 
   let draining = false
   const hardExit = (sig: NodeJS.Signals): void => {
-    void release().finally(() => process.exit(sig === "SIGINT" ? 130 : 143))
+    void release().finally(() => proc.exit(sig === "SIGINT" ? 130 : 143))
   }
   const onSignal = (sig: NodeJS.Signals): void => {
     if (!opts.onSignal) { hardExit(sig); return }
@@ -136,13 +149,13 @@ async function withLock(
     log(`${sig} received — draining in-flight work before releasing the lock`)
     opts.onSignal(sig)
   }
-  process.on("SIGINT", onSignal)
-  process.on("SIGTERM", onSignal)
+  proc.on("SIGINT", onSignal)
+  proc.on("SIGTERM", onSignal)
   try {
     await fn(release)
   } finally {
-    process.off("SIGINT", onSignal)
-    process.off("SIGTERM", onSignal)
+    proc.off("SIGINT", onSignal)
+    proc.off("SIGTERM", onSignal)
     await release()
   }
 }

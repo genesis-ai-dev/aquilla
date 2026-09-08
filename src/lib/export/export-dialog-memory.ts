@@ -31,7 +31,7 @@ export type SubtitleTarget = "subtitle" | "audio"
 
 export interface ExportDialogMemory {
   section: ExportSection | null
-  audioMode: "audio-by-character" | "audio-by-line"
+  audioMode: "audio-by-character" | "audio-by-line" | "audio-chapter"
   subtitleTarget: SubtitleTarget
   /** The chosen format inside the third section. */
   foldFormat: string | null
@@ -60,6 +60,7 @@ const SECTIONS: readonly ExportSection[] = ["audio", "subtitle", "fold"]
 const AUDIO_MODES: readonly ExportDialogMemory["audioMode"][] = [
   "audio-by-character",
   "audio-by-line",
+  "audio-chapter",
 ]
 const TARGETS: readonly SubtitleTarget[] = ["subtitle", "audio"]
 

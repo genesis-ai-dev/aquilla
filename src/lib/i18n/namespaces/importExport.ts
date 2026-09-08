@@ -506,6 +506,21 @@ export const importExport = defineNamespace({
       "One file per recording, numbered in playing order and named by character. Each WAV carries " +
       "a broadcast timestamp a DAW can place from, and a manifest.csv lists every file with its " +
       "timecode. For reviewing and re-recording individual lines.",
+    "importExport.format.audioChapter.label": "Chapter audio",
+    "importExport.format.audioChapter.description":
+      "One continuous WAV per chapter, with the verse recordings joined end to end in verse " +
+      "order. For community check — play the chapter straight through outside the editor.",
+    "importExport.dialog.audioChapterModeLabel": "By chapter",
+    "importExport.dialog.audioChapterModeHint":
+      "One file per chapter, verses joined end to end in order. For community check — play the " +
+      "chapter straight through.",
+    "importExport.dialog.chapterStitchPreview":
+      "{clips} verses recorded · {chapters} chapters",
+    "importExport.status.stitchingChapterAudio": "Stitching chapter audio…",
+    "importExport.status.exportedAudioChapters": plural({
+      one: "Exported {count} chapter as a continuous audio file.",
+      other: "Exported {count} chapters as continuous audio files.",
+    }),
     "importExport.format.characterSheets.label": "Character sheets (corrected)",
     "importExport.format.characterSheets.description":
       "Both character spreadsheets back — subtitle and audio — in her own columns, with every " +
@@ -1475,6 +1490,20 @@ export const importExport = defineNamespace({
       "importExport.status.exportedAudioByCharacterWithSkipped": {
         description: "Success-status message after an audio-by-character export where some clips were skipped (missing audio).",
         placeholders: { count: "Number of clips skipped." },
+      },
+      "importExport.dialog.chapterStitchPreview": {
+        description:
+          "One-line preview under the chapter-audio export option, counting how many verse " +
+          "recordings will be stitched and how many chapter files that produces.",
+        placeholders: {
+          clips: "Number of verse recordings that will be included.",
+          chapters: "Number of chapter files the export will produce.",
+        },
+      },
+      "importExport.status.exportedAudioChapters": {
+        description:
+          "Success-status message after stitching verse recordings into one continuous file per chapter.",
+        placeholders: { count: "Number of chapter audio files exported." },
       },
       "importExport.status.couldNotLoadProject": {
         description: "Error-status message when loading all project files for a project-scope export fails.",

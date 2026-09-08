@@ -23,6 +23,7 @@ import { FrontierForgotPasswordForm } from "./git-import/FrontierForgotPasswordF
 import { cn } from "@/lib/utils"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 type AuthMode = "login" | "signup" | "forgot"
@@ -300,14 +301,14 @@ const ENV_HINT: string | null = (() => {
   return mode
 })()
 
-interface EntrySummary {
+export interface EntrySummary {
   key: string
   username: string
   email?: string
   active: boolean
 }
 
-function AccountMenuEntry({
+export function AccountMenuEntry({
   summary,
   onSelect,
 }: {
@@ -324,12 +325,9 @@ function AccountMenuEntry({
     >
       <InitialsAvatar name={summary.username} size="xs" shape="square" menuSafe />
       <div className="flex min-w-0 flex-col gap-0.5">
-        <div className="flex min-w-0 items-baseline gap-2">
-          <span className="truncate font-medium">{summary.username}</span>
-          {summary.email && (
-            <span className="min-w-0 truncate text-xs text-muted-foreground">{summary.email}</span>
-          )}
-        </div>
+        <AppTooltip content={summary.email} side="right" align="start">
+          <span className="min-w-0 break-words font-medium">{summary.username}</span>
+        </AppTooltip>
         {ENV_HINT && (
           <span className="truncate text-xs text-amber-600 dark:text-amber-500">{ENV_HINT}</span>
         )}

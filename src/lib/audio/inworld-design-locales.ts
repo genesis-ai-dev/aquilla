@@ -1,4 +1,4 @@
-// Language + accent for Inworld Voice Design (freeform).
+// Language + accent for Inworld Voice Design (freeform and structured).
 //
 // Inworld takes a single `languageCode` (`en-US`, `en-scottish`, `kbt`). The
 // Portal splits GET /voices/v1/supportedLanguages into Language (family) and

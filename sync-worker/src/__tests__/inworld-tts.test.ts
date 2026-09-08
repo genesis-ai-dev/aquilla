@@ -10,6 +10,7 @@ import {
   resolveInworldModelId,
   clampInworldSpeakingRate,
   clampInworldDesignSamples,
+  parseInworldDesignPromptMode,
   DEFAULT_INWORLD_TTS_MODEL,
   INWORLD_TTS_MODEL_HIGHEST,
 } from "../inworld-tts"
@@ -127,5 +128,16 @@ describe("voice design helpers", () => {
     expect(clampInworldDesignSamples(2)).toBe(2)
     expect(clampInworldDesignSamples(9)).toBe(3)
     expect(clampInworldDesignSamples(0)).toBe(1)
+  })
+
+  it("accepts Inworld designPromptMode enum values", () => {
+    expect(parseInworldDesignPromptMode("DESIGN_PROMPT_MODE_VERBATIM")).toBe(
+      "DESIGN_PROMPT_MODE_VERBATIM",
+    )
+    expect(parseInworldDesignPromptMode("DESIGN_PROMPT_MODE_ASSISTED")).toBe(
+      "DESIGN_PROMPT_MODE_ASSISTED",
+    )
+    expect(parseInworldDesignPromptMode("verbatim")).toBeUndefined()
+    expect(parseInworldDesignPromptMode(undefined)).toBeUndefined()
   })
 })

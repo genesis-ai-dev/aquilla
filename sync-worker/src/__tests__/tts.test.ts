@@ -774,6 +774,49 @@ describe("POST /api/v1/voice/tts/design", () => {
       languageCode: "en-GB",
     })
   })
+
+  it("forwards DESIGN_PROMPT_MODE_VERBATIM for a structured profile", async () => {
+    const { db } = makeStubDb()
+    const calls = stubInworld({
+      wav: makeWav(1),
+      designPreviews: [
+        { voiceId: "ws__design-voice-a", previewText: "Hello", previewAudio: "UklGRQ==" },
+      ],
+    })
+    const token = await makeToken()
+    const prompt = [
+      "dialect: British English",
+      "gender: male",
+      "age: middle-aged",
+      "emotion: ",
+      "tone: warm, neutral",
+      "pitch: ",
+      "volume: ",
+      "speed: steady",
+      "clarity: ",
+      "fluency: ",
+      "personality: ",
+      "texture: ",
+      "environment: ",
+    ].join("\n")
+    const res = (await call(
+      makeEnv(db),
+      jsonPost("/api/v1/voice/tts/design", {
+        projectId: "p1",
+        designPrompt: prompt,
+        designPromptMode: "DESIGN_PROMPT_MODE_VERBATIM",
+        language: "en-GB",
+      }, token),
+    ))!
+    expect(res.status).toBe(200)
+    expect(calls[0]!.body).toEqual({
+      designPrompt: prompt,
+      previewText: INWORLD_DESIGN_DEFAULT_PREVIEW_TEXT,
+      voiceDesignConfig: { numberOfSamples: 3 },
+      languageCode: "en-GB",
+      designPromptMode: "DESIGN_PROMPT_MODE_VERBATIM",
+    })
+  })
 })
 
 describe("POST /api/v1/voice/tts/publish", () => {

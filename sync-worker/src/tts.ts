@@ -26,6 +26,7 @@ import {
   cloneInworldVoice,
   designInworldVoice,
   listInworldVoices,
+  parseInworldDesignPromptMode,
   publishInworldVoice,
   synthesizeInworldSpeech,
   type InworldTtsConfig,
@@ -380,7 +381,7 @@ function bearerToken(request: Request): string | null {
 /**
  * POST /api/v1/voice/tts/design
  *
- * JSON body: { projectId, designPrompt, previewText?, language?, numberOfSamples? }
+ * JSON body: { projectId, designPrompt, designPromptMode?, previewText?, language?, numberOfSamples? }
  * Returns { previewVoices: [{ voiceId, previewText, previewAudio }] }.
  * Preview audio is base64 — not written to R2.
  */
@@ -396,6 +397,7 @@ async function handleDesignTtsVoice(request: Request, env: TtsEnv): Promise<Resp
   let body: {
     projectId?: string
     designPrompt?: string
+    designPromptMode?: string
     previewText?: string
     language?: string
     numberOfSamples?: unknown
@@ -424,11 +426,13 @@ async function handleDesignTtsVoice(request: Request, env: TtsEnv): Promise<Resp
   }
 
   try {
+    const designPromptMode = parseInworldDesignPromptMode(body.designPromptMode)
     const previewVoices = await designInworldVoice(config, {
       designPrompt,
       ...(body.previewText !== undefined ? { previewText: body.previewText } : {}),
       ...(body.language !== undefined ? { language: body.language } : {}),
       ...(body.numberOfSamples !== undefined ? { numberOfSamples: Number(body.numberOfSamples) } : {}),
+      ...(designPromptMode ? { designPromptMode } : {}),
     })
     return Response.json({ previewVoices })
   } catch (err) {

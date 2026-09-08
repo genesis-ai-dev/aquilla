@@ -74,7 +74,12 @@ on each name when the project has more than one lane.
 
 On the TTS tab with the Inworld engine, nested **Prebuilt voice** /
 **Voice design** tabs pick the source. Prebuilt is the catalog dropdown.
-Voice design describes a voice in English (30–1000 characters), picks a
+Voice design has **Freeform** and **Structured** modes (Inworld Portal's
+tabs). Freeform describes a voice in English (30–1000 characters). Structured
+edits the exact profile the model receives as `key: value` lines (`dialect`,
+`gender`, `age`, `emotion`, `tone`, `pitch`, `volume`, `speed`, `clarity`,
+`fluency`, `personality`, `texture`, `environment`) and posts
+`designPromptMode: DESIGN_PROMPT_MODE_VERBATIM`. Both modes pick a
 **Language** and **Accent** (one `languageCode` such as `en-US` /
 `en-scottish` / `kbt` — Inworld has no separate accent field), and a preview script
 (about 50–400 characters) the samples will speak. Language and Accent come

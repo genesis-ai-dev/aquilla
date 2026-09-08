@@ -28,6 +28,25 @@ export const audio = defineNamespace({
     "audio.newVoice.designPromptHint":
       "Write in English. Include age, gender, accent, pitch, pace, and tone. Under 30 characters rarely works.",
     "audio.newVoice.designPromptTooShort": "Write at least 30 characters so Inworld can shape a voice.",
+    "audio.newVoice.designModeGroupLabel": "Voice design mode",
+    "audio.newVoice.designModeFreeform": "Freeform",
+    "audio.newVoice.designModeStructured": "Structured",
+    "audio.newVoice.designStructuredHint":
+      "The exact profile the model receives. Dialect carries language and accent.",
+    "audio.newVoice.designClearProfile": "Clear",
+    "audio.newVoice.designAttrDialect": "Dialect",
+    "audio.newVoice.designAttrGender": "Gender",
+    "audio.newVoice.designAttrAge": "Age",
+    "audio.newVoice.designAttrEmotion": "Emotion",
+    "audio.newVoice.designAttrTone": "Tone",
+    "audio.newVoice.designAttrPitch": "Pitch",
+    "audio.newVoice.designAttrVolume": "Volume",
+    "audio.newVoice.designAttrSpeed": "Speed",
+    "audio.newVoice.designAttrClarity": "Clarity",
+    "audio.newVoice.designAttrFluency": "Fluency",
+    "audio.newVoice.designAttrPersonality": "Personality",
+    "audio.newVoice.designAttrTexture": "Texture",
+    "audio.newVoice.designAttrEnvironment": "Environment",
     "audio.newVoice.designScriptLabel": "Preview script",
     "audio.newVoice.designScriptHint":
       "The previews speak this. About 50–400 characters in English shapes the voice best.",
@@ -601,6 +620,103 @@ export const audio = defineNamespace({
           "Inline validation under the Voice Design description when the text is " +
           "shorter than 30 characters and Generate is disabled.",
       },
+      "audio.newVoice.designModeGroupLabel": {
+        description:
+          "Accessible group label (not visible text) for the Freeform / Structured " +
+          "tab pair on Voice Design, read by screen readers.",
+      },
+      "audio.newVoice.designModeFreeform": {
+        description:
+          "Tab on Voice Design: describe the voice in plain English. Short noun. " +
+          "Opposite of Structured.",
+        maxLength: 14,
+      },
+      "audio.newVoice.designModeStructured": {
+        description:
+          "Tab on Voice Design: edit the voice profile as one attribute per line " +
+          "(dialect, gender, age, …). Short noun. Opposite of Freeform.",
+        maxLength: 14,
+      },
+      "audio.newVoice.designStructuredHint": {
+        description:
+          "Helper above the Structured Voice Design attribute fields. Explains that " +
+          "this is the exact profile the model receives, and that Dialect carries " +
+          "language and accent.",
+      },
+      "audio.newVoice.designClearProfile": {
+        description:
+          "Button that resets every Structured Voice Design attribute to empty. " +
+          "Short verb.",
+        maxLength: 12,
+      },
+      "audio.newVoice.designAttrDialect": {
+        description:
+          "Label for the Dialect field on Structured Voice Design. The serialized " +
+          "key stays English (dialect:). Short noun.",
+        maxLength: 16,
+      },
+      "audio.newVoice.designAttrGender": {
+        description:
+          "Label for the Gender field on Structured Voice Design. Short noun.",
+        maxLength: 16,
+      },
+      "audio.newVoice.designAttrAge": {
+        description:
+          "Label for the Age field on Structured Voice Design. Short noun.",
+        maxLength: 16,
+      },
+      "audio.newVoice.designAttrEmotion": {
+        description:
+          "Label for the Emotion field on Structured Voice Design. Short noun.",
+        maxLength: 16,
+      },
+      "audio.newVoice.designAttrTone": {
+        description:
+          "Label for the Tone field on Structured Voice Design. Short noun.",
+        maxLength: 16,
+      },
+      "audio.newVoice.designAttrPitch": {
+        description:
+          "Label for the Pitch field on Structured Voice Design. Short noun.",
+        maxLength: 16,
+      },
+      "audio.newVoice.designAttrVolume": {
+        description:
+          "Label for the Volume field on Structured Voice Design. Short noun.",
+        maxLength: 16,
+      },
+      "audio.newVoice.designAttrSpeed": {
+        description:
+          "Label for the Speed field on Structured Voice Design. Short noun.",
+        maxLength: 16,
+      },
+      "audio.newVoice.designAttrClarity": {
+        description:
+          "Label for the Clarity field on Structured Voice Design. Short noun.",
+        maxLength: 16,
+      },
+      "audio.newVoice.designAttrFluency": {
+        description:
+          "Label for the Fluency field on Structured Voice Design. Short noun.",
+        maxLength: 16,
+      },
+      "audio.newVoice.designAttrPersonality": {
+        description:
+          "Label for the Personality field on Structured Voice Design. Short noun.",
+        maxLength: 16,
+      },
+      "audio.newVoice.designAttrTexture": {
+        description:
+          "Label for the Texture field on Structured Voice Design (timbre: smooth, " +
+          "raspy). Short noun.",
+        maxLength: 16,
+      },
+      "audio.newVoice.designAttrEnvironment": {
+        description:
+          "Label for the Environment field on Structured Voice Design (studio, " +
+          "quiet room). Short noun.",
+        maxLength: 16,
+      },
       "audio.newVoice.designScriptLabel": {
         description:
           "Form label above the Voice Design textarea for the spoken preview script " +
@@ -620,7 +736,7 @@ export const audio = defineNamespace({
       },
       "audio.newVoice.designLanguageHint": {
         description:
-          "Tooltip on the info icon beside Language on Voice Design (freeform). Explains " +
+          "Tooltip on the info icon beside Language on Voice Design. Explains " +
           "that the designed voice and its preview script use this language.",
       },
       "audio.newVoice.designLanguageHelpAria": {

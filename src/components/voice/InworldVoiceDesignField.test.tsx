@@ -187,6 +187,7 @@ describe("InworldVoiceDesignField", () => {
         expect.any(Function),
       )
     })
+    expect(vi.mocked(designInworldVoice).mock.calls[0]?.[0].designPromptMode).toBeUndefined()
     expect(await screen.findByRole("radio", { name: "Preview 1" })).toBeChecked()
     expect(screen.getByRole("radio", { name: "Preview 2" })).not.toBeChecked()
     expect(onSelectionChange).toHaveBeenCalledWith({
@@ -327,5 +328,121 @@ describe("InworldVoiceDesignField", () => {
     const alert = await screen.findByRole("alert")
     expect(alert).toHaveTextContent("Inworld 400: designPrompt too long")
     expect(alert).toHaveClass("select-text")
+  })
+
+  it("switches to Structured with one field per voice-profile attribute", async () => {
+    const user = userEvent.setup()
+    renderField()
+    expect(screen.getByRole("tab", { name: "Freeform" })).toHaveAttribute("aria-selected", "true")
+    await user.click(screen.getByRole("tab", { name: "Structured" }))
+    expect(screen.getByRole("tab", { name: "Structured" })).toHaveAttribute("aria-selected", "true")
+    expect(screen.queryByLabelText("Describe the voice")).toBeNull()
+    expect(screen.getByLabelText("Dialect")).toBeTruthy()
+    expect(screen.getByLabelText("Gender")).toBeTruthy()
+    expect(screen.getByLabelText("Age")).toBeTruthy()
+    expect(screen.getByLabelText("Emotion")).toBeTruthy()
+    expect(screen.getByLabelText("Tone")).toBeTruthy()
+    expect(screen.getByLabelText("Pitch")).toBeTruthy()
+    expect(screen.getByLabelText("Volume")).toBeTruthy()
+    expect(screen.getByLabelText("Speed")).toBeTruthy()
+    expect(screen.getByLabelText("Clarity")).toBeTruthy()
+    expect(screen.getByLabelText("Fluency")).toBeTruthy()
+    expect(screen.getByLabelText("Personality")).toBeTruthy()
+    expect(screen.getByLabelText("Texture")).toBeTruthy()
+    expect(screen.getByLabelText("Environment")).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Generate previews" })).toBeDisabled()
+  })
+
+  it("sends a verbatim structured profile when generating from Structured", async () => {
+    const play = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal(
+      "Audio",
+      class {
+        src = ""
+        play = play
+        pause = vi.fn()
+        onended: (() => void) | null = null
+        removeAttribute = vi.fn()
+        load = vi.fn()
+      },
+    )
+    vi.mocked(designInworldVoice).mockResolvedValue([
+      { voiceId: "ws__design-voice-a", previewText: "Hello", previewAudio: "UklGRQ==" },
+    ])
+    const user = userEvent.setup()
+    const { onPromptChange } = renderField()
+    await user.click(screen.getByRole("tab", { name: "Structured" }))
+    await user.type(screen.getByLabelText("Dialect"), "British English")
+    await user.type(screen.getByLabelText("Gender"), "male")
+    await user.type(screen.getByLabelText("Age"), "middle-aged")
+    expect(onPromptChange).toHaveBeenCalled()
+    await user.click(screen.getByRole("button", { name: "Generate previews" }))
+    await waitFor(() => {
+      expect(designInworldVoice).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectId: "p1",
+          designPromptMode: "DESIGN_PROMPT_MODE_VERBATIM",
+          language: "en-US",
+          numberOfSamples: 3,
+        }),
+        expect.any(Function),
+      )
+    })
+    const sent = vi.mocked(designInworldVoice).mock.calls[0]![0]
+    expect(sent.designPrompt).toMatch(/^dialect: British English$/m)
+    expect(sent.designPrompt).toMatch(/^gender: male$/m)
+    expect(sent.designPrompt).toMatch(/^age: middle-aged$/m)
+    expect(sent.designPrompt).toMatch(/^environment: $/m)
+    expect(await screen.findByRole("radio", { name: "Preview 1" })).toBeChecked()
+  })
+
+  it("opens Structured when the saved prompt is already a voice profile", () => {
+    renderField({
+      prompt: [
+        "dialect: British English",
+        "gender: male",
+        "age: ",
+        "emotion: ",
+        "tone: ",
+        "pitch: ",
+        "volume: ",
+        "speed: ",
+        "clarity: ",
+        "fluency: ",
+        "personality: ",
+        "texture: ",
+        "environment: ",
+      ].join("\n"),
+    })
+    expect(screen.getByRole("tab", { name: "Structured" })).toHaveAttribute("aria-selected", "true")
+    expect(screen.getByLabelText("Dialect")).toHaveValue("British English")
+    expect(screen.getByLabelText("Gender")).toHaveValue("male")
+    expect(screen.getByRole("button", { name: "Generate previews" })).toBeEnabled()
+  })
+
+  it("clears the structured profile back to empty fields", async () => {
+    const user = userEvent.setup()
+    const { onPromptChange } = renderField({
+      prompt: [
+        "dialect: British English",
+        "gender: male",
+        "age: ",
+        "emotion: ",
+        "tone: ",
+        "pitch: ",
+        "volume: ",
+        "speed: ",
+        "clarity: ",
+        "fluency: ",
+        "personality: ",
+        "texture: ",
+        "environment: ",
+      ].join("\n"),
+    })
+    await user.click(screen.getByRole("button", { name: "Clear" }))
+    expect(screen.getByLabelText("Dialect")).toHaveValue("")
+    expect(screen.getByLabelText("Gender")).toHaveValue("")
+    expect(onPromptChange).toHaveBeenCalledWith("")
+    expect(screen.getByRole("button", { name: "Generate previews" })).toBeDisabled()
   })
 })

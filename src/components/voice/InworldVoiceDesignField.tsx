@@ -7,8 +7,10 @@ import { Button } from "@/components/ui/button"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Spinner } from "@/components/ui/spinner"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { InworldDesignLocaleFields } from "@/components/voice/InworldDesignLocaleFields"
+import { InworldDesignProfileFields } from "@/components/voice/InworldDesignProfileFields"
 import { VoiceInfoTip } from "@/components/voice/VoiceInfoTip"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
@@ -19,9 +21,19 @@ import {
   INWORLD_DESIGN_PREVIEW_TEXT_MIN,
   INWORLD_DESIGN_PROMPT_MAX,
   INWORLD_DESIGN_PROMPT_MIN,
+  INWORLD_DESIGN_PROMPT_MODE_VERBATIM,
   INWORLD_DESIGN_SAMPLE_COUNT,
   INWORLD_VOICE_DESIGN_DOCS_URL,
+  blankInworldVoiceProfile,
+  initialInworldDesignMode,
+  inworldVoiceProfileHasValue,
+  looksLikeInworldVoiceProfile,
+  parseInworldVoiceProfile,
   previewAudioSrc,
+  serializeInworldVoiceProfile,
+  type InworldDesignMode,
+  type InworldDesignProfileKey,
+  type InworldVoiceProfileExtra,
 } from "@/lib/audio/inworld-voice-design"
 import { designInworldVoice, synthesizeCellTts, type InworldDesignedPreview } from "@/lib/sync/tts"
 import { cn } from "@/lib/utils"
@@ -63,6 +75,11 @@ export function InworldVoiceDesignField({
   audioQuality?: Voice["audioQuality"]
 }) {
   const t = useT()
+  const [mode, setMode] = useState<InworldDesignMode>(() => initialInworldDesignMode(prompt))
+  const [profile, setProfile] = useState(() => parseInworldVoiceProfile(prompt).profile)
+  const [extras, setExtras] = useState<InworldVoiceProfileExtra[]>(
+    () => parseInworldVoiceProfile(prompt).extras,
+  )
   const [previews, setPreviews] = useState<InworldDesignedPreview[]>([])
   const [generating, setGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -72,15 +89,37 @@ export function InworldVoiceDesignField({
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const aliveRef = useRef(true)
   const savedSrcRef = useRef<string | null>(null)
+  const structuredPrompt = serializeInworldVoiceProfile(profile, extras)
+  const designPrompt = mode === "structured" ? structuredPrompt.trim() : prompt.trim()
   const trimmed = prompt.trim()
   const trimmedScript = script.trim()
-  const tooShort = trimmed.length > 0 && trimmed.length < INWORLD_DESIGN_PROMPT_MIN
+  const tooShort = mode === "freeform" && trimmed.length > 0 && trimmed.length < INWORLD_DESIGN_PROMPT_MIN
   const scriptTooShort = trimmedScript.length > 0 && trimmedScript.length < INWORLD_DESIGN_PREVIEW_TEXT_MIN
-  const canGenerate = trimmed.length >= INWORLD_DESIGN_PROMPT_MIN
-    && trimmed.length <= INWORLD_DESIGN_PROMPT_MAX
+  const promptReady = mode === "structured"
+    ? inworldVoiceProfileHasValue(profile, extras)
+      && structuredPrompt.length >= INWORLD_DESIGN_PROMPT_MIN
+      && structuredPrompt.length <= INWORLD_DESIGN_PROMPT_MAX
+    : trimmed.length >= INWORLD_DESIGN_PROMPT_MIN
+      && trimmed.length <= INWORLD_DESIGN_PROMPT_MAX
+  const canGenerate = promptReady
     && trimmedScript.length >= INWORLD_DESIGN_PREVIEW_TEXT_MIN
     && trimmedScript.length <= INWORLD_DESIGN_PREVIEW_TEXT_MAX
     && !generating
+
+  const applyProfile = (next: typeof profile, nextExtras: InworldVoiceProfileExtra[]) => {
+    setProfile(next)
+    setExtras(nextExtras)
+    onPromptChange(serializeInworldVoiceProfile(next, nextExtras))
+  }
+
+  const selectMode = (next: InworldDesignMode) => {
+    if (next === "structured" && looksLikeInworldVoiceProfile(prompt)) {
+      const parsed = parseInworldVoiceProfile(prompt)
+      setProfile(parsed.profile)
+      setExtras(parsed.extras)
+    }
+    setMode(next)
+  }
 
   const canPlaySaved = Boolean(existingVoiceId)
     && trimmedScript.length >= INWORLD_DESIGN_PREVIEW_TEXT_MIN
@@ -133,9 +172,10 @@ export function InworldVoiceDesignField({
         {
           projectId,
           fileId,
-          designPrompt: trimmed,
+          designPrompt,
           previewText: trimmedScript,
           numberOfSamples: INWORLD_DESIGN_SAMPLE_COUNT,
+          ...(mode === "structured" ? { designPromptMode: INWORLD_DESIGN_PROMPT_MODE_VERBATIM } : {}),
           ...(language ? { language } : {}),
         },
         audioSyncTokenFetcherForSession(session),
@@ -243,34 +283,61 @@ export function InworldVoiceDesignField({
 
   return (
     <div className="space-y-3">
-      <Field className="gap-2.5">
-        <div className="flex flex-col gap-1">
-          <FieldLabel htmlFor="inworld-design-prompt">{t("audio.newVoice.describeLabel")}</FieldLabel>
-          <p className="text-[11px] text-muted-foreground">
-            {t("audio.newVoice.designPromptHint")}{" "}
-            <a
-              href={INWORLD_VOICE_DESIGN_DOCS_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 underline underline-offset-2 hover:text-foreground"
-            >
-              {t("audio.newVoice.designDocsLink")}
-              <ExternalLink className="size-3" aria-hidden />
-            </a>
-          </p>
-        </div>
-        <Textarea
-          id="inworld-design-prompt"
-          value={prompt}
-          onChange={(e) => onPromptChange(e.target.value)}
-          rows={3}
-          maxLength={INWORLD_DESIGN_PROMPT_MAX}
-          placeholder={t("audio.newVoice.designPromptPlaceholder")}
+      <Tabs
+        value={mode}
+        onValueChange={(value) => {
+          if (value === "freeform" || value === "structured") selectMode(value)
+        }}
+        className="gap-0"
+      >
+        <TabsList className="w-full" aria-label={t("audio.newVoice.designModeGroupLabel")}>
+          <TabsTrigger value="freeform">{t("audio.newVoice.designModeFreeform")}</TabsTrigger>
+          <TabsTrigger value="structured">{t("audio.newVoice.designModeStructured")}</TabsTrigger>
+        </TabsList>
+      </Tabs>
+
+      {mode === "freeform" ? (
+        <Field className="gap-2.5">
+          <div className="flex flex-col gap-1">
+            <FieldLabel htmlFor="inworld-design-prompt">{t("audio.newVoice.describeLabel")}</FieldLabel>
+            <p className="text-[11px] text-muted-foreground">
+              {t("audio.newVoice.designPromptHint")}{" "}
+              <a
+                href={INWORLD_VOICE_DESIGN_DOCS_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 underline underline-offset-2 hover:text-foreground"
+              >
+                {t("audio.newVoice.designDocsLink")}
+                <ExternalLink className="size-3" aria-hidden />
+              </a>
+            </p>
+          </div>
+          <Textarea
+            id="inworld-design-prompt"
+            value={prompt}
+            onChange={(e) => onPromptChange(e.target.value)}
+            rows={3}
+            maxLength={INWORLD_DESIGN_PROMPT_MAX}
+            placeholder={t("audio.newVoice.designPromptPlaceholder")}
+          />
+          {tooShort && (
+            <p className="text-[11px] text-destructive">{t("audio.newVoice.designPromptTooShort")}</p>
+          )}
+        </Field>
+      ) : (
+        <InworldDesignProfileFields
+          profile={profile}
+          onChange={(key: InworldDesignProfileKey, value: string) => {
+            applyProfile({ ...profile, [key]: value }, extras)
+          }}
+          onClear={() => {
+            setProfile(blankInworldVoiceProfile())
+            setExtras([])
+            onPromptChange("")
+          }}
         />
-        {tooShort && (
-          <p className="text-[11px] text-destructive">{t("audio.newVoice.designPromptTooShort")}</p>
-        )}
-      </Field>
+      )}
 
       <Field>
         <div className="flex items-center gap-1.5">

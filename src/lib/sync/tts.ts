@@ -174,6 +174,7 @@ export interface DesignInworldVoiceArgs {
   previewText?: string
   language?: string
   numberOfSamples?: number
+  designPromptMode?: "DESIGN_PROMPT_MODE_ASSISTED" | "DESIGN_PROMPT_MODE_VERBATIM"
 }
 
 export interface InworldDesignedPreview {
@@ -200,6 +201,7 @@ export async function designInworldVoice(
   if (args.previewText !== undefined) body.previewText = args.previewText
   if (args.language !== undefined) body.language = args.language
   if (args.numberOfSamples !== undefined) body.numberOfSamples = args.numberOfSamples
+  if (args.designPromptMode !== undefined) body.designPromptMode = args.designPromptMode
 
   const res = await fetch(`${syncWorkerHttpOrigin()}/api/v1/voice/tts/design`, {
     method: "POST",

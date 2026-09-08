@@ -9,7 +9,7 @@
 //   { displayName, languageCode?, voiceSamples: [{ audioData: base64 }] }
 // Voice design (https://docs.inworld.ai/api-reference/voiceAPI/voiceservice/design-voice):
 //   POST https://api.inworld.ai/voices/v1/voices:design
-//   { designPrompt, previewText, languageCode?, voiceDesignConfig.numberOfSamples }
+//   { designPrompt, designPromptMode?, previewText, languageCode?, voiceDesignConfig.numberOfSamples }
 // Publish designed voice (https://docs.inworld.ai/api-reference/voiceAPI/voiceservice/publish-voice):
 //   POST https://api.inworld.ai/voices/v1/voices/{voiceId}:publish
 //   { displayName, description?, tags? }
@@ -31,6 +31,8 @@ export const DEFAULT_INWORLD_DELIVERY_MODE = "STABLE" as const
 export const INWORLD_DESIGN_PROMPT_MIN = 30
 export const INWORLD_DESIGN_PROMPT_MAX = 1000
 export const INWORLD_DESIGN_SAMPLE_COUNT = 3
+export const INWORLD_DESIGN_PROMPT_MODE_ASSISTED = "DESIGN_PROMPT_MODE_ASSISTED"
+export const INWORLD_DESIGN_PROMPT_MODE_VERBATIM = "DESIGN_PROMPT_MODE_VERBATIM"
 /** BSB Revelation 1:17–18 — default spoken script for Voice Design previews. */
 export const INWORLD_DESIGN_DEFAULT_PREVIEW_TEXT =
   "Do not be afraid. I am the First and the Last, the Living One. I was dead, and behold, now I am alive forever and ever! And I hold the keys of Death and of Hades."
@@ -67,6 +69,7 @@ export interface DesignInworldVoiceArgs {
   previewText?: string
   language?: string
   numberOfSamples?: number
+  designPromptMode?: "DESIGN_PROMPT_MODE_ASSISTED" | "DESIGN_PROMPT_MODE_VERBATIM"
 }
 
 export interface InworldDesignedPreview {
@@ -270,6 +273,14 @@ export async function cloneInworldVoice(
   return voiceId
 }
 
+export function parseInworldDesignPromptMode(
+  value: unknown,
+): "DESIGN_PROMPT_MODE_ASSISTED" | "DESIGN_PROMPT_MODE_VERBATIM" | undefined {
+  if (value === INWORLD_DESIGN_PROMPT_MODE_VERBATIM) return INWORLD_DESIGN_PROMPT_MODE_VERBATIM
+  if (value === INWORLD_DESIGN_PROMPT_MODE_ASSISTED) return INWORLD_DESIGN_PROMPT_MODE_ASSISTED
+  return undefined
+}
+
 export function clampInworldDesignSamples(value: unknown): number {
   const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN
   if (!Number.isFinite(n)) return INWORLD_DESIGN_SAMPLE_COUNT
@@ -298,6 +309,10 @@ export async function designInworldVoice(
     voiceDesignConfig: { numberOfSamples: clampInworldDesignSamples(args.numberOfSamples) },
   }
   if (languageCode) body.languageCode = languageCode
+  const designPromptMode = parseInworldDesignPromptMode(args.designPromptMode)
+  if (designPromptMode === INWORLD_DESIGN_PROMPT_MODE_VERBATIM) {
+    body.designPromptMode = designPromptMode
+  }
 
   let res: Response
   try {

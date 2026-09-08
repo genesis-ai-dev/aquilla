@@ -174,3 +174,60 @@ describe("Scheduler.runOnce", () => {
     expect(db.getJob(job.id)?.sha).toBe("def")
   })
 })
+
+describe("Scheduler.runForever", () => {
+  // Regression for the SIGINT/SIGTERM graceful-stop bug: abort must not tear
+  // down a stage that is mid-flight. `runForever` should only resolve once
+  // the in-flight `pushJob` call has actually finished.
+  it("waits for an in-flight push to finish before resolving on abort", async () => {
+    const job = db.enqueue(PROJECT.gitlab_id, "content", "abc")
+    let releasePush: () => void = () => {}
+    const pushGate = new Promise<void>((resolve) => { releasePush = resolve })
+    let pushStarted: () => void = () => {}
+    const pushStartedGate = new Promise<void>((resolve) => { pushStarted = resolve })
+    let pushCalls = 0
+    const config = loadConfig(ENV, { home: root })
+    const stages: StageFns = {
+      ensureCheckout: async (_deps, p) => ({ dir: path.join(root, "clones", String(p.gitlabId)), sha: p.wantSha, recloned: false }),
+      materialize: async (_deps, input) => planFor(input.job.id),
+      pushJob: async (deps, input) => {
+        pushCalls++
+        pushStarted()
+        await pushGate
+        deps.db.advance(input.job.id, "done")
+        return { pushed: 1, finalized: true, settingsUpdated: false, verified: true, reseeded: false }
+      },
+    }
+    const ctx: SchedulerCtx = {
+      config,
+      db,
+      sync: {} as SyncClient,
+      gitlab: { project: async () => GL_PROJECT } as unknown as GitLabClient,
+      creds: { gitlabUrl: "https://git", gitlabToken: "t", accessToken: "", source: "direct-token" } as GitLabCredentials,
+      pacer: new Pacer({ eventsPerSec: 1e9, chunkStart: 500, chunkMin: 50, chunkMax: 2500 }),
+      log: () => {},
+      digest: new Digest(),
+      stages,
+    }
+    const scheduler = new Scheduler(ctx)
+    const ac = new AbortController()
+
+    let resolved = false
+    const done = scheduler.runForever(ac.signal).then(() => { resolved = true })
+
+    await pushStartedGate
+    ac.abort()
+    // Give the (now-aborted) loop a chance to spin if it were (wrongly) not
+    // waiting on the in-flight stage.
+    await new Promise((r) => setTimeout(r, 20))
+    expect(resolved).toBe(false)
+    expect(pushCalls).toBe(1)
+
+    releasePush()
+    await done
+    expect(resolved).toBe(true)
+    // No further claims happened after abort — the in-flight push is the only call.
+    expect(pushCalls).toBe(1)
+    expect(db.getJob(job.id)?.stage).toBe("done")
+  })
+})

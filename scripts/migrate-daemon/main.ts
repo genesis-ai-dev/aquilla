@@ -95,7 +95,20 @@ function acquireLock(config: DaemonConfig): RunLock | null {
 }
 
 /** Acquire, heartbeat, and release the run lock around `fn`. */
-async function withLock(config: DaemonConfig, fn: (release: () => Promise<void>) => Promise<void>): Promise<void> {
+/**
+ * Acquire, heartbeat, and release the run lock around `fn`.
+ *
+ * By default a SIGINT/SIGTERM releases the lock and exits immediately (fine
+ * for the short-lived one-shot commands). Pass `onSignal` to instead let the
+ * caller drain in-flight work first (e.g. abort a scheduler loop) — the lock
+ * heartbeat keeps running and the lock is released exactly once, after `fn`
+ * resolves. A second signal during that drain force-exits right away.
+ */
+async function withLock(
+  config: DaemonConfig,
+  fn: (release: () => Promise<void>) => Promise<void>,
+  opts: { onSignal?: (sig: NodeJS.Signals) => void } = {},
+): Promise<void> {
   const lock = acquireLock(config)
   if (lock) {
     try {
@@ -111,26 +124,44 @@ async function withLock(config: DaemonConfig, fn: (release: () => Promise<void>)
     : null
   beat?.unref()
   const release = async (): Promise<void> => { if (beat) clearInterval(beat); await lock?.release() }
-  const onSignal = (sig: NodeJS.Signals): void => {
+
+  let draining = false
+  const hardExit = (sig: NodeJS.Signals): void => {
     void release().finally(() => process.exit(sig === "SIGINT" ? 130 : 143))
   }
-  process.once("SIGINT", onSignal)
-  process.once("SIGTERM", onSignal)
-  try { await fn(release) } finally { await release() }
+  const onSignal = (sig: NodeJS.Signals): void => {
+    if (!opts.onSignal) { hardExit(sig); return }
+    if (draining) { log(`! second ${sig} received while draining — exiting immediately`); hardExit(sig); return }
+    draining = true
+    log(`${sig} received — draining in-flight work before releasing the lock`)
+    opts.onSignal(sig)
+  }
+  process.on("SIGINT", onSignal)
+  process.on("SIGTERM", onSignal)
+  try {
+    await fn(release)
+  } finally {
+    process.off("SIGINT", onSignal)
+    process.off("SIGTERM", onSignal)
+    await release()
+  }
 }
 
 async function cmdDaemon(config: DaemonConfig): Promise<void> {
   const { scheduler, digest } = await build(config)
   const ac = new AbortController()
-  await withLock(config, async () => {
-    const stop = (): void => ac.abort()
-    process.once("SIGINT", stop)
-    process.once("SIGTERM", stop)
-    if (config.discordWebhookUrl) await postDiscord(config.discordWebhookUrl, `migrate-daemon started (${config.runner})`)
-    await scheduler.runForever(ac.signal)
-    const tail = digest.hourly()
-    if (tail && config.discordWebhookUrl) await postDiscord(config.discordWebhookUrl, tail)
-  })
+  let signal: NodeJS.Signals | undefined
+  await withLock(
+    config,
+    async () => {
+      if (config.discordWebhookUrl) await postDiscord(config.discordWebhookUrl, `migrate-daemon started (${config.runner})`)
+      await scheduler.runForever(ac.signal)
+      const tail = digest.hourly()
+      if (tail && config.discordWebhookUrl) await postDiscord(config.discordWebhookUrl, tail)
+    },
+    { onSignal: (sig) => { signal = sig; ac.abort() } },
+  )
+  if (signal) process.exit(signal === "SIGINT" ? 130 : 143)
 }
 
 async function cmdOnce(config: DaemonConfig, args: Args): Promise<number> {

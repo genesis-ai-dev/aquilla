@@ -94,9 +94,22 @@ const readOrEmpty = (file: string | undefined): string =>
   file !== undefined && fs.existsSync(file) ? fs.readFileSync(file, "utf8") : ""
 const sha256 = (s: string): string => createHash("sha256").update(s).digest("hex")
 
+/** Keep only the plan we are about to write: a project accumulates one plan
+ *  per sha otherwise, and a 17M-event corpus makes that unbounded on disk.
+ *  Best-effort — a plan another process still holds open is not our business. */
+function prunePlans(dir: string, keep: string): void {
+  if (!fs.existsSync(dir)) return
+  for (const f of fs.readdirSync(dir)) {
+    if (!f.endsWith(".ndjson")) continue
+    const full = path.join(dir, f)
+    if (full === keep) continue
+    try { fs.rmSync(full) } catch { /* best-effort */ }
+  }
+}
+
 export async function materialize(deps: MaterializeDeps, input: MaterializeInput): Promise<MaterializeResult> {
   const { db } = deps
-  const { project, dir, force } = input
+  const { job, project, dir, force } = input
   const now = deps.now ?? Date.now
   const projectId = project.aquilla_id
   const projectKey = String(project.gitlab_id)
@@ -105,8 +118,12 @@ export async function materialize(deps: MaterializeDeps, input: MaterializeInput
   const sources = listByStem(path.join(dir, ".project/sourceTexts"), ".source")
   const stems = [...new Set([...targets.keys(), ...sources.keys()])].sort()
 
-  const planPath = path.join(deps.plansDir, `job-${input.job.id}.ndjson`)
+  // Spec layout: plans/<gitlabId>/<sha>.ndjson — the parity gate picks the
+  // newest file per project id, so one directory per project is required.
+  const projectPlansDir = path.join(deps.plansDir, projectKey)
+  const planPath = path.join(projectPlansDir, `${job.sha}.ndjson`)
   const writer = new PlanWriter(planPath)
+  prunePlans(projectPlansDir, planPath)
   const ledgerSize = db.ledgerCount(project.gitlab_id)
   const existingEventIds = new LedgerSet(db, project.gitlab_id, ledgerSize)
 
@@ -116,13 +133,13 @@ export async function materialize(deps: MaterializeDeps, input: MaterializeInput
   let files = 0
   let changedFiles = 0
 
-  const emit = (events: IngestEvent[], prerequisiteIds: ReadonlySet<string>): void => {
+  const emit = async (events: IngestEvent[], prerequisiteIds: ReadonlySet<string>): Promise<void> => {
     const fresh = new Set(db.ledgerFilterNew(project.gitlab_id, events.map((e) => e.id)))
     for (const event of events) {
       if (!fresh.has(event.id)) continue
       const line: PlanLine = { id: event.id, event, hash: eventHash(event) }
       if (prerequisiteIds.has(event.id)) line.prerequisite = true
-      writer.write(line)
+      await writer.write(line)
     }
   }
 
@@ -192,7 +209,7 @@ export async function materialize(deps: MaterializeDeps, input: MaterializeInput
           ? events.filter((e) => e.kind === "file.create" && e.fileId === fileId).map((e) => e.id)
           : [],
       )
-      emit(events, prerequisiteIds)
+      await emit(events, prerequisiteIds)
     }
 
     const commentsFile = path.join(dir, COMMENTS_PATH)
@@ -207,7 +224,7 @@ export async function materialize(deps: MaterializeDeps, input: MaterializeInput
       if (!commentsUnchanged) {
         try {
           const parsed: unknown = JSON.parse(raw)
-          emit(mapComments(parsed, { projectId, projectKey, fallbackTs: now() }), new Set())
+          await emit(mapComments(parsed, { projectId, projectKey, fallbackTs: now() }), new Set())
         } catch { /* skip bad comments, exactly as migrate-all does */ }
       }
     }

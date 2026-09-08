@@ -81,6 +81,22 @@ describe("materialize", () => {
     db.close()
   })
 
+  it("writes the plan at plans/<gitlabId>/<sha>.ndjson and prunes older shas", async () => {
+    const db = new DaemonDb(":memory:")
+    const dir = makeProjectDir(["GEN 1"])
+    const first = await materialize(deps(db), { job: job(), project: seed(db), dir, httpUrlToRepo: "https://git/x.git" })
+    expect(first.planPath).toBe(path.join(root, "plans", "47", "deadbeef.ndjson"))
+
+    // A second sha for the same project must not leave the old plan behind —
+    // the parity gate picks the newest, and disk growth is otherwise unbounded.
+    const second = await materialize(deps(db), {
+      job: { ...job(2), sha: "cafebabe" }, project: db.getProject(47)!, dir, httpUrlToRepo: "https://git/x.git",
+    })
+    expect(second.planPath).toBe(path.join(root, "plans", "47", "cafebabe.ndjson"))
+    expect(fs.readdirSync(path.join(root, "plans", "47"))).toEqual(["cafebabe.ndjson"])
+    db.close()
+  })
+
   it("skips an unchanged file once its hash and the ledger are recorded", async () => {
     const db = new DaemonDb(":memory:")
     const dir = makeProjectDir(["GEN 1"])

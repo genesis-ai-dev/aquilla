@@ -41,9 +41,18 @@ export class PlanWriter {
     fs.mkdirSync(path.dirname(file), { recursive: true })
     this.stream = fs.createWriteStream(file, { flags: "w" })
   }
-  write(line: PlanLine): void {
+  /** Honours backpressure: a 17M-event plan would otherwise buffer the whole
+   *  stream in memory when the disk cannot keep up. */
+  async write(line: PlanLine): Promise<void> {
     this.count++
-    this.stream.write(`${JSON.stringify(line)}\n`)
+    if (!this.stream.write(`${JSON.stringify(line)}\n`)) {
+      await new Promise<void>((resolve, reject) => {
+        const onError = (e: Error): void => { this.stream.off("drain", onDrain); reject(e) }
+        const onDrain = (): void => { this.stream.off("error", onError); resolve() }
+        this.stream.once("error", onError)
+        this.stream.once("drain", onDrain)
+      })
+    }
   }
   get lines(): number { return this.count }
   close(): Promise<{ lines: number }> {

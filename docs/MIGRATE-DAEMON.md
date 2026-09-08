@@ -114,12 +114,28 @@ Everything lives under `MIGRATE_HOME` (`~/aquilla-migrate` on the box):
 
 ## Operations
 
-- **Deploy (first time)**: from the Mac,
-  `ssh clear@<box> 'bash -s' < deploy/migrate-daemon/install.sh [branch] [env-file]`
-  (or copy the script over and run it locally as `clear`). Idempotent — safe to
-  re-run. Installs the repo checkout, systemd unit, env file (if given),
-  logrotate stanza, and enables (but does not start) the service. See
-  `deploy/migrate-daemon/env.example` for every variable.
+- **Deploy (first time)** — two steps, because the box requires an
+  interactive sudo password so a non-interactive SSH session can't run
+  privileged commands:
+  1. As `clear` (no sudo): `ssh clear@<box> 'bash -s' < deploy/migrate-daemon/install.sh [branch] [env-file]`
+     (or copy the script over and run it locally). Idempotent. Clones/updates
+     the repo and installs the toolchain + dependencies entirely in
+     user-space, then prints the exact `sudo bash .../install-system.sh
+     [env-file]` command to run next.
+  2. As root, interactively on the box (not over non-interactive SSH):
+     `sudo bash deploy/migrate-daemon/install-system.sh [env-file]`. Copies
+     the systemd unit, installs the env file (if given), writes the
+     logrotate stanza, and enables (but does not start) the service.
+  See `deploy/migrate-daemon/env.example` for every variable.
+
+  **Why user-space pnpm**: the box's system `node` (`/usr/bin/node`) has no
+  bundled `pnpm`, and `corepack enable` writes shims next to it — into
+  root-owned `/usr/bin` — so it fails without root. `install.sh` instead
+  runs `corepack enable --install-directory ~/.local/bin`, and the systemd
+  unit (`aquilla-migrate.service`) sets `Environment=PATH=` to include
+  `/home/clear/.local/bin` and calls `pnpm` there directly (no
+  `/usr/bin/env` indirection, since the login PATH systemd uses doesn't
+  include it either).
 
 - **Roll a new version**: `deploy/migrate-daemon/update.sh [branch]`, run on the
   box as `clear`. `git pull --ff-only` + `pnpm install --frozen-lockfile` +

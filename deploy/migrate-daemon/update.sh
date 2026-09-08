@@ -12,6 +12,8 @@ set -euo pipefail
 BRANCH="${1:-main}"
 REPO_DIR="$HOME/aquilla"
 
+export PATH="$HOME/.local/bin:$PATH"
+
 echo "==> Pulling $BRANCH"
 git -C "$REPO_DIR" fetch origin
 git -C "$REPO_DIR" checkout "$BRANCH"

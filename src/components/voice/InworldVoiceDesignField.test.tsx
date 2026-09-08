@@ -1,11 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { useState } from "react"
-import { screen, waitFor } from "@testing-library/react"
+import { fireEvent, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { InworldVoiceDesignField, type InworldDesignSelection } from "./InworldVoiceDesignField"
 import { designInworldVoice, synthesizeCellTts } from "@/lib/sync/tts"
 import { getCellAudioStreamUrl, parseFrontierAudioUrl } from "@/lib/audio/upload"
-import { INWORLD_DESIGN_DEFAULT_PREVIEW_TEXT } from "@/lib/audio/inworld-voice-design"
+import {
+  INWORLD_DESIGN_DEFAULT_PREVIEW_TEXT,
+  blankStructuredDesignPrompt,
+  inworldDesignPresetPrompt,
+} from "@/lib/audio/inworld-voice-design"
 import type { FrontierSession } from "@/lib/frontier/types"
 import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
 
@@ -43,10 +47,14 @@ function renderField(opts: {
   function Harness() {
     const [selection, setSelection] = useState<InworldDesignSelection | null>(null)
     const [language, setLanguage] = useState("en-US")
+    const [prompt, setPrompt] = useState(opts.prompt ?? "")
     return (
       <InworldVoiceDesignField
-        prompt={opts.prompt ?? ""}
-        onPromptChange={onPromptChange}
+        prompt={prompt}
+        onPromptChange={(next) => {
+          onPromptChange(next)
+          setPrompt(next)
+        }}
         selection={selection}
         onSelectionChange={(next) => {
           onSelectionChange(next)
@@ -330,27 +338,22 @@ describe("InworldVoiceDesignField", () => {
     expect(alert).toHaveClass("select-text")
   })
 
-  it("switches to Structured with one field per voice-profile attribute", async () => {
+  it("switches to Structured with a key: value textarea", async () => {
     const user = userEvent.setup()
     renderField()
     expect(screen.getByRole("tab", { name: "Freeform" })).toHaveAttribute("aria-selected", "true")
     await user.click(screen.getByRole("tab", { name: "Structured" }))
     expect(screen.getByRole("tab", { name: "Structured" })).toHaveAttribute("aria-selected", "true")
     expect(screen.queryByLabelText("Describe the voice")).toBeNull()
-    expect(screen.getByLabelText("Dialect")).toBeTruthy()
-    expect(screen.getByLabelText("Gender")).toBeTruthy()
-    expect(screen.getByLabelText("Age")).toBeTruthy()
-    expect(screen.getByLabelText("Emotion")).toBeTruthy()
-    expect(screen.getByLabelText("Tone")).toBeTruthy()
-    expect(screen.getByLabelText("Pitch")).toBeTruthy()
-    expect(screen.getByLabelText("Volume")).toBeTruthy()
-    expect(screen.getByLabelText("Speed")).toBeTruthy()
-    expect(screen.getByLabelText("Clarity")).toBeTruthy()
-    expect(screen.getByLabelText("Fluency")).toBeTruthy()
-    expect(screen.getByLabelText("Personality")).toBeTruthy()
-    expect(screen.getByLabelText("Texture")).toBeTruthy()
-    expect(screen.getByLabelText("Environment")).toBeTruthy()
+    const profile = screen.getByLabelText("Voice profile")
+    expect(profile).toHaveValue(blankStructuredDesignPrompt())
+    expect(profile).toHaveClass("font-mono")
+    expect(screen.queryByLabelText("Dialect")).toBeNull()
     expect(screen.getByRole("button", { name: "Generate previews" })).toBeDisabled()
+    const chips = screen.getByRole("group", { name: "Voice design presets" })
+    const reset = screen.getByRole("button", { name: "Reset" })
+    expect(reset).toBeDisabled()
+    expect(chips.compareDocumentPosition(reset) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it("sends a verbatim structured profile when generating from Structured", async () => {
@@ -372,9 +375,22 @@ describe("InworldVoiceDesignField", () => {
     const user = userEvent.setup()
     const { onPromptChange } = renderField()
     await user.click(screen.getByRole("tab", { name: "Structured" }))
-    await user.type(screen.getByLabelText("Dialect"), "British English")
-    await user.type(screen.getByLabelText("Gender"), "male")
-    await user.type(screen.getByLabelText("Age"), "middle-aged")
+    const filled = [
+      "dialect: British English",
+      "gender: male",
+      "age: middle-aged",
+      "emotion: ",
+      "tone: ",
+      "pitch: ",
+      "volume: ",
+      "speed: ",
+      "clarity: ",
+      "fluency: ",
+      "personality: ",
+      "texture: ",
+      "environment: ",
+    ].join("\n")
+    fireEvent.change(screen.getByLabelText("Voice profile"), { target: { value: filled } })
     expect(onPromptChange).toHaveBeenCalled()
     await user.click(screen.getByRole("button", { name: "Generate previews" }))
     await waitFor(() => {
@@ -397,30 +413,28 @@ describe("InworldVoiceDesignField", () => {
   })
 
   it("opens Structured when the saved prompt is already a voice profile", () => {
-    renderField({
-      prompt: [
-        "dialect: British English",
-        "gender: male",
-        "age: ",
-        "emotion: ",
-        "tone: ",
-        "pitch: ",
-        "volume: ",
-        "speed: ",
-        "clarity: ",
-        "fluency: ",
-        "personality: ",
-        "texture: ",
-        "environment: ",
-      ].join("\n"),
-    })
+    const saved = [
+      "dialect: British English",
+      "gender: male",
+      "age: ",
+      "emotion: ",
+      "tone: ",
+      "pitch: ",
+      "volume: ",
+      "speed: ",
+      "clarity: ",
+      "fluency: ",
+      "personality: ",
+      "texture: ",
+      "environment: ",
+    ].join("\n")
+    renderField({ prompt: saved })
     expect(screen.getByRole("tab", { name: "Structured" })).toHaveAttribute("aria-selected", "true")
-    expect(screen.getByLabelText("Dialect")).toHaveValue("British English")
-    expect(screen.getByLabelText("Gender")).toHaveValue("male")
+    expect(screen.getByLabelText("Voice profile")).toHaveValue(saved)
     expect(screen.getByRole("button", { name: "Generate previews" })).toBeEnabled()
   })
 
-  it("clears the structured profile back to empty fields", async () => {
+  it("clears the structured profile back to the empty template", async () => {
     const user = userEvent.setup()
     const { onPromptChange } = renderField({
       prompt: [
@@ -439,10 +453,57 @@ describe("InworldVoiceDesignField", () => {
         "environment: ",
       ].join("\n"),
     })
-    await user.click(screen.getByRole("button", { name: "Clear" }))
-    expect(screen.getByLabelText("Dialect")).toHaveValue("")
-    expect(screen.getByLabelText("Gender")).toHaveValue("")
-    expect(onPromptChange).toHaveBeenCalledWith("")
+    const chips = screen.getByRole("group", { name: "Voice design presets" })
+    const reset = screen.getByRole("button", { name: "Reset" })
+    expect(chips.compareDocumentPosition(reset) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    await user.click(reset)
+    expect(screen.getByLabelText("Voice profile")).toHaveValue(blankStructuredDesignPrompt())
+    expect(onPromptChange).toHaveBeenCalledWith(blankStructuredDesignPrompt())
     expect(screen.getByRole("button", { name: "Generate previews" })).toBeDisabled()
+    expect(reset).toBeDisabled()
+  })
+
+  it("places outline preset chips under the freeform prompt", () => {
+    renderField()
+    const input = screen.getByLabelText("Describe the voice")
+    const group = screen.getByRole("group", { name: "Voice design presets" })
+    expect(input.compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Agent" })).toHaveAttribute("aria-pressed", "false")
+    expect(screen.getByRole("button", { name: "Pirate" })).toBeTruthy()
+    expect(screen.queryByRole("button", { name: "Reset" })).toBeNull()
+  })
+
+  it("fills Freeform from a preset and keeps Structured independent", async () => {
+    const user = userEvent.setup()
+    const { onPromptChange } = renderField()
+    await user.click(screen.getByRole("button", { name: "Agent" }))
+    const agent = inworldDesignPresetPrompt("agent", "freeform")
+    expect(screen.getByLabelText("Describe the voice")).toHaveValue(agent)
+    expect(onPromptChange).toHaveBeenCalledWith(agent)
+    expect(screen.getByRole("button", { name: "Agent" })).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByRole("button", { name: "Generate previews" })).toBeEnabled()
+
+    await user.click(screen.getByRole("tab", { name: "Structured" }))
+    expect(screen.getByLabelText("Voice profile")).toHaveValue(blankStructuredDesignPrompt())
+    expect(screen.getByRole("button", { name: "Agent" })).toHaveAttribute("aria-pressed", "false")
+    await user.click(screen.getByRole("button", { name: "Narrator" }))
+    const narrator = inworldDesignPresetPrompt("narrator", "structured")
+    expect(screen.getByLabelText("Voice profile")).toHaveValue(narrator)
+    expect(screen.getByRole("button", { name: "Narrator" })).toHaveAttribute("aria-pressed", "true")
+    expect(screen.getByRole("button", { name: "Generate previews" })).toBeEnabled()
+
+    await user.click(screen.getByRole("tab", { name: "Freeform" }))
+    expect(screen.getByLabelText("Describe the voice")).toHaveValue(agent)
+    expect(screen.getByRole("button", { name: "Agent" })).toHaveAttribute("aria-pressed", "true")
+  })
+
+  it("clears the selected preset after the profile is edited", async () => {
+    const user = userEvent.setup()
+    renderField()
+    await user.click(screen.getByRole("tab", { name: "Structured" }))
+    await user.click(screen.getByRole("button", { name: "Pirate" }))
+    expect(screen.getByRole("button", { name: "Pirate" })).toHaveAttribute("aria-pressed", "true")
+    await user.type(screen.getByLabelText("Voice profile"), " extra")
+    expect(screen.getByRole("button", { name: "Pirate" })).toHaveAttribute("aria-pressed", "false")
   })
 })

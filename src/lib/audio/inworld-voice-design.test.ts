@@ -1,16 +1,22 @@
 import { describe, expect, it } from "vitest"
 import {
   INWORLD_DESIGN_DEFAULT_PREVIEW_TEXT,
+  INWORLD_DESIGN_PRESET_IDS,
   INWORLD_DESIGN_PREVIEW_TEXT_MIN,
+  INWORLD_DESIGN_PROMPT_MAX,
   blankInworldVoiceProfile,
+  blankStructuredDesignPrompt,
   initialInworldDesignMode,
+  inworldDesignPresetPrompt,
   inworldVoiceProfileHasValue,
   isInworldDesignedVoiceId,
   looksLikeInworldVoiceProfile,
+  matchingInworldDesignPreset,
   parseInworldVoiceProfile,
   previewAudioMime,
   previewAudioSrc,
   serializeInworldVoiceProfile,
+  structuredDesignPromptHasValue,
 } from "./inworld-voice-design"
 
 describe("INWORLD_DESIGN_DEFAULT_PREVIEW_TEXT", () => {
@@ -57,7 +63,28 @@ describe("Inworld structured voice profile", () => {
     ].join("\n"))
     expect(looksLikeInworldVoiceProfile(text)).toBe(true)
     expect(inworldVoiceProfileHasValue(blankInworldVoiceProfile())).toBe(false)
+    expect(structuredDesignPromptHasValue(text)).toBe(false)
     expect(initialInworldDesignMode(text)).toBe("structured")
+  })
+
+  it("seeds the Structured textarea with a trailing space after each key", () => {
+    expect(blankStructuredDesignPrompt()).toBe([
+      "dialect: ",
+      "gender: ",
+      "age: ",
+      "emotion: ",
+      "tone: ",
+      "pitch: ",
+      "volume: ",
+      "speed: ",
+      "clarity: ",
+      "fluency: ",
+      "personality: ",
+      "texture: ",
+      "environment: ",
+    ].join("\n"))
+    expect(structuredDesignPromptHasValue(blankStructuredDesignPrompt())).toBe(false)
+    expect(looksLikeInworldVoiceProfile(blankStructuredDesignPrompt())).toBe(true)
   })
 
   it("round-trips filled attributes and extra lines", () => {
@@ -84,5 +111,29 @@ describe("Inworld structured voice profile", () => {
     expect(looksLikeInworldVoiceProfile(prose)).toBe(false)
     expect(initialInworldDesignMode(prose)).toBe("freeform")
     expect(parseInworldVoiceProfile(prose).profile).toEqual(blankInworldVoiceProfile())
+  })
+})
+
+describe("Inworld Voice Design presets", () => {
+  it("keeps every preset inside the prompt budget and ready to generate", () => {
+    for (const id of INWORLD_DESIGN_PRESET_IDS) {
+      const freeform = inworldDesignPresetPrompt(id, "freeform")
+      const structured = inworldDesignPresetPrompt(id, "structured")
+      expect(freeform.length).toBeGreaterThanOrEqual(30)
+      expect(freeform.length).toBeLessThanOrEqual(INWORLD_DESIGN_PROMPT_MAX)
+      expect(structured.length).toBeGreaterThanOrEqual(30)
+      expect(structured.length).toBeLessThanOrEqual(INWORLD_DESIGN_PROMPT_MAX)
+      expect(looksLikeInworldVoiceProfile(structured)).toBe(true)
+      expect(structuredDesignPromptHasValue(structured)).toBe(true)
+      expect(matchingInworldDesignPreset(freeform, "freeform")).toBe(id)
+      expect(matchingInworldDesignPreset(structured, "structured")).toBe(id)
+    }
+  })
+
+  it("clears the match after the prompt is edited", () => {
+    const agent = inworldDesignPresetPrompt("agent", "freeform")
+    expect(matchingInworldDesignPreset(`${agent} extra`, "freeform")).toBeNull()
+    const structured = inworldDesignPresetPrompt("pirate", "structured")
+    expect(matchingInworldDesignPreset(structured.replace("male", "female"), "structured")).toBeNull()
   })
 })

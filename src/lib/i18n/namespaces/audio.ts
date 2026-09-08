@@ -31,22 +31,15 @@ export const audio = defineNamespace({
     "audio.newVoice.designModeGroupLabel": "Voice design mode",
     "audio.newVoice.designModeFreeform": "Freeform",
     "audio.newVoice.designModeStructured": "Structured",
+    "audio.newVoice.designPresetGroupLabel": "Voice design presets",
+    "audio.newVoice.designPresetAgent": "Agent",
+    "audio.newVoice.designPresetNarrator": "Narrator",
+    "audio.newVoice.designPresetCompanion": "Companion",
+    "audio.newVoice.designPresetInstructor": "Instructor",
+    "audio.newVoice.designPresetPirate": "Pirate",
+    "audio.newVoice.designStructuredLabel": "Voice profile",
     "audio.newVoice.designStructuredHint":
-      "The exact profile the model receives. Dialect carries language and accent.",
-    "audio.newVoice.designClearProfile": "Clear",
-    "audio.newVoice.designAttrDialect": "Dialect",
-    "audio.newVoice.designAttrGender": "Gender",
-    "audio.newVoice.designAttrAge": "Age",
-    "audio.newVoice.designAttrEmotion": "Emotion",
-    "audio.newVoice.designAttrTone": "Tone",
-    "audio.newVoice.designAttrPitch": "Pitch",
-    "audio.newVoice.designAttrVolume": "Volume",
-    "audio.newVoice.designAttrSpeed": "Speed",
-    "audio.newVoice.designAttrClarity": "Clarity",
-    "audio.newVoice.designAttrFluency": "Fluency",
-    "audio.newVoice.designAttrPersonality": "Personality",
-    "audio.newVoice.designAttrTexture": "Texture",
-    "audio.newVoice.designAttrEnvironment": "Environment",
+      "One attribute per line, as key: value. Fill in the ones that matter. Dialect carries language and accent.",
     "audio.newVoice.designScriptLabel": "Preview script",
     "audio.newVoice.designScriptHint":
       "The previews speak this. About 50–400 characters in English shapes the voice best.",
@@ -637,85 +630,58 @@ export const audio = defineNamespace({
           "(dialect, gender, age, …). Short noun. Opposite of Freeform.",
         maxLength: 14,
       },
+      "audio.newVoice.designPresetGroupLabel": {
+        description:
+          "Accessible group label (not visible text) for the five starting-point " +
+          "chips under the Voice Design prompt (Agent, Narrator, Companion, " +
+          "Instructor, Pirate), read by screen readers.",
+      },
+      "audio.newVoice.designPresetAgent": {
+        description:
+          "Chip under the Voice Design prompt that fills a patient, helpful " +
+          "customer-support voice. Short noun. The English prompt it inserts is " +
+          "not this string — only the chip label is translated.",
+        maxLength: 14,
+      },
+      "audio.newVoice.designPresetNarrator": {
+        description:
+          "Chip under the Voice Design prompt that fills a calm narration voice. " +
+          "Short noun for that starting style, not the project's default-narrator " +
+          "badge (audio.narrator). The English prompt it inserts is not this string.",
+        maxLength: 14,
+      },
+      "audio.newVoice.designPresetCompanion": {
+        description:
+          "Chip under the Voice Design prompt that fills a bright, energetic " +
+          "companion voice. Short noun. The English prompt it inserts is not this " +
+          "string — only the chip label is translated.",
+        maxLength: 14,
+      },
+      "audio.newVoice.designPresetInstructor": {
+        description:
+          "Chip under the Voice Design prompt that fills a soothing instructor " +
+          "voice. Short noun. The English prompt it inserts is not this string — " +
+          "only the chip label is translated.",
+        maxLength: 14,
+      },
+      "audio.newVoice.designPresetPirate": {
+        description:
+          "Chip under the Voice Design prompt that fills a theatrical pirate " +
+          "voice. Short noun. The English prompt it inserts is not this string — " +
+          "only the chip label is translated.",
+        maxLength: 14,
+      },
+      "audio.newVoice.designStructuredLabel": {
+        description:
+          "Form label above the Structured Voice Design textarea. The textarea is " +
+          "a key: value profile (dialect, gender, age, …), not a free-English " +
+          "description.",
+      },
       "audio.newVoice.designStructuredHint": {
         description:
-          "Helper above the Structured Voice Design attribute fields. Explains that " +
-          "this is the exact profile the model receives, and that Dialect carries " +
-          "language and accent.",
-      },
-      "audio.newVoice.designClearProfile": {
-        description:
-          "Button that resets every Structured Voice Design attribute to empty. " +
-          "Short verb.",
-        maxLength: 12,
-      },
-      "audio.newVoice.designAttrDialect": {
-        description:
-          "Label for the Dialect field on Structured Voice Design. The serialized " +
-          "key stays English (dialect:). Short noun.",
-        maxLength: 16,
-      },
-      "audio.newVoice.designAttrGender": {
-        description:
-          "Label for the Gender field on Structured Voice Design. Short noun.",
-        maxLength: 16,
-      },
-      "audio.newVoice.designAttrAge": {
-        description:
-          "Label for the Age field on Structured Voice Design. Short noun.",
-        maxLength: 16,
-      },
-      "audio.newVoice.designAttrEmotion": {
-        description:
-          "Label for the Emotion field on Structured Voice Design. Short noun.",
-        maxLength: 16,
-      },
-      "audio.newVoice.designAttrTone": {
-        description:
-          "Label for the Tone field on Structured Voice Design. Short noun.",
-        maxLength: 16,
-      },
-      "audio.newVoice.designAttrPitch": {
-        description:
-          "Label for the Pitch field on Structured Voice Design. Short noun.",
-        maxLength: 16,
-      },
-      "audio.newVoice.designAttrVolume": {
-        description:
-          "Label for the Volume field on Structured Voice Design. Short noun.",
-        maxLength: 16,
-      },
-      "audio.newVoice.designAttrSpeed": {
-        description:
-          "Label for the Speed field on Structured Voice Design. Short noun.",
-        maxLength: 16,
-      },
-      "audio.newVoice.designAttrClarity": {
-        description:
-          "Label for the Clarity field on Structured Voice Design. Short noun.",
-        maxLength: 16,
-      },
-      "audio.newVoice.designAttrFluency": {
-        description:
-          "Label for the Fluency field on Structured Voice Design. Short noun.",
-        maxLength: 16,
-      },
-      "audio.newVoice.designAttrPersonality": {
-        description:
-          "Label for the Personality field on Structured Voice Design. Short noun.",
-        maxLength: 16,
-      },
-      "audio.newVoice.designAttrTexture": {
-        description:
-          "Label for the Texture field on Structured Voice Design (timbre: smooth, " +
-          "raspy). Short noun.",
-        maxLength: 16,
-      },
-      "audio.newVoice.designAttrEnvironment": {
-        description:
-          "Label for the Environment field on Structured Voice Design (studio, " +
-          "quiet room). Short noun.",
-        maxLength: 16,
+          "Helper above the Structured Voice Design textarea. Explains that the " +
+          "profile is one attribute per line as key: value, that empty keys can " +
+          "be left blank, and that Dialect carries language and accent.",
       },
       "audio.newVoice.designScriptLabel": {
         description:

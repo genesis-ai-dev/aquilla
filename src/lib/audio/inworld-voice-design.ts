@@ -61,6 +61,11 @@ export function blankInworldVoiceProfile(): InworldVoiceProfile {
   }
 }
 
+/** Empty Structured textarea: one `key: ` line per attribute, ready to type into. */
+export function blankStructuredDesignPrompt(): string {
+  return INWORLD_DESIGN_PROFILE_KEYS.map((key) => `${key}: `).join("\n")
+}
+
 export function parseInworldVoiceProfile(text: string): {
   profile: InworldVoiceProfile
   extras: InworldVoiceProfileExtra[]
@@ -106,6 +111,11 @@ export function inworldVoiceProfileHasValue(
     || extras.some((row) => row.value.trim().length > 0)
 }
 
+export function structuredDesignPromptHasValue(text: string): boolean {
+  const parsed = parseInworldVoiceProfile(text)
+  return inworldVoiceProfileHasValue(parsed.profile, parsed.extras)
+}
+
 /** True when most lines are `key: value` and at least one is a known profile key. */
 export function looksLikeInworldVoiceProfile(text: string): boolean {
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.length > 0)
@@ -123,6 +133,146 @@ export function looksLikeInworldVoiceProfile(text: string): boolean {
 
 export function initialInworldDesignMode(prompt: string): InworldDesignMode {
   return looksLikeInworldVoiceProfile(prompt) ? "structured" : "freeform"
+}
+
+/** Starting-point chips under the Voice Design prompt. English is the Inworld payload. */
+export const INWORLD_DESIGN_PRESET_IDS = [
+  "agent",
+  "narrator",
+  "companion",
+  "instructor",
+  "pirate",
+] as const
+
+export type InworldDesignPresetId = (typeof INWORLD_DESIGN_PRESET_IDS)[number]
+
+type InworldDesignPreset = {
+  freeform: string
+  structured: InworldVoiceProfile
+}
+
+export const INWORLD_DESIGN_PRESETS: Record<InworldDesignPresetId, InworldDesignPreset> = {
+  agent: {
+    freeform:
+      "A patient, helpful female voice, 25-40 years old. Warm, friendly tone with genuine empathy. Professional yet approachable. Skilled at conveying understanding and solutions.",
+    structured: {
+      dialect: "general american english",
+      gender: "female",
+      age: "adult",
+      emotion: "empathetic and understanding",
+      tone: "warm, friendly, and professional",
+      pitch: "mid-range with gentle, reassuring inflections",
+      volume: "moderate and consistent",
+      speed: "moderate pace with thoughtful pauses",
+      clarity: "clear and well-articulated",
+      fluency: "fluent with no hesitations",
+      personality: "patient, helpful, and approachable",
+      texture: "smooth and warm",
+      environment: "quiet indoor studio",
+    },
+  },
+  narrator: {
+    freeform:
+      "A mature male voice speaking at a steady pace and neutral tone. The timbre is warm and resonant, conveying a sense of calm and authority, suitable for narrations.",
+    structured: {
+      dialect: "general american english",
+      gender: "male",
+      age: "middle-aged",
+      emotion: "calm and composed",
+      tone: "neutral, conveying a sense of authority",
+      pitch: "low male pitch with a relatively flat contour",
+      volume: "moderate and consistent",
+      speed: "slow and deliberate, with measured pauses",
+      clarity: "highly articulate and precise",
+      fluency: "fluent and measured",
+      personality: "authoritative and composed",
+      texture: "warm and resonant",
+      environment: "clean studio recording with very low noise",
+    },
+  },
+  companion: {
+    freeform:
+      "A bright, enthusiastic young female voice in her early 20s. High energy with upward inflections and animated delivery. Fast-paced, bubbly tone with expressive variations.",
+    structured: {
+      dialect: "general american english",
+      gender: "female",
+      age: "young",
+      emotion: "cheerful and enthusiastic",
+      tone: "upbeat and animated",
+      pitch: "medium-high female pitch with rising inflections",
+      volume: "moderate to loud",
+      speed: "fast-paced and energetic",
+      clarity: "clear with expressive emphasis",
+      fluency: "fluent and lively",
+      personality: "bubbly, outgoing, and expressive",
+      texture: "bright and youthful",
+      environment: "quiet indoor studio",
+    },
+  },
+  instructor: {
+    freeform:
+      "A soothing, calming female voice, 30-45 years old. Gentle, flowing delivery with natural pauses and smooth transitions. Warm, peaceful tone that creates relaxation without sounding robotic.",
+    structured: {
+      dialect: "general american english",
+      gender: "female",
+      age: "adult",
+      emotion: "serene and reassuring",
+      tone: "gentle and soothing",
+      pitch: "low to mid-range with soft inflections",
+      volume: "soft and even",
+      speed: "slow, with long calming pauses",
+      clarity: "clear and unhurried",
+      fluency: "fluent with natural, flowing phrasing",
+      personality: "calm, nurturing, and mindful",
+      texture: "soft, breathy, and smooth",
+      environment: "quiet indoor studio",
+    },
+  },
+  pirate: {
+    freeform:
+      "A swaggering pirate captain in his fifties, loud and boisterous, with a harsh, gravelly rasp. He drags out his vowels and laughs mid-sentence.",
+    structured: {
+      dialect: "west country english",
+      gender: "male",
+      age: "adult",
+      emotion: "amused and lighthearted",
+      tone: "performative and theatrical",
+      pitch: "medium-low male pitch with varied intonation for emphasis",
+      volume: "loud and projecting",
+      speed: "slow and deliberate, with dramatic pauses",
+      clarity: "moderate, some words are slurred or mumbled",
+      fluency: "fluent but interrupted by laughter",
+      personality: "playful, confident, and a bit mischievous",
+      texture: "harsh and raspy, with a gravelly, weathered quality",
+      environment: "large, reverberant indoor space, like a hall or chamber",
+    },
+  },
+}
+
+export function inworldDesignPresetPrompt(
+  id: InworldDesignPresetId,
+  mode: InworldDesignMode,
+): string {
+  const preset = INWORLD_DESIGN_PRESETS[id]
+  return mode === "structured"
+    ? serializeInworldVoiceProfile(preset.structured)
+    : preset.freeform
+}
+
+function foldDesignPrompt(text: string): string {
+  return text.replace(/\r\n/g, "\n").trim()
+}
+
+/** Which chip matches the current textarea, or null after the user edits away. */
+export function matchingInworldDesignPreset(
+  text: string,
+  mode: InworldDesignMode,
+): InworldDesignPresetId | null {
+  const folded = foldDesignPrompt(text)
+  if (!folded) return null
+  return INWORLD_DESIGN_PRESET_IDS.find(
+    (id) => foldDesignPrompt(inworldDesignPresetPrompt(id, mode)) === folded,
+  ) ?? null
 }
 /** Inworld asks for ~50–400 English characters so the preview is 1–30 seconds. */
 export const INWORLD_DESIGN_PREVIEW_TEXT_MIN = 50

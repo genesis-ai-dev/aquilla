@@ -2,7 +2,7 @@
 // Publish happens on Create/Save in NewVoiceModal, not here.
 
 import { useEffect, useRef, useState } from "react"
-import { ExternalLink, Pause, Play } from "lucide-react"
+import { ExternalLink, Pause, Play, RotateCcw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
@@ -10,7 +10,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { InworldDesignLocaleFields } from "@/components/voice/InworldDesignLocaleFields"
-import { InworldDesignProfileFields } from "@/components/voice/InworldDesignProfileFields"
+import { InworldDesignPresetChips } from "@/components/voice/InworldDesignPresetChips"
 import { VoiceInfoTip } from "@/components/voice/VoiceInfoTip"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
@@ -24,16 +24,12 @@ import {
   INWORLD_DESIGN_PROMPT_MODE_VERBATIM,
   INWORLD_DESIGN_SAMPLE_COUNT,
   INWORLD_VOICE_DESIGN_DOCS_URL,
-  blankInworldVoiceProfile,
+  blankStructuredDesignPrompt,
   initialInworldDesignMode,
-  inworldVoiceProfileHasValue,
   looksLikeInworldVoiceProfile,
-  parseInworldVoiceProfile,
   previewAudioSrc,
-  serializeInworldVoiceProfile,
+  structuredDesignPromptHasValue,
   type InworldDesignMode,
-  type InworldDesignProfileKey,
-  type InworldVoiceProfileExtra,
 } from "@/lib/audio/inworld-voice-design"
 import { designInworldVoice, synthesizeCellTts, type InworldDesignedPreview } from "@/lib/sync/tts"
 import { cn } from "@/lib/utils"
@@ -76,9 +72,11 @@ export function InworldVoiceDesignField({
 }) {
   const t = useT()
   const [mode, setMode] = useState<InworldDesignMode>(() => initialInworldDesignMode(prompt))
-  const [profile, setProfile] = useState(() => parseInworldVoiceProfile(prompt).profile)
-  const [extras, setExtras] = useState<InworldVoiceProfileExtra[]>(
-    () => parseInworldVoiceProfile(prompt).extras,
+  const [freeformDraft, setFreeformDraft] = useState(() =>
+    looksLikeInworldVoiceProfile(prompt) ? "" : prompt,
+  )
+  const [structuredDraft, setStructuredDraft] = useState(() =>
+    looksLikeInworldVoiceProfile(prompt) ? prompt : blankStructuredDesignPrompt(),
   )
   const [previews, setPreviews] = useState<InworldDesignedPreview[]>([])
   const [generating, setGenerating] = useState(false)
@@ -89,16 +87,15 @@ export function InworldVoiceDesignField({
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const aliveRef = useRef(true)
   const savedSrcRef = useRef<string | null>(null)
-  const structuredPrompt = serializeInworldVoiceProfile(profile, extras)
-  const designPrompt = mode === "structured" ? structuredPrompt.trim() : prompt.trim()
+  const designPrompt = (mode === "structured" ? structuredDraft : prompt).trim()
   const trimmed = prompt.trim()
   const trimmedScript = script.trim()
   const tooShort = mode === "freeform" && trimmed.length > 0 && trimmed.length < INWORLD_DESIGN_PROMPT_MIN
   const scriptTooShort = trimmedScript.length > 0 && trimmedScript.length < INWORLD_DESIGN_PREVIEW_TEXT_MIN
   const promptReady = mode === "structured"
-    ? inworldVoiceProfileHasValue(profile, extras)
-      && structuredPrompt.length >= INWORLD_DESIGN_PROMPT_MIN
-      && structuredPrompt.length <= INWORLD_DESIGN_PROMPT_MAX
+    ? structuredDesignPromptHasValue(structuredDraft)
+      && structuredDraft.length >= INWORLD_DESIGN_PROMPT_MIN
+      && structuredDraft.length <= INWORLD_DESIGN_PROMPT_MAX
     : trimmed.length >= INWORLD_DESIGN_PROMPT_MIN
       && trimmed.length <= INWORLD_DESIGN_PROMPT_MAX
   const canGenerate = promptReady
@@ -106,17 +103,18 @@ export function InworldVoiceDesignField({
     && trimmedScript.length <= INWORLD_DESIGN_PREVIEW_TEXT_MAX
     && !generating
 
-  const applyProfile = (next: typeof profile, nextExtras: InworldVoiceProfileExtra[]) => {
-    setProfile(next)
-    setExtras(nextExtras)
-    onPromptChange(serializeInworldVoiceProfile(next, nextExtras))
-  }
-
   const selectMode = (next: InworldDesignMode) => {
-    if (next === "structured" && looksLikeInworldVoiceProfile(prompt)) {
-      const parsed = parseInworldVoiceProfile(prompt)
-      setProfile(parsed.profile)
-      setExtras(parsed.extras)
+    if (next === mode) return
+    if (next === "structured") {
+      const nextText = looksLikeInworldVoiceProfile(prompt)
+        ? prompt
+        : structuredDraft.trim().length > 0
+          ? structuredDraft
+          : blankStructuredDesignPrompt()
+      setStructuredDraft(nextText)
+      onPromptChange(nextText)
+    } else {
+      onPromptChange(freeformDraft)
     }
     setMode(next)
   }
@@ -316,27 +314,81 @@ export function InworldVoiceDesignField({
           <Textarea
             id="inworld-design-prompt"
             value={prompt}
-            onChange={(e) => onPromptChange(e.target.value)}
+            onChange={(e) => {
+              setFreeformDraft(e.target.value)
+              onPromptChange(e.target.value)
+            }}
             rows={3}
             maxLength={INWORLD_DESIGN_PROMPT_MAX}
             placeholder={t("audio.newVoice.designPromptPlaceholder")}
+          />
+          <InworldDesignPresetChips
+            mode="freeform"
+            value={prompt}
+            onSelect={(text) => {
+              setFreeformDraft(text)
+              onPromptChange(text)
+            }}
           />
           {tooShort && (
             <p className="text-[11px] text-destructive">{t("audio.newVoice.designPromptTooShort")}</p>
           )}
         </Field>
       ) : (
-        <InworldDesignProfileFields
-          profile={profile}
-          onChange={(key: InworldDesignProfileKey, value: string) => {
-            applyProfile({ ...profile, [key]: value }, extras)
-          }}
-          onClear={() => {
-            setProfile(blankInworldVoiceProfile())
-            setExtras([])
-            onPromptChange("")
-          }}
-        />
+        <Field className="gap-2.5">
+          <div className="flex min-w-0 flex-col gap-1">
+            <FieldLabel htmlFor="inworld-design-profile">{t("audio.newVoice.designStructuredLabel")}</FieldLabel>
+            <p className="text-[11px] text-muted-foreground">
+              {t("audio.newVoice.designStructuredHint")}{" "}
+              <a
+                href={INWORLD_VOICE_DESIGN_DOCS_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 underline underline-offset-2 hover:text-foreground"
+              >
+                {t("audio.newVoice.designDocsLink")}
+                <ExternalLink className="size-3" aria-hidden />
+              </a>
+            </p>
+          </div>
+          <Textarea
+            id="inworld-design-profile"
+            value={structuredDraft}
+            onChange={(e) => {
+              setStructuredDraft(e.target.value)
+              onPromptChange(e.target.value)
+            }}
+            rows={13}
+            maxLength={INWORLD_DESIGN_PROMPT_MAX}
+            spellCheck={false}
+            className="min-h-56 font-mono text-xs leading-5"
+          />
+          <div className="flex items-center gap-1.5">
+            <InworldDesignPresetChips
+              mode="structured"
+              value={structuredDraft}
+              onSelect={(text) => {
+                setStructuredDraft(text)
+                onPromptChange(text)
+              }}
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className="ms-auto shrink-0"
+              disabled={!structuredDesignPromptHasValue(structuredDraft)}
+              onClick={() => {
+                const blank = blankStructuredDesignPrompt()
+                setStructuredDraft(blank)
+                onPromptChange(blank)
+              }}
+              aria-label={t("common.reset")}
+            >
+              <RotateCcw />
+            </Button>
+          </div>
+        </Field>
       )}
 
       <Field>

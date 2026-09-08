@@ -7,6 +7,10 @@ import {
   base64ToBytes,
   buildListVoicesFilter,
   inworldLangCodeToBcp47,
+  resolveInworldModelId,
+  clampInworldSpeakingRate,
+  DEFAULT_INWORLD_TTS_MODEL,
+  INWORLD_TTS_MODEL_HIGHEST,
 } from "../inworld-tts"
 
 describe("inworldAuthHeader", () => {
@@ -92,5 +96,20 @@ describe("list-voices filter", () => {
   it("returns null when no lane maps onto an Inworld language", () => {
     expect(buildListVoicesFilter(["French"])).toBeNull()
     expect(buildListVoicesFilter([])).toBeNull()
+  })
+})
+
+describe("playground knobs", () => {
+  it("maps Standard/Highest onto Flash vs TTS-2", () => {
+    expect(resolveInworldModelId("standard")).toBe(DEFAULT_INWORLD_TTS_MODEL)
+    expect(resolveInworldModelId("highest")).toBe(INWORLD_TTS_MODEL_HIGHEST)
+    expect(resolveInworldModelId(undefined, "inworld-tts-2")).toBe("inworld-tts-2")
+    expect(resolveInworldModelId("standard", "inworld-tts-2")).toBe(DEFAULT_INWORLD_TTS_MODEL)
+  })
+
+  it("clamps speakingRate", () => {
+    expect(clampInworldSpeakingRate(0.95)).toBe(0.95)
+    expect(clampInworldSpeakingRate(0.1)).toBe(0.5)
+    expect(clampInworldSpeakingRate(9)).toBe(1.5)
   })
 })

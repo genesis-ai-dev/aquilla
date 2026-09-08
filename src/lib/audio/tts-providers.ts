@@ -245,6 +245,9 @@ export function normalizeVoiceForProvider(
     return next
   }
   delete next.language
+  delete next.speakingRate
+  delete next.deliveryMode
+  delete next.audioQuality
   if (engine === "gemini") {
     if (!isGeminiVoiceName(next.voiceName)) next.voiceName = DEFAULT_GEMINI_VOICE
     return next

@@ -210,6 +210,30 @@ describe("NewVoiceModal engine selection", () => {
     expect(engineCard(/Inworld/).getAttribute("aria-pressed")).toBe("true")
     expect(screen.queryByRole("button", { name: /OmniVoice/ })).toBeNull()
   })
+
+  it("shows Inworld quality, delivery, and talking speed on the TTS tab", () => {
+    renderCreate({ provider: "inworld" })
+    expect(screen.getByRole("switch", { name: "Audio quality" })).toBeTruthy()
+    expect(screen.getByRole("group", { name: "Delivery" })).toBeTruthy()
+    expect(screen.getByRole("group", { name: "Talking speed" })).toBeTruthy()
+  })
+
+  it("hides Inworld playground knobs when the engine is Gemini", () => {
+    renderCreate({ provider: "inworld" })
+    fireEvent.click(engineCard(/Gemini/))
+    expect(screen.queryByRole("switch", { name: "Audio quality" })).toBeNull()
+    expect(screen.getByLabelText("Describe the voice")).toBeTruthy()
+  })
+
+  it("saves Highest quality from the Inworld settings", async () => {
+    const user = userEvent.setup()
+    const { onSave } = renderCreate({ provider: "inworld" })
+    await user.click(screen.getByRole("switch", { name: "Audio quality" }))
+    create()
+    const saved = (onSave as ReturnType<typeof vi.fn>).mock.calls[0][0] as Voice
+    expect(saved.audioQuality).toBe("highest")
+    expect(saved.deliveryMode).toBe("STABLE")
+  })
 })
 
 describe("NewVoiceModal clone tab engines", () => {

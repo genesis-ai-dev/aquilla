@@ -30,6 +30,7 @@ import { convertToCloneVoice } from "./voice-clone"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { notifyAudioAttachmentsChanged } from "./audio-attachments-bus"
 import { synthesizeCellTts } from "@/lib/sync/tts"
+import { inworldSynthFieldsFromVoice } from "./inworld-voice-settings"
 import { effectiveSourceText } from "@/lib/cell-text"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord, ProjectTtsSettings } from "@/lib/parsers/types"
@@ -126,6 +127,7 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
           ...(project.targetLanguage ? { language: project.targetLanguage } : {}),
           ...(voice.voiceName ? { voiceId: voice.voiceName } : {}),
           ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
+          ...inworldSynthFieldsFromVoice(voice),
         },
         getSyncToken,
       )

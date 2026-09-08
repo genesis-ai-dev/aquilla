@@ -23,6 +23,7 @@ import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { injectOptimisticAudioAttachment, notifyAudioAttachmentsChanged } from "./audio-attachments-bus"
 import { probeDurationMsSafe } from "@/lib/import"
 import { synthesizeCellTts } from "@/lib/sync/tts"
+import { inworldSynthFieldsFromVoice } from "./inworld-voice-settings"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
 import type { GeminiTtsContext } from "./gemini-tts"
@@ -90,6 +91,7 @@ export async function generateAndAttachCellVoice(
         ...(args.geminiContext?.targetLanguage ? { language: args.geminiContext.targetLanguage } : {}),
         ...(voice.voiceName ? { voiceId: voice.voiceName } : {}),
         ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
+        ...inworldSynthFieldsFromVoice(voice),
       },
       getSyncToken,
     )

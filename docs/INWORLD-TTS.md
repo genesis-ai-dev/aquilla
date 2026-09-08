@@ -66,5 +66,18 @@ Aquilla proxies the catalog as `GET /api/v1/voice/tts/voices?projectId=&language
 SYSTEM voice whose primary language matches a lane, and badges the language
 on each name when the project has more than one lane.
 
+Per-voice playground knobs (New Voice dialog, Inworld engine) persist on the
+`Voice` record and are sent with `POST /api/v1/voice/tts`:
+
+| Control | Voice field | Inworld API |
+| --- | --- | --- |
+| Audio quality → Standard | `audioQuality: "standard"` | `modelId: inworld-tts-2-flash` |
+| Audio quality → Highest | `audioQuality: "highest"` | `modelId: inworld-tts-2` |
+| Delivery | `deliveryMode: STABLE \| BALANCED \| CREATIVE` | `deliveryMode` (TTS-2 only; ignored on Flash) |
+| Talking speed | `speakingRate` in `[0.5, 1.5]` | `audioConfig.speakingRate` |
+
+Unset fields keep today's Flash defaults. Delivery is disabled in the UI until
+Highest is on, because Flash ignores it.
+
 Legacy project voices with `provider: "omnivoice"` are remapped to Inworld at
 runtime (same hosted path, same clone-from-reference flow).

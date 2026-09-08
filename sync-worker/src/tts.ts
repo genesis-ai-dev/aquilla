@@ -82,7 +82,8 @@ function inworldCloneCacheKey(env: TtsEnv, projectId: string, referenceAudioId: 
  * POST /api/v1/voice/tts
  *
  * JSON body:
- *   { projectId, fileId, cellId?, text, voiceId?, referenceAudioId?, language? }
+ *   { projectId, fileId, cellId?, text, voiceId?, referenceAudioId?, language?,
+ *     speakingRate?, deliveryMode?, audioQuality? }
  *
  * Returns { audioId, durationSeconds } on success.
  * Returns null when the path/method doesn't match (dispatcher falls through).
@@ -116,6 +117,9 @@ export async function handleTtsRequest(
     voiceId?: string
     referenceAudioId?: string
     language?: string
+    speakingRate?: unknown
+    deliveryMode?: unknown
+    audioQuality?: unknown
   }
   try {
     body = await request.json()
@@ -123,7 +127,7 @@ export async function handleTtsRequest(
     return new Response("expected JSON body", { status: 400 })
   }
 
-  const { projectId, fileId, text, voiceId, referenceAudioId, language } = body
+  const { projectId, fileId, text, voiceId, referenceAudioId, language, speakingRate, deliveryMode, audioQuality } = body
   if (!projectId || !fileId || !text) {
     return new Response("missing projectId, fileId, or text", { status: 400 })
   }
@@ -219,6 +223,9 @@ export async function handleTtsRequest(
       text,
       voiceId: inworldVoiceId,
       language,
+      speakingRate,
+      deliveryMode,
+      audioQuality,
     })
     wavBytes = synth.wavBytes
     durationSeconds = Number.isFinite(synth.durationSeconds) ? Math.max(0, synth.durationSeconds) : 0

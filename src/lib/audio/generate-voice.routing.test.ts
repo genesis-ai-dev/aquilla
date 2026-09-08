@@ -47,6 +47,48 @@ describe("generateAndAttachCellVoice routing", () => {
     )
   })
 
+  it("forwards Inworld playground knobs to the server TTS path", async () => {
+    vi.resetModules()
+    const synthCellTts = vi.fn(async () => ({
+      audioId: "audio-tts-1", durationSeconds: 1.2,
+      objectName: "audio-tts-1.wav", url: "frontier-audio://audio-tts-1.wav",
+    }))
+    vi.doMock("@/lib/sync/tts", () => ({ synthesizeCellTts: synthCellTts }))
+    vi.doMock("./tts", () => ({
+      synthesizeForCell: vi.fn(), setTtsStatus: vi.fn(),
+      ttsStatusKey: (s: string) => s,
+    }))
+    vi.doMock("@/lib/sync/events-emit", () => ({ emitCellAudioAttach: vi.fn(async () => {}) }))
+    vi.doMock("./audio-attachments-bus", () => ({ notifyAudioAttachmentsChanged: vi.fn(), injectOptimisticAudioAttachment: vi.fn() }))
+    vi.doMock("./sync-token-fetcher", () => ({ audioSyncTokenFetcherForSession: () => async () => "tok" }))
+    vi.doMock("./upload", () => ({
+      buildAudioId: () => "id", uploadCellAudio: vi.fn(),
+      fetchCellAudio: vi.fn(async () => new ArrayBuffer(4)),
+    }))
+    vi.doMock("./voice-clone", () => ({ convertToCloneVoice: vi.fn() }))
+    vi.doMock("./voices", () => ({
+      resolveVoice: () => ({
+        id: "v", name: "N", provider: "inworld", voiceName: "Dennis",
+        audioQuality: "highest", deliveryMode: "CREATIVE", speakingRate: 0.95,
+      }),
+    }))
+    const { generateAndAttachCellVoice } = await import("./generate-voice")
+    await generateAndAttachCellVoice({
+      projectId: "p", fileId: "f", cellId: "c", text: "hello",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      session: { jwt: "j", username: "u" } as any, username: "u",
+    })
+    expect(synthCellTts).toHaveBeenCalledWith(
+      expect.objectContaining({
+        voiceId: "Dennis",
+        audioQuality: "highest",
+        deliveryMode: "CREATIVE",
+        speakingRate: 0.95,
+      }),
+      expect.any(Function),
+    )
+  })
+
   const mockPlainTts = (opts: { canEncode: boolean }) => {
     vi.resetModules()
     const ttsBlob = new Blob(["wav-bytes"], { type: "audio/wav" })

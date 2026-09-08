@@ -24,6 +24,12 @@ export interface SynthesizeCellTtsArgs {
   referenceAudioId?: string
   /** BCP-47 language tag. */
   language?: string
+  /** Talking speed in [0.5, 1.5]. */
+  speakingRate?: number
+  /** STABLE | BALANCED | CREATIVE. Honored only on Highest quality (inworld-tts-2). */
+  deliveryMode?: "STABLE" | "BALANCED" | "CREATIVE"
+  /** Standard = Flash; Highest = TTS-2. */
+  audioQuality?: "standard" | "highest"
 }
 
 export interface SynthesizeCellTtsResult {
@@ -55,7 +61,7 @@ export async function synthesizeCellTts(
   const token = await getSyncToken(args.projectId, args.fileId)
   if (!token) throw new Error("synthesizeCellTts: no sync token")
 
-  const body: Record<string, string> = {
+  const body: Record<string, string | number> = {
     projectId: args.projectId,
     fileId: args.fileId,
     text: args.text,
@@ -64,6 +70,9 @@ export async function synthesizeCellTts(
   if (args.voiceId !== undefined) body.voiceId = args.voiceId
   if (args.referenceAudioId !== undefined) body.referenceAudioId = args.referenceAudioId
   if (args.language !== undefined) body.language = args.language
+  if (args.speakingRate !== undefined) body.speakingRate = args.speakingRate
+  if (args.deliveryMode !== undefined) body.deliveryMode = args.deliveryMode
+  if (args.audioQuality !== undefined) body.audioQuality = args.audioQuality
 
   const res = await fetch(`${syncWorkerHttpOrigin()}/api/v1/voice/tts`, {
     method: "POST",

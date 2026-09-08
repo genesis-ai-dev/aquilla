@@ -3,7 +3,7 @@
 // Official REST (https://docs.inworld.ai/api-reference/ttsAPI/texttospeech/synthesize-speech):
 //   POST https://api.inworld.ai/tts/v1/voice
 //   Authorization: Basic $INWORLD_API_KEY
-//   { text, voiceId, modelId: "inworld-tts-2-flash", audioConfig, language? }
+//   { text, voiceId, modelId, audioConfig (speakingRate), language?, deliveryMode? }
 // Instant clone (https://docs.inworld.ai/api-reference/voiceAPI/voiceservice/clone-voice):
 //   POST https://api.inworld.ai/voices/v1/voices:clone
 //   { displayName, languageCode?, voiceSamples: [{ audioData: base64 }] }
@@ -14,8 +14,12 @@
 
 export const DEFAULT_INWORLD_API_BASE = "https://api.inworld.ai"
 export const DEFAULT_INWORLD_TTS_MODEL = "inworld-tts-2-flash"
+export const INWORLD_TTS_MODEL_HIGHEST = "inworld-tts-2"
 export const DEFAULT_INWORLD_VOICE = "Dennis"
 export const INWORLD_MAX_TEXT_CHARS = 2000
+export const INWORLD_SPEAKING_RATE_MIN = 0.5
+export const INWORLD_SPEAKING_RATE_MAX = 1.5
+export const DEFAULT_INWORLD_DELIVERY_MODE = "STABLE" as const
 
 export interface InworldTtsConfig {
   apiKey: string
@@ -28,6 +32,9 @@ export interface SynthesizeInworldArgs {
   text: string
   voiceId?: string
   language?: string
+  speakingRate?: unknown
+  deliveryMode?: unknown
+  audioQuality?: unknown
 }
 
 export interface SynthesizeInworldResult {
@@ -228,21 +235,60 @@ export async function cloneInworldVoice(
   return voiceId
 }
 
+export function parseInworldAudioQuality(value: unknown): "standard" | "highest" | undefined {
+  return value === "standard" || value === "highest" ? value : undefined
+}
+
+export function parseInworldDeliveryMode(value: unknown): "STABLE" | "BALANCED" | "CREATIVE" | undefined {
+  return value === "STABLE" || value === "BALANCED" || value === "CREATIVE" ? value : undefined
+}
+
+export function clampInworldSpeakingRate(value: unknown): number | undefined {
+  const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN
+  if (!Number.isFinite(n)) return undefined
+  const clamped = Math.min(INWORLD_SPEAKING_RATE_MAX, Math.max(INWORLD_SPEAKING_RATE_MIN, n))
+  return Math.round(clamped * 100) / 100
+}
+
+/** Per-voice quality wins over the worker's INWORLD_TTS_MODEL override. */
+export function resolveInworldModelId(
+  audioQuality: unknown,
+  configModelId?: string,
+): string {
+  const quality = parseInworldAudioQuality(audioQuality)
+  if (quality === "highest") return INWORLD_TTS_MODEL_HIGHEST
+  if (quality === "standard") return DEFAULT_INWORLD_TTS_MODEL
+  return configModelId?.trim() || DEFAULT_INWORLD_TTS_MODEL
+}
+
+export function isInworldTts2Model(modelId: string): boolean {
+  return modelId === INWORLD_TTS_MODEL_HIGHEST
+}
+
 export async function synthesizeInworldSpeech(
   config: InworldTtsConfig,
   args: SynthesizeInworldArgs,
 ): Promise<SynthesizeInworldResult> {
   const language = toInworldLanguage(args.language)
+  const modelId = resolveInworldModelId(args.audioQuality, config.modelId)
+  const speakingRate = clampInworldSpeakingRate(args.speakingRate)
+  const audioConfig: Record<string, unknown> = {
+    audioEncoding: "LINEAR16",
+    sampleRateHertz: 24000,
+  }
+  if (speakingRate !== undefined && speakingRate !== 1) {
+    audioConfig.speakingRate = speakingRate
+  }
   const payload: Record<string, unknown> = {
     text: args.text,
     voiceId: args.voiceId?.trim() || config.defaultVoiceId || DEFAULT_INWORLD_VOICE,
-    modelId: config.modelId?.trim() || DEFAULT_INWORLD_TTS_MODEL,
-    audioConfig: {
-      audioEncoding: "LINEAR16",
-      sampleRateHertz: 24000,
-    },
+    modelId,
+    audioConfig,
   }
   if (language) payload.language = language
+  if (isInworldTts2Model(modelId)) {
+    payload.deliveryMode = parseInworldDeliveryMode(args.deliveryMode) ?? DEFAULT_INWORLD_DELIVERY_MODE
+  }
 
   let res: Response
   try {

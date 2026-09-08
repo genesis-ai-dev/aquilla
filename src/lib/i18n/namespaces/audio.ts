@@ -19,6 +19,26 @@ export const audio = defineNamespace({
     "audio.newVoice.inworldVoiceLoading": "Loading voices…",
     "audio.newVoice.inworldVoiceUnavailable":
       "Couldn't load Inworld voices for these languages. Showing the built-in list.",
+    "audio.newVoice.audioQualityLabel": "Audio quality",
+    "audio.newVoice.audioQualityHint":
+      "Standard uses Inworld TTS 2 Flash — faster and lower cost. Highest uses Inworld TTS 2 for a fuller, more expressive reading, and unlocks Delivery.",
+    "audio.newVoice.audioQualityStandard": "Standard",
+    "audio.newVoice.audioQualityHighest": "Highest",
+    "audio.newVoice.deliveryLabel": "Delivery",
+    "audio.newVoice.deliveryHint":
+      "How varied the reading is. More Stable stays consistent; More Creative has a wider emotional range.",
+    "audio.newVoice.deliveryNeedsHighest":
+      "Delivery is available with Highest audio quality (Inworld TTS 2). Flash ignores this control.",
+    "audio.newVoice.deliveryStable": "More Stable",
+    "audio.newVoice.deliveryBalanced": "Balanced",
+    "audio.newVoice.deliveryCreative": "More Creative",
+    "audio.newVoice.talkingSpeedLabel": "Talking speed",
+    "audio.newVoice.talkingSpeedHint":
+      "How fast the voice speaks. 1.0 is the voice's native speed. Values below 0.8 can sound less natural.",
+    "audio.newVoice.talkingSpeedResetAria": "Reset talking speed",
+    "audio.newVoice.audioQualityHelpAria": "About audio quality",
+    "audio.newVoice.deliveryHelpAria": "About delivery",
+    "audio.newVoice.talkingSpeedHelpAria": "About talking speed",
     "audio.newVoice.describeLabel": "Describe the voice",
     "audio.newVoice.describePlaceholder": "e.g. a warm older man, calm and clear",
     "audio.newVoice.kokoroLabel": "Voice",
@@ -488,6 +508,90 @@ export const audio = defineNamespace({
           "Helper under the Inworld voice dropdown when the live catalog could " +
           "not be loaded (missing API key, network error, or no voices for the " +
           "project's languages). The dropdown still lists a small built-in English set.",
+      },
+      "audio.newVoice.audioQualityLabel": {
+        description:
+          "Form label for the Inworld audio-quality row in the New Voice dialog. " +
+          "Paired with a switch that chooses Standard (Flash model) or Highest (TTS-2).",
+      },
+      "audio.newVoice.audioQualityHint": {
+        description:
+          "Tooltip explaining the Audio quality switch: Standard is the faster " +
+          "Flash model; Highest is the fuller TTS-2 model and unlocks the Delivery slider.",
+      },
+      "audio.newVoice.audioQualityStandard": {
+        description:
+          "Value shown next to the Audio quality switch when Flash (Standard) is selected. " +
+          "Keep short — it sits in a narrow column beside the toggle.",
+        maxLength: 12,
+      },
+      "audio.newVoice.audioQualityHighest": {
+        description:
+          "Value shown next to the Audio quality switch when TTS-2 (Highest) is selected. " +
+          "Keep short — it sits in a narrow column beside the toggle.",
+        maxLength: 12,
+      },
+      "audio.newVoice.deliveryLabel": {
+        description:
+          "Form label for the Inworld Delivery slider (More Stable / Balanced / More Creative) " +
+          "in the New Voice dialog. Delivery is disabled until Audio quality is Highest.",
+      },
+      "audio.newVoice.deliveryHint": {
+        description:
+          "Tooltip for Delivery when Highest quality is on. Explains that More Stable is " +
+          "consistent and More Creative has a wider emotional range.",
+      },
+      "audio.newVoice.deliveryNeedsHighest": {
+        description:
+          "Tooltip for Delivery when Audio quality is still Standard. Explains that the " +
+          "slider only applies on Highest (Inworld TTS 2) because Flash ignores it.",
+      },
+      "audio.newVoice.deliveryStable": {
+        description:
+          "Left tick label under the Delivery slider. Means the most consistent, least " +
+          "varied reading. Short phrase, not a sentence.",
+        maxLength: 16,
+      },
+      "audio.newVoice.deliveryBalanced": {
+        description:
+          "Center tick label under the Delivery slider. Means a middle ground between " +
+          "stability and variation. One word if the target language allows.",
+        maxLength: 16,
+      },
+      "audio.newVoice.deliveryCreative": {
+        description:
+          "Right tick label under the Delivery slider. Means a more varied, expressive " +
+          "reading. Short phrase, not a sentence.",
+        maxLength: 16,
+      },
+      "audio.newVoice.talkingSpeedLabel": {
+        description:
+          "Form label for the Inworld talking-speed slider (0.5× to 1.5×) in the New Voice dialog.",
+      },
+      "audio.newVoice.talkingSpeedHint": {
+        description:
+          "Tooltip for talking speed. 1.0 is the voice's native speed; values below 0.8 " +
+          "can sound less natural. Keep the numeric examples.",
+      },
+      "audio.newVoice.talkingSpeedResetAria": {
+        description:
+          "Accessible name for the circular reset button that returns talking speed to 1.0×. " +
+          "The button has no visible text, only an undo-arrow icon.",
+      },
+      "audio.newVoice.audioQualityHelpAria": {
+        description:
+          "Accessible name for the info-icon button beside Audio quality. The visible label " +
+          "is already on the row; this names the help control for screen readers.",
+      },
+      "audio.newVoice.deliveryHelpAria": {
+        description:
+          "Accessible name for the info-icon button beside Delivery. The visible label is " +
+          "already on the row; this names the help control for screen readers.",
+      },
+      "audio.newVoice.talkingSpeedHelpAria": {
+        description:
+          "Accessible name for the info-icon button beside Talking speed. The visible label " +
+          "is already on the row; this names the help control for screen readers.",
       },
       "audio.newVoice.describeLabel": {
         description:

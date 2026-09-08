@@ -248,6 +248,21 @@ export interface Voice {
    * to badge the name when a project has more than one target-language lane.
    */
   language?: string
+  /**
+   * Inworld talking speed in [0.5, 1.5]. Default 1. Maps to
+   * `audioConfig.speakingRate`.
+   */
+  speakingRate?: number
+  /**
+   * Inworld delivery: STABLE | BALANCED | CREATIVE. Only sent when audio
+   * quality is Highest (`inworld-tts-2`); Flash ignores it.
+   */
+  deliveryMode?: "STABLE" | "BALANCED" | "CREATIVE"
+  /**
+   * Inworld audio quality. Standard = `inworld-tts-2-flash` (default);
+   * Highest = `inworld-tts-2` (unlocks Delivery).
+   */
+  audioQuality?: "standard" | "highest"
   /** Spoken accent or oral reading tradition. */
   accent?: string
   /** Closest high-resource language whose pronunciation should be used as a fallback. */

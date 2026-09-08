@@ -366,9 +366,54 @@ describe("POST /api/v1/voice/tts", () => {
       voiceId: "Sarah",
       modelId: "inworld-tts-2-flash",
     }))
+    expect((calls[0].body as { audioConfig: { speakingRate?: number } }).audioConfig.speakingRate).toBeUndefined()
+    expect((calls[0].body as { deliveryMode?: string }).deliveryMode).toBeUndefined()
 
     const stored = await env.SNAPSHOTS._bytes(audioObjectKey(env, "p1", "f1", body.objectName))
     expect(stored && stored.byteLength).toBe(wav.byteLength)
+  })
+
+  it("sends Highest quality as inworld-tts-2 with deliveryMode and speakingRate", async () => {
+    const { db } = makeStubDb()
+    const env = makeEnv(db)
+    const wav = makeWav(1)
+    const calls = stubInworld({ wav })
+    const token = await makeToken()
+
+    const res = (await call(env, ttsReq({
+      projectId: "p1",
+      fileId: "f1",
+      text: "Hello world",
+      voiceId: "Sarah",
+      audioQuality: "highest",
+      deliveryMode: "CREATIVE",
+      speakingRate: 0.95,
+    }, token)))!
+    expect(res.status).toBe(200)
+    expect(calls[0].body).toEqual(expect.objectContaining({
+      modelId: "inworld-tts-2",
+      deliveryMode: "CREATIVE",
+      audioConfig: expect.objectContaining({
+        audioEncoding: "LINEAR16",
+        speakingRate: 0.95,
+      }),
+    }))
+  })
+
+  it("does not send deliveryMode on Flash even if the client includes it", async () => {
+    const { db } = makeStubDb()
+    const calls = stubInworld({ wav: makeWav(1) })
+    const token = await makeToken()
+    const res = (await call(makeEnv(db), ttsReq({
+      projectId: "p1",
+      fileId: "f1",
+      text: "hi",
+      audioQuality: "standard",
+      deliveryMode: "CREATIVE",
+    }, token)))!
+    expect(res.status).toBe(200)
+    expect((calls[0].body as { modelId: string }).modelId).toBe("inworld-tts-2-flash")
+    expect((calls[0].body as { deliveryMode?: string }).deliveryMode).toBeUndefined()
   })
 
   it("records durationSeconds to the budget counter after success", async () => {

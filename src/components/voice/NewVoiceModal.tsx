@@ -1,9 +1,10 @@
 // NewVoiceModal — one modal, two ways to make a voice:
 //   • TTS voice — name it, pick the engine (Inworld / Gemini / Kokoro / MMS —
-//     seeded from the project's configured engine), and fill the engine's one
-//     knob (Gemini: describe how it sounds; Kokoro: pick a bundled speaker;
-//     MMS: language; Inworld: stock voice). Gemini's base timbre stays a smart default (rotated
-//     so each new voice sounds distinct).
+//     seeded from the project's configured engine), and fill that engine's
+//     knobs (Gemini: describe how it sounds; Kokoro: pick a bundled speaker;
+//     MMS: language; Inworld: stock voice plus quality / delivery / speed).
+//     Gemini's base timbre stays a smart default (rotated so each new voice
+//     sounds distinct).
 //   • Clone voice — name it, pick a cloud engine that can clone (Inworld /
 //     Gemini — Kokoro and MMS are on-device and cannot), and capture a short
 //     reference clip (record, upload, or reuse a take). Generation is re-voiced
@@ -16,7 +17,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { AudioLines, Check, Pause, Play, Sparkles, Star, Trash2, UserRound } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
-import { Dialog, DialogContent } from "@/components/ui/dialog"
+import { Dialog, DialogBody, DialogContent } from "@/components/ui/dialog"
 import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -53,6 +54,7 @@ import {
   type TtsProviderInfo,
 } from "@/lib/audio/tts-providers"
 import { InworldVoiceField } from "@/components/voice/InworldVoiceField"
+import { InworldVoiceSettings } from "@/components/voice/InworldVoiceSettings"
 import { projectTargetLaneLanguages } from "@/lib/audio/inworld-voices"
 import { HAS_EXTENDED_MMS_MODELS, POPULAR_MMS_LANGUAGES } from "@/lib/audio/mms-languages"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
@@ -309,7 +311,8 @@ function NewVoiceModalBody({
             </Tabs>
           )}
 
-          <FieldGroup className="space-y-4 pt-1">
+          <DialogBody>
+            <FieldGroup className="space-y-4 pt-1">
             {/* Name */}
             <Field>
               <FieldLabel htmlFor="voice-name">{t("common.name")}</FieldLabel>
@@ -359,6 +362,9 @@ function NewVoiceModalBody({
                 session={session}
               />
             )}
+            {activeProvider === "inworld" && (
+              <InworldVoiceSettings voice={draft} onChange={update} />
+            )}
             {activeProvider === "gemini" && (
               <Field>
                 <FieldLabel htmlFor="voice-describe">{t("audio.newVoice.describeLabel")}</FieldLabel>
@@ -386,7 +392,8 @@ function NewVoiceModalBody({
                 onApplyTake={(take) => void applyTake(take)}
               />
             )}
-          </FieldGroup>
+            </FieldGroup>
+          </DialogBody>
 
           {/* Footer */}
           <div className="-mx-5 -mb-5 mt-2 flex flex-wrap items-center gap-2 rounded-b-3xl bg-muted/40 p-5">

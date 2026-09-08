@@ -38,7 +38,7 @@ async function receive(request: Request, env: MigrateWebhookEnv): Promise<Respon
   const gitlabId = isPush ? body.project?.id : body.project_id
   if (typeof gitlabId !== 'number') return new Response('missing project id', { status: 400 })
   const ts = Date.now()
-  const item: InboxItem = { key: `${PREFIX}${String(ts).padStart(16, '0')}-${gitlabId}`, gitlabId, sha: isPush ? (body.after ?? '') : '', ts, kind: isPush ? 'push' : body.event_name! }
+  const item: InboxItem = { key: `${PREFIX}${String(ts).padStart(16, '0')}-${gitlabId}.json`, gitlabId, sha: isPush ? (body.after ?? '') : '', ts, kind: isPush ? 'push' : body.event_name! }
   await env.SNAPSHOTS.put(item.key, JSON.stringify(item))
   return new Response(null, { status: 204 })
 }

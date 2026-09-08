@@ -28,6 +28,7 @@ describe('/migrate/webhook', () => {
     const list = await handleMigrateWebhookRequest(new Request('https://s/migrate/webhook/inbox', { headers: { Authorization: 'Bearer sec' } }), e)
     const body = (await list!.json()) as { items: Array<{ gitlabId: number; sha: string; key: string }>; last: string }
     expect(body.items.map((i) => [i.gitlabId, i.sha])).toEqual([[1, 'a1'], [2, 'b2']])
+    expect(body.items[0].key).toMatch(/^_migrate\/inbox\/\d{16}-1\.json$/)
     const list2 = await handleMigrateWebhookRequest(new Request(`https://s/migrate/webhook/inbox?after=${encodeURIComponent(body.items[0].key)}`, { headers: { Authorization: 'Bearer sec' } }), e)
     expect(((await list2!.json()) as { items: unknown[] }).items).toHaveLength(1)
   })

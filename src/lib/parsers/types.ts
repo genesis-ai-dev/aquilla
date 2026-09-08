@@ -285,6 +285,13 @@ export interface Voice {
    */
   referenceAudioId?: string
   /**
+   * R2 object name (incl. ext) of the Voice Design sample the user picked.
+   * The editor plays this clip so it matches the preview, instead of
+   * synthesizing the script again. Voices saved before this field existed
+   * fall back to a fresh TTS request.
+   */
+  designPreviewAudioId?: string
+  /**
    * When the clone reference was lifted from a line take, `${cellId}:${slot}`
    * of that take. The Reference audio tab is filled only when `referenceAudioId`
    * is set *without* this key (a recorded or uploaded clip).

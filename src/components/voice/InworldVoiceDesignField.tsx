@@ -15,6 +15,8 @@ import { VoiceInfoTip } from "@/components/voice/VoiceInfoTip"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { getCellAudioStreamUrl, parseFrontierAudioUrl } from "@/lib/audio/upload"
+import { audioMimeForExt } from "@/lib/audio/mime"
+import { fetchVoiceReference } from "@/lib/audio/voice-clone"
 import {
   INWORLD_DESIGN_DEFAULT_PREVIEW_TEXT,
   INWORLD_DESIGN_PREVIEW_TEXT_MAX,
@@ -39,6 +41,11 @@ import type { Voice } from "@/lib/parsers/types"
 export type InworldDesignSelection = {
   voiceId: string
   unpublished: boolean
+  previewAudio?: string
+}
+
+function unpublishedSelection(preview: InworldDesignedPreview): InworldDesignSelection {
+  return { voiceId: preview.voiceId, unpublished: true, previewAudio: preview.previewAudio }
 }
 
 export function InworldVoiceDesignField({
@@ -47,6 +54,7 @@ export function InworldVoiceDesignField({
   selection,
   onSelectionChange,
   existingVoiceId,
+  existingPreviewAudioId,
   language,
   onLanguageChange,
   projectId,
@@ -61,6 +69,7 @@ export function InworldVoiceDesignField({
   selection: InworldDesignSelection | null
   onSelectionChange: (selection: InworldDesignSelection | null) => void
   existingVoiceId?: string
+  existingPreviewAudioId?: string
   language?: string
   onLanguageChange: (language: string) => void
   projectId?: string
@@ -120,13 +129,21 @@ export function InworldVoiceDesignField({
   }
 
   const canPlaySaved = Boolean(existingVoiceId)
-    && trimmedScript.length >= INWORLD_DESIGN_PREVIEW_TEXT_MIN
-    && trimmedScript.length <= INWORLD_DESIGN_PREVIEW_TEXT_MAX
     && !generating
+    && (
+      Boolean(existingPreviewAudioId)
+      || (
+        trimmedScript.length >= INWORLD_DESIGN_PREVIEW_TEXT_MIN
+        && trimmedScript.length <= INWORLD_DESIGN_PREVIEW_TEXT_MAX
+      )
+    )
+  const savedPlaybackKey = existingPreviewAudioId
+    ?? `${existingVoiceId ?? ""}:${trimmedScript}:${language ?? ""}:${speakingRate ?? ""}:${deliveryMode ?? ""}:${audioQuality ?? ""}`
 
   useEffect(() => {
+    if (savedSrcRef.current?.startsWith("blob:")) URL.revokeObjectURL(savedSrcRef.current)
     savedSrcRef.current = null
-  }, [trimmedScript, language, speakingRate, deliveryMode, audioQuality, existingVoiceId])
+  }, [savedPlaybackKey])
 
   const haltAudio = (audio: HTMLAudioElement | null) => {
     if (!audio) return
@@ -147,6 +164,8 @@ export function InworldVoiceDesignField({
       aliveRef.current = false
       haltAudio(audioRef.current)
       audioRef.current = null
+      if (savedSrcRef.current?.startsWith("blob:")) URL.revokeObjectURL(savedSrcRef.current)
+      savedSrcRef.current = null
     }
   }, [])
 
@@ -181,7 +200,7 @@ export function InworldVoiceDesignField({
       setPreviews(rows)
       const first = rows[0]
       if (first) {
-        onSelectionChange({ voiceId: first.voiceId, unpublished: true })
+        onSelectionChange(unpublishedSelection(first))
         playPreview(first)
       } else {
         onSelectionChange(null)
@@ -222,7 +241,7 @@ export function InworldVoiceDesignField({
       stopPreview()
       return
     }
-    onSelectionChange({ voiceId: preview.voiceId, unpublished: true })
+    onSelectionChange(unpublishedSelection(preview))
     playPreview(preview)
   }
 
@@ -245,6 +264,21 @@ export function InworldVoiceDesignField({
     setLoadingSaved(true)
     try {
       const getSyncToken = audioSyncTokenFetcherForSession(session)
+      if (existingPreviewAudioId) {
+        const bytes = await fetchVoiceReference({
+          projectId,
+          fileId,
+          referenceAudioId: existingPreviewAudioId,
+          getSyncToken,
+        })
+        if (!aliveRef.current) return
+        const ext = existingPreviewAudioId.slice(existingPreviewAudioId.lastIndexOf(".") + 1)
+        const src = URL.createObjectURL(new Blob([bytes as BlobPart], { type: audioMimeForExt(ext) }))
+        if (savedSrcRef.current?.startsWith("blob:")) URL.revokeObjectURL(savedSrcRef.current)
+        savedSrcRef.current = src
+        playSrc(src, existingVoiceId)
+        return
+      }
       const result = await synthesizeCellTts(
         {
           projectId,
@@ -464,7 +498,7 @@ export function InworldVoiceDesignField({
             if (typeof voiceId !== "string" || !voiceId) return
             const preview = previews.find((row) => row.voiceId === voiceId)
             if (!preview) return
-            onSelectionChange({ voiceId, unpublished: true })
+            onSelectionChange(unpublishedSelection(preview))
             playPreview(preview)
           }}
           aria-label={t("audio.newVoice.designSelectPreview")}

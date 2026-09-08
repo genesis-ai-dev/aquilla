@@ -514,6 +514,7 @@ describe("NewVoiceModal Inworld Voice Design", () => {
   afterEach(() => {
     vi.mocked(designInworldVoice).mockReset()
     vi.mocked(publishInworldVoice).mockReset()
+    vi.mocked(uploadVoiceReference).mockReset()
   })
 
   it("nests Prebuilt and Voice design under Inworld TTS", () => {
@@ -624,6 +625,7 @@ describe("NewVoiceModal Inworld Voice Design", () => {
       { voiceId: "ws__design-voice-a", previewText: "Hello", previewAudio: "UklGRQ==" },
     ])
     vi.mocked(publishInworldVoice).mockResolvedValue("ws__design-voice-a")
+    vi.mocked(uploadVoiceReference).mockResolvedValue(undefined)
     const user = userEvent.setup()
     const { onSave } = renderCreate({
       provider: "inworld",
@@ -650,6 +652,14 @@ describe("NewVoiceModal Inworld Voice Design", () => {
     const saved = (onSave as ReturnType<typeof vi.fn>).mock.calls[0][0] as Voice
     expect(saved.voiceName).toBe("ws__design-voice-a")
     expect(saved.prompt).toBe(DESIGN_PROMPT)
+    expect(uploadVoiceReference).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: "p1",
+        fileId: "f1",
+        blob: expect.any(Blob),
+      }),
+    )
+    expect(saved.designPreviewAudioId).toMatch(/^design-preview-.+\.wav$/)
   })
 
   it("stops the design preview when the dialog closes", async () => {

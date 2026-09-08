@@ -95,8 +95,11 @@ the published TTS-2 table. There is no Other / typed-code field on Voice
 design; that stays on Prebuilt when a project lane is not a code Inworld can
 map. Generate posts `POST /api/v1/voice/tts/design`; Create/Save publishes the chosen preview
 via `POST /api/v1/voice/tts/publish`. The published `voiceId` is stored on
-`Voice.voiceName` like a catalog or clone id. Preview audio stays in the
-browser (base64) and is not written to R2.
+`Voice.voiceName` like a catalog or clone id. The chosen preview clip is
+uploaded project-scoped to R2 (same reference-clip path as clone audio) and
+the object name is stored on `Voice.designPreviewAudioId`. Opening the voice
+later plays that clip, not a new synthesize of the preview script. Voices
+saved before this field existed still fall back to a fresh TTS request.
 
 Per-voice playground knobs (New Voice dialog, Inworld engine) persist on the
 `Voice` record and are sent with `POST /api/v1/voice/tts`:

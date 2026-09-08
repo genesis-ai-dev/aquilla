@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event"
 import { InworldVoiceDesignField, type InworldDesignSelection } from "./InworldVoiceDesignField"
 import { designInworldVoice, synthesizeCellTts } from "@/lib/sync/tts"
 import { getCellAudioStreamUrl, parseFrontierAudioUrl } from "@/lib/audio/upload"
+import { fetchVoiceReference } from "@/lib/audio/voice-clone"
 import {
   INWORLD_DESIGN_DEFAULT_PREVIEW_TEXT,
   blankStructuredDesignPrompt,
@@ -30,6 +31,10 @@ vi.mock("@/lib/audio/upload", () => ({
   getCellAudioStreamUrl: vi.fn(),
 }))
 
+vi.mock("@/lib/audio/voice-clone", () => ({
+  fetchVoiceReference: vi.fn(),
+}))
+
 const session = { jwt: "tok", username: "dev" } as FrontierSession
 const LONG_PROMPT = "A middle-aged male voice with a clear British accent speaking at a steady pace and with a warm, neutral tone."
 
@@ -38,6 +43,7 @@ function renderField(opts: {
   onPromptChange?: (prompt: string) => void
   onSelectionChange?: (selection: InworldDesignSelection | null) => void
   existingVoiceId?: string
+  existingPreviewAudioId?: string
   speakingRate?: number
   deliveryMode?: "STABLE" | "BALANCED" | "CREATIVE"
   audioQuality?: "standard" | "highest"
@@ -61,6 +67,7 @@ function renderField(opts: {
           setSelection(next)
         }}
         existingVoiceId={opts.existingVoiceId}
+        existingPreviewAudioId={opts.existingPreviewAudioId}
         language={language}
         onLanguageChange={setLanguage}
         projectId="p1"
@@ -82,6 +89,9 @@ describe("InworldVoiceDesignField", () => {
     vi.mocked(synthesizeCellTts).mockReset()
     vi.mocked(parseFrontierAudioUrl).mockReset()
     vi.mocked(getCellAudioStreamUrl).mockReset()
+    vi.mocked(fetchVoiceReference).mockReset()
+    if (vi.isMockFunction(URL.createObjectURL)) vi.mocked(URL.createObjectURL).mockRestore()
+    if (vi.isMockFunction(URL.revokeObjectURL)) vi.mocked(URL.revokeObjectURL).mockRestore()
     vi.unstubAllGlobals()
   })
 
@@ -201,6 +211,7 @@ describe("InworldVoiceDesignField", () => {
     expect(onSelectionChange).toHaveBeenCalledWith({
       voiceId: "ws__design-voice-a",
       unpublished: true,
+      previewAudio: "UklGRQ==",
     })
     await waitFor(() => {
       expect(play).toHaveBeenCalledTimes(1)
@@ -217,6 +228,7 @@ describe("InworldVoiceDesignField", () => {
     expect(onSelectionChange).toHaveBeenLastCalledWith({
       voiceId: "ws__design-voice-b",
       unpublished: true,
+      previewAudio: "UklGRQ==",
     })
     await waitFor(() => {
       expect(play).toHaveBeenCalledTimes(2)
@@ -261,10 +273,52 @@ describe("InworldVoiceDesignField", () => {
     renderField({ existingVoiceId: "ws__design-voice-saved" })
     expect(screen.getByText("Saved voice")).toBeTruthy()
     expect(screen.getByRole("button", { name: "Play saved voice" })).toBeEnabled()
-    expect(screen.getByText(/Play it back, or generate new previews/i)).toBeTruthy()
+    expect(screen.getByText(/Play the sample you picked, or generate new previews/i)).toBeTruthy()
   })
 
-  it("plays a saved designed voice by synthesizing the preview script", async () => {
+  it("plays a saved designed voice from the stored preview clip", async () => {
+    const play = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal(
+      "Audio",
+      class {
+        src = ""
+        play = play
+        pause = vi.fn()
+        onended: (() => void) | null = null
+        removeAttribute = vi.fn()
+        load = vi.fn()
+      },
+    )
+    vi.mocked(fetchVoiceReference).mockResolvedValue(new Uint8Array([1, 2, 3]))
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:design-preview")
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {})
+    const user = userEvent.setup()
+    renderField({
+      existingVoiceId: "ws__design-voice-saved",
+      existingPreviewAudioId: "design-preview-1.wav",
+    })
+    await user.click(screen.getByRole("button", { name: "Play saved voice" }))
+    await waitFor(() => {
+      expect(fetchVoiceReference).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectId: "p1",
+          fileId: "f1",
+          referenceAudioId: "design-preview-1.wav",
+        }),
+      )
+    })
+    expect(synthesizeCellTts).not.toHaveBeenCalled()
+    await waitFor(() => {
+      expect(play).toHaveBeenCalledTimes(1)
+      expect(screen.getByRole("button", { name: "Stop saved voice" })).toBeTruthy()
+    })
+    await user.click(screen.getByRole("button", { name: "Stop saved voice" }))
+    await user.click(screen.getByRole("button", { name: "Play saved voice" }))
+    await waitFor(() => expect(play).toHaveBeenCalledTimes(2))
+    expect(fetchVoiceReference).toHaveBeenCalledTimes(1)
+  })
+
+  it("plays a legacy designed voice by synthesizing the preview script", async () => {
     const play = vi.fn().mockResolvedValue(undefined)
     vi.stubGlobal(
       "Audio",

@@ -67,7 +67,7 @@ export const audio = defineNamespace({
     "audio.newVoice.designStopPreview": "Stop preview {n}",
     "audio.newVoice.designSelectPreview": "Voice previews",
     "audio.newVoice.designExistingHint":
-      "This saved voice was designed. Play it back, or generate new previews to replace it.",
+      "This saved voice was designed. Play the sample you picked, or generate new previews to replace it.",
     "audio.newVoice.designSavedLabel": "Saved voice",
     "audio.newVoice.designPlaySaved": "Play saved voice",
     "audio.newVoice.designStopSaved": "Stop saved voice",
@@ -808,8 +808,9 @@ export const audio = defineNamespace({
       "audio.newVoice.designExistingHint": {
         description:
           "Helper on the Voice Design tab when editing a voice that was already " +
-          "designed and published. Tells the user they can play the saved voice, " +
-          "generate new previews to replace it, or leave it as-is.",
+          "designed and published. Tells the user they can play the sample they " +
+          "picked (the stored preview clip), generate new previews to replace it, " +
+          "or leave it as-is.",
       },
       "audio.newVoice.designSavedLabel": {
         description:

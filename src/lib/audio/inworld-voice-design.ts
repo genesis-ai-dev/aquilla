@@ -295,3 +295,21 @@ export function previewAudioMime(b64: string): string {
 export function previewAudioSrc(b64: string): string {
   return `data:${previewAudioMime(b64)};base64,${b64}`
 }
+
+export function inworldDesignPreviewExt(b64: string): "wav" | "mp3" {
+  return previewAudioMime(b64) === "audio/mpeg" ? "mp3" : "wav"
+}
+
+export function inworldDesignPreviewBlob(b64: string): Blob {
+  const binary = globalThis.atob(b64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  return new Blob([bytes], { type: previewAudioMime(b64) })
+}
+
+/** Project-scoped R2 object name for a picked Voice Design sample. */
+export function buildDesignPreviewAudioId(ext: string): string {
+  const ts = Date.now()
+  const rnd = Math.random().toString(36).slice(2, 11)
+  return `design-preview-${ts}-${rnd}.${ext}`
+}

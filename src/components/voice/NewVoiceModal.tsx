@@ -65,7 +65,12 @@ import {
   InworldVoiceDesignField,
   type InworldDesignSelection,
 } from "@/components/voice/InworldVoiceDesignField"
-import { isInworldDesignedVoiceId } from "@/lib/audio/inworld-voice-design"
+import {
+  buildDesignPreviewAudioId,
+  inworldDesignPreviewBlob,
+  inworldDesignPreviewExt,
+  isInworldDesignedVoiceId,
+} from "@/lib/audio/inworld-voice-design"
 import { publishInworldVoice } from "@/lib/sync/tts"
 import { projectTargetLaneLanguages } from "@/lib/audio/inworld-voices"
 import { needsInworldLanguagePicker, toInworldLanguage } from "@/lib/audio/inworld-languages"
@@ -317,6 +322,7 @@ function NewVoiceModalBody({
     }
     if (designing && designSelection) {
       let voiceName = designSelection.voiceId
+      let designPreviewAudioId = next.designPreviewAudioId
       if (designSelection.unpublished) {
         if (!projectId || !fileId || !session) {
           setTakeError(t("audio.newVoice.errorDesignNoProject"))
@@ -334,6 +340,18 @@ function NewVoiceModalBody({
             },
             audioSyncTokenFetcherForSession(session),
           )
+          if (designSelection.previewAudio) {
+            const blob = inworldDesignPreviewBlob(designSelection.previewAudio)
+            const id = buildDesignPreviewAudioId(inworldDesignPreviewExt(designSelection.previewAudio))
+            await uploadVoiceReference({
+              projectId,
+              fileId,
+              referenceAudioId: id,
+              blob,
+              getSyncToken: audioSyncTokenFetcherForSession(session),
+            })
+            designPreviewAudioId = id
+          }
         } catch (e) {
           setTakeError(e instanceof Error ? e.message : String(e))
           setSaving(false)
@@ -342,8 +360,10 @@ function NewVoiceModalBody({
         setSaving(false)
       }
       next = { ...next, voiceName }
+      if (designPreviewAudioId) next.designPreviewAudioId = designPreviewAudioId
     } else if (mode === "tts" && effectiveTtsProvider(next.provider ?? projectProvider) === "inworld") {
       delete next.prompt
+      delete next.designPreviewAudioId
     }
     onSave(next)
     onClose()
@@ -469,6 +489,7 @@ function NewVoiceModalBody({
                     selection={designSelection}
                     onSelectionChange={setDesignSelection}
                     existingVoiceId={isInworldDesignedVoiceId(draft.voiceName) ? draft.voiceName : undefined}
+                    existingPreviewAudioId={draft.designPreviewAudioId}
                     language={draft.language ?? catalogLanguages.find((lane) => toInworldLanguage(lane))}
                     onLanguageChange={(language) => update({ language })}
                     projectId={projectId}

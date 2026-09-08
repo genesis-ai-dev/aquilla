@@ -6,8 +6,11 @@ import {
   INWORLD_DESIGN_PROMPT_MAX,
   blankInworldVoiceProfile,
   blankStructuredDesignPrompt,
+  buildDesignPreviewAudioId,
   initialInworldDesignMode,
   inworldDesignPresetPrompt,
+  inworldDesignPreviewBlob,
+  inworldDesignPreviewExt,
   inworldVoiceProfileHasValue,
   isInworldDesignedVoiceId,
   looksLikeInworldVoiceProfile,
@@ -40,6 +43,14 @@ describe("previewAudioMime", () => {
     expect(previewAudioMime("UklGRQAAAAA=")).toBe("audio/wav")
     expect(previewAudioMime("SUQzAAAA")).toBe("audio/mpeg")
     expect(previewAudioSrc("UklGRQAAAAA=")).toMatch(/^data:audio\/wav;base64,UklGRQ/)
+  })
+
+  it("builds a typed blob and R2 object name for a picked sample", () => {
+    expect(inworldDesignPreviewExt("UklGRQAAAAA=")).toBe("wav")
+    expect(inworldDesignPreviewExt("SUQzAAAA")).toBe("mp3")
+    const blob = inworldDesignPreviewBlob("UklGRQAAAAA=")
+    expect(blob.type).toBe("audio/wav")
+    expect(buildDesignPreviewAudioId("wav")).toMatch(/^design-preview-\d+-[a-z0-9]+\.wav$/)
   })
 })
 

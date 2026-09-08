@@ -22,8 +22,10 @@ derivation). Either path enqueues a `content` job for the project at `detected`.
 **fetch** (`stages/fetch.ts`) — ensures a local git checkout for the project is at
 or past the sha that triggered the job, cloning fresh or fast-forwarding as
 needed. If the checkout lands ahead of the triggering sha (a push landed mid-clone),
-the newer sha is re-enqueued rather than migrating a stale tree. Advances to
-`fetched`.
+the newer sha is re-enqueued rather than migrating a stale tree. Every clone/fetch
+disables git-lfs smudging (env var plus `-c filter.lfs.*` flags), so LFS objects
+always land as pointer text, never smudged bytes — audio attachments are migrated
+separately in sub-project 2 via direct R2 copy. Advances to `fetched`.
 
 **materialize** (`stages/materialize.ts`) — walks the checkout file-by-file,
 delta-filtering against the local ledger, and streams an NDJSON event plan to

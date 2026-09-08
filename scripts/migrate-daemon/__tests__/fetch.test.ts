@@ -67,6 +67,34 @@ describe("ensureCheckout", () => {
   })
 })
 
+describe("ensureCheckout LFS smudge guard", () => {
+  it("passes GIT_LFS_SKIP_SMUDGE and disables lfs filters on every git call", async () => {
+    const calls: { args: string[]; env?: NodeJS.ProcessEnv }[] = []
+    const fakeExec = async (
+      file: string,
+      args: readonly string[],
+      options?: { cwd?: string; maxBuffer?: number; env?: NodeJS.ProcessEnv },
+    ): Promise<{ stdout: string; stderr: string }> => {
+      calls.push({ args: [...args], env: options?.env })
+      return x(file, args as string[], { cwd: options?.cwd })
+    }
+    const sha1 = await head()
+    await ensureCheckout(
+      { clonesDir: clones, gitlabToken: "", exec: fakeExec },
+      { gitlabId: 42, httpUrlToRepo: bare, branch: "main", wantSha: sha1 },
+    )
+    expect(calls.length).toBeGreaterThan(0)
+    for (const call of calls) {
+      expect(call.args.slice(0, 6)).toEqual([
+        "-c", "filter.lfs.smudge=",
+        "-c", "filter.lfs.process=",
+        "-c", "filter.lfs.required=false",
+      ])
+      expect(call.env?.GIT_LFS_SKIP_SMUDGE).toBe("1")
+    }
+  })
+})
+
 describe("authedUrl", () => {
   it("rewrites https URLs to the oauth2 basic-auth form", () => {
     expect(authedUrl("https://h/p.git", "tok")).toBe("https://oauth2:tok@h/p.git")

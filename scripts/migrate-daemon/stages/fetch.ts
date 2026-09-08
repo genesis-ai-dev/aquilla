@@ -56,8 +56,21 @@ export async function ensureCheckout(deps: FetchDeps, p: { gitlabId: number; htt
       }
       throw e
     })
+  // The target box has git-lfs installed: an un-filtered clone/fetch smudges
+  // every LFS object (one project's audio attachments alone reach 9.8 GB;
+  // 488 projects would exhaust disk). The content stage only ever needs
+  // pointer text (files/**, .project/sourceTexts/**, .project/comments.json,
+  // and the IDML pointer files under .project/attachments/pointers/originals
+  // — read as text by resolveGitlabIdmlOriginal, not smudged bytes), so every
+  // git invocation disables the smudge/process/required filters explicitly
+  // (proof against a global lfs config on the box) plus the env-var guard.
+  const LFS_NO_SMUDGE_ARGS = ["-c", "filter.lfs.smudge=", "-c", "filter.lfs.process=", "-c", "filter.lfs.required=false"]
   const git = (args: string[], cwd?: string) =>
-    redactErr(exec("git", args, { cwd, maxBuffer: 64 << 20, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } }))
+    redactErr(exec("git", [...LFS_NO_SMUDGE_ARGS, ...args], {
+      cwd,
+      maxBuffer: 64 << 20,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_LFS_SKIP_SMUDGE: "1" },
+    }))
   const rev = async () => (await git(["rev-parse", "HEAD"], dir)).stdout.trim()
   const contains = async (sha: string) => { try { await git(["merge-base", "--is-ancestor", sha, "HEAD"], dir); return true } catch { return false } }
 

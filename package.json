@@ -6,6 +6,10 @@
   "packageManager": "pnpm@10.19.0",
   "scripts": {
     "dev": "tsx scripts/dev-stack.ts",
+    "dev:start": "bash scripts/dev-ctl.sh start",
+    "dev:stop": "bash scripts/dev-ctl.sh stop",
+    "dev:status": "bash scripts/dev-ctl.sh status",
+    "dev:refresh": "bash scripts/dev-ctl.sh refresh",
     "dev:vite": "vite",
     "predev:vite": "node scripts/ensure-port-free.mjs 5173",
     "predev:codex": "node scripts/ensure-port-free.mjs 5173",

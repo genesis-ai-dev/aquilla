@@ -27,11 +27,37 @@ export const execFileP = (
 export interface FetchDeps { clonesDir: string; gitlabToken: string; exec?: typeof execFileP }
 export interface FetchResult { dir: string; sha: string; recloned: boolean }
 
+/** Basic-auth form git-over-HTTPS actually accepts for GitLab/Frontier
+ *  tokens (cf. scripts/lib/checkout-guard.ts, scripts/migrate-fetch.ts).
+ *  Only rewrites https:// URLs; anything else (e.g. file:// in tests) is
+ *  returned unchanged. */
+export function authedUrl(url: string, token: string): string {
+  if (!token || !/^https:\/\//.test(url)) return url
+  return url.replace(/^https:\/\//, `https://oauth2:${token}@`)
+}
+
+/** Strip any embedded token from text before it can reach logs/errors. */
+export function redact(text: string, token?: string): string {
+  let out = text.replace(/oauth2:[^@\s]+@/g, "oauth2:***@")
+  if (token) out = out.split(token).join("***")
+  return out
+}
+
 export async function ensureCheckout(deps: FetchDeps, p: { gitlabId: number; httpUrlToRepo: string; branch: string; wantSha: string }): Promise<FetchResult> {
   const exec = deps.exec ?? execFileP
   const dir = path.join(deps.clonesDir, String(p.gitlabId))
-  const auth = deps.gitlabToken ? ["-c", `http.extraHeader=Authorization: Bearer ${deps.gitlabToken}`] : []
-  const git = (args: string[], cwd?: string) => exec("git", [...auth, ...args], { cwd, maxBuffer: 64 << 20, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } })
+  const authed = authedUrl(p.httpUrlToRepo, deps.gitlabToken)
+  const redactErr = <T>(promise: Promise<T>): Promise<T> =>
+    promise.catch((e: unknown) => {
+      if (e instanceof Error) {
+        e.message = redact(e.message, deps.gitlabToken)
+        const stderr = (e as { stderr?: unknown }).stderr
+        if (typeof stderr === "string") (e as { stderr?: string }).stderr = redact(stderr, deps.gitlabToken)
+      }
+      throw e
+    })
+  const git = (args: string[], cwd?: string) =>
+    redactErr(exec("git", args, { cwd, maxBuffer: 64 << 20, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } }))
   const rev = async () => (await git(["rev-parse", "HEAD"], dir)).stdout.trim()
   const contains = async (sha: string) => { try { await git(["merge-base", "--is-ancestor", sha, "HEAD"], dir); return true } catch { return false } }
 
@@ -39,13 +65,15 @@ export async function ensureCheckout(deps: FetchDeps, p: { gitlabId: number; htt
   const clone = async () => {
     fs.rmSync(dir, { recursive: true, force: true })
     fs.mkdirSync(deps.clonesDir, { recursive: true })
-    await git(["clone", "--depth", "50", "--single-branch", "--branch", p.branch, p.httpUrlToRepo, dir])
+    await git(["clone", "--depth", "50", "--single-branch", "--branch", p.branch, authed, dir])
+    // Never persist the token in .git/config.
+    await git(["remote", "set-url", "origin", p.httpUrlToRepo], dir)
     recloned = true
   }
   if (!fs.existsSync(path.join(dir, ".git"))) await clone()
   else {
     try {
-      await git(["fetch", "--depth", "50", "origin", p.branch], dir)
+      await git(["fetch", "--depth", "50", authed, p.branch], dir)
       await git(["merge", "--ff-only", "FETCH_HEAD"], dir)
     } catch {
       await clone()
@@ -53,8 +81,10 @@ export async function ensureCheckout(deps: FetchDeps, p: { gitlabId: number; htt
   }
   if (!(await contains(p.wantSha))) {
     // Shallow history may not include wantSha yet, or the hook raced the mirror. One deepen, then give up.
-    try { await git(["fetch", "--deepen", "200", "origin", p.branch], dir) } catch { /* fall through */ }
-    if (!(await contains(p.wantSha))) throw new Error(`checkout ${dir} at ${await rev()} does not contain wantSha ${p.wantSha}`)
+    try { await git(["fetch", "--deepen", "200", authed, p.branch], dir) } catch { /* fall through */ }
+    if (!(await contains(p.wantSha))) {
+      throw new Error(redact(`checkout ${dir} at ${await rev()} does not contain wantSha ${p.wantSha}`, deps.gitlabToken))
+    }
   }
   return { dir, sha: await rev(), recloned }
 }

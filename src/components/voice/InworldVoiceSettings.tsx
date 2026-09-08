@@ -1,12 +1,13 @@
 // Inworld playground knobs on a voice: audio quality, delivery, talking speed.
-// Highest quality switches the request to inworld-tts-2 so Delivery is honored.
+// Highest quality switches the request to inworld-tts-2 so Delivery and steering
+// are honored.
 
-import { HelpCircle, RotateCcw } from "lucide-react"
+import { ExternalLink, RotateCcw } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Slider } from "@/components/ui/slider"
 import { Switch } from "@/components/ui/switch"
-import { AppTooltip } from "@/components/ui/tooltip"
+import { VoiceInfoTip } from "@/components/voice/VoiceInfoTip"
 import { useT } from "@/lib/i18n/I18nProvider"
 import {
   DEFAULT_INWORLD_DELIVERY_MODE,
@@ -14,6 +15,7 @@ import {
   INWORLD_SPEAKING_RATE_MAX,
   INWORLD_SPEAKING_RATE_MIN,
   INWORLD_SPEAKING_RATE_STEP,
+  INWORLD_STEERING_DOCS_URL,
   effectiveInworldAudioQuality,
   effectiveInworldDeliveryMode,
   effectiveInworldSpeakingRate,
@@ -58,29 +60,29 @@ export function InworldVoiceSettings({
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-1.5">
           <span className="text-sm font-medium">{t("audio.newVoice.audioQualityLabel")}</span>
-          <SettingHelp
-            ariaLabel={t("audio.newVoice.audioQualityHelpAria")}
+          <VoiceInfoTip
+            label={t("audio.newVoice.audioQualityHelpAria")}
             content={t("audio.newVoice.audioQualityHint")}
           />
         </div>
         <div className="flex items-center gap-2">
+          <span className="w-16 text-end text-sm text-muted-foreground">
+            {highest ? t("audio.newVoice.audioQualityHighest") : t("audio.newVoice.audioQualityStandard")}
+          </span>
           <Switch
             size="sm"
             checked={highest}
             onCheckedChange={(checked) => setQuality(checked === true ? "highest" : "standard")}
             aria-label={t("audio.newVoice.audioQualityLabel")}
           />
-          <span className="w-16 text-sm text-muted-foreground">
-            {highest ? t("audio.newVoice.audioQualityHighest") : t("audio.newVoice.audioQualityStandard")}
-          </span>
         </div>
       </div>
 
       <div className={highest ? "space-y-2" : "space-y-2 opacity-50"}>
         <div className="flex items-center gap-1.5">
           <span className="text-sm font-medium">{t("audio.newVoice.deliveryLabel")}</span>
-          <SettingHelp
-            ariaLabel={t("audio.newVoice.deliveryHelpAria")}
+          <VoiceInfoTip
+            label={t("audio.newVoice.deliveryHelpAria")}
             content={highest ? t("audio.newVoice.deliveryHint") : t("audio.newVoice.deliveryNeedsHighest")}
           />
         </div>
@@ -101,14 +103,25 @@ export function InworldVoiceSettings({
           <span>{t("audio.newVoice.deliveryBalanced")}</span>
           <span>{t("audio.newVoice.deliveryCreative")}</span>
         </div>
+        {highest && (
+          <a
+            href={INWORLD_STEERING_DOCS_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+          >
+            {t("audio.newVoice.steeringBestPractices")}
+            <ExternalLink className="size-3" aria-hidden />
+          </a>
+        )}
       </div>
 
       <div className="space-y-2">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5">
             <span className="text-sm font-medium">{t("audio.newVoice.talkingSpeedLabel")}</span>
-            <SettingHelp
-              ariaLabel={t("audio.newVoice.talkingSpeedHelpAria")}
+            <VoiceInfoTip
+              label={t("audio.newVoice.talkingSpeedHelpAria")}
               content={t("audio.newVoice.talkingSpeedHint")}
             />
           </div>
@@ -123,7 +136,7 @@ export function InworldVoiceSettings({
             >
               <RotateCcw />
             </Button>
-            <Badge variant="secondary" className="tabular-nums">
+            <Badge variant="outline" className="bg-muted tabular-nums">
               {formatInworldSpeakingRate(rate)}
             </Badge>
           </div>
@@ -146,19 +159,5 @@ export function InworldVoiceSettings({
         </div>
       </div>
     </div>
-  )
-}
-
-function SettingHelp({ ariaLabel, content }: { ariaLabel: string; content: string }) {
-  return (
-    <AppTooltip content={content}>
-      <button
-        type="button"
-        className="inline-flex size-5 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"
-        aria-label={ariaLabel}
-      >
-        <HelpCircle className="size-3.5" aria-hidden />
-      </button>
-    </AppTooltip>
   )
 }

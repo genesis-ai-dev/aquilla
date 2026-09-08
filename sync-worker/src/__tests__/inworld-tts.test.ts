@@ -9,6 +9,7 @@ import {
   inworldLangCodeToBcp47,
   resolveInworldModelId,
   clampInworldSpeakingRate,
+  clampInworldDesignSamples,
   DEFAULT_INWORLD_TTS_MODEL,
   INWORLD_TTS_MODEL_HIGHEST,
 } from "../inworld-tts"
@@ -30,9 +31,13 @@ describe("toInworldLanguage", () => {
     expect(toInworldLanguage("fra")).toBe("fr-FR")
   })
 
-  it("passes through BCP-47 tags", () => {
+  it("passes through BCP-47 tags and ISO-639-3 language subtags", () => {
     expect(toInworldLanguage("en-GB")).toBe("en-GB")
     expect(toInworldLanguage("pt-BR")).toBe("pt-BR")
+    expect(toInworldLanguage("fil")).toBe("fil")
+    expect(toInworldLanguage("yue")).toBe("yue")
+    expect(toInworldLanguage("en-scottish")).toBe("en-scottish")
+    expect(toInworldLanguage("en-GB-u-sd-gbwls")).toBe("en-GB-u-sd-gbwls")
   })
 
   it("normalizes underscore separators", () => {
@@ -103,7 +108,9 @@ describe("playground knobs", () => {
   it("maps Standard/Highest onto Flash vs TTS-2", () => {
     expect(resolveInworldModelId("standard")).toBe(DEFAULT_INWORLD_TTS_MODEL)
     expect(resolveInworldModelId("highest")).toBe(INWORLD_TTS_MODEL_HIGHEST)
+    expect(resolveInworldModelId(undefined)).toBe(INWORLD_TTS_MODEL_HIGHEST)
     expect(resolveInworldModelId(undefined, "inworld-tts-2")).toBe("inworld-tts-2")
+    expect(resolveInworldModelId(undefined, "inworld-tts-2-flash")).toBe("inworld-tts-2-flash")
     expect(resolveInworldModelId("standard", "inworld-tts-2")).toBe(DEFAULT_INWORLD_TTS_MODEL)
   })
 
@@ -111,5 +118,14 @@ describe("playground knobs", () => {
     expect(clampInworldSpeakingRate(0.95)).toBe(0.95)
     expect(clampInworldSpeakingRate(0.1)).toBe(0.5)
     expect(clampInworldSpeakingRate(9)).toBe(1.5)
+  })
+})
+
+describe("voice design helpers", () => {
+  it("defaults sample count to 3 and clamps to 1–3", () => {
+    expect(clampInworldDesignSamples(undefined)).toBe(3)
+    expect(clampInworldDesignSamples(2)).toBe(2)
+    expect(clampInworldDesignSamples(9)).toBe(3)
+    expect(clampInworldDesignSamples(0)).toBe(1)
   })
 })

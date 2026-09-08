@@ -19,11 +19,64 @@ export const audio = defineNamespace({
     "audio.newVoice.inworldVoiceLoading": "Loading voices…",
     "audio.newVoice.inworldVoiceUnavailable":
       "Couldn't load Inworld voices for these languages. Showing the built-in list.",
+    "audio.newVoice.inworldCustomVoice": "Designed voice",
+    "audio.newVoice.tabPrebuilt": "Prebuilt voice",
+    "audio.newVoice.tabDesign": "Voice design",
+    "audio.newVoice.inworldSourceGroupLabel": "Inworld voice source",
+    "audio.newVoice.designPromptPlaceholder":
+      "A middle-aged male voice with a clear British accent, speaking at a steady pace with a warm, neutral tone.",
+    "audio.newVoice.designPromptHint":
+      "Write in English. Include age, gender, accent, pitch, pace, and tone. Under 30 characters rarely works.",
+    "audio.newVoice.designPromptTooShort": "Write at least 30 characters so Inworld can shape a voice.",
+    "audio.newVoice.designScriptLabel": "Preview script",
+    "audio.newVoice.designScriptHint":
+      "The previews speak this. About 50–400 characters in English shapes the voice best.",
+    "audio.newVoice.designScriptHelpAria": "About the preview script",
+    "audio.newVoice.designScriptTooShort": "Write at least 50 characters so the preview has enough to say.",
+    "audio.newVoice.designLanguageHint":
+      "The language this designed voice will speak. The preview script is read in this language too.",
+    "audio.newVoice.designLanguageHelpAria": "About the language",
+    "audio.newVoice.designLanguageSearch": "Find a language…",
+    "audio.newVoice.designLanguageSearchAria": "Find a language",
+    "audio.newVoice.designAccentLabel": "Accent",
+    "audio.newVoice.designAccentHint":
+      "Regional accent for that language. American English is en-US; British is en-GB.",
+    "audio.newVoice.designAccentHelpAria": "About the accent",
+    "audio.newVoice.designAccentUS": "American",
+    "audio.newVoice.designAccentGB": "British",
+    "audio.newVoice.designAccentMX": "Mexican",
+    "audio.newVoice.designAccentBR": "Brazilian",
+    "audio.newVoice.designAccentStandard": "Standard",
+    "audio.newVoice.designGenerate": "Generate previews",
+    "audio.newVoice.designGenerating": "Generating…",
+    "audio.newVoice.designDocsLink": "Voice design guide",
+    "audio.newVoice.designPreviewLabel": "Preview {n}",
+    "audio.newVoice.designPlayPreview": "Play preview {n}",
+    "audio.newVoice.designStopPreview": "Stop preview {n}",
+    "audio.newVoice.designSelectPreview": "Voice previews",
+    "audio.newVoice.designExistingHint":
+      "This saved voice was designed. Play it back, or generate new previews to replace it.",
+    "audio.newVoice.designSavedLabel": "Saved voice",
+    "audio.newVoice.designPlaySaved": "Play saved voice",
+    "audio.newVoice.designStopSaved": "Stop saved voice",
+    "audio.newVoice.errorDesignPreviewRequired":
+      "Generate previews and pick one before creating this voice.",
+    "audio.newVoice.errorDesignNoProject": "Open a project file before designing a voice.",
+    "audio.newVoice.inworldLanguageLabel": "Language",
+    "audio.newVoice.inworldLanguagePlaceholder": "Choose a language",
+    "audio.newVoice.inworldLanguageHint":
+      "At least one project language isn't a code Inworld recognizes. Choose the closest match so we can load matching voices.",
+    "audio.newVoice.inworldLanguageOther": "Other",
+    "audio.newVoice.inworldLanguageCodeLabel": "Language code",
+    "audio.newVoice.inworldLanguageCodeHint":
+      "Use a BCP-47 tag Inworld should speak, for example sv-SE.",
+    "audio.newVoice.errorInworldLanguageRequired": "Choose a language for this Inworld voice.",
     "audio.newVoice.audioQualityLabel": "Audio quality",
     "audio.newVoice.audioQualityHint":
-      "Standard uses Inworld TTS 2 Flash — faster and lower cost. Highest uses Inworld TTS 2 for a fuller, more expressive reading, and unlocks Delivery.",
+      "Standard uses Inworld TTS 2 Flash — faster and lower cost. Highest uses Inworld TTS 2 for a fuller, more expressive reading, and unlocks Delivery and steering.",
     "audio.newVoice.audioQualityStandard": "Standard",
     "audio.newVoice.audioQualityHighest": "Highest",
+    "audio.newVoice.steeringBestPractices": "Best practices",
     "audio.newVoice.deliveryLabel": "Delivery",
     "audio.newVoice.deliveryHint":
       "How varied the reading is. More Stable stays consistent; More Creative has a wider emotional range.",
@@ -348,9 +401,9 @@ export const audio = defineNamespace({
     // see audio.newVoice.singleVoiceHint's context note — so only the hint
     // sentence is keyed here.)
     "audio.provider.inworldHint":
-      "Runs on our servers via Inworld TTS 2 Flash. No user API key; usage is cloud-metered. Supports voice cloning from a reference recording.",
+      "Runs on our servers. Standard uses Inworld TTS 2 Flash; Highest uses Inworld TTS 2. No user API key; usage is cloud-metered. Supports voice cloning from a reference recording.",
     "audio.provider.omnivoiceHint":
-      "Runs on our servers via Inworld TTS 2 Flash. No user API key; usage is cloud-metered. Supports voice cloning from a reference recording.",
+      "Runs on our servers. Standard uses Inworld TTS 2 Flash; Highest uses Inworld TTS 2. No user API key; usage is cloud-metered. Supports voice cloning from a reference recording.",
     "audio.provider.geminiHint": "BYOK Google AI key. Promptable, high-quality voices.",
     "audio.provider.kokoroHint": "Runs in-browser after a one-time local model download.",
     "audio.provider.mmsHintSherpa": "Local browser voices loaded from the Sherpa-ONNX MMS mirror.",
@@ -509,6 +562,241 @@ export const audio = defineNamespace({
           "not be loaded (missing API key, network error, or no voices for the " +
           "project's languages). The dropdown still lists a small built-in English set.",
       },
+      "audio.newVoice.inworldCustomVoice": {
+        description:
+          "Fallback label in the Inworld prebuilt-voice dropdown for a Voice Design " +
+          "id that is not in the SYSTEM catalog. Shown instead of the raw voice id.",
+      },
+      "audio.newVoice.tabPrebuilt": {
+        description:
+          "Nested tab on the Inworld TTS form: pick a stock voice from Inworld's " +
+          "library (Dennis, Alex, …), as opposed to designing a new one from a " +
+          "text description. Short noun phrase.",
+        maxLength: 18,
+      },
+      "audio.newVoice.tabDesign": {
+        description:
+          "Nested tab on the Inworld TTS form: create a custom voice from a text " +
+          "description (Inworld Voice Design), as opposed to picking a prebuilt " +
+          "library voice. Short noun phrase.",
+        maxLength: 18,
+      },
+      "audio.newVoice.inworldSourceGroupLabel": {
+        description:
+          "Accessible group label (not visible text) for the Prebuilt / Voice design " +
+          "tab pair on the Inworld TTS form, read by screen readers.",
+      },
+      "audio.newVoice.designPromptPlaceholder": {
+        description:
+          "Placeholder inside the Voice Design description textarea before the user " +
+          "types. An example voice description in English, not an instruction.",
+      },
+      "audio.newVoice.designPromptHint": {
+        description:
+          "Helper under the Voice Design description label, above the prompt. Tells the user to write " +
+          "in English and which attributes to include, and that very short prompts fail.",
+      },
+      "audio.newVoice.designPromptTooShort": {
+        description:
+          "Inline validation under the Voice Design description when the text is " +
+          "shorter than 30 characters and Generate is disabled.",
+      },
+      "audio.newVoice.designScriptLabel": {
+        description:
+          "Form label above the Voice Design textarea for the spoken preview script " +
+          "(the words the generated samples will say), as opposed to the voice " +
+          "description field above it.",
+      },
+      "audio.newVoice.designScriptHint": {
+        description:
+          "Tooltip on the info icon beside the Voice Design preview-script label. " +
+          "Explains that the generated samples speak this text, and that about " +
+          "50–400 English characters produce the best voice.",
+      },
+      "audio.newVoice.designScriptHelpAria": {
+        description:
+          "Accessible name for the info-icon button beside Preview script. The visible " +
+          "label is already on the row; this names the help control for screen readers.",
+      },
+      "audio.newVoice.designLanguageHint": {
+        description:
+          "Tooltip on the info icon beside Language on Voice Design (freeform). Explains " +
+          "that the designed voice and its preview script use this language.",
+      },
+      "audio.newVoice.designLanguageHelpAria": {
+        description:
+          "Accessible name for the info-icon button beside Language on Voice Design.",
+      },
+      "audio.newVoice.designLanguageSearch": {
+        description:
+          "Placeholder inside the Voice Design Language combobox search field. " +
+          "The list has ~95 Inworld TTS-2 languages.",
+      },
+      "audio.newVoice.designLanguageSearchAria": {
+        description:
+          "Accessible name for the search field inside the Voice Design Language combobox.",
+      },
+      "audio.newVoice.designAccentLabel": {
+        description:
+          "Form label for the regional-accent dropdown next to Language on Voice Design. " +
+          "Short noun.",
+        maxLength: 14,
+      },
+      "audio.newVoice.designAccentHint": {
+        description:
+          "Tooltip on the info icon beside Accent on Voice Design. Explains that accent " +
+          "is the regional variant (American vs British English).",
+      },
+      "audio.newVoice.designAccentHelpAria": {
+        description:
+          "Accessible name for the info-icon button beside Accent on Voice Design.",
+      },
+      "audio.newVoice.designAccentUS": {
+        description:
+          "Accent option for en-US. Adjective, as in American English. Not the country name.",
+        maxLength: 16,
+      },
+      "audio.newVoice.designAccentGB": {
+        description:
+          "Accent option for en-GB. Adjective, as in British English. Not the country name.",
+        maxLength: 16,
+      },
+      "audio.newVoice.designAccentMX": {
+        description:
+          "Accent option for es-MX. Adjective, as in Mexican Spanish.",
+        maxLength: 16,
+      },
+      "audio.newVoice.designAccentBR": {
+        description:
+          "Accent option for pt-BR. Adjective, as in Brazilian Portuguese.",
+        maxLength: 16,
+      },
+      "audio.newVoice.designAccentStandard": {
+        description:
+          "Accent option when the language has no regional tag (for example Yoruba). " +
+          "Short noun.",
+        maxLength: 16,
+      },
+      "audio.newVoice.designScriptTooShort": {
+        description:
+          "Inline validation under the Voice Design preview-script field when the " +
+          "text is shorter than 50 characters and Generate is disabled.",
+      },
+      "audio.newVoice.designGenerate": {
+        description:
+          "Button that asks Inworld to generate up to three listen-able voice " +
+          "previews from the description. Verb phrase, present tense.",
+        maxLength: 22,
+      },
+      "audio.newVoice.designGenerating": {
+        description:
+          "Busy label on the Generate previews button while Inworld is creating " +
+          "the three voice samples. Ellipsis is part of the English.",
+        maxLength: 18,
+      },
+      "audio.newVoice.designDocsLink": {
+        description:
+          "Link next to the Voice Design hint that opens Inworld's Voice Design " +
+          "guide in a new tab. Short noun phrase.",
+      },
+      "audio.newVoice.designPreviewLabel": {
+        description:
+          "Visible label for one of the generated Voice Design preview rows. {n} is " +
+          "the 1-based index (1, 2, or 3).",
+        placeholders: { n: "1-based preview number (1, 2, or 3)" },
+      },
+      "audio.newVoice.designPlayPreview": {
+        description:
+          "Accessible name of the play control on Voice Design preview {n}. Screen " +
+          "readers only; the visible control is a play icon.",
+        placeholders: { n: "1-based preview number (1, 2, or 3)" },
+      },
+      "audio.newVoice.designStopPreview": {
+        description:
+          "Accessible name of the stop/pause control on Voice Design preview {n} " +
+          "while that preview is playing. Screen readers only.",
+        placeholders: { n: "1-based preview number (1, 2, or 3)" },
+      },
+      "audio.newVoice.designSelectPreview": {
+        description:
+          "Accessible group label for the Voice Design preview radio buttons " +
+          "(Preview 1, Preview 2, Preview 3). Screen readers only; not visible text. " +
+          "The chosen radio is the voice that Create/Save will publish.",
+      },
+      "audio.newVoice.designExistingHint": {
+        description:
+          "Helper on the Voice Design tab when editing a voice that was already " +
+          "designed and published. Tells the user they can play the saved voice, " +
+          "generate new previews to replace it, or leave it as-is.",
+      },
+      "audio.newVoice.designSavedLabel": {
+        description:
+          "Row label for the already-published Voice Design voice when editing. " +
+          "Shown next to a play control so the user can hear the saved voice " +
+          "without generating new samples.",
+      },
+      "audio.newVoice.designPlaySaved": {
+        description:
+          "Accessible name of the play control on the saved Voice Design row. " +
+          "Screen readers only.",
+      },
+      "audio.newVoice.designStopSaved": {
+        description:
+          "Accessible name of the stop/pause control on the saved Voice Design " +
+          "row while that clip is playing. Screen readers only.",
+      },
+      "audio.newVoice.errorDesignPreviewRequired": {
+        description:
+          "Footer error when the user hits Create/Save on the Voice Design tab " +
+          "without generating and selecting a preview.",
+      },
+      "audio.newVoice.errorDesignNoProject": {
+        description:
+          "Inline error when Generate previews is clicked without a project and " +
+          "file context (needed to mint a sync token for the worker).",
+      },
+      "audio.newVoice.inworldLanguageLabel": {
+        description:
+          "Form label for the Inworld language dropdown on the New Voice dialog. " +
+          "Shown when any of the project's target-language lanes does not map onto an " +
+          "Inworld BCP-47 code (for example a display name like French), even if other " +
+          "lanes are valid codes.",
+      },
+      "audio.newVoice.inworldLanguagePlaceholder": {
+        description:
+          "Placeholder inside the Inworld language dropdown before the user picks " +
+          "a BCP-47 code. Keep short — it sits in the closed select.",
+        maxLength: 24,
+      },
+      "audio.newVoice.inworldLanguageHint": {
+        description:
+          "Helper under the Inworld language dropdown. Explains that at least one " +
+          "project lane label isn't an Inworld language code, so the user should pick " +
+          "the closest supported language to load matching stock voices.",
+      },
+      "audio.newVoice.inworldLanguageOther": {
+        description:
+          "Last option in the Inworld language dropdown. Choosing it reveals a " +
+          "text field so the user can type a BCP-47 tag that is not in the shortlist. " +
+          "Keep short — it is a select option.",
+        maxLength: 16,
+      },
+      "audio.newVoice.inworldLanguageCodeLabel": {
+        description:
+          "Form label for the raw BCP-47 language-code text field, shown after " +
+          "the user picks Other in the Inworld language dropdown.",
+      },
+      "audio.newVoice.inworldLanguageCodeHint": {
+        description:
+          "Helper under the raw Inworld language-code field. Tells the user to " +
+          "type a BCP-47 tag; sv-SE is an example, do not localize the tag itself.",
+      },
+      "audio.newVoice.errorInworldLanguageRequired": {
+        description:
+          "Inline error when Create/Save is pressed on an Inworld voice while the " +
+          "language dropdown is still empty and no project lane maps onto an Inworld " +
+          "code. Mixed projects with at least one mapped lane can save without a pick.",
+      },
       "audio.newVoice.audioQualityLabel": {
         description:
           "Form label for the Inworld audio-quality row in the New Voice dialog. " +
@@ -517,19 +805,26 @@ export const audio = defineNamespace({
       "audio.newVoice.audioQualityHint": {
         description:
           "Tooltip explaining the Audio quality switch: Standard is the faster " +
-          "Flash model; Highest is the fuller TTS-2 model and unlocks the Delivery slider.",
+          "Flash model; Highest is the TTS-2 model and unlocks Delivery and steering.",
       },
       "audio.newVoice.audioQualityStandard": {
         description:
-          "Value shown next to the Audio quality switch when Flash (Standard) is selected. " +
+          "Value shown to the left of the Audio quality switch when Flash (Standard) is selected. " +
           "Keep short — it sits in a narrow column beside the toggle.",
         maxLength: 12,
       },
       "audio.newVoice.audioQualityHighest": {
         description:
-          "Value shown next to the Audio quality switch when TTS-2 (Highest) is selected. " +
+          "Value shown to the left of the Audio quality switch when TTS-2 (Highest) is selected. " +
           "Keep short — it sits in a narrow column beside the toggle.",
         maxLength: 12,
+      },
+      "audio.newVoice.steeringBestPractices": {
+        description:
+          "Link at the right end of the Delivery row when Highest (TTS-2) is on. " +
+          "Opens Inworld's steering best-practices page in a new tab. Keep short — " +
+          "it sits with an external-link icon.",
+        maxLength: 24,
       },
       "audio.newVoice.deliveryLabel": {
         description:
@@ -1735,13 +2030,14 @@ export const audio = defineNamespace({
       "audio.provider.inworldHint": {
         description:
           "Tooltip on the Inworld TTS engine card in the TTS engine picker (New " +
-          "Voice dialog), explaining hosted Inworld TTS 2 Flash: no user API key, " +
-          "usage-metered, and it supports cloning from a reference clip.",
+          "Voice dialog). Hosted Inworld has two models: Standard is TTS 2 Flash " +
+          "(faster) and Highest is TTS 2. No user API key, usage-metered, and it " +
+          "supports cloning from a reference clip.",
       },
       "audio.provider.omnivoiceHint": {
         description:
           "Legacy alias of audio.provider.inworldHint kept so older catalogs still " +
-          "resolve. Same meaning: hosted Inworld TTS 2 Flash, no user key, clone-capable.",
+          "resolve. Same meaning: hosted Inworld TTS 2 and Flash, no user key, clone-capable.",
       },
       "audio.provider.geminiHint": {
         description:

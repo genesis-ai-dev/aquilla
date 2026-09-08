@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import { audio } from "@/lib/i18n/namespaces/audio"
 import {
   DEFAULT_GEMINI_VOICE,
   DEFAULT_INWORLD_VOICE,
@@ -82,6 +83,16 @@ describe("TTS provider normalization", () => {
     ])
   })
 
+  it("describes Inworld as both TTS 2 and Flash", () => {
+    const inworld = TTS_PROVIDER_INFOS.find((p) => p.id === "inworld")
+    expect(inworld?.blurb).toMatch(/TTS 2/)
+    expect(inworld?.blurb).toMatch(/Flash/)
+    const hint = audio.keys["audio.provider.inworldHint"]
+    expect(hint).toMatch(/TTS 2 Flash/)
+    expect(hint).toMatch(/Highest uses Inworld TTS 2/)
+    expect(audio.keys["audio.provider.omnivoiceHint"]).toBe(hint)
+  })
+
   it("marks only cloud engines as cloning-capable", () => {
     const byId = Object.fromEntries(TTS_PROVIDER_INFOS.map((p) => [p.id, p]))
     expect(byId.inworld.supportsCloning).toBe(true)
@@ -113,6 +124,8 @@ describe("TTS provider normalization", () => {
   it("normalizes Gemini names onto Dennis when switching to inworld", () => {
     expect(normalizeVoiceForProvider(geminiVoice, "inworld").voiceName).toBe(DEFAULT_INWORLD_VOICE)
     expect(normalizeVoiceForProvider(geminiVoice, "inworld").provider).toBe("inworld")
+    expect(normalizeVoiceForProvider(geminiVoice, "inworld").audioQuality).toBe("highest")
+    expect(normalizeVoiceForProvider(geminiVoice, "inworld").deliveryMode).toBe("STABLE")
   })
 
   it("remaps persisted omnivoice ids to inworld at runtime", () => {
@@ -129,6 +142,12 @@ describe("TTS provider normalization", () => {
   it("keeps an Inworld Instant Voice Cloning id", () => {
     const cloned: Voice = { ...geminiVoice, voiceName: "ws__narrator_20260907_120000z" }
     expect(normalizeVoiceForProvider(cloned, "inworld").voiceName).toBe("ws__narrator_20260907_120000z")
+  })
+
+  it("keeps an Inworld Voice Design id", () => {
+    const designed: Voice = { ...geminiVoice, voiceName: "ws__design-voice-38b05df9" }
+    expect(isInworldVoiceName(designed.voiceName)).toBe(true)
+    expect(normalizeVoiceForProvider(designed, "inworld").voiceName).toBe("ws__design-voice-38b05df9")
   })
 
   it("accepts live catalog ids such as Alex without treating Gemini names as Inworld", () => {

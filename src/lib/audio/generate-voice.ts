@@ -24,6 +24,7 @@ import { injectOptimisticAudioAttachment, notifyAudioAttachmentsChanged } from "
 import { probeDurationMsSafe } from "@/lib/import"
 import { synthesizeCellTts } from "@/lib/sync/tts"
 import { inworldSynthFieldsFromVoice } from "./inworld-voice-settings"
+import { inworldLanguageForRequest } from "./inworld-languages"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { ProjectTtsSettings } from "@/lib/parsers/types"
 import type { GeminiTtsContext } from "./gemini-tts"
@@ -82,13 +83,14 @@ export async function generateAndAttachCellVoice(
   // R2 (native voice-cloning when a reference is set), and returns its id —
   // no client synth, no upload, no Seed-VC. Branch out entirely.
   if (isServerTtsProvider(provider)) {
+    const language = inworldLanguageForRequest(voice, args.geminiContext?.targetLanguage)
     const result = await synthesizeCellTts(
       {
         projectId: args.projectId,
         fileId: args.fileId,
         cellId: args.cellId,
         text,
-        ...(args.geminiContext?.targetLanguage ? { language: args.geminiContext.targetLanguage } : {}),
+        ...(language ? { language } : {}),
         ...(voice.voiceName ? { voiceId: voice.voiceName } : {}),
         ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
         ...inworldSynthFieldsFromVoice(voice),

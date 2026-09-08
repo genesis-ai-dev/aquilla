@@ -241,11 +241,14 @@ export interface Voice {
   /** Optional Gemini model override. */
   model?: string
   /** Gemini prebuilt voice id (e.g. "Kore"). For Kokoro, the engine voice name.
-   *  For Inworld, the catalog `voiceId` (Dennis, Alex, or an Instant Clone id). */
+   *  For Inworld, the catalog `voiceId` (Dennis, Alex), an Instant Clone id, or
+   *  a published Voice Design id (`workspace__design-voice-…`). */
   voiceName?: string
   /**
    * BCP-47 language this Inworld stock voice was picked for (AQU-1189). Used
-   * to badge the name when a project has more than one target-language lane.
+   * to badge the name when a project has more than one target-language lane,
+   * and as the synthesize/catalog language when the project lane is a
+   * display name Inworld cannot map.
    */
   language?: string
   /**
@@ -259,8 +262,8 @@ export interface Voice {
    */
   deliveryMode?: "STABLE" | "BALANCED" | "CREATIVE"
   /**
-   * Inworld audio quality. Standard = `inworld-tts-2-flash` (default);
-   * Highest = `inworld-tts-2` (unlocks Delivery).
+   * Inworld audio quality. Highest = `inworld-tts-2` (default, unlocks Delivery
+   * and steering); Standard = `inworld-tts-2-flash`.
    */
   audioQuality?: "standard" | "highest"
   /** Spoken accent or oral reading tradition. */
@@ -290,7 +293,7 @@ export interface Voice {
 }
 
 export interface ProjectTtsSettings {
-  /** "inworld" (hosted Inworld TTS 2 Flash, no user key) is the default. "gemini" is BYOK; "kokoro"/"mms" run locally. Legacy `"omnivoice"` remaps to inworld. */
+  /** "inworld" (hosted Inworld TTS 2, no user key) is the default. "gemini" is BYOK; "kokoro"/"mms" run locally. Legacy `"omnivoice"` remaps to inworld. */
   provider?: TtsProvider
   /** Gemini API key for BYOK TTS. Stored in the local project record. */
   apiKey?: string

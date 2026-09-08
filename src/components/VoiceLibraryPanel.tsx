@@ -11,7 +11,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from "react"
 import { Check, MoreHorizontal, Pencil, Plus, Search, Star, Trash2 } from "lucide-react"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
 import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
 import { cn } from "@/lib/utils"
@@ -39,6 +39,7 @@ import {
 import type { ProjectTtsSettings, TtsProvider, Voice } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { PRESET_VOICES, upsertVoice } from "@/lib/audio/voices"
+import { formatVoiceLanguageName, languageForVoiceDescription } from "@/lib/audio/inworld-languages"
 import { providerInfo, resolveTtsProvider } from "@/lib/audio/tts-providers"
 import { NewVoiceModal } from "@/components/voice/NewVoiceModal"
 import { VoiceNameWithLanguage } from "@/components/voice/VoiceLanguageBadge"
@@ -221,6 +222,7 @@ export function VoiceLibraryPanel({
               key={voice.id}
               voice={voice}
               projectProvider={projectProvider}
+              fallbackLanguage={targetLanguage}
               showLanguageBadge={languageBadge}
               active={voice.id === selectedId}
               isDefault={voice.id === defaultVoiceId}
@@ -318,12 +320,13 @@ function VoiceActionMenu({
  *  selected check · hover ⋯ menu. Click selects; drag assigns onto a line.
  *  Right-click (and the ⋯ button) open the same items as a file-tab row. */
 function VoiceRow({
-  voice, projectProvider, showLanguageBadge, active, isDefault, stats, canEdit, onSelect, onEdit, onMakeDefault, onDelete,
+  voice, projectProvider, fallbackLanguage, showLanguageBadge, active, isDefault, stats, canEdit, onSelect, onEdit, onMakeDefault, onDelete,
 }: {
   voice: Voice
   /** The project's configured TTS provider — the fallback for voices that
    *  don't carry their own (e.g. cast minted on import). */
   projectProvider: TtsProvider
+  fallbackLanguage?: string
   showLanguageBadge: boolean
   active: boolean
   isDefault: boolean
@@ -338,6 +341,7 @@ function VoiceRow({
   onDelete: () => void
 }) {
   const t = useT()
+  const { locale } = useI18n()
   const actionsMenu = useMemo(() => createMenuHandle(), [])
   // Same resolution the synth path uses (CellTtsButton, generateAndAttachCellVoice):
   // a voice's own provider wins; an absent one falls back to the project's
@@ -345,6 +349,8 @@ function VoiceRow({
   const engineLabel = voice.referenceAudioId
     ? t("audio.library.cloneEngineLabel")
     : providerInfo(voice.provider ?? projectProvider).shortTitle
+  const languageTag = languageForVoiceDescription(voice.language, fallbackLanguage)
+  const languageName = languageTag ? formatVoiceLanguageName(languageTag, locale) : ""
   const actions = (
     <VoiceActionMenu
       isDefault={isDefault}
@@ -369,6 +375,12 @@ function VoiceRow({
           <span className={cn("font-medium", voice.referenceAudioId && "text-emerald-600 dark:text-emerald-400")}>
             {engineLabel}
           </span>
+          {languageName ? (
+            <>
+              {" · "}
+              <span>{languageName}</span>
+            </>
+          ) : null}
           {" · "}
           {stats && stats.assigned > 0
             ? t("audio.library.voicedStats", { voiced: stats.voiced, assigned: stats.assigned })

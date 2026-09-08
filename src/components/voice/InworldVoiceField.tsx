@@ -1,4 +1,4 @@
-import { useMemo } from "react"
+import { useEffect, useMemo } from "react"
 import { Field, FieldLabel } from "@/components/ui/field"
 import {
   Select,
@@ -13,6 +13,8 @@ import { Spinner } from "@/components/ui/spinner"
 import { VoiceLanguageBadge } from "@/components/voice/VoiceLanguageBadge"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { DEFAULT_INWORLD_VOICE, isInworldVoiceName } from "@/lib/audio/tts-providers"
+import { isInworldDesignedVoiceId } from "@/lib/audio/inworld-voice-design"
+import { catalogLanguagesForInworld } from "@/lib/audio/inworld-languages"
 import {
   showVoiceLanguageBadge,
   useInworldCatalogVoices,
@@ -22,6 +24,7 @@ import type { FrontierSession } from "@/lib/frontier/types"
 
 export function InworldVoiceField({
   value,
+  language,
   onChange,
   targetLanguages,
   projectId,
@@ -29,6 +32,7 @@ export function InworldVoiceField({
   session,
 }: {
   value: string | undefined
+  language?: string
   onChange: (voiceId: string, language?: string) => void
   targetLanguages: readonly string[]
   projectId?: string
@@ -36,18 +40,33 @@ export function InworldVoiceField({
   session?: FrontierSession | null
 }) {
   const t = useT()
+  const catalogLanguages = useMemo(
+    () => catalogLanguagesForInworld(targetLanguages, language),
+    [targetLanguages, language],
+  )
   const { voices, status, attempted } = useInworldCatalogVoices({
     enabled: true,
     projectId,
     fileId,
     session,
-    languages: targetLanguages,
+    languages: catalogLanguages,
   })
-  const showBadge = showVoiceLanguageBadge(targetLanguages)
+  const showBadge = showVoiceLanguageBadge(targetLanguages) || catalogLanguages.length > 1
   const groups = useMemo(() => groupCatalogByLanguage(voices), [voices])
   const selected = voices.find((v) => v.voiceId === value)
+  const customValue = value && !selected && isInworldVoiceName(value) ? value : undefined
   const selectValue = selected?.voiceId
-    ?? (value && isInworldVoiceName(value) ? value : voices[0]?.voiceId ?? DEFAULT_INWORLD_VOICE)
+    ?? customValue
+    ?? voices[0]?.voiceId
+    ?? DEFAULT_INWORLD_VOICE
+
+  useEffect(() => {
+    const first = voices[0]
+    if (!first) return
+    if (voices.some((row) => row.voiceId === value)) return
+    if (value && isInworldVoiceName(value)) return
+    onChange(first.voiceId, first.language)
+  }, [voices, value, onChange])
 
   return (
     <Field>
@@ -55,7 +74,7 @@ export function InworldVoiceField({
       <Select
         value={selectValue}
         onValueChange={(next) => {
-          const id = next || DEFAULT_INWORLD_VOICE
+          const id = typeof next === "string" && next ? next : DEFAULT_INWORLD_VOICE
           const match = voices.find((v) => v.voiceId === id)
           onChange(id, match?.language)
         }}
@@ -67,10 +86,27 @@ export function InworldVoiceField({
                 <span className="truncate">{selected.displayName}</span>
                 {showBadge ? <VoiceLanguageBadge language={selected.language} /> : null}
               </span>
-            ) : selectValue}
+            ) : customValue
+              ? isInworldDesignedVoiceId(customValue)
+                ? t("audio.newVoice.inworldCustomVoice")
+                : customValue
+              : selectValue}
           </SelectValue>
         </SelectTrigger>
-        <SelectContent>
+        <SelectContent
+          side="bottom"
+          align="start"
+          alignItemWithTrigger={false}
+          collisionAvoidance={{ side: "shift", align: "shift", fallbackAxisSide: "none" }}
+          className="max-h-40"
+        >
+          {customValue && (
+            <SelectItem value={customValue}>
+              {isInworldDesignedVoiceId(customValue)
+                ? t("audio.newVoice.inworldCustomVoice")
+                : customValue}
+            </SelectItem>
+          )}
           {status === "loading" && (
             <div className="flex items-center gap-2 px-2 py-2 text-xs text-muted-foreground">
               <Spinner className="size-3" />

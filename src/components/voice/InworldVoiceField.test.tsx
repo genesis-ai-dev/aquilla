@@ -4,7 +4,7 @@
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { InworldVoiceField } from "./InworldVoiceField"
 import { listInworldVoices } from "@/lib/sync/tts"
@@ -14,15 +14,17 @@ import type { FrontierSession } from "@/lib/frontier/types"
 vi.mock("@/lib/sync/tts", () => ({
   synthesizeCellTts: vi.fn(),
   listInworldVoices: vi.fn(),
+  listInworldSupportedLanguages: vi.fn().mockResolvedValue([]),
 }))
 
 const session = { jwt: "tok", username: "dev" } as FrontierSession
 
-function renderField(languages: string[]) {
+function renderField(languages: string[], language?: string, value = "Dennis") {
   const onChange = vi.fn()
   render(
     <InworldVoiceField
-      value="Dennis"
+      value={value}
+      language={language}
       onChange={onChange}
       targetLanguages={languages}
       projectId="p1"
@@ -65,5 +67,30 @@ describe("InworldVoiceField", () => {
     await user.click(screen.getByRole("combobox", { name: "Voice" }))
     expect(await screen.findByRole("option", { name: "Dennis" })).toBeTruthy()
     expect(screen.queryByText("en-US")).toBeNull()
+  })
+
+  it("fetches the user-chosen language when the lane is not a code Inworld maps", async () => {
+    vi.mocked(listInworldVoices).mockResolvedValue([
+      { voiceId: "Emile", displayName: "Emile", language: "fr-FR" },
+    ])
+    renderField(["French"], "fr-FR")
+    await waitFor(() => {
+      expect(listInworldVoices).toHaveBeenCalledWith(
+        expect.objectContaining({ languages: ["fr-FR"] }),
+        expect.any(Function),
+      )
+    })
+  })
+
+  it("keeps a designed voice id that is not in the catalog", async () => {
+    vi.mocked(listInworldVoices).mockResolvedValue([
+      { voiceId: "Dennis", displayName: "Dennis", language: "en-US" },
+    ])
+    const { onChange } = renderField(["en"], undefined, "ws__design-voice-38b05df9")
+    expect(await screen.findByText("Designed voice")).toBeTruthy()
+    await waitFor(() => {
+      expect(listInworldVoices).toHaveBeenCalled()
+    })
+    expect(onChange).not.toHaveBeenCalled()
   })
 })

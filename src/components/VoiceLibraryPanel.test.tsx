@@ -209,6 +209,53 @@ describe("VoiceLibraryPanel (selector)", () => {
     expect(screen.getByText("Dennis")).toBeTruthy()
     expect(screen.queryByText("en-US")).toBeNull()
   })
+
+  it("puts the voice language in the row description", () => {
+    const onSettingsChange = vi.fn()
+    render(
+      <VoiceLibraryPanel
+        projectId="dev-project"
+        targetLanguage="en"
+        settings={{
+          provider: "inworld",
+          voices: [
+            makeVoice({
+              id: "v-en",
+              name: "Dennis",
+              provider: "inworld",
+              voiceName: "Dennis",
+              language: "en-US",
+            }),
+          ],
+        }}
+        onSettingsChange={onSettingsChange}
+        castStats={new Map([["v-en", { assigned: 2, voiced: 0 }]])}
+      />,
+    )
+    const row = screen.getByText("Dennis").closest("[role='button']")
+    expect(row).toHaveTextContent(/Inworld/)
+    expect(row).toHaveTextContent(/English/i)
+    expect(row).toHaveTextContent(/0\/2 voiced/)
+  })
+
+  it("uses the project language on a voice that has none of its own", () => {
+    const onSettingsChange = vi.fn()
+    render(
+      <VoiceLibraryPanel
+        projectId="dev-project"
+        targetLanguage="es"
+        targetLanes={["fr"]}
+        settings={{
+          provider: "inworld",
+          voices: [makeVoice({ id: "v-narrator", name: "Narrator", provider: "inworld" })],
+          defaultVoiceId: "v-narrator",
+        }}
+        onSettingsChange={onSettingsChange}
+      />,
+    )
+    const row = screen.getByText("Narrator").closest("[role='button']")
+    expect(row).toHaveTextContent(/Spanish/i)
+  })
 })
 
 // AQU-365: viewer/below-floor character-CRUD gating. Character writes flow

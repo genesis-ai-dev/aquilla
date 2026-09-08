@@ -5,12 +5,15 @@
 //   Delivery       → deliveryMode (STABLE | BALANCED | CREATIVE; TTS-2 only)
 //   Talking speed  → audioConfig.speakingRate in [0.5, 1.5]
 //
-// Flash ignores deliveryMode; the picker disables that slider until Highest.
+// Flash ignores deliveryMode; the picker disables that slider on Standard.
 
 import type { Voice } from "@/lib/parsers/types"
 
 export const INWORLD_TTS_MODEL_STANDARD = "inworld-tts-2-flash"
 export const INWORLD_TTS_MODEL_HIGHEST = "inworld-tts-2"
+
+/** Inworld steering (instruction tags) — Highest quality / TTS-2 only. */
+export const INWORLD_STEERING_DOCS_URL = "https://docs.inworld.ai/tts/capabilities/steering"
 
 export const INWORLD_SPEAKING_RATE_MIN = 0.5
 export const INWORLD_SPEAKING_RATE_MAX = 1.5
@@ -23,7 +26,7 @@ export const DEFAULT_INWORLD_DELIVERY_MODE: InworldDeliveryMode = "STABLE"
 
 export const INWORLD_AUDIO_QUALITIES = ["standard", "highest"] as const
 export type InworldAudioQuality = (typeof INWORLD_AUDIO_QUALITIES)[number]
-export const DEFAULT_INWORLD_AUDIO_QUALITY: InworldAudioQuality = "standard"
+export const DEFAULT_INWORLD_AUDIO_QUALITY: InworldAudioQuality = "highest"
 
 export type InworldSynthFields = {
   speakingRate?: number
@@ -73,14 +76,17 @@ export function effectiveInworldSpeakingRate(voice: Pick<Voice, "speakingRate">)
   return clampInworldSpeakingRate(voice.speakingRate) ?? INWORLD_SPEAKING_RATE_DEFAULT
 }
 
-/** Fields to POST with /api/v1/voice/tts. Omits defaults so existing voices stay Flash. */
+/** Fields to POST with /api/v1/voice/tts. Unset quality/delivery follow the Highest defaults. */
 export function inworldSynthFieldsFromVoice(
   voice: Pick<Voice, "speakingRate" | "deliveryMode" | "audioQuality">,
 ): InworldSynthFields {
   const fields: InworldSynthFields = {}
   const speakingRate = clampInworldSpeakingRate(voice.speakingRate)
   if (speakingRate !== undefined) fields.speakingRate = speakingRate
-  if (isInworldDeliveryMode(voice.deliveryMode)) fields.deliveryMode = voice.deliveryMode
-  if (isInworldAudioQuality(voice.audioQuality)) fields.audioQuality = voice.audioQuality
+  const audioQuality = effectiveInworldAudioQuality(voice)
+  fields.audioQuality = audioQuality
+  if (audioQuality === "highest") {
+    fields.deliveryMode = effectiveInworldDeliveryMode(voice)
+  }
   return fields
 }

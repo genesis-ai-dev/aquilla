@@ -2,6 +2,12 @@ import type { ProjectTtsSettings, TtsProvider, Voice } from "@/lib/parsers/types
 import { HAS_HOSTED_MMS_MODELS, USE_SHERPA_MMS_MODELS, isSupportedMmsLanguageCode } from "./mms-languages"
 import { defaultKokoroVoiceForLanguage, isBundledKokoroVoiceName } from "./kokoro-languages"
 import type { MessageKey } from "@/lib/i18n/messages/en"
+import {
+  DEFAULT_INWORLD_AUDIO_QUALITY,
+  DEFAULT_INWORLD_DELIVERY_MODE,
+  isInworldAudioQuality,
+  isInworldDeliveryMode,
+} from "./inworld-voice-settings"
 
 export const DEFAULT_TTS_PROVIDER: TtsProvider = "inworld"
 
@@ -102,7 +108,7 @@ export const TTS_PROVIDER_INFOS: readonly TtsProviderInfo[] = [
     supportsCloning: true,
     hasNamedVoices: true,
     badge: "Recommended",
-    blurb: "Hosted Inworld TTS 2 Flash — multilingual, clone from a reference clip.",
+    blurb: "Hosted Inworld TTS 2 and Flash — multilingual, clone from a reference clip.",
     hintKey: "audio.provider.inworldHint",
   },
   {
@@ -242,6 +248,10 @@ export function normalizeVoiceForProvider(
   const next: Voice = { ...voice, provider: engine }
   if (engine === "inworld") {
     if (!isInworldVoiceName(next.voiceName)) next.voiceName = DEFAULT_INWORLD_VOICE
+    if (!isInworldAudioQuality(next.audioQuality)) {
+      next.audioQuality = DEFAULT_INWORLD_AUDIO_QUALITY
+      if (!isInworldDeliveryMode(next.deliveryMode)) next.deliveryMode = DEFAULT_INWORLD_DELIVERY_MODE
+    }
     return next
   }
   delete next.language

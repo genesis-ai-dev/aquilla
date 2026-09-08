@@ -7,8 +7,16 @@
 // Instant clone (https://docs.inworld.ai/api-reference/voiceAPI/voiceservice/clone-voice):
 //   POST https://api.inworld.ai/voices/v1/voices:clone
 //   { displayName, languageCode?, voiceSamples: [{ audioData: base64 }] }
+// Voice design (https://docs.inworld.ai/api-reference/voiceAPI/voiceservice/design-voice):
+//   POST https://api.inworld.ai/voices/v1/voices:design
+//   { designPrompt, previewText, languageCode?, voiceDesignConfig.numberOfSamples }
+// Publish designed voice (https://docs.inworld.ai/api-reference/voiceAPI/voiceservice/publish-voice):
+//   POST https://api.inworld.ai/voices/v1/voices/{voiceId}:publish
+//   { displayName, description?, tags? }
 // List voices (https://docs.inworld.ai/api-reference/voiceAPI/voiceservice/list-voices):
 //   GET https://api.inworld.ai/voices/v1/voices?filter=source = "SYSTEM" AND lang_code = "en-US"
+// Supported languages:
+//   GET https://api.inworld.ai/voices/v1/supportedLanguages
 //
 // AQU-1189: this is the commercial replacement for Modal OmniVoice (CC-BY-NC weights).
 
@@ -20,6 +28,12 @@ export const INWORLD_MAX_TEXT_CHARS = 2000
 export const INWORLD_SPEAKING_RATE_MIN = 0.5
 export const INWORLD_SPEAKING_RATE_MAX = 1.5
 export const DEFAULT_INWORLD_DELIVERY_MODE = "STABLE" as const
+export const INWORLD_DESIGN_PROMPT_MIN = 30
+export const INWORLD_DESIGN_PROMPT_MAX = 1000
+export const INWORLD_DESIGN_SAMPLE_COUNT = 3
+/** BSB Revelation 1:17–18 — default spoken script for Voice Design previews. */
+export const INWORLD_DESIGN_DEFAULT_PREVIEW_TEXT =
+  "Do not be afraid. I am the First and the Last, the Living One. I was dead, and behold, now I am alive forever and ever! And I hold the keys of Death and of Hades."
 
 export interface InworldTtsConfig {
   apiKey: string
@@ -46,6 +60,25 @@ export interface CloneInworldArgs {
   displayName: string
   audioBytes: ArrayBuffer
   language?: string
+}
+
+export interface DesignInworldVoiceArgs {
+  designPrompt: string
+  previewText?: string
+  language?: string
+  numberOfSamples?: number
+}
+
+export interface InworldDesignedPreview {
+  voiceId: string
+  previewText: string
+  previewAudio: string
+}
+
+export interface PublishInworldVoiceArgs {
+  voiceId: string
+  displayName: string
+  description?: string
 }
 
 export interface InworldCatalogVoice {
@@ -87,7 +120,8 @@ export function inworldApiBase(config: InworldTtsConfig): string {
   return (config.apiBase?.trim() || DEFAULT_INWORLD_API_BASE).replace(/\/+$/, "")
 }
 
-/** Map project language tags (eng, en, en-US, EN_GB) onto Inworld's BCP-47. */
+/** Map project language tags (eng, en, en-US, EN_GB) onto Inworld's BCP-47.
+ *  Keep in sync with src/lib/audio/inworld-languages.ts. */
 export function toInworldLanguage(value: string | undefined): string | undefined {
   if (!value) return undefined
   const trimmed = value.trim()
@@ -100,7 +134,8 @@ export function toInworldLanguage(value: string | undefined): string | undefined
     // Already a region-tagged BCP-47 (en-GB) — keep as-is after separator fix.
     return normalized.includes("-") ? normalized : ISO_639_3_TO_BCP47[primary]
   }
-  if (/^[a-z]{2}(-[a-z0-9]+)*$/i.test(normalized)) return normalized
+  // ISO 639-1 (2) or ISO 639-3 (3, e.g. fil, yue, ceb) plus optional subtags.
+  if (/^[a-z]{2,3}(-[a-z0-9]+)*$/i.test(normalized)) return normalized
   return undefined
 }
 
@@ -235,6 +270,103 @@ export async function cloneInworldVoice(
   return voiceId
 }
 
+export function clampInworldDesignSamples(value: unknown): number {
+  const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN
+  if (!Number.isFinite(n)) return INWORLD_DESIGN_SAMPLE_COUNT
+  return Math.min(3, Math.max(1, Math.round(n)))
+}
+
+export function encodeInworldVoiceId(voiceId: string): string {
+  return encodeURIComponent(voiceId.trim())
+}
+
+export async function designInworldVoice(
+  config: InworldTtsConfig,
+  args: DesignInworldVoiceArgs,
+): Promise<InworldDesignedPreview[]> {
+  const designPrompt = args.designPrompt.trim()
+  if (designPrompt.length < INWORLD_DESIGN_PROMPT_MIN || designPrompt.length > INWORLD_DESIGN_PROMPT_MAX) {
+    throw new Error(
+      `design prompt must be ${INWORLD_DESIGN_PROMPT_MIN}–${INWORLD_DESIGN_PROMPT_MAX} characters`,
+    )
+  }
+  const previewText = args.previewText?.trim() || INWORLD_DESIGN_DEFAULT_PREVIEW_TEXT
+  const languageCode = toInworldLanguage(args.language)
+  const body: Record<string, unknown> = {
+    designPrompt,
+    previewText,
+    voiceDesignConfig: { numberOfSamples: clampInworldDesignSamples(args.numberOfSamples) },
+  }
+  if (languageCode) body.languageCode = languageCode
+
+  let res: Response
+  try {
+    res = await fetch(`${inworldApiBase(config)}/voices/v1/voices:design`, {
+      method: "POST",
+      headers: {
+        Authorization: inworldAuthHeader(config.apiKey),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    })
+  } catch (err) {
+    throw new Error(`Inworld voice design unreachable: ${String(err)}`)
+  }
+  if (!res.ok) {
+    throw new Error(`Inworld voice design failed (${res.status}): ${await readInworldError(res)}`)
+  }
+  const json = (await res.json()) as {
+    previewVoices?: Array<{ voiceId?: string; previewText?: string; previewAudio?: string }>
+  }
+  const previews: InworldDesignedPreview[] = []
+  for (const row of json.previewVoices ?? []) {
+    const voiceId = row.voiceId?.trim()
+    const previewAudio = row.previewAudio?.trim()
+    if (!voiceId || !previewAudio) continue
+    previews.push({
+      voiceId,
+      previewText: row.previewText?.trim() || previewText,
+      previewAudio,
+    })
+  }
+  if (previews.length === 0) throw new Error("Inworld voice design returned no previews")
+  return previews
+}
+
+export async function publishInworldVoice(
+  config: InworldTtsConfig,
+  args: PublishInworldVoiceArgs,
+): Promise<string> {
+  const voiceId = args.voiceId.trim()
+  if (!voiceId) throw new Error("missing voiceId")
+  const displayName = args.displayName.trim().slice(0, 100) || "Designed voice"
+  const body: Record<string, unknown> = { displayName }
+  const description = args.description?.trim()
+  if (description) body.description = description.slice(0, 1000)
+
+  let res: Response
+  try {
+    res = await fetch(
+      `${inworldApiBase(config)}/voices/v1/voices/${encodeInworldVoiceId(voiceId)}:publish`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: inworldAuthHeader(config.apiKey),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+      },
+    )
+  } catch (err) {
+    throw new Error(`Inworld voice publish unreachable: ${String(err)}`)
+  }
+  if (!res.ok) {
+    throw new Error(`Inworld voice publish failed (${res.status}): ${await readInworldError(res)}`)
+  }
+  const json = (await res.json()) as { voice?: { voiceId?: string }; voiceId?: string }
+  return json.voice?.voiceId ?? json.voiceId ?? voiceId
+}
+
 export function parseInworldAudioQuality(value: unknown): "standard" | "highest" | undefined {
   return value === "standard" || value === "highest" ? value : undefined
 }
@@ -258,7 +390,7 @@ export function resolveInworldModelId(
   const quality = parseInworldAudioQuality(audioQuality)
   if (quality === "highest") return INWORLD_TTS_MODEL_HIGHEST
   if (quality === "standard") return DEFAULT_INWORLD_TTS_MODEL
-  return configModelId?.trim() || DEFAULT_INWORLD_TTS_MODEL
+  return configModelId?.trim() || INWORLD_TTS_MODEL_HIGHEST
 }
 
 export function isInworldTts2Model(modelId: string): boolean {
@@ -324,8 +456,11 @@ export async function synthesizeInworldSpeech(
 export async function listInworldVoices(
   config: InworldTtsConfig,
   languages: readonly string[],
+  opts?: { allSystem?: boolean },
 ): Promise<InworldCatalogVoice[]> {
-  const filter = buildListVoicesFilter(languages)
+  const filter = opts?.allSystem
+    ? `source = "SYSTEM"`
+    : buildListVoicesFilter(languages)
   if (!filter) return []
 
   const voices: InworldCatalogVoice[] = []

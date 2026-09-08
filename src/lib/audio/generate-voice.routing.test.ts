@@ -38,6 +38,8 @@ describe("generateAndAttachCellVoice routing", () => {
         text: "hello",
         language: "es",
         voiceId: "Dennis",
+        audioQuality: "highest",
+        deliveryMode: "STABLE",
       }),
       expect.any(Function),
     )
@@ -85,6 +87,44 @@ describe("generateAndAttachCellVoice routing", () => {
         deliveryMode: "CREATIVE",
         speakingRate: 0.95,
       }),
+      expect.any(Function),
+    )
+  })
+
+  it("prefers a saved Inworld voice language over an unmapped lane tag", async () => {
+    vi.resetModules()
+    const synthCellTts = vi.fn(async () => ({
+      audioId: "audio-tts-1", durationSeconds: 1.2,
+      objectName: "audio-tts-1.wav", url: "frontier-audio://audio-tts-1.wav",
+    }))
+    vi.doMock("@/lib/sync/tts", () => ({ synthesizeCellTts: synthCellTts }))
+    vi.doMock("./tts", () => ({
+      synthesizeForCell: vi.fn(), setTtsStatus: vi.fn(),
+      ttsStatusKey: (s: string) => s,
+    }))
+    vi.doMock("@/lib/sync/events-emit", () => ({ emitCellAudioAttach: vi.fn(async () => {}) }))
+    vi.doMock("./audio-attachments-bus", () => ({ notifyAudioAttachmentsChanged: vi.fn(), injectOptimisticAudioAttachment: vi.fn() }))
+    vi.doMock("./sync-token-fetcher", () => ({ audioSyncTokenFetcherForSession: () => async () => "tok" }))
+    vi.doMock("./upload", () => ({
+      buildAudioId: () => "id", uploadCellAudio: vi.fn(),
+      fetchCellAudio: vi.fn(async () => new ArrayBuffer(4)),
+    }))
+    vi.doMock("./voice-clone", () => ({ convertToCloneVoice: vi.fn() }))
+    vi.doMock("./voices", () => ({
+      resolveVoice: () => ({
+        id: "v", name: "N", provider: "inworld", voiceName: "Dennis",
+        language: "fr-FR",
+      }),
+    }))
+    const { generateAndAttachCellVoice } = await import("./generate-voice")
+    await generateAndAttachCellVoice({
+      projectId: "p", fileId: "f", cellId: "c", text: "hello",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      session: { jwt: "j", username: "u" } as any, username: "u",
+      geminiContext: { targetLanguage: "French" },
+    })
+    expect(synthCellTts).toHaveBeenCalledWith(
+      expect.objectContaining({ language: "fr-FR" }),
       expect.any(Function),
     )
   })

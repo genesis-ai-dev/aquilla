@@ -15,17 +15,34 @@ function renderSettings(voice: Pick<Voice, "speakingRate" | "deliveryMode" | "au
 }
 
 describe("InworldVoiceSettings", () => {
-  it("defaults to Standard quality with Delivery disabled", () => {
+  it("defaults to Highest quality with Delivery enabled", () => {
     renderSettings()
-    expect(screen.getByRole("switch", { name: "Audio quality" })).not.toBeChecked()
-    expect(screen.getByText("Standard")).toBeTruthy()
-    expect(screen.getByRole("group", { name: "Delivery" })).toHaveAttribute("data-disabled")
+    expect(screen.getByRole("switch", { name: "Audio quality" })).toBeChecked()
+    expect(screen.getByText("Highest")).toBeTruthy()
+    expect(screen.getByRole("group", { name: "Delivery" })).not.toHaveAttribute("data-disabled")
     expect(screen.getByText("1x")).toBeTruthy()
   })
 
-  it("turning on Highest quality unlocks Delivery and persists STABLE", async () => {
+  it("links Highest quality to Inworld steering best practices", () => {
+    renderSettings()
+    const slider = screen.getByRole("group", { name: "Delivery" })
+    const captions = screen.getByText("More Creative")
+    const link = screen.getByRole("link", { name: "Best practices" })
+    expect(link.getAttribute("href")).toBe("https://docs.inworld.ai/tts/capabilities/steering")
+    expect(link.getAttribute("target")).toBe("_blank")
+    expect(slider.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(captions.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it("hides steering best practices on Standard quality", () => {
+    renderSettings({ audioQuality: "standard" })
+    expect(screen.getByText("Standard")).toBeTruthy()
+    expect(screen.queryByRole("link", { name: "Best practices" })).toBeNull()
+  })
+
+  it("turning on Highest quality from Standard unlocks Delivery and persists STABLE", async () => {
     const user = userEvent.setup()
-    const { onChange } = renderSettings()
+    const { onChange } = renderSettings({ audioQuality: "standard" })
     await user.click(screen.getByRole("switch", { name: "Audio quality" }))
     expect(onChange).toHaveBeenCalledWith({
       audioQuality: "highest",

@@ -9,6 +9,7 @@
 
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
 import { errorFromHostedTts } from "@/lib/audio/tts-engine-error"
+import { parseInworldSupportedLanguages } from "@/lib/audio/inworld-supported-languages"
 import type { SyncTokenForFile } from "../audio/upload"
 
 export interface SynthesizeCellTtsArgs {
@@ -100,20 +101,24 @@ export interface InworldCatalogVoice {
 
 /**
  * GET /api/v1/voice/tts/voices — Inworld SYSTEM voices for the given
- * target-language lanes. The sync token is project-scoped; fileId is only
- * needed to mint it.
+ * target-language lanes. Pass `all: true` for every SYSTEM voice.
+ * The sync token is project-scoped; fileId is only needed to mint it.
  */
 export async function listInworldVoices(
-  args: { projectId: string; fileId: string; languages: readonly string[] },
+  args: { projectId: string; fileId: string; languages: readonly string[]; all?: boolean },
   getSyncToken: SyncTokenForFile,
 ): Promise<InworldCatalogVoice[]> {
   const token = await getSyncToken(args.projectId, args.fileId)
   if (!token) throw new Error("listInworldVoices: no sync token")
 
   const params = new URLSearchParams({ projectId: args.projectId })
-  for (const language of args.languages) {
-    const trimmed = language.trim()
-    if (trimmed) params.append("language", trimmed)
+  if (args.all) {
+    params.set("all", "1")
+  } else {
+    for (const language of args.languages) {
+      const trimmed = language.trim()
+      if (trimmed) params.append("language", trimmed)
+    }
   }
 
   const res = await fetch(`${syncWorkerHttpOrigin()}/api/v1/voice/tts/voices?${params.toString()}`, {
@@ -125,4 +130,131 @@ export async function listInworldVoices(
   }
   const json = (await res.json()) as { voices?: InworldCatalogVoice[] }
   return Array.isArray(json.voices) ? json.voices : []
+}
+
+export interface InworldSupportedLanguageRow {
+  code: string
+  familyCode: string
+  familyDisplayName: string
+  accentDisplayName: string
+  displayName: string
+  creationEnabled: boolean
+  hasVoices: boolean
+}
+
+/**
+ * GET /api/v1/voice/tts/supported-languages — Inworld Voice Design catalog
+ * (family + accent). The sync token is project-scoped; fileId is only needed
+ * to mint it.
+ */
+export async function listInworldSupportedLanguages(
+  args: { projectId: string; fileId: string },
+  getSyncToken: SyncTokenForFile,
+): Promise<InworldSupportedLanguageRow[]> {
+  const token = await getSyncToken(args.projectId, args.fileId)
+  if (!token) throw new Error("listInworldSupportedLanguages: no sync token")
+
+  const params = new URLSearchParams({ projectId: args.projectId })
+  const res = await fetch(
+    `${syncWorkerHttpOrigin()}/api/v1/voice/tts/supported-languages?${params.toString()}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw errorFromHostedTts(res.status, text || res.statusText)
+  }
+  const json = (await res.json()) as { languages?: unknown }
+  return parseInworldSupportedLanguages(json)
+}
+
+export interface DesignInworldVoiceArgs {
+  projectId: string
+  fileId: string
+  designPrompt: string
+  previewText?: string
+  language?: string
+  numberOfSamples?: number
+}
+
+export interface InworldDesignedPreview {
+  voiceId: string
+  previewText: string
+  previewAudio: string
+}
+
+/**
+ * POST /api/v1/voice/tts/design — generate up to three Voice Design previews.
+ * The sync token is project-scoped; fileId is only needed to mint it.
+ */
+export async function designInworldVoice(
+  args: DesignInworldVoiceArgs,
+  getSyncToken: SyncTokenForFile,
+): Promise<InworldDesignedPreview[]> {
+  const token = await getSyncToken(args.projectId, args.fileId)
+  if (!token) throw new Error("designInworldVoice: no sync token")
+
+  const body: Record<string, string | number> = {
+    projectId: args.projectId,
+    designPrompt: args.designPrompt,
+  }
+  if (args.previewText !== undefined) body.previewText = args.previewText
+  if (args.language !== undefined) body.language = args.language
+  if (args.numberOfSamples !== undefined) body.numberOfSamples = args.numberOfSamples
+
+  const res = await fetch(`${syncWorkerHttpOrigin()}/api/v1/voice/tts/design`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw errorFromHostedTts(res.status, text || res.statusText)
+  }
+  const json = (await res.json()) as { previewVoices?: InworldDesignedPreview[] }
+  return Array.isArray(json.previewVoices) ? json.previewVoices : []
+}
+
+export interface PublishInworldVoiceArgs {
+  projectId: string
+  fileId: string
+  voiceId: string
+  displayName?: string
+  description?: string
+}
+
+/**
+ * POST /api/v1/voice/tts/publish — promote a Voice Design preview into the
+ * workspace library so later synthesize calls can use its voiceId.
+ */
+export async function publishInworldVoice(
+  args: PublishInworldVoiceArgs,
+  getSyncToken: SyncTokenForFile,
+): Promise<string> {
+  const token = await getSyncToken(args.projectId, args.fileId)
+  if (!token) throw new Error("publishInworldVoice: no sync token")
+
+  const body: Record<string, string> = {
+    projectId: args.projectId,
+    voiceId: args.voiceId,
+  }
+  if (args.displayName !== undefined) body.displayName = args.displayName
+  if (args.description !== undefined) body.description = args.description
+
+  const res = await fetch(`${syncWorkerHttpOrigin()}/api/v1/voice/tts/publish`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw errorFromHostedTts(res.status, text || res.statusText)
+  }
+  const json = (await res.json()) as { voiceId?: string }
+  return json.voiceId?.trim() || args.voiceId
 }

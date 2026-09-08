@@ -8,6 +8,7 @@
  */
 
 import { afterEach, describe, it, expect, vi } from "vitest"
+import { useState } from "react"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { NewVoiceModal } from "./NewVoiceModal"
@@ -16,8 +17,17 @@ import type { CellData } from "@/hooks/useCells"
 import { GEMINI_TTS_VOICES } from "@/lib/audio/tts-providers"
 import { buildVoiceReferenceId, uploadVoiceReference } from "@/lib/audio/voice-clone"
 import { parseFrontierAudioUrl, fetchCellAudio } from "@/lib/audio/upload"
+import { designInworldVoice, publishInworldVoice } from "@/lib/sync/tts"
+import type { FrontierSession } from "@/lib/frontier/types"
 
 // Stub heavy audio / network dependencies; the engine picker itself is pure UI.
+vi.mock("@/lib/sync/tts", () => ({
+  listInworldVoices: vi.fn().mockResolvedValue([]),
+  listInworldSupportedLanguages: vi.fn().mockResolvedValue([]),
+  synthesizeCellTts: vi.fn(),
+  designInworldVoice: vi.fn(),
+  publishInworldVoice: vi.fn(),
+}))
 vi.mock("@/components/VoiceCloneSection", () => ({
   VoiceCloneSection: ({
     voice,
@@ -47,26 +57,33 @@ vi.mock("@/lib/audio/voice-clone", () => ({
 vi.mock("@/lib/audio/upload", () => ({
   parseFrontierAudioUrl: vi.fn(),
   fetchCellAudio: vi.fn(),
+  getCellAudioStreamUrl: vi.fn(),
 }))
 
 function renderCreate({
   provider,
   targetLanguage,
+  targetLanes,
   paletteIndex = 0,
   onSave = vi.fn(),
   initialMode,
   cells = [],
   seedCellId,
   projectId,
+  fileId,
+  session,
 }: {
   provider?: TtsProvider
   targetLanguage?: string
+  targetLanes?: string[]
   paletteIndex?: number
   onSave?: (v: Voice) => void
   initialMode?: "tts" | "clone"
   cells?: CellData[]
   seedCellId?: string | null
   projectId?: string
+  fileId?: string | null
+  session?: FrontierSession | null
 } = {}) {
   render(
     <NewVoiceModal
@@ -75,6 +92,7 @@ function renderCreate({
       voice={null}
       provider={provider}
       targetLanguage={targetLanguage}
+      targetLanes={targetLanes}
       isDefault={false}
       paletteIndex={paletteIndex}
       cells={cells}
@@ -82,6 +100,8 @@ function renderCreate({
       initialMode={initialMode}
       seedCellId={seedCellId}
       projectId={projectId}
+      fileId={fileId}
+      session={session}
     />,
   )
   return { onSave }
@@ -203,6 +223,8 @@ describe("NewVoiceModal engine selection", () => {
     const saved = (onSave as ReturnType<typeof vi.fn>).mock.calls[0][0] as Voice
     expect(saved.provider).toBe("inworld")
     expect(saved.voiceName).toBe("Dennis")
+    expect(saved.audioQuality).toBe("highest")
+    expect(saved.deliveryMode).toBe("STABLE")
   })
 
   it("remaps a persisted omnivoice project to the Inworld card", () => {
@@ -225,14 +247,76 @@ describe("NewVoiceModal engine selection", () => {
     expect(screen.getByLabelText("Describe the voice")).toBeTruthy()
   })
 
-  it("saves Highest quality from the Inworld settings", async () => {
-    const user = userEvent.setup()
+  it("defaults Inworld voices to Highest quality with Stable delivery", () => {
     const { onSave } = renderCreate({ provider: "inworld" })
-    await user.click(screen.getByRole("switch", { name: "Audio quality" }))
+    expect(screen.getByRole("switch", { name: "Audio quality" })).toBeChecked()
+    expect(screen.getByText("Highest")).toBeTruthy()
+    expect(screen.getByRole("link", { name: "Best practices" })).toBeTruthy()
+    expect(screen.getByRole("group", { name: "Delivery" })).not.toHaveAttribute("data-disabled")
     create()
     const saved = (onSave as ReturnType<typeof vi.fn>).mock.calls[0][0] as Voice
     expect(saved.audioQuality).toBe("highest")
     expect(saved.deliveryMode).toBe("STABLE")
+  })
+
+  it("saves Standard quality when Highest is turned off", async () => {
+    const user = userEvent.setup()
+    const { onSave } = renderCreate({ provider: "inworld" })
+    await user.click(screen.getByRole("switch", { name: "Audio quality" }))
+    expect(screen.queryByRole("link", { name: "Best practices" })).toBeNull()
+    create()
+    const saved = (onSave as ReturnType<typeof vi.fn>).mock.calls[0][0] as Voice
+    expect(saved.audioQuality).toBe("standard")
+  })
+
+  it("asks for an Inworld language when the project lane is a display name", async () => {
+    const user = userEvent.setup()
+    const { onSave } = renderCreate({ provider: "inworld", targetLanguage: "French" })
+    expect(screen.getByRole("combobox", { name: "Language" })).toBeTruthy()
+    expect(screen.getByText(/isn't a code Inworld recognizes/)).toBeTruthy()
+    create()
+    expect(onSave).not.toHaveBeenCalled()
+    expect(screen.getByText("Choose a language for this Inworld voice.")).toBeTruthy()
+    await user.click(screen.getByRole("combobox", { name: "Language" }))
+    await user.click(await screen.findByRole("option", { name: /fr-FR/ }))
+    create()
+    const saved = (onSave as ReturnType<typeof vi.fn>).mock.calls[0][0] as Voice
+    expect(saved.language).toBe("fr-FR")
+  })
+
+  it("saves a typed Inworld language code from Other", async () => {
+    const user = userEvent.setup()
+    const { onSave } = renderCreate({ provider: "inworld", targetLanguage: "French" })
+    await user.click(screen.getByRole("combobox", { name: "Language" }))
+    await user.click(await screen.findByRole("option", { name: "Other" }))
+    await user.type(screen.getByLabelText("Language code"), "sv-SE")
+    create()
+    const saved = (onSave as ReturnType<typeof vi.fn>).mock.calls[0][0] as Voice
+    expect(saved.language).toBe("sv-SE")
+  })
+
+  it("does not show the Inworld language picker when every lane is already a code", () => {
+    renderCreate({ provider: "inworld", targetLanguage: "en" })
+    expect(screen.queryByRole("combobox", { name: "Language" })).toBeNull()
+    expect(screen.getByRole("combobox", { name: "Voice" })).toBeTruthy()
+  })
+
+  it("shows the Inworld language picker when one extra lane is unrecognized", async () => {
+    const user = userEvent.setup()
+    const { onSave } = renderCreate({
+      provider: "inworld",
+      targetLanguage: "en",
+      targetLanes: ["French"],
+    })
+    expect(screen.getByRole("combobox", { name: "Language" })).toBeTruthy()
+    create()
+    expect(onSave).toHaveBeenCalled()
+    ;(onSave as ReturnType<typeof vi.fn>).mockClear()
+    await user.click(screen.getByRole("combobox", { name: "Language" }))
+    await user.click(await screen.findByRole("option", { name: /fr-FR/ }))
+    create()
+    const saved = (onSave as ReturnType<typeof vi.fn>).mock.calls[0][0] as Voice
+    expect(saved.language).toBe("fr-FR")
   })
 })
 
@@ -407,5 +491,209 @@ describe("NewVoiceModal clone reference source tabs", () => {
       expect(screen.queryByLabelText("Lifting take…")).toBeNull()
     })
     expect(screen.getByRole("button", { name: /hola mundo/ }).querySelector(".lucide-check")).toBeTruthy()
+  })
+
+  it("shows a selectable error when lifting a take has no project context", () => {
+    renderCreate({
+      provider: "omnivoice",
+      initialMode: "clone",
+      cells: [lineTakeCell],
+      seedCellId: "cell-1",
+    })
+    fireEvent.click(screen.getByRole("button", { name: /hola mundo/ }))
+    const alerts = screen.getAllByText("No project context to lift a take.")
+    expect(alerts.length).toBeGreaterThan(0)
+    expect(alerts.every((node) => node.classList.contains("select-text"))).toBe(true)
+  })
+})
+
+const DESIGN_PROMPT =
+  "A middle-aged male voice with a clear British accent speaking at a steady pace and with a warm, neutral tone."
+
+describe("NewVoiceModal Inworld Voice Design", () => {
+  afterEach(() => {
+    vi.mocked(designInworldVoice).mockReset()
+    vi.mocked(publishInworldVoice).mockReset()
+  })
+
+  it("nests Prebuilt and Voice design under Inworld TTS", () => {
+    renderCreate({ provider: "inworld" })
+    expect(screen.getByRole("tab", { name: /Prebuilt voice/ })).toBeTruthy()
+    expect(screen.getByRole("tab", { name: /Voice design/ })).toBeTruthy()
+    expect(screen.getByRole("combobox", { name: "Voice" })).toBeTruthy()
+  })
+
+  it("opens Edit for an existing Inworld voice without crashing", () => {
+    render(
+      <NewVoiceModal
+        open
+        onClose={vi.fn()}
+        voice={{
+          id: "voice-1",
+          name: "Narrator",
+          color: "#e2e8f0",
+          provider: "inworld",
+          voiceName: "Dennis",
+          language: "en-US",
+          builtIn: false,
+        }}
+        isDefault={false}
+        paletteIndex={0}
+        cells={[]}
+        onSave={vi.fn()}
+      />,
+    )
+    expect(screen.getByText("Edit voice")).toBeTruthy()
+    expect(screen.getByRole("tab", { name: "Prebuilt voice" })).toBeTruthy()
+    expect(screen.getByRole("tab", { name: "Voice design" })).toBeTruthy()
+  })
+
+  it("opens Edit for a saved Voice Design voice on that tab with playback", () => {
+    render(
+      <NewVoiceModal
+        open
+        onClose={vi.fn()}
+        voice={{
+          id: "voice-1",
+          name: "Designed",
+          color: "#e2e8f0",
+          provider: "inworld",
+          voiceName: "ws__design-voice-saved",
+          language: "en-US",
+          builtIn: false,
+        }}
+        isDefault={false}
+        paletteIndex={0}
+        cells={[]}
+        onSave={vi.fn()}
+        projectId="p1"
+        fileId="f1"
+        session={{ jwt: "tok", username: "dev" } as FrontierSession}
+      />,
+    )
+    expect(screen.getByText("Edit voice")).toBeTruthy()
+    expect(screen.getByRole("tab", { name: "Voice design" })).toHaveAttribute("aria-selected", "true")
+    expect(screen.getByText("Saved voice")).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Play saved voice" })).toBeEnabled()
+  })
+
+  it("hides the catalog picker on the Voice design tab", async () => {
+    const user = userEvent.setup()
+    renderCreate({ provider: "inworld" })
+    await user.click(screen.getByRole("tab", { name: /Voice design/ }))
+    expect(screen.queryByRole("combobox", { name: "Voice" })).toBeNull()
+    expect(screen.getByLabelText("Describe the voice")).toBeTruthy()
+    expect(screen.getByLabelText("Preview script")).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Generate previews" })).toBeDisabled()
+  })
+
+  it("always offers Language and Accent on Voice design, without Other", async () => {
+    const user = userEvent.setup()
+    renderCreate({ provider: "inworld", targetLanguage: "en" })
+    expect(screen.queryByRole("combobox", { name: "Language" })).toBeNull()
+    await user.click(screen.getByRole("tab", { name: /Voice design/ }))
+    expect(screen.getByRole("combobox", { name: "Language" })).toBeTruthy()
+    expect(screen.getByRole("combobox", { name: "Accent" })).toBeTruthy()
+    await user.click(screen.getByRole("combobox", { name: "Language" }))
+    expect(screen.queryByRole("option", { name: "Other" })).toBeNull()
+  })
+
+  it("keeps Other on Prebuilt and hides it on Voice design", async () => {
+    const user = userEvent.setup()
+    renderCreate({ provider: "inworld", targetLanguage: "French" })
+    await user.click(screen.getByRole("combobox", { name: "Language" }))
+    expect(screen.getByRole("option", { name: "Other" })).toBeTruthy()
+    await user.click(screen.getByRole("tab", { name: /Voice design/ }))
+    await user.click(screen.getByRole("combobox", { name: "Language" }))
+    expect(screen.queryByRole("option", { name: "Other" })).toBeNull()
+  })
+
+  it("blocks Create on Voice design until a preview is generated", async () => {
+    const user = userEvent.setup()
+    const { onSave } = renderCreate({ provider: "inworld" })
+    await user.click(screen.getByRole("tab", { name: /Voice design/ }))
+    create()
+    expect(onSave).not.toHaveBeenCalled()
+    const alert = screen.getByRole("alert")
+    expect(alert).toHaveTextContent(/Generate previews and pick one/)
+    expect(alert).toHaveClass("select-text")
+  })
+
+  it("publishes the chosen preview when Create is pressed", async () => {
+    vi.mocked(designInworldVoice).mockResolvedValue([
+      { voiceId: "ws__design-voice-a", previewText: "Hello", previewAudio: "UklGRQ==" },
+    ])
+    vi.mocked(publishInworldVoice).mockResolvedValue("ws__design-voice-a")
+    const user = userEvent.setup()
+    const { onSave } = renderCreate({
+      provider: "inworld",
+      projectId: "p1",
+      fileId: "f1",
+      session: { jwt: "tok", username: "dev" } as FrontierSession,
+    })
+    await user.click(screen.getByRole("tab", { name: /Voice design/ }))
+    await user.type(screen.getByLabelText("Describe the voice"), DESIGN_PROMPT)
+    await user.click(screen.getByRole("button", { name: "Generate previews" }))
+    expect(await screen.findByText("Preview 1")).toBeTruthy()
+    create("British narrator")
+    await waitFor(() => {
+      expect(publishInworldVoice).toHaveBeenCalledWith(
+        expect.objectContaining({
+          projectId: "p1",
+          voiceId: "ws__design-voice-a",
+          displayName: "British narrator",
+        }),
+        expect.any(Function),
+      )
+    })
+    expect(onSave).toHaveBeenCalledTimes(1)
+    const saved = (onSave as ReturnType<typeof vi.fn>).mock.calls[0][0] as Voice
+    expect(saved.voiceName).toBe("ws__design-voice-a")
+    expect(saved.prompt).toBe(DESIGN_PROMPT)
+  })
+
+  it("stops the design preview when the dialog closes", async () => {
+    const pause = vi.fn()
+    vi.stubGlobal(
+      "Audio",
+      class {
+        src = ""
+        play = vi.fn().mockResolvedValue(undefined)
+        pause = pause
+        onended: (() => void) | null = null
+        removeAttribute = vi.fn()
+        load = vi.fn()
+      },
+    )
+    vi.mocked(designInworldVoice).mockResolvedValue([
+      { voiceId: "ws__design-voice-a", previewText: "Hello", previewAudio: "UklGRQ==" },
+    ])
+    function Harness() {
+      const [open, setOpen] = useState(true)
+      return (
+        <NewVoiceModal
+          open={open}
+          onClose={() => setOpen(false)}
+          voice={null}
+          provider="inworld"
+          isDefault={false}
+          paletteIndex={0}
+          cells={[]}
+          onSave={vi.fn()}
+          projectId="p1"
+          fileId="f1"
+          session={{ jwt: "tok", username: "dev" } as FrontierSession}
+        />
+      )
+    }
+    const user = userEvent.setup()
+    render(<Harness />)
+    await user.click(screen.getByRole("tab", { name: /Voice design/ }))
+    await user.type(screen.getByLabelText("Describe the voice"), DESIGN_PROMPT)
+    await user.click(screen.getByRole("button", { name: "Generate previews" }))
+    expect(await screen.findByText("Preview 1")).toBeTruthy()
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    expect(screen.queryByRole("dialog")).toBeNull()
+    expect(pause).toHaveBeenCalled()
   })
 })

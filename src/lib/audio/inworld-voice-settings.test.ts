@@ -39,12 +39,21 @@ describe("inworld voice settings", () => {
     expect(inworldDeliveryModeAt(2)).toBe("CREATIVE")
   })
 
-  it("omits unset playground knobs so Flash stays the default", () => {
-    expect(inworldSynthFieldsFromVoice({ voiceName: "Dennis" } as Voice)).toEqual({})
+  it("fills Highest + Stable when playground knobs are unset", () => {
+    expect(inworldSynthFieldsFromVoice({ voiceName: "Dennis" } as Voice)).toEqual({
+      audioQuality: "highest",
+      deliveryMode: "STABLE",
+    })
     expect(inworldSynthFieldsFromVoice(inworldVoice)).toEqual({
       speakingRate: 0.95,
       deliveryMode: "CREATIVE",
       audioQuality: "highest",
+    })
+  })
+
+  it("omits deliveryMode when Standard quality is explicit", () => {
+    expect(inworldSynthFieldsFromVoice({ audioQuality: "standard" } as Voice)).toEqual({
+      audioQuality: "standard",
     })
   })
 

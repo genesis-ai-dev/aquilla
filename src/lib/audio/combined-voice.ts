@@ -31,6 +31,7 @@ import { emitCellAudioAttach } from "@/lib/sync/events-emit"
 import { notifyAudioAttachmentsChanged } from "./audio-attachments-bus"
 import { synthesizeCellTts } from "@/lib/sync/tts"
 import { inworldSynthFieldsFromVoice } from "./inworld-voice-settings"
+import { inworldLanguageForRequest } from "./inworld-languages"
 import { effectiveSourceText } from "@/lib/cell-text"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord, ProjectTtsSettings } from "@/lib/parsers/types"
@@ -118,13 +119,14 @@ export async function generateCombinedVoice(args: CombinedVoiceArgs): Promise<Co
       // Server-side: one Inworld call for the whole joined clip; the worker
       // stores it (native clone when a reference is set) and returns its id.
       onProgress?.("Synthesizing combined clip…")
+      const language = inworldLanguageForRequest(voice, project.targetLanguage)
       const result = await synthesizeCellTts(
         {
           projectId: project.id,
           fileId,
           cellId: chosen[0].id,
           text: joined,
-          ...(project.targetLanguage ? { language: project.targetLanguage } : {}),
+          ...(language ? { language } : {}),
           ...(voice.voiceName ? { voiceId: voice.voiceName } : {}),
           ...(voice.referenceAudioId ? { referenceAudioId: voice.referenceAudioId } : {}),
           ...inworldSynthFieldsFromVoice(voice),

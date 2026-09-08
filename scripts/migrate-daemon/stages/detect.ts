@@ -6,7 +6,7 @@ import { detectCodexProject, listDescendantGroups, listTopLevelGroups, type GitL
 import type { GitLabCredentials } from "../../../src/lib/migrate/gitlab/auth"
 import { orgLegacyUuidFor, projectIdFor, teamLegacyUuidFor } from "../../../src/lib/migrate/ids"
 import type { DaemonDb } from "../db"
-import type { GitLabClient, GitLabProjectLite, SyncClient } from "../http"
+import { INBOX_PAGE, type GitLabClient, type GitLabProjectLite, type SyncClient } from "../http"
 import { CONTENT_LOGIC_VERSION } from "./materialize"
 
 export interface PlacementIndex {
@@ -112,15 +112,23 @@ export async function registerProject(
 }
 
 /**
- * Drain the sync-worker webhook inbox since the last cursor. Duplicate
+ * Drain the sync-worker webhook inbox since the last cursor, following pages
+ * until one comes back short. Duplicate
  * gitlabIds within one batch collapse to the last (latest-sha) occurrence
  * before registering, so one project only gets probed/upserted once per poll.
  */
 export async function pollInbox(deps: DetectDeps): Promise<number> {
-  const after = deps.db.kvGet("inbox_cursor")
-  const { items, last } = await deps.sync.inbox(after)
+  let after = deps.db.kvGet("inbox_cursor")
   const byProject = new Map<number, string>()
-  for (const item of items) byProject.set(item.gitlabId, item.sha)
+  // The inbox is paged (INBOX_PAGE per request, bounded by the Worker's
+  // subrequest cap), so drain until a short page says there is no more.
+  let last: string | undefined
+  for (;;) {
+    const page = await deps.sync.inbox(after)
+    for (const item of page.items) byProject.set(item.gitlabId, item.sha)
+    if (page.last !== undefined) { last = page.last; after = page.last }
+    if (page.items.length < INBOX_PAGE) break
+  }
 
   let enqueued = 0
   for (const [gitlabId, sha] of byProject) {

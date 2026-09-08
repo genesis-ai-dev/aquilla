@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach } from "vitest"
 import { DaemonDb } from "../db"
 import { CONTENT_LOGIC_VERSION } from "../stages/materialize"
 import { pollInbox, reconcile, registerProject, type DetectDeps, type PlacementIndex } from "../stages/detect"
-import type { GitLabClient, GitLabProjectLite, SyncClient } from "../http"
+import { INBOX_PAGE, type GitLabClient, type GitLabProjectLite, type SyncClient } from "../http"
 
 const proj = (over: Partial<GitLabProjectLite> = {}): GitLabProjectLite => ({
   id: 7, name: "demo", namespace: "org/team", path_with_namespace: "org/team/demo",
@@ -100,6 +100,28 @@ describe("pollInbox", () => {
     expect(n).toBe(1)
     expect(db.kvGet("inbox_cursor")).toBe("cursor-1")
     expect(db.listJobs().length).toBe(1)
+  })
+
+  it("follows pages until one comes back short", async () => {
+    const db = new DaemonDb(":memory:")
+    const gitlab = { project: async (id: number) => proj({ id }) } as unknown as GitLabClient
+    const cursors: Array<string | undefined> = []
+    const sync: Pick<SyncClient, "inbox" | "orgTeamMaps"> = {
+      inbox: async (after) => {
+        cursors.push(after)
+        if (after === undefined) {
+          // A full page means "there may be more" — the poll must ask again.
+          const items = Array.from({ length: INBOX_PAGE }, (_, i) => ({ key: `k${i}`, gitlabId: 100 + i, sha: "s", ts: i }))
+          return { items, last: "cursor-1" }
+        }
+        return { items: [{ key: "z", gitlabId: 9, sha: "s2", ts: 999 }], last: "cursor-2" }
+      },
+      orgTeamMaps: async () => ({ orgMap: new Map(), teamMap: new Map() }),
+    }
+    const n = await pollInbox(makeDeps({ db, gitlab, sync }))
+    expect(cursors).toEqual([undefined, "cursor-1"])
+    expect(n).toBe(INBOX_PAGE + 1)
+    expect(db.kvGet("inbox_cursor")).toBe("cursor-2")
   })
 
   it("collapses duplicate gitlabIds in one batch to the last (latest-sha) item", async () => {

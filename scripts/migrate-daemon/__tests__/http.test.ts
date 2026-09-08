@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { retryingFetch, HttpError, SyncClient, GitLabClient } from "../http"
+import { retryingFetch, HttpError, SyncClient, GitLabClient, INBOX_PAGE } from "../http"
 
 const noSleep = { sleep: async () => {}, random: () => 0.5 }
 
@@ -65,6 +65,23 @@ describe("SyncClient", () => {
     const pages: string[][] = []
     for await (const p of c.eventIds("p")) pages.push(p)
     expect(pages).toEqual([["a"], ["b"]])
+  })
+  it("eventIds runs onPage before each page fetch (per-page pacing)", async () => {
+    let n = 0
+    vi.stubGlobal("fetch", vi.fn(async () => (++n === 1 ? Response.json({ ids: ["a"], lastSeq: 5, more: true }) : Response.json({ ids: ["b"], lastSeq: 9, more: false }))))
+    const c = new SyncClient("https://s", "sec", "r", noSleep)
+    let paced = 0
+    for await (const _p of c.eventIds("p", async () => { paced++ })) void _p
+    expect(paced).toBe(2)
+  })
+  it("inbox asks for the capped page size", async () => {
+    const f = vi.fn(async (_u: string) => Response.json({ items: [], last: undefined }))
+    vi.stubGlobal("fetch", f)
+    const c = new SyncClient("https://s", "sec", "r", noSleep)
+    await c.inbox(undefined)
+    expect(String(f.mock.calls[0][0])).toBe(`https://s/migrate/webhook/inbox?limit=${INBOX_PAGE}`)
+    await c.inbox("cursor 1")
+    expect(String(f.mock.calls[1][0])).toBe(`https://s/migrate/webhook/inbox?limit=${INBOX_PAGE}&after=cursor%201`)
   })
   it("orgTeamMaps maps orgs/groups from the real response shape", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({

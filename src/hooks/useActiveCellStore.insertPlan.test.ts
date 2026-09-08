@@ -253,3 +253,99 @@ describe("CellStore.resortSourceOrderByChain (via a targeted read)", () => {
     expect(store.getAllCellViews().map((c) => c.id).slice(0, 3)).toEqual(["c0", "inserted", "c1"])
   })
 })
+
+// AQU-1068 review round. Matthew, via Ryder (Biblica debrief, 2026-09-05):
+// "I don't want it to renumber everything, that's gonna mess something up."
+// Ryder's test: confirm the source-cell number is a DERIVED line number and
+// not a stored label — if derived, adding is fine; if stored, adding one must
+// not bump all the others.
+//
+// It is derived, and these tests hold that true. Nothing an insert writes
+// touches another cell's identity: the new cell takes a `sequenceIndex`
+// BETWEEN its neighbours (never a renumber of the run), and exactly one other
+// row is written at all — the successor whose anchor now points at the new
+// cell. See `cellNumberLabel` in scripture-reference.ts for the display half:
+// an imported cell's number comes from its own `canonicalRef` or its import
+// manifest's `displayLabel`, neither of which an insert can reach.
+describe("inserting a cell renumbers nothing (AQU-1068 review)", () => {
+  const labelled = () => [
+    row("a", { anchorCellId: null, sequenceIndex: 0, canonicalRef: "GEN 1:1" }),
+    row("b", { anchorCellId: "a", sequenceIndex: 1, canonicalRef: "GEN 1:2" }),
+    row("c", { anchorCellId: "b", sequenceIndex: 2, canonicalRef: "GEN 1:3" }),
+  ]
+
+  it("leaves every other cell's ref and sequence index exactly as they were", () => {
+    const store = makeStore(labelled())
+    // `toRows` is the PERSISTED shape — the rows that go to the cache and
+    // that a delta merges against — so it carries the two fields a
+    // renumbering implementation would have to rewrite.
+    const before = store.toRows().map((r) => ({
+      id: r.cellId,
+      ref: r.canonicalRef,
+      seq: r.sequenceIndex,
+    }))
+
+    const plan = store.getInsertPlan("b", "below")!
+    store.applyOptimisticSourceInsert({
+      cellId: "new",
+      anchorCellId: plan.anchorCellId,
+      reanchorCellId: plan.reanchor?.cellId ?? null,
+      sequenceIndex: (plan.sequenceBefore! + plan.sequenceAfter!) / 2,
+    })
+
+    const after = new Map(store.toRows().map((r) => [r.cellId, r]))
+    for (const original of before) {
+      expect(after.get(original.id)!.canonicalRef).toBe(original.ref)
+      expect(after.get(original.id)!.sequenceIndex).toBe(original.seq)
+    }
+  })
+
+  it("mints the new cell a sequence BETWEEN its neighbours, so the run never shifts", () => {
+    const store = makeStore(labelled())
+    const plan = store.getInsertPlan("b", "below")!
+    expect(plan.sequenceBefore).toBe(1)
+    expect(plan.sequenceAfter).toBe(2)
+    store.applyOptimisticSourceInsert({
+      cellId: "new",
+      anchorCellId: plan.anchorCellId,
+      reanchorCellId: plan.reanchor?.cellId ?? null,
+      sequenceIndex: 1.5,
+    })
+    expect(store.toRows().map((r) => r.sequenceIndex)).toEqual([0, 1, 1.5, 2])
+  })
+
+  it("writes exactly ONE other row — the successor's anchor, and nothing else", () => {
+    // The blast radius of an insert, stated as a number. A renumbering
+    // implementation would have to touch every row after the insertion point.
+    const store = makeStore(labelled())
+    const versions = new Map(
+      store.toRows().map((r) => [r.cellId, store.getCellVersion(r.cellId)]),
+    )
+    const plan = store.getInsertPlan("b", "below")!
+    store.applyOptimisticSourceInsert({
+      cellId: "new",
+      anchorCellId: plan.anchorCellId,
+      reanchorCellId: plan.reanchor?.cellId ?? null,
+      sequenceIndex: 1.5,
+    })
+    const bumped = [...versions.keys()].filter(
+      (id) => store.getCellVersion(id) !== versions.get(id),
+    )
+    expect(bumped).toEqual(["c"])
+  })
+
+  it("carries no ref or import label of its own, so it cannot displace a verse number", () => {
+    const store = makeStore(labelled())
+    const plan = store.getInsertPlan("b", "below")!
+    store.applyOptimisticSourceInsert({
+      cellId: "new",
+      anchorCellId: plan.anchorCellId,
+      reanchorCellId: plan.reanchor?.cellId ?? null,
+      sequenceIndex: 1.5,
+      metadata: { aquillaOrigin: { kind: "user-insert" } },
+    })
+    const added = store.toRows().find((r) => r.cellId === "new")!
+    expect(added.canonicalRef ?? null).toBeNull()
+    expect((added.metadata as Record<string, unknown> | null)?.aquillaImport).toBeUndefined()
+  })
+})

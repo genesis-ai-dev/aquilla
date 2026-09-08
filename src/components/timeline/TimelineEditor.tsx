@@ -47,7 +47,8 @@ import {
 import { cn } from "@/lib/utils"
 import { deriveLanes } from "@/lib/timeline/lanes"
 import { deriveSourceRegions, EMPTY_SOURCE_REGIONS } from "@/lib/timeline/source-regions"
-import { isLineEmpty, isUserAddedLine } from "@/lib/timeline/user-lines"
+import { isUserAddedLine } from "@/lib/timeline/user-lines"
+import { isImportedRow } from "@/lib/cell-editing-gate"
 import { Spinner } from "@/components/ui/spinner"
 import { OverflowMenu, type OverflowMenuItem } from "@/components/OverflowMenu"
 import { SourceRegionLane } from "./SourceRegionLane"
@@ -3306,19 +3307,17 @@ export function TimelineEditor({
             // exactly as it was.
             emptySpans={addableSpans}
             onAddLine={canAddLine && onAddLine ? (s, e) => void onAddLine(s, e) : undefined}
-            // Only a line someone added here, and only while it is still
-            // empty — deleting a cell with takes or comments on it would
-            // leave every one of them behind.
+            // Only a line someone added here.
             // AQU-1068 widened this: a MAINTAINER may take back any cell,
             // imported ones included, and the confirmation dialog upstream is
-            // what makes that safe. Below that rank the old rule stands — only
-            // a line added here, only while it is still empty, because a cell
-            // carrying takes or comments would strand every one of them.
-            // The same predicate the text table asks, so the two surfaces can
-            // never disagree about what is removable.
+            // what makes that safe. Below that rank only a line added here can
+            // go — but a line added here can ALWAYS go, however full it is.
+            // The same shared predicate the text table asks, so the two
+            // surfaces can never disagree about what is removable; see
+            // `isImportedRow` for the emptiness clause that used to live here.
             canRemove={
               canAddLine
-                ? (c) => canRemoveImportedCells || (isUserAddedLine(c) && isLineEmpty(c))
+                ? (c) => canRemoveImportedCells || !isImportedRow(c)
                 : undefined
             }
             onRemove={onRemoveLine}

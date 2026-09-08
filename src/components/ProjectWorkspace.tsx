@@ -178,13 +178,14 @@ import { resolveCueCharacter, formatCueCharacter } from "@/lib/timeline/cue-char
 import { CueLinkDrawer } from "./timeline/CueLinkDrawer"
 import { v7 as uuidv7 } from "uuid"
 import { sequenceBetween } from "@/lib/timeline/derive"
-import { isLineEmpty, isUserAddedLine, userLineOrigin } from "@/lib/timeline/user-lines"
+import { isUserAddedLine, userLineOrigin } from "@/lib/timeline/user-lines"
 import { buildCellRemovalInventory, type CellRemovalInventory } from "@/lib/cell-removal-inventory"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import {
   canEditCells,
   canRemoveImportedCells as canRemoveImportedCellsGate,
   cellPlacement,
+  isImportedRow,
   rowActionAvailability,
   type RowActionReason,
 } from "@/lib/cell-editing-gate"
@@ -1983,12 +1984,158 @@ export function ProjectWorkspace() {
   }, [project?.id, activeFileId, currentUsername, cellStore, getTokenForFile, getTokenForProjectFile, tts.settings, tts.saveTts, revalidateCells])
 
   /**
-   * AQU-646: take back a line you added. Deliberately narrow — only a line a
-   * person created here (`metadata.aquillaOrigin`), and only while it is still
-   * empty on every side. That is not timidity: `source.cell.delete`'s
-   * projection removes one row and cleans up nothing else, so a cell carrying
-   * takes, validators or comments would leave all of them behind. Clear those
-   * first and the line becomes removable.
+   * AQU-1068: undo an optimistic insert or removal the server refused.
+   *
+   * Wired to BOTH refusal callbacks. `onRejected` alone is not enough — it
+   * documents itself as deliberately skipping 403, and 403 is the only status
+   * the cell-editing gate returns, so a rollback on that callback alone can
+   * never fire for the case it exists for.
+   *
+   * The kind filter is ANY event in the batch, not just the create or delete.
+   * An insert and a removal each emit a `source.cell.reorder` to keep the
+   * anchor chain honest; if that companion is the one refused, the row is
+   * fine but the chain is not, and putting the row back is still the correct
+   * repair.
+   */
+  const rollbackRefusedCellChange = useCallback(
+    (
+      entries: { kind: string }[],
+      cellId: string,
+      restore?: Parameters<typeof cellStore.rollbackOptimisticSourceChange>[1],
+      message?: MessageKey,
+    ) => {
+      if (!entries.some((e) => e.kind.startsWith("source.cell.") || e.kind.startsWith("target.cell."))) return
+      cellStore.rollbackOptimisticSourceChange(cellId, restore)
+      if (message) toast.add({ type: "error", title: t(message) })
+    },
+    [cellStore, toast, t],
+  )
+
+  /**
+   * AQU-1068: an insert or a removal whose companion event was DEAD-LETTERED.
+   *
+   * "Accepted" is not "applied". Every add and remove sends a
+   * `source.cell.reorder` alongside its create or delete to keep the anchor
+   * chain honest, and each of those events is arbitrated separately: AD-2 is
+   * first-child-wins, so a collaborator who touched the same cell first takes
+   * the slot and ours is logged but never projected. The server reports that
+   * in `stale`, and until now nobody listened on these paths.
+   *
+   * The damage is silent and specific. A dropped re-anchor leaves the
+   * successor pointing at a cell that is being deleted, and `walkAnchorChain`
+   * appends whatever it cannot reach to the TAIL of the file — which is how a
+   * removal quietly reorders a document, and one of the two ways Matthew's
+   * cell ended up second from last.
+   *
+   * The repair is a single rebase, the same move `commitCompletedCell` already
+   * makes for a dead-lettered draft: read the cell's real head from the server
+   * and re-emit the same intent chained onto it. Bounded to one attempt — a
+   * second loss is a genuine concurrent conflict, and the caller then rolls
+   * back rather than fighting over the row.
+   *
+   * Returns true when every stale event was repaired.
+   */
+  const rebaseStaleCellStructureEvents = useCallback(
+    async (
+      staleIds: ReadonlySet<string>,
+      emitted: Awaited<ReturnType<typeof enqueueEvents>>,
+    ): Promise<boolean> => {
+      if (!project?.id || !activeFileId) return false
+      const losers = emitted.filter(
+        (e) =>
+          staleIds.has(e.eventId) &&
+          (e.event.kind === "source.cell.reorder" || e.event.kind === "source.cell.delete"),
+      )
+      if (losers.length === 0) return true
+
+      const mint = await getTokenForProjectFile(project.id, activeFileId)
+      if (!mint.token) return false
+      // One read for every cell that needs a new parent.
+      const cellIds = [...new Set(losers.map((e) => e.event.cellId).filter((id): id is string => Boolean(id)))]
+      const rows = await fetchCellsByIds(project.id, activeFileId, cellIds, mint.token)
+      const headByCell = new Map<string, string>()
+      for (const row of rows) {
+        if (row.side === "source" && row.eventId) headByCell.set(row.cellId, row.eventId)
+      }
+
+      const retries: Array<
+        | {
+            kind: "source.cell.reorder"
+            projectId: string
+            fileId: string
+            cellId: string
+            parentId: string
+            author: string
+            payload: { anchorCellId: string | null }
+          }
+        | {
+            kind: "source.cell.delete"
+            projectId: string
+            fileId: string
+            cellId: string
+            parentId: string
+            author: string
+            payload: Record<string, never>
+          }
+      > = []
+      for (const loser of losers) {
+        const cellId = loser.event.cellId
+        if (!cellId) continue
+        const head = headByCell.get(cellId)
+        if (!head) {
+          // No source row on the server. For a delete that is the outcome we
+          // wanted — somebody else removed it first, so the intent already
+          // holds. For a re-anchor there is nothing left to point anywhere.
+          continue
+        }
+        const base = { projectId: project.id, fileId: activeFileId, cellId, parentId: head, author: currentUsername }
+        if (loser.event.kind === "source.cell.reorder") {
+          // Re-send the ORIGINAL anchor: the intent ("sit after this cell") is
+          // still what we want; only the parent it chains onto was stale.
+          retries.push({
+            ...base,
+            kind: "source.cell.reorder" as const,
+            payload: loser.event.payload as { anchorCellId: string | null },
+          })
+        } else {
+          retries.push({ ...base, kind: "source.cell.delete" as const, payload: {} })
+        }
+      }
+      if (retries.length === 0) return true
+
+      const retried = await enqueueEvents(retries)
+      const retriedIds = new Set(retried.map((r) => r.eventId))
+      let lostAgain = false
+      await flushOutboxBatch({
+        getTokenForFile: getTokenForProjectFile,
+        onStaleSiblings: (entries) => {
+          if (entries.some((entry) => retriedIds.has(entry.id))) lostAgain = true
+        },
+        onRejected: (entries) => {
+          if (entries.some((entry) => retriedIds.has(entry.id))) lostAgain = true
+        },
+        onForbidden: (entries) => {
+          if (entries.some((entry) => retriedIds.has(entry.id))) lostAgain = true
+        },
+      })
+      return !lostAgain
+    },
+    [project?.id, activeFileId, currentUsername, getTokenForProjectFile],
+  )
+
+  /**
+   * Remove a cell: its source row, its translations in every lane, and — since
+   * AQU-1068 — everything hanging off it.
+   *
+   * This used to be narrow in two ways, and BOTH are now obsolete. It took
+   * only a line a person had added here, and only while that line was still
+   * empty on every side, because `source.cell.delete` removed one row and
+   * cleaned up nothing else, so a cell carrying takes, validators or comments
+   * would have left all of them behind. AQU-1068 gave the projection a real
+   * cascade (validators, takes, pairings, comments, waivers, back-translations,
+   * morph rows), so neither restriction has a reason left. Who may remove what
+   * is now the shared gate's business; this function only checks that there is
+   * something here to remove.
    */
   const handleRemoveLine = useCallback(
     async (cellId: string) => {
@@ -2015,7 +2162,12 @@ export function ProjectWorkspace() {
       // One batch, in order: re-point the row that pointed at this one, drop
       // any target rows, then the source row itself. The two chain-mutating
       // events sit on DIFFERENT cells, so neither waits on the other's head.
-      await enqueueEvents([
+      //
+      // A SOURCE-LESS row (see getRemovalPlan) sends only the target deletes:
+      // there is no source row to delete and nothing anchored to it to mend,
+      // and a delete naming a source row the server does not have would be a
+      // no-op that still claimed a chain slot.
+      const emitted = await enqueueEvents([
         ...(plan.successor
           ? [
               {
@@ -2038,16 +2190,21 @@ export function ProjectWorkspace() {
           author: currentUsername,
           payload: lang ? { targetLang: lang } : {},
         })),
-        {
-          kind: "source.cell.delete" as const,
-          projectId: project.id,
-          fileId: activeFileId,
-          cellId,
-          parentId: plan.eventId,
-          author: currentUsername,
-          payload: {},
-        },
+        ...(plan.sourceless
+          ? []
+          : [
+              {
+                kind: "source.cell.delete" as const,
+                projectId: project.id,
+                fileId: activeFileId,
+                cellId,
+                parentId: plan.eventId,
+                author: currentUsername,
+                payload: {},
+              },
+            ]),
       ])
+      const staleIds = new Set<string>()
       await flushOutboxBatch({
         getTokenForFile: getTokenForProjectFile,
         // A freshness floor protects a row from every correcting fetch, so a
@@ -2057,11 +2214,26 @@ export function ProjectWorkspace() {
           rollbackRefusedCellChange(entries, cellId, removed, "editor.removeCell.failedToast"),
         onForbidden: (entries) =>
           rollbackRefusedCellChange(entries, cellId, removed, "editor.removeCell.forbiddenToast"),
+        // "Accepted" is not "applied". A dead-lettered re-anchor leaves the
+        // successor pointing at the cell we just deleted, and the chain walk
+        // then appends it at the tail of the file — a removal that silently
+        // reorders the document. See rebaseStaleCellStructureEvents.
+        onStaleSiblings: (entries) => {
+          for (const entry of entries) staleIds.add(entry.id)
+        },
       })
+      if (staleIds.size > 0 && !(await rebaseStaleCellStructureEvents(staleIds, emitted))) {
+        rollbackRefusedCellChange(
+          [{ kind: "source.cell.delete" }],
+          cellId,
+          removed,
+          "editor.removeCell.failedToast",
+        )
+      }
       revalidateCells()
       setTimelineSelectedCellId(null)
     },
-    [project?.id, activeFileId, currentUsername, getActiveCell, cellStore, getTokenForProjectFile, revalidateCells, toast, t],
+    [project?.id, activeFileId, currentUsername, getActiveCell, cellStore, getTokenForProjectFile, revalidateCells, toast, t, rebaseStaleCellStructureEvents, rollbackRefusedCellChange],
   )
 
   // Media-lens empty state: attach a clip to the ACTIVE file by upload or
@@ -4186,6 +4358,28 @@ export function ProjectWorkspace() {
     // the live store row instead; it was updated by the same write-back that
     // cleared the pending entry, so at least one of the two is always fresh.
     const liveCell = getActiveCell(cell.id)
+    // AQU-1068: the cell was REMOVED while the model was generating.
+    //
+    // The `?? cell` fallback below is for the mid-refetch window, where the
+    // snapshot is the best available copy of a row that still exists. When the
+    // row is gone for good it is the wrong answer entirely: the commit is sent
+    // anyway, the server projects a target row for a cell with no source, and
+    // the client shows that orphan at the tail of the file. That is Matthew's
+    // "the translation jumped to the second last cell", and it was
+    // unrecoverable because a source-less row could not be removed.
+    //
+    // Checked BEFORE the optimistic patch below, not just before the emit:
+    // `applyOptimisticTargetEdit` writes a shadow with a freshness floor, and a
+    // floor on a cell with no source row protects the phantom from every
+    // correcting fetch there will ever be.
+    if (!liveCell && cellStore.wasRemoved(cell.id)) {
+      const key = laneCellKey(cell.id)
+      pendingCompletionEventIdRef.current.delete(key)
+      pendingTargetCommitHeadsRef.current.delete(key)
+      // Silent: the row this would report on is no longer on screen, and the
+      // person who deleted it does not need to be told their deletion worked.
+      return
+    }
     const commitCell = liveCell ?? cell
     // IDML v2 model output is protected HTML, not plain text. Validate the
     // exact slot/token sequence before any optimistic mutation or event is
@@ -4329,7 +4523,7 @@ export function ProjectWorkspace() {
     // only that row's stats and cell data back (its authoritative event_id
     // becomes the next commit's parent) instead of re-fetching the file.
     confirmCommitted(cell.id, eventId)
-  }, [project?.id, project?.syncRole?.level, applyOptimisticTargetEdit, activeLane, laneCellKey, getActiveCell, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, refreshOutboxPending, revalidateCellStats, revalidateCell, confirmCommitted])
+  }, [project?.id, project?.syncRole?.level, applyOptimisticTargetEdit, activeLane, laneCellKey, getActiveCell, cellStore, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, refreshOutboxPending, revalidateCellStats, revalidateCell, confirmCommitted])
 
   const commitCompletedCells = useCallback(async (
     drafts: CompletedCellDraft[],
@@ -4348,7 +4542,22 @@ export function ProjectWorkspace() {
     for (let index = 0; index < drafts.length; index++) {
       const draft = drafts[index]
       try {
-        const liveCell = getActiveCell(draft.cell.id) ?? draft.cell
+        const live = getActiveCell(draft.cell.id)
+        // AQU-1068: same rule as the single-cell path — a cell removed while
+        // the batch was generating takes its draft with it, rather than
+        // resurrecting as a source-less row at the tail of the file. A batch
+        // makes this MORE likely, not less: it is in flight for longer.
+        if (!live && cellStore.wasRemoved(draft.cell.id)) {
+          const key = laneCellKey(draft.cell.id)
+          pendingCompletionEventIdRef.current.delete(key)
+          pendingTargetCommitHeadsRef.current.delete(key)
+          results[index] = {
+            status: "rejected",
+            reason: new Error("This cell was removed while the draft was generating, so it was not saved"),
+          }
+          continue
+        }
+        const liveCell = live ?? draft.cell
         const completed = normalizeProtectedCompletion(liveCell, draft.text)
         const parentId = resolveTargetCommitParentId(liveCell)
         prepared.push({ index, draft, liveCell, completed, parentId })
@@ -6551,7 +6760,7 @@ export function ProjectWorkspace() {
         endMs,
         metadata: { aquillaOrigin: userLineOrigin() },
       })
-      await enqueueEvents([
+      const emitted = await enqueueEvents([
         {
           kind: "source.cell.create" as const,
           projectId: project.id,
@@ -6602,13 +6811,29 @@ export function ProjectWorkspace() {
       // The gap-insert path had NO rollback at all — the primary Chosen
       // subtitle workflow applied an optimistic insert and, if the server
       // refused it, left the row on screen forever behind its freshness floor.
+      const staleIds = new Set<string>()
       await flushOutboxBatch({
         getTokenForFile: getTokenForProjectFile,
         onRejected: (entries) =>
           rollbackRefusedCellChange(entries, cellId, undefined, "editor.addCell.failedToast"),
         onForbidden: (entries) =>
           rollbackRefusedCellChange(entries, cellId, undefined, "editor.addCell.forbiddenToast"),
+        // A dead-lettered re-anchor is the insert's silent failure mode: the
+        // new line is created, the row it should have displaced still claims
+        // the old anchor, and the chain walk drops the new line at the tail of
+        // the file. The row is fine; the ORDER is wrong.
+        onStaleSiblings: (entries) => {
+          for (const entry of entries) staleIds.add(entry.id)
+        },
       })
+      if (staleIds.size > 0 && !(await rebaseStaleCellStructureEvents(staleIds, emitted))) {
+        rollbackRefusedCellChange(
+          [{ kind: "source.cell.create" }],
+          cellId,
+          undefined,
+          "editor.addCell.failedToast",
+        )
+      }
       revalidateCells()
       // Land on it exactly as clicking its row would — but not yet.
       // `revalidate()` is fire-and-forget, so the row does not exist on this
@@ -6619,7 +6844,7 @@ export function ProjectWorkspace() {
       setPendingNewCell({ cellId, thenRecord: Boolean(opts?.thenRecord) })
       return cellId
     },
-    [project?.id, activeFileId, currentUsername, getActiveCells, cellStore, getTokenForProjectFile, revalidateCells],
+    [project?.id, activeFileId, currentUsername, getActiveCells, cellStore, getTokenForProjectFile, revalidateCells, rebaseStaleCellStructureEvents, rollbackRefusedCellChange],
   )
 
   /**
@@ -6654,7 +6879,7 @@ export function ProjectWorkspace() {
         sequenceIndex: sequenceBetween(plan.sequenceBefore, plan.sequenceAfter),
         metadata: { aquillaOrigin: userLineOrigin() },
       })
-      await enqueueEvents([
+      const emitted = await enqueueEvents([
         {
           kind: "source.cell.create" as const,
           projectId: project.id,
@@ -6691,18 +6916,32 @@ export function ProjectWorkspace() {
             ]
           : []),
       ])
+      const staleIds = new Set<string>()
       await flushOutboxBatch({
         getTokenForFile: getTokenForProjectFile,
         onRejected: (entries) =>
           rollbackRefusedCellChange(entries, newCellId, undefined, "editor.addCell.failedToast"),
         onForbidden: (entries) =>
           rollbackRefusedCellChange(entries, newCellId, undefined, "editor.addCell.forbiddenToast"),
+        // See handleAddLine: a dead-lettered re-anchor leaves the new cell
+        // correctly created and wrongly placed, at the tail of the file.
+        onStaleSiblings: (entries) => {
+          for (const entry of entries) staleIds.add(entry.id)
+        },
       })
+      if (staleIds.size > 0 && !(await rebaseStaleCellStructureEvents(staleIds, emitted))) {
+        rollbackRefusedCellChange(
+          [{ kind: "source.cell.create" }],
+          newCellId,
+          undefined,
+          "editor.addCell.failedToast",
+        )
+      }
       revalidateCells()
       setPendingNewCell({ cellId: newCellId, thenRecord: false })
       return newCellId
     },
-    [project?.id, activeFileId, currentUsername, cellStore, getTokenForProjectFile, revalidateCells],
+    [project?.id, activeFileId, currentUsername, cellStore, getTokenForProjectFile, revalidateCells, rebaseStaleCellStructureEvents, rollbackRefusedCellChange],
   )
 
   /**
@@ -8480,34 +8719,6 @@ export function ProjectWorkspace() {
   // lens that array is empty by design, and forcing it would cost a full
   // thousand-object rebuild on every store bump for a surface nobody is looking
   // at. This is why the controls are a media-lens affordance.
-  //
-  /**
-   * AQU-1068: undo an optimistic insert or removal the server refused.
-   *
-   * Wired to BOTH refusal callbacks. `onRejected` alone is not enough — it
-   * documents itself as deliberately skipping 403, and 403 is the only status
-   * the cell-editing gate returns, so a rollback on that callback alone can
-   * never fire for the case it exists for.
-   *
-   * The kind filter is ANY event in the batch, not just the create or delete.
-   * An insert and a removal each emit a `source.cell.reorder` to keep the
-   * anchor chain honest; if that companion is the one refused, the row is
-   * fine but the chain is not, and putting the row back is still the correct
-   * repair.
-   */
-  const rollbackRefusedCellChange = useCallback(
-    (
-      entries: { kind: string }[],
-      cellId: string,
-      restore?: Parameters<typeof cellStore.rollbackOptimisticSourceChange>[1],
-      message?: MessageKey,
-    ) => {
-      if (!entries.some((e) => e.kind.startsWith("source.cell.") || e.kind.startsWith("target.cell."))) return
-      cellStore.rollbackOptimisticSourceChange(cellId, restore)
-      if (message) toast.add({ type: "error", title: t(message) })
-    },
-    [cellStore, toast, t],
-  )
 
   /**
    * AQU-1068: ask before destroying anything, and say what "anything" is.
@@ -8644,9 +8855,10 @@ export function ProjectWorkspace() {
         isIdmlCell: resolveIdmlEditorConfiguration(cell.metadata, cell.originalHtml) != null,
         gapAbove: gaps.gapAbove,
         gapBelow: gaps.gapBelow,
-        // A line somebody added here and left empty is theirs to take back at
-        // any rank; anything else is the client's own content.
-        isImported: !(isUserAddedLine(cell) && isLineEmpty(cell)),
+        // A line somebody added here is theirs to take back at any rank;
+        // anything else is the client's own content. One shared definition —
+        // see `isImportedRow` for why it no longer asks about emptiness.
+        isImported: isImportedRow(cell),
         canRemoveImported: canRemoveImportedCells,
       })
       // The label answers the ACTION the user reached for, not the row's

@@ -252,6 +252,21 @@ export class CellStore {
   private pendingProgressEventIds: string[] = []
   private optimisticEdits = new Map<string, OptimisticEdit>()
   private freshnessFloors = new Map<string, number>()
+  /**
+   * AQU-1068: cells this store has watched LEAVE the file — removed here, or
+   * removed by a collaborator and confirmed by a delta.
+   *
+   * It exists to answer one question no other state can: `getCellView` returns
+   * null both for "this cell is gone" and for "this store is looking at a
+   * different file now", and a write that is in flight when its cell is
+   * removed has to tell those apart. Dropping the write is right in the first
+   * case and would lose work in the second.
+   *
+   * Never cleared per-cell except by a rollback that puts the row back —
+   * `reset()` clears the whole set, because on a file switch the ids stop
+   * meaning anything.
+   */
+  private removedCellIds = new Set<string>()
   private cellVersionById = new Map<string, number>()
   // Feeds per-cell versions from one store-lifetime counter that reset() never
   // rewinds. useSyncExternalStore bails out when getCellVersion returns a value
@@ -380,6 +395,10 @@ export class CellStore {
     this.pendingProgressEventIds = []
     this.optimisticEdits = new Map()
     this.freshnessFloors = new Map()
+    // A different file's ids say nothing about this one — and keeping them
+    // would make `wasRemoved` claim a cell was deleted when the store simply
+    // moved on, which is the exact confusion the set exists to prevent.
+    this.removedCellIds = new Set()
     this.cellVersionById = new Map()
     this.maxServerSeq = null
     this.projectEpoch = null
@@ -717,14 +736,32 @@ export class CellStore {
    * Reads `sourceById` because `CellData` carries neither field.
    */
   getRemovalPlan(cellId: string): {
+    /** Empty for a source-less row: there is no source event to chain onto. */
     eventId: string
     anchorCellId: string | null
     successor: { cellId: string; eventId: string } | null
     /** The target-side rows to take with it, per language lane. */
     targetLangs: string[]
+    /**
+     * AQU-1068: this row has TARGET rows but no source. The caller must emit
+     * the per-lane target deletes and nothing else — no source delete, no
+     * re-anchor.
+     */
+    sourceless: boolean
   } | null {
     const source = this.sourceById.get(cellId)
-    if (!source) return null
+    if (!source) {
+      // A GHOST: a translation whose cell was removed while the draft was in
+      // flight. The server projects a target row for it and the read route
+      // hands it back with no source, so it lands at the tail of the file
+      // (see `joinSourceAndTarget`) and used to be unremovable — this branch
+      // returning null was the "no way to recover from it" in Matthew's
+      // report. There is no chain to mend: nothing can anchor to a cell with
+      // no source row.
+      const langs = this.laneTargetLangsFor(cellId)
+      if (langs.length === 0) return null
+      return { eventId: "", anchorCellId: null, successor: null, targetLangs: langs, sourceless: true }
+    }
     // AQU-1068: NOT YET CONFIRMED, so not yet removable.
     //
     // An optimistically inserted row has no event id — the outbox has not been
@@ -747,13 +784,24 @@ export class CellStore {
         break
       }
     }
+    return {
+      eventId: source.eventId,
+      anchorCellId: source.anchorCellId,
+      successor,
+      targetLangs: this.laneTargetLangsFor(cellId),
+      sourceless: false,
+    }
+  }
+
+  /** Every lane holding a target row for this cell, active lane first. */
+  private laneTargetLangsFor(cellId: string): string[] {
     const targetLangs: string[] = []
     const own = this.targetById.get(cellId)
     if (own) targetLangs.push(own.targetLang ?? "")
     for (const row of this.otherLaneTargetRows) {
       if (row.cellId === cellId) targetLangs.push(row.targetLang ?? "")
     }
-    return { eventId: source.eventId, anchorCellId: source.anchorCellId, successor, targetLangs }
+    return targetLangs
   }
 
   /**
@@ -968,8 +1016,28 @@ export class CellStore {
   }
 
   replaceChangedRows(changedCellIds: string[], rows: CellRow[], maxServerSeq?: number): void {
+    // AQU-1068: a delta names every cell an event touched and carries those
+    // cells' CURRENT rows, so a changed id with no row is the server telling us
+    // the cell is gone — the only signal a collaborator's removal ever gives
+    // this client. Recorded before the merge, which drops the rows and takes
+    // the evidence with it.
+    if (changedCellIds.length > 0) {
+      const present = new Set(rows.map((row) => row.cellId))
+      for (const cellId of changedCellIds) {
+        if (!present.has(cellId)) this.removedCellIds.add(cellId)
+      }
+    }
     const merged = mergeCellsDelta(this.toRows(), changedCellIds, rows)
     this.replaceRows(merged, { changedCellIds, maxServerSeq })
+  }
+
+  /**
+   * AQU-1068: has this cell left the file, as opposed to never having been in
+   * this store? See `removedCellIds`. A write that finds its cell missing asks
+   * this before deciding whether to drop itself.
+   */
+  wasRemoved(cellId: string): boolean {
+    return this.removedCellIds.has(cellId)
   }
 
   toRows(): CellRow[] {
@@ -1303,29 +1371,40 @@ export class CellStore {
    * floors both so an in-flight delta cannot bring the row back.
    *
    * Returns what it removed, so the caller can restore it if the server refuses.
+   *
+   * AQU-1068: `source` is optional because a GHOST row — target rows whose
+   * source was deleted while a draft was in flight — is exactly a row a user
+   * needs to be able to take out. Refusing here (as this did) is what left
+   * Matthew's stranded translation on screen with no way to remove it.
    */
   applyOptimisticSourceRemove(cellId: string): {
-    source: CellRow
+    source: CellRow | undefined
     target: CellRow | undefined
     otherLanes: CellRow[]
     orderIndex: number
     successorCellId: string | null
   } | null {
     const source = this.sourceById.get(cellId)
-    if (!source) return null
-    const seq = ++this.writeSeq
     const target = this.targetById.get(cellId)
+    const hasOtherLane = this.otherLaneTargetRows.some((r) => r.cellId === cellId)
+    // Nothing on any side: there is no row here to remove.
+    if (!source && !target && !hasOtherLane) return null
+    const seq = ++this.writeSeq
     const otherLanes = this.otherLaneTargetRows.filter((r) => r.cellId === cellId)
     const orderIndex = this.order.indexOf(cellId)
 
+    // A ghost has no source row, so nothing can be anchored to it and there is
+    // no chain to repair — the successor hunt only applies to a real removal.
     let successorCellId: string | null = null
-    for (const [id, r] of this.sourceById) {
-      if (r.anchorCellId === cellId) { successorCellId = id; break }
-    }
-    if (successorCellId) {
-      const successor = this.sourceById.get(successorCellId)!
-      this.sourceById.set(successorCellId, { ...successor, anchorCellId: source.anchorCellId })
-      this.freshnessFloors.set(successorCellId, ++this.writeSeq)
+    if (source) {
+      for (const [id, r] of this.sourceById) {
+        if (r.anchorCellId === cellId) { successorCellId = id; break }
+      }
+      if (successorCellId) {
+        const successor = this.sourceById.get(successorCellId)!
+        this.sourceById.set(successorCellId, { ...successor, anchorCellId: source.anchorCellId })
+        this.freshnessFloors.set(successorCellId, ++this.writeSeq)
+      }
     }
 
     this.sourceById.delete(cellId)
@@ -1339,6 +1418,10 @@ export class CellStore {
     this.indexById = new Map(this.order.map((id, index) => [id, index]))
     this.optimisticEdits.delete(targetOverlayKey(cellId, this.ctx.lane ?? ""))
     this.freshnessFloors.set(cellId, seq)
+    // The cell has left the file. Anything still in flight for it — an AI draft
+    // generating right now — must be dropped rather than re-creating it as a
+    // source-less row at the tail.
+    this.removedCellIds.add(cellId)
     this.listVersion++
 
     this.rebuildDerivedIndexes()
@@ -1356,15 +1439,18 @@ export class CellStore {
   rollbackOptimisticSourceChange(
     cellId: string,
     restore?: {
-      source: CellRow
+      source: CellRow | undefined
       target: CellRow | undefined
       otherLanes: CellRow[]
       orderIndex: number
       successorCellId: string | null
     } | null,
   ): void {
+    // The row is back (or never left), so it is no longer a removed cell — and
+    // a write still in flight for it should be allowed to land after all.
+    this.removedCellIds.delete(cellId)
     if (restore) {
-      this.sourceById.set(cellId, restore.source)
+      if (restore.source) this.sourceById.set(cellId, restore.source)
       if (restore.target) this.targetById.set(cellId, restore.target)
       if (restore.otherLanes.length) this.otherLaneTargetRows = [...this.otherLaneTargetRows, ...restore.otherLanes]
       if (restore.successorCellId) {
@@ -1374,7 +1460,9 @@ export class CellStore {
       }
       const at = restore.orderIndex >= 0 ? Math.min(restore.orderIndex, this.order.length) : this.order.length
       this.order.splice(at, 0, cellId)
-      if (!this.sourceOrder.includes(cellId)) this.sourceOrder.splice(at, 0, cellId)
+      // Only a row that HAS a source belongs in the source chain. Putting a
+      // ghost back there would invent a source row the server never had.
+      if (restore.source && !this.sourceOrder.includes(cellId)) this.sourceOrder.splice(at, 0, cellId)
       if (restore.target && !this.targetOrder.includes(cellId)) this.targetOrder.push(cellId)
     } else {
       // Undoing an INSERT: the row and whatever it displaced.

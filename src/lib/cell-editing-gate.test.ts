@@ -5,7 +5,8 @@
 // instrument for a matrix of ranks, tiers and file kinds.
 
 import { describe, it, expect } from "vitest"
-import { canEditCells, canRemoveImportedCells, cellPlacement, rowActionAvailability } from "./cell-editing-gate"
+import { canEditCells, canRemoveImportedCells, cellPlacement, isImportedRow, rowActionAvailability } from "./cell-editing-gate"
+import { userLineOrigin } from "@/lib/timeline/user-line-origin"
 import { ROLE } from "@/lib/frontier/roles"
 
 const subject = (over: Partial<Parameters<typeof canEditCells>[0]> = {}) => ({
@@ -184,5 +185,58 @@ describe("rowActionAvailability", () => {
       const out = rowActionAvailability(row({ isImported: true, canRemoveImported: false }))
       expect([out.above, out.below]).toEqual([null, null])
     })
+  })
+})
+
+// AQU-1068 review round. Matthew: "after recording audio and then trying to
+// remove the cell, I wasn't able to."
+//
+// Both surfaces used to ask `isUserAddedLine(cell) && isLineEmpty(cell)`, so a
+// line became the client's imported content the moment its author put anything
+// in it. The server never agreed — `isUserInsertedCell` reads the origin marker
+// and nothing else — so the client was refusing a delete the server allows.
+describe("isImportedRow", () => {
+  const added = { metadata: { aquillaOrigin: userLineOrigin() } as Record<string, unknown> }
+
+  it("says a line somebody added here is not imported", () => {
+    expect(isImportedRow(added)).toBe(false)
+  })
+
+  it("STAYS not-imported once that line has content — the review bug", () => {
+    // Emptiness is not part of the question. Whatever the author has since
+    // typed, recorded or had translated into their own line, it is still
+    // their line.
+    expect(isImportedRow({ ...added, original: "typed after the fact" } as never)).toBe(false)
+    expect(isImportedRow({ ...added, translated: "drafted" } as never)).toBe(false)
+    expect(isImportedRow({
+      ...added,
+      attachments: { "take-x-1": { isDeleted: false } },
+    } as never)).toBe(false)
+  })
+
+  it("says an imported row IS imported", () => {
+    expect(isImportedRow({ metadata: null })).toBe(true)
+    expect(isImportedRow({})).toBe(true)
+    expect(isImportedRow({ metadata: { aquillaImport: { displayLabel: "1" } } })).toBe(true)
+  })
+
+  it("does not mistake some other origin marker for a user insert", () => {
+    expect(isImportedRow({ metadata: { aquillaOrigin: { kind: "import" } } })).toBe(true)
+  })
+
+  it("keeps a contributor's own recorded line removable, and imported rows not", () => {
+    // The composed rule, as both surfaces ask it.
+    const asContributor = (cell: Parameters<typeof isImportedRow>[0]) =>
+      rowActionAvailability({
+        placement: "anywhere",
+        isMediaCell: false,
+        isIdmlCell: false,
+        gapAbove: true,
+        gapBelow: true,
+        isImported: isImportedRow(cell),
+        canRemoveImported: false,
+      }).remove
+    expect(asContributor({ ...added, attachments: { "take-x-1": { isDeleted: false } } } as never)).toBeNull()
+    expect(asContributor({ metadata: null })).toBe("maintainerOnly")
   })
 })

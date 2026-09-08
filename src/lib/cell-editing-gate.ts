@@ -15,6 +15,7 @@
 // keeps the setting readable — a project admin is never asked about timings.
 
 import { ROLE } from "@/lib/frontier/roles"
+import { isUserAddedLine } from "@/lib/timeline/user-line-origin"
 import type { OrderedBy } from "@/lib/parsers/types"
 
 export interface CellEditingSubject {
@@ -50,6 +51,28 @@ export function canEditCells(s: CellEditingSubject): boolean {
  */
 export function canRemoveImportedCells(s: CellEditingSubject): boolean {
   return canEditCells(s) && (s.roleLevel ?? 0) >= ROLE.MAINTAINER
+}
+
+/**
+ * ...and the OTHER half of that clause: which rows count as imported.
+ *
+ * One signal, the `aquillaOrigin` marker the create event writes — the same
+ * question the server's `isUserInsertedCell` asks, so the two can never
+ * disagree about whose content a row is.
+ *
+ * AQU-1068 review: the two surfaces each carried their own version of this and
+ * both added "...and it is still EMPTY", which turned a line you added into
+ * imported content the moment you typed or recorded into it. Matthew hit it by
+ * recording audio on a new cell and finding he could no longer remove it,
+ * while the server would have accepted that delete. The emptiness test answers
+ * a different question — whether the removal needs a confirmation dialog — and
+ * still does, in `buildCellRemovalInventory`.
+ *
+ * It lives here so there is exactly one definition for the table and the
+ * timeline to share.
+ */
+export function isImportedRow(cell: { metadata?: Record<string, unknown> | null }): boolean {
+  return !isUserAddedLine(cell)
 }
 
 export interface CellEditingFile {

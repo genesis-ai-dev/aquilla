@@ -57,6 +57,8 @@ const deps = (db: DaemonDb): MaterializeDeps => ({
 })
 
 describe("materialize", () => {
+  const gc = (globalThis as { gc?: () => void }).gc
+
   it("writes an NDJSON plan of uuid-keyed events for a fresh project", async () => {
     const db = new DaemonDb(":memory:")
     const project = seed(db)
@@ -157,7 +159,7 @@ describe("materialize", () => {
     expect(Number(m![1])).toBe(CONTENT_LOGIC_VERSION)
   })
 
-  it("stays under 300 MB of heap on a 200-file project", async () => {
+  it.skipIf(!gc)("stays under 300 MB of heap on a 200-file project", async () => {
     const db = new DaemonDb(":memory:")
     const stems = Array.from({ length: 200 }, (_, i) => `BK ${i + 1}`)
     const dir = makeProjectDir(stems)
@@ -165,11 +167,11 @@ describe("materialize", () => {
     expect(r.files).toBe(200)
     expect(r.changedFiles).toBe(200)
     expect(r.lines).toBeGreaterThan(200)
-    const gc = (globalThis as { gc?: () => void }).gc
-    if (gc) {
-      gc()
-      expect(process.memoryUsage().heapUsed).toBeLessThan(300 * 1024 * 1024)
-    }
+    expect(gc, "run with NODE_OPTIONS=--expose-gc (pnpm test:daemon)").toBeDefined()
+    gc!()
+    const heapUsed = process.memoryUsage().heapUsed
+    console.log(`heap after gc: ${(heapUsed / 1024 / 1024).toFixed(1)} MB`)
+    expect(heapUsed).toBeLessThan(300 * 1024 * 1024)
     db.close()
   }, 120_000)
 })

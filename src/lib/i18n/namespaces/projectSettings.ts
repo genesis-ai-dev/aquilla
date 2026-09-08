@@ -34,11 +34,10 @@ export const projectSettings = defineNamespace({
     "projectSettings.create.dialogTitle": "Create New Project",
     // AQU-832: create.nameLabel/sourceLanguageLabel still reuse
     // projectSettings.info.{nameLabel,sourceLanguageLabel}. Target label is
-    // create-dialog-only and switches between the singular info key and
-    // create.targetLanguagesLabel by lane count.
+    // create-dialog-only and stays "Target Language(s)" for any lane count.
     "projectSettings.create.namePlaceholder": "My Translation Project",
     "projectSettings.create.sourceLanguagePlaceholder": "English, Grade 7 English, es-419…",
-    "projectSettings.create.targetLanguagesLabel": "Target Languages",
+    "projectSettings.create.targetLanguagesLabel": "Target Language(s)",
     "projectSettings.create.targetLanguagePlaceholder": "French, conversational Swahili, zh-Hant…",
     "projectSettings.create.additionalTargetPlaceholder": "Add another…",
     "projectSettings.create.addTargetLanguageAction": "Add another language",
@@ -791,10 +790,9 @@ export const projectSettings = defineNamespace({
       },
       "projectSettings.create.targetLanguagesLabel": {
         description:
-          "Field label above the target-language boxes in the create dialog once " +
-          "the user has entered more than one language. While only one lane is " +
-          "filled, the dialog reuses projectSettings.info.targetLanguageLabel " +
-          "rather than a second singular string.",
+          "Field label above the target-language boxes in the create dialog. " +
+          "Always 'Target Language(s)' — the parenthetical covers one or many " +
+          "lanes without swapping the label as boxes fill.",
       },
       "projectSettings.create.shapeLinkedTargetName": {
         description:

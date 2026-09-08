@@ -123,18 +123,18 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     })
   })
 
-  it("relabels the field 'Target Language' on the default self-contained shape", () => {
+  it("labels the field 'Target Language(s)' on the default self-contained shape", () => {
     openDialogWithBasics()
-    expect(screen.getByText("Target Language")).toBeTruthy()
+    expect(screen.getByText("Target Language(s)")).toBeTruthy()
     expect(targetLangInput()).toBeTruthy()
     expect(screen.getByTestId("create-target-lang-inputs")).toBeTruthy()
   })
 
-  it("pluralizes target copy when a second language is entered and reverts when it is removed", () => {
+  it("keeps the field label fixed while pluralizing shape copy with lane count", () => {
     openDialogWithBasics()
     fireEvent.click(screen.getByText("Advanced: project shape"))
 
-    expect(screen.getByText("Target Language")).toBeTruthy()
+    expect(screen.getByText("Target Language(s)")).toBeTruthy()
     expect(
       screen.getByText(/owns both its source and its target\./),
     ).toBeTruthy()
@@ -147,8 +147,7 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
 
     addExtraLanguage("es")
 
-    expect(screen.getByText("Target Languages")).toBeTruthy()
-    expect(screen.queryByText("Target Language")).toBeNull()
+    expect(screen.getByText("Target Language(s)")).toBeTruthy()
     expect(
       screen.getByText(/owns both its source and its targets\./),
     ).toBeTruthy()
@@ -158,7 +157,7 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
 
     fireEvent.click(screen.getByTestId("create-target-lang-remove-1"))
 
-    expect(screen.getByText("Target Language")).toBeTruthy()
+    expect(screen.getByText("Target Language(s)")).toBeTruthy()
     expect(
       screen.getByText(/owns both its source and its target\./),
     ).toBeTruthy()
@@ -403,7 +402,7 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     // A linked target is the Biblica case — one upstream source, several
     // languages — so it needs lanes at creation just as much as a
     // self-contained project does.
-    expect(screen.getByText("Target Language")).toBeTruthy()
+    expect(screen.getByText("Target Language(s)")).toBeTruthy()
     expect(screen.getByTestId("create-extra-lang-input")).toBeTruthy()
     expect(screen.getByTestId("create-add-target-lang")).toBeTruthy()
   })

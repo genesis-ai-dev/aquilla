@@ -434,22 +434,9 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                   return (
                     <Field data-invalid={invalid}>
                       <div className="flex items-center gap-1.5">
-                        <form.Subscribe
-                          selector={(state) =>
-                            filledTargetLaneCount(
-                              state.values.targetLanguage,
-                              state.values.extraLanguages,
-                            )
-                          }
-                        >
-                          {(targetLaneCount) => (
-                            <FieldLabel htmlFor="project-create-target">
-                              {targetLaneCount === 1
-                                ? t("projectSettings.info.targetLanguageLabel")
-                                : t("projectSettings.create.targetLanguagesLabel")}
-                            </FieldLabel>
-                          )}
-                        </form.Subscribe>
+                        <FieldLabel htmlFor="project-create-target">
+                          {t("projectSettings.create.targetLanguagesLabel")}
+                        </FieldLabel>
                         <LanguageFieldHint />
                       </div>
                       <form.Field

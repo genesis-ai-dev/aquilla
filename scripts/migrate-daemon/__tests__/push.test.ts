@@ -146,9 +146,10 @@ describe("pushJob", () => {
     expect(db.getProject(7)?.applied_sha).toBe("abc")
   })
 
-  it("reseeds the ledger and reports unverified when prod's count disagrees", async () => {
+  it("reseeds the ledger and reports unverified when prod holds FEWER events than the ledger", async () => {
+    // Only a deficit is drift: prod is missing events the ledger says landed.
     const planPath = await writePlan("d.ndjson", ["e1", "e2"])
-    const { sync, calls } = fakeSync({ count: 5, ids: [["x1", "x2"], ["x3"]] })
+    const { sync, calls } = fakeSync({ count: 1, ids: [["x1", "x2"], ["x3"]] })
     const r = await pushJob(deps(sync), { job: JOB, project: PROJECT, plan: plan(planPath) })
     expect(calls.eventCount).toBe(1)
     expect(r.reseeded).toBe(true)
@@ -159,6 +160,19 @@ describe("pushJob", () => {
     expect(db.getJob(1)?.stage).not.toBe("done")
     expect(db.getProject(7)?.applied_sha).toBe(null)
     expect(db.fileHash(7, "files/target/a.codex")).toBe(undefined)
+  })
+
+  it("verifies when prod holds MORE events than the ledger (human-authored writes)", async () => {
+    // `eventCount` counts every event in the project, including edits people
+    // made in the app. A surplus must not be read as drift and trigger a reseed.
+    const planPath = await writePlan("d2.ndjson", ["e1", "e2"])
+    const { sync, calls } = fakeSync({ count: 9, ids: [["x1"]] })
+    const r = await pushJob(deps(sync), { job: JOB, project: PROJECT, plan: plan(planPath) })
+    expect(r.verified).toBe(true)
+    expect(r.reseeded).toBe(false)
+    expect(calls.eventCount).toBe(1)
+    expect(db.ledgerCount(7)).toBe(2)
+    expect(db.getJob(1)?.stage).toBe("done")
   })
 
   it("makes no write calls in dry-run", async () => {

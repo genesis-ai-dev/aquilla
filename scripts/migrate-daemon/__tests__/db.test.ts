@@ -65,4 +65,20 @@ describe("DaemonDb ledger", () => {
     db.kvSet("inbox_cursor", "k1")
     expect(db.kvGet("inbox_cursor")).toBe("k1")
   })
+  it("setFileHashes rolls back on error and doesn't wedge connection", () => {
+    const db = new DaemonDb(":memory:")
+    proj(db)
+    // Try to insert a null hash (invalid for NOT NULL column) as second entry
+    expect(() => {
+      db.setFileHashes(47, [
+        { path: "files/target/good.codex", hash: "h1" },
+        { path: "files/target/bad.codex", hash: null as unknown as string },
+      ])
+    }).toThrow()
+    // Connection is not wedged: kv operations work
+    db.kvSet("inbox_cursor", "k1")
+    expect(db.kvGet("inbox_cursor")).toBe("k1")
+    // No partial rows written: first entry was rolled back
+    expect(db.fileHash(47, "files/target/good.codex")).toBeUndefined()
+  })
 })

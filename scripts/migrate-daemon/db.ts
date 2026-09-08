@@ -151,8 +151,13 @@ export class DaemonDb {
   setFileHashes(projectId: number, entries: { path: string; hash: string }[]): void {
     const up = this.d.prepare(`INSERT INTO files (project_id, path, content_hash) VALUES (?,?,?) ON CONFLICT(project_id, path) DO UPDATE SET content_hash=excluded.content_hash`)
     this.d.exec("BEGIN")
-    for (const e of entries) up.run(projectId, e.path, e.hash)
-    this.d.exec("COMMIT")
+    try {
+      for (const e of entries) up.run(projectId, e.path, e.hash)
+      this.d.exec("COMMIT")
+    } catch (e) {
+      this.d.exec("ROLLBACK")
+      throw e
+    }
   }
   kvGet(key: string): string | undefined {
     return (this.d.prepare(`SELECT value FROM kv WHERE key=?`).get(key) as { value: string } | undefined)?.value

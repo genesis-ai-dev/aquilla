@@ -69,11 +69,18 @@ describe('file_section_progress projection', () => {
       validator_histogram: Record<string, number>
       revision: number
     }>('file_section_progress')
-    expect(projected).toHaveLength(3)
+    // file + GEN 1 + GEN 2 + the AQU-1093 book row for GEN.
+    expect(projected).toHaveLength(4)
     expect(projected.find((row) => row.scope === 'file')).toMatchObject({
       total_count: 3,
       filled_count: 2,
       revision: 7,
+    })
+    // The book row sums its chapters: GEN 1 (2 cells) + GEN 2 (1).
+    expect(projected.find((row) => row.scope === 'book')).toMatchObject({
+      section_key: 'GEN',
+      total_count: 3,
+      filled_count: 2,
     })
     expect(projected.find((row) => row.section_key === 'GEN 1')).toMatchObject({
       total_count: 2,
@@ -103,7 +110,7 @@ describe('file_section_progress projection', () => {
   it('full rebuild removes section rows that no longer exist', async () => {
     const { db, pg, rows } = await fixture()
     await db.batch(fullProgressRecomputeStmts(db, PROJECT, FILE, 100))
-    expect(await rows('file_section_progress')).toHaveLength(3)
+    expect(await rows('file_section_progress')).toHaveLength(4)
 
     await pg.query(
       `UPDATE cells SET canonical_ref = NULL
@@ -112,10 +119,12 @@ describe('file_section_progress projection', () => {
     )
     await db.batch(fullProgressRecomputeStmts(db, PROJECT, FILE, 101))
 
+    // GEN 2 goes; the GEN book row survives because GEN 1 still has verses.
     const projected = await rows<{ scope: string; section_key: string }>('file_section_progress')
-    expect(projected).toHaveLength(2)
+    expect(projected).toHaveLength(3)
     expect(projected.some((row) => row.section_key === 'GEN 2')).toBe(false)
     expect(projected.some((row) => row.scope === 'file')).toBe(true)
+    expect(projected.some((row) => row.scope === 'book' && row.section_key === 'GEN')).toBe(true)
   })
 })
 
@@ -129,7 +138,7 @@ describe('GET file progress', () => {
       headers: { Authorization: `Bearer ${token}` },
     }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
     expect(response.status).toBe(200)
-    expect(response.headers.get('ETag')).toBe('"progress:file-progress:7:v2:p"')
+    expect(response.headers.get('ETag')).toBe('"progress:file-progress:7:v2:p:s2"')
     const body = await response.json() as FileProgressResponse
     expect(body.file).toMatchObject({ totalCount: 3, filledCount: 2, validatedCount: 1 })
     expect(body.sections.map((section) => section.key)).toEqual(['GEN 1', 'GEN 2'])
@@ -142,6 +151,33 @@ describe('GET file progress', () => {
       },
     }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
     expect(conditional.status).toBe(304)
+  })
+
+  it('carries per-chapter audio counts, so the inspector need not fetch twice', async () => {
+    // AQU-1098: the projection has written audio_count since 0088, but this
+    // route never selected it, so a chapter list could only ever show text.
+    const { db, pg } = await fixture()
+    await pg.query(
+      `INSERT INTO cell_audio
+         (project_id, file_id, cell_id, audio_id, slot, url, event_id, created_ts,
+          selected, deleted, approved, duration_ms)
+       VALUES ($1,$2,'c1','a1','take','u1','e1',1, 1,0,1,1000),
+              ($1,$2,'c3','a2','take','u2','e2',1, 1,0,0,1000)`,
+      [PROJECT, FILE],
+    )
+    await db.batch(fullProgressRecomputeStmts(db, PROJECT, FILE, 100))
+    const token = await makeTestToken(SECRET, { projectId: PROJECT, fileId: FILE })
+    const response = (await handleProgressReadRequest(new Request(
+      `https://worker/api/v1/projects/${PROJECT}/files/${FILE}/progress`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    ), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
+    const body = await response.json() as FileProgressResponse
+    expect(body.file).toMatchObject({ audioCount: 2, audioValidatedCount: 1 })
+    const gen1 = body.sections.find((section) => section.key === 'GEN 1')!
+    const gen2 = body.sections.find((section) => section.key === 'GEN 2')!
+    // GEN 1 holds the approved take, GEN 2 the unapproved one.
+    expect(gen1).toMatchObject({ audioCount: 1, audioValidatedCount: 1 })
+    expect(gen2).toMatchObject({ audioCount: 1, audioValidatedCount: 0 })
   })
 
   it('rejects a token scoped to another project', async () => {
@@ -161,18 +197,18 @@ describe('GET file progress', () => {
     const fallback = (await handleProgressReadRequest(new Request(url, {
       headers: { Authorization: `Bearer ${token}` },
     }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
-    expect(fallback.headers.get('ETag')).toBe('"progress:file-progress:7:v2:f"')
+    expect(fallback.headers.get('ETag')).toBe('"progress:file-progress:7:v2:f:s2"')
     expect((await fallback.json() as FileProgressResponse).source).toBe('file-counter-fallback')
 
     await db.batch(fullProgressRecomputeStmts(db, PROJECT, FILE, 100))
     const projected = (await handleProgressReadRequest(new Request(url, {
       headers: {
         Authorization: `Bearer ${token}`,
-        'If-None-Match': '"progress:file-progress:7:v2:f"',
+        'If-None-Match': '"progress:file-progress:7:v2:f:s2"',
       },
     }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
     expect(projected.status).toBe(200)
-    expect(projected.headers.get('ETag')).toBe('"progress:file-progress:7:v2:p"')
+    expect(projected.headers.get('ETag')).toBe('"progress:file-progress:7:v2:p:s2"')
     expect((await projected.json() as FileProgressResponse).sections).toHaveLength(2)
   })
 

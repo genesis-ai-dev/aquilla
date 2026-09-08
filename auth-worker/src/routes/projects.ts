@@ -98,6 +98,8 @@ interface FileProjection {
   anchorFileId?: string
   bookCode?: string
   hasScriptureContent?: boolean
+  /** Sidebar folder. Read from files.meta, or recovered from a Biblica parserVersion. */
+  corpusMarker?: string
   /** Timeline-segment-model order lens, read from files.meta. Omitted when
    *  unset → client treats as 'sequence'. */
   orderedBy?: string
@@ -182,6 +184,7 @@ export async function loadFilesByProject(
     let sourceTextDirection: "ltr" | "rtl" | undefined
     let targetTextDirection: "ltr" | "rtl" | undefined
     let hasScriptureContent: boolean | undefined
+    let corpusMarker: string | undefined
     let coreMediaUrl: string | undefined
     let timingMode: "dubbing" | "audioFirst" | undefined
     let audioVttTimebase: FileProjection["audioVttTimebase"]
@@ -205,6 +208,8 @@ export async function loadFilesByProject(
             hasScriptureContent?: unknown
             audioVtt?: { timebase?: unknown }
           }
+          corpusMarker?: unknown
+          parserVersion?: unknown
         }
         if (m.orderedBy) orderedBy = m.orderedBy
         sourceLanguage = normalizeLanguage(m.source_language ?? m.sourceLanguage)
@@ -212,6 +217,7 @@ export async function loadFilesByProject(
         sourceTextDirection = normalizeTextDirection(m.source_text_direction ?? m.sourceTextDirection)
         targetTextDirection = normalizeTextDirection(m.target_text_direction ?? m.targetTextDirection)
         if (m.aquillaImport?.hasScriptureContent === true) hasScriptureContent = true
+        corpusMarker = resolveCorpusMarker(m.corpusMarker, m.parserVersion)
         if (typeof m.coreMediaUrl === "string" && m.coreMediaUrl.trim()) coreMediaUrl = m.coreMediaUrl
         if (m.timingMode === "dubbing" || m.timingMode === "audioFirst") timingMode = m.timingMode
         // `scale` is the only required field: a drift measured from the words
@@ -255,6 +261,7 @@ export async function loadFilesByProject(
       ...(f.anchor_file_id ? { anchorFileId: f.anchor_file_id } : {}),
       ...(f.book_code ? { bookCode: f.book_code } : {}),
       ...(hasScriptureContent ? { hasScriptureContent: true } : {}),
+      ...(corpusMarker ? { corpusMarker } : {}),
       ...(orderedBy ? { orderedBy } : {}),
       ...(sourceLanguage ? { sourceLanguage } : {}),
       ...(targetLanguage ? { targetLanguage } : {}),
@@ -272,6 +279,22 @@ export async function loadFilesByProject(
 
 function normalizeTextDirection(value: string | undefined): "ltr" | "rtl" | undefined {
   return value === "ltr" || value === "rtl" ? value : undefined
+}
+
+const BIBLICA_PROFILE_FOLDERS: Readonly<Record<string, string>> = {
+  "builtin:biblica-study-notes": "Biblica Study Notes",
+  "builtin:biblica-treasure-hunt": "Treasure Hunt Bible",
+  "builtin:biblica-reach4life": "Reach 4 Life",
+  "builtin:biblica-ebl": "Equipping Biblical Leaders",
+}
+
+function resolveCorpusMarker(explicit: unknown, parserVersion: unknown): string | undefined {
+  if (typeof explicit === "string") {
+    const trimmed = explicit.trim()
+    if (trimmed) return trimmed
+  }
+  if (typeof parserVersion !== "string") return undefined
+  return BIBLICA_PROFILE_FOLDERS[parserVersion.split("@")[0]]
 }
 
 function normalizeLanguage(value: string | undefined): string | undefined {

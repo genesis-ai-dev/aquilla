@@ -5,9 +5,9 @@
 //   - files.filled_count tracks target cells with non-empty trimmed content
 //   - files.approved_count tracks target cells where validated=1
 //   - Both are full recomputes (not incremental deltas) on each commit / validate
-//   - cell_count is COUNT(DISTINCT cell_id) across source + target
+//   - cell_count is the number of distinct cell_ids across source + target
 //
-// Source: event-projection.ts fileCountersRecomputeStmt (lines 96-122)
+// Source: event-projection.ts fileCountersRecomputeStmt
 
 import { describe, it, expect, vi } from 'vitest'
 

@@ -7,18 +7,23 @@ export interface ProgressReadEnv {
 }
 
 interface ProgressRow {
-  scope: 'file' | 'section'
+  scope: 'file' | 'section' | 'book'
   section_key: string
   total_count: number | string
   filled_count: number | string
   validator_histogram: Record<string, number> | string | null
   // AQU-1083: the structural subset of the three above, recorded by the
   // projection whatever the policy says, so excluding headings is a
-  // subtraction here rather than a reprojection over there.
-  structural_count: number | string
-  structural_filled_count: number | string
-  structural_validator_histogram: Record<string, number> | string | null
+  // subtraction here rather than a reprojection over there. Optional because
+  // plan-route builds rows by hand; absent reads as nothing to subtract.
+  structural_count?: number | string | null
+  structural_filled_count?: number | string | null
+  structural_validator_histogram?: Record<string, number> | string | null
   revision: number | string | bigint
+  // AQU-1098: written by the projection since 0088. Absent on the synthetic
+  // rows plan-route builds, which carry their own audio numbers.
+  audio_count?: number | string | null
+  audio_validated_count?: number | string | null
 }
 
 export interface ProgressCounts {
@@ -26,6 +31,13 @@ export interface ProgressCounts {
   filledCount: number
   validatedCount: number
   validationLevels: number[]
+  /**
+   * AQU-1098: source cells carrying a live take, and those whose take is
+   * selected AND approved. Same rule the org portfolio counts by, so a
+   * chapter's audio and the project's audio can never disagree.
+   */
+  audioCount: number
+  audioValidatedCount: number
 }
 
 export interface FileProgressResponse {
@@ -57,7 +69,7 @@ const BOOK_ORDER = [
   'GEN','EXO','LEV','NUM','DEU','JOS','JDG','RUT','1SA','2SA','1KI','2KI','1CH','2CH','EZR','NEH','EST','JOB','PSA','PRO','ECC','SNG','ISA','JER','LAM','EZK','DAN','HOS','JOL','AMO','OBA','JON','MIC','NAM','HAB','ZEP','HAG','ZEC','MAL',
   'MAT','MRK','LUK','JHN','ACT','ROM','1CO','2CO','GAL','EPH','PHP','COL','1TH','2TH','1TI','2TI','TIT','PHM','HEB','JAS','1PE','2PE','1JN','2JN','3JN','JUD','REV',
 ]
-const BOOK_INDEX = new Map(BOOK_ORDER.map((book, index) => [book, index]))
+export const BOOK_INDEX = new Map(BOOK_ORDER.map((book, index) => [book, index]))
 
 function parseHistogram(raw: ProgressRow['validator_histogram']): Map<number, number> {
   let value: unknown = raw
@@ -76,16 +88,21 @@ function parseHistogram(raw: ProgressRow['validator_histogram']): Map<number, nu
   return out
 }
 
-function counts(
+/**
+ * The numbers a row reports, with the policy applied. `countStructural`
+ * defaults to counting — the behaviour every caller had before the setting
+ * existed — so a caller that has not resolved the policy gets today's numbers.
+ */
+export function counts(
   row: ProgressRow,
   validationCount: number,
-  countStructural: boolean,
+  countStructural = true,
 ): ProgressCounts {
   const histogram = parseHistogram(row.validator_histogram)
   if (!countStructural) {
     // Bucket-wise, because the levels are cumulative on read: a validated
     // chapter title would otherwise still be counted at every level below it.
-    for (const [bucket, amount] of parseHistogram(row.structural_validator_histogram)) {
+    for (const [bucket, amount] of parseHistogram(row.structural_validator_histogram ?? null)) {
       const remaining = (histogram.get(bucket) ?? 0) - amount
       if (remaining > 0) histogram.set(bucket, remaining)
       else histogram.delete(bucket)
@@ -107,6 +124,8 @@ function counts(
     filledCount: Math.max(0, (Number(row.filled_count) || 0) - structuralFilled),
     validatedCount: validationLevels[Math.min(levelCap, validationCount) - 1] ?? 0,
     validationLevels,
+    audioCount: Number(row.audio_count) || 0,
+    audioValidatedCount: Number(row.audio_validated_count) || 0,
   }
 }
 
@@ -147,7 +166,7 @@ function compareCanonicalRefs(a: string, b: string): number {
     || a.localeCompare(b)
 }
 
-async function readValidationCount(db: AquillaDb, projectId: string): Promise<number> {
+export async function readValidationCount(db: AquillaDb, projectId: string): Promise<number> {
   const row = await db
     .prepare('SELECT settings FROM project_settings WHERE project_id = ?')
     .bind(projectId)
@@ -254,7 +273,7 @@ export async function handleProgressReadRequest(
       .prepare(
         `SELECT scope, section_key, total_count, filled_count, validator_histogram,
                 structural_count, structural_filled_count, structural_validator_histogram,
-                revision
+                revision, audio_count, audio_validated_count
            FROM file_section_progress
           WHERE project_id = ? AND file_id = ? AND target_lang = ?`,
       )
@@ -297,6 +316,9 @@ export async function handleProgressReadRequest(
       structural_filled_count: fallback.structural_filled_count,
       structural_validator_histogram: structuralHistogram,
       revision: fallback.revision,
+      // `files` carries no audio rollup — the projection is the only source,
+      // and this branch runs only before it has been backfilled.
+      audio_count: 0, audio_validated_count: 0,
     }]
     source = 'file-counter-fallback'
   }
@@ -308,8 +330,13 @@ export async function handleProgressReadRequest(
   // sequence. Include the source so clients cannot retain an empty fallback
   // through a false 304 after projection rows appear.
   const laneTag = lane ? `:lane:${encodeURIComponent(lane)}` : ''
+  // `s2` marks the response SHAPE (audio counts added, AQU-1098). Without it
+  // a client holding a pre-audio cached body would 304 and keep it forever:
+  // the shape changed without the revision moving. The structural policy is
+  // part of the key for the same reason: flipping it changes every number
+  // without moving the revision either.
   const structuralTag = countStructural ? '' : ':nostruct'
-  const etag = `"progress:${fileId}:${revision}:v${validationCount}:${source === 'projection' ? 'p' : 'f'}${structuralTag}${laneTag}"`
+  const etag = `"progress:${fileId}:${revision}:v${validationCount}:${source === 'projection' ? 'p' : 'f'}:s2${structuralTag}${laneTag}"`
   if (request.headers.get('If-None-Match') === etag) {
     return new Response(null, { status: 304, headers: { ETag: etag, 'Cache-Control': 'private, no-cache' } })
   }

@@ -3,6 +3,7 @@
 import type { Env, AuthUser } from "../types"
 import { ORG_WIDE_ACCESS_FLOOR, resolveProjectRole } from "./project-permissions"
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
+import { planUnitCountsSql, aoeTodayIso } from "../../../db/shared/plan-units"
 
 /** Map numeric role level to a human-readable name. Used for secondarySources. */
 function roleNameForLevel(level: number): string {
@@ -890,7 +891,7 @@ export interface PortfolioLane {
   lastEditAt: number | null
 }
 
-export interface PortfolioRow { id: string; name: string; totalCells: number; validatedCells: number; filledCells: number; lastEditAt: number | null; audioCells: number; validatedAudioCells: number; recordedMs: number; deadlineAt: string | null; aiDraftedCells: number; sourceLanguage: string | null; targetLanguage: string | null; lanes: PortfolioLane[] }
+export interface PortfolioRow { id: string; name: string; totalCells: number; validatedCells: number; filledCells: number; lastEditAt: number | null; audioCells: number; validatedAudioCells: number; recordedMs: number; deadlineAt: string | null; aiDraftedCells: number; sourceLanguage: string | null; targetLanguage: string | null; lanes: PortfolioLane[]; unitsTotal: number; unitsDone: number; unitsOverdue: number }
 export interface OrgPortfolioRow extends PortfolioRow { orgId: number }
 
 /** Soft-deleted file in an org the caller can see (Archived → Recently deleted). */
@@ -921,6 +922,11 @@ interface PortfolioDbRow {
   // (the canonical per-project source useProject overlays). Null when unset.
   source_language: string | null
   target_language: string | null
+  // AQU-1097: planning units — how many this project has, how many a manager
+  // has marked done, and how many are past their target date without a mark.
+  units_total: number
+  units_done: number
+  units_overdue: number
 }
 
 function mapPortfolioRow(r: PortfolioDbRow, lanesByProject: Map<string, PortfolioLane[]>): PortfolioRow {
@@ -941,6 +947,9 @@ function mapPortfolioRow(r: PortfolioDbRow, lanesByProject: Map<string, Portfoli
     sourceLanguage: r.source_language || null,
     targetLanguage: r.target_language || null,
     lanes: lanesByProject.get(r.id) ?? [],
+    unitsTotal: Number(r.units_total) || 0,
+    unitsDone: Number(r.units_done) || 0,
+    unitsOverdue: Number(r.units_overdue) || 0,
   }
 }
 
@@ -1165,7 +1174,14 @@ const PORTFOLIO_JOINS = `
        LEFT JOIN files f ON f.project_id = p.id
        LEFT JOIN project_settings ps ON ps.project_id = p.id
        LEFT JOIN org_settings os ON os.org_id = p.org_id
-       LEFT JOIN au ON au.project_id = p.id`
+       LEFT JOIN au ON au.project_id = p.id
+       LEFT JOIN pu ON pu.project_id = p.id`
+
+/** AQU-1097: planning-unit counts, read from the `pu` CTE above. */
+const PORTFOLIO_UNIT_COLUMNS = `
+            COALESCE(MAX(pu.units_total), 0)           AS units_total,
+            COALESCE(MAX(pu.units_done), 0)            AS units_done,
+            COALESCE(MAX(pu.units_overdue), 0)         AS units_overdue`
 
 /**
  * Audio coverage and validation, with structural cells dropped where a project
@@ -1190,7 +1206,7 @@ const PORTFOLIO_JOINS = `
  * previous shape of this query, three correlated subqueries over ~300k rows,
  * is what caused the 15s dashboard timeout; this must not walk back into it.
  */
-const portfolioAudioCte = (orgPredicate: string) => `
+const portfolioCtes = (orgPredicate: string) => `
      WITH policy AS (
        SELECT p.id AS project_id,
               COALESCE(ps.count_structural, os.count_structural) = 'false' AS excluded
@@ -1222,6 +1238,8 @@ const portfolioAudioCte = (orgPredicate: string) => `
               AND a.project_id IN (SELECT id FROM projects WHERE ${orgPredicate})
          ) ca
         GROUP BY ca.project_id
+     ), pu AS MATERIALIZED (
+       ${planUnitCountsSql(`f.project_id IN (SELECT id FROM projects WHERE ${orgPredicate})`)}
      )`
 
 /** Per-project rollup over the org's non-archived projects (derive-on-read, one GROUP BY). */
@@ -1229,6 +1247,7 @@ export async function getOrgPortfolio(
   env: Env,
   orgId: number,
   viewer: { userId: number; isAdmin: boolean },
+  now: number = Date.now(),
 ): Promise<PortfolioRow[]> {
   // Perf (dashboard 15s timeout fix):
   //  - The AQU-523 language pair reads the STORED generated columns on
@@ -1241,22 +1260,26 @@ export async function getOrgPortfolio(
   //    collapses the file fan-out without affecting the SUMs (same for the
   //    1:1 project_settings join).
   const rows = await env.AQUILLA_PG.prepare(
-    `${portfolioAudioCte('org_id = ?')}
+    `${portfolioCtes('org_id = ?')}
      SELECT p.org_id AS org_id, p.id AS id, p.name AS name, p.deadline_at AS deadline_at,${PORTFOLIO_CELL_COLUMNS}
             MAX(f.last_edit_at)                     AS last_edit_at,
             MAX(ps.source_language)                 AS source_language,
             MAX(ps.target_language)                 AS target_language,
             COALESCE(MAX(au.audio_cells), 0)           AS audio_cells,
             COALESCE(MAX(au.validated_audio_cells), 0) AS validated_audio_cells,
-            COALESCE(MAX(au.recorded_ms), 0)           AS recorded_ms
+            COALESCE(MAX(au.recorded_ms), 0)           AS recorded_ms,${PORTFOLIO_UNIT_COLUMNS}
        FROM projects p${PORTFOLIO_JOINS}
       WHERE p.org_id = ? AND p.archived_at IS NULL
         AND ${PORTFOLIO_VISIBILITY_PREDICATE}
       GROUP BY p.id, p.name
       ORDER BY LOWER(p.name)`,
   ).bind(
-    // policy CTE, then the audio scope inside it, then the outer WHERE.
-    orgId, orgId, orgId,
+    // Org scopes in CTE order: the AQU-1083 policy, the audio scope inside it,
+    // the plan-unit counts (preceded by their AoE cutoff date), then the outer
+    // WHERE.
+    orgId, orgId,
+    aoeTodayIso(now), orgId,
+    orgId,
     viewer.isAdmin ? 1 : 0, viewer.userId, viewer.userId, viewer.userId, viewer.userId,
   ).all<PortfolioDbRow>()
   const lanesByProject = await fetchPortfolioLanes(env, [orgId])
@@ -1314,6 +1337,7 @@ export async function getOrgPortfolios(
   env: Env,
   orgIds: number[],
   viewer: { userId: number; isAdmin: boolean },
+  now: number = Date.now(),
 ): Promise<OrgPortfolioRow[]> {
   const uniqueOrgIds = [...new Set(orgIds)].filter((id) => Number.isInteger(id) && id > 0)
   if (uniqueOrgIds.length === 0) return []
@@ -1324,22 +1348,25 @@ export async function getOrgPortfolios(
   // uses the small generated project_settings projections, so this no longer
   // transfers/parses hundreds of MB of full settings blobs for large accounts.
   const rows = await env.AQUILLA_PG.prepare(
-    `${portfolioAudioCte(`org_id IN (${placeholders})`)}
+    `${portfolioCtes(`org_id IN (${placeholders})`)}
      SELECT p.org_id AS org_id, p.id AS id, p.name AS name, p.deadline_at AS deadline_at,${PORTFOLIO_CELL_COLUMNS}
             MAX(f.last_edit_at)                     AS last_edit_at,
             MAX(ps.source_language)                 AS source_language,
             MAX(ps.target_language)                 AS target_language,
             COALESCE(MAX(au.audio_cells), 0)           AS audio_cells,
             COALESCE(MAX(au.validated_audio_cells), 0) AS validated_audio_cells,
-            COALESCE(MAX(au.recorded_ms), 0)           AS recorded_ms
+            COALESCE(MAX(au.recorded_ms), 0)           AS recorded_ms,${PORTFOLIO_UNIT_COLUMNS}
        FROM projects p${PORTFOLIO_JOINS}
       WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL
         AND ${PORTFOLIO_VISIBILITY_PREDICATE}
       GROUP BY p.org_id, p.id, p.name
       ORDER BY p.org_id, LOWER(p.name)`,
   ).bind(
-    // policy CTE, then the audio scope inside it, then the outer WHERE.
-    ...uniqueOrgIds, ...uniqueOrgIds, ...uniqueOrgIds,
+    // Same order as getOrgPortfolio: policy, audio, plan-unit counts (after
+    // their AoE cutoff date), outer WHERE.
+    ...uniqueOrgIds, ...uniqueOrgIds,
+    aoeTodayIso(now), ...uniqueOrgIds,
+    ...uniqueOrgIds,
     viewer.isAdmin ? 1 : 0, viewer.userId, viewer.userId, viewer.userId, viewer.userId,
   ).all<PortfolioDbRow>()
   const lanesByProject = await fetchPortfolioLanes(env, uniqueOrgIds)

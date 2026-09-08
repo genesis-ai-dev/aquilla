@@ -24,6 +24,7 @@ import type { ChainSlot } from './chain-claims'
 import { eventQualifiedParentKey } from './chain-claims'
 import { ROLE } from './role-policy'
 import { trackPatchRequiresExisting } from './track-editing-authority'
+import { usableCorpusMarker } from './corpus-marker'
 
 // A single event row as it lives in Postgres. JSON.parse on `payload` is the
 // caller's responsibility — `payload` here is already an object.
@@ -180,6 +181,15 @@ export function laneOfEvent(kind: string, payload: unknown): string {
  * Driven FROM `files` rather than from `cells` so a file whose cells have all
  * been deleted is still reset to zero. The per-project form relied on that.
  *
+ * cell_count deliberately avoids COUNT(DISTINCT cell_id): that sorts the whole
+ * row set (value included, ~170 B/row) and spilled to disk on every
+ * 30K+-cell file under prod's 4 MB work_mem (4.6 GB temp over 8.6 days).
+ * GROUP BY cell_id over cells_pkey (project_id, file_id, cell_id, …) is an
+ * ordered Index Only Scan + Group — no sort at any work_mem. Guarded by
+ * __tests__/hot-query-plans.test.ts. The structural cell count needs no
+ * DISTINCT at all: a cell has exactly one source row, so counting structural
+ * SOURCE rows is the distinct count.
+ *
  * NOTE: this is what was always meant by file-create's "counters are
  * maintained by the cell commit projection path" comment — that maintenance
  * never actually existed before, so every `files` row sat at cell_count=0.
@@ -187,7 +197,11 @@ export function laneOfEvent(kind: string, payload: unknown): string {
 function fileCountersSql(scope: 'file' | 'project'): string {
   return `WITH counters AS (
          SELECT f.id AS file_id,
-                COUNT(DISTINCT c.cell_id)::integer AS cell_count,
+                (SELECT COUNT(*) FROM (
+                   SELECT 1 FROM cells
+                    WHERE project_id = f.project_id AND file_id = f.id
+                    GROUP BY cell_id
+                 ) AS distinct_cells)::integer AS cell_count,
                 COUNT(*) FILTER (WHERE c.validated = 1)::integer AS approved_count,
                 COUNT(*) FILTER (
                   WHERE c.side = 'target' AND TRIM(c.value) != ''
@@ -197,8 +211,8 @@ function fileCountersSql(scope: 'file' | 'project'): string {
                 COUNT(*) FILTER (
                   WHERE c.side = 'target' AND c.ai_drafted = 1
                 )::integer AS ai_drafted_count,
-                COUNT(DISTINCT c.cell_id) FILTER (
-                  WHERE s.type IN ('heading', 'paratext')
+                COUNT(*) FILTER (
+                  WHERE c.side = 'source' AND c.type IN ('heading', 'paratext')
                 )::integer AS structural_cell_count,
                 COUNT(*) FILTER (
                   WHERE s.type IN ('heading', 'paratext')
@@ -1543,6 +1557,8 @@ case 'cell.audio.attach': {
       if (p.r2Key) langMeta.r2Key = p.r2Key
       if (p.importFormat) langMeta.importFormat = p.importFormat
       if (p.parserVersion) langMeta.parserVersion = p.parserVersion
+      const corpusMarker = usableCorpusMarker(p.corpusMarker)
+      if (corpusMarker) langMeta.corpusMarker = corpusMarker
       stmts.push(
         db
           .prepare(
@@ -2127,6 +2143,15 @@ case 'cell.audio.attach': {
       return ['files']
     }
 
+    case 'file.corpus.set': {
+      const p = event.payload as EventPayloads['file.corpus.set']
+      if (!event.fileId) {
+        throw new Error(`file.corpus.set event ${event.id} is missing fileId`)
+      }
+      stmts.push(buildFileCorpusSetStmt(db, event.projectId, event.fileId, event.id, p.corpusMarker))
+      return ['files']
+    }
+
     case 'file.track.set': {
       // Per-track presentation overrides — rebuild path; the dispatch path
       // (handlers/file-track-set.ts) uses the same shared SQL builder.
@@ -2393,12 +2418,39 @@ case 'cell.audio.attach': {
 }
 
 /**
- * Shared meta-merge for the file's audio timing mode. Same shape as
- * buildFileVideoSetStmt below (one files.meta JSON key, merged or removed);
- * used by both the live handler (handlers/file-timing-set.ts) and the rebuild
- * projection case. Null clears the key — the file falls back to the
- * project-level default.
+ * Shared meta-merge for the file's sidebar corpus group. Same shape as
+ * buildFileTimingSetStmt (one files.meta JSON key, merged or removed).
+ * Null / blank clears the key — the file lands in Ungrouped.
  */
+export function buildFileCorpusSetStmt(
+  db: AquillaDb,
+  projectId: string,
+  fileId: string,
+  eventId: string,
+  corpusMarker: string | null,
+): AquillaStatement {
+  const NOW = "(extract(epoch from now()) * 1000)::bigint"
+  const usable = usableCorpusMarker(corpusMarker)
+  if (usable == null) {
+    return db
+      .prepare(
+        `UPDATE files
+            SET meta = (COALESCE(NULLIF(meta, ''), '{}')::jsonb - 'corpusMarker')::text,
+                event_id = ?, updated_at = ${NOW}
+          WHERE id = ? AND project_id = ?`,
+      )
+      .bind(eventId, fileId, projectId)
+  }
+  return db
+    .prepare(
+      `UPDATE files
+          SET meta = (COALESCE(NULLIF(meta, ''), '{}')::jsonb || jsonb_build_object('corpusMarker', ?::text))::text,
+              event_id = ?, updated_at = ${NOW}
+        WHERE id = ? AND project_id = ?`,
+    )
+    .bind(usable, eventId, fileId, projectId)
+}
+
 export function buildFileTimingSetStmt(
   db: AquillaDb,
   projectId: string,

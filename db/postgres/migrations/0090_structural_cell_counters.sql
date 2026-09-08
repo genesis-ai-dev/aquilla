@@ -23,7 +23,7 @@
 -- transaction. Apply by hand, in a window, BEFORE deploying anything that reads
 -- these columns (neon:status is a deploy precondition and will fail until then):
 --   set -a; . ./.env; set +a
---   npx tsx scripts/pg.ts db/postgres/migrations/0083_structural_cell_counters.sql
+--   npx tsx scripts/pg.ts db/postgres/migrations/0090_structural_cell_counters.sql
 
 BEGIN;
 
@@ -105,7 +105,8 @@ UPDATE files f
 -- file_section_progress is per target lane, so the structural aggregates are
 -- computed per lane too. `scope='file'` rows key on section_key = '' and
 -- target_lang = ''; section rows key on the canonical chapter prefix, the same
--- SPLIT_PART expression sectionKeyExpr uses in progress-projection.ts.
+-- SPLIT_PART expression sectionKeyExpr uses in progress-projection.ts; book
+-- rows (added by 0088, which this must follow) key on the book token.
 WITH paired AS (
   SELECT p.project_id,
          p.file_id,
@@ -122,7 +123,13 @@ WITH paired AS (
      AND s.type IN ('heading', 'paratext')
      AND (
        p.scope = 'file'
-       OR BTRIM(SPLIT_PART(COALESCE(s.canonical_ref, ''), ':', 1)) = p.section_key
+       OR (p.scope = 'section'
+           AND BTRIM(SPLIT_PART(COALESCE(s.canonical_ref, ''), ':', 1)) = p.section_key)
+       -- Book rows (0088) key on the first token of the chapter key, the same
+       -- SPLIT_PART bookKeyExpr uses. Front matter ("GEN:mt1:1") has no chapter,
+       -- so its chapter key IS the book key and it lands in the book row too.
+       OR (p.scope = 'book'
+           AND SPLIT_PART(BTRIM(SPLIT_PART(COALESCE(s.canonical_ref, ''), ':', 1)), ' ', 1) = p.section_key)
      )
     LEFT JOIN cells t
       ON t.project_id  = s.project_id

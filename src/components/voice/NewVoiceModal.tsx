@@ -503,7 +503,11 @@ function NewVoiceModalBody({
               </>
             )}
             {activeProvider === "inworld" && (
-              <InworldVoiceSettings voice={draft} onChange={update} />
+              <InworldVoiceSettings
+                voice={draft}
+                onChange={update}
+                previewIgnored={mode === "tts" && inworldSource === "design"}
+              />
             )}
             {activeProvider === "gemini" && (
               <Field>

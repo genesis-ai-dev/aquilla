@@ -114,7 +114,10 @@ Per-voice playground knobs (New Voice dialog, Inworld engine) persist on the
 Unset quality/delivery follow Highest + Stable. Delivery is disabled in the UI
 on Standard, because Flash ignores it. Highest quality also shows a Best
 practices link to Inworld [steering](https://docs.inworld.ai/tts/capabilities/steering)
-(instruction tags in the spoken text; TTS-2 only).
+(instruction tags in the spoken text; TTS-2 only). Voice Design preview
+generation does not send these knobs — the New Voice dialog says so under
+Generate previews and above the controls. They apply on later
+`POST /api/v1/voice/tts` with the published voice.
 
 If any target-language lane is a display name Inworld cannot map (`French`,
 `Grade 7 English`, …), the New Voice dialog shows a Language dropdown — even

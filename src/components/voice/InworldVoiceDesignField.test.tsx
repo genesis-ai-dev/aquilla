@@ -99,6 +99,7 @@ describe("InworldVoiceDesignField", () => {
     renderField({ prompt: "too short for a useful voice" })
     expect(screen.getByText(/at least 30 characters/)).toBeTruthy()
     expect(screen.getByRole("button", { name: "Generate previews" })).toBeDisabled()
+    expect(screen.getByText("Previews ignore audio quality, delivery, and talking speed.")).toBeTruthy()
   })
 
   it("disables Generate when the preview script is too short", async () => {

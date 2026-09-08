@@ -60,6 +60,10 @@ export const audio = defineNamespace({
     "audio.newVoice.designAccentBR": "Brazilian",
     "audio.newVoice.designAccentStandard": "Standard",
     "audio.newVoice.designGenerate": "Generate previews",
+    "audio.newVoice.designGenerateKnobsHint":
+      "Previews ignore audio quality, delivery, and talking speed.",
+    "audio.newVoice.designKnobsHint":
+      "The options below only apply when you generate a line with this voice. They don't affect the voices you hear in this dialog.",
     "audio.newVoice.designGenerating": "Generating…",
     "audio.newVoice.designDocsLink": "Voice design guide",
     "audio.newVoice.designPreviewLabel": "Preview {n}",
@@ -769,6 +773,21 @@ export const audio = defineNamespace({
           "Button that asks Inworld to generate up to three listen-able voice " +
           "previews from the description. Verb phrase, present tense.",
         maxLength: 22,
+      },
+      "audio.newVoice.designGenerateKnobsHint": {
+        description:
+          "Helper under the Generate previews button. Tells the user that audio " +
+          "quality, delivery, and talking speed are not sent with Voice Design " +
+          "preview generation — those knobs only affect later line TTS.",
+      },
+      "audio.newVoice.designKnobsHint": {
+        description:
+          "Helper above the Audio quality / Delivery / Talking speed controls " +
+          "when the Voice Design tab is selected. 'The options below' are those " +
+          "three knobs. They still save on the voice for later line TTS. The " +
+          "second sentence names what they do not change: the Voice Design " +
+          "preview clips (and the saved-voice row) you can play in this dialog. " +
+          "'Generate a line' is later cell TTS, not the Generate previews button.",
       },
       "audio.newVoice.designGenerating": {
         description:

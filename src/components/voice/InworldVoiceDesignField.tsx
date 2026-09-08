@@ -453,16 +453,19 @@ export function InworldVoiceDesignField({
         session={session}
       />
 
-      <Button type="button" variant="outline" className="w-full" disabled={!canGenerate} onClick={() => void generate()}>
-        {generating ? (
-          <>
-            <Spinner className="size-3" />
-            {t("audio.newVoice.designGenerating")}
-          </>
-        ) : (
-          t("audio.newVoice.designGenerate")
-        )}
-      </Button>
+      <div className="space-y-1.5">
+        <Button type="button" variant="outline" className="w-full" disabled={!canGenerate} onClick={() => void generate()}>
+          {generating ? (
+            <>
+              <Spinner className="size-3" />
+              {t("audio.newVoice.designGenerating")}
+            </>
+          ) : (
+            t("audio.newVoice.designGenerate")
+          )}
+        </Button>
+        <p className="text-[11px] text-muted-foreground">{t("audio.newVoice.designGenerateKnobsHint")}</p>
+      </div>
 
       {error && (
         <p className="select-text cursor-text break-words text-xs text-destructive" role="alert">{error}</p>

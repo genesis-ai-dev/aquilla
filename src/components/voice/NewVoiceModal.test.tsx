@@ -247,6 +247,16 @@ describe("NewVoiceModal engine selection", () => {
     expect(screen.getByLabelText("Describe the voice")).toBeTruthy()
   })
 
+  it("explains that playground knobs do not affect Voice Design previews", async () => {
+    const user = userEvent.setup()
+    renderCreate({ provider: "inworld" })
+    expect(screen.queryByText(/options below only apply/)).toBeNull()
+    expect(screen.queryByText(/Previews ignore audio quality/)).toBeNull()
+    await user.click(screen.getByRole("tab", { name: /Voice design/ }))
+    expect(screen.getByText("Previews ignore audio quality, delivery, and talking speed.")).toBeTruthy()
+    expect(screen.getByText("The options below only apply when you generate a line with this voice. They don't affect the voices you hear in this dialog.")).toBeTruthy()
+  })
+
   it("defaults Inworld voices to Highest quality with Stable delivery", () => {
     const { onSave } = renderCreate({ provider: "inworld" })
     expect(screen.getByRole("switch", { name: "Audio quality" })).toBeChecked()

@@ -30,9 +30,12 @@ import type { Voice } from "@/lib/parsers/types"
 export function InworldVoiceSettings({
   voice,
   onChange,
+  previewIgnored = false,
 }: {
   voice: Pick<Voice, "speakingRate" | "deliveryMode" | "audioQuality">
   onChange: (patch: Pick<Voice, "speakingRate" | "deliveryMode" | "audioQuality">) => void
+  /** Voice Design samples do not send these knobs; they apply on later synthesize. */
+  previewIgnored?: boolean
 }) {
   const t = useT()
   const quality = effectiveInworldAudioQuality(voice)
@@ -57,6 +60,9 @@ export function InworldVoiceSettings({
 
   return (
     <div className="space-y-4">
+      {previewIgnored && (
+        <p className="text-[11px] text-muted-foreground">{t("audio.newVoice.designKnobsHint")}</p>
+      )}
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-1.5">
           <span className="text-sm font-medium">{t("audio.newVoice.audioQualityLabel")}</span>

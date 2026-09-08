@@ -392,7 +392,7 @@ describe("InworldVoiceDesignField", () => {
     expect(sent.designPrompt).toMatch(/^dialect: British English$/m)
     expect(sent.designPrompt).toMatch(/^gender: male$/m)
     expect(sent.designPrompt).toMatch(/^age: middle-aged$/m)
-    expect(sent.designPrompt).toMatch(/^environment: $/m)
+    expect(sent.designPrompt).toMatch(/^environment:$/m)
     expect(await screen.findByRole("radio", { name: "Preview 1" })).toBeChecked()
   })
 

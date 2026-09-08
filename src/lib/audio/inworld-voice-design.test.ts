@@ -41,19 +41,19 @@ describe("Inworld structured voice profile", () => {
   it("serializes the blank template as one attribute per line", () => {
     const text = serializeInworldVoiceProfile(blankInworldVoiceProfile())
     expect(text).toBe([
-      "dialect: ",
-      "gender: ",
-      "age: ",
-      "emotion: ",
-      "tone: ",
-      "pitch: ",
-      "volume: ",
-      "speed: ",
-      "clarity: ",
-      "fluency: ",
-      "personality: ",
-      "texture: ",
-      "environment: ",
+      "dialect:",
+      "gender:",
+      "age:",
+      "emotion:",
+      "tone:",
+      "pitch:",
+      "volume:",
+      "speed:",
+      "clarity:",
+      "fluency:",
+      "personality:",
+      "texture:",
+      "environment:",
     ].join("\n"))
     expect(looksLikeInworldVoiceProfile(text)).toBe(true)
     expect(inworldVoiceProfileHasValue(blankInworldVoiceProfile())).toBe(false)

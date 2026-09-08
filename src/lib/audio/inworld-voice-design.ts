@@ -85,11 +85,15 @@ export function serializeInworldVoiceProfile(
   profile: InworldVoiceProfile,
   extras: readonly InworldVoiceProfileExtra[] = [],
 ): string {
-  const lines = INWORLD_DESIGN_PROFILE_KEYS.map((key) => `${key}: ${profile[key] ?? ""}`)
+  const line = (key: string, value: string) => {
+    const trimmed = value.trim()
+    return trimmed.length > 0 ? `${key}: ${trimmed}` : `${key}:`
+  }
+  const lines = INWORLD_DESIGN_PROFILE_KEYS.map((key) => line(key, profile[key] ?? ""))
   for (const extra of extras) {
     const name = extra.key.trim()
     if (!name) continue
-    lines.push(`${name}: ${extra.value}`)
+    lines.push(line(name, extra.value))
   }
   return lines.join("\n")
 }

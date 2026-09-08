@@ -72,9 +72,15 @@ afterEach(() => {
   fs.rmSync(root, { recursive: true, force: true })
 })
 
-function planFor(jobId: number): MaterializeResult {
+/** Mirrors the real `plans/<gitlabId>/<sha>.ndjson` layout and actually writes
+ *  the file, so a test can assert the scheduler deletes it on `done`. */
+function planFor(jobId: number, sha = "abc"): MaterializeResult {
+  const planPath = path.join(root, "plans", String(PROJECT.gitlab_id), `${sha}.ndjson`)
+  fs.mkdirSync(path.dirname(planPath), { recursive: true })
+  fs.writeFileSync(planPath, "")
+  void jobId
   return {
-    planPath: path.join(root, `job-${jobId}.ndjson`), lines: 2, files: 1, changedFiles: 1,
+    planPath, lines: 2, files: 1, changedFiles: 1,
     castHash: "cast", speakers: [], fileHashes: [], idml: [],
   }
 }
@@ -97,7 +103,7 @@ function makeScheduler(over: {
     materialize: async (_deps, input) => {
       calls.materializes.push({ force: input.force === true })
       if (over.materializeThrows) throw new Error("boom")
-      return planFor(input.job.id)
+      return planFor(input.job.id, input.job.sha)
     },
     pushJob: async (deps, input) => {
       calls.pushes++
@@ -128,6 +134,13 @@ describe("Scheduler.runOnce", () => {
     expect(calls).toMatchObject({ checkouts: 1, pushes: 1 })
     expect(db.getJob(job.id)?.stage).toBe("done")
     expect(scheduler.stageLog).toEqual(["fetched", "planned", "done"])
+  })
+
+  it("deletes the plan file once the job reaches done", async () => {
+    db.enqueue(PROJECT.gitlab_id, "content", "abc")
+    const { scheduler } = makeScheduler({})
+    await scheduler.runOnce({})
+    expect(fs.existsSync(path.join(root, "plans", "7", "abc.ndjson"))).toBe(false)
   })
 
   it("leaves the job at planned in dry-run and never advances it to done", async () => {
@@ -176,6 +189,92 @@ describe("Scheduler.runOnce", () => {
   })
 })
 
+/** `weeklyReseed` is private; the scheduler's own tick calls it. Reaching it
+ *  directly keeps the test about reseed semantics rather than loop timing. */
+interface ReseedAccess { weeklyReseed(): Promise<void> }
+
+function reseedScheduler(over: { fail?: Set<number>; discord?: string } = {}) {
+  const config = loadConfig(ENV, { home: root, discordWebhookUrl: over.discord })
+  const pages: string[][] = [["a"], ["b"], ["c"]]
+  const sync = {
+    eventIds: async function* (_projectId: string, onPage?: () => Promise<void>) {
+      for (const page of pages) { if (onPage) await onPage(); yield page }
+    },
+  } as unknown as SyncClient
+  const paced = { n: 0 }
+  const ctx: SchedulerCtx = {
+    config, db, sync,
+    gitlab: { project: async () => GL_PROJECT } as unknown as GitLabClient,
+    creds: {} as GitLabCredentials,
+    pacer: { acquire: async () => { paced.n++ }, paused: false, chunkSize: 1, record: () => {}, snapshot: () => ({}) } as unknown as Pacer,
+    log: () => {},
+    digest: new Digest(),
+    stages: {},
+  }
+  const scheduler = new Scheduler(ctx)
+  const orig = ctx.sync.eventIds.bind(ctx.sync)
+  if (over.fail) {
+    // Fail per project by aquilla_id.
+    ctx.sync.eventIds = ((projectId: string, onPage?: () => Promise<void>) => {
+      const gid = Number(projectId.replace("proj-", ""))
+      if (over.fail!.has(gid)) {
+        return (async function* () {
+          if (gid) throw new Error(`boom ${gid}`)
+          yield []
+        })()
+      }
+      return orig(projectId, onPage)
+    }) as SyncClient["eventIds"]
+  }
+  return { scheduler: scheduler as unknown as ReseedAccess, paced }
+}
+
+describe("Scheduler.weeklyReseed", () => {
+  const project = (gitlabId: number): void => {
+    db.upsertProject({ ...PROJECT, gitlab_id: gitlabId, aquilla_id: `proj-${gitlabId}`, applied_sha: "abc" })
+  }
+
+  it("paces per page, marks the pass done, and force-re-materializes each project", async () => {
+    project(7)
+    const { scheduler, paced } = reseedScheduler()
+    await scheduler.weeklyReseed()
+    expect(paced.n).toBe(3) // one acquire per page, not one per project
+    expect(db.kvGet("reseed_done:7")).toBe("0")
+    expect(db.kvGet("last_full_reseed")).toBeDefined()
+    expect(db.kvGet("reseed_failed_ids")).toBe("[]")
+    expect(db.listJobs("detected").map((j) => j.project_id)).toContain(7)
+  })
+
+  it("skips projects already reseeded in this pass on a restart", async () => {
+    project(7)
+    const first = reseedScheduler()
+    await first.scheduler.weeklyReseed()
+    db.kvSet("last_full_reseed", "0") // pretend the pass was interrupted before it finished
+    const second = reseedScheduler()
+    await second.scheduler.weeklyReseed()
+    expect(second.paced.n).toBe(0)
+  })
+
+  it("continues past a failing project, records it, and holds off re-entry for an hour", async () => {
+    project(7)
+    project(8)
+    const { scheduler } = reseedScheduler({ fail: new Set([7]) })
+    await scheduler.weeklyReseed()
+    expect(JSON.parse(db.kvGet("reseed_failed_ids") ?? "[]")).toEqual([7])
+    expect(db.getProject(7)?.last_error).toMatch(/reseed failed/)
+    expect(db.kvGet("reseed_done:8")).toBe("0") // the pass carried on
+    expect(Number(db.kvGet("reseed_next_attempt"))).toBeGreaterThan(Date.now() + 59 * 60_000)
+  })
+
+  it("does not re-enter while the last pass is inside the weekly interval", async () => {
+    project(7)
+    db.kvSet("last_full_reseed", String(Date.now()))
+    const { scheduler, paced } = reseedScheduler()
+    await scheduler.weeklyReseed()
+    expect(paced.n).toBe(0)
+  })
+})
+
 describe("Scheduler.runForever", () => {
   // Regression for the SIGINT/SIGTERM graceful-stop bug: abort must not tear
   // down a stage that is mid-flight. `runForever` should only resolve once
@@ -190,7 +289,7 @@ describe("Scheduler.runForever", () => {
     const config = loadConfig(ENV, { home: root })
     const stages: StageFns = {
       ensureCheckout: async (_deps, p) => ({ dir: path.join(root, "clones", String(p.gitlabId)), sha: p.wantSha, recloned: false }),
-      materialize: async (_deps, input) => planFor(input.job.id),
+      materialize: async (_deps, input) => planFor(input.job.id, input.job.sha),
       pushJob: async (deps, input) => {
         pushCalls++
         pushStarted()

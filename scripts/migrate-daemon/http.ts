@@ -47,6 +47,10 @@ export async function retryingFetch(url: string, init: RequestInit, opts: RetryO
 }
 
 export interface InboxItem { key: string; gitlabId: number; sha: string; ts: number }
+/** Must match `MAX_LIMIT` in sync-worker/src/events/migrate-webhook-route.ts —
+ *  the Worker does one R2 `get` per key, so the page size is bounded by the
+ *  subrequest cap, and `detect.ts` uses a short page to mean "drained". */
+export const INBOX_PAGE = 200
 export interface OrgTeamMaps { orgMap: Map<string, { id: number; ownerUserId: number }>; teamMap: Map<string, number> }
 
 export class SyncClient {
@@ -89,9 +93,10 @@ export class SyncClient {
   postSettings(projectId: string, settings: Record<string, unknown>): Promise<void> {
     return this.json<unknown>("/migrate/settings", { method: "POST", body: JSON.stringify({ projectId, settings }) }).then(() => undefined)
   }
-  async *eventIds(projectId: string): AsyncGenerator<string[]> {
+  async *eventIds(projectId: string, onPage?: () => Promise<void>): AsyncGenerator<string[]> {
     let after = 0
     for (;;) {
+      if (onPage) await onPage()
       const page = await this.json<{ ids: string[]; lastSeq: number; more: boolean }>(
         `/migrate/event-ids?projectId=${encodeURIComponent(projectId)}&after=${after}&limit=50000`)
       yield page.ids
@@ -127,7 +132,8 @@ export class SyncClient {
     }
   }
   inbox(after: string | undefined): Promise<{ items: InboxItem[]; last: string | undefined }> {
-    return this.json(`/migrate/webhook/inbox${after ? `?after=${encodeURIComponent(after)}` : ""}`)
+    const q = `limit=${INBOX_PAGE}${after ? `&after=${encodeURIComponent(after)}` : ""}`
+    return this.json(`/migrate/webhook/inbox?${q}`)
   }
 }
 

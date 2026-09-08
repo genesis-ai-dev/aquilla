@@ -42,10 +42,17 @@ export interface PushResult {
   reseeded: boolean
 }
 
-/** Throw away the local ledger and rebuild it from prod's own event ids. */
-export async function seedLedger(db: DaemonDb, sync: SyncClient, project: ProjectRow): Promise<number> {
+/** Throw away the local ledger and rebuild it from prod's own event ids.
+ *  `onPage` runs before each page fetch — the weekly reseed uses it to pace
+ *  per page rather than per project, so one 17M-id project cannot burst. */
+export async function seedLedger(
+  db: DaemonDb,
+  sync: SyncClient,
+  project: ProjectRow,
+  opts: { onPage?: () => Promise<void> } = {},
+): Promise<number> {
   const ids: string[] = []
-  for await (const page of sync.eventIds(project.aquilla_id)) ids.push(...page)
+  for await (const page of sync.eventIds(project.aquilla_id, opts.onPage)) ids.push(...page)
   db.ledgerReplace(project.gitlab_id, ids)
   return ids.length
 }
@@ -91,13 +98,18 @@ export async function pushJob(deps: PushDeps, input: PushInput): Promise<PushRes
 
   const settingsUpdated = await applyCast(deps, project, plan)
 
+  // `eventCount` counts every event prod holds, including human-authored ones
+  // that never came from a migration. So only a *deficit* is drift: prod
+  // missing events the ledger claims are applied means the mirror is wrong.
+  // A surplus is expected in any project people have actually worked in.
   const remote = await sync.eventCount(project.aquilla_id)
   const local = db.ledgerCount(project.gitlab_id)
-  if (remote !== local) {
+  if (remote < local) {
     log(`  verify mismatch: prod has ${remote} events, ledger has ${local} — reseeding ledger`)
     await seedLedger(db, sync, project)
     return { pushed: state.pushed, finalized, settingsUpdated, verified: false, reseeded: true }
   }
+  if (remote > local) log(`  verify ok: prod has ${remote - local} non-migrate events (human-authored)`)
 
   db.setFileHashes(project.gitlab_id, plan.fileHashes)
   db.setProjectFields(project.gitlab_id, { applied_sha: job.sha, content_logic: CONTENT_LOGIC_VERSION })

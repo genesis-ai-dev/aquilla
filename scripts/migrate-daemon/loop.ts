@@ -6,6 +6,7 @@
 // strictly serial because prod has a single writer. `runOnce` drains until no
 // stage has a ready job; `runForever` layers detection timers on top of the
 // same drain and stops claiming on abort.
+import fs from "node:fs"
 import path from "node:path"
 import type { DaemonConfig } from "./config"
 import type { DaemonDb, JobRow, JobStage, ProjectRow } from "./db"
@@ -40,6 +41,8 @@ export interface SchedulerCtx {
 
 const IDLE_SLEEP_MS = 5_000
 const RESEED_INTERVAL_MS = 7 * 24 * 60 * 60_000
+/** A pass that failed for at least one project must not re-enter immediately. */
+const RESEED_RETRY_MS = 60 * 60_000
 const DIGEST_INTERVAL_MS = 60 * 60_000
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
@@ -50,6 +53,10 @@ export class Scheduler {
   private readonly stages: StageFns
   private readonly plans = new Map<number, MaterializeResult>()
   private readonly forceNext = new Set<number>()
+  /** Jobs that already went through one reseed-and-force-re-materialize round
+   *  after a verify mismatch. Kept separate from `forceNext`, which the weekly
+   *  reseed also populates for reasons that are not a failed verify. */
+  private readonly reverified = new Set<number>()
   private readonly inFlight = new Set<number>()
   /** Jobs this process is done with but that stay in a non-terminal stage
    *  (dry-run leaves them at `planned`), so the drain must not re-claim them. */
@@ -194,17 +201,20 @@ export class Scheduler {
     if (pacer.paused) digest.breakerTrips++
 
     if (!res.verified) {
-      if (this.forceNext.has(job.id)) {
+      if (this.reverified.has(job.id)) {
         this.plans.delete(job.id)
         this.forceNext.delete(job.id)
+        this.reverified.delete(job.id)
         throw new Error("verify mismatch persisted after ledger reseed and forced re-materialize")
       }
       this.forceNext.add(job.id)
+      this.reverified.add(job.id)
       this.plans.delete(job.id)
       this.advance(job, "fetched")
       return
     }
     this.forceNext.delete(job.id)
+    this.reverified.delete(job.id)
     this.plans.delete(job.id)
     if (config.dryRun) {
       // pushJob does not write in dry-run and leaves the job at `planned`;
@@ -212,6 +222,8 @@ export class Scheduler {
       this.settled.add(job.id)
       return
     }
+    // The plan has landed in prod; the file is dead weight from here on.
+    try { fs.rmSync(plan.planPath) } catch { /* best-effort */ }
     this.stageLog.push("done")
     digest.done++
   }
@@ -258,16 +270,48 @@ export class Scheduler {
   }
 
   /** Rebuild the local ledger from prod once a week so drift (manual ingests,
-   *  a restored backup) cannot make the delta filter silently skip events. */
+   *  a restored backup) cannot make the delta filter silently skip events.
+   *
+   *  Progress is persisted per project (`reseed_done:<gitlabId>`) so a restart
+   *  mid-pass resumes instead of redoing ~17M ids, and a project failure is
+   *  recorded and skipped rather than aborting the pass — an abort would leave
+   *  `last_full_reseed` unset and make the next 5s tick restart everything.
+   */
   private async weeklyReseed(): Promise<void> {
     const { db, sync, pacer, log } = this.ctx
+    const now = Date.now()
     const last = Number(db.kvGet("last_full_reseed") ?? 0)
-    if (Number.isFinite(last) && Date.now() - last < RESEED_INTERVAL_MS) return
+    if (Number.isFinite(last) && last > 0 && now - last < RESEED_INTERVAL_MS) return
+    const nextAttempt = Number(db.kvGet("reseed_next_attempt") ?? 0)
+    if (Number.isFinite(nextAttempt) && now < nextAttempt) return
+
+    const failed: number[] = []
     for (const p of db.listProjects("ok")) {
-      await pacer.acquire(1)
-      const n = await seedLedger(db, sync, p)
-      log(`reseed ${p.gitlab_id} (${p.aquilla_id}): ${n} events`)
+      // Marker value is the pass's *starting* `last_full_reseed`, so a restart
+      // mid-pass skips finished projects but the next weekly pass does not.
+      const doneKey = `reseed_done:${p.gitlab_id}`
+      if (db.kvGet(doneKey) === String(last)) continue
+      try {
+        const n = await seedLedger(db, sync, p, { onPage: () => pacer.acquire(1) })
+        db.kvSet(doneKey, String(last))
+        log(`reseed ${p.gitlab_id} (${p.aquilla_id}): ${n} events`)
+        // Projection drift (an unchanged file whose orphan pass was skipped in
+        // steady state) is reconciled by a forced re-materialize of every
+        // project the reseed touched — see docs/MIGRATE-DAEMON.md (F4).
+        const sha = p.applied_sha ?? p.head_sha
+        if (sha) this.forceNext.add(db.enqueue(p.gitlab_id, "content", sha).id)
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        failed.push(p.gitlab_id)
+        db.setProjectFields(p.gitlab_id, { last_error: `reseed failed: ${msg}` })
+        log(`reseed ${p.gitlab_id} (${p.aquilla_id}) failed: ${msg}`)
+        this.notify(`migrate-daemon: weekly reseed failed for project ${p.gitlab_id}: ${msg}`)
+      }
     }
+    // The pass is over either way: recording it stops the hot loop. A failed
+    // pass additionally holds off re-entry for an hour.
+    db.kvSet("reseed_failed_ids", JSON.stringify(failed))
     db.kvSet("last_full_reseed", String(Date.now()))
+    db.kvSet("reseed_next_attempt", String(Date.now() + (failed.length ? RESEED_RETRY_MS : 0)))
   }
 }

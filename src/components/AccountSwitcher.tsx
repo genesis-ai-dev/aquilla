@@ -293,14 +293,6 @@ export function AccountSwitcher({
   )
 }
 
-/** Non-prod environment label derived from the Vite mode at build time. */
-const ENV_HINT: string | null = (() => {
-  const mode = import.meta.env.MODE as string | undefined
-  if (!mode || mode === "production") return null
-  if (mode === "development") return "dev"
-  return mode
-})()
-
 export interface EntrySummary {
   key: string
   username: string
@@ -328,9 +320,6 @@ export function AccountMenuEntry({
         <AppTooltip content={summary.email} side="right" align="start">
           <span className="min-w-0 break-words font-medium">{summary.username}</span>
         </AppTooltip>
-        {ENV_HINT && (
-          <span className="truncate text-xs text-amber-600 dark:text-amber-500">{ENV_HINT}</span>
-        )}
       </div>
       {summary.active && <Check className="size-4 shrink-0 opacity-60" />}
     </DropdownMenuItem>

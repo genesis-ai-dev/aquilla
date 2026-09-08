@@ -40,6 +40,7 @@ describe("AccountMenuEntry", () => {
 
     expect(username).not.toHaveClass("truncate")
     expect(screen.queryByText("person@example.com")).not.toBeInTheDocument()
+    expect(screen.queryByText(import.meta.env.MODE)).not.toBeInTheDocument()
 
     fireEvent.pointerEnter(username, { pointerType: "mouse" })
     fireEvent.mouseEnter(username)

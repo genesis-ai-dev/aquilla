@@ -156,7 +156,8 @@ export class Scheduler {
 
   private async stageMaterialize(job: JobRow, project: ProjectRow, force: boolean): Promise<void> {
     const gl = await this.glProject(project.gitlab_id)
-    const at = Date.now()
+    // parity gate only: freezes `now` so migrate-all and the daemon hash identically
+    const at = process.env.MIGRATE_FIXED_NOW ? Number(process.env.MIGRATE_FIXED_NOW) : Date.now()
     const fresh = this.ctx.db.getJob(job.id) ?? job
     const plan = await this.stages.materialize(
       {

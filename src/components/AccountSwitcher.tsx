@@ -318,7 +318,7 @@ export function AccountMenuEntry({
       <InitialsAvatar name={summary.username} size="xs" shape="square" menuSafe />
       <div className="flex min-w-0 flex-col gap-0.5">
         <AppTooltip content={summary.email} side="right" align="start">
-          <span className="min-w-0 break-words font-medium">{summary.username}</span>
+          <span className="w-fit min-w-0 break-words font-medium">{summary.username}</span>
         </AppTooltip>
       </div>
       {summary.active && <Check className="size-4 shrink-0 opacity-60" />}

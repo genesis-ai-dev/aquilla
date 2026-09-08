@@ -39,6 +39,7 @@ describe("AccountMenuEntry", () => {
     const username = screen.getByText("a-complete-long-username")
 
     expect(username).not.toHaveClass("truncate")
+    expect(username).toHaveClass("w-fit")
     expect(screen.queryByText("person@example.com")).not.toBeInTheDocument()
     expect(screen.queryByText(import.meta.env.MODE)).not.toBeInTheDocument()
 

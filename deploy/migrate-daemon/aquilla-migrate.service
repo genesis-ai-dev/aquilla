@@ -1,0 +1,20 @@
+[Unit]
+Description=Aquilla migrate daemon (GitLab -> Aquilla content sync)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=clear
+WorkingDirectory=/home/clear/aquilla
+EnvironmentFile=/etc/aquilla-migrate/env
+Environment=NODE_OPTIONS=--max-old-space-size=16384
+Environment=MIGRATE_HOME=/home/clear/aquilla-migrate
+ExecStart=/usr/bin/env pnpm migrate:daemon daemon
+Restart=always
+RestartSec=10
+MemoryMax=32G
+StandardOutput=append:/home/clear/aquilla-migrate/daemon.log
+StandardError=inherit
+
+[Install]
+WantedBy=multi-user.target

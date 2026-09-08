@@ -86,6 +86,7 @@ describe("Reach 4 Life import", () => {
       fileType: "idml",
       kind: "idml",
       parserVersion: `${REACH4LIFE_PROFILE_ID}@1`,
+      corpusMarker: "Reach 4 Life",
     })
     // Two books are introduced here, so no single book identifies the file.
     expect(bodies.find((body) => body.file)?.file?.bookCode).toBeUndefined()

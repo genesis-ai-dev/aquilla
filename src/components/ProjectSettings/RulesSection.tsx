@@ -8,6 +8,7 @@
 import { useCallback, useMemo, useState } from "react"
 import { useActiveOrgOptional } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { useConcepts } from "@/hooks/useConcepts"
 import { useOrgSettings } from "@/hooks/useOrgSettings"
 import { useProject } from "@/hooks/useProject"
 import { useProjectCells } from "@/hooks/useProjectCells"
@@ -71,13 +72,6 @@ export function RulesSettingsSection({
     roleLevel ?? project?.syncRole?.level ?? null,
   )
 
-  const { rules, userRules, builtinRules, addRule, updateRule, deleteRule, setBuiltinOverride } = useRules(
-    project ?? null,
-    refresh,
-    patchSettings as Parameters<typeof useRules>[2],
-    orgRules,
-  )
-
   const jwt = session?.jwt
   const projectFiles = useMemo(
     () => (project?.files ?? []).map((file) => ({ id: file.id, name: file.name, type: file.type })),
@@ -87,6 +81,29 @@ export function RulesSettingsSection({
     if (!jwt) return Promise.resolve(null)
     return buildFileScopedTokenFetcher(() => jwt, projectId)(fileId)
   }, [jwt, projectId])
+
+  // AQU-1006 follow-up: concepts come from the sync-worker projection, not the
+  // retired `project.terminology` settings key. Without this, `rules` below
+  // would silently omit every terminology rule and this surface would show a
+  // rules list that disagrees with what the editor actually enforces.
+  //
+  // NOTE the ordering: `getToken` is declared ABOVE `useRules` now, where it
+  // used to sit below. useConcepts needs it, and useRules needs useConcepts.
+  const { concepts: localConcepts } = useConcepts({
+    projectId,
+    getToken,
+    tokenReady: !!jwt,
+  })
+
+  const { rules, userRules, builtinRules, addRule, updateRule, deleteRule, setBuiltinOverride } = useRules(
+    project ?? null,
+    refresh,
+    patchSettings as Parameters<typeof useRules>[2],
+    orgRules,
+    undefined,
+    undefined,
+    localConcepts,
+  )
 
   const { files } = useProjectCells({
     projectId,

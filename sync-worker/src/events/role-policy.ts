@@ -94,6 +94,8 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   // editing flow — contributor-level, like target.* / cell.waive. It mutates
   // an existing row's display name, not the project's file inventory.
   'file.rename': ROLE.CONTRIBUTOR,
+  // Sidebar folder label — same class as file.rename (grouping, not inventory).
+  'file.corpus.set': ROLE.CONTRIBUTOR,
 
   // file.delete/file.restore are structural changes (soft-delete tombstone).
   // Require PROJECT_LEAD (500) — same as file.create and source.* imports.
@@ -109,6 +111,20 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   'comment.edit': ROLE.COMMENTER,
   'comment.delete': ROLE.COMMENTER,
   'comment.resolve': ROLE.COMMENTER,
+
+  // Terminology: CONTRIBUTOR is the floor to PARTICIPATE — it buys you a
+  // suggestion (`term.create` with status 'draft'), which compiles to no rules
+  // and binds nobody. Every BINDING write (approving, editing, deleting, or
+  // creating an already-active term) has the org's configured
+  // `termbaseEditMinRole` put back on top of this in authorize.ts — the same
+  // conditional-raise shape `source.cell.create` uses for allowLineCreation.
+  // Reading this table alone will therefore UNDERSTATE the real floor; see
+  // termbase-authority.ts.
+  'term.create': ROLE.CONTRIBUTOR,
+  'term.update': ROLE.CONTRIBUTOR,
+  'term.delete': ROLE.CONTRIBUTOR,
+  'term.approve': ROLE.CONTRIBUTOR,
+  'term.reject': ROLE.CONTRIBUTOR,
 
   // Back-translations: writing a BT is a translator-level action (contributor+).
   // Viewing BTs is gated only at the read route (viewer+); the write event

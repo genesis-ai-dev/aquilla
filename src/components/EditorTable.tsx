@@ -129,6 +129,8 @@ import {
 import { TargetDraftActions, TargetReferenceActions } from "./cell/TargetCellActions"
 import { TargetValidationControl } from "./cell/TargetValidationControl"
 import { MilestoneNavigator, type MilestoneNavigationItem } from "./ChapterNavigator"
+import { cellIdsForMilestonePage } from "@/lib/milestone-navigation"
+import { getMilestoneSplit, useMilestoneSplit } from "@/lib/store/milestone-split-pref"
 import { EDITOR_SURFACE_TOOLBAR_CLASS } from "./editor-surface-toolbar"
 import { CellVoicePanel } from "./cell/CellVoicePanel"
 // CellAudioRecordButton: getUnsupportedReason used by the rail mic denied-help
@@ -818,6 +820,8 @@ interface EditorTableProps {
   /** Non-null when the user cannot write terminology (below Maintainer) —
    *  the add-term popover opens blocked with this reason instead of accepting input. */
   addConceptBlockedReason?: string | null
+  /** May this user APPROVE a term (enforce it), vs only suggest one? */
+  canApproveConcept?: boolean
   onAskAiFromSelection?: (chip: ContextChip) => void
   /** Called when the user drops a voice chip onto a cell's audio area.
    *  Parent should assign the voice then trigger TTS generation. */
@@ -891,7 +895,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   audioLens, castGutter = false, ttsSettings, onOpenAudioSetup,
   onAttachMediaFile, onAttachMediaUrl,
   orderedBy,
-  onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, onAskAiFromSelection, onAssignVoice,
+  onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onAskAiFromSelection, onAssignVoice,
   onCellCommitted,
   getPendingTargetEventId,
   onOptimisticEdit,
@@ -941,6 +945,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     subsectionKey?: string
   } | null>(null)
   const clearChapterNavigationSelection = useCallback(() => {
+    if (getMilestoneSplit()) return
     setChapterNavigationSelection(null)
   }, [])
   const [activeEditorCellId, setActiveEditorCellId] = useState<string | null>(null)
@@ -1000,7 +1005,56 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const [hoveredFootnote, setHoveredFootnote] = useState<{ cellId: string; index: number } | null>(null)
   const isDragging = useRef(false)
   const dragCells = useRef<Set<string>>(new Set())
-  const displayCellIds = useCellIds(cellStore, orderedBy, !!audioLens)
+  const fileCellIds = useCellIds(cellStore, orderedBy, !!audioLens)
+  const cellStoreVersion = useCellStoreVersion(cellStore)
+  const audioFileId = cellStore.getFileId()
+  const splitByMilestone = useMilestoneSplit()
+  const pendingJumpCellIdRef = useRef<string | null>(null)
+  const milestoneNavigation = useMemo(() =>
+    readAtVersion(cellStoreVersion, () => cellStore.getNavigationIndex(fileCellIds)),
+  [cellStore, cellStoreVersion, fileCellIds])
+  const milestoneKeyByCellId = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const entry of milestoneNavigation) {
+      for (const cellId of entry.cellIds) map.set(cellId, entry.key)
+    }
+    return map
+  }, [milestoneNavigation])
+  const idmlMilestoneNavigation = useMemo(() =>
+    fileType === "idml" || readAtVersion(cellStoreVersion, () => milestoneNavigation.some((entry) => {
+      const view = cellStore.getCellView(entry.firstCellId)
+      return Boolean(view && resolveIdmlEditorConfiguration(view.metadata, view.originalHtml))
+    })),
+  [cellStore, cellStoreVersion, fileType, milestoneNavigation])
+  const subsectionKeyByCellId = useMemo(() => {
+    const map = new Map<string, string>()
+    if (!idmlMilestoneNavigation) return map
+    for (const entry of milestoneNavigation) {
+      for (const subsection of entry.subsections) {
+        for (const cellId of subsection.cellIds) map.set(cellId, subsection.key)
+      }
+    }
+    return map
+  }, [idmlMilestoneNavigation, milestoneNavigation])
+  const displayCellIds = useMemo(() => {
+    if (!splitByMilestone) return fileCellIds
+    const selected = chapterNavigationSelection?.fileId === audioFileId
+      ? chapterNavigationSelection
+      : null
+    const key = selected?.label && milestoneNavigation.some((entry) => entry.key === selected.label)
+      ? selected.label
+      : milestoneNavigation[0]?.key
+    if (!key) return fileCellIds
+    // The 50-cell ranges are picker jump targets, not extra pages: a 74-cell
+    // section stays one page when this toggle is on.
+    return cellIdsForMilestonePage(milestoneNavigation, key) ?? fileCellIds
+  }, [
+    audioFileId,
+    chapterNavigationSelection,
+    fileCellIds,
+    milestoneNavigation,
+    splitByMilestone,
+  ])
   const displayCellIdsRef = useRef<readonly string[]>(displayCellIds)
   const selectionDragRef = useRef<{
     pointerId: number
@@ -1114,9 +1168,34 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     }
   }, [setFollowHoverLock, hasListRows])
   const handleFollowRest = useCallback(() => setFollowHoverLock(false), [setFollowHoverLock])
+  const revealCellPage = useCallback((cellId: string): boolean => {
+    if (displayCellIdsRef.current.includes(cellId)) return true
+    if (!splitByMilestone) return false
+    const key = milestoneKeyByCellId.get(cellId)
+    if (!key) return false
+    const subsectionKey = idmlMilestoneNavigation
+      ? subsectionKeyByCellId.get(cellId)
+      : undefined
+    setChapterNavigationSelection({
+      fileId: audioFileId,
+      label: key,
+      ...(subsectionKey ? { subsectionKey } : {}),
+    })
+    pendingJumpCellIdRef.current = cellId
+    return true
+  }, [
+    audioFileId,
+    idmlMilestoneNavigation,
+    milestoneKeyByCellId,
+    splitByMilestone,
+    subsectionKeyByCellId,
+  ])
   const followScrollToCell = useCallback((cellId: string) => {
     const index = displayCellIdsRef.current.indexOf(cellId)
-    if (index < 0) return
+    if (index < 0) {
+      if (revealCellPage(cellId)) setFollowHoverLock(true)
+      return
+    }
     setFollowHoverLock(true)
     // A range picked in the segment navigator must not stay latched while
     // playback walks past it — drop it so the trigger quietly tracks the
@@ -1125,12 +1204,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     // 0.35: the running row rides high enough to leave reading room below.
     // Animated (Sam 2026-08-08): the follow glides instead of teleporting.
     programmaticListScroll(index, { viewPosition: 0.35, animated: true })
-  }, [clearChapterNavigationSelection, programmaticListScroll, setFollowHoverLock])
+  }, [clearChapterNavigationSelection, programmaticListScroll, revealCellPage, setFollowHoverLock])
 
   // Durable cell audio (AD-2 cell.audio.* grammar). Per-file read; overlay each
   // visible row's attachments + selected clips at render time, rather than
   // cloning the entire active file into audio-enriched CellData objects.
-  const audioFileId = cellStore.getFileId()
   const { byCellId: audioByCellId } = useFileAudioAttachments(project.id, audioFileId)
 
   // Timeline-segment-model (Scope A): the rendered row list. For a `'time'`-
@@ -1143,7 +1221,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // Combined-voice range lookup resolves through the active store at call time
   // so the editor does not keep a second full CellData[] just for audio.
   const isTimeOrdered = orderedBy === "time"
-  const cellStoreVersion = useCellStoreVersion(cellStore)
 
   useEffect(() => {
     if (!activeEditorCellId) return
@@ -1409,7 +1486,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       // STORE order — but the list renders displayCellIds, which time-ordered
       // files re-sort by timing, so those jumps could land on the wrong row.
       const index = displayCellIdsRef.current.indexOf(cellId)
-      if (index < 0) return false
+      if (index < 0) return revealCellPage(cellId)
       clearChapterNavigationSelection()
       // Default "release": a jump the user is INSPECTING (search, presence,
       // findings) must not have playback yank the table back a beat later.
@@ -1456,7 +1533,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     pulseCells(cellIds) {
       pulseCellsDom(cellIds)
     },
-  }), [clearChapterNavigationSelection, displayCellIds.length, cellStore, focusCellEditorByIndex, getListQueryRoot, flashCellDom, pulseCellsDom, programmaticListScroll, issueFollowCommand])
+  }), [clearChapterNavigationSelection, displayCellIds.length, cellStore, focusCellEditorByIndex, getListQueryRoot, flashCellDom, pulseCellsDom, programmaticListScroll, issueFollowCommand, revealCellPage])
 
   // FRO-297: Focus the grid-row wrapper div (not TipTap) at `index`.
   // Used for Esc-to-grid and arrow-key navigation while NOT in edit mode.
@@ -1776,24 +1853,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   }, [cellStore])
 
   const firstVisibleCellId = displayCellIds[firstVisibleIndex] ?? null
-  const milestoneNavigation = useMemo(() =>
-    readAtVersion(cellStoreVersion, () => cellStore.getNavigationIndex(displayCellIds)),
-  [cellStore, cellStoreVersion, displayCellIds])
-
-  const milestoneKeyByCellId = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const entry of milestoneNavigation) {
-      for (const cellId of entry.cellIds) map.set(cellId, entry.key)
-    }
-    return map
-  }, [milestoneNavigation])
-
-  const idmlMilestoneNavigation = useMemo(() =>
-    fileType === "idml" || readAtVersion(cellStoreVersion, () => milestoneNavigation.some((entry) => {
-      const view = cellStore.getCellView(entry.firstCellId)
-      return Boolean(view && resolveIdmlEditorConfiguration(view.metadata, view.originalHtml))
-    })),
-  [cellStore, cellStoreVersion, fileType, milestoneNavigation])
 
   const currentMilestoneKey = useMemo(() => {
     const visibleIndex = chapterVisibleIndex ?? firstVisibleIndex
@@ -1868,7 +1927,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       const nextCache = new Map<string, { version: number; isNumbered: boolean }>()
       const map = new Map<string, number>()
       let ordinal = 0
-      for (const id of displayCellIds) {
+      for (const id of fileCellIds) {
         const version = cellStore.getCellVersion(id)
         let entry = cache.get(id)
         if (!entry || entry.version !== version) {
@@ -1885,14 +1944,14 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       sequentialEntryCacheRef.current = nextCache
       return map
     }),
-  [cellStore, cellStoreVersion, displayCellIds])
+  [cellStore, cellStoreVersion, fileCellIds])
 
   // p1-paragraph-ui-wiring (Task 3 + coordinator follow-up): paragraph group
   // info, keyed by the group's start cell id — drives the "Draft paragraph"
   // rail button's visibility/label/dialog copy and its in-flight guard. Only
   // start cells (the only ones the button can render on) need an entry, but
   // deriveParagraphs needs the full ordered per-file cell list to find file/
-  // paragraph boundaries, so this walks displayCellIds once, same idiom as
+  // paragraph boundaries, so this walks fileCellIds once, same idiom as
   // sequentialNumberByCellId above. Legacy imports (no paragraphStart flags
   // anywhere) still produce one group per file — harmless, since the rail
   // button is separately gated on `cell.paragraphStart === true`, which never
@@ -1924,7 +1983,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       const cache = paragraphEntryCacheRef.current
       const nextCache = new Map<string, { version: number; fileId: string; paragraphStart?: boolean; validated: boolean }>()
       const orderedCells: { id: string; fileId: string; paragraphStart?: boolean }[] = []
-      for (const id of displayCellIds) {
+      for (const id of fileCellIds) {
         const version = cellStore.getCellVersion(id)
         let entry = cache.get(id)
         if (!entry || entry.version !== version) {
@@ -1947,18 +2006,8 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       }
       return map
     }),
-  [cellStore, cellStoreVersion, displayCellIds])
+  [cellStore, cellStoreVersion, fileCellIds])
 
-  const subsectionKeyByCellId = useMemo(() => {
-    const map = new Map<string, string>()
-    if (!idmlMilestoneNavigation) return map
-    for (const entry of milestoneNavigation) {
-      for (const subsection of entry.subsections) {
-        for (const cellId of subsection.cellIds) map.set(cellId, subsection.key)
-      }
-    }
-    return map
-  }, [idmlMilestoneNavigation, milestoneNavigation])
   const viewportCellId = displayCellIds[chapterVisibleIndex ?? firstVisibleIndex]
   const currentSubsectionKey = subsectionKeyByCellId.get(viewportCellId ?? "")
   const selectedChapterLabel = chapterNavigationSelection?.fileId === audioFileId
@@ -2005,21 +2054,79 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   const handleChapterSelect = useCallback((key: string, subsectionKey?: string) => {
     const entry = milestoneNavigation.find((candidate) => candidate.key === key)
-    const subsection = entry?.subsections.find((candidate) => candidate.key === subsectionKey)
-    const index = subsection?.firstIndex ?? entry?.firstIndex ?? -1
-    if (index < 0) return
+    const subsection = idmlMilestoneNavigation
+      ? entry?.subsections.find((candidate) => candidate.key === subsectionKey)
+      : undefined
+    const targetCellId = subsection?.firstCellId ?? entry?.firstCellId
+    if (!targetCellId) return
     setChapterNavigationSelection({
       fileId: audioFileId,
       label: key,
       ...(subsection ? { subsectionKey: subsection.key } : {}),
     })
+    if (splitByMilestone) {
+      pendingJumpCellIdRef.current = targetCellId
+      return
+    }
+    const index = subsection?.firstIndex ?? entry?.firstIndex ?? -1
+    if (index < 0) return
     setFirstVisibleIndex(index)
     setChapterVisibleIndex(index)
     // Picking a range mid-playback is deliberate navigation AWAY — release
     // following (its long smooth scroll used to trip the truce as a fake
     // "user scroll" and kill follow as a side effect; now it's explicit).
     programmaticListScroll(index, { viewPosition: 0, animated: true, follow: "release" })
-  }, [audioFileId, milestoneNavigation, programmaticListScroll])
+  }, [audioFileId, idmlMilestoneNavigation, milestoneNavigation, programmaticListScroll, splitByMilestone])
+
+  // Settings can flip the split pref while this table is still mounted
+  // (the settings dialog sits over the editor). Pin the current visible
+  // cell's division before paint so paging does not jump to the first
+  // milestone.
+  useLayoutEffect(() => {
+    if (!splitByMilestone || !audioFileId) return
+    const selected = chapterNavigationSelection?.fileId === audioFileId
+      ? chapterNavigationSelection
+      : null
+    if (selected?.label && milestoneNavigation.some((entry) => entry.key === selected.label)) {
+      return
+    }
+    const visibleId = fileCellIds[chapterVisibleIndex ?? firstVisibleIndex]
+    const key = (visibleId && milestoneKeyByCellId.get(visibleId)) ?? milestoneNavigation[0]?.key
+    if (!key) return
+    const subsectionKey = idmlMilestoneNavigation && visibleId
+      ? subsectionKeyByCellId.get(visibleId)
+      : undefined
+    if (visibleId) pendingJumpCellIdRef.current = visibleId
+    setChapterNavigationSelection({
+      fileId: audioFileId,
+      label: key,
+      ...(subsectionKey ? { subsectionKey } : {}),
+    })
+  }, [
+    audioFileId,
+    chapterNavigationSelection,
+    chapterVisibleIndex,
+    fileCellIds,
+    firstVisibleIndex,
+    idmlMilestoneNavigation,
+    milestoneKeyByCellId,
+    milestoneNavigation,
+    splitByMilestone,
+  ])
+
+  useLayoutEffect(() => {
+    const cellId = pendingJumpCellIdRef.current
+    if (!cellId) return
+    const index = displayCellIds.indexOf(cellId)
+    if (index < 0) {
+      pendingJumpCellIdRef.current = null
+      return
+    }
+    pendingJumpCellIdRef.current = null
+    setFirstVisibleIndex(index)
+    setChapterVisibleIndex(index)
+    programmaticListScroll(index, { viewPosition: 0, animated: false, follow: "release" })
+  }, [displayCellIds, programmaticListScroll])
 
   // Parallel-bibles sidebar tracking: report the first visible row's canonical
   // ref as the user scrolls. Keyed on the derived ref string
@@ -2361,6 +2468,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onProjectChanged={onProjectChanged}
           onAddConceptFromSelection={onAddConceptFromSelection}
           addConceptBlockedReason={addConceptBlockedReason}
+        canApproveConcept={canApproveConcept}
           onAskAiFromSelection={onAskAiFromSelection}
           onAssignVoice={onAssignVoice}
           onDragStart={handleDragStart}
@@ -2515,6 +2623,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 activeKey={activeChapterLabel!}
                 activeSubsectionKey={activeSubsectionKey}
                 onSelect={handleChapterSelect}
+                pageByMilestone={splitByMilestone}
               />
             </div>
           </div>
@@ -2539,12 +2648,15 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     <div className="flex h-full min-h-0 flex-col" onMouseUp={handleMouseUp}>
       {showStripNav && stripNavSlot
         ? createPortal(
-            <MilestoneNavigator
-              items={milestoneNavigationItems}
-              activeKey={activeChapterLabel}
-              activeSubsectionKey={activeSubsectionKey}
-              onSelect={handleChapterSelect}
-            />,
+            <div className="flex min-w-0 items-center gap-2">
+              <MilestoneNavigator
+                items={milestoneNavigationItems}
+                activeKey={activeChapterLabel}
+                activeSubsectionKey={activeSubsectionKey}
+                onSelect={handleChapterSelect}
+                pageByMilestone={splitByMilestone}
+              />
+            </div>,
             stripNavSlot,
           )
         : null}
@@ -3097,6 +3209,8 @@ interface MemoizedRowProps {
   /** Add-from-selection: create a terminology entry from selected source text. */
   onAddConceptFromSelection?: (draft: ConceptDraft) => void | Promise<void>
   addConceptBlockedReason?: string | null
+  /** May this user APPROVE a term (enforce it), vs only suggest one? */
+  canApproveConcept?: boolean
   onAskAiFromSelection?: (chip: ContextChip) => void
   onAssignVoice?: (cellId: string, voiceId: string) => void
   onDragStart: (cellId: string) => void
@@ -3170,7 +3284,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     getFootnoteDetails,
     onSeekToCue, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled,
     sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, isAnonymous,
-    onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, onAskAiFromSelection, onAssignVoice,
+    onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onAskAiFromSelection, onAssignVoice,
     audioLens, onOpenAudioSetup,
     onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
     onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
@@ -3319,6 +3433,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onProjectChanged={onProjectChanged}
         onAddConceptFromSelection={onAddConceptFromSelection}
         addConceptBlockedReason={addConceptBlockedReason}
+        canApproveConcept={canApproveConcept}
         onAskAiFromSelection={onAskAiFromSelection}
         onAssignVoice={onAssignVoice}
         onDragStart={handleDragStart}
@@ -3483,6 +3598,8 @@ interface EditorRowProps {
   /** Add-from-selection: create a terminology entry from selected source text. */
   onAddConceptFromSelection?: (draft: ConceptDraft) => void | Promise<void>
   addConceptBlockedReason?: string | null
+  /** May this user APPROVE a term (enforce it), vs only suggest one? */
+  canApproveConcept?: boolean
   onAskAiFromSelection?: (chip: ContextChip) => void
   onAssignVoice?: (cellId: string, voiceId: string) => void
   getTokenForFile?: (fileId: string) => Promise<string | null>
@@ -4265,7 +4382,7 @@ function EditorRow({
   onEscapeToGrid, onGridRowKeyNav,
   rowIndex, contentNumber, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols, castGutter, ttsSettings,
   isAnonymous, micDenied,
-  audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection, addConceptBlockedReason, onAskAiFromSelection,
+  audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onAskAiFromSelection,
   onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
   onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
   isStaleSource,
@@ -4481,6 +4598,12 @@ function EditorRow({
     () => resolveIdmlEditorConfiguration(cell.metadata, cell.originalHtml),
     [cell.metadata, cell.originalHtml],
   )
+  const idmlStyleCatalog = idmlConfiguration?.kind === "ready"
+    ? idmlConfiguration.context.styleCatalog
+    : undefined
+  const idmlParagraphStyleId = idmlConfiguration?.kind === "ready"
+    ? idmlConfiguration.context.paragraphStyleId
+    : undefined
   const canEditSourceForCell = canEditSource && !idmlConfiguration
   // AQU-847: an imported MEDIA section's `value` (→ `cell.original`) is the
   // import FILENAME; its real source text is the transcript. The read surface
@@ -6064,6 +6187,7 @@ function EditorRow({
                 onAskAi={handleAskAiFromSelection}
                 onAddToTermbase={onAddConceptFromSelection ? handleCreateTerm : undefined}
                 addConceptBlockedReason={addConceptBlockedReason}
+        canApproveConcept={canApproveConcept}
                 onAddOpenChange={handleAddTermOpenChange}
                 onViewConcept={onOpenTerminologyConcept}
                 onToolbarMouseDown={handleToolbarMouseDown}
@@ -6165,7 +6289,11 @@ function EditorRow({
                 className="w-full !px-0"
               />
             ) : (cell.medium !== "media" && (sourceDraft?.valueHtml || cell.originalHtml)) ? (
-              <SanitizedRichHtml html={sourceDraft?.valueHtml || cell.originalHtml || ""} />
+              <SanitizedRichHtml
+                html={sourceDraft?.valueHtml || cell.originalHtml || ""}
+                idmlStyleCatalog={idmlStyleCatalog}
+                idmlParagraphStyleId={idmlParagraphStyleId}
+              />
             ) : (
               <UsfmSourceText
                 // AQU-646: an imported media segment's stored `value` is the
@@ -6355,7 +6483,11 @@ function EditorRow({
                           {overlayDraftText}
                         </span>
                       ) : idmlConfiguration && visibleTranslatedHtml ? (
-                        <TargetIdmlHtml html={visibleTranslatedHtml} />
+                        <TargetIdmlHtml
+                          html={visibleTranslatedHtml}
+                          idmlStyleCatalog={idmlStyleCatalog}
+                          idmlParagraphStyleId={idmlParagraphStyleId}
+                        />
                       ) : targetHasRichFormatting && visibleTranslatedHtml ? (
                         <TargetRichHtml
                           html={visibleTranslatedHtml}

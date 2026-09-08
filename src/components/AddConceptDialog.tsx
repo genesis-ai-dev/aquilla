@@ -24,12 +24,20 @@ const formSchema = z.object({
   term: requiredString("Source term"),
   rendering: z.string(),
   caseInsensitive: z.boolean(),
+  approve: z.boolean(),
 })
 
 export interface AddConceptPopoverProps {
   sourceTerm: string
-  /** Non-null when the current user cannot write terminology. */
+  /** Non-null when the current user cannot write terminology AT ALL. */
   blockedReason?: string | null
+  /**
+   * May this user APPROVE a term (add it enforced), as opposed to merely
+   * suggesting one? Defaults to false — the restrictive answer — so a caller
+   * that forgets to pass it produces suggestions rather than silently writing
+   * enforced terminology the user has no authority for.
+   */
+  canApprove?: boolean
   onConfirm: (draft: ConceptDraft) => void | Promise<void>
   onOpenChange?: (open: boolean) => void
   children: React.ReactNode
@@ -38,6 +46,7 @@ export interface AddConceptPopoverProps {
 export function AddConceptPopover({
   sourceTerm,
   blockedReason,
+  canApprove = false,
   onConfirm,
   onOpenChange,
   children,
@@ -52,7 +61,7 @@ export function AddConceptPopover({
   const seededTermRef = useRef("")
 
   const form = useForm({
-    defaultValues: { term: sourceTerm, rendering: "", caseInsensitive: true },
+    defaultValues: { term: sourceTerm, rendering: "", caseInsensitive: true, approve: canApprove },
     validators: { onSubmit: formSchema },
     onSubmit: ({ value }) => {
       if (blocked) return
@@ -63,6 +72,11 @@ export function AddConceptPopover({
         sourceTerm: value.term.trim(),
         ...(rendering ? { rendering } : {}),
         ...(value.caseInsensitive ? {} : { caseSensitive: true }),
+        // Never send `approve: true` from a user who cannot approve, whatever
+        // the form field says — the server would refuse it, and asking for
+        // something guaranteed to fail produces a confusing error instead of
+        // the suggestion the user actually wanted.
+        approve: canApprove && value.approve,
       })
     },
   })
@@ -80,7 +94,8 @@ export function AddConceptPopover({
     form.setFieldValue("term", seed)
     form.setFieldValue("rendering", "")
     form.setFieldValue("caseInsensitive", true)
-  }, [open, sourceTerm, form])
+    form.setFieldValue("approve", canApprove)
+  }, [open, sourceTerm, form, canApprove])
 
   function handleOpenChange(next: boolean) {
     if (next) {
@@ -91,6 +106,7 @@ export function AddConceptPopover({
         form.setFieldValue("term", seed)
         form.setFieldValue("rendering", "")
         form.setFieldValue("caseInsensitive", true)
+        form.setFieldValue("approve", canApprove)
       }
     } else {
       seededTermRef.current = ""
@@ -166,6 +182,49 @@ export function AddConceptPopover({
                   />
                 </Field>
               )}
+            />
+            <form.Field
+              name="approve"
+              children={(field) => (
+                <div className="flex items-start gap-2">
+                  <Checkbox
+                    id={`${id}-approve`}
+                    checked={field.state.value}
+                    // Locked off below the org's termbase floor: a contributor
+                    // may SUGGEST a term but not put it into force.
+                    disabled={blocked || !canApprove}
+                    onCheckedChange={(checked) => field.handleChange(checked === true)}
+                  />
+                  <div className="grid gap-0.5">
+                    <FieldLabel htmlFor={`${id}-approve`} className="text-xs font-normal">
+                      {t("terminology.addConcept.approveLabel")}
+                    </FieldLabel>
+                    <p className="text-[11px] leading-snug text-muted-foreground">
+                      {!canApprove
+                        ? t("terminology.addConcept.approveNoPermissionHint")
+                        : field.state.value
+                          ? t("terminology.addConcept.approveEnforcedHint")
+                          : t("terminology.addConcept.approveSuggestionHint")}
+                    </p>
+                  </div>
+                </div>
+              )}
+            />
+            {/* AQU-1006 follow-up: the demo's second complaint was "I added a
+                term and no blot appeared". A concept with no rendering compiles
+                to ZERO rules (compileConceptsToRules), so it can never
+                highlight anything however it is approved. Say so at the moment
+                the rendering box is left empty, rather than letting the user
+                discover it by its absence. */}
+            <form.Subscribe
+              selector={(state) => [state.values.rendering, state.values.approve] as const}
+              children={([rendering, approve]) =>
+                approve && !rendering.trim() ? (
+                  <p className="text-[11px] leading-snug text-muted-foreground">
+                    {t("terminology.addConcept.noRenderingNotEnforcedHint")}
+                  </p>
+                ) : null
+              }
             />
             <form.Field
               name="caseInsensitive"

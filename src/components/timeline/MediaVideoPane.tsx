@@ -125,6 +125,11 @@ export interface MediaVideoPaneProps {
   onVideoDuration?: (src: string, sec: number | null) => void
   /** Opens the link-video dialog — offered when the source will not load. */
   onChangeVideo?: () => void
+  /** AQU-1119: collapse the video section to a rail. Absent means no button. */
+  onCollapse?: () => void
+  /** AQU-1119: fold the OTHER sections so the picture has the lens to itself. */
+  onToggleFullscreen?: () => void
+  isFullscreen?: boolean
   sourceDirectionMode?: DirectionMode
   targetDirectionMode?: DirectionMode
   sourceTextDirection?: TextDirection
@@ -142,6 +147,9 @@ export function MediaVideoPane({
   onVideoPlaying,
   onVideoDuration,
   onChangeVideo,
+  onCollapse,
+  onToggleFullscreen,
+  isFullscreen,
   sourceDirectionMode = "auto",
   targetDirectionMode = "auto",
   sourceTextDirection = "ltr",
@@ -944,6 +952,7 @@ export function MediaVideoPane({
         src={src}
         onRetry={() => { setFailed(false); setLoadAttempt((n) => n + 1) }}
         onChangeVideo={onChangeVideo}
+        onCollapse={onCollapse}
       />
     )
   }
@@ -954,7 +963,12 @@ export function MediaVideoPane({
       data-video-state={slaved ? "slaved" : "standalone"}
       className="flex h-full min-h-0 flex-col overflow-hidden border-r border-border"
     >
-      <VideoPaneHeader src={src} />
+      <VideoPaneHeader
+        src={src}
+        onCollapse={onCollapse}
+        onToggleFullscreen={onToggleFullscreen}
+        isFullscreen={isFullscreen}
+      />
       {/* The black field fills everything under the header, and the picture is
           centred in it at the video's own proportions — leftover space becomes
           cinema bars instead of blank page. */}

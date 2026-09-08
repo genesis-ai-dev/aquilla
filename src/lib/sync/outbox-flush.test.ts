@@ -16,7 +16,11 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { flushOutboxBatch, subscribeStaleSiblings } from "./outbox-flush"
+import { flushOutboxBatch, subscribeStaleSiblings, subscribeAppliedEvents } from "./outbox-flush"
+import { createFlushAppliedTracker } from "./flush-applied"
+import { createLiveApplier } from "./live-apply"
+import { CellStore } from "@/hooks/useActiveCellStore"
+import type { CellRow } from "./cells-read-types"
 import {
   enqueueOutboxEvent,
   outboxPendingCount,
@@ -235,6 +239,111 @@ describe("flushOutboxBatch", () => {
 
     expect(result).toMatchObject({ posted: 3, accepted: 3, networkError: false })
     expect(await outboxPendingCount()).toBe(0)
+  })
+
+  // -- Own-write landing from the response ----------------------------------
+
+  describe("applied[] frames on the POST response", () => {
+    const targetRow: CellRow = {
+      cellId: "cell-1", side: "target", value: "v", valueHtml: "<p>v</p>", type: null,
+      canonicalRef: null, anchorCellId: null, eventId: "e1", sourceEventId: null,
+      lastEditor: "tester", lastEditAt: 5, validated: false, wordCount: 1,
+    }
+    const appliedFrame = {
+      t: "event.applied", id: "e1", kind: "target.cell.commit", project: "proj",
+      file: "f1", cell: "cell-1", by: "tester", serverSeq: 42, rows: [targetRow],
+    }
+
+    it("parses applied[] and hands the frames to onApplied AND tab-wide subscribers", async () => {
+      await enqueueOutboxEvent(makeEvent("e1", "f1"))
+      const fetchMock = vi.fn().mockResolvedValue(
+        jsonResponse({ accepted: [{ id: "e1" }], rejected: [], applied: [appliedFrame] }),
+      )
+      const onApplied = vi.fn()
+      const listener = vi.fn()
+      const unsub = subscribeAppliedEvents(listener)
+      try {
+        await flushOutboxBatch({
+          getTokenForFile: TOKEN_FN,
+          fetchImpl: fetchMock as unknown as typeof fetch,
+          onApplied,
+        })
+      } finally {
+        unsub()
+      }
+      expect(onApplied).toHaveBeenCalledTimes(1)
+      expect(listener).toHaveBeenCalledTimes(1)
+      const frames = listener.mock.calls[0][0]
+      expect(frames).toHaveLength(1)
+      expect(frames[0]).toMatchObject({ id: "e1", cell: "cell-1", serverSeq: 42 })
+      expect(frames[0].rows).toEqual([targetRow])
+    })
+
+    it("drops malformed rows (keeps the frame) and skips frames without id/kind/project", async () => {
+      await enqueueOutboxEvent(makeEvent("e1", "f1"))
+      const fetchMock = vi.fn().mockResolvedValue(
+        jsonResponse({
+          accepted: [{ id: "e1" }],
+          rejected: [],
+          applied: [{ ...appliedFrame, rows: [{ nope: true }] }, { t: "event.applied" }],
+        }),
+      )
+      const onApplied = vi.fn()
+      await flushOutboxBatch({ getTokenForFile: TOKEN_FN, fetchImpl: fetchMock as unknown as typeof fetch, onApplied })
+      const frames = onApplied.mock.calls[0][0]
+      expect(frames).toHaveLength(1)
+      expect("rows" in frames[0]).toBe(false)
+    })
+
+    it("a commit costs exactly ONE request: the POST lands the head, no confirming GET is needed", async () => {
+      // The full client path a committing handler takes: flush → applied[]
+      // → liveApplier lands rows in the store → confirm() says no refetch.
+      await enqueueOutboxEvent(makeEvent("e1", "f1"))
+      const store = new CellStore()
+      store.setRuntime({ projectId: "proj", fileId: "f1", username: "tester", requiredValidations: 1, auditStats: new Map() })
+      store.replaceRows([{ ...targetRow, value: "old", eventId: "e0" }], { full: true })
+      const revalidateCell = vi.fn()
+      const applyCommittedCellStats = vi.fn().mockReturnValue(true)
+      const tracker = createFlushAppliedTracker({
+        liveApplier: createLiveApplier({ store, revalidateCell }),
+        isActive: (p, f) => p === "proj" && f === "f1",
+        applyCommittedCellStats,
+      })
+      const fetchMock = vi.fn().mockResolvedValue(
+        jsonResponse({ accepted: [{ id: "e1" }], rejected: [], applied: [appliedFrame] }),
+      )
+      const unsub = subscribeAppliedEvents((frames) => tracker.onFrames(frames))
+      try {
+        await flushOutboxBatch({ getTokenForFile: TOKEN_FN, fetchImpl: fetchMock as unknown as typeof fetch })
+      } finally {
+        unsub()
+      }
+      // The listener ran before the flush resolved: the head is already in.
+      expect(store.getCellView("cell-1")?.targetEventId).toBe("e1")
+      expect(tracker.confirm("cell-1", "e1")).toEqual({ refetchCell: false, refetchStats: false })
+      expect(revalidateCell).not.toHaveBeenCalled()
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      expect(await outboxPendingCount()).toBe(0)
+    })
+
+    it("does not surface applied[] for a background account (shouldSurface=false)", async () => {
+      await enqueueOutboxEvent(makeEvent("e1", "f1"))
+      const fetchMock = vi.fn().mockResolvedValue(
+        jsonResponse({ accepted: [{ id: "e1" }], rejected: [], applied: [appliedFrame] }),
+      )
+      const listener = vi.fn()
+      const unsub = subscribeAppliedEvents(listener)
+      try {
+        await flushOutboxBatch({
+          getTokenForFile: TOKEN_FN,
+          fetchImpl: fetchMock as unknown as typeof fetch,
+          ownerScope: { ownerKey: "", isSessionCurrent: async () => true, shouldSurface: () => false },
+        })
+      } finally {
+        unsub()
+      }
+      expect(listener).not.toHaveBeenCalled()
+    })
   })
 
   // -- Partial accept --------------------------------------------------------

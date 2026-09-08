@@ -6,12 +6,16 @@ export interface ProgressReadEnv {
 }
 
 interface ProgressRow {
-  scope: 'file' | 'section'
+  scope: 'file' | 'section' | 'book'
   section_key: string
   total_count: number | string
   filled_count: number | string
   validator_histogram: Record<string, number> | string | null
   revision: number | string | bigint
+  // AQU-1098: written by the projection since 0088. Absent on the synthetic
+  // rows plan-route builds, which carry their own audio numbers.
+  audio_count?: number | string | null
+  audio_validated_count?: number | string | null
 }
 
 export interface ProgressCounts {
@@ -19,6 +23,13 @@ export interface ProgressCounts {
   filledCount: number
   validatedCount: number
   validationLevels: number[]
+  /**
+   * AQU-1098: source cells carrying a live take, and those whose take is
+   * selected AND approved. Same rule the org portfolio counts by, so a
+   * chapter's audio and the project's audio can never disagree.
+   */
+  audioCount: number
+  audioValidatedCount: number
 }
 
 export interface FileProgressResponse {
@@ -50,7 +61,7 @@ const BOOK_ORDER = [
   'GEN','EXO','LEV','NUM','DEU','JOS','JDG','RUT','1SA','2SA','1KI','2KI','1CH','2CH','EZR','NEH','EST','JOB','PSA','PRO','ECC','SNG','ISA','JER','LAM','EZK','DAN','HOS','JOL','AMO','OBA','JON','MIC','NAM','HAB','ZEP','HAG','ZEC','MAL',
   'MAT','MRK','LUK','JHN','ACT','ROM','1CO','2CO','GAL','EPH','PHP','COL','1TH','2TH','1TI','2TI','TIT','PHM','HEB','JAS','1PE','2PE','1JN','2JN','3JN','JUD','REV',
 ]
-const BOOK_INDEX = new Map(BOOK_ORDER.map((book, index) => [book, index]))
+export const BOOK_INDEX = new Map(BOOK_ORDER.map((book, index) => [book, index]))
 
 function parseHistogram(raw: ProgressRow['validator_histogram']): Map<number, number> {
   let value: unknown = raw
@@ -69,7 +80,7 @@ function parseHistogram(raw: ProgressRow['validator_histogram']): Map<number, nu
   return out
 }
 
-function counts(row: ProgressRow, validationCount: number): ProgressCounts {
+export function counts(row: ProgressRow, validationCount: number): ProgressCounts {
   const histogram = parseHistogram(row.validator_histogram)
   const levelCap = Math.min(MAX_VALIDATION_LEVELS, Math.max(1, validationCount))
   const validationLevels = Array.from({ length: levelCap }, (_, index) => {
@@ -83,6 +94,8 @@ function counts(row: ProgressRow, validationCount: number): ProgressCounts {
     filledCount: Number(row.filled_count) || 0,
     validatedCount: validationLevels[Math.min(levelCap, validationCount) - 1] ?? 0,
     validationLevels,
+    audioCount: Number(row.audio_count) || 0,
+    audioValidatedCount: Number(row.audio_validated_count) || 0,
   }
 }
 
@@ -123,7 +136,7 @@ function compareCanonicalRefs(a: string, b: string): number {
     || a.localeCompare(b)
 }
 
-async function readValidationCount(db: AquillaDb, projectId: string): Promise<number> {
+export async function readValidationCount(db: AquillaDb, projectId: string): Promise<number> {
   const row = await db
     .prepare('SELECT settings FROM project_settings WHERE project_id = ?')
     .bind(projectId)
@@ -222,7 +235,8 @@ export async function handleProgressReadRequest(
   const [rowsResult, validationCount] = await Promise.all([
     env.AQUILLA_PG
       .prepare(
-        `SELECT scope, section_key, total_count, filled_count, validator_histogram, revision
+        `SELECT scope, section_key, total_count, filled_count, validator_histogram, revision,
+                audio_count, audio_validated_count
            FROM file_section_progress
           WHERE project_id = ? AND file_id = ? AND target_lang = ?`,
       )
@@ -251,6 +265,9 @@ export async function handleProgressReadRequest(
       scope: 'file', section_key: '', total_count: fallback.total_count,
       filled_count: fallback.filled_count, validator_histogram: histogram,
       revision: fallback.revision,
+      // `files` carries no audio rollup — the projection is the only source,
+      // and this branch runs only before it has been backfilled.
+      audio_count: 0, audio_validated_count: 0,
     }]
     source = 'file-counter-fallback'
   }
@@ -262,7 +279,10 @@ export async function handleProgressReadRequest(
   // sequence. Include the source so clients cannot retain an empty fallback
   // through a false 304 after projection rows appear.
   const laneTag = lane ? `:lane:${encodeURIComponent(lane)}` : ''
-  const etag = `"progress:${fileId}:${revision}:v${validationCount}:${source === 'projection' ? 'p' : 'f'}${laneTag}"`
+  // `s2` marks the response SHAPE (audio counts added, AQU-1098). Without it
+  // a client holding a pre-audio cached body would 304 and keep it forever:
+  // the shape changed without the revision moving.
+  const etag = `"progress:${fileId}:${revision}:v${validationCount}:${source === 'projection' ? 'p' : 'f'}:s2${laneTag}"`
   if (request.headers.get('If-None-Match') === etag) {
     return new Response(null, { status: 304, headers: { ETag: etag, 'Cache-Control': 'private, no-cache' } })
   }

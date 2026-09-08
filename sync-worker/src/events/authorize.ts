@@ -9,6 +9,7 @@ import { verifyTokenForDoc, verifyTokenForProject, type SyncTokenClaims } from '
 import { resolveAllowSelfAssignment } from './assignment-authority'
 import { isLockedTimingEvent, isUserInsertedCell, resolveTimingLocked } from './timing-authority'
 import { resolveCellEditingFloor } from './cell-editing-authority'
+import { isBindingTermWrite, resolveTermbaseFloor } from './termbase-authority'
 import { isGatedTrackPatch, resolveAllowTrackEditing } from './track-editing-authority'
 import { laneOfEvent } from './event-projection'
 import { makeRequestCache, type RequestCache } from './request-cache'
@@ -20,6 +21,12 @@ export const PROJECT_SENTINEL_FILE_ID = '__project__'
 function isCommentKind(kind: string): boolean {
   return kind === 'comment.create' || kind === 'comment.edit' ||
     kind === 'comment.delete' || kind === 'comment.resolve'
+}
+
+/** `term.*` — project-scoped like comments, so they take the sentinel path too. */
+function isTermKind(kind: string): boolean {
+  return kind === 'term.create' || kind === 'term.update' ||
+    kind === 'term.delete' || kind === 'term.approve' || kind === 'term.reject'
 }
 
 /**
@@ -176,12 +183,16 @@ export async function authorize<K extends EventKind>(
   if (!token) {
     return { ok: false, status: 401, reason: 'missing token' }
   }
-  // 3a. Project-scoped comment.* events use the sentinel '__project__' fileId.
-  //     For these, we verify via verifyTokenForProject (checks projectId only)
-  //     instead of verifyTokenForDoc (which requires exact fileId match).
-  //     All other events must carry a real fileId (Phase 0).
-  if (raw.fileId === PROJECT_SENTINEL_FILE_ID && isCommentKind(raw.kind)) {
-    // Project-scoped comment path: token must match the event's projectId.
+  // 3a. Project-scoped comment.* and term.* events use the sentinel
+  //     '__project__' fileId. For these, we verify via verifyTokenForProject
+  //     (checks projectId only) instead of verifyTokenForDoc (which requires
+  //     exact fileId match). All other events must carry a real fileId
+  //     (Phase 0).
+  if (
+    raw.fileId === PROJECT_SENTINEL_FILE_ID &&
+    (isCommentKind(raw.kind) || isTermKind(raw.kind))
+  ) {
+    // Project-scoped path: token must match the event's projectId.
     const authResult = await verifyTokenForProject(token, raw.projectId, secret)
     if (!authResult.ok) {
       return authResult
@@ -194,6 +205,26 @@ export async function authorize<K extends EventKind>(
 
     if (tokenClaims.role < requiredRoleFor(raw.kind)) {
       return { ok: false, status: 403, reason: `role too low for ${raw.kind}` }
+    }
+
+    // AQU-1006 follow-up: the org's termbase floor on top of the static
+    // CONTRIBUTOR floor, for the `term.*` writes that BIND (see
+    // termbase-authority.ts).
+    //
+    // THIS CHECK LIVES HERE, INSIDE THE SENTINEL BRANCH, AND MUST STAY HERE.
+    // The branch RETURNS, so a gate placed further down with the other
+    // conditional floor raises never runs for a project-scoped event — which
+    // is every `term.*` event there is. A termbase gate below this point is a
+    // gate that is always skipped.
+    if (db != null && isTermKind(raw.kind) && isBindingTermWrite(raw.kind, raw.payload)) {
+      const floor = await resolveTermbaseFloor(db, raw.projectId, cache ?? makeRequestCache(db))
+      if (tokenClaims.role < floor) {
+        return {
+          ok: false,
+          status: 403,
+          reason: 'managing terminology is not permitted at this clearance; suggest the term instead',
+        }
+      }
     }
 
     const claims: EventClaims = {

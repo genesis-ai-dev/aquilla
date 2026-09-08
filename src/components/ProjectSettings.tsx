@@ -1276,6 +1276,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       "section-project-info",
       "section-languages",
       "section-bible-resources",
+      "section-import",
       "section-user",
       "section-members",
       "section-ai-instructions",

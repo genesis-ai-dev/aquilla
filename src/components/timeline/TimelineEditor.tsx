@@ -68,9 +68,9 @@ import { chipOverlaps, MIN_ADDABLE_SPAN_SEC } from "@/lib/timeline/lane-timing"
 import { resolveCueCharacter, formatCueCharacter } from "@/lib/timeline/cue-character"
 import { buildTimelineLayout, type TimelineLayout } from "@/lib/timeline/layout"
 import { gutterWidthPx, loadGutterCollapsed, saveGutterCollapsed } from "@/lib/timeline/gutter-width"
+import { MEDIA_HEADER_ROW, MediaSectionCollapseButton } from "./MediaSectionRail"
 import {
   deriveTracksForFile,
-  TRACK_KIND_LABELS,
   type TimelineTrack,
   type TrackKind,
 } from "@/lib/timeline/tracks"
@@ -386,13 +386,26 @@ export interface TimelineEditorProps {
    *  saying so, is a question the user cannot act on. */
   hideTimingMode?: boolean
   /**
-   * Was this file imported as subtitles (VTT/SRT/SBV)?
+   * AQU-1119: collapse the timeline itself, and collapse the text section
+   * whose header this component portals into the workspace's slot.
    *
-   * Only the workspace can answer it — the file's type does not otherwise
-   * reach this component — and it decides one thing here: what the text
-   * column under the timeline is called. See `textHeadingLabel`.
+   * Both are the workspace's business — it owns the panel group and the
+   * per-file collapsed set — so this component only offers the affordance.
+   * Absent means no button at all, which is how every other optional control
+   * here behaves and is right outside the media lens, where there is nothing
+   * to collapse into.
    */
-  isSubtitleImport?: boolean
+  onCollapseSection?: () => void
+  onCollapseTextSection?: () => void
+  /**
+   * AQU-1119: the text section's full-screen toggle, threaded through for the
+   * same reason its collapse control is — this component owns the header it
+   * portals into the table column's slot. The timeline itself gets no such
+   * control: its full screen would fold BOTH body sections, and the body is a
+   * flex row that something has to fill.
+   */
+  onToggleTextFullscreen?: () => void
+  isTextFullscreen?: boolean
   /** Needed by the missing-audio probe behind the chip strip's badge. */
   project?: ProjectRecord
   /** Fires when the highlighted section changes so a sibling transport (the
@@ -1013,7 +1026,10 @@ export function TimelineEditor({
   timingMode = "dubbing",
   onChangeTimingMode,
   hideTimingMode = false,
-  isSubtitleImport = false,
+  onCollapseSection,
+  onCollapseTextSection,
+  onToggleTextFullscreen,
+  isTextFullscreen,
   project,
   onSelectCell,
   onTranscribeSections,
@@ -1753,28 +1769,23 @@ export function TimelineEditor({
   // would be flashing subtitle rows around a stretch where nobody SPOKE. Two
   // tracks, conflated. (EditorTable keeps its pulseCells API for other callers.)
 
-  // What the text column under the timeline is called.
+  // What the section under the timeline is called: "Text".
   //
   // Pinned rather than derived per-cell, because in this workflow every cell is
   // a text cell and the header would otherwise change as you clicked around.
+  // NOT "Dialogue" (Sam, 2026-08-20) — a heading of its own invention, sitting
+  // between the gutter above and "Audio cues" an inch away, invited exactly the
+  // mix-up it was meant to end.
   //
-  // NOT "Dialogue" (Sam, 2026-08-20): these cells ARE the file's source text,
-  // the track gutter directly above already calls them that, and the thing
-  // they were being confused with — the heard lines from the audio sibling —
-  // is labelled "Audio cues" a few inches away. A heading of its own invention
-  // sitting between those two invited exactly that mix-up.
-  //
-  // IT TRACKS THE GUTTER'S WORD, which is the whole point of it — so when the
-  // gutter's went "Subtitles" → "Source text" (2026-08-24) this followed. Two
-  // different names for one column of cells, an inch apart, is precisely the
-  // confusion the heading was rewritten to end.
-  //
-  // Keyed on the FILE now, not on `subtitleFileWithFootage` (a linked-video
-  // heuristic). That gate left a subtitle file with no video falling through to
-  // the per-cell derivation, which says "Dialogue" whenever nothing is
-  // selected — the confusing case, on the one file type that can least afford
-  // it.
-  const textHeadingLabel = isSubtitleImport ? TRACK_KIND_LABELS["source-subtitles"] : undefined
+  // AQU-1119 stopped it borrowing the GUTTER's word. It used to read
+  // `TRACK_KIND_LABELS["source-subtitles"]`, i.e. "Source text", and that was
+  // wrong once the thing being named became a whole collapsible SECTION:
+  // source and target are the two COLUMNS inside it, so naming the section
+  // after one of its own columns mislabels the other half. The gutter's rows
+  // keep their names — a track genuinely is one side — and the section now has
+  // a word of its own, unconditional, so it no longer depends on how the file
+  // was imported.
+  const textHeadingLabel = t("editor.timeline.textPaneTitle")
 
   // Stretches of film that no cell covers — where a line can still be added.
   // Derived from the same sweep the Source track draws, so the two can never
@@ -3107,10 +3118,17 @@ export function TimelineEditor({
     headingLabel: textHeadingLabel,
     castName: formatCueCharacter(currentCharacter.names),
     cameraState: currentCharacter.cameraState ?? null,
+    // AQU-1119: the text section's own collapse control. It belongs in this
+    // header rather than the timeline toolbar because it acts on the column
+    // beneath it — the same reasoning that keeps the gutter's toggle inside
+    // the gutter.
+    onCollapse: onCollapseTextSection,
+    onToggleFullscreen: onToggleTextFullscreen,
+    isFullscreen: isTextFullscreen,
     // AQU-646 stage 3e: the transcribe controls used to be a full-width row of
     // their own beneath the lanes, on screen whether or not there was anything
     // to transcribe. They sit in the text header now, and ONLY WHEN THERE IS A
-    // SELECTION (Sam, 2026-08-25) — so the header reads just "Source text" the
+    // SELECTION (Sam, 2026-08-25) — so the header reads just its own name the
     // rest of the time and the row the bar used to occupy goes back to the
     // tracks.
     //
@@ -3510,8 +3528,21 @@ export function TimelineEditor({
       }
     >
       {/* toolbar */}
-      <div className="flex shrink-0 items-center gap-2 border-b border-border bg-muted/30 px-3 py-1.5">
-        <span className="text-xs font-medium text-muted-foreground">{t("editor.timeline.title")}</span>
+      <div
+        className={`flex shrink-0 items-center gap-2 border-b border-border bg-muted/30 px-3 py-1.5 ${MEDIA_HEADER_ROW}`}
+      >
+        <span className="text-sm font-semibold tracking-wide text-muted-foreground">
+            {t("editor.timeline.title")}
+          </span>
+        {/* AQU-1119: beside the heading, like the gutter's own toggle sits in
+            the gutter — a control that folds a region belongs on that region's
+            name, not in the corner. Withheld entirely when the workspace
+            passes no handler: outside the media lens there is nothing to fold
+            INTO, and a disabled button would be a question the reader cannot
+            act on. */}
+        {onCollapseSection && (
+          <MediaSectionCollapseButton section="timeline" onCollapse={onCollapseSection} />
+        )}
         {/* Pre-merge round: the mode is FILE-level again (the video link it
             interacts with is per-file), so the control returns to the
             toolbar. Same clearance as before: `onChangeTimingMode` absent =

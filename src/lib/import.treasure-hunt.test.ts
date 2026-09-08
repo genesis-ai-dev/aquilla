@@ -84,6 +84,7 @@ describe("Treasure Hunt Bible import", () => {
       kind: "idml",
       parserVersion: `${TREASURE_HUNT_PROFILE_ID}@1`,
       bookCode: "GEN",
+      corpusMarker: "Treasure Hunt Bible",
     })
 
     const cells = bodies.flatMap((body) => body.cells ?? [])

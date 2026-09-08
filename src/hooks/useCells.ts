@@ -1177,12 +1177,12 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   // revalidate on any error so we never end up with stale local state on a
   // transient network blip.
   //
-  // FUTURE: replace this HTTP round-trip with a server-pushed row payload
-  // on the existing `event.applied` WS frame (Supabase-realtime style). That
-  // saves a round-trip per change and is the right shape for the deferred
-  // AD-13/14 neighborhood propagation, which will dirty many cells per
-  // event — fanning out N targeted GETs would be worse than today's full
-  // refetch. See TODO in sync-worker/src/events/event-projection.ts.
+  // This is now the FALLBACK only: `event.applied` WS frames and the
+  // `POST /events` response (`applied[]`) both carry the cell's projected
+  // rows, which land through src/lib/sync/live-apply.ts (peers) and
+  // src/lib/sync/flush-applied.ts (own writes) without a GET. The GET
+  // remains for frames without rows (older worker, >cap batch, partial
+  // commit) and for the error/discard paths above.
   const cellFetchInFlightRef = useRef<Set<string>>(new Set())
   // Self-reference so the discard-exhaustion path below can re-kick a fresh
   // targeted fetch after the in-flight marker clears (a useCallback can't

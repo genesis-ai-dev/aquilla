@@ -251,6 +251,9 @@ export const editor = defineNamespace({
     "editor.milestone.cellRange": "Cells {range}",
     "editor.milestone.percentTranslated": "{percent}% translated",
     "editor.milestone.percentValidated": "{percent}% validated",
+    "editor.milestone.splitAria": "Split into milestones",
+    "editor.milestone.splitHint":
+      "Show only the cells in the current division. Use the arrows to move to the next one.",
 
     "editor.milestone.chapter.moveBetween": "Move between chapters",
     "editor.milestone.chapter.previous": "Previous chapter",
@@ -669,6 +672,13 @@ export const editor = defineNamespace({
     // affordances. Keyed 2026-08-20 — these surfaces were authored inline
     // while the dubbing workflow was being designed.
     "editor.timeline.videoPaneTitle": "Video",
+    // AQU-1119: the section heading over the dialogue table, opposite the
+    // Video header. It says "Text" and not "Source text" because SOURCE and
+    // TARGET are the two columns underneath it — the section holds both, and
+    // naming it after one of its columns read as a mislabel. Deliberately not
+    // the track row's name: `TRACK_KIND_LABELS` still calls those "Source
+    // text" / "Target text", which is right, because a track IS one side.
+    "editor.timeline.textPaneTitle": "Text",
     "editor.timeline.videoPaneLinked": "Linked video",
     "editor.timeline.videoPaneStart": "Click to start the picture",
     "editor.timeline.videoPanePicture": "picture",
@@ -732,6 +742,23 @@ export const editor = defineNamespace({
     // line, and the summary band says what is inside better.)
     "editor.timeline.gutterCollapseAria": "Narrow the track names",
     "editor.timeline.gutterExpandAria": "Show the track names",
+    // AQU-1119: collapsing a whole section of the media lens down to a rail of
+    // one icon, and bringing it back. Each pair is one button in two states —
+    // the collapse control lives in the section's own header, the expand
+    // control IS the rail.
+    "editor.timeline.collapseVideoAria": "Hide the video",
+    "editor.timeline.expandVideoAria": "Show the video",
+    "editor.timeline.collapseTimelineAria": "Hide the timeline",
+    "editor.timeline.expandTimelineAria": "Show the timeline",
+    "editor.timeline.collapseTextAria": "Hide the text",
+    "editor.timeline.expandTextAria": "Show the text",
+    // AQU-1119: the other control beside each body section's chevron. Where
+    // the chevron folds ITS OWN section, this one folds the others so this
+    // section has the lens to itself — one button in two states.
+    "editor.timeline.fullscreenVideoAria": "Fill the lens with the video",
+    "editor.timeline.restoreVideoAria": "Put the video back in its column",
+    "editor.timeline.fullscreenTextAria": "Fill the lens with the text",
+    "editor.timeline.restoreTextAria": "Put the text back in its column",
     "editor.timeline.folderExpandAria": "Show the tracks in {name}",
     "editor.timeline.folderCollapseAria": "Hide the tracks in {name}",
     "editor.timeline.trackMenuAria": "Track options for {name}",
@@ -1578,6 +1605,79 @@ export const editor = defineNamespace({
           "and description are readable again. Affects every row at once. " +
           "Doubles as the button's hover tooltip.",
       },
+      "editor.timeline.collapseVideoAria": {
+        description:
+          "Screen-reader name and tooltip of the button in the video's own " +
+          "header that collapses the whole video section to a 40px rail of one " +
+          "icon, giving its width to the text beside it. Doubles as the " +
+          "button's hover tooltip. Pairs with expandVideoAria.",
+      },
+      "editor.timeline.expandVideoAria": {
+        description:
+          "Screen-reader name and tooltip of the collapsed video rail — the " +
+          "strip of one icon that is all that remains of the video section, " +
+          "and which is itself the button that brings the picture back. The " +
+          "name is only ever seen on hover, so it carries the whole label.",
+      },
+      "editor.timeline.fullscreenVideoAria": {
+        description:
+          "Screen-reader name and tooltip of the button beside the video " +
+          "header's collapse chevron, which folds the OTHER sections — the " +
+          "timeline and the text — so the picture has the whole media lens " +
+          "to itself. Not browser fullscreen: the app window is unchanged. " +
+          "Pairs with restoreVideoAria, which is the same button pressed.",
+      },
+      "editor.timeline.restoreVideoAria": {
+        description:
+          "Screen-reader name and tooltip of that same button once the video " +
+          "already has the lens to itself: pressing it puts the sections that " +
+          "were folded to make room back the way they were. 'Its column' is " +
+          "the video's normal place beside the text, not a table column.",
+      },
+      "editor.timeline.fullscreenTextAria": {
+        description:
+          "Screen-reader name and tooltip of the button beside the text " +
+          "header's collapse chevron, which folds the OTHER sections — the " +
+          "timeline and the video — so the cells have the whole media lens " +
+          "to themselves. Not browser fullscreen: the app window is " +
+          "unchanged. Pairs with restoreTextAria, the same button pressed.",
+      },
+      "editor.timeline.restoreTextAria": {
+        description:
+          "Screen-reader name and tooltip of that same button once the text " +
+          "already has the lens to itself: pressing it puts the sections that " +
+          "were folded to make room back the way they were. 'Its column' is " +
+          "the text's normal place beside the video.",
+      },
+      "editor.timeline.collapseTimelineAria": {
+        description:
+          "Screen-reader name and tooltip of the button in the timeline's " +
+          "toolbar that collapses the whole timeline to a 40px rail of one " +
+          "icon, giving its height to the video and text below it. Doubles as " +
+          "the button's hover tooltip. Pairs with expandTimelineAria.",
+      },
+      "editor.timeline.expandTimelineAria": {
+        description:
+          "Screen-reader name and tooltip of the collapsed timeline rail — the " +
+          "strip of one icon that is all that remains of the timeline, and " +
+          "which is itself the button that brings it back. The name is only " +
+          "ever seen on hover, so it carries the whole label.",
+      },
+      "editor.timeline.collapseTextAria": {
+        description:
+          "Screen-reader name and tooltip of the button in the text section's " +
+          "header that collapses the dialogue table to a 40px rail of one " +
+          "icon, giving its width to the video beside it. 'Text' here is the " +
+          "section holding the source and target columns, not one of them. " +
+          "Doubles as the button's hover tooltip. Pairs with expandTextAria.",
+      },
+      "editor.timeline.expandTextAria": {
+        description:
+          "Screen-reader name and tooltip of the collapsed text rail — the " +
+          "strip of one icon that is all that remains of the dialogue table, " +
+          "and which is itself the button that brings it back. The name is " +
+          "only ever seen on hover, so it carries the whole label.",
+      },
       "editor.timeline.folderExpandAria": {
         description:
           "Screen-reader name of the triangle that opens a timeline folder and " +
@@ -2336,6 +2436,22 @@ export const editor = defineNamespace({
         placeholders: {
           percent: "Whole-number percentage, already rounded, without the % sign.",
         },
+      },
+      "editor.milestone.splitAria": {
+        description:
+          "Label of the switch in ⋯ → Editor settings. It switches the table " +
+          "between a continuous list of every cell and a paged view that shows " +
+          "only the current division. On means the paged view is active. A " +
+          "switch label, so it names the thing being toggled on.",
+        maxLength: 28,
+        screenshot: "editor-table",
+      },
+      "editor.milestone.splitHint": {
+        description:
+          "Tooltip explaining that same switch: what the on state does, and that " +
+          "the chapter/section arrows then turn the page. 'Division' stays " +
+          "generic because the unit differs by file type (chapter, slide, section…).",
+        screenshot: "editor-table",
       },
       "editor.milestone.chapter.moveBetween": {
         description: MILESTONE_MOVE_BETWEEN + MILESTONE_KIND_CHAPTER,

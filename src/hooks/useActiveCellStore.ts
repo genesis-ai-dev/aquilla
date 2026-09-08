@@ -11,6 +11,7 @@ import {
   scheduleCellsCacheWrite,
 } from "@/lib/sync/cells-cache"
 import { peekOutboxBatch, subscribeToOutbox } from "@/lib/sync/outbox"
+import { isStructuralCell } from "@/lib/cells/structural"
 import { extractUsfmFootnotes, type ExtractedFootnote } from "@/lib/footnotes/extract"
 import { sortByLens } from "@/lib/timeline/derive"
 import type { OrderedBy, RuleWaiver } from "@/lib/parsers/types"
@@ -196,6 +197,21 @@ interface RuntimeContext {
    * `setRuntime` callers that predate lanes keep compiling; normalized to `''`.
    */
   lane?: string
+  /**
+   * AQU-1083: does this project count structural cells (headings, book titles,
+   * chapter markers) toward progress? Absent ⇒ yes, which is what every
+   * project did before the setting existed.
+   *
+   * The store owns the counting RULE — what "translated" means for a cell,
+   * including the audio-only case — so it is also the right place to decide
+   * which cells the rule is applied to. The alternative was recomputing those
+   * totals in the sidebar from cell summaries, which would have re-derived
+   * "translated" by a different route and drifted from this one.
+   *
+   * Structural cells stay in `order`, in every navigation index and in the
+   * editor: excluding them from PROGRESS is not the same as hiding them.
+   */
+  countStructural?: boolean
 }
 
 interface PendingOverlay {
@@ -235,6 +251,7 @@ export class CellStore {
     auditStats: EMPTY_STATS,
     ownTakeCellIds: EMPTY_TAKES,
     lane: "",
+    countStructural: true,
   }
 
   private order: string[] = []
@@ -321,11 +338,22 @@ export class CellStore {
     const prevStats = this.ctx.auditStats
     const nextLane = next.lane ?? ""
     const statsChanged = prevStats !== next.auditStats
-    const userChanged = this.ctx.username !== next.username || this.ctx.requiredValidations !== next.requiredValidations
+    // AQU-1083: a structural-policy flip changes which cells every derived
+    // progress number counts, so it invalidates exactly what a threshold
+    // change does — hence it rides the same branch below.
+    const nextCountStructural = next.countStructural ?? true
+    const userChanged = this.ctx.username !== next.username
+      || this.ctx.requiredValidations !== next.requiredValidations
+      || (this.ctx.countStructural ?? true) !== nextCountStructural
     const laneChanged = (this.ctx.lane ?? "") !== nextLane
     // AQU-646: the take set arrives from the attachment hook via its own
     // setter, not from these options, so a runtime update must not blank it.
-    this.ctx = { ...next, lane: nextLane, ownTakeCellIds: next.ownTakeCellIds ?? this.ctx.ownTakeCellIds }
+    this.ctx = {
+      ...next,
+      lane: nextLane,
+      countStructural: nextCountStructural,
+      ownTakeCellIds: next.ownTakeCellIds ?? this.ctx.ownTakeCellIds,
+    }
     if (laneChanged) {
       // AQU-538: re-partition the already-loaded rows against the new active
       // lane. `toRows()` retains every lane's rows, so switching lane re-derives
@@ -1391,7 +1419,13 @@ export class CellStore {
       const canonical = target?.canonicalRef ?? source?.canonicalRef ?? null
       const section = navigation.milestoneByCellId.get(id)?.key ?? ""
 
-      if (source) {
+      // AQU-1083: a structural cell is still a cell — it stays in `order`, in
+      // the editor and in the navigation index. It just is not a unit of
+      // PROGRESS when the project says so, so it is skipped here and nowhere
+      // else. This snapshot is the local overlay the sidebar paints while an
+      // edit is in flight; without the same rule the file bar would jump to
+      // the unsubtracted total on every keystroke and settle back after.
+      if (source && (this.ctx.countStructural !== false || !isStructuralCell(source.type))) {
         const audit = this.ctx.auditStats.get(id)
         const endorsements = audit
           ? audit.activeValidators.length
@@ -1471,7 +1505,14 @@ export class CellStore {
     const progressFor = (cellIds: readonly string[]) => {
       let translated = 0
       let validated = 0
+      let total = 0
       for (const cellId of cellIds) {
+        // AQU-1083: the chapter keeps every cell in `cellIds` — the sidebar
+        // still draws a square for a heading, and jumping to the chapter still
+        // lands on it. Only the fraction beside the chapter name changes.
+        if (this.ctx.countStructural === false
+          && isStructuralCell(this.sourceById.get(cellId)?.type)) continue
+        total += 1
         const target = this.targetById.get(cellId)
         const activeLane = this.ctx.lane ?? ""
         const pending = this.pendingOverlay.get(cellId)
@@ -1484,7 +1525,7 @@ export class CellStore {
         if (targetValue.trim() || this.ctx.ownTakeCellIds?.has(cellId)) translated += 1
         if (target?.validated) validated += 1
       }
-      return { translated, validated, total: cellIds.length }
+      return { translated, validated, total }
     }
     const entries = derived.orderedMilestones.map((group): CellNavigationEntry => {
       const progress = progressFor(group.cellIds)
@@ -1560,6 +1601,8 @@ export interface UseActiveCellStoreOptions {
    * lanes are already loaded, so no refetch is needed).
    */
   lane?: string
+  /** AQU-1083: does this project count headings toward progress? Default yes. */
+  countStructural?: boolean
 }
 
 export interface UseActiveCellStoreResult {
@@ -1591,6 +1634,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     getToken,
     enabled = true,
     lane = "",
+    countStructural = true,
   } = opts
   const store = useMemo(() => new CellStore(), [])
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1625,8 +1669,8 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     // rows against it on change (instant lane switch, no refetch). This effect
     // is defined before the (projectId, fileId, enabled) reload effect, so on a
     // lane change the store's active lane is updated before any fetch runs.
-    store.setRuntime({ projectId, fileId, username, requiredValidations, auditStats, lane })
-  }, [auditStats, fileId, lane, projectId, requiredValidations, store, username])
+    store.setRuntime({ projectId, fileId, username, requiredValidations, auditStats, lane, countStructural })
+  }, [auditStats, countStructural, fileId, lane, projectId, requiredValidations, store, username])
 
   // I4 cache hygiene: never persist optimistic values as server rows.
   // `applyOptimisticTargetEdit` mutates the target row in place (value under

@@ -8,6 +8,7 @@ import {
   familyCodeOf,
   formatDesignAccentLabel,
   formatDesignLanguageName,
+  isFamilyDefaultAccent,
   primaryLanguageOf,
   regionFlagEmoji,
   regionOf,
@@ -113,23 +114,42 @@ describe("portal catalog grouping", () => {
     expect(designLanguageFamilies(rows)).toHaveLength(250)
   })
 
-  it("groups English accents from accentDisplayName and hides the bare family code", () => {
-    expect(designAccentsForFamily("en", portalCatalog).map((row) => row.code)).toEqual(
-      expect.arrayContaining(["en-US", "en-GB", "en-scottish"]),
-    )
-    expect(designAccentsForFamily("en", portalCatalog).map((row) => row.code)).not.toContain("en")
+  it("puts the family default first, then named accents", () => {
+    expect(designAccentsForFamily("en", portalCatalog).map((row) => row.code)).toEqual([
+      "en",
+      "en-US",
+      "en-GB",
+      "en-scottish",
+    ])
   })
 
-  it("defaults English to American", () => {
-    expect(defaultCodeForFamily("en", portalCatalog)).toBe("en-US")
+  it("synthesizes Default when the catalog only has named regional rows", () => {
+    const namedOnly = portalCatalog.filter((row) => row.code !== "en")
+    expect(designAccentsForFamily("en", namedOnly).map((row) => row.code)).toEqual([
+      "en",
+      "en-US",
+      "en-GB",
+      "en-scottish",
+    ])
+  })
+
+  it("defaults English to the family Default", () => {
+    expect(defaultCodeForFamily("en", portalCatalog)).toBe("en")
   })
 
   it("canonicalizes a saved code, a bare family, and a lane display name", () => {
     expect(canonicalizeDesignLocale("en-GB", portalCatalog)).toBe("en-GB")
-    expect(canonicalizeDesignLocale("en", portalCatalog)).toBe("en-US")
-    expect(canonicalizeDesignLocale("French", portalCatalog)).toBe("fr-FR")
+    expect(canonicalizeDesignLocale("en", portalCatalog)).toBe("en")
+    expect(canonicalizeDesignLocale("French", portalCatalog)).toBe("fr")
     expect(canonicalizeDesignLocale("es-MX", portalCatalog)).toBe("es-MX")
     expect(canonicalizeDesignLocale("en-scottish", portalCatalog)).toBe("en-scottish")
+    expect(canonicalizeDesignLocale(undefined, portalCatalog)).toBe("en")
+  })
+
+  it("labels the bare family code as a family-default accent", () => {
+    const english = portalCatalog.find((row) => row.code === "en")!
+    expect(isFamilyDefaultAccent(english)).toBe(true)
+    expect(isFamilyDefaultAccent(portalCatalog.find((row) => row.code === "en-US")!)).toBe(false)
   })
 
   it("labels accents from the portal fields", () => {
@@ -147,7 +167,7 @@ describe("TTS-2 fallback catalog", () => {
     expect(designLanguageFamilies(rows).length).toBeGreaterThanOrEqual(90)
     expect(rows.some((row) => row.code === "sw")).toBe(true)
     expect(rows.some((row) => row.code === "fil")).toBe(true)
-    expect(defaultCodeForFamily("en", rows)).toBe("en-US")
+    expect(defaultCodeForFamily("en", rows)).toBe("en")
   })
 })
 

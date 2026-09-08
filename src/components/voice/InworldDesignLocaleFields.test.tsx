@@ -37,6 +37,7 @@ function lang(
 
 const portalLanguages: InworldSupportedLanguage[] = [
   lang({ code: "kbt", familyCode: "kbt", familyDisplayName: "Abadi" }),
+  lang({ code: "en", familyCode: "en", familyDisplayName: "English" }),
   lang({
     code: "en-US",
     familyCode: "en",
@@ -140,6 +141,19 @@ describe("InworldDesignLocaleFields", () => {
     expect(onLanguageChange).toHaveBeenCalledWith("en-US")
   })
 
+  it("puts Default first on the accent list and selects it", async () => {
+    vi.mocked(listInworldSupportedLanguages).mockResolvedValue(portalLanguages)
+    const user = userEvent.setup()
+    const { onLanguageChange } = renderLocales()
+    await user.click(await screen.findByRole("combobox", { name: "Accent" }))
+    const options = screen.getAllByRole("option")
+    expect(options[0]).toHaveAccessibleName(/^Default$/)
+    expect(screen.getByRole("option", { name: /American/ })).toBeTruthy()
+    expect(onLanguageChange).toHaveBeenCalledWith("en")
+    await user.click(options[0])
+    expect(onLanguageChange).toHaveBeenCalledWith("en")
+  })
+
   it("explains language and accent behind info icons", async () => {
     vi.mocked(listInworldSupportedLanguages).mockResolvedValue(portalLanguages)
     renderLocales("en-US")
@@ -149,7 +163,7 @@ describe("InworldDesignLocaleFields", () => {
     )
     await expectTooltip(
       screen.getByRole("button", { name: "About the accent" }),
-      /Regional accent/i,
+      /Default is just en/i,
     )
   })
 })

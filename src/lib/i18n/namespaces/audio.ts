@@ -52,12 +52,13 @@ export const audio = defineNamespace({
     "audio.newVoice.designLanguageSearchAria": "Find a language",
     "audio.newVoice.designAccentLabel": "Accent",
     "audio.newVoice.designAccentHint":
-      "Regional accent for that language. American English is en-US; British is en-GB.",
+      "Regional accent for that language. Default is just en; American English is en-US; British is en-GB.",
     "audio.newVoice.designAccentHelpAria": "About the accent",
     "audio.newVoice.designAccentUS": "American",
     "audio.newVoice.designAccentGB": "British",
     "audio.newVoice.designAccentMX": "Mexican",
     "audio.newVoice.designAccentBR": "Brazilian",
+    "audio.newVoice.designAccentDefault": "Default",
     "audio.newVoice.designAccentStandard": "Standard",
     "audio.newVoice.designGenerate": "Generate previews",
     "audio.newVoice.designGenerateKnobsHint":
@@ -731,7 +732,8 @@ export const audio = defineNamespace({
       "audio.newVoice.designAccentHint": {
         description:
           "Tooltip on the info icon beside Accent on Voice Design. Explains that accent " +
-          "is the regional variant (American vs British English).",
+          "is the regional variant, that Default is the family code (en for English), " +
+          "and that American vs British English are en-US / en-GB.",
       },
       "audio.newVoice.designAccentHelpAria": {
         description:
@@ -755,6 +757,13 @@ export const audio = defineNamespace({
       "audio.newVoice.designAccentBR": {
         description:
           "Accent option for pt-BR. Adjective, as in Brazilian Portuguese.",
+        maxLength: 16,
+      },
+      "audio.newVoice.designAccentDefault": {
+        description:
+          "First accent option in Voice Design. The language's family code with " +
+          "no regional tag (en, fr, sw). Short noun. Selected until the user " +
+          "picks a named regional accent.",
         maxLength: 16,
       },
       "audio.newVoice.designAccentStandard": {

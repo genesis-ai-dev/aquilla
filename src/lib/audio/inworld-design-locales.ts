@@ -9,7 +9,7 @@ import { toInworldLanguage } from "./inworld-languages"
 import { INWORLD_TTS2_LANGUAGE_NAMES } from "./inworld-tts2-languages"
 import type { InworldSupportedLanguage } from "./inworld-supported-languages"
 
-export const INWORLD_DESIGN_DEFAULT_LOCALE = "en-US"
+export const INWORLD_DESIGN_DEFAULT_LOCALE = "en"
 
 export function primaryLanguageOf(locale: string): string {
   const mapped = toInworldLanguage(locale) ?? locale.trim()
@@ -81,6 +81,23 @@ export function designLanguageFamilies(
   return out
 }
 
+function syntheticFamilyDefault(sample: InworldSupportedLanguage): InworldSupportedLanguage {
+  return {
+    code: sample.familyCode,
+    familyCode: sample.familyCode,
+    familyDisplayName: sample.familyDisplayName,
+    accentDisplayName: "",
+    displayName: sample.familyDisplayName,
+    creationEnabled: true,
+    hasVoices: false,
+  }
+}
+
+export function isFamilyDefaultAccent(row: InworldSupportedLanguage): boolean {
+  return !row.accentDisplayName.trim()
+    && row.code.toLowerCase() === row.familyCode.toLowerCase()
+}
+
 export function designAccentsForFamily(
   familyCode: string,
   rows: readonly InworldSupportedLanguage[],
@@ -88,8 +105,13 @@ export function designAccentsForFamily(
   const key = familyCode.trim().toLowerCase()
   if (!key) return []
   const inFamily = rows.filter((row) => row.familyCode.toLowerCase() === key)
-  const named = inFamily.filter((row) => row.accentDisplayName)
-  return named.length > 0 ? named : inFamily
+  if (inFamily.length === 0) return []
+  const named = inFamily.filter((row) => row.accentDisplayName.trim())
+  const rest = (named.length > 0 ? named : inFamily)
+    .filter((row) => row.code.toLowerCase() !== key)
+  const existingDefault = inFamily.find((row) => row.code.toLowerCase() === key)
+  const defaultRow = existingDefault ?? syntheticFamilyDefault(inFamily[0]!)
+  return [defaultRow, ...rest]
 }
 
 export function defaultCodeForFamily(
@@ -97,17 +119,6 @@ export function defaultCodeForFamily(
   rows: readonly InworldSupportedLanguage[],
 ): string {
   const accents = designAccentsForFamily(familyCode, rows)
-  if (accents.length === 0) return INWORLD_DESIGN_DEFAULT_LOCALE
-  const us = accents.find((row) => regionOf(row.code) === "US")
-  if (us) return us.code
-  const family = familyCode.trim().toLowerCase()
-  const native = accents.find((row) => {
-    const region = regionOf(row.code)
-    return Boolean(region && region.toLowerCase() === family)
-  })
-  if (native) return native.code
-  const voiced = accents.find((row) => row.hasVoices)
-  if (voiced) return voiced.code
   return accents[0]?.code ?? INWORLD_DESIGN_DEFAULT_LOCALE
 }
 
@@ -144,9 +155,8 @@ export function canonicalizeDesignLocale(
     : undefined
   const familyCode = mappedFamily ?? (value ? familyMatchingLabel(value, rows) : undefined)
   if (familyCode) return defaultCodeForFamily(familyCode, rows)
-  if (rows.some((row) => row.code.toLowerCase() === INWORLD_DESIGN_DEFAULT_LOCALE.toLowerCase())) {
-    return INWORLD_DESIGN_DEFAULT_LOCALE
-  }
+  const english = rows.find((row) => row.familyCode.toLowerCase() === "en")
+  if (english) return defaultCodeForFamily(english.familyCode, rows)
   return rows[0]?.code ?? INWORLD_DESIGN_DEFAULT_LOCALE
 }
 

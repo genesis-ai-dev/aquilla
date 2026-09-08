@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { Fragment, useEffect, useMemo, useState } from "react"
 import { ChevronDownIcon } from "lucide-react"
 import { Combobox as ComboboxPrimitive } from "@base-ui/react/combobox"
 import { Field, FieldLabel } from "@/components/ui/field"
@@ -15,6 +15,7 @@ import {
   SelectContent,
   SelectGroup,
   SelectItem,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
@@ -27,6 +28,7 @@ import {
   designAccentsForFamily,
   designLanguageFamilies,
   familyCodeOf,
+  isFamilyDefaultAccent,
   regionFlagEmoji,
   regionOf,
   rowForDesignCode,
@@ -175,11 +177,12 @@ export function InworldDesignLocaleFields({
     return t("audio.newVoice.designAccentBR")
   }
   const standard = t("audio.newVoice.designAccentStandard")
+  const familyDefault = t("audio.newVoice.designAccentDefault")
   const accentLabel = (code: string) => {
     const row = rowForDesignCode(code, rows)
-    return row
-      ? accentLabelForRow(row, locale, namedAccent, standard)
-      : standard
+      ?? accents.find((entry) => entry.code.toLowerCase() === code.trim().toLowerCase())
+    if (!row || isFamilyDefaultAccent(row)) return familyDefault
+    return accentLabelForRow(row, locale, namedAccent, standard)
   }
 
   useEffect(() => {
@@ -237,13 +240,16 @@ export function InworldDesignLocaleFields({
             className="max-h-80"
           >
             <SelectGroup>
-              {accents.map((row) => (
-                <SelectItem key={row.code} value={row.code}>
-                  <span className="flex min-w-0 items-center gap-2">
-                    <AccentFlag region={regionOf(row.code)} />
-                    <span className="truncate">{accentLabel(row.code)}</span>
-                  </span>
-                </SelectItem>
+              {accents.map((row, index) => (
+                <Fragment key={row.code}>
+                  {index === 1 ? <SelectSeparator /> : null}
+                  <SelectItem value={row.code}>
+                    <span className="flex min-w-0 items-center gap-2">
+                      <AccentFlag region={regionOf(row.code)} />
+                      <span className="truncate">{accentLabel(row.code)}</span>
+                    </span>
+                  </SelectItem>
+                </Fragment>
               ))}
             </SelectGroup>
           </SelectContent>

@@ -209,6 +209,63 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     expect(addLaneButton()).toHaveProperty("disabled", false)
   })
 
+  /** Fill boxes 1..9 so the field sits at its 10-box limit (box 0 already
+   *  came from openDialogWithBasics). */
+  function fillToBoxLimit() {
+    for (let i = 1; i < 10; i += 1) addExtraLanguage(`lang-${i}`)
+  }
+
+  it("swaps the plus button for a comma-separated field at the box limit", () => {
+    openDialogWithBasics()
+    expect(screen.getByTestId("create-add-target-lang")).toBeTruthy()
+    expect(screen.queryByTestId("create-bulk-target-langs")).toBeNull()
+
+    fillToBoxLimit()
+
+    expect(screen.queryAllByTestId(/^create-target-lang-input-\d+$/)).toHaveLength(9)
+    expect(screen.queryByTestId("create-add-target-lang")).toBeNull()
+    expect(screen.getByTestId("create-bulk-target-langs")).toBeTruthy()
+  })
+
+  it("turns comma-separated overflow entries into lanes on submit", async () => {
+    openDialogWithBasics()
+    fillToBoxLimit()
+
+    fireEvent.change(screen.getByTestId("create-bulk-target-langs"), {
+      target: { value: "Swahili, Yoruba , Hausa" },
+    })
+    expect(screen.getByTestId("create-bulk-target-langs-count").textContent).toContain("3")
+
+    fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
+
+    await waitFor(() => {
+      expect(mockCreateCloudProject).toHaveBeenCalledTimes(1)
+    })
+    await waitFor(() => {
+      const lanesCall = mockPatchProjectSettings.mock.calls.find(
+        (call) => (call[2] as { targetLanes?: string[] }).targetLanes,
+      )
+      expect((lanesCall?.[2] as { targetLanes: string[] }).targetLanes).toEqual([
+        "lang-1", "lang-2", "lang-3", "lang-4", "lang-5",
+        "lang-6", "lang-7", "lang-8", "lang-9",
+        "Swahili", "Yoruba", "Hausa",
+      ])
+    })
+  })
+
+  it("drops overflow entries duplicating the primary, a box, or each other", () => {
+    openDialogWithBasics({ target: "French" })
+    fillToBoxLimit()
+
+    fireEvent.change(screen.getByTestId("create-bulk-target-langs"), {
+      target: { value: "french, LANG-3, Swahili, swahili" },
+    })
+
+    // Only Swahili is genuinely new — the primary, an existing box, and the
+    // repeat within the field itself all drop case-insensitively.
+    expect(screen.getByTestId("create-bulk-target-langs-count").textContent).toContain("1")
+  })
+
   it("removes a box via its × button", () => {
     openDialogWithBasics()
     addExtraLanguage("es")

@@ -42,6 +42,14 @@ export const projectSettings = defineNamespace({
     "projectSettings.create.targetLanguagePlaceholder": "French, conversational Swahili, zh-Hant…",
     "projectSettings.create.additionalTargetPlaceholder": "Add another…",
     "projectSettings.create.addTargetLanguageAction": "Add another language",
+    "projectSettings.create.bulkTargetLanguagesHint":
+      "That's all {max} boxes. Add any remaining languages here, separated by commas.",
+    "projectSettings.create.bulkTargetLanguagesPlaceholder":
+      "Swahili, Yoruba, Hausa, zh-Hant…",
+    "projectSettings.create.bulkTargetLanguagesCount": plural({
+      one: "Adds {count} more lane.",
+      other: "Adds {count} more lanes.",
+    }),
     "projectSettings.create.languageHintAriaLabel": "What can I enter here?",
     "projectSettings.create.languageHintTooltip":
       "Any label works — a BCP-47 tag, a language name, or a register description " +
@@ -803,6 +811,29 @@ export const projectSettings = defineNamespace({
         description:
           "Label of the button under the target-language boxes in the create dialog " +
           "that appends one more empty box (one per additional target lane).",
+      },
+      "projectSettings.create.bulkTargetLanguagesHint": {
+        description:
+          "Field description above the comma-separated overflow field in the create " +
+          "dialog, shown once the per-lane boxes have hit their limit and the plus " +
+          "button has been replaced.",
+        placeholders: {
+          max: "The number of individual target-language boxes the dialog allows before switching to the overflow field.",
+        },
+      },
+      "projectSettings.create.bulkTargetLanguagesPlaceholder": {
+        description:
+          "Placeholder in the comma-separated target-language overflow field, showing " +
+          "the expected comma-delimited shape.",
+      },
+      "projectSettings.create.bulkTargetLanguagesCount": {
+        description:
+          "Count of extra target lanes recognised in the comma-separated overflow " +
+          "field, shown beneath it as live feedback. Reflects lanes that would " +
+          "actually be created, after duplicates and the overall cap are applied.",
+        placeholders: {
+          count: "How many extra target lanes the overflow field currently contributes; governs the plural form.",
+        },
       },
       "projectSettings.create.languageHintAriaLabel": {
         description: "Accessible name of the small info-icon button beside a source/target language field that opens an explanatory tooltip.",

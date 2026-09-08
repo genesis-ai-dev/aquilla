@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog"
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { LanguageComboboxInput } from "@/components/LanguageComboboxInput"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Spinner } from "@/components/ui/spinner"
@@ -104,6 +105,14 @@ const MAX_EXTRA_LANGUAGE_LENGTH = 64
  * somebody to.
  */
 const MAX_TARGET_LANES = 50
+
+/**
+ * How many individual boxes the target field stacks before it stops growing.
+ * Past this the remaining lanes go into one comma-separated field instead:
+ * ten rows already make for a tall dialog, and pasting a list beats forty
+ * more clicks on the plus button.
+ */
+const MAX_TARGET_LANE_BOXES = 10
 
 /**
  * AQU-538 creation fix (spec §5): the self-contained shape's target field
@@ -960,6 +969,15 @@ function validateTargetLanguage(
  *  re-uses one row's DOM (and focus) for another row's value. */
 type LaneDraft = { id: number; value: string }
 
+/** Split the overflow field. Commas are the documented separator; newlines
+ *  count too so pasting a column of languages works without reformatting. */
+function splitBulkLanes(raw: string): string[] {
+  return raw
+    .split(/[,\n]/)
+    .map((tag) => tag.trim())
+    .filter(Boolean)
+}
+
 function TargetLanguageInputs({
   onPrimaryChange,
   onExtrasChange,
@@ -974,31 +992,54 @@ function TargetLanguageInputs({
   const t = useT()
   // Index 0 is the project's targetLanguage; 1..n are the additional lanes.
   const [lanes, setLanes] = useState<LaneDraft[]>([{ id: 0, value: "" }])
+  // Overflow once every box is used: comma-separated, parsed the same way.
+  const [bulk, setBulk] = useState("")
   const nextLaneId = useRef(1)
 
-  function sync(next: LaneDraft[]) {
-    setLanes(next)
-    onPrimaryChange(next[0]?.value ?? "")
-    // Blank boxes and anything an earlier box already claimed are dropped
-    // instead of PATCHed; the offending row surfaces the error inline.
+  /**
+   * Collapse the boxes and the overflow field into the lane list the form
+   * submits. Blank entries, over-long ones, and case-insensitive duplicates
+   * are dropped rather than PATCHed; boxes win over the overflow field
+   * because they came first. The primary is excluded — it travels as
+   * targetLanguage, not as a lane.
+   */
+  function collectExtras(nextLanes: LaneDraft[], nextBulk: string): string[] {
     const claimed = new Set<string>()
-    const primary = (next[0]?.value ?? "").trim().toLowerCase()
+    const primary = (nextLanes[0]?.value ?? "").trim().toLowerCase()
     if (primary) claimed.add(primary)
     const extras: string[] = []
-    for (const lane of next.slice(1)) {
-      const trimmed = lane.value.trim()
-      if (!trimmed) continue
+    const candidates = [
+      ...nextLanes.slice(1).map((lane) => lane.value),
+      ...splitBulkLanes(nextBulk),
+    ]
+    for (const candidate of candidates) {
+      const trimmed = candidate.trim()
+      if (!trimmed || trimmed.length > MAX_EXTRA_LANGUAGE_LENGTH) continue
       const lower = trimmed.toLowerCase()
       if (claimed.has(lower)) continue
+      // The primary occupies one of the MAX_TARGET_LANES slots.
+      if (extras.length >= MAX_TARGET_LANES - 1) break
       claimed.add(lower)
       extras.push(trimmed)
     }
-    onExtrasChange(extras)
+    return extras
+  }
+
+  function sync(nextLanes: LaneDraft[], nextBulk: string) {
+    setLanes(nextLanes)
+    setBulk(nextBulk)
+    onPrimaryChange(nextLanes[0]?.value ?? "")
+    onExtrasChange(collectExtras(nextLanes, nextBulk))
   }
 
   const values = lanes.map((l) => l.value)
   const lastFilled = (values[values.length - 1] ?? "").trim().length > 0
-  const canAddMore = lanes.length < MAX_TARGET_LANES && lastFilled
+  const atBoxLimit = lanes.length >= MAX_TARGET_LANE_BOXES
+  const canAddMore = !atBoxLimit && lastFilled
+  // What the overflow field contributes beyond the boxes, after dedup and
+  // the cap — so the count reflects what would actually be created.
+  const bulkAccepted =
+    collectExtras(lanes, bulk).length - collectExtras(lanes, "").length
 
   return (
     <div className="flex flex-col gap-2" data-testid="create-target-lang-inputs">
@@ -1028,7 +1069,10 @@ function TargetLanguageInputs({
                 exclude={values.filter((_, i) => i !== index)}
                 onBlur={index === 0 ? onBlur : undefined}
                 onValueChange={(next) =>
-                  sync(lanes.map((l, i) => (i === index ? { ...l, value: next } : l)))
+                  sync(
+                    lanes.map((l, i) => (i === index ? { ...l, value: next } : l)),
+                    bulk,
+                  )
                 }
                 placeholder={
                   index === 0
@@ -1045,7 +1089,7 @@ function TargetLanguageInputs({
                   })}
                   data-testid={`create-target-lang-remove-${index}`}
                   className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-60 hover:bg-muted hover:opacity-100"
-                  onClick={() => sync(lanes.filter((_, i) => i !== index))}
+                  onClick={() => sync(lanes.filter((_, i) => i !== index), bulk)}
                 >
                   <X className="size-4" aria-hidden="true" />
                 </button>
@@ -1056,21 +1100,54 @@ function TargetLanguageInputs({
         )
       })}
 
-      <div>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={!canAddMore}
-          data-testid="create-add-target-lang"
-          onClick={() =>
-            sync([...lanes, { id: nextLaneId.current++, value: "" }])
-          }
-        >
-          <Plus className="size-4" aria-hidden="true" />
-          {t("projectSettings.create.addTargetLanguageAction")}
-        </Button>
-      </div>
+      {atBoxLimit ? (
+        <div className="flex flex-col gap-1">
+          <FieldDescription>
+            {t("projectSettings.create.bulkTargetLanguagesHint", {
+              max: MAX_TARGET_LANE_BOXES,
+            })}
+          </FieldDescription>
+          <Textarea
+            id="project-create-bulk-target-langs"
+            data-testid="create-bulk-target-langs"
+            name="aquilla-project-bulk-target-languages"
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="none"
+            spellCheck={false}
+            rows={3}
+            value={bulk}
+            onChange={(event) => sync(lanes, event.target.value)}
+            placeholder={t("projectSettings.create.bulkTargetLanguagesPlaceholder")}
+          />
+          {bulkAccepted > 0 && (
+            <p
+              className="text-xs text-muted-foreground"
+              data-testid="create-bulk-target-langs-count"
+            >
+              {t("projectSettings.create.bulkTargetLanguagesCount", {
+                count: bulkAccepted,
+              })}
+            </p>
+          )}
+        </div>
+      ) : (
+        <div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={!canAddMore}
+            data-testid="create-add-target-lang"
+            onClick={() =>
+              sync([...lanes, { id: nextLaneId.current++, value: "" }], bulk)
+            }
+          >
+            <Plus className="size-4" aria-hidden="true" />
+            {t("projectSettings.create.addTargetLanguageAction")}
+          </Button>
+        </div>
+      )}
     </div>
   )
 }

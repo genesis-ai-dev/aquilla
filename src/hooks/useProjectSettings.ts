@@ -145,6 +145,13 @@ export interface UseProjectSettings {
   updatedAt: string | null
   /** True after the first GET resolves (success OR network failure). */
   hasFetched: boolean
+  /**
+   * AQU-1083: the org default this project inherits when it has no
+   * `countStructuralCells` of its own. Null when the project has no org, or
+   * before the first response that carries it — read it as
+   * `settings.countStructuralCells ?? orgCountStructuralCells ?? true`.
+   */
+  orgCountStructuralCells: boolean | null
   isOnline: boolean
   canEdit: boolean
   reasonCannotEdit: CannotEditReason
@@ -303,9 +310,18 @@ export function useProjectSettings(
   // the next queued PATCH runs in the same microtask the previous one
   // resolves, well before React commits and runs the effect.
   const serverRef = useRef<ProjectSettingsResponse | null>(null)
+  // AQU-1083: the org default, held apart from the snapshot above because not
+  // every snapshot carries it — the optimistic one built during a patch has no
+  // server response behind it, and a server that predates the field omits it.
+  // Either would otherwise blank the org default for a moment and flip the
+  // project control's meaning while a save was in flight.
+  const [orgCountStructuralCells, setOrgCountStructuralCells] = useState<boolean | null>(null)
   const writeServer = useCallback((next: ProjectSettingsResponse | null) => {
     serverRef.current = next
     setServer(next)
+    if (next?.orgCountStructuralCells !== undefined) {
+      setOrgCountStructuralCells(next.orgCountStructuralCells)
+    }
   }, [])
 
   // Keep a ref so refresh's identity is stable across connectivity changes.
@@ -755,6 +771,7 @@ export function useProjectSettings(
     updatedBy: server?.updatedBy ?? null,
     updatedAt: server?.updatedAt ?? null,
     hasFetched,
+    orgCountStructuralCells,
     isOnline,
     canEdit,
     reasonCannotEdit,

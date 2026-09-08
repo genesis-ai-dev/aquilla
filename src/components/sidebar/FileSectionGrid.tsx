@@ -7,15 +7,20 @@ interface Props {
   projectId: string
   fileId: string
   validationCount: number
+  /** AQU-1083: the project's effective structural-cell policy. Flipping it
+   *  changes every number below, so the snapshot has to be revalidated. */
+  countStructural?: boolean
   getTokenForFile: (fileId: string) => Promise<string | null>
   onSectionClick: (sectionLabel: string) => void
   chapters?: BookHealthChapter[]
 }
 
 /** Sections shown beneath an expanded file, with per-cell health squares. */
-export function FileSectionGrid({ projectId, fileId, validationCount, getTokenForFile, onSectionClick, chapters }: Props) {
+export function FileSectionGrid({ projectId, fileId, validationCount, countStructural, getTokenForFile, onSectionClick, chapters }: Props) {
   const t = useT()
-  const { sections, error, retry } = useSectionProgressState(projectId, fileId, validationCount, getTokenForFile)
+  const { sections, error, retry } = useSectionProgressState(
+    projectId, fileId, validationCount, getTokenForFile, countStructural,
+  )
 
   if (!chapters && sections === null) {
     return (

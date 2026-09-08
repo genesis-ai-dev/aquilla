@@ -540,12 +540,16 @@ export function ProjectWorkspace() {
     settingsFetched,
   } = useProject(projectId!)
   // AQU-1083: the effective policy for this project — its own answer, else its
-  // org's (which rides on the project record), else count them. The footer
-  // below is the only progress surface that counts cells itself; every other
-  // one reads a number the server already resolved this against.
+  // org's, else count them. Both legs come from the settings hook, which is
+  // the one thing here that re-reads on a remote change frame and on window
+  // focus; an org-level flip therefore reaches this workspace without a
+  // reload. The footer below is the only progress surface that counts cells
+  // itself, and the sidebar's chapter tiles need the value to know when their
+  // cached snapshot is stale — every other surface reads a number the server
+  // already resolved this against.
   const countStructuralCells =
     projectSettings?.settings?.countStructuralCells
-    ?? loadedProject?.orgCountStructuralCells
+    ?? projectSettings?.orgCountStructuralCells
     ?? true
   // Client-local overlays (corpusMarker, originalName, suggestionsDismissedAt,
   // aiSetupSkipped) live in IDB; merge them onto the server-fetched record on
@@ -10379,6 +10383,7 @@ export function ProjectWorkspace() {
                   activeChapterHealth={activeChapterHealth}
                   suggestionFileIds={suggestionFileIds}
                   validationCount={validationCount}
+                  countStructural={countStructuralCells}
                   getTokenForFile={getTokenForFile}
                   targetLang={activeLane}
                   onSelectFile={workspaceTabs.openFile}

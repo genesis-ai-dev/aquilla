@@ -1729,3 +1729,27 @@ export async function getTermbaseEditMinRoleForProject(
   return getTermbaseEditMinRole(env, project.org_id)
 }
 
+/**
+ * AQU-1083: the org default a project inherits when it has no answer of its
+ * own. Null for a project with no org — there is no default to inherit, which
+ * the caller renders as the built-in "count them".
+ *
+ * This rides on the project's SETTINGS response rather than its project
+ * record, deliberately: an open editor re-reads its settings on a remote
+ * change frame and on window focus, and never re-reads the project record at
+ * all. Putting it here is what lets an org-level flip reach a workspace that
+ * is already open.
+ */
+export async function getOrgCountStructuralCellsForProject(
+  env: Env,
+  projectId: string,
+): Promise<boolean | null> {
+  const project = await env.AQUILLA_PG.prepare(
+    "SELECT org_id FROM projects WHERE id = ?",
+  )
+    .bind(projectId)
+    .first<{ org_id: number | null }>()
+  if (!project?.org_id) return null
+  return getOrgCountStructuralCells(env, project.org_id)
+}
+

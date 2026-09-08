@@ -100,6 +100,42 @@ const BOOLEAN_POLICY_KEYS = new Set(["allowSelfAssignment"])
  */
 const COUNT_STRUCTURAL_KEY = "countStructuralCells"
 
+/**
+ * AQU-1083: tell each project's realtime room that its effective settings
+ * moved, so an editor already open on one re-reads instead of waiting for a
+ * focus or a reload.
+ *
+ * Best-effort by design, exactly like the single-project write's notify: the
+ * durable change has already landed and the settings read on reconnect is
+ * still the correctness path, so a failed notification must never fail the
+ * request. Shared by the two places an ORG-level decision changes what a
+ * PROJECT resolves — flipping the default, and clearing the overrides.
+ *
+ * `version` is the project settings row's version AFTER the change, and the
+ * two callers differ: clearing an override bumps that row, while flipping the
+ * org default does not touch it at all. Nothing on the receiving end compares
+ * the number — it re-reads unconditionally — but sending a version that never
+ * existed would be a trap for the first thing that does.
+ */
+function notifyProjectRoomsBestEffort(
+  c: { env: AuthHonoEnv["Bindings"]; executionCtx: { waitUntil(p: Promise<unknown>): void } },
+  projects: ReadonlyArray<{ projectId: string; version: number }>,
+): void {
+  if (projects.length === 0) return
+  const notify = Promise.all(
+    projects.map((row) =>
+      notifySyncWorkerOfProjectSettingsChange(c.env, row.projectId, row.version),
+    ),
+  ).then(() => undefined)
+  try {
+    c.executionCtx.waitUntil(notify)
+  } catch {
+    // Hono's direct test harness has no ExecutionContext; the notification is
+    // best-effort there just as it is in a deployed Worker.
+    void notify
+  }
+}
+
 interface OrgSettingsRow {
   org_id: number
   settings: string
@@ -379,6 +415,35 @@ orgSettings.on(
     }
 
     const fresh = await loadSettings(c.env, orgId)
+
+    // AQU-1083: this key is the only org setting a PROJECT resolves through,
+    // so it is the only one whose change alters what a project's own progress
+    // reads say. The projects that feel it are exactly the ones with no
+    // override of their own — an overriding project is deliberately deaf, and
+    // the reset dialog is what offers to change that.
+    //
+    // Gated on the value actually CHANGING: the client patch is a whole-object
+    // read-modify-write, so every org settings save echoes this key back, and
+    // notifying on presence would wake every project room in the org whenever
+    // anyone touched an unrelated setting.
+    if (current.settings[COUNT_STRUCTURAL_KEY] !== body.settings[COUNT_STRUCTURAL_KEY]) {
+      const { results: inheriting } = await c.env.AQUILLA_PG.prepare(
+        `SELECT p.id AS project_id, COALESCE(ps.version, 0) AS version
+           FROM projects p
+           LEFT JOIN project_settings ps ON ps.project_id = p.id
+          WHERE p.org_id = ? AND p.archived_at IS NULL
+            AND ps.count_structural IS NULL`,
+      ).bind(orgId).all<{ project_id: string; version: number }>()
+      // Their own settings row is untouched — only what it RESOLVES to moved.
+      notifyProjectRoomsBestEffort(
+        c,
+        (inheriting ?? []).map((row) => ({
+          projectId: row.project_id,
+          version: Number(row.version),
+        })),
+      )
+    }
+
     return c.json(fresh)
   },
 )
@@ -572,19 +637,11 @@ orgSettings.post(
           AND ps.count_structural IS NOT NULL`,
     ).bind(COUNT_STRUCTURAL_KEY, user.id, orgId).run()
 
-    // Best-effort, exactly as the single-project write is: an editor open on
-    // one of these should re-read, but a failed notification must not fail
-    // the change that already landed.
-    const notify = Promise.all(
-      affected.map((row) =>
-        notifySyncWorkerOfProjectSettingsChange(c.env, row.project_id, Number(row.version) + 1),
-      ),
-    ).then(() => undefined)
-    try {
-      c.executionCtx.waitUntil(notify)
-    } catch {
-      void notify
-    }
+    // The UPDATE above bumped each of these rows by one.
+    notifyProjectRoomsBestEffort(
+      c,
+      affected.map((row) => ({ projectId: row.project_id, version: Number(row.version) + 1 })),
+    )
 
     return c.json({
       cleared: affected.length,

@@ -166,3 +166,103 @@ describe("project: countStructuralCells is a lead-level, key-exact carve-out", (
     expect((await storedProject()).countStructuralCells).toBeUndefined()
   })
 })
+
+// The carve-out lowers WHO may write this key. It must not also lower the
+// concurrency guard that protects every other key in the same blob — a lead
+// writing on a stale version would otherwise silently clobber a maintainer's
+// concurrent edit to a setting the lead cannot even see.
+describe("optimistic concurrency still applies to this key", () => {
+  it("409s a project lead writing on a stale version, and stores nothing", async () => {
+    await seedOrg()
+    await seedProject()
+    expect((await patchProject(await jwtFor("leo"), { countStructuralCells: false })).status).toBe(200)
+
+    // patchProject always sends ifMatchVersion: 0, which the write above made stale.
+    const stale = await patchProject(await jwtFor("leo"), { countStructuralCells: true })
+    expect(stale.status).toBe(409)
+    const body = (await stale.json()) as { current?: { version: number } }
+    expect(body.current?.version).toBe(1)
+    expect((await storedProject()).countStructuralCells).toBe(false)
+  })
+
+  it("409s a maintainer writing the org key on a stale version", async () => {
+    await seedOrg()
+    expect((await patchOrg(await jwtFor("mara"), { countStructuralCells: false })).status).toBe(200)
+    const stale = await patchOrg(await jwtFor("mara"), { countStructuralCells: true })
+    expect(stale.status).toBe(409)
+    expect((await storedOrg()).countStructuralCells).toBe(false)
+  })
+})
+
+// AQU-1083: the org default rides on the project SETTINGS response.
+//
+// It used to ride on the project RECORD, which an open editor never re-reads —
+// so an org-level flip could not reach a workspace that was already open. This
+// response is the one the editor re-reads on a remote change frame and on
+// window focus, which is the whole reason it moved here.
+describe("the settings response carries the org default", () => {
+  const getProjectSettings = async (jwt: string) =>
+    app.request("/api/v2/projects/p1/settings", { headers: authHeader(jwt) }, env)
+
+  it("reports the org's answer to a project that has none of its own", async () => {
+    await seedOrg()
+    await seedProject()
+    await patchOrg(await jwtFor("mara"), { countStructuralCells: false })
+    const body = (await (await getProjectSettings(await jwtFor("leo"))).json()) as {
+      orgCountStructuralCells: boolean | null
+      settings: Record<string, unknown>
+    }
+    expect(body.orgCountStructuralCells).toBe(false)
+    // And the project's own answer is still absent — this is the fallback, not
+    // a value that has been stamped into the project.
+    expect(body.settings.countStructuralCells).toBeUndefined()
+  })
+
+  it("follows the org switch", async () => {
+    await seedOrg()
+    await seedProject()
+    const read = async () =>
+      ((await (await getProjectSettings(await jwtFor("leo"))).json()) as
+        { orgCountStructuralCells: boolean | null }).orgCountStructuralCells
+    // Unset at the org reads as the built-in default: count them.
+    expect(await read()).toBe(true)
+    await patchOrg(await jwtFor("mara"), { countStructuralCells: false })
+    expect(await read()).toBe(false)
+  })
+
+  it("is null for a project with no organization", async () => {
+    await seedOrg()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, created_by) VALUES ('solo', 'Solo', 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('solo',3,500,1)",
+    ).run()
+    const res = await app.request(
+      "/api/v2/projects/solo/settings",
+      { headers: authHeader(await jwtFor("leo")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    // No org means no default to inherit. The client reads that as "count
+    // them", the same as every project did before this setting existed.
+    expect((await res.json() as { orgCountStructuralCells: boolean | null })
+      .orgCountStructuralCells).toBeNull()
+  })
+
+  it("carries it on the 409 body too, which is what a conflicted client snaps to", async () => {
+    await seedOrg()
+    await seedProject()
+    await patchOrg(await jwtFor("mara"), { countStructuralCells: false })
+    expect((await patchProject(await jwtFor("leo"), { countStructuralCells: true })).status).toBe(200)
+
+    const stale = await patchProject(await jwtFor("leo"), { countStructuralCells: false })
+    expect(stale.status).toBe(409)
+    const body = (await stale.json()) as {
+      current?: { orgCountStructuralCells: boolean | null }
+    }
+    // Without this the project control would lose what "Organization default"
+    // means at exactly the moment it redraws from the conflict winner.
+    expect(body.current?.orgCountStructuralCells).toBe(false)
+  })
+})

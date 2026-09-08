@@ -385,18 +385,9 @@ export interface ProjectRecord {
    * every terminology write, so this is an affordance value, not authority.
    */
   termbaseEditMinRole?: number | null
-  /**
-   * AQU-1083: the ORG's default for whether structural cells — chapter
-   * headings, section titles, book names — count toward progress. Sent by the
-   * single-project endpoint for the same reason as the floor above: the
-   * project's own control offers "use the organization default" and cannot
-   * label that option without knowing what the default is, and a project lead
-   * may not be able to read org settings at all.
-   *
-   * Absent (older server, local-only project) ⇒ true, which is what every
-   * project did before this setting existed.
-   */
-  orgCountStructuralCells?: boolean | null
+  // AQU-1083's org default is NOT here. It lives on the project settings
+  // response (`ProjectSettingsResponse.orgCountStructuralCells`), because that
+  // is the one an open editor re-reads when someone else changes it.
   sourceLanguage: string
   targetLanguage: string
   /**

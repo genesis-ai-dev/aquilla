@@ -217,6 +217,16 @@ export interface ProjectSettingsResponse {
   updatedAt: string
   updatedBy: { id: number; username: string } | null
   settings: ProjectWideSettings
+  /**
+   * AQU-1083: the org default this project inherits when `settings` carries no
+   * `countStructuralCells` of its own. Null when the project has no org.
+   *
+   * It rides on THIS response rather than the project record because this is
+   * the one an open editor re-reads — on a remote change frame and on window
+   * focus — so an org-level flip reaches a workspace that is already open.
+   * Optional: a server that predates this simply omits it.
+   */
+  orgCountStructuralCells?: boolean | null
 }
 
 export type PatchResult =

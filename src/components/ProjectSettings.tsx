@@ -352,6 +352,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     dismissConflict,
     hasFetched: sharedSettingsFetched,
     settings: sharedSettingsBlob,
+    // AQU-1083: what "Organization default" currently resolves to, from the
+    // same response as the value it is the fallback for.
+    orgCountStructuralCells,
   } = useProjectSettings(id ?? null, project?.syncRole?.level ?? null)
 
   // Org context for the termbase-sharing section. The user's org; the section's
@@ -2210,7 +2213,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               structuralCellsRow={
                 <StructuralCellsProjectSection
                   value={sharedSettingsBlob?.countStructuralCells}
-                  orgDefault={project?.orgCountStructuralCells ?? true}
+                  orgDefault={orgCountStructuralCells ?? true}
                   disabled={!canEditShared}
                   disabledTooltip={sharedDisabledTooltip ?? undefined}
                   onPatch={patchShared}

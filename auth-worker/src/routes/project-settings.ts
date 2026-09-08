@@ -34,9 +34,16 @@ import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { ROLE } from "../types"
 import { resolveProjectRole } from "../services/project-permissions"
-import { getTermbaseEditMinRoleForProject } from "../services/org-permissions"
+import {
+  getTermbaseEditMinRoleForProject,
+  getOrgCountStructuralCellsForProject,
+} from "../services/org-permissions"
 import { notifySyncWorkerOfProjectSettingsChange } from "../services/sync-worker-notify"
-import { loadProjectSettings, updateProjectSettingsShared } from "../../../db/shared/projects"
+import {
+  loadProjectSettings,
+  updateProjectSettingsShared,
+  type ProjectSettingsResponse,
+} from "../../../db/shared/projects"
 
 const projectSettings = new Hono<AuthHonoEnv>()
 
@@ -86,6 +93,25 @@ export function changedSettingsKeys(
   return changed
 }
 
+/**
+ * AQU-1083: attach the org-level defaults this project inherits.
+ *
+ * Applied to EVERY settings response, the 409 body included — a client that
+ * conflicts snaps its whole state to `current`, so a body without this field
+ * would silently drop the org default and the project's control would start
+ * claiming the wrong thing about what "Organization default" means.
+ */
+async function withOrgDefaults(
+  env: AuthHonoEnv["Bindings"],
+  projectId: string,
+  response: ProjectSettingsResponse,
+): Promise<ProjectSettingsResponse & { orgCountStructuralCells: boolean | null }> {
+  return {
+    ...response,
+    orgCountStructuralCells: await getOrgCountStructuralCellsForProject(env, projectId),
+  }
+}
+
 // ──────────────────────────────────────────────────────────────────────────
 // GET /api/v2/projects/:projectId/settings
 // ──────────────────────────────────────────────────────────────────────────
@@ -98,7 +124,7 @@ projectSettings.get("/:projectId/settings", authMiddleware, async (c) => {
   if (!role) return c.json({ error: "no access to project" }, 403)
 
   const response = await loadProjectSettings(c.env.AQUILLA_PG, projectId)
-  return c.json(response)
+  return c.json(await withOrgDefaults(c.env, projectId, response))
 })
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -217,7 +243,13 @@ projectSettings.on(
     })
 
     if (result.status === "conflict") {
-      return c.json({ error: "version mismatch", current: result.current }, 409)
+      return c.json(
+        {
+          error: "version mismatch",
+          current: await withOrgDefaults(c.env, projectId, result.current),
+        },
+        409,
+      )
     }
     if (result.status === "error") {
       return c.json({ error: `write failed: ${result.message}` }, 500)
@@ -235,7 +267,7 @@ projectSettings.on(
       // remains best-effort there just as it is in a deployed Worker.
       void notifyPromise
     }
-    return c.json(fresh)
+    return c.json(await withOrgDefaults(c.env, projectId, fresh))
   },
 )
 

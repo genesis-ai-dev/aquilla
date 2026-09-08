@@ -56,6 +56,7 @@ vi.mock("@/hooks/useOrgSettings", () => ({
     allowSelfAssignment: false,
     // AQU-822: terminology floor — default Project lead.
     termbaseEditMinRole: 500,
+    languageEditMinRole: 600,
     refresh: vi.fn(async () => null),
     requestPromotion: vi.fn(async () => ({ kind: "blocked" })),
   }),

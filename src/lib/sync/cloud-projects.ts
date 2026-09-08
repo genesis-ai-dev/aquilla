@@ -55,6 +55,9 @@ export interface CloudProjectSummary {
   /** AQU-822: the org's effective termbase-edit floor. Returned by the
    *  single-project endpoint; absent on the list endpoint / older servers. */
   termbaseEditMinRole?: number | null
+  /** AQU-1086: the org's effective language-edit floor. Returned by the
+   *  single-project endpoint; absent on the list endpoint / older servers. */
+  languageEditMinRole?: number | null
   /** Present on the single-project endpoint; list endpoint filters archived rows. */
   archivedAt?: string | null
   /** Present on the single-project endpoint; used to show "archived by X" in Trash. */
@@ -427,6 +430,10 @@ export function minimalProjectRecord(summary: CloudProjectSummary): ProjectRecor
   // callers read as the PROJECT_LEAD default.
   if (summary.termbaseEditMinRole !== undefined) {
     record.termbaseEditMinRole = summary.termbaseEditMinRole
+  }
+  // AQU-1086: same for the org's language-edit floor.
+  if (summary.languageEditMinRole !== undefined) {
+    record.languageEditMinRole = summary.languageEditMinRole
   }
   // AQU-476/478: propagate link mode/consumes/gate/cursor when present.
   if (summary.sourceLinkMode !== undefined) record.sourceLinkMode = summary.sourceLinkMode

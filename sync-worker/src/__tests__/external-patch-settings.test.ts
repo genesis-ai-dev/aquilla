@@ -157,6 +157,57 @@ describe('PatchSettings — per-key floors', () => {
     expect(commitRes.status).toBe(200)
   })
 
+  it('language keys default to MAINTAINER (600), and an org languageEditMinRole override lowers them (AQU-1086)', async () => {
+    const env = makeEnv(tdb.db)
+    // Default: no org setting → a project lead is denied, same as any other key.
+    const leadBefore = await memberToken(tdb, 500)
+    const { res: deniedRes, body: denied } = await prepare(env, leadBefore.token, patchCmd([
+      { key: 'targetLanguage', value: 'de' },
+    ]))
+    expect(deniedRes.status).toBe(403)
+    expect(denied.error.code).toBe('permission_denied')
+
+    // Org opts in → the same lead-scoped PAT can patch a language key, at
+    // prepare AND at commit.
+    await tdb.pg.query(
+      `INSERT INTO org_settings (org_id, settings, version) VALUES ($1, $2, 1)`,
+      [ORG_ID, JSON.stringify({ languageEditMinRole: 500 })],
+    )
+    const lead = await memberToken(tdb, 500)
+    const { res, body } = await prepare(env, lead.token, patchCmd([
+      { key: 'targetLanguage', value: 'de' },
+      { key: 'targetLanes', value: ['es'] },
+    ]))
+    expect(res.status).toBe(200)
+    const { res: commitRes } = await commit(env, lead.token, body.changeset.id)
+    expect(commitRes.status).toBe(200)
+    const stored = JSON.parse((await tdb.rows<{ settings: string }>('project_settings'))[0].settings)
+    expect(stored.targetLanguage).toBe('de')
+    expect(stored.targetLanes).toEqual(['es'])
+  })
+
+  it('a lowered languageEditMinRole does not widen any other key (AQU-1086)', async () => {
+    const env = makeEnv(tdb.db)
+    await tdb.pg.query(
+      `INSERT INTO org_settings (org_id, settings, version) VALUES ($1, $2, 1)`,
+      [ORG_ID, JSON.stringify({ languageEditMinRole: 500 })],
+    )
+    const lead = await memberToken(tdb, 500)
+    // Mixed batch takes the max floor — the non-language key still needs 600.
+    const { res: mixedRes } = await prepare(env, lead.token, patchCmd([
+      { key: 'targetLanguage', value: 'de' },
+      { key: 'brief', value: 'x' },
+    ]))
+    expect(mixedRes.status).toBe(403)
+
+    // Terminology keeps its own (unchanged) floor — a contributor stays denied.
+    const contributor = await memberToken(tdb, 400)
+    const { res: termRes } = await prepare(env, contributor.token, patchCmd([
+      { key: 'terminology', value: { concepts: [] } },
+    ]))
+    expect(termRes.status).toBe(403)
+  })
+
   it('mixing terminology with another key takes the max floor (600)', async () => {
     const env = makeEnv(tdb.db)
     const lead = await memberToken(tdb, 500)

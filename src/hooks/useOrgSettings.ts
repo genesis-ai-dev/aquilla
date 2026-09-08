@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { ROLE } from "@/lib/frontier/roles"
+import { resolveLanguageEditFloor } from "@/lib/sync/role-policy"
 import {
   fetchOrgSettings,
   patchOrgSettings,
@@ -105,6 +106,15 @@ const DEFAULT_ALLOW_SELF_ASSIGNMENT = false
 // default) — all three must agree.
 const TERMBASE_FLOOR_WRITE_MIN_ROLE = ROLE.OWNER
 const DEFAULT_TERMBASE_EDIT_MIN_ROLE = ROLE.PROJECT_LEAD
+
+// AQU-1086: languageEditMinRole is the second write-gating permission-policy
+// key (who may change a project's source/target language and its extra target
+// lanes). Same OWNER-only write gate; its default is MAINTAINER — today's
+// behaviour — so an org opts IN to project-lead language editing. See
+// DEFAULT_LANGUAGE_EDIT_MIN_ROLE in src/lib/sync/role-policy.ts (the client
+// gate) and in auth-worker/src/services/org-permissions.ts (the server
+// default) — all three must agree.
+const LANGUAGE_FLOOR_WRITE_MIN_ROLE = ROLE.OWNER
 const EMPTY_RULES: TranslationRule[] = []
 
 export interface UseOrgSettings {
@@ -199,6 +209,13 @@ export interface UseOrgSettings {
    * Settings surface rather than for project-level gating.
    */
   termbaseEditMinRole: number
+  /**
+   * AQU-1086: the org's effective `languageEditMinRole` — the minimum role
+   * allowed to change a project's languages. The per-project gate reads the
+   * same floor off the project record (`ProjectRecord.languageEditMinRole`),
+   * so this is here for the org Settings UI.
+   */
+  languageEditMinRole: number
   /** Force a re-GET. */
   refresh: () => Promise<OrgSettingsResponse | null>
   /** Patch org settings (adds/replaces top-level keys). Blocked if !canEdit —
@@ -317,6 +334,14 @@ export function useOrgSettings(
     if (typeof raw === "number" && Number.isFinite(raw) && raw >= 100 && raw <= 700) return raw
     return DEFAULT_TERMBASE_EDIT_MIN_ROLE
   })()
+
+  // AQU-1086: effective language-edit floor — explicit org setting, or the
+  // MAINTAINER default when unset / out of the role ladder.
+  const languageEditMinRole = resolveLanguageEditFloor(
+    typeof server?.settings?.languageEditMinRole === "number"
+      ? (server.settings.languageEditMinRole as number)
+      : null,
+  )
 
   // AQU-496: effective self-assignment authority — explicit org setting, or
   // false (leads-only) when unset.
@@ -441,6 +466,7 @@ export function useOrgSettings(
     memberProgressViewMinRole,
     allowSelfAssignment,
     termbaseEditMinRole,
+    languageEditMinRole,
     refresh,
     patch,
     requestPromotion,
@@ -474,4 +500,14 @@ export function canEditAssignmentAuthority(callerRoleLevel: number | null | unde
  */
 export function canEditTermbaseFloor(callerRoleLevel: number | null | undefined): boolean {
   return (callerRoleLevel ?? 0) >= TERMBASE_FLOOR_WRITE_MIN_ROLE
+}
+
+/**
+ * AQU-1086: True when `callerRoleLevel` is allowed to CHANGE the
+ * languageEditMinRole floor (OWNER-only, same rationale as the helpers above —
+ * a maintainer must not be able to hand out project-language editing on their
+ * own authority).
+ */
+export function canEditLanguageFloor(callerRoleLevel: number | null | undefined): boolean {
+  return (callerRoleLevel ?? 0) >= LANGUAGE_FLOOR_WRITE_MIN_ROLE
 }

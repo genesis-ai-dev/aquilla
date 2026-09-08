@@ -76,6 +76,20 @@ export interface OrgWideSettings {
    */
   termbaseEditMinRole?: number
   /**
+   * AQU-1086: minimum org/project role allowed to change a project's source
+   * and target language, and its extra target-lane registry (`targetLanes` /
+   * `archivedLanes`). Unset ⇒ MAINTAINER (600), i.e. the behaviour before
+   * this setting existed; an org opts in to project-lead language editing by
+   * lowering it to 500.
+   *
+   * It does NOT widen any other project setting: the server carve-out applies
+   * only to a write whose changed keys are all language keys (auth-worker
+   * project-settings route).
+   *
+   * Same OWNER-only write gate as termbaseEditMinRole / exportMinRole.
+   */
+  languageEditMinRole?: number
+  /**
    * AQU-433: Org-scoped provider API keys. Set once by an org owner/maintainer;
    * used as the baseline for all members and projects in the org.
    * Precedence: project key > user (localStorage) key > org key.

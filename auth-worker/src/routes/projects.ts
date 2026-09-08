@@ -50,10 +50,12 @@ import {
   bumpOrgActivity,
   canViewRoster,
   DEFAULT_TERMBASE_EDIT_MIN_ROLE,
+  DEFAULT_LANGUAGE_EDIT_MIN_ROLE,
   getEffectiveOrgRole,
   getOrCreateUserOrg,
   getRosterViewMinRole,
   getTermbaseEditMinRole,
+  getLanguageEditMinRole,
   listEffectiveProjectMembers,
 } from "../services/org-permissions"
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
@@ -625,11 +627,20 @@ projects.get("/:projectId", authMiddleware, async (c) => {
       ? await getTermbaseEditMinRole(c.env, row.org_id)
       : DEFAULT_TERMBASE_EDIT_MIN_ROLE
 
+  // AQU-1086: same deal for the org's language-edit floor — the Project
+  // Settings language fields and the Languages card gate on it, and the
+  // project-settings route re-resolves it on every language write.
+  const languageEditMinRole =
+    row.org_id != null
+      ? await getLanguageEditMinRole(c.env, row.org_id)
+      : DEFAULT_LANGUAGE_EDIT_MIN_ROLE
+
   return c.json({
     id: row.id,
     name: row.name,
     orgId: row.org_id,
     termbaseEditMinRole,
+    languageEditMinRole,
     archivedAt: row.archived_at,
     archivedBy: row.archived_by
       ? { id: row.archived_by, username: row.archived_by_username }

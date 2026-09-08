@@ -385,6 +385,17 @@ export interface ProjectRecord {
    * every terminology write, so this is an affordance value, not authority.
    */
   termbaseEditMinRole?: number | null
+  /**
+   * AQU-1086: the org's effective `languageEditMinRole` — the minimum role
+   * allowed to change this project's source/target language and its extra
+   * target lanes. Sent by the single-project endpoint so the Project Settings
+   * language fields and the Languages card share one floor without a second
+   * org-settings fetch. Absent (older server / local-only project) ⇒ the
+   * MAINTAINER default in `src/lib/sync/role-policy.ts`. The server
+   * re-resolves it on every language write, so this is an affordance value,
+   * not authority.
+   */
+  languageEditMinRole?: number | null
   sourceLanguage: string
   targetLanguage: string
   /**

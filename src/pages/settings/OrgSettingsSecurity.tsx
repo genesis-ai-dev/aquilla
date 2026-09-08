@@ -2,6 +2,7 @@ import { ExportPermissionsSection } from "@/components/settings/ExportPermission
 import { AssignmentAuthoritySection } from "@/components/settings/AssignmentAuthoritySection"
 import { RosterProgressSection } from "@/components/settings/RosterProgressSection"
 import { TermbaseEditSection } from "@/components/settings/TermbaseEditSection"
+import { LanguageEditSection } from "@/components/settings/LanguageEditSection"
 import { SettingsGroup } from "@/components/ui/page"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useOrgSettings, canEditRosterProgressFloor } from "@/hooks/useOrgSettings"
@@ -28,6 +29,7 @@ export function OrgSettingsSecurity() {
         <ExportPermissionsSection orgSettings={orgSettings} canEdit={canEdit} />
         <AssignmentAuthoritySection orgSettings={orgSettings} canEdit={canEdit} />
         <TermbaseEditSection orgSettings={orgSettings} canEdit={canEdit} />
+        <LanguageEditSection orgSettings={orgSettings} canEdit={canEdit} />
       </SettingsGroup>
     </OrgSettingsDetailPage>
   )

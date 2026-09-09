@@ -9,8 +9,13 @@
 // (`plans/<gitlabId>/<sha>.ndjson`) — the newest file per project id is used.
 // Both sides must be run against a fresh/empty ledger (see the brief) so
 // neither stream is delta-filtered against prior state.
+//
+// Both sides are streamed line-by-line via `readline` rather than read whole
+// into memory — daemon plan files for 166k-event projects can exceed 512 MB,
+// well past Node's ~512 MiB single-string readFileSync limit.
 import fs from "node:fs"
 import path from "node:path"
+import readline from "node:readline"
 import type { PlanLine } from "./plan"
 
 export interface CompareResult {
@@ -20,9 +25,27 @@ export interface CompareResult {
   order: number
 }
 
+/** Slimmed-down `PlanLine`: only what `compareProject` needs to diff and
+ *  order-check a plan. Event payloads are dropped so a 166k-event project's
+ *  comparison stays memory-bounded. */
+export interface ParityLine {
+  id: string
+  hash: string
+  fileId?: string | null
+  kind: string
+  reconcile?: true
+}
+
+function toParityLine(l: PlanLine): ParityLine {
+  const out: ParityLine = { id: l.id, hash: l.hash, fileId: l.event.fileId, kind: l.event.kind }
+  if (l.reconcile) out.reconcile = true
+  return out
+}
+
 /** Pure comparison: `old` is the migrate-all dry-run stream (id -> hash),
- *  `plan` is the daemon's materialized plan for the same project. */
-export function compareProject(old: Map<string, { hash: string }>, plan: PlanLine[]): CompareResult {
+ *  `plan` is the daemon's materialized plan for the same project, slimmed to
+ *  `ParityLine`s (no event payloads retained). */
+export function compareProject(old: Map<string, { hash: string }>, plan: ParityLine[]): CompareResult {
   const byId = new Map(plan.map((l) => [l.id, l]))
   let missing = 0
   let changed = 0
@@ -51,14 +74,14 @@ export function compareProject(old: Map<string, { hash: string }>, plan: PlanLin
   const lastCreateIdx = new Map<string, number>()
   plan.forEach((l, i) => {
     if (l.reconcile) return
-    if (l.event.kind === "source.cell.create" || l.event.kind === "file.create") {
-      const fileId = l.event.fileId
+    if (l.kind === "source.cell.create" || l.kind === "file.create") {
+      const fileId = l.fileId
       if (fileId) lastCreateIdx.set(fileId, i)
     }
   })
   plan.forEach((l, i) => {
     if (!l.reconcile) return
-    const fileId = l.event.fileId
+    const fileId = l.fileId
     if (!fileId) return
     const lastCreate = lastCreateIdx.get(fileId)
     if (lastCreate === undefined || i < lastCreate) order++
@@ -67,25 +90,56 @@ export function compareProject(old: Map<string, { hash: string }>, plan: PlanLin
   return { missing, extra, changed, order }
 }
 
-function readOldPlan(file: string): Map<string, { hash: string }> {
+/** Streams `<oldDir>/<id>.ndjson` (`{id, hash}` lines from migrate-all's
+ *  `--dump-plan`) line-by-line rather than reading the whole file, so a large
+ *  old-script dump never has to sit in memory as one string. */
+async function readOldPlan(file: string): Promise<Map<string, { hash: string }>> {
   const out = new Map<string, { hash: string }>()
-  const text = fs.readFileSync(file, "utf8")
-  for (const raw of text.split("\n")) {
-    const trimmed = raw.trim()
-    if (!trimmed) continue
-    const { id, hash } = JSON.parse(trimmed) as { id: string; hash: string }
-    out.set(id, { hash })
+  const rl = readline.createInterface({ input: fs.createReadStream(file), crlfDelay: Infinity })
+  let lineNo = 0
+  try {
+    for await (const raw of rl) {
+      lineNo++
+      const trimmed = raw.trim()
+      if (!trimmed) continue
+      let parsed: { id: string; hash: string }
+      try {
+        parsed = JSON.parse(trimmed) as { id: string; hash: string }
+      } catch (e) {
+        throw new Error(`${file}:${lineNo}: ${e instanceof Error ? e.message : String(e)}`)
+      }
+      out.set(parsed.id, { hash: parsed.hash })
+    }
+  } finally {
+    rl.close()
   }
   return out
 }
 
-function readPlanFile(file: string): PlanLine[] {
-  const out: PlanLine[] = []
-  const text = fs.readFileSync(file, "utf8")
-  for (const raw of text.split("\n")) {
-    const trimmed = raw.trim()
-    if (!trimmed) continue
-    out.push(JSON.parse(trimmed) as PlanLine)
+/** Streams a daemon plan file line-by-line, folding each `PlanLine` into a
+ *  slim `ParityLine` (dropping the event payload) so a 512 MB+ plan never
+ *  has to be materialized whole. Uses `readline` directly (rather than
+ *  `readPlan`'s batched generator) so a parse error can be pinned to the
+ *  exact line — `readPlan` only surfaces line boundaries at batch size. */
+async function readPlanFile(file: string): Promise<ParityLine[]> {
+  const out: ParityLine[] = []
+  const rl = readline.createInterface({ input: fs.createReadStream(file), crlfDelay: Infinity })
+  let lineNo = 0
+  try {
+    for await (const raw of rl) {
+      lineNo++
+      const trimmed = raw.trim()
+      if (!trimmed) continue
+      let parsed: PlanLine
+      try {
+        parsed = JSON.parse(trimmed) as PlanLine
+      } catch (e) {
+        throw new Error(`${file}:${lineNo}: ${e instanceof Error ? e.message : String(e)}`)
+      }
+      out.push(toParityLine(parsed))
+    }
+  } finally {
+    rl.close()
   }
   return out
 }
@@ -106,7 +160,7 @@ function newestPlanFile(plansDir: string, gitlabId: string): string | undefined 
   return best?.file
 }
 
-export function main(argv: string[]): number {
+export async function main(argv: string[]): Promise<number> {
   const [oldDir, plansDir, ...rest] = argv
   if (!oldDir || !plansDir) {
     console.error("usage: parity.ts <oldDir> <plansDir> [--only <id>]")
@@ -125,14 +179,14 @@ export function main(argv: string[]): number {
   const totals: CompareResult = { missing: 0, extra: 0, changed: 0, order: 0 }
   let noPlan = 0
   for (const id of ids) {
-    const old = readOldPlan(path.join(oldDir, `${id}.ndjson`))
+    const old = await readOldPlan(path.join(oldDir, `${id}.ndjson`))
     const planFile = newestPlanFile(plansDir, id)
     if (!planFile) {
       console.log(`${id} no-plan`)
       noPlan++
       continue
     }
-    const plan = readPlanFile(planFile)
+    const plan = await readPlanFile(planFile)
     const result = compareProject(old, plan)
     console.log(`${id} missing=${result.missing} extra=${result.extra} changed=${result.changed} order=${result.order}`)
     totals.missing += result.missing
@@ -148,5 +202,5 @@ export function main(argv: string[]): number {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  process.exit(main(process.argv.slice(2)))
+  main(process.argv.slice(2)).then((code) => process.exit(code))
 }

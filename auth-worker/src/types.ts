@@ -256,6 +256,8 @@ export interface Env {
   STRIPE_PUBLISHABLE_KEY?: string
   /** Recurring $500 / 4-week Field Plan price id (price_…). */
   BILLING_CHECKOUT_ENABLED?: string
+  /** Approved environment-specific catalog JSON. Amounts are fetched from Stripe. */
+  STRIPE_PRICE_CATALOG?: string
   STRIPE_PRICE_FIELD_MONTHLY?: string
   STRIPE_PRICE_FIELD_ANNUAL?: string
   STRIPE_PRICE_FIELD?: string

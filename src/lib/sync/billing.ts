@@ -101,3 +101,16 @@ export async function startBillingPortal(jwt: string, orgId: number): Promise<st
   if (!json.url) throw new Error("Portal session missing URL")
   return json.url
 }
+
+export type { BillingOffer, BillingOffers } from "../../../db/shared/billing-offers"
+
+export async function getBillingOffers(
+  jwt: string, orgId: number,
+): Promise<import("../../../db/shared/billing-offers").BillingOffers> {
+  const res = await fetchWithTimeout(
+    `${FRONTIER_BASE}/api/v2/orgs/${encodeURIComponent(String(orgId))}/billing/offers`,
+    { headers: { Authorization: `Bearer ${jwt}` } },
+  )
+  if (!res.ok) throw new Error("Plan prices are temporarily unavailable.")
+  return res.json()
+}

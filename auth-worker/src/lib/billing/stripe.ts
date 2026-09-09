@@ -48,6 +48,7 @@ export async function stripeForm(
   }
   const res = await fetch(`${STRIPE_API}${path}`, {
     method,
+    signal: AbortSignal.timeout(10_000),
     headers: {
       Authorization: `Bearer ${secret}`,
       "Content-Type": "application/x-www-form-urlencoded",

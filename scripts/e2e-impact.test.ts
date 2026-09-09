@@ -7,6 +7,7 @@ import {
 } from "./lib/e2e-run-mode"
 
 const specs = [
+  "e2e/specs/orgs/org-settings-billing.smoke.spec.ts",
   "e2e/specs/ai/completion.smoke.spec.ts",
   "e2e/specs/auth/login-account-setup-status.smoke.spec.ts",
   "e2e/specs/auth/session-expired-banner.smoke.spec.ts",
@@ -21,6 +22,14 @@ const specs = [
 ]
 
 describe("changed-file E2E impact selection", () => {
+  it("selects billing for catalog, client, and shared-contract changes", () => {
+    for (const file of ["config/pricing/stripe-sandbox.json", "db/shared/billing-offers.ts",
+      "src/components/org/BillingOffers.tsx", "auth-worker/src/lib/billing/catalog.ts"]) {
+      expect(selectAffectedE2E([file], specs).specs).toContain(
+        "e2e/specs/orgs/org-settings-billing.smoke.spec.ts")
+    }
+  })
+
   it("runs a changed smoke spec directly", () => {
     expect(selectAffectedE2E([specs[3]], specs).specs).toEqual([specs[3]])
   })

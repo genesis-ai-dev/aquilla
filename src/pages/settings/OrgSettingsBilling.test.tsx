@@ -3,8 +3,7 @@ import { render, screen } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { OrgSettingsBilling } from "./OrgSettingsBilling"
-import userEvent from "@testing-library/user-event"
-import { getOrgBilling, startBillingCheckout } from "@/lib/sync/billing"
+import { getOrgBilling, getBillingOffers } from "@/lib/sync/billing"
 import type { OrgBilling } from "@/lib/sync/billing"
 
 vi.mock("@/pages/settings/OrgSettingsShell", () => ({
@@ -20,6 +19,7 @@ vi.mock("@/lib/frontier/orgs", () => ({
 }))
 vi.mock("@/lib/sync/billing", () => ({
   getOrgBilling: vi.fn(),
+  getBillingOffers: vi.fn(),
   startBillingCheckout: vi.fn(),
   startBillingPortal: vi.fn(),
 }))
@@ -69,7 +69,11 @@ const unpaid: OrgBilling = {
   },
 }
 
-beforeEach(() => localStorage.clear())
+beforeEach(() => {
+  localStorage.clear()
+  vi.mocked(getBillingOffers).mockResolvedValue({ available: false, priceVersion: null,
+    entitlementVersion: null, usageInterval: "week", checkoutEnabled: false, offers: [] })
+})
 afterEach(() => vi.clearAllMocks())
 
 function renderBilling() {
@@ -85,14 +89,12 @@ function renderBilling() {
 }
 
 describe("OrgSettingsBilling", () => {
-  it("shows Explore plus a Coming soon Field Plan button", async () => {
+  it("shows the current Free plan and safe new-plan comparison", async () => {
     mockGet.mockResolvedValueOnce(unpaid)
     renderBilling()
-    const subscribe = await screen.findByTestId("subscribe-field-plan")
-    expect(subscribe).toBeDefined()
-    expect((subscribe as HTMLButtonElement).disabled).toBe(true)
-    expect(subscribe.textContent).toMatch(/Coming soon/i)
-    expect(screen.getByTestId("billing-plan").textContent).toMatch(/Explore/i)
+    expect(await screen.findByTestId("billing-plan")).toHaveTextContent("Free")
+    expect(await screen.findByRole("tab", { name: "Team & Enterprise" })).toBeDefined()
+    expect(screen.queryByTestId("subscribe-field-plan")).toBeNull()
     expect(screen.getByTestId("billing-usage").textContent).toMatch(/rolling seven-day/)
     expect(screen.getByRole("link", { name: "Check covered access" }).getAttribute("href")).toContain("ETEN%20affiliate")
     expect(screen.queryByText(/4 weeks|4-week|\$500|\$200/)).toBeNull()
@@ -128,16 +130,11 @@ describe("OrgSettingsBilling", () => {
     expect(screen.queryByTestId("subscribe-field-plan")).toBeNull()
     expect(screen.getByRole("link", { name: "Check covered access" })).toBeDefined()
   })
-  it("sends the selected monthly interval when checkout is enabled", async () => {
+  it("keeps new purchases unavailable even if the legacy checkout flag is enabled", async () => {
     mockGet.mockResolvedValueOnce({ ...unpaid, checkoutEnabled: true })
-    vi.mocked(startBillingCheckout).mockRejectedValueOnce(new Error("Test checkout reached"))
-    const user = userEvent.setup()
     renderBilling()
-    await user.click(await screen.findByRole("combobox", { name: "Field billing period" }))
-    await user.click(await screen.findByRole("option", { name: "Monthly" }))
-    await user.click(screen.getByRole("button", { name: "Upgrade to Field" }))
-    expect(startBillingCheckout).toHaveBeenCalledWith("jwt", 1, "field", 1, "monthly")
-    expect(await screen.findByRole("alert")).toHaveTextContent("Test checkout reached")
+    expect(await screen.findByTestId("billing-plan")).toHaveTextContent("Free")
+    expect(await screen.findByText(/Plan prices are temporarily unavailable/)).toBeDefined()
+    expect(screen.queryByRole("button", { name: /Upgrade to Field/ })).toBeNull()
   })
-
 })

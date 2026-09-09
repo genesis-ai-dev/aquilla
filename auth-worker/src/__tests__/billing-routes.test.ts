@@ -1,5 +1,5 @@
 import { env } from "cloudflare:test"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import app from "../index"
 import { seedUser, jwtFor, authHeader } from "./helpers/db"
 import { applyAddonPurchase, applySubscriptionSnapshot } from "../lib/billing/apply"
@@ -273,5 +273,43 @@ describe("verifyStripeSignature", () => {
     // would accept a signature over content this endpoint never saw.
     const t = Math.floor(Date.now() / 1000)
     expect(verifyStripeSignature({ payload, header: `t=${t},v0=${sign(t, secret)}`, secret })).toBe(false)
+  })
+})
+
+
+describe("GET /api/v2/orgs/:orgId/billing/offers", () => {
+  afterEach(() => vi.unstubAllGlobals())
+  it("requires billing authority before fetching Stripe information", async () => {
+    await seedOrg()
+    const fetch = vi.fn()
+    vi.stubGlobal("fetch", fetch)
+    const response = await request("http://local/api/v2/orgs/1/billing/offers", {
+      headers: authHeader(await jwtFor("anna")),
+    })
+    expect(response.status).toBe(403)
+    expect(fetch).not.toHaveBeenCalled()
+  })
+  it("returns a safe unavailable catalog when configuration is missing", async () => {
+    await seedOrg()
+    const response = await request("http://local/api/v2/orgs/1/billing/offers", {
+      headers: authHeader(await jwtFor("wendi")),
+    })
+    expect(response.status).toBe(200)
+    expect(response.headers.get("cache-control")).toBe("private, no-store")
+    expect(await response.json()).toMatchObject({ available: false, offers: [], checkoutEnabled: false })
+  })
+  it("passes real Stripe adapter output through the authenticated route", async () => {
+    await seedOrg()
+    const { default: manifest } = await import("../../../config/pricing/stripe-sandbox.json")
+    const { stripeCatalogResponse } = await import("./helpers/stripe-catalog")
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => Response.json(stripeCatalogResponse(new URL(url).pathname))))
+    const response = await app.request("http://local/api/v2/orgs/1/billing/offers", {
+      headers: authHeader(await jwtFor("wendi")),
+    }, { ...env, STRIPE_SECRET_KEY: "sk_test_fixture", STRIPE_PRICE_CATALOG: JSON.stringify(manifest) })
+    expect(response.status).toBe(200)
+    const body = await response.json() as { available: boolean; offers: Array<{ offer: string; interval: string; totalAmount: number }> }
+    expect(body.available).toBe(true)
+    expect(body.offers.find(o => o.offer === "team_20x" && o.interval === "year")?.totalAmount).toBe(720000)
+    expect(JSON.stringify(body)).not.toMatch(/credits|price_1|sk_test/i)
   })
 })

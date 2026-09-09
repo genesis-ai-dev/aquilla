@@ -1,9 +1,9 @@
 /** New-offer contract. Existing Field subscriptions retain their legacy rules. */
 export type Offer = 'free' | 'pro' | 'max_5x' | 'max_20x' | 'team' | 'team_20x'
 const credits: Record<Offer, number> = {
-  free: 100, pro: 200, max_5x: 1000, max_20x: 4000, team: 1000, team_20x: 4000,
+  free: 25, pro: 50, max_5x: 250, max_20x: 1000, team: 250, team_20x: 1000,
 }
-export function monthlyAllowance(offer: Offer, quantity = 1): number {
+export function weeklyAllowance(offer: Offer, quantity = 1): number {
   if (!Number.isSafeInteger(quantity) || quantity < 1
     || (quantity !== 1 && offer !== 'max_20x' && offer !== 'team_20x')) {
     throw new Error('Invalid capacity quantity')
@@ -13,30 +13,18 @@ export function monthlyAllowance(offer: Offer, quantity = 1): number {
   return allowance
 }
 
-/** Clamp from the original UTC anchor every time; February must not cause drift. */
-function anniversary(anchor: Date, offset: number): Date {
-  const date = new Date(anchor)
-  date.setUTCDate(1)
-  date.setUTCMonth(anchor.getUTCMonth() + offset)
-  const lastDay = new Date(Date.UTC(
-    date.getUTCFullYear(), date.getUTCMonth() + 1, 0,
-  )).getUTCDate()
-  date.setUTCDate(Math.min(anchor.getUTCDate(), lastDay))
-  return date
-}
-
-/** End-exclusive credit period. Annual payment still uses monthly periods. */
-export function monthlyUsagePeriod(anchorIso: string, nowIso: string) {
-  const anchor = new Date(anchorIso)
-  const now = new Date(nowIso)
-  if (!Number.isFinite(anchor.getTime()) || !Number.isFinite(now.getTime())
-    || now < anchor) throw new Error('Invalid usage period timestamp')
-  let offset = (now.getUTCFullYear() - anchor.getUTCFullYear()) * 12
-    + now.getUTCMonth() - anchor.getUTCMonth()
-  if (anniversary(anchor, offset) > now) offset -= 1
+/** Full seven-day periods, anchored to activation; billing never resets usage. */
+export function weeklyUsagePeriod(anchorIso: string, nowIso: string) {
+  const anchor = Date.parse(anchorIso)
+  const now = Date.parse(nowIso)
+  if (!Number.isFinite(anchor) || !Number.isFinite(now) || now < anchor) {
+    throw new Error('Invalid usage period timestamp')
+  }
+  const week = 7 * 24 * 60 * 60 * 1000
+  const start = anchor + Math.floor((now - anchor) / week) * week
   return {
-    start: anniversary(anchor, offset).toISOString(),
-    end: anniversary(anchor, offset + 1).toISOString(),
+    start: new Date(start).toISOString(),
+    end: new Date(start + week).toISOString(),
   }
 }
 
@@ -84,11 +72,11 @@ export function resolveApprovedPrice(
     || (binding.offer !== 'max_20x' && binding.offer !== 'team_20x'
       && binding.maxQuantity !== 1)
     || quantity > binding.maxQuantity) throw new Error('Capacity quantity is not approved')
-  const allowanceCredits = monthlyAllowance(binding.offer, quantity)
+  const allowanceCredits = weeklyAllowance(binding.offer, quantity)
   const totalAmount = price.unit_amount * quantity
   if (!Number.isSafeInteger(totalAmount)) throw new Error('Invalid price total')
   return {
-    priceId: price.id, offer: binding.offer, quantity, allowanceCredits,
+    usageInterval: 'week' as const, priceId: price.id, offer: binding.offer, quantity, allowanceCredits,
     scope: binding.offer.startsWith('team') ? 'team' as const : 'personal' as const,
     currency: price.currency, interval: binding.interval,
     unitAmount: price.unit_amount, totalAmount,
@@ -128,9 +116,9 @@ export function quoteOffer(
   const totalAmount = lines.reduce((total, line) => total + line.totalAmount, 0)
   if (!Number.isSafeInteger(totalAmount)) throw new Error('Invalid total')
   return {
-    offer, quantity, interval, currency, totalAmount,
+    offer, quantity, interval, currency, totalAmount, usageInterval: 'week' as const,
     monthlyEquivalent: interval === 'year' ? totalAmount / 12 : totalAmount,
-    allowanceCredits: monthlyAllowance(offer, quantity),
+    allowanceCredits: weeklyAllowance(offer, quantity),
     plan: offer.startsWith('team') ? 'team' : offer.startsWith('max') ? 'max' : 'pro',
     scope: offer.startsWith('team') ? 'team' : 'personal',
     capacity: offer.endsWith('20x') ? '20x_pro' : offer === 'max_5x' || offer === 'team' ? '5x_pro' : '2x_free',
@@ -160,5 +148,6 @@ export function pricingEventProperties(
     billing_acquisition_price_version: cohort.acquisitionPriceVersion,
     billing_price_ids: quote.lineItems.map(line => line.price),
     billing_allowance_credits: quote.allowanceCredits,
+    billing_usage_interval: quote.usageInterval,
   }
 }

@@ -60,10 +60,10 @@ it('provisions reusable baseline prices and feeds the real quote/analytics consu
     ...b, maxQuantity: b.offer.endsWith('20x') ? 3 : 1,
   })) }
   const team = quoteOffer(expanded, prices, 'team_20x', 'month', 3)
-  expect(team).toMatchObject({ totalAmount: 96000, allowanceCredits: 12000 })
+  expect(team).toMatchObject({ totalAmount: 96000, allowanceCredits: 3000 })
   expect(team.lineItems.map(i => i.quantity)).toEqual([1, 3])
   expect(quoteOffer(expanded, prices, 'max_20x', 'year', 2))
-    .toMatchObject({ totalAmount: 240000, allowanceCredits: 8000 })
+    .toMatchObject({ totalAmount: 240000, allowanceCredits: 2000 })
   expect(() => quoteOffer(manifest, prices, 'team_20x', 'month', 2)).toThrow()
   expect(() => quoteOffer(manifest, [], 'pro', 'month')).toThrow('unavailable')
   expect(pricingEventProperties(team, {
@@ -91,7 +91,7 @@ it('changes experiment prices without changing plan entitlements or acquisition 
   }
   const base = make('baseline-v1', 'price_baseline', 12000)
   const higher = make('higher-v1', 'price_higher', 16000)
-  expect([base.allowanceCredits, higher.allowanceCredits]).toEqual([4000, 4000])
+  expect([base.allowanceCredits, higher.allowanceCredits]).toEqual([1000, 1000])
   expect([base.plan, higher.plan]).toEqual(['max', 'max'])
   expect([base.totalAmount, higher.totalAmount]).toEqual([12000, 16000])
   expect(pricingEventProperties(higher, {

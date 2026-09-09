@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
-  monthlyAllowance, monthlyUsagePeriod, resolveApprovedPrice,
+  weeklyAllowance, weeklyUsagePeriod, resolveApprovedPrice,
   type ApprovedPriceBinding, type Offer, type StripePriceInput,
 } from './pricing-model'
 const binding: ApprovedPriceBinding = {
@@ -15,44 +15,50 @@ const price: StripePriceInput = {
 }
 describe('new pricing contract', () => {
   it.each<[Offer, number, number]>([
-    ['free', 1, 100], ['pro', 1, 200], ['max_5x', 1, 1000],
-    ['max_20x', 1, 4000], ['max_20x', 2, 8000], ['team', 1, 1000],
-    ['team_20x', 1, 4000], ['team_20x', 2, 8000],
+    ['free', 1, 25], ['pro', 1, 50], ['max_5x', 1, 250],
+    ['max_20x', 1, 1000], ['max_20x', 2, 2000], ['team', 1, 250],
+    ['team_20x', 1, 1000], ['team_20x', 2, 2000],
   ])('%s × %i replaces rather than adds base capacity', (offer, qty, credits) => {
-    expect(monthlyAllowance(offer, qty)).toBe(credits)
+    expect(weeklyAllowance(offer, qty)).toBe(credits)
   })
   it.each([0, -1, 1.5, Infinity, Number.MAX_SAFE_INTEGER])(
     'rejects invalid quantity %s', quantity => {
-      expect(() => monthlyAllowance('max_20x', quantity)).toThrow()
+      expect(() => weeklyAllowance('max_20x', quantity)).toThrow()
     },
   )
   it('does not let more capacity unlock team permissions', () => {
     const max = { ...binding, offer: 'max_20x' as const, maxQuantity: 4 }
     expect(resolveApprovedPrice([max], price, 2)).toMatchObject({
-      scope: 'personal', allowanceCredits: 8000, quantity: 2,
+      scope: 'personal', allowanceCredits: 2000, quantity: 2,
     })
     expect(() => resolveApprovedPrice([binding], price, 2)).toThrow()
     expect(() => resolveApprovedPrice([max], price, 5)).toThrow()
   })
-  it('gives annual payment a monthly allowance and Stripe-sourced amounts', () => {
+  it('gives annual payment weekly capacity and Stripe-sourced amounts', () => {
     expect(resolveApprovedPrice([binding], price, 1)).toMatchObject({
-      allowanceCredits: 1000, totalAmount: 600000, monthlyEquivalent: 50000,
+      allowanceCredits: 250, usageInterval: 'week', totalAmount: 600000,
+      monthlyEquivalent: 50000,
     })
-    expect(monthlyUsagePeriod('2026-01-31T12:00:00Z', '2026-03-10T00:00:00Z'))
-      .toEqual({ start: '2026-02-28T12:00:00.000Z', end: '2026-03-31T12:00:00.000Z' })
   })
-  it('preserves the anchor across short months, exact boundaries and leap years', () => {
-    const anchor = '2024-01-31T23:45:10Z'
-    expect(monthlyUsagePeriod(anchor, '2024-02-29T23:45:09Z'))
-      .toEqual({ start: '2024-01-31T23:45:10.000Z', end: '2024-02-29T23:45:10.000Z' })
-    expect(monthlyUsagePeriod(anchor, '2024-02-29T23:45:10Z'))
-      .toEqual({ start: '2024-02-29T23:45:10.000Z', end: '2024-03-31T23:45:10.000Z' })
-    expect(monthlyUsagePeriod(anchor, '2025-03-31T23:45:10Z'))
-      .toEqual({ start: '2025-03-31T23:45:10.000Z', end: '2025-04-30T23:45:10.000Z' })
+  it('uses exact seven-day boundaries across leap days and billing renewals', () => {
+    const anchor = '2024-02-26T23:45:10Z'
+    expect(weeklyUsagePeriod(anchor, '2024-03-01T00:00:00Z')).toEqual({
+      start: '2024-02-26T23:45:10.000Z', end: '2024-03-04T23:45:10.000Z',
+    })
+    expect(weeklyUsagePeriod(anchor, '2024-03-04T23:45:09Z')).toEqual({
+      start: '2024-02-26T23:45:10.000Z', end: '2024-03-04T23:45:10.000Z',
+    })
+    expect(weeklyUsagePeriod(anchor, '2024-03-04T23:45:10Z')).toEqual({
+      start: '2024-03-04T23:45:10.000Z', end: '2024-03-11T23:45:10.000Z',
+    })
+    // Inactivity does not move the original anchor or grant an annual pool.
+    expect(weeklyUsagePeriod(anchor, '2025-02-24T23:45:10Z')).toEqual({
+      start: '2025-02-24T23:45:10.000Z', end: '2025-03-03T23:45:10.000Z',
+    })
   })
   it('rejects missing anchors instead of resetting credits', () => {
-    expect(() => monthlyUsagePeriod('', '2026-09-09')).toThrow()
-    expect(() => monthlyUsagePeriod('2026-09-10', '2026-09-09')).toThrow()
+    expect(() => weeklyUsagePeriod('', '2026-09-09')).toThrow()
+    expect(() => weeklyUsagePeriod('2026-09-10', '2026-09-09')).toThrow()
   })
   it('rejects unknown, ambiguous, inactive and mismatched prices', () => {
     expect(() => resolveApprovedPrice([], price, 1)).toThrow()

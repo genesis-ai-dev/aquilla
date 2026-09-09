@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { useSearchParams } from "react-router-dom"
-import { CreditCard, ExternalLink } from "lucide-react"
-import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { ExternalLink } from "lucide-react"
+import { BillingOffers } from "@/components/org/BillingOffers"
 import { Badge } from "@/components/ui/badge"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -15,7 +15,6 @@ import {
 import { ROLE } from "@/lib/frontier/roles"
 import {
   getOrgBilling,
-  startBillingCheckout,
   startBillingPortal,
   type OrgBilling,
 } from "@/lib/sync/billing"
@@ -27,7 +26,7 @@ function planLabel(plan: OrgBilling["plan"]): string {
   const resolved = normalizeBillingPlan(plan)
   if (resolved === "field") return "Field Plan"
   if (resolved === "enterprise") return "Enterprise"
-  return "Explore"
+  return "Free"
 }
 
 export function OrgSettingsBilling() {
@@ -40,8 +39,7 @@ export function OrgSettingsBilling() {
   const [data, setData] = useState<OrgBilling | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [billingInterval, setBillingInterval] = useState<"monthly" | "annual">("annual")
-  const [busy, setBusy] = useState<"field" | "portal" | null>(null)
+  const [busy, setBusy] = useState<"portal" | null>(null)
 
   const [searchParams, setSearchParams] = useSearchParams()
   const [notice, setNotice] = useState<string | null>(null)
@@ -73,15 +71,12 @@ export function OrgSettingsBilling() {
     void load()
   }, [load])
 
-  async function go(kind: "field" | "portal") {
+  async function go(kind: "portal") {
     if (!jwt || activeOrgId == null) return
     setBusy(kind)
     setError(null)
     try {
-      const url =
-        kind === "portal"
-          ? await startBillingPortal(jwt, activeOrgId)
-          : await startBillingCheckout(jwt, activeOrgId, kind, 1, billingInterval)
+      const url = await startBillingPortal(jwt, activeOrgId)
       window.location.assign(url)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't start Stripe.")
@@ -89,7 +84,6 @@ export function OrgSettingsBilling() {
     }
   }
 
-  const checkoutEnabled = data?.checkoutEnabled === true
 
   return (
     <OrgSettingsDetailPage
@@ -127,38 +121,7 @@ export function OrgSettingsBilling() {
                 </Badge>
               }
             />
-            {normalizeBillingPlan(data.plan) === "explore" ? (
-              <SettingsRow
-                label={t("billing.plan.field")}
-                description="For ongoing team translation and review, with up to 20 collaborators."
-                control={
-                  <div className="flex flex-wrap items-center gap-3">
-                  <Select
-                    value={billingInterval}
-                    onValueChange={(value) => { if (value) setBillingInterval(value) }}
-                  >
-                    <SelectTrigger aria-label="Field billing period">
-                      <SelectValue>{billingInterval === "annual" ? "Annual" : "Monthly"}</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectGroup>
-                        <SelectItem value="annual">Annual</SelectItem>
-                        <SelectItem value="monthly">Monthly</SelectItem>
-                      </SelectGroup>
-                    </SelectContent>
-                  </Select>
-                  <Button
-                    onClick={() => void go("field")}
-                    disabled={!checkoutEnabled || !data.canSubscribe || busy != null}
-                    data-testid="subscribe-field-plan"
-                  >
-                    <CreditCard data-icon="inline-start" />
-                    {busy === "field" ? "Redirecting…" : checkoutEnabled ? "Upgrade to Field" : "Coming soon"}
-                  </Button>
-                  </div>
-                }
-              />
-            ) : data.canManage ? (
+            {data.canManage ? (
               <SettingsRow
                 label={t("billing.plan.manage")}
                 description={t("billing.plan.manageHelp")}
@@ -177,10 +140,11 @@ export function OrgSettingsBilling() {
             ) : null}
           </SettingsGroup>
 
+          {jwt && activeOrgId != null ? <BillingOffers key={activeOrgId} jwt={jwt} orgId={activeOrgId} /> : null}
           <SettingsGroup label="Plans and covered access">
             <SettingsRow
               label="ETEN affiliate or Bible-translation team?"
-              description="Your Field access may already be covered. Contact us to confirm coverage and arrange access without paying for a subscription."
+              description="Your organization’s access may already be covered. Contact us to confirm coverage and arrange access without paying for a subscription."
               control={
                 <a
                   href="mailto:hello@aquilla.app?subject=ETEN%20affiliate%20or%20Bible-translation%20access"
@@ -192,7 +156,7 @@ export function OrgSettingsBilling() {
             />
             <SettingsRow
               label="Compare plans"
-              description="See Field pricing or discuss a custom annual Enterprise quote."
+              description="See Individual and Team pricing or discuss a custom annual Enterprise quote."
               control={<a href="https://aquilla.app/pricing" className={cn(buttonVariants({ variant: "outline" }))}>View plans</a>}
             />
           </SettingsGroup>

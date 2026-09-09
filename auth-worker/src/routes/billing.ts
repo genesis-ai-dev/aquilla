@@ -31,6 +31,8 @@ import {
 } from "../lib/billing/stripe"
 import { readOrgBilling, readWordSnapshot } from "../lib/billing/words"
 
+import { readBillingOffers, unavailableOffers } from "../lib/billing/catalog"
+
 const billing = new Hono<AuthHonoEnv>()
 
 function spaOrigin(env: { BASE_URL?: string }): string {
@@ -46,6 +48,22 @@ async function requireMaintainer(c: Context<AuthHonoEnv>, orgId: number) {
   if (role == null || role < ROLE.MAINTAINER) return false
   return true
 }
+
+billing.get("/orgs/:orgId/billing/offers", authMiddleware, async (c) => {
+  const rawId = c.req.param("orgId") ?? ""
+  const orgId = Number(rawId)
+  if (!/^\d+$/.test(rawId) || !Number.isSafeInteger(orgId) || orgId < 1) {
+    return c.json({ error: "invalid orgId" }, 400)
+  }
+  if (!(await requireMaintainer(c, orgId))) return c.json({ error: "forbidden" }, 403)
+  c.header("Cache-Control", "private, no-store")
+  try {
+    return c.json(await readBillingOffers(c.env))
+  } catch {
+    // Stripe errors can contain account details; never echo them to customers.
+    return c.json(unavailableOffers())
+  }
+})
 
 billing.get("/orgs/:orgId/billing", authMiddleware, async (c) => {
   const orgId = parseInt(c.req.param("orgId") ?? "", 10)

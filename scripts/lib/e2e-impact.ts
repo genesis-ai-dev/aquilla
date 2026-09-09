@@ -7,6 +7,10 @@ const CORE_SENTINELS = [
 
 const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
   {
+    source: /^(?:src\/.*billing|auth-worker\/.*billing|db\/shared\/billing|config\/pricing\/)/i,
+    sentinels: ["e2e/specs/orgs/org-settings-billing.smoke.spec.ts"],
+  },
+  {
     source: /^(?:auth-worker\/|src\/(?:pages|components|lib|hooks|context)\/.*(?:auth|account|login|signup|password|session|credential|outbox))/i,
     sentinels: [
       "e2e/specs/auth/login-account-setup-status.smoke.spec.ts",
@@ -69,7 +73,7 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
 const NON_RUNTIME = /^(?:docs\/|\.github\/|\.claude\/|\.agents\/|test-results|playwright-report|.*\.(?:md|mdx|txt|png|jpe?g|gif|svg|mp4|mov|csv))$/i
 const UNIT_TEST = /(?:^|\/)(?:__tests__\/.*|[^/]+\.(?:test|spec)\.[cm]?[jt]sx?)$/i
 const E2E_INFRA = /^(?:e2e\/(?:config|helpers|reporters)\/|scripts\/(?:e2e-|lib\/spawn-worker)|package\.json$|pnpm-lock\.yaml$|vite\.config|tsconfig)/i
-const PRODUCT_RUNTIME = /^(?:src\/|auth-worker\/|sync-worker\/|packages\/)/
+const PRODUCT_RUNTIME = /^(?:src\/|auth-worker\/|sync-worker\/|packages\/|config\/pricing\/|db\/shared\/billing)/
 
 function normalize(file: string): string {
   return file.trim().replaceAll("\\", "/").replace(/^\.\//, "")

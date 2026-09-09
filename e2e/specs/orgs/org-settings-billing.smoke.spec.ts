@@ -1,13 +1,7 @@
 import { test, expect, orgRoute } from "../../helpers/multi-user"
 
-/**
- * Org billing settings — Field Plan subscribe surface.
- *
- * Does not complete a Stripe Checkout (that needs a live card + webhook).
- * It asserts the maintainer can open Billing & usage and see the unpaid
- * Field Plan CTA plus shared usage guidance.
- */
-test("org billing settings shows Field Plan subscribe CTA", async ({ alice }) => {
+/** Existing organization billing boundary: auth → API → billing UI. */
+test("org billing settings preserves access while new pricing is unavailable", async ({ alice }) => {
   await alice.goto(orgRoute(alice, "/settings"))
   await expect(alice.locator("h1").filter({ hasText: /Organization settings/i })).toBeVisible()
   await alice.getByRole("link", { name: /Billing & usage/i }).click()
@@ -15,7 +9,9 @@ test("org billing settings shows Field Plan subscribe CTA", async ({ alice }) =>
   await expect(alice.locator("h1").filter({ hasText: /Billing & usage/i })).toBeVisible()
   await expect(alice.getByTestId("billing-plan")).toBeVisible()
   await expect(alice.getByTestId("billing-usage")).toContainText("rolling seven-day")
-  await expect(alice.getByTestId("subscribe-field-plan")).toBeDisabled()
+  await expect(alice.getByRole("tab", { name: "Team & Enterprise" })).toBeVisible()
+  await expect(alice.getByText(/Plan prices are temporarily unavailable/)).toBeVisible()
+  await expect(alice.getByTestId("subscribe-field-plan")).toHaveCount(0)
   await expect(alice.getByRole("link", { name: "Check covered access" })).toHaveAttribute("href", /ETEN%20affiliate/)
-  await expect(alice.getByText(/Field Plan/i).first()).toBeVisible()
+  await expect(alice.getByTestId("billing-plan")).toHaveText("Free")
 })

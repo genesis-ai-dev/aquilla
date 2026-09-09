@@ -2822,30 +2822,33 @@ describe("the heading over the text column", () => {
     />
   )
 
-  it("says Source text for a file imported as subtitles", () => {
-    render(editor({ isSubtitleImport: true }))
-    expect(screen.getByTestId("tl-dialogue-header")).toHaveTextContent("Source text")
+  // AQU-1119 made this one word, unconditionally. It used to borrow the track
+  // gutter's own label — "Source text" — which was right while it named a
+  // column and wrong the moment it named the whole collapsible SECTION: source
+  // and target are the two columns inside it, so the gutter's word mislabels
+  // half of what it now sits over. The gutter's rows are untouched.
+
+  it("says Text with no video linked", () => {
+    render(editor({ coreMediaUrl: null }))
+    expect(screen.getByTestId("tl-dialogue-header")).toHaveTextContent("Text")
   })
 
-  it("says it with no video linked, which is where it used to say Dialogue", () => {
-    // The old gate was `coreMediaUrl && no media cells`, so a subtitle file
-    // with no video fell through to the per-cell derivation — which says
-    // "Dialogue" whenever nothing is selected. The confusing case, on the one
-    // file type that can least afford it.
-    render(editor({ isSubtitleImport: true, coreMediaUrl: null }))
-    expect(screen.getByTestId("tl-dialogue-header")).not.toHaveTextContent("Dialogue")
+  it("says Text with a video linked too", () => {
+    render(editor({ coreMediaUrl: "https://example.test/master.m3u8" }))
+    expect(screen.getByTestId("tl-dialogue-header")).toHaveTextContent("Text")
   })
 
-  it("says it with a video linked too", () => {
-    render(editor({ isSubtitleImport: true, coreMediaUrl: "https://example.test/master.m3u8" }))
-    expect(screen.getByTestId("tl-dialogue-header")).toHaveTextContent("Source text")
-  })
-
-  it("leaves every other kind of project deriving its own word", () => {
-    // An audio-first project has real media cells and no subtitle import; its
-    // header keeps changing with the selection, which is what it should do.
-    render(editor({}))
+  it("no longer borrows the gutter's column name", () => {
+    render(editor({ coreMediaUrl: "https://example.test/master.m3u8" }))
     expect(screen.getByTestId("tl-dialogue-header")).not.toHaveTextContent("Source text")
+  })
+
+  it("says the same thing on every kind of project, not just a subtitle import", () => {
+    // It used to depend on how the file was imported, which meant an
+    // audio-first project fell through to a per-cell derivation and the
+    // heading changed as you clicked around.
+    render(editor({}))
+    expect(screen.getByTestId("tl-dialogue-header")).toHaveTextContent("Text")
   })
 })
 

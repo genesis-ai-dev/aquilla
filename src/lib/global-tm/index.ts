@@ -14,7 +14,7 @@
 //      writes (write gate) AND any entry of an opted-out project that somehow
 //      exists in the store (legacy row, replication bug) is excluded at read.
 //
-// The store is an injected interface so the Worker can back it with D1/PG
+// The store is an injected interface so the Worker can back it with Postgres
 // (cells_fts / value_tsv) while tests use the in-memory implementation.
 
 export interface GlobalTmEntry {

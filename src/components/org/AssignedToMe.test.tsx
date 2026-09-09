@@ -48,7 +48,11 @@ function renderInbox() {
 
 describe("AssignedToMe", () => {
   it("shows a loading skeleton while assignments are unresolved", async () => {
-    mockGetMy.mockImplementationOnce(() => new Promise(() => {}))
+    // Every call must stay pending, not just the first: OrgProvider can
+    // resolve the active org after mount, which re-runs the fetch effect,
+    // and a second call falling through to the bare mock resolved to
+    // undefined and dismissed the skeleton before the assertion ran.
+    mockGetMy.mockImplementation(() => new Promise(() => {}))
     renderInbox()
 
     await waitFor(() => expect(screen.getByPlaceholderText("Search assignments…")).toBeInTheDocument())

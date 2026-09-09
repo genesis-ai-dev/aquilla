@@ -15,7 +15,8 @@
     "predev:context": "node scripts/ensure-port-free.mjs 5173",
     "dev:context": "BRAND=context vite",
     "build": "pnpm idml:gate && tsc -b && vite build && tsx scripts/check-app-build.ts && tsx scripts/check-brand-build.ts aquilla",
-    "build:workers-build": "node scripts/assert-workers-build-env.mjs && node scripts/cloudflare-ci-checks.mjs",
+    "build:compile": "tsc -b && vite build",
+    "build:workers-build": "bash scripts/ci-build.sh",
     "build:workers-build:identity": "CI=1 pnpm --dir auth-worker install --frozen-lockfile && pnpm --dir auth-worker run build:workers-build",
     "build:workers-build:sync": "CI=1 pnpm --dir sync-worker install --frozen-lockfile && pnpm --dir sync-worker run build:workers-build",
     "build:codex": "pnpm idml:gate && BRAND=codex tsc -b && BRAND=codex vite build && tsx scripts/check-app-build.ts && tsx scripts/check-brand-build.ts codex",
@@ -32,6 +33,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:worker": "vitest run --config worker/vitest.config.ts --dir worker",
+    "test:daemon": "NODE_OPTIONS=--expose-gc vitest run scripts/migrate-daemon",
     "scan:secrets": "tsx scripts/secret-scan.ts",
     "admin:request": "tsx scripts/admin-request.ts",
     "test:idml": "pnpm --filter @aquilla/idml-roundtrip test",
@@ -102,7 +104,8 @@
     "neon:backfill:progress:prod": "tsx scripts/neon-target.ts production backfill-progress",
     "migrate:users": "tsx scripts/migrate-users.ts",
     "neon:refresh:dev": "tsx scripts/refresh-neon-branch.ts dev",
-    "neon:refresh-dev": "pnpm neon:refresh:dev"
+    "neon:refresh-dev": "pnpm neon:refresh:dev",
+    "migrate:daemon": "tsx scripts/migrate-daemon/main.ts"
   },
   "dependencies": {
     "@aquilla/idml-roundtrip": "workspace:2.0.3",

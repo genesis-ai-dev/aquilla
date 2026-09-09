@@ -78,7 +78,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
-      # Manual fallback for checks that normally run via pnpm check:push.
+      # Broad validation remains available through this manual workflow.
       - run: pnpm run i18n:check
       - run: pnpm run scan:secrets
 
@@ -105,7 +105,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm test
-      # Also exercised by pnpm check:push.
+      # Run worker coverage explicitly; pushes use affected browser tests.
       - run: pnpm test:worker
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:idml

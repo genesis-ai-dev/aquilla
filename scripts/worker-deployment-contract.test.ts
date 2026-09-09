@@ -494,9 +494,10 @@ describe("worker deployment environment contract", () => {
     expect(build).toContain("pnpm run build:compile")
     expect(build).not.toMatch(/pnpm (?:test|lint|run build\n)/)
     expect(build).not.toMatch(/scan:secrets|idml:gate|neon:check/)
-    expect(rootPackage.scripts["check:push"])
-      .toBe("node scripts/push-checks.mjs")
-    expect(readRepoFile(".husky", "pre-push")).toContain("pnpm run check:push")
+    const hook = readRepoFile(".husky", "pre-push")
+    expect(hook).toContain("pnpm run scan:secrets")
+    expect(hook).toContain("pnpm run test:e2e:affected")
+    expect(hook).not.toMatch(/pnpm (?:test$|run check:push|run test:e2e:smoke)/m)
   })
 
   it("keeps all live deployments off automatic push triggers", () => {

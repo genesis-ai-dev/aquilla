@@ -10,13 +10,13 @@ for git_env_name in $(git rev-parse --local-env-vars); do
   unset "$git_env_name"
 done
 
-# Run validation locally so Cloudflare can publish previews immediately after
-# compilation. check:push scans credentials before lint or test suites.
-echo "[pre-push] running validation (pnpm run check:push)…"
-pnpm run check:push
+# Keep pushes proportional: scan credentials, then select browser tests from
+# the pushed commits. Full unit/worker and smoke suites are not push gates.
+echo "[pre-push] scanning tracked files for credentials…"
+pnpm run scan:secrets
 status=$?
 if [ $status -ne 0 ]; then
-  echo "[pre-push] Validation failed. Push blocked."
+  echo "[pre-push] Secret scan failed. Push blocked."
   exit $status
 fi
 

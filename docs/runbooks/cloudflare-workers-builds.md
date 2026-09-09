@@ -111,14 +111,15 @@ The deploy step uploads only a route-free `aquilla-web-preview` version.
 Slash-named branches become stable lowercase aliases. No preview command can
 name a live web, identity, or sync Worker.
 
-Validation runs locally before push. `.husky/pre-push` invokes `pnpm check:push`:
-credential scanning first, then lint, translation checks, root and worker tests,
-worker typechecks, IDML tests/release validation, and schema checks. It then runs
-`pnpm test:e2e:affected`, preserving Git's pushed refs for affected selection.
-Install root and each worker package's dependencies before pushing; the browser
-checks also require the local Docker/Postgres stack. Heavy Vitest suites run
-in separate phases with bounded concurrency. Pushes take longer because these
-checks now run on the developer machine rather than delaying preview publication.
+Before push, `.husky/pre-push` runs `pnpm scan:secrets`, then
+`pnpm test:e2e:affected`. The existing selector uses the commits being pushed
+and domain sentinels; it does not run the full smoke suite. Git's pushed refs
+are preserved for selection, while inherited repository variables are cleared
+so test fixtures can safely create their own Git repositories.
+
+Pushes do not run the full root/worker suites, lint, or IDML/schema validation.
+Run directly affected unit/worker tests during implementation. The manual CI
+workflow retains broader validation when explicitly requested.
 
 Hooks apply only to pushes that execute them: `--no-verify`, `HUSKY=0`, and
 API-created commits bypass local validation. Cloudflare still builds these

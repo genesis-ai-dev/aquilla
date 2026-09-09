@@ -16,7 +16,6 @@
     "dev:context": "BRAND=context vite",
     "build": "pnpm idml:gate && tsc -b && vite build && tsx scripts/check-app-build.ts && tsx scripts/check-brand-build.ts aquilla",
     "build:compile": "tsc -b && vite build",
-    "check:push": "node scripts/push-checks.mjs",
     "build:workers-build": "bash scripts/ci-build.sh",
     "build:workers-build:identity": "CI=1 pnpm --dir auth-worker install --frozen-lockfile && pnpm --dir auth-worker run build:workers-build",
     "build:workers-build:sync": "CI=1 pnpm --dir sync-worker install --frozen-lockfile && pnpm --dir sync-worker run build:workers-build",

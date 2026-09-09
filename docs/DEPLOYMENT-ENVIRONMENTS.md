@@ -71,9 +71,10 @@ because it has no deployable Wrangler application.
 The consolidated `.github/workflows/ci.yml` is `workflow_dispatch`-only. Normal
 pull-request and push activity consumes no GitHub-hosted runner minutes. Cloudflare
 receives GitHub repository events, runs the repository-owned build commands, and
-reports compilation results and preview links back to GitHub. Tests, lint,
-secret scanning, and schema checks run in the local pre-push hook. QA tests the
-published preview; preview success does not certify automated test results.
+reports compilation results and preview links back to GitHub. The local pre-push
+hook runs a secret scan and the existing commit-based affected E2E selection,
+not the full suites. QA tests the published preview; preview success does not
+certify automated test results.
 
 Every Workers Builds preview uses development API hosts, including builds of
 `main`. Preview versions remain route-free permanently; they are never promoted

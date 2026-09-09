@@ -263,7 +263,7 @@ describe("worker deployment environment contract", () => {
       scripts?: Record<string, string>
     }
     expect(rootPackage.scripts?.["deploy:workers-build"])
-      .toBe("node scripts/cloudflare-pr-preview.mjs --workers-build")
+      .toBe("node scripts/cloudflare-stack-preview.mjs")
     expect(rootPackage.scripts?.["build:workers-build"])
       .toBe("bash scripts/ci-build.sh")
     expect(rootPackage.scripts?.["build:workers-build:identity"])
@@ -479,8 +479,8 @@ describe("worker deployment environment contract", () => {
     expect(workersBuild).toContain("normalizedBranch === \"main\" ? \"production\" : \"development\"")
     expect(workersBuild).toContain("promote: false")
     expect(workersBuildScript).not.toContain("api.aquilla.app")
-    expect(workersBuildScript).toContain("H=api.dev.aquilla.app")
-    expect(workersBuildScript).toContain("verify-deployment-artifacts.mjs dist")
+    expect(workersBuildScript).toContain("pnpm exec tsc -b")
+    expect(readRepoFile("scripts", "cloudflare-stack-preview.mjs")).toContain('verify(join(cwd, "dist"))')
   })
 
   it("compiles Cloudflare previews without running validation suites", () => {
@@ -491,7 +491,7 @@ describe("worker deployment environment contract", () => {
     expect(rootPackage.scripts["build:workers-build"])
       .toBe("bash scripts/ci-build.sh")
     expect(rootPackage.scripts["build:compile"]).toBe("tsc -b && vite build")
-    expect(build).toContain("pnpm run build:compile")
+    expect(build).toContain("pnpm exec tsc -b")
     expect(build).not.toMatch(/pnpm (?:test|lint|run build\n)/)
     expect(build).not.toMatch(/scan:secrets|idml:gate|neon:check/)
     const hook = readRepoFile(".husky", "pre-push")

@@ -1566,3 +1566,13 @@ CREATE INDEX IF NOT EXISTS contextual_decisions_run
 --   SELECT setval(pg_get_serial_sequence('groups','id'),        COALESCE((SELECT MAX(id) FROM groups),1));
 --   SELECT setval(pg_get_serial_sequence('activity_logs','id'), COALESCE((SELECT MAX(id) FROM activity_logs),1));
 --   SELECT setval(pg_get_serial_sequence('password_reset_tokens','id'), COALESCE((SELECT MAX(id) FROM password_reset_tokens),1));
+-- Immutable offer assignments. This migration activates no experiments.
+CREATE TABLE IF NOT EXISTS billing_price_cohorts (
+  org_id BIGINT NOT NULL REFERENCES organizations(id),
+  experiment_key TEXT NOT NULL,
+  variant TEXT NOT NULL,
+  price_version TEXT NOT NULL,
+  assigned_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  exposed_at TIMESTAMPTZ,
+  PRIMARY KEY (org_id, experiment_key)
+);

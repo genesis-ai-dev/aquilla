@@ -118,3 +118,17 @@ that is one more reason the bots should run against previews.
 - Popovers and dialogs portal outside the row. Scope snapshots to `main` or
   `body` to see them; `-i` hides non-interactive text, so read a posted
   comment with `get text`.
+
+## Relationship to the repo's skills
+
+- `.agents/skills/verify-dev-change`: a developer's agent drives the local
+  stack as the seeded dev user to prove its own change before saying
+  "done". Same idea one step earlier: one person, one change, one machine,
+  no written journey. This folder is the other side of the PR: someone
+  else's change, on its preview, against journeys the team agreed on.
+- `.agents/skills/agent-browser`: the stock discovery stub for the CLI the
+  replays use. Nothing here replaces it; `agent-browser skills get core` is
+  still the usage guide.
+- `.agents/skills/to-issues` and `triage`: where a bot's finding goes when
+  it is real. A PR comment is the first stop; a ticket follows only after
+  a person agrees.

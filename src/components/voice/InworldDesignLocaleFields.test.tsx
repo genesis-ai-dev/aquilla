@@ -66,7 +66,6 @@ function renderLocales(
   initial?: string,
   copy?: "design" | "catalog",
   voicesOnly = false,
-  onDesignInstead?: () => void,
 ) {
   const onLanguageChange = vi.fn()
   function Harness() {
@@ -75,7 +74,6 @@ function renderLocales(
       <InworldDesignLocaleFields
         copy={copy}
         voicesOnly={voicesOnly}
-        onDesignInstead={onDesignInstead}
         language={language}
         onLanguageChange={(next) => {
           onLanguageChange(next)
@@ -186,7 +184,8 @@ describe("InworldDesignLocaleFields", () => {
       screen.getByRole("button", { name: "About the accent" }),
       /matching stock voices/i,
     )
-    expect(screen.getByText(/Can't find the language/)).toBeTruthy()
+    expect(screen.getByText(/Can't find the language\? Go to the Voice design tab/)).toBeTruthy()
+    expect(screen.queryByRole("button", { name: /Can't find the language/ })).toBeNull()
   })
 
   it("hides languages without SYSTEM voices on the prebuilt picker", async () => {
@@ -200,15 +199,13 @@ describe("InworldDesignLocaleFields", () => {
     expect(screen.queryByRole("option", { name: /^Tamil$/i })).toBeNull()
   })
 
-  it("tells the user to design a voice when search misses on prebuilt", async () => {
+  it("shows a short empty state when search misses on prebuilt", async () => {
     vi.mocked(listInworldSupportedLanguages).mockResolvedValue(portalLanguages)
     const user = userEvent.setup()
-    const onDesignInstead = vi.fn()
-    renderLocales("en-US", "catalog", true, onDesignInstead)
+    renderLocales("en-US", "catalog", true)
     await user.click(screen.getByRole("combobox", { name: "Language" }))
     await user.type(screen.getByRole("combobox", { name: "Find a language" }), "abadi")
-    expect(await screen.findByText(/No stock voices match/)).toBeTruthy()
-    await user.click(screen.getByRole("button", { name: /Can't find the language/ }))
-    expect(onDesignInstead).toHaveBeenCalled()
+    expect(await screen.findByText("No matches")).toBeTruthy()
+    expect(screen.queryByText(/Design a voice yourself/)).toBeNull()
   })
 })

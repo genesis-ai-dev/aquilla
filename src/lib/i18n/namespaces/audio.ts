@@ -54,9 +54,7 @@ export const audio = defineNamespace({
     "audio.newVoice.catalogLanguageHint":
       "Stock voices for languages Inworld already has speakers for.",
     "audio.newVoice.catalogMissingLanguageHint":
-      "Can't find the language? Design a voice yourself.",
-    "audio.newVoice.catalogLanguageEmpty":
-      "No stock voices match. Design a voice yourself.",
+      "Can't find the language? Go to the Voice design tab to design one yourself.",
     "audio.newVoice.designLanguageHelpAria": "About the language",
     "audio.newVoice.designLanguageSearch": "Find a language…",
     "audio.newVoice.designLanguageSearchAria": "Find a language",
@@ -737,13 +735,8 @@ export const audio = defineNamespace({
       "audio.newVoice.catalogMissingLanguageHint": {
         description:
           "Helper under Language and Accent on the Inworld prebuilt tab. Tells " +
-          "the user that a missing language means they should switch to Voice " +
-          "design and create one. When it is a button, it opens that tab.",
-      },
-      "audio.newVoice.catalogLanguageEmpty": {
-        description:
-          "Empty state inside the Prebuilt language combobox when search matches " +
-          "no language that has stock Inworld speakers. Points the user to Voice design.",
+          "the user to open the Voice design tab when a language is missing " +
+          "from the stock catalog. Plain text, not a control.",
       },
       "audio.newVoice.designLanguageHelpAria": {
         description:

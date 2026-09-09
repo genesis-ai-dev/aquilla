@@ -405,7 +405,7 @@ function NewVoiceModalBody({
               }}
               className="gap-0"
             >
-              <TabsList size="lg" className="w-full" aria-label={t("audio.newVoice.kindGroupLabel")}>
+              <TabsList size="lg" aria-label={t("audio.newVoice.kindGroupLabel")}>
                 <TabsTrigger value="tts">
                   <Sparkles /> {t("audio.newVoice.tabTts")}
                 </TabsTrigger>
@@ -474,7 +474,7 @@ function NewVoiceModalBody({
                   onValueChange={(value) => setInworldSource(value as "prebuilt" | "design")}
                   className="gap-0"
                 >
-                  <TabsList className="w-full" aria-label={t("audio.newVoice.inworldSourceGroupLabel")}>
+                  <TabsList aria-label={t("audio.newVoice.inworldSourceGroupLabel")}>
                     <TabsTrigger value="prebuilt">
                       {t("audio.newVoice.tabPrebuilt")}
                     </TabsTrigger>
@@ -488,7 +488,6 @@ function NewVoiceModalBody({
                     <InworldDesignLocaleFields
                       copy="catalog"
                       voicesOnly
-                      onDesignInstead={() => setInworldSource("design")}
                       language={inworldLocaleLanguage}
                       onLanguageChange={setInworldLanguage}
                       projectId={projectId}
@@ -719,7 +718,7 @@ function CloneReferenceSource({
       onValueChange={(value) => setSource(value as CloneSource)}
       className="gap-2"
     >
-      <TabsList className="w-full" aria-label={t("audio.newVoice.referenceSourceGroupLabel")}>
+      <TabsList aria-label={t("audio.newVoice.referenceSourceGroupLabel")}>
         <TabsTrigger value="record" className="pe-3">
           {t("audio.newVoice.referenceLabel")}
           {clipFilled && (

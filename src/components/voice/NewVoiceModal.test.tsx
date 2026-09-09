@@ -658,13 +658,14 @@ describe("NewVoiceModal Inworld Voice Design", () => {
       fileId: "f1",
       session: { jwt: "tok", username: "dev" } as FrontierSession,
     })
-    expect(screen.getByRole("button", { name: /Can't find the language/ })).toBeTruthy()
+    expect(screen.getByText(/Can't find the language\? Go to the Voice design tab/)).toBeTruthy()
+    expect(screen.queryByRole("button", { name: /Can't find the language/ })).toBeNull()
     await user.click(screen.getByRole("combobox", { name: "Language" }))
     expect(screen.queryByRole("option", { name: "Other" })).toBeNull()
     expect(screen.queryByRole("option", { name: /^Abadi$/i })).toBeNull()
     expect(await screen.findByRole("option", { name: /^Swahili$/i })).toBeTruthy()
     await user.keyboard("{Escape}")
-    await user.click(screen.getByRole("button", { name: /Can't find the language/ }))
+    await user.click(screen.getByRole("tab", { name: /Voice design/ }))
     expect(screen.getByRole("tab", { name: /Voice design/ })).toHaveAttribute("aria-selected", "true")
     await user.click(screen.getByRole("combobox", { name: "Language" }))
     expect(screen.queryByRole("option", { name: "Other" })).toBeNull()

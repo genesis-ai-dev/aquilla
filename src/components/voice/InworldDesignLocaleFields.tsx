@@ -113,7 +113,7 @@ function DesignLanguageCombobox({
         align="start"
         side="bottom"
         sideOffset={4}
-        className="flex w-(--anchor-width) min-w-(--anchor-width) max-w-(--anchor-width) flex-col p-0 *:data-[slot=input-group]:mx-0! *:data-[slot=input-group]:my-0! *:data-[slot=input-group]:h-8 *:data-[slot=input-group]:rounded-none *:data-[slot=input-group]:border-0! *:data-[slot=input-group]:bg-transparent! *:data-[slot=input-group]:shadow-none!"
+        className="flex w-(--anchor-width) min-w-56 flex-col p-0 *:data-[slot=input-group]:mx-0! *:data-[slot=input-group]:my-0! *:data-[slot=input-group]:h-8 *:data-[slot=input-group]:rounded-none *:data-[slot=input-group]:border-0! *:data-[slot=input-group]:bg-transparent! *:data-[slot=input-group]:shadow-none!"
       >
         <ComboboxInput
           showTrigger={false}
@@ -124,7 +124,7 @@ function DesignLanguageCombobox({
           className="w-auto rounded-none border-0 bg-transparent shadow-none outline-none ring-0 hover:border-0! focus-within:border-0! has-[[data-slot=input-group-control]:focus-visible]:border-0! has-[[data-slot=input-group-control]:focus-visible]:ring-0! *:data-[slot=input-group-addon]:py-0 *:data-[slot=input-group-addon][data-align=inline-start]:pl-3 *:data-[slot=input-group-addon][data-align=inline-end]:pe-3 *:data-[slot=input-group-addon][data-align=inline-end]:has-[>button]:me-0"
         />
         <ComboboxSeparator className="mx-0 my-0" />
-        <ComboboxEmpty>{emptyText}</ComboboxEmpty>
+        <ComboboxEmpty className="flex-col items-center px-3 py-4 text-xs text-balance">{emptyText}</ComboboxEmpty>
         <ComboboxList className="max-h-80 flex-1">
           {(row: LocaleOption) => (
             <ComboboxItem key={row.value} value={row} className="min-w-0">
@@ -145,7 +145,6 @@ export function InworldDesignLocaleFields({
   session,
   copy = "design",
   voicesOnly = false,
-  onDesignInstead,
 }: {
   language?: string
   onLanguageChange: (language: string) => void
@@ -156,7 +155,6 @@ export function InworldDesignLocaleFields({
   copy?: "design" | "catalog"
   /** Prebuilt: only languages Inworld already has SYSTEM speakers for. */
   voicesOnly?: boolean
-  onDesignInstead?: () => void
 }) {
   const t = useT()
   const { locale } = useI18n()
@@ -219,7 +217,7 @@ export function InworldDesignLocaleFields({
           onValueChange={(next) => onLanguageChange(defaultCodeForFamily(next, rows))}
           searchPlaceholder={t("audio.newVoice.designLanguageSearch")}
           searchAriaLabel={t("audio.newVoice.designLanguageSearchAria")}
-          emptyText={voicesOnly ? t("audio.newVoice.catalogLanguageEmpty") : t("common.noMatches")}
+          emptyText={t("common.noMatches")}
         />
       </Field>
 
@@ -272,17 +270,7 @@ export function InworldDesignLocaleFields({
       </Field>
       </div>
       {voicesOnly && (
-        onDesignInstead ? (
-          <button
-            type="button"
-            className="text-start text-[11px] text-muted-foreground underline-offset-2 hover:underline"
-            onClick={onDesignInstead}
-          >
-            {missingLanguageHint}
-          </button>
-        ) : (
-          <p className="text-[11px] text-muted-foreground">{missingLanguageHint}</p>
-        )
+        <p className="text-[11px] text-muted-foreground">{missingLanguageHint}</p>
       )}
     </div>
   )

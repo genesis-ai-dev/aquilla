@@ -20,8 +20,17 @@ function ev(id: string, kind: string, fileId = "f1", cellId?: string): IngestEve
   } as IngestEvent
 }
 
-function line(id: string, kind: string, hash: string, fileId = "f1", cellId?: string): PlanLine {
-  return { id, event: ev(id, kind, fileId, cellId), hash }
+function line(
+  id: string,
+  kind: string,
+  hash: string,
+  fileId = "f1",
+  cellId?: string,
+  reconcile?: true,
+): PlanLine {
+  const l: PlanLine = { id, event: ev(id, kind, fileId, cellId), hash }
+  if (reconcile) l.reconcile = true
+  return l
 }
 
 describe("compareProject", () => {
@@ -49,20 +58,34 @@ describe("compareProject", () => {
     expect(compareProject(old, plan)).toEqual({ missing: 1, extra: 0, changed: 0, order: 0 })
   })
 
-  it("flags a reconciliation event that lands before its file's last create", () => {
+  it("flags a tagged reconciliation event that lands before its file's last create", () => {
     const old = new Map([["a", { hash: "h1" }], ["b", { hash: "h2" }]])
     const plan: PlanLine[] = [
-      line("a", "source.cell.delete", "h1", "f1", "c1"), // reconciliation before the create — out of order
+      line("a", "source.cell.delete", "h1", "f1", "c1", true), // reconciliation before the create — out of order
       line("b", "source.cell.create", "h2", "f1", "c1"),
     ]
     expect(compareProject(old, plan)).toEqual({ missing: 0, extra: 0, changed: 0, order: 1 })
   })
 
-  it("does not flag a reconciliation event that lands after its file's last create", () => {
+  it("does not flag a tagged reconciliation event that lands after its file's last create", () => {
     const old = new Map([["a", { hash: "h1" }], ["b", { hash: "h2" }]])
     const plan: PlanLine[] = [
       line("a", "source.cell.create", "h1", "f1", "c1"),
-      line("b", "source.cell.delete", "h2", "f1", "c1"),
+      line("b", "source.cell.delete", "h2", "f1", "c1", true),
+    ]
+    expect(compareProject(old, plan)).toEqual({ missing: 0, extra: 0, changed: 0, order: 0 })
+  })
+
+  it("does not flag an UNTAGGED cell.delete before a create — mapper events interleave freely", () => {
+    // mapFilePairToEvents itself emits *.cell.delete interleaved with creates,
+    // identically on migrate-all and the daemon; only reconcile-tagged lines
+    // from computeOrphanRetractions are subject to the ordering invariant.
+    // This is the AQU false-positive: an empty-ledger run emits no reconcile
+    // lines at all, so order must stay 0.
+    const old = new Map([["a", { hash: "h1" }], ["b", { hash: "h2" }]])
+    const plan: PlanLine[] = [
+      line("a", "source.cell.delete", "h1", "f1", "c1"), // untagged mapper delete, before the create
+      line("b", "source.cell.create", "h2", "f1", "c1"),
     ]
     expect(compareProject(old, plan)).toEqual({ missing: 0, extra: 0, changed: 0, order: 0 })
   })

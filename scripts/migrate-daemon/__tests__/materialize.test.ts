@@ -7,6 +7,7 @@ import path from "node:path"
 import { DaemonDb, type ProjectRow, type JobRow } from "../db"
 import { readPlan } from "../plan"
 import { materialize, CONTENT_LOGIC_VERSION, type MaterializeDeps } from "../stages/materialize"
+import { fileIdFor, sourceCellCreateEventId } from "../../../src/lib/migrate/ids"
 
 const FIX = path.resolve(__dirname, "../../../tests/fixtures/codex-editor")
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -153,6 +154,65 @@ describe("materialize", () => {
       .finally(() => { globalThis.fetch = realFetch })
     expect(second.changedFiles).toBe(1)
     expect(second.lines).toBeGreaterThan(0)
+    db.close()
+  })
+
+  it("tags a reconciliation event with reconcile:true, unlike mapper lines", async () => {
+    const db = new DaemonDb(":memory:")
+    const dir = makeProjectDir(["GEN 1"])
+    const project = seed(db)
+    const first = await materialize(deps(db), { job: job(), project, dir, httpUrlToRepo: "https://git/x.git" })
+    const firstLines = []
+    for await (const b of readPlan(first.planPath, 100)) firstLines.push(...b)
+    const ids = firstLines.map((l) => l.event.id)
+
+    // Seed a cell the migration itself created in a past run, but that the
+    // current Codex parse no longer produces — the provenance guard
+    // (computeOrphanRetractions) only retracts cells whose genesis create is
+    // already logged.
+    const fileId = fileIdFor(String(project.gitlab_id), "GEN 1")
+    const orphanCellId = "orphan-cell-not-in-current-parse"
+    const orphanCreateId = sourceCellCreateEventId(project.aquilla_id, fileId, orphanCellId)
+    ledgerAdd(db, 47, [...ids, orphanCreateId])
+    db.setFileHashes(47, first.fileHashes)
+    markApplied(db, 47, "deadbeef")
+
+    // Stub the projection read: it holds the still-live cells (so they are
+    // not misread as previously-deleted-and-now-resurrected) plus the orphan
+    // cell the current parse no longer produces.
+    const realFetch = globalThis.fetch
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          cells: [
+            { cellId: "GEN 1:1", hasSource: true, hasTarget: true },
+            { cellId: "GEN 1:2", hasSource: true, hasTarget: true },
+            { cellId: orphanCellId, hasSource: true, hasTarget: false },
+          ],
+          lastCellId: orphanCellId,
+          more: false,
+        }),
+        { headers: { "Content-Type": "application/json" } },
+      )) as typeof fetch
+
+    const second = await materialize(deps(db), {
+      job: { ...job(2), sha: "cafebabe" }, project: db.getProject(47)!, dir, httpUrlToRepo: "https://git/x.git", force: true,
+    }).finally(() => { globalThis.fetch = realFetch })
+
+    const lines = []
+    for await (const b of readPlan(second.planPath, 100)) lines.push(...b)
+    const reconciled = lines.filter((l) => l.reconcile)
+    expect(reconciled.length).toBeGreaterThan(0)
+    expect(reconciled.some((l) => l.event.kind === "source.cell.delete" && l.event.cellId === orphanCellId)).toBe(true)
+    // The mapper's own events dedupe against the ledger on this forced re-run
+    // (only the orphan pass's escalated ids are genuinely new), so verify the
+    // "mapper lines stay untagged" half against the FIRST plan instead — a
+    // plain first materialize where every line comes straight from
+    // `mapFilePairToEvents`/`mapComments`, none of it reconciliation. (Captured
+    // above, before the second call, since `prunePlans` would otherwise be
+    // irrelevant here but a same-sha rerun would still truncate the file.)
+    expect(firstLines.length).toBeGreaterThan(0)
+    expect(firstLines.every((l) => l.reconcile === undefined)).toBe(true)
     db.close()
   })
 

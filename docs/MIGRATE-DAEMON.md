@@ -247,6 +247,10 @@ tsx scripts/migrate-daemon/parity.ts <oldDir> <fresh-empty-dir>/plans [--only <i
 Expect zero `missing`, `extra`, `changed`, and ordering (`order`) differences.
 Both runs must start from an empty/fresh `MIGRATE_HOME` — a mirror that already
 has ledger rows will delta-filter events out and produce false "missing" diffs.
+The `order` invariant only ever judges plan lines tagged `reconcile: true`
+(retractions/resurrections/repairs from `computeOrphanRetractions`), so it is
+only exercised when the ledger being reconciled against is seeded — an
+empty-ledger run emits no reconciliation events at all and `order` reports 0.
 
 ## Cutover checklist
 

@@ -13,11 +13,6 @@ import fs from "node:fs"
 import path from "node:path"
 import type { PlanLine } from "./plan"
 
-/** Reconciliation event kinds the daemon emits after the fact — each must
- *  land, per fileId, after that file's last create (source.cell.create or
- *  file.create), never before it. */
-const RECONCILIATION_KINDS = new Set(["source.cell.delete", "target.cell.delete", "source.cell.reanchor"])
-
 export interface CompareResult {
   missing: number
   extra: number
@@ -44,18 +39,25 @@ export function compareProject(old: Map<string, { hash: string }>, plan: PlanLin
     if (!old.has(id)) extra++
   }
 
-  // Ordering invariant: within a fileId, a reconciliation kind must come
-  // after the last create for that file.
+  // Ordering invariant: within a fileId, a line explicitly tagged `reconcile`
+  // (a retraction/resurrection/repair from `computeOrphanRetractions`) must
+  // land after the last UNTAGGED create for that file. Untagged
+  // `*.cell.delete`/`*.cell.reanchor` events come straight from the mapper
+  // (`mapFilePairToEvents`), which interleaves creates and deletes identically
+  // on migrate-all and the daemon — those carry no ordering constraint and
+  // must never be judged here, or an empty-ledger run (no reconciliation
+  // events at all) reports a false-positive `order` count.
   let order = 0
   const lastCreateIdx = new Map<string, number>()
   plan.forEach((l, i) => {
+    if (l.reconcile) return
     if (l.event.kind === "source.cell.create" || l.event.kind === "file.create") {
       const fileId = l.event.fileId
       if (fileId) lastCreateIdx.set(fileId, i)
     }
   })
   plan.forEach((l, i) => {
-    if (!RECONCILIATION_KINDS.has(l.event.kind)) return
+    if (!l.reconcile) return
     const fileId = l.event.fileId
     if (!fileId) return
     const lastCreate = lastCreateIdx.get(fileId)

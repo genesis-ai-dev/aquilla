@@ -133,12 +133,17 @@ export async function materialize(deps: MaterializeDeps, input: MaterializeInput
   let files = 0
   let changedFiles = 0
 
-  const emit = async (events: IngestEvent[], prerequisiteIds: ReadonlySet<string>): Promise<void> => {
+  const emit = async (
+    events: IngestEvent[],
+    prerequisiteIds: ReadonlySet<string>,
+    reconcileIds: ReadonlySet<string> = new Set(),
+  ): Promise<void> => {
     const fresh = new Set(db.ledgerFilterNew(project.gitlab_id, events.map((e) => e.id)))
     for (const event of events) {
       if (!fresh.has(event.id)) continue
       const line: PlanLine = { id: event.id, event, hash: eventHash(event) }
       if (prerequisiteIds.has(event.id)) line.prerequisite = true
+      if (reconcileIds.has(event.id)) line.reconcile = true
       await writer.write(line)
     }
   }
@@ -192,6 +197,7 @@ export async function materialize(deps: MaterializeDeps, input: MaterializeInput
       // finds in `events` and reconciles each against that file's projection
       // rows, with no state carried between files — so calling it once per pair
       // yields exactly what migrate-all's single project-wide call does.
+      let reconcileIds = new Set<string>()
       if (ledgerSize > 0) {
         const { retractions, repairs, resurrections } = await computeOrphanRetractions({
           syncBase: deps.syncBase,
@@ -202,6 +208,7 @@ export async function materialize(deps: MaterializeDeps, input: MaterializeInput
           fallbackAuthor: FALLBACK_AUTHOR,
           fallbackTs: now(),
         })
+        reconcileIds = new Set([...retractions, ...resurrections, ...repairs].map((e) => e.id))
         events.push(...retractions, ...resurrections, ...repairs)
       }
       const prerequisiteIds = new Set(
@@ -209,7 +216,7 @@ export async function materialize(deps: MaterializeDeps, input: MaterializeInput
           ? events.filter((e) => e.kind === "file.create" && e.fileId === fileId).map((e) => e.id)
           : [],
       )
-      await emit(events, prerequisiteIds)
+      await emit(events, prerequisiteIds, reconcileIds)
     }
 
     const commentsFile = path.join(dir, COMMENTS_PATH)

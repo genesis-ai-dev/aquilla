@@ -12,6 +12,11 @@ export interface PlanLine {
   event: IngestEvent
   /** IDML `file.create` that must land before the source artifact is copied. */
   prerequisite?: true
+  /** Set on retraction/resurrection/repair events from `computeOrphanRetractions`
+   *  (Task 12 parity gate order check) — never on the mapper's own events, which
+   *  interleave creates and deletes identically on both migrate-all and the
+   *  daemon and carry no such ordering constraint. */
+  reconcile?: true
   /** Content hash of the event's meaningful fields (Task 12 parity gate). */
   hash: string
 }

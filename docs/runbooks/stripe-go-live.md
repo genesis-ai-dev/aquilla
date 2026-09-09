@@ -2,6 +2,29 @@
 
 Updated: 2026-09-09. Tickets: AQU-837 (billing readiness), AQU-1091 (pricing and app UI).
 
+## Latest launch decisions: weekly usage and Pro AI tools
+
+This section supersedes older monthly-allowance implementation notes below.
+Monthly/annual Stripe prices do not change. Weekly capacity is the prior monthly
+reference divided by four, with full resets every seven days, no rollover, and
+no extra reset at invoice renewal. Continuous weekly periods yield about 52
+allocations annually; do not implement a 28-day billing cycle. Five-hour
+throttling remains a future option, disabled now.
+
+Pro unlocks advanced AI tools: in-app agent, AI-assisted briefs, suggested checks
+from edit patterns, and tokens for external-agent integrations. Max inherits all
+Pro features and increases capacity only. Team inherits these tools in its shared
+workspace. Credit units stay internal; app and marketing show weekly percentages,
+reset dates, and relative capacity.
+
+Required implementation: replace the foundation's monthly usage calculations;
+apply weekly metering across actual AI execution paths; enforce workspace feature
+capabilities and token permissions server-side; update app controls and marketing
+copy. Test feature access, ownership isolation, shared usage across tools, reset
+boundaries, concurrent consumption, and renewals that do not reset weekly usage.
+The current foundation and earlier passing monthly tests do not satisfy this
+revised contract. No production entitlement or reset behavior changed yet.
+
 ## Production launch checklist
 
 **Status: not ready to enable paid checkout.** Prices are ready in sandbox;
@@ -14,7 +37,7 @@ older Field launch instructions below. Ryder requests production launch on
 - [ ] Set launch rules: maximum blocks, payment failures, upgrades/proration,
   cancellation/downgrades, and Team collaborator/reviewer access.
 - [ ] Connect the new catalog to checkout, signed webhooks, workspace plans,
-  monthly credit resets, usage enforcement, and covered access.
+  monthly allowance resets, percentage usage, enforcement, and covered access.
 - [ ] Update app and marketing prices, plan names, allowances, and purchase links.
 - [ ] Install sandbox secrets, enable the dev webhook, and test a complete
   payment → correct workspace access → renewal/cancellation journey. Verify
@@ -34,20 +57,26 @@ one unavailable until approved. Sandbox setup alone does not make billing ready.
 
 ## Complete customer journey: remaining app and marketing work
 
+Customer-facing rule: show percentage usage and relative capacity, never credits.
+This applies to app screens, marketing, notifications, and limit errors. Internal
+credit values below document implementation only, not copy to publish.
+
 These are implementation tasks, not just Stripe dashboard settings. The prepared
 Field page and checkout remain an older draft until these steps are complete.
 
 1. **Marketing → selected offer.** Replace Field with Team and add the Individual
    and Team & Enterprise tabs, defaulting to Team & Enterprise. Support deep links,
    monthly/annual selection, and approved block quantities. Show monthly equivalents
-   and annual totals from a validated Stripe catalog. Explain monthly credit resets,
+   and annual totals from a validated Stripe catalog. Show relative capacity with explicit baselines, hide internal credit counts,
+   and explain monthly allowance resets,
    exhaustion, cancellation, and additional capacity. Keep Enterprise and ETEN /
    Bible-translation inquiry paths; never imply affiliation automatically grants access.
 2. **Selected offer → correct workspace.** Carry offer and interval through sign-in,
    then confirm the personal or team workspace being upgraded. Check billing authority
    on the server. Organization-owned projects consume that organization's allowance;
    a member's personal subscription must not pay for them. Billing settings show the
-   current plan, allowance, renewal date, upgrade options, and eligible portal access.
+   current plan, percentage used, allowance reset date, renewal date, upgrade
+   options, and eligible portal access. Never display internal credit counts.
 3. **Workspace → Stripe Checkout.** Resolve approved Price IDs on the server, validate
    quantity and workspace eligibility, and retain the assigned pricing cohort. Team
    20× sends one platform item plus N capacity items. Never accept client-supplied
@@ -57,7 +86,7 @@ Field page and checkout remain an older draft until these steps are complete.
    versions, capacity, and the original monthly allowance anchor. Reconcile renewal,
    failure, cancellation, upgrades, and downgrades under the approved launch rules.
    Preserve legacy subscriptions and negotiated or sponsored access.
-5. **Access → usable allowance.** Allocate and consume monthly credits safely across
+5. **Access → usable allowance.** Keep credit accounting internal. Allocate and consume monthly credits safely across
    concurrent requests. Annual billing still resets credits monthly. Enforce personal
    versus shared pools, no rollover, and capacity changes without erasing consumed
    usage. Confirm member limits and reviewer permissions match advertised plans.
@@ -77,6 +106,189 @@ Before integrating, reconcile migration numbers against current main: another
 working-copy change uses `0090_org_entitlements.sql`, while this branch adds
 `0090_billing_price_cohorts.sql`. Assign unique migration numbers and verify their
 combined schema before applying either as part of the release.
+
+## Working checklist and evidence — 2026-09-09
+
+Use this section to track individual deliverables under the production checklist.
+A checked item means its stated scope has evidence. It does not imply deployment.
+Keep each production item open until all its acceptance checks pass.
+Record environment, commit, command or Stripe object ID, outcome, and date.
+Never put credentials, signing secrets, or customer payment details in this document.
+
+### Starting position
+
+- [x] Confirm AQU-837 is Dispatched and assigned to Ryder in Linear.
+- [x] Confirm the requested worktree contains the approved pricing document,
+  sandbox manifest, quote module, and persisted cohort module.
+- [x] Inspect the checkout and webhook routes against the target journey.
+  Checkout still selects Field prices; new offer resolution is not connected.
+- [x] Identify the existing billing smoke journey in `e2e/JOURNEYS.md`.
+  Extend `org-settings-billing.smoke.spec.ts` for the new cross-layer contract.
+- [ ] Reconcile this branch with current main before implementation integration.
+  The local tracking ref reports 142 commits behind and three ahead at inspection.
+  This is a local-ref observation, not a fresh remote comparison.
+- [ ] Resolve the migration-number collision and verify the combined schema.
+
+Source inspection: `auth-worker/src/routes/billing.ts`,
+`auth-worker/src/lib/billing/apply.ts`, `docs/pricing/pricing-model.md`,
+and `e2e/JOURNEYS.md`. No sandbox or live payment verification occurs in this update.
+
+### Launch decisions — commercial owner: Ryder
+
+Approval must include the rule and date. Unchecked decisions remain unresolved;
+this checklist does not approve proposed commercial behavior.
+
+- [ ] Maximum self-service 20× block quantity: **pending**.
+  Keep quantity above one unavailable until approval and enforcement are complete.
+- [ ] Failed-payment rule: **pending**. Specify grace duration, access during
+  retries, recovery behavior, and the final unpaid state.
+- [ ] Upgrade rule: **pending**. Specify effective time, Stripe proration,
+  additional allowance, and payment requirements before granting capacity.
+- [ ] Downgrade rule: **pending**. Specify effective time, allowance treatment,
+  and handling when current usage or membership exceeds the lower plan.
+- [ ] Cancellation rule: **pending**. Specify period-end versus immediate
+  cancellation, refunds, remaining allowance, and the resulting workspace plan.
+- [ ] Individual reviewer permissions: **pending**. Define allowed actions and
+  confirm the proposed three active guest reviewers across the workspace.
+- [ ] Team collaborator limit: **pending**. Confirm whether 20 includes the owner
+  and define which roles count toward the limit.
+- [ ] Team and Enterprise support commitments: **pending**. Approve customer copy
+  against the services actually provided.
+- [ ] Existing-customer treatment: document preservation of existing prices,
+  billing periods, negotiated access, and allowance rules. Any migration needs
+  separate approval; renaming Field does not authorize migration.
+
+### Marketing → sign-in → workspace
+
+- [ ] AQU-1091: implement Individual and Team & Enterprise tabs, defaulting to
+  Team & Enterprise. Preserve audience, offer, interval, and quantity in links.
+- [ ] Replace superseded Field copy across cards, comparisons, FAQs, and app UI.
+  Show shared Team allowances and monthly resets for annual subscriptions.
+- [ ] Render public amounts from a validated Stripe-derived catalog snapshot.
+  Test unavailable, inactive, wrong-mode, and mismatched prices.
+- [ ] Show annual totals and monthly equivalents; keep Enterprise rollout and
+  covered-access inquiries available.
+- [ ] Carry the selected offer through sign-in and confirm the target workspace
+  before checkout. Reject invalid or obsolete selections on the server.
+- [ ] Verify personal versus team workspace eligibility and server-side billing
+  authority. Test another workspace's ID and a member without billing authority.
+- [ ] Show the current plan, capacity, usage, reset date, renewal date, and
+  eligible portal actions in billing settings.
+
+### Workspace → approved Stripe Checkout
+
+- [x] Prepare the approved ten-price sandbox manifest and offer composition.
+  Evidence: `config/pricing/stripe-sandbox.json` and prior contract checks below.
+- [ ] Retrieve and validate Stripe Prices through the billing API. Hide amounts
+  and purchase actions when Stripe pricing cannot be verified.
+- [ ] Resolve the selected offer from server-approved Price IDs and the persisted
+  workspace cohort. Reject browser-supplied prices, amounts, and cohort overrides.
+- [ ] Connect all five paid offer shapes for monthly and annual checkout:
+  Pro, Max 5×, Max 20×, Team base, and Team 20×.
+- [ ] Assert Team 20× charges the platform once and capacity at quantity N.
+  Assert its allowance is 4,000 × N, without the base 1,000 credits.
+- [ ] Enforce the approved quantity limit and exclude existing, sponsored, or
+  negotiated subscriptions from inappropriate self-service purchase paths.
+- [ ] Prevent repeated checkout attempts from creating duplicate subscriptions.
+- [ ] Keep browser success redirects informational until verified payment state
+  reaches the owning workspace.
+
+### Signed events → durable workspace access
+
+- [ ] Install the sandbox API and signing secrets through the secret manager.
+  Verify account and environment without exposing secret values.
+- [ ] Enable the recorded dev webhook after compatible code and configuration
+  are deployed. Confirm its subscribed events support the approved failure rule.
+- [ ] Test valid, invalid, and missing signatures using the configured event
+  payload shape. Local unsigned bypass does not verify Stripe signatures.
+- [ ] Persist subscription identity, approved prices, entitlement and price
+  versions, scope, capacity, and the original monthly allowance anchor.
+- [ ] Make event application and deduplication recoverable together. Test a
+  failure after receipt recording, then redelivery of the same Stripe event.
+- [ ] Test duplicate and out-of-order events, simultaneous delivery, and an
+  invoice arriving before subscription-to-workspace mapping exists.
+- [ ] Reconcile paid renewal, failed payment, recovery, cancellation, upgrade,
+  and downgrade according to the approved rules.
+- [ ] Preserve legacy and covered access through subscription updates and replay.
+  Reject events whose subscription/customer mapping conflicts with the workspace.
+
+Inspection identifies a retry risk: the current handler records an event before
+applying its subscription update. A later failure can leave redelivery classified
+as a duplicate. Verify and fix this boundary before checking off event recovery.
+
+### Workspace access → actual allowed work
+
+- [ ] Select the allowance using project ownership. A member's personal plan
+  must never fund work on an organization's project.
+- [ ] Allocate monthly allowances idempotently, including all twelve monthly
+  periods of annual subscriptions and workspace-creation anniversaries for Free.
+- [ ] Verify month-end and leap-year boundaries, no rollover, and recovery after
+  inactivity. Persist the original anchor rather than drifting after February.
+- [ ] Enforce credits across concurrent AI requests and retries. Verify the
+  actual work endpoint and persisted ledger, not only the billing display.
+- [ ] Preserve consumed usage during capacity changes and payment-event replay.
+- [ ] Exhaust the allowance and confirm AI work stops while existing work,
+  manual editing, and export remain available.
+- [ ] Enforce reviewer actions and collaborator limits on server operations.
+- [ ] Verify covered-access provisioning, approved caps, and the absence of
+  payment prompts for organizations without a Stripe subscription.
+
+### Management and retention
+
+- [ ] Verify portal invoices, payment-method changes, and cancellation end to
+  end. Keep unverified portal plan/quantity switching disabled.
+- [ ] Connect stable workspace plan/cohort properties to consent-respecting
+  exposure, activation, useful-work, and paid-renewal events.
+- [ ] Deduplicate paid renewal invoices and exclude prorations, expansion,
+  zero-value invoices, and checkout redirects from renewal counts.
+- [ ] Build monthly and annual retention views with separate product-activity
+  and payment measures. Keep price experiments disabled for launch.
+
+### Sandbox acceptance matrix
+
+Each row needs evidence from Stripe → webhook → stored entitlement → displayed
+plan → actual allowed work. All rows are **not run for the new model**.
+Foundation unit tests do not complete these rows.
+
+| Offer | Monthly journey | Annual journey | Monthly credits |
+| --- | --- | --- | ---: |
+| Pro | Not run | Not run | 200 |
+| Max 5× | Not run | Not run | 1,000 |
+| Max 20×, one block | Not run | Not run | 4,000 |
+| Team base | Not run | Not run | 1,000 shared |
+| Team 20×, one block | Not run | Not run | 4,000 shared |
+
+After quantity approval, add both intervals at the maximum supported quantity
+and prove the next quantity is rejected. Test cancellation, payment failure and
+recovery, duplicate/reordered delivery, monthly reset, exhaustion, workspace
+isolation, and covered access alongside this matrix.
+
+### Release and production acceptance
+
+- [ ] Record targeted unit, producer→consumer integration, and billing smoke
+  results against the integrated release commit.
+- [ ] Reconcile the behavior spec and update the journey registry and affected
+  E2E selection when coverage changes.
+- [ ] Pass `npm run build` and the complete `npm run test:e2e:smoke` release gate.
+  Investigate any worker slow-request logs before release.
+- [ ] Complete owner-confirmed business/payout activation and verify live prices,
+  account identity, webhook, secrets, tax treatment, and portal configuration.
+- [ ] Deploy reviewed app/API/marketing commits with paid checkout disabled.
+  Record commits, deployment identifiers, migrations, and environment checks.
+- [ ] Confirm the rollback operator and checkout-disable procedure. Preserve
+  webhook processing and existing subscriptions when disabling new purchases.
+- [ ] Enable checkout only after every applicable production gate passes.
+- [ ] Confirm the first authorized production purchase grants correct workspace
+  access. Record redacted evidence and monitor webhook/payment failures.
+
+### Checklist maintenance test impact
+
+This update changes documentation only. It adds acceptance criteria and records
+source inspection; no runtime producer, consumer, or product behavior changes.
+No regression tests change or run for this documentation update. Earlier test
+results below remain historical evidence, not a new verification run.
+Validation: `git diff --check` and review against the pricing model and current
+checkout/webhook source. AQU-837 remains Dispatched; release gates remain open.
 
 ## Baseline catalog and experiment readiness — 2026-09-09
 

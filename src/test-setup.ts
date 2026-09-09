@@ -1,17 +1,9 @@
 import "fake-indexeddb/auto"
 import "@testing-library/jest-dom/vitest"
 import { afterEach, vi } from "vitest"
-import { cleanup, configure } from "@testing-library/react"
+import { cleanup } from "@testing-library/react"
 import { resetWindowFocusRevalidateForTests } from "@/lib/sync/window-focus-revalidate"
 import { resetAllRequestCoalescersForTests } from "@/lib/request-coalescer"
-
-// Cloudflare Workers Builds runs this suite beside the lint and agent-worker
-// lanes in one bounded container (scripts/cloudflare-ci-checks.mjs). Under that
-// contention, findBy*/waitFor calls that settle in a few milliseconds locally
-// have blown Testing Library's 1 s default and turned the preview gate red on
-// tests unrelated to the change. Pair with the WORKERS_CI testTimeout in
-// vite.config.ts; local runs keep the default so a real hang still fails fast.
-if (process.env.WORKERS_CI) configure({ asyncUtilTimeout: 5_000 })
 
 // Stub PostHog globally. A real VITE_POSTHOG_KEY in a developer's .env makes
 // src/lib/posthog.ts call posthog.init() at import time, which tries to fetch a

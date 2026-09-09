@@ -198,13 +198,6 @@ export default defineConfig(({ mode }) => ({
     environment: "happy-dom",
     setupFiles: ["./src/test-setup.ts"],
     passWithNoTests: false,
-    // Cloudflare Workers Builds runs this suite in a bounded container while
-    // the lint and agent-worker lanes run beside it (scripts/cloudflare-ci-checks.mjs).
-    // Under that contention, synchronous RTL tests that finish in under a
-    // second locally have hit the 5 s default and turned the whole preview
-    // gate red. Widen the per-test budget only there; local runs keep the
-    // default so a genuine hang still fails fast.
-    testTimeout: process.env.WORKERS_CI ? 20_000 : 5_000,
     exclude: [
       "**/node_modules/**",
       "dist/**",

@@ -91,13 +91,6 @@ Both workers use
 `WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE=postgresql://aquilla:aquilla@127.0.0.1:5432/aquilla_dev`
 to point Hyperdrive at the local Docker Postgres.
 
-The harness also sends a fully drained GET to each worker's root once per
-second after the previous probe completes. This avoids Wrangler's local
-five-second idle-connection race while ProjectSync WebSockets remain open
-([workers-sdk #15452](https://github.com/cloudflare/workers-sdk/issues/15452)).
-A failed probe aborts the run; application requests are never retried by this
-workaround. Shutdown stops and aborts outstanding probes.
-
 Then writes `.env.test.local` (loaded by Vite via `--mode test`):
 ```
 VITE_AUTH_BASE=http://127.0.0.1:9787

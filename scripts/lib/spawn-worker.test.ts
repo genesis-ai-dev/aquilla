@@ -1,12 +1,11 @@
 import path from "node:path"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it } from "vitest"
 import {
   defaultWranglerRegistryDir,
   inspectorPortForWorkerPort,
   isolatedWranglerName,
   wranglerDevArgs,
   wranglerRegistryEnv,
-  startWorkerProxyKeepAlive,
 } from "./spawn-worker"
 
 describe("managed Wrangler dev command", () => {
@@ -87,62 +86,5 @@ describe("Wrangler local registry isolation", () => {
     expect(isolatedWranglerName("aquilla-sync-worker-local", "-s0")).not.toBe(
       "aquilla-sync-worker-local",
     )
-  })
-})
-
-
-describe("local worker proxy keep-alive", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals()
-    vi.useRealTimers()
-  })
-
-  it("drains probes and keeps traffic below the proxy's five-second idle limit", async () => {
-    vi.useFakeTimers()
-    const drain = vi.fn().mockResolvedValue(new ArrayBuffer(0))
-    const request = vi.fn().mockResolvedValue({ status: 404, arrayBuffer: drain })
-    vi.stubGlobal("fetch", request)
-    const onError = vi.fn()
-    const stop = startWorkerProxyKeepAlive("http://127.0.0.1:9788/", onError)
-    await vi.advanceTimersByTimeAsync(3_000)
-    expect(request).toHaveBeenCalledTimes(4)
-    expect(drain).toHaveBeenCalledTimes(4)
-    expect(onError).not.toHaveBeenCalled()
-    stop()
-    await vi.advanceTimersByTimeAsync(10_000)
-    expect(request).toHaveBeenCalledTimes(4)
-  })
-
-  it("never overlaps slow probes and aborts the active one on shutdown", async () => {
-    vi.useFakeTimers()
-    let resolveResponse!: (response: Response) => void
-    const request = vi.fn().mockReturnValue(new Promise<Response>((resolve) => {
-      resolveResponse = resolve
-    }))
-    vi.stubGlobal("fetch", request)
-    const onError = vi.fn()
-    const stop = startWorkerProxyKeepAlive("http://127.0.0.1:9788/", onError)
-    await vi.advanceTimersByTimeAsync(4_000)
-    expect(request).toHaveBeenCalledTimes(1)
-    const signal = request.mock.calls[0][1].signal as AbortSignal
-    stop()
-    expect(signal.aborted).toBe(true)
-    resolveResponse(new Response("not found", { status: 404 }))
-    await vi.advanceTimersByTimeAsync(10_000)
-    expect(request).toHaveBeenCalledTimes(1)
-    expect(onError).not.toHaveBeenCalled()
-  })
-
-  it.each(["disconnect", "HTTP 503"])("reports %s and stops instead of retrying", async (failure) => {
-    vi.useFakeTimers()
-    const request = failure === "disconnect"
-      ? vi.fn().mockRejectedValue(new Error("connection lost"))
-      : vi.fn().mockResolvedValue(new Response("unavailable", { status: 503 }))
-    vi.stubGlobal("fetch", request)
-    const onError = vi.fn()
-    startWorkerProxyKeepAlive("http://127.0.0.1:9788/", onError)
-    await vi.advanceTimersByTimeAsync(10_000)
-    expect(onError).toHaveBeenCalledTimes(1)
-    expect(request).toHaveBeenCalledTimes(1)
   })
 })

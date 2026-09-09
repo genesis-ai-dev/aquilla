@@ -861,6 +861,17 @@ async function commitCreateProject(
     orgId,
     createdBy: cred.userId,
     writeCreatorMembership: true,
+    // AQU-1223: the language pair rides the create instead of being dropped.
+    // Sent only when the command carried one, so a bare name+orgId create still
+    // writes no settings row at all.
+    ...(cmd.sourceLanguage !== undefined || cmd.targetLanguage !== undefined
+      ? {
+          settingsSeed: {
+            ...(cmd.sourceLanguage !== undefined ? { sourceLanguage: cmd.sourceLanguage } : {}),
+            ...(cmd.targetLanguage !== undefined ? { targetLanguage: cmd.targetLanguage } : {}),
+          },
+        }
+      : {}),
   })
 
   if (!inserted) {

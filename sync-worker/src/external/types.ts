@@ -66,6 +66,11 @@ export interface ChangesetSummary {
   newProjectId?: string
   /** CreateProject: the target org id as a string, or 'personal' for org-less. */
   targetOrg?: string
+  /** CreateProject: the language pair being seeded into settings, when the
+   *  command carried one (AQU-1223) — rendered on /approve/:id so a human sees
+   *  the configuration they are authorizing, not just the name. `''` (the
+   *  source-only shape) is shown as 'none'. */
+  newProjectLanguages?: string
   /** Receipt-only UpdateProjectSettings: the changeset's project id. */
   projectId?: string
   /** UpdateProjectSettings: the pinned settings version this write guards on. */

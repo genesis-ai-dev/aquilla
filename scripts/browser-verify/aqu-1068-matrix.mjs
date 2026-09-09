@@ -20,7 +20,7 @@ mkdirSync(SHOTS, { recursive: true })
 const UNTIMED = { project: "dev-project", file: "019f9000-0000-7000-8000-000000000001", label: "untimed .md" }
 const TIMED = { project: "221ee4f6-3542-442d-b01a-8668a34d5824", file: "019fd234-ac8a-7111-87f1-c7d3302ba06e", label: "timed VTT" }
 const MEDIA = { project: "221ee4f6-3542-442d-b01a-8668a34d5824", file: "01a0173f-28d1-72c7-80ca-d77186ffc44e", label: "MP3 import" }
-const BIBLE = { project: "fb88e6fd-bfe5-4a24-acf2-b30db044ab02", file: "019fec1e-f7de-700e-b6fa-496c70002320", label: "31k Bible" }
+const BIBLE = { project: "fb88e6fd-bfe5-4a24-acf2-b30db044ab02", file: "01a0645a-4599-727b-af5e-b72eadde555f", label: "31k Bible" }
 
 const sql = (q) => execFileSync("psql", [PG, "-t", "-A", "-c", q], { encoding: "utf8" }).trim()
 const setFloor = (project, tier) =>
@@ -88,6 +88,16 @@ async function main() {
   page.on("pageerror", (e) => console.log("  [pageerror]", e.message))
 
   const open = async (shape) => {
+    // A SOFT-DELETED file id is the trap this guard exists for. The app falls
+    // back to another file in the project, so the page fills with rows, every
+    // control renders, every gesture works — and the counts, which come from
+    // Postgres keyed on the id we ASKED for, describe a file nobody touched.
+    // That is how the Bible leg came to report a working insert as a lost one.
+    // Refuse to run against a fixture that no longer exists.
+    const alive = sql(`SELECT COUNT(*) FROM files WHERE id='${shape.file}' AND deleted_at IS NULL`)
+    if (alive !== "1") {
+      throw new Error(`${shape.label}: fixture file ${shape.file} is missing or deleted — repoint it before trusting this run`)
+    }
     await page.goto(`${WEB}/project/${shape.project}/editor/file/${shape.file}`, { waitUntil: "domcontentloaded" })
     await page.waitForSelector("[data-cell-id]", { timeout: 60_000 })
     await page.waitForTimeout(1500)
@@ -104,12 +114,25 @@ async function main() {
   const menus = async () =>
     (await page.$$eval('[data-testid^="cell-menu-"]', (els) =>
       els.map((e) => e.getAttribute("data-testid")))).filter((t) => t && !ENTRY_IDS.has(t) && !t.endsWith("-reason")).length
-  /** Open one row's menu and leave it open for the assertions that follow. */
+  /** Open one row's menu and leave it open for the assertions that follow.
+   *  Closes any menu already open first: the entries carry fixed test ids, so
+   *  two open menus make every `getByTestId` ambiguous rather than wrong — a
+   *  strict-mode violation, not a silent misread. */
   const openMenu = async (cellId) => {
+    await closeMenu()
     await page.locator(`[data-testid="cell-menu-${cellId}"]`).first().click()
     await page.getByTestId("cell-menu-insert-below").waitFor({ timeout: 5000 })
   }
-  const closeMenu = async () => { await page.keyboard.press("Escape") }
+  /** Escape, then WAIT for the popup to actually leave the DOM — it unmounts on
+   *  an animation frame, so returning early is what let two overlap. */
+  const closeMenu = async () => {
+    if ((await page.getByTestId("cell-menu-insert-below").count()) === 0) return
+    await page.keyboard.press("Escape")
+    await page.waitForFunction(
+      () => document.querySelectorAll('[data-testid="cell-menu-insert-below"]').length === 0,
+      undefined, { timeout: 5000 },
+    )
+  }
   /** The inline reason on one entry, or "" when it is live. Round 4's rule
    *  moved reasons INSIDE the item — a disabled menu item fires no pointer
    *  events, so a tooltip anchored to it could never open. */
@@ -283,7 +306,17 @@ async function main() {
   )
   const elapsed = Date.now() - t0
   check("31k Bible: the row appears without waiting on the round trip", elapsed < 1000, `${elapsed}ms`)
-  await page.waitForTimeout(4000)
+  // POLL, do not sleep. A 31k file's insert has to travel an optimistic apply,
+  // a debounced cache write, the flush and the confirming read; a fixed wait
+  // that is long enough today is a flake tomorrow, and one that is too short
+  // reports a working insert as a lost one (it did — 4s was not enough here).
+  const persisted = await (async () => {
+    for (let i = 0; i < 30; i++) {
+      if (sourceCount(BIBLE.file) === bibleCountBefore + 1) return true
+      await page.waitForTimeout(1000)
+    }
+    return false
+  })()
   const bibleAfter = await rowIds()
   const bibleNew = bibleAfter.find((id) => !bibleBefore.includes(id))
   check("31k Bible: it lands directly after the row that was clicked",
@@ -293,7 +326,7 @@ async function main() {
   // scripts insert into and clean this fixture too, so its absolute count
   // drifts and a literal here rots into a false failure.
   check("31k Bible: and stays there once the server confirms",
-    sourceCount(BIBLE.file) === bibleCountBefore + 1,
+    persisted,
     `${bibleCountBefore} -> ${sourceCount(BIBLE.file)} source cells`)
   await page.screenshot({ path: `${SHOTS}/04-bible-inserted.png` })
 

@@ -7,7 +7,7 @@ import { execFileSync } from "node:child_process"
 const WEB = "http://127.0.0.1:5173"
 const IDENTITY = "http://127.0.0.1:8788"
 const PG = "postgresql://aquilla:aquilla@127.0.0.1:5432/aquilla_dev"
-const BIBLE = { project: "fb88e6fd-bfe5-4a24-acf2-b30db044ab02", file: "019fec1e-f7de-700e-b6fa-496c70002320" }
+const BIBLE = { project: "fb88e6fd-bfe5-4a24-acf2-b30db044ab02", file: "01a0645a-4599-727b-af5e-b72eadde555f" }
 
 const sql = (q) => execFileSync("psql", [PG, "-t", "-A", "-c", q], { encoding: "utf8" }).trim()
 sql(`INSERT INTO project_settings (project_id, settings) VALUES ('${BIBLE.project}', '{"cellEditingFloor":"maintainer"}')
@@ -16,6 +16,9 @@ const resetInsertedCells = () =>
   sql(`DELETE FROM cells WHERE file_id='${BIBLE.file}'
        AND metadata::jsonb -> 'aquillaOrigin' ->> 'kind' = 'user-insert'`)
 resetInsertedCells()
+
+const alive = sql(`SELECT COUNT(*) FROM files WHERE id='${BIBLE.file}' AND deleted_at IS NULL`)
+if (alive !== "1") throw new Error(`fixture file ${BIBLE.file} is missing or deleted — repoint it`)
 
 async function main() {
   const { access_token, username } = await (await fetch(`${IDENTITY}/__dev__/login`, {

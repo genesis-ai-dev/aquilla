@@ -6,10 +6,22 @@ import { execFileSync } from "node:child_process"
 const WEB = "http://127.0.0.1:5173"
 const IDENTITY = "http://127.0.0.1:8788"
 const PG = "postgresql://aquilla:aquilla@127.0.0.1:5432/aquilla_dev"
-const BIBLE = { project: "fb88e6fd-bfe5-4a24-acf2-b30db044ab02", file: "019fec1e-f7de-700e-b6fa-496c70002320" }
+const BIBLE = { project: "fb88e6fd-bfe5-4a24-acf2-b30db044ab02", file: "01a0645a-4599-727b-af5e-b72eadde555f" }
 
 const sql = (q) => execFileSync("psql", [PG, "-t", "-A", "-c", q], { encoding: "utf8" }).trim()
 sql(`DELETE FROM cells WHERE file_id='${BIBLE.file}' AND metadata::jsonb -> 'aquillaOrigin' ->> 'kind' = 'user-insert'`)
+// Opt the project in. This used to ride on whatever the matrix left behind,
+// which is a dependency between two scripts that clean up after themselves —
+// the matrix clears the tier when it finishes, so running this one after it
+// found a menu with no structural entries and timed out looking for them.
+sql(`INSERT INTO project_settings (project_id, settings) VALUES ('${BIBLE.project}', '{"cellEditingFloor":"maintainer"}')
+     ON CONFLICT (project_id) DO UPDATE SET settings = (project_settings.settings::jsonb || '{"cellEditingFloor":"maintainer"}'::jsonb)::text`)
+// And refuse to run against a fixture that has been deleted: the app falls back
+// to another file in the project, so everything renders and every count
+// describes a file nobody touched.
+
+const alive = sql(`SELECT COUNT(*) FROM files WHERE id='${BIBLE.file}' AND deleted_at IS NULL`)
+if (alive !== "1") throw new Error(`fixture file ${BIBLE.file} is missing or deleted — repoint it`)
 
 async function main() {
   const { access_token, username } = await (await fetch(`${IDENTITY}/__dev__/login`, {

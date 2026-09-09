@@ -100,14 +100,18 @@ async function main() {
   await page.screenshot({ path: `${SHOTS}/01-default-off.png` })
 
   // ── 2. Opt in through the settings UI ──────────────────────────────────────
-  await page.goto(`${WEB}/project/${PROJECT}/settings/validation`, { waitUntil: "domcontentloaded" })
+  // The tier lives in the General pane (`section-cell-editing`), not
+  // Validation — it answers WHO restructures a file, not how work is approved.
+  await page.goto(`${WEB}/project/${PROJECT}/settings/general`, { waitUntil: "domcontentloaded" })
   const trigger = page.getByTestId("settings-cell-editing-floor")
   await trigger.waitFor({ timeout: 30_000 })
   check("the setting reads 'No one' before anyone changes it", (await trigger.textContent())?.includes("No one") === true)
   await page.screenshot({ path: `${SHOTS}/02-setting-default.png` })
 
   await trigger.click()
-  await page.getByRole("option", { name: "Maintainers", exact: true }).click()
+  // AQU-1068 item 5 round: the tiers are the product's standard role ladder
+  // now ("Maintainer (600)"), not the old bespoke phrasing ("Maintainers").
+  await page.getByRole("option", { name: /^Maintainer \(600\)$/ }).click()
   await page.getByRole("button", { name: /save changes/i }).click()
   await page.waitForTimeout(2500)
   await page.screenshot({ path: `${SHOTS}/03-setting-maintainers.png` })

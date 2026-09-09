@@ -2,9 +2,14 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { tmpdir } from "node:os"
 import { describe, expect, it, vi } from "vitest"
+import { workersBuildPreviewAlias } from "./cloudflare-pr-preview.mjs"
 import { deployStackPreview, previewConfig, previewOrigin, PREVIEW_WORKERS } from "./cloudflare-stack-preview.mjs"
 
 const env = { WORKERS_CI: "1", WORKERS_CI_BRANCH: "feature/example", WORKERS_CI_COMMIT_SHA: "abc123", WRANGLER_CI_OVERRIDE_NAME: "aquilla-web-preview" }
+
+const previewName = workersBuildPreviewAlias(env.WORKERS_CI_BRANCH)
+const authOrigin = `https://${previewName}-aquilla-auth-preview.blue-darkness-7674.workers.dev`
+const syncOrigin = `https://${previewName}-aquilla-sync-preview.blue-darkness-7674.workers.dev`
 
 describe("full-stack Cloudflare previews", () => {
   it("connects Wrangler output to the frontend build and backend callbacks", async ({ onTestFinished }) => {
@@ -18,9 +23,9 @@ describe("full-stack Cloudflare previews", () => {
         return { stdout: JSON.stringify(["SECRET_KEY", "SYNC_SECRET_KEY", "ADMIN_SECRET"].map((name) => ({ name, type: "secret_text" }))) }
       }
       if (args[1] === "vite") {
-        expect(options.env.VITE_AUTH_BASE).toBe("https://branch.auth.cloudflare.app/identity")
-        expect(options.env.VITE_CHAT_BASE).toBe("https://branch.auth.cloudflare.app/chat")
-        expect(options.env.VITE_SYNC_WORKER_HOST).toBe("branch.sync.cloudflare.app/sync")
+        expect(options.env.VITE_AUTH_BASE).toBe(`${authOrigin}/identity`)
+        expect(options.env.VITE_CHAT_BASE).toBe(`${authOrigin}/chat`)
+        expect(options.env.VITE_SYNC_WORKER_HOST).toBe(`${new URL(syncOrigin).host}/sync`)
         return { stdout: "" }
       }
       expect(args.slice(0, 3)).toEqual(["exec", "wrangler", "preview"])
@@ -29,10 +34,10 @@ describe("full-stack Cloudflare previews", () => {
       expect(options.env.WRANGLER_CI_OVERRIDE_NAME).toBe(config.name)
       configs.push({ surface, config })
       writeFileSync(options.env.WRANGLER_OUTPUT_FILE_PATH, JSON.stringify({
-        type: "preview", worker_name: config.name,
+        type: "preview", preview_slug: previewName,
         preview_name: args[args.indexOf("--name") + 1],
         deployment_id: "deployment-123",
-        preview_urls: [`https://branch.${surface}.cloudflare.app`],
+        preview_urls: [`https://${previewName}-${config.name}.blue-darkness-7674.workers.dev`],
       }) + "\n")
       return { stdout: "" }
     })
@@ -96,7 +101,7 @@ describe("full-stack Cloudflare previews", () => {
   })
 
   it("rejects missing URLs and mismatched Worker identities", () => {
-    const entry = { worker_name: PREVIEW_WORKERS.auth, preview_name: "test", deployment_id: "123", preview_urls: [] }
+    const entry = { worker_name: PREVIEW_WORKERS.auth, preview_name: "test", preview_slug: "test", deployment_id: "123", preview_urls: [] }
     expect(() => previewOrigin(entry, "auth", "test")).toThrow("Enable Preview")
     expect(() => previewOrigin(entry, "sync", "test")).toThrow("identity")
     expect(() => previewOrigin({ ...entry, preview_urls: ["https://api.aquilla.app"] }, "auth", "test")).toThrow("URL")

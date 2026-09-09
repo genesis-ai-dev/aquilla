@@ -62,14 +62,17 @@ export function previewConfig(surface, { cwd, urls = {} }) {
 }
 
 export function previewOrigin(entry, surface, name) {
-  if (entry.worker_name !== PREVIEW_WORKERS[surface] || entry.preview_name !== name || !entry.deployment_id) {
+  // The beta API currently omits worker_name. Check it when present, and
+  // always verify the complete account/Worker/branch hostname below.
+  if ((entry.worker_name && entry.worker_name !== PREVIEW_WORKERS[surface])
+      || entry.preview_name !== name || entry.preview_slug !== name || !entry.deployment_id) {
     throw new Error(`Unexpected ${surface} preview deployment identity`)
   }
   const value = entry.preview_urls?.[0]
   if (!value) throw new Error(`Enable Preview Deployments URLs for ${PREVIEW_WORKERS[surface]}`)
   const url = new URL(value)
   if (url.protocol !== "https:" || url.username || url.password || url.pathname !== "/" || url.search || url.hash
-      || !(url.hostname.endsWith(".workers.dev") || url.hostname.endsWith(".cloudflare.app"))) {
+      || url.hostname !== `${name}-${PREVIEW_WORKERS[surface]}.blue-darkness-7674.workers.dev`) {
     throw new Error(`Unexpected ${surface} preview URL`)
   }
   return url.origin
@@ -92,7 +95,7 @@ export async function deployStackPreview({ cwd = process.cwd(), env = process.en
     })
     const entry = parseWranglerOutput(readFileSync(outputPath, "utf8"), "preview")
     const origin = previewOrigin(entry, surface, name)
-    if (surface === "web") webOutput = entry
+    if (surface === "web") webOutput = { ...entry, worker_name: PREVIEW_WORKERS.web }
     if (urls[surface] && urls[surface] !== origin) throw new Error(`${surface} preview URL changed during deployment`)
     urls[surface] = origin
   }

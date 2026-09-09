@@ -36,9 +36,9 @@ async function main() {
 
   const before = await page.$$eval("[data-cell-id]", (els) => els.map((e) => e.getAttribute("data-cell-id")))
   const anchor = before[1]
-  await page.locator(`[data-testid="row-structure-${anchor}-add"]`).first().click()
-  await page.getByTestId("row-insert-below").waitFor()
-  await page.getByTestId("row-insert-below").click()
+  await page.locator(`[data-testid="cell-menu-${anchor}"]`).first().click()
+  await page.getByTestId("cell-menu-insert-below").waitFor()
+  await page.getByTestId("cell-menu-insert-below").click()
   const handle = await page.waitForFunction(
     (known) => [...document.querySelectorAll("[data-cell-id]")]
       .map((e) => e.getAttribute("data-cell-id")).find((id) => id && !known.includes(id)) ?? false,

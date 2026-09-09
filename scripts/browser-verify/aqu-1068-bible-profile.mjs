@@ -58,10 +58,10 @@ async function main() {
   const anchor = before[1]
 
   // INSERT
-  await page.locator(`[data-testid="row-structure-${anchor}-add"]`).first().click()
-  await page.getByTestId("row-insert-below").waitFor()
+  await page.locator(`[data-testid="cell-menu-${anchor}"]`).first().click()
+  await page.getByTestId("cell-menu-insert-below").waitFor()
   await page.evaluate(() => window.__mark("insert-click"))
-  await page.getByTestId("row-insert-below").click()
+  await page.getByTestId("cell-menu-insert-below").click()
   const handle = await page.waitForFunction(
     (known) => [...document.querySelectorAll("[data-cell-id]")]
       .map((e) => e.getAttribute("data-cell-id")).find((id) => id && !known.includes(id)) ?? false,
@@ -74,15 +74,18 @@ async function main() {
   // REMOVE the inserted (empty, user-added → single click, no dialog)
   const diag = await page.evaluate((id) => ({
     rowThere: Boolean(document.querySelector(`[data-cell-id="${id}"]`)),
-    removeThere: Boolean(document.querySelector(`[data-testid="row-remove-${id}"]`)),
-    removeCount: document.querySelectorAll('[data-testid^="row-remove-"]').length,
-    corners: document.querySelectorAll('[data-testid^="row-structure-"]').length,
+    // AQU-1068 item 5: remove is a MENU ENTRY now, so its presence cannot be
+    // read off the row without opening one. What the row still shows is the
+    // menu's trigger, which is the count that matters here.
+    menuThere: Boolean(document.querySelector(`[data-testid="cell-menu-${id}"]`)),
+    menuCount: document.querySelectorAll('[data-testid^="cell-menu-"]').length,
     rows: document.querySelectorAll("[data-cell-id]").length,
   }), newId)
   console.log("pre-remove diag:", JSON.stringify(diag))
-  if (!diag.removeThere) await page.screenshot({ path: "/tmp/claude-501/-Users-sampjvv-Code-codex/bc75a9c8-7dc9-45e3-8d84-95c07f53caa5/scratchpad/bible-pre-remove.png" })
+  if (!diag.menuThere) await page.screenshot({ path: "/tmp/claude-501/-Users-sampjvv-Code-codex/bc75a9c8-7dc9-45e3-8d84-95c07f53caa5/scratchpad/bible-pre-remove.png" })
   await page.evaluate(() => window.__mark("remove-click"))
-  await page.locator(`[data-testid="row-remove-${newId}"]`).first().click()
+  await page.locator(`[data-testid="cell-menu-${newId}"]`).first().click()
+  await page.getByTestId("cell-menu-remove").click()
   try {
     await page.waitForFunction((id) => ![...document.querySelectorAll("[data-cell-id]")].some((e) => e.getAttribute("data-cell-id") === id), newId, { timeout: 60_000 })
     await page.evaluate(() => window.__mark("remove-row-gone"))
@@ -96,7 +99,8 @@ async function main() {
 
   // DIALOG on an imported verse (cancel — no mutation)
   await page.evaluate(() => window.__mark("dialog-click"))
-  await page.locator(`[data-testid="row-remove-${before[2]}"]`).first().click()
+  await page.locator(`[data-testid="cell-menu-${before[2]}"]`).first().click()
+  await page.getByTestId("cell-menu-remove").click()
   await page.getByRole("dialog").waitFor({ timeout: 15_000 })
   await page.evaluate(() => window.__mark("dialog-open"))
   await page.keyboard.press("Escape")

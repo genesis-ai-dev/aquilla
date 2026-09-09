@@ -1,6 +1,12 @@
 /**
- * AQU-646: adding and removing lines from the TEXT TABLE, alongside the
- * gestures the timeline already offers (Sam, 2026-08-11).
+ * AQU-646, then AQU-1068 item 5: adding and removing lines from the TEXT
+ * TABLE, alongside the gestures the timeline already offers (Sam, 2026-08-11).
+ *
+ * These controls used to be a `[×][+]` corner that appeared on row hover.
+ * They now live in the source cell's ONE menu, in the place the pencil used to
+ * sit — Ryder, relaying the Biblica debrief (2026-09-05): the pencil "should
+ * be more like a three-dot menu so it can offer more than 'edit text'". Every
+ * rule below survived that move unchanged; only the way you reach them did.
  *
  * The load-bearing rules, and why each is pinned here:
  *   - A row with no room after it gets NO insert control, rather than a
@@ -36,6 +42,16 @@ import type { CellRow } from "@/lib/sync/cells-read-types"
 
 vi.mock("@/hooks/useMicPermission", () => ({
   useMicPermission: () => ({ micDenied: true }),
+}))
+
+// The table asks this to decide whether the source lane is pinned upstream,
+// and it reports `loading: true` on its first render — which the capabilities
+// hook treats as LOCKED (default-locked, so a doomed edit is never offered).
+// Left real, every assertion about the source entry would depend on how far a
+// fetch happened to have got.
+const dcsCursor = vi.hoisted(() => ({ value: { cursor: null as string | null, loading: false } }))
+vi.mock("@/hooks/useDcsUpstreamCursor", () => ({
+  useDcsUpstreamCursor: () => dcsCursor.value,
 }))
 
 // happy-dom has no layout engine — render every row (same stand-in the
@@ -77,6 +93,11 @@ const project: ProjectRecord = {
   files: [],
   members: [],
 }
+
+/** A cloud project at a stated rank. `canEditSource` is PROJECT_LEAD (500) and
+ *  up, so the rank is what decides whether the source entry is offered. */
+const projectAt = (level: number): ProjectRecord =>
+  ({ ...project, syncRole: { level } }) as ProjectRecord
 
 function row(
   cellId: string,
@@ -144,11 +165,14 @@ const SLOTS = {
   ]),
 }
 
-function renderTable(over: Partial<Parameters<typeof EditorTable>[0]> = {}) {
+function renderTable(
+  over: Partial<Parameters<typeof EditorTable>[0]> = {},
+  actions: Parameters<typeof EditorActionsProvider>[0]["value"] = {},
+) {
   const qc = new QueryClient()
   return render(
     <QueryClientProvider client={qc}>
-      <EditorActionsProvider value={{}}>
+      <EditorActionsProvider value={actions}>
         <EditorTable
           project={project}
           cellStore={makeStore()}
@@ -191,14 +215,20 @@ const rowActions = (cell: CellData, gaps: { gapAbove: boolean; gapBelow: boolean
 const editing = (over: Record<string, unknown> = {}) => ({
   head: SLOTS.head,
   afterCell: SLOTS.afterCell,
-  onAddLine: vi.fn(),
   rowActions,
-  onRemoveLine: vi.fn(),
   ...over,
 }) as NonNullable<Parameters<typeof EditorTable>[0]["sourceLineEditing"]>
 
-const addBtn = (cellId: string) =>
-  within(rowEl(cellId)).getByTestId(`row-structure-${cellId}-add`)
+/** The cell's one menu button, and opening it. */
+const menuBtn = (cellId: string) =>
+  within(rowEl(cellId)).getByTestId(`cell-menu-${cellId}`)
+const openMenu = (cellId: string) => { fireEvent.click(menuBtn(cellId)) }
+/** Menus are a popup layer, so entries are found on `screen`, not in the row. */
+const entry = (name: "insert-above" | "insert-below" | "remove" | "edit-source" | "edit-timestamps") =>
+  screen.findByTestId(`cell-menu-${name}`)
+const closeMenu = () => {
+  fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
+}
 
 /**
  * AQU-1068 round 3: THE CONTROL IS ALWAYS THERE, and says why it cannot be
@@ -212,36 +242,41 @@ const addBtn = (cellId: string) =>
  * not an explanation.
  */
 describe("EditorTable — the row's structural controls", () => {
-  it("renders nothing at all when the workflow is off", async () => {
-    // The one case that still hides: no access.
-    renderTable()
+  it("renders nothing at all when there is nothing to offer", async () => {
+    // The one case that still hides: no access. A contributor on an untimed
+    // file with the workflow off can edit no source text, restructure nothing
+    // and retime nothing, so the trigger itself does not render — a
+    // permanently empty menu would be furniture.
+    renderTable({ project: projectAt(400) })
     await screen.findByText("First cue")
-    expect(screen.queryByTestId("row-structure-cue-a")).toBeNull()
-    expect(screen.queryByTestId("row-remove-added")).toBeNull()
+    expect(screen.queryByTestId("cell-menu-cue-a")).toBeNull()
   })
 
-  it("sits in the row's bottom-right corner, half-visible at rest", async () => {
-    // The placement IS the fix: two earlier cuts put this control outside the
-    // row (clipped away by the list's paint containment) and then floating in
-    // the middle of it. Bottom-right is the row's only free corner — the action
-    // rail owns the top-right.
+  it("sits where the pencil did, quiet until the row is reached for", async () => {
+    // The placement IS a fix in its own right: two earlier cuts put this
+    // control outside the row (clipped away by the list's paint containment)
+    // and then floating in the middle of it. It now shares the pencil's corner,
+    // which is the one place a source-cell action has always lived.
+    //
+    // AQU-1134 rides on the z-index: the term action rail pops up over this
+    // corner at z-20 and used to render BEHIND the pencil, so the trigger
+    // stays below it.
     renderTable({ sourceLineEditing: editing() })
     await screen.findByText("First cue")
-    const corner = within(rowEl("cue-a")).getByTestId("row-structure-cue-a")
-    expect(corner.className).toContain("right-2")
-    expect(corner.className).toContain("bottom-1")
-    expect(corner.className).toContain("opacity-50")
-    expect(corner.className).toContain("group-hover/rowstrip:opacity-100")
+    const trigger = menuBtn("cue-a")
+    expect(trigger.className).toContain("end-1")
+    expect(trigger.className).toContain("top-1")
+    expect(trigger.className).toContain("z-10")
+    expect(trigger.className).toContain("opacity-0")
   })
 
-  it("gives EVERY row a corner, including one with no room after it", async () => {
+  it("gives EVERY row a menu, including one with no room after it", async () => {
     // cue-b is absent from the afterCell map — the trailing breath is under the
     // floor. It used to get no `+` at all.
     renderTable({ sourceLineEditing: editing() })
     await screen.findByText("Second cue")
     for (const id of ["cue-a", "added", "cue-b"]) {
-      expect(within(rowEl(id)).getByTestId(`row-structure-${id}`)).toBeInTheDocument()
-      expect(addBtn(id)).toBeInTheDocument()
+      expect(menuBtn(id)).toBeInTheDocument()
     }
   })
 
@@ -250,124 +285,184 @@ describe("EditorTable — the row's structural controls", () => {
     // only "below" here, on the reasoning that "above me" duplicates the
     // previous row's "below". The duplication is now deliberate: pointing at
     // the row you want to push down is how people describe the act.
-    const onAddLine = vi.fn()
-    renderTable({ sourceLineEditing: editing({ onAddLine }) })
+    const onAddLineAt = vi.fn()
+    renderTable({ sourceLineEditing: editing() }, { onAddLineAt })
     await screen.findByText("First cue")
 
-    fireEvent.click(addBtn("added"))
-    fireEvent.click(await screen.findByTestId("row-insert-above"))
-    expect(onAddLine).toHaveBeenCalledWith(20, 25)
+    openMenu("added")
+    fireEvent.click(await entry("insert-above"))
+    expect(onAddLineAt).toHaveBeenCalledWith(20, 25)
 
-    fireEvent.click(addBtn("added"))
-    fireEvent.click(await screen.findByTestId("row-insert-below"))
-    expect(onAddLine).toHaveBeenLastCalledWith(28, 40)
+    openMenu("added")
+    fireEvent.click(await entry("insert-below"))
+    expect(onAddLineAt).toHaveBeenLastCalledWith(28, 40)
   })
 
   it("the same silence is reachable from either side of it", async () => {
     // 20-25 is "below cue-a" and "above added". Both doors, one room.
-    const onAddLine = vi.fn()
-    renderTable({ sourceLineEditing: editing({ onAddLine }) })
+    const onAddLineAt = vi.fn()
+    renderTable({ sourceLineEditing: editing() }, { onAddLineAt })
     await screen.findByText("First cue")
-    fireEvent.click(addBtn("cue-a"))
-    fireEvent.click(await screen.findByTestId("row-insert-below"))
-    expect(onAddLine).toHaveBeenCalledWith(20, 25)
+    openMenu("cue-a")
+    fireEvent.click(await entry("insert-below"))
+    expect(onAddLineAt).toHaveBeenCalledWith(20, 25)
   })
 
   it("shows the unavailable direction DISABLED, with its reason, not missing", async () => {
     renderTable({ sourceLineEditing: editing() })
     await screen.findByText("Second cue")
-    fireEvent.click(addBtn("cue-b"))
-    const below = await screen.findByTestId("row-insert-below")
+    openMenu("cue-b")
+    const below = await entry("insert-below")
     expect(below).toHaveAttribute("data-disabled")
-    expect(within(below).getByTestId("row-insert-below-reason")).toHaveTextContent(NO_ROOM)
+    expect(within(below).getByTestId("cell-menu-insert-below-reason")).toHaveTextContent(NO_ROOM)
     // ...while the direction that IS available stays live.
-    expect(screen.getByTestId("row-insert-above")).not.toHaveAttribute("data-disabled")
+    expect(screen.getByTestId("cell-menu-insert-above")).not.toHaveAttribute("data-disabled")
   })
 
   it("a disabled direction does nothing when clicked", async () => {
-    const onAddLine = vi.fn()
-    renderTable({ sourceLineEditing: editing({ onAddLine }) })
+    const onAddLineAt = vi.fn()
+    renderTable({ sourceLineEditing: editing() }, { onAddLineAt })
     await screen.findByText("Second cue")
-    fireEvent.click(addBtn("cue-b"))
-    fireEvent.click(await screen.findByTestId("row-insert-below"))
-    expect(onAddLine).not.toHaveBeenCalled()
+    openMenu("cue-b")
+    fireEvent.click(await entry("insert-below"))
+    expect(onAddLineAt).not.toHaveBeenCalled()
   })
 
   it("hands the exact silence to the workspace, not the row's own times", async () => {
     // The row spans 25-28s; the silence after it is 28-40s, and it is the
     // SILENCE that must travel.
-    const onAddLine = vi.fn()
-    renderTable({ sourceLineEditing: editing({ onAddLine }) })
+    const onAddLineAt = vi.fn()
+    renderTable({ sourceLineEditing: editing() }, { onAddLineAt })
     await screen.findByText("First cue")
-    fireEvent.click(addBtn("added"))
-    fireEvent.click(await screen.findByTestId("row-insert-below"))
-    expect(onAddLine).toHaveBeenCalledWith(28, 40)
+    openMenu("added")
+    fireEvent.click(await entry("insert-below"))
+    expect(onAddLineAt).toHaveBeenCalledWith(28, 40)
   })
 
-  it("disables the + ITSELF when neither direction is possible", async () => {
-    // A menu of nothing but dead items is worse than one explained button.
+  it("keeps every entry present when a row can do nothing, each explaining itself", async () => {
+    // The corner used to disable the `+` ITSELF here, because a menu of
+    // nothing but dead items was worse than one explained button. That trade
+    // is gone now the menu holds more than inserts: the entries are the
+    // explanation, and there is always something else in the list.
     renderTable({
       sourceLineEditing: editing({
         rowActions: () => ({ above: MEDIA_ADD, below: MEDIA_ADD, remove: MEDIA_REMOVE }),
       }),
     })
     await screen.findByText("First cue")
-    expect(addBtn("cue-a")).toBeDisabled()
-    fireEvent.click(addBtn("cue-a"))
-    expect(screen.queryByTestId("row-insert-above")).toBeNull()
+    openMenu("cue-a")
+    for (const [name, reason] of [
+      ["insert-above", MEDIA_ADD],
+      ["insert-below", MEDIA_ADD],
+      ["remove", MEDIA_REMOVE],
+    ] as const) {
+      const item = await entry(name)
+      expect(item).toHaveAttribute("data-disabled")
+      expect(within(item).getByTestId(`cell-menu-${name}-reason`)).toHaveTextContent(reason)
+    }
   })
 
   it("Remove is always present, and disabled with a reason where it does not apply", async () => {
     renderTable({ sourceLineEditing: editing() })
     await screen.findByText("First cue")
-    // A line somebody added here and left empty: theirs to take back.
-    expect(within(rowEl("added")).getByTestId("row-remove-added")).not.toBeDisabled()
+    // A line somebody added here: theirs to take back.
+    openMenu("added")
+    expect(await entry("remove")).not.toHaveAttribute("data-disabled")
+    closeMenu()
     // An imported cue, below maintainer: shown, refused, explained.
-    expect(within(rowEl("cue-a")).getByTestId("row-remove-cue-a")).toBeDisabled()
-    expect(within(rowEl("cue-b")).getByTestId("row-remove-cue-b")).toBeDisabled()
+    openMenu("cue-a")
+    const refused = await entry("remove")
+    expect(refused).toHaveAttribute("data-disabled")
+    expect(within(refused).getByTestId("cell-menu-remove-reason")).toHaveTextContent(MAINTAINER_ONLY)
   })
 
   it("Remove reaches the workspace with the row's id", async () => {
-    const onRemoveLine = vi.fn()
-    renderTable({ sourceLineEditing: editing({ onRemoveLine }) })
+    const onRemoveCell = vi.fn()
+    renderTable({ sourceLineEditing: editing() }, { onRemoveCell })
     await screen.findByText("First cue")
-    fireEvent.click(within(rowEl("added")).getByTestId("row-remove-added"))
-    expect(onRemoveLine).toHaveBeenCalledWith("added")
+    openMenu("added")
+    fireEvent.click(await entry("remove"))
+    expect(onRemoveCell).toHaveBeenCalledWith("added")
   })
 
   it("a disabled Remove does not reach the workspace", async () => {
-    const onRemoveLine = vi.fn()
-    renderTable({ sourceLineEditing: editing({ onRemoveLine }) })
+    const onRemoveCell = vi.fn()
+    renderTable({ sourceLineEditing: editing() }, { onRemoveCell })
     await screen.findByText("First cue")
-    fireEvent.click(within(rowEl("cue-a")).getByTestId("row-remove-cue-a"))
-    expect(onRemoveLine).not.toHaveBeenCalled()
+    openMenu("cue-a")
+    fireEvent.click(await entry("remove"))
+    expect(onRemoveCell).not.toHaveBeenCalled()
   })
 
   it("the first row's above direction is the head silence", async () => {
-    const onAddLine = vi.fn()
-    renderTable({ sourceLineEditing: editing({ onAddLine }) })
+    const onAddLineAt = vi.fn()
+    renderTable({ sourceLineEditing: editing() }, { onAddLineAt })
     await screen.findByText("First cue")
-    fireEvent.click(addBtn("cue-a"))
-    fireEvent.click(await screen.findByTestId("row-insert-above"))
-    expect(onAddLine).toHaveBeenCalledWith(0, 10)
+    openMenu("cue-a")
+    fireEvent.click(await entry("insert-above"))
+    expect(onAddLineAt).toHaveBeenCalledWith(0, 10)
   })
 
   it("with no leading silence the first row's above is disabled, not absent", async () => {
     renderTable({ sourceLineEditing: editing({ head: null }) })
     await screen.findByText("First cue")
-    fireEvent.click(addBtn("cue-a"))
-    const above = await screen.findByTestId("row-insert-above")
-    expect(above).toHaveAttribute("data-disabled")
+    openMenu("cue-a")
+    expect(await entry("insert-above")).toHaveAttribute("data-disabled")
   })
 })
 
 /**
- * AQU-1068: the same corner control, on a file with no clock.
+ * AQU-1068 item 5: the entries that are NOT structural.
+ *
+ * The menu replaced the source pencil, so editing the source text is one of
+ * its entries now — including the DCS-pinned case, where the pencil used to be
+ * swapped for a padlock so the affordance never silently vanished (AQU-615).
+ * That is the same idea, as the entry's own reason.
+ */
+describe("EditorTable — the source-text entry", () => {
+  it("opens the menu on its own when there is nothing structural to offer", async () => {
+    // No `sourceLineEditing` at all, but a project lead may edit source text.
+    renderTable({ project: projectAt(500) })
+    await screen.findByText("First cue")
+    openMenu("cue-a")
+    expect(await entry("edit-source")).not.toHaveAttribute("data-disabled")
+    expect(screen.queryByTestId("cell-menu-insert-above")).toBeNull()
+    expect(screen.queryByTestId("cell-menu-remove")).toBeNull()
+  })
+
+  it("renders disabled with the lock's reason where the pencil became a padlock", async () => {
+    // A DCS-pinned source: the rank is high enough, the repository is not.
+    dcsCursor.value = { cursor: "abc123", loading: false }
+    try {
+      renderTable({ project: projectAt(500) })
+      await screen.findByText("First cue")
+      openMenu("cue-a")
+      const item = await entry("edit-source")
+      expect(item).toHaveAttribute("data-disabled")
+      expect(within(item).getByTestId("cell-menu-edit-source-reason")).toHaveTextContent(/./)
+    } finally {
+      dcsCursor.value = { cursor: null, loading: false }
+    }
+  })
+
+  it("is absent when this person simply may not edit source text", async () => {
+    // No permission and no reason to give: the entry does not exist, and the
+    // menu is carried by the structural entries alone.
+    renderTable({ project: projectAt(400), sourceLineEditing: editing() })
+    await screen.findByText("First cue")
+    openMenu("cue-a")
+    await entry("insert-above")
+    expect(screen.queryByTestId("cell-menu-edit-source")).toBeNull()
+  })
+})
+
+/**
+ * AQU-1068: the same menu, on a file with no clock.
  *
  * An ordinary text file has no silences to measure, so every row can take a
- * cell on either side. That difference is resolved in the workspace and arrives
- * here as plain thunks, which is why RowStructureCorner no longer knows what a
- * second is.
+ * cell on either side. That difference is resolved in the workspace and
+ * arrives as one flag, which is why the menu never has to know what a second
+ * is — it just asks the context to insert beside a cell id.
  */
 describe("EditorTable — structural controls on an untimed file", () => {
   const untimedEditing = (over: Record<string, unknown> = {}) =>
@@ -376,7 +471,7 @@ describe("EditorTable — structural controls on an untimed file", () => {
       // shared with the timed path rather than made optional for one caller.
       head: null,
       afterCell: new Map(),
-      untimed: { onInsertAbove: vi.fn(), onInsertBelow: vi.fn(), ...(over.untimed ?? {}) },
+      untimed: true,
       // No clock, so no "no room" — the workspace's resolver ignores the gap
       // flags entirely when placement is "anywhere".
       rowActions: (cell: CellData) => ({
@@ -391,30 +486,42 @@ describe("EditorTable — structural controls on an untimed file", () => {
     renderTable({ sourceLineEditing: untimedEditing() })
     await screen.findByText("Second cue")
     for (const id of ["cue-a", "added", "cue-b"]) {
-      fireEvent.click(addBtn(id))
-      const above = await screen.findByTestId("row-insert-above")
-      expect(above).not.toHaveAttribute("data-disabled")
-      expect(screen.getByTestId("row-insert-below")).not.toHaveAttribute("data-disabled")
-      fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
+      openMenu(id)
+      expect(await entry("insert-above")).not.toHaveAttribute("data-disabled")
+      expect(screen.getByTestId("cell-menu-insert-below")).not.toHaveAttribute("data-disabled")
+      closeMenu()
     }
   })
 
   it("passes the row's own id to the insert, not a time span", async () => {
-    const onInsertBelow = vi.fn()
-    renderTable({ sourceLineEditing: untimedEditing({ untimed: { onInsertAbove: vi.fn(), onInsertBelow } }) })
+    const onInsertCellBeside = vi.fn()
+    renderTable({ sourceLineEditing: untimedEditing() }, { onInsertCellBeside })
     await screen.findByText("Second cue")
-    fireEvent.click(addBtn("cue-b"))
-    fireEvent.click(await screen.findByTestId("row-insert-below"))
-    expect(onInsertBelow).toHaveBeenCalledWith("cue-b")
+    openMenu("cue-b")
+    fireEvent.click(await entry("insert-below"))
+    expect(onInsertCellBeside).toHaveBeenCalledWith("cue-b", "below")
   })
 
   it("insert above passes the row's id too", async () => {
-    const onInsertAbove = vi.fn()
-    renderTable({ sourceLineEditing: untimedEditing({ untimed: { onInsertAbove, onInsertBelow: vi.fn() } }) })
+    const onInsertCellBeside = vi.fn()
+    renderTable({ sourceLineEditing: untimedEditing() }, { onInsertCellBeside })
     await screen.findByText("First cue")
-    fireEvent.click(addBtn("cue-a"))
-    fireEvent.click(await screen.findByTestId("row-insert-above"))
-    expect(onInsertAbove).toHaveBeenCalledWith("cue-a")
+    openMenu("cue-a")
+    fireEvent.click(await entry("insert-above"))
+    expect(onInsertCellBeside).toHaveBeenCalledWith("cue-a", "above")
+  })
+
+  it("never reaches for the timed path on a file with no clock", async () => {
+    // The spans are empty here, so an untimed insert that went looking for one
+    // would silently do nothing — the failure this flag exists to prevent.
+    const onAddLineAt = vi.fn()
+    const onInsertCellBeside = vi.fn()
+    renderTable({ sourceLineEditing: untimedEditing() }, { onAddLineAt, onInsertCellBeside })
+    await screen.findByText("First cue")
+    openMenu("added")
+    fireEvent.click(await entry("insert-below"))
+    expect(onAddLineAt).not.toHaveBeenCalled()
+    expect(onInsertCellBeside).toHaveBeenCalledWith("added", "below")
   })
 
   it("still asks the workspace what is removable", async () => {
@@ -424,19 +531,201 @@ describe("EditorTable — structural controls on an untimed file", () => {
       }),
     })
     await screen.findByText("First cue")
-    expect(within(rowEl("cue-a")).getByTestId("row-remove-cue-a")).not.toBeDisabled()
+    openMenu("cue-a")
+    expect(await entry("remove")).not.toHaveAttribute("data-disabled")
   })
 
   it("a media row refuses everything, answering each action in its own words", async () => {
     // An MP3 import: every row IS audio. It used to render nothing at all,
-    // which is the case that started this round.
+    // which is the case that started round 3.
     renderTable({
       sourceLineEditing: untimedEditing({
         rowActions: () => ({ above: MEDIA_ADD, below: MEDIA_ADD, remove: MEDIA_REMOVE }),
       }),
     })
     await screen.findByText("First cue")
-    expect(addBtn("cue-a")).toBeDisabled()
-    expect(within(rowEl("cue-a")).getByTestId("row-remove-cue-a")).toBeDisabled()
+    openMenu("cue-a")
+    expect(await entry("insert-above")).toHaveAttribute("data-disabled")
+    expect(screen.getByTestId("cell-menu-remove")).toHaveAttribute("data-disabled")
+    expect(screen.getByTestId("cell-menu-remove-reason")).toHaveTextContent(MEDIA_REMOVE)
+  })
+
+  it("offers no timestamps entry — an untimed file has none to edit", async () => {
+    // Sam, 2026-09-09: hidden rather than disabled. Not a permission, just a
+    // fact about the file, and a dead entry on every text project is furniture.
+    renderTable({ sourceLineEditing: untimedEditing() })
+    await screen.findByText("First cue")
+    openMenu("cue-a")
+    await entry("insert-above")
+    expect(screen.queryByTestId("cell-menu-edit-timestamps")).toBeNull()
+  })
+})
+
+/**
+ * AQU-1068 item 5: typing a line's start and end.
+ *
+ * Greenlit by Sam (2026-09-09) off Ryder's menu note. Dragging a chip is the
+ * right tool for "about here" and the wrong one for "exactly 1:02.500", which
+ * is what a subtitle conformed against a script needs.
+ *
+ * The permission here is the project's TIMING LOCK, not the cell-editing tier:
+ * moving a line in time is not restructuring the file, and the timeline's drag
+ * has always answered to the lock alone.
+ */
+describe("EditorTable — the timestamps entry", () => {
+  /** The store's rows are timed, so a time-ordered file offers the entry. */
+  const timed = { orderedBy: "time" as const }
+
+  it("is offered on a timed file", async () => {
+    renderTable(timed)
+    await screen.findByText("First cue")
+    openMenu("cue-a")
+    expect(await entry("edit-timestamps")).not.toHaveAttribute("data-disabled")
+  })
+
+  it("is HIDDEN on a file with no clock, not disabled", async () => {
+    // Sam, 2026-09-09: not a permission, just a fact about the file — and a
+    // dead entry on every text project is furniture rather than an
+    // explanation.
+    renderTable({ project: projectAt(500) })
+    await screen.findByText("First cue")
+    openMenu("cue-a")
+    await entry("edit-source")
+    expect(screen.queryByTestId("cell-menu-edit-timestamps")).toBeNull()
+  })
+
+  it("seeds the fields from the row, in the timeline's own precise format", async () => {
+    // `fmtDragTime` — MM:SS.mmm, what the drag readout shows. The idle chip's
+    // tenths would silently drop precision the moment somebody saved.
+    renderTable(timed)
+    await screen.findByText("First cue")
+    openMenu("cue-a")
+    fireEvent.click(await entry("edit-timestamps"))
+    expect(await screen.findByTestId("cell-times-start")).toHaveValue("00:10.000")
+    expect(screen.getByTestId("cell-times-end")).toHaveValue("00:20.000")
+  })
+
+  it("saves what was typed, through the workspace's retime handler", async () => {
+    const onRetimeCell = vi.fn()
+    renderTable(timed, { onRetimeCell })
+    await screen.findByText("First cue")
+    openMenu("cue-a")
+    fireEvent.click(await entry("edit-timestamps"))
+    fireEvent.change(await screen.findByTestId("cell-times-start"), { target: { value: "0:12.5" } })
+    fireEvent.click(screen.getByTestId("cell-times-save"))
+    expect(onRetimeCell).toHaveBeenCalledWith("cue-a", 12.5, 20)
+  })
+
+  it("refuses a value it cannot read, and saves nothing", async () => {
+    const onRetimeCell = vi.fn()
+    renderTable(timed, { onRetimeCell })
+    await screen.findByText("First cue")
+    openMenu("cue-a")
+    fireEvent.click(await entry("edit-timestamps"))
+    fireEvent.change(await screen.findByTestId("cell-times-start"), { target: { value: "half past" } })
+    fireEvent.click(screen.getByTestId("cell-times-save"))
+    expect(onRetimeCell).not.toHaveBeenCalled()
+    expect(screen.getByTestId("cell-times-error")).toBeInTheDocument()
+  })
+
+  it("pulls a span back inside its neighbours, and SAYS it did", async () => {
+    // `added` runs 25-28s between cues ending at 20s and starting at 40s.
+    // Typing 45s for its end would put it past the cue after it, which would
+    // make the anchor chain and the clock disagree about the order.
+    const onRetimeCell = vi.fn()
+    renderTable(timed, { onRetimeCell })
+    await screen.findByText("First cue")
+    openMenu("added")
+    fireEvent.click(await entry("edit-timestamps"))
+    fireEvent.change(await screen.findByTestId("cell-times-end"), { target: { value: "0:45" } })
+    fireEvent.click(screen.getByTestId("cell-times-save"))
+    expect(onRetimeCell).toHaveBeenCalledWith("added", 25, 40)
+    // Not silently: the corrected value goes back into the field with a note,
+    // rather than closing over something other than what was typed.
+    expect(screen.getByTestId("cell-times-note")).toBeInTheDocument()
+    expect(screen.getByTestId("cell-times-end")).toHaveValue("00:40.000")
+  })
+
+  it("refuses an imported audio row in its own words", async () => {
+    renderTable({
+      ...timed,
+      sourceLineEditing: editing({
+        rowActions: () => ({ above: MEDIA_ADD, below: MEDIA_ADD, remove: MEDIA_REMOVE }),
+      }),
+      cellStore: (() => {
+        const store = makeStore()
+        store.replaceRowsForCell("cue-a", [
+          row("cue-a", "source", "First cue", { startMs: 10_000, endMs: 20_000, medium: "media" }),
+        ])
+        return store
+      })(),
+    })
+    await screen.findByText("First cue")
+    openMenu("cue-a")
+    const item = await entry("edit-timestamps")
+    expect(item).toHaveAttribute("data-disabled")
+    expect(within(item).getByTestId("cell-menu-edit-timestamps-reason")).toHaveTextContent(MEDIA_REMOVE)
+  })
+})
+
+/**
+ * The project-wide timing lock (AQU-646). Sam, 2026-09-09: it must never work
+ * while locked — and a maintainer should be sent to the SETTING rather than
+ * having it flipped from under a row, because the lock covers every file and
+ * they should see that scope before changing it.
+ */
+describe("EditorTable — timestamps while the project's timings are locked", () => {
+  const timed = { orderedBy: "time" as const }
+  const LOCKED = "Timing is locked for this project."
+
+  it("greys the entry for someone who cannot lift the lock", async () => {
+    renderTable(timed, { timingLocked: true, canUnlockTiming: false })
+    await screen.findByText("First cue")
+    openMenu("cue-a")
+    const item = await entry("edit-timestamps")
+    expect(item).toHaveAttribute("data-disabled")
+    expect(within(item).getByTestId("cell-menu-edit-timestamps-reason")).toHaveTextContent(LOCKED)
+  })
+
+  it("still lets a line somebody ADDED here be retimed", async () => {
+    // AQU-646's exemption: a line added here carries no imported timing to
+    // corrupt, so the lock leaves it movable — the same rule the drag follows.
+    renderTable(timed, { timingLocked: true, canUnlockTiming: false })
+    await screen.findByText("First cue")
+    openMenu("added")
+    expect(await entry("edit-timestamps")).not.toHaveAttribute("data-disabled")
+  })
+
+  it("opens INERT for a maintainer, pointing at the setting rather than flipping it", async () => {
+    const onOpenTimingSettings = vi.fn()
+    const onRetimeCell = vi.fn()
+    renderTable(timed, {
+      timingLocked: true,
+      canUnlockTiming: true,
+      onOpenTimingSettings,
+      onRetimeCell,
+    })
+    await screen.findByText("First cue")
+    openMenu("cue-a")
+    fireEvent.click(await entry("edit-timestamps"))
+
+    // The fields are there but dead, and the reason is stated.
+    expect(await screen.findByTestId("cell-times-locked")).toHaveTextContent(LOCKED)
+    expect(screen.getByTestId("cell-times-start")).toBeDisabled()
+    // No save at all while locked — there is nothing to save.
+    expect(screen.queryByTestId("cell-times-save")).toBeNull()
+
+    fireEvent.click(screen.getByTestId("cell-times-unlock"))
+    expect(onOpenTimingSettings).toHaveBeenCalled()
+    // It navigates; it does NOT quietly unlock the whole project.
+    expect(onRetimeCell).not.toHaveBeenCalled()
+  })
+
+  it("offers no way in at all to someone who cannot lift it", async () => {
+    renderTable(timed, { timingLocked: true, canUnlockTiming: false })
+    await screen.findByText("First cue")
+    openMenu("cue-a")
+    fireEvent.click(await entry("edit-timestamps"))
+    expect(screen.queryByTestId("cell-times-unlock")).toBeNull()
   })
 })

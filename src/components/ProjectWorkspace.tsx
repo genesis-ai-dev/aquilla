@@ -57,6 +57,7 @@ import {
   ALL_ORGS_PARAM,
   editorReturnFromLocation,
   orgHomePath,
+  projectSettingsPath,
   withEditorReturn,
 } from "@/lib/navigation/org-paths"
 import { updateProject, patchProject, getProject, mergeServerProjectWithLocalCache } from "@/lib/store/project-index"
@@ -7010,6 +7011,56 @@ export function ProjectWorkspace() {
 
   /** Stable wrapper over the ref above — see `audioHomeRef`. */
   const audioHomeFor = useCallback((cell: CellData) => audioHomeRef.current(cell), [])
+  /**
+   * AQU-1068 item 5: the menu's three structural actions, as ONE stable
+   * identity each.
+   *
+   * `handleAddLine` and `handleAddCell` already take exactly these arguments;
+   * these wrappers exist only so the context value does not change identity
+   * when those callbacks are rebuilt, which would re-render the whole editor
+   * subtree on every store bump.
+   */
+  const handleAddLineRef = useRef<(startSec: number, endSec: number) => void>(() => {})
+  handleAddLineRef.current = (startSec, endSec) => { void handleAddLine(startSec, endSec) }
+  const handleAddLineAt = useCallback((startSec: number, endSec: number) => {
+    handleAddLineRef.current(startSec, endSec)
+  }, [])
+
+  const handleAddCellRef = useRef<(cellId: string, position: "above" | "below") => void>(() => {})
+  handleAddCellRef.current = (cellId, position) => { void handleAddCell(cellId, position) }
+  const handleInsertCellBeside = useCallback((cellId: string, position: "above" | "below") => {
+    handleAddCellRef.current(cellId, position)
+  }, [])
+
+  // Declared below this memo, so naming it directly in the dep array would hit
+  // the temporal dead zone — dep arrays are evaluated eagerly, unlike the
+  // callback bodies that already reference it.
+  const requestRemoveCellRef = useRef<(cellId: string) => void>(() => {})
+  const handleRemoveCell = useCallback((cellId: string) => {
+    requestRemoveCellRef.current(cellId)
+  }, [])
+
+  /**
+   * Take a maintainer to the switch that locks timings, rather than flipping
+   * it from inside the row (Sam, 2026-09-09).
+   *
+   * The lock is PROJECT-wide: unlocking it from a popover to fix one line
+   * would quietly free every file's timings for every member below maintainer.
+   * Sending them to the setting shows them the scope of what they are about to
+   * change, and teaches them where it lives for next time.
+   *
+   * `audio-media` is the pane group holding the Timeline card, and the
+   * `backgroundLocation` state opens it as a modal over the editor rather than
+   * navigating away from the file — the same shape the AI-setup link beside it
+   * uses.
+   */
+  const handleOpenTimingSettings = useCallback(() => {
+    if (!projectId) return
+    navigate(projectSettingsPath(projectId, "audio-media"), {
+      state: { backgroundLocation: location, projectSettingsModalDepth: 1 },
+    })
+  }, [navigate, projectId, location])
+
   const handleOpenTerminologyConcept = useCallback((conceptId: string) => {
     navigate(
       `/project/${projectId}/terminology?concept=${encodeURIComponent(conceptId)}`,
@@ -7028,7 +7079,17 @@ export function ProjectWorkspace() {
     onTakeSaved: handleTakeSaved, // AQU-646: a take gives a text-less line a target row
     audioHomeFor, // AQU-646 stage 3f: where this row's audio belongs
     myScopes, // AQU-633: per-cell validate scope gate
-  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleTakeSaved, audioHomeFor, myScopes])
+    // AQU-1068 item 5: the source cell's menu. Its REASONS are per-row and
+    // travel as strings; these are the same functions for every row, so they
+    // ride the context and stay out of React.memo's compare surface.
+    onAddLineAt: handleAddLineAt,
+    onInsertCellBeside: handleInsertCellBeside,
+    onRemoveCell: handleRemoveCell,
+    onRetimeCell: handleRetimeSubtitle,
+    timingLocked,
+    canUnlockTiming,
+    onOpenTimingSettings: handleOpenTimingSettings,
+  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleTakeSaved, audioHomeFor, myScopes, handleAddLineAt, handleInsertCellBeside, handleRemoveCell, handleRetimeSubtitle, timingLocked, canUnlockTiming, handleOpenTimingSettings])
 
   const handleAssignVoice = useCallback(async (cellId: string, voiceId: string) => {
     if (!audioProject || !frontierSession) return
@@ -8791,6 +8852,10 @@ export function ProjectWorkspace() {
     [getActiveCell, cellStore, allProjectComments, linkedTakesByCell, handleRemoveLine, toast, t],
   )
 
+  // Publish it to the stable wrapper the editor context hands the rows. See
+  // `handleRemoveCell` above for why the indirection exists.
+  requestRemoveCellRef.current = requestRemoveCell
+
   // AQU-1068: who may add and remove cells at all. ONE question, asked of the
   // project's configured tier — no rank clears it on its own, because the
   // setting answers *whether* this project restructures its files. The static
@@ -8922,7 +8987,10 @@ export function ProjectWorkspace() {
   const sourceLineEditing = useMemo(
     () => {
       if (!canEditLines) return undefined
-      const shared = { rowActions, onRemoveLine: (cellId: string) => requestRemoveCell(cellId) }
+      // AQU-1068 item 5: only what varies per ROW is left here — the silences
+      // and the rule that reads them. The three actions moved to
+      // EditorActionsContext when the controls moved inside the row; see the
+      // note on `EditorTableProps.sourceLineEditing`.
       if (placement === "anywhere") {
         return {
           // Unused on this path — an untimed file has no silences to measure —
@@ -8930,22 +8998,13 @@ export function ProjectWorkspace() {
           // made optional for one caller.
           head: null,
           afterCell: EMPTY_INSERT_SLOTS.afterCell,
-          onAddLine: () => {},
-          untimed: {
-            onInsertAbove: (cellId: string) => void handleAddCell(cellId, "above"),
-            onInsertBelow: (cellId: string) => void handleAddCell(cellId, "below"),
-          },
-          ...shared,
+          untimed: true,
+          rowActions,
         }
       }
-      return {
-        head: insertSlots.head,
-        afterCell: insertSlots.afterCell,
-        onAddLine: (startSec: number, endSec: number) => void handleAddLine(startSec, endSec),
-        ...shared,
-      }
+      return { head: insertSlots.head, afterCell: insertSlots.afterCell, rowActions }
     },
-    [canEditLines, placement, insertSlots, handleAddLine, handleAddCell, rowActions, requestRemoveCell],
+    [canEditLines, placement, insertSlots, rowActions],
   )
 
   // AQU-646 SUB-53 / pre-merge round: which job THIS FILE is for. The mode is

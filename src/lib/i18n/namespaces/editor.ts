@@ -1286,6 +1286,22 @@ export const editor = defineNamespace({
       "was closed.",
 
     // — Source column ——————————————————————————————————————————————
+    // AQU-1068 item 5: the source cell's one menu, which replaced the pencil
+    // and the hover corner. `editor.source.editText` and the row's insert /
+    // remove / reason strings are reused verbatim as its entries.
+    "editor.cellMenu.trigger": "Cell actions",
+    "editor.cellMenu.editTimestamps": "Edit timestamps",
+    "editor.cellMenu.timingLocked": "Timing is locked for this project.",
+    "editor.cellMenu.unlockInSettings": "Unlock timing in project settings",
+    "editor.cellMenu.startLabel": "Start time",
+    "editor.cellMenu.endLabel": "End time",
+    "editor.cellMenu.betweenHint": "Between {from} and {to}",
+    "editor.cellMenu.afterHint": "After {from}",
+    "editor.cellMenu.beforeHint": "Before {to}",
+    "editor.cellMenu.badTime": "Type a time like 1:02.5",
+    "editor.cellMenu.clampedToNeighbours":
+      "Moved to fit between the lines on either side.",
+    "editor.cellMenu.saveTimestamps": "Save",
     "editor.source.textAria": "Source text",
     "editor.source.editText": "Edit source text",
     "editor.source.doneEditing": "Done editing source",
@@ -4562,6 +4578,91 @@ export const editor = defineNamespace({
         description:
           "Screen-reader name of the read-only source column of one row — the text " +
           "being translated from.",
+      },
+      "editor.cellMenu.trigger": {
+        description:
+          "Screen-reader name of the three-dot button at the top-right of a source " +
+          "cell. It opens the one menu holding every action on that cell: edit its " +
+          "source text, edit its timestamps, insert a cell above or below, remove it.",
+        maxLength: 20,
+      },
+      "editor.cellMenu.editTimestamps": {
+        description:
+          "Menu entry that opens a small form for typing this line's start and end " +
+          "times. Only on files that run on a clock (subtitles, cue sheets). " +
+          "Imperative.",
+        maxLength: 24,
+      },
+      "editor.cellMenu.timingLocked": {
+        description:
+          "Why the timestamps entry is unavailable: a project-wide setting locks " +
+          "imported timings against accidental changes. A full sentence — it is " +
+          "shown as a second line inside the menu entry, and in the form itself.",
+      },
+      "editor.cellMenu.unlockInSettings": {
+        description:
+          "Button shown to a maintainer when timing is locked. It does NOT unlock " +
+          "anything — it takes them to the project settings page where the switch " +
+          "lives, because the lock covers the whole project and they should see " +
+          "that before changing it. Imperative.",
+        maxLength: 40,
+      },
+      "editor.cellMenu.startLabel": {
+        description:
+          "Label of the field holding when this line starts. Not bare \"Start\": " +
+          "beside a second field it would read as a verb, and it collides with " +
+          "the recorder's Start button.",
+        maxLength: 14,
+      },
+      "editor.cellMenu.endLabel": {
+        description:
+          "Label of the field holding when this line ends. Pairs with the start " +
+          "field beside it, so the two must read as a matched pair.",
+        maxLength: 14,
+      },
+      "editor.cellMenu.betweenHint": {
+        description:
+          "Hint under the timestamp fields naming the room this line has. {from} " +
+          "and {to} are timecodes like 1:02.500 — the end of the line before and " +
+          "the start of the line after.",
+        placeholders: {
+          from: "The end of the line BEFORE this one, as a timecode like 1:02.500.",
+          to: "The start of the line AFTER this one, as a timecode like 1:04.000.",
+        },
+      },
+      "editor.cellMenu.afterHint": {
+        description:
+          "The same hint when this is the LAST line, so there is nothing after it " +
+          "to bound against. {from} is a timecode.",
+        placeholders: {
+          from: "The end of the line BEFORE this one, as a timecode like 1:02.500.",
+        },
+      },
+      "editor.cellMenu.beforeHint": {
+        description:
+          "The same hint when this is the FIRST line, so there is nothing before " +
+          "it. {to} is a timecode.",
+        placeholders: {
+          to: "The start of the line AFTER this one, as a timecode like 1:04.000.",
+        },
+      },
+      "editor.cellMenu.badTime": {
+        description:
+          "Error under a timestamp field that cannot be read as a time. The example " +
+          "is deliberately the short form people actually type; the field accepts " +
+          "longer ones too. Keep the example a plain digits-and-punctuation " +
+          "timecode in every language.",
+      },
+      "editor.cellMenu.clampedToNeighbours": {
+        description:
+          "Shown after saving when the times typed overlapped the line before or " +
+          "after and were pulled back to fit. Not an error — the change was saved, " +
+          "just not exactly as typed.",
+      },
+      "editor.cellMenu.saveTimestamps": {
+        description:
+          "Button that commits the typed start and end times. Imperative, one word.",
+        maxLength: 12,
       },
       "editor.source.editText": {
         description:

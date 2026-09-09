@@ -81,11 +81,21 @@ async function main() {
 
   // ── 1. Default is refusal, for an OWNER ────────────────────────────────────
   await openFile()
-  const corners0 = await page.$$('[data-testid^="row-structure-"]')
+  // AQU-1068 item 5: the corner became the source cell's one menu. The menu
+  // itself may exist for reasons that are not structural (editing source text,
+  // typing timestamps), so what proves the tier is refusing is the absence of
+  // its structural ENTRIES — which means opening it.
+  const menus0 = await page.$$('[data-testid^="cell-menu-"]')
+  let structural0 = 0
+  if (menus0.length > 0) {
+    await menus0[0].click()
+    structural0 = await page.locator('[data-testid="cell-menu-insert-below"]').count()
+    await page.keyboard.press("Escape")
+  }
   check(
     "default 'No one' offers no structural controls, even to an owner",
-    corners0.length === 0,
-    `${corners0.length} corners`,
+    structural0 === 0,
+    `${structural0} structural entries in ${menus0.length} menus`,
   )
   await page.screenshot({ path: `${SHOTS}/01-default-off.png` })
 
@@ -105,19 +115,18 @@ async function main() {
   // ── 3. The controls appear ─────────────────────────────────────────────────
   await openFile()
   const before = await rowIds()
-  // Exact ids only — the `row-structure-<id>-add` button shares the prefix.
-  const cornerIds = await page.$$eval('[data-testid^="row-structure-"]', (els) =>
-    els.map((e) => e.getAttribute("data-testid")).filter((t) => t && !t.endsWith("-add") && !t.endsWith("-remove")))
+  const menuIds = await page.$$eval('[data-testid^="cell-menu-"]', (els) =>
+    els.map((e) => e.getAttribute("data-testid")))
   check("opting in reveals a structural control on every rendered row",
-    before.every((id) => cornerIds.includes(`row-structure-${id}`)),
-    `${cornerIds.length} corners / ${before.length} rendered rows`)
+    before.every((id) => menuIds.includes(`cell-menu-${id}`)),
+    `${menuIds.length} menus / ${before.length} rendered rows`)
   await page.screenshot({ path: `${SHOTS}/04-controls-visible.png` })
 
   // ── 4. Insert below the second row ─────────────────────────────────────────
   const cellsBefore = sourceCellCount()
   const anchorId = before[1]
-  await page.locator(`[data-testid="row-structure-${anchorId}-add"]`).first().click()
-  await page.getByTestId("row-insert-below").click()
+  await page.locator(`[data-testid="cell-menu-${anchorId}"]`).first().click()
+  await page.getByTestId("cell-menu-insert-below").click()
   await page.waitForTimeout(3000)
   const afterInsert = await rowIds()
   const insertedAt = afterInsert.findIndex((id) => !before.includes(id))
@@ -143,7 +152,8 @@ async function main() {
   const importedId = afterReload.find((id) => isImported(id))
   if (!importedId) throw new Error("no imported cell is rendered — cannot test the confirmation path")
   const cellsBeforeRemove = sourceCellCount()
-  await page.locator(`[data-testid="row-remove-${importedId}"]`).first().click()
+  await page.locator(`[data-testid="cell-menu-${importedId}"]`).first().click()
+  await page.getByTestId("cell-menu-remove").click()
   const dialog = page.getByRole("dialog")
   await dialog.waitFor({ timeout: 10_000 })
   const body = (await dialog.textContent()) ?? ""

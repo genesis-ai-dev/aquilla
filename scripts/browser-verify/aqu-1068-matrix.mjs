@@ -93,22 +93,41 @@ async function main() {
     await page.waitForTimeout(1500)
   }
   const rowIds = () => page.$$eval("[data-cell-id]", (els) => els.map((e) => e.getAttribute("data-cell-id")))
-  const corners = async () =>
-    (await page.$$eval('[data-testid^="row-structure-"]', (els) =>
-      els.map((e) => e.getAttribute("data-testid")).filter((t) => t && !t.endsWith("-add") && !t.endsWith("-remove")))).length
+  // AQU-1068 item 5: the corner became the source cell's one menu. Its ENTRIES
+  // share the `cell-menu-` prefix, so the trigger count filters them out by
+  // name — they only exist while a menu is open, but counting on that would be
+  // a trap for whoever adds the next entry.
+  const ENTRY_IDS = new Set([
+    "cell-menu-edit-source", "cell-menu-edit-timestamps",
+    "cell-menu-insert-above", "cell-menu-insert-below", "cell-menu-remove",
+  ])
+  const menus = async () =>
+    (await page.$$eval('[data-testid^="cell-menu-"]', (els) =>
+      els.map((e) => e.getAttribute("data-testid")))).filter((t) => t && !ENTRY_IDS.has(t) && !t.endsWith("-reason")).length
+  /** Open one row's menu and leave it open for the assertions that follow. */
+  const openMenu = async (cellId) => {
+    await page.locator(`[data-testid="cell-menu-${cellId}"]`).first().click()
+    await page.getByTestId("cell-menu-insert-below").waitFor({ timeout: 5000 })
+  }
+  const closeMenu = async () => { await page.keyboard.press("Escape") }
+  /** The inline reason on one entry, or "" when it is live. Round 4's rule
+   *  moved reasons INSIDE the item — a disabled menu item fires no pointer
+   *  events, so a tooltip anchored to it could never open. */
+  const reasonOn = async (name) =>
+    ((await page.getByTestId(`cell-menu-${name}-reason`).first().textContent().catch(() => "")) ?? "").trim()
 
   // ── 1. TIMED VTT in the TEXT lens — the shape Sam broke first ─────────────
   resetInsertedCells(TIMED.file)
   setFloor(TIMED.project, "maintainer")
   await open(TIMED)
   const timedRows = await rowIds()
-  const timedCorners = await corners()
+  const timedMenus = await menus()
   check("timed VTT: the text lens offers structural controls at all",
-    timedCorners > 0, `${timedCorners} corners on ${timedRows.length} rows`)
+    timedMenus > 0, `${timedMenus} menus on ${timedRows.length} rows`)
 
-  // Round 3: every row has a `+`; gap-constraint shows up as DISABLED
-  // directions inside the menu, not as a missing button.
-  const addable = await page.$$eval('[data-testid$="-add"]', (els) => els.length)
+  // Round 3: every row has a menu; gap-constraint shows up as DISABLED
+  // directions inside it, not as a missing control.
+  const addable = timedMenus
   check("timed VTT: every row gets a control, none are missing",
     addable === timedRows.length, `${addable} add buttons / ${timedRows.length} rows`)
 
@@ -117,16 +136,16 @@ async function main() {
   // The LAST cue has no silence after it (no footage linked, so no known tail),
   // which is the cleanest row to prove "refused, and says so".
   const lastRow = timedRows[timedRows.length - 1]
-  await page.locator(`[data-testid="row-structure-${lastRow}-add"]`).first().click()
-  const belowItem = page.getByTestId("row-insert-below")
+  await openMenu(lastRow)
+  const belowItem = page.getByTestId("cell-menu-insert-below")
   await belowItem.waitFor({ timeout: 5000 })
   check("timed VTT: the direction with no room is DISABLED, not missing",
     (await belowItem.getAttribute("data-disabled")) !== null)
   check("timed VTT: ...and carries a reason the user can read",
-    (await page.getByTestId("row-insert-below-reason").count()) > 0,
-    ((await page.getByTestId("row-insert-below-reason").textContent().catch(() => "")) ?? "").slice(0, 60))
+    (await page.getByTestId("cell-menu-insert-below-reason").count()) > 0,
+    (await reasonOn("insert-below")).slice(0, 60))
   check("timed VTT: ...while the direction that HAS room stays live",
-    (await page.getByTestId("row-insert-above").getAttribute("data-disabled")) === null)
+    (await page.getByTestId("cell-menu-insert-above").getAttribute("data-disabled")) === null)
   await page.keyboard.press("Escape")
   await page.waitForTimeout(300)
   await page.screenshot({ path: `${SHOTS}/01-timed-text-lens.png` })
@@ -151,13 +170,12 @@ async function main() {
   if (addable > 0) {
     const before = sourceCount(TIMED.file)
     const beforeIds = await rowIds()
-    // The `+` always opens the menu now; pick a direction that is live.
-    await page.locator('[data-testid$="-add"]:not([disabled])').first().click()
-    const below = page.getByTestId("row-insert-below")
-    await below.waitFor({ timeout: 5000 })
+    // Pick a direction that is live on the first row that has one.
+    await openMenu(beforeIds[0])
+    const below = page.getByTestId("cell-menu-insert-below")
     const target = (await below.getAttribute("data-disabled")) === null
       ? below
-      : page.getByTestId("row-insert-above")
+      : page.getByTestId("cell-menu-insert-above")
     await target.click()
     await page.waitForTimeout(3000)
     const afterIds = await rowIds()
@@ -182,34 +200,39 @@ async function main() {
   // Round 3 inverts this leg. Rendering nothing was the bug: Sam switched the
   // setting on, nothing happened, and there was no way to tell an inapplicable
   // file from a broken feature.
-  check("MP3 import: the controls are PRESENT", (await corners()) === mediaRows.length,
-    `${await corners()} corners on ${mediaRows.length} rows`)
-  const mp3Add = page.locator(`[data-testid="row-structure-${mediaRows[0]}-add"]`).first()
-  const mp3Remove = page.locator(`[data-testid="row-remove-${mediaRows[0]}"]`).first()
-  check("MP3 import: add is disabled, not absent", await mp3Add.isDisabled())
-  check("MP3 import: remove is disabled too", await mp3Remove.isDisabled())
-  // `force` because the button carries `pointer-events-none` so the pointer can
-  // reach the wrapper that actually opens the tooltip — Playwright's
-  // actionability check would otherwise refuse the hover. NOT caught: a hover
-  // that fails must fail the check, not silently produce "no tooltip".
-  // Past AppTooltip's 600ms open delay, with room to spare.
-  await mp3Add.hover({ force: true })
-  await page.waitForTimeout(1400)
-  const tip = (await page.locator('[role="tooltip"]').first().textContent().catch(() => "")) ?? ""
-  // Round 4: the tooltip on the `+` must answer the INSERT ("can't be added"),
-  // not describe the row — the row-describing string was the round-4 complaint.
-  check("MP3 import: hovering the + explains the refused ADD", /can.t be added to imported audio/i.test(tip), tip.slice(0, 80))
+  check("MP3 import: the controls are PRESENT", (await menus()) === mediaRows.length,
+    `${await menus()} menus on ${mediaRows.length} rows`)
+  await openMenu(mediaRows[0])
+  check("MP3 import: add is disabled, not absent",
+    (await page.getByTestId("cell-menu-insert-below").getAttribute("data-disabled")) !== null)
+  check("MP3 import: remove is disabled too",
+    (await page.getByTestId("cell-menu-remove").getAttribute("data-disabled")) !== null)
+  // Round 4: the reason must answer the ACTION the user reached for — a dead
+  // insert is a question about a NEW cell, so it cannot describe the row. It
+  // rides INSIDE the entry rather than in a tooltip, because a disabled menu
+  // item fires no pointer events and a tooltip there could never open.
+  const addReason = await reasonOn("insert-below")
+  check("MP3 import: the add entry explains the refused ADD",
+    /can.t be added to imported audio/i.test(addReason), addReason.slice(0, 80))
+  const removeReason = await reasonOn("remove")
+  check("MP3 import: the remove entry answers REMOVAL in its own words",
+    /original recording/i.test(removeReason), removeReason.slice(0, 80))
   await page.screenshot({ path: `${SHOTS}/03-mp3-disabled.png` })
 
   // ── 3. Untimed .md — still anywhere, both directions ──────────────────────
   setFloor(UNTIMED.project, "maintainer")
   await open(UNTIMED)
   const mdRows = await rowIds()
-  check("untimed .md: every rendered row offers a control", (await corners()) === mdRows.length,
-    `${await corners()} / ${mdRows.length}`)
-  const mdAdd = await page.$$eval('[data-testid$="-add"]:not([disabled])', (els) => els.length)
-  check("untimed .md: every row can take a cell — no gaps to respect", mdAdd === mdRows.length,
-    `${mdAdd} enabled add buttons`)
+  check("untimed .md: every rendered row offers a control", (await menus()) === mdRows.length,
+    `${await menus()} / ${mdRows.length}`)
+  let mdLive = 0
+  for (const id of mdRows) {
+    await openMenu(id)
+    if ((await page.getByTestId("cell-menu-insert-below").getAttribute("data-disabled")) === null) mdLive++
+    await closeMenu()
+  }
+  check("untimed .md: every row can take a cell — no gaps to respect", mdLive === mdRows.length,
+    `${mdLive} rows offering a live insert`)
 
   // ── 3b. The removal dialog must SEE a recording in the text lens ──────────
   //
@@ -223,7 +246,8 @@ async function main() {
   const seededAudio = seedTake(UNTIMED.project, UNTIMED.file, takeCell)
   try {
     await open(UNTIMED)
-    await page.locator(`[data-testid="row-remove-${takeCell}"]`).first().click()
+    await openMenu(takeCell)
+    await page.getByTestId("cell-menu-remove").click()
     const dialog = page.getByRole("dialog")
     await dialog.waitFor({ timeout: 10_000 })
     const body = (await dialog.textContent()) ?? ""
@@ -248,10 +272,9 @@ async function main() {
   // Open the menu FIRST, then time only what this round changed: the gap
   // between asking for the cell and seeing it. Timing the whole gesture would
   // measure Playwright's click resolution and the dropdown's own animation.
-  await page.locator(`[data-testid="row-structure-${anchorId}-add"]`).first().click()
-  await page.getByTestId("row-insert-below").waitFor()
+  await openMenu(anchorId)
   const t0 = Date.now()
-  await page.getByTestId("row-insert-below").click()
+  await page.getByTestId("cell-menu-insert-below").click()
   // Wait for the row to EXIST, not for the network.
   await page.waitForFunction(
     (known) => document.querySelectorAll("[data-cell-id]").length > 0 &&

@@ -1,0 +1,264 @@
+date	story	run	result	seconds	note
+2026-09-09T01:42:32Z	projects-create	1	PASS	10	PASS: row 'Journey create 184222' in Projects table; overview url http://127.0.0.1:5173/projects/3d0e03b4-e8b9-4fd7-90b5-e99f396a1011
+2026-09-09T01:42:43Z	projects-create	2	PASS	11	PASS: row 'Journey create 184232' in Projects table; overview url http://127.0.0.1:5173/projects/4b31aff4-10fc-41c9-a9b7-7458591c7fc7
+2026-09-09T01:42:53Z	projects-create	3	PASS	10	PASS: row 'Journey create 184243' in Projects table; overview url http://127.0.0.1:5173/projects/a59b6075-46aa-48d6-b13a-22273703c261
+2026-09-09T01:43:04Z	projects-create	4	PASS	11	PASS: row 'Journey create 184253' in Projects table; overview url http://127.0.0.1:5173/projects/01b24cfd-3349-4e72-a036-a809a9a2bec6
+2026-09-09T01:43:14Z	projects-create	5	PASS	10	PASS: row 'Journey create 184304' in Projects table; overview url http://127.0.0.1:5173/projects/6ebbcf1d-3582-4221-9e35-f30ee21fa447
+2026-09-09T01:45:06Z	projects-archive	1	FAIL	10	FAIL: confirm Archive button
+2026-09-09T01:45:17Z	orgs-preferences-persist	1	PASS	11	PASS: switch checked=true -> checked=false, survived reload, restored to checked=true
+2026-09-09T01:45:27Z	orgs-preferences-persist	2	PASS	10	PASS: switch checked=true -> checked=false, survived reload, restored to checked=true
+2026-09-09T01:45:38Z	orgs-preferences-persist	3	PASS	11	PASS: switch checked=true -> checked=false, survived reload, restored to checked=true
+2026-09-09T01:45:49Z	orgs-preferences-persist	4	PASS	11	PASS: switch checked=true -> checked=false, survived reload, restored to checked=true
+2026-09-09T01:46:00Z	orgs-preferences-persist	5	PASS	11	PASS: switch checked=true -> checked=false, survived reload, restored to checked=true
+2026-09-09T01:46:54Z	projects-archive	1	FAIL	40	FAIL: did not land on Projects list
+2026-09-09T01:47:37Z	projects-route-health	1	PASS	49	PASS: 20 routes clean, no crash boundary or vite-error-overlay
+2026-09-09T01:47:43Z	projects-archive	1	PASS	14	PASS: 'Journey archive 184729' left the active table and is listed under Archived (overview was http://127.0.0.1:5173/projects/8ff87805-53a0-4746-ae42-24d1ea666
+2026-09-09T01:47:57Z	projects-archive	2	PASS	14	PASS: 'Journey archive 184743' left the active table and is listed under Archived (overview was http://127.0.0.1:5173/projects/57b93039-2bd4-4d59-9a09-1fd20cf3e
+2026-09-09T01:48:11Z	projects-archive	3	PASS	14	PASS: 'Journey archive 184757' left the active table and is listed under Archived (overview was http://127.0.0.1:5173/projects/669a2659-0562-4408-b7da-5a9b17601
+2026-09-09T01:48:26Z	projects-archive	4	PASS	15	PASS: 'Journey archive 184811' left the active table and is listed under Archived (overview was http://127.0.0.1:5173/projects/86c3a225-f1c7-4b35-91ee-2e20b2bb0
+2026-09-09T01:48:33Z	projects-route-health	2	PASS	56	PASS: 20 routes clean, no crash boundary or vite-error-overlay
+2026-09-09T01:48:44Z	projects-archive	5	PASS	18	PASS: 'Journey archive 184826' left the active table and is listed under Archived (overview was http://127.0.0.1:5173/projects/19e34a38-0a2a-447a-a85b-a0263af59
+2026-09-09T01:49:32Z	projects-route-health	3	PASS	59	PASS: 20 routes clean, no crash boundary or vite-error-overlay
+2026-09-09T01:49:34Z	projects-route-health	4	FAIL	2	FAIL: login
+2026-09-09T01:50:38Z	projects-route-health	1	PASS	53	PASS: 20 routes clean, no crash boundary or vite-error-overlay
+2026-09-09T01:51:38Z	projects-route-health	2	PASS	60	PASS: 20 routes clean, no crash boundary or vite-error-overlay
+2026-09-09T01:52:41Z	projects-route-health	3	PASS	63	PASS: 20 routes clean, no crash boundary or vite-error-overlay
+2026-09-09T01:52:45Z	collab-member-presence	1	FAIL	108	FAIL: members page
+2026-09-09T01:53:12Z	orgs-add-member-sees-org	1	FAIL	31	FAIL: bob org switcher
+2026-09-09T01:54:25Z	projects-route-health	4	PASS	104	PASS: 20 routes clean, no crash boundary or vite-error-overlay
+2026-09-09T01:54:31Z	collab-bt-edit-locked-for-reviewer	1	FAIL	57	FAIL: import preview
+2026-09-09T01:54:44Z	orgs-add-member-sees-org	1	PASS	45	PASS: org 'Journey OAM 185359' created by alice; bob's switcher lists it as Maintainer
+2026-09-09T01:54:56Z	collab-bt-edit-locked-for-reviewer	1	FAIL	62	FAIL: import preview
+2026-09-09T01:55:01Z	collab-member-presence	1	FAIL	56	FAIL: add member dialog
+2026-09-09T01:55:09Z	projects-settings-rename	1	FAIL	50	FAIL: click Project settings
+2026-09-09T01:55:22Z	orgs-add-member-sees-org	2	PASS	38	PASS: org 'Journey OAM 185444' created by alice; bob's switcher lists it as Maintainer
+2026-09-09T01:56:13Z	projects-route-health	5	PASS	108	PASS: 20 routes clean, no crash boundary or vite-error-overlay
+2026-09-09T01:56:13Z	orgs-add-member-sees-org	3	PASS	51	PASS: org 'Journey OAM 185522' created by alice; bob's switcher lists it as Maintainer
+2026-09-09T01:56:24Z	sharing-invite-link-join	1	FAIL	76	FAIL: settings panel
+2026-09-09T01:56:55Z	collab-member-presence	1	FAIL	39	FAIL: add member dialog never opened after retries
+2026-09-09T01:56:56Z	sharing-invite-link-join	1	PASS	59	PASS: row 'Journey invite 185557' shared with bob on /orgs/all; bob project url http://127.0.0.1:5173/project/6d616904-8dd3-4d10-a061-9b2e20648de3/editor
+2026-09-09T01:57:01Z	orgs-add-member-sees-org	4	PASS	48	PASS: org 'Journey OAM 185613' created by alice; bob's switcher lists it as Maintainer
+2026-09-09T01:57:30Z	sharing-invite-link-join	1	PASS	58	PASS: row 'Journey invite 185631' shared with bob on /orgs/all; bob project url http://127.0.0.1:5173/project/1e09fb02-5d47-419b-8858-5607746d3984/editor
+2026-09-09T01:57:37Z	orgs-add-member-sees-org	5	PASS	36	PASS: org 'Journey OAM 185701' created by alice; bob's switcher lists it as Maintainer
+2026-09-09T01:57:43Z	sharing-invite-link-join	2	PASS	47	PASS: row 'Journey invite 185656' shared with bob on /orgs/all; bob project url http://127.0.0.1:5173/project/2ca05cef-f452-474b-ac13-17012a0eb874/editor
+2026-09-09T01:58:12Z	sharing-invite-link-join	2	PASS	42	PASS: row 'Journey invite 185730' shared with bob on /orgs/all; bob project url http://127.0.0.1:5173/project/33bce106-bb57-4c2c-ab7d-9a3f6b29deec/editor
+2026-09-09T01:58:32Z	sharing-invite-link-join	1	PASS	54	PASS: row 'Journey invite 185738' shared with bob on /orgs/all; bob project url http://127.0.0.1:5173/project/d86f919f-bc20-4f6a-a40e-029d64aa9385/editor
+2026-09-09T01:58:33Z	editor-comments-write-through	1	PASS	36	PASS: comment 'e2e-agent-comment-185829' write-through: drawer, row badge, and sidebar count all updated
+2026-09-09T01:58:36Z	sharing-invite-link-join	3	PASS	53	PASS: row 'Journey invite 185744' shared with bob on /orgs/all; bob project url http://127.0.0.1:5173/project/9896ba1f-ca87-4639-8b76-c445c8c93847/editor
+2026-09-09T01:59:00Z	sharing-invite-link-join	3	PASS	48	PASS: row 'Journey invite 185812' shared with bob on /orgs/all; bob project url http://127.0.0.1:5173/project/9b53e179-b4ff-4ab1-ae81-5ce3854c909a/editor
+2026-09-09T01:59:02Z	collab-member-presence	1	FAIL	73	FAIL: add member dialog never opened after retries
+2026-09-09T01:59:04Z	editor-comments-write-through	2	PASS	31	PASS: comment 'e2e-agent-comment-185900' write-through: drawer, row badge, and sidebar count all updated
+2026-09-09T01:59:20Z	sharing-invite-link-join	2	PASS	48	PASS: row 'Journey invite 185832' shared with bob on /orgs/all; bob project url http://127.0.0.1:5173/project/62b63bfd-f1b3-4e26-ad2c-ac14aba639cd/editor
+2026-09-09T01:59:26Z	sharing-invite-link-join	4	PASS	50	PASS: row 'Journey invite 185836' shared with bob on /orgs/all; bob project url http://127.0.0.1:5173/project/2546725d-f37a-46f5-a746-4570f08e7951/editor
+2026-09-09T01:59:42Z	editor-comments-write-through	3	PASS	38	PASS: comment 'e2e-agent-comment-185937' write-through: drawer, row badge, and sidebar count all updated
+2026-09-09T01:59:51Z	sharing-invite-link-join	4	PASS	51	PASS: row 'Journey invite 185900' shared with bob on /orgs/all; bob project url http://127.0.0.1:5173/project/db4a0d85-927b-40da-97a1-2be83e2e7c50/editor
+2026-09-09T02:00:11Z	collab-cross-user-validate	1	FAIL	59	FAIL: members page
+2026-09-09T02:00:11Z	collab-bt-edit-locked-for-reviewer	1	FAIL	60	FAIL: import preview
+2026-09-09T02:00:18Z	sharing-invite-link-join	3	PASS	58	PASS: row 'Journey invite 185920' shared with bob on /orgs/all; bob project url http://127.0.0.1:5173/project/83ee87dd-92b2-4f10-99ef-77f793585cf9/editor
+2026-09-09T02:00:20Z	editor-comments-write-through	4	PASS	38	PASS: comment 'e2e-agent-comment-190011' write-through: drawer, row badge, and sidebar count all updated
+2026-09-09T02:00:20Z	sharing-invite-link-join	5	PASS	54	PASS: row 'Journey invite 185926' shared with bob on /orgs/all; bob project url http://127.0.0.1:5173/project/ae9a3b49-f964-46fe-ae6f-a447c52244d5/editor
+2026-09-09T02:00:24Z	collab-bt-edit-locked-for-reviewer	1	FAIL	61	FAIL: import preview
+2026-09-09T02:00:38Z	sharing-invite-link-join	5	PASS	47	PASS: row 'Journey invite 185951' shared with bob on /orgs/all; bob project url http://127.0.0.1:5173/project/9670370e-13eb-466a-bceb-42beaef35b2d/editor
+2026-09-09T02:00:47Z	projects-settings-rename	1	PASS	62	PASS: renamed to 'Journey settings 185945 renamed', source language 'English (US)' saved, title survives reload
+2026-09-09T02:01:05Z	editor-comments-write-through	5	PASS	45	PASS: comment 'e2e-agent-comment-190101' write-through: drawer, row badge, and sidebar count all updated
+2026-09-09T02:01:21Z	sharing-invite-link-join	4	PASS	63	PASS: row 'Journey invite 190018' shared with bob on /orgs/all; bob project url http://127.0.0.1:5173/project/bc121d3b-abfa-4253-b5b4-c5c3b2eefaa4/editor
+2026-09-09T02:01:45Z	projects-settings-rename	2	PASS	58	PASS: renamed to 'Journey settings 190047 renamed', source language 'English (US)' saved, title survives reload
+2026-09-09T02:02:21Z	sharing-invite-link-join	5	PASS	60	PASS: row 'Journey invite 190121' shared with bob on /orgs/all; bob project url http://127.0.0.1:5173/project/987f8e14-bfc0-46a0-a7ff-0d6a2fd825dd/editor
+2026-09-09T02:02:23Z	collab-member-presence	1	PASS	65	PASS: popover 'dialog "1 online"' with 'BO bob online' shown for project 538f047e-85c0-41d3-b5f3-4b5585ad2b6f, closed on Escape
+2026-09-09T02:02:33Z	sharing-invite-link-join	1	PASS	68	PASS: row 'Journey invite 190125' shared with bob on /orgs/all; bob project url http://127.0.0.1:5173/project/250f3666-e904-42c6-9320-85aa490e6a44/editor
+2026-09-09T02:02:37Z	collab-member-presence	1	PASS	68	PASS: popover 'dialog "1 online"' with 'BO bob online' shown for project 24867f3f-c580-4f2d-bd6f-0fc4888719d6, closed on Escape
+2026-09-09T02:02:56Z	projects-settings-rename	3	PASS	71	PASS: renamed to 'Journey settings 190145 renamed', source language 'English (US)' saved, title survives reload
+2026-09-09T02:03:13Z	collab-bt-edit-locked-for-reviewer	1	FAIL	64	FAIL: import preview
+2026-09-09T02:03:13Z	sharing-invite-link-join	2	FAIL	40	FAIL: Project settings link not in snapshot
+2026-09-09T02:03:25Z	collab-member-presence	2	PASS	61	PASS: popover 'dialog "1 online"' with 'BO bob online' shown for project a211686c-7a2d-4188-a208-b3deaf8ea87a, closed on Escape
+2026-09-09T02:03:47Z	collab-member-presence	2	PASS	70	PASS: popover 'dialog "1 online"' with 'BO bob online' shown for project 9831de1d-c0f5-4822-9066-0c8eb1bd5da7, closed on Escape
+2026-09-09T02:04:00Z	projects-settings-rename	4	PASS	64	PASS: renamed to 'Journey settings 190256 renamed', source language 'English (US)' saved, title survives reload
+2026-09-09T02:04:19Z	orgs-add-member-sees-org	1	FAIL	28	FAIL: no 'Add a member' button for alice (Maintainer) at Dev Org — org-membership add is Owner-only by design (OrgMembersTable.tsx isOwner gate); Add to proje
+2026-09-09T02:04:29Z	collab-cross-user-validate	1	FAIL	55	FAIL: Open project button
+2026-09-09T02:04:35Z	collab-member-presence	3	PASS	70	PASS: popover 'dialog "1 online"' with 'BO bob online' shown for project 4e1d2666-8cb4-46e2-b901-471863377f3c, closed on Escape
+2026-09-09T02:05:00Z	collab-member-presence	3	PASS	73	PASS: popover 'dialog "1 online"' with 'BO bob online' shown for project a8341bea-098e-4a55-8cb3-5a0cbae50c6c, closed on Escape
+2026-09-09T02:05:04Z	sharing-invite-link-join	1	PASS	70	PASS: row 'Journey invite 190354' shared with bob on /orgs/all; bob project url http://127.0.0.1:5173/project/a4ab83b3-eda0-43b1-9bcb-ddc96035e737/editor
+2026-09-09T02:05:18Z	projects-settings-rename	5	PASS	78	PASS: renamed to 'Journey settings 190400 renamed', source language 'English (US)' saved, title survives reload
+2026-09-09T02:05:56Z	collab-member-presence	4	PASS	81	PASS: popover 'dialog "1 online"' with 'BO bob online' shown for project f5197b92-3a46-4a06-a771-62261b04d11b, closed on Escape
+2026-09-09T02:06:12Z	collab-member-presence	4	PASS	72	PASS: popover 'dialog "1 online"' with 'BO bob online' shown for project e2f4c0cd-64d6-4e81-a0d5-22e67a1ac205, closed on Escape
+2026-09-09T02:06:21Z	sharing-invite-link-join	2	PASS	77	PASS: row 'Journey invite 190504' shared with bob on /orgs/all; bob project url http://127.0.0.1:5173/project/4e079998-9fd2-4bb7-8bf0-80a324dc3cb9/editor
+2026-09-09T02:06:31Z	collab-bt-edit-locked-for-reviewer	1	FAIL	67	FAIL: import preview
+2026-09-09T02:07:05Z	collab-member-presence	5	FAIL	69	FAIL: presence trigger 'BO bob' never appeared for alice
+2026-09-09T02:07:08Z	collab-member-presence	5	PASS	56	PASS: popover 'dialog "1 online"' with 'BO bob online' shown for project ed44f7c8-30a5-4e09-bd1f-2b3162836bf7, closed on Escape
+2026-09-09T02:07:18Z	sharing-invite-link-join	3	PASS	57	PASS: row 'Journey invite 190621' shared with bob on /orgs/all; bob project url http://127.0.0.1:5173/project/673c3eba-de86-487d-90b4-f10110e2d38e/editor
+2026-09-09T02:07:20Z	collab-bt-edit-locked-for-reviewer	1	FAIL	69	FAIL: import preview
+2026-09-09T02:07:26Z	projects-setup-checklist-survives-refresh	1	PASS	71	PASS: checklist restored after open+reload, stayed closed after skip+reload
+2026-09-09T02:07:59Z	rules-builtin-violation	1	FAIL	36	FAIL: Extra whitespace enabled switch not on the page
+2026-09-09T02:08:15Z	sharing-invite-link-join	4	PASS	57	PASS: row 'Journey invite 190718' shared with bob on /orgs/all; bob project url http://127.0.0.1:5173/project/860afff3-20c5-44fb-aef1-3416e3e85b7c/editor
+2026-09-09T02:08:47Z	collab-member-presence	1	PASS	69	PASS: popover 'dialog "1 online"' with 'BO bob online' shown for project 835db82a-d97d-4019-bfe8-8c91f91a63db, closed on Escape (no reload needed)
+2026-09-09T02:08:48Z	projects-setup-checklist-survives-refresh	2	PASS	82	PASS: checklist restored after open+reload, stayed closed after skip+reload
+2026-09-09T02:09:26Z	sharing-invite-link-join	5	PASS	71	PASS: row 'Journey invite 190815' shared with bob on /orgs/all; bob project url http://127.0.0.1:5173/project/56d2faec-b183-4628-8c66-2fe9a5684f47/editor
+2026-09-09T02:09:31Z	collab-bt-edit-locked-for-reviewer	1	FAIL	34	FAIL: Import button
+2026-09-09T02:09:51Z	projects-setup-checklist-survives-refresh	3	FAIL	63	FAIL: Setup chip
+2026-09-09T02:10:01Z	collab-member-presence	2	PASS	74	PASS: popover 'dialog "1 online"' with 'BO bob online' shown for project d7189348-e767-4cbe-84c3-3543666ccb5f, closed on Escape (no reload needed)
+2026-09-09T02:10:12Z	collab-cross-user-comment	1	FAIL	52	FAIL: Add comment button
+2026-09-09T02:10:33Z	orgs-add-member-sees-org	1	FAIL	141	FAIL: no roster row for bob after Add
+2026-09-09T02:10:38Z	collab-cross-user-comment	1	FAIL	87	FAIL: comments drawer did not open
+2026-09-09T02:10:39Z	collab-member-presence	3	PASS	38	PASS: popover 'dialog "1 online"' with 'BO bob online' shown for project 43621de7-e6cf-4499-8346-2d2b5403a619, closed on Escape (no reload needed)
+2026-09-09T02:10:42Z	collab-bt-edit-locked-for-reviewer	1	FAIL	60	FAIL: import preview
+2026-09-09T02:10:46Z	collab-cross-user-validate	1	FAIL	76	FAIL: import preview
+2026-09-09T02:10:48Z	collab-file-propagates	1	FAIL	87	FAIL: import preview
+2026-09-09T02:11:08Z	collab-member-presence	1	FAIL	145	FAIL: presence trigger 'BO bob' never appeared for alice, even after a reload
+2026-09-09T02:11:18Z	collab-bt-edit-locked-for-reviewer	1	FAIL	35	FAIL: Import button
+2026-09-09T02:11:39Z	projects-setup-checklist-survives-refresh	1	PASS	80	PASS: checklist restored after open+reload, stayed closed after skip+reload
+2026-09-09T02:11:49Z	collab-member-presence	4	PASS	70	PASS: popover 'dialog "1 online"' with 'BO bob online' shown for project c4ea7c35-a0a8-4a8a-ae5c-945d65173233, closed on Escape (no reload needed)
+2026-09-09T02:12:22Z	collab-cross-user-comment	1	FAIL	31	FAIL: Aquilla username field not in snapshot
+2026-09-09T02:12:36Z	collab-member-presence	1	PASS	62	PASS: popover 'dialog "1 online"' with 'BO bob online' shown for project 12cc268a-7b16-49de-b469-4ab5bdd5271e, closed on Escape (no reload needed)
+2026-09-09T02:13:07Z	collab-member-presence	5	PASS	78	PASS: popover 'dialog "1 online"' with 'BO bob online' shown for project 285afb85-9b98-4ec4-987f-d751d57792d5, closed on Escape (no reload needed)
+2026-09-09T02:13:07Z	collab-bt-edit-locked-for-reviewer	1	FAIL	99	FAIL: import preview
+2026-09-09T02:13:14Z	projects-setup-checklist-survives-refresh	2	PASS	95	PASS: checklist restored after open+reload, stayed closed after skip+reload
+2026-09-09T02:13:29Z	orgs-add-member-sees-org	1	PASS	76	PASS: alice created org 25 'Journey org 191213' and added bob as Contributor; bob's switcher lists it (after reload)
+2026-09-09T02:13:44Z	collab-member-presence	2	PASS	68	PASS: popover 'dialog "1 online"' with 'BO bob online' shown for project ffe1fdbc-f1a0-4529-aa66-40e4b19c453e, closed on Escape (no reload needed)
+2026-09-09T02:14:03Z	collab-cross-user-comment	1	PASS	83	PASS: bob's comments page shows 'cross-comment-1788920021' for project CrossComment 191240 (1ffc0c73-cb1c-4ed6-8eec-581ed5812e23) after 0 Refresh poll(s)
+2026-09-09T02:14:12Z	orgs-add-member-sees-org	2	PASS	43	PASS: alice created org 26 'Journey org 191329' and added bob as Contributor; bob's switcher lists it (after reload)
+2026-09-09T02:14:17Z	rules-builtin-violation	1	PASS	38	PASS: Extra whitespace rule flagged Line 1 amber after a double-space commit (e194ae93-7e35-4ce1-a6ce-a4b168dc758c)
+2026-09-09T02:14:22Z	collab-cross-user-validate	1	FAIL	150	FAIL: import preview
+2026-09-09T02:14:30Z	projects-setup-checklist-survives-refresh	3	PASS	76	PASS: checklist restored after open+reload, stayed closed after skip+reload
+2026-09-09T02:14:42Z	collab-member-presence	3	PASS	58	PASS: popover 'dialog "1 online"' with 'BO bob online' shown for project 820c0906-298c-43ea-9bca-7838d052d0b6, closed on Escape (no reload needed)
+2026-09-09T02:15:02Z	collab-file-propagates	1	FAIL	161	FAIL: import preview
+2026-09-09T02:15:09Z	collab-cross-user-comment	2	PASS	66	PASS: bob's comments page shows 'cross-comment-1788920083' for project CrossComment 191403 (ae5c17e1-e7a1-4742-9b76-dec7d9916140) after 0 Refresh poll(s)
+2026-09-09T02:15:10Z	collab-bt-edit-locked-for-reviewer	1	FAIL	162	FAIL: import preview
+2026-09-09T02:15:10Z	orgs-add-member-sees-org	3	PASS	58	PASS: alice created org 27 'Journey org 191412' and added bob as Contributor; bob's switcher lists it (after reload)
+2026-09-09T02:15:17Z	rules-builtin-violation	2	PASS	60	PASS: Extra whitespace rule flagged Line 1 amber after a double-space commit (b668df75-9061-46d7-a8a0-cabc7c9cd3b8)
+2026-09-09T02:15:41Z	collab-cross-user-comment	1	PASS	81	PASS: bob's comments page shows 'cross-comment-1788920114' for project CrossComment 191420 (9c8ff027-0f68-4e44-9cd4-e0fb856fa3c7) after 0 Refresh poll(s)
+2026-09-09T02:15:48Z	collab-member-presence	4	PASS	66	PASS: popover 'dialog "1 online"' with 'BO bob online' shown for project 820b03a7-0323-49f3-a5c8-9580590d9b97, closed on Escape (no reload needed)
+2026-09-09T02:15:53Z	projects-setup-checklist-survives-refresh	4	PASS	83	PASS: checklist restored after open+reload, stayed closed after skip+reload
+2026-09-09T02:16:09Z	orgs-add-member-sees-org	4	PASS	59	PASS: alice created org 28 'Journey org 191510' and added bob as Contributor; bob's switcher lists it (after reload)
+2026-09-09T02:16:33Z	collab-cross-user-comment	3	PASS	84	PASS: bob's comments page shows 'cross-comment-1788920164' for project CrossComment 191509 (415155f1-4e1f-42e5-9009-6c77d689ae66) after 0 Refresh poll(s)
+2026-09-09T02:16:44Z	orgs-add-member-sees-org	5	FAIL	35	FAIL: org switcher
+2026-09-09T02:16:44Z	projects-onboarding-wizard	1	PASS	23	PASS: signed up as wizard191621, project 'Journey onboarding 191621' created, landed on http://127.0.0.1:5173/project/a3418202-db1d-4d3d-8531-eee357927c79/edito
+2026-09-09T02:16:52Z	rules-builtin-violation	3	FAIL	95	FAIL: editable field did not mount
+2026-09-09T02:17:02Z	projects-onboarding-wizard	2	PASS	18	PASS: signed up as wizard191644, project 'Journey onboarding 191644' created, landed on http://127.0.0.1:5173/project/3f738d86-21ad-4a01-8982-0918f2a59415/edito
+2026-09-09T02:17:04Z	collab-cross-user-validate	1	FAIL	43	FAIL: Close button not in snapshot
+2026-09-09T02:17:10Z	collab-member-presence	5	PASS	82	PASS: popover 'dialog "1 online"' with 'BO bob online' shown for project 685afb76-a22f-4552-87c4-ee7507deb41a, closed on Escape (no reload needed)
+2026-09-09T02:17:25Z	collab-cross-user-comment	4	FAIL	52	FAIL: Open project button
+2026-09-09T02:17:30Z	projects-onboarding-wizard	3	FAIL	28	FAIL: open /onboarding
+2026-09-09T02:17:50Z	projects-setup-checklist-survives-refresh	5	FAIL	117	FAIL: drawer did not restore after reload
+2026-09-09T02:18:50Z	projects-setup-checklist-survives-refresh	1	FAIL	31	FAIL: New Project button
+2026-09-09T02:18:51Z	collab-cross-user-comment	1	FAIL	64	FAIL: New Project button
+2026-09-09T02:19:02Z	collab-cross-user-validate	1	FAIL	71	FAIL: New Project button
+2026-09-09T02:19:02Z	collab-cross-user-comment	2	FAIL	201	FAIL: bob's comments page never showed 'cross-comment-1788920209'
+2026-09-09T02:19:07Z	collab-bt-edit-locked-for-reviewer	1	FAIL	161	FAIL: editor toolbar did not render
+2026-09-09T02:19:16Z	orgs-add-member-sees-org	1	FAIL	133	FAIL: bob home
+2026-09-09T02:19:31Z	collab-cross-user-comment	1	FAIL	28	FAIL: alice login
+2026-09-09T02:19:31Z	projects-setup-checklist-survives-refresh	1	FAIL	27	FAIL: login
+2026-09-09T02:19:44Z	collab-cross-user-comment	1	FAIL	8	FAIL: New Project button
+2026-09-09T02:19:44Z	projects-setup-checklist-survives-refresh	1	FAIL	1	FAIL: login
+2026-09-09T02:19:48Z	collab-cross-user-comment	1	FAIL	1	FAIL: alice login
+2026-09-09T02:19:54Z	collab-file-propagates	1	FAIL	1	FAIL: alice login
+2026-09-09T02:20:15Z	orgs-add-member-sees-org	1	FAIL	40	FAIL: bob home: switcher never rendered
+2026-09-09T16:09:25Z	collab-bt-edit-locked-for-reviewer	1	FAIL	73	FAIL: import preview
+2026-09-09T16:09:58Z	collab-cross-user-comment	1	PASS	33	PASS: bob's comments page shows 'cross-comment-1788970189' for project CrossComment 090925 (5af1c1b8-508f-4731-94b2-308e96b816a8) after 0 Refresh poll(s), reloa
+2026-09-09T16:10:32Z	collab-cross-user-comment	2	PASS	34	PASS: bob's comments page shows 'cross-comment-1788970222' for project CrossComment 090958 (7ab0c4bc-d7a0-403f-9ea1-00eacc074fdf) after 0 Refresh poll(s), reloa
+2026-09-09T16:11:05Z	collab-cross-user-comment	3	PASS	33	PASS: bob's comments page shows 'cross-comment-1788970255' for project CrossComment 091032 (ec8b4971-7506-45d7-9be7-a0ebdc9f4db7) after 0 Refresh poll(s), reloa
+2026-09-09T16:11:37Z	collab-cross-user-comment	4	PASS	32	PASS: bob's comments page shows 'cross-comment-1788970288' for project CrossComment 091105 (d7fc4ddd-e943-469e-af99-db79b8d224f6) after 0 Refresh poll(s), reloa
+2026-09-09T16:12:09Z	collab-cross-user-comment	5	PASS	32	PASS: bob's comments page shows 'cross-comment-1788970321' for project CrossComment 091137 (732b7b0e-0f65-48f4-aef9-d676f0992bd4) after 0 Refresh poll(s), reloa
+2026-09-09T16:13:00Z	collab-cross-user-validate	1	FAIL	51	FAIL: import preview
+2026-09-09T16:14:54Z	collab-file-propagates	1	FAIL	114	FAIL: import preview
+2026-09-09T16:15:21Z	collab-member-presence	1	PASS	27	PASS: popover 'dialog "1 online"' with 'BO bob online' shown for project d083739e-06fe-4293-85fd-959508ac30ce, closed on Escape (no reload needed)
+2026-09-09T16:15:26Z	collab-member-presence	2	FAIL	5	FAIL: New Project button
+2026-09-09T16:15:43Z	editor-comments-write-through	1	PASS	17	PASS: comment 'e2e-agent-comment-091541' write-through: drawer, row badge, and sidebar count all updated
+2026-09-09T16:16:01Z	editor-comments-write-through	2	PASS	18	PASS: comment 'e2e-agent-comment-091558' write-through: drawer, row badge, and sidebar count all updated
+2026-09-09T16:16:18Z	editor-comments-write-through	3	PASS	17	PASS: comment 'e2e-agent-comment-091615' write-through: drawer, row badge, and sidebar count all updated
+2026-09-09T16:16:36Z	editor-comments-write-through	4	PASS	18	PASS: comment 'e2e-agent-comment-091633' write-through: drawer, row badge, and sidebar count all updated
+2026-09-09T16:16:53Z	editor-comments-write-through	5	PASS	17	PASS: comment 'e2e-agent-comment-091651' write-through: drawer, row badge, and sidebar count all updated
+2026-09-09T16:17:05Z	orgs-account-switcher	1	PASS	12	PASS: account menu opened, Preferences -> Workspace -> Close, back at http://127.0.0.1:5173/project/dev-project/editor
+2026-09-09T16:17:16Z	orgs-account-switcher	2	PASS	11	PASS: account menu opened, Preferences -> Workspace -> Close, back at http://127.0.0.1:5173/project/dev-project/editor
+2026-09-09T16:17:27Z	orgs-account-switcher	3	PASS	11	PASS: account menu opened, Preferences -> Workspace -> Close, back at http://127.0.0.1:5173/project/dev-project/editor
+2026-09-09T16:17:38Z	orgs-account-switcher	4	PASS	11	PASS: account menu opened, Preferences -> Workspace -> Close, back at http://127.0.0.1:5173/project/dev-project/editor
+2026-09-09T16:17:50Z	orgs-account-switcher	5	PASS	12	PASS: account menu opened, Preferences -> Workspace -> Close, back at http://127.0.0.1:5173/project/dev-project/editor
+2026-09-09T16:18:15Z	orgs-add-member-sees-org	1	PASS	25	PASS: alice created org 31 'Journey org 091750' and added bob as Contributor; bob's switcher lists it (after reload)
+2026-09-09T16:18:39Z	orgs-add-member-sees-org	2	PASS	24	PASS: alice created org 32 'Journey org 091815' and added bob as Contributor; bob's switcher lists it (after reload)
+2026-09-09T16:19:04Z	orgs-add-member-sees-org	3	PASS	25	PASS: alice created org 33 'Journey org 091839' and added bob as Contributor; bob's switcher lists it (after reload)
+2026-09-09T16:19:28Z	orgs-add-member-sees-org	4	PASS	24	PASS: alice created org 34 'Journey org 091904' and added bob as Contributor; bob's switcher lists it (after reload)
+2026-09-09T16:19:52Z	orgs-add-member-sees-org	5	PASS	24	PASS: alice created org 35 'Journey org 091928' and added bob as Contributor; bob's switcher lists it (after reload)
+2026-09-09T16:20:00Z	orgs-billing-cta	1	FAIL	8	FAIL: Billing & usage link
+2026-09-09T16:20:11Z	orgs-preferences-persist	1	PASS	11	PASS: switch checked=true -> checked=false, survived reload, restored to checked=true
+2026-09-09T16:20:21Z	orgs-preferences-persist	2	PASS	10	PASS: switch checked=true -> checked=false, survived reload, restored to checked=true
+2026-09-09T16:20:32Z	orgs-preferences-persist	3	PASS	11	PASS: switch checked=true -> checked=false, survived reload, restored to checked=true
+2026-09-09T16:20:42Z	orgs-preferences-persist	4	PASS	10	PASS: switch checked=true -> checked=false, survived reload, restored to checked=true
+2026-09-09T16:20:52Z	orgs-preferences-persist	5	PASS	10	PASS: switch checked=true -> checked=false, survived reload, restored to checked=true
+2026-09-09T16:21:08Z	projects-archive	1	PASS	16	PASS: 'Journey archive 092052' left the active table and is listed under Archived (overview was http://127.0.0.1:5173/projects/10694664-746a-4f2b-8763-0eb079a7a
+2026-09-09T16:21:23Z	projects-archive	2	PASS	15	PASS: 'Journey archive 092108' left the active table and is listed under Archived (overview was http://127.0.0.1:5173/projects/661d861b-4016-4693-9d11-35196134e
+2026-09-09T16:21:38Z	projects-archive	3	PASS	15	PASS: 'Journey archive 092123' left the active table and is listed under Archived (overview was http://127.0.0.1:5173/projects/14b274ea-367c-4427-abf4-1c1cb2930
+2026-09-09T16:21:54Z	projects-archive	4	PASS	16	PASS: 'Journey archive 092138' left the active table and is listed under Archived (overview was http://127.0.0.1:5173/projects/5b2399fe-3fc4-47e4-a884-0e18bcb21
+2026-09-09T16:22:09Z	projects-archive	5	PASS	15	PASS: 'Journey archive 092154' left the active table and is listed under Archived (overview was http://127.0.0.1:5173/projects/ec8f8f57-73d2-4fb4-b2de-49a87498a
+2026-09-09T16:22:22Z	projects-create	1	PASS	13	PASS: row 'Journey create 092209' in Projects table; overview url http://127.0.0.1:5173/projects/b608f36f-0ed9-4a4b-9b9a-4371416520a2
+2026-09-09T16:22:35Z	projects-create	2	PASS	13	PASS: row 'Journey create 092222' in Projects table; overview url http://127.0.0.1:5173/projects/5e93cb29-1262-4049-8d96-c4d7dfb06781
+2026-09-09T16:22:49Z	projects-create	3	PASS	14	PASS: row 'Journey create 092235' in Projects table; overview url http://127.0.0.1:5173/projects/f52769b4-d247-43bc-bbd0-a01c7df09cee
+2026-09-09T16:23:03Z	projects-create	4	PASS	14	PASS: row 'Journey create 092249' in Projects table; overview url http://127.0.0.1:5173/projects/ccddbd25-2979-4d87-8d7f-bc4ce2eaa850
+2026-09-09T16:23:16Z	projects-create	5	PASS	13	PASS: row 'Journey create 092303' in Projects table; overview url http://127.0.0.1:5173/projects/c21798cb-2b45-42c4-a940-996b8ce4fa7b
+2026-09-09T16:23:25Z	projects-onboarding-wizard	1	PASS	9	PASS: signed up as wizard092316, project 'Journey onboarding 092316' created, landed on http://127.0.0.1:5173/project/08a04f74-06a7-48c0-aeae-ffd174ae82d3/edito
+2026-09-09T16:23:35Z	projects-onboarding-wizard	2	PASS	9	PASS: signed up as wizard092325, project 'Journey onboarding 092325' created, landed on http://127.0.0.1:5173/project/2a6e26fb-d771-45c9-adef-bec10064abd9/edito
+2026-09-09T16:23:44Z	projects-onboarding-wizard	3	PASS	9	PASS: signed up as wizard092335, project 'Journey onboarding 092335' created, landed on http://127.0.0.1:5173/project/4c1e42b2-b056-4428-8232-ff3a71df44c9/edito
+2026-09-09T16:23:53Z	projects-onboarding-wizard	4	PASS	9	PASS: signed up as wizard092344, project 'Journey onboarding 092344' created, landed on http://127.0.0.1:5173/project/3eda6e32-8500-4815-968a-769dc60f4328/edito
+2026-09-09T16:24:02Z	projects-onboarding-wizard	5	PASS	9	PASS: signed up as wizard092353, project 'Journey onboarding 092353' created, landed on http://127.0.0.1:5173/project/49c7c53c-092e-4571-959f-3b60f1bffa37/edito
+2026-09-09T16:25:21Z	projects-route-health	1	PASS	79	PASS: 20 routes clean, no crash boundary or vite-error-overlay
+2026-09-09T16:26:38Z	projects-route-health	2	PASS	77	PASS: 20 routes clean, no crash boundary or vite-error-overlay
+2026-09-09T16:27:56Z	projects-route-health	3	PASS	78	PASS: 20 routes clean, no crash boundary or vite-error-overlay
+2026-09-09T16:29:13Z	projects-route-health	4	PASS	77	PASS: 20 routes clean, no crash boundary or vite-error-overlay
+2026-09-09T16:29:15Z	projects-route-health	5	FAIL	2	FAIL: login
+2026-09-09T16:30:01Z	projects-settings-rename	1	PASS	46	PASS: renamed to 'Journey settings 092915 renamed', source language 'English (US)' saved, title survives reload
+2026-09-09T16:30:46Z	projects-settings-rename	2	PASS	45	PASS: renamed to 'Journey settings 093001 renamed', source language 'English (US)' saved, title survives reload
+2026-09-09T16:31:32Z	projects-settings-rename	3	PASS	46	PASS: renamed to 'Journey settings 093046 renamed', source language 'English (US)' saved, title survives reload
+2026-09-09T16:32:17Z	projects-settings-rename	4	PASS	45	PASS: renamed to 'Journey settings 093132 renamed', source language 'English (US)' saved, title survives reload
+2026-09-09T16:33:03Z	projects-settings-rename	5	PASS	46	PASS: renamed to 'Journey settings 093217 renamed', source language 'English (US)' saved, title survives reload
+2026-09-09T16:37:07Z	projects-setup-checklist-survives-refresh	1	PASS	244	PASS: checklist restored after open+reload, stayed closed after skip+reload
+2026-09-09T16:41:10Z	projects-setup-checklist-survives-refresh	2	PASS	243	PASS: checklist restored after open+reload, stayed closed after skip+reload
+2026-09-09T16:45:04Z	projects-setup-checklist-survives-refresh	3	FAIL	234	FAIL: title field
+2026-09-09T16:45:24Z	rules-builtin-violation	1	PASS	20	PASS: Extra whitespace rule flagged Line 1 amber after a double-space commit (c7942165-676e-4054-8cf2-1a5bf85029e2)
+2026-09-09T16:45:44Z	rules-builtin-violation	2	PASS	20	PASS: Extra whitespace rule flagged Line 1 amber after a double-space commit (5ce4915b-1d9d-4364-9396-f129ce935dc4)
+2026-09-09T16:46:04Z	rules-builtin-violation	3	PASS	20	PASS: Extra whitespace rule flagged Line 1 amber after a double-space commit (bae07f5d-7f20-4cf6-99f0-86a5796676da)
+2026-09-09T16:46:25Z	rules-builtin-violation	4	PASS	21	PASS: Extra whitespace rule flagged Line 1 amber after a double-space commit (3b08f6a5-55fd-40bb-b5b0-970da5fce5a6)
+2026-09-09T16:46:45Z	rules-builtin-violation	5	PASS	20	PASS: Extra whitespace rule flagged Line 1 amber after a double-space commit (a69859f7-3155-4dd9-9ea6-a6cda83b1be9)
+2026-09-09T16:47:30Z	rules-custom-crud	1	FAIL	45	FAIL: inline editor did not mount
+2026-09-09T16:48:00Z	sharing-invite-link-join	1	PASS	30	PASS: row 'Journey invite 094730' shared with bob on /orgs/all; bob project url http://127.0.0.1:5173/project/163a5708-85e3-4e36-b7e3-dc3120bc8b8b/editor
+2026-09-09T16:48:31Z	sharing-invite-link-join	2	PASS	31	PASS: row 'Journey invite 094800' shared with bob on /orgs/all; bob project url http://127.0.0.1:5173/project/bafc9bd2-429a-46de-8475-c09dc907e6b5/editor
+2026-09-09T16:49:02Z	sharing-invite-link-join	3	PASS	31	PASS: row 'Journey invite 094831' shared with bob on /orgs/all; bob project url http://127.0.0.1:5173/project/43402a7e-59b5-4a04-9278-ec8370cd57a6/editor
+2026-09-09T16:49:32Z	sharing-invite-link-join	4	PASS	30	PASS: row 'Journey invite 094902' shared with bob on /orgs/all; bob project url http://127.0.0.1:5173/project/42e8b0d3-f732-4cc8-9586-1646ce4fa940/editor
+2026-09-09T16:50:02Z	sharing-invite-link-join	5	PASS	30	PASS: row 'Journey invite 094932' shared with bob on /orgs/all; bob project url http://127.0.0.1:5173/project/963d73bf-cf9e-4366-b0c6-f7b242de1a5c/editor
+2026-09-09T16:50:34Z	orgs-billing-cta	1	FAIL	10	FAIL: Field Plan text not present
+2026-09-09T16:50:57Z	editor-import-and-edit	1	PASS	23	PASS: 'Hello agent 095034' committed in cell 1 of 7 and survived reload at http://127.0.0.1:5173/project/67c454ff-148a-40ab-8483-c278c27e7e3c/editor/file/01a087
+2026-09-09T16:51:06Z	editor-import-and-edit	2	FAIL	9	FAIL: fill
+2026-09-09T16:51:38Z	collab-file-propagates	1	PASS	32	PASS: bob's sidebar shows sample.md on first visit to http://127.0.0.1:5173/project/9806b396-deca-4b03-9165-038633016e81/editor (project Collab FP 095106, id 98
+2026-09-09T16:52:11Z	collab-file-propagates	2	PASS	33	PASS: bob's sidebar shows sample.md on first visit to http://127.0.0.1:5173/project/ff509c80-7230-452d-a1a3-486792a77684/editor (project Collab FP 095138, id ff
+2026-09-09T16:52:44Z	collab-file-propagates	3	PASS	33	PASS: bob's sidebar shows sample.md on first visit to http://127.0.0.1:5173/project/d065b97d-28d8-4977-bd63-d28f9314af3c/editor (project Collab FP 095211, id d0
+2026-09-09T16:53:16Z	collab-file-propagates	4	PASS	32	PASS: bob's sidebar shows sample.md on first visit to http://127.0.0.1:5173/project/808e3a94-4559-494c-9c81-e99bd7606f74/editor (project Collab FP 095244, id 80
+2026-09-09T16:53:33Z	collab-file-propagates	5	FAIL	17	FAIL: bob suggestion checkbox not in snapshot
+2026-09-09T16:54:09Z	collab-cross-user-validate	1	PASS	36	PASS: bob validated cell 0 on project 7deee935-4b16-4ec5-be88-736c01436ba1, file 01a08717-2006-70dd-ba7a-46190c68f7fa — control reads 'Validated — row 1. Cl
+2026-09-09T16:54:27Z	collab-cross-user-validate	2	FAIL	18	FAIL: open Role combobox
+2026-09-09T16:54:42Z	collab-bt-edit-locked-for-reviewer	1	FAIL	15	FAIL: click row 1 target
+2026-09-09T16:55:09Z	collab-member-presence	1	PASS	27	PASS: popover 'dialog "1 online"' with 'BO bob online' shown for project 52a1e57a-0812-4f2d-af95-dffd80859a48, closed on Escape (no reload needed)
+2026-09-09T16:55:36Z	collab-member-presence	2	PASS	27	PASS: popover 'dialog "1 online"' with 'BO bob online' shown for project 577382f1-cc95-44a3-b470-352981961d9a, closed on Escape (no reload needed)
+2026-09-09T16:56:04Z	collab-member-presence	3	PASS	28	PASS: popover 'dialog "1 online"' with 'BO bob online' shown for project a79a3aaf-8171-43f2-bfb4-e895b7c7b6d7, closed on Escape (no reload needed)
+2026-09-09T16:56:31Z	collab-member-presence	4	PASS	27	PASS: popover 'dialog "1 online"' with 'BO bob online' shown for project 2438ba38-a161-41af-b3a2-58978c698863, closed on Escape (no reload needed)
+2026-09-09T16:56:59Z	collab-member-presence	5	PASS	28	PASS: popover 'dialog "1 online"' with 'BO bob online' shown for project 9eeed15e-ec90-4f7f-9e06-42044bbce18d, closed on Escape (no reload needed)
+2026-09-09T16:58:18Z	projects-route-health	1	PASS	79	PASS: 20 routes clean, no crash boundary or vite-error-overlay
+2026-09-09T16:58:20Z	projects-route-health	2	FAIL	2	FAIL: login
+2026-09-09T16:58:52Z	rules-custom-crud	1	FAIL	16	FAIL: inline editor still open after Cancel
+2026-09-09T16:59:00Z	orgs-billing-cta	1	FAIL	8	FAIL: Billing & usage link
+2026-09-09T16:59:24Z	editor-import-and-edit	1	PASS	24	PASS: 'Hello agent 095900' committed in cell 1 of 7 and survived reload at http://127.0.0.1:5173/project/6f292244-41f0-4772-82b1-699b67fa6b54/editor/file/01a087
+2026-09-09T16:59:47Z	editor-import-and-edit	2	PASS	23	PASS: 'Hello agent 095924' committed in cell 1 of 7 and survived reload at http://127.0.0.1:5173/project/37a23231-283d-4a59-a9b2-6eb5e752aecb/editor/file/01a087
+2026-09-09T17:00:09Z	editor-import-and-edit	3	PASS	22	PASS: 'Hello agent 095947' committed in cell 1 of 7 and survived reload at http://127.0.0.1:5173/project/ceab644e-61be-4758-9e78-c6a58cc260e0/editor/file/01a087
+2026-09-09T17:00:32Z	editor-import-and-edit	4	PASS	23	PASS: 'Hello agent 100009' committed in cell 1 of 7 and survived reload at http://127.0.0.1:5173/project/4f4221f6-8b67-45ea-9816-a80b1888d012/editor/file/01a087
+2026-09-09T17:00:55Z	editor-import-and-edit	5	PASS	23	PASS: 'Hello agent 100032' committed in cell 1 of 7 and survived reload at http://127.0.0.1:5173/project/b2597cab-eb53-4202-935a-d3edde1264cc/editor/file/01a087
+2026-09-09T17:01:13Z	projects-setup-checklist-survives-refresh	1	PASS	18	PASS: checklist restored after open+reload, stayed closed after skip+reload
+2026-09-09T17:01:33Z	projects-setup-checklist-survives-refresh	2	PASS	20	PASS: checklist restored after open+reload, stayed closed after skip+reload
+2026-09-09T17:01:54Z	projects-setup-checklist-survives-refresh	3	PASS	21	PASS: checklist restored after open+reload, stayed closed after skip+reload
+2026-09-09T17:02:17Z	projects-setup-checklist-survives-refresh	4	PASS	23	PASS: checklist restored after open+reload, stayed closed after skip+reload
+2026-09-09T17:02:41Z	projects-setup-checklist-survives-refresh	5	PASS	24	PASS: checklist restored after open+reload, stayed closed after skip+reload
+2026-09-09T17:03:30Z	collab-bt-edit-locked-for-reviewer	1	FAIL	22	FAIL: type translation
+2026-09-09T17:04:13Z	collab-cross-user-validate	1	FAIL	43	FAIL: create dialog
+2026-09-09T17:04:54Z	collab-file-propagates	1	PASS	41	PASS: bob's sidebar shows sample.md on first visit to http://127.0.0.1:5173/project/40c11137-816f-4bde-9e2f-894620b17463/editor (project Collab FP 100413, id 40
+2026-09-09T17:05:32Z	collab-file-propagates	2	PASS	38	PASS: bob's sidebar shows sample.md on first visit to http://127.0.0.1:5173/project/8d3bc591-e94a-46f1-8842-29676d4ceb0a/editor (project Collab FP 100454, id 8d
+2026-09-09T17:06:11Z	collab-file-propagates	3	PASS	39	PASS: bob's sidebar shows sample.md on first visit to http://127.0.0.1:5173/project/fa310dc0-abf0-42dc-b42e-590891cd2973/editor (project Collab FP 100532, id fa
+2026-09-09T17:07:13Z	collab-file-propagates	4	PASS	62	PASS: bob's sidebar shows sample.md on first visit to http://127.0.0.1:5173/project/dc9b557b-1ce1-46fa-b899-0757a8c567c2/editor (project Collab FP 100611, id dc
+2026-09-09T17:07:14Z	collab-file-propagates	5	FAIL	1	FAIL: alice login
+2026-09-09T17:07:17Z	projects-route-health	1	FAIL	3	FAIL: login
+2026-09-09T17:07:41Z	rules-custom-crud	1	FAIL	3	FAIL: login
+2026-09-09T17:07:44Z	orgs-billing-cta	1	FAIL	3	FAIL: login

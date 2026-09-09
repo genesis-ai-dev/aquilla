@@ -53,6 +53,33 @@ The calibration rule from the 2026-09-03 call: a story earns trust only after
 it has passed five times in a row on a build known to be good. Until then a
 red means the story or the harness is wrong, not the app.
 
+## Replays and streaks
+
+The cold run is the agent's job: read the story, find the path. Once a path
+is found it is written down as a replay, `replays/<slug>.sh`, a short shell
+script of agent-browser commands that exits 0 on PASS with its evidence on
+the last line. `streak.sh <slug> [runs]` runs the replay back to back and
+appends one line per run to `streaks.tsv`. Five passes in a row on the dev
+tip is the bar a story must clear before its red is trusted.
+
+Be clear about what each measures. A cold run measures whether an agent can
+find the path from the story alone. A streak measures whether the harness
+and the app hold that path steady. Both matter; only the second is cheap
+enough to run every night. A replay is deliberately not a Playwright spec:
+it has no fixtures, no network interception, and no reset, and it is allowed
+to fail for harness reasons. When it does, fix the replay, never the app.
+
+```bash
+sh e2e/journeys/streak.sh projects-create 5
+```
+
+Run streaks one story at a time against one stack. Two runs at once are
+fine; three agents at once took the sync worker down. `wrangler dev` also
+exits when a browser closes mid-socket (`Network connection lost.`), and
+the dev-stack script then stops everything, so a scheduled run needs a
+supervisor that restarts the stack and retries. A `FAIL: login` under five
+seconds means the stack was down, not that login broke.
+
 ## Harness notes
 
 Learned on the first runs (see `FINDINGS-2026-09-08.md`):
@@ -67,3 +94,9 @@ Learned on the first runs (see `FINDINGS-2026-09-08.md`):
 - After clicking a cell's read view, wait for the editable element to mount
   and type into it by ref. Typing at "current focus" is lost.
 - Language pickers on the create dialog accept a typed code (`en`, `fr`).
+- `wait --text` reads visible text only. A search box's placeholder such as
+  `Search projects…` never satisfies it; wait for the element instead
+  (`wait "table"`).
+- To act on a control that `find` misses, pull its ref out of the snapshot:
+  `ab snapshot -i -c | grep -o 'checkbox "I understand[^]]*ref=e[0-9]*'`,
+  then `check @eN`. `replays/projects-archive.sh` shows the pattern.

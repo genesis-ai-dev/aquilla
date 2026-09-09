@@ -177,7 +177,7 @@ export class Workspace {
       )
     }
     const skipChecklist = this.page.getByRole("button", { name: /Skip for now/i })
-    if (await skipChecklist.isVisible({ timeout: 1_500 }).catch(() => false)) {
+    if (await skipChecklist.isVisible()) {
       await skipChecklist.click()
       await expect(skipChecklist).toBeHidden({ timeout: 5_000 })
     }
@@ -260,52 +260,31 @@ export class Workspace {
 
   private async openImportDialog(): Promise<void> {
     const uploadCard = this.uploadFilesCard()
-    if (await uploadCard.isVisible({ timeout: 250 }).catch(() => false)) return
+    const importButton = this.page
+      .getByRole("button", { name: /^Import(?: a file)?$/i })
+      .filter({ visible: true })
+      .first()
+    const moreButton = this.page.getByRole("banner")
+      .getByRole("button", { name: /^More$/i })
 
-    // Header controls can be replaced while project data hydrates. Retry the
-    // opener, but first check whether the previous click already opened the
-    // dialog so we never click through its overlay.
-    for (let attempt = 0; attempt < 2; attempt++) {
-      if (await uploadCard.isVisible({ timeout: 250 }).catch(() => false)) return
+    // Wait for cold project hydration before choosing the available surface.
+    // An already-open dialog is also valid (for example, setup opened it).
+    await expect(uploadCard.or(importButton).or(moreButton).first())
+      .toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+    // These immediate probes only select between the ready UI branches.
+    if (await uploadCard.isVisible()) return
 
-      // Import is a visible header button beside the ⋯ overflow menu.
-      const banner = this.page.getByRole("banner")
-      const importBtn = banner.getByRole("button", { name: /^Import$/i })
-      if (await importBtn.isVisible({ timeout: 1_000 }).catch(() => false)) {
-        await importBtn.click()
-      } else {
-        const moreActionsBtn = banner.getByRole("button", { name: /^More$/i })
-        if (await moreActionsBtn.isVisible({ timeout: 1_000 }).catch(() => false)) {
-          await moreActionsBtn.click()
-          const importItem = this.page
-            .getByRole("menuitem", { name: /^Import$/i })
-            .filter({ visible: true })
-            .last()
-          await expect(importItem).toBeVisible({ timeout: 5_000 })
-          try {
-            await importItem.click({ timeout: 2_000 })
-          } catch (error) {
-            if (!(await uploadCard.isVisible({ timeout: 500 }).catch(() => false))) {
-              throw error
-            }
-            return
-          }
-        } else {
-          // A fully hydrated project with no files uses the editor empty-state
-          // CTA ("Import a file") instead of the header Import button.
-          const directImportBtn = this.page
-            .getByRole("button", { name: /^Import(?: a file)?$/i })
-            .filter({ visible: true })
-            .first()
-          await expect(directImportBtn).toBeVisible({ timeout: 10_000 })
-          await directImportBtn.click()
-        }
-      }
-
-      if (await uploadCard.isVisible({ timeout: 3_000 }).catch(() => false)) return
+    if (await importButton.isVisible()) {
+      await importButton.click()
+    } else {
+      await moreButton.click()
+      await this.page.getByRole("menuitem", { name: /^Import$/i })
+        .filter({ visible: true }).last().click()
     }
 
-    throw new Error("Import dialog did not open")
+    // ImportDialog is lazy-loaded. isVisible() does not wait;
+    // retrying clicks races the module load and can hit a modal overlay.
+    await expect(uploadCard).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
   }
 
   /** Click a file row in the sidebar, identified by a substring of its name.
@@ -386,7 +365,7 @@ export class Workspace {
 
     const target = this.editableTarget(index)
     let activatedFromReadView = false
-    if (!(await target.isVisible({ timeout: 250 }).catch(() => false))) {
+    if (!(await target.isVisible())) {
       const readView = this.targetReadView(index)
       await expect(readView).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
       await readView.click()

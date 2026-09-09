@@ -184,6 +184,11 @@
       "count": 3
     }
   },
+  "src/components/ProjectCreateDialog.tsx": {
+    "i18n/no-unkeyed-string": {
+      "count": 9
+    }
+  },
   "src/components/ProjectSettings.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 12

@@ -1,14 +1,20 @@
-import { readFileSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { join } from "node:path"
+import { tmpdir } from "node:os"
 import { describe, expect, it, vi } from "vitest"
 import { deployStackPreview, previewConfig, previewOrigin, PREVIEW_WORKERS } from "./cloudflare-stack-preview.mjs"
 
-const env = { WORKERS_CI: "1", WORKERS_CI_BRANCH: "feature/example", WORKERS_CI_COMMIT_SHA: "abc123" }
+const env = { WORKERS_CI: "1", WORKERS_CI_BRANCH: "feature/example", WORKERS_CI_COMMIT_SHA: "abc123", WRANGLER_CI_OVERRIDE_NAME: "aquilla-web-preview" }
 
 describe("full-stack Cloudflare previews", () => {
-  it("connects Wrangler output to the frontend build and backend callbacks", async () => {
+  it("connects Wrangler output to the frontend build and backend callbacks", async ({ onTestFinished }) => {
+    const outputDirectory = mkdtempSync(join(tmpdir(), "preview-ci-output-"))
+    onTestFinished(() => rmSync(outputDirectory, { recursive: true, force: true }))
     const configs: Array<{ surface: string; config: any }> = []
     const run = vi.fn(async (_command: string, args: string[], options: any) => {
       if (args.includes("base-config")) {
+        const config = JSON.parse(readFileSync(args[args.indexOf("--config") + 1], "utf8"))
+        expect(options.env.WRANGLER_CI_OVERRIDE_NAME).toBe(config.name)
         return { stdout: JSON.stringify(["SECRET_KEY", "SYNC_SECRET_KEY", "ADMIN_SECRET"].map((name) => ({ name, type: "secret_text" }))) }
       }
       if (args[1] === "vite") {
@@ -20,6 +26,7 @@ describe("full-stack Cloudflare previews", () => {
       expect(args.slice(0, 3)).toEqual(["exec", "wrangler", "preview"])
       const config = JSON.parse(readFileSync(args[args.indexOf("--config") + 1], "utf8"))
       const surface = Object.keys(PREVIEW_WORKERS).find((key) => PREVIEW_WORKERS[key] === config.name)!
+      expect(options.env.WRANGLER_CI_OVERRIDE_NAME).toBe(config.name)
       configs.push({ surface, config })
       writeFileSync(options.env.WRANGLER_OUTPUT_FILE_PATH, JSON.stringify({
         type: "preview", worker_name: config.name,
@@ -30,7 +37,7 @@ describe("full-stack Cloudflare previews", () => {
       return { stdout: "" }
     })
     const verify = vi.fn()
-    const result = await deployStackPreview({ cwd: "/tmp/preview-contract-fixture", env, run, verify })
+    const result = await deployStackPreview({ cwd: "/tmp/preview-contract-fixture", env: { ...env, WRANGLER_OUTPUT_FILE_DIRECTORY: outputDirectory }, run, verify })
     expect(configs.map(({ surface }) => surface)).toEqual(["auth", "sync", "web", "auth", "sync"])
     expect(configs[0].config.previews.vars.SYNC_WORKER_URL).toBe("https://preview-not-ready.invalid")
     expect(configs[3].config.previews.vars).toMatchObject({
@@ -38,6 +45,9 @@ describe("full-stack Cloudflare previews", () => {
     })
     expect(configs[4].config.previews.vars).toMatchObject({
       BASE_URL: result.urls.web, AUTH_WORKER_URL: `${result.urls.auth}/identity`,
+    })
+    expect(JSON.parse(readFileSync(join(outputDirectory, "wrangler-output-aquilla-preview.json"), "utf8"))).toMatchObject({
+      type: "preview", worker_name: PREVIEW_WORKERS.web, preview_urls: [result.urls.web],
     })
     expect(verify).toHaveBeenCalledWith("/tmp/preview-contract-fixture/dist")
     expect(run.mock.calls.filter(([, args]) => args[1] === "vite")).toHaveLength(1)

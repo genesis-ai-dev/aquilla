@@ -1,6 +1,6 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join, resolve } from "node:path"
+import { dirname, join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 import { workersBuildMetadata } from "./assert-workers-build-env.mjs"
 import { runCommand, workersBuildPreviewAlias } from "./cloudflare-pr-preview.mjs"
@@ -81,15 +81,18 @@ export async function deployStackPreview({ cwd = process.cwd(), env = process.en
   const temp = mkdtempSync(join(tmpdir(), "aquilla-stack-preview-"))
   const urls = {}
   let deploymentIndex = 0
+  let webOutput
   const deploy = async (surface) => {
     const configPath = join(temp, `${surface}.json`)
     const outputPath = join(temp, `${deploymentIndex++}.ndjson`)
     writeFileSync(configPath, JSON.stringify(previewConfig(surface, { cwd, urls })))
     await run("pnpm", ["exec", "wrangler", "preview", "--config", configPath,
       "--name", name, "--tag", commitSha, "--message", `Branch ${branch} @ ${commitSha}`], {
-      cwd, env: { ...env, WRANGLER_OUTPUT_FILE_PATH: outputPath },
+      cwd, env: { ...env, WRANGLER_CI_OVERRIDE_NAME: PREVIEW_WORKERS[surface], WRANGLER_OUTPUT_FILE_PATH: outputPath },
     })
-    const origin = previewOrigin(parseWranglerOutput(readFileSync(outputPath, "utf8"), "preview"), surface, name)
+    const entry = parseWranglerOutput(readFileSync(outputPath, "utf8"), "preview")
+    const origin = previewOrigin(entry, surface, name)
+    if (surface === "web") webOutput = entry
     if (urls[surface] && urls[surface] !== origin) throw new Error(`${surface} preview URL changed during deployment`)
     urls[surface] = origin
   }
@@ -98,7 +101,7 @@ export async function deployStackPreview({ cwd = process.cwd(), env = process.en
       const configPath = join(temp, `${surface}.json`)
       writeFileSync(configPath, JSON.stringify(previewConfig(surface, { cwd, urls })))
       const result = await run("pnpm", ["exec", "wrangler", "preview", "base-config", "secret", "list",
-        "--config", configPath, "--json"], { cwd, env })
+        "--config", configPath, "--json"], { cwd, env: { ...env, WRANGLER_CI_OVERRIDE_NAME: PREVIEW_WORKERS[surface] } })
       const names = new Set(JSON.parse(result.stdout).map((secret) => secret.name))
       const required = surface === "auth" ? ["SECRET_KEY", "SYNC_SECRET_KEY", "ADMIN_SECRET"] : ["SYNC_SECRET_KEY", "ADMIN_SECRET"]
       const missing = required.filter((key) => !names.has(key))
@@ -120,6 +123,14 @@ export async function deployStackPreview({ cwd = process.cwd(), env = process.en
     await deploy("web")
     await deploy("auth")
     await deploy("sync")
+    // Preserve Cloudflare's machine-readable result so its native GitHub
+    // integration can attach the app URL, not just a link to the build log.
+    const ciOutput = env.WRANGLER_OUTPUT_FILE_PATH || (env.WRANGLER_OUTPUT_FILE_DIRECTORY
+      ? join(env.WRANGLER_OUTPUT_FILE_DIRECTORY, "wrangler-output-aquilla-preview.json") : undefined)
+    if (ciOutput) {
+      mkdirSync(dirname(ciOutput), { recursive: true })
+      appendFileSync(ciOutput, `${JSON.stringify(webOutput)}\n`)
+    }
     console.log(`[cloudflare-preview] branch=${branch} commit=${commitSha} app=${urls.web} auth=${urls.auth} sync=${urls.sync}`)
     return { name, urls }
   } finally {

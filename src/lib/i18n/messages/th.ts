@@ -2972,6 +2972,8 @@ export const th: Catalog = {
   "projectSettings.create.shapeSelfContained": "{name} — มีต้นฉบับและฉบับแปลเป็นของตัวเอง",
   "projectSettings.create.shapeLinkedTargetName": "ฉบับแปลที่เชื่อมโยง",
   "projectSettings.create.shapeLinkedTarget": "{name} — อ่านต้นฉบับจากโปรเจกต์อื่น มีเฉพาะฉบับแปลเป็นของตัวเอง",
+  "projectSettings.create.cloneModeName": "โคลน",
+  "projectSettings.create.liveModeName": "สด",
   "projectSettings.create.upstreamProjectLabel": "โปรเจกต์ต้นทาง",
   "projectSettings.create.upstreamProjectPlaceholder": "เลือกโปรเจกต์ที่จะเชื่อมโยง…",
   "projectSettings.create.linkConsumesLabel": "อะไรจะกลายเป็นต้นฉบับของโปรเจกต์นี้?",

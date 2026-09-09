@@ -2970,6 +2970,8 @@ export const my: Catalog = {
   "projectSettings.create.shapeSelfContained": "{name} — မိမိကိုယ်ပိုင် မူရင်းနှင့် ဘာသာပြန် ပိုင်ဆိုင်သည်။",
   "projectSettings.create.shapeLinkedTargetName": "ချိတ်ဆက်ထားသော ဘာသာပြန်",
   "projectSettings.create.shapeLinkedTarget": "{name} — အခြားပရောဂျက်မှ မူရင်းကို ဖတ်သည်; ၎င်း၏ ဘာသာပြန်ကိုသာ ပိုင်ဆိုင်သည်။",
+  "projectSettings.create.cloneModeName": "ကူးယူထား",
+  "projectSettings.create.liveModeName": "တိုက်ရိုက်",
   "projectSettings.create.upstreamProjectLabel": "အထက်ပိုင်း ပရောဂျက်",
   "projectSettings.create.upstreamProjectPlaceholder": "ချိတ်ဆက်ရန် ပရောဂျက်တစ်ခု ရွေးပါ…",
   "projectSettings.create.linkConsumesLabel": "ဤပရောဂျက်၏ မူရင်းအဖြစ် မည်သည့်အရာ ဖြစ်သင့်သနည်း?",

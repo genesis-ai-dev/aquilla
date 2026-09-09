@@ -3378,6 +3378,8 @@ export const zh_Hans: Catalog = {
   "projectSettings.create.shapeSelfContained": "{name} — 同时拥有自己的来源与目标。",
   "projectSettings.create.shapeLinkedTargetName": "链接目标",
   "projectSettings.create.shapeLinkedTarget": "{name} — 从另一个项目读取来源；只拥有自己的目标。",
+  "projectSettings.create.cloneModeName": "克隆",
+  "projectSettings.create.liveModeName": "实时",
   "projectSettings.create.upstreamProjectLabel": "上游项目",
   "projectSettings.create.upstreamProjectPlaceholder": "选择要链接的项目…",
   "projectSettings.create.linkConsumesLabel": "要以什么作为这个项目的来源？",

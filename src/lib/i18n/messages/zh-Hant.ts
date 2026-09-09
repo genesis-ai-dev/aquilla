@@ -3378,6 +3378,8 @@ export const zh_Hant: Catalog = {
   "projectSettings.create.shapeSelfContained": "{name} — 同時擁有自己的來源與目標。",
   "projectSettings.create.shapeLinkedTargetName": "連結目標",
   "projectSettings.create.shapeLinkedTarget": "{name} — 從另一個專案讀取來源；只擁有自己的目標。",
+  "projectSettings.create.cloneModeName": "克隆",
+  "projectSettings.create.liveModeName": "即時",
   "projectSettings.create.upstreamProjectLabel": "上游專案",
   "projectSettings.create.upstreamProjectPlaceholder": "選擇要連結的專案…",
   "projectSettings.create.linkConsumesLabel": "要以什麼作為這個專案的來源？",

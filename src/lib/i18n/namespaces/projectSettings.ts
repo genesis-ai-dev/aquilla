@@ -71,9 +71,11 @@ export const projectSettings = defineNamespace({
     }),
     // Mode is implied by shape (self-contained → optional clone; linked-target → live).
     // These intros replace the old clone/live radio pair under Advanced.
+    "projectSettings.create.cloneModeName": "Cloned",
     "projectSettings.create.cloneIntro":
       "Do you want to import a {mode} copy of another project? This will create a " +
       "one-time snapshot and then remain independent.",
+    "projectSettings.create.liveModeName": "live",
     "projectSettings.create.liveIntro":
       "You are creating a {mode} copy. Your new project will be connected to the " +
       "upstream project, and fixes in the upstream project will automatically " +
@@ -854,20 +856,36 @@ export const projectSettings = defineNamespace({
           name: "The bold shape name, already translated via projectSettings.create.shapeLinkedTargetName and wrapped in <strong> by the caller.",
         },
       },
+      "projectSettings.create.cloneModeName": {
+        description:
+          "The emphasized mode word in projectSettings.create.cloneIntro — a one-time " +
+          "snapshot copy, not a live link.",
+      },
       "projectSettings.create.cloneIntro": {
         description:
           "Explanatory line under the Self Contained shape radio: offers an optional " +
-          "one-time clone from an upstream project. {mode} is the bold word 'Cloned'.",
+          "one-time clone from an upstream project. The bold mode name is a separate " +
+          "translated+styled placeholder so word order can move per locale.",
         placeholders: {
-          mode: "The bold word 'Cloned', wrapped in <strong> by the caller.",
+          mode:
+            "The bold mode name, already translated via projectSettings.create.cloneModeName " +
+            "and wrapped in <strong> by the caller.",
         },
+      },
+      "projectSettings.create.liveModeName": {
+        description:
+          "The emphasized mode word in projectSettings.create.liveIntro — a live-linked " +
+          "copy that stays connected to the upstream project.",
       },
       "projectSettings.create.liveIntro": {
         description:
           "Explanatory line under the Linked Target shape radio: states that this " +
-          "create is a live-linked copy. {mode} is the bold word 'live'.",
+          "create is a live-linked copy. The bold mode name is a separate translated+styled " +
+          "placeholder so word order can move per locale.",
         placeholders: {
-          mode: "The bold word 'live', wrapped in <strong> by the caller.",
+          mode:
+            "The bold mode name, already translated via projectSettings.create.liveModeName " +
+            "and wrapped in <strong> by the caller.",
         },
       },
       "projectSettings.create.linkConsumesSource": {

@@ -2967,6 +2967,8 @@ export const mfa: Catalog = {
   "projectSettings.create.shapeSelfContained": "{name} — memiliki sumber dan sasarannya sendiri.",
   "projectSettings.create.shapeLinkedTargetName": "Sasaran terpaut",
   "projectSettings.create.shapeLinkedTarget": "{name} — membaca sumber daripada projek lain; hanya memiliki sasarannya sendiri.",
+  "projectSettings.create.cloneModeName": "klon",
+  "projectSettings.create.liveModeName": "langsung",
   "projectSettings.create.upstreamProjectLabel": "Projek hulu",
   "projectSettings.create.upstreamProjectPlaceholder": "Pilih projek untuk dipautkan…",
   "projectSettings.create.linkConsumesLabel": "Apakah yang patut menjadi sumber projek ini?",

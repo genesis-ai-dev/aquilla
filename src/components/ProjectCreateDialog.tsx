@@ -543,14 +543,14 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
                           <RichMessage
                             k="projectSettings.create.liveIntro"
                             values={{
-                              mode: <strong>live</strong>,
+                              mode: <strong>{t("projectSettings.create.liveModeName")}</strong>,
                             }}
                           />
                         ) : (
                           <RichMessage
                             k="projectSettings.create.cloneIntro"
                             values={{
-                              mode: <strong>Cloned</strong>,
+                              mode: <strong>{t("projectSettings.create.cloneModeName")}</strong>,
                             }}
                           />
                         )}

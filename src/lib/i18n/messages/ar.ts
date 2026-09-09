@@ -2973,6 +2973,8 @@ export const ar: Catalog = {
   "projectSettings.create.shapeSelfContained": "{name} — يملك مصدره وهدفه.",
   "projectSettings.create.shapeLinkedTargetName": "هدف مرتبط",
   "projectSettings.create.shapeLinkedTarget": "{name} — يقرأ المصدر من مشروع آخر؛ يملك هدفه فقط.",
+  "projectSettings.create.cloneModeName": "مستنسخ",
+  "projectSettings.create.liveModeName": "مباشر",
   "projectSettings.create.upstreamProjectLabel": "المشروع الأصلي",
   "projectSettings.create.upstreamProjectPlaceholder": "اختر مشروعًا للربط منه…",
   "projectSettings.create.linkConsumesLabel": "ما الذي سيصبح مصدر هذا المشروع؟",

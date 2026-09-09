@@ -39,7 +39,7 @@ application and must not be given a placeholder build command.
 | Connection | Branch | Binding profile | Operation | Changes live traffic |
 | --- | --- | --- | --- | --- |
 | All live Workers | Any | N/A | no automatic build; Git disconnected | No |
-| `aquilla-web-preview` | Any repository branch | development API hosts | lint, tests, build, route-free preview upload | No |
+| `aquilla-web-preview` | Any repository branch | development API hosts | TypeScript/Vite build, route-free preview upload | No |
 
 Both environments and their routes remain controlled by the explicit operator
 commands below.
@@ -93,7 +93,7 @@ Playwright smoke on a dedicated Hetzner box is also separate — see
 [hetzner-ci.md](hetzner-ci.md). It is `workflow_dispatch`-only until a
 self-hosted runner is Idle.
 
-## Pull-request validation
+## Pull-request previews
 
 Connect only `aquilla-web-preview` to `genesis-ai-dev/aquilla`. Configure:
 
@@ -102,17 +102,28 @@ Connect only `aquilla-web-preview` to `genesis-ai-dev/aquilla`. Configure:
 - root directory: `/`
 - non-production branch builds: enabled
 
-The build runs root lint/unit/IDML/schema/build gates, both identity and sync
-typecheck/test suites, and the agent-worker typecheck/tests. Independent lanes
-run concurrently in three bounded-memory phases so the complete gate fits both
-Cloudflare's build-duration and memory limits; any failed phase prevents later
-phases and fails the whole build. The long root and sync Vitest suites run in
-separate phases so they cannot starve each other's asynchronous tests. The IDML
-browser-conformance lane uses its pinned, serverless Chromium binary without
-requiring root access. The deploy step uploads only a route-free
-`aquilla-web-preview` version. Slash-named branches are normalized and hashed
-into stable lowercase aliases. No preview command can name `aquilla-web`,
-`aquilla-web-development`, either identity Worker, or either sync Worker.
+The build runs `tsc -b` and `vite build` through `build:compile`. It does not
+run lint, secret scanning, unit tests, worker suites, IDML release validation,
+or browser tests. It retains small environment and upload-artifact checks.
+Compilation produces a preview for QA; a green preview check is not a test result.
+
+The deploy step uploads only a route-free `aquilla-web-preview` version.
+Slash-named branches become stable lowercase aliases. No preview command can
+name a live web, identity, or sync Worker.
+
+Validation runs locally before push. `.husky/pre-push` invokes `pnpm check:push`:
+credential scanning first, then lint, translation checks, root and worker tests,
+worker typechecks, IDML tests/release validation, and schema checks. It then runs
+`pnpm test:e2e:affected`, preserving Git's pushed refs for affected selection.
+Install root and each worker package's dependencies before pushing; the browser
+checks also require the local Docker/Postgres stack. Heavy Vitest suites run
+in separate phases with bounded concurrency. Pushes take longer because these
+checks now run on the developer machine rather than delaying preview publication.
+
+Hooks apply only to pushes that execute them: `--no-verify`, `HUSKY=0`, and
+API-created commits bypass local validation. Cloudflare still builds these
+commits without running tests. QA owns functional review of each preview.
+The full smoke suite remains the explicit merge/deploy/release gate.
 
 GitHub's removed Actions contexts (`lint`, `typecheck`, `unit`, and `build`)
 must not remain required. After the first successful Workers Build establishes

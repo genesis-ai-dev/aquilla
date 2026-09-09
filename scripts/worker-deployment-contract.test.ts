@@ -265,7 +265,7 @@ describe("worker deployment environment contract", () => {
     expect(rootPackage.scripts?.["deploy:workers-build"])
       .toBe("node scripts/cloudflare-pr-preview.mjs --workers-build")
     expect(rootPackage.scripts?.["build:workers-build"])
-      .toBe("node scripts/assert-workers-build-env.mjs && node scripts/cloudflare-ci-checks.mjs")
+      .toBe("bash scripts/ci-build.sh")
     expect(rootPackage.scripts?.["build:workers-build:identity"])
       .toBe("CI=1 pnpm --dir auth-worker install --frozen-lockfile && pnpm --dir auth-worker run build:workers-build")
     expect(rootPackage.scripts?.["build:workers-build:sync"])
@@ -281,6 +281,7 @@ describe("worker deployment environment contract", () => {
 
     expect(workerPackage.scripts?.["build:workers-build"])
       .toContain("assert-workers-build-env.mjs")
+    expect(workerPackage.scripts?.["build:workers-build"]).not.toContain("pnpm test")
     expect(workerPackage.scripts?.["deploy:workers-build"])
       .toBe("node ../scripts/cloudflare-build-deploy.mjs sync")
     expect(workerPackage.scripts?.deploy).toBe("pnpm --dir .. run deploy:aquilla:sync")
@@ -290,6 +291,7 @@ describe("worker deployment environment contract", () => {
     }
     expect(authPackage.scripts?.["build:workers-build"])
       .toContain("assert-workers-build-env.mjs")
+    expect(authPackage.scripts?.["build:workers-build"]).not.toContain("pnpm test")
     expect(authPackage.scripts?.["deploy:workers-build"])
       .toBe("node ../scripts/cloudflare-build-deploy.mjs identity")
     expect(authPackage.scripts?.deploy).toBe("pnpm --dir .. run deploy:aquilla:auth")
@@ -383,7 +385,7 @@ describe("worker deployment environment contract", () => {
 
     expect(matrix).toContain("`main` -> `production`")
     expect(matrix).toContain("`dev` -> `development`")
-    expect(matrix).toContain("Cloudflare Workers Builds owns automatic pull-request validation")
+    expect(matrix).toContain("Cloudflare Workers Builds owns automatic compile-only pull-request previews")
     expect(matrix).toContain("Live Aquilla deployments require an explicit human/operator action")
     expect(matrix).toContain("All unnamed Wrangler profiles are local-only")
     expect(matrix).toContain("deployment-branch policy")
@@ -481,35 +483,20 @@ describe("worker deployment environment contract", () => {
     expect(workersBuildScript).toContain("verify-deployment-artifacts.mjs dist")
   })
 
-  it("runs the former required PR gates on Cloudflare infrastructure", () => {
+  it("compiles Cloudflare previews without running validation suites", () => {
     const rootPackage = JSON.parse(readRepoFile("package.json")) as {
-      scripts?: Record<string, string>
+      scripts: Record<string, string>
     }
-    const command = rootPackage.scripts?.["build:workers-build"] ?? ""
-    const checks = readRepoFile("scripts", "cloudflare-ci-checks.mjs")
-    const browserConformance = readRepoFile(
-      "packages",
-      "idml-roundtrip",
-      "scripts",
-      "run-browser-conformance.ts",
-    )
-
-    expect(command).toContain("scripts/cloudflare-ci-checks.mjs")
-    expect(checks).toContain('["pnpm", ["lint"]]')
-    expect(checks).toContain('["pnpm", ["test"]]')
-    expect(checks).toContain('"build:workers-build:identity"')
-    expect(checks).toContain('"build:workers-build:sync"')
-    expect(checks).toContain('["pnpm", ["test:idml"]]')
-    expect(checks).toContain('["pnpm", ["neon:check"]]')
-    expect(checks).toContain('["npm", ["ci", "--prefix", "agent-worker"]]')
-    expect(checks).toContain('"type-check"')
-    expect(checks).toContain('["bash", ["scripts/ci-build.sh"]]')
-    expect(checks).not.toContain("playwright install")
-    expect(browserConformance).toContain('process.env.WORKERS_CI === "1"')
-    expect(browserConformance).toContain('import("@sparticuz/chromium")')
-    expect(browserConformance).toContain("serverlessChromium.executablePath()")
-    expect(checks).toContain("CHECK_PHASES")
-    expect(checks).toContain("Promise.allSettled")
+    const build = readRepoFile("scripts", "ci-build.sh")
+    expect(rootPackage.scripts["build:workers-build"])
+      .toBe("bash scripts/ci-build.sh")
+    expect(rootPackage.scripts["build:compile"]).toBe("tsc -b && vite build")
+    expect(build).toContain("pnpm run build:compile")
+    expect(build).not.toMatch(/pnpm (?:test|lint|run build\n)/)
+    expect(build).not.toMatch(/scan:secrets|idml:gate|neon:check/)
+    expect(rootPackage.scripts["check:push"])
+      .toBe("node scripts/push-checks.mjs")
+    expect(readRepoFile(".husky", "pre-push")).toContain("pnpm run check:push")
   })
 
   it("keeps all live deployments off automatic push triggers", () => {

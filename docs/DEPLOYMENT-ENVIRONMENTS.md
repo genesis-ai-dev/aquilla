@@ -61,7 +61,7 @@ schema, build, or deploy step; there is no default environment. Production jobs
 enter the GitHub `production` Environment, whose deployment-branch policy admits
 only `main`.
 
-Cloudflare Workers Builds owns automatic pull-request validation through the
+Cloudflare Workers Builds owns automatic compile-only pull-request previews through the
 dedicated `aquilla-web-preview` Worker. All six production/development Workers
 remain disconnected from Git. The preview Worker has no custom domain or live
 route, always targets development APIs, and never promotes a version or changes
@@ -71,7 +71,9 @@ because it has no deployable Wrangler application.
 The consolidated `.github/workflows/ci.yml` is `workflow_dispatch`-only. Normal
 pull-request and push activity consumes no GitHub-hosted runner minutes. Cloudflare
 receives GitHub repository events, runs the repository-owned build commands, and
-reports its check results and preview links back to GitHub.
+reports compilation results and preview links back to GitHub. Tests, lint,
+secret scanning, and schema checks run in the local pre-push hook. QA tests the
+published preview; preview success does not certify automated test results.
 
 Every Workers Builds preview uses development API hosts, including builds of
 `main`. Preview versions remain route-free permanently; they are never promoted

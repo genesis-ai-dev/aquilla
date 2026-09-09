@@ -90,9 +90,12 @@ the box), or `tsx scripts/migrate-daemon/main.ts <command>` directly.
   it.
 
 - **`once [--only <gitlab-id>] [--dry-run] [--force]`** — drains every ready job
-  once and exits. `--only` first registers/looks up a single GitLab project id
-  before draining (used for the canary). `--force` forces re-materialization
-  even if the checkout looks unchanged. Example output:
+  once and exits. `--only` first registers/looks up a single GitLab project id,
+  then scopes the drain to that project's jobs only — other projects' ready jobs
+  are left untouched, and the weekly reseed pass is skipped (used for the
+  canary). Without `--only`, `once` drains every ready job for every project.
+  `--force` forces re-materialization even if the checkout looks unchanged.
+  Example output:
   ```
   once: 3 job(s) done, 0 planned, 1 with errors
     job 42 project 913: verify mismatch persisted after ledger reseed and forced re-materialize

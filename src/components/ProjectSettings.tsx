@@ -2404,7 +2404,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         {id && sectionsToRender.some((s) => s.id === "section-monday") && (
           <MondayIntegrationSection
             projectId={id}
-            orgId={org?.id ?? null}
+            orgId={project?.orgId ?? null}
             roleLevel={project?.syncRole?.level ?? null}
           />
         )}

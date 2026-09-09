@@ -109,6 +109,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocked.analyzeMondayMapping.mockResolvedValue(analysis())
   mocked.fetchMondayBoardStructure.mockResolvedValue({
+    url: "https://actual-account.monday.com/boards/b1",
     columns: [{ id: "numbers_1", title: "Progress", type: "numbers" }],
     groups: [],
   })
@@ -158,6 +159,7 @@ describe("MondaySetupWizard", () => {
     expect(mocked.syncMondayNow).toHaveBeenCalledWith("tok", "p1")
     expect(onLinked).toHaveBeenCalled()
     expect(screen.getByText(/pushed 3 items/i)).toBeTruthy()
+    expect(screen.getByRole("link", { name: /view board/i }).getAttribute("href")).toBe("https://actual-account.monday.com/boards/b1")
   })
 
   it("says so when the link saved but the first push failed", async () => {
@@ -228,6 +230,7 @@ describe("MondaySetupWizard", () => {
     renderWizard()
     await scanToReview()
 
+    fireEvent.click(screen.getByRole("button", { name: /customize data and columns/i }))
     await pickSelectOption(/board items/i, /one item per file/i)
     fireEvent.click(screen.getByRole("button", { name: /apply and push/i }))
 
@@ -243,6 +246,7 @@ describe("MondaySetupWizard", () => {
     renderWizard()
     await scanToReview()
 
+    fireEvent.click(screen.getByRole("button", { name: /customize data and columns/i }))
     fireEvent.click(screen.getByRole("button", { name: /remove mapping row/i }))
     // Nothing mapped means nothing to push — Apply must not be offered.
     await waitFor(() => {
@@ -250,4 +254,13 @@ describe("MondaySetupWizard", () => {
       expect(apply.disabled).toBe(true)
     })
   })
+})
+
+it("does not call a skipped push successful", async () => {
+  mocked.syncMondayNow.mockResolvedValue({ ok: true, pushed: false })
+  renderWizard()
+  await scanToReview()
+  expect(screen.queryByRole("combobox", { name: /board items/i })).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: /apply and push/i }))
+  expect(await screen.findByRole("heading", { name: /sync needs attention/i })).toBeTruthy()
 })

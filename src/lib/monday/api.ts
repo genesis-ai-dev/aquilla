@@ -73,12 +73,15 @@ export interface MondayBoard {
 
 /** GET /orgs/:orgId/boards/:boardId/structure. */
 export interface MondayBoardStructure {
+  url?: string | null
+  name?: string | null
   columns: { id: string; title: string; type: string }[]
   groups: { id: string; title: string }[]
 }
 
 /** The `link` object from GET/PUT/PATCH /projects/:projectId/link. */
 export interface MondayBoardLink {
+  boardUrl?: string | null
   id: string
   boardId: string
   boardName: string | null
@@ -92,6 +95,8 @@ export interface MondayBoardLink {
 }
 
 export interface MondayLinkStatus {
+  orgConnected?: boolean
+  orgId?: number | null
   linked: boolean
   link?: MondayBoardLink
 }
@@ -259,6 +264,7 @@ export async function deleteMondayLink(jwt: string, projectId: string): Promise<
 // ── AI configure + sync ────────────────────────────────────────────────────
 
 export interface MondayAnalysis {
+  boardUrl?: string | null
   proposal: MondayMapping
   summary: string
   /** Why a board column the user can see isn't in the proposal (read-only type,
@@ -301,6 +307,7 @@ export async function analyzeMondayMapping(
     warnings: data.warnings ?? [],
     boardId: data.boardId ?? body.boardId ?? "",
     boardName: data.boardName ?? null,
+    boardUrl: data.boardUrl ?? null,
     boardReason: data.boardReason ?? "",
   }
 }

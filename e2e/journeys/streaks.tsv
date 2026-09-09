@@ -279,3 +279,4 @@ date	story	run	result	seconds	note
 2026-09-09T20:21:05Z	collab-cross-user-validate	4	PASS	56	PASS: bob validated cell 0 on project 4d1100b6-1692-46af-b49f-57155c5db914, file 01a087d4-691b-7722-878b-db2426d5d33c — control reads 'Validated — row 1. Cl
 2026-09-09T20:22:01Z	collab-cross-user-validate	5	PASS	56	PASS: bob validated cell 0 on project 4533bff2-ae1c-4cef-ba80-656559511d59, file 01a087d5-41d3-728d-b35c-0ce3d5754ead — control reads 'Validated — row 1. Cl
 2026-09-09T20:22:27Z	collab-bt-edit-locked-for-reviewer	1	FAIL	26	FAIL: type translation
+2026-09-09T21:24:03Z	projects-create	1	PASS	18	PASS: row 'Journey create 142345' in Projects table; overview url http://127.0.0.1:5173/projects/5b294b14-af6a-4530-b5b4-7cf9ccb7b1c2

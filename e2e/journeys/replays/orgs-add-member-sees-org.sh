@@ -25,7 +25,7 @@ abB wait '[data-tour="org-switcher"]' >/dev/null || fail "bob home: switcher nev
 
 abA open "$BASE/__dev/login?as=alice" >/dev/null || fail "alice login"
 abA wait --load networkidle >/dev/null
-abA open "$BASE/orgs/9/overview" >/dev/null 2>&1
+abA open "$BASE/orgs/$ORG/overview" >/dev/null 2>&1
 abA wait '[data-tour="org-switcher"]' >/dev/null || fail "org switcher never rendered for alice"
 abA find role combobox click --name "Organization switcher" >/dev/null || fail "org switcher"
 abA find role button click --name "Create" >/dev/null || fail "Create button in switcher"

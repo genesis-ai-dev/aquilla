@@ -9,7 +9,7 @@ export AGENT_BROWSER_DEFAULT_TIMEOUT="${AGENT_BROWSER_DEFAULT_TIMEOUT:-45000}"
 NAME="Journey checklist $(date +%H%M%S)"
 
 login alice || fail "login"
-ab open "$BASE/orgs/9/projects" >/dev/null && ab wait --load networkidle >/dev/null
+ab open "$BASE/orgs/$ORG/projects" >/dev/null && ab wait --load networkidle >/dev/null
 ab find role button click --name "New Project" >/dev/null || fail "New Project button"
 ab wait --text "Create New Project" >/dev/null || fail "dialog"
 ab find label "Project title" fill "$NAME" >/dev/null || fail "title field"

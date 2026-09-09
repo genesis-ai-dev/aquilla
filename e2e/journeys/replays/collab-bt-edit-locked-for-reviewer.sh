@@ -13,7 +13,7 @@ NAME="BT locked $(date +%H%M%S)"
 abA open "$BASE/__dev/login?as=alice" >/dev/null || fail "alice login"
 abA wait --load networkidle >/dev/null
 
-abA open "$BASE/orgs/9/projects" >/dev/null && abA wait --load networkidle >/dev/null
+abA open "$BASE/orgs/$ORG/projects" >/dev/null && abA wait --load networkidle >/dev/null
 abA find role button click --name "New Project" >/dev/null || fail "New Project button"
 abA wait --text "Create New Project" >/dev/null || fail "create dialog"
 abA find label "Project title" fill "$NAME" >/dev/null || fail "title field"

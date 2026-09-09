@@ -3,7 +3,7 @@
 . "$(dirname "$0")/_lib.sh"
 NAME="Journey create $(date +%H%M%S)"
 login alice || fail "login"
-ab open "$BASE/orgs/9/projects" >/dev/null && ab wait --load networkidle >/dev/null
+ab open "$BASE/orgs/$ORG/projects" >/dev/null && ab wait --load networkidle >/dev/null
 ab find role button click --name "New Project" >/dev/null || fail "New Project button"
 ab wait --text "Create New Project" >/dev/null || fail "dialog"
 ab find label "Project title" fill "$NAME" >/dev/null || fail "title field"
@@ -13,7 +13,7 @@ ab find role button click --name "Create Project" >/dev/null || fail "Create Pro
 ab wait --text "Open project" >/dev/null || fail "overview did not load"
 url=$(ab get url); case "$url" in */projects/*) ;; *) fail "url after create: $url";; esac
 [ "$(count "heading \"$NAME\"")" -ge 1 ] || fail "overview heading is not the title"
-ab open "$BASE/orgs/9/projects" >/dev/null && ab wait --load networkidle >/dev/null
+ab open "$BASE/orgs/$ORG/projects" >/dev/null && ab wait --load networkidle >/dev/null
 rows=$(count "cell \"$NAME\"" "table")
 [ "$rows" -ge 1 ] || fail "no table row named $NAME"
 pass "row '$NAME' in Projects table; overview url $url"

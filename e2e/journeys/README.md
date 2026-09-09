@@ -2,101 +2,119 @@
 
 Plain-English user journeys that an AI agent walks through the running app
 with [agent-browser](https://github.com/vercel-labs/agent-browser). The agent
-reads each story, drives the browser, judges the end state, and reports.
+reads a story, drives the browser, judges the end state, and reports.
 
-This is **not** a merge gate. The Playwright smoke suite in `e2e/specs` stays
-the deterministic gate. Agent journeys are advisory: they cope with moved
-buttons, notice things a selector cannot, and write a readable report. They
-are also non-deterministic and cost tokens per run, so a red here is a lead,
-not a verdict.
+They exist for one job: QA on every pull request, done by bots against the
+PR's own full-stack preview, with a comment a reviewer can act on. That
+flow is written out in `PR-BOT.md`. The stories are the bots' briefs. The
+replays are the parts of a story a bot no longer has to think about.
 
-## Why both
+## Where this sits in the pipeline
 
-| | Playwright smoke | Agent journey |
+| Stage | What runs | Where |
 | --- | --- | --- |
-| Who holds the steps | a spec file, fixed in advance | the agent, decided from each snapshot |
-| Cost per run | none | model tokens |
-| Breaks when | a selector stops matching | the story is ambiguous or the harness misfires |
-| Good at | exact assertions, races, ten clients at once | exploring, judging, reporting |
-| Role | gate | scout |
+| Push | secret scan, affected e2e, unit and worker suites (pre-push hook) | the developer's machine |
+| Pull request | Cloudflare builds a full-stack preview of the branch (no tests) | Cloudflare |
+| Pull request | bots walk the PR's claim and the touched stories against that preview, comment | wherever the bots run |
+| Merge to dev | human sanity check of dev before main | a person |
 
-## Story format
+No test runs inside Cloudflare any more; a green check means it compiled and
+uploaded. The bots are what stands between a preview and a reviewer's
+time. The Playwright smoke suite keeps its place on push and stays the
+deterministic record of the same journeys.
 
-One file per journey. Keep the section names; the agent looks for them.
+## Stories, cold runs, replays
 
-- **Smoke twin**: the Playwright spec that covers the same journey, if any.
-- **Preconditions**: account, org, data that must exist first.
-- **Steps**: what a person would do, naming controls by their visible label.
-- **Expected end state**: what must be true at the end.
-- **Counts as a failure**: the specific wrong outcomes, so the agent does not
-  invent its own bar.
-- **Notes for the agent**: harness quirks learned on earlier runs.
+A **story** is the brief: preconditions, steps a person would take with
+controls named by their visible label, the expected end state, and what
+counts as a failure so the bot does not invent its own bar. One file per
+journey, sections in that order, plus **Smoke twin** (the Playwright spec
+for the same journey) and **Notes for the agent** (harness quirks learned
+on earlier runs).
 
-## Running a story
+A **cold run** is a bot reading the story and finding the path from
+scratch. That is the run that copes with a moved button, notices what a
+selector cannot, and writes a report in words.
 
-Install once:
+A **replay** (`replays/<slug>.sh`) is the path written down once found, as
+agent-browser commands that exit 0 on PASS with the evidence on the last
+line. It costs no tokens and runs in seconds, so it is what a bot runs
+first on every PR for every story the diff touches. When a replay fails,
+the bot cold-walks that story before reporting, so a harness miss is never
+reported as a bug. A replay is deliberately not a Playwright spec: no
+fixtures, no network interception, no reset.
 
-```bash
-npm i -g agent-browser && agent-browser install
-```
+## Calibration
 
-Boot the local stack (`pnpm dev`, needs the `aquilla-dev-pg` container), then
-hand an agent the story and this prompt:
-
-> Walk `e2e/journeys/<story>.md` against http://127.0.0.1:5173 with
-> agent-browser. Log in by opening `/__dev/login?as=alice`. Use a named
-> session. Re-snapshot after every page change. Report PASS or FAIL against
-> "Expected end state", quote the evidence, and attach a screenshot of the end
-> state. Do not fix the app.
-
-The calibration rule from the 2026-09-03 call: a story earns trust only after
-it has passed five times in a row on a build known to be good. Until then a
-red means the story or the harness is wrong, not the app.
-
-## Replays and streaks
-
-The cold run is the agent's job: read the story, find the path. Once a path
-is found it is written down as a replay, `replays/<slug>.sh`, a short shell
-script of agent-browser commands that exits 0 on PASS with its evidence on
-the last line. `streak.sh <slug> [runs]` runs the replay back to back and
-appends one line per run to `streaks.tsv`. Five passes in a row on the dev
-tip is the bar a story must clear before its red is trusted.
-
-Be clear about what each measures. A cold run measures whether an agent can
-find the path from the story alone. A streak measures whether the harness
-and the app hold that path steady. Both matter; only the second is cheap
-enough to run every night. A replay is deliberately not a Playwright spec:
-it has no fixtures, no network interception, and no reset, and it is allowed
-to fail for harness reasons. When it does, fix the replay, never the app.
+A story earns trust only after its replay has passed five times in a row
+on a build known to be good (the rule from the 2026-09-03 call). Until
+then a red means the story or the harness is wrong, not the app.
 
 ```bash
-sh e2e/journeys/streak.sh projects-create 5
+sh e2e/journeys/streak.sh projects-create 5      # local stack
+AQUILLA_BASE=https://<preview> AQUILLA_QA_USER=qa AQUILLA_QA_PASSWORD=... \
+  sh e2e/journeys/streak.sh projects-create 5    # a PR preview
 ```
 
-Run streaks one story at a time against one stack. Two runs at once are
-fine; three agents at once took the sync worker down. `wrangler dev` also
-exits when a browser closes mid-socket (`Network connection lost.`), and
-the dev-stack script then stops everything, so a scheduled run needs a
-supervisor that restarts the stack and retries. A `FAIL: login` under five
-seconds means the stack was down, not that login broke.
+`streak.sh` appends one line per run to `streaks.tsv`; that file is the
+calibration record. `FINDINGS-*.md` hold the tables per pass.
+
+## Target and login
+
+`AQUILLA_BASE` picks the app under test; unset means the local stack. A
+preview's URL is `https://<branch alias>-aquilla-web-preview.<account>.workers.dev`
+(the build log prints it as `app=`; the alias is the branch name lowered,
+non-alphanumerics to `-`, cut at 30). `AQUILLA_ORG_ID` is the org the
+stories work in (`9`, Dev Org, on the local seed).
+
+On the local stack `login` opens `/__dev/login?as=<user>`. On a preview
+that route does not exist; set `AQUILLA_QA_USER` and `AQUILLA_QA_PASSWORD`
+and `login` signs in through the real form. Use a QA account on
+development storage, never a production account.
+
+## Running a story by hand
+
+Install once: `npm i -g agent-browser && agent-browser install`. Boot the
+local stack (`pnpm dev`, needs the `aquilla-dev-pg` container) or take a
+preview URL. Then hand an agent the story and this prompt:
+
+> Walk `e2e/journeys/<story>.md` against <base URL> with agent-browser.
+> Use a named session. Re-snapshot after every page change. Report PASS or
+> FAIL against "Expected end state", quote the evidence, and attach a
+> screenshot of the end state. Do not fix the app.
+
+## Running many
+
+One story at a time per local stack. Two runs at once are fine; three
+agents at once took the sync worker down. `wrangler dev` also exits when a
+browser closes mid-socket (`Network connection lost.`), and the dev-stack
+script then stops everything, so anything unattended on a local stack
+needs a supervisor that restarts it and retries. A `FAIL: login` under
+five seconds means the stack was down. Previews do not have this problem;
+that is one more reason the bots should run against previews.
 
 ## Harness notes
 
-Learned on the first runs (see `FINDINGS-2026-09-08.md`):
-
-- Prefer snapshot refs (`@eN`). `find role <role> --name` missed sidebar links
-  and a dialog checkbox that the snapshot listed plainly.
+- Prefer snapshot refs (`@eN`). `find role <role> --name` misses sidebar
+  links, dialog checkboxes, and some icon buttons that the snapshot lists
+  plainly. To act on one, pull its ref out of the snapshot
+  (`ab snapshot -i -c | grep -o 'checkbox "I understand[^]]*ref=e[0-9]*'`)
+  then `check @eN`; `replays/projects-archive.sh` shows the pattern.
+- Some icon buttons never fire on a pointer click at all (the rule
+  editor's **Edit rule** and **Cancel**). A DOM click through `eval`
+  does; `replays/rules-custom-crud.sh` shows it.
 - `wait --url` with a glob timed out on URLs it should have matched. Use
   `wait --text` or `wait --load networkidle`, then read `get url`.
-- `wait --text` is page-wide. A project title in the breadcrumb or the
-  "Back to" history button satisfies it while the table row is absent. Scope
-  checks with `snapshot -s <selector>` or `get count`.
-- After clicking a cell's read view, wait for the editable element to mount
-  and type into it by ref. Typing at "current focus" is lost.
+- `wait --text` is page-wide and reads visible text only. A title in the
+  breadcrumb or the "Back to" history button satisfies it while the table
+  row is absent; a placeholder such as `Search projects…` never does.
+  Scope checks with `snapshot -s <selector>` or `get count`, and wait for
+  elements (`wait "table"`) rather than placeholder text.
+- After clicking a cell's read view, wait for the editable element to
+  mount and type into it by ref. Typing at "current focus" is lost.
 - Language pickers on the create dialog accept a typed code (`en`, `fr`).
-- `wait --text` reads visible text only. A search box's placeholder such as
-  `Search projects…` never satisfies it; wait for the element instead
-  (`wait "table"`).
-- To act on a control that `find` misses, pull its ref out of the snapshot:
-  `ab snapshot -i -c | grep -o 'checkbox "I understand[^]]*ref=e[0-9]*'`,
-  then `check @eN`. `replays/projects-archive.sh` shows the pattern.
+- Give the upload command an absolute path; the daemon resolves relative
+  paths from its own working directory.
+- Popovers and dialogs portal outside the row. Scope snapshots to `main` or
+  `body` to see them; `-i` hides non-interactive text, so read a posted
+  comment with `get text`.

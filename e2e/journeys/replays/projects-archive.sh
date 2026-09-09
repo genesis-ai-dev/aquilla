@@ -3,7 +3,7 @@
 . "$(dirname "$0")/_lib.sh"
 NAME="Journey archive $(date +%H%M%S)"
 login alice || fail "login"
-ab open "$BASE/orgs/9/projects" >/dev/null && ab wait --load networkidle >/dev/null
+ab open "$BASE/orgs/$ORG/projects" >/dev/null && ab wait --load networkidle >/dev/null
 ab find role button click --name "New Project" >/dev/null || fail "New Project button"
 ab wait --text "Create New Project" >/dev/null || fail "dialog"
 ab find label "Project title" fill "$NAME" >/dev/null && ab find label "Source Language" fill "en" >/dev/null && ab find label "Target language(s)" fill "fr" >/dev/null || fail "fill"
@@ -23,8 +23,8 @@ btn=$(ab snapshot -i -c | grep -o 'button "Archive" \[ref=e[0-9]*' | grep -o 'e[
 ab click "@$btn" >/dev/null || fail "click confirm Archive"
 ab wait "table" >/dev/null || fail "did not land on Projects list"
 ab wait --load networkidle >/dev/null
-url=$(ab get url); case "$url" in */orgs/9/projects*) ;; *) fail "url after archive: $url";; esac
+url=$(ab get url); case "$url" in */orgs/$ORG/projects*) ;; *) fail "url after archive: $url";; esac
 [ "$(count "cell \"$NAME\"" "table")" -eq 0 ] || fail "row '$NAME' still in active table"
-ab open "$BASE/orgs/9/archived" >/dev/null && ab wait --load networkidle >/dev/null
+ab open "$BASE/orgs/$ORG/archived" >/dev/null && ab wait --load networkidle >/dev/null
 [ "$(count "cell \"$NAME\"" "table")" -ge 1 ] || fail "row '$NAME' missing from Archived"
 pass "'$NAME' left the active table and is listed under Archived (overview was $overview)"

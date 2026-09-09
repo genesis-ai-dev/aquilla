@@ -3,7 +3,7 @@
 . "$(dirname "$0")/_lib.sh"
 NAME="Journey rules-crud $(date +%H%M%S)"
 login alice || fail "login"
-ab open "$BASE/orgs/9/projects" >/dev/null && ab wait --load networkidle >/dev/null
+ab open "$BASE/orgs/$ORG/projects" >/dev/null && ab wait --load networkidle >/dev/null
 ab find role button click --name "New Project" >/dev/null || fail "New Project button"
 ab wait --text "Create New Project" >/dev/null || fail "dialog"
 ab find label "Project title" fill "$NAME" >/dev/null && ab find label "Source Language" fill "en" >/dev/null && ab find label "Target language(s)" fill "fr" >/dev/null || fail "fill create-project fields"

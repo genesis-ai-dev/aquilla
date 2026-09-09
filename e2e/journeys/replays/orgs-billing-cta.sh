@@ -3,7 +3,7 @@
 . "$(dirname "$0")/_lib.sh"
 
 login alice || fail "login"
-ab open "$BASE/orgs/9/settings" >/dev/null && ab wait --load networkidle >/dev/null
+ab open "$BASE/orgs/$ORG/settings" >/dev/null && ab wait --load networkidle >/dev/null
 [ "$(count 'heading "Organization settings"')" -ge 1 ] || fail "no Organization settings heading"
 
 # Sidebar links miss find-by-role; click by href instead.
@@ -13,7 +13,7 @@ ab click 'a[href$="/settings/billing"]' >/dev/null 2>&1 || {
   case "$r" in *clicked*) ;; *) fail "Billing & usage link ($r)";; esac
 }
 ab wait --load networkidle >/dev/null
-url=$(ab get url); case "$url" in */orgs/9/settings/billing) ;; *) fail "url after Billing & usage click: $url";; esac
+url=$(ab get url); case "$url" in */orgs/$ORG/settings/billing) ;; *) fail "url after Billing & usage click: $url";; esac
 [ "$(count 'heading "Billing & usage"')" -ge 1 ] || fail "no Billing & usage heading"
 
 plan=$(ab get count '[data-testid="billing-plan"]')

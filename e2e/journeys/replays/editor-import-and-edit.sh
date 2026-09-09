@@ -5,7 +5,7 @@ NAME="Journey editor $(date +%H%M%S)"
 TEXT="Hello agent $(date +%H%M%S)"
 FIXTURE="$(cd "$(dirname "$0")/../../fixtures" && pwd)/sample.md"
 login alice || fail "login"
-ab open "$BASE/orgs/9/projects" >/dev/null && ab wait --load networkidle >/dev/null
+ab open "$BASE/orgs/$ORG/projects" >/dev/null && ab wait --load networkidle >/dev/null
 ab find role button click --name "New Project" >/dev/null || fail "New Project button"
 ab wait --text "Create New Project" >/dev/null || fail "dialog"
 ab wait 'input' >/dev/null; ab wait 300 >/dev/null

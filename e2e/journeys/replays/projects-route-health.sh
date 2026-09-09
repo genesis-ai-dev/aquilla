@@ -24,8 +24,8 @@ EOF
 
 count=0
 for route in \
-  "/" "/projects" "/orgs/9/archived" "/orgs/9/assigned" "/orgs/9/teams" \
-  "/orgs/9/members" "/orgs/9/settings" "/preferences" \
+  "/" "/projects" "/orgs/$ORG/archived" "/orgs/$ORG/assigned" "/orgs/$ORG/teams" \
+  "/orgs/$ORG/members" "/orgs/$ORG/settings" "/preferences" \
   "/project/$PID/editor" "/project/$PID/settings" "/project/$PID/settings/members" \
   "/project/$PID/settings/rules" "/project/$PID/settings/memory" "/project/$PID/rules" \
   "/project/$PID/terminology" "/project/$PID/comments" "/project/$PID/memory" \

@@ -13,7 +13,7 @@ export VITE_CHAT_BASE="https://$H/chat"
 
 echo "ci-preview-build: branch=$WORKERS_CI_BRANCH -> API host $H"
 
-pnpm run build
+pnpm run build:compile
 bash scripts/verify-dist-host.sh "$H"
 rm -f dist/_redirects
 node scripts/verify-deployment-artifacts.mjs dist

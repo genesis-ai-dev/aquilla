@@ -80,6 +80,49 @@ function killTree(pid: number, signal: NodeJS.Signals = "SIGTERM"): void {
   }
 }
 
+/** Keep the local proxy below its five-second idle-connection race while
+ * WebSockets are open (workers-sdk #14641 / #15452). E2E only: this does not
+ * retry application requests or recover a failed worker. A probe failure
+ * stops the loop and invalidates the run through onError.
+ */
+export function startWorkerProxyKeepAlive(
+  url: string,
+  onError: (error: unknown) => void,
+): () => void {
+  const controller = new AbortController()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const stop = () => {
+    controller.abort()
+    if (timer !== undefined) clearTimeout(timer)
+  }
+  const probe = async () => {
+    try {
+      const response = await fetch(url, {
+        signal: AbortSignal.any([
+          controller.signal,
+          AbortSignal.timeout(10_000),
+        ]),
+      })
+      // The workers' root route may return 404. Consume the entire response
+      // so this probe does not itself abandon a body in the proxy.
+      await response.arrayBuffer()
+      if (response.status >= 500) {
+        throw new Error(`Local worker proxy returned HTTP ${response.status}`)
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        stop()
+        onError(error)
+      }
+    } finally {
+      // Schedule after completion: a slow worker never accumulates probes.
+      if (!controller.signal.aborted) timer = setTimeout(() => void probe(), 1_000)
+    }
+  }
+  void probe()
+  return stop
+}
+
 /** Spawns `wrangler dev --local` in a child process and waits until the
  * worker is reachable on its port. Streams stdout/stderr to a log file
  * (silent by default); pass `streamToParent: true` to also tee to this

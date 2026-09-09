@@ -9,6 +9,7 @@ import {
   openLogFile,
   isolatedWranglerName,
   inspectorPortForWorkerPort,
+  startWorkerProxyKeepAlive,
   type SpawnedWorker,
 } from "./lib/spawn-worker"
 import { MockLLMServer } from "../e2e/helpers/mock-llm-server"
@@ -187,6 +188,18 @@ function runOnce(
  * going and every remaining spec would fail in 0s with ECONNREFUSED.
  * Abort the shard immediately and dump worker logs. */
 function abortIfWorkerDies(worker: SpawnedWorker, label: string): void {
+  // AQU-1220: avoid Wrangler's local five-second keep-alive race while the
+  // suite holds ProjectSync sockets open. Fail the gate on any probe failure.
+  const stopKeepAlive = startWorkerProxyKeepAlive(
+    `http://127.0.0.1:${worker.port}/`,
+    (error) => {
+      if (shuttingDown) return
+      console.error(`${TAG}[fail] ${label} proxy keep-alive failed:`, error)
+      dumpLogs()
+      void shutdown(1)
+    },
+  )
+  cleanup.push(async () => stopKeepAlive())
   worker.child.on("exit", (code, signal) => {
     if (shuttingDown) return
     const reason = code != null ? `exit ${code}` : `signal ${signal ?? "unknown"}`

@@ -17,7 +17,7 @@ not a micro-spec farm.
 | Projects | Create project, appears on dashboard | `e2e/specs/projects/create.smoke.spec.ts` |
 | Projects | Open / delete / restore from trash | `e2e/specs/projects/project-trash.smoke.spec.ts` |
 | Projects | App shell still routes | `e2e/specs/projects/route-health.smoke.spec.ts` |
-| Projects | Monday organization handoff, project organization scope, recommended setup, and board destinations (AQU-1208; covered in RTL; worker integration covers metadata persistence) | `src/components/ProjectSettings/MondayIntegrationSection.test.tsx`, `src/components/ProjectSettings/MondaySetupWizard.test.tsx`, `src/components/ProjectSettings.subMenuIA.test.tsx`, `src/pages/settings/OrgSettingsMonday.test.tsx` |
+| Projects | Monday organization handoff, project overview shortcuts, project organization scope, recommended setup, and board destinations (AQU-1208; covered in RTL; worker integration covers metadata persistence) | `src/components/ProjectSettings/MondayIntegrationSection.test.tsx`, `src/components/ProjectSettings/MondaySetupWizard.test.tsx`, `src/components/ProjectSettings.subMenuIA.test.tsx`, `src/pages/settings/OrgSettingsMonday.test.tsx`, `src/components/org/ProjectMondayCard.test.tsx`, `src/components/org/ProjectOverview.test.tsx` |
 | Projects | Project settings rename/save persists | `e2e/specs/projects/project-settings.smoke.spec.ts` |
 | Projects | Knowledge Base upload, extracted-text read, and delete persist through Postgres + R2 (via Living Memory → Knowledge, `/project/:id/memory/knowledge`) | `e2e/specs/projects/project-settings.smoke.spec.ts` |
 | Projects | Setup checklist survives refresh | `e2e/specs/editor/setup-checklist-survives-refresh.smoke.spec.ts` |

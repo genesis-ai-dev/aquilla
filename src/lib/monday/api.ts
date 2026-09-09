@@ -8,6 +8,7 @@
  * src/lib/sync/org-settings.ts.
  */
 
+import { notifyMondayLinkChanged } from "./events"
 import { AUTH_BASE } from "../frontier/auth"
 import type { MessageKey } from "../i18n/messages/en"
 import { t } from "../i18n/standalone"
@@ -232,6 +233,7 @@ export async function putMondayLink(
   })
   if (!res.ok) await readError(res, "error.monday.saveLink")
   const out = (await res.json()) as { link: MondayBoardLink; warnings?: string[] }
+  notifyMondayLinkChanged(projectId)
   return { link: out.link, warnings: out.warnings ?? [] }
 }
 
@@ -249,6 +251,7 @@ export async function patchMondayLink(
   if (!res.ok) await readError(res, "error.monday.updateLink")
   // Accept both `{ link }` (PUT-style envelope) and a bare link object.
   const out = (await res.json()) as MondayBoardLink | { link: MondayBoardLink }
+  notifyMondayLinkChanged(projectId)
   return "link" in out && typeof out.link === "object" ? out.link : (out as MondayBoardLink)
 }
 
@@ -259,6 +262,7 @@ export async function deleteMondayLink(jwt: string, projectId: string): Promise<
     headers: authHeaders(jwt),
   })
   if (!res.ok) await readError(res, "error.monday.removeLink")
+  notifyMondayLinkChanged(projectId)
 }
 
 // ── AI configure + sync ────────────────────────────────────────────────────

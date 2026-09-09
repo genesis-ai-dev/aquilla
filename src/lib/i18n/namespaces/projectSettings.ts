@@ -592,6 +592,12 @@ export const projectSettings = defineNamespace({
     //    in MondayIntegrationSection.tsx scoped this trio to a dedicated later
     //    wave; this is that wave. "Monday"/"Monday.com" is the product's own
     //    name and stays as-is in every locale.
+    "projectSettings.monday.overviewConnectDescription": "Your organization is connected. Link a board to share this project's progress.",
+    "projectSettings.monday.overviewOpenBoard": "Open board in Monday",
+    "projectSettings.monday.overviewConfigureLink": "Configure link",
+    "projectSettings.monday.overviewLinkBoard": "Link a board",
+    "projectSettings.monday.overviewMaintainerHint": "A project maintainer can link a board.",
+    "projectSettings.monday.overviewUrlUnavailable": "The board link is unavailable. Find the board by name in Monday.",
     "projectSettings.monday.boardSyncLabel": "Board sync",
     "projectSettings.monday.loadingIntegration": "Loading Monday integration…",
     "projectSettings.monday.orgNotConnected": "Your organization hasn't connected Monday.com yet.",

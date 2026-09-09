@@ -1,3 +1,4 @@
+import { ProjectMondayCard } from "./ProjectMondayCard"
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { useParams, useNavigate, useLocation, Link } from "react-router-dom"
 import { MoreHorizontal, Download, SlidersHorizontal, Archive, PlayCircle, PauseCircle, Settings, Pencil } from "lucide-react"
@@ -1131,6 +1132,10 @@ export function ProjectOverview() {
 
                 {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
               </div>
+
+              {project?.syncRole && (
+                <ProjectMondayCard projectId={id} jwt={jwt} roleLevel={project.syncRole.level} />
+              )}
 
               {/* ── Progress card ── */}
               {/* AQU-486: progress has no configurable floor today — everyone

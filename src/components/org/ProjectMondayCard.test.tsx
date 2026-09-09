@@ -16,7 +16,7 @@ function LocationProbe() {
   const location = useLocation()
   return <output data-testid="location">{JSON.stringify({ path: location.pathname, state: location.state })}</output>
 }
-function view(roleLevel = 600, jwt: string | null = "token") {
+function view(roleLevel: number | null = 600, jwt: string | null = "token") {
   return render(<MemoryRouter initialEntries={["/projects/p1"]}>
     <ProjectMondayCard projectId="p1" jwt={jwt} roleLevel={roleLevel} />
     <LocationProbe />
@@ -53,16 +53,28 @@ it("opens the authoritative saved board URL and offers configuration", async () 
   expect(screen.getByRole("link", { name: "Configure link" })).toHaveAttribute("href", "/project/p1/settings/integrations")
   expect(fetchMondayBoardStructure).not.toHaveBeenCalled()
 })
-it("members can open linked boards but cannot configure or create links", async () => {
+it.each([null, 0, 100, 200, 300, 400, 500, 599])("hides the entire card and makes no Monday requests below maintainer (%s)", async role => {
   vi.mocked(fetchMondayLink).mockResolvedValue({ linked: true, link: linked })
-  const first = view(400)
+  await act(async () => view(role))
+  expect(screen.queryByLabelText("Monday.com")).toBeNull()
+  expect(fetchMondayLink).not.toHaveBeenCalled()
+  expect(fetchMondayBoardStructure).not.toHaveBeenCalled()
+})
+it.each([600, 700])("allows maintainer and owner roles (%s)", async role => {
+  vi.mocked(fetchMondayLink).mockResolvedValue({ linked: true, link: linked })
+  view(role)
   expect(await screen.findByRole("link", { name: "Open board in Monday" })).toBeTruthy()
-  expect(screen.queryByRole("link", { name: "Configure link" })).toBeNull()
-  first.unmount()
-  vi.mocked(fetchMondayLink).mockResolvedValue({ linked: false, orgConnected: true })
-  view(400)
-  expect(await screen.findByText("A project maintainer can link a board.")).toBeTruthy()
-  expect(screen.queryByRole("link", { name: "Link a board" })).toBeNull()
+  expect(screen.getByRole("link", { name: "Configure link" })).toBeTruthy()
+})
+it("immediately hides a loaded card when the user's role drops below maintainer", async () => {
+  vi.mocked(fetchMondayLink).mockResolvedValue({ linked: true, link: linked })
+  const rendered = view(600)
+  await screen.findByRole("link", { name: "Open board in Monday" })
+  vi.mocked(fetchMondayLink).mockClear()
+  rendered.rerender(<MemoryRouter><ProjectMondayCard projectId="p1" jwt="token" roleLevel={500} /></MemoryRouter>)
+  expect(screen.queryByLabelText("Monday.com")).toBeNull()
+  fireEvent.focus(window)
+  expect(fetchMondayLink).not.toHaveBeenCalled()
 })
 it("resolves legacy links from the project's organization without guessing a URL", async () => {
   vi.mocked(fetchMondayLink).mockResolvedValue({ linked: true, orgId: 7, link: { ...linked, boardUrl: null } })

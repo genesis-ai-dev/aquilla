@@ -19,6 +19,7 @@ interface Props {
 export function ProjectMondayCard({ projectId, jwt, roleLevel }: Props) {
   const t = useT()
   const location = useLocation()
+  const canManage = (roleLevel ?? 0) >= ROLE.MAINTAINER
   const [state, setState] = useState<{
     projectId: string
     jwt: string
@@ -27,7 +28,10 @@ export function ProjectMondayCard({ projectId, jwt, roleLevel }: Props) {
   } | null>(null)
 
   useEffect(() => {
-    if (!jwt) return
+    if (!jwt || !canManage) {
+      setState(null)
+      return
+    }
     let current = true
     let request = 0
     const load = async () => {
@@ -56,13 +60,12 @@ export function ProjectMondayCard({ projectId, jwt, roleLevel }: Props) {
       window.removeEventListener("focus", load)
       unsubscribe()
     }
-  }, [projectId, jwt, location.key])
+  }, [projectId, jwt, location.key, canManage])
 
-  if (!state || state.projectId !== projectId || state.jwt !== jwt) return null
+  if (!canManage || !state || state.projectId !== projectId || state.jwt !== jwt) return null
   const { status, boardUrl } = state
   if (!(status.orgConnected ?? status.link?.orgConnected)) return null
   const link = status.linked ? status.link : undefined
-  const canManage = (roleLevel ?? 0) >= ROLE.MAINTAINER
   const settingsPath = projectSettingsPath(projectId, "integrations")
 
   return (
@@ -79,17 +82,13 @@ export function ProjectMondayCard({ projectId, jwt, roleLevel }: Props) {
             {t("projectSettings.monday.overviewOpenBoard")} <ExternalLink data-icon="inline-end" />
           </a>
         )}
-        {canManage ? (
-          <Link
-            to={settingsPath}
-            state={{ backgroundLocation: location, projectSettingsModalDepth: 1 }}
-            className={buttonVariants({ variant: link ? "outline" : "default", size: "sm" })}
-          >
-            {t(link ? "projectSettings.monday.overviewConfigureLink" : "projectSettings.monday.overviewLinkBoard")}
-          </Link>
-        ) : !link ? (
-          <p className="text-sm text-muted-foreground">{t("projectSettings.monday.overviewMaintainerHint")}</p>
-        ) : null}
+        <Link
+          to={settingsPath}
+          state={{ backgroundLocation: location, projectSettingsModalDepth: 1 }}
+          className={buttonVariants({ variant: link ? "outline" : "default", size: "sm" })}
+        >
+          {t(link ? "projectSettings.monday.overviewConfigureLink" : "projectSettings.monday.overviewLinkBoard")}
+        </Link>
         {link && !boardUrl && (
           <p className="text-sm text-muted-foreground">{t("projectSettings.monday.overviewUrlUnavailable")}</p>
         )}

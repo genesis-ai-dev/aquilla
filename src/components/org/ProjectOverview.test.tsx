@@ -1455,3 +1455,11 @@ it("AQU-1208: the overview exposes Monday setup for a connected project", async 
   expect(await screen.findByRole("link", { name: "Link a board" })).toHaveAttribute("href", "/project/p1/settings/integrations")
   expect(mondayLink).toHaveBeenCalledWith("jwt", "p1")
 })
+
+it("AQU-1208: the overview hides the Monday card below maintainer", () => {
+  useProject.mockReturnValue({ project: projectRecord({ level: 500 }), status: "ready", refresh })
+  mondayLink.mockResolvedValue({ linked: false, orgConnected: true })
+  renderOverview()
+  expect(screen.queryByLabelText("Monday.com")).toBeNull()
+  expect(mondayLink).not.toHaveBeenCalled()
+})

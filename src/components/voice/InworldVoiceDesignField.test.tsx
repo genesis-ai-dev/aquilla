@@ -112,6 +112,17 @@ describe("InworldVoiceDesignField", () => {
     expect(screen.getByRole("button", { name: "Generate previews" })).toBeDisabled()
   })
 
+  it("explains Freeform and Structured on hover", async () => {
+    renderField()
+    const freeformHelp =
+      "Describe the voice in your own words, and we build the full voice profile from it"
+    const structuredHelp =
+      "Edit the voice profile directly for full control over the voice's nuances"
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    await expectTooltip(screen.getByRole("tab", { name: "Freeform" }), freeformHelp)
+    await expectTooltip(screen.getByRole("tab", { name: "Structured" }), structuredHelp)
+  })
+
   it("explains the preview script behind an info icon on the label", async () => {
     renderField()
     const help =
@@ -127,10 +138,12 @@ describe("InworldVoiceDesignField", () => {
     renderField()
     const label = screen.getByText("Describe the voice")
     const hint = screen.getByText(/Write in English/)
+    const tabs = screen.getByRole("tablist", { name: "Voice design mode" })
     const input = screen.getByLabelText("Describe the voice")
     const guide = screen.getByRole("link", { name: /Voice design guide/ })
     expect(label.compareDocumentPosition(hint) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(hint.compareDocumentPosition(input) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(hint.compareDocumentPosition(tabs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(tabs.compareDocumentPosition(input) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(hint).toContainElement(guide)
   })
 
@@ -401,6 +414,10 @@ describe("InworldVoiceDesignField", () => {
     expect(screen.getByRole("tab", { name: "Structured" })).toHaveAttribute("aria-selected", "true")
     expect(screen.queryByLabelText("Describe the voice")).toBeNull()
     const profile = screen.getByLabelText("Voice profile")
+    const hint = screen.getByText(/One attribute per line/)
+    const tabs = screen.getByRole("tablist", { name: "Voice design mode" })
+    expect(hint.compareDocumentPosition(tabs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(tabs.compareDocumentPosition(profile) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(profile).toHaveValue(blankStructuredDesignPrompt())
     expect(profile).toHaveClass("font-mono")
     expect(screen.queryByLabelText("Dialect")).toBeNull()

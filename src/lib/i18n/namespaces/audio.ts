@@ -31,6 +31,10 @@ export const audio = defineNamespace({
     "audio.newVoice.designModeGroupLabel": "Voice design mode",
     "audio.newVoice.designModeFreeform": "Freeform",
     "audio.newVoice.designModeStructured": "Structured",
+    "audio.newVoice.designModeFreeformHint":
+      "Describe the voice in your own words, and we build the full voice profile from it",
+    "audio.newVoice.designModeStructuredHint":
+      "Edit the voice profile directly for full control over the voice's nuances",
     "audio.newVoice.designPresetGroupLabel": "Voice design presets",
     "audio.newVoice.designPresetAgent": "Agent",
     "audio.newVoice.designPresetNarrator": "Narrator",
@@ -638,6 +642,16 @@ export const audio = defineNamespace({
           "Tab on Voice Design: edit the voice profile as one attribute per line " +
           "(dialect, gender, age, …). Short noun. Opposite of Freeform.",
         maxLength: 14,
+      },
+      "audio.newVoice.designModeFreeformHint": {
+        description:
+          "Hover tooltip on the Freeform tab. Explains that a plain-English " +
+          "description is expanded into the full voice profile.",
+      },
+      "audio.newVoice.designModeStructuredHint": {
+        description:
+          "Hover tooltip on the Structured tab. Explains that the user edits " +
+          "the voice-profile attributes directly for finer control.",
       },
       "audio.newVoice.designPresetGroupLabel": {
         description:

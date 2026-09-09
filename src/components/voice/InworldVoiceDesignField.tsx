@@ -8,6 +8,7 @@ import { Field, FieldLabel } from "@/components/ui/field"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { Textarea } from "@/components/ui/textarea"
 import { InworldDesignLocaleFields } from "@/components/voice/InworldDesignLocaleFields"
 import { InworldDesignPresetChips } from "@/components/voice/InworldDesignPresetChips"
@@ -313,117 +314,117 @@ export function InworldVoiceDesignField({
     }
   }
 
+  const promptFieldId = mode === "freeform" ? "inworld-design-prompt" : "inworld-design-profile"
+
   return (
     <div className="space-y-3">
-      <Tabs
-        value={mode}
-        onValueChange={(value) => {
-          if (value === "freeform" || value === "structured") selectMode(value)
-        }}
-        className="gap-0"
-      >
-        <TabsList className="w-full" aria-label={t("audio.newVoice.designModeGroupLabel")}>
-          <TabsTrigger value="freeform">{t("audio.newVoice.designModeFreeform")}</TabsTrigger>
-          <TabsTrigger value="structured">{t("audio.newVoice.designModeStructured")}</TabsTrigger>
-        </TabsList>
-      </Tabs>
+      <Field className="gap-2.5">
+        <div className={cn("flex flex-col gap-1", mode === "structured" && "min-w-0")}>
+          <FieldLabel htmlFor={promptFieldId}>
+            {mode === "freeform"
+              ? t("audio.newVoice.describeLabel")
+              : t("audio.newVoice.designStructuredLabel")}
+          </FieldLabel>
+          <p className="text-[11px] text-muted-foreground">
+            {mode === "freeform"
+              ? t("audio.newVoice.designPromptHint")
+              : t("audio.newVoice.designStructuredHint")}{" "}
+            <a
+              href={INWORLD_VOICE_DESIGN_DOCS_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 underline underline-offset-2 hover:text-foreground"
+            >
+              {t("audio.newVoice.designDocsLink")}
+              <ExternalLink className="size-3" aria-hidden />
+            </a>
+          </p>
+        </div>
 
-      {mode === "freeform" ? (
-        <Field className="gap-2.5">
-          <div className="flex flex-col gap-1">
-            <FieldLabel htmlFor="inworld-design-prompt">{t("audio.newVoice.describeLabel")}</FieldLabel>
-            <p className="text-[11px] text-muted-foreground">
-              {t("audio.newVoice.designPromptHint")}{" "}
-              <a
-                href={INWORLD_VOICE_DESIGN_DOCS_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 underline underline-offset-2 hover:text-foreground"
-              >
-                {t("audio.newVoice.designDocsLink")}
-                <ExternalLink className="size-3" aria-hidden />
-              </a>
-            </p>
-          </div>
-          <Textarea
-            id="inworld-design-prompt"
-            value={prompt}
-            onChange={(e) => {
-              setFreeformDraft(e.target.value)
-              onPromptChange(e.target.value)
-            }}
-            rows={3}
-            maxLength={INWORLD_DESIGN_PROMPT_MAX}
-            placeholder={t("audio.newVoice.designPromptPlaceholder")}
-          />
-          <InworldDesignPresetChips
-            mode="freeform"
-            value={prompt}
-            onSelect={(text) => {
-              setFreeformDraft(text)
-              onPromptChange(text)
-            }}
-          />
-          {tooShort && (
-            <p className="text-[11px] text-destructive">{t("audio.newVoice.designPromptTooShort")}</p>
-          )}
-        </Field>
-      ) : (
-        <Field className="gap-2.5">
-          <div className="flex min-w-0 flex-col gap-1">
-            <FieldLabel htmlFor="inworld-design-profile">{t("audio.newVoice.designStructuredLabel")}</FieldLabel>
-            <p className="text-[11px] text-muted-foreground">
-              {t("audio.newVoice.designStructuredHint")}{" "}
-              <a
-                href={INWORLD_VOICE_DESIGN_DOCS_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 underline underline-offset-2 hover:text-foreground"
-              >
-                {t("audio.newVoice.designDocsLink")}
-                <ExternalLink className="size-3" aria-hidden />
-              </a>
-            </p>
-          </div>
-          <Textarea
-            id="inworld-design-profile"
-            value={structuredDraft}
-            onChange={(e) => {
-              setStructuredDraft(e.target.value)
-              onPromptChange(e.target.value)
-            }}
-            rows={13}
-            maxLength={INWORLD_DESIGN_PROMPT_MAX}
-            spellCheck={false}
-            className="min-h-56 font-mono text-xs leading-5"
-          />
-          <div className="flex items-center gap-1.5">
+        <Tabs
+          value={mode}
+          onValueChange={(value) => {
+            if (value === "freeform" || value === "structured") selectMode(value)
+          }}
+          className="gap-0"
+        >
+          <TabsList aria-label={t("audio.newVoice.designModeGroupLabel")}>
+            <AppTooltip content={t("audio.newVoice.designModeFreeformHint")} className="max-w-xs">
+              <TabsTrigger value="freeform">{t("audio.newVoice.designModeFreeform")}</TabsTrigger>
+            </AppTooltip>
+            <AppTooltip content={t("audio.newVoice.designModeStructuredHint")} className="max-w-xs">
+              <TabsTrigger value="structured">{t("audio.newVoice.designModeStructured")}</TabsTrigger>
+            </AppTooltip>
+          </TabsList>
+        </Tabs>
+
+        {mode === "freeform" ? (
+          <>
+            <Textarea
+              id="inworld-design-prompt"
+              value={prompt}
+              onChange={(e) => {
+                setFreeformDraft(e.target.value)
+                onPromptChange(e.target.value)
+              }}
+              rows={3}
+              maxLength={INWORLD_DESIGN_PROMPT_MAX}
+              placeholder={t("audio.newVoice.designPromptPlaceholder")}
+            />
             <InworldDesignPresetChips
-              mode="structured"
-              value={structuredDraft}
+              mode="freeform"
+              value={prompt}
               onSelect={(text) => {
-                setStructuredDraft(text)
+                setFreeformDraft(text)
                 onPromptChange(text)
               }}
             />
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              className="ms-auto shrink-0"
-              disabled={!structuredDesignPromptHasValue(structuredDraft)}
-              onClick={() => {
-                const blank = blankStructuredDesignPrompt()
-                setStructuredDraft(blank)
-                onPromptChange(blank)
+            {tooShort && (
+              <p className="text-[11px] text-destructive">{t("audio.newVoice.designPromptTooShort")}</p>
+            )}
+          </>
+        ) : (
+          <>
+            <Textarea
+              id="inworld-design-profile"
+              value={structuredDraft}
+              onChange={(e) => {
+                setStructuredDraft(e.target.value)
+                onPromptChange(e.target.value)
               }}
-              aria-label={t("common.reset")}
-            >
-              <RotateCcw />
-            </Button>
-          </div>
-        </Field>
-      )}
+              rows={13}
+              maxLength={INWORLD_DESIGN_PROMPT_MAX}
+              spellCheck={false}
+              className="min-h-56 font-mono text-xs leading-5"
+            />
+            <div className="flex items-center gap-1.5">
+              <InworldDesignPresetChips
+                mode="structured"
+                value={structuredDraft}
+                onSelect={(text) => {
+                  setStructuredDraft(text)
+                  onPromptChange(text)
+                }}
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                className="ms-auto shrink-0"
+                disabled={!structuredDesignPromptHasValue(structuredDraft)}
+                onClick={() => {
+                  const blank = blankStructuredDesignPrompt()
+                  setStructuredDraft(blank)
+                  onPromptChange(blank)
+                }}
+                aria-label={t("common.reset")}
+              >
+                <RotateCcw />
+              </Button>
+            </div>
+          </>
+        )}
+      </Field>
 
       <Field>
         <div className="flex items-center gap-1.5">

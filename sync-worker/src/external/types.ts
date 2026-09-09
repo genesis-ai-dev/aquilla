@@ -59,13 +59,20 @@ export interface ChangesetSummary {
    *  command kind, so the human on /approve/:id sees WHICH lifecycle op they're
    *  approving instead of an empty "No changes summarized." box (design §2 /
    *  blind-approval fix). */
-  command?: 'CreateProject' | 'UpdateProjectSettings' | 'PatchSettings'
+  command?: 'CreateProject' | 'CreateOrg' | 'UpdateProjectSettings' | 'PatchSettings'
   /** CreateProject: the project name being created. */
   projectName?: string
   /** CreateProject: the definitive new project id. */
   newProjectId?: string
   /** CreateProject: the target org id as a string, or 'personal' for org-less. */
   targetOrg?: string
+  /** CreateOrg: the organization name being created (AQU-1221). */
+  orgName?: string
+  /** CreateOrg: who will own the new org, in plain language — the credential's
+   *  minting user, resolved server-side (an agent can never name someone else).
+   *  Rendered on /approve/:id as "Org owner: alice", so the human approving is
+   *  told both WHAT is created and WHO ends up owning it. */
+  orgOwner?: string
   /** Receipt-only UpdateProjectSettings: the changeset's project id. */
   projectId?: string
   /** UpdateProjectSettings: the pinned settings version this write guards on. */
@@ -154,11 +161,15 @@ export interface ReceiptOnlyReceipt {
   credentialId: string
   channel: ProvenanceChannel
   changesetId: string
-  command: 'CreateProject' | 'UpdateProjectSettings' | 'PatchSettings'
+  command: 'CreateProject' | 'CreateOrg' | 'UpdateProjectSettings' | 'PatchSettings'
   appliedAt: string
   /** CreateProject: the created project id. UpdateProjectSettings /
-   *  PatchSettings: the updated project id. */
-  projectId: string
+   *  PatchSettings: the updated project id. Absent for CreateOrg — it creates
+   *  no project, and the changeset's own project id is a filing placeholder
+   *  that never resolves to a row. */
+  projectId?: string
+  /** CreateOrg: the created org id (AQU-1221). */
+  orgId?: number
   /** UpdateProjectSettings / PatchSettings: the new settings version after the
    *  write. */
   version?: number

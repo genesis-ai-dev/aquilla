@@ -105,14 +105,22 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
       '4. prepare_translations — stage your writes as a changeset. Nothing is applied yet. Returns { changesetId, digest, summary, mode, approvalUrl? }.',
       '5. confirm_changeset with that changesetId + digest. act mode: applies immediately. ask mode: first show the approvalUrl to a human and wait for them to approve in their browser, then call confirm_changeset — until then it returns confirmation_required and applies nothing.',
     ],
-    // All five domain command kinds now ship (Agent API v1.1). PlanImport
-    // stages via the dedicated preview_import / prepare_import tools (or raw
-    // REST PlanImport cells); prepare_translations's `commands` argument still
-    // does not accept it. CreateProject / UpdateProjectSettings / LinkMedia
-    // stage through the SAME prepare_translations / confirm_changeset tools as
-    // SetTranslation, via that `commands` argument — see projectLifecycle and
-    // linkMedia below for their per-kind rules.
-    commandKinds: ['SetTranslation', 'PlanImport', 'CreateProject', 'UpdateProjectSettings', 'LinkMedia'],
+    // All six domain command kinds now ship (Agent API v1.1 + AQU-1221).
+    // PlanImport stages via the dedicated preview_import / prepare_import tools
+    // (or raw REST PlanImport cells); prepare_translations's `commands`
+    // argument still does not accept it. CreateOrg / CreateProject /
+    // UpdateProjectSettings / LinkMedia stage through the SAME
+    // prepare_translations / confirm_changeset tools as SetTranslation, via
+    // that `commands` argument — see projectLifecycle and linkMedia below for
+    // their per-kind rules.
+    commandKinds: [
+      'SetTranslation',
+      'PlanImport',
+      'CreateOrg',
+      'CreateProject',
+      'UpdateProjectSettings',
+      'LinkMedia',
+    ],
     // AQU-926 command registry: the role-agnostic catalog index (every
     // agent-reachable command, incl. the newer PatchSettings / EmitEvents).
     // Static floors only — dynamic checks (org overrides, per-event floors)
@@ -164,17 +172,23 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
       mcpStagingTool: 'prepare_translations',
       commitTool: 'confirm_changeset',
       note:
-        'CreateProject and UpdateProjectSettings are receipt-only (a plain row write, not an ' +
-        'event) — stage via prepare_translations\'s `commands` argument and commit with ' +
-        'confirm_changeset exactly like SetTranslation. Each must be the sole command in its ' +
-        'changeset. CreateProject requires an unscoped or org-scoped credential with org ' +
+        'CreateOrg, CreateProject and UpdateProjectSettings are receipt-only (a plain row ' +
+        'write, not an event) — stage via prepare_translations\'s `commands` argument and ' +
+        'commit with confirm_changeset exactly like SetTranslation. Each must be the sole ' +
+        'command in its changeset. CreateOrg (AQU-1221) starts a whole new tenant: it takes ' +
+        'ONLY a name, requires an UNSCOPED credential (org- or project-scoped gets ' +
+        'scope_denied), makes the credential\'s minting user the org OWNER, rejects any ' +
+        'tier/billing/entitlement field with validation_failed naming it, and is capped at 5 ' +
+        'staged creations per credential per 15 minutes (rate_limited). Its receipt carries ' +
+        'orgId, not projectId — feed that orgId to a follow-up CreateProject to populate the ' +
+        'new org. CreateProject requires an unscoped or org-scoped credential with org ' +
         'role >= MAINTAINER (a project-scoped credential gets scope_denied) — and prepare ' +
-        'ALWAYS stages CreateProject in ask-mode regardless of credential mode, so it always ' +
-        'requires human approval at the approvalUrl before it can commit; a project id ' +
-        'claimed by another caller between prepare and commit returns ' +
+        'ALWAYS stages CreateOrg and CreateProject in ask-mode regardless of credential ' +
+        'mode, so they always require human approval at the approvalUrl before they can ' +
+        'commit; a project id claimed by another caller between prepare and commit returns ' +
         'conflict. UpdateProjectSettings requires project role >= MAINTAINER and a matching ' +
         'ifMatchVersion (else plan_stale). Receipt shape: { credentialId, channel, ' +
-        'changesetId, command, appliedAt, projectId, version? }.',
+        'changesetId, command, appliedAt, projectId?, orgId?, version? }.',
     },
     linkMedia: {
       mcpStagingTool: 'prepare_translations',

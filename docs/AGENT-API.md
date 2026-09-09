@@ -206,6 +206,8 @@ impossible rather than merely prohibited.
 
 Initial command set:
 
+- `CreateOrg` (create an organization owned by the credential's minting user — always
+  human-approved, unscoped credentials only, default tier, rate-limited)
 - `CreateProject`, `UpdateProjectSettings`
 - `PlanImport` (produces an import changeset from an artifact + recipe, §5)
 - `SetTranslation` (batch; compiled to `target.cell.commit` chained per AD-9 —

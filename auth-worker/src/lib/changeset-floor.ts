@@ -23,8 +23,8 @@
 //
 // SWARM-TODO(AQU-CMDREG-P1): once sync-worker's external/authority.ts
 // (§2.3, built in parallel) has landed, collapse the max-over-commands walk and
-// the CreateProject carve-out below onto its requiredFloorForChangeset /
-// isProjectCreation, and export requiredRoleForOps so the termbase raise above
+// the tenant-creation carve-out below onto its requiredFloorForChangeset /
+// isTenantCreation, and export requiredRoleForOps so the termbase raise above
 // can become an exact match instead of a ceiling.
 
 import {
@@ -80,20 +80,24 @@ function asFloorCommand(raw: unknown): Command | null {
 }
 
 /**
- * True when the plan CREATES a project. Such a plan keeps the creator rule:
- * its authority is org-level (re-checked at commit) and the project it names
- * does not exist until commit, so no project role can resolve against it —
- * a role floor would deny everyone, including the person who staged it.
+ * True when the plan CREATES a tenant — a project (CreateProject) or an
+ * organization (CreateOrg, AQU-1221). Such a plan keeps the creator rule: its
+ * authority is org-level or scope-level (re-checked at commit) and the project
+ * it is filed under does not exist until commit — for CreateOrg it never
+ * exists at all — so no project role can resolve against it, and a role floor
+ * would deny everyone, including the person who staged it.
  *
  * Mirrors the same carve-out in sync-worker/src/external/authority.ts. Both
  * copies exist only because the rule has to be applied on two different
  * principal shapes (browser session here, credential context there); the FLOOR
  * itself is imported, never restated.
  */
-export function planCreatesProject(commandsRaw: unknown): boolean {
+export function planCreatesTenant(commandsRaw: unknown): boolean {
   const rawList = parseCommandList(commandsRaw)
   if (!rawList) return false
-  return rawList.some((raw) => isRecord(raw) && raw.kind === "CreateProject")
+  return rawList.some(
+    (raw) => isRecord(raw) && (raw.kind === "CreateProject" || raw.kind === "CreateOrg"),
+  )
 }
 
 /** True when the plan patches the `terminology` settings key — the one op

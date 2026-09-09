@@ -173,7 +173,7 @@ hand-rolled client), not just Claude products.
 | `search_project` | Full-text search over source/target cells. |
 | `read_content` | List a project's files, or read one file's cells (with `since`/`limit`/`cursor`). |
 | `read_history` | Append-only event history for one cell. |
-| `prepare_translations` | Stage a changeset (see §3): a `SetTranslation` batch via `translations`, and/or `CreateProject` / `UpdateProjectSettings` / `LinkMedia` commands via `commands` (Agent API v1.1 — §4.1 below). |
+| `prepare_translations` | Stage a changeset (see §3): a `SetTranslation` batch via `translations`, and/or `CreateOrg` / `CreateProject` / `UpdateProjectSettings` / `LinkMedia` commands via `commands` (Agent API v1.1 + AQU-1221 — §4.1 below). |
 | `get_changeset` | Fetch a changeset's status/summary/digest/receipt/approvalUrl. |
 | `confirm_changeset` | Commit a prepared changeset (ask or act). |
 | `discard_changeset` | Discard a staged/stale/expired changeset. |
@@ -280,7 +280,8 @@ CONTRIBUTOR=400, PROJECT_LEAD=500, MAINTAINER=600).
 
 Every command below shares the one `POST .../changesets` → `.../commit` pipeline. `SetTranslation`
 and `PlanImport` are unchanged from v1; `CreateProject`, `UpdateProjectSettings`, and `LinkMedia`
-are new in v1.1 (`sync-worker/src/external/{commands,prepare,commit}.ts`).
+are new in v1.1, and `CreateOrg` was added by AQU-1221
+(`sync-worker/src/external/{commands,prepare,commit}.ts`).
 
 - **`SetTranslation`** (`{ kind: "SetTranslation", fileId, cellId, value, valueHtml? }`) compiles
   to `target.cell.commit`, requires **CONTRIBUTOR** at commit time (routed through the same
@@ -306,6 +307,35 @@ are new in v1.1 (`sync-worker/src/external/{commands,prepare,commit}.ts`).
   needs no org-role check at all. If the chosen project id is claimed by another caller between
   prepare and commit, commit returns **`409 conflict`** (not `plan_stale` — this is a genuine
   race, distinguished from the credential's own crash-retry, which is idempotent success).
+- **`CreateOrg`** (`{ kind: "CreateOrg", name }`) — **receipt-only** (AQU-1221): applies a plain
+  row write via `db/shared/orgs.ts` (creates the `organizations` row plus an owner (700)
+  `org_members` row for the caller, in one atomic statement), not an event. Must be the **sole
+  command** in its changeset. This is the command that unblocks setting up a new partner
+  workspace end to end: previously the catalog had nothing org-level, so an agent stalled until a
+  human created the org shell by hand. Feed the receipt's `orgId` to a follow-up `CreateProject`
+  to populate the new org.
+  **`name` is the only accepted field.** Any other key is `400 validation_failed` naming it — in
+  particular tier / billing / entitlement fields (`plan`, `tier`, `addonPacks`,
+  `stripeCustomerId`, `complimentaryWords`, `hardCapWords`, …): a new org is always created on
+  the default tier (no `org_billing` row = plan `none`), and there is no path to plan or billing
+  state through this surface. There is likewise **no owner field** — ownership is resolved
+  server-side from the credential's minting user, so an agent can neither point ownership
+  elsewhere nor make itself a member.
+  **Scope gate:** the credential must be **unscoped**. An org-scoped credential (`403
+  scope_denied`) is confined to the org it names, and a project-scoped one to its project;
+  creating a new tenant is outside either scope by definition. Re-checked live at commit.
+  **Always ask-mode:** like `CreateProject`, prepare FORCES the changeset to ask-mode regardless
+  of the credential's or request's mode, so every agent-initiated org creation passes a human
+  approval at the `approvalUrl`. The approval page states the org name and its incoming owner in
+  plain language.
+  **Rate limit:** at most **5 staged org creations per credential per 15 minutes**; beyond that,
+  `429 rate_limited`. Much tighter than the generic per-route throttle — a runaway loop here
+  would litter a real person's org switcher and approval queue with junk tenants.
+  **Filing project id:** the `:projectId` in the URL is a placeholder only. No project is created,
+  and the receipt carries `orgId` instead of `projectId`. `organizations.id` is a generated
+  identity column, so unlike `CreateProject` no id is pinned at prepare; a crash-retry instead
+  absorbs the org it already created (same creator, same planned name, within the changeset's own
+  lifetime) rather than minting a second one.
 - **`UpdateProjectSettings`** (`{ kind: "UpdateProjectSettings", projectId, settings,
   ifMatchVersion }`) — **receipt-only**: applies a version-guarded write via the same shared
   module auth-worker's internal settings route uses (first-write insert vs `version + 1` update;
@@ -375,7 +405,7 @@ routes mirror the same shape and codes by convention.)
 | `validation_failed` | 400 | Malformed request, bad command shape, oversize/wrong-content-type artifact, expired changeset, wrong changeset status for the action, a `CreateProject`/`UpdateProjectSettings`/`LinkMedia` not staged as the sole (or only-LinkMedia) command in its changeset, etc. | Fix the request per `details`/`message`; do not retry unchanged. |
 | `conflict` | 409 | `CreateProject` only: the chosen project id was claimed by a different caller between `prepare` and `commit` — a genuine race, distinct from your own crash-retry (which is idempotent success, not a conflict). | Don't retry with the same id. Choose a different `projectId` (or omit it and let the next changeset's URL id pick a fresh one) and re-`prepare`. |
 | `job_failed` | 500 | Unexpected server-side failure (misconfiguration, unhandled exception, partial apply on `PlanImport`). | Safe to retry once; if it persists, treat as a bug — check `details.receipt` for a `PlanImport` partial-apply accounting. |
-| `rate_limited` | 429 | Too many requests from this credential in the trailing 15 minutes — enforced per credential on every external route (`db/shared/rate-limit.ts`, wired in across the 2026-07-30, 2026-08-20, and 2026-08-27 pen-test passes). | Back off and retry later; don't tighten a polling loop in response to a 429. |
+| `rate_limited` | 429 | Too many requests from this credential in the trailing 15 minutes — enforced per credential on every external route (`db/shared/rate-limit.ts`, wired in across the 2026-07-30, 2026-08-20, and 2026-08-27 pen-test passes). `CreateOrg` carries its own, much tighter cap: 5 staged org creations per credential per 15 minutes (AQU-1221). | Back off and retry later; don't tighten a polling loop in response to a 429. |
 | `not_found` | 404 | Resource (changeset, artifact, project, credential) doesn't exist or isn't visible to this credential. | Don't retry with the same id. |
 
 MCP tool errors use the identical code set inside the tool result (`isError: true`, JSON text

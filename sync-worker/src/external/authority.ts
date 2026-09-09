@@ -30,11 +30,12 @@ export function requiredFloorForChangeset(commands: readonly Command[]): number 
   return Math.max(...commands.map(requiredRoleForCommand))
 }
 
-/** True when a CreateProject plan keeps the creator rule: its authority is
- *  org-level (re-checked in the commit handler) and its target project may not
- *  exist yet, so no project role can be resolved against it. */
-function isProjectCreation(commands: readonly Command[]): boolean {
-  return commands.some((c) => c.kind === 'CreateProject')
+/** True when a plan CREATES a tenant (CreateProject / CreateOrg, AQU-1221) and
+ *  so keeps the creator rule: its authority is org-level or scope-level
+ *  (re-checked in the commit handler) and the project it is filed under may not
+ *  exist at all, so no project role can be resolved against it. */
+function isTenantCreation(commands: readonly Command[]): boolean {
+  return commands.some((c) => c.kind === 'CreateProject' || c.kind === 'CreateOrg')
 }
 
 /**
@@ -47,7 +48,7 @@ export async function changesetAuthorityDenied(
   cs: StoredChangeset,
   cred: ApiCredentialContext,
 ): Promise<Response | null> {
-  if (isProjectCreation(cs.commands)) {
+  if (isTenantCreation(cs.commands)) {
     if (String(cs.createdByUserId) === String(cred.userId)) return null
     return errorResponse('permission_denied', 'only the changeset creator may access it')
   }
@@ -64,6 +65,6 @@ export async function changesetAuthorityDenied(
 /** Visibility filter for a list of changesets — the same rule, applied in
  *  memory against one already-resolved role level (the caller's). */
 export function visibleAtRole(cs: StoredChangeset, roleLevel: number, userId: string): boolean {
-  if (isProjectCreation(cs.commands)) return String(cs.createdByUserId) === String(userId)
+  if (isTenantCreation(cs.commands)) return String(cs.createdByUserId) === String(userId)
   return roleLevel >= requiredFloorForChangeset(cs.commands)
 }

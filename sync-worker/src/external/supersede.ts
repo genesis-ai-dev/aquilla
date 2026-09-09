@@ -117,6 +117,8 @@ function satisfiesCommand(c: Command, live: SupersedeLiveState): Verdict {
       return no('creation commands are never satisfied by inspection')
     case 'CreateProject':
       return no('creation commands are never satisfied by inspection')
+    case 'CreateOrg':
+      return no('creation commands are never satisfied by inspection')
     case 'LinkMedia':
       return no('creation commands are never satisfied by inspection')
     // The deprecated whole-blob replace carries no per-key intent to compare

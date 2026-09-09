@@ -36,6 +36,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:worker": "vitest run --config worker/vitest.config.ts --dir worker",
+    "test:daemon": "NODE_OPTIONS=--expose-gc vitest run scripts/migrate-daemon",
     "scan:secrets": "tsx scripts/secret-scan.ts",
     "admin:request": "tsx scripts/admin-request.ts",
     "test:idml": "pnpm --filter @aquilla/idml-roundtrip test",
@@ -106,7 +107,8 @@
     "neon:backfill:progress:prod": "tsx scripts/neon-target.ts production backfill-progress",
     "migrate:users": "tsx scripts/migrate-users.ts",
     "neon:refresh:dev": "tsx scripts/refresh-neon-branch.ts dev",
-    "neon:refresh-dev": "pnpm neon:refresh:dev"
+    "neon:refresh-dev": "pnpm neon:refresh:dev",
+    "migrate:daemon": "tsx scripts/migrate-daemon/main.ts"
   },
   "dependencies": {
     "@aquilla/idml-roundtrip": "workspace:2.0.3",

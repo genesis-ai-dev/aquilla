@@ -9,6 +9,8 @@ import { onMondayLinkChanged } from "@/lib/monday/events"
 import { ROLE } from "@/lib/frontier/roles"
 import { useT } from "@/lib/i18n/I18nProvider"
 
+import { SectionVisibilityBadge } from "./SectionVisibilityBadge"
+
 interface Props {
   projectId: string
   jwt: string | null
@@ -71,7 +73,10 @@ export function ProjectMondayCard({ projectId, jwt, roleLevel }: Props) {
   return (
     <Card size="sm" aria-label="Monday.com">
       <CardHeader>
-        <CardTitle>Monday.com</CardTitle>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <CardTitle>Monday.com</CardTitle>
+          <SectionVisibilityBadge minRole={ROLE.MAINTAINER} />
+        </div>
         <CardDescription>
           {link ? link.boardName ?? link.boardId : t("projectSettings.monday.overviewConnectDescription")}
         </CardDescription>

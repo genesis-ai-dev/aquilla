@@ -1295,12 +1295,11 @@ export const editor = defineNamespace({
     "editor.cellMenu.unlockInSettings": "Unlock timing in project settings",
     "editor.cellMenu.startLabel": "Start time",
     "editor.cellMenu.endLabel": "End time",
-    "editor.cellMenu.betweenHint": "Between {from} and {to}",
-    "editor.cellMenu.afterHint": "After {from}",
-    "editor.cellMenu.beforeHint": "Before {to}",
+    "editor.cellMenu.betweenHint": "Previous ends {from} · next starts {to}",
+    "editor.cellMenu.afterHint": "Previous ends {from}",
+    "editor.cellMenu.beforeHint": "Next starts {to}",
     "editor.cellMenu.badTime": "Type a time like 1:02.5",
-    "editor.cellMenu.clampedToNeighbours":
-      "Moved to fit between the lines on either side.",
+    "editor.cellMenu.invertedTimes": "The end has to come after the start.",
     "editor.cellMenu.saveTimestamps": "Save",
     "editor.source.textAria": "Source text",
     "editor.source.editText": "Edit source text",
@@ -4622,9 +4621,11 @@ export const editor = defineNamespace({
       },
       "editor.cellMenu.betweenHint": {
         description:
-          "Hint under the timestamp fields naming the room this line has. {from} " +
-          "and {to} are timecodes like 1:02.500 — the end of the line before and " +
-          "the start of the line after.",
+          "Hint under the timestamp fields showing where the neighbouring lines " +
+          "sit. INFORMATION, NOT A LIMIT — a line may deliberately overlap the " +
+          "one before or after it (two speakers talking over each other), so do " +
+          "not translate this as a rule about what is allowed. {from} and {to} " +
+          "are timecodes like 1:02.500.",
         placeholders: {
           from: "The end of the line BEFORE this one, as a timecode like 1:02.500.",
           to: "The start of the line AFTER this one, as a timecode like 1:04.000.",
@@ -4632,16 +4633,16 @@ export const editor = defineNamespace({
       },
       "editor.cellMenu.afterHint": {
         description:
-          "The same hint when this is the LAST line, so there is nothing after it " +
-          "to bound against. {from} is a timecode.",
+          "The same hint when this is the LAST line, so there is no next line to " +
+          "show. {from} is a timecode.",
         placeholders: {
           from: "The end of the line BEFORE this one, as a timecode like 1:02.500.",
         },
       },
       "editor.cellMenu.beforeHint": {
         description:
-          "The same hint when this is the FIRST line, so there is nothing before " +
-          "it. {to} is a timecode.",
+          "The same hint when this is the FIRST line, so there is no previous " +
+          "line to show. {to} is a timecode.",
         placeholders: {
           to: "The start of the line AFTER this one, as a timecode like 1:04.000.",
         },
@@ -4653,11 +4654,12 @@ export const editor = defineNamespace({
           "longer ones too. Keep the example a plain digits-and-punctuation " +
           "timecode in every language.",
       },
-      "editor.cellMenu.clampedToNeighbours": {
+      "editor.cellMenu.invertedTimes": {
         description:
-          "Shown after saving when the times typed overlapped the line before or " +
-          "after and were pulled back to fit. Not an error — the change was saved, " +
-          "just not exactly as typed.",
+          "Error under the timestamp fields when the end is at or before the " +
+          "start, which is the one span that cannot mean anything. Nothing is " +
+          "saved and what was typed is kept, so the person can see and fix it — " +
+          "silently swapping the two fields would be the worse surprise.",
       },
       "editor.cellMenu.saveTimestamps": {
         description:

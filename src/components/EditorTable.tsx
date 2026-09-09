@@ -103,7 +103,7 @@ import {
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
 import { Popover, PopoverContent, PopoverDescription, PopoverTitle, PopoverTrigger } from "@/components/ui/popover"
 import { Input } from "@/components/ui/input"
-import { clampSpan, parseTimecode } from "@/lib/timeline/timecode"
+import { parseTimecode, spanProblem } from "@/lib/timeline/timecode"
 import { fmtDragTime } from "@/components/timeline/format"
 import { isUserAddedLine } from "@/lib/timeline/user-line-origin"
 import {
@@ -2984,7 +2984,6 @@ function CellTimestampsPopover({
   const [start, setStart] = useState("")
   const [end, setEnd] = useState("")
   const [error, setError] = useState<string | null>(null)
-  const [note, setNote] = useState<string | null>(null)
 
   // Seed from the row every time it opens, never while it is open: a live
   // reseed would fight the person typing when a collaborator's retime or
@@ -2994,7 +2993,6 @@ function CellTimestampsPopover({
     setStart(fmtDragTime(startSec))
     setEnd(fmtDragTime(endSec))
     setError(null)
-    setNote(null)
   }, [open, startSec, endSec])
 
   const locked = Boolean(disabledReason)
@@ -3006,16 +3004,16 @@ function CellTimestampsPopover({
       setError(t("editor.cellMenu.badTime"))
       return
     }
-    const span = clampSpan({ startSec: parsedStart, endSec: parsedEnd, prevEndSec, nextStartSec })
-    onSave?.(span.startSec, span.endSec)
-    if (span.clamped) {
-      // Say so and show what was actually saved, rather than closing over a
-      // value that differs from what they typed.
-      setStart(fmtDragTime(span.startSec))
-      setEnd(fmtDragTime(span.endSec))
-      setNote(t("editor.cellMenu.clampedToNeighbours"))
+    // OVERLAP IS ALLOWED (Sam, 2026-09-09). The neighbours are shown as
+    // context, never enforced: typing exact times is when somebody wants two
+    // lines to sound together. The one refusal left is a span that cannot mean
+    // anything — and it is REFUSED, not repaired, because silently swapping
+    // two fields somebody just typed is a worse surprise than being told.
+    if (spanProblem(parsedStart, parsedEnd)) {
+      setError(t("editor.cellMenu.invertedTimes"))
       return
     }
+    onSave?.(parsedStart, parsedEnd)
     onOpenChange(false)
   }
 
@@ -3047,7 +3045,6 @@ function CellTimestampsPopover({
         onChange={(e) => {
           onChange(e.target.value)
           setError(null)
-          setNote(null)
         }}
         onKeyDown={(e) => {
           if (e.key === "Enter") {
@@ -3091,9 +3088,6 @@ function CellTimestampsPopover({
         ) : null}
         {error ? (
           <p data-testid="cell-times-error" className="mt-1 text-[11px] text-destructive">{error}</p>
-        ) : null}
-        {note ? (
-          <p data-testid="cell-times-note" className="mt-1 text-[11px] text-muted-foreground">{note}</p>
         ) : null}
         <div className="mt-3 flex justify-end">
           {locked ? (

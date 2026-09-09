@@ -13,8 +13,6 @@
 // format, and the popover writes that back into the field, so a person can
 // always see precisely what they committed.
 
-import { MIN_ADDABLE_SPAN_SEC } from "./lane-timing"
-
 /**
  * Seconds from a typed timecode, or null when it is not one.
  *
@@ -59,60 +57,37 @@ export function parseTimecode(input: string): number | null {
   return hours * 3600 + minutes * 60 + seconds + ms / 1000
 }
 
-export interface SpanBounds {
-  startSec: number
-  endSec: number
-  /** End of the line before this one, or null when it is the first. */
-  prevEndSec: number | null
-  /** Start of the line after this one, or null when it is the last. */
-  nextStartSec: number | null
-}
-
-export interface ClampedSpan {
-  startSec: number
-  endSec: number
-  /** True when the bounds moved either edge away from what was asked for. */
-  clamped: boolean
-}
+/** The one thing a typed span cannot be. */
+export type SpanProblem = "inverted"
 
 /**
- * Hold a typed span inside its neighbours.
+ * Is this a span at all?
  *
- * THIS IS NOT POLITENESS. The text table orders rows by the anchor chain while
- * the media lens sorts them by the clock, and those two orders agreeing is an
- * invariant several rounds of this PR went into restoring. A span dragged past
- * its neighbour is refused by the timeline for the same reason; typing one has
- * to be refused the same way or the two entry points disagree about what the
- * file may look like.
+ * OVERLAP IS ALLOWED, deliberately (Sam, 2026-09-09). Typing exact times is
+ * precisely when a person wants two lines to sound together — two speakers
+ * talking over each other is a real thing a subtitle has to say, and the
+ * formats express it happily. An earlier cut of this clamped a typed span
+ * inside its neighbours on the grounds that the text table orders rows by the
+ * anchor chain while the media lens sorts by the clock. That reasoning was too
+ * broad: the lens sorts on START time (`sortByLens`), so a line that merely
+ * overlaps its neighbour still sorts after it and the two orders agree. Only
+ * moving a start BEFORE the previous line's start would part them, which is a
+ * different act from overlapping.
  *
- * The caller is told when the bounds bit (`clamped`), so the popover can write
- * the corrected value back into the field rather than silently saving
- * something other than what was typed.
+ * What is left is the one span that cannot mean anything: an end at or before
+ * its start. That is refused rather than repaired — the caller says so and
+ * keeps what was typed, because silently swapping two fields is a worse
+ * surprise than being told.
+ *
+ * The timeline's DRAG still bounds itself by the neighbouring chips. The two
+ * entry points differ on purpose: a drag is a gesture at a position, where
+ * sliding under the next cue is almost always a slip, and typing is a
+ * statement of intent.
  */
-export function clampSpan({ startSec, endSec, prevEndSec, nextStartSec }: SpanBounds): ClampedSpan {
-  const floor = Math.max(0, prevEndSec ?? 0)
-  // A missing neighbour is open-ended in that direction — the last line of a
-  // file with no known duration may run as long as it likes.
-  const ceiling = nextStartSec ?? Number.POSITIVE_INFINITY
-
-  let start = Math.min(Math.max(startSec, floor), ceiling)
-  let end = Math.min(Math.max(endSec, floor), ceiling)
-
-  // Inverted or too short. Grow the END first, because the start is the edge
-  // the person was more likely aiming at; only push the start back when there
-  // is no room after it, which happens in a silence barely wider than the
-  // floor.
-  if (end - start < MIN_ADDABLE_SPAN_SEC) {
-    end = start + MIN_ADDABLE_SPAN_SEC
-    if (end > ceiling) {
-      end = ceiling
-      start = Math.max(floor, end - MIN_ADDABLE_SPAN_SEC)
-    }
-  }
-
-  // Compare in whole milliseconds: the write rounds to ms, so a difference
-  // below that is not a change anyone can observe and must not be reported as
-  // one.
-  const movedMs = (a: number, b: number) => Math.round(a * 1000) !== Math.round(b * 1000)
-  return { startSec: start, endSec: end, clamped: movedMs(start, startSec) || movedMs(end, endSec) }
+export function spanProblem(startSec: number, endSec: number): SpanProblem | null {
+  // Whole milliseconds, because that is what the write stores — two values a
+  // microsecond apart are the same instant once saved, and calling that a
+  // valid span would store a cue of no length.
+  const ms = (sec: number) => Math.round(sec * 1000)
+  return ms(endSec) <= ms(startSec) ? "inverted" : null
 }

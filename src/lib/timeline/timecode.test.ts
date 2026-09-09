@@ -2,8 +2,7 @@
 // somebody wrote, and keeping the result inside its neighbours.
 
 import { describe, expect, it } from "vitest"
-import { MIN_ADDABLE_SPAN_SEC } from "./lane-timing"
-import { clampSpan, parseTimecode } from "./timecode"
+import { parseTimecode, spanProblem } from "./timecode"
 
 describe("parseTimecode", () => {
   it("reads the format the idle chip shows, which is what people copy", () => {
@@ -73,72 +72,43 @@ describe("parseTimecode", () => {
   })
 })
 
-describe("clampSpan", () => {
-  const bounds = (over: Partial<Parameters<typeof clampSpan>[0]> = {}) => ({
-    startSec: 10,
-    endSec: 12,
-    prevEndSec: 5,
-    nextStartSec: 20,
-    ...over,
+// Sam, 2026-09-09, testing the popover: "when timestamps are edited manually,
+// overlap should be allowed. also, we should make sure it is not possible to
+// set the start time after the end time or vice-versa."
+//
+// The first half reverses an earlier clamp that held a typed span inside its
+// neighbours. That was too strict: the media lens sorts on START time, so a
+// line overlapping the one before it still sorts after it and the chain and
+// the clock agree. Typing exact times is exactly when somebody wants two
+// speakers talking over each other.
+describe("spanProblem", () => {
+  it("accepts an ordinary span", () => {
+    expect(spanProblem(10, 12)).toBeNull()
   })
 
-  it("leaves a span that already fits exactly as it was", () => {
-    expect(clampSpan(bounds())).toEqual({ startSec: 10, endSec: 12, clamped: false })
+  it("ALLOWS a span that overlaps its neighbours — that is the point", () => {
+    // Nothing here knows about neighbours any more, which is the change: a
+    // caller cannot accidentally reintroduce the bound by passing them.
+    expect(spanProblem.length).toBe(2)
+    expect(spanProblem(0, 9999)).toBeNull()
   })
 
-  it("holds the start at the previous line's end", () => {
-    // Letting it past would make the anchor chain and the clock disagree
-    // about which line comes first — the divergence this PR spent rounds
-    // removing.
-    const out = clampSpan(bounds({ startSec: 2 }))
-    expect(out.startSec).toBe(5)
-    expect(out.clamped).toBe(true)
+  it("refuses an end BEFORE its start", () => {
+    expect(spanProblem(15, 11)).toBe("inverted")
   })
 
-  it("holds the end at the next line's start", () => {
-    const out = clampSpan(bounds({ endSec: 30 }))
-    expect(out.endSec).toBe(20)
-    expect(out.clamped).toBe(true)
+  it("refuses an end EQUAL to its start — a cue of no length says nothing", () => {
+    expect(spanProblem(10, 10)).toBe("inverted")
   })
 
-  it("treats a missing neighbour as open-ended", () => {
-    // The last line of a file with no known duration may run as long as it
-    // likes; the first may start at zero.
-    const out = clampSpan(bounds({ startSec: 0, endSec: 9999, prevEndSec: null, nextStartSec: null }))
-    expect(out).toEqual({ startSec: 0, endSec: 9999, clamped: false })
+  it("judges in whole milliseconds, because that is what gets stored", () => {
+    // Two values a microsecond apart are the same instant once written, so
+    // calling that a valid span would store a cue of no length.
+    expect(spanProblem(10, 10.0000001)).toBe("inverted")
+    expect(spanProblem(10, 10.001)).toBeNull()
   })
 
-  it("never lets the span start before zero", () => {
-    expect(clampSpan(bounds({ startSec: -4, prevEndSec: null })).startSec).toBe(0)
-  })
-
-  it("grows the END to the minimum span, since the start is what they aimed at", () => {
-    const out = clampSpan(bounds({ startSec: 10, endSec: 10 }))
-    expect(out.startSec).toBe(10)
-    expect(out.endSec).toBeCloseTo(10 + MIN_ADDABLE_SPAN_SEC, 6)
-    expect(out.clamped).toBe(true)
-  })
-
-  it("pushes the START back only when there is no room after it", () => {
-    // A silence barely wider than the floor: the end has nowhere to grow to,
-    // so the start gives way instead.
-    const out = clampSpan({ startSec: 19.9, endSec: 19.95, prevEndSec: 5, nextStartSec: 20 })
-    expect(out.endSec).toBe(20)
-    expect(out.startSec).toBeCloseTo(20 - MIN_ADDABLE_SPAN_SEC, 6)
-    expect(out.clamped).toBe(true)
-  })
-
-  it("repairs an inverted span rather than saving it", () => {
-    const out = clampSpan(bounds({ startSec: 15, endSec: 11 }))
-    expect(out.endSec).toBeGreaterThan(out.startSec)
-    expect(out.clamped).toBe(true)
-  })
-
-  it("does not call a sub-millisecond difference a clamp", () => {
-    // The write rounds to whole milliseconds, so anything finer is not a
-    // change the user could observe — reporting it would make the popover
-    // claim it corrected something when it did not.
-    const out = clampSpan(bounds({ startSec: 10.00004 }))
-    expect(out.clamped).toBe(false)
+  it("does not mind a span starting at zero", () => {
+    expect(spanProblem(0, 1)).toBeNull()
   })
 })

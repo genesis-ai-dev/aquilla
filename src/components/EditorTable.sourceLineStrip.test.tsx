@@ -628,10 +628,14 @@ describe("EditorTable — the timestamps entry", () => {
     expect(screen.getByTestId("cell-times-error")).toBeInTheDocument()
   })
 
-  it("pulls a span back inside its neighbours, and SAYS it did", async () => {
+  it("ALLOWS a span that overlaps the line after it", async () => {
+    // Sam, 2026-09-09: "when timestamps are edited manually, overlap should be
+    // allowed." Two speakers talking over each other is a real thing a subtitle
+    // has to say, and typing exact times is when somebody means it. An earlier
+    // cut clamped to the neighbours; the media lens sorts on START time, so an
+    // overlapping line still sorts after the one before it.
+    //
     // `added` runs 25-28s between cues ending at 20s and starting at 40s.
-    // Typing 45s for its end would put it past the cue after it, which would
-    // make the anchor chain and the clock disagree about the order.
     const onRetimeCell = vi.fn()
     renderTable(timed, { onRetimeCell })
     await screen.findByText("First cue")
@@ -639,11 +643,35 @@ describe("EditorTable — the timestamps entry", () => {
     fireEvent.click(await entry("edit-timestamps"))
     fireEvent.change(await screen.findByTestId("cell-times-end"), { target: { value: "0:45" } })
     fireEvent.click(screen.getByTestId("cell-times-save"))
-    expect(onRetimeCell).toHaveBeenCalledWith("added", 25, 40)
-    // Not silently: the corrected value goes back into the field with a note,
-    // rather than closing over something other than what was typed.
-    expect(screen.getByTestId("cell-times-note")).toBeInTheDocument()
-    expect(screen.getByTestId("cell-times-end")).toHaveValue("00:40.000")
+    expect(onRetimeCell).toHaveBeenCalledWith("added", 25, 45)
+  })
+
+  it("refuses an end at or before its start, and keeps what was typed", async () => {
+    // The one span that cannot mean anything. Refused rather than repaired —
+    // silently swapping two fields somebody just typed is the worse surprise.
+    const onRetimeCell = vi.fn()
+    renderTable(timed, { onRetimeCell })
+    await screen.findByText("First cue")
+    openMenu("cue-a")
+    fireEvent.click(await entry("edit-timestamps"))
+    fireEvent.change(await screen.findByTestId("cell-times-end"), { target: { value: "0:05" } })
+    fireEvent.click(screen.getByTestId("cell-times-save"))
+    expect(onRetimeCell).not.toHaveBeenCalled()
+    expect(screen.getByTestId("cell-times-error")).toBeInTheDocument()
+    // Still theirs to correct, not blanked or swapped.
+    expect(screen.getByTestId("cell-times-end")).toHaveValue("0:05")
+  })
+
+  it("refuses a zero-length span too", async () => {
+    const onRetimeCell = vi.fn()
+    renderTable(timed, { onRetimeCell })
+    await screen.findByText("First cue")
+    openMenu("cue-a")
+    fireEvent.click(await entry("edit-timestamps"))
+    fireEvent.change(await screen.findByTestId("cell-times-end"), { target: { value: "00:10.000" } })
+    fireEvent.click(screen.getByTestId("cell-times-save"))
+    expect(onRetimeCell).not.toHaveBeenCalled()
+    expect(screen.getByTestId("cell-times-error")).toBeInTheDocument()
   })
 
   it("refuses an imported audio row in its own words", async () => {

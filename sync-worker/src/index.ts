@@ -73,6 +73,7 @@ import { handleCellBacktranslationsReadRequest } from "./events/cell-backtransla
 import { handleExternalReadRequest } from "./external/read-routes"
 import { handleExternalMcpRequest } from "./external/mcp-route"
 import { handleExternalDiscoveryRequest } from "./external/discovery-route"
+import { handleExternalCommandsDocRequest } from "./external/commands-doc-route"
 export { ProjectSync } from "./project-do"
 // Inert legacy DO class — kept exported so deploys don't trip the
 // "script does not export class 'FileSync'" guard. See file-sync-legacy.ts.
@@ -436,6 +437,12 @@ const worker = {
     // AQU-533 (W2-B): Agent API source-artifact upload / inspect.
     const externalArtifactsResponse = await handleExternalArtifactsRequest(request, env)
     if (externalArtifactsResponse) return withCors(externalArtifactsResponse, request)
+
+    // Static command documentation (the REST half of describe_command).
+    // Unauthenticated like the discovery root, and mounted with it so both sit
+    // just ahead of the 404 fallback.
+    const externalCommandsDocResponse = handleExternalCommandsDocRequest(request)
+    if (externalCommandsDocResponse) return withCors(externalCommandsDocResponse, request)
 
     // Agent API discovery root + JSON 404 fallback. MUST stay after every
     // other /api/v1/external/* handler — it claims the root and anything the

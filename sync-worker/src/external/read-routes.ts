@@ -2,6 +2,7 @@
 //
 //   GET /api/v1/external/me                                — identity bootstrap
 //   GET /api/v1/external/projects                          — list accessible projects
+//   GET /api/v1/external/projects/:projectId                — one project + settings/version
 //   GET /api/v1/external/projects/:projectId/search?q=&side=&limit=&cursor=
 //   GET /api/v1/external/projects/:projectId/files?limit=&cursor=
 //   GET /api/v1/external/projects/:projectId/files/:fileId/cells?since=&limit=&cursor=
@@ -54,6 +55,7 @@ import { handleCellsReadRequest } from "../events/cells-read-route"
 import { externalError } from "./errors"
 import { AUTH_HINT } from "./discovery-route"
 import { listProjectsForCredential } from "./projects-list"
+import { loadProjectDetail } from "./project-detail"
 import { validateApiCredential, type ApiCredentialContext } from "../../../db/shared/api-credentials"
 import { resolveProjectRoleShared } from "../../../db/shared/project-roles"
 import { countRecentRateLimitEvents, recordRateLimitEvent } from "../../../db/shared/rate-limit"
@@ -66,6 +68,7 @@ export interface ExternalReadsEnv {
 
 const ME_RE = /^\/api\/v1\/external\/me$/
 const PROJECTS_RE = /^\/api\/v1\/external\/projects$/
+const PROJECT_DETAIL_RE = /^\/api\/v1\/external\/projects\/([^/]+)$/
 const SEARCH_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/search$/
 const FILE_CELLS_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/files\/([^/]+)\/cells$/
 const FILES_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/files$/
@@ -226,6 +229,35 @@ async function handleExternalProjects(request: Request, env: ExternalReadsEnv): 
   if (limited) return limited
   const projects = await listProjectsForCredential(env.AQUILLA_PG, authed.credential)
   return Response.json({ data: projects, nextCursor: null })
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/external/projects/:projectId — cold-start step 3: read one
+// project's detail INCLUDING its settings blob and live settings version.
+//
+// AQU-1222: this path used to fall through to the discovery 404, which left
+// `PatchSettings.ifMatchVersion` (a hard prepare-time equality check) with no
+// read to source it from. The response is the shared ExternalProjectDetail
+// shape, identical to the MCP get_project tool's.
+// ---------------------------------------------------------------------------
+
+async function handleExternalProjectDetail(
+  request: Request,
+  env: ExternalReadsEnv,
+  projectId: string,
+): Promise<Response> {
+  const authed = await authenticateAndScope(request, env, projectId)
+  if (!authed.ok) return authed.response
+  if (env.AQUILLA_PG) {
+    const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.ctx.credential.credentialId)
+    if (limited) return limited
+  }
+
+  // authenticateAndScope already 404s an unknown project id; a null here means
+  // the project was deleted between the two reads.
+  const detail = await loadProjectDetail(env.AQUILLA_PG as AquillaDb, projectId, authed.ctx.role)
+  if (!detail) return externalError("not_found", "project not found", 404)
+  return Response.json(detail)
 }
 
 // ---------------------------------------------------------------------------
@@ -537,6 +569,11 @@ export async function handleExternalReadRequest(
   if (match) {
     return handleExternalCellHistory(request, env, decodeURIComponent(match[1]), decodeURIComponent(match[2]))
   }
+
+  // Last of the /projects/* family: its regex is the least specific, so every
+  // deeper project route above must get first refusal.
+  match = url.pathname.match(PROJECT_DETAIL_RE)
+  if (match) return handleExternalProjectDetail(request, env, decodeURIComponent(match[1]))
 
   return null
 }

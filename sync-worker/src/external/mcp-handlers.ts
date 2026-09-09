@@ -22,6 +22,7 @@ import { SERVER_PARSEABLE_FILE_TYPES, CLIENT_ONLY_FORMATS } from './import-parse
 import { handleExternalReadRequest } from './read-routes'
 import { handleExternalChangesetsRequest } from './changesets-route'
 import { listProjectsForCredential } from './projects-list'
+import { loadProjectDetail } from './project-detail'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { COMMAND_CATALOG } from '../../../db/shared/command-catalog'
 import type { ApiCredentialContext } from '../../../db/shared/api-credentials'
@@ -116,9 +117,9 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
     // AQU-926 command registry: the role-agnostic catalog index (every
     // agent-reachable command, incl. the newer PatchSettings / EmitEvents).
     // Static floors only — dynamic checks (org overrides, per-event floors)
-    // run at prepare. Full per-command params docs are served by the in-app
-    // harness's describe_command tool; a matching MCP tool is planned (P3) —
-    // do not invent one from this index.
+    // run at prepare. AQU-1222 shipped the matching describe_command tool, so
+    // the full per-command params doc is now one call away from here instead
+    // of in-app only.
     commands: {
       index: COMMAND_CATALOG.filter((c) => c.agentReachable).map((c) => ({
         kind: c.kind,
@@ -128,8 +129,8 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
       })),
       note:
         'Commands stage via prepare_translations `commands` (or REST .../changesets) and ' +
-        'commit via confirm_changeset. describe_command (in-app agent harness) serves each ' +
-        "command's full parameter doc; it is not yet an MCP tool.",
+        'commit via confirm_changeset. Call describe_command({ kind }) for one command\'s ' +
+        'full parameter doc (REST: GET /api/v1/external/commands/:kind).',
     },
     planImport: {
       stagingChannels: ['rest', 'mcp'],
@@ -241,13 +242,6 @@ async function listProjects(env: ExternalEnv, cred: ApiCredentialContext): Promi
   return ok({ projects })
 }
 
-interface ProjectRow {
-  id: string
-  name: string
-  org_id: number | string | bigint | null
-  archived_at: string | null
-}
-
 async function getProject(
   env: ExternalEnv,
   cred: ApiCredentialContext,
@@ -265,17 +259,56 @@ async function getProject(
   if (!resolved || resolved.level < ROLE.VIEWER) {
     return fail('permission_denied', 'no project membership (VIEWER role required)')
   }
-  const row = await db
-    .prepare('SELECT id, name, org_id, archived_at FROM projects WHERE id = ?')
-    .bind(projectId)
-    .first<ProjectRow>()
-  if (!row) return fail('not_found', `project ${projectId} not found`)
+  // AQU-1222: shared with the REST GET /projects/:projectId route so the two
+  // adapters cannot drift — and so both carry settingsVersion, the number
+  // PatchSettings.ifMatchVersion has to match.
+  const detail = await loadProjectDetail(db, projectId, resolved.level)
+  if (!detail) return fail('not_found', `project ${projectId} not found`)
+  return ok(detail)
+}
+
+// ── describe_command ─────────────────────────────────────────────────────────
+
+/** AQU-1222: the command catalog's L2 params doc, previously reachable only
+ *  from the in-app agent harness (auth-worker command-tools.ts) even though
+ *  get_capabilities.commands pointed external agents at it. Same shared catalog,
+ *  so the two describe_command surfaces answer identically.
+ *
+ *  No role gate: the catalog is static documentation, and every credential
+ *  already sees the same index through get_capabilities. Kinds with
+ *  agentReachable=false are governance-only and stay indistinguishable from
+ *  unknown on every agent surface (audit §6.7). */
+function describeCommandTool(args: Record<string, unknown>): McpToolResult {
+  const index = COMMAND_CATALOG.filter((c) => c.agentReachable)
+  const kind = str(args, 'kind')
+  if (!kind) {
+    // No kind → the index, so a caller that guessed the argument name wrong
+    // still learns what it may ask about instead of just being rejected.
+    return ok({
+      commands: index.map((c) => ({
+        kind: c.kind,
+        title: c.title,
+        tier: c.tier,
+        minRoleLevel: c.minRoleLevel,
+        oneLiner: c.oneLiner,
+      })),
+      note: 'Call describe_command({ kind }) for one command\'s full parameter doc.',
+    })
+  }
+
+  const entry = index.find((c) => c.kind === kind)
+  if (!entry) {
+    return fail('not_found', `unknown command "${kind}"`, {
+      details: { availableKinds: index.map((c) => c.kind) },
+    })
+  }
   return ok({
-    id: row.id,
-    name: row.name,
-    org_id: row.org_id == null ? null : String(row.org_id),
-    archived: row.archived_at != null,
-    role: resolved.level,
+    kind: entry.kind,
+    title: entry.title,
+    tier: entry.tier,
+    minRoleLevel: entry.minRoleLevel,
+    oneLiner: entry.oneLiner,
+    paramsDoc: entry.paramsDoc,
   })
 }
 
@@ -616,6 +649,8 @@ export async function callTool(
       if (!projectId) return fail('validation_failed', 'projectId is required')
       return getProject(env, cred, projectId)
     }
+    case 'describe_command':
+      return describeCommandTool(args)
     case 'search_project':
       return searchProject(env, token, args)
     case 'read_content':

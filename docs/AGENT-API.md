@@ -542,3 +542,32 @@ The command layer is now the **shared write spine for both agent surfaces** (see
   `credential_id = 'session'`, forced ask mode, `channel: "app"` provenance, and the existing
   `/api/v2/changesets/:id/approval|approve|reject` human gate; the SPA's live ChangesetCard
   commits after approval (per-item confirmation for testimony kinds).
+
+## Status addendum (2026-09-09, AQU-1222 — the read half of the settings surface)
+
+Live verification of AQU-1176 found its write half (`PatchSettings`) deployed but its
+reads missing, which left the command unusable from outside: `ifMatchVersion` is a hard
+equality check against the live settings version, and nothing published that number.
+Three gaps closed:
+
+- **`GET /api/v1/external/projects/:projectId`** — new REST read returning
+  `{ id, name, org_id, archived, role, settings, settingsVersion, settingsUpdatedAt }`.
+  `settingsVersion` is what `PatchSettings.ifMatchVersion` must equal (0 before the
+  project's first settings write). The MCP `get_project` tool returns the identical
+  payload — both call `external/project-detail.ts`, the single shared read, the way
+  `projects-list.ts` is shared by the list adapters. Scope/role gating is unchanged:
+  credential scope first, then live project role >= VIEWER, so a wrong-project
+  credential gets `scope_denied` rather than a leak.
+- **`describe_command` on the external surface** — the shared catalog's `paramsDoc` was
+  reachable only from the in-app harness even though `get_capabilities.commands` pointed
+  external agents at it. Now an MCP tool (`describe_command({ kind })`, no `kind` returns
+  the index) and a REST pair (`GET /api/v1/external/commands`,
+  `GET /api/v1/external/commands/:kind`). All three surfaces read
+  `db/shared/command-catalog.ts`, so they cannot disagree; `agentReachable: false` kinds
+  stay indistinguishable from unknown. The REST pair is unauthenticated for the same
+  reason the discovery root is — static documentation, no project data.
+- **`docs` link** — the API map advertised
+  `github.com/genesis-ai-dev/aquilla/blob/main/docs/api/QUICKSTART.md`, a private repo
+  that 404s for every external caller. `DOCS_URL` is now `/api/v1/external/docs`, served
+  unauthenticated by the discovery route as a Markdown rendering **generated from the
+  API map itself**, so the prose cannot drift from the machine-readable map.

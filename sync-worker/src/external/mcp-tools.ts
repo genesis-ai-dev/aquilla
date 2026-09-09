@@ -64,12 +64,38 @@ export const MCP_TOOLS: McpToolDef[] = [
     name: 'get_project',
     description:
       'Fetch a single project by id after checking the credential scope and that the owner ' +
-      'has at least VIEWER role on it. Returns { id, name, org_id, archived, role } or a ' +
-      'not_found / scope_denied / permission_denied tool error.',
+      'has at least VIEWER role on it. Returns { id, name, org_id, archived, role, settings, ' +
+      'settingsVersion, settingsUpdatedAt } or a not_found / scope_denied / permission_denied ' +
+      'tool error. `settingsVersion` is the live project-settings version — read it here ' +
+      'before staging a PatchSettings/UpdateProjectSettings command, whose ifMatchVersion ' +
+      'must equal it or prepare returns plan_stale. (REST: GET .../projects/:projectId.)',
     inputSchema: {
       type: 'object',
       properties: { ...projectIdProp },
       required: ['projectId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'describe_command',
+    description:
+      'Look up the full parameter documentation for one changeset command kind — its params, ' +
+      'role floor, gotchas, and a worked example — so you can build a command correctly ' +
+      'instead of discovering its shape one validation_failed at a time. Args: kind ' +
+      '(optional). Omit kind to get the index of every command you may stage ' +
+      '({ kind, title, tier, minRoleLevel, oneLiner }); pass one (e.g. "PatchSettings", ' +
+      '"SetTranslation", "EmitEvents") to get that command\'s paramsDoc. An unknown kind ' +
+      'returns a not_found tool error listing the valid ones. Static documentation — it ' +
+      'reads no project data and needs no projectId. (REST: GET /api/v1/external/commands ' +
+      'and GET /api/v1/external/commands/:kind.)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        kind: {
+          type: 'string',
+          description: 'Command kind to document. Omit for the index of all command kinds.',
+        },
+      },
       additionalProperties: false,
     },
   },

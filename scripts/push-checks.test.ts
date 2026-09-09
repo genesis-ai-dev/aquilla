@@ -30,6 +30,8 @@ const args = process.argv.slice(2)
 const command = args.join(" ")
 appendFileSync(process.env.PUSH_TEST_LOG, JSON.stringify({
   command, refs: process.env.E2E_PUSH_REFS,
+  gitDir: process.env.GIT_DIR, gitWorkTree: process.env.GIT_WORK_TREE,
+  gitIndex: process.env.GIT_INDEX_FILE,
 }) + "\\n")
 if (command === "run check:push") {
   const pkg = require(process.cwd() + "/package.json")
@@ -50,13 +52,15 @@ if (command === process.env.PUSH_TEST_FAIL) process.exit(17)
     env: {
       ...env, PATH: `${dir}:${path.dirname(process.execPath)}:/usr/bin:/bin`,
       PUSH_TEST_LOG: log, PUSH_TEST_FAIL: failCommand,
+      GIT_DIR: path.join(root, ".git"), GIT_WORK_TREE: root,
+      GIT_INDEX_FILE: path.join(dir, "caller-index"),
     },
     input: "refs/heads/feature abc refs/heads/feature def\n",
     encoding: "utf8", timeout: 30_000,
   })
   if (result.error) throw result.error
   const entries = readFileSync(log, "utf8").trim().split("\n")
-    .map((line) => JSON.parse(line) as { command: string; refs: string })
+    .map((line) => JSON.parse(line) as { command: string; refs: string; gitDir?: string; gitWorkTree?: string; gitIndex?: string })
   return { result, entries, commands: entries.map(({ command }) => command) }
 }
 
@@ -64,6 +68,9 @@ describe("pre-push validation", () => {
   it("runs the former Cloudflare suites locally before affected E2E", () => {
     const { result, entries, commands } = push()
     expect(result.status, result.stderr).toBe(0)
+    expect(entries.every(({ gitDir, gitWorkTree, gitIndex }) =>
+      gitDir === undefined && gitWorkTree === undefined && gitIndex === undefined,
+    )).toBe(true)
     expect(commands.slice(0, 2)).toEqual(["run check:push", "run scan:secrets"])
     expect(commands).toEqual(expect.arrayContaining([
       "lint", "run i18n:check", "test --maxWorkers=2",

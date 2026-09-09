@@ -4,6 +4,12 @@
 E2E_PUSH_REFS=$(cat)
 export E2E_PUSH_REFS
 
+# Tests create temporary Git repositories. Do not let this hook's repository
+# variables redirect their Git commands into the repository being pushed.
+for git_env_name in $(git rev-parse --local-env-vars); do
+  unset "$git_env_name"
+done
+
 # Run validation locally so Cloudflare can publish previews immediately after
 # compilation. check:push scans credentials before lint or test suites.
 echo "[pre-push] running validation (pnpm run check:push)…"

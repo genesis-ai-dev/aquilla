@@ -1,19 +1,12 @@
 #!/usr/bin/env bash
-# Build the route-free PR preview. It always targets development APIs; main,
-# dev, and feature builds must never compile a preview against production.
+# Cloudflare owns the repo trigger. Compile here; the deploy command bundles
+# Vite once the matching auth and sync preview URLs are known. No test suites.
 set -euo pipefail
-
 node scripts/assert-workers-build-env.mjs
-
-H=api.dev.aquilla.app
-
-export VITE_SYNC_WORKER_HOST="$H/sync"
-export VITE_AUTH_BASE="https://$H/identity"
-export VITE_CHAT_BASE="https://$H/chat"
-
-echo "ci-preview-build: branch=$WORKERS_CI_BRANCH -> API host $H"
-
-pnpm run build:compile
-bash scripts/verify-dist-host.sh "$H"
-rm -f dist/_redirects
-node scripts/verify-deployment-artifacts.mjs dist
+CI=1 pnpm --dir auth-worker install --frozen-lockfile &
+auth_install=$!
+CI=1 pnpm --dir sync-worker install --frozen-lockfile &
+sync_install=$!
+wait "$auth_install"
+wait "$sync_install"
+pnpm exec tsc -b

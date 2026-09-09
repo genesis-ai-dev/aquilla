@@ -2437,7 +2437,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           insertAboveEndSec={insertAboveSpan?.endSec}
           insertBelowStartSec={insertBelowSpan?.startSec}
           insertBelowEndSec={insertBelowSpan?.endSec}
-          prevEndSec={neighbourTimes.prevEndSec}
+          prevStartSec={neighbourTimes.prevStartSec}
           nextStartSec={neighbourTimes.nextStartSec}
           timedFile={isTimeOrdered}
           isBacktranslationConfigured={isBacktranslationConfigured}
@@ -2912,16 +2912,32 @@ function timestampNeighbours(
   index: number,
   displayCellIds: readonly string[],
   cellStore: CellStore,
-): { prevEndSec: number | null; nextStartSec: number | null } {
-  const edge = (at: number, side: "startTime" | "endTime"): number | null => {
-    const id = at >= 0 && at < displayCellIds.length ? displayCellIds[at] : undefined
+): { prevStartSec: number | null; nextStartSec: number | null } {
+  // Their STARTS, because the start is the only thing bounded: a line may
+  // overlap its neighbours as far as it likes, but the order of the starts is
+  // what the media lens and every timed export sort on.
+  //
+  // Walks OUTWARD past rows with no timing of their own. A timed file can hold
+  // untimed rows (the dashed edge `untimedInTimeLens` draws) and one of those
+  // bounds nothing, so stopping at the first would invent a limit where there
+  // is none. The scan ends at the first timed row, which is its neighbour in
+  // all but a file that is almost entirely untimed — and there the popover is
+  // not offered at all.
+  const startOf = (id: string | undefined): number | null => {
     if (!id) return null
-    // Seconds already — `startTime`/`endTime` on the view are what the whole
-    // timeline works in; the milliseconds live on the row underneath.
-    const sec = cellStore.getCellView(id)?.[side]
+    // Seconds already — `startTime` on the view is what the whole timeline
+    // works in; the milliseconds live on the row underneath.
+    const sec = cellStore.getCellView(id)?.startTime
     return typeof sec === "number" ? sec : null
   }
-  return { prevEndSec: edge(index - 1, "endTime"), nextStartSec: edge(index + 1, "startTime") }
+  const scan = (step: -1 | 1): number | null => {
+    for (let at = index + step; at >= 0 && at < displayCellIds.length; at += step) {
+      const sec = startOf(displayCellIds[at])
+      if (sec !== null) return sec
+    }
+    return null
+  }
+  return { prevStartSec: scan(-1), nextStartSec: scan(1) }
 }
 
 /**
@@ -2934,9 +2950,14 @@ function timestampNeighbours(
 interface CellTimestampsProps {
   startSec: number
   endSec: number
-  /** End of the line before, or null when this is the first. */
-  prevEndSec: number | null
-  /** Start of the line after, or null when this is the last. */
+  /**
+   * The STARTS of the lines either side, in clock order — the only limit on a
+   * typed span. Null at either end of the file, and for a neighbour with no
+   * timing of its own. Overlap is free; it is the ORDER of the starts that has
+   * to hold, because that is what the media lens and every timed export sort
+   * on while the text table reads the anchor chain.
+   */
+  prevStartSec: number | null
   nextStartSec: number | null
   /** Set when the row itself cannot be retimed (imported audio, IDML), or the
    *  project's timings are locked. The entry renders disabled with it. */
@@ -2969,7 +2990,7 @@ function CellTimestampsPopover({
   onOpenChange,
   startSec,
   endSec,
-  prevEndSec,
+  prevStartSec,
   nextStartSec,
   disabledReason,
   offerUnlock,
@@ -3004,13 +3025,22 @@ function CellTimestampsPopover({
       setError(t("editor.cellMenu.badTime"))
       return
     }
-    // OVERLAP IS ALLOWED (Sam, 2026-09-09). The neighbours are shown as
-    // context, never enforced: typing exact times is when somebody wants two
-    // lines to sound together. The one refusal left is a span that cannot mean
-    // anything — and it is REFUSED, not repaired, because silently swapping
-    // two fields somebody just typed is a worse surprise than being told.
-    if (spanProblem(parsedStart, parsedEnd)) {
-      setError(t("editor.cellMenu.invertedTimes"))
+    // OVERLAP IS ALLOWED IN FULL (Sam, 2026-09-09): a line may run past the one
+    // after it, or begin under the tail of the one before, for as long as it
+    // likes. The only limit is that its START stays between its neighbours'
+    // starts, because that is what keeps the clock order and the anchor chain
+    // agreeing. Refused rather than repaired — silently moving a value
+    // somebody just typed is a worse surprise than being told, and it guesses
+    // at which of the two they meant.
+    const problem = spanProblem(parsedStart, parsedEnd, { prevStartSec, nextStartSec })
+    if (problem) {
+      setError(
+        problem === "inverted"
+          ? t("editor.cellMenu.invertedTimes")
+          : problem === "startsBeforePrevious"
+            ? t("editor.cellMenu.startsBeforePrevious", { from: fmtDragTime(prevStartSec ?? 0) })
+            : t("editor.cellMenu.startsAfterNext", { to: fmtDragTime(nextStartSec ?? 0) }),
+      )
       return
     }
     onSave?.(parsedStart, parsedEnd)
@@ -3018,10 +3048,10 @@ function CellTimestampsPopover({
   }
 
   const hint =
-    prevEndSec !== null && nextStartSec !== null
-      ? t("editor.cellMenu.betweenHint", { from: fmtDragTime(prevEndSec), to: fmtDragTime(nextStartSec) })
-      : prevEndSec !== null
-        ? t("editor.cellMenu.afterHint", { from: fmtDragTime(prevEndSec) })
+    prevStartSec !== null && nextStartSec !== null
+      ? t("editor.cellMenu.betweenHint", { from: fmtDragTime(prevStartSec), to: fmtDragTime(nextStartSec) })
+      : prevStartSec !== null
+        ? t("editor.cellMenu.afterHint", { from: fmtDragTime(prevStartSec) })
         : nextStartSec !== null
           ? t("editor.cellMenu.beforeHint", { to: fmtDragTime(nextStartSec) })
           : null
@@ -3465,7 +3495,7 @@ interface MemoizedRowProps {
   insertBelowStartSec?: number
   insertBelowEndSec?: number
   /** The room this line has, for the timestamps form. Null at either end. */
-  prevEndSec: number | null
+  prevStartSec: number | null
   nextStartSec: number | null
   /** True when this file runs on a clock, so timestamps can be typed at all. */
   timedFile?: boolean
@@ -3573,7 +3603,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     insertAboveReason, insertBelowReason, removeReason,
     structuralEditing, untimedInserts,
     insertAboveStartSec, insertAboveEndSec, insertBelowStartSec, insertBelowEndSec,
-    prevEndSec, nextStartSec, timedFile,
+    prevStartSec, nextStartSec, timedFile,
     isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation, getStatisticalBt,
     getFootnoteDetails,
     onSeekToCue, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled,
@@ -3707,7 +3737,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         insertAboveEndSec={insertAboveEndSec}
         insertBelowStartSec={insertBelowStartSec}
         insertBelowEndSec={insertBelowEndSec}
-        prevEndSec={prevEndSec}
+        prevStartSec={prevStartSec}
         nextStartSec={nextStartSec}
         timedFile={timedFile}
         isBacktranslationConfigured={isBacktranslationConfigured}
@@ -3870,7 +3900,7 @@ interface EditorRowProps {
   insertAboveEndSec?: number
   insertBelowStartSec?: number
   insertBelowEndSec?: number
-  prevEndSec?: number | null
+  prevStartSec?: number | null
   nextStartSec?: number | null
   timedFile?: boolean
   isBacktranslationConfigured?: boolean
@@ -4696,7 +4726,7 @@ function EditorRow({
   insertAboveReason = null, insertBelowReason = null, removeReason = null,
   structuralEditing, untimedInserts,
   insertAboveStartSec, insertAboveEndSec, insertBelowStartSec, insertBelowEndSec,
-  prevEndSec = null, nextStartSec = null, timedFile,
+  prevStartSec = null, nextStartSec = null, timedFile,
   isBacktranslationConfigured, isBacktranslating, backtranslationError, onBacktranslate, onSaveBacktranslation,
   getStatisticalBt,
   getFootnoteDetails,
@@ -4976,7 +5006,7 @@ function EditorRow({
     ? {
         startSec: cell.startTime ?? 0,
         endSec: cell.endTime ?? 0,
-        prevEndSec,
+        prevStartSec,
         nextStartSec,
         disabledReason: timestampsReason,
         // A maintainer may open the locked form: it is what points them at the

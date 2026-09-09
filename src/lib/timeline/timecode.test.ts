@@ -82,15 +82,10 @@ describe("parseTimecode", () => {
 // the clock agree. Typing exact times is exactly when somebody wants two
 // speakers talking over each other.
 describe("spanProblem", () => {
+  const between = (prevStartSec: number | null, nextStartSec: number | null) => ({ prevStartSec, nextStartSec })
+
   it("accepts an ordinary span", () => {
     expect(spanProblem(10, 12)).toBeNull()
-  })
-
-  it("ALLOWS a span that overlaps its neighbours — that is the point", () => {
-    // Nothing here knows about neighbours any more, which is the change: a
-    // caller cannot accidentally reintroduce the bound by passing them.
-    expect(spanProblem.length).toBe(2)
-    expect(spanProblem(0, 9999)).toBeNull()
   })
 
   it("refuses an end BEFORE its start", () => {
@@ -102,13 +97,68 @@ describe("spanProblem", () => {
   })
 
   it("judges in whole milliseconds, because that is what gets stored", () => {
-    // Two values a microsecond apart are the same instant once written, so
-    // calling that a valid span would store a cue of no length.
     expect(spanProblem(10, 10.0000001)).toBe("inverted")
     expect(spanProblem(10, 10.001)).toBeNull()
   })
 
-  it("does not mind a span starting at zero", () => {
-    expect(spanProblem(0, 1)).toBeNull()
+  describe("overlap, which is allowed in full", () => {
+    // Two speakers talking over each other is a real thing a subtitle says,
+    // both VTT and SRT express it, and the exporters already sort by start
+    // time. The END never decides order, so it is never bounded.
+    it("lets a line run far past the start of the one after it", () => {
+      expect(spanProblem(10, 500, between(5, 20))).toBeNull()
+    })
+
+    it("lets a line begin under the tail of the one before it", () => {
+      // `prev` starts at 5 and may well end at 30; this one starts at 10.
+      expect(spanProblem(10, 12, between(5, 20))).toBeNull()
+    })
+
+    it("lets two lines share a start exactly", () => {
+      // Simultaneous speakers. The export's sort is stable, so they keep their
+      // document order.
+      expect(spanProblem(20, 25, between(5, 20))).toBeNull()
+      expect(spanProblem(5, 25, between(5, 20))).toBeNull()
+    })
+  })
+
+  describe("the one limit: a start may not pass either neighbour's start", () => {
+    // Order in the media lens and in every timed export is by start time
+    // (`sortByLens`), while the text table reads the anchor chain. Consecutive
+    // starts staying in sequence is exactly what keeps those two agreeing.
+    it("refuses a start pushed past the NEXT line's start", () => {
+      expect(spanProblem(25, 30, between(5, 20))).toBe("startsAfterNext")
+    })
+
+    it("refuses a start pulled above the PREVIOUS line's start", () => {
+      // The half a rule naming only the following line would miss.
+      expect(spanProblem(2, 30, between(5, 20))).toBe("startsBeforePrevious")
+    })
+
+    it("is open-ended at either end of the file", () => {
+      expect(spanProblem(0, 1, between(null, 20))).toBeNull()
+      expect(spanProblem(9999, 10_000, between(5, null))).toBeNull()
+    })
+
+    it("ignores a neighbour that carries no timing", () => {
+      // An untimed row bounds nothing — the caller passes null for it and the
+      // rule looks past it to the nearest timed line.
+      expect(spanProblem(9999, 10_000, between(null, null))).toBeNull()
+    })
+
+    it("reports the span's own incoherence FIRST when it is both", () => {
+      // "the end is before the start" is the more actionable answer.
+      expect(spanProblem(25, 11, between(5, 20))).toBe("inverted")
+    })
+
+    it("treats a sub-millisecond crossing as no crossing", () => {
+      // Same instant once stored.
+      expect(spanProblem(20.0000001, 30, between(5, 20))).toBeNull()
+      expect(spanProblem(20.001, 30, between(5, 20))).toBe("startsAfterNext")
+    })
+
+    it("says nothing about the END, however far it runs", () => {
+      expect(spanProblem(6, 100_000, between(5, 20))).toBeNull()
+    })
   })
 })

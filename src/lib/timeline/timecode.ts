@@ -57,37 +57,58 @@ export function parseTimecode(input: string): number | null {
   return hours * 3600 + minutes * 60 + seconds + ms / 1000
 }
 
-/** The one thing a typed span cannot be. */
-export type SpanProblem = "inverted"
+/** Why a typed span cannot be saved. */
+export type SpanProblem =
+  /** The end is at or before the start — a cue of no length says nothing. */
+  | "inverted"
+  /** Its start would move above the line before it, changing the file's order. */
+  | "startsBeforePrevious"
+  /** Its start would move below the line after it, likewise. */
+  | "startsAfterNext"
+
+/** The starts of the lines either side of this one, in CLOCK order. Null at
+ *  either end of the file, and for a neighbour that carries no timing of its
+ *  own — an untimed row bounds nothing. */
+export interface StartBounds {
+  prevStartSec: number | null
+  nextStartSec: number | null
+}
 
 /**
- * Is this a span at all?
+ * Can this span be saved?
  *
- * OVERLAP IS ALLOWED, deliberately (Sam, 2026-09-09). Typing exact times is
- * precisely when a person wants two lines to sound together — two speakers
- * talking over each other is a real thing a subtitle has to say, and the
- * formats express it happily. An earlier cut of this clamped a typed span
- * inside its neighbours on the grounds that the text table orders rows by the
- * anchor chain while the media lens sorts by the clock. That reasoning was too
- * broad: the lens sorts on START time (`sortByLens`), so a line that merely
- * overlaps its neighbour still sorts after it and the two orders agree. Only
- * moving a start BEFORE the previous line's start would part them, which is a
- * different act from overlapping.
+ * OVERLAP IS ALLOWED IN FULL (Sam, 2026-09-09). A line may run into the one
+ * after it, or start under the tail of the one before, for as long as it likes
+ * — two speakers talking over each other is a real thing a subtitle says, both
+ * VTT and SRT express it, and the exporters already sort cues by start time
+ * (`sortedByTime`) precisely because the clock is the authority for a timed
+ * file. Typing exact times is when somebody means it.
  *
- * What is left is the one span that cannot mean anything: an end at or before
- * its start. That is refused rather than repaired — the caller says so and
- * keeps what was typed, because silently swapping two fields is a worse
- * surprise than being told.
+ * ONE LIMIT SURVIVES, and it is the narrowest one that keeps the file coherent:
+ * a line's START may not pass either neighbour's START. Order in the media lens
+ * and in every timed export is by start time and nothing else (`sortByLens`),
+ * while the text table reads the anchor chain — so as long as consecutive
+ * starts stay in sequence the two orders agree, and the moment one crosses they
+ * do not. The END is unbounded because the end never decides order.
  *
- * The timeline's DRAG still bounds itself by the neighbouring chips. The two
- * entry points differ on purpose: a drag is a gesture at a position, where
- * sliding under the next cue is almost always a slip, and typing is a
- * statement of intent.
+ * Both directions, deliberately: a start dragged back above the PREVIOUS line's
+ * start breaks the order exactly as one pushed past the next line's does, and a
+ * rule that named only the following line would miss half of it.
  */
-export function spanProblem(startSec: number, endSec: number): SpanProblem | null {
+export function spanProblem(
+  startSec: number,
+  endSec: number,
+  bounds?: StartBounds,
+): SpanProblem | null {
   // Whole milliseconds, because that is what the write stores — two values a
-  // microsecond apart are the same instant once saved, and calling that a
-  // valid span would store a cue of no length.
+  // microsecond apart are the same instant once saved, so a span between them
+  // would be a cue of no length, and a start "before" a neighbour by less than
+  // a millisecond is the same start.
   const ms = (sec: number) => Math.round(sec * 1000)
-  return ms(endSec) <= ms(startSec) ? "inverted" : null
+  // The span's own coherence first: it is the more actionable answer when a
+  // value is both inverted and out of order.
+  if (ms(endSec) <= ms(startSec)) return "inverted"
+  if (bounds?.prevStartSec != null && ms(startSec) < ms(bounds.prevStartSec)) return "startsBeforePrevious"
+  if (bounds?.nextStartSec != null && ms(startSec) > ms(bounds.nextStartSec)) return "startsAfterNext"
+  return null
 }

@@ -628,27 +628,72 @@ describe("EditorTable — the timestamps entry", () => {
     expect(screen.getByTestId("cell-times-error")).toBeInTheDocument()
   })
 
-  it("ALLOWS a span that overlaps the line after it", async () => {
-    // Sam, 2026-09-09: "when timestamps are edited manually, overlap should be
-    // allowed." Two speakers talking over each other is a real thing a subtitle
-    // has to say, and typing exact times is when somebody means it. An earlier
-    // cut clamped to the neighbours; the media lens sorts on START time, so an
-    // overlapping line still sorts after the one before it.
+  it("ALLOWS a span that runs far past the line after it", async () => {
+    // Sam, 2026-09-09: overlap is allowed in full. Two speakers talking over
+    // each other is a real thing a subtitle says, and the timed exporters
+    // already sort by start time. The END never decides order, so nothing
+    // bounds it.
     //
-    // `added` runs 25-28s between cues ending at 20s and starting at 40s.
+    // `added` runs 25-28s; the cue after it starts at 40s.
     const onRetimeCell = vi.fn()
     renderTable(timed, { onRetimeCell })
     await screen.findByText("First cue")
     openMenu("added")
     fireEvent.click(await entry("edit-timestamps"))
-    fireEvent.change(await screen.findByTestId("cell-times-end"), { target: { value: "0:45" } })
+    fireEvent.change(await screen.findByTestId("cell-times-end"), { target: { value: "0:55" } })
     fireEvent.click(screen.getByTestId("cell-times-save"))
-    expect(onRetimeCell).toHaveBeenCalledWith("added", 25, 45)
+    expect(onRetimeCell).toHaveBeenCalledWith("added", 25, 55)
+  })
+
+  it("ALLOWS a start under the tail of the line before it", async () => {
+    // `cue-a` runs 10-20s and `added` starts at 25s. Moving `added` back to
+    // 15s puts it inside `cue-a` — an overlap, not a reorder, because its
+    // start is still after `cue-a`'s.
+    const onRetimeCell = vi.fn()
+    renderTable(timed, { onRetimeCell })
+    await screen.findByText("First cue")
+    openMenu("added")
+    fireEvent.click(await entry("edit-timestamps"))
+    fireEvent.change(await screen.findByTestId("cell-times-start"), { target: { value: "0:15" } })
+    fireEvent.click(screen.getByTestId("cell-times-save"))
+    expect(onRetimeCell).toHaveBeenCalledWith("added", 15, 28)
+  })
+
+  it("refuses a start pushed past the NEXT line's start", async () => {
+    // The one limit. Order in the media lens and in every timed export is by
+    // start time, while the text table reads the anchor chain — so a start
+    // crossing its neighbour's is what would part the two.
+    const onRetimeCell = vi.fn()
+    renderTable(timed, { onRetimeCell })
+    await screen.findByText("First cue")
+    openMenu("added")
+    fireEvent.click(await entry("edit-timestamps"))
+    // Both fields, or the span would be inverted as well — and the span's own
+    // incoherence is the more actionable answer, so it is reported first.
+    fireEvent.change(await screen.findByTestId("cell-times-start"), { target: { value: "0:45" } })
+    fireEvent.change(screen.getByTestId("cell-times-end"), { target: { value: "0:50" } })
+    fireEvent.click(screen.getByTestId("cell-times-save"))
+    expect(onRetimeCell).not.toHaveBeenCalled()
+    // Names the line it would pass and where that line starts.
+    expect(screen.getByTestId("cell-times-error")).toHaveTextContent(/00:40\.000/)
+  })
+
+  it("refuses a start pulled above the PREVIOUS line's start", async () => {
+    // The half a rule naming only the following line would miss.
+    const onRetimeCell = vi.fn()
+    renderTable(timed, { onRetimeCell })
+    await screen.findByText("First cue")
+    openMenu("added")
+    fireEvent.click(await entry("edit-timestamps"))
+    fireEvent.change(await screen.findByTestId("cell-times-start"), { target: { value: "0:05" } })
+    fireEvent.click(screen.getByTestId("cell-times-save"))
+    expect(onRetimeCell).not.toHaveBeenCalled()
+    expect(screen.getByTestId("cell-times-error")).toHaveTextContent(/00:10\.000/)
   })
 
   it("refuses an end at or before its start, and keeps what was typed", async () => {
-    // The one span that cannot mean anything. Refused rather than repaired —
-    // silently swapping two fields somebody just typed is the worse surprise.
+    // Refused rather than repaired — silently swapping two fields somebody
+    // just typed is the worse surprise, and it guesses which they meant.
     const onRetimeCell = vi.fn()
     renderTable(timed, { onRetimeCell })
     await screen.findByText("First cue")
@@ -658,7 +703,6 @@ describe("EditorTable — the timestamps entry", () => {
     fireEvent.click(screen.getByTestId("cell-times-save"))
     expect(onRetimeCell).not.toHaveBeenCalled()
     expect(screen.getByTestId("cell-times-error")).toBeInTheDocument()
-    // Still theirs to correct, not blanked or swapped.
     expect(screen.getByTestId("cell-times-end")).toHaveValue("0:05")
   })
 

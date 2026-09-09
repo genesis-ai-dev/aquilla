@@ -12,6 +12,8 @@ import {
   primaryLanguageOf,
   regionFlagEmoji,
   regionOf,
+  withExtraDesignLanguage,
+  localeRowsForPicker,
 } from "./inworld-design-locales"
 import {
   fallbackDesignLanguages,
@@ -144,6 +146,21 @@ describe("portal catalog grouping", () => {
     expect(canonicalizeDesignLocale("es-MX", portalCatalog)).toBe("es-MX")
     expect(canonicalizeDesignLocale("en-scottish", portalCatalog)).toBe("en-scottish")
     expect(canonicalizeDesignLocale(undefined, portalCatalog)).toBe("en")
+  })
+
+  it("does not add a second family when the extra is a display name already in the catalog", () => {
+    const families = designLanguageFamilies(withExtraDesignLanguage(portalCatalog, "French"))
+    expect(families.filter((row) => row.familyDisplayName === "French")).toHaveLength(1)
+    expect(families.some((row) => row.familyCode === "French")).toBe(false)
+  })
+
+  it("keeps only languages with SYSTEM voices for the prebuilt picker", () => {
+    const mixed = [
+      lang({ code: "en", familyCode: "en", familyDisplayName: "English", hasVoices: true }),
+      lang({ code: "kbt", familyCode: "kbt", familyDisplayName: "Abadi", hasVoices: false }),
+    ]
+    const families = designLanguageFamilies(localeRowsForPicker(mixed, "kbt", true))
+    expect(families.map((row) => row.familyCode)).toEqual(["en"])
   })
 
   it("labels the bare family code as a family-default accent", () => {

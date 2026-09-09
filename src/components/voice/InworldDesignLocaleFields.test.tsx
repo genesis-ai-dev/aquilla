@@ -36,7 +36,7 @@ function lang(
 }
 
 const portalLanguages: InworldSupportedLanguage[] = [
-  lang({ code: "kbt", familyCode: "kbt", familyDisplayName: "Abadi" }),
+  lang({ code: "kbt", familyCode: "kbt", familyDisplayName: "Abadi", hasVoices: false }),
   lang({ code: "en", familyCode: "en", familyDisplayName: "English" }),
   lang({
     code: "en-US",
@@ -57,17 +57,25 @@ const portalLanguages: InworldSupportedLanguage[] = [
     familyDisplayName: "Swahili",
     accentDisplayName: "Kenyan",
   }),
-  lang({ code: "fil", familyCode: "fil", familyDisplayName: "Filipino" }),
-  lang({ code: "ta", familyCode: "ta", familyDisplayName: "Tamil" }),
-  lang({ code: "acw", familyCode: "acw", familyDisplayName: "Hijazi Arabic" }),
+  lang({ code: "fil", familyCode: "fil", familyDisplayName: "Filipino", hasVoices: false }),
+  lang({ code: "ta", familyCode: "ta", familyDisplayName: "Tamil", hasVoices: false }),
+  lang({ code: "acw", familyCode: "acw", familyDisplayName: "Hijazi Arabic", hasVoices: false }),
 ]
 
-function renderLocales(initial?: string) {
+function renderLocales(
+  initial?: string,
+  copy?: "design" | "catalog",
+  voicesOnly = false,
+  onDesignInstead?: () => void,
+) {
   const onLanguageChange = vi.fn()
   function Harness() {
     const [language, setLanguage] = useState(initial)
     return (
       <InworldDesignLocaleFields
+        copy={copy}
+        voicesOnly={voicesOnly}
+        onDesignInstead={onDesignInstead}
         language={language}
         onLanguageChange={(next) => {
           onLanguageChange(next)
@@ -165,5 +173,42 @@ describe("InworldDesignLocaleFields", () => {
       screen.getByRole("button", { name: "About the accent" }),
       /Default is just en/i,
     )
+  })
+
+  it("explains catalog language copy on prebuilt", async () => {
+    vi.mocked(listInworldSupportedLanguages).mockResolvedValue(portalLanguages)
+    renderLocales("en-US", "catalog", true)
+    await expectTooltip(
+      screen.getByRole("button", { name: "About the language" }),
+      /already has speakers/i,
+    )
+    await expectTooltip(
+      screen.getByRole("button", { name: "About the accent" }),
+      /matching stock voices/i,
+    )
+    expect(screen.getByText(/Can't find the language/)).toBeTruthy()
+  })
+
+  it("hides languages without SYSTEM voices on the prebuilt picker", async () => {
+    vi.mocked(listInworldSupportedLanguages).mockResolvedValue(portalLanguages)
+    const user = userEvent.setup()
+    renderLocales("en-US", "catalog", true)
+    await user.click(screen.getByRole("combobox", { name: "Language" }))
+    expect(await screen.findByRole("option", { name: /^English$/i })).toBeTruthy()
+    expect(screen.getByRole("option", { name: /^Swahili$/i })).toBeTruthy()
+    expect(screen.queryByRole("option", { name: /^Abadi$/i })).toBeNull()
+    expect(screen.queryByRole("option", { name: /^Tamil$/i })).toBeNull()
+  })
+
+  it("tells the user to design a voice when search misses on prebuilt", async () => {
+    vi.mocked(listInworldSupportedLanguages).mockResolvedValue(portalLanguages)
+    const user = userEvent.setup()
+    const onDesignInstead = vi.fn()
+    renderLocales("en-US", "catalog", true, onDesignInstead)
+    await user.click(screen.getByRole("combobox", { name: "Language" }))
+    await user.type(screen.getByRole("combobox", { name: "Find a language" }), "abadi")
+    expect(await screen.findByText(/No stock voices match/)).toBeTruthy()
+    await user.click(screen.getByRole("button", { name: /Can't find the language/ }))
+    expect(onDesignInstead).toHaveBeenCalled()
   })
 })

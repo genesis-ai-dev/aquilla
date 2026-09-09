@@ -47,12 +47,20 @@ export const audio = defineNamespace({
     "audio.newVoice.designScriptTooShort": "Write at least 50 characters so the preview has enough to say.",
     "audio.newVoice.designLanguageHint":
       "The language this designed voice will speak. The preview script is read in this language too.",
+    "audio.newVoice.catalogLanguageHint":
+      "Stock voices for languages Inworld already has speakers for.",
+    "audio.newVoice.catalogMissingLanguageHint":
+      "Can't find the language? Design a voice yourself.",
+    "audio.newVoice.catalogLanguageEmpty":
+      "No stock voices match. Design a voice yourself.",
     "audio.newVoice.designLanguageHelpAria": "About the language",
     "audio.newVoice.designLanguageSearch": "Find a language…",
     "audio.newVoice.designLanguageSearchAria": "Find a language",
     "audio.newVoice.designAccentLabel": "Accent",
     "audio.newVoice.designAccentHint":
       "Regional accent for that language. Default is just en; American English is en-US; British is en-GB.",
+    "audio.newVoice.catalogAccentHint":
+      "Regional accent used to load matching stock voices. Default is the language tag without a region.",
     "audio.newVoice.designAccentHelpAria": "About the accent",
     "audio.newVoice.designAccentUS": "American",
     "audio.newVoice.designAccentGB": "British",
@@ -706,18 +714,38 @@ export const audio = defineNamespace({
           "Tooltip on the info icon beside Language on Voice Design. Explains " +
           "that the designed voice and its preview script use this language.",
       },
+      "audio.newVoice.catalogLanguageHint": {
+        description:
+          "Tooltip on the info icon beside Language on the Inworld prebuilt tab. " +
+          "Explains that the searchable list is only languages that already have " +
+          "Inworld SYSTEM speakers.",
+      },
+      "audio.newVoice.catalogMissingLanguageHint": {
+        description:
+          "Helper under Language and Accent on the Inworld prebuilt tab. Tells " +
+          "the user that a missing language means they should switch to Voice " +
+          "design and create one. When it is a button, it opens that tab.",
+      },
+      "audio.newVoice.catalogLanguageEmpty": {
+        description:
+          "Empty state inside the Prebuilt language combobox when search matches " +
+          "no language that has stock Inworld speakers. Points the user to Voice design.",
+      },
       "audio.newVoice.designLanguageHelpAria": {
         description:
-          "Accessible name for the info-icon button beside Language on Voice Design.",
+          "Accessible name for the info-icon button beside Language on Voice Design " +
+          "and on the Inworld prebuilt/clone language picker.",
       },
       "audio.newVoice.designLanguageSearch": {
         description:
-          "Placeholder inside the Voice Design Language combobox search field. " +
-          "The list has ~95 Inworld TTS-2 languages.",
+          "Placeholder inside the Inworld Language combobox search field on Voice " +
+          "Design and on the prebuilt/clone tabs. The list is every language Inworld " +
+          "returns from supportedLanguages.",
       },
       "audio.newVoice.designLanguageSearchAria": {
         description:
-          "Accessible name for the search field inside the Voice Design Language combobox.",
+          "Accessible name for the search field inside the Inworld Language combobox " +
+          "on Voice Design and on the prebuilt/clone tabs.",
       },
       "audio.newVoice.designAccentLabel": {
         description:
@@ -730,6 +758,12 @@ export const audio = defineNamespace({
           "Tooltip on the info icon beside Accent on Voice Design. Explains that accent " +
           "is the regional variant, that Default is the family code (en for English), " +
           "and that American vs British English are en-US / en-GB.",
+      },
+      "audio.newVoice.catalogAccentHint": {
+        description:
+          "Tooltip on the info icon beside Accent on the Inworld prebuilt and clone " +
+          "tabs. Explains that accent is the regional variant used to load matching " +
+          "stock voices, and that Default is the family code without a region.",
       },
       "audio.newVoice.designAccentHelpAria": {
         description:
@@ -864,10 +898,9 @@ export const audio = defineNamespace({
       },
       "audio.newVoice.inworldLanguageLabel": {
         description:
-          "Form label for the Inworld language dropdown on the New Voice dialog. " +
-          "Shown when any of the project's target-language lanes does not map onto an " +
-          "Inworld BCP-47 code (for example a display name like French), even if other " +
-          "lanes are valid codes.",
+          "Form label for the Inworld language combobox on the New Voice dialog. " +
+          "Used on Voice Design and on the prebuilt/clone tabs. The list is every " +
+          "language from Inworld's supportedLanguages catalog, with search.",
       },
       "audio.newVoice.inworldLanguagePlaceholder": {
         description:

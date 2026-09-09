@@ -2,7 +2,8 @@
 //   • TTS voice — name it, pick the engine (Inworld / Gemini / Kokoro / MMS —
 //     seeded from the project's configured engine), and fill that engine's
 //     knobs (Gemini: describe how it sounds; Kokoro: pick a bundled speaker;
-//     MMS: language; Inworld: prebuilt catalog voice or Voice Design, plus
+//     MMS: language; Inworld: prebuilt catalog voice (searchable API language
+//     + accent, then a stock speaker) or Voice Design, plus
 //     quality / delivery / speed).
 //     Gemini's base timbre stays a smart default (rotated so each new voice
 //     sounds distinct).
@@ -59,7 +60,7 @@ import {
   DEFAULT_INWORLD_DELIVERY_MODE,
 } from "@/lib/audio/inworld-voice-settings"
 import { InworldVoiceField } from "@/components/voice/InworldVoiceField"
-import { InworldLanguageField } from "@/components/voice/InworldLanguageField"
+import { InworldDesignLocaleFields } from "@/components/voice/InworldDesignLocaleFields"
 import { InworldVoiceSettings } from "@/components/voice/InworldVoiceSettings"
 import {
   InworldVoiceDesignField,
@@ -217,6 +218,12 @@ function NewVoiceModalBody({
   const update = useCallback((patch: Partial<Voice>) => setDraft((d) => ({ ...d, ...patch })), [])
   const setInworldVoice = useCallback((voiceId: string, language?: string) => {
     update({ voiceName: voiceId, language })
+  }, [update])
+  const inworldLocaleLanguage = draft.language
+    ?? catalogLanguages.find((lane) => toInworldLanguage(lane))
+    ?? catalogLanguages[0]
+  const setInworldLanguage = useCallback((language: string) => {
+    update({ language })
   }, [update])
   const [deleteOpen, setDeleteOpen] = useState(false)
 
@@ -450,10 +457,14 @@ function NewVoiceModalBody({
                 onChange={(v) => update({ voiceName: v || undefined })}
               />
             )}
-            {activeProvider === "inworld" && languagePicker && !(mode === "tts" && inworldSource === "design") && (
-              <InworldLanguageField
-                value={draft.language}
-                onChange={(language) => update({ language })}
+            {mode === "clone" && activeProvider === "inworld" && (
+              <InworldDesignLocaleFields
+                copy="catalog"
+                language={inworldLocaleLanguage}
+                onLanguageChange={setInworldLanguage}
+                projectId={projectId}
+                fileId={fileId}
+                session={session}
               />
             )}
             {mode === "tts" && activeProvider === "inworld" && (
@@ -473,15 +484,27 @@ function NewVoiceModalBody({
                   </TabsList>
                 </Tabs>
                 {inworldSource === "prebuilt" ? (
-                  <InworldVoiceField
-                    value={draft.voiceName}
-                    language={draft.language}
-                    onChange={setInworldVoice}
-                    targetLanguages={catalogLanguages}
-                    projectId={projectId}
-                    fileId={fileId}
-                    session={session}
-                  />
+                  <>
+                    <InworldDesignLocaleFields
+                      copy="catalog"
+                      voicesOnly
+                      onDesignInstead={() => setInworldSource("design")}
+                      language={inworldLocaleLanguage}
+                      onLanguageChange={setInworldLanguage}
+                      projectId={projectId}
+                      fileId={fileId}
+                      session={session}
+                    />
+                    <InworldVoiceField
+                      value={draft.voiceName}
+                      language={draft.language}
+                      onChange={setInworldVoice}
+                      targetLanguages={draft.language ? [draft.language] : catalogLanguages}
+                      projectId={projectId}
+                      fileId={fileId}
+                      session={session}
+                    />
+                  </>
                 ) : (
                   <InworldVoiceDesignField
                     prompt={draft.prompt ?? ""}
@@ -491,7 +514,7 @@ function NewVoiceModalBody({
                     existingVoiceId={isInworldDesignedVoiceId(draft.voiceName) ? draft.voiceName : undefined}
                     existingPreviewAudioId={draft.designPreviewAudioId}
                     language={draft.language ?? catalogLanguages.find((lane) => toInworldLanguage(lane))}
-                    onLanguageChange={(language) => update({ language })}
+                    onLanguageChange={setInworldLanguage}
                     projectId={projectId}
                     fileId={fileId}
                     session={session}

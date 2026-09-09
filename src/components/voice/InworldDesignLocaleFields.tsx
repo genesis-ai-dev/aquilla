@@ -31,8 +31,8 @@ import {
   isFamilyDefaultAccent,
   regionFlagEmoji,
   regionOf,
+  localeRowsForPicker,
   rowForDesignCode,
-  withExtraDesignLanguage,
 } from "@/lib/audio/inworld-design-locales"
 import { useInworldSupportedLanguages } from "@/lib/audio/inworld-voices"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -143,12 +143,20 @@ export function InworldDesignLocaleFields({
   projectId,
   fileId,
   session,
+  copy = "design",
+  voicesOnly = false,
+  onDesignInstead,
 }: {
   language?: string
   onLanguageChange: (language: string) => void
   projectId?: string
   fileId?: string | null
   session?: FrontierSession | null
+  /** Voice Design vs prebuilt/clone catalog — same picker, different hints. */
+  copy?: "design" | "catalog"
+  /** Prebuilt: only languages Inworld already has SYSTEM speakers for. */
+  voicesOnly?: boolean
+  onDesignInstead?: () => void
 }) {
   const t = useT()
   const { locale } = useI18n()
@@ -159,8 +167,8 @@ export function InworldDesignLocaleFields({
     session,
   })
   const rows = useMemo(
-    () => withExtraDesignLanguage(catalog, language),
-    [catalog, language],
+    () => localeRowsForPicker(catalog, language, voicesOnly),
+    [catalog, language, voicesOnly],
   )
   const selected = canonicalizeDesignLocale(language, rows)
   const selectedLanguage = familyCodeOf(selected, rows)
@@ -189,13 +197,18 @@ export function InworldDesignLocaleFields({
     if (selected !== language) onLanguageChange(selected)
   }, [selected, language, onLanguageChange])
 
+  const missingLanguageHint = t("audio.newVoice.catalogMissingLanguageHint")
+
   return (
-    <div className="grid grid-cols-2 gap-3">
+    <div className="flex flex-col gap-1.5">
+      <div className="grid grid-cols-2 gap-3">
       <Field className="min-w-0">
         <div className="flex items-center gap-1.5">
           <FieldLabel htmlFor="inworld-design-language">{t("audio.newVoice.inworldLanguageLabel")}</FieldLabel>
           <VoiceInfoTip
-            content={t("audio.newVoice.designLanguageHint")}
+            content={copy === "catalog"
+              ? t("audio.newVoice.catalogLanguageHint")
+              : t("audio.newVoice.designLanguageHint")}
             label={t("audio.newVoice.designLanguageHelpAria")}
           />
         </div>
@@ -206,7 +219,7 @@ export function InworldDesignLocaleFields({
           onValueChange={(next) => onLanguageChange(defaultCodeForFamily(next, rows))}
           searchPlaceholder={t("audio.newVoice.designLanguageSearch")}
           searchAriaLabel={t("audio.newVoice.designLanguageSearchAria")}
-          emptyText={t("common.noMatches")}
+          emptyText={voicesOnly ? t("audio.newVoice.catalogLanguageEmpty") : t("common.noMatches")}
         />
       </Field>
 
@@ -214,7 +227,9 @@ export function InworldDesignLocaleFields({
         <div className="flex items-center gap-1.5">
           <FieldLabel htmlFor="inworld-design-accent">{t("audio.newVoice.designAccentLabel")}</FieldLabel>
           <VoiceInfoTip
-            content={t("audio.newVoice.designAccentHint")}
+            content={copy === "catalog"
+              ? t("audio.newVoice.catalogAccentHint")
+              : t("audio.newVoice.designAccentHint")}
             label={t("audio.newVoice.designAccentHelpAria")}
           />
         </div>
@@ -255,6 +270,20 @@ export function InworldDesignLocaleFields({
           </SelectContent>
         </Select>
       </Field>
+      </div>
+      {voicesOnly && (
+        onDesignInstead ? (
+          <button
+            type="button"
+            className="text-start text-[11px] text-muted-foreground underline-offset-2 hover:underline"
+            onClick={onDesignInstead}
+          >
+            {missingLanguageHint}
+          </button>
+        ) : (
+          <p className="text-[11px] text-muted-foreground">{missingLanguageHint}</p>
+        )
+      )}
     </div>
   )
 }

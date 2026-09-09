@@ -17,7 +17,9 @@ import type { CellData } from "@/hooks/useCells"
 import { GEMINI_TTS_VOICES } from "@/lib/audio/tts-providers"
 import { buildVoiceReferenceId, uploadVoiceReference } from "@/lib/audio/voice-clone"
 import { parseFrontierAudioUrl, fetchCellAudio } from "@/lib/audio/upload"
-import { designInworldVoice, publishInworldVoice } from "@/lib/sync/tts"
+import { designInworldVoice, publishInworldVoice, listInworldSupportedLanguages } from "@/lib/sync/tts"
+import { __resetInworldSupportedLanguagesCacheForTests } from "@/lib/audio/inworld-voices"
+import type { InworldSupportedLanguage } from "@/lib/audio/inworld-supported-languages"
 import type { FrontierSession } from "@/lib/frontier/types"
 
 // Stub heavy audio / network dependencies; the engine picker itself is pure UI.
@@ -117,6 +119,9 @@ function create(name = "Hero") {
 describe("NewVoiceModal engine selection", () => {
   afterEach(() => {
     vi.unstubAllGlobals()
+    __resetInworldSupportedLanguagesCacheForTests()
+    vi.mocked(listInworldSupportedLanguages).mockReset()
+    vi.mocked(listInworldSupportedLanguages).mockResolvedValue([])
   })
   it("offers all four engines", () => {
     renderCreate({ provider: "inworld" })
@@ -279,39 +284,41 @@ describe("NewVoiceModal engine selection", () => {
     expect(saved.audioQuality).toBe("standard")
   })
 
-  it("asks for an Inworld language when the project lane is a display name", async () => {
+  it("maps a display-name project lane onto the searchable Inworld catalog", async () => {
     const user = userEvent.setup()
     const { onSave } = renderCreate({ provider: "inworld", targetLanguage: "French" })
     expect(screen.getByRole("combobox", { name: "Language" })).toBeTruthy()
-    expect(screen.getByText(/isn't a code Inworld recognizes/)).toBeTruthy()
-    create()
-    expect(onSave).not.toHaveBeenCalled()
-    expect(screen.getByText("Choose a language for this Inworld voice.")).toBeTruthy()
+    expect(screen.queryByText(/isn't a code Inworld recognizes/)).toBeNull()
     await user.click(screen.getByRole("combobox", { name: "Language" }))
-    await user.click(await screen.findByRole("option", { name: /fr-FR/ }))
+    await user.click(await screen.findByRole("option", { name: /^French$/i }))
     create()
     const saved = (onSave as ReturnType<typeof vi.fn>).mock.calls[0][0] as Voice
-    expect(saved.language).toBe("fr-FR")
+    expect(saved.language).toBe("fr")
   })
 
-  it("saves a typed Inworld language code from Other", async () => {
+  it("saves a searched Inworld language from the catalog", async () => {
     const user = userEvent.setup()
     const { onSave } = renderCreate({ provider: "inworld", targetLanguage: "French" })
     await user.click(screen.getByRole("combobox", { name: "Language" }))
-    await user.click(await screen.findByRole("option", { name: "Other" }))
-    await user.type(screen.getByLabelText("Language code"), "sv-SE")
+    await user.type(screen.getByRole("combobox", { name: "Find a language" }), "swedish")
+    await user.click(await screen.findByRole("option", { name: /^Swedish$/i }))
     create()
     const saved = (onSave as ReturnType<typeof vi.fn>).mock.calls[0][0] as Voice
-    expect(saved.language).toBe("sv-SE")
+    expect(saved.language).toBe("sv")
   })
 
-  it("does not show the Inworld language picker when every lane is already a code", () => {
+  it("always offers the searchable Inworld language catalog on Prebuilt", async () => {
+    const user = userEvent.setup()
     renderCreate({ provider: "inworld", targetLanguage: "en" })
-    expect(screen.queryByRole("combobox", { name: "Language" })).toBeNull()
+    expect(screen.getByRole("combobox", { name: "Language" })).toBeTruthy()
+    expect(screen.getByRole("combobox", { name: "Accent" })).toBeTruthy()
     expect(screen.getByRole("combobox", { name: "Voice" })).toBeTruthy()
+    await user.click(screen.getByRole("combobox", { name: "Language" }))
+    expect(screen.queryByRole("option", { name: "Other" })).toBeNull()
+    expect(await screen.findByRole("option", { name: /^Swahili$/i })).toBeTruthy()
   })
 
-  it("shows the Inworld language picker when one extra lane is unrecognized", async () => {
+  it("lets the user pick a catalog language when an extra lane is unrecognized", async () => {
     const user = userEvent.setup()
     const { onSave } = renderCreate({
       provider: "inworld",
@@ -323,10 +330,10 @@ describe("NewVoiceModal engine selection", () => {
     expect(onSave).toHaveBeenCalled()
     ;(onSave as ReturnType<typeof vi.fn>).mockClear()
     await user.click(screen.getByRole("combobox", { name: "Language" }))
-    await user.click(await screen.findByRole("option", { name: /fr-FR/ }))
+    await user.click(await screen.findByRole("option", { name: /^French$/i }))
     create()
     const saved = (onSave as ReturnType<typeof vi.fn>).mock.calls[0][0] as Voice
-    expect(saved.language).toBe("fr-FR")
+    expect(saved.language).toBe("fr")
   })
 })
 
@@ -525,6 +532,9 @@ describe("NewVoiceModal Inworld Voice Design", () => {
     vi.mocked(designInworldVoice).mockReset()
     vi.mocked(publishInworldVoice).mockReset()
     vi.mocked(uploadVoiceReference).mockReset()
+    __resetInworldSupportedLanguagesCacheForTests()
+    vi.mocked(listInworldSupportedLanguages).mockReset()
+    vi.mocked(listInworldSupportedLanguages).mockResolvedValue([])
   })
 
   it("nests Prebuilt and Voice design under Inworld TTS", () => {
@@ -601,7 +611,8 @@ describe("NewVoiceModal Inworld Voice Design", () => {
   it("always offers Language and Accent on Voice design, without Other", async () => {
     const user = userEvent.setup()
     renderCreate({ provider: "inworld", targetLanguage: "en" })
-    expect(screen.queryByRole("combobox", { name: "Language" })).toBeNull()
+    expect(screen.getByRole("combobox", { name: "Language" })).toBeTruthy()
+    expect(screen.getByRole("combobox", { name: "Accent" })).toBeTruthy()
     await user.click(screen.getByRole("tab", { name: /Voice design/ }))
     expect(screen.getByRole("combobox", { name: "Language" })).toBeTruthy()
     expect(screen.getByRole("combobox", { name: "Accent" })).toBeTruthy()
@@ -609,14 +620,55 @@ describe("NewVoiceModal Inworld Voice Design", () => {
     expect(screen.queryByRole("option", { name: "Other" })).toBeNull()
   })
 
-  it("keeps Other on Prebuilt and hides it on Voice design", async () => {
+  it("hides Other on Prebuilt and Voice design, and lists stock voices only on Prebuilt", async () => {
+    vi.mocked(listInworldSupportedLanguages).mockResolvedValue([
+      {
+        code: "kbt",
+        familyCode: "kbt",
+        familyDisplayName: "Abadi",
+        accentDisplayName: "",
+        displayName: "Abadi",
+        creationEnabled: true,
+        hasVoices: false,
+      } satisfies InworldSupportedLanguage,
+      {
+        code: "en",
+        familyCode: "en",
+        familyDisplayName: "English",
+        accentDisplayName: "",
+        displayName: "English",
+        creationEnabled: true,
+        hasVoices: true,
+      },
+      {
+        code: "sw",
+        familyCode: "sw",
+        familyDisplayName: "Swahili",
+        accentDisplayName: "",
+        displayName: "Swahili",
+        creationEnabled: true,
+        hasVoices: true,
+      },
+    ])
     const user = userEvent.setup()
-    renderCreate({ provider: "inworld", targetLanguage: "French" })
-    await user.click(screen.getByRole("combobox", { name: "Language" }))
-    expect(screen.getByRole("option", { name: "Other" })).toBeTruthy()
-    await user.click(screen.getByRole("tab", { name: /Voice design/ }))
+    renderCreate({
+      provider: "inworld",
+      targetLanguage: "en",
+      projectId: "p1",
+      fileId: "f1",
+      session: { jwt: "tok", username: "dev" } as FrontierSession,
+    })
+    expect(screen.getByRole("button", { name: /Can't find the language/ })).toBeTruthy()
     await user.click(screen.getByRole("combobox", { name: "Language" }))
     expect(screen.queryByRole("option", { name: "Other" })).toBeNull()
+    expect(screen.queryByRole("option", { name: /^Abadi$/i })).toBeNull()
+    expect(await screen.findByRole("option", { name: /^Swahili$/i })).toBeTruthy()
+    await user.keyboard("{Escape}")
+    await user.click(screen.getByRole("button", { name: /Can't find the language/ }))
+    expect(screen.getByRole("tab", { name: /Voice design/ })).toHaveAttribute("aria-selected", "true")
+    await user.click(screen.getByRole("combobox", { name: "Language" }))
+    expect(screen.queryByRole("option", { name: "Other" })).toBeNull()
+    expect(await screen.findByRole("option", { name: /^Abadi$/i })).toBeTruthy()
   })
 
   it("blocks Create on Voice design until a preview is generated", async () => {

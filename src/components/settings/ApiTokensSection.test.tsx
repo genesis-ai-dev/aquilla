@@ -9,6 +9,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { pickSelectOption } from "@/test-utils/select"
 import { ApiTokensSection } from "./ApiTokensSection"
 import type { ApiCredential, MintCredentialResult } from "@/lib/sync/credentials"
 import type { OrgSummary } from "@/lib/frontier/orgs"
@@ -85,22 +86,6 @@ const REVOKED_CREDENTIAL: ApiCredential = {
   expiresAt: null,
   lastUsedAt: null,
   revokedAt: "2026-06-15T00:00:00.000Z",
-}
-
-// Base UI Select renders a combobox trigger; options live in a portaled
-// popup. Clicks on options don't reliably commit a selection under
-// happy-dom, but hover-highlighting + Enter does (see
-// ProjectCreateDialog.addAsLane.test.tsx for the original of this helper).
-async function pickSelectOption(triggerName: RegExp, optionName: RegExp) {
-  const trigger = screen.getByRole("combobox", { name: triggerName })
-  fireEvent.click(trigger)
-  const option = await screen.findByRole("option", { name: optionName })
-  fireEvent.pointerMove(option)
-  fireEvent.mouseMove(option)
-  fireEvent.keyDown(document.activeElement ?? option, { key: "Enter" })
-  await waitFor(() => {
-    expect(screen.queryByRole("listbox")).toBeNull()
-  })
 }
 
 beforeEach(() => {

@@ -56,7 +56,7 @@ describe("GET /api/v2/orgs/:orgId/billing", () => {
 })
 
 describe("POST /api/v2/orgs/:orgId/billing/checkout", () => {
-  it("503s Field Plan checkout when Stripe is unconfigured", async () => {
+  it("keeps checkout unavailable before launch", async () => {
     await seedOrg()
     const res = await request("http://local/api/v2/orgs/1/billing/checkout", {
       method: "POST",
@@ -64,7 +64,26 @@ describe("POST /api/v2/orgs/:orgId/billing/checkout", () => {
       body: JSON.stringify({ kind: "field" }),
     })
     expect(res.status).toBe(503)
-    expect(((await res.json()) as { error: string }).error).toBe("stripe_unconfigured")
+    expect(((await res.json()) as { error: string }).error).toBe("checkout_disabled")
+  })
+})
+
+describe("pre-launch purchase gate", () => {
+  it("stays closed with Stripe configured and ignores client-side launch flags", async () => {
+    await seedOrg()
+    const configured = { ...env, STRIPE_SECRET_KEY: "sk_test_not_a_real_key", BILLING_CHECKOUT_ENABLED: "false" }
+    const headers = { ...authHeader(await jwtFor("wendi")), "Content-Type": "application/json" }
+    const snapshot = await app.request("http://local/api/v2/orgs/1/billing", { headers }, configured)
+    const body = await snapshot.json() as { checkoutEnabled: boolean; canSubscribe: boolean; canBuyAddon: boolean }
+    expect(body).toMatchObject({ checkoutEnabled: false, canSubscribe: false, canBuyAddon: false })
+    for (const kind of ["field", "addon"]) {
+      const response = await app.request("http://local/api/v2/orgs/1/billing/checkout", {
+        method: "POST", headers,
+        body: JSON.stringify({ kind, billingInterval: "annual", checkoutEnabled: true }),
+      }, configured)
+      expect(response.status).toBe(503)
+      expect(await response.json()).toMatchObject({ error: "checkout_disabled" })
+    }
   })
 })
 

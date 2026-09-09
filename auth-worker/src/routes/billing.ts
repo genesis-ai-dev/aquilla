@@ -5,7 +5,8 @@
 
 import { Hono } from "hono"
 import type { Context } from "hono"
-import { z } from "zod"
+import type { z } from "zod"
+import { checkoutSchema } from "../lib/billing/checkout-input"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
 import { getEffectiveOrgRole } from "../services/org-permissions"
 import { ROLE } from "../types"
@@ -19,7 +20,7 @@ import {
 import { FIELD_PLAN, resolveFieldPlan } from "../lib/billing/plans"
 import { loadPlatformSettings } from "../lib/platform-settings"
 import {
-  addonPriceId,
+  checkoutEnabled,
   createCheckoutSession,
   createPortalSession,
   fieldPriceId,
@@ -74,10 +75,10 @@ billing.get("/orgs/:orgId/billing", authMiddleware, async (c) => {
     includedCredits: snapshot.includedCredits,
     languageCount: snapshot.languageCount,
     wordsPerCredit: snapshot.wordsPerCredit,
-    canSubscribe: (snapshot.plan === "none" || snapshot.plan === "explore") && stripeConfigured(c.env),
-    canBuyAddon: snapshot.plan === "field" && !snapshot.talkToUs && stripeConfigured(c.env),
+    canSubscribe: (snapshot.plan === "none" || snapshot.plan === "explore") && checkoutEnabled(c.env),
+    canBuyAddon: false,
     canManage: Boolean(snapshot.stripeCustomerId) && stripeConfigured(c.env),
-    checkoutEnabled: false,
+    checkoutEnabled: checkoutEnabled(c.env),
     stripeConfigured: stripeConfigured(c.env),
     fieldPlan: {
       name: catalog.name,
@@ -96,11 +97,6 @@ billing.get("/orgs/:orgId/billing", authMiddleware, async (c) => {
   })
 })
 
-const checkoutSchema = z.object({
-  kind: z.enum(["field", "addon"]),
-  packs: z.number().int().min(1).max(20).optional(),
-})
-
 billing.post("/orgs/:orgId/billing/checkout", authMiddleware, async (c) => {
   const orgId = parseInt(c.req.param("orgId") ?? "", 10)
   if (!Number.isFinite(orgId)) return c.json({ error: "invalid orgId" }, 400)
@@ -113,6 +109,14 @@ billing.post("/orgs/:orgId/billing/checkout", authMiddleware, async (c) => {
     return c.json({ error: "invalid body" }, 400)
   }
 
+  // Provisioning Stripe must never silently activate customer purchases.
+  if (!checkoutEnabled(c.env)) {
+    return c.json({ error: "checkout_disabled", message: "Paid subscriptions are coming soon." }, 503)
+  }
+  if (body.kind === "addon") {
+    return c.json({ error: "addons_unavailable", message: "Contact us to discuss additional capacity." }, 409)
+  }
+
   const catalog = resolveFieldPlan((await loadPlatformSettings(c.env)).settings.fieldPlan, c.env)
   const snapshot = await readWordSnapshot(c.env.AQUILLA_PG, orgId, catalog)
   if (snapshot.plan === "enterprise") {
@@ -121,30 +125,21 @@ billing.post("/orgs/:orgId/billing/checkout", authMiddleware, async (c) => {
   if (body.kind === "field" && snapshot.plan === "field") {
     return c.json({ error: "already_subscribed", message: "This organization is already on the Field Plan." }, 409)
   }
-  if (body.kind === "addon" && snapshot.plan !== "field") {
-    return c.json({ error: "not_subscribed", message: "Buy the Field Plan before adding word packs." }, 409)
-  }
-  if (body.kind === "addon" && snapshot.talkToUs) {
-    return c.json({ error: "talk_to_us", message: "This volume needs an Enterprise conversation." }, 409)
-  }
 
   const user = c.get("user")
   try {
     const session = await createCheckoutSession(c.env, {
       customerId: snapshot.stripeCustomerId ?? undefined,
       customerEmail: snapshot.stripeCustomerId ? undefined : user.email,
-      priceId:
-        body.kind === "field"
-          ? (catalog.stripePriceField ?? fieldPriceId(c.env))
-          : (catalog.stripePriceAddon ?? addonPriceId(c.env)),
-      mode: body.kind === "field" ? "subscription" : "payment",
-      quantity: body.kind === "addon" ? (body.packs ?? 1) : 1,
+      priceId: fieldPriceId(c.env, body.billingInterval),
+      mode: "subscription",
+      quantity: 1,
       successUrl: billingReturnUrl(c.env, orgId, "?checkout=success"),
       cancelUrl: billingReturnUrl(c.env, orgId, "?checkout=cancel"),
       metadata: {
         orgId: String(orgId),
         kind: body.kind,
-        packs: String(body.kind === "addon" ? (body.packs ?? 1) : 0),
+        billingInterval: body.billingInterval,
       },
     })
     if (!session.url) return c.json({ error: "stripe_error", message: "Checkout session missing URL" }, 502)

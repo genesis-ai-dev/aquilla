@@ -3,9 +3,13 @@ import { render, screen } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { OrgSettingsBilling } from "./OrgSettingsBilling"
-import { getOrgBilling } from "@/lib/sync/billing"
+import userEvent from "@testing-library/user-event"
+import { getOrgBilling, startBillingCheckout } from "@/lib/sync/billing"
 import type { OrgBilling } from "@/lib/sync/billing"
 
+vi.mock("@/pages/settings/OrgSettingsShell", () => ({
+  OrgSettingsShell: ({ children }: { children: React.ReactNode }) => children,
+}))
 vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "jwt", username: "wendi", createdAt: "x" }, loading: false }),
@@ -18,6 +22,10 @@ vi.mock("@/lib/sync/billing", () => ({
   getOrgBilling: vi.fn(),
   startBillingCheckout: vi.fn(),
   startBillingPortal: vi.fn(),
+}))
+
+vi.mock("@/lib/sync/cloud-projects", () => ({
+  fetchAccessibleProjectsResult: vi.fn(async () => ({ ok: true, projects: [] })),
 }))
 
 const mockGet = vi.mocked(getOrgBilling)
@@ -85,11 +93,12 @@ describe("OrgSettingsBilling", () => {
     expect((subscribe as HTMLButtonElement).disabled).toBe(true)
     expect(subscribe.textContent).toMatch(/Coming soon/i)
     expect(screen.getByTestId("billing-plan").textContent).toMatch(/Explore/i)
-    expect(screen.getByTestId("billing-usage").textContent).toMatch(/12/)
-    expect(screen.getByTestId("billing-usage").textContent).not.toMatch(/1,200/)
+    expect(screen.getByTestId("billing-usage").textContent).toMatch(/rolling seven-day/)
+    expect(screen.getByRole("link", { name: "Check covered access" }).getAttribute("href")).toContain("ETEN%20affiliate")
+    expect(screen.queryByText(/4 weeks|4-week|\$500|\$200/)).toBeNull()
   })
 
-  it("shows add-on + portal controls on an active Field Plan", async () => {
+  it("shows portal but no unavailable add-on purchases on an active Field Plan", async () => {
     mockGet.mockResolvedValueOnce({
       ...unpaid,
       plan: "field",
@@ -107,8 +116,28 @@ describe("OrgSettingsBilling", () => {
       canManage: true,
     })
     renderBilling()
-    expect(await screen.findByTestId("buy-word-addon")).toBeDefined()
-    expect(screen.getByTestId("manage-billing")).toBeDefined()
+    expect(await screen.findByTestId("manage-billing")).toBeDefined()
+    expect(screen.queryByTestId("buy-word-addon")).toBeNull()
     expect(screen.getByTestId("billing-plan").textContent).toMatch(/Field Plan/i)
   })
+  it("offers covered Field organizations contact without a Stripe portal", async () => {
+    mockGet.mockResolvedValueOnce({ ...unpaid, plan: "field", status: "active", canManage: false })
+    renderBilling()
+    expect(await screen.findByTestId("billing-plan")).toHaveTextContent("Field Plan")
+    expect(screen.queryByTestId("manage-billing")).toBeNull()
+    expect(screen.queryByTestId("subscribe-field-plan")).toBeNull()
+    expect(screen.getByRole("link", { name: "Check covered access" })).toBeDefined()
+  })
+  it("sends the selected monthly interval when checkout is enabled", async () => {
+    mockGet.mockResolvedValueOnce({ ...unpaid, checkoutEnabled: true })
+    vi.mocked(startBillingCheckout).mockRejectedValueOnce(new Error("Test checkout reached"))
+    const user = userEvent.setup()
+    renderBilling()
+    await user.click(await screen.findByRole("combobox", { name: "Field billing period" }))
+    await user.click(await screen.findByRole("option", { name: "Monthly" }))
+    await user.click(screen.getByRole("button", { name: "Upgrade to Field" }))
+    expect(startBillingCheckout).toHaveBeenCalledWith("jwt", 1, "field", 1, "monthly")
+    expect(await screen.findByRole("alert")).toHaveTextContent("Test checkout reached")
+  })
+
 })

@@ -257,7 +257,9 @@ MONDAY_CLIENT_ID = ""
 MONDAY_APP_ID = ""
 MONDAY_APP_SLUG = ""
 MONDAY_REDIRECT_URI = "https://aquilla.app/oauth/callback"
-# Stripe Field Plan: set STRIPE_PRICE_FIELD / STRIPE_PRICE_ADDON here after
+# Stripe launch: use STRIPE_PRICE_FIELD_MONTHLY / STRIPE_PRICE_FIELD_ANNUAL.
+# Keep BILLING_CHECKOUT_ENABLED unset/false until an explicit launch.
+# Legacy Field Plan: STRIPE_PRICE_FIELD / STRIPE_PRICE_ADDON retained after
 # live (or test) prices are provisioned. Checkout 503s until they exist.
 # Secrets: `wrangler secret put STRIPE_SECRET_KEY` + STRIPE_WEBHOOK_SECRET.
 

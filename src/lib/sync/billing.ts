@@ -69,13 +69,14 @@ export async function startBillingCheckout(
   orgId: number,
   kind: "field" | "addon",
   packs = 1,
+  billingInterval: "monthly" | "annual" = "monthly",
 ): Promise<string> {
   const res = await fetchWithTimeout(
     `${FRONTIER_BASE}/api/v2/orgs/${encodeURIComponent(String(orgId))}/billing/checkout`,
     {
       method: "POST",
       headers: { Authorization: `Bearer ${jwt}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ kind, packs }),
+      body: JSON.stringify({ kind, packs, billingInterval }),
     },
   )
   if (!res.ok) {

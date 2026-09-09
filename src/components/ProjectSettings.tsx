@@ -371,10 +371,14 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   )
   const canSeeMembers = !isCloudProject || canViewRoster
   const [privilegedOpen, setPrivilegedOpen] = useState(false)
+  // project.files is a fresh array each render; key on the file ids. The key is
+  // computed here because a dependency list entry has to be a simple expression
+  // (react-hooks/use-memo).
+  const metricsFilesKey = (project?.files ?? []).map((f) => f.id).join(",")
   const metricsFiles = useMemo(
     () => (project?.files ?? []).map((f) => ({ id: f.id, name: f.name })),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [(project?.files ?? []).map((f) => f.id).join(",")],
+    [metricsFilesKey],
   )
   const getJwt = useCallback(() => session?.jwt ?? null, [session?.jwt])
   const {

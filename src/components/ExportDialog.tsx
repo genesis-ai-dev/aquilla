@@ -436,6 +436,23 @@ export function ExportDialog({
    *  were imported beside it. */
   const [subtitleTarget, setSubtitleTarget] = useState<SubtitleTarget>("subtitle")
 
+  // The restore effect below writes all four of these, so they are declared
+  // ahead of it — a setter used above its own `useState` is stale by the time it
+  // fires (react-hooks/immutability).
+  //
+  // Two shapes of subtitle file codex-editor offers as separate formats
+  // (2026-08-18). Both default off: the file this produces untouched is the
+  // one it has always produced.
+  const [vttCueSplitting, setVttCueSplitting] = useState(false)
+  const [vttExcludeLabels, setVttExcludeLabels] = useState(false)
+  /** Source above target in every cue — a review artifact, played against the
+   *  picture to check the translation line by line. */
+  const [vttIncludeSource, setVttIncludeSource] = useState(false)
+  /** Which of the two audio deliverables the Audio card will produce. They are
+   *  two forms of one thing — a mix track and a review folder — so they share a
+   *  card and a button rather than competing as two entries in a list. */
+  const [audioMode, setAudioMode] = useState<"audio-by-character" | "audio-by-line">("audio-by-character")
+
   // Re-derive defaults when the dialog opens on a (possibly different) file.
   //
   // Seeded FALSE rather than with `open`, so a dialog that mounts already open
@@ -500,17 +517,9 @@ export function ExportDialog({
   const [customBaseName, setCustomBaseName] = useState<string>(defaultBaseName)
   const [appendTimestamp, setAppendTimestamp] = useState(false)
   const [appendLangTag, setAppendLangTag] = useState(false)
-  // Two shapes of subtitle file codex-editor offers as separate formats
-  // (2026-08-18). Both default off: the file this produces untouched is the
-  // one it has always produced.
   /** The live export toast, so the catch-all below can turn a spinner that
    *  will never finish into the error it actually was. */
   const exportToastRef = useRef<string | null>(null)
-  const [vttCueSplitting, setVttCueSplitting] = useState(false)
-  const [vttExcludeLabels, setVttExcludeLabels] = useState(false)
-  /** Source above target in every cue — a review artifact, played against the
-   *  picture to check the translation line by line. */
-  const [vttIncludeSource, setVttIncludeSource] = useState(false)
 
   // Keep the base name in sync when the active file changes (e.g. dialog reopened on a new file).
   useEffect(() => {
@@ -661,11 +670,6 @@ export function ExportDialog({
     steeredModeRef.current = true
     if (recordedLines === 0 && addedTrackTakes > 0) setAudioMode("audio-by-line")
   }, [open, recordedLines, addedTrackTakes])
-
-  /** Which of the two audio deliverables the Audio card will produce. They are
-   *  two forms of one thing — a mix track and a review folder — so they share a
-   *  card and a button rather than competing as two entries in a list. */
-  const [audioMode, setAudioMode] = useState<"audio-by-character" | "audio-by-line">("audio-by-character")
 
   /**
    * Remember the selection, per project and per user.

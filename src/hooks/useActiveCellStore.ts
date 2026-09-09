@@ -1593,8 +1593,15 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
     lane = "",
   } = opts
   const store = useMemo(() => new CellStore(), [])
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  if (typeof window !== "undefined") (window as any).__cellStore = store
+  // Debug handle for the console and e2e probes. Published from an effect
+  // rather than during render — render must stay free of external writes
+  // (react-hooks/immutability). `store` is stable for the hook's lifetime, so
+  // this runs once per mount.
+  useEffect(() => {
+    if (typeof window === "undefined") return
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(window as any).__cellStore = store
+  }, [store])
   const [isLoading, setIsLoading] = useState(false)
   const [isError, setIsError] = useState(false)
   const projectRef = useRef(projectId)
@@ -1699,7 +1706,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
         if (tokenRetryRef.current) clearTimeout(tokenRetryRef.current)
         tokenRetryRef.current = setTimeout(() => {
           tokenRetryRef.current = null
-          if (generationRef.current === gen) void doFetch(soft)
+          if (generationRef.current === gen) void doFetchRef.current(soft)
         }, delay)
         return
       }

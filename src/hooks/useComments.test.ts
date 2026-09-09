@@ -19,8 +19,10 @@ import type { CommentRecord } from "@/lib/sync/comments-read-types"
 
 // Mock fetchCommentsForProject so tests control what the server "returns".
 const mockFetchComments = vi.fn<() => Promise<CommentRecord[]>>()
+const mockFetchCounts = vi.fn(async () => ({ unresolved: 0, byFile: {} }))
 vi.mock("@/lib/sync/comments-read", () => ({
   fetchCommentsForProject: (..._args: unknown[]) => mockFetchComments(),
+  fetchCommentCounts: (..._args: unknown[]) => mockFetchCounts(),
 }))
 
 // Mock enqueueEvent to capture what the hook enqueues without touching IDB.
@@ -294,5 +296,49 @@ describe("useComments — sentinel fileId for project-scoped mutations (AQU-228 
     const enqueuedEvent = mockEnqueueEvent.mock.calls[0][0] as { kind: string; fileId?: string }
     expect(enqueuedEvent.kind).toBe("comment.resolve")
     expect(enqueuedEvent.fileId).toBe("file-xyz")
+  })
+})
+
+// ── Priority file first, rest paged behind (comments pagination) ──────────────
+//
+// Why: the project-wide list is now paged. The open file's markers must not
+// wait for history, and the badge must be right even before the list is done.
+describe("useComments — open file first, then the rest of the project", () => {
+  it("publishes the priority file's threads before the project-wide pages, then merges without duplicates", async () => {
+    const fileRow = makeServerComment({ commentId: "cmt-file", scopeKind: "cell", fileId: "f-open", cellId: "c1", createdAt: 500 })
+    const otherRow = makeServerComment({ commentId: "cmt-other", scopeKind: "cell", fileId: "f-other", cellId: "c9", createdAt: 100 })
+    let releaseRest!: () => void
+    const restGate = new Promise<void>((r) => { releaseRest = r })
+    mockFetchComments.mockReset()
+    // 1st call: scoped to the open file. 2nd call: project-wide, held back.
+    mockFetchComments
+      .mockResolvedValueOnce([fileRow])
+      .mockImplementationOnce(async () => { await restGate; return [otherRow, fileRow] })
+    mockFetchCounts.mockResolvedValue({ unresolved: 2, byFile: { "f-open": 1, "f-other": 1 } })
+
+    const { result } = renderHook(() =>
+      useComments({ projectId: "proj-1", getToken: GET_TOKEN, author: "alice", priorityFileId: "f-open" }),
+    )
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    expect(result.current.comments.map((c) => c.commentId)).toEqual(["cmt-file"])
+    expect(result.current.isLoadingRest).toBe(true)
+    // The badge is complete while the list is still paging in.
+    await waitFor(() => expect(result.current.counts?.unresolved).toBe(2))
+
+    await act(async () => { releaseRest() })
+    await waitFor(() => expect(result.current.isLoadingRest).toBe(false))
+    // Server order (createdAt), the priority row not repeated.
+    expect(result.current.comments.map((c) => c.commentId)).toEqual(["cmt-other", "cmt-file"])
+  })
+
+  it("a counts failure does not blank the list", async () => {
+    mockFetchComments.mockResolvedValue([makeServerComment()])
+    mockFetchCounts.mockRejectedValue(new Error("boom"))
+    const { result } = renderHook(() => useComments({ projectId: "proj-1", getToken: GET_TOKEN, author: "alice" }))
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    expect(result.current.comments).toHaveLength(1)
+    expect(result.current.isError).toBe(false)
+    expect(result.current.counts).toBeNull()
   })
 })

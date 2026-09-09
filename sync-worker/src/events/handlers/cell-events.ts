@@ -66,6 +66,29 @@ export interface HandleCellEventOptions {
 /** Cell-level kinds that this handler accepts. */
 export type CellEventKind = Exclude<EventKind, 'file.create'>
 
+/**
+ * AQU-1093: audio events that change the per-unit audio ROLLUP.
+ *
+ * Audio projections only touch `cell_audio`, so before this they never
+ * triggered a progress recompute — file/section/book audio counts would drift
+ * the moment anyone recorded or approved a take, and only a full rebuild would
+ * repair them.
+ *
+ * Deliberately not every `cell.audio.*` kind: rename, trim, place and measure
+ * are frequent (one timeline drag emits a stream of them) and change no count.
+ */
+const AUDIO_ROLLUP_KINDS: ReadonlySet<string> = new Set([
+  'cell.audio.attach',
+  'cell.audio.select',
+  'cell.audio.remove',
+  'cell.audio.validate',
+  'cell.audio.unvalidate',
+])
+
+function touchesAudioRollup(kind: string, touches: readonly ProjectionTable[]): boolean {
+  return touches.includes('cell_audio') && AUDIO_ROLLUP_KINDS.has(kind)
+}
+
 function projectionTablesFor(touches: readonly ProjectionTable[]): ProjectionTable[] {
   // Always include `events` so dirty-table broadcasts invalidate the
   // event-log query caches.
@@ -150,7 +173,11 @@ export function handleCellEvent(
       chainGate,
       validationCount: opts.validationCount,
     })
-    if (opts.deferFileCounters && event.fileId && projectionTouches.includes('files')) {
+    if (
+      opts.deferFileCounters &&
+      event.fileId &&
+      (projectionTouches.includes('files') || touchesAudioRollup(event.kind, projectionTouches))
+    ) {
       counterFile = { projectId: event.projectId, fileId: event.fileId }
     }
   }

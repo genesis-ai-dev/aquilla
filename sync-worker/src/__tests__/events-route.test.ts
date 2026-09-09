@@ -958,6 +958,42 @@ describe('POST /events — event.applied carries serverSeq + the cell\'s project
     expect(JSON.stringify(bySideLane(rows))).toBe(JSON.stringify(bySideLane(viaRead)))
   })
 
+  it('the POST response `applied[]` carries the same frame (serverSeq + rows) as the DO broadcast', async () => {
+    // The WHY: the author's own client used to follow its outbox flush with a
+    // GET …/cells?cellIds= + GET /cells/audit-stats to confirm the head. The
+    // response already knows the projection, so one POST is the whole cost.
+    const token = await makeToken({ role: 500, username: 'alice' })
+    const { db } = await makeTestDb()
+    await handleEventsWriteRequest(
+      await makeRequest([sourceCreate(), targetCreate()], token),
+      makeEnv(db),
+    )
+    const { env, applied } = makeProjectSyncEnv(db)
+
+    const res = await handleEventsWriteRequest(await makeRequest([targetCommit()], token), env)
+    expect(res?.status).toBe(200)
+    const body = (await res!.json()) as { accepted: Array<{ id: string }>; applied: Array<Record<string, unknown>> }
+    expect(body.accepted).toEqual([{ id: 'evt-commit-001' }])
+    expect(body.applied).toHaveLength(1)
+    // Byte-identical to what peers receive over the WS.
+    expect(JSON.stringify(body.applied[0])).toBe(JSON.stringify(applied()[0]))
+    expect(body.applied[0].t).toBe('event.applied')
+    expect(body.applied[0].by).toBe('alice')
+    expect(typeof body.applied[0].serverSeq).toBe('number')
+    const target = (body.applied[0].rows as Array<{ side: string; eventId: string }>).find((r) => r.side === 'target')!
+    expect(target.eventId).toBe('evt-commit-001')
+  })
+
+  it('`applied[]` is returned even when no ProjectSync DO is bound (HTTP-only deployments)', async () => {
+    const token = await makeToken({ role: 500, username: 'alice' })
+    const { db } = await makeTestDb()
+    await handleEventsWriteRequest(await makeRequest([sourceCreate(), targetCreate()], token), makeEnv(db))
+    const res = await handleEventsWriteRequest(await makeRequest([targetCommit()], token), makeEnv(db))
+    const body = (await res!.json()) as { applied: Array<{ id: string; rows?: unknown[] }> }
+    expect(body.applied.map((f) => f.id)).toEqual(['evt-commit-001'])
+    expect(Array.isArray(body.applied[0].rows)).toBe(true)
+  })
+
   it('a cell.validate frame carries rows reflecting the flipped validated flag', async () => {
     const token = await makeToken({ role: 400 })
     const reviewerToken = await makeToken({ role: 300, username: 'reviewer-bob' })

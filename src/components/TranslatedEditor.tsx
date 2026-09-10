@@ -749,9 +749,14 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
           // background tints competing with the recessed fill.
           // No fixed text-* class: font size inherits from the target column
           // wrapper, which carries the per-file font-size pref inline.
+          // AQU-1101: `break-words` on the editable surface too. ProseMirror's
+          // own `word-wrap: break-word` does not survive `prose`'s reset here,
+          // and without it the active cell re-widens its grid track the moment
+          // an unbreakable token is typed or pasted into it — the read surface
+          // and the editing surface have to agree or the row jumps on focus.
           compactHeight
-            ? "prose prose-sm max-w-none px-1 py-0 leading-snug focus:outline-none"
-            : "prose prose-sm max-w-none h-full min-h-[40px] px-1 py-0.5 leading-relaxed focus:outline-none",
+            ? "prose prose-sm max-w-none min-w-0 break-words px-1 py-0 leading-snug focus:outline-none"
+            : "prose prose-sm max-w-none h-full min-h-[40px] min-w-0 break-words px-1 py-0.5 leading-relaxed focus:outline-none",
           idmlContext && "whitespace-pre-wrap",
           "rounded-lg transition-colors",
           className

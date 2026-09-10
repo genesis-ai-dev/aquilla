@@ -7,7 +7,12 @@ reads a story, drives the browser, judges the end state, and reports.
 They exist for one job: QA on every pull request, done by bots against the
 PR's own full-stack preview, with a comment a reviewer can act on. That
 flow is written out in `PR-BOT.md`. The stories are the bots' briefs. The
-replays are the parts of a story a bot no longer has to think about.
+replays are the parts of a story a bot no longer has to think about. The
+comment reports the *effect* on the named screen, not that a control
+moved: the first Grokbot walk of PR 626 flipped **Try Autopilot** and
+called it good; the Autopilot panel on Overview stayed hidden until a
+reload. A comment that says the walk passed without that check is a
+failed bot run, not a review.
 
 ## Where this sits in the pipeline
 

@@ -1,7 +1,7 @@
 // AQU-538 "creation fix" (spec §5 / QA-AQU538-LANES.md "UX gaps" #1): the
 // self-contained shape's target field is one text box per lane, stacked, with
 // a plus button that appends another. Box 0 is targetLanguage, the rest become
-// settings.targetLanes via a follow-up PATCH. The linked-target shape stays
+// settings.targetLanes in the same create settings PATCH. The linked-target shape stays
 // single-field — see ProjectCreateDialog.linked.test.tsx /
 // ProjectCreateDialog.addAsLane.test.tsx.
 
@@ -241,14 +241,17 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
       expect(mockCreateCloudProject).toHaveBeenCalledTimes(1)
     })
     await waitFor(() => {
-      const lanesCall = mockPatchProjectSettings.mock.calls.find(
-        (call) => (call[2] as { targetLanes?: string[] }).targetLanes,
-      )
-      expect((lanesCall?.[2] as { targetLanes: string[] }).targetLanes).toEqual([
+      expect(mockPatchProjectSettings).toHaveBeenCalledTimes(1)
+      const [, , settings] = mockPatchProjectSettings.mock.calls[0]!
+      expect((settings as { targetLanes: string[] }).targetLanes).toEqual([
         "lang-1", "lang-2", "lang-3", "lang-4", "lang-5",
         "lang-6", "lang-7", "lang-8", "lang-9",
         "Swahili", "Yoruba", "Hausa",
       ])
+      expect(settings).toMatchObject({
+        sourceLanguage: "English",
+        targetLanguage: "French",
+      })
     })
   })
 
@@ -273,7 +276,7 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     expect(screen.queryAllByTestId(/^create-target-lang-input-\d+$/)).toHaveLength(0)
   })
 
-  it("submit with 2 extras: creates the project, then PATCHes settings with both lanes using the fetched version", async () => {
+  it("submit with 2 extras: creates the project, then PATCHes settings once with languages and lanes at version 0", async () => {
     openDialogWithBasics({ name: "Multilingual Episode 1", source: "English", target: "French" })
     addExtraLanguage("es")
     addExtraLanguage("pt-BR")
@@ -282,31 +285,20 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
 
     await waitFor(() => {
       expect(mockCreateCloudProject).toHaveBeenCalledTimes(1)
-      expect(mockFetchProjectSettings).toHaveBeenCalledTimes(1)
+      expect(mockFetchProjectSettings).not.toHaveBeenCalled()
     })
 
-    // create → fetch(for version) → PATCH targetLanes, in that order.
-    const createOrder = mockCreateCloudProject.mock.invocationCallOrder[0]!
-    const fetchOrder = mockFetchProjectSettings.mock.invocationCallOrder[0]!
-    expect(createOrder).toBeLessThan(fetchOrder)
-
-    const [, projectId] = mockFetchProjectSettings.mock.calls[0]!
-    expect(projectId).toEqual(expect.any(String))
-
-    // Two PATCH calls: the existing sourceLanguage/targetLanguage seed write
-    // (version 0, untouched by this slice), then the targetLanes write using
-    // the version returned by fetchProjectSettings (2, from the mock above).
     await waitFor(() => {
-      expect(mockPatchProjectSettings).toHaveBeenCalledTimes(2)
+      expect(mockPatchProjectSettings).toHaveBeenCalledTimes(1)
     })
-    const lanesCall = mockPatchProjectSettings.mock.calls.find(
-      (call) => (call[2] as { targetLanes?: string[] }).targetLanes,
-    )
-    expect(lanesCall).toBeTruthy()
-    const [, lanesProjectId, lanesSettings, lanesVersion] = lanesCall!
-    expect(lanesProjectId).toEqual(projectId)
-    expect(lanesSettings).toEqual({ targetLanes: ["es", "pt-BR"] })
-    expect(lanesVersion).toBe(2)
+    const [, projectId, settings, version] = mockPatchProjectSettings.mock.calls[0]!
+    expect(projectId).toEqual(expect.any(String))
+    expect(settings).toEqual({
+      sourceLanguage: "English",
+      targetLanguage: "French",
+      targetLanes: ["es", "pt-BR"],
+    })
+    expect(version).toBe(0)
 
     expect(mockCreateProject).toHaveBeenCalledTimes(1)
   })
@@ -319,11 +311,14 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
       expect(mockCreateCloudProject).toHaveBeenCalledTimes(1)
     })
     expect(mockFetchProjectSettings).not.toHaveBeenCalled()
-    // Only the pre-existing sourceLanguage/targetLanguage seed write.
     await waitFor(() => {
       expect(mockPatchProjectSettings).toHaveBeenCalledTimes(1)
     })
-    expect(mockPatchProjectSettings.mock.calls[0]![2]).not.toHaveProperty("targetLanes")
+    expect(mockPatchProjectSettings.mock.calls[0]![2]).toEqual({
+      sourceLanguage: "English",
+      targetLanguage: "French",
+    })
+    expect(mockPatchProjectSettings.mock.calls[0]![3]).toBe(0)
   })
 
   it("creates with only the primary box filled and no lanes added", async () => {
@@ -350,20 +345,8 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     expect(mockFetchProjectSettings).not.toHaveBeenCalled()
   })
 
-  it("PATCH failure for targetLanes still resolves with the created project, and surfaces a non-fatal warning", async () => {
-    // First PATCH (seed sourceLanguage/targetLanguage) succeeds; second
-    // (targetLanes) fails.
-    mockPatchProjectSettings
-      .mockResolvedValueOnce({
-        kind: "ok",
-        value: {
-          version: 1,
-          updatedAt: "2026-07-13T00:00:00.000Z",
-          updatedBy: { id: 1, username: "wendi" },
-          settings: {},
-        },
-      })
-      .mockResolvedValueOnce({ kind: "error", status: 500, message: "boom" })
+  it("PATCH failure for settings still resolves with the created project, and surfaces a non-fatal warning", async () => {
+    mockPatchProjectSettings.mockResolvedValueOnce({ kind: "error", status: 500, message: "boom" })
 
     openDialogWithBasics()
     addExtraLanguage("es")

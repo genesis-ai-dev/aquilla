@@ -34,17 +34,9 @@ vi.mock("@/lib/sync/cloud-projects", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/sync/cloud-projects")>()
   return { ...actual, createCloudProject: vi.fn().mockResolvedValue(undefined) }
 })
-// fetchProjectSettings and PROJECT_SETTINGS_VERSION_INITIAL are only reached
-// when the form carries extra lanes, but they must exist on the mock or that
-// path throws on an undefined import rather than failing an assertion.
 vi.mock("@/lib/sync/project-settings", () => ({
   PROJECT_SETTINGS_VERSION_INITIAL: 0,
-  fetchProjectSettings: vi.fn().mockResolvedValue({
-    version: 2,
-    updatedAt: "2026-07-13T00:00:00.000Z",
-    updatedBy: { id: 1, username: "wendi" },
-    settings: { sourceLanguage: "English", targetLanguage: "French" },
-  }),
+  fetchProjectSettings: vi.fn(),
   patchProjectSettings: vi.fn().mockResolvedValue({
     kind: "ok",
     value: {
@@ -207,10 +199,14 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
     // The lanes PATCH used to be gated on the self-contained shape; a linked
     // target is precisely the case that wants several of them.
     await waitFor(() => {
-      const lanesCall = mockPatchProjectSettings.mock.calls.find(
-        (call) => (call[2] as { targetLanes?: string[] }).targetLanes,
-      )
-      expect(lanesCall?.[2]).toEqual({ targetLanes: ["es"] })
+      expect(mockPatchProjectSettings).toHaveBeenCalledTimes(1)
+      const [, , settings, version] = mockPatchProjectSettings.mock.calls[0]!
+      expect(settings).toEqual({
+        sourceLanguage: "English",
+        targetLanguage: "French",
+        targetLanes: ["es"],
+      })
+      expect(version).toBe(0)
     })
   })
 

@@ -486,7 +486,7 @@ export async function commitMemoryCommand(
   // live project role meets the plan's staged floor (CONTRIBUTOR for the
   // adding kinds), so checking `role` here would let a contributor's approval
   // ride a lead-owned credential into the copilot.
-  const approve = await approverMeetsReviewFloor(db, projectId, confirmationId)
+  const approver = await approverWithReviewFloor(db, projectId, confirmationId)
 
   const memoryId = cs.plannedIds?.memory?.memoryId ?? crypto.randomUUID()
   // Pinned at prepare, so a crash-retry finds ITS OWN row instead of inserting
@@ -507,15 +507,13 @@ export async function commitMemoryCommand(
     }
   }
 
-  if (!approve) {
+  if (approver === null) {
     return finishMemoryReceipt(db, cred, cs, cmd, projectId, path, 'proposed', confirmationId, channel)
   }
 
-  const reviewed = await reviewMemory(db, {
-    id: memoryId,
-    action: 'approve',
-    reviewedBy: String(cred.userId),
-  })
+  // The approver is the reviewer of record — the audit trail must name the
+  // human whose authority published this, not the credential's owner.
+  const reviewed = await reviewMemory(db, { id: memoryId, action: 'approve', reviewedBy: approver })
   if (reviewed.status === 'supersedes_human_edited') {
     return errorResponse(
       'permission_denied',
@@ -523,34 +521,37 @@ export async function commitMemoryCommand(
       { path },
     )
   }
-  // invalid_state on a retry = our own earlier attempt already approved it.
-  // reviewMemory('approve') only ever yields 'approved' on the ok path; the
-  // widen-to-MemoryStatus is a type artifact, so re-narrow rather than
-  // reporting a status this branch cannot produce.
-  const status = reviewed.status === 'ok' && reviewed.memory.status === 'proposed' ? 'proposed' : 'approved'
+  // `invalid_state` on a retry means our own earlier attempt already approved
+  // it — but don't ASSUME that. Re-read and report the row's real status, so a
+  // receipt never claims `approved` for a row that isn't.
+  const status = reviewed.status === 'ok' ? reviewed.memory.status : (await getMemory(db, memoryId))?.status
+  if (status !== 'approved' && status !== 'proposed') {
+    return errorResponse('job_failed', `memory at ${path} could not be approved`, { path, status })
+  }
   return finishMemoryReceipt(db, cred, cs, cmd, projectId, path, status, confirmationId, channel)
 }
 
 /**
- * Whether the human who confirmed this changeset holds the memory-review floor
- * on the project RIGHT NOW. False when there was no confirmation at all (act
- * mode), when the row is gone, or when that user's live role is below the
+ * The id of the human who confirmed this changeset, IF their live project role
+ * meets the memory-review floor. Null when there was no confirmation at all
+ * (act mode), when the row is gone, or when that user's role is below the
  * floor — in every one of those cases the write lands `proposed` and the
  * in-app review still has to happen.
  */
-async function approverMeetsReviewFloor(
+async function approverWithReviewFloor(
   db: AquillaDb,
   projectId: string,
   confirmationId: string | null,
-): Promise<boolean> {
-  if (confirmationId === null) return false
+): Promise<string | null> {
+  if (confirmationId === null) return null
   const row = await db
     .prepare(`SELECT user_id FROM changeset_confirmations WHERE id = ?`)
     .bind(confirmationId)
     .first<{ user_id: string | number | null }>()
-  if (row?.user_id == null) return false
-  const approverRole = await resolveProjectRoleShared(db, { id: String(row.user_id) }, projectId)
-  return !!approverRole && approverRole.level >= MEMORY_REVIEW_ROLE
+  if (row?.user_id == null) return null
+  const approverId = String(row.user_id)
+  const approverRole = await resolveProjectRoleShared(db, { id: approverId }, projectId)
+  return approverRole && approverRole.level >= MEMORY_REVIEW_ROLE ? approverId : null
 }
 
 async function finishMemoryReceipt(

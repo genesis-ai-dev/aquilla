@@ -321,6 +321,15 @@ describe('memory commands — approval gate', () => {
     expect(committed!.res.status).toBe(200)
     expect(committed!.body.receipt!.memoryStatus).toBe('approved')
     expect((await buildMemoryContext(tdb.db, PROJECT)).memoryIndex).toHaveLength(1)
+
+    // The audit trail names the human whose authority published it — the lead
+    // who approved, not the contributor whose credential staged it.
+    const { rows } = await tdb.pg.query<{ created_by: string; reviewed_by: string }>(
+      `SELECT created_by, reviewed_by FROM agent_memories WHERE project_id = $1 AND status = 'approved'`,
+      [PROJECT],
+    )
+    expect(rows[0].reviewed_by).toBe(String(lead.userId))
+    expect(rows[0].created_by).toBe(String(contributor.userId))
   })
 
   it('a viewer cannot stage a memory write at all', async () => {

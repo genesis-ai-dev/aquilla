@@ -1,6 +1,9 @@
 // CLI entrypoint for the migrate daemon. Parses args, wires the stages, and
-// holds the same R2 run lock `scripts/migrate-all.ts --apply` takes — the two
-// are mutually exclusive writers against the same prod project set.
+// holds the same R2 run lock `scripts/migrate-all.ts --apply` (content pass)
+// takes — the two are mutually exclusive writers against the same prod
+// project set. The nightly `--audio-fast --apply` pass uses a *different*
+// lock key (see scripts/migrate-all.ts) so it no longer contends with this
+// daemon's continuous lease — see docs/MIGRATE-DAEMON.md, Cutover checklist.
 import os from "node:os"
 import fs from "node:fs"
 import path from "node:path"

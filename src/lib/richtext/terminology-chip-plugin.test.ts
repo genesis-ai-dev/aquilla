@@ -92,11 +92,10 @@ describe("buildTerminologyChipDecorationSet", () => {
     expect(set.find()).toHaveLength(0)
   })
 
-  it("creates two decorations per match (host inline + widget chip)", () => {
+  it("creates one inline highlight per match", () => {
     const doc = makeDoc("worship God today")
     const set = buildTerminologyChipDecorationSet(doc, [makeConcept("God")])
-    // One inline (host) + one widget = 2
-    expect(set.find()).toHaveLength(2)
+    expect(set.find()).toHaveLength(1)
   })
 
   it("inline decoration covers the matched word positions", () => {
@@ -110,6 +109,10 @@ describe("buildTerminologyChipDecorationSet", () => {
     expect(inline).toBeDefined()
     expect(inline!.from).toBe(9)  // 8 + 1
     expect(inline!.to).toBe(12)   // 11 + 1
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const attrs = (inline as any).type.attrs
+    expect(attrs.class).toContain("term-chip-host")
+    expect(attrs["data-source-term"]).toBe("God")
   })
 
   it("creates decorations for multiple concepts", () => {
@@ -118,7 +121,7 @@ describe("buildTerminologyChipDecorationSet", () => {
       makeConcept("God"),
       makeConcept("love"),
     ])
-    // "God" → 1 match → 2 decorations; "love" → 2 matches → 4 decorations = 6 total
-    expect(set.find()).toHaveLength(6)
+    // "God" → 1 match; "love" → 2 matches.
+    expect(set.find()).toHaveLength(3)
   })
 })

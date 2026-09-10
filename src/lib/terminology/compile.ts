@@ -6,8 +6,8 @@
  *
  * Rules produced per active concept:
  *   preferred / admitted renderings → one `source-requires-target` rule
- *     (source contains sourceTerm ⇒ target must contain at least one approved
- *      rendering; absence = "term not rendered with an approved rendering")
+ *     (instance counts add up 1:1: each sourceTerm hit needs a counterpart
+ *      approved rendering, and extra renderings in the target are also a miss)
  *   each forbidden rendering → one `target-forbids` rule per rendering
  *     (source contains sourceTerm AND target contains forbidden text ⇒ violation)
  *
@@ -52,7 +52,7 @@ export function compileConceptsToRules(concepts: Concept[]): TranslationRule[] {
     const sourcePattern = termToRegexSource(concept.sourceTerm)
     if (sourcePattern === null) continue
 
-    // source-requires-target: source contains the term ⇒ target must have an approved rendering.
+    // source-requires-target: each source instance needs a counterpart rendering.
     if (approved.length > 0) {
       // Alternation of all approved renderings, each wildcard-aware. Drop any
       // empty rendering pattern. rule-engine compiles this with /i (+/u for
@@ -81,6 +81,7 @@ export function compileConceptsToRules(concepts: Concept[]): TranslationRule[] {
           type: "source-requires-target",
           sourcePattern,
           targetPattern,
+          ...(concept.caseSensitive ? { caseSensitive: true } : {}),
         },
       })
     }
@@ -112,6 +113,7 @@ export function compileConceptsToRules(concepts: Concept[]): TranslationRule[] {
         check: {
           type: "target-forbids",
           targetPattern: forbiddenPattern,
+          ...(concept.caseSensitive ? { caseSensitive: true } : {}),
         },
       })
     }

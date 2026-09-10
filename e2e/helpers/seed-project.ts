@@ -165,6 +165,8 @@ export interface ProjectedCellRow {
   value: string
   validated: boolean
   aiDrafted: boolean
+  /** Chain head for this side/lane — the event id the projection last applied. */
+  eventId: string
 }
 
 /** Read a seeded file's cell rows straight from the sync-worker projection —
@@ -184,6 +186,36 @@ export async function readProjectedCells(
   const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
   if (!r.ok) throw new Error(`cells read failed: HTTP ${r.status} — ${await r.text()}`)
   return ((await r.json()) as { cells: ProjectedCellRow[] }).cells
+}
+
+/** One event on a cell's chain as returned by the per-cell history route
+ * (sync-worker `cell-history-read-route.ts`), newest-first. */
+export interface CellHistoryEventRow {
+  id: string
+  parentId: string | null
+  kind: string
+  author: string
+  serverSeq: number
+  payload: unknown
+}
+
+/** Read a cell's full event log (newest-first) from
+ * `GET /api/v1/projects/:p/files/:f/cells/:c/history` — the audit truth the
+ * history drawer renders. Stale (bumped) commits are in here too: they never
+ * advanced the projection but are still logged. */
+export async function readCellHistory(
+  jwt: string,
+  seeded: Pick<SeededProject, "projectId" | "fileId">,
+  cellId: string,
+  limit = 200,
+): Promise<CellHistoryEventRow[]> {
+  const token = await mintSyncToken(jwt, seeded.projectId, seeded.fileId)
+  const url =
+    `${SYNC_BASE}/api/v1/projects/${seeded.projectId}/files/${seeded.fileId}` +
+    `/cells/${encodeURIComponent(cellId)}/history?limit=${limit}`
+  const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+  if (!r.ok) throw new Error(`cell history read failed: HTTP ${r.status} — ${await r.text()}`)
+  return ((await r.json()) as { events: CellHistoryEventRow[] }).events
 }
 
 /** Navigate an authed page straight into the seeded file's editor and wait

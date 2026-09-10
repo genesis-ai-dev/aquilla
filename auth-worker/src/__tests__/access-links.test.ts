@@ -239,6 +239,37 @@ describe("POST /api/v2/access-links/:token/redeem", () => {
     const res = await redeem(token, "4821")
     expect(res.status).toBe(401)
   })
+
+  it("throttles by IP across many distinct tokens once the per-IP failure cap is hit", async () => {
+    // [Pen test] Auth & session mgmt (2026-08-31): the per-token lockout alone
+    // doesn't stop a caller who holds several real tokens (e.g. a leaked
+    // distribution list) from guessing PINs across them — each token gets its
+    // own 5-guess budget. A shared IP-scoped counter closes that gap.
+    await seedProjectWithCreator("proj-1", 1, "alice")
+    await seedUser(2, "translator")
+    const tokens: string[] = []
+    for (let i = 0; i < 31; i++) {
+      const mint = await mintLink("proj-1", "alice", {
+        projectId: "proj-1",
+        userId: 2,
+        pin: "4821",
+      })
+      const { token } = (await mint.json()) as { token: string }
+      tokens.push(token)
+    }
+
+    // Wrong PIN against 30 distinct tokens trips the per-IP cap (each is only
+    // its first failure, well under any single token's own 5-attempt lockout).
+    for (let i = 0; i < 30; i++) {
+      const r = await redeem(tokens[i], "0000")
+      expect(r.status).toBe(401)
+    }
+
+    // The 31st attempt — even with the CORRECT PIN, on a fresh, unlocked
+    // token — is rejected by the IP throttle before the PIN is ever checked.
+    const res = await redeem(tokens[30], "4821")
+    expect(res.status).toBe(429)
+  })
 })
 
 describe("POST /api/v2/access-links/:token/revoke", () => {

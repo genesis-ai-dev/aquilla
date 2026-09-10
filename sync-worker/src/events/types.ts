@@ -19,6 +19,18 @@
 //   4. (If it mutates the projection) a handler in handlers/.
 // TypeScript's exhaustiveness check enforces (1)–(3).
 
+/** Mirrors `RenderingStatus` in src/lib/terminology/types.ts. */
+export type TermRenderingStatusPayload = 'preferred' | 'admitted' | 'forbidden'
+
+/** Mirrors `TermRendering` in src/lib/terminology/types.ts. */
+export interface TermRenderingPayload {
+  rendering: string
+  status: TermRenderingStatusPayload
+}
+
+/** Mirrors `Concept['status']` in src/lib/terminology/types.ts. */
+export type ConceptStatusPayload = 'active' | 'draft' | 'deprecated'
+
 export type EventKind =
   // Source-side cell events (importer / admin only).
   | 'source.cell.create'
@@ -81,6 +93,25 @@ export type EventKind =
   | 'comment.edit'
   | 'comment.delete'
   | 'comment.resolve'
+  // Terminology concepts (non-chain-mutating; project-level).
+  //
+  // Concepts USED to live in the project_settings JSON blob, where every add
+  // PATCHed the whole `terminology` array rebuilt from the writer's stale
+  // snapshot — two people adding terms in the same minute silently destroyed
+  // each other's entries (observed live, 2026-09-04 demo: five attendees added
+  // terms, one survived). On the event log each write names ONE concept, so a
+  // concurrent add can no longer overwrite an array it never read.
+  //
+  // Project-level like `assignment.*`: the envelope carries `__project__` as
+  // fileId for auth/routing, and the concept id rides the payload.
+  | 'term.create'
+  | 'term.update'
+  | 'term.delete'
+  // Review-queue transitions. Separate kinds (rather than a `term.update` with
+  // a status field) so the audit log distinguishes "someone edited this term"
+  // from "someone approved it" — the approval trail is the point.
+  | 'term.approve'
+  | 'term.reject'
   // Back-translations (non-chain-mutating; contributor-level).
   // Does NOT move cells.event_id; does NOT affect validations or endorsements.
   | 'cell.backtranslation.set'
@@ -112,6 +143,10 @@ export type EventKind =
   // with is per-file too. Non-chain-mutating; maintainer floor (structural,
   // same clearance as project settings).
   | 'file.timing.set'
+  // Sidebar folder / corpus group for a file, stored in files.meta JSON.
+  // Non-chain-mutating; contributor-level — same class as file.rename (label
+  // cleanup), not track structure. Null clears the file back to Ungrouped.
+  | 'file.corpus.set'
   // Stage 1 (first-class timeline tracks): one track's presentation overrides
   // — rename, reorder, group, or the whole record of a user-added track —
   // stored in files.meta JSON under `trackOverrides`. Non-chain-mutating;
@@ -522,6 +557,11 @@ export interface EventPayloads {
     /** Versioned normalized-import summary persisted under files.meta. */
     importManifest?: Record<string, unknown>
     /**
+     * Sidebar folder for the file — "OT"/"NT" for scripture, or a named
+     * collection such as "Treasure Hunt Bible". Stored in files.meta.
+     */
+    corpusMarker?: string
+    /**
      * Internal re-import fold snapshot. The specialized re-import route uses
      * this to make event-log rebuilds reproduce the live merged file metadata
      * exactly. Normal genesis imports omit it.
@@ -529,10 +569,14 @@ export interface EventPayloads {
     projectionMeta?: Record<string, unknown>
   }
   // Rename a file's display label. Non-chain-mutating; parentId omitted.
-  // (Corpus/grouping marker is not server-backed yet — name only.)
   'file.rename': {
     /** New display name for the file in the project sidebar. */
     name: string
+  }
+  // Set/clear the file's sidebar corpus group, stored in files.meta JSON;
+  // null clears it (Ungrouped). Contributor-level, like file.rename.
+  'file.corpus.set': {
+    corpusMarker: string | null
   }
   // Soft-delete a file. Non-chain-mutating; parentId omitted.
   // Stamps `files.deleted_at`; cells and audio are retained (R2 wipe deferred).
@@ -562,6 +606,42 @@ export interface EventPayloads {
   'comment.resolve': {
     commentId: string // top-level only; server noops on a reply id
     resolved: boolean
+  }
+
+  // ── Terminology concepts (non-chain-mutating, project-level) ───────────
+  // `conceptId` is client-generated (uuid) and is the projection's primary
+  // key, so a replayed/duplicated create is an idempotent upsert rather than a
+  // second concept.
+  'term.create': {
+    conceptId: string
+    sourceTerm: string
+    renderings: TermRenderingPayload[]
+    /** 'draft' = suggested, awaiting review; 'active' = enforced immediately. */
+    status: ConceptStatusPayload
+    notes?: string
+    caseSensitive?: boolean
+  }
+  // Partial patch. Only the keys present are written — absent keys keep their
+  // projected value, so two people editing DIFFERENT fields of the same
+  // concept both survive. `renderings` is the one exception: it is replaced
+  // wholesale, because a rendering list has no stable per-item id to merge on.
+  'term.update': {
+    conceptId: string
+    sourceTerm?: string
+    renderings?: TermRenderingPayload[]
+    notes?: string
+    caseSensitive?: boolean
+  }
+  'term.delete': {
+    conceptId: string // soft-delete: stamps deleted_at
+  }
+  'term.approve': {
+    conceptId: string // draft -> active
+  }
+  'term.reject': {
+    conceptId: string
+    /** 'deprecate' keeps the row for the record; 'delete' soft-deletes it. */
+    mode: 'delete' | 'deprecate'
   }
 
   // ── Back-translations (non-chain-mutating) ─────────────────────────────

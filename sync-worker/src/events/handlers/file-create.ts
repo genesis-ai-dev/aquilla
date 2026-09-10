@@ -10,6 +10,7 @@
 import type { AuthorizedEvent } from '../authorize'
 import type { RealtimeMessage, ProjectionTable } from '../realtime'
 import { buildEventInsertStmt } from '../event-insert'
+import { usableCorpusMarker } from '../corpus-marker'
 import type { DispatchResult } from './types'
 
 export function handleFileCreate(
@@ -58,6 +59,8 @@ export function handleFileCreate(
   if (event.payload.r2Key) langMeta.r2Key = event.payload.r2Key
   if (event.payload.importFormat) langMeta.importFormat = event.payload.importFormat
   if (event.payload.parserVersion) langMeta.parserVersion = event.payload.parserVersion
+  const corpusMarker = usableCorpusMarker(event.payload.corpusMarker)
+  if (corpusMarker) langMeta.corpusMarker = corpusMarker
 
   const fileUpsert = db
     .prepare(

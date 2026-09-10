@@ -13,9 +13,12 @@ export interface VideoPaneErrorCardProps {
   src: string
   onRetry(): void
   onChangeVideo?: () => void
+  /** AQU-1119: a video that cannot play is exactly one you may want out of the
+   *  way, so the error card offers the same collapse control as the pane. */
+  onCollapse?: () => void
 }
 
-export function VideoPaneErrorCard({ src, onRetry, onChangeVideo }: VideoPaneErrorCardProps) {
+export function VideoPaneErrorCard({ src, onRetry, onChangeVideo, onCollapse }: VideoPaneErrorCardProps) {
   const t = useT()
   return (
     <div
@@ -23,7 +26,7 @@ export function VideoPaneErrorCard({ src, onRetry, onChangeVideo }: VideoPaneErr
       data-video-state="error"
       className="flex h-full min-h-0 flex-col overflow-hidden border-r border-border"
     >
-      <VideoPaneHeader src={src} />
+      <VideoPaneHeader src={src} onCollapse={onCollapse} />
       <div className="m-2 flex min-h-0 flex-col items-start gap-2 rounded-md border border-dashed border-border bg-muted/30 p-3">
         <div className="flex items-center gap-1.5 text-xs font-medium text-foreground">
           <Film className="h-3.5 w-3.5 shrink-0" />

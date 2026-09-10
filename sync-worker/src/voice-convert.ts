@@ -65,6 +65,13 @@ export async function handleVoiceReferenceRequest(
 
   const projectId = decodeURIComponent(match[1])
   const referenceAudioId = decodeURIComponent(match[2])
+  // [Pen test] Input validation & injection (2026-09-02): both segments are
+  // decoded *after* the `[^/]+` path match, so a %2f/%2e%2e%2f-encoded value
+  // can smuggle a "/" or ".." into the decoded id and land directly in the R2
+  // key below — same class of bug as the /audio route's isPathSafeId fix.
+  if (!isPathSafeId(projectId) || !isPathSafeId(referenceAudioId)) {
+    return new Response("invalid projectId or referenceAudioId", { status: 400 })
+  }
 
   const header = request.headers.get("Authorization") ?? ""
   const token = header.startsWith("Bearer ") ? header.slice("Bearer ".length) : null
@@ -149,11 +156,11 @@ export async function handleVoiceConvertRequest(
   if (!projectId || !fileId || !referenceAudioId) {
     return new Response("missing projectId, fileId, or referenceAudioId", { status: 400 })
   }
-  // projectId/fileId are form fields (unlike /audio, whose ids are URL-path
-  // segments matched by `[^/]+`) and land directly in an R2 key below, so
-  // reject anything that could act as a path separator there.
-  if (!isPathSafeId(projectId) || !isPathSafeId(fileId)) {
-    return new Response("invalid projectId or fileId", { status: 400 })
+  // projectId/fileId/referenceAudioId are form fields (unlike /audio, whose
+  // ids are URL-path segments matched by `[^/]+`) and land directly in an R2
+  // key below, so reject anything that could act as a path separator there.
+  if (!isPathSafeId(projectId) || !isPathSafeId(fileId) || !isPathSafeId(referenceAudioId)) {
+    return new Response("invalid projectId, fileId, or referenceAudioId", { status: 400 })
   }
 
   // Auth: sync-token scoped to this (projectId, fileId), same as /audio.

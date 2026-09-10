@@ -2,12 +2,13 @@ import { describe, it, expect, afterEach } from "vitest"
 import { FLAGS, isFlagEnabled } from "./flags"
 
 describe("feature flags registry", () => {
-  it("defines contextualTranslation, default on", () => {
-    // The flag gates DISCOVERY (is the play button visible), not spend — a run
-    // only starts when someone clicks it. Off-by-default made the feature
-    // reachable only by someone who already knew to go looking for it.
+  it("defines contextualTranslation, default OFF", () => {
+    // AQU-1103 regression guard. Autopilot is opt-in: a project that has never
+    // stored a value must not get its surfaces. This registry default is the
+    // only thing that enables the feature for such a project, so asserting it
+    // here is asserting the product rule, not restating the source.
     expect(FLAGS.contextualTranslation).toBeDefined()
-    expect(FLAGS.contextualTranslation.default).toBe(true)
+    expect(FLAGS.contextualTranslation.default).toBe(false)
     expect(FLAGS.contextualTranslation.labelKey).toBe("autopilot.settings.controlsLabel")
     expect(FLAGS.contextualTranslation.descriptionKey).toBe("autopilot.settings.controlsDescription")
   })
@@ -20,14 +21,18 @@ describe("isFlagEnabled", () => {
   })
 
   it("absent field falls back to the registry default", () => {
-    expect(isFlagEnabled({}, "contextualTranslation")).toBe(true)
-    expect(isFlagEnabled({ experimentalFlags: undefined }, "contextualTranslation")).toBe(true)
+    // AQU-1103: a project nobody has touched reads OFF. This is the exact shape
+    // that was live in production — no `experimentalFlags` on the record at all.
+    expect(isFlagEnabled({}, "contextualTranslation")).toBe(false)
+    expect(isFlagEnabled({ experimentalFlags: undefined }, "contextualTranslation")).toBe(false)
   })
 
-  it("a default-on flag still honours an explicit opt-out", () => {
+  it("a default-off flag still honours an explicit opt-in", () => {
+    // Someone who deliberately switched Autopilot on keeps it across the
+    // default flip — the stored value wins.
     expect(
-      isFlagEnabled({ experimentalFlags: { contextualTranslation: false } }, "contextualTranslation"),
-    ).toBe(false)
+      isFlagEnabled({ experimentalFlags: { contextualTranslation: true } }, "contextualTranslation"),
+    ).toBe(true)
   })
 
   it("stored value wins over the default", () => {

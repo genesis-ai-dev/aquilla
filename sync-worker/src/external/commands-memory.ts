@@ -480,8 +480,13 @@ export async function commitMemoryCommand(
   }
 
   // The changeset's human confirmation stands in for the Memory-tab review —
-  // but only at the authority that review actually requires.
-  const approve = confirmationId !== null && role.level >= MEMORY_REVIEW_ROLE
+  // but only at the authority that review actually requires, and only for the
+  // person who actually gave it. The approver is NOT necessarily the
+  // credential's owner: auth-worker's approval route admits any user whose
+  // live project role meets the plan's staged floor (CONTRIBUTOR for the
+  // adding kinds), so checking `role` here would let a contributor's approval
+  // ride a lead-owned credential into the copilot.
+  const approve = await approverMeetsReviewFloor(db, projectId, confirmationId)
 
   const memoryId = cs.plannedIds?.memory?.memoryId ?? crypto.randomUUID()
   // Pinned at prepare, so a crash-retry finds ITS OWN row instead of inserting
@@ -524,6 +529,28 @@ export async function commitMemoryCommand(
   // reporting a status this branch cannot produce.
   const status = reviewed.status === 'ok' && reviewed.memory.status === 'proposed' ? 'proposed' : 'approved'
   return finishMemoryReceipt(db, cred, cs, cmd, projectId, path, status, confirmationId, channel)
+}
+
+/**
+ * Whether the human who confirmed this changeset holds the memory-review floor
+ * on the project RIGHT NOW. False when there was no confirmation at all (act
+ * mode), when the row is gone, or when that user's live role is below the
+ * floor — in every one of those cases the write lands `proposed` and the
+ * in-app review still has to happen.
+ */
+async function approverMeetsReviewFloor(
+  db: AquillaDb,
+  projectId: string,
+  confirmationId: string | null,
+): Promise<boolean> {
+  if (confirmationId === null) return false
+  const row = await db
+    .prepare(`SELECT user_id FROM changeset_confirmations WHERE id = ?`)
+    .bind(confirmationId)
+    .first<{ user_id: string | number | null }>()
+  if (row?.user_id == null) return false
+  const approverRole = await resolveProjectRoleShared(db, { id: String(row.user_id) }, projectId)
+  return !!approverRole && approverRole.level >= MEMORY_REVIEW_ROLE
 }
 
 async function finishMemoryReceipt(

@@ -91,13 +91,28 @@ async function commit(env: ReturnType<typeof makeEnv>, token: string, id: string
   return { res, body: (await res.json()) as JsonBody }
 }
 
-/** Stands in for the human clicking approve on /approve/:id. */
-async function confirm(tdb: TestDb, changesetId: string, credentialId: string, digest: string) {
+/** Stands in for a human clicking approve on /approve/:id. `approverUserId` is
+ *  the human who approved — auth-worker admits any user meeting the plan's
+ *  staged floor, so this is NOT necessarily the credential's owner. */
+async function confirm(
+  tdb: TestDb,
+  changesetId: string,
+  credentialId: string,
+  digest: string,
+  approverUserId: number,
+) {
   await tdb.pg.query(
     `INSERT INTO changeset_confirmations
        (id, changeset_id, user_id, credential_id, digest, expires_at, consumed_at)
-     VALUES ($1, $2, '1', $3, $4, $5, NULL)`,
-    [crypto.randomUUID(), changesetId, credentialId, digest, new Date(Date.now() + 60_000).toISOString()],
+     VALUES ($1, $2, $3, $4, $5, $6, NULL)`,
+    [
+      crypto.randomUUID(),
+      changesetId,
+      String(approverUserId),
+      credentialId,
+      digest,
+      new Date(Date.now() + 60_000).toISOString(),
+    ],
   )
 }
 
@@ -105,14 +120,20 @@ async function confirm(tdb: TestDb, changesetId: string, credentialId: string, d
 async function run(
   tdb: TestDb,
   env: ReturnType<typeof makeEnv>,
-  actor: { token: string; credentialId: string },
+  actor: { token: string; credentialId: string; userId: number },
   command: unknown,
-  opts: { approve?: boolean } = {},
+  opts: { approve?: boolean; approverUserId?: number } = {},
 ) {
   const staged = await prepare(env, actor.token, command)
   if (staged.res.status !== 200) return { staged, committed: null }
   if (opts.approve) {
-    await confirm(tdb, staged.body.changeset!.id, actor.credentialId, staged.body.digest!)
+    await confirm(
+      tdb,
+      staged.body.changeset!.id,
+      actor.credentialId,
+      staged.body.digest!,
+      opts.approverUserId ?? actor.userId,
+    )
   }
   const committed = await commit(env, actor.token, staged.body.changeset!.id)
   return { staged, committed }
@@ -260,11 +281,46 @@ describe('memory commands — approval gate', () => {
     const env = makeEnv(tdb.db)
     const contributor = await memberToken(tdb, 400, 'ask')
     const { committed } = await run(tdb, env, contributor, EXAMPLE, { approve: true })
+    // (approver defaults to the credential owner — here, the contributor.)
 
     expect(committed!.res.status).toBe(200)
     expect(committed!.body.receipt!.memoryStatus).toBe('proposed')
     const ctx = await buildMemoryContext(tdb.db, PROJECT)
     expect(ctx.memoryIndex).toHaveLength(0)
+  })
+
+  it('a CONTRIBUTOR approver cannot publish a lead-owned credential\'s plan', async () => {
+    // auth-worker admits any approver meeting the plan's staged floor, which for
+    // AddExample is CONTRIBUTOR. The authority that counts is the APPROVER's, not
+    // the credential owner's — otherwise a contributor's click rides a lead's
+    // credential straight into the copilot.
+    const env = makeEnv(tdb.db)
+    const lead = await memberToken(tdb, 500, 'ask')
+    const contributor = await memberToken(tdb, 400)
+    const { committed } = await run(tdb, env, lead, EXAMPLE, {
+      approve: true,
+      approverUserId: contributor.userId,
+    })
+
+    expect(committed!.res.status).toBe(200)
+    expect(committed!.body.receipt!.memoryStatus).toBe('proposed')
+    expect((await buildMemoryContext(tdb.db, PROJECT)).memoryIndex).toHaveLength(0)
+  })
+
+  it('a PROJECT_LEAD approver publishes a contributor-owned credential\'s plan', async () => {
+    // The mirror case: the credential owner is only a contributor, but a lead
+    // approved, so the lead's authority is what lands it.
+    const env = makeEnv(tdb.db)
+    const contributor = await memberToken(tdb, 400, 'ask')
+    const lead = await memberToken(tdb, 500)
+    const { committed } = await run(tdb, env, contributor, EXAMPLE, {
+      approve: true,
+      approverUserId: lead.userId,
+    })
+
+    expect(committed!.res.status).toBe(200)
+    expect(committed!.body.receipt!.memoryStatus).toBe('approved')
+    expect((await buildMemoryContext(tdb.db, PROJECT)).memoryIndex).toHaveLength(1)
   })
 
   it('a viewer cannot stage a memory write at all', async () => {

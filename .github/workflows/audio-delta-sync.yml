@@ -1,12 +1,25 @@
-name: Delta sync (content + audio)
+name: Delta sync (audio + users)
 
 # Scheduled delta import of legacy-Codex projects from GitLab → Neon + R2.
-# Two passes, both delta (per-project HEAD-sha compared against the state
-# persisted in R2, so unchanged projects are skipped without cloning):
-#   1. CONTENT — orgs/teams (created in Neon via /migrate/groups), projects,
-#      cells/comments/cast (events via the pipelined /migrate/ingest).
-#   2. AUDIO  — every take copied R2→R2 (CopyObject, no egress) + cell_audio events.
+# Content (orgs/teams/projects/cells) is NO LONGER migrated here — that's
+# owned by the migrate daemon running continuously on the Linux box
+# (scripts/migrate-daemon/), live since 2026-09-09. See docs/MIGRATE-DAEMON.md.
+# This workflow still runs the two passes below, both delta (per-project
+# HEAD-sha compared against the state persisted in R2, so unchanged projects
+# are skipped without cloning):
+#   1. USERS — D1 identity + GitLab org/team/project access.
+#   2. AUDIO — every take copied R2→R2 (CopyObject, no egress) + cell_audio events.
 # Idempotent end to end; safe to re-run.
+#
+# Lock coexistence: the migrate daemon holds a continuous R2 run lock while
+# it's live, under the same key scripts/migrate-all.ts's content pass uses
+# (they must stay mutually exclusive — both write source/target cell events).
+# The audio pass below (--audio-fast --apply) acquires a SEPARATE lock key
+# (_migrate/audio-fast.lock, see scripts/migrate-all.ts) so it no longer
+# contends with the daemon's lease — audio-fast only does R2 CopyObject of
+# take bytes + emits cell.audio.* events, disjoint from what the daemon
+# writes for content. Without this the audio pass would fail every night
+# with LockHeldError while the daemon holds the content lock continuously.
 #
 # Required repo secrets (Settings → Secrets and variables → Actions):
 #   FRONTIER_USERNAME, FRONTIER_PASSWORD   GitLab creds (Frontier password grant), OR
@@ -68,9 +81,9 @@ jobs:
       - name: Install auth-worker deps (imported by migrate-users.ts)
         run: npm ci --prefix auth-worker
 
-      # Restore the delta state (HEAD-sha-per-project, for BOTH passes:
-      # contentSha + audioFastSha) so unchanged projects are skipped without
-      # cloning. Missing object → first run → full sweep.
+      # Restore the delta state (HEAD-sha-per-project, for audioFastSha) so
+      # unchanged projects are skipped without cloning. Missing object →
+      # first run → full sweep.
       - name: Restore migrate state from R2
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -79,11 +92,10 @@ jobs:
         run: |
           aws s3 cp "s3://${R2_BUCKET}/${STATE_KEY}" .migrate-state.json \
             --endpoint-url "$R2_ENDPOINT" || echo "no prior state — full sweep"
-          echo "state entries: $(grep -c contentSha .migrate-state.json 2>/dev/null || echo 0) content, $(grep -c audioFastSha .migrate-state.json 2>/dev/null || echo 0) audio"
+          echo "state entries: $(grep -c audioFastSha .migrate-state.json 2>/dev/null || echo 0) audio"
 
       # 1) USERS: atomically import every safe D1-only identity together with
-      #    its GitLab-derived org/team/project access. This must finish before
-      #    the full group/content pass so formerly unresolved members resolve.
+      #    its GitLab-derived org/team/project access.
       - name: User identity and access delta
         id: users
         timeout-minutes: 30
@@ -103,34 +115,10 @@ jobs:
           set -o pipefail
           npx tsx scripts/migrate-users.ts --apply 2>&1 | tee users.log
 
-      # 2) CONTENT: orgs/teams (created in Neon) + projects + cells. The group
-      #    sync runs inline, so new orgs are fully pulled in. R2 creds are for
-      #    the run lock (_migrate/audio-migrate-state.lock) that every --apply
-      #    acquires so a stray local run can never overlap this one.
-      # Step-level timeouts (not just the job's): a JOB-level timeout kills
-      # `if: always()` steps too, so the state-persist step never ran and every
-      # nightly full sweep restarted from zero (run 28809824118: content took
-      # 5h45m, job died at 350m into audio, persist stuck "pending"). A STEP
-      # timeout only fails the step; migrate-all.ts saveState()s after every
-      # project, so persisting the partial .migrate-state.json lets successive
-      # runs converge instead of repeating the sweep.
-      - name: Content delta
-        id: content
-        timeout-minutes: 150
-        env:
-          FRONTIER_USERNAME: ${{ secrets.FRONTIER_USERNAME }}
-          FRONTIER_PASSWORD: ${{ secrets.FRONTIER_PASSWORD }}
-          FRONTIER_TOKEN: ${{ secrets.FRONTIER_TOKEN }}
-          GITLAB_URL: ${{ secrets.GITLAB_URL }}
-          SYNC_SECRET_KEY: ${{ secrets.SYNC_SECRET_KEY }}
-          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-        run: |
-          set -o pipefail
-          npx tsx scripts/migrate-all.ts --apply 2>&1 | tee content.log
-
-      # 3) AUDIO: every take, copied R2→R2. Runs even if content failed
-      #    (independent + idempotent), so one bad pass doesn't block the other.
+      # 2) AUDIO: every take, copied R2→R2. Uses its own R2 run lock
+      #    (_migrate/audio-fast.lock) so it never contends with the migrate
+      #    daemon's continuous content-pass lock — see the coexistence note
+      #    at the top of this file.
       - name: Audio delta
         id: audio
         if: always()
@@ -167,46 +155,27 @@ jobs:
         if: always()
         id: report
         run: |
-          u=users.log; c=content.log; a=audio.log
+          u=users.log; a=audio.log
           [ -f "$u" ] || echo "users.log missing — user pass did not produce output" > "$u"
-          [ -f "$c" ] || echo "content.log missing — content pass did not produce output" > "$c"
           [ -f "$a" ] || echo "audio.log missing — audio pass did not produce output" > "$a"
-
-          # ── content ── (grep -c already prints 0 when no match; no `|| echo 0`)
-          c_applied=$(grep -oE "Applied [0-9]+/[0-9]+ projects" "$c" | tail -1); [ -z "$c_applied" ] && c_applied="Applied ?/? (failed early)"
-          c_changed=$(grep -cE "↳ delta:" "$c")
-          c_events=$(grep -oE "delta: [0-9]+ new" "$c" | awk '{s+=$2} END{print s+0}')
-          c_groups=$(grep -oE "[0-9]+ orgs / [0-9]+ teams (upserted|planned)" "$c" | tail -1)
-          c_skipped=$(grep -c "content unchanged" "$c")
-          c_errors=$(grep -cE "✗ " "$c")
 
           # ── users ──
           u_summary=$(tail -1 "$u")
 
-          # ── audio ──
+          # ── audio ── (grep -c already prints 0 when no match; no `|| echo 0`)
           a_applied=$(grep -oE "Applied [0-9]+/[0-9]+ projects" "$a" | tail -1); [ -z "$a_applied" ] && a_applied="Applied ?/? (failed early)"
           a_changed=$(grep -cE "copied [0-9]+/[0-9]+.*\([0-9.]+s\)" "$a")
           a_copied=$(grep -oE "copied [0-9]+/[0-9]+.*\([0-9.]+s\)" "$a" | grep -oE "copied [0-9]+" | awk '{s+=$2} END{print s+0}')
           a_lfsmiss=$(grep -oE "lfs-miss [0-9]+" "$a" | awk '{s+=$2} END{print s+0}')
           a_errors=$(grep -cE "✗ " "$a")
 
-          errors=$((c_errors + a_errors))
+          errors=$((a_errors))
           status="✅ ok"; [ "$errors" -gt 0 ] && status="⚠️ ${errors} errors"
           {
             echo "## Delta sync — ${status}"
             echo ""
             echo "### Users (D1 identity + GitLab access)"
             echo "\`${u_summary}\`"
-            echo ""
-            echo "### Content (orgs / projects / cells)"
-            echo "| metric | value |"
-            echo "|---|---|"
-            echo "| ${c_applied} | |"
-            echo "| projects with new content | ${c_changed} |"
-            echo "| new events ingested | ${c_events} |"
-            echo "| org/team sync | ${c_groups:-n/a} |"
-            echo "| unchanged (skipped) | ${c_skipped} |"
-            echo "| content errors | ${c_errors} |"
             echo ""
             echo "### Audio (takes)"
             echo "| metric | value |"
@@ -219,8 +188,6 @@ jobs:
           } | tee "$GITHUB_STEP_SUMMARY"
           {
             echo "status=${status}"
-            echo "c_applied=${c_applied}"
-            echo "c_events=${c_events}"
             echo "a_applied=${a_applied}"
             echo "a_copied=${a_copied}"
             echo "errors=${errors}"
@@ -235,15 +202,13 @@ jobs:
           WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           R_STATUS: ${{ steps.report.outputs.status }}
-          R_CAPPLIED: ${{ steps.report.outputs.c_applied }}
-          R_CEVENTS: ${{ steps.report.outputs.c_events }}
           R_AAPPLIED: ${{ steps.report.outputs.a_applied }}
           R_ACOPIED: ${{ steps.report.outputs.a_copied }}
           R_ERRORS: ${{ steps.report.outputs.errors }}
         run: |
           if [ -z "$WEBHOOK" ]; then echo "no DISCORD_WEBHOOK_URL secret — skipping"; exit 0; fi
-          msg=$(printf '**Delta sync** — %s\nContent: %s · %s new events\nAudio: %s · %s takes copied\nerrors: %s\n<%s>' \
-            "$R_STATUS" "$R_CAPPLIED" "$R_CEVENTS" "$R_AAPPLIED" "$R_ACOPIED" "$R_ERRORS" "$RUN_URL")
+          msg=$(printf '**Delta sync** — %s\nAudio: %s · %s takes copied\nerrors: %s\n<%s>' \
+            "$R_STATUS" "$R_AAPPLIED" "$R_ACOPIED" "$R_ERRORS" "$RUN_URL")
           curl -fsS -H "Content-Type: application/json" \
             -d "$(jq -n --arg c "$msg" '{content:$c}')" \
             "$WEBHOOK" || echo "discord post failed (non-fatal)"

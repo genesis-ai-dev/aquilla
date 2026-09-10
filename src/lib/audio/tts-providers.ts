@@ -1,6 +1,5 @@
 import type { ProjectTtsSettings, TtsProvider, Voice } from "@/lib/parsers/types"
 import { HAS_HOSTED_MMS_MODELS, USE_SHERPA_MMS_MODELS, isSupportedMmsLanguageCode } from "./mms-languages"
-import { defaultKokoroVoiceForLanguage, isBundledKokoroVoiceName } from "./kokoro-languages"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import {
   DEFAULT_INWORLD_AUDIO_QUALITY,
@@ -52,7 +51,6 @@ export const GEMINI_TTS_VOICES: readonly { name: string; descriptionKey: Message
 ] as const
 
 export const DEFAULT_GEMINI_VOICE = "Kore"
-export { DEFAULT_KOKORO_VOICE } from "./kokoro-languages"
 export const DEFAULT_MMS_LANGUAGE = "eng"
 
 /** Inworld stock voices used as the hosted default catalog (AQU-1189).
@@ -95,7 +93,7 @@ export interface TtsProviderInfo {
   /** Optional external info page; only set when a real page exists. */
   learnMoreUrl?: string
   badge?: string
-  localModel?: "kokoro" | "mms"
+  localModel?: "mms"
   requiresGeminiKey?: boolean
 }
 
@@ -122,18 +120,6 @@ export const TTS_PROVIDER_INFOS: readonly TtsProviderInfo[] = [
     blurb: "Highest quality, promptable; many languages.",
     caveat: "Needs your own Google AI key.",
     hintKey: "audio.provider.geminiHint",
-  },
-  {
-    id: "kokoro",
-    title: "Kokoro (local)",
-    shortTitle: "Kokoro",
-    tier: "device",
-    supportsCloning: false,
-    hasNamedVoices: true,
-    localModel: "kokoro",
-    blurb: "Free, on-device English voices.",
-    caveat: "One-time download; may affect performance.",
-    hintKey: "audio.provider.kokoroHint",
   },
   {
     id: "mms",
@@ -171,9 +157,9 @@ const ISO_639_TO_MMS: Record<string, string> = {
   yo: "yor", yor: "yor",
 }
 
-/** Unset and leftover `"omnivoice"` ids resolve to Inworld (AQU-1189). */
+/** Unset and leftover `"omnivoice"` / `"kokoro"` ids resolve to Inworld (AQU-1189, AQU-1051). */
 export function effectiveTtsProvider(provider: TtsProvider | undefined): TtsProvider {
-  if (!provider || provider === "omnivoice") return DEFAULT_TTS_PROVIDER
+  if (!provider || provider === "omnivoice" || provider === "kokoro") return DEFAULT_TTS_PROVIDER
   return provider
 }
 
@@ -197,8 +183,10 @@ export function isGeminiVoiceName(value: string | undefined): boolean {
 export function isInworldVoiceName(value: string | undefined): boolean {
   if (!value) return false
   const trimmed = value.trim()
-  // Live catalog ids (Alex, Dennis, …) must not steal Gemini/Kokoro/MMS knobs.
-  if (isGeminiVoiceName(trimmed) || isKokoroVoiceName(trimmed) || isMmsLanguageCode(trimmed)) {
+  // Live catalog ids (Alex, Dennis, …) must not steal Gemini/MMS knobs, or
+  // leftover Kokoro speaker ids (`af_bella`) that would otherwise match the
+  // generic `[A-Za-z][\w-]+` catalog pattern.
+  if (isGeminiVoiceName(trimmed) || isLegacyKokoroVoiceName(trimmed) || isMmsLanguageCode(trimmed)) {
     return false
   }
   if (INWORLD_VOICE_NAMES.has(trimmed.toLowerCase())) return true
@@ -207,8 +195,9 @@ export function isInworldVoiceName(value: string | undefined): boolean {
   return /^[A-Za-z][\w-]{0,127}$/.test(trimmed)
 }
 
-export function isKokoroVoiceName(value: string | undefined): boolean {
-  return isBundledKokoroVoiceName(value)
+/** Leftover Kokoro 82M speaker ids (`af_heart`, `bf_emma`, `zf_xiaoxiao`). */
+export function isLegacyKokoroVoiceName(value: string | undefined): boolean {
+  return Boolean(value && /^[a-z][fm]_[a-z]+$/i.test(value.trim()))
 }
 
 export function isMmsLanguageCode(value: string | undefined): boolean {
@@ -231,7 +220,6 @@ export function defaultVoiceNameForProvider(
 ): string {
   const engine = effectiveTtsProvider(provider)
   if (engine === "inworld") return DEFAULT_INWORLD_VOICE
-  if (engine === "kokoro") return defaultKokoroVoiceForLanguage(context.targetLanguage)
   if (engine === "mms") return inferMmsLanguageCode(context.targetLanguage) ?? DEFAULT_MMS_LANGUAGE
   return DEFAULT_GEMINI_VOICE
 }
@@ -259,12 +247,6 @@ export function normalizeVoiceForProvider(
     if (!isGeminiVoiceName(next.voiceName)) next.voiceName = DEFAULT_GEMINI_VOICE
     return next
   }
-  if (engine === "kokoro") {
-    if (!isKokoroVoiceName(next.voiceName)) {
-      next.voiceName = defaultKokoroVoiceForLanguage(context.targetLanguage)
-    }
-    return next
-  }
   next.voiceName =
     inferMmsLanguageCode(next.voiceName) ??
     inferMmsLanguageCode(context.targetLanguage) ??
@@ -272,6 +254,6 @@ export function normalizeVoiceForProvider(
   return next
 }
 
-export function ttsProviderModel(provider: TtsProvider): "kokoro" | "mms" | null {
+export function ttsProviderModel(provider: TtsProvider): "mms" | null {
   return providerInfo(provider).localModel ?? null
 }

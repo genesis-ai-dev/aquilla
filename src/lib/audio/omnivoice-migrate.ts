@@ -1,25 +1,31 @@
-// One-time persist of legacy OmniVoice TTS settings onto Inworld (AQU-1189).
+// One-time persist of leftover OmniVoice / Kokoro TTS settings onto Inworld
+// (AQU-1189, AQU-1051).
 //
-// Runtime still remaps `omnivoice` → `inworld` (`effectiveTtsProvider`) so a
-// blocked/offline save cannot strand generate on a leftover stored id. This
-// rewrite is what actually clears the stored id: project provider, per-voice
-// provider, and language tags stored as ISO-639-3 / display names.
+// Runtime still remaps `omnivoice` / `kokoro` → `inworld` (`effectiveTtsProvider`)
+// so a blocked/offline save cannot strand generate on a leftover stored id.
+// This rewrite is what actually clears the stored id: project provider,
+// per-voice provider, leftover Kokoro speaker ids, and language tags stored
+// as ISO-639-3 / display names.
 
 import type { ProjectTtsSettings, TtsProvider, Voice } from "@/lib/parsers/types"
 import { toInworldLanguageLoose } from "./inworld-languages"
-import { normalizeVoiceForProvider } from "./tts-providers"
+import { isLegacyKokoroVoiceName, normalizeVoiceForProvider } from "./tts-providers"
+
+function isLegacyHostedProvider(provider: TtsProvider | undefined): boolean {
+  return provider === "omnivoice" || provider === "kokoro"
+}
 
 export function ttsSettingsNeedOmnivoiceMigration(
   settings: ProjectTtsSettings | undefined,
 ): boolean {
   if (!settings) return false
-  if (settings.provider === "omnivoice") return true
-  return Boolean(settings.voices?.some((voice) => voice.provider === "omnivoice"))
+  if (isLegacyHostedProvider(settings.provider)) return true
+  return Boolean(settings.voices?.some((voice) => isLegacyHostedProvider(voice.provider)))
 }
 
 function shouldMigrateVoice(voice: Voice, projectProvider: TtsProvider | undefined): boolean {
-  if (voice.provider === "omnivoice") return true
-  return projectProvider === "omnivoice" && voice.provider === undefined
+  if (isLegacyHostedProvider(voice.provider)) return true
+  return isLegacyHostedProvider(projectProvider) && voice.provider === undefined
 }
 
 function migratedLanguage(voice: Voice, targetLanguage?: string): string | undefined {
@@ -44,7 +50,10 @@ export function migrateOmnivoiceVoice(
   context: { projectProvider?: TtsProvider; targetLanguage?: string } = {},
 ): Voice {
   if (!shouldMigrateVoice(voice, context.projectProvider)) return voice
-  const normalized = normalizeVoiceForProvider(voice, "inworld", {
+  const source = isLegacyKokoroVoiceName(voice.voiceName)
+    ? { ...voice, voiceName: undefined }
+    : voice
+  const normalized = normalizeVoiceForProvider(source, "inworld", {
     targetLanguage: context.targetLanguage,
   })
   const language = migratedLanguage(voice, context.targetLanguage)
@@ -54,8 +63,8 @@ export function migrateOmnivoiceVoice(
 
 /**
  * Returns the same object when nothing needs rewriting so callers can skip
- * persist. Voices on Gemini / Kokoro / MMS are left alone even if the project
- * default was OmniVoice.
+ * persist. Voices on Gemini / MMS are left alone even if the project default
+ * was OmniVoice or Kokoro.
  */
 export function migrateOmnivoiceTtsSettings(
   settings: ProjectTtsSettings | undefined,
@@ -63,7 +72,7 @@ export function migrateOmnivoiceTtsSettings(
 ): ProjectTtsSettings | undefined {
   if (!settings) return settings
   const projectProvider = settings.provider
-  let changed = projectProvider === "omnivoice"
+  let changed = isLegacyHostedProvider(projectProvider)
   const nextProvider: TtsProvider | undefined = changed ? "inworld" : projectProvider
 
   let nextVoices = settings.voices
@@ -117,7 +126,7 @@ export function omnivoiceMigrationProperties(
     migrateOmnivoiceVoice(voice, { projectProvider, targetLanguage: context.targetLanguage }),
   )
   return {
-    project_provider_migrated: projectProvider === "omnivoice",
+    project_provider_migrated: isLegacyHostedProvider(projectProvider),
     voice_count: migrated.length,
     cloned_voice_count: migrated.filter((voice) => Boolean(voice.referenceAudioId)).length,
     from_languages: uniqueLanguages(migrated),

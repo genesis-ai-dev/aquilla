@@ -223,9 +223,9 @@ export const AUDIO_MEDIA_STRATEGY_LABELS: Record<AudioMediaStrategy, { nameKey: 
 }
 
 /**
- * `"omnivoice"` is a persisted legacy id. Opening a project rewrites it to
- * `"inworld"` (language tags included); runtime still remaps unread copies
- * so generate uses hosted Inworld (AQU-1189).
+ * `"omnivoice"` and `"kokoro"` are persisted legacy ids. Opening a project
+ * rewrites them to `"inworld"` (language tags included); runtime still remaps
+ * unread copies so generate uses hosted Inworld (AQU-1189, AQU-1051).
  */
 export type TtsProvider = "inworld" | "omnivoice" | "gemini" | "kokoro" | "mms"
 
@@ -240,13 +240,14 @@ export interface Voice {
   name: string
   /** Hex color for the voice's chip/dot in the UI. */
   color?: string
-  /** Defaults to "inworld" when absent. Kokoro voices ignore everything below voiceName. */
+  /** Defaults to "inworld" when absent. Leftover `"kokoro"` is rewritten to inworld. */
   provider?: TtsProvider
   /** Optional Gemini model override. */
   model?: string
-  /** Gemini prebuilt voice id (e.g. "Kore"). For Kokoro, the engine voice name.
-   *  For Inworld, the catalog `voiceId` (Dennis, Alex), an Instant Clone id, or
-   *  a published Voice Design id (`workspace__design-voice-…`). */
+  /** Gemini prebuilt voice id (e.g. "Kore"). For Inworld, the catalog `voiceId`
+   *  (Dennis, Alex), an Instant Clone id, or a published Voice Design id
+   *  (`workspace__design-voice-…`). Leftover Kokoro speaker ids (`af_heart`)
+   *  are rewritten to the Inworld stock default on load. */
   voiceName?: string
   /**
    * BCP-47 language this Inworld stock voice was picked for (AQU-1189). Used
@@ -304,7 +305,7 @@ export interface Voice {
 }
 
 export interface ProjectTtsSettings {
-  /** "inworld" (hosted Inworld TTS 2, no user key) is the default. "gemini" is BYOK; "kokoro"/"mms" run locally. Legacy `"omnivoice"` is rewritten to inworld on load and remapped at runtime. */
+  /** "inworld" (hosted Inworld TTS 2, no user key) is the default. "gemini" is BYOK; "mms" runs locally. Legacy `"omnivoice"` / `"kokoro"` are rewritten to inworld on load and remapped at runtime. */
   provider?: TtsProvider
   /** Gemini API key for BYOK TTS. Stored in the local project record. */
   apiKey?: string

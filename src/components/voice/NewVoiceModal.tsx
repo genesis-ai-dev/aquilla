@@ -1,19 +1,18 @@
 // NewVoiceModal — one modal, two ways to make a voice:
-//   • TTS voice — name it, pick the engine (Inworld / Gemini / Kokoro / MMS —
+//   • TTS voice — name it, pick the engine (Inworld / Gemini / MMS —
 //     seeded from the project's configured engine), and fill that engine's
-//     knobs (Gemini: describe how it sounds; Kokoro: pick a bundled speaker;
-//     MMS: language; Inworld: prebuilt catalog voice (searchable API language
-//     + accent, then a stock speaker) or Voice Design, plus
-//     quality / delivery / speed).
+//     knobs (Gemini: describe how it sounds; MMS: language; Inworld: prebuilt
+//     catalog voice (searchable API language + accent, then a stock speaker)
+//     or Voice Design, plus quality / delivery / speed).
 //     Gemini's base timbre stays a smart default (rotated so each new voice
-//     sounds distinct).
+//     sounds distinct). Leftover Kokoro project defaults remap to Inworld.
 //   • Clone voice — name it, pick a cloud engine that can clone (Inworld /
-//     Gemini — Kokoro and MMS are on-device and cannot), and capture a short
+//     Gemini — MMS is on-device and cannot), and capture a short
 //     reference clip (record, upload, or reuse a take). Generation is re-voiced
 //     to match it. A local project default is remapped to Inworld on this tab.
 //
 // Editing an existing voice reuses this same modal, locked to the voice's kind
-// (TTS: all four engines; clone: cloud clone engines only).
+// (TTS: all three engines; clone: cloud clone engines only).
 // Deliberately de-purpled: TTS uses the brand accent, Clone uses emerald.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
@@ -38,7 +37,6 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { VoiceCloneSection } from "@/components/VoiceCloneSection"
-import { KokoroVoiceField } from "@/components/voice/KokoroVoiceField"
 import { cn } from "@/lib/utils"
 import { isRecordedCloneClip, newVoiceId, VOICE_PALETTE } from "@/lib/audio/voices"
 import {
@@ -317,7 +315,7 @@ function NewVoiceModalBody({
     let next: Voice = { ...draft, name: draft.name.trim() || fallback }
     if (mode === "clone") {
       // A clone rides a cloning-capable engine; fall back to the hosted default
-      // if the draft's engine (kokoro/mms) can't re-voice a reference.
+      // if the draft's engine (mms) can't re-voice a reference.
       const base = draft.provider ?? projectProvider
       const cloneProvider = providerInfo(base).supportsCloning ? base : DEFAULT_TTS_PROVIDER
       next = normalizeVoiceForProvider(next, cloneProvider, { targetLanguage })
@@ -432,7 +430,7 @@ function NewVoiceModalBody({
               />
             </Field>
 
-            {/* Engine — TTS offers all four; clone only the cloud engines that
+            {/* Engine — TTS offers cloud + MMS; clone only the cloud engines that
                 can re-voice a reference. Same slot on both tabs so the control
                 doesn't jump. */}
             <Field>
@@ -444,13 +442,6 @@ function NewVoiceModalBody({
               />
             </Field>
 
-            {mode === "tts" && activeProvider === "kokoro" && (
-              <KokoroVoiceField
-                value={draft.voiceName ?? ""}
-                targetLanguage={targetLanguage}
-                onChange={(v) => update({ voiceName: v || undefined })}
-              />
-            )}
             {mode === "tts" && activeProvider === "mms" && (
               <MmsLanguageField
                 value={draft.voiceName ?? ""}

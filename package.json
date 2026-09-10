@@ -134,7 +134,6 @@
     "input-otp": "^1.4.2",
     "isomorphic-git": "^1.40.0",
     "jszip": "^3.10.1",
-    "kokoro-js": "^1.2.1",
     "lucide-react": "^1.28.0",
     "onnxruntime-web": "1.27.0",
     "postgres": "^3.4.9",

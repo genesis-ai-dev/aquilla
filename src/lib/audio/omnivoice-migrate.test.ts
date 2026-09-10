@@ -18,6 +18,7 @@ const omnivoiceVoice = (overrides: Partial<Voice> = {}): Voice => ({
 describe("ttsSettingsNeedOmnivoiceMigration", () => {
   it("is true for a project-level omnivoice id or a leftover voice", () => {
     expect(ttsSettingsNeedOmnivoiceMigration({ provider: "omnivoice" })).toBe(true)
+    expect(ttsSettingsNeedOmnivoiceMigration({ provider: "kokoro" })).toBe(true)
     expect(ttsSettingsNeedOmnivoiceMigration({
       provider: "gemini",
       voices: [omnivoiceVoice()],
@@ -67,6 +68,17 @@ describe("migrateOmnivoiceVoice", () => {
     expect(cloned.language).toBe("fr-FR")
   })
 
+  it("rewrites leftover Kokoro speaker ids onto Inworld Dennis", () => {
+    const next = migrateOmnivoiceVoice({
+      id: "v-k",
+      name: "Kid",
+      provider: "kokoro",
+      voiceName: "af_heart",
+    })
+    expect(next.provider).toBe("inworld")
+    expect(next.voiceName).toBe(DEFAULT_INWORLD_VOICE)
+  })
+
   it("returns the same object when the voice is already Gemini", () => {
     const gemini: Voice = { id: "g", name: "G", provider: "gemini", voiceName: "Kore" }
     expect(migrateOmnivoiceVoice(gemini, { projectProvider: "omnivoice" })).toBe(gemini)
@@ -103,6 +115,18 @@ describe("migrateOmnivoiceTtsSettings", () => {
     expect(next?.voices?.[1]).toEqual(settings.voices?.[1])
     expect(next?.voices?.[2]).toMatchObject({
       id: "v3", provider: "inworld", language: "fr-FR", referenceAudioId: "r.wav",
+    })
+  })
+
+  it("rewrites a Kokoro project default and its voices", () => {
+    const settings: ProjectTtsSettings = {
+      provider: "kokoro",
+      voices: [{ id: "v1", name: "Kid", provider: "kokoro", voiceName: "af_bella" }],
+    }
+    const next = migrateOmnivoiceTtsSettings(settings, { targetLanguage: "en" })
+    expect(next?.provider).toBe("inworld")
+    expect(next?.voices?.[0]).toMatchObject({
+      id: "v1", provider: "inworld", voiceName: DEFAULT_INWORLD_VOICE,
     })
   })
 })

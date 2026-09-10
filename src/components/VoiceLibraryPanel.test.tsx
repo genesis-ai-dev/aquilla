@@ -78,13 +78,13 @@ describe("VoiceLibraryPanel (selector)", () => {
         projectId="dev-project"
         targetLanguage="en"
         targetLanes={["es"]}
-        settings={{ provider: "kokoro", voices: [narrator], defaultVoiceId: narrator.id }}
+        settings={{ provider: "mms", voices: [narrator], defaultVoiceId: narrator.id }}
         onSettingsChange={onSettingsChange}
       />,
     )
     fireEvent.click(screen.getByRole("button", { name: /New voice/ }))
     expect(screen.getByTestId("new-voice-modal")).toBeTruthy()
-    expect(modalProps.last?.provider).toBe("kokoro")
+    expect(modalProps.last?.provider).toBe("mms")
     expect(modalProps.last?.voice).toBeNull()
     expect(modalProps.last?.targetLanguage).toBe("en")
     expect(modalProps.last?.targetLanes).toEqual(["es"])
@@ -94,14 +94,14 @@ describe("VoiceLibraryPanel (selector)", () => {
     setup({
       provider: "mms",
       voices: [
-        makeVoice({ id: "v-k", name: "Kiki", provider: "kokoro", voiceName: "af_heart" }),
+        makeVoice({ id: "v-k", name: "Kiki", provider: "inworld", voiceName: "Dennis" }),
         makeVoice({ id: "v-c", name: "Cloney", provider: undefined, voiceName: undefined, referenceAudioId: "ref-1.webm" }),
         // No per-voice engine → falls back to the project engine (mms).
         makeVoice({ id: "v-legacy", name: "Legacy", provider: undefined, voiceName: undefined }),
       ],
       defaultVoiceId: "v-k",
     })
-    expect(screen.getByText("Kokoro")).toBeTruthy()
+    expect(screen.getByText("Inworld")).toBeTruthy()
     expect(screen.getByText("Clone")).toBeTruthy()
     expect(screen.getByText("MMS")).toBeTruthy()
   })
@@ -129,8 +129,8 @@ describe("VoiceLibraryPanel (selector)", () => {
 
   it("still labels a voice with its own explicit provider, ignoring the project default", () => {
     const onSettingsChange = vi.fn()
-    const kokoroVoice = makeVoice({ id: "v-kokoro", name: "Kid", provider: "kokoro", voiceName: "af_heart" })
-    const settings: ProjectTtsSettings = { provider: "inworld", voices: [kokoroVoice] }
+    const leftoverKokoro = makeVoice({ id: "v-kokoro", name: "Kid", provider: "kokoro", voiceName: "af_heart" })
+    const settings: ProjectTtsSettings = { provider: "gemini", voices: [leftoverKokoro] }
     render(
       <VoiceLibraryPanel
         projectId="dev-project"
@@ -138,7 +138,8 @@ describe("VoiceLibraryPanel (selector)", () => {
         onSettingsChange={onSettingsChange}
       />,
     )
-    expect(screen.getByText("Kokoro")).toBeTruthy()
+    expect(screen.getByText("Inworld")).toBeTruthy()
+    expect(screen.queryByText("Kokoro")).toBeNull()
   })
 
   it("opens Edit / Make narrator / Delete from the ⋯ menu", () => {

@@ -49,6 +49,42 @@ describe("generateAndAttachCellVoice routing", () => {
     )
   })
 
+  it("leftover Kokoro voices take the Inworld server path with Dennis", async () => {
+    vi.resetModules()
+    const synthCellTts = vi.fn(async () => ({
+      audioId: "audio-tts-1", durationSeconds: 1.2,
+      objectName: "audio-tts-1.wav", url: "frontier-audio://audio-tts-1.wav",
+    }))
+    const synthForCell = vi.fn(async () => new Blob(["x"], { type: "audio/wav" }))
+    vi.doMock("@/lib/sync/tts", () => ({ synthesizeCellTts: synthCellTts }))
+    vi.doMock("./tts", () => ({
+      synthesizeForCell: synthForCell, setTtsStatus: vi.fn(),
+      ttsStatusKey: (s: string) => s,
+    }))
+    vi.doMock("@/lib/sync/events-emit", () => ({ emitCellAudioAttach: vi.fn(async () => {}) }))
+    vi.doMock("./audio-attachments-bus", () => ({ notifyAudioAttachmentsChanged: vi.fn(), injectOptimisticAudioAttachment: vi.fn() }))
+    vi.doMock("./sync-token-fetcher", () => ({ audioSyncTokenFetcherForSession: () => async () => "tok" }))
+    vi.doMock("./upload", () => ({
+      buildAudioId: () => "id", uploadCellAudio: vi.fn(),
+      fetchCellAudio: vi.fn(async () => new ArrayBuffer(4)),
+    }))
+    vi.doMock("./voice-clone", () => ({ convertToCloneVoice: vi.fn() }))
+    vi.doMock("./voices", () => ({
+      resolveVoice: () => ({ id: "v", name: "Kid", provider: "kokoro", voiceName: "af_heart" }),
+    }))
+    const { generateAndAttachCellVoice } = await import("./generate-voice")
+    await generateAndAttachCellVoice({
+      projectId: "p", fileId: "f", cellId: "c", text: "hello",
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      session: { jwt: "j", username: "u" } as any, username: "u",
+    })
+    expect(synthCellTts).toHaveBeenCalledWith(
+      expect.objectContaining({ voiceId: "Dennis" }),
+      expect.any(Function),
+    )
+    expect(synthForCell).not.toHaveBeenCalled()
+  })
+
   it("forwards Inworld playground knobs to the server TTS path", async () => {
     vi.resetModules()
     const synthCellTts = vi.fn(async () => ({
@@ -148,7 +184,9 @@ describe("generateAndAttachCellVoice routing", () => {
     }))
     vi.doMock("./tts-providers", () => ({
       resolveTtsProvider: () => "gemini",
+      effectiveTtsProvider: (p: string | undefined) => p ?? "gemini",
       isServerTtsProvider: () => false,
+      normalizeVoiceForProvider: (voice: { id: string }) => voice,
     }))
     vi.doMock("./opus-encode", () => ({
       canEncodeOpus: () => opts.canEncode,

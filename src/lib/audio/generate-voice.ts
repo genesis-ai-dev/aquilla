@@ -14,7 +14,12 @@ import { canEncodeOpus, encodeMonoToWebmOpus } from "./opus-encode"
 import { decodeToMono48k, TARGET_RATE } from "./decode-mono"
 import { audioCachePutBlob } from "./bytes-cache"
 import { resolveVoice } from "./voices"
-import { resolveTtsProvider, isServerTtsProvider } from "./tts-providers"
+import {
+  effectiveTtsProvider,
+  isServerTtsProvider,
+  normalizeVoiceForProvider,
+  resolveTtsProvider,
+} from "./tts-providers"
 import { buildAudioId, uploadCellAudio, fetchCellAudio } from "./upload"
 import { uploadLosslessSiblingBestEffort } from "./lossless-sibling"
 import { audioSyncTokenFetcherForSession } from "./sync-token-fetcher"
@@ -72,10 +77,16 @@ export async function generateAndAttachCellVoice(
   const text = args.text.trim()
   if (!text) throw new Error("Cell has no text to synthesize")
 
-  const voice = resolveVoice(args.projectTtsSettings, args.cellVoiceId)
+  const rawVoice = resolveVoice(args.projectTtsSettings, args.cellVoiceId)
   // Resolve the effective engine: a voice with no provider falls back to the
-  // project default (Inworld), which must still route server-side.
-  const provider = voice.provider ?? resolveTtsProvider(args.projectTtsSettings)
+  // project default (Inworld), which must still route server-side. Leftover
+  // OmniVoice / Kokoro ids remap here so generate never hits a removed engine.
+  const provider = effectiveTtsProvider(
+    rawVoice.provider ?? resolveTtsProvider(args.projectTtsSettings),
+  )
+  const voice = normalizeVoiceForProvider(rawVoice, provider, {
+    targetLanguage: args.geminiContext?.targetLanguage,
+  })
   const getSyncToken = audioSyncTokenFetcherForSession(args.session)
 
   // Inworld is server-side: the sync-worker synthesizes, stores the clip in

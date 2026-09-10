@@ -194,7 +194,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
     return {
       category: "missing-gemini-key",
       title: t("audio.aiError.geminiKeyRequiredTitle"),
-      body: "Add a Gemini API key to use this Gemini voice, or switch the line to Inworld TTS (hosted, no key) or a local engine (Kokoro or MMS).",
+      body: "Add a Gemini API key to use this Gemini voice, or switch the line to Inworld TTS (hosted, no key) or a local MMS engine.",
       raw,
     }
   }
@@ -250,7 +250,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
       title: t("audio.aiError.ttsNotConfiguredTitle"),
       // Worded to follow its own title rather than repeat it — the recorder
       // renders the two as one sentence.
-      body: "Switch this project to a local voice (Kokoro or MMS), which runs in the browser, or ask an administrator to configure the server voice service.",
+      body: "Switch this project to a local MMS voice, which runs in the browser, or ask an administrator to configure the server voice service.",
       raw,
     }
   }

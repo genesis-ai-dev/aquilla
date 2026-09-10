@@ -3,7 +3,6 @@ import { audio } from "@/lib/i18n/namespaces/audio"
 import {
   DEFAULT_GEMINI_VOICE,
   DEFAULT_INWORLD_VOICE,
-  DEFAULT_KOKORO_VOICE,
   DEFAULT_MMS_LANGUAGE,
   DEFAULT_TTS_PROVIDER,
   TTS_PROVIDER_INFOS,
@@ -11,6 +10,7 @@ import {
   effectiveTtsProvider,
   inferMmsLanguageCode,
   isInworldVoiceName,
+  isLegacyKokoroVoiceName,
   isServerTtsProvider,
   normalizeVoiceForProvider,
   providerInfo,
@@ -29,20 +29,18 @@ describe("TTS provider normalization", () => {
     expect(normalizeVoiceForProvider(geminiVoice, "gemini").voiceName).toBe("Charon")
   })
 
-  it("does not pass Gemini voice ids to Kokoro", () => {
-    expect(normalizeVoiceForProvider(geminiVoice, "kokoro").voiceName).toBe(DEFAULT_KOKORO_VOICE)
-  })
-
-  it("does not treat a BCP-47 tag as a Kokoro voice id", () => {
-    const tagged: Voice = { ...geminiVoice, voiceName: "en-us" }
-    expect(normalizeVoiceForProvider(tagged, "kokoro").voiceName).toBe(DEFAULT_KOKORO_VOICE)
-  })
-
-  it("picks a British Kokoro voice when the target language is en-gb", () => {
-    expect(defaultVoiceNameForProvider("kokoro", { targetLanguage: "en-gb" })).toBe("bf_emma")
-    expect(
-      normalizeVoiceForProvider(geminiVoice, "kokoro", { targetLanguage: "en-GB" }).voiceName,
-    ).toBe("bf_emma")
+  it("remaps leftover Kokoro onto Inworld and drops speaker ids", () => {
+    expect(effectiveTtsProvider("kokoro")).toBe("inworld")
+    expect(isServerTtsProvider("kokoro")).toBe(true)
+    expect(providerInfo("kokoro").id).toBe("inworld")
+    expect(defaultVoiceNameForProvider("kokoro")).toBe(DEFAULT_INWORLD_VOICE)
+    expect(normalizeVoiceForProvider(geminiVoice, "kokoro").provider).toBe("inworld")
+    expect(normalizeVoiceForProvider(geminiVoice, "kokoro").voiceName).toBe(DEFAULT_INWORLD_VOICE)
+    const leftover: Voice = { ...geminiVoice, voiceName: "af_bella" }
+    expect(normalizeVoiceForProvider(leftover, "inworld").voiceName).toBe(DEFAULT_INWORLD_VOICE)
+    expect(isLegacyKokoroVoiceName("af_bella")).toBe(true)
+    expect(isLegacyKokoroVoiceName("bf_emma")).toBe(true)
+    expect(isInworldVoiceName("af_bella")).toBe(false)
   })
 
   it("does not pass Gemini voice ids to MMS", () => {
@@ -69,17 +67,17 @@ describe("TTS provider normalization", () => {
   })
 
   it("does not pass local voice ids to Gemini", () => {
-    const kokoro: Voice = { ...geminiVoice, voiceName: "af_bella" }
-    expect(normalizeVoiceForProvider(kokoro, "gemini").voiceName).toBe(DEFAULT_GEMINI_VOICE)
+    const leftover: Voice = { ...geminiVoice, voiceName: "af_bella" }
+    expect(normalizeVoiceForProvider(leftover, "gemini").voiceName).toBe(DEFAULT_GEMINI_VOICE)
   })
 
   it("defaults to inworld", () => {
     expect(DEFAULT_TTS_PROVIDER).toBe("inworld")
   })
 
-  it("lists all four engines with cloud engines first", () => {
+  it("lists the three remaining engines with cloud engines first", () => {
     expect(TTS_PROVIDER_INFOS.map((p) => p.id)).toEqual([
-      "inworld", "gemini", "kokoro", "mms",
+      "inworld", "gemini", "mms",
     ])
   })
 
@@ -96,7 +94,6 @@ describe("TTS provider normalization", () => {
     const byId = Object.fromEntries(TTS_PROVIDER_INFOS.map((p) => [p.id, p]))
     expect(byId.inworld.supportsCloning).toBe(true)
     expect(byId.gemini.supportsCloning).toBe(true)
-    expect(byId.kokoro.supportsCloning).toBe(false)
     expect(byId.mms.supportsCloning).toBe(false)
   })
 
@@ -104,7 +101,6 @@ describe("TTS provider normalization", () => {
     const byId = Object.fromEntries(TTS_PROVIDER_INFOS.map((p) => [p.id, p]))
     expect(byId.inworld.hasNamedVoices).toBe(true)
     expect(byId.gemini.hasNamedVoices).toBe(true)
-    expect(byId.kokoro.hasNamedVoices).toBe(true)
     expect(byId.mms.hasNamedVoices).toBe(true)
   })
 
@@ -112,7 +108,6 @@ describe("TTS provider normalization", () => {
     const byId = Object.fromEntries(TTS_PROVIDER_INFOS.map((p) => [p.id, p]))
     expect(byId.inworld.tier).toBe("cloud")
     expect(byId.gemini.tier).toBe("cloud")
-    expect(byId.kokoro.tier).toBe("device")
     expect(byId.mms.tier).toBe("device")
   })
 

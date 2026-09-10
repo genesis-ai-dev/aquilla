@@ -120,16 +120,6 @@ export const audio = defineNamespace({
     "audio.newVoice.talkingSpeedHelpAria": "About talking speed",
     "audio.newVoice.describeLabel": "Describe the voice",
     "audio.newVoice.describePlaceholder": "e.g. a warm older man, calm and clear",
-    "audio.newVoice.kokoroLabel": "Voice",
-    "audio.newVoice.kokoroPlaceholder": "e.g. af_bella",
-    "audio.newVoice.kokoroGroupAmerican": "American English",
-    "audio.newVoice.kokoroGroupBritish": "British English",
-    "audio.newVoice.kokoroGenderFemale": "Female",
-    "audio.newVoice.kokoroGenderMale": "Male",
-    "audio.newVoice.kokoroEnglishOnlyHint":
-      "On-device Kokoro speaks English. Pick an American or British voice, or switch this line to Inworld TTS, Gemini, or MMS.",
-    "audio.newVoice.kokoroPlaySample": "Play {name} sample",
-    "audio.newVoice.kokoroStopSample": "Stop {name} sample",
     "audio.newVoice.mmsLanguageLabel": "Language",
     "audio.newVoice.singleVoiceHint":
       "{engine} uses a single neural voice. Use the Clone tab to make it sound like a specific person.",
@@ -429,7 +419,6 @@ export const audio = defineNamespace({
     "audio.provider.inworldHint":
       "Runs on our servers. Standard uses Inworld TTS 2 Flash; Highest uses Inworld TTS 2. No user API key; usage is cloud-metered. Supports voice cloning from a reference recording.",
     "audio.provider.geminiHint": "BYOK Google AI key. Promptable, high-quality voices.",
-    "audio.provider.kokoroHint": "Runs in-browser after a one-time local model download.",
     "audio.provider.mmsHintSherpa": "Local browser voices loaded from the Sherpa-ONNX MMS mirror.",
     "audio.provider.mmsHintHosted": "Local browser voices loaded from the hosted MMS model bucket.",
     "audio.provider.mmsHintFallback": "Local browser voices for supported MMS language repos.",
@@ -461,7 +450,6 @@ export const audio = defineNamespace({
     // ai-consent.ts — display name of each heavy in-browser AI model, shown
     // in the first-run download-consent dialog (AiModelConsentDialog).
     "audio.consent.whisperLabel": "Whisper (transcription)",
-    "audio.consent.kokoroLabel": "Kokoro (text-to-speech)",
     "audio.consent.mmsLabel": "MMS (multilingual TTS)",
 
     // ai-error.ts categorizeAiError() — plain-language heading for each
@@ -560,7 +548,7 @@ export const audio = defineNamespace({
       "audio.newVoice.engineLabel": {
         description:
           "Form label above the row of TTS engine choice cards. On the TTS tab " +
-          "this is all four engines (Inworld, Gemini, Kokoro, MMS). On the Clone " +
+          "this is Inworld, Gemini, and MMS. On the Clone " +
           "tab it is only the cloud engines that can clone a reference clip " +
           "(Inworld, Gemini) — on-device engines are omitted, not shown disabled. " +
           "'Engine' means which speech-synthesis backend generates this voice's audio.",
@@ -1044,56 +1032,6 @@ export const audio = defineNamespace({
         description:
           "Placeholder example text inside the empty 'describe the voice' textarea, " +
           "showing the kind of description that works well.",
-      },
-      "audio.newVoice.kokoroLabel": {
-        description:
-          "Label for the voice-picker dropdown shown only when the Kokoro engine is " +
-          "selected. Lists Kokoro's built-in American and British speakers. 'Kokoro' " +
-          "is the engine's proper name — do not translate it if it appears nearby.",
-      },
-      "audio.newVoice.kokoroPlaceholder": {
-        description:
-          "Placeholder example inside the empty Kokoro voice-id field, showing the " +
-          "format of a real id. The example code itself ('af_bella') is data, not " +
-          "prose — keep it as-is; only 'e.g.' needs translating.",
-      },
-      "audio.newVoice.kokoroGroupAmerican": {
-        description:
-          "Section heading inside the Kokoro voice dropdown for American English speakers.",
-      },
-      "audio.newVoice.kokoroGroupBritish": {
-        description:
-          "Section heading inside the Kokoro voice dropdown for British English speakers.",
-      },
-      "audio.newVoice.kokoroGenderFemale": {
-        description:
-          "Short gender tag next to a female Kokoro speaker's name in the dropdown.",
-      },
-      "audio.newVoice.kokoroGenderMale": {
-        description:
-          "Short gender tag next to a male Kokoro speaker's name in the dropdown.",
-      },
-      "audio.newVoice.kokoroEnglishOnlyHint": {
-        description:
-          "Helper under the Kokoro voice dropdown when the project's target language " +
-          "is not English. Tells the user Kokoro only speaks English and names the " +
-          "other engines that can speak other languages. 'Kokoro', 'Inworld TTS', " +
-          "'Gemini', and 'MMS' are engine names — do not translate them.",
-      },
-      "audio.newVoice.kokoroPlaySample": {
-        description:
-          "Accessible name of the play button that previews a Kokoro speaker. " +
-          "{name} is the speaker's given name (Heart, Bella, George).",
-        placeholders: {
-          name: "The Kokoro speaker's given name, e.g. Heart or Bella.",
-        },
-      },
-      "audio.newVoice.kokoroStopSample": {
-        description:
-          "Accessible name of the same button while that speaker's sample is playing.",
-        placeholders: {
-          name: "The Kokoro speaker's given name, e.g. Heart or Bella.",
-        },
       },
       "audio.newVoice.mmsLanguageLabel": {
         description:
@@ -1750,7 +1688,7 @@ export const audio = defineNamespace({
         description:
           "Label on the recorder's voice button while a local voice model is " +
           "downloading, so a wait of tens of seconds does not read as a hang. " +
-          "Only local engines (Kokoro, MMS) report progress. Keep it short — " +
+          "Only local engines (MMS) report progress. Keep it short — " +
           "the button is about half the panel wide.",
         placeholders: { percent: "Whole-number download progress, 0 to 100, without the % sign." },
         maxLength: 18,
@@ -2184,12 +2122,6 @@ export const audio = defineNamespace({
           "bring your own key — the user must supply their own Google AI key for this " +
           "engine to work.",
       },
-      "audio.provider.kokoroHint": {
-        description:
-          "Tooltip on the Kokoro engine card in the TTS engine picker, explaining the " +
-          "one-time local model download that happens before this on-device engine " +
-          "can generate audio.",
-      },
       "audio.provider.mmsHintSherpa": {
         description:
           "Tooltip on the MMS engine card in the TTS engine picker, shown in the " +
@@ -2299,11 +2231,6 @@ export const audio = defineNamespace({
           "model download consent dialog (AiModelConsentDialog) — names the feature " +
           "in parentheses since 'Whisper' alone doesn't say what it's for.",
       },
-      "audio.consent.kokoroLabel": {
-        description:
-          "Display name for the Kokoro text-to-speech model in the same consent " +
-          "dialog as audio.consent.whisperLabel, same naming pattern.",
-      },
       "audio.consent.mmsLabel": {
         description:
           "Display name for the MMS multilingual text-to-speech model in the same " +
@@ -2399,7 +2326,7 @@ export const audio = defineNamespace({
       },
       "audio.aiError.modelLoadFailedTitle": {
         description:
-          "Popover heading when an on-device model (Whisper/Kokoro/MMS/transformers " +
+          "Popover heading when an on-device model (Whisper/MMS/transformers " +
           "runtime) fails to download or initialize.",
       },
       "audio.aiError.audioFormatUnsupportedTitle": {

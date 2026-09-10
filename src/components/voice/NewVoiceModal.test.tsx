@@ -2,9 +2,9 @@
  * NewVoiceModal.test.tsx — engine (TTS provider) selection during creation.
  *
  * The creation modal must honor the project's configured engine, not hardcode
- * Gemini: a Kokoro/MMS/Inworld project creates voices on that engine, and
- * the user can switch engines per-voice. Regression guard for the f7abd8790
- * simplification that dropped the 4-engine picker.
+ * Gemini: an MMS/Inworld project creates voices on that engine, and
+ * the user can switch engines per-voice. Leftover Kokoro project defaults
+ * remap to Inworld.
  */
 
 import { afterEach, describe, it, expect, vi } from "vitest"
@@ -123,21 +123,23 @@ describe("NewVoiceModal engine selection", () => {
     vi.mocked(listInworldSupportedLanguages).mockReset()
     vi.mocked(listInworldSupportedLanguages).mockResolvedValue([])
   })
-  it("offers all four engines", () => {
+  it("offers Inworld, Gemini, and MMS", () => {
     renderCreate({ provider: "inworld" })
-    for (const label of [/Inworld/, /Gemini/, /Kokoro/, /MMS/]) {
+    for (const label of [/Inworld/, /Gemini/, /MMS/]) {
       expect(engineCard(label)).toBeTruthy()
     }
+    expect(screen.queryByRole("button", { name: /Kokoro/ })).toBeNull()
   })
 
-  it("seeds a new voice with the project's configured engine (kokoro)", () => {
+  it("remaps a leftover Kokoro project default onto Inworld", () => {
     const { onSave } = renderCreate({ provider: "kokoro" })
-    expect(engineCard(/Kokoro/).getAttribute("aria-pressed")).toBe("true")
+    expect(engineCard(/Inworld/).getAttribute("aria-pressed")).toBe("true")
+    expect(screen.queryByRole("button", { name: /Kokoro/ })).toBeNull()
     create()
     expect(onSave).toHaveBeenCalledTimes(1)
     const saved = (onSave as ReturnType<typeof vi.fn>).mock.calls[0][0] as Voice
-    expect(saved.provider).toBe("kokoro")
-    expect(saved.voiceName).toBe("af_heart")
+    expect(saved.provider).toBe("inworld")
+    expect(saved.voiceName).toBe("Dennis")
   })
 
   it("seeds an MMS voice with the language inferred from targetLanguage", () => {
@@ -166,59 +168,11 @@ describe("NewVoiceModal engine selection", () => {
     expect(saved.voiceName).toBe(GEMINI_TTS_VOICES[2].name)
   })
 
-  it("shows the engine's one knob: Describe for Gemini, speaker list for Kokoro", () => {
+  it("shows Describe for Gemini and a language picker for MMS", () => {
     renderCreate({ provider: "gemini" })
     expect(screen.getByLabelText("Describe the voice")).toBeTruthy()
-    fireEvent.click(engineCard(/Kokoro/))
+    fireEvent.click(engineCard(/MMS/))
     expect(screen.queryByLabelText("Describe the voice")).toBeNull()
-    expect(screen.getByRole("combobox", { name: "Voice" })).toBeTruthy()
-  })
-
-  it("lists British speakers first when the project target is en-gb", async () => {
-    const user = userEvent.setup()
-    const { onSave } = renderCreate({ provider: "kokoro", targetLanguage: "en-gb" })
-    const trigger = screen.getByRole("combobox", { name: "Voice" })
-    expect(trigger).toHaveTextContent(/Emma/)
-    await user.click(trigger)
-    const options = screen.getAllByRole("option")
-    expect(options[0]).toHaveTextContent(/Emma/)
-    await user.click(screen.getByRole("option", { name: /Bella/ }))
-    create()
-    const saved = (onSave as ReturnType<typeof vi.fn>).mock.calls[0][0] as Voice
-    expect(saved.voiceName).toBe("af_bella")
-  })
-
-  it("plays a Kokoro sample without changing the selected speaker", async () => {
-    const play = vi.fn().mockResolvedValue(undefined)
-    vi.stubGlobal(
-      "Audio",
-      class {
-        src = ""
-        play = play
-        pause = vi.fn()
-        load = vi.fn()
-        removeAttribute = vi.fn()
-        addEventListener = vi.fn()
-        constructor(src?: string) {
-          this.src = src ?? ""
-        }
-      },
-    )
-    const user = userEvent.setup()
-    const { onSave } = renderCreate({ provider: "kokoro", targetLanguage: "en-gb" })
-    await user.click(screen.getByRole("combobox", { name: "Voice" }))
-    await user.click(screen.getByRole("button", { name: "Play Bella sample" }))
-    expect(play).toHaveBeenCalled()
-    expect(screen.getByRole("combobox", { name: "Voice" })).toHaveTextContent(/Emma/)
-    await user.click(screen.getByRole("option", { name: /Bella/ }))
-    create()
-    const saved = (onSave as ReturnType<typeof vi.fn>).mock.calls[0][0] as Voice
-    expect(saved.voiceName).toBe("af_bella")
-  })
-
-  it("explains that Kokoro is English-only for a non-English project language", () => {
-    renderCreate({ provider: "kokoro", targetLanguage: "es" })
-    expect(screen.getByText(/On-device Kokoro speaks English/)).toBeTruthy()
   })
 
   it("defaults to inworld when no project provider is passed", () => {
@@ -337,7 +291,7 @@ describe("NewVoiceModal engine selection", () => {
 })
 
 describe("NewVoiceModal clone tab engines", () => {
-  it("offers only cloud clone engines, not Kokoro or MMS", () => {
+  it("offers only cloud clone engines, not MMS", () => {
     renderCreate({ provider: "inworld", initialMode: "clone" })
     expect(engineCard(/Inworld/)).toBeTruthy()
     expect(engineCard(/Gemini/)).toBeTruthy()
@@ -367,9 +321,9 @@ describe("NewVoiceModal clone tab engines", () => {
     expect(saved.referenceAudioId).toBe("ref.webm")
   })
 
-  it("switching from the TTS tab remaps Kokoro to Inworld", () => {
+  it("keeps leftover Kokoro remapped to Inworld when switching to the clone tab", () => {
     renderCreate({ provider: "kokoro" })
-    expect(engineCard(/Kokoro/).getAttribute("aria-pressed")).toBe("true")
+    expect(engineCard(/Inworld/).getAttribute("aria-pressed")).toBe("true")
     fireEvent.click(screen.getByRole("tab", { name: /Clone voice/ }))
     expect(engineCard(/Inworld/).getAttribute("aria-pressed")).toBe("true")
     expect(screen.queryByRole("button", { name: /Kokoro/ })).toBeNull()

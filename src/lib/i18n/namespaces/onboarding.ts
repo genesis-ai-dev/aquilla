@@ -215,9 +215,6 @@ export const onboarding = defineNamespace({
     "onboarding.checklist.aiModels.whisper.label": "Whisper transcription",
     "onboarding.checklist.aiModels.whisper.blurb":
       "Word-level timing for recorded audio. Runs locally; no network after download.",
-    "onboarding.checklist.aiModels.kokoro.label": "Kokoro voices",
-    "onboarding.checklist.aiModels.kokoro.blurb":
-      "English voices that run in the browser after a one-time download.",
     "onboarding.checklist.aiModels.mms.label": "MMS multilingual voices",
     "onboarding.checklist.aiModels.mms.blurb":
       "Local voices for many languages — one language model per download.",
@@ -395,7 +392,7 @@ export const onboarding = defineNamespace({
       "Optional personal AI provider override for this device only.",
     "onboarding.preferences.section.localModels.title": "Local models",
     "onboarding.preferences.section.localModels.description":
-      "Whisper transcription and Kokoro / MMS voices run entirely in your browser — stored once and shared across all projects on this device.",
+      "Whisper transcription and MMS voices run entirely in your browser — stored once and shared across all projects on this device.",
     "onboarding.preferences.section.usage.title": "Usage",
     "onboarding.preferences.section.usage.description": "Your audio and AI activity. No pricing is shown here.",
     "onboarding.preferences.section.apiTokens.title": "API tokens",
@@ -590,7 +587,7 @@ export const onboarding = defineNamespace({
       },
       "onboarding.checklist.aiModels.sizeMb": {
         description:
-          "Size badge next to an individual model's name (Whisper, Kokoro, MMS) before it has been downloaded.",
+          "Size badge next to an individual model's name (Whisper, MMS) before it has been downloaded.",
         placeholders: { size: "That model's download size in megabytes. A plain number." },
       },
       "onboarding.checklist.invite.copyLinkAriaLabel": {

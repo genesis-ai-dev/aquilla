@@ -34,18 +34,20 @@ describe("CellTtsButton hover label (AQU-360)", () => {
     expect(btn.getAttribute("aria-label")).not.toContain("Gemini")
   })
 
-  it("names Kokoro when that's the project's configured provider", () => {
+  it("names Inworld when leftover Kokoro is the project's configured provider", () => {
     renderButton({ provider: "kokoro", voices: [{ id: "v1", name: "Narrator", color: "#000" }], defaultVoiceId: "v1" })
-    expect(screen.getByRole("button").getAttribute("aria-label")).toContain("Kokoro")
+    expect(screen.getByRole("button").getAttribute("aria-label")).toContain("Inworld")
+    expect(screen.getByRole("button").getAttribute("aria-label")).not.toContain("Kokoro")
   })
 
-  it("honors a voice's own provider over the project default", () => {
+  it("honors a leftover Kokoro voice as Inworld over a Gemini project default", () => {
     renderButton({
-      provider: "inworld",
+      provider: "gemini",
       voices: [{ id: "v1", name: "Kid", color: "#000", provider: "kokoro", voiceName: "af_heart" }],
       defaultVoiceId: "v1",
     })
-    expect(screen.getByRole("button").getAttribute("aria-label")).toContain("Kokoro")
+    expect(screen.getByRole("button").getAttribute("aria-label")).toContain("Inworld")
+    expect(screen.getByRole("button").getAttribute("aria-label")).not.toContain("Kokoro")
   })
 })
 

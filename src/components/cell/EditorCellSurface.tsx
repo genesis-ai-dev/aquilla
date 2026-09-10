@@ -163,6 +163,12 @@ interface EditorTargetReadSurfaceProps extends HTMLAttributes<HTMLDivElement> {
   editable?: boolean
   empty?: boolean
   subdued?: boolean
+  /**
+   * AQU-1077: keep every space exactly as stored. Only IDML wants this — its
+   * editor hydrates with `preserveWhitespace: "full"` and its slots are
+   * whitespace-exact for surgical export, so the read surface must agree.
+   */
+  preserveWhitespace?: boolean
 }
 
 /** Cheap read surface that upgrades to TranslatedEditor only when activated. */
@@ -171,6 +177,7 @@ export const EditorTargetReadSurface = forwardRef<HTMLDivElement, EditorTargetRe
     editable = false,
     empty = false,
     subdued = false,
+    preserveWhitespace = false,
     className,
     ...props
   }, ref) {
@@ -182,10 +189,20 @@ export const EditorTargetReadSurface = forwardRef<HTMLDivElement, EditorTargetRe
         role="textbox"
         aria-multiline="true"
         className={cn(
-          // AQU-1101: `whitespace-pre-wrap` alone preserves an unbreakable run
-          // intact; `break-words` is what lets it break mid-token so the target
-          // column keeps its half of the row.
-          "relative min-h-[40px] w-full min-w-0 flex-1 whitespace-pre-wrap break-words rounded-lg px-1 py-0.5 leading-relaxed text-foreground/90 outline-none",
+          // AQU-1101: `min-w-0` lets the surface shrink below its content's
+          // min-content width; `break-words` is what lets an unbreakable run
+          // break mid-token so the target column keeps its half of the row.
+          "relative min-h-[40px] w-full min-w-0 flex-1 break-words rounded-lg px-1 py-0.5 leading-relaxed text-foreground/90 outline-none",
+          // AQU-1077: `pre-wrap` made this surface disagree with the editor it
+          // stands in for. TipTap parses the same stored value as HTML, so
+          // ProseMirror collapses runs of spaces and tabs — imported DOCX
+          // tab-leader gaps (a TOC line's page number) reflowed into ordinary
+          // prose the moment a cell was clicked into, and scattered back into
+          // ragged columns on blur. `pre-line` collapses horizontal whitespace
+          // exactly like that parse while still honouring newlines, so a
+          // genuine line break in a plain-text draft survives. Nothing here
+          // touches the stored value — only how it is painted.
+          preserveWhitespace ? "whitespace-pre-wrap" : "whitespace-pre-line",
           editable && "cursor-text focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:ring-offset-1",
           subdued && "opacity-30 transition-opacity",
           empty && "text-muted-foreground/60",

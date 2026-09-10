@@ -54,12 +54,15 @@ export async function hashQueryParams(parts: {
   topK: number
   validatedOnly: boolean
   excludeCellId: string | null
+  /** Lane tag; omitted/`undefined` hashes as `""` (default lane). */
+  targetLang?: string
 }): Promise<string> {
   const payload = [
     parts.q,
     String(parts.topK),
     parts.validatedOnly ? "1" : "0",
     parts.excludeCellId ?? "",
+    parts.targetLang ?? "",
   ].join(" ")
   const buf = await crypto.subtle.digest(
     "SHA-256",

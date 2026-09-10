@@ -345,4 +345,66 @@ describe("useFocusLock", () => {
     })
     expect(ws.sent.filter((m) => m.t === "focus.renew").length).toBe(renewalsBefore)
   })
+
+  it("AQU-1154: a self lock.released while still in the cell re-claims instead of stranding the lease", () => {
+    // The DO drops a lease from under a live editor on a lease sweep or a
+    // socket flap. focus.renew on a gone lease is a silent server no-op, so
+    // the old "stop renewing" reaction left the user editing unlocked and a
+    // peer free to claim. The user is still in the cell: claim it again.
+    const ws = makeFakeReconciler()
+    const { result } = renderHook(() =>
+      useFocusLock({
+        reconciler: ws,
+        cellId: "c",
+        currentUserId: "alice",
+        leaseMs: 30_000,
+      }),
+    )
+    act(() => {
+      result.current[0].claim()
+    })
+    act(() => {
+      result.current[1]({
+        t: "lock.released",
+        cellId: "c",
+        by: { userId: "alice", ts: 500 },
+      })
+    })
+    expect(ws.sent.at(-1)).toEqual({ t: "focus.claim", cellId: "c", leaseMs: 30_000 })
+    expect(result.current[0].isHeld).toBe(true)
+
+    // Renewal keeps running against the re-claimed lease.
+    act(() => {
+      vi.advanceTimersByTime(15_000)
+    })
+    expect(ws.sent.at(-1)).toEqual({ t: "focus.renew", cellId: "c" })
+  })
+
+  it("AQU-1154: the echo of our own release() does not re-claim", () => {
+    const ws = makeFakeReconciler()
+    const { result } = renderHook(() =>
+      useFocusLock({
+        reconciler: ws,
+        cellId: "c",
+        currentUserId: "alice",
+        leaseMs: 30_000,
+      }),
+    )
+    act(() => {
+      result.current[0].claim()
+    })
+    act(() => {
+      result.current[0].release()
+    })
+    const before = ws.sent.length
+    act(() => {
+      result.current[1]({
+        t: "lock.released",
+        cellId: "c",
+        by: { userId: "alice", ts: 500 },
+      })
+    })
+    expect(ws.sent.length).toBe(before)
+    expect(result.current[0].isHeld).toBe(false)
+  })
 })

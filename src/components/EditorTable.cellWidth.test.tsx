@@ -190,9 +190,11 @@ describe("EditorTable — source/target columns stay equal in width", () => {
     expect(well.className).toContain("min-w-0")
     expect(read.className).toContain("min-w-0")
 
-    // The read surface is `whitespace-pre-wrap`, which on its own PRESERVES an
-    // unbreakable run intact — break-words is what actually breaks it.
-    expect(read.className).toContain("whitespace-pre-wrap")
+    // The read surface paints with a `whitespace-pre-*` mode (AQU-1077 picks
+    // `pre-line` by default, `pre-wrap` for IDML), and either one on its own
+    // PRESERVES an unbreakable run intact — break-words is what actually
+    // breaks it.
+    expect(read.className).toMatch(/\bwhitespace-pre-(line|wrap)\b/)
     expect(read.className).toContain("break-words")
   })
 

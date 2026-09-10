@@ -36,6 +36,17 @@
 > credit-cap enforcement across concurrent chat requests, traced to its
 > mechanics but reported rather than fixed, since a correct fix means
 > redesigning the credit-guard/ledger interaction, not a same-day patch.
+> `docs/OPSEC-REVIEW-2026-08-31.md` is the most recent pass — the third on
+> auth & session management, taking up the invite-storage question 08-24
+> handed forward. It adds OPS-25 (the three public invite-preview routes each
+> hand-rolled a "best-effort caller" helper that checked only signature and
+> `exp`, skipping *both* the `jti` logout denylist and the
+> `password_changed_at` cutoff — now one shared `resolveSession` behind both
+> the required and optional auth paths, plus a drift guard) and OPS-26 (invite
+> tokens are **not** hashed at rest — see the D5 correction below — reported
+> rather than fixed, because three product surfaces deliberately re-display a
+> live invite token and hashing them is a product decision, not a port of
+> OPS-20's migration).
 
 _Standing OPSEC review of Aquilla's handling of sensitive data. Complements
 `docs/SECURITY-NOTES-2026-06-10.md` (application-security findings, June audit)
@@ -66,7 +77,7 @@ Ranked by what it would cost us if it leaked, not by volume.
 | D2 | **Unpublished translation drafts** — per-cell target text, comments, backtranslations | Postgres `cells`/`events`, R2 source blobs | Pre-publication scripture text for named languages. In restricted-access regions, *which* language is being worked on and *by whom* is the sensitive part, not the prose. |
 | D3 | **Translator identity + activity** — emails, usernames, org/project membership, presence, focus locks, `last_used_at` | Postgres; the `ProjectSync` DO in memory | Presence and focus-lock data is a working-hours and collaboration graph. Combined with D2 this answers "who is translating what, and when" — the question that makes this product a target rather than a curiosity. |
 | D4 | **Third-party credentials** — `OPENROUTER_API_KEY`, Monday client/signing secrets, GitLab admin token, Neon/Hyperdrive connection strings, R2 keys, `CLOUDFLARE_API_TOKEN`, Apple/Windows/Tauri signing keys | Worker secrets + GitHub Actions secrets | Direct financial loss (LLM spend), or — for the code-signing keys — the ability to ship a signed malicious desktop build. |
-| D5 | **Bearer tokens in circulation** — 30-day access JWTs, 15-minute sync tokens, `aqk_` Agent-API PATs, password-reset and email-verification tokens, invite tokens | Client IndexedDB / localStorage; `api_credentials`, `password_reset_tokens`, `email_verification_tokens` (all hashed — the latter two since migration 0080, OPS-20) | Each is a live credential. A password-reset token is account takeover on its own for 24 hours. Invite tokens ride in a URL path, which is the least protected place a bearer token can be — **and this row's "hashed" claim has not been checked against `project_invites`** (see OPS-20 follow-up). |
+| D5 | **Bearer tokens in circulation** — 30-day access JWTs, 15-minute sync tokens, `aqk_` Agent-API PATs, password-reset and email-verification tokens, invite tokens | Client IndexedDB / localStorage; `api_credentials`, `password_reset_tokens`, `email_verification_tokens` (hashed — the latter two since migration 0080, OPS-20); `project_invites`, `org_invites` (**plaintext** — OPS-26) | Each is a live credential. A password-reset token is account takeover on its own for 24 hours. Invite tokens ride in a URL path, which is the least protected place a bearer token can be — **and, checked on 2026-08-31, they are the exception to this row's "hashed" claim**: both invite tables store the raw token, so a DB read hands over working invite links (OPS-26, `docs/OPSEC-REVIEW-2026-08-31.md`). |
 | D6 | **Voice recordings and cloned voices** | R2 `aquilla-snapshots`, Modal services | Biometric-adjacent. A cloned voice is not revocable the way a password is. |
 | D7 | **User-supplied vendor API keys** (Gemini/TTS/completion) | Browser `localStorage`, org settings in Postgres | Someone else's credential that we chose to hold. |
 | D8 | **Session replays** | PostHog (third party) | Inputs are masked, but the page body is deliberately visible — so D2 draft text leaves our infrastructure by design. |
@@ -196,14 +207,12 @@ nothing, including for the credential scan added in V5.
 the first thing to resolve, because it gates whether anything else in §5 is
 actually enforced.
 
-**Update (2026-08-12, dev merge): resolved by relocation, not repair.** AQU-564
-retired Actions as the pull-request gate entirely: `ci.yml` now has no
-`pull_request`/`push` trigger (dispatch-only fallback), and PR validation runs
-in Cloudflare Workers Builds via `scripts/cloudflare-ci-checks.mjs`. The
-credential scan from V5 accordingly runs in that script's `lint` lane — the
-enforced path — with the `ci.yml` lint step retained as a mirror for dispatch
-runs. "CI is green" is meaningful again, provided the Workers Builds check is
-required on the target branch.
+**Update (2026-09-09, AQU-1219): validation runs before push.** Cloudflare
+Workers Builds now compiles previews only. `.husky/pre-push` runs
+`pnpm scan:secrets` before the existing commit-based affected E2E gate. The dispatch-only `ci.yml` retains manual equivalents.
+A green preview check confirms compilation, not security or functional testing.
+Local hooks can be bypassed; API-created commits do not execute them. QA reviews
+published previews under this explicitly chosen policy.
 
 ### V5 — No credential scanning in the toolchain — **FIXED IN THIS CHANGE** [FACT]
 
@@ -310,19 +319,17 @@ resolved by AQU-564 — see its section above.)
 | Fail closed on the sync auth bypass in deployed environments | `sync-worker/src/environment-guard.ts`, `index.ts`, `project-do.ts` |
 | Baseline HTTP security headers on the web surface | `worker/security-headers.ts` |
 | Invite tokens fingerprinted, never logged whole | `src/lib/sync/invites.ts` |
-| Credential scanning as a required CI check | `scripts/secret-scan.ts`; lint lane of `scripts/cloudflare-ci-checks.mjs` (the enforced PR gate), mirrored in `.github/workflows/ci.yml` (`lint`) |
-| SPA Worker suite actually runs | `pnpm run test:worker` — spa lane of `scripts/cloudflare-ci-checks.mjs`, mirrored in the ci.yml `unit` job |
+| Credential scanning before push | `scripts/secret-scan.ts`; first command in `.husky/pre-push`; manual fallback in `.github/workflows/ci.yml` |
+| SPA Worker suite available for targeted/manual validation | `pnpm run test:worker`; manual ci.yml `unit` job |
 | auth-worker `hono` floor raised above the SEC-7 advisory | `auth-worker/package.json` |
 
 Every one has a test. A control without a test is V4 waiting to happen again.
 
 ### Recommended next, in order
 
-0. ~~**Get CI actually running again (V4a).**~~ Done via AQU-564: the PR gate
-   moved off Actions to Cloudflare Workers Builds
-   (`scripts/cloudflare-ci-checks.mjs`); every control above now rides an
-   enforced lane there. Residual: confirm the Workers Builds check is marked
-   required on `dev`/`main` branch protection.
+0. **Validation ownership (AQU-1219).** Local push hooks run automated checks;
+   Cloudflare compiles previews for QA. Do not interpret its branch-protection
+   check as evidence that tests or credential scanning ran.
 1. **Split `SECRET_KEY` / `SYNC_SECRET_KEY` per environment (V7).** Highest
    leverage remaining. Replace cross-env token portability with a dev-only test
    fixture — the testing convenience it buys is not worth prod credentials

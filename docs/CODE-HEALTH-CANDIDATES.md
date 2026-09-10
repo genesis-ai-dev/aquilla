@@ -55,13 +55,11 @@ routine never modifies test files.
   `src/lib/sync/audit-stats-overlay.ts`, `src/lib/sync/project-settings.ts`,
   `src/lib/sync/file-projection.ts`, `src/lib/sync/events-emit.ts`,
   `src/lib/audio/transcribe.ts`, `src/lib/audio/timings.ts`, `src/lib/rules/edit-miner.ts`,
-  `src/lib/export/export-service.ts`.
-- **Remaining files**: `src/lib/frontier/members.ts:20` ("The D1 schema has no
-  gitlab_project_id column") and `src/lib/global-tm/index.ts:17` ("the Worker can back it
-  with D1/PG" — should just say "Postgres" since no worker binds D1 anymore) — both deferred
-  past the ≤8-file budget in the 2026-08-19 run. `src/lib/migrate/group-sync.ts:5` already
-  frames it as historical ("completing the D1→Neon cutover") — confirmed correct as-is,
-  leave alone.
+  `src/lib/export/export-service.ts`. The last two remaining files,
+  `src/lib/frontier/members.ts:21` and `src/lib/global-tm/index.ts:17`, were fixed in the
+  2026-09-02 run (reworded to "Postgres" — same treatment). `src/lib/migrate/group-sync.ts:5`
+  already frames it as historical ("completing the D1→Neon cutover") — confirmed correct
+  as-is, leave alone.
 - **False positives to skip** (not database D1 — a paragraph-model spec-section tag, see
   `docs/superpowers/specs/2026-06-18-paragraph-drafting-retrieval-context-design.md`):
   `src/hooks/useCells.ts:123,309`, `src/lib/parsers/paragraphs.ts`, `src/lib/parsers/types.ts:
@@ -69,22 +67,29 @@ routine never modifies test files.
   `src/lib/parsers/text-splitter.ts:6`, `src/lib/sync/project-settings.ts:65` ("D10" spec
   tag). Also skip `AD-2 chain pointer... entry came from D1` at `src/lib/parsers/types.ts:723`
   only after re-reading in context (mixed usage nearby).
-- **Why deferred further**: only 2 files left, small enough to fold into the next
-  comment-drift-themed run alongside a fresh grep sweep (new drift may have landed since).
-- **Proof needed**: comment-only edits; verify each hit is genuinely describing D1 as live
-  (not historical "migrated from D1" framing, not the paragraph-model tag above) before
-  touching it.
+- **Remaining**: none known as of 2026-09-02 — a fresh repo-wide grep would be needed to
+  confirm before closing this entry outright.
 
-## "frontier-server" mentions in sync-worker
+## "frontier-server" mentions in sync-worker — done 2026-09-02
 
-- **Files**: `sync-worker/src/cors.ts:4`, `sync-worker/src/admin.ts:24`.
-- **Friction**: same drift as the `src/` "frontier-server" comments fixed by the
-  2026-08-11 comment/doc run — these describe the *current* auth flow in present tense
-  but name the retired frontier-server service.
-- **Why deferred**: touching `sync-worker/` requires running its own test suite
-  (`cd sync-worker && npm test`) per the routine — bundle with a sync-worker-scoped
-  pass rather than an `src/`-only comment run.
-- **Proof needed**: comment-only edits; sync-worker suite green.
+- **Status**: fixed in the 2026-09-02 run. `sync-worker/src/cors.ts:4` and
+  `sync-worker/src/events/role-policy.ts:3` reworded "frontier-server" → "auth-worker"
+  (confirmed via `grep -rn "SYNC_SECRET_KEY" auth-worker/src` that auth-worker, not any
+  retired service, is the actual server-to-server caller and role-hierarchy owner).
+  `sync-worker/.dev.vars.example:4-6` (not source code, but same drift) also reworded.
+  `sync-worker/src/admin.ts:24` — the entry that originally flagged this file no longer
+  applies; a fresh grep found no "frontier-server" text left in `admin.ts` (already fixed
+  or moved by an unrelated change since the candidate was logged).
+- **Left alone (correctly historical, not drift)**: `sync-worker/src/events/role-policy.ts`
+  is the only sync-worker hit that was live-framed. `src/lib/frontier/auth.ts:4` ("History:
+  this file previously fetched... legacy frontier-server... Phase D cuts that dependency")
+  and `src/lib/sync/sync-token.ts:7` ("old frontier-server still work" as an E2E-mock
+  fallback) both already use explicit historical/legacy framing — correct as-is, same
+  distinction the D1-comment-drift entries below already draw.
+- **Still blocked (test file, frozen zone)**: `src/lib/frontier/roles.test.ts:24` — see the
+  dedicated ledger entry below.
+- **Proof**: comment-only edits; sync-worker suite 130/130 files, 1543/1543 tests, both
+  baseline and after, byte-identical.
 
 ## Additional candidates from the 2026-08-11 component cleanup run
 
@@ -138,15 +143,24 @@ future pass (verify each still applies — code moves):
     flaky, not a regression), `pnpm lint` problem list byte-identical to baseline once
     accounting for an unrelated `packages/idml-roundtrip/dist` build-artifact warning
     (see new entry below), no test file touched.
-  - `src/lib/milestone-navigation.ts` (5 sites: ~85, 86, 110, 114, 126)
-  - `src/lib/biblica/treasure-hunt/notes.ts:173`, `note-rules.ts` (~179, 205),
-    `reach4life/notes.ts:153`
-  - `src/lib/idml/completion.ts` (~334, 466), `src/lib/migrate/idml.ts` (~336, 417),
-    `src/lib/migrate/map.ts:245`
-  - `src/lib/export/exporters/vtt.ts` (~209, 210, 243), `src/lib/export/audio-bwf.ts:85`,
-    `src/lib/export/audio-by-character.ts:326`, `src/lib/audio/whisper-worker.ts:186`
-  - `src/hooks/useActiveCellStore.ts:1366`, `src/components/MultiProjectInviteDialog.tsx:126`,
-    `src/lib/import/normalized-manifest.ts:471`
+  - **Status**: `src/lib/milestone-navigation.ts`, `src/lib/biblica/treasure-hunt/notes.ts`,
+    `src/lib/biblica/treasure-hunt/note-rules.ts`, `src/lib/biblica/reach4life/notes.ts`,
+    `src/lib/idml/completion.ts`, `src/lib/migrate/idml.ts`, `src/lib/migrate/map.ts`, and
+    `src/lib/export/exporters/vtt.ts` done in the 2026-09-07 run — all 17 array-index
+    non-null assertions across those 8 files removed (each site individually verified as a
+    loop invariant, a prior length guard, or a fixed-length array populated for every
+    index). `pnpm test` full-suite went from 1 pre-existing failure
+    (`RecordingVideoSurface.test.tsx`, a known timing flake — see the environment-note
+    section below) at baseline to 1016/1016 passing at final (the flake didn't reproduce
+    that run, consistent with intermittent), `pnpm lint` problem count byte-identical
+    (389: 13 errors, 376 warnings) once accounting for the `packages/idml-roundtrip/dist`
+    build-artifact noise below, no test file touched. Baseline and final were each run in
+    a fully isolated `git worktree`/checkout to rule out read races with the edits.
+  - **Remaining**: `src/lib/export/audio-bwf.ts:85`,
+    `src/lib/export/audio-by-character.ts:326`, `src/lib/audio/whisper-worker.ts:186`,
+    `src/hooks/useActiveCellStore.ts:1366`, `src/components/MultiProjectInviteDialog.tsx:126`,
+    `src/lib/import/normalized-manifest.ts:471` — 6 files, not attempted this run to stay
+    inside the ≤8-file budget.
 - **Proof needed when revisited**: same as this run — isolate with `npx tsc --noEmit -p
   tsconfig.app.json` scoped to the touched file(s) plus full `pnpm test`/`pnpm lint`
   byte-identical-failure-list comparison; no test files touched.
@@ -230,6 +244,42 @@ run until it's fixed.
 - **Proof needed when revisited**: same as this run — `grep -rn` zero-importer check per
   file, `pnpm test` green before and after, run at least twice each way given the
   demonstrated flake risk.
+- **More evidence, 2026-09-02 run** (comment-only diff, zero test-file-count change, so this
+  confirms the flake isn't specific to file-count churn): three full-suite `pnpm test` runs
+  against the *same* 5-file comment-only diff produced three different failure sets —
+  baseline 1 file/2 tests (`ArchivedProjects.test.tsx`), run 2 added
+  `RecordingVideoSurface.test.tsx` (2 files/3 tests), run 3 added
+  `AssignedToMe.test.tsx` instead (3 files/4 tests, `ArchivedProjects.test.tsx` present in
+  all three). All three newly-seen files pass 100% in isolation
+  (`pnpm test <file>`). None of the failing files import or relate to any file this run
+  touched (`sync-worker/src/cors.ts`, `sync-worker/src/events/role-policy.ts`,
+  `sync-worker/.dev.vars.example`, `src/lib/frontier/members.ts`,
+  `src/lib/global-tm/index.ts`) — same worker-sharding/ordering mechanism as the
+  `TeamsList.test.tsx` case above, just a wider set of affected files than previously
+  logged.
+
+## 2026-08-31 run — reconfirmed the full `ImportDialog` orphan cluster; issue #410 still open
+
+A dead-code research pass this run (independent grep, not reusing the 2026-08-17 list)
+re-derived the same finding above and filled in the remaining file names. The full orphan
+set in `src/components/import/` — all shadowed by same-named inline functions defined
+directly inside `ImportDialog.tsx`, confirmed zero imports from `ImportDialog.tsx` or
+anywhere else except an isolated two-file internal cluster (`HelloaoPanel.tsx` →
+`ImportDialogBackButton.tsx`, `UploadPanel.tsx` → `ParatextChoice.tsx`) — is:
+`ImportLanding.tsx`, `UploadPanel.tsx`, `EBiblePanel.tsx`, `HelloaoPanel.tsx`,
+`ObsPanel.tsx`, `DcsPanel.tsx`, `MaculaPanel.tsx`, `TnPanel.tsx`, `BiblicaPanel.tsx`,
+`SdbhPanel.tsx`, `DirectionPanel.tsx`, `ImportResultPanel.tsx`, `CollisionPanel.tsx`,
+`ParatextChoice.tsx`, `ImportDialogBackButton.tsx` — 15 files, ~3,900 lines total.
+
+[genesis-ai-dev/aquilla#410](https://github.com/genesis-ai-dev/aquilla/issues/410) (the
+`TeamsList.test.tsx` order-dependent flake blocking this) is still **open**, unassigned,
+no linked PR. This run's own `pnpm test` baseline/final comparison did not trigger it
+(failure list byte-identical both times: `ArchivedProjects.test.tsx`,
+`RecordingVideoSurface.test.tsx`, unrelated to this cluster) — consistent with #410 being
+neighbor/order-dependent rather than reliably reproducing on every run. Until #410 is
+fixed, deleting this cluster still can't be proven behavior-preserving by this routine's
+own green-to-green standard; re-verify zero-importer status again before deleting once
+unblocked, since files move.
 
 ## Remaining "frontier-server" comment mention (frozen — test file)
 

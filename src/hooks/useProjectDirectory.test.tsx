@@ -90,7 +90,7 @@ describe("useProjectDirectory", () => {
     expect(getPortfoliosPage).toHaveBeenCalledWith(
       "jwt",
       [1, 2],
-      expect.objectContaining({ q: "" }),
+      expect.objectContaining({ q: "", scope: "memberships" }),
     )
   })
 })

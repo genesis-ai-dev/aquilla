@@ -596,7 +596,7 @@ export function OrgHome() {
     let cancelled = false
     setError(null)
     const orgById = new Map(orgs.map((org) => [org.id, org]))
-    getPortfolios(jwt, orgs.map((org) => org.id))
+    getPortfolios(jwt, orgs.map((org) => org.id), { scope: "memberships" })
       .then((portfolios) => {
         if (!cancelled) setProjects(portfolios.flatMap(({ orgId, projects: list }) => {
           const org = orgById.get(orgId)

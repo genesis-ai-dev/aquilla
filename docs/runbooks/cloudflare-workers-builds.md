@@ -138,8 +138,11 @@ local `.dev.vars` or copies production secrets. Enable Preview Deployments URLs
 for all three parents. The script fails if Wrangler returns no preview URL.
 
 Generated `previews` configs bind both backends to development Hyperdrive
-`53581197ff7a4202a5ed0ef08537d4a6` and `aquilla-snapshots-dev`. This isolates code
-and Durable Objects, **not database rows or blobs**. QA should use a separate
+`53581197ff7a4202a5ed0ef08537d4a6` and `aquilla-snapshots-dev`. Auth previews
+also set `ADMIN_EMAILS` (same allowlist as development) because generated preview
+JSON does not inherit `auth-worker/wrangler.toml` `[vars]` — without it, a
+platform-admin account on shared development data is a regular user on the
+preview. This isolates code and Durable Objects, **not database rows or blobs**. QA should use a separate
 project per preview; development and preview sessions of the same project do
 not share a Durable Object broadcast namespace. Schema-changing PRs need a
 separate database branch. Automatic migrations, legacy identity migration,

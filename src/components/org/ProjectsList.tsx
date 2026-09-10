@@ -284,7 +284,7 @@ export function ProjectsList() {
       return
     }
     let cancelled = false
-    getPortfolios(jwt, orgs.map((org) => org.id))
+    getPortfolios(jwt, orgs.map((org) => org.id), { scope: "memberships" })
       .then((portfolios) => {
         if (!cancelled) setPortfolioProjects(portfolios.flatMap(({ projects }) => projects))
       })

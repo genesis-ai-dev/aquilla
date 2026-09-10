@@ -150,7 +150,9 @@ function fetchDirectoryPage(
   if (orgIds.length === 1) {
     return getPortfolioPage(jwt, orgIds[0]!, pageOpts)
   }
-  return getPortfoliosPage(jwt, orgIds, pageOpts)
+  // All-orgs: omit the id list so POST /portfolio uses memberships (AQU-756)
+  // instead of 400ing past the worker's orgIds cap.
+  return getPortfoliosPage(jwt, orgIds, { ...pageOpts, scope: "memberships" })
 }
 
 function mergeProjects(

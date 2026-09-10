@@ -67,6 +67,10 @@ describe("full-stack Cloudflare previews", () => {
     expect(config).not.toHaveProperty("build")
     expect(config.previews.vars).not.toHaveProperty("WRANGLER_LOCAL")
     expect(config.previews.vars).not.toHaveProperty("ALLOW_UNAUTHENTICATED")
+    if (surface === "auth") {
+      expect(config.previews.vars.ADMIN_EMAILS).toContain("joel@frontierrnd.com")
+      expect(config.previews.vars.ADMIN_REQUIRE_ELEVATION).toBe("true")
+    }
     expect(JSON.stringify(config)).not.toContain("api.aquilla.app")
   })
 

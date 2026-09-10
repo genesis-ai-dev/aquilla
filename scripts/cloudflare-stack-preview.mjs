@@ -47,6 +47,11 @@ export function previewConfig(surface, { cwd, urls = {} }) {
       ACCESS_TOKEN_EXPIRE_MINUTES: "43200",
       SYNC_WORKER_URL: urls.sync ? `${urls.sync}/sync` : UNREADY,
       LEGACY_USER_MIGRATION_ENABLED: "false",
+      // Same allowlist as auth-worker wrangler.toml [env.development]. Generated
+      // preview JSON does not inherit wrangler.toml [vars], so without this a
+      // platform-admin test account (AQU-756) is a regular user on the preview
+      // even though it shares the development Neon branch.
+      ADMIN_EMAILS: "ryderwishart@gmail.com,danieljlosey@gmail.com,the.disciplexiii@gmail.com,joel@frontierrnd.com,jade@frontierrnd.com,sampetetc@gmail.com",
       ADMIN_REQUIRE_ELEVATION: "true",
       DEFAULT_LLM_MODEL: "openai/gpt-5.6-luna",
     })

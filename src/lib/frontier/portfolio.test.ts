@@ -98,6 +98,20 @@ describe("getPortfolioPage / getPortfoliosPage", () => {
     await getPortfolios("jwt", orgIds)
     expect(calledBody).toEqual({})
   })
+
+  it("omits orgIds for all-orgs memberships even under the batch cap (AQU-756)", async () => {
+    let calledBody: unknown
+    global.fetch = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      calledBody = JSON.parse(String(init?.body))
+      return new Response(JSON.stringify({ portfolios: [], nextCursor: null }), { status: 200 })
+    }) as unknown as typeof fetch
+
+    const orgIds = Array.from({ length: 101 }, (_, i) => i + 1)
+    await getPortfoliosPage("jwt", orgIds, { limit: 40, scope: "memberships" })
+    expect(calledBody).toEqual({ limit: 40 })
+    await getPortfolios("jwt", orgIds, { scope: "memberships" })
+    expect(calledBody).toEqual({})
+  })
 })
 
 describe("validatedPct", () => {

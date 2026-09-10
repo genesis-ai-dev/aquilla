@@ -138,6 +138,24 @@ export async function getPortfolioPage(
   return { projects: body.projects ?? [], nextCursor: body.nextCursor ?? null }
 }
 
+export type PortfolioBatchScope = "orgIds" | "memberships"
+
+/** POST /orgs/portfolio body. All-orgs omits orgIds so the worker uses memberships
+ *  (AQU-756) instead of sending a list that 400s past the worker's batch cap. */
+export function portfolioBatchPayload(
+  orgIds: number[],
+  extra: Record<string, unknown> = {},
+  scope: PortfolioBatchScope = "orgIds",
+): ({ orgIds?: number[] } & Record<string, unknown>) | null {
+  const uniqueOrgIds = [...new Set(orgIds)].filter((id) => Number.isInteger(id) && id > 0)
+  const omitOrgIds = scope === "memberships" || uniqueOrgIds.length > PORTFOLIO_ORG_IDS_MAX
+  if (!omitOrgIds && uniqueOrgIds.length === 0) return null
+  return {
+    ...(omitOrgIds ? {} : { orgIds: uniqueOrgIds }),
+    ...extra,
+  }
+}
+
 export async function getPortfoliosPage(
   jwt: string,
   orgIds: number[],
@@ -146,44 +164,49 @@ export async function getPortfoliosPage(
     limit?: number
     cursor?: string | null
     signal?: AbortSignal
+    scope?: PortfolioBatchScope
   } = {},
 ): Promise<{ projects: Array<PortfolioProject & { orgId: number }>; nextCursor: string | null }> {
-  const uniqueOrgIds = [...new Set(orgIds)].filter((id) => Number.isInteger(id) && id > 0)
-  if (uniqueOrgIds.length === 0) return { projects: [], nextCursor: null }
+  const body = portfolioBatchPayload(
+    orgIds,
+    {
+      q: opts.q?.trim() || undefined,
+      limit: opts.limit ?? PORTFOLIO_PAGE_SIZE,
+      cursor: opts.cursor || undefined,
+    },
+    opts.scope ?? "orgIds",
+  )
+  if (!body) return { projects: [], nextCursor: null }
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/portfolio`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` },
     signal: opts.signal,
-    body: JSON.stringify({
-      // AQU-756: over the batch cap, omit orgIds so the worker uses memberships.
-      ...(uniqueOrgIds.length <= PORTFOLIO_ORG_IDS_MAX ? { orgIds: uniqueOrgIds } : {}),
-      q: opts.q?.trim() || undefined,
-      limit: opts.limit ?? PORTFOLIO_PAGE_SIZE,
-      cursor: opts.cursor || undefined,
-    }),
+    body: JSON.stringify(body),
   })
   if (!res.ok) throw new UserError(res.status, "", "org")
-  const body = (await res.json()) as {
+  const payload = (await res.json()) as {
     portfolios: OrgPortfolio[]
     nextCursor?: string | null
   }
   return {
-    projects: (body.portfolios ?? []).flatMap((portfolio) =>
+    projects: (payload.portfolios ?? []).flatMap((portfolio) =>
       portfolio.projects.map((project) => ({ ...project, orgId: portfolio.orgId })),
     ),
-    nextCursor: body.nextCursor ?? null,
+    nextCursor: payload.nextCursor ?? null,
   }
 }
 
-export async function getPortfolios(jwt: string, orgIds: number[]): Promise<OrgPortfolio[]> {
-  const uniqueOrgIds = [...new Set(orgIds)].filter((id) => Number.isInteger(id) && id > 0)
-  if (uniqueOrgIds.length === 0) return []
+export async function getPortfolios(
+  jwt: string,
+  orgIds: number[],
+  opts: { scope?: PortfolioBatchScope } = {},
+): Promise<OrgPortfolio[]> {
+  const body = portfolioBatchPayload(orgIds, {}, opts.scope ?? "orgIds")
+  if (!body) return []
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/portfolio`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` },
-    body: JSON.stringify(
-      uniqueOrgIds.length <= PORTFOLIO_ORG_IDS_MAX ? { orgIds: uniqueOrgIds } : {},
-    ),
+    body: JSON.stringify(body),
   })
   if (!res.ok) throw new UserError(res.status, "", "org")
   return ((await res.json()) as { portfolios: OrgPortfolio[] }).portfolios

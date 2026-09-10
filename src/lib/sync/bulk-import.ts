@@ -102,6 +102,8 @@ export interface BulkImportFileMeta {
   /** Timeline-segment-model order lens ('time' | 'sequence'). Stored in
    *  files.meta on the server; absent ⇒ client treats as 'sequence'. */
   orderedBy?: string
+  /** Sidebar folder — "OT"/"NT" or a named collection such as a Biblica title. */
+  corpusMarker?: string
   /** Versioned normalized-import summary. Per-unit locators live on cells. */
   importManifest?: object
 }

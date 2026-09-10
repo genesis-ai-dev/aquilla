@@ -654,6 +654,35 @@ describe('POST /import — cells land in Postgres projection (AQU-135)', () => {
     expect(fileMeta).toMatchObject({ importFormat: 'json', parserVersion: 'builtin:obs@1' })
   })
 
+  it('persists corpusMarker on files.meta so sidebar folders survive reload', async () => {
+    const token = await leadToken()
+    const { db, rows } = await makeTestDb()
+    const req = new Request('https://worker/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        projectId: PROJECT_ID,
+        fileId: FILE_ID,
+        file: {
+          id: 'f-thb',
+          name: 'Genesis',
+          fileType: 'idml',
+          parserVersion: 'builtin:biblica-treasure-hunt@1',
+          corpusMarker: 'Treasure Hunt Bible',
+        },
+        cells: [{ id: 'thb-evt-1', cellId: 'note-1', value: 'A fact about Genesis.' }],
+      }),
+    })
+    const res = await handleBulkImportRequest(req, makeEnv(db))
+    expect(res?.status).toBe(200)
+    const fileRows = await rows('files')
+    const fileMeta = typeof fileRows[0].meta === 'string'
+      ? JSON.parse(fileRows[0].meta)
+      : fileRows[0].meta
+    expect(fileMeta.corpusMarker).toBe('Treasure Hunt Bible')
+    expect(fileMeta.parserVersion).toBe('builtin:biblica-treasure-hunt@1')
+  })
+
   it('duplicate cellIds within one chunk dedupe last-wins (multi-row ON CONFLICT safety)', async () => {
     // Postgres rejects a multi-row INSERT … ON CONFLICT DO UPDATE that touches
     // the same row twice; the bulk builder dedupes by cellId keeping the LAST

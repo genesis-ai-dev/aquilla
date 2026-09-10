@@ -27,8 +27,8 @@ function detectBibleBook(file: FileReference): RenameSuggestion | null {
   const name = getBookName(codeMatch)!
   const corpus = getTestament(codeMatch)!
 
-  // Friendly label already applied. corpusMarker is client-local (not on the
-  // server projection) and is often missing after reload — don't re-prompt.
+  // Friendly label already applied. Don't re-prompt just because a corpus
+  // folder is missing — grouping is persisted separately on the file.
   if (file.name === name) return null
 
   return {

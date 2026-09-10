@@ -48,8 +48,12 @@ Important invariants:
 
 - The event ID is the idempotency key. Retrying the same event must not duplicate
   its effect.
-- Chain-mutating events use first-write-wins against the current parent. A stale
-  sibling returns `409` rather than silently overwriting accepted work.
+- Chain-mutating events are a compare-and-swap on the cell's current head: an
+  event advances the projection only if its `parentId` is the head for that
+  side/lane at commit time (or the row does not exist yet). A stale event is
+  still logged and `200`-accepted, but reported in the response `stale[]` and
+  never overwrites accepted work — so a client chaining on its own stale head
+  stays stale until it revalidates (AQU-1154).
 - The sync Worker is the single writer for the event log and its projections.
 - A successful write advances the durable projection before realtime broadcast.
 - The browser removes an outbox record only after the server accepts it. Rejected
@@ -64,6 +68,24 @@ request while infrastructure settles, so the client uses bounded state-based
 retries for known transient missing rows. Exhaustion is an explicit error; it is
 never converted to an empty project or destructive reset. See the sync read helpers
 and their regression tests for the exact retry contracts.
+
+## Cell page reads (AQU-1160)
+
+`GET /api/v1/projects/:projectId/files/:fileId/cells` returns cells in
+**anchor-chain order** (head = `anchor_cell_id IS NULL`, siblings tiebroken by
+`event_id`, orphans appended per AQU-931 — see the route's header comment and
+`walkAnchorChain` in `sync-worker/src/events/cells-read-route.ts` for the exact
+contract). The first page for a given file version still pays a full-file read
++ in-memory chain walk (there's no way around computing the order at least once
+without a persisted position column — a bigger change than a route-level fix,
+see the runbook below). Every subsequent page for the *same* version is served
+from an isolate-local cache of just the ordered id list, so it costs a single
+bounded `(side, target_lang, cell_id) IN (...)` lookup (indexed by
+`idx_cells_file_scan`) instead of re-walking the file. The cache is keyed by
+the route's response ETag (`fileId:epoch:rebuiltSeq:maxSeq`) plus
+`projectId`/`side`/`lane`, so any write, rebuild, or re-incarnation
+invalidates it automatically — see
+[`docs/runbooks/fix-cell-page-read-scaling.md`](runbooks/fix-cell-page-read-scaling.md).
 
 ## Authentication and revocation
 

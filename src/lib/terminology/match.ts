@@ -76,9 +76,14 @@ export function buildTermRegex(term: string, flags = "iu"): RegExp | null {
   return new RegExp(src, flags)
 }
 
-/** True if `haystack` contains a match for `term` (case-insensitive, Unicode). */
-export function matchesTerm(haystack: string, term: string): boolean {
+/** True if `haystack` contains a match for `term` (Unicode; case-insensitive unless asked). */
+export function matchesTerm(
+  haystack: string,
+  term: string,
+  opts?: { caseSensitive?: boolean },
+): boolean {
   if (!haystack) return false
-  const re = buildTermRegex(term)
+  const flags = opts?.caseSensitive ? "u" : "iu"
+  const re = buildTermRegex(term, flags)
   return re !== null && re.test(haystack)
 }

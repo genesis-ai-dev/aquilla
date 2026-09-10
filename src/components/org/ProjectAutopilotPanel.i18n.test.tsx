@@ -124,7 +124,11 @@ describe("localized Autopilot overview and settings wiring", () => {
 
     expect(screen.getByText("ميزات تجريبية")).toBeInTheDocument()
     expect(screen.getByText("ميزات محلية على هذا الجهاز.")).toBeInTheDocument()
-    expect(screen.getByRole("switch", { name: "إظهار عناصر تحكم Autopilot" })).toBeChecked()
+    // AQU-1103: unchecked — Autopilot is opt-in, and this project stores no
+    // flag. The assertion this test exists for is the localized switch NAME
+    // resolving through the typed message key; its state just tracks the
+    // registry default.
+    expect(screen.getByRole("switch", { name: "إظهار عناصر تحكم Autopilot" })).not.toBeChecked()
     expect(screen.getByText("عناصر التحكم هذه لا تبدأ العمل.")).toBeInTheDocument()
   })
 })

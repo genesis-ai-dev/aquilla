@@ -308,6 +308,124 @@ interface Cursor {
   offset: number
 }
 
+// ─── AQU-1160: ordered-id chain cache ───────────────────────────────────────
+//
+// The full-file read + in-memory anchor-chain walk above is O(file size) —
+// correct (it's the tested oracle every fallback below defers to) but a
+// 500-row page on a 30k-cell file paid the cost of materializing and walking
+// every row on EVERY page. This cache breaks that: the FIRST page request for
+// a given (project, file, side, lane, ETag) still pays the full walk (there's
+// no way around computing the order at least once without a persisted
+// position column — a bigger change than this ticket takes on, see the
+// SWARM-TODO in the PR/issue comment), but it remembers the resulting
+// ORDERED LIST OF IDS (not the row data — cheap, ~40 bytes/id) so every
+// subsequent page for the same version is a single bounded
+// `(side, target_lang, cell_id) IN (...)` point lookup sized to the page,
+// served by idx_cells_file_scan (0083_cells_scan_index.sql).
+//
+// Keyed by the response ETag: that string is already the exact "identity of
+// current full state" value this route computes for conditional reads
+// (fileId + epoch + rebuiltSeq + maxSeq — see makeEtag), so any write that
+// would change ordering, add/remove/change a row, or rebuild/re-incarnate the
+// project changes the key and the cache misses safely. Never used for the
+// `cellIds=` fast path (unpaginated, order is the caller's request order) or
+// the `since=` delta path (unordered by design).
+//
+// Isolate-local only (no DO/KV): correctness never depends on a hit, so a
+// cold isolate or eviction just falls back to the full walk — see the
+// SWARM-TODO for the isolate-hit-rate caveat this implies for the very first
+// page of a newly-opened file.
+interface ChainCacheItem {
+  cellId: string
+  side: "source" | "target"
+  targetLang: string
+}
+
+interface ChainCacheEntry {
+  items: ChainCacheItem[]
+  cachedAt: number
+}
+
+const CHAIN_CACHE_MAX_ENTRIES = 32
+const CHAIN_CACHE_TTL_MS = 10 * 60 * 1000
+// Upper bound on the SUM of cached ids across all entries. Each item is a
+// small object (~100 bytes with V8 overhead for a ~30-char cell id + side +
+// lane), so 200K ids is ~20MB worst case — comfortably inside a Worker
+// isolate's 128MB even alongside the request itself. A single file larger
+// than this is simply not cached (falls back to the full walk, which is the
+// pre-cache behavior, never wrong).
+const CHAIN_CACHE_MAX_TOTAL_ITEMS = 200_000
+
+// One module-level (isolate-local) Map, NOT keyed on the AquillaDb instance:
+// index.ts constructs a fresh PostgresDb for EVERY request, so a per-db
+// WeakMap could never hit across the sequential page requests this cache
+// exists for (every page re-ran the full-file SELECT in production).
+//
+// Staleness: the key embeds the response ETag, which is recomputed from the
+// watermark query on every request (fetchWatermarks → makeEtag:
+// fileId + projectEpoch + rebuiltSeq + maxSeq). Any write to the project
+// bumps maxSeq (a rebuild bumps rebuiltSeq, a re-incarnation bumps the
+// epoch), so a post-write request computes a different key and misses. The
+// cache can therefore never serve an ordering older than the watermark the
+// same request just read. `fileId` alone is not a safe cross-project key
+// (nothing enforces global fileId uniqueness at this layer), so the key
+// also carries `projectId`.
+const chainCache = new Map<string, ChainCacheEntry>()
+let chainCacheTotalItems = 0
+
+/** Test-only: isolated test databases in one process all use the same
+ *  project/file ids with identical zero watermarks, so their ETags collide;
+ *  reset between tests to keep them independent. */
+export function resetChainCacheForTests(): void {
+  chainCache.clear()
+  chainCacheTotalItems = 0
+}
+
+function chainCacheKey(
+  projectId: string,
+  etag: string,
+  sideFilter: "source" | "target" | null,
+  laneFilter: string | null,
+): string {
+  return `${projectId} ${etag} ${sideFilter ?? "*"} ${laneFilter ?? ""}`
+}
+
+function chainCacheDelete(key: string): void {
+  const entry = chainCache.get(key)
+  if (!entry) return
+  chainCache.delete(key)
+  chainCacheTotalItems -= entry.items.length
+}
+
+function chainCacheGet(key: string): ChainCacheEntry | null {
+  const entry = chainCache.get(key)
+  if (!entry) return null
+  if (Date.now() - entry.cachedAt > CHAIN_CACHE_TTL_MS) {
+    chainCacheDelete(key)
+    return null
+  }
+  // Touch for recency: re-insert so Map's insertion-order iteration doubles
+  // as a cheap LRU for the eviction below.
+  chainCache.delete(key)
+  chainCache.set(key, entry)
+  return entry
+}
+
+function chainCacheSet(key: string, entry: ChainCacheEntry): void {
+  chainCacheDelete(key)
+  if (entry.items.length > CHAIN_CACHE_MAX_TOTAL_ITEMS) return
+  chainCache.set(key, entry)
+  chainCacheTotalItems += entry.items.length
+  while (
+    chainCache.size > CHAIN_CACHE_MAX_ENTRIES ||
+    chainCacheTotalItems > CHAIN_CACHE_MAX_TOTAL_ITEMS
+  ) {
+    const oldest = chainCache.keys().next().value
+    if (oldest === undefined) break
+    chainCacheDelete(oldest)
+  }
+}
+
 function encodeCursor(c: Cursor): string {
   return btoa(JSON.stringify(c))
 }
@@ -653,6 +771,65 @@ export async function handleCellsReadRequest(
     }
   }
 
+  // AQU-1160: cache applies only to the paginated whole-file/whole-side walk
+  // — never to the targeted cellIds fast path (already bounded, order is the
+  // caller's request order) and only when the watermark/ETag was computed
+  // (i.e. cellIdsFilter is empty, same gate as the delta branch above).
+  const useChainCache = etag !== null && (!cellIdsFilter || cellIdsFilter.length === 0)
+  const cacheKey = useChainCache ? chainCacheKey(projectId, etag!, sideFilter, laneFilter) : null
+  const cached = cacheKey ? chainCacheGet(cacheKey) : null
+
+  if (cached) {
+    const offset = cursor?.offset ?? 0
+    const pageItems = cached.items.slice(offset, offset + limit)
+    const nextOffset = offset + pageItems.length
+    const hasMore = nextOffset < cached.items.length
+
+    let cells: CellRowOut[] = []
+    if (pageItems.length > 0) {
+      // Bounded point lookup: exactly the page's rows, served by
+      // idx_cells_file_scan (project_id, file_id, side, target_lang, cell_id)
+      // — independent of file size (AQU-1160 AC1).
+      const tuples = pageItems.map(() => "(?, ?, ?)").join(", ")
+      const pageParts = [
+        `SELECT ${columns}`,
+        "FROM cells",
+        "WHERE project_id = ? AND file_id = ?",
+        `AND (side, target_lang, cell_id) IN (${tuples})`,
+      ]
+      const pageBinds: unknown[] = [projectId, fileId]
+      for (const item of pageItems) pageBinds.push(item.side, item.targetLang, item.cellId)
+      const pageRes = await env.AQUILLA_PG
+        .prepare(pageParts.join(" "))
+        .bind(...pageBinds)
+        .all<CellRowRaw>()
+      // Evidence for AQU-1160 AC1: a page read touches exactly the page's
+      // rows, not the file. Compare against the cache-miss row-count log
+      // below (which logs `allRows.length`, the pre-AQU-1160 full-file cost).
+      console.log(
+        `[cells-read] chain-cache hit file=${fileId} rows=${pageRes.results.length} page=${pageItems.length} totalOrdered=${cached.items.length}`,
+      )
+      const bySlot = new Map<string, CellRowRaw>()
+      for (const r of pageRes.results) bySlot.set(`${r.side} ${r.target_lang ?? ""} ${r.cell_id}`, r)
+      cells = []
+      for (const item of pageItems) {
+        const row = bySlot.get(`${item.side} ${item.targetLang} ${item.cellId}`)
+        if (row) cells.push(mapRow(row))
+      }
+    }
+
+    return Response.json(
+      {
+        cells,
+        nextCursor: hasMore ? encodeCursor({ offset: nextOffset }) : null,
+        total: cached.items.length,
+        maxServerSeq,
+        projectEpoch,
+      },
+      { headers: cacheHeaders(etag!) },
+    )
+  }
+
   const parts: string[] = [
     `SELECT ${columns}`,
     "FROM cells",
@@ -676,6 +853,12 @@ export async function handleCellsReadRequest(
 
   const result = await env.AQUILLA_PG.prepare(sql).bind(...binds).all<CellRowRaw>()
   const allRows = result.results
+  if (useChainCache) {
+    // Evidence for AQU-1160 AC1's baseline: this is the pre-cache, full-file
+    // cost every page paid before this change. Compare against the
+    // chain-cache hit log above.
+    console.log(`[cells-read] chain-cache miss file=${fileId} rows=${allRows.length}`)
+  }
 
   let ordered: CellRowRaw[]
   if (cellIdsFilter && cellIdsFilter.length > 0) {
@@ -739,6 +922,13 @@ export async function handleCellsReadRequest(
     }
   } else {
     ordered = walkAnchorChain(allRows)
+  }
+
+  if (cacheKey) {
+    chainCacheSet(cacheKey, {
+      items: ordered.map((r) => ({ cellId: r.cell_id, side: r.side, targetLang: r.target_lang ?? "" })),
+      cachedAt: Date.now(),
+    })
   }
 
   const offset = cursor?.offset ?? 0

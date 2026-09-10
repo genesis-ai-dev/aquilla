@@ -192,6 +192,25 @@ outside the event log. v1 therefore:
 The doc promises universal *auditability* in v1, and universal *event* provenance only
 where events exist.
 
+**Org-scoped reads (AQU-1236).** Credentials have always been scoped org-**or**-project,
+but the read tier only ever exposed the single scoped project, so a console managing a
+partner's whole workspace had to mint and juggle one token per project. An org-scoped
+credential can now enumerate its orgs (`GET …/orgs`), list a given org's projects
+(`GET …/orgs/:orgId/projects`, or `GET …/projects?orgId=`), and search an explicit list
+of projects in one call (`GET …/search?q=&projectIds=a,b`). Three invariants hold:
+
+- **Scope narrows, never widens.** Every query runs through the credential's own scope.
+  A *project*-scoped credential sees exactly its one project and that project's org — it
+  cannot reach the org's siblings. Naming a resource outside the scope returns
+  `scope_denied`, not an empty list, so "not yours" never reads as "empty".
+- **Cross-project search is all-or-nothing.** Every listed project is gated before any of
+  them is searched; one unauthorized id fails the whole call. A partial result set would
+  otherwise be indistinguishable from a complete one, and diffing result sets would leak
+  which project ids exist. Fan-out is bounded (10 projects) and charges the search rate
+  limit once per project searched.
+- **No new PII.** These routes expose ids, names, and the *caller's own* role level.
+  Org member lists, emails, and owner identities stay on the in-app surfaces.
+
 ---
 
 ## 3. Commands, changesets, confirmation, and jobs
@@ -331,10 +350,11 @@ CRUD surface with MCP bolted on.
 | Outcome | Tools |
 | --- | --- |
 | Discovery | `get_capabilities`, `get_identity_and_scope` |
-| Projects | `list_projects`, `get_project`, `create_project`, `update_project` |
+| Orgs | `list_orgs` — **implemented** (AQU-1236): the orgs a credential covers, `{ id, name, role, role_source }`. REST: `GET …/orgs` and `GET …/orgs/:orgId/projects` |
+| Projects | `list_projects` (optional `orgId` filter — AQU-1236), `get_project`, `create_project`, `update_project` |
 | Artifacts | `create_artifact_upload`, `inspect_artifact` |
 | Ingestion | `preview_import`, `prepare_import` — **implemented**: both parse an already-uploaded source artifact server-side with the built-in DOM-free parsers (txt, md, json, po, properties, obs, vtt, srt, sbv, csv, tsv, usfm; 5000-cell cap) — preview returns cells without staging, prepare stages a `PlanImport` changeset linking the artifact. Upload stays REST-only (`POST …/artifacts`, 25MB). REST equivalent: `POST …/artifacts/:artifactId/parse` (body `{ "stage": true }` to stage). DOM-bound formats (docx, pptx, html, xliff, tmx, usx, idml) are not yet server-parseable. |
-| Reading | `search_project`, `read_content`, `read_history` |
+| Reading | `search_project`, `search_projects` (cross-project, explicit id list, max 10 — AQU-1236), `read_content`, `read_history` |
 | Translation | `prepare_translations` |
 | Verification | `run_checks` — structured, actionable failures (e.g. `"term 'covenant' rendered 3 ways: [refs]"`), never a bare 400 |
 | Changesets | `get_changeset`, `confirm_changeset`, `discard_changeset` |

@@ -55,7 +55,10 @@ function apiMap(): Record<string, unknown> {
     ],
     endpoints: {
       'GET /api/v1/external/me': 'Who am I: userId, username, mode, scope. Start here.',
-      'GET /api/v1/external/projects': 'List accessible projects (up to 100).',
+      'GET /api/v1/external/orgs': 'List the organizations this credential covers (up to 100): { id, name, role, role_source }. See "orgScopedReads".',
+      'GET /api/v1/external/orgs/:orgId/projects': 'List one org’s projects. An org outside the credential’s scope returns scope_denied.',
+      'GET /api/v1/external/projects': 'List accessible projects (up to 100). Optional ?orgId= narrows to one org.',
+      'GET /api/v1/external/search?q=&projectIds=a,b': 'Full-text search SEVERAL projects in one call; every result carries its projectId. Optional side=source|target. See "orgScopedReads".',
       'GET /api/v1/external/projects/:projectId/files': 'List a project’s files.',
       'GET /api/v1/external/projects/:projectId/files/:fileId/cells': 'Read a file’s cells (source + target). Supports since/limit/cursor, and lane=<tag> to filter targets to one target-language lane (see multiLanguage).',
       'GET /api/v1/external/projects/:projectId/search?q=': 'Full-text search cells. Optional side=source|target.',
@@ -68,6 +71,20 @@ function apiMap(): Record<string, unknown> {
       'POST /api/v1/external/projects/:projectId/changesets/:id/commit': 'Commit a prepared changeset. Idempotent; safe to retry.',
       'POST /api/v1/external/projects/:projectId/changesets/:id/discard': 'Discard a staged changeset.',
       'POST /api/v1/external/mcp': 'MCP server (JSON-RPC 2.0, streamable HTTP, same bearer token). Tools mirror the REST surface — see "mcp" below.',
+    },
+    orgScopedReads: {
+      note:
+        'Credentials are scoped org-or-project. An ORG-scoped token can work a partner’s whole workspace from one credential: list its orgs, enumerate each org’s projects, and search several projects in one call. Scope only ever narrows — a PROJECT-scoped token sees exactly its one project (and that project’s org) from these routes, and naming anything outside the scope returns scope_denied rather than an empty list, so "not yours" never looks like "empty".',
+      workflow: [
+        `1. GET ${EXTERNAL_ROOT}/orgs → { data: [{ id, name, role, role_source }] } — the orgs this credential covers.`,
+        `2. GET ${EXTERNAL_ROOT}/orgs/:orgId/projects (or ${EXTERNAL_ROOT}/projects?orgId=:orgId) → that org’s projects.`,
+        `3. GET ${EXTERNAL_ROOT}/search?q=term&projectIds=proj-a,proj-b → one merged, rank-ordered result set; each row carries its projectId, and the response echoes the projectIds searched.`,
+      ],
+      maxProjectsPerSearch: 10,
+      strictness:
+        'Cross-project search is all-or-nothing: if ANY listed project is unknown, outside the credential’s scope, or one you have no membership on, the whole call fails (not_found / scope_denied / permission_denied) instead of returning a quietly partial result set. It also costs one search-rate-limit unit per project searched.',
+      privacy:
+        'These routes expose ids, names, and YOUR role level only — no org member lists, emails, or owner identities.',
     },
     importing: {
       note:

@@ -6,7 +6,6 @@ import {
   type ArchiveResult,
   type UnarchiveResult,
 } from "../sync/archive"
-import { broadcastProjectLocalUpdated } from "./project-local-events"
 
 interface CodexDB extends DBSchema {
   projects: {
@@ -32,6 +31,32 @@ const DB_NAME = "codex"
 const DB_VERSION = 4
 
 let dbPromise: ReturnType<typeof openDB<CodexDB>> | null = null
+
+// ── Local-record change notification ─────────────────────────────────────
+// Device-local fields (experimentalFlags, completionSettings, …) live ONLY on
+// this IDB record, and their writer — Project settings → Experimental — opens
+// as a route-modal over a still-mounted consumer (the project overview, the
+// workspace; see App.tsx `backgroundLocation`). Those consumers read the
+// record through useProject, which has no other way to learn the local record
+// moved. Every write path in this module notifies, so a read hook can
+// re-overlay the device-local fields without a page reload (AQU-1103).
+
+type ProjectRecordListener = (projectId: string) => void
+const projectRecordListeners = new Set<ProjectRecordListener>()
+
+/**
+ * Subscribe to writes on the local `projects` store. The listener receives the
+ * id of the record that was created, updated, patched, or deleted; re-reading
+ * is the caller's job. Returns the unsubscribe function.
+ */
+export function subscribeProjectRecords(listener: ProjectRecordListener): () => void {
+  projectRecordListeners.add(listener)
+  return () => { projectRecordListeners.delete(listener) }
+}
+
+function notifyProjectRecord(projectId: string): void {
+  for (const listener of projectRecordListeners) listener(projectId)
+}
 
 export function getDb() {
   if (!dbPromise) {
@@ -129,12 +154,13 @@ export async function getProject(id: string): Promise<ProjectRecord | undefined>
 export async function createProject(project: ProjectRecord): Promise<void> {
   const db = await getDb()
   await db.put("projects", project)
+  notifyProjectRecord(project.id)
 }
 
 export async function updateProject(project: ProjectRecord): Promise<void> {
   const db = await getDb()
   await db.put("projects", project)
-  broadcastProjectLocalUpdated(project.id)
+  notifyProjectRecord(project.id)
 }
 
 /**
@@ -210,6 +236,7 @@ export function mergeServerProjectWithLocalCache(
 export async function deleteProject(id: string): Promise<void> {
   const db = await getDb()
   await db.delete("projects", id)
+  notifyProjectRecord(id)
 }
 
 export interface TombstoneOutcome {

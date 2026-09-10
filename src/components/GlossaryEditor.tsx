@@ -29,6 +29,10 @@ import { useProject } from "@/hooks/useProject"
 import type { UseProjectSettings } from "@/hooks/useProjectSettings"
 import { useProjectCells } from "@/hooks/useProjectCells"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { useConcepts } from "@/hooks/useConcepts"
+
+/** Stable identity so the memo below holds when a workspace project has none. */
+const EMPTY_SERVER_CONCEPTS: Concept[] = []
 import type { Concept, TermRendering } from "@/lib/terminology/types"
 import {
   addConcept,
@@ -135,7 +139,25 @@ export function GlossaryEditor({
     enabled: Boolean(project?.id && projectFiles.length > 0 && cellDataRequested),
   })
 
-  const serverConcepts = useMemo(() => project?.terminology ?? [], [project?.terminology])
+  // AQU-1006 follow-up: concepts come from the sync-worker projection, not the
+  // retired `project.terminology` settings key.
+  //
+  // Two paths, mirroring how this component already resolves `project`:
+  //   - WORKSPACE-OWNED (`workspaceProject` passed in): its `terminology` is
+  //     ALREADY projection-sourced — ProjectWorkspace folds `useConcepts` onto
+  //     the record it hands down (see `editorProject`). Reuse it and skip the
+  //     fetch, exactly as `ownedProject` is disabled on this path; fetching
+  //     again would be the "duplicate project resolve" this path exists to
+  //     avoid, and would flash an empty glossary before it landed.
+  //   - STANDALONE (routed directly): fetch for ourselves.
+  const fetched = useConcepts({
+    projectId: id ?? null,
+    getToken,
+    tokenReady: !!frontierSession?.jwt && workspaceProject == null,
+  })
+  const serverConcepts = workspaceProject
+    ? workspaceProject.terminology ?? EMPTY_SERVER_CONCEPTS
+    : fetched.concepts
   const conceptsRef = useRef<Concept[]>(serverConcepts)
   const pendingWritesRef = useRef(0)
   const [optimisticConcepts, setOptimisticConcepts] = useState<Concept[] | null>(null)
@@ -322,8 +344,8 @@ export function GlossaryEditor({
     const corpus = cellFiles.flatMap((f) =>
       (f.cells ?? []).map((c: { original?: string }) => c.original ?? ""),
     )
-    const candidates = extractCandidates(corpus, { managed: project.terminology ?? [] })
-    const existing = new Set((project.terminology ?? []).map((c) => c.sourceTerm.trim().toLowerCase()))
+    const candidates = extractCandidates(corpus, { managed: serverConcepts })
+    const existing = new Set(serverConcepts.map((c) => c.sourceTerm.trim().toLowerCase()))
     let working = project
     for (const cand of candidates) {
       if (cand.isManaged || existing.has(cand.term.trim().toLowerCase())) continue

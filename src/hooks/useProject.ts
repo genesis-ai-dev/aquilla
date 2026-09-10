@@ -20,11 +20,7 @@ import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { useProjectSettings } from "@/hooks/useProjectSettings"
 import { buildCompletionSettings } from "@/hooks/useCompletionSettings"
 import type { ProjectWideSettings } from "@/lib/sync/project-settings"
-import { getProject } from "@/lib/store/project-index"
-import {
-  PROJECT_LOCAL_UPDATED_EVENT,
-  type ProjectLocalUpdatedDetail,
-} from "@/lib/store/project-local-events"
+import { getProject, subscribeProjectRecords } from "@/lib/store/project-index"
 
 /**
  * Overlay synced project-wide settings onto the server-returned ProjectRecord.
@@ -94,6 +90,39 @@ function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): 
   return next ?? record
 }
 
+/**
+ * Overlay the DEVICE-LOCAL fields (the ones that live only on the IDB record,
+ * never on the server) onto a record. Returns the input by reference when the
+ * local copy carries nothing new: the workspace stamps this IDB record on
+ * every sync-token round-trip (syncRole, file metadata), and each of those
+ * writes notifies the subscription below — an equal-but-new object would
+ * re-render every consumer of `project` for nothing.
+ */
+function applyDeviceLocalSettings(
+  record: ProjectRecord,
+  local: ProjectRecord | undefined,
+): ProjectRecord {
+  if (
+    !local ||
+    (!local.completionSettings &&
+      !local.experimentalFlags &&
+      local.aiProviderChosen === undefined)
+  ) {
+    return record
+  }
+  const next: ProjectRecord = {
+    ...record,
+    ...(local.completionSettings ? { completionSettings: local.completionSettings } : {}),
+    ...(local.experimentalFlags ? { experimentalFlags: local.experimentalFlags } : {}),
+    ...(local.aiProviderChosen !== undefined ? { aiProviderChosen: local.aiProviderChosen } : {}),
+  }
+  const unchanged =
+    JSON.stringify(record.completionSettings ?? null) === JSON.stringify(next.completionSettings ?? null) &&
+    JSON.stringify(record.experimentalFlags ?? null) === JSON.stringify(next.experimentalFlags ?? null) &&
+    record.aiProviderChosen === next.aiProviderChosen
+  return unchanged ? record : next
+}
+
 async function overlayDeviceLocalSettings(record: ProjectRecord): Promise<ProjectRecord> {
   let local: ProjectRecord | undefined
   try {
@@ -102,13 +131,7 @@ async function overlayDeviceLocalSettings(record: ProjectRecord): Promise<Projec
     console.warn("[useProject] failed to read device-local project cache", err)
     return record
   }
-  if (!local?.completionSettings && !local?.experimentalFlags && local?.aiProviderChosen === undefined) return record
-  return {
-    ...record,
-    ...(local.completionSettings ? { completionSettings: local.completionSettings } : {}),
-    ...(local.experimentalFlags ? { experimentalFlags: local.experimentalFlags } : {}),
-    ...(local.aiProviderChosen !== undefined ? { aiProviderChosen: local.aiProviderChosen } : {}),
-  }
+  return applyDeviceLocalSettings(record, local)
 }
 
 export type ProjectLoadStatus =
@@ -154,8 +177,6 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
   // refresh()es after an assignment.
   const [pm, setPm] = useState<{ id: number; username: string } | null>(null)
   const hasLoaded = useRef(Boolean(initialProject))
-  const projectRef = useRef(project)
-  projectRef.current = project
   const { session, loading: sessionLoading } = useFrontierSession()
 
   const refresh = useCallback(() => {
@@ -223,24 +244,40 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
     return cleanup
   }, [refresh])
 
-  // Settings (and other routes) write device-local completionSettings via
-  // updateProject. Re-overlay IDB onto this instance so the editor sparkle
-  // gate sees Custom OpenRouter / BYOK immediately — a full server refresh
-  // is unnecessary and would race the IDB write.
+  // AQU-1103 / AQU-1158: device-local fields (experimentalFlags,
+  // completionSettings, aiProviderChosen) are written by Project settings /
+  // Set up AI, which open as a route-modal OVER a still-mounted
+  // overview/workspace (App.tsx `backgroundLocation`), so nothing re-runs
+  // `refresh` for them. Re-overlay whenever this project's local record changes
+  // — that is what lets Autopilot follow the Experimental toggle and the
+  // sparkle gate see Custom OpenRouter / BYOK without a page reload.
+  // Deliberately not gated on `enabled`: a sub-route reusing an ancestor's
+  // record must follow the same toggle, and an IDB read is not a resolve.
   useEffect(() => {
-    if (!enabled) return
-    const onLocalUpdated = (event: Event) => {
-      const id = (event as CustomEvent<ProjectLocalUpdatedDetail>).detail?.projectId
-      if (id !== projectId) return
-      const current = projectRef.current
-      if (!current) return
-      void overlayDeviceLocalSettings(current).then((next) => {
-        setProject(next)
-      })
+    let cancelled = false
+    let latestRead = 0
+    const unsubscribe = subscribeProjectRecords((changedId) => {
+      if (changedId !== projectId) return
+      // Last-issued read wins: a toggle ON then OFF issues two reads, and
+      // only the newer may land, or a slow older read would resurrect the
+      // value the user just switched away from. The newest read was issued
+      // after the newest write completed (writers notify post-put), so it
+      // sees the final state.
+      const read = ++latestRead
+      void getProject(projectId)
+        .then((local) => {
+          if (cancelled || read !== latestRead) return
+          setProject((prev) => (prev ? applyDeviceLocalSettings(prev, local) : prev))
+        })
+        .catch((err: unknown) => {
+          console.warn("[useProject] failed to re-read device-local project cache", err)
+        })
+    })
+    return () => {
+      cancelled = true
+      unsubscribe()
     }
-    window.addEventListener(PROJECT_LOCAL_UPDATED_EVENT, onLocalUpdated)
-    return () => window.removeEventListener(PROJECT_LOCAL_UPDATED_EVENT, onLocalUpdated)
-  }, [enabled, projectId])
+  }, [projectId])
 
   // Overlay synced settings (server-authoritative project-wide fields) onto
   // the hydrated record so existing consumers see merged values without any

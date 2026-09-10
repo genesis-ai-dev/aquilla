@@ -197,6 +197,47 @@ describe("live deployment environment verification", () => {
     expect(indexRequests).toHaveLength(1)
   })
 
+  it("requests the SPA shell with no-cache, so it cannot compare an old document to a new bundle", async () => {
+    // REGRESSION (2026-09-04): the shell was fetched WITHOUT `no-cache` while
+    // its chunks were fetched WITH it. After a deploy that meant a cached
+    // previous-build document naming hashes the new bundle no longer had; the
+    // missing hashes fell through `not_found_handling` to the SPA shell and the
+    // crawl reported "the deployed asset is missing" against a perfectly good
+    // deployment. Failed every deploy until the edge cache aged out (~10 min).
+    const seen = new Map<string, Headers>()
+    const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input)
+      seen.set(url, new Headers(init?.headers))
+      if (url === "https://aquilla.app/app") {
+        return response('<script type="module" src="/assets/index.js"></script>', 200, "text/html")
+      }
+      if (url === "https://aquilla.app/assets/index.js") {
+        return response([
+          "https://api.aquilla.app/identity",
+          "api.aquilla.app/sync",
+          "https://api.aquilla.app/chat",
+        ].join(" "))
+      }
+      const caseStudy = serveCaseStudies("https://aquilla.app", url)
+      if (caseStudy) return caseStudy
+      throw new Error(`unexpected URL ${url}`)
+    })
+
+    await expect(verifyLiveEnvironment("production", {
+      surface: "spa",
+      fetchImpl,
+      lookup,
+      attempts: 1,
+      log: vi.fn(),
+    })).resolves.toBeUndefined()
+
+    // The document and the assets it names must come from the same deployment.
+    const shell = seen.get("https://aquilla.app/app")
+    const asset = seen.get("https://aquilla.app/assets/index.js")
+    expect(shell?.get("cache-control")).toBe("no-cache")
+    expect(asset?.get("cache-control")).toBe("no-cache")
+  })
+
   it("rejects a missing JavaScript asset that falls back to the SPA shell", async () => {
     const fetchImpl = vi.fn(async (input: string | URL | Request) => {
       const url = String(input)
@@ -366,7 +407,10 @@ describe("live deployment environment verification", () => {
     })).resolves.toBeUndefined()
 
     expect(fetchImpl).toHaveBeenCalledWith(`${previewOrigin}/app`, {
-      headers: { Accept: "text/html" },
+      // `Cache-Control: no-cache` must accompany the shell fetch — see the
+      // regression test above; the shell and the chunks it names have to come
+      // from the same deployment.
+      headers: { Accept: "text/html", "Cache-Control": "no-cache" },
     })
     expect(fetchImpl.mock.calls.flat().map(String)).not.toContain("https://dev.aquilla.app/app")
   })

@@ -170,7 +170,7 @@ function placeContentUnits(units: readonly IdmlTranslationUnit[]): {
         // something else: a fact or hunt of the previous book, front matter, or
         // another book's own title.
         for (let index = placed.length - 1; index >= 0; index -= 1) {
-          const earlier = placed[index]!
+          const earlier = placed[index]
           if (earlier.contentType !== "intro") break
           if (isTreasureHuntBookNameStyle(earlier.unit.paragraphStyleId ?? "")) break
           earlier.bookCode = reference.bookCode

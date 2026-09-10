@@ -38,6 +38,7 @@ import {
   RESET_REQUEST_MAX_PER_IDENTIFIER,
 } from "../utils/rate-limit"
 import { revokeToken } from "../utils/token-revocation"
+import { evictUserSessions } from "../lib/session-cache"
 import {
   LegacyUserMigrationError,
   migrateLegacyUserCandidate,
@@ -726,6 +727,7 @@ auth.patch("/me", authMiddleware, zValidator("json", patchMeSchema), async (c) =
     )
       .bind(preferencesJson, user.id)
       .run()
+    evictUserSessions(user.id)
   }
 
   // Re-fetch to return the canonical record.
@@ -1093,6 +1095,8 @@ auth.post(
       )
         .bind(passwordHash, user.id)
         .run()
+      // Same-isolate eviction so the password_changed_at cutoff bites at once.
+      evictUserSessions(user.id)
       await c.env.AQUILLA_PG.prepare(
         "DELETE FROM password_reset_tokens WHERE user_id = ?",
       )

@@ -105,6 +105,7 @@ export interface AgentWorkbenchProps {
     cellLockHolders?: ReadonlyMap<string, string>
     onClaimCell?: (cellId: string) => void
     onReleaseCell?: (cellId: string) => void
+    onViewCell?: (cellId: string | null) => void
     onTargetPresenceSelection?: (cellId: string, selection: TargetPresenceSelection | null) => void
     onVisibleCellIdsChange?: (cellIds: string[]) => void
   }
@@ -470,6 +471,7 @@ export function AgentWorkbench({ agent, credits, onCollapse, onJumpToCell, onCho
                 onChooseFile={onChooseFile}
                 scrollContainerRef={sourceScrollRef}
                 onScroll={(event) => synchronizeScroll("source", event.currentTarget)}
+                onViewCell={workspace?.onViewCell}
               />
             </ResizablePanel>
 
@@ -557,6 +559,7 @@ export function AgentWorkbench({ agent, credits, onCollapse, onJumpToCell, onCho
                   cellLockHolders={workspace?.cellLockHolders}
                   onClaimCell={workspace?.onClaimCell}
                   onReleaseCell={workspace?.onReleaseCell}
+                  onViewCell={workspace?.onViewCell}
                   onTargetPresenceSelection={workspace?.onTargetPresenceSelection}
                 />
               )}

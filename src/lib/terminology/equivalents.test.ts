@@ -54,6 +54,30 @@ describe("predictEquivalents", () => {
     }
   })
 
+  it("reports confidence as consistent co-occurrence across project examples", () => {
+    const pairs: BilingualPair[] = [
+      ...Array.from({ length: 20 }, (_, i) => ({
+        source: `god appears ${i}`,
+        target: `dios aparece ${i}`,
+      })),
+      ...Array.from({ length: 10 }, (_, i) => ({
+        source: `god remains ${i}`,
+        target: `otro queda ${i}`,
+      })),
+      ...Array.from({ length: 10 }, (_, i) => ({
+        source: `a king appears ${i}`,
+        target: `dios aparece de nuevo ${i}`,
+      })),
+      ...Array.from({ length: 20 }, (_, i) => ({
+        source: `a king remains ${i}`,
+        target: `el rey queda ${i}`,
+      })),
+    ]
+    const result = predictEquivalents(pairs, "god")
+
+    expect(result.find((r) => r.target === "dios")?.confidenceScore).toBeCloseTo(2 / 3)
+  })
+
   it("caps a χ²-only candidate (no EM corroboration) at AMBER, never HIGH", () => {
     // Tiny corpus (< 50 pairs) → EM stays in Dice cold-start, probTable per the
     // cold path may still surface some, so we craft a token only χ² sees: a rare

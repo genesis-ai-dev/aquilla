@@ -3,6 +3,7 @@ import {
   parseIdml,
   validateIdmlTranslation,
   type IdmlFormatMetadataV2,
+  type IdmlStyleCatalog,
 } from "@aquilla/idml-roundtrip"
 import {
   SAMPLE_TREASURE_HUNT,
@@ -13,6 +14,7 @@ import {
   scripture,
 } from "@/lib/biblica/treasure-hunt/__fixtures__/treasure-hunt-idml"
 import { selectTreasureHuntNotes } from "@/lib/biblica/treasure-hunt/notes"
+import { prepareIdmlDisplayHtml } from "@/lib/richtext/idml-style-display"
 import { extractTreasureHuntStrings } from "./biblica-treasure-hunt"
 
 describe("Treasure Hunt parser adapter", () => {
@@ -76,6 +78,50 @@ describe("Treasure Hunt parser adapter", () => {
     expect(strings[12]!.metadata?.biblica).toMatchObject({
       paragraphStyle: "ParagraphStyle/!meta_par_ns",
     })
+  })
+
+  it("stamps hunt and intro heading paragraph faces so unstyled runs display Bold", async () => {
+    const buffer = await makeTreasureHuntIdml()
+    const parsed = await parseIdml(buffer)
+    const { strings } = await extractTreasureHuntStrings(buffer, async () => parsed)
+    const byText = (text: string) => strings.find((cell) => cell.original === text)
+
+    const huntHead = byText(SAMPLE_TREASURE_HUNT.huntHead)
+    expect(huntHead?.metadata).toMatchObject({
+      idmlParagraphStyle: "ParagraphStyle/!meta_hunt_head",
+      idmlStyleDisplay: {
+        "ParagraphStyle/!meta_hunt_head": { bold: true, italic: false },
+      },
+      biblica: { paragraphStyle: "ParagraphStyle/!meta_hunt_head" },
+    })
+
+    const introHead = byText(SAMPLE_TREASURE_HUNT.introHead)
+    expect(introHead?.metadata).toMatchObject({
+      idmlParagraphStyle: "ParagraphStyle/_intro_head",
+      idmlStyleDisplay: {
+        "ParagraphStyle/_intro_head": { bold: true, italic: false },
+      },
+    })
+
+    const factHead = byText(SAMPLE_TREASURE_HUNT.factHead)
+    expect(factHead?.metadata).toMatchObject({
+      idmlParagraphStyle: "ParagraphStyle/!meta_fact_head",
+    })
+    expect(factHead?.metadata?.idmlStyleDisplay).toBeUndefined()
+
+    const painted = prepareIdmlDisplayHtml(
+      huntHead!.originalHtml!,
+      huntHead!.metadata?.idmlStyleDisplay as IdmlStyleCatalog | undefined,
+      huntHead!.metadata?.idmlParagraphStyle as string | undefined,
+    )
+    const root = document.createElement("div")
+    root.innerHTML = painted
+    const slot = root.querySelector<HTMLElement>("span[data-idml-protected=\"slot\"]")
+    expect(slot?.textContent).toBe(SAMPLE_TREASURE_HUNT.huntHead)
+    expect(slot?.style.fontWeight).toBe("700")
+    expect(slot?.getAttribute("data-idml-character-style")).toBe(
+      "CharacterStyle/$ID/[No character style]",
+    )
   })
 
   it("only tags cells with a book once one has been named", async () => {

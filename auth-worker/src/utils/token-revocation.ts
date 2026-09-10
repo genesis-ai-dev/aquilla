@@ -10,6 +10,8 @@
 // revoked individually — callers should skip the check entirely when
 // `jti` is absent rather than treat it as "revoked".
 
+import { evictSessionByJti } from "../lib/session-cache"
+
 function scopedError(prefix: string, err: unknown): void {
   console.warn(`[token-revocation] ${prefix}:`, err)
 }
@@ -31,7 +33,9 @@ export async function revokeToken(
     )
     .bind(jti, userId, expSeconds)
     .run()
-  await pruneExpiredOccasionally(db)
+  // Same-isolate eviction; other isolates age the entry out within
+  // SESSION_CACHE_TTL_MS (see lib/session-cache.ts).
+  evictSessionByJti(jti)
 }
 
 /**
@@ -55,11 +59,10 @@ export async function isTokenRevoked(db: AquillaDb, jti: string): Promise<boolea
   }
 }
 
-/** Roughly 1-in-50 calls also prunes rows past their natural token expiry so
- *  the table stays bounded without a scheduled job — same approach as
- *  rate-limit.ts's `pruneOldEventsOccasionally`. */
-async function pruneExpiredOccasionally(db: AquillaDb): Promise<void> {
-  if (Math.random() >= 0.02) return
+/** Prunes rows past their natural token expiry so the table stays bounded.
+ *  Called from the 5-minute cron in index.ts (`scheduled`) — it used to run
+ *  on ~2% of logouts inline, on the request path. Non-throwing. */
+export async function pruneExpiredRevokedTokens(db: AquillaDb): Promise<void> {
   try {
     await db.prepare("DELETE FROM revoked_tokens WHERE expires_at < now()").bind().run()
   } catch (err) {

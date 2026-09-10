@@ -159,7 +159,11 @@ export const MCP_TOOLS: McpToolDef[] = [
       '`commands` shapes (each enforced server-side; a validation_failed error names the ' +
       'violated rule):\n' +
       '  { kind: "CreateProject", name, projectId?, orgId? } — receipt-only (a plain row ' +
-      'write, not an event); must be the SOLE command in the changeset. `projectId` is ' +
+      'write, not an event); must be the SOLE command in the changeset. `name` must be a ' +
+      'REAL name derived from what you are importing (source folder or file name, the ' +
+      'publication/curriculum title, the language pair) or asked of the human — ' +
+      'content-free placeholders ("default", "untitled", "new project", …) are rejected ' +
+      'with validation_failed. `projectId` is ' +
       'optional: when omitted, the DEFINITIVE new project id is this tool call\'s own ' +
       '`projectId` argument (the changeset\'s URL project id) — set BOTH to the same value ' +
       'to avoid ambiguity, or omit the command\'s `projectId` and rely on the top-level one. ' +
@@ -224,7 +228,14 @@ export const MCP_TOOLS: McpToolDef[] = [
                 type: 'object',
                 properties: {
                   kind: { type: 'string', enum: ['CreateProject'] },
-                  name: { type: 'string' },
+                  name: {
+                    type: 'string',
+                    description:
+                      'The project\'s human-facing name. Derive it from what is being ' +
+                      'imported (source folder/file name, publication or curriculum ' +
+                      'title, language pair) or ask the human — placeholders like ' +
+                      '"default" or "untitled" are rejected.',
+                  },
                   projectId: {
                     type: 'string',
                     description: 'Optional — defaults to this call\'s top-level projectId.',

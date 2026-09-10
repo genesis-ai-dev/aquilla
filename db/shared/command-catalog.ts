@@ -85,7 +85,9 @@ Gotchas:
     paramsDoc: `### CreateProject
 Params: \`{ name, projectId?, orgId? }\` — sole command; forced ask-mode regardless of credential mode.
 Requires org MAINTAINER (600) on the target org; project-scoped credentials can never create projects.
-Gotcha: when \`projectId\` is omitted the changeset URL's project id becomes the definitive id, pinned at prepare (crash-retry re-applies the same id).`,
+Gotchas:
+- \`name\` must be a REAL name, not a placeholder: derive it from what you are importing (the source folder or file name, the publication/curriculum title, the language pair), or ask the human. Content-free names ("default", "untitled", "new project", "unnamed", …) are rejected with \`validation_failed\` — the name is what humans see in the workspace forever after.
+- When \`projectId\` is omitted the changeset URL's project id becomes the definitive id, pinned at prepare (crash-retry re-applies the same id).`,
   },
   {
     kind: 'PatchSettings',

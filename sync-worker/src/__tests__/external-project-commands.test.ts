@@ -154,6 +154,51 @@ describe('project commands — validation', () => {
     expect(body.error.code).toBe('validation_failed')
   })
 
+  // AQU-1140: the agent that imported the LOTE curriculum created a project
+  // literally named "default". The name is what humans see in the workspace from
+  // then on, so a content-free placeholder is rejected and the agent is told to
+  // derive a real one.
+  it.each([
+    'default',
+    'Default',
+    ' default ',
+    'Default Project',
+    'new_project',
+    'untitled',
+    'Untitled 2',
+    'unnamed',
+    '   ',
+  ])('CreateProject with the placeholder name %o → validation_failed', async (name) => {
+    const env = makeEnv(tdb.db)
+    await seedOrgMember(tdb, 1, 600)
+    const token = await credToken(tdb, {
+      credentialId: '00000000-0000-0000-0000-0000000000a1', userId: 1, username: 'alice',
+      orgId: String(ORG_ID), projectId: null,
+    })
+    const { res, body } = await prepare(env, 'new-proj', token, [
+      { kind: 'CreateProject', name, orgId: ORG_ID },
+    ])
+    expect(res.status).toBe(400)
+    expect(body.error.code).toBe('validation_failed')
+    // No project row may be created by a rejected plan.
+    const row = await tdb.pg.query(`SELECT id FROM projects WHERE id = 'new-proj'`)
+    expect(row.rows.length).toBe(0)
+  })
+
+  it('CreateProject keeps accepting a real name, and stores it trimmed', async () => {
+    const env = makeEnv(tdb.db)
+    await seedOrgMember(tdb, 1, 600)
+    const token = await credToken(tdb, {
+      credentialId: '00000000-0000-0000-0000-0000000000a9', userId: 1, username: 'alice',
+      orgId: String(ORG_ID), projectId: null,
+    })
+    const { res, body } = await prepare(env, 'lote-proj', token, [
+      { kind: 'CreateProject', name: '  Living on the Edge  ', orgId: ORG_ID },
+    ])
+    expect(res.status).toBe(200)
+    expect(body.summary.projectName).toBe('Living on the Edge')
+  })
+
   it('UpdateProjectSettings with a non-integer ifMatchVersion → validation_failed', async () => {
     const env = makeEnv(tdb.db)
     const token = await credToken(tdb, {

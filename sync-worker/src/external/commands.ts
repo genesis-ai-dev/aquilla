@@ -133,6 +133,47 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
+/** Content-free names an agent reaches for when it has nothing better (AQU-1140).
+ *  A project is a durable, human-facing object — "default" tells the humans who
+ *  later open the workspace nothing about what is in it. Kept deliberately small:
+ *  only names that carry no information at all. Names that merely LOOK generic
+ *  but a human might genuinely have chosen ("Test project", "Sandbox") are not
+ *  listed — a false rejection is worse than a lazy name a human picked. */
+const PLACEHOLDER_PROJECT_NAMES: ReadonlySet<string> = new Set([
+  'default',
+  'default project',
+  'new project',
+  'no name',
+  'none',
+  'placeholder',
+  'project',
+  'tbd',
+  'unnamed',
+  'unnamed project',
+  'untitled',
+  'untitled project',
+])
+
+/** Normalize a candidate project name for placeholder comparison: case-fold,
+ *  turn separators/punctuation into spaces (so `new_project` / `Default-Project`
+ *  collapse onto the same key), squash runs of whitespace, and drop a trailing
+ *  auto-increment suffix (`untitled 2` → `untitled`). */
+function normalizeProjectName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+\d+$/, '')
+    .trim()
+}
+
+/** True when `name` is a content-free placeholder rather than a real project
+ *  name. Exported for the SPA/worker tests and any future caller that wants to
+ *  apply the same bar before offering a name to a human. */
+export function isPlaceholderProjectName(name: string): boolean {
+  return PLACEHOLDER_PROJECT_NAMES.has(normalizeProjectName(name))
+}
+
 /** Validate a raw request `commands` value into a typed batch. */
 export function validateCommands(raw: unknown): ValidateCommandsResult {
   if (!Array.isArray(raw)) {
@@ -385,6 +426,26 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
         issues.push({ index, message: 'CreateProject.name must be a non-empty string' })
         return
       }
+      // AQU-1140: the name is what humans see in the workspace forever after, so
+      // an agent may not fall back to a content-free placeholder. Trim first —
+      // a whitespace-only name is as empty as '', and " Default " is as much a
+      // placeholder as "default".
+      const name = c.name.trim()
+      if (name.length === 0) {
+        issues.push({ index, message: 'CreateProject.name must be a non-empty string' })
+        return
+      }
+      if (isPlaceholderProjectName(name)) {
+        issues.push({
+          index,
+          message:
+            `CreateProject.name "${c.name}" is a placeholder, not a project name. ` +
+            'Derive a meaningful one from what is being imported (the source folder ' +
+            'or file name, the publication/curriculum title, the language pair), or ' +
+            'ask the human what to call it.',
+        })
+        return
+      }
       if (c.projectId !== undefined && !isNonEmptyString(c.projectId)) {
         issues.push({ index, message: 'CreateProject.projectId must be a non-empty string when present' })
         return
@@ -400,7 +461,7 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
       commands.push({
         kind: 'CreateProject',
         ...(c.projectId !== undefined ? { projectId: c.projectId as string } : {}),
-        name: c.name,
+        name,
         ...(c.orgId !== undefined ? { orgId: c.orgId as string | number } : {}),
       })
       return

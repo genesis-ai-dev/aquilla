@@ -7,6 +7,8 @@
 // sync-worker/src/external/*; floors here are the STATIC index-filtering values
 // (dynamic checks — org overrides, per-event floors — happen at prepare).
 
+import { settingsKeyDocLines } from './project-settings-keys'
+
 export type CommandTier = 'prepared' | 'structural' | 'testimony' | 'governance'
 
 export interface CommandCatalogEntry {
@@ -26,6 +28,13 @@ export interface CommandCatalogEntry {
 // Role levels mirror role-policy.ts (VIEWER 100 … OWNER 700). Redeclared as
 // plain numbers so this module stays importable from both workers without
 // crossing package roots.
+/** AQU-1224: the settings schema, rendered for describe_command("PatchSettings")
+ *  so an agent DISCOVERS the legal keys instead of probing for them (unknown
+ *  keys are rejected at prepare, so probing no longer teaches anything). */
+const PATCH_SETTINGS_KEY_DOC = settingsKeyDocLines()
+  .map((line) => `\`${line}\``)
+  .join(', ')
+
 const COMMENTER = 200
 const CONTRIBUTOR = 400
 const PROJECT_LEAD = 500
@@ -98,7 +107,9 @@ Gotcha: when \`projectId\` is omitted the changeset URL's project id becomes the
 Params: \`{ projectId, ops: [{ key, value }], ifMatchVersion }\` — sole command; top-level settings keys only; each op replaces that key's value wholesale (one op per key — duplicates are rejected).
 Floors: \`terminology\` needs the org's termbase-edit floor (default PROJECT_LEAD 500); every other key needs MAINTAINER 600.
 Policy keys are NEVER writable by agents (permission_denied): agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, validationCount, validationCountAudio, allowSelfValidation, harmonize_min_role, contributeToGlobalTm.
+Valid keys, with the value type each holds: ${PATCH_SETTINGS_KEY_DOC}. \`null\` clears any key (JSON cannot carry undefined, so there is no "delete").
 Gotchas:
+- A key not on that list is a typo, not a new setting: prepare rejects it with \`validation_failed\` naming the key, and a wrong value type is rejected the same way naming the expected type. Nothing reaches the approval queue either way.
 - \`ifMatchVersion\` must equal the live settings version at prepare AND commit (plan_stale on drift) — read it first.
 - Prefer this over UpdateProjectSettings (deprecated whole-blob replace).
 Example: \`{ "kind": "PatchSettings", "projectId": "p1", "ops": [{ "key": "targetLanes", "value": ["es","pt"] }], "ifMatchVersion": 7 }\``,

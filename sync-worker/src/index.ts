@@ -53,6 +53,7 @@ import { handleMigrateSourceArtifactCopyRequest } from "./events/migrate-source-
 import { handleMigrateOrgTeamMapsRequest } from "./events/migrate-org-team-maps-route"
 import { handleMigrateGroupsRequest } from "./events/migrate-groups-route"
 import { handleMigrateUsersReadRequest } from "./events/migrate-users-read-route"
+import { handleMigrateWebhookRequest } from "./events/migrate-webhook-route"
 import { handleSourceUploadRequest } from "./events/source-upload-route"
 import { handleExportSourceRequest } from "./events/export-route"
 import { handleExportBundleRequest } from "./events/export-bundle-route"
@@ -108,6 +109,9 @@ declare global {
       HYPERDRIVE?: Hyperdrive
       /** Shared HMAC key with identity that mints /sync-token JWTs. */
       SYNC_SECRET_KEY?: string
+      /** Shared secret GitLab sends as `X-Gitlab-Token` on webhook deliveries
+       *  to `/migrate/webhook/gitlab`. See events/migrate-webhook-route.ts. */
+      GITLAB_WEBHOOK_SECRET?: string
       /**
        * OPS-2: dedicated bearer for the operator-only routes (`/admin/files/*`,
        * `DELETE /audio/*`), so ops calls never carry the token-signing key.
@@ -368,6 +372,12 @@ const worker = {
     if (importReconcileResponse) return importReconcileResponse
     const bulkMorphImportResponse = await handleBulkMorphImportRequest(request, env)
     if (bulkMorphImportResponse) return bulkMorphImportResponse
+    // GitLab webhook receiver + daemon inbox (AQU-XXXX). The receiver is called by
+    // GitLab itself, which cannot send x-migrate-runner, so it sits before the fence.
+    if (new URL(request.url).pathname === "/migrate/webhook/gitlab") {
+      const r = await handleMigrateWebhookRequest(request, env)
+      if (r) return r
+    }
     // AQU-1005/AQU-1007: identification fence over the whole /migrate/*
     // surface — blocks header-less runners (503 + source log) and gives every
     // allowed run an audit trail. See lib/migrate-fence.ts.
@@ -397,6 +407,8 @@ const worker = {
     if (migrateGroupsResponse) return migrateGroupsResponse
     const migrateUsersReadResponse = await handleMigrateUsersReadRequest(request, env)
     if (migrateUsersReadResponse) return migrateUsersReadResponse
+    const migrateWebhookInbox = await handleMigrateWebhookRequest(request, env)
+    if (migrateWebhookInbox) return migrateWebhookInbox
     const sourceUploadResponse = await handleSourceUploadRequest(request, env)
     if (sourceUploadResponse) return sourceUploadResponse
     const exportSourceResponse = await handleExportSourceRequest(request, env)

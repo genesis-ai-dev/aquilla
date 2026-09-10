@@ -575,6 +575,41 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     setBibleResourcesEnabled((prev) => (prev === baseline.bibleResourcesEnabled ? project.bibleResourcesEnabled : prev))
   }, [project, baseline, sharedSettingsFetched])
 
+  // AQU-1115: the Source/Target Language fields rendered permanently EMPTY on a
+  // project that has both set. Same two-phase shape as the AQU-460 race above,
+  // but worse: this page passes `includeSettings: false` to `useProject` (it
+  // owns the editable settings hook below, and a second overlay request would
+  // be a duplicate GET), so `project` here is `minimalProjectRecord`, which
+  // hardcodes `sourceLanguage: ""` / `targetLanguage: ""` — the languages live
+  // ONLY in the shared settings blob and never reach `project` at all. The
+  // baseline seed therefore didn't just *race* the real values, it could never
+  // see them, so the fields stayed blank forever. (The Languages card below
+  // looked right because it reads `sharedSettingsBlob` directly — that
+  // discrepancy is exactly what the bug report describes.)
+  //
+  // Once this page's own settings GET has resolved, re-sync both fields from
+  // the blob. `hasFetched` fails closed (stays false on a failed GET), so a
+  // settings outage leaves the previous behavior rather than blanking anything.
+  const languagesResyncedRef = useRef(false)
+  useEffect(() => {
+    if (!baseline || !sharedSettingsFetched) return
+    if (languagesResyncedRef.current) return
+    languagesResyncedRef.current = true
+    // Absent stays absent — a project with a genuinely empty language must show
+    // an empty field, never an invented default. A free-text label that isn't
+    // in the language catalog rides through verbatim.
+    const nextSource = sharedSettingsBlob?.sourceLanguage ?? baseline.sourceLanguage
+    const nextTarget = sharedSettingsBlob?.targetLanguage ?? baseline.targetLanguage
+    if (nextSource === baseline.sourceLanguage && nextTarget === baseline.targetLanguage) return
+    setBaseline((prev) => (prev ? { ...prev, sourceLanguage: nextSource, targetLanguage: nextTarget } : prev))
+    // Only adopt the hydrated value where the user hasn't already typed over the
+    // (blank) seed — otherwise this would stomp an in-progress edit. Settling to
+    // the true server value must also not read as a user edit, which is why the
+    // baseline moves with it.
+    setSourceLanguage((prev) => (prev === baseline.sourceLanguage ? nextSource : prev))
+    setTargetLanguage((prev) => (prev === baseline.targetLanguage ? nextTarget : prev))
+  }, [baseline, sharedSettingsFetched, sharedSettingsBlob])
+
   const effectiveCompletionApiKey = apiKey.trim() || completionUserKey.trim()
 
   const loadModels = useCallback(async (opts: { force?: boolean } = {}) => {

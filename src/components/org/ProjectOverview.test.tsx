@@ -435,12 +435,36 @@ describe("ProjectOverview Autopilot discovery flag", () => {
     expect(screen.queryByTestId("project-autopilot-panel-mock")).not.toBeInTheDocument()
   })
 
-  it("shows the overview surface under the default-on discovery flag", async () => {
+  it("hides the overview surface when the project has never opted in", async () => {
+    // AQU-1103 regression guard, at the surface the bug was reported on: a PM's
+    // project overview. This is the production shape — no `experimentalFlags`
+    // on the record at all — which used to fall through to a default-on
+    // registry entry and render an Autopilot panel reporting "Needs attention"
+    // on a project nobody had enrolled.
     fetchSyncToken.mockResolvedValue({ token: "tok" })
     fetchProjectFiles.mockResolvedValue([])
     getPortfolio.mockResolvedValue([])
     useProject.mockReturnValue({
       project: projectRecord({ level: 700 }),
+      status: "ready",
+      refresh,
+    })
+
+    renderOverview()
+
+    await screen.findByRole("heading", { level: 1, name: "John" })
+    expect(screen.queryByTestId("project-autopilot-panel-mock")).not.toBeInTheDocument()
+  })
+
+  it("shows the overview surface once the project has opted in", async () => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    getPortfolio.mockResolvedValue([])
+    useProject.mockReturnValue({
+      project: projectRecord({
+        level: 700,
+        experimentalFlags: { contextualTranslation: true },
+      }),
       status: "ready",
       refresh,
     })
@@ -455,7 +479,10 @@ describe("ProjectOverview Autopilot discovery flag", () => {
     fetchProjectFiles.mockResolvedValue([])
     getPortfolio.mockResolvedValue([])
     useProject.mockReturnValue({
-      project: projectRecord({ level: 700 }),
+      project: projectRecord({
+        level: 700,
+        experimentalFlags: { contextualTranslation: true },
+      }),
       roleLevel: ROLE.VIEWER,
       status: "ready",
       refresh,

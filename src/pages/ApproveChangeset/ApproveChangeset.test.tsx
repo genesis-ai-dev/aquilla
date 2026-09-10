@@ -109,6 +109,33 @@ describe("ApproveChangeset", () => {
     expect(screen.queryByText(/No changes summarized/i)).not.toBeInTheDocument()
   })
 
+  it("states an AddOrgMember change in plain language — who, which org, what role (AQU-1235)", async () => {
+    const data = {
+      ...APPROVAL_DATA,
+      summary: {
+        command: "AddOrgMember",
+        orgMemberUsername: "bob",
+        targetOrg: "Acme (id 10)",
+        orgMemberNewRole: "contributor",
+        orgMemberCurrentRole: "not a member",
+        warnings: [],
+      },
+    }
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(data), { status: 200 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    renderPage()
+
+    // The approver must be able to answer "who, where, what role" without
+    // reading the raw plan — a blind approval is the failure mode here.
+    expect(await screen.findByText("AddOrgMember")).toBeInTheDocument()
+    expect(screen.getByText("bob")).toBeInTheDocument()
+    expect(screen.getByText("Acme (id 10)")).toBeInTheDocument()
+    expect(screen.getByText("contributor")).toBeInTheDocument()
+    expect(screen.getByText(/org member new role/i)).toBeInTheDocument()
+    expect(screen.queryByText(/No changes summarized/i)).not.toBeInTheDocument()
+  })
+
   it("renders per-key settings previews for an UpdateProjectSettings changeset", async () => {
     const data = {
       ...APPROVAL_DATA,

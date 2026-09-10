@@ -59,13 +59,26 @@ export interface ChangesetSummary {
    *  command kind, so the human on /approve/:id sees WHICH lifecycle op they're
    *  approving instead of an empty "No changes summarized." box (design §2 /
    *  blind-approval fix). */
-  command?: 'CreateProject' | 'UpdateProjectSettings' | 'PatchSettings'
+  command?:
+    | 'CreateProject'
+    | 'UpdateProjectSettings'
+    | 'PatchSettings'
+    | 'AddOrgMember'
+    | 'SetOrgRole'
+    | 'RemoveOrgMember'
   /** CreateProject: the project name being created. */
   projectName?: string
   /** CreateProject: the definitive new project id. */
   newProjectId?: string
-  /** CreateProject: the target org id as a string, or 'personal' for org-less. */
+  /** CreateProject: the target org id as a string, or 'personal' for org-less.
+   *  Org-membership commands: the target org's name + id, for the approval page. */
   targetOrg?: string
+  /** AQU-1235: the username being added / changed / removed. */
+  orgMemberUsername?: string
+  /** AQU-1235: the org role the member is being moved TO, as a role name. */
+  orgMemberNewRole?: string
+  /** AQU-1235: the org role the member holds TODAY ('not a member' for an add). */
+  orgMemberCurrentRole?: string
   /** Receipt-only UpdateProjectSettings: the changeset's project id. */
   projectId?: string
   /** UpdateProjectSettings: the pinned settings version this write guards on. */
@@ -118,6 +131,17 @@ export interface PlannedEventIds {
   /** PatchSettings (receipt-only): the settings version pinned at prepare —
    *  same guard semantics as updateProjectSettings. */
   patchSettings?: { version: number }
+  /** AQU-1235 org membership (receipt-only): the resolved target org + user
+   *  (pinned at prepare so commit writes the SAME identity the human approved,
+   *  never a re-resolution of the username), plus the role the target held at
+   *  prepare — the drift guard — and the role being written (absent for a
+   *  removal). */
+  orgMember?: {
+    orgId: number
+    targetUserId: string
+    previousRole: number | null
+    role?: number
+  }
   /** EmitEvents: one entry per plan event, in event order — the compiled event
    *  id plus any payload ids minted at prepare (comment.create's commentId /
    *  assignment.create's assignmentId when the caller omitted them), so a
@@ -154,14 +178,29 @@ export interface ReceiptOnlyReceipt {
   credentialId: string
   channel: ProvenanceChannel
   changesetId: string
-  command: 'CreateProject' | 'UpdateProjectSettings' | 'PatchSettings'
+  command:
+    | 'CreateProject'
+    | 'UpdateProjectSettings'
+    | 'PatchSettings'
+    | 'AddOrgMember'
+    | 'SetOrgRole'
+    | 'RemoveOrgMember'
   appliedAt: string
   /** CreateProject: the created project id. UpdateProjectSettings /
-   *  PatchSettings: the updated project id. */
+   *  PatchSettings: the updated project id. Org membership: the project the
+   *  plan was filed under (the write itself is org-level). */
   projectId: string
   /** UpdateProjectSettings / PatchSettings: the new settings version after the
    *  write. */
   version?: number
+  /** AQU-1235: the org the membership change landed in. */
+  orgId?: number
+  /** AQU-1235: the user whose membership changed. */
+  targetUserId?: string
+  /** AQU-1235: the org role held before the change (null/absent = not a member). */
+  previousRole?: number
+  /** AQU-1235: the org role written (absent for a removal). */
+  role?: number
 }
 
 /** The full stored plan, as persisted in `changesets`. */

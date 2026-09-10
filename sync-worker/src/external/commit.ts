@@ -23,6 +23,8 @@ import {
   type UpdateProjectSettingsCommand,
 } from './commands'
 import { changedPolicyKeys, commitPatchSettings } from './commands-patch-settings'
+import { isOrgMemberCommand, type OrgMemberCommand } from './commands-org-members'
+import { commitOrgMember } from './org-members-engine'
 import { commitEmitEvents } from './emit-events-engine'
 import {
   buildProvenance,
@@ -210,6 +212,12 @@ export async function commitChangesetCore(
   )
   if (patchSettingsCmd) {
     return commitPatchSettings(db, cred, cs, patchSettingsCmd, channel)
+  }
+  // AQU-1235 org membership: receipt-only with an ORG-level gate, so like
+  // CreateProject it must run before the project-role precheck below.
+  const orgMemberCmd = cs.commands.find((c): c is OrgMemberCommand => isOrgMemberCommand(c))
+  if (orgMemberCmd) {
+    return commitOrgMember(db, cred, cs, orgMemberCmd, channel)
   }
 
   // ── Live role/membership precheck (§2) ────────────────────────────────────

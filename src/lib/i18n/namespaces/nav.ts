@@ -279,6 +279,7 @@ export const nav = defineNamespace({
     "nav.fileList.collapseGroup": "Collapse {group}",
     "nav.fileList.renameGroup": "Rename {group}",
     "nav.fileList.ungroupedLabel": "Ungrouped",
+    "nav.fileList.jumpToTestament": "Jump to Testament",
 
     // -- OutboxInspectorPopover --
     "nav.outbox.popoverAriaLabel": "Pending changes",
@@ -1177,6 +1178,13 @@ export const nav = defineNamespace({
           "identity string 'Ungrouped' the code branches on (is-this-the-synthetic-" +
           "bucket, rename eligibility, …) is NOT this key and stays English — only this " +
           "display copy is translated.",
+      },
+      "nav.fileList.jumpToTestament": {
+        description:
+          "Accessible name for the pair of buttons under the file filter that scroll " +
+          "the file list to the Old Testament or New Testament group (AQU-1084). " +
+          "The buttons themselves reuse importExport.helloao.presetOldTestament / " +
+          "presetNewTestament. 'Testament' is the Bible-division term of art.",
       },
 
       // -- OutboxInspectorPopover --

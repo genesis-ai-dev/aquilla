@@ -1,5 +1,6 @@
 import { test, expect } from "../../helpers/multi-user"
 import { jwtFor, openSeededProject, seedProjectWithFile } from "../../helpers/seed-project"
+import { ProjectSettings } from "../../helpers/page-objects/ProjectSettings"
 
 /**
  * Contextual drafting run: enable the experimental flag, press play on the
@@ -15,15 +16,12 @@ test("contextual run pill drives a seeded file to parked with staged drafts", as
   const jwt = await jwtFor("alice")
   const seeded = await seedProjectWithFile(jwt, { name: `Contextual ${Date.now()}` })
 
-  // The device-local flag is ON by default (it gates discovery of the play
-  // button, not spend). Assert that through the real settings UI rather than
-  // assuming it: if the default is ever flipped back, this fails here with an
-  // obvious cause instead of as a missing pill fifty lines down.
+  // AQU-1103: the device-local flag is OFF by default — Autopilot is opt-in.
+  // Opt in through the real settings UI (the page object asserts the OFF
+  // default on the way): if the default is ever flipped back, this fails
+  // here with an obvious cause instead of as a missing pill fifty lines down.
   await alice.goto(`/project/${seeded.projectId}/settings`)
-  await alice.getByRole("link", { name: /Experimental/ }).click()
-  const flagSwitch = alice.getByRole("switch", { name: "Show Autopilot controls" })
-  await expect(flagSwitch).toBeVisible()
-  await expect(flagSwitch).toBeChecked()
+  await new ProjectSettings(alice).enableAutopilotControls()
 
   // The pill is visible while its server capability snapshot is still
   // hydrating. Wait for that authoritative response before pressing Play so

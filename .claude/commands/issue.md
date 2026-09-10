@@ -40,6 +40,8 @@ Arguments: $ARGUMENTS
 Parse `$ARGUMENTS`:
 
 - **`AQU-###`** → operate on that specific issue. `get_issue` to read its current status.
+  If it has no milestone, set one (its Road to V1 area — `list_milestones` the project)
+  before working it.
 - **`next`** (or empty) → `list_issues` filtered to project + status `Todo` (the agent-ready
   queue — **never `Triage`/`Backlog`**), pick the highest-priority / lowest-numbered one, and
   operate on it.
@@ -54,7 +56,9 @@ Parse `$ARGUMENTS`:
   embed status `Todo`; an explicitly passed `state` overrides that — confirm the create
   response actually says `Triage`, and re-save if not. Leave it **unassigned**: the team's
   rotation auto-assigns at create time — if the response shows an assignee, clear it with a
-  follow-up `assignee: null` save. Then:
+  follow-up `assignee: null` save. Set a **milestone** (`milestone` on `save_issue`):
+  Prototype Debugging's milestones are the Road to V1 areas — `list_milestones` the project
+  for the live list; every issue in the project carries exactly one. Then:
   - **Interactive session** (a human just typed this command): the invocation *is* the
     triage decision — if the issue is fully specified and agent-ready, promote it to `Todo`
     and proceed as if the user passed that `AQU-###`; if it needs a human decision/review

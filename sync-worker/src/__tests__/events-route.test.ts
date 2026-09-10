@@ -165,8 +165,14 @@ describe('POST /events — authorization', () => {
     expect(tables.events[0].author).toBe('token-alice')
   })
 
-  it('rejects source.cell.* from a CONTRIBUTOR token with 403', async () => {
-    const token = await makeToken({ role: 400 })
+  it('rejects source.cell.* from a VIEWER token with 403', async () => {
+    // The static floor in role-policy.ts is COMMENTER (200), and since
+    // 2026-09-09 it is the ONLY server floor on this kind — the project's
+    // `cellEditingFloor` tier is enforced at the button instead. A viewer (100)
+    // is the rank this still refuses. (This test named a CONTRIBUTOR until the
+    // tier came out; a contributor is above the static floor and is now
+    // accepted, which the two tests below assert directly.)
+    const token = await makeToken({ role: 100 })
     const event = sourceCreate()
     const { db, snapshot } = await makeTestDb()
     const res = (await handleEventsWriteRequest(await makeRequest([event], token), makeEnv(db)))!
@@ -175,25 +181,28 @@ describe('POST /events — authorization', () => {
     expect(body.rejected[0].status).toBe(403)
   })
 
-  it('rejects source.cell.* from a PROJECT_LEAD token while the project has not opted in', async () => {
-    // AQU-1068: the static CONTRIBUTOR floor is no longer the operative gate.
-    // `cellEditingFloor` defaults to "none", which refuses every rank — a lead
-    // included, and an owner too.
+  it('ACCEPTS source.cell.* from a PROJECT_LEAD token on a project that never opted in', async () => {
+    // AQU-1068, reversed on 2026-09-09. This used to assert a 403: the
+    // `cellEditingFloor` tier defaulted to "none" and refused every rank at
+    // this perimeter. The tier is now a product rule enforced at the button
+    // (see authorize.ts), because refusing here also refused audio-cue
+    // re-import, DCS upstream import and diarization — all of which emit this
+    // kind through the user's own outbox. What is left is the static floor.
     const token = await makeToken({ role: 500 })
     const event = sourceCreate()
-    const { db } = await makeTestDb()
+    const { db, snapshot } = await makeTestDb()
     const res = (await handleEventsWriteRequest(await makeRequest([event], token), makeEnv(db)))!
     const body = await res.json() as any
-    expect(body.rejected).toHaveLength(1)
-    expect(body.rejected[0].status).toBe(403)
+    expect(body.accepted).toHaveLength(1)
+    expect((await snapshot()).events[0].kind).toBe('source.cell.create')
   })
 
-  it('accepts source.cell.* from a PROJECT_LEAD token once the project opts in', async () => {
+  it('accepts it with a tier set too — the tier changes nothing at this layer', async () => {
     const token = await makeToken({ role: 500 })
     const event = sourceCreate()
     const { db, snapshot } = await makeTestDb({
       project_settings: [
-        { project_id: 'proj-a', settings: JSON.stringify({ cellEditingFloor: 'project_lead' }) },
+        { project_id: 'proj-a', settings: JSON.stringify({ cellEditingFloor: 'maintainer' }) },
       ],
     })
     const res = (await handleEventsWriteRequest(await makeRequest([event], token), makeEnv(db)))!
@@ -686,8 +695,10 @@ describe('POST /events — target.cell.commit whose source cell was removed', ()
   // The cell is IMPORTED — seeded straight into `cells` the way the import
   // route lands one, with no `source.cell.create` in the log. That is the cell
   // AQU-1068 newly lets somebody remove, and the one a translator is drafting
-  // against. Removing it needs the project opted in AND maintainer rank
-  // (cell-editing-authority.ts), so the seed does both.
+  // against. Removing it needs MAINTAINER rank — the one cell-structure rule
+  // authorize.ts still enforces — so the token below carries it. The tier in
+  // the seed is inert since 2026-09-09 and kept only to prove it changes
+  // nothing.
   const SOURCE_HEAD = 'evt-src-imported'
   const importedCell = () =>
     makeTestDb({

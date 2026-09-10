@@ -197,11 +197,17 @@ async function stageOne(
   }
 
   // 1b. AQU-1068: adding and removing cells is gated on the project's
-  // `cellEditingFloor` as well as the static floor above. REFUSING HERE IS THE
-  // WHOLE POINT — the agent applies through the user's own outbox with the
-  // user's own token, so anything staged past this dies at the /events
-  // perimeter with a 403, in the middle of a changeset the user has already
-  // approved. Better to never offer it.
+  // `cellEditingFloor` as well as the static floor above.
+  //
+  // THIS IS NOW THE ONLY PLACE THE TIER IS ENFORCED FOR THE AGENT, and that is
+  // deliberate rather than an accident of layering. Until 2026-09-09 the /events
+  // perimeter checked the tier too, and this check merely spared the user a 403
+  // in the middle of an approved changeset. The perimeter stopped checking it
+  // (see sync-worker authorize.ts: enforcing it there silently refused
+  // audio-cue re-import, DCS import and diarization), so a proposal staged past
+  // this line would now be ACCEPTED by the server. We refuse anyway, because
+  // the tier decides which buttons exist and an Apply button is a button: the
+  // agent should offer exactly what the person could do by hand, and no more.
   if (isCellEditingKind(kind)) {
     if (cellEditingFloor == null) {
       return {

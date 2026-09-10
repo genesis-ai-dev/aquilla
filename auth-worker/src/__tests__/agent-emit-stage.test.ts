@@ -435,10 +435,18 @@ describe("stageEvents — destination file naming (AQU-846)", () => {
 })
 
 describe("stageEvents — the project's cell-editing tier (AQU-1068)", () => {
-  // Staging is where this has to be caught. The agent applies through the
-  // user's own outbox with the user's own token, so anything staged past the
-  // tier dies at the /events perimeter with a 403 — in the middle of a
-  // changeset the user has already approved.
+  // STAGING IS THE ONLY PLACE THIS IS CAUGHT, as of 2026-09-09.
+  //
+  // It used to be the polite place: the /events perimeter checked the tier too,
+  // and refusing here merely spared the user a 403 in the middle of a changeset
+  // they had already approved. The perimeter stopped checking it — enforcing it
+  // there silently refused audio-cue re-import, DCS upstream import and
+  // diarization, which all emit these kinds through the user's own outbox — so
+  // a proposal staged past these tests would now be ACCEPTED by the server.
+  //
+  // We refuse anyway, and that is the decision: the tier decides which buttons
+  // exist, and an Apply button is a button. These tests are what keep the agent
+  // from offering what the person could not do by hand.
 
   it("refuses source.cell.create when the project has not opted in", async () => {
     await seedCellEditingFloor(null)

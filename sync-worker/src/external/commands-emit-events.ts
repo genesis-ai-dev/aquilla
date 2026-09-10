@@ -79,15 +79,22 @@ export function emitEventsFloor(cmd: EmitEventsCommand): number {
   let floor = 0
   for (const e of cmd.events) {
     // AQU-1068: source.cell.create/delete/reorder sit at COMMENTER in the
-    // static table because the operative gate is the project's
-    // `cellEditingFloor`, applied per event in authorize.ts. This floor is a
-    // PREPARE-TIME fail-fast only — it stops a caller staging a changeset they
-    // could never commit — and PROJECT_LEAD is the honest lower bound for it:
-    // an integration adding, deleting or re-anchoring source rows is a
-    // re-import-shaped act. The real decision still happens at commit, because
-    // these events route through the /events perimeter like any other (see
-    // emit-events-engine.ts), where the project's tier and the maintainer
-    // requirement on removing an IMPORTED cell both apply.
+    // static table, and PROJECT_LEAD is put back here because an integration
+    // adding, deleting or re-anchoring source rows is a re-import-shaped act.
+    //
+    // THIS LINE IS LOAD-BEARING, not a fail-fast convenience. It used to be one
+    // of two floors: the project's `cellEditingFloor` was also checked per
+    // event in authorize.ts. Since 2026-09-09 that tier is a product rule
+    // enforced at the button and NOT at the perimeter, and the external surface
+    // never consulted it anyway (it is exempt by `src === 'external'`). So this
+    // hard-coded PROJECT_LEAD is now the ONLY thing holding an integration
+    // above COMMENTER for these three kinds. A test pins it. Do not soften it
+    // to REQUIRED_ROLE without replacing it with something else.
+    //
+    // What still applies at commit is the maintainer requirement on removing an
+    // IMPORTED cell — except that the external exemption skips that too, which
+    // is a documented gap rather than an accident: it is the behaviour this
+    // surface had before AQU-1068. See authorize.ts.
     const kindFloor =
       e.kind === 'source.cell.create' || e.kind === 'source.cell.delete' || e.kind === 'source.cell.reorder'
         ? ROLE.PROJECT_LEAD

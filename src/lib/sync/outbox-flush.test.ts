@@ -402,11 +402,16 @@ describe("flushOutboxBatch", () => {
   // -- AQU-1068: a 403 has to REACH the caller, not just be quarantined --
 
   it("AQU-1068: calls onForbidden for a 403, with the kind read back off the batch", async () => {
-    // The cell-editing gate answers 403 and NOTHING ELSE, while `onRejected`
+    // The cell-structure gate answers 403 and NOTHING ELSE, while `onRejected`
     // documents itself as deliberately skipping that class. An optimistic
     // insert or removal carries a freshness floor, so no correcting fetch can
     // undo it — without this callback the caller can never learn to roll back,
     // and the row stays wrong until the tab is closed.
+    //
+    // The reason string below is the live one. It was the tier's refusal until
+    // 2026-09-09; the tier is no longer checked at the perimeter, so the 403
+    // this path actually sees is the maintainer rule on removing an imported
+    // cell (sync-worker authorize.ts).
     // The kind is what the caller reads back to decide whether to roll back,
     // so it has to survive the round trip. `makeEvent` is typed to the commit
     // kind; the cast keeps this leg honest without widening the helper.
@@ -419,7 +424,7 @@ describe("flushOutboxBatch", () => {
     const fetchMock = vi.fn().mockResolvedValue(
       jsonResponse({
         accepted: [],
-        rejected: [{ id: "e1", status: 403, reason: "adding or removing cells is not enabled for this project" }],
+        rejected: [{ id: "e1", status: 403, reason: "removing an imported cell requires maintainer" }],
       }),
     )
     await flushOutboxBatch({
@@ -435,7 +440,7 @@ describe("flushOutboxBatch", () => {
         id: "e1",
         kind: "source.cell.create",
         status: 403,
-        reason: "adding or removing cells is not enabled for this project",
+        reason: "removing an imported cell requires maintainer",
       }),
     ])
     // The existing callback still does NOT see it — that contract is unchanged.

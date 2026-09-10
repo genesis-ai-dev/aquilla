@@ -36,29 +36,28 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   // direct re-imports. The import-bot service account is provisioned at
   // OWNER level out of band.
   //
-  // AQU-1068: create/delete/reorder sit at COMMENTER because this table is
-  // the LOWEST reachable floor, not the operative one — reorder included
+  // AQU-1068: create/delete/reorder sit at COMMENTER — reorder included
   // because it is the chain bookkeeping riding every add and remove batch.
-  // The real gate is the project's `cellEditingFloor`, applied in authorize.ts:
-  // all three are refused outright unless the project opted in, and a delete
-  // additionally needs MAINTAINER unless it is a cell a person added by
-  // hand (cell-editing-authority.ts).
+  //
+  // SINCE 2026-09-09 THIS IS THE ONLY SERVER FLOOR ON THESE THREE KINDS, and
+  // that is deliberate. The project's `cellEditingFloor` tier used to be
+  // checked in authorize.ts on top of it; it is now a PRODUCT rule enforced
+  // where the buttons are drawn, because enforcing it here silently refused
+  // audio-cue re-import, DCS upstream import and diarization — three flows
+  // that emit these kinds through the user's own outbox. See the long note in
+  // authorize.ts. What survives at the perimeter is the rule that protects the
+  // client's file: a delete needs MAINTAINER unless the cell is one a person
+  // added by hand here.
   //
   // LOWERED FROM CONTRIBUTOR (Matthew's review, approved by Sam 2026-09-08)
-  // when the tier list grew Commenter and Reviewer rungs. This floor sits
-  // UNDER the tier gate, so at CONTRIBUTOR those two rungs were unreachable
-  // by construction: a project could name them and the event would still be
-  // refused a step earlier, which is a setting that lies.
+  // when the tier list grew Commenter and Reviewer rungs; at CONTRIBUTOR those
+  // two rungs were unreachable by construction, which is a setting that lies.
   //
-  // Nothing is opened up by dropping it, for two independent reasons. The
-  // tier gate refuses EVERYONE — an owner included — while the setting is
-  // unset, and "none" is the default and the meaning of an absent or
-  // unreadable settings row, so a project has to opt in before this floor is
-  // ever the deciding term. And the external API surface, which is exempt
-  // from the tier gate, does not consult this table for these three kinds at
-  // all: `emitEventsFloor` (external/commands-emit-events.ts) hard-codes
-  // PROJECT_LEAD for create/delete/reorder precisely so lowering the static
-  // floor cannot reach it.
+  // The external API surface does not consult this table for these three kinds
+  // at all: `emitEventsFloor` (external/commands-emit-events.ts) hard-codes
+  // PROJECT_LEAD for create/delete/reorder, and since the tier check went away
+  // that hard-coded floor is now the ONLY thing holding integrations above
+  // this line. There is a test pinning it for exactly that reason.
   'source.cell.create': ROLE.COMMENTER,
   'source.cell.commit': ROLE.PROJECT_LEAD,
   'source.cell.delete': ROLE.COMMENTER,

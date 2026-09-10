@@ -30,7 +30,11 @@ export { ROLE }
  * `cellEditingFloor` tier list, target.cell.create → contributor), which is
  * the same floor the native add-row affordance answers to. That mirror is the
  * LOWEST reachable floor, not the operative one: whether this project admits
- * the caller at all is the tier gate's per-event call on the server.
+ * the caller at all is the `cellEditingFloor` tier, and auth-worker asks that
+ * question when it STAGES the proposal (lib/agent/emit-stage.ts), so a card
+ * the tier would refuse never reaches this button. Since 2026-09-09 that
+ * staging check is the only place the tier is enforced for the agent — the
+ * sync perimeter no longer checks it (see sync-worker authorize.ts).
  */
 export const SUPPORTED_APPLY_KINDS = [
   "target.cell.commit",

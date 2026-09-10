@@ -1943,8 +1943,20 @@ export function ProjectWorkspace() {
   const [diarizePhase, setDiarizePhase] = useState<DiarizationPhase | null>(null)
   const [diarizeError, setDiarizeError] = useState<string | null>(null)
   const diarizeBusy = diarizePhase != null && diarizePhase !== "done" && diarizePhase !== "failed"
+  // MAINTAINER, and not merely because diarization is expensive. It REPLACES
+  // every media cell in the file — one `source.cell.delete` per imported
+  // segment, then one create per detected turn — so it is a re-import-shaped
+  // act, and the server holds removing an IMPORTED cell at maintainer whatever
+  // the project's tier says. Below that rank the deletes were refused one by
+  // one, silently, and the file was left half-replaced. Its two siblings were
+  // already gated this way: the audio-cue dialog on `canManageSources` and the
+  // DCS panel on its own IMPORT_MIN_ROLE. (Sam, 2026-09-09: maintainers only
+  // for now, revisit if people complain.)
   const canDiarize =
-    !!activeFile && fileOrderedBy(activeFile) === "time" && cellSummaries.some((c) => c.medium === "media")
+    !!activeFile &&
+    fileOrderedBy(activeFile) === "time" &&
+    cellSummaries.some((c) => c.medium === "media") &&
+    (project?.syncRole?.level ?? 0) >= ROLE.MAINTAINER
   const handleDiarize = useCallback(async () => {
     if (!project?.id || !activeFileId) return
     setDiarizeError(null)
@@ -2171,11 +2183,11 @@ export function ProjectWorkspace() {
       // cell. The server's cascade now drops every lane's target row as part
       // of `source.cell.delete`, under the same gate, so the two can no longer
       // disagree. It also keeps the whole removal inside the one permission
-      // (`cellEditingFloor`) that is supposed to govern it: `target.cell.delete`
-      // floors at CONTRIBUTOR and is not tier-gated, so listing it here made
-      // removal impossible for the Commenter and Reviewer tiers this round
-      // added — the throw came before anything was enqueued, so the row left
-      // the screen with no request and no rollback.
+      // that is supposed to govern it: `target.cell.delete` floors at
+      // CONTRIBUTOR, so listing it here made removal impossible for the
+      // Commenter and Reviewer tiers this round added — the throw came before
+      // anything was enqueued, so the row left the screen with no request and
+      // no rollback.
       //
       // A SOURCE-LESS row (see getRemovalPlan) is the exception: there is no
       // source event to carry the cascade, so its lanes are named explicitly.
@@ -6770,11 +6782,10 @@ export function ProjectWorkspace() {
       // at the tail. The two chain-mutating events sit on different cells, so
       // neither waits on the other's head. source.cell.reorder carries the
       // same static floor as source.cell.create (COMMENTER since the review
-      // round widened the tier list) and rides the same
-      // `cellEditingFloor` gate on the server (Sam, 2026-08-21 — the
-      // day this batch silently died for a contributor because the reorder
-      // still floored at PROJECT_LEAD and enqueueEvents throws per input,
-      // before writing anything).
+      // round widened the tier list), which is what keeps the batch alive
+      // (Sam, 2026-08-21 — the day it silently died for a contributor because
+      // the reorder still floored at PROJECT_LEAD and enqueueEvents throws per
+      // input, before writing anything).
       // Same instant-feedback path as handleAddCell — see its note.
       cellStore.applyOptimisticSourceInsert({
         cellId,

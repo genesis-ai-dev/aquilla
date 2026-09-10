@@ -8,7 +8,6 @@ import { requiredRoleFor, ROLE } from './role-policy'
 import { verifyTokenForDoc, verifyTokenForProject, type SyncTokenClaims } from '../auth'
 import { resolveAllowSelfAssignment } from './assignment-authority'
 import { isLockedTimingEvent, isUserInsertedCell, resolveTimingLocked } from './timing-authority'
-import { resolveCellEditingFloor } from './cell-editing-authority'
 import { isBindingTermWrite, resolveTermbaseFloor } from './termbase-authority'
 import { isGatedTrackPatch, resolveAllowTrackEditing } from './track-editing-authority'
 import { laneOfEvent } from './event-projection'
@@ -310,78 +309,57 @@ export async function authorize<K extends EventKind>(
     }
   }
 
-  // AQU-1068: `source.cell.create` / `source.cell.delete` /
-  // `source.cell.reorder` are gated on the project's `cellEditingFloor`.
-  // Reorder is in the list because every add and remove BATCHES one in to keep
-  // the anchor chain intact, and a gate that refused the companion killed the
-  // whole batch (which is exactly how this went wrong on 2026-08-21).
+  // AQU-1068: removing an IMPORTED cell needs MAINTAINER. This is the one rule
+  // about cell structure that this perimeter still enforces.
   //
-  // NO `tokenClaims.role < X` TERM, AND ITS ABSENCE IS DELIBERATE. The
-  // predecessor block carried one because it was a conditional floor RAISE for
-  // whoever fell below a static floor; this is not that. "none" — the default,
-  // and what an absent or unreadable setting means — refuses EVERYONE,
-  // including an owner, because the setting answers *whether* a project
-  // restructures its files, not merely *who* may. A clearance term here would
-  // open the back door the gate exists to close.
+  // THE PROJECT'S `cellEditingFloor` TIER IS DELIBERATELY NOT CHECKED HERE, and
+  // its absence is a decision rather than an oversight (Sam, 2026-09-09). The
+  // tier is a PRODUCT rule, enforced where the buttons are drawn — the row's
+  // menu, the timeline's add and remove, the gap inserts, and the agent's
+  // proposal staging in auth-worker all read it from the same shared module. It
+  // exists to stop a project restructuring its files by ACCIDENT, not to stop
+  // somebody determined, and everyone who reaches this code is already a member
+  // the org admitted.
   //
-  // The static floors in role-policy.ts stay LOW on purpose — COMMENTER since
-  // the tier list grew rungs below contributor: imports (`POST /import`,
-  // lead-gated in its own route) and the in-app agent emit these same kinds,
-  // and a raised static floor would break them.
+  // Enforcing it here refused three legitimate flows, silently, on any project
+  // that had not opted in — all three of which emit these same kinds through
+  // the user's OWN outbox: audio-cue re-import (`handleReconcileAudioCues`),
+  // DCS upstream import and repair, and diarization. Each REPLACES imported
+  // content wholesale, each is maintainer-gated at its own button, and none is
+  // the by-hand restructuring the tier was written to govern.
   //
-  // THE EXTERNAL API SURFACE IS EXEMPT, and that is not a hole — it is the
-  // behaviour this path already had. The predecessor block skipped everyone at
-  // PROJECT_LEAD and above, and `emitEventsFloor` holds external callers at
-  // exactly that floor, so no integration gains anything here it did not have
-  // before AQU-1068. It also has to be exempt to work at all: an external
-  // PlanImport POPULATES A NEW FILE through this perimeter (commit.ts chunks
-  // `file.create` + N × `source.cell.create` through it), which is a
-  // file-creation act gated by `file.create`'s own floor, not the
-  // restructuring of an existing file that `cellEditingFloor` governs.
+  // What actually protects the client's work is the rule below. An IMPORTED
+  // cell is content from their own file, so taking one back needs MAINTAINER
+  // whatever the tier says; below that rank a person only ever removes a line
+  // somebody added by hand here. `isUserInsertedCell` fails closed, so a cell
+  // row that cannot be read keeps the requirement rather than waiving it.
   //
-  // The in-app agent is deliberately NOT exempt: it applies through the user's
-  // own outbox with the user's own token, so it may do exactly what that
-  // person may do and no more.
+  // Contrast the timing lock (timing-authority.ts) and `allowTrackEditing`
+  // just below, which stay server-enforced and should. Those answer "may this
+  // project's imported TIMINGS move at all" — a question whose wrong answer
+  // corrupts data the client handed us. This one answers "should we draw the
+  // button", and a wrong answer there is a button somebody did not want.
   //
-  // An absent `db` skips the check, matching the carve-outs above.
+  // The external surface keeps its exemption: that is the behaviour it had
+  // before AQU-1068, `emitEventsFloor` holds external callers at PROJECT_LEAD
+  // for these kinds, and an external PlanImport populates a whole new file
+  // through this perimeter. An absent `db` skips the check, matching the
+  // carve-outs above.
   if (
     db != null &&
     tokenClaims.src !== 'external' &&
-    (raw.kind === 'source.cell.create' ||
-      raw.kind === 'source.cell.delete' ||
-      raw.kind === 'source.cell.reorder')
+    raw.kind === 'source.cell.delete' &&
+    tokenClaims.role < ROLE.MAINTAINER
   ) {
-    const floor = await resolveCellEditingFloor(db, raw.projectId, settings)
-    if (floor == null) {
+    const userInserted =
+      raw.fileId != null &&
+      raw.cellId != null &&
+      (await isUserInsertedCell(db, raw.projectId, raw.fileId, raw.cellId))
+    if (!userInserted) {
       return {
         ok: false,
         status: 403,
-        reason: 'adding or removing cells is not enabled for this project',
-      }
-    }
-    if (tokenClaims.role < floor) {
-      return {
-        ok: false,
-        status: 403,
-        reason: `role too low to add or remove cells (${raw.kind})`,
-      }
-    }
-    // ...and the second gate on removal: an IMPORTED cell is the client's own
-    // work, so taking one back needs MAINTAINER whatever tier is configured.
-    // Below that rank a person only ever removes a line somebody added by hand
-    // here. `isUserInsertedCell` fails closed, so an unreadable cell row keeps
-    // the maintainer requirement rather than waiving it.
-    if (raw.kind === 'source.cell.delete' && tokenClaims.role < ROLE.MAINTAINER) {
-      const userInserted =
-        raw.fileId != null &&
-        raw.cellId != null &&
-        (await isUserInsertedCell(db, raw.projectId, raw.fileId, raw.cellId))
-      if (!userInserted) {
-        return {
-          ok: false,
-          status: 403,
-          reason: 'removing an imported cell requires maintainer',
-        }
+        reason: 'removing an imported cell requires maintainer',
       }
     }
   }

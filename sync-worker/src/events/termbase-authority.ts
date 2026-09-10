@@ -17,13 +17,13 @@
 //   floor auth-worker applies to the settings-blob carve-out today.
 //
 // The floor is an ORG setting, so it cannot live in role-policy.ts's static
-// map — hence this module, in the shape of its siblings
-// (track-editing-authority.ts, cell-editing-authority.ts). The difference
-// from those two: this one is a conditional floor RAISE, like
-// cell-editing-authority. The static table floors every `term.*` kind at
-// CONTRIBUTOR, and the binding kinds get the org floor put back here.
-// (It named `line-creation-authority.ts` before AQU-1068 retired that module
-// in favour of `cell-editing-authority.ts`.)
+// map — hence this module, in the shape of its sibling
+// track-editing-authority.ts. This one is a conditional floor RAISE: the
+// static table floors every `term.*` kind at CONTRIBUTOR, and the binding
+// kinds get the org floor put back here.
+// (It named `line-creation-authority.ts` before AQU-1068 retired that module,
+// then cell-editing-authority.ts until 2026-09-09, when the cell tier stopped
+// being enforced at this perimeter at all — see authorize.ts.)
 
 import type { AquillaDb } from '../../../db/shim/postgres'
 import { makeRequestCache, type RequestCache } from './request-cache'

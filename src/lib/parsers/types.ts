@@ -421,9 +421,11 @@ export interface ProjectRecord {
   syncSettings?: ProjectSyncSettings
   suggestionsDismissedAt?: string  // ISO timestamp; suggestion banner is hidden after this is set.
   setupChecklistDismissed?: boolean
-  /** AQU-1068: who may add and remove cells here? Absent (and "none") means
-   *  nobody, whatever their rank — see ProjectWideSettings.cellEditingFloor
-   *  for the full rationale, and `resolveCellEditingFloor` for the mapping.
+  /** AQU-1068: who is OFFERED the add and remove actions here? Absent (and
+   *  "none") means nobody, whatever their rank. This is a product rule, read
+   *  by the editor's affordances rather than enforced at the sync perimeter —
+   *  see ProjectWideSettings.cellEditingFloor for the full rationale, and
+   *  `resolveCellEditingFloor` for the mapping.
    *
    *  Structurally the same union as `CellEditingTier` in
    *  `@/lib/sync/project-settings`, spelled out rather than imported to keep

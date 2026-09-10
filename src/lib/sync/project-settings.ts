@@ -81,10 +81,21 @@ export interface ProjectWideSettings {
    * translations, takes, comments and validations with it (see the cascade in
    * event-projection's `source.cell.delete` case).
    *
-   * REMOVING AN IMPORTED CELL NEEDS MAINTAINER ON TOP OF THE FLOOR. Below that
-   * rank a person only ever removes a line somebody added by hand here — an
-   * imported line is the client's own work and stays maintainer-only to take
-   * back, whatever tier is configured. authorize.ts enforces both halves.
+   * IT IS A PRODUCT RULE, ENFORCED AT THE AFFORDANCE, AND THAT IS DELIBERATE
+   * (Sam, 2026-09-09). This value decides which buttons exist — the row menu,
+   * the timeline's add and remove, the gap inserts, and the agent's proposal
+   * staging in auth-worker, which reads the same shared mapping. The sync
+   * perimeter does NOT check it. It was checked there until 2026-09-09, and
+   * doing so silently refused three flows that emit the same event kinds
+   * through the user's own outbox: audio-cue re-import, DCS upstream import
+   * and repair, and diarization. The setting stops accidents, not attackers,
+   * and everyone who can reach the perimeter is already a member the org
+   * admitted. Contrast `allowTrackEditing` below, which stays server-enforced.
+   *
+   * REMOVING AN IMPORTED CELL NEEDS MAINTAINER, WHATEVER THE TIER, and that
+   * half IS enforced at the perimeter (authorize.ts) because it protects the
+   * client's own file rather than merely shaping the UI. Below that rank a
+   * person only ever removes a line somebody added by hand here.
    *
    * The old boolean is deliberately NOT migrated: a project that had it on
    * lands on "none" like everyone else, and a maintainer picks a tier when
@@ -106,12 +117,13 @@ export interface ProjectWideSettings {
    * existing capability away from every project that has one. They stay
    * maintainer-only, which is what they were.
    *
-   * NOTE HOW THIS DIFFERS FROM `cellEditingFloor` ABOVE — which is AQU-1068's
-   * replacement for the `allowLineCreation` this paragraph used to contrast
-   * against. The surviving difference is shape, not stranding: that one names a
-   * role FLOOR as well as answering whether, while this is a bare whether
-   * riding `file.track.set`'s existing MAINTAINER floor. On stranding they now
-   * AGREE, because the tier governs removal as well as insertion. Switching
+   * NOTE HOW THIS DIFFERS FROM `cellEditingFloor` ABOVE. Two differences now.
+   * Shape: that one names a role FLOOR as well as answering whether, while
+   * this is a bare whether riding `file.track.set`'s existing MAINTAINER
+   * floor. And enforcement: THIS ONE IS CHECKED ON THE SERVER and that one is
+   * not, because no import or re-import path emits `file.track.set`, so
+   * enforcing it at the perimeter breaks nothing. On stranding they AGREE,
+   * because both govern removal as well as insertion. Switching
    * this off strands — three user-added tracks become un-deletable and
    * un-recolourable until it goes back on. That is Sam's call (2026-08-22) and
    * it is the coherent one for a structural switch: the tracks keep working and
@@ -250,10 +262,14 @@ export function resolveTimingLocked(
  *
  * `null` is the answer for "none", for an absent key, and for any value this
  * build does not recognise — a tier a newer client invents must not read as
- * permission on an older one. THE CLIENT'S COPY IS AN AFFORDANCE GATE ONLY;
- * the decision that counts is `resolveCellEditingFloor` in the sync worker
- * (`events/cell-editing-authority.ts`), which reads the same key from the
- * settings row. Keep the two in lock-step.
+ * permission on an older one.
+ *
+ * THIS IS THE DECISION, not a mirror of one. Since 2026-09-09 the sync worker
+ * does not check the tier at all (see its authorize.ts for why), so the
+ * affordances gated on this function are what the setting means. The other
+ * reader is auth-worker's agent staging, through the shared mapping in
+ * `db/shared/cell-editing-floor.ts` — an apply button is a button too. Keep
+ * this function and that one in lock-step.
  */
 export function resolveCellEditingFloor(
   settings: Pick<ProjectWideSettings, "cellEditingFloor"> | null | undefined,

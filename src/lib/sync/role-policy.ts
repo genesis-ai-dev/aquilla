@@ -28,13 +28,16 @@ const REQUIRED_ROLE: Record<string, number> = {
   // the LOWEST reachable floor, not the operative one. Reorder is in the set
   // because it is the chain bookkeeping RIDING every add and remove
   // (handleAddLine/handleRemoveLine batch it in), and a floor that refused it
-  // silently killed the whole batch. The real gate is the project's
-  // `cellEditingFloor`: all three refused unless the project opted in, and a
-  // delete additionally needs MAINTAINER unless the cell is one a person added
-  // by hand (sync-worker authorize.ts + cell-editing-authority.ts). The client
-  // gate's own rule applies here: only block what is PROVABLY insufficient,
-  // and no rank at or above the tier's lowest rung is — the tier decides, and
-  // this table cannot see it.
+  // silently killed the whole batch.
+  //
+  // The project's `cellEditingFloor` decides who is actually offered these
+  // actions, and since 2026-09-09 it decides it HERE — in the client's
+  // affordances (cell-editing-gate.ts and its callers) rather than at the
+  // server perimeter, which now enforces only one rule: a delete needs
+  // MAINTAINER unless the cell is one a person added by hand. This table's own
+  // rule applies unchanged: only block what is PROVABLY insufficient, and no
+  // rank at or above the tier's lowest rung is — the tier decides, and this
+  // table cannot see it.
   //
   // LOWERED FROM CONTRIBUTOR (Matthew's review, approved by Sam 2026-09-08)
   // in lock-step with the server, when the tier list grew Commenter and

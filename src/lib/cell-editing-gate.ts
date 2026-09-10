@@ -13,6 +13,14 @@
 // the second: a text file takes a cell anywhere, a subtitle file only in a gap
 // wide enough to hold one, and some files take none at all. That split is what
 // keeps the setting readable — a project admin is never asked about timings.
+//
+// SINCE 2026-09-09 THIS MODULE IS THE TIER'S ENFORCEMENT, not a preview of the
+// server's. The sync perimeter stopped checking `cellEditingFloor` because
+// doing so silently refused audio-cue re-import, DCS upstream import and
+// diarization — three flows that emit the same event kinds through the user's
+// own outbox. The tier stops accidents, not attackers, so it lives where the
+// buttons are drawn. The one rule the server still applies is the removal
+// clause below, which protects the client's file rather than the UI.
 
 import { ROLE } from "@/lib/frontier/roles"
 import { isUserAddedLine } from "@/lib/timeline/user-line-origin"
@@ -47,7 +55,9 @@ export function canEditCells(s: CellEditingSubject): boolean {
  * ...and the second gate, on removal only. An IMPORTED cell is the client's own
  * work, so taking one back needs MAINTAINER whatever tier is configured; below
  * that rank a person only ever removes a line somebody added by hand here.
- * Mirrors the clause authorize.ts applies per event.
+ *
+ * This one DOES mirror a live server clause — the only cell-structure rule
+ * authorize.ts still enforces per event. Keep the two in step.
  */
 export function canRemoveImportedCells(s: CellEditingSubject): boolean {
   return canEditCells(s) && (s.roleLevel ?? 0) >= ROLE.MAINTAINER

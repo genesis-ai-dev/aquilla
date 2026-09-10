@@ -31,9 +31,12 @@ vi.mock('partyserver', () => ({
 import { handleEventsWriteRequest } from '../events/route'
 import { handleRebuildProjectionRequest } from '../events/rebuild'
 import { handleBulkImportRequest } from '../events/import-route'
+import { handleCellHistoryReadRequest } from '../events/cell-history-read-route'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
 import { makeTestToken } from './helpers/auth'
 import type { RawEvent } from '../events/types'
+import { buildChainClaimStmt } from '../events/chain-claims'
+import { buildEventProjectionStmts } from '../events/event-projection'
 
 const SECRET = 'test-secret'
 const PROJECT = 'proj-a'
@@ -318,6 +321,151 @@ describe('per-project server_seq allocator (RACE-1 / PERF-5)', () => {
     expect(new Set(seqs).size).toBe(seqs.length)
     expect(await counterValue(t)).toBe(Math.max(...seqs))
     await assertNoGhostHeads(t)
+  })
+})
+
+// ── AQU-1154: head compare-and-swap (invariant I1) ────────────────────────
+//
+// First-child-of-parent alone lets a stale branch climb back onto the head:
+// A1 and B1 both chain on H; A1 wins, B1 is stale — but B's client keeps
+// chaining on ITS OWN stale head, and B2 (parent B1) finds the (cell, B1)
+// slot unclaimed, so it won and overwrote A1; A2 (parent A1) then won back,
+// and the head ping-ponged forever. The rule is now a compare-and-swap on the
+// cell's current head: an event advances the projection iff its parentId IS
+// the head for that side/lane at commit time (or the row does not exist yet).
+
+async function rebuild(): Promise<void> {
+  const req = new Request(`https://worker/admin/projects/${PROJECT}/rebuild-projection`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${SECRET}` },
+  })
+  const res = await handleRebuildProjectionRequest(req, { AQUILLA_PG: t.db, SYNC_SECRET_KEY: SECRET })
+  expect(res!.status).toBe(200)
+}
+
+describe('head compare-and-swap: a stale branch cannot climb back onto the head (AQU-1154)', () => {
+  it('B2 chained on the stale sibling B1 is stale; A2 chained on the head A1 wins', async () => {
+    await postEvents(t.db, [commit('evt-H', null, 'head')])
+
+    const rA1 = await postEvents(t.db, [commit('evt-A1', 'evt-H', 'A1')])
+    expect(rA1.stale).toEqual([])
+    const rB1 = await postEvents(t.db, [commit('evt-B1', 'evt-H', 'B1')])
+    expect(rB1.stale.map((s) => s.id)).toEqual(['evt-B1'])
+    expect((await headOf(t))?.event_id).toBe('evt-A1')
+
+    // THE bug: (cell, evt-B1) has no claim, so first-child let this win.
+    const rB2 = await postEvents(t.db, [commit('evt-B2', 'evt-B1', 'B2')])
+    expect(rB2.accepted.map((a) => a.id)).toEqual(['evt-B2'])
+    expect(rB2.stale).toEqual([{ id: 'evt-B2', fileId: FILE, cellId: 'cell-1' }])
+    expect((await headOf(t))?.event_id).toBe('evt-A1')
+    expect((await headOf(t))?.value).toBe('A1')
+
+    const rA2 = await postEvents(t.db, [commit('evt-A2', 'evt-A1', 'A2')])
+    expect(rA2.stale).toEqual([])
+    expect((await headOf(t))?.event_id).toBe('evt-A2')
+
+    // Every event is still history.
+    expect((await eventRows(t)).map((r) => r.id)).toEqual(
+      expect.arrayContaining(['evt-A1', 'evt-B1', 'evt-B2', 'evt-A2']),
+    )
+    await assertNoGhostHeads(t)
+  })
+
+  it('a same-request chain C1 → C2 both advance (C1 moved the head earlier in the transaction)', async () => {
+    await postEvents(t.db, [commit('evt-H', null, 'head')])
+    const r = await postEvents(t.db, [
+      commit('evt-C1', 'evt-H', 'C1'),
+      commit('evt-C2', 'evt-C1', 'C2'),
+    ])
+    expect(r.accepted.map((a) => a.id)).toEqual(['evt-C1', 'evt-C2'])
+    expect(r.stale).toEqual([])
+    expect((await headOf(t))?.event_id).toBe('evt-C2')
+  })
+
+  it('the in-transaction cells write is itself a head CAS (an in-flight race the pre-check cannot see)', async () => {
+    // Bypass the route pre-check: build B2's gated statements directly with a
+    // claim it holds, against a row whose head is A1 — the shape an in-flight
+    // request lands in after a concurrent A1 committed between its pre-check
+    // and its transaction.
+    await postEvents(t.db, [commit('evt-H', null, 'head')])
+    await postEvents(t.db, [commit('evt-A1', 'evt-H', 'A1')])
+
+    const gate = { projectId: PROJECT, fileId: FILE, cellId: 'cell-1', parentKey: 'evt-B1' }
+    const stmts: AquillaStatement[] = [buildChainClaimStmt(t.db, gate, 'evt-B2')]
+    buildEventProjectionStmts(
+      t.db,
+      {
+        id: 'evt-B2',
+        schemaVersion: 1,
+        projectId: PROJECT,
+        fileId: FILE,
+        cellId: 'cell-1',
+        parentId: 'evt-B1',
+        kind: 'target.cell.commit',
+        author: 'bob',
+        payload: { value: 'B2' },
+        clientTs: 1,
+        serverTs: 1,
+      },
+      stmts,
+      { chainGate: gate, deferFileCounters: true },
+    )
+    const results = await t.db.batch(stmts)
+    // The claim was taken (slot was free) but the cells UPSERT changed nothing.
+    expect(results[0].meta.changes).toBe(1)
+    expect(results[1].meta.changes).toBe(0)
+    expect((await headOf(t))?.event_id).toBe('evt-A1')
+  })
+
+  it('rebuild replays the same head-CAS rule, so replay == live for the A/B branch', async () => {
+    await postEvents(t.db, [commit('evt-H', null, 'head')])
+    await postEvents(t.db, [commit('evt-A1', 'evt-H', 'A1')])
+    await postEvents(t.db, [commit('evt-B1', 'evt-H', 'B1')])
+    await postEvents(t.db, [commit('evt-B2', 'evt-B1', 'B2')])
+    await postEvents(t.db, [commit('evt-A2', 'evt-A1', 'A2')])
+    const live = await headOf(t)
+    expect(live?.event_id).toBe('evt-A2')
+
+    await rebuild()
+    const rebuilt = await headOf(t)
+    expect(rebuilt?.event_id).toBe('evt-A2')
+    expect(rebuilt?.value).toBe('A2')
+    await assertNoGhostHeads(t)
+  })
+
+  it('never loses user data: the bumped branch (B1, B2) is durable with its full payload and served by the history route', async () => {
+    // Invariant "never lose user data": a commit that loses the head CAS is
+    // reported in `stale[]` (HTTP 200) but MUST still land in the event log
+    // with its payload and parent pointer, and the per-cell history route
+    // MUST return it — that is what lets the client drawer show it as a
+    // bumped entry with "Promote to current".
+    await postEvents(t.db, [commit('evt-H', null, 'head')])
+    await postEvents(t.db, [commit('evt-A1', 'evt-H', 'A1')])
+    const rB1 = await postEvents(t.db, [commit('evt-B1', 'evt-H', 'B1')])
+    expect(rB1.stale.map((s) => s.id)).toEqual(['evt-B1'])
+    const rB2 = await postEvents(t.db, [commit('evt-B2', 'evt-B1', 'B2')])
+    expect(rB2.stale.map((s) => s.id)).toEqual(['evt-B2'])
+    await postEvents(t.db, [commit('evt-A2', 'evt-A1', 'A2')])
+    expect((await headOf(t))?.event_id).toBe('evt-A2')
+
+    const token = await makeTestToken(SECRET, { projectId: PROJECT, fileId: FILE })
+    const res = await handleCellHistoryReadRequest(
+      new Request(`https://worker/api/v1/projects/${PROJECT}/files/${FILE}/cells/cell-1/history`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      { AQUILLA_PG: t.db, SYNC_SECRET_KEY: SECRET },
+    )
+    expect(res!.status).toBe(200)
+    const body = (await res!.json()) as {
+      events: Array<{ id: string; parentId: string | null; payload: { value: string } }>
+    }
+    const byId = new Map(body.events.map((e) => [e.id, e]))
+    // Newest-first by server_seq; every branch event is present.
+    expect(body.events.map((e) => e.id)).toEqual(['evt-A2', 'evt-B2', 'evt-B1', 'evt-A1', 'evt-H'])
+    expect(byId.get('evt-B1')).toMatchObject({ parentId: 'evt-H', payload: { value: 'B1' } })
+    expect(byId.get('evt-B2')).toMatchObject({ parentId: 'evt-B1', payload: { value: 'B2' } })
+    expect(byId.get('evt-A1')).toMatchObject({ parentId: 'evt-H', payload: { value: 'A1' } })
+    expect(byId.get('evt-A2')).toMatchObject({ parentId: 'evt-A1', payload: { value: 'A2' } })
   })
 })
 

@@ -3,6 +3,8 @@ import "@testing-library/jest-dom/vitest"
 import { afterEach, vi } from "vitest"
 import { cleanup } from "@testing-library/react"
 import type { ReactNode } from "react"
+import { resetWindowFocusRevalidateForTests } from "@/lib/sync/window-focus-revalidate"
+import { resetAllRequestCoalescersForTests } from "@/lib/request-coalescer"
 
 // Stub PostHog globally. A real VITE_POSTHOG_KEY in a developer's .env makes
 // src/lib/posthog.ts call posthog.init() at import time, which tries to fetch a
@@ -87,4 +89,9 @@ vi.mock("@legendapp/list/react", async () => {
 
 afterEach(() => {
   cleanup()
+  // Module-level rate limits / caches would otherwise leak across tests: a
+  // focus dispatched in one test would suppress the next test's focus for 5s,
+  // and a roster cached in one test would answer the next test's fetch.
+  resetWindowFocusRevalidateForTests()
+  resetAllRequestCoalescersForTests()
 })

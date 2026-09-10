@@ -25,8 +25,7 @@
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
-import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
-import { JWTService } from "../auth/jwt"
+import { authMiddleware, optionalCaller, type AuthHonoEnv } from "../middleware/auth"
 import {
   INVITE_MIN_ROLE,
   LINK_ROLE_CAP,
@@ -40,7 +39,7 @@ import {
   ALL_ROLE_LEVELS,
   isCanonicalRoleLevel,
   isLinkRoleLevel,
-  LINK_ROLE_ALLOWED,
+  forgetProjectRole,
   ORG_WIDE_ACCESS_FLOOR,
   resolveProjectRole,
   resolveProjectRoleIncludingArchived,
@@ -78,25 +77,6 @@ import { createProjectShared } from "../../../db/shared/projects"
 
 const projects = new Hono<AuthHonoEnv>()
 
-/**
- * FRO-347 follow-up: best-effort caller identity for the (otherwise public)
- * invite-preview route. Unlike `authMiddleware`, a missing/invalid/expired
- * token is NOT an error here — it just means "treat this preview as
- * anonymous", since the route must stay reachable for signed-out visitors
- * following a share link. Mirrors `optionalCaller` in routes/invites.ts.
- */
-async function optionalCaller(env: Env, authHeader: string | null): Promise<AuthUser | null> {
-  if (!authHeader) return null
-  const jwtService = new JWTService(env)
-  const token = jwtService.extractTokenFromHeader(authHeader)
-  if (!token) return null
-  const payload = await jwtService.verifyToken(token)
-  if (!payload) return null
-  const now = Math.floor(Date.now() / 1000)
-  if (payload.exp < now) return null
-  return jwtService.getUserByUsername(payload.sub)
-}
-
 function roleNameFor(level: number): string {
   return ROLE_NAMES[level] ?? `level_${level}`
 }
@@ -119,6 +99,8 @@ interface FileProjection {
   anchorFileId?: string
   bookCode?: string
   hasScriptureContent?: boolean
+  /** Sidebar folder. Read from files.meta, or recovered from a Biblica parserVersion. */
+  corpusMarker?: string
   /** Timeline-segment-model order lens, read from files.meta. Omitted when
    *  unset → client treats as 'sequence'. */
   orderedBy?: string
@@ -203,6 +185,7 @@ export async function loadFilesByProject(
     let sourceTextDirection: "ltr" | "rtl" | undefined
     let targetTextDirection: "ltr" | "rtl" | undefined
     let hasScriptureContent: boolean | undefined
+    let corpusMarker: string | undefined
     let coreMediaUrl: string | undefined
     let timingMode: "dubbing" | "audioFirst" | undefined
     let audioVttTimebase: FileProjection["audioVttTimebase"]
@@ -226,6 +209,8 @@ export async function loadFilesByProject(
             hasScriptureContent?: unknown
             audioVtt?: { timebase?: unknown }
           }
+          corpusMarker?: unknown
+          parserVersion?: unknown
         }
         if (m.orderedBy) orderedBy = m.orderedBy
         sourceLanguage = normalizeLanguage(m.source_language ?? m.sourceLanguage)
@@ -233,6 +218,7 @@ export async function loadFilesByProject(
         sourceTextDirection = normalizeTextDirection(m.source_text_direction ?? m.sourceTextDirection)
         targetTextDirection = normalizeTextDirection(m.target_text_direction ?? m.targetTextDirection)
         if (m.aquillaImport?.hasScriptureContent === true) hasScriptureContent = true
+        corpusMarker = resolveCorpusMarker(m.corpusMarker, m.parserVersion)
         if (typeof m.coreMediaUrl === "string" && m.coreMediaUrl.trim()) coreMediaUrl = m.coreMediaUrl
         if (m.timingMode === "dubbing" || m.timingMode === "audioFirst") timingMode = m.timingMode
         // `scale` is the only required field: a drift measured from the words
@@ -276,6 +262,7 @@ export async function loadFilesByProject(
       ...(f.anchor_file_id ? { anchorFileId: f.anchor_file_id } : {}),
       ...(f.book_code ? { bookCode: f.book_code } : {}),
       ...(hasScriptureContent ? { hasScriptureContent: true } : {}),
+      ...(corpusMarker ? { corpusMarker } : {}),
       ...(orderedBy ? { orderedBy } : {}),
       ...(sourceLanguage ? { sourceLanguage } : {}),
       ...(targetLanguage ? { targetLanguage } : {}),
@@ -293,6 +280,22 @@ export async function loadFilesByProject(
 
 function normalizeTextDirection(value: string | undefined): "ltr" | "rtl" | undefined {
   return value === "ltr" || value === "rtl" ? value : undefined
+}
+
+const BIBLICA_PROFILE_FOLDERS: Readonly<Record<string, string>> = {
+  "builtin:biblica-study-notes": "Biblica Study Notes",
+  "builtin:biblica-treasure-hunt": "Treasure Hunt Bible",
+  "builtin:biblica-reach4life": "Reach 4 Life",
+  "builtin:biblica-ebl": "Equipping Biblical Leaders",
+}
+
+function resolveCorpusMarker(explicit: unknown, parserVersion: unknown): string | undefined {
+  if (typeof explicit === "string") {
+    const trimmed = explicit.trim()
+    if (trimmed) return trimmed
+  }
+  if (typeof parserVersion !== "string") return undefined
+  return BIBLICA_PROFILE_FOLDERS[parserVersion.split("@")[0]]
 }
 
 function normalizeLanguage(value: string | undefined): string | undefined {
@@ -1295,6 +1298,9 @@ projects.delete("/:projectId/members/:userId", authMiddleware, async (c) => {
   )
     .bind(projectId, targetUserId)
     .run()
+  // The per-request memo may hold the pre-delete role (an owner removing
+  // their own direct row resolved it above as the caller).
+  forgetProjectRole(c.env, projectId, targetUserId)
 
   // AQU-346: when NO grant path survives the delete (AD-12: org / group /
   // creator paths are additive and unaffected by removing the direct row),
@@ -1795,9 +1801,5 @@ projects.delete("/:projectId/invites/:token", authMiddleware, async (c) => {
   const removed = typeof changes === "number" ? changes > 0 : true
   return c.json({ removed })
 })
-
-// Re-export the canonical link-role list so tests that imported it from the
-// old projects-invites module continue to work.
-export { LINK_ROLE_ALLOWED }
 
 export default projects

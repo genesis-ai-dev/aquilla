@@ -379,7 +379,9 @@ export const org = defineNamespace({
       "Percentage of cells that have at least one audio recording attached. This is coverage, not validation — see 'Audio Validated' for review status.",
     "org.projectOverview.audioValidated": "Audio Validated",
     "org.projectOverview.audioValidatedTooltip":
-      "Not tracked yet — the server does not record whether a validation applies to text or audio content (see AQU-490).",
+      "Share of every cell whose selected recording has been validated. Counted against every cell, the same way as Validated, so it agrees with the Plan below.",
+    "org.projectOverview.audioValidatedOfRecorded":
+      "Of the audio actually recorded, {percent}% is validated.",
     "org.projectOverview.crossLaneTooltip": "Cross-language stat — not broken down per language.",
     "org.projectOverview.cellsSuffix": "cells",
     "org.projectOverview.laneDefaultFallback": "Default",
@@ -1016,6 +1018,15 @@ export const org = defineNamespace({
     // "Assign work" menu item → dialog.assign.title (identical text)
     // "Add member" menu item → org.teamDetail.addMemberButton (identical text)
     "org.orgProjectsDataTable.noSearchMatch": "No projects match your search.",
+    // AQU-1097: the plan rollup. Never says "books" — a unit is a book, an
+    // episode or a document depending on the project.
+    "org.orgProjectsDataTable.unitsColumn": "Done",
+    "org.orgProjectsDataTable.unitsDoneValue": "{done} of {total}",
+    "org.orgProjectsDataTable.unitsDoneAria": "{done} of {total} units marked done",
+    "org.orgProjectsDataTable.unitsOverdueTooltip": plural({
+      one: "{count} unit is past its target date",
+      other: "{count} units are past their target date",
+    }),
     // "Clear" → common.clear (identical text)
 
     // -- OrgProjectsPage: single-org projects list page --
@@ -1086,6 +1097,83 @@ export const org = defineNamespace({
     // "Project settings" aria-label → editor.navTitle.projectSettings (identical text)
     "org.projectOverview.archiveDialogTitle": "Archive project",
     "org.projectOverview.filterProgressByLanguageAriaLabel": "Filter progress by language",
+    // ── AQU-1092…1098: the plan board ──────────────────────────────────
+    // Copy is deliberately unit-agnostic. A planning unit is a Bible book in
+    // one project, a dub episode in another, a document in a third — so
+    // nothing here may say "books".
+    "org.projectOverview.plan.heading": "Plan",
+    "org.projectOverview.plan.regionAria": "Planning units, grouped by status",
+    "org.projectOverview.plan.summaryDoneLabel": "of {total} done",
+    "org.projectOverview.plan.summaryOverdueLabel": plural({ one: "overdue", other: "overdue" }),
+    "org.projectOverview.plan.summaryInProgressLabel": plural({ one: "in progress", other: "in progress" }),
+    "org.projectOverview.plan.emptyTitle": "Nothing to plan yet",
+    "org.projectOverview.plan.loading": "Loading the plan\u2026",
+    "org.projectOverview.plan.saveFailed": "That change could not be saved, so it has been undone. Try again.",
+    "org.projectOverview.plan.errorTitle": "The plan could not be loaded",
+    "org.projectOverview.plan.error": "Something went wrong reading this project's plan. Nothing has been lost \u2014 try again.",
+    "org.projectOverview.plan.importSource": "Import source",
+    "org.projectOverview.plan.empty":
+      "Import a source and its books, episodes or documents appear here as rows you can give target dates and mark done.",
+    "org.projectOverview.plan.keyboardHint": "Arrow keys move between units \u00b7 Esc closes",
+    "org.projectOverview.plan.cellCount": plural({ one: "{count} cell", other: "{count} cells" }),
+    "org.projectOverview.plan.textBarsAria": "Text {translated}% translated, {validated}% validated",
+    "org.projectOverview.plan.audioBarsAria": "Audio {recorded}% recorded, {validated}% validated",
+    "org.projectOverview.plan.statusDone": "Done",
+    "org.projectOverview.plan.statusOverdue": "Overdue",
+    "org.projectOverview.plan.statusSoon": "Due soon",
+    "org.projectOverview.plan.statusInProgress": "In progress",
+    "org.projectOverview.plan.statusNotStarted": "Not started",
+    "org.projectOverview.plan.groupHintOverdue": "past target, not marked done",
+    "org.projectOverview.plan.groupHintSoon": "target within a week",
+    "org.projectOverview.plan.groupHintInProgress": "active, comfortably ahead",
+    "org.projectOverview.plan.groupHintNotStarted": "no content yet",
+    "org.projectOverview.plan.groupHintDone": "marked complete by a manager",
+    // The inspector docked beside the board.
+    "org.projectOverview.plan.inspectorAria": "Details for {unit}",
+    "org.projectOverview.plan.previousUnit": "Previous unit",
+    "org.projectOverview.plan.nextUnit": "Next unit",
+    "org.projectOverview.plan.targetDate": "Target date",
+    "org.projectOverview.plan.noTarget": "No target",
+    "org.projectOverview.plan.noTargetSet": "No target date set",
+    "org.projectOverview.plan.targetVisibleHint": "Visible to everyone on the project.",
+    "org.projectOverview.plan.targetMaintainerOnly": "Only maintainers can set target dates.",
+    "org.projectOverview.plan.completion": "Completion",
+    "org.projectOverview.plan.markDone": "Mark done",
+    "org.projectOverview.plan.markDoneHint": "Undoable.",
+    "org.projectOverview.plan.markDoneAnyway": "Mark done anyway",
+    "org.projectOverview.plan.unmarkDone": "Un-mark",
+    "org.projectOverview.plan.notMarkedDone": "Not marked done.",
+    "org.projectOverview.plan.aMaintainer": "a maintainer",
+    "org.projectOverview.plan.markedDoneBy": "Marked done {date} by {user}",
+    "org.projectOverview.plan.doneBelowFullNudge":
+      "Validated is at {validated}%. Marking done records your judgment, not the numbers \u2014 the bars stay visible beside the mark.",
+    "org.projectOverview.plan.progress": "Progress",
+    "org.projectOverview.plan.lastActivity": "Last activity {when}.",
+    "org.projectOverview.plan.noActivity": "No activity yet.",
+    "org.projectOverview.plan.resizeInspector": "Resize the details panel",
+    "org.projectOverview.plan.textBarLabel": "TXT",
+    "org.projectOverview.plan.audioBarLabel": "AUD",
+    "org.projectOverview.plan.noTargetShort": "\u2014",
+    "org.projectOverview.plan.daysLate": plural({ one: "{count} day late", other: "{count} days late" }),
+    "org.projectOverview.plan.markedOn": "marked {date}",
+    "org.projectOverview.plan.daysUntil": plural({ one: "in {count} day", other: "in {count} days" }),
+    "org.projectOverview.plan.noTargetDate": "no target date",
+    // AQU-1096: the list controls. Neutral throughout — the orphaned
+    // filterFiles* keys say "files", which this surface never does.
+    "org.projectOverview.plan.filterPlaceholder": "Filter by name\u2026",
+    "org.projectOverview.plan.filterAria": "Filter the plan by name",
+    "org.projectOverview.plan.clearFilter": "Clear the plan filter",
+    "org.projectOverview.plan.noMatchTitle": "Nothing matches",
+    "org.projectOverview.plan.noMatch": "No unit matches the filters you have set. Clear them to see the whole plan again.",
+    "org.projectOverview.plan.showingCount": "Showing {shown} of {total}.",
+    "org.projectOverview.plan.viewStatus": "By status",
+    "org.projectOverview.plan.viewOrder": "In order",
+    "org.projectOverview.plan.needsDate": "Needs a date",
+    "org.projectOverview.plan.needsDateTooltip": "Show only the units nobody has given a target date yet.",
+    "org.projectOverview.plan.chapters": "Progress by chapter",
+    "org.projectOverview.plan.sections": "Progress by section",
+    "org.projectOverview.plan.chapterCount": plural({ one: "{count} chapter", other: "{count} chapters" }),
+    "org.projectOverview.plan.sectionCount": plural({ one: "{count} section", other: "{count} sections" }),
 
     // -- TeamDetail: single team's page. Most call-site strings here reuse
     // existing org.teamDetail.* / org.teamForm.* / common.* keys already
@@ -1783,6 +1871,28 @@ export const org = defineNamespace({
           "the org projects data table and the Archived projects/files tables.",
         placeholders: { name: "The project's or file's name — not translated." },
       },
+      "org.orgProjectsDataTable.unitsColumn": {
+        description:
+          "Column header on the org projects table: how many of a project's planning " +
+          "units a manager has marked finished. Deliberately neutral — a unit is a Bible " +
+          "book, a dub episode or a document depending on the project, so this must never " +
+          "say 'Books'.",
+        maxLength: 12,
+      },
+      "org.orgProjectsDataTable.unitsDoneValue": {
+        description: "Cell value for the Done column, e.g. '5 of 66'.",
+        placeholders: { done: "Units marked done — a number.", total: "Units in the project — a number." },
+      },
+      "org.orgProjectsDataTable.unitsDoneAria": {
+        description: "Screen-reader label for the Done column cell.",
+        placeholders: { done: "Units marked done — a number.", total: "Units in the project — a number." },
+      },
+      "org.orgProjectsDataTable.unitsOverdueTooltip": {
+        description:
+          "Tooltip on the red badge beside the Done count: how many units are past their " +
+          "target date without a Done mark.",
+        placeholders: { count: "Overdue units — a number." },
+      },
       "org.sharedProjectsPage.scopedDescription": {
         description:
           "Subheading on the shared-with-you page when arriving scoped to one guest organization (via the org switcher), naming that organization.",
@@ -2006,6 +2116,260 @@ export const org = defineNamespace({
       "org.projectOverview.filterProgressByLanguageAriaLabel": {
         description:
           "Accessible name for the segmented All/per-lane tabs that filter the Progress card's stats by target language, shown only when the project has more than one lane.",
+      },
+      "org.projectOverview.audioValidatedOfRecorded": {
+        description:
+          "Second sentence of the Audio Validated tooltip, appended after org.projectOverview.audioValidatedTooltip. Gives the other ratio a reviewer usually wants: validated audio measured against the audio that exists rather than against every cell. A separate sentence, and a separate key, so it can be ordered independently.",
+        placeholders: {
+          percent: "Validated audio as a percentage of the audio actually recorded \u2014 a whole number, no % sign.",
+        },
+      },
+      "org.projectOverview.plan.heading": {
+        description: "Heading of the project dashboard's plan table. Neutral on purpose: rows are Bible books, dub episodes or documents depending on the project, so this must never say 'Books'.",
+        maxLength: 16,
+      },
+      "org.projectOverview.plan.regionAria": {
+        description: "Screen-reader name for the plan list region, which arrow keys navigate.",
+      },
+      "org.projectOverview.plan.summaryDoneLabel": {
+        description:
+          "Summary pill above the plan table. The count of finished units is rendered as a bold numeral IMMEDIATELY BEFORE this text, so the phrase continues from it: \"2\" + \"of 66 done\".",
+        placeholders: { total: "Units in the project — a number." },
+      },
+      "org.projectOverview.plan.summaryOverdueLabel": {
+        description:
+          "Summary pill. The count is rendered as a bold numeral immediately before this text: \"1\" + \"overdue\". The plural form is selected by that count even though it does not appear in the string.",
+      },
+      "org.projectOverview.plan.summaryInProgressLabel": {
+        description:
+          "Summary pill. The count is rendered as a bold numeral immediately before this text: \"28\" + \"in progress\". Counts units that are started or due soon but not finished.",
+      },
+      "org.projectOverview.plan.emptyTitle": {
+        description: "Heading of the empty state, when a project has no plannable files yet.",
+      },
+      "org.projectOverview.plan.errorTitle": {
+        description:
+          "Heading shown when the plan read fails. Deliberately distinct from the empty state, which would tell a manager their project has no work in it.",
+      },
+      "org.projectOverview.plan.importSource": {
+        description:
+          "Button in the plan's empty state. Opens the editor, which is where importing a source happens.",
+      },
+      "org.projectOverview.plan.empty": {
+        description: "Shown when a project has no plannable files yet.",
+      },
+      "org.projectOverview.plan.keyboardHint": {
+        description: "Hint shown while a unit is selected, describing keyboard navigation.",
+      },
+      "org.projectOverview.plan.cellCount": {
+        description: "Secondary line under a unit's name: how many cells it contains.",
+        placeholders: { count: "Cells in the unit — a number." },
+      },
+      "org.projectOverview.plan.textBarsAria": {
+        description: "Screen-reader label for the two stacked text-progress bars on a plan row.",
+        placeholders: { translated: "Percent translated — a number.", validated: "Percent validated — a number." },
+      },
+      "org.projectOverview.plan.audioBarsAria": {
+        description: "Screen-reader label for the two stacked audio-progress bars on a plan row.",
+        placeholders: { recorded: "Percent recorded — a number.", validated: "Percent validated — a number." },
+      },
+      "org.projectOverview.plan.statusDone": {
+        description: "Status of a unit a manager has explicitly marked finished. Can read Done even when its bars are below 100%.",
+        maxLength: 14,
+      },
+      "org.projectOverview.plan.statusOverdue": {
+        description: "Status of a unit past its target date with no Done mark.",
+        maxLength: 14,
+      },
+      "org.projectOverview.plan.statusSoon": {
+        description: "Status of a unit whose target date is within a week.",
+        maxLength: 14,
+      },
+      "org.projectOverview.plan.statusInProgress": {
+        description: "Status of a unit with content that is comfortably ahead of its target.",
+        maxLength: 14,
+      },
+      "org.projectOverview.plan.statusNotStarted": {
+        description: "Status of a unit with no translated text and no recorded audio yet.",
+        maxLength: 14,
+      },
+      "org.projectOverview.plan.groupHintOverdue": {
+        description: "Right-aligned hint on the Overdue group header, explaining what puts a unit there.",
+      },
+      "org.projectOverview.plan.groupHintSoon": {
+        description: "Hint on the Due soon group header.",
+      },
+      "org.projectOverview.plan.groupHintInProgress": {
+        description: "Hint on the In progress group header.",
+      },
+      "org.projectOverview.plan.groupHintNotStarted": {
+        description: "Hint on the Not started group header.",
+      },
+      "org.projectOverview.plan.groupHintDone": {
+        description: "Hint on the Done group header, stressing that the mark is a human judgment.",
+      },
+      "org.projectOverview.plan.inspectorAria": {
+        description: "Screen-reader name for the detail panel docked beside the plan.",
+        placeholders: { unit: "The unit's name — a book name, episode or document title. Not translated." },
+      },
+      "org.projectOverview.plan.previousUnit": {
+        description: "Tooltip on the up arrow that steps to the previous unit.",
+        maxLength: 20,
+      },
+      "org.projectOverview.plan.nextUnit": {
+        description: "Tooltip on the down arrow that steps to the next unit.",
+        maxLength: 20,
+      },
+      "org.projectOverview.plan.targetDate": {
+        description: "Label for the date a manager plans this unit to be finished by.",
+        maxLength: 18,
+      },
+      "org.projectOverview.plan.noTarget": {
+        description: "Placeholder in the target-date picker when none is set.",
+        maxLength: 16,
+      },
+      "org.projectOverview.plan.noTargetSet": {
+        description: "Shown instead of a date picker to someone who cannot set dates.",
+        maxLength: 28,
+      },
+      "org.projectOverview.plan.targetVisibleHint": {
+        description: "Hint under the target-date picker: the date is not private to the person setting it.",
+      },
+      "org.projectOverview.plan.targetMaintainerOnly": {
+        description: "Explains to a non-maintainer why no date control is offered.",
+      },
+      "org.projectOverview.plan.completion": {
+        description: "Section label above the Mark done control.",
+        maxLength: 16,
+      },
+      "org.projectOverview.plan.markDone": {
+        description: "Button marking a unit finished. An explicit human judgment, not derived from percentages.",
+        maxLength: 14,
+      },
+      "org.projectOverview.plan.markDoneHint": {
+        description: "Reassurance beside Mark done that the action can be reversed.",
+        maxLength: 14,
+      },
+      "org.projectOverview.plan.markDoneAnyway": {
+        description: "Confirms marking a unit done although its validated percentage is below 100.",
+        maxLength: 22,
+      },
+      "org.projectOverview.plan.unmarkDone": {
+        description: "Button reversing a Done mark.",
+        maxLength: 14,
+      },
+      "org.projectOverview.plan.notMarkedDone": {
+        description: "Shown to a non-maintainer when a unit has no Done mark.",
+        maxLength: 24,
+      },
+      "org.projectOverview.plan.aMaintainer": {
+        description: "Fallback for who marked a unit done when the username is unknown.",
+        maxLength: 18,
+      },
+      "org.projectOverview.plan.markedDoneBy": {
+        description: "Provenance line: when a unit was marked done and by whom.",
+        placeholders: { date: "ISO date, e.g. 2026-09-02.", user: "Username — not translated." },
+      },
+      "org.projectOverview.plan.doneBelowFullNudge": {
+        description: "Shown when marking a unit done whose validated share is under 100%. Informative, not blocking — the mark is a judgment the numbers cannot make.",
+        placeholders: { validated: "Percent validated — a number." },
+      },
+      "org.projectOverview.plan.progress": {
+        description: "Section label above the four progress bars.",
+        maxLength: 16,
+      },
+      "org.projectOverview.plan.lastActivity": {
+        description: "When this unit was last edited.",
+        placeholders: { when: "How long ago the unit was last edited \u2014 already-formatted relative time." },
+      },
+      "org.projectOverview.plan.resizeInspector": {
+        description:
+          "Accessible name for the drag handle on the left edge of the docked details panel.",
+      },
+      "org.projectOverview.plan.noActivity": {
+        description: "Shown when a unit has never been edited.",
+        maxLength: 24,
+      },
+      "org.projectOverview.plan.textBarLabel": {
+        description:
+          "Three-letter label beside a plan row's text-progress bars. Abbreviated because it " +
+          "repeats on every row; keep it very short.",
+        maxLength: 4,
+      },
+      "org.projectOverview.plan.audioBarLabel": {
+        description:
+          "Three-letter label beside a plan row's audio-progress bars. Abbreviated because it " +
+          "repeats on every row; keep it very short.",
+        maxLength: 4,
+      },
+      "org.projectOverview.plan.noTargetShort": {
+        description:
+          "Placeholder in a plan row's date column when the unit has no target date. An em " +
+          "dash; translate only if the language uses a different absent-value mark.",
+        maxLength: 3,
+      },
+      "org.projectOverview.plan.daysLate": {
+        description:
+          "Under an overdue unit's target date: how far past it the unit is, counted from the " +
+          "end of the target day everywhere on Earth.",
+        placeholders: { count: "Whole days late — a number." },
+      },
+      "org.projectOverview.plan.markedOn": {
+        description: "Under a finished unit's date: when a manager marked it done.",
+        placeholders: { date: "A short calendar date, already formatted." },
+      },
+      "org.projectOverview.plan.daysUntil": {
+        description: "Note beside a Due soon unit: how long until its target date.",
+        placeholders: { count: "Days remaining — a number." },
+      },
+      "org.projectOverview.plan.noTargetDate": {
+        description: "Note beside a started unit that nobody has given a target date.",
+      },
+      "org.projectOverview.plan.filterPlaceholder": {
+        description:
+          "Placeholder in the plan's filter box. Ends in an ellipsis; the matching aria-label does not. Matches a unit's displayed name and its book code.",
+        maxLength: 24,
+      },
+      "org.projectOverview.plan.filterAria": {
+        description:
+          "Accessible name for the plan's filter box. Says what typing here does; unlike the visible placeholder it must NOT end in an ellipsis.",
+      },
+      "org.projectOverview.plan.showingCount": {
+        description:
+          "Footer line under a filtered plan, saying how much of it is on screen. The summary pills above always count the WHOLE project, so this is the only place the filtered figure appears.",
+        placeholders: {
+          shown: "Units passing the filter \u2014 a number.",
+          total: "Units in the project \u2014 a number.",
+        },
+      },
+      "org.projectOverview.plan.viewStatus": {
+        description:
+          "Button that arranges the plan grouped by status (the default). Paired with 'In order'.",
+        maxLength: 14,
+      },
+      "org.projectOverview.plan.viewOrder": {
+        description:
+          "Button that arranges the plan as one flat list in canonical order \u2014 Bible book order, or file order. Paired with 'By status'.",
+        maxLength: 14,
+      },
+      "org.projectOverview.plan.needsDate": {
+        description:
+          "Toggle that narrows the plan to units with no target date and no Done mark \u2014 a planner's to-do list.",
+        maxLength: 16,
+      },
+      "org.projectOverview.plan.chapters": {
+        description: "Inspector heading over the per-chapter breakdown of a Bible book.",
+      },
+      "org.projectOverview.plan.sections": {
+        description: "Inspector heading over the per-section breakdown of a non-Scripture unit.",
+      },
+      "org.projectOverview.plan.chapterCount": {
+        description: "Part of the inspector subtitle, e.g. \"1,007 cells \u00b7 21 chapters \u00b7 Tok Pisin\".",
+        placeholders: { count: "Chapters in the unit — a number." },
+      },
+      "org.projectOverview.plan.sectionCount": {
+        description: "Part of the inspector subtitle for a non-Scripture unit.",
+        placeholders: { count: "Sections in the unit — a number." },
       },
       "org.memberActivityPanel.fileRollupSummary": {
         description:

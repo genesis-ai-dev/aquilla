@@ -1,6 +1,7 @@
 import { FRONTIER_BASE, AUTH_BASE } from "./auth";
 import { UserError } from "@/lib/errors/user-error";
 import { ROLE } from "@/lib/frontier/roles";
+import { createRequestCoalescer } from "@/lib/request-coalescer";
 
 export interface LookedUpUser {
   id: number;
@@ -18,8 +19,9 @@ export interface ProjectMemberRole {
    *   - "org":      user has an org_members row for this project's org
    *   - "creator":  user is the project's `created_by`
    *
-   * "gitlab" was a v1 legacy field for GitLab pass-through projects. The D1
-   * schema has no gitlab_project_id column and auth-worker never returns it.
+   * "gitlab" was a v1 legacy field for GitLab pass-through projects. The
+   * Postgres schema has no gitlab_project_id column and auth-worker never
+   * returns it.
    */
   source: "override" | "group" | "creator" | "org";
 }
@@ -110,10 +112,33 @@ export type ProjectRosterResult =
 export async function fetchProjectRoster(
   jwt: string,
   projectId: string,
-  opts?: { minRole?: number },
+  opts?: { minRole?: number; fresh?: boolean },
+): Promise<ProjectRosterResult> {
+  // useProjectMembers and useSetupChecklist both read the roster on workspace
+  // mount; share one in-flight request and a short cache so that costs one GET.
+  // Mutations below invalidate the project's entries, and `fresh` bypasses.
+  const key = `${jwt}|${projectId}|${opts?.minRole ?? ""}`
+  return rosterCoalescer.run(key, () => fetchProjectRosterUncached(jwt, projectId, opts?.minRole), {
+    fresh: opts?.fresh,
+  })
+}
+
+const ROSTER_CACHE_TTL_MS = 30_000
+const rosterCoalescer = createRequestCoalescer<ProjectRosterResult>({ cacheTtlMs: ROSTER_CACHE_TTL_MS })
+
+/** Drop every cached roster after a membership write (writes are rare; the
+ *  next read is one cheap GET). */
+export function invalidateProjectRosters(): void {
+  rosterCoalescer.invalidate()
+}
+
+async function fetchProjectRosterUncached(
+  jwt: string,
+  projectId: string,
+  minRole?: number,
 ): Promise<ProjectRosterResult> {
   const qs =
-    opts?.minRole != null ? `?minRole=${encodeURIComponent(String(opts.minRole))}` : ""
+    minRole != null ? `?minRole=${encodeURIComponent(String(minRole))}` : ""
   const res = await fetch(
     `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/members${qs}`,
     { headers: authHeaders(jwt) }
@@ -141,9 +166,10 @@ export async function fetchProjectRoster(
  */
 export async function listProjectMembers(
   jwt: string,
-  projectId: string
+  projectId: string,
+  opts?: { fresh?: boolean },
 ): Promise<ProjectMember[] | null> {
-  const result = await fetchProjectRoster(jwt, projectId);
+  const result = await fetchProjectRoster(jwt, projectId, { fresh: opts?.fresh });
   return result.kind === "ok" ? result.members : null;
 }
 
@@ -205,6 +231,7 @@ export async function addProjectMember(
     const text = await res.text().catch(() => "");
     throw new UserError(res.status, text, "project");
   }
+  invalidateProjectRosters();
   return (await res.json()) as ProjectMember;
 }
 
@@ -244,6 +271,7 @@ export async function addProjectMembers(
     const text = await res.text().catch(() => "");
     throw new UserError(res.status, text, "project");
   }
+  invalidateProjectRosters();
   return ((await res.json()) as { results: MemberGrantResult[] }).results;
 }
 
@@ -260,6 +288,7 @@ export async function removeProjectMember(
     const text = await res.text().catch(() => "");
     throw new UserError(res.status, text, "project");
   }
+  invalidateProjectRosters();
 }
 
 export interface RevokeAllResult {
@@ -304,6 +333,7 @@ export async function revokeAllProjectAccess(
     const text = await res.text().catch(() => "")
     throw new UserError(res.status, text, "project")
   }
+  invalidateProjectRosters()
   return (await res.json()) as RevokeAllResult
 }
 

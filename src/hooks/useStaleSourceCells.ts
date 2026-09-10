@@ -22,6 +22,7 @@ import {
 } from "@/lib/sync/stale-source-read"
 import type { BehindSeq } from "@/lib/sync/stale-source-read-types"
 import { syncWorkerHttpOrigin } from "@/lib/sync/sync-worker-url"
+import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
 
 const EMPTY: ReadonlySet<string> = new Set()
 
@@ -265,22 +266,7 @@ export function useStaleSourceCells(
   // appear without the user manually reloading.
   useEffect(() => {
     if (typeof window === "undefined") return
-    function onFocus() { void doFetch() }
-    function onVis() {
-      if (typeof document !== "undefined" && document.visibilityState === "visible") {
-        void doFetch()
-      }
-    }
-    window.addEventListener("focus", onFocus)
-    if (typeof document !== "undefined") {
-      document.addEventListener("visibilitychange", onVis)
-    }
-    return () => {
-      window.removeEventListener("focus", onFocus)
-      if (typeof document !== "undefined") {
-        document.removeEventListener("visibilitychange", onVis)
-      }
-    }
+    return subscribeWindowRegainedFocus(() => { void doFetch() })
   }, [doFetch])
 
   // QA-BUG-2 (AQU-479 push accelerator): awaitable "sync then revalidate".

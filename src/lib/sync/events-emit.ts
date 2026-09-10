@@ -18,6 +18,7 @@ import { v7 as uuidv7 } from "uuid"
 import { enqueueOutboxEvent, enqueueOutboxEvents } from "./outbox"
 import { getCqrsOutboxBridge } from "./cqrs-bridge"
 import { canPerform, requiredRoleFor, ROLE } from "./role-policy"
+import type { TermRendering } from "@/lib/terminology/types"
 import {
   OUTBOX_SCHEMA_VERSION,
   type OutboxEventKind,
@@ -221,14 +222,7 @@ export interface CellCommitInput {
   replaceString?: string
 }
 
-/**
- * Emit a `target.cell.commit` event — translator-side commit on blur, idle,
- * or lock release. The caller supplies the current chain head; the returned
- * eventId becomes the next parent for follow-up commits.
- */
-export async function emitTargetCellCommit(
-  input: CellCommitInput,
-): Promise<string> {
+function noteTargetCellCommit(input: CellCommitInput): void {
   // AQU-267: once-per-session first-commit funnel event.
   if (!_firstCommitFired) {
     _firstCommitFired = true
@@ -241,15 +235,49 @@ export async function emitTargetCellCommit(
   // Model A/B: the AI auto-commit carries the draft's actual per-cell text —
   // attach it to the pending assignment so later gestures can measure edit
   // distance against it. A human commit on such a cell is the "edited"
-  // outcome, with the distance from draft to this new text; the entry stays
-  // so further polish keeps refining the distance until validation. No-op for
-  // cells without a pending assignment (see lib/ab/feedback.ts).
+  // outcome. No-op for cells without a pending assignment.
   if (input.aiSuggestion) {
     noteAbDraftText(input.fileId, input.cellId, input.value)
   } else {
     reportAbOutcome(input.fileId, input.cellId, "edited", input.value)
   }
-  const parentId = input.parentId
+}
+
+function targetCellCommitEventInput(
+  input: CellCommitInput,
+): BuildEventInput<"target.cell.commit"> {
+  return {
+    kind: "target.cell.commit",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    cellId: input.cellId,
+    parentId: input.parentId ?? null,
+    author: input.author,
+    payload: {
+      value: input.value,
+      ...(input.valueHtml !== undefined ? { valueHtml: input.valueHtml } : {}),
+      ...(input.sourceEventId !== undefined
+        ? { sourceEventId: input.sourceEventId }
+        : {}),
+      ...(input.targetLang ? { targetLang: input.targetLang } : {}),
+      ...(input.aiSuggestion ? { ai_suggestion: true } : {}),
+      ...(input.aiSuggestion && input.aiDraft ? { ai_draft: input.aiDraft } : {}),
+      ...(input.searchQuery !== undefined ? { search_query: input.searchQuery } : {}),
+      ...(input.replaceString !== undefined ? { replace_string: input.replaceString } : {}),
+    },
+    clientTs: input.clientTs,
+  }
+}
+
+/**
+ * Emit a `target.cell.commit` event — translator-side commit on blur, idle,
+ * or lock release. The caller supplies the current chain head; the returned
+ * eventId becomes the next parent for follow-up commits.
+ */
+export async function emitTargetCellCommit(
+  input: CellCommitInput,
+): Promise<string> {
+  noteTargetCellCommit(input)
   // A first-time commit on a cell that has never been written before is a
   // genesis target write — but in our model, the cell came from the source
   // side first, so even the first target.cell.commit has a chain head (the
@@ -260,30 +288,21 @@ export async function emitTargetCellCommit(
   //
   // Once we wire useCells against `cells.event_id` (2c-β), parentId is
   // always concrete here.
-  const { eventId } = await enqueueEvent({
-    kind: "target.cell.commit",
-    projectId: input.projectId,
-    fileId: input.fileId,
-    cellId: input.cellId,
-    parentId: parentId ?? null,
-    author: input.author,
-    payload: {
-      value: input.value,
-      ...(input.valueHtml !== undefined ? { valueHtml: input.valueHtml } : {}),
-      ...(input.sourceEventId !== undefined
-        ? { sourceEventId: input.sourceEventId }
-        : {}),
-      // AQU-538: '' (default lane) is omitted so default-lane events stay
-      // byte-identical to pre-lane events (idempotency ids, replay, history).
-      ...(input.targetLang ? { targetLang: input.targetLang } : {}),
-      ...(input.aiSuggestion ? { ai_suggestion: true } : {}),
-      ...(input.aiSuggestion && input.aiDraft ? { ai_draft: input.aiDraft } : {}),
-      ...(input.searchQuery !== undefined ? { search_query: input.searchQuery } : {}),
-      ...(input.replaceString !== undefined ? { replace_string: input.replaceString } : {}),
-    },
-    clientTs: input.clientTs,
-  })
+  const { eventId } = await enqueueEvent(targetCellCommitEventInput(input))
   return eventId
+}
+
+/**
+ * Enqueue a model response's cell commits atomically. Each cell retains its
+ * own event id and chain parent, while IndexedDB performs one transaction and
+ * the outbox overlay receives one notification for the complete burst.
+ */
+export async function emitTargetCellCommits(
+  inputs: CellCommitInput[],
+): Promise<string[]> {
+  for (const input of inputs) noteTargetCellCommit(input)
+  const events = await enqueueEvents(inputs.map(targetCellCommitEventInput))
+  return events.map(({ eventId }) => eventId)
 }
 
 export interface CellValidateInput {
@@ -1223,6 +1242,7 @@ export interface FileCreateInput {
   targetTextDirection?: "ltr" | "rtl"
   /** Timeline-segment-model order lens: 'time' | 'sequence'. */
   orderedBy?: string
+  corpusMarker?: string
   author: string
   clientTs?: number
 }
@@ -1246,6 +1266,7 @@ export async function emitFileCreate(input: FileCreateInput): Promise<string> {
       ...(input.sourceTextDirection !== undefined ? { sourceTextDirection: input.sourceTextDirection } : {}),
       ...(input.targetTextDirection !== undefined ? { targetTextDirection: input.targetTextDirection } : {}),
       ...(input.orderedBy !== undefined ? { orderedBy: input.orderedBy } : {}),
+      ...(input.corpusMarker !== undefined ? { corpusMarker: input.corpusMarker } : {}),
     },
     clientTs: input.clientTs,
   })
@@ -1371,6 +1392,30 @@ export interface FileRenameInput {
  * null`), like `cell.audio.attach`; the server projects it as a `files`
  * UPDATE keyed on fileId.
  */
+export interface FileCorpusSetInput {
+  projectId: string
+  fileId: string
+  /** Sidebar folder label; null / blank clears the file back to Ungrouped. */
+  corpusMarker: string | null
+  author: string
+  clientTs?: number
+}
+
+/** Persist a file's sidebar group so it survives reload and other devices. */
+export async function emitFileCorpusSet(input: FileCorpusSetInput): Promise<string> {
+  const trimmed = input.corpusMarker?.trim() ?? ""
+  const { eventId } = await enqueueEvent({
+    kind: "file.corpus.set",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    parentId: null,
+    author: input.author,
+    payload: { corpusMarker: trimmed || null },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
 export async function emitFileRename(input: FileRenameInput): Promise<string> {
   const { eventId } = await enqueueEvent({
     kind: "file.rename",
@@ -1423,6 +1468,149 @@ export async function emitTargetCellRepin(input: TargetCellRepinInput): Promise<
       sourceEventId: input.sourceEventId,
       expectedTargetEventId: input.expectedTargetEventId,
     },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+// ── Terminology concepts (AQU-1006 follow-up) ────────────────────────────
+//
+// Project-scoped, so every term event rides the `__project__` sentinel fileId
+// and carries no cellId. `parentId` is always null: these are non-chain-
+// mutating, they move no cell head, and the projection is keyed on the
+// concept id rather than a parent chain.
+//
+// WHY THESE EXIST AT ALL, because "we could just PATCH the settings" is the
+// obvious objection and it is what broke: concepts used to live in the
+// project_settings JSON blob under one `terminology` key, so every add wrote
+// the WHOLE array from the writer's stale snapshot and silently destroyed
+// entries added by anyone else in the meantime. Each emitter below names ONE
+// concept. Do not add a bulk emitter that writes a whole termbase.
+
+/** Must match PROJECT_SENTINEL_FILE_ID in sync-worker/src/events/authorize.ts. */
+const PROJECT_SENTINEL_FILE_ID = "__project__"
+
+export interface TermCreateInput {
+  projectId: string
+  conceptId: string
+  sourceTerm: string
+  renderings: TermRendering[]
+  /**
+   * 'draft' is a SUGGESTION — it compiles to no rules, so it changes nothing
+   * for anyone else, and any contributor may write one. 'active' means the
+   * term is enforced immediately, which needs the org's termbase floor; the
+   * server refuses it at lower clearance rather than silently downgrading.
+   */
+  status: "active" | "draft" | "deprecated"
+  notes?: string
+  caseSensitive?: boolean
+  author: string
+  clientTs?: number
+}
+
+export async function emitTermCreate(input: TermCreateInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "term.create",
+    projectId: input.projectId,
+    fileId: PROJECT_SENTINEL_FILE_ID,
+    parentId: null,
+    author: input.author,
+    payload: {
+      conceptId: input.conceptId,
+      sourceTerm: input.sourceTerm,
+      renderings: input.renderings,
+      status: input.status,
+      ...(input.notes ? { notes: input.notes } : {}),
+      ...(input.caseSensitive ? { caseSensitive: true } : {}),
+    },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+export interface TermUpdateInput {
+  projectId: string
+  conceptId: string
+  /** Only the fields you pass are written; the rest keep their projected value. */
+  sourceTerm?: string
+  renderings?: TermRendering[]
+  notes?: string
+  caseSensitive?: boolean
+  author: string
+  clientTs?: number
+}
+
+export async function emitTermUpdate(input: TermUpdateInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "term.update",
+    projectId: input.projectId,
+    fileId: PROJECT_SENTINEL_FILE_ID,
+    parentId: null,
+    author: input.author,
+    payload: {
+      conceptId: input.conceptId,
+      // Spread-if-defined, NOT `?? null`: an absent key is what tells the
+      // projector to leave that column alone. Sending an explicit null would
+      // ask COALESCE to keep the old value too, but only by accident — and it
+      // would make "clear the notes" indistinguishable from "don't touch the
+      // notes" if the projector ever stopped using COALESCE.
+      ...(input.sourceTerm !== undefined ? { sourceTerm: input.sourceTerm } : {}),
+      ...(input.renderings !== undefined ? { renderings: input.renderings } : {}),
+      ...(input.notes !== undefined ? { notes: input.notes } : {}),
+      ...(input.caseSensitive !== undefined ? { caseSensitive: input.caseSensitive } : {}),
+    },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+export interface TermConceptRefInput {
+  projectId: string
+  conceptId: string
+  author: string
+  clientTs?: number
+}
+
+export async function emitTermDelete(input: TermConceptRefInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "term.delete",
+    projectId: input.projectId,
+    fileId: PROJECT_SENTINEL_FILE_ID,
+    parentId: null,
+    author: input.author,
+    payload: { conceptId: input.conceptId },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+/** Promote a suggested (draft) concept to enforced (active). */
+export async function emitTermApprove(input: TermConceptRefInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "term.approve",
+    projectId: input.projectId,
+    fileId: PROJECT_SENTINEL_FILE_ID,
+    parentId: null,
+    author: input.author,
+    payload: { conceptId: input.conceptId },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+export interface TermRejectInput extends TermConceptRefInput {
+  /** 'deprecate' keeps the row visible in archives; 'delete' tombstones it. */
+  mode: "delete" | "deprecate"
+}
+
+export async function emitTermReject(input: TermRejectInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "term.reject",
+    projectId: input.projectId,
+    fileId: PROJECT_SENTINEL_FILE_ID,
+    parentId: null,
+    author: input.author,
+    payload: { conceptId: input.conceptId, mode: input.mode },
     clientTs: input.clientTs,
   })
   return eventId

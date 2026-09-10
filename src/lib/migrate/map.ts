@@ -242,7 +242,7 @@ export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): Inge
 
   let prevCellId: string | null = null
   for (let physicalOrder = 0; physicalOrder < orderedCells.length; physicalOrder++) {
-    const ordered = orderedCells[physicalOrder]!
+    const ordered = orderedCells[physicalOrder]
     const cellId = ordered.metadata.id
     const s = sourceById.get(cellId)
     const t = targetById.get(cellId)

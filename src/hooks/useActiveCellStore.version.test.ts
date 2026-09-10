@@ -159,6 +159,65 @@ describe("CellStore per-cell versions", () => {
     expect(view?.validationStatus).not.toBe("empty")
   })
 
+  it("applies a model response as one version bump and retains AI provenance", () => {
+    const store = new CellStore()
+    runtime(store, new Map())
+    store.replaceRows([
+      row("a", "source", "hello"),
+      row("b", "source", "world"),
+      row("c", "source", "untouched"),
+    ])
+    const beforeFile = store.getAllVersion()
+    const beforeA = store.getCellVersion("a")
+    const beforeB = store.getCellVersion("b")
+    const beforeC = store.getCellVersion("c")
+    let fileNotifications = 0
+    let aNotifications = 0
+    let bNotifications = 0
+    store.subscribeAll(() => { fileNotifications++ })
+    store.subscribeCell("a", () => { aNotifications++ })
+    store.subscribeCell("b", () => { bNotifications++ })
+    const provenance = {
+      model: "test-model",
+      provider: "custom" as const,
+      promptVersion: "v1",
+      exampleIds: [],
+      generatedAt: 123,
+      mode: "batch" as const,
+      projectState: {
+        sourceLanguage: "en",
+        targetLanguage: "es",
+        approvedExampleCount: 0,
+      },
+    }
+
+    store.setPendingState(new Map([
+      ["a", {
+        value: "hola",
+        eventId: "event-a",
+        aiDrafted: true,
+        aiDraft: provenance,
+      }],
+      ["b", {
+        value: "mundo",
+        eventId: "event-b",
+        aiDrafted: true,
+        aiDraft: provenance,
+      }],
+    ]), ["event-a", "event-b"])
+
+    expect(store.getAllVersion()).toBe(beforeFile + 1)
+    expect(fileNotifications).toBe(1)
+    expect(store.getCellVersion("a")).toBeGreaterThan(beforeA)
+    expect(store.getCellVersion("b")).toBeGreaterThan(beforeB)
+    expect(store.getCellVersion("c")).toBe(beforeC)
+    expect(aNotifications).toBe(1)
+    expect(bNotifications).toBe(1)
+    expect(store.getCellView("a")?.aiDrafted).toBe(true)
+    expect(store.getCellView("a")?.aiDraft).toEqual(provenance)
+    expect(store.getCellView("b")?.translated).toBe("mundo")
+  })
+
   it("notifies per-cell subscribers on reset() so rows drop the old file's content", () => {
     const store = new CellStore()
     runtime(store, new Map())

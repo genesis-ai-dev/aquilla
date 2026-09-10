@@ -25,6 +25,7 @@ vi.mock('partyserver', () => ({
 
 import { handleExternalExportRequest } from '../external/export-route'
 import { handleExternalMcpRequest } from '../external/mcp-route'
+import { handleExternalReadRequest } from '../external/read-routes'
 import { handleExternalDiscoveryRequest } from '../external/discovery-route'
 import { MCP_EXPORT_MAX_BYTES } from '../external/mcp-handlers'
 import { MCP_TOOLS } from '../external/mcp-tools'
@@ -329,12 +330,20 @@ describe('GET .../files/:fileId/export (REST)', () => {
     expect((await errorBody(limited)).code).toBe('rate_limited')
   })
 
-  it('does not claim paths it should not', async () => {
-    const res = await handleExternalExportRequest(
+  it('does not claim paths it should not, and no other external handler claims its own', async () => {
+    const cells = await handleExternalExportRequest(
       new Request(`https://w/api/v1/external/projects/${PROJECT}/files/${FILE}/cells`),
       makeEnv(),
     )
-    expect(res).toBeNull()
+    expect(cells).toBeNull()
+
+    // The read tier must decline /export, or dispatch order in index.ts would
+    // silently decide which handler wins.
+    const exported = await handleExternalReadRequest(
+      new Request(`https://w/api/v1/external/projects/${PROJECT}/files/${FILE}/export`),
+      makeEnv(),
+    )
+    expect(exported).toBeNull()
   })
 })
 

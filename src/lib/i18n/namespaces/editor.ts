@@ -251,6 +251,9 @@ export const editor = defineNamespace({
     "editor.milestone.cellRange": "Cells {range}",
     "editor.milestone.percentTranslated": "{percent}% translated",
     "editor.milestone.percentValidated": "{percent}% validated",
+    "editor.milestone.splitAria": "Split into milestones",
+    "editor.milestone.splitHint":
+      "Show only the cells in the current division. Use the arrows to move to the next one.",
 
     "editor.milestone.chapter.moveBetween": "Move between chapters",
     "editor.milestone.chapter.previous": "Previous chapter",
@@ -403,6 +406,23 @@ export const editor = defineNamespace({
     "editor.bibles.closePicker": "Close picker",
     "editor.bibles.addVersion": "Add version",
     "editor.bibles.attribution": "Text from the",
+
+    // — Verse-resources reference sidebar (AQU-461) ————————————————————
+    "editor.resources.openTooltip":
+      "Verse resources: the people, places and terms this verse mentions",
+    "editor.resources.show": "Show verse resources",
+    "editor.resources.hide": "Hide verse resources",
+    "editor.resources.edgeTab": "Helps",
+    "editor.resources.title": "Verse Resources",
+    "editor.resources.scrollHint":
+      "Scroll the editor to a verse to see the people, places and terms it mentions.",
+    "editor.resources.noneForRef": "No linked people, places or terms for {ref}.",
+    "editor.resources.failedToLoad": "Couldn't load resources: {error}",
+    "editor.resources.openMap": "Open map",
+    "editor.resources.mapAria": "Map showing {place} at {coords}",
+    "editor.resources.openExternal": "Open the full article",
+    "editor.resources.openExternalAria": "Open the full article about {entity}",
+    "editor.resources.attribution": "Reference data from the",
 
     // — Translation-notes reference sidebar ——————————————————————————
     "editor.tn.title": "Translation Notes",
@@ -670,6 +690,13 @@ export const editor = defineNamespace({
     // affordances. Keyed 2026-08-20 — these surfaces were authored inline
     // while the dubbing workflow was being designed.
     "editor.timeline.videoPaneTitle": "Video",
+    // AQU-1119: the section heading over the dialogue table, opposite the
+    // Video header. It says "Text" and not "Source text" because SOURCE and
+    // TARGET are the two columns underneath it — the section holds both, and
+    // naming it after one of its columns read as a mislabel. Deliberately not
+    // the track row's name: `TRACK_KIND_LABELS` still calls those "Source
+    // text" / "Target text", which is right, because a track IS one side.
+    "editor.timeline.textPaneTitle": "Text",
     "editor.timeline.videoPaneLinked": "Linked video",
     "editor.timeline.videoPaneStart": "Click to start the picture",
     "editor.timeline.videoPanePicture": "picture",
@@ -733,6 +760,23 @@ export const editor = defineNamespace({
     // line, and the summary band says what is inside better.)
     "editor.timeline.gutterCollapseAria": "Narrow the track names",
     "editor.timeline.gutterExpandAria": "Show the track names",
+    // AQU-1119: collapsing a whole section of the media lens down to a rail of
+    // one icon, and bringing it back. Each pair is one button in two states —
+    // the collapse control lives in the section's own header, the expand
+    // control IS the rail.
+    "editor.timeline.collapseVideoAria": "Hide the video",
+    "editor.timeline.expandVideoAria": "Show the video",
+    "editor.timeline.collapseTimelineAria": "Hide the timeline",
+    "editor.timeline.expandTimelineAria": "Show the timeline",
+    "editor.timeline.collapseTextAria": "Hide the text",
+    "editor.timeline.expandTextAria": "Show the text",
+    // AQU-1119: the other control beside each body section's chevron. Where
+    // the chevron folds ITS OWN section, this one folds the others so this
+    // section has the lens to itself — one button in two states.
+    "editor.timeline.fullscreenVideoAria": "Fill the lens with the video",
+    "editor.timeline.restoreVideoAria": "Put the video back in its column",
+    "editor.timeline.fullscreenTextAria": "Fill the lens with the text",
+    "editor.timeline.restoreTextAria": "Put the text back in its column",
     "editor.timeline.folderExpandAria": "Show the tracks in {name}",
     "editor.timeline.folderCollapseAria": "Hide the tracks in {name}",
     "editor.timeline.trackMenuAria": "Track options for {name}",
@@ -1524,6 +1568,79 @@ export const editor = defineNamespace({
           "and description are readable again. Affects every row at once. " +
           "Doubles as the button's hover tooltip.",
       },
+      "editor.timeline.collapseVideoAria": {
+        description:
+          "Screen-reader name and tooltip of the button in the video's own " +
+          "header that collapses the whole video section to a 40px rail of one " +
+          "icon, giving its width to the text beside it. Doubles as the " +
+          "button's hover tooltip. Pairs with expandVideoAria.",
+      },
+      "editor.timeline.expandVideoAria": {
+        description:
+          "Screen-reader name and tooltip of the collapsed video rail — the " +
+          "strip of one icon that is all that remains of the video section, " +
+          "and which is itself the button that brings the picture back. The " +
+          "name is only ever seen on hover, so it carries the whole label.",
+      },
+      "editor.timeline.fullscreenVideoAria": {
+        description:
+          "Screen-reader name and tooltip of the button beside the video " +
+          "header's collapse chevron, which folds the OTHER sections — the " +
+          "timeline and the text — so the picture has the whole media lens " +
+          "to itself. Not browser fullscreen: the app window is unchanged. " +
+          "Pairs with restoreVideoAria, which is the same button pressed.",
+      },
+      "editor.timeline.restoreVideoAria": {
+        description:
+          "Screen-reader name and tooltip of that same button once the video " +
+          "already has the lens to itself: pressing it puts the sections that " +
+          "were folded to make room back the way they were. 'Its column' is " +
+          "the video's normal place beside the text, not a table column.",
+      },
+      "editor.timeline.fullscreenTextAria": {
+        description:
+          "Screen-reader name and tooltip of the button beside the text " +
+          "header's collapse chevron, which folds the OTHER sections — the " +
+          "timeline and the video — so the cells have the whole media lens " +
+          "to themselves. Not browser fullscreen: the app window is " +
+          "unchanged. Pairs with restoreTextAria, the same button pressed.",
+      },
+      "editor.timeline.restoreTextAria": {
+        description:
+          "Screen-reader name and tooltip of that same button once the text " +
+          "already has the lens to itself: pressing it puts the sections that " +
+          "were folded to make room back the way they were. 'Its column' is " +
+          "the text's normal place beside the video.",
+      },
+      "editor.timeline.collapseTimelineAria": {
+        description:
+          "Screen-reader name and tooltip of the button in the timeline's " +
+          "toolbar that collapses the whole timeline to a 40px rail of one " +
+          "icon, giving its height to the video and text below it. Doubles as " +
+          "the button's hover tooltip. Pairs with expandTimelineAria.",
+      },
+      "editor.timeline.expandTimelineAria": {
+        description:
+          "Screen-reader name and tooltip of the collapsed timeline rail — the " +
+          "strip of one icon that is all that remains of the timeline, and " +
+          "which is itself the button that brings it back. The name is only " +
+          "ever seen on hover, so it carries the whole label.",
+      },
+      "editor.timeline.collapseTextAria": {
+        description:
+          "Screen-reader name and tooltip of the button in the text section's " +
+          "header that collapses the dialogue table to a 40px rail of one " +
+          "icon, giving its width to the video beside it. 'Text' here is the " +
+          "section holding the source and target columns, not one of them. " +
+          "Doubles as the button's hover tooltip. Pairs with expandTextAria.",
+      },
+      "editor.timeline.expandTextAria": {
+        description:
+          "Screen-reader name and tooltip of the collapsed text rail — the " +
+          "strip of one icon that is all that remains of the dialogue table, " +
+          "and which is itself the button that brings it back. The name is " +
+          "only ever seen on hover, so it carries the whole label.",
+      },
       "editor.timeline.folderExpandAria": {
         description:
           "Screen-reader name of the triangle that opens a timeline folder and " +
@@ -2232,6 +2349,22 @@ export const editor = defineNamespace({
           percent: "Whole-number percentage, already rounded, without the % sign.",
         },
       },
+      "editor.milestone.splitAria": {
+        description:
+          "Label of the switch in ⋯ → Editor settings. It switches the table " +
+          "between a continuous list of every cell and a paged view that shows " +
+          "only the current division. On means the paged view is active. A " +
+          "switch label, so it names the thing being toggled on.",
+        maxLength: 28,
+        screenshot: "editor-table",
+      },
+      "editor.milestone.splitHint": {
+        description:
+          "Tooltip explaining that same switch: what the on state does, and that " +
+          "the chapter/section arrows then turn the page. 'Division' stays " +
+          "generic because the unit differs by file type (chapter, slide, section…).",
+        screenshot: "editor-table",
+      },
       "editor.milestone.chapter.moveBetween": {
         description: MILESTONE_MOVE_BETWEEN + MILESTONE_KIND_CHAPTER,
       },
@@ -2898,6 +3031,98 @@ export const editor = defineNamespace({
           "It is followed immediately by a link whose text is the data source's " +
           "proper name, which is not translated — so this string ends mid-phrase on " +
           "purpose and the name cannot be moved in front of it.",
+      },
+      "editor.resources.openTooltip": {
+        description:
+          "Tooltip on the collapsed right-edge tab that opens the verse-resources " +
+          "sidebar. Two halves: the feature's name, then what it shows. 'Resources' " +
+          "here means published reference articles about the things the verse names " +
+          "(a person, a town, a key term), not files or project assets.",
+      },
+      "editor.resources.show": {
+        description:
+          "Screen-reader name of that same collapsed edge tab. Imperative.",
+      },
+      "editor.resources.hide": {
+        description:
+          "Screen-reader name of the X that collapses the verse-resources sidebar " +
+          "back to its edge tab. Nothing is unloaded or lost.",
+      },
+      "editor.resources.edgeTab": {
+        description:
+          "The one word printed vertically down the collapsed edge tab. Extremely " +
+          "tight — it must read rotated 90° in a 36px-wide column. 'Helps' is the " +
+          "field's own term for reference material that assists a translator. " +
+          "Abbreviate rather than let it overflow.",
+        maxLength: 10,
+      },
+      "editor.resources.title": {
+        description:
+          "Heading of the open verse-resources sidebar. Names what the panel lists: " +
+          "reference articles for the entities the currently-viewed verse mentions.",
+        maxLength: 24,
+      },
+      "editor.resources.scrollHint": {
+        description:
+          "Empty state shown before the editor has scrolled to a verse. Explains the " +
+          "interaction: the panel follows the editor's scroll position. Full sentence.",
+      },
+      "editor.resources.noneForRef": {
+        description:
+          "Empty state when a verse IS in view but the corpus links no entities to " +
+          "it — common for non-narrative verses. States the fact; nothing is broken " +
+          "and there is no action to take.",
+        placeholders: {
+          ref: "The verse being viewed, as book/chapter/verse (e.g. 'MAT 2 1'). Not translated.",
+        },
+      },
+      "editor.resources.failedToLoad": {
+        description:
+          "Error line replacing the list when the reference lookup fails (offline, " +
+          "or the upstream corpus is down). The verse itself is unaffected.",
+        placeholders: {
+          error: "Raw English error text from the failed request. Not translated.",
+        },
+      },
+      "editor.resources.openMap": {
+        description:
+          "Link under a place's locator map; opens that location on openstreetmap.org " +
+          "in a new tab, where it can be zoomed. Imperative, very tight — it sits on " +
+          "one 10px line opposite the coordinates.",
+        maxLength: 16,
+      },
+      "editor.resources.mapAria": {
+        description:
+          "Screen-reader description of the locator map image, which is otherwise " +
+          "just tiles. Names the place and reads out its coordinates, since a " +
+          "non-sighted user cannot see the marker.",
+        placeholders: {
+          place: "Name of the biblical place shown, e.g. 'Bethlehem (of Judah)'. Not translated.",
+          coords:
+            "Formatted latitude/longitude, e.g. '31.705°N, 35.210°E'. The N/S/E/W letters are " +
+            "English compass abbreviations. Not translated.",
+        },
+      },
+      "editor.resources.openExternal": {
+        description:
+          "Tooltip on the small external-link icon beside an entity's name; it opens " +
+          "that entity's full reference article on the source site in a new tab.",
+        maxLength: 24,
+      },
+      "editor.resources.openExternalAria": {
+        description:
+          "Screen-reader name of that same icon-only link. Icon-only, so this string " +
+          "is the only name it has, and it must say WHICH entity it opens.",
+        placeholders: {
+          entity: "Name of the person, place or term, e.g. 'Herod'. Not translated.",
+        },
+      },
+      "editor.resources.attribution": {
+        description:
+          "Opening words of the 10px attribution line at the foot of the sidebar. It " +
+          "is followed immediately by links whose text is each data source's proper " +
+          "name, which is not translated — so this string ends mid-phrase on purpose " +
+          "and the names cannot be moved in front of it.",
       },
       "editor.tn.title": {
         description:

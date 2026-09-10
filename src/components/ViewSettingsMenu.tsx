@@ -27,6 +27,7 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { toast } from "@/components/ui/toast"
 import { cn } from "@/lib/utils"
 import { MIN_FONT_SIZE, MAX_FONT_SIZE, FONT_SIZE_STEP } from "@/lib/store/file-view-prefs"
+import { setMilestoneSplit, useMilestoneSplit } from "@/lib/store/milestone-split-pref"
 import type { FootnoteViewMode } from "@/lib/footnotes/types"
 import type { TargetKeyTermHighlightMode } from "@/hooks/useTargetKeyTermHighlightPreference"
 import type { DirectionMode, TextDirection, TextDirectionSummary } from "@/lib/text-direction"
@@ -122,6 +123,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
 }, ref) {
   const t = useT()
   const [menuOpen, setMenuOpen] = useState(false)
+  const splitByMilestone = useMilestoneSplit()
   const mismatch = useMemo(
     () =>
       getManualDirectionMismatch({
@@ -291,6 +293,13 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
           <PopoverTitle className="sr-only">{t("editor.view.settings")}</PopoverTitle>
 
           <FieldGroup className="gap-3">
+            <SwitchRow
+              id="view-split-milestones"
+              label={t("editor.milestone.splitAria")}
+              checked={splitByMilestone}
+              disabled={!fileOpen}
+              onCheckedChange={setMilestoneSplit}
+            />
             <SwitchRow
               id="view-show-line-numbers"
               label={t("editor.view.showLineNumbers")}

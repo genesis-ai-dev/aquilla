@@ -19,8 +19,8 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { v7 as uuidv7 } from "uuid"
 import { enqueueEvent } from "@/lib/sync/events-emit"
-import { fetchCommentsForProject } from "@/lib/sync/comments-read"
-import type { CommentRecord } from "@/lib/sync/comments-read-types"
+import { fetchCommentCounts, fetchCommentsForProject } from "@/lib/sync/comments-read"
+import type { CommentCounts, CommentRecord } from "@/lib/sync/comments-read-types"
 import type { CommentScope } from "@/lib/sync/outbox-types"
 
 export type { CommentRecord, CommentScope }
@@ -44,6 +44,14 @@ export interface UseCommentsOptions {
   /** Optional narrow scope — when set, only loads comments for this scope. */
   scope?: { fileId?: string; cellId?: string }
   /**
+   * The file the user has open. On a project-wide load its threads are
+   * fetched first (one scoped request) and published as soon as they land;
+   * the rest of the project then pages in behind them (`isLoadingRest`).
+   * Ignored when `scope` narrows the load. Read at refresh time, so changing
+   * it does not refetch.
+   */
+  priorityFileId?: string | null
+  /**
    * Optional auth-readiness signal (AQU-640). When the caller's `getToken`
    * can only mint a real token once a session/JWT has loaded, pass whether
    * that token is ready yet (e.g. `!!session?.jwt`). While `false`, the
@@ -58,8 +66,17 @@ export interface UseCommentsOptions {
 
 export interface UseCommentsApi {
   comments: CommentRecord[]
+  /** True until the first rows (the priority file's, or the first page) land. */
   isLoading: boolean
+  /** True while later pages of the project-wide list are still arriving. */
+  isLoadingRest: boolean
   isError: boolean
+  /**
+   * Open-thread counts from the worker's aggregate endpoint — for badges.
+   * Null until the first successful load; not derived from `comments`, so it
+   * is complete even while the list is still paging in.
+   */
+  counts: CommentCounts | null
   /**
    * Add a new comment. Returns the client-generated commentId so callers
    * can reference it immediately in optimistic UI.
@@ -82,17 +99,20 @@ export interface UseCommentsApi {
 }
 
 export function useComments(opts: UseCommentsOptions): UseCommentsApi {
-  const { projectId, getToken, author, scope, tokenReady } = opts
+  const { projectId, getToken, author, scope, tokenReady, priorityFileId } = opts
 
   const [comments, setComments] = useState<CommentRecord[]>([])
   const [isLoading, setIsLoading] = useState(false)
+  const [isLoadingRest, setIsLoadingRest] = useState(false)
   const [isError, setIsError] = useState(false)
+  const [counts, setCounts] = useState<CommentCounts | null>(null)
 
   // Keep latest props in refs so callbacks don't close over stale values.
   const projectRef = useRef(projectId)
   const tokenRef = useRef(getToken)
   const authorRef = useRef(author)
   const scopeRef = useRef(scope)
+  const priorityFileRef = useRef(priorityFileId)
   // Keep a ref to the latest comments array so mutation callbacks (edit/delete/
   // resolve) can look up a comment's fileId without closing over stale state.
   const commentsRef = useRef<CommentRecord[]>(comments)
@@ -101,7 +121,8 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
     tokenRef.current = getToken
     authorRef.current = author
     scopeRef.current = scope
-  }, [projectId, getToken, author, scope])
+    priorityFileRef.current = priorityFileId
+  }, [projectId, getToken, author, scope, priorityFileId])
   // Sync commentsRef whenever the comments array changes.
   useEffect(() => {
     commentsRef.current = comments
@@ -114,6 +135,8 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
   // Optimistic comments: records queued locally but not yet confirmed by server.
   // Keyed by commentId for O(1) lookup and dedup.
   const optimisticRef = useRef<Map<string, CommentRecord>>(new Map())
+  // Bumped per refresh(); pages from a superseded refresh are dropped.
+  const fetchGenRef = useRef(0)
 
   /**
    * Merge server rows with any still-pending optimistic comments.
@@ -139,6 +162,8 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
     const pid = projectRef.current
     const fetchToken = tokenRef.current
     if (!pid) return
+    const gen = ++fetchGenRef.current
+    const isCurrent = () => gen === fetchGenRef.current
 
     // Capture the mutation clock at the point we STARTED this fetch.
     // (Currently used implicitly via mergeWithOptimistic; explicit seq
@@ -155,22 +180,54 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
         return
       }
       const sc = scopeRef.current
-      const rows = await fetchCommentsForProject(pid, token, {
-        fileId: sc?.fileId,
-        cellId: sc?.cellId,
-      })
+      const narrow = Boolean(sc?.fileId || sc?.cellId)
 
-      // Merge server rows with any still-pending optimistic comments.
-      // The mutationSeq guard means we never replace newer local state with
-      // a stale snapshot — both branches call mergeWithOptimistic so that
-      // optimistic records not yet confirmed by the server stay visible.
-      const merged = mergeWithOptimistic(rows)
-      setComments(merged)
+      // Badge counts ride alongside; a failure here must not blank the list.
+      const countsPromise = narrow
+        ? null
+        : fetchCommentCounts(pid, token).then(
+            (c) => { if (isCurrent()) setCounts(c) },
+            (err: unknown) => { console.warn('[useComments] counts fetch failed:', err) },
+          )
+
+      if (narrow) {
+        const rows = await fetchCommentsForProject(pid, token, {
+          fileId: sc?.fileId,
+          cellId: sc?.cellId,
+        })
+        if (!isCurrent()) return
+        setComments(mergeWithOptimistic(sortByCreation(rows)))
+        return
+      }
+
+      // 1. The open file's threads: one scoped request, published immediately.
+      const priority = priorityFileRef.current
+      const priorityRows = priority ? await fetchCommentsForProject(pid, token, { fileId: priority }) : []
+      if (!isCurrent()) return
+      if (priority) {
+        setComments(mergeWithOptimistic(sortByCreation(priorityRows)))
+        setIsLoading(false)
+      }
+
+      // 2. Everything else, page by page, merged behind the priority rows.
+      setIsLoadingRest(true)
+      const publish = (soFar: CommentRecord[]) => {
+        if (!isCurrent()) return
+        setComments(mergeWithOptimistic(sortByCreation(unionById(priorityRows, soFar))))
+      }
+      const rest = await fetchCommentsForProject(pid, token, {}, publish)
+      if (!isCurrent()) return
+      publish(rest)
+      await countsPromise
     } catch (err) {
+      if (!isCurrent()) return
       console.warn('[useComments] fetch failed:', err)
       setIsError(true)
     } finally {
-      setIsLoading(false)
+      if (isCurrent()) {
+        setIsLoading(false)
+        setIsLoadingRest(false)
+      }
     }
   }, [])
 
@@ -344,5 +401,27 @@ export function useComments(opts: UseCommentsOptions): UseCommentsApi {
     if (opt) optimisticRef.current.set(commentId, { ...opt, resolved, updatedAt: Date.now() })
   }, [])
 
-  return { comments, isLoading, isError, addComment, editComment, deleteComment, resolveThread, refresh }
+  return {
+    comments, isLoading, isLoadingRest, isError, counts,
+    addComment, editComment, deleteComment, resolveThread, refresh,
+  }
+}
+
+/** Server order: (createdAt, commentId) — the same key the worker pages on. */
+function sortByCreation(rows: CommentRecord[]): CommentRecord[] {
+  return [...rows].sort(
+    (a, b) => a.createdAt - b.createdAt || (a.commentId < b.commentId ? -1 : a.commentId > b.commentId ? 1 : 0),
+  )
+}
+
+/** The priority file's rows come back again inside the project-wide pages. */
+function unionById(first: CommentRecord[], rest: CommentRecord[]): CommentRecord[] {
+  const seen = new Set(first.map((c) => c.commentId))
+  const out = [...first]
+  for (const c of rest) {
+    if (seen.has(c.commentId)) continue
+    seen.add(c.commentId)
+    out.push(c)
+  }
+  return out
 }

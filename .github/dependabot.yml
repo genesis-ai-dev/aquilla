@@ -1,4 +1,17 @@
 version: 2
+
+# Version-update lag policy (AQU-681): never take a release on the day it ships.
+# `cooldown.default-days: 7` holds every ecosystem one week behind the latest
+# published version — most malicious or broken fresh releases are caught and
+# yanked within ~24h, so a week is the cheapest useful supply-chain buffer.
+#
+# This does NOT delay security fixes: GitHub applies `cooldown` to version
+# updates only ("the cooldown option is only available for version updates, not
+# security updates"), so Dependabot security updates still open immediately.
+#
+# `interval: monthly` + `open-pull-requests-limit: 2` are a separate, deliberate
+# PR-volume control — the cooldown is a floor on a release's age, not a cap on
+# how late a bump may land. Don't conflate the two when tuning either.
 updates:
   # Root SPA + shared packages (packages/*, worker/, scripts/)
   - package-ecosystem: npm
@@ -6,7 +19,7 @@ updates:
     schedule:
       interval: monthly
     cooldown:
-      default-days: 30
+      default-days: 7
     open-pull-requests-limit: 2
     groups:
       npm-minor-patch:
@@ -29,7 +42,7 @@ updates:
     schedule:
       interval: monthly
     cooldown:
-      default-days: 30
+      default-days: 7
     open-pull-requests-limit: 2
     groups:
       auth-worker-deps:
@@ -41,7 +54,7 @@ updates:
     schedule:
       interval: monthly
     cooldown:
-      default-days: 30
+      default-days: 7
     open-pull-requests-limit: 2
     groups:
       sync-worker-deps:
@@ -57,7 +70,7 @@ updates:
     schedule:
       interval: monthly
     cooldown:
-      default-days: 30
+      default-days: 7
     open-pull-requests-limit: 2
     groups:
       agent-worker-deps:
@@ -69,7 +82,7 @@ updates:
     schedule:
       interval: monthly
     cooldown:
-      default-days: 30
+      default-days: 7
     open-pull-requests-limit: 2
     groups:
       cargo-deps:
@@ -81,7 +94,7 @@ updates:
     schedule:
       interval: monthly
     cooldown:
-      default-days: 30
+      default-days: 7
     open-pull-requests-limit: 2
     groups:
       github-actions:

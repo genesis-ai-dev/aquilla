@@ -59,6 +59,10 @@ describe("RecordingVideoSurface — the rolling lead-in", () => {
   const video = () => screen.getByTestId("rec-video") as HTMLVideoElement
 
   it("rewinds by the countdown's length and rolls, so the line arrives at zero", () => {
+    // Freeze the clock: the component reads Date.now() again at mount, and on a
+    // loaded CI box the milliseconds between the two reads showed up as a
+    // 0.05 s drift in currentTime.
+    vi.useFakeTimers()
     render(
       <RecordingVideoSurface
         src="film.webm"

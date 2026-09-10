@@ -16,6 +16,8 @@ export interface SourceSelectionToolbarProps {
   onAskAi: () => void
   onAddToTermbase?: (draft: ConceptDraft) => void | Promise<void>
   addConceptBlockedReason?: string | null
+  /** May this user APPROVE a term (enforce it), vs only suggest one? */
+  canApproveConcept?: boolean
   onAddOpenChange?: (open: boolean) => void
   onViewConcept?: (conceptId: string) => void
   /** AQU-260: called on mousedown so the parent suppresses selectionchange clearing. */
@@ -30,6 +32,7 @@ export function SourceSelectionToolbar({
   onAskAi,
   onAddToTermbase,
   addConceptBlockedReason,
+  canApproveConcept,
   onAddOpenChange,
   onViewConcept,
   onToolbarMouseDown,
@@ -86,6 +89,7 @@ export function SourceSelectionToolbar({
         <AddConceptPopover
           sourceTerm={sourceSelection}
           blockedReason={addConceptBlockedReason}
+          canApprove={canApproveConcept}
           onConfirm={onAddToTermbase}
           onOpenChange={onAddOpenChange}
         >

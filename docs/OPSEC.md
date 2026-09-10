@@ -207,14 +207,12 @@ nothing, including for the credential scan added in V5.
 the first thing to resolve, because it gates whether anything else in §5 is
 actually enforced.
 
-**Update (2026-08-12, dev merge): resolved by relocation, not repair.** AQU-564
-retired Actions as the pull-request gate entirely: `ci.yml` now has no
-`pull_request`/`push` trigger (dispatch-only fallback), and PR validation runs
-in Cloudflare Workers Builds via `scripts/cloudflare-ci-checks.mjs`. The
-credential scan from V5 accordingly runs in that script's `lint` lane — the
-enforced path — with the `ci.yml` lint step retained as a mirror for dispatch
-runs. "CI is green" is meaningful again, provided the Workers Builds check is
-required on the target branch.
+**Update (2026-09-09, AQU-1219): validation runs before push.** Cloudflare
+Workers Builds now compiles previews only. `.husky/pre-push` runs
+`pnpm scan:secrets` before the existing commit-based affected E2E gate. The dispatch-only `ci.yml` retains manual equivalents.
+A green preview check confirms compilation, not security or functional testing.
+Local hooks can be bypassed; API-created commits do not execute them. QA reviews
+published previews under this explicitly chosen policy.
 
 ### V5 — No credential scanning in the toolchain — **FIXED IN THIS CHANGE** [FACT]
 
@@ -321,19 +319,17 @@ resolved by AQU-564 — see its section above.)
 | Fail closed on the sync auth bypass in deployed environments | `sync-worker/src/environment-guard.ts`, `index.ts`, `project-do.ts` |
 | Baseline HTTP security headers on the web surface | `worker/security-headers.ts` |
 | Invite tokens fingerprinted, never logged whole | `src/lib/sync/invites.ts` |
-| Credential scanning as a required CI check | `scripts/secret-scan.ts`; lint lane of `scripts/cloudflare-ci-checks.mjs` (the enforced PR gate), mirrored in `.github/workflows/ci.yml` (`lint`) |
-| SPA Worker suite actually runs | `pnpm run test:worker` — spa lane of `scripts/cloudflare-ci-checks.mjs`, mirrored in the ci.yml `unit` job |
+| Credential scanning before push | `scripts/secret-scan.ts`; first command in `.husky/pre-push`; manual fallback in `.github/workflows/ci.yml` |
+| SPA Worker suite available for targeted/manual validation | `pnpm run test:worker`; manual ci.yml `unit` job |
 | auth-worker `hono` floor raised above the SEC-7 advisory | `auth-worker/package.json` |
 
 Every one has a test. A control without a test is V4 waiting to happen again.
 
 ### Recommended next, in order
 
-0. ~~**Get CI actually running again (V4a).**~~ Done via AQU-564: the PR gate
-   moved off Actions to Cloudflare Workers Builds
-   (`scripts/cloudflare-ci-checks.mjs`); every control above now rides an
-   enforced lane there. Residual: confirm the Workers Builds check is marked
-   required on `dev`/`main` branch protection.
+0. **Validation ownership (AQU-1219).** Local push hooks run automated checks;
+   Cloudflare compiles previews for QA. Do not interpret its branch-protection
+   check as evidence that tests or credential scanning ran.
 1. **Split `SECRET_KEY` / `SYNC_SECRET_KEY` per environment (V7).** Highest
    leverage remaining. Replace cross-env token portability with a dev-only test
    fixture — the testing convenience it buys is not worth prod credentials

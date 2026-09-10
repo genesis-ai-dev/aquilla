@@ -1,6 +1,7 @@
 import type { EventKind } from './types'
 
-// Numeric role levels matching frontier-server's role hierarchy.
+// Numeric role levels matching auth-worker's role hierarchy
+// (auth-worker/src/services/project-permissions.ts's ROLE_NAMES).
 // 100-gaps for future extensibility (e.g. inserting a 350 between
 // REVIEWER and CONTRIBUTOR if a workflow ever needs it).
 export const ROLE = {
@@ -94,6 +95,8 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   // editing flow — contributor-level, like target.* / cell.waive. It mutates
   // an existing row's display name, not the project's file inventory.
   'file.rename': ROLE.CONTRIBUTOR,
+  // Sidebar folder label — same class as file.rename (grouping, not inventory).
+  'file.corpus.set': ROLE.CONTRIBUTOR,
 
   // file.delete/file.restore are structural changes (soft-delete tombstone).
   // Require PROJECT_LEAD (500) — same as file.create and source.* imports.

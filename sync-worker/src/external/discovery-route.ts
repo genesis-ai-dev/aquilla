@@ -60,6 +60,8 @@ function apiMap(): Record<string, unknown> {
       'GET /api/v1/external/projects/:projectId/files/:fileId/cells': 'Read a file’s cells (source + target). Supports since/limit/cursor, and lane=<tag> to filter targets to one target-language lane (see multiLanguage).',
       'GET /api/v1/external/projects/:projectId/search?q=': 'Full-text search cells. Optional side=source|target.',
       'GET /api/v1/external/projects/:projectId/cells/:cellId/history': 'Append-only event history for one cell.',
+      'GET /api/v1/external/projects/:projectId/comments':
+        'Reviewer comment threads, oldest first. Optional fileId, or fileId+cellId for one cell; limit (default 50, max 200) + cursor to page. parentCommentId null = thread root. `author` is a per-project pseudonym unless the credential was minted with real identities; `viaAgent` marks comments this API posted. Reply with an EmitEvents changeset carrying comment.create + parentCommentId.',
       'POST /api/v1/external/projects/:projectId/artifacts': 'Upload raw bytes (max 25MB). Headers: x-artifact-name (required), content-type, x-artifact-kind (source|audio).',
       'GET /api/v1/external/projects/:projectId/artifacts/:artifactId': 'Artifact metadata (/content for bytes, /inspect for a format sniff).',
       'POST /api/v1/external/projects/:projectId/artifacts/:artifactId/parse': 'Parse a source artifact with the built-in importers. Default = preview { fileName, fileType, totalCells, sampleCells, warnings }; body { "stage": true } also stages a PlanImport changeset linking the artifact. See "importing" below.',

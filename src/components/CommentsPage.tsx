@@ -33,7 +33,7 @@ import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import { useProject } from "@/hooks/useProject"
 import type { ProjectRecord } from "@/lib/parsers/types"
-import { renderCommentHtml } from "@/lib/comments/comment-helpers"
+import { renderCommentHtml, stripAgentCommentMarker } from "@/lib/comments/comment-helpers"
 import { canMutateComment, foreignRoleFor } from "@/lib/sync/role-policy"
 import { denialMessage } from "@/lib/permissions/denial"
 import { ROLE, resolveRoleName } from "@/lib/frontier/roles"
@@ -882,7 +882,10 @@ export function CommentsPage({ project: workspaceProject }: CommentsPageProps = 
     const authors = new Map<string, string>()
     for (const c of comments) {
       if (c.fileId) fileIds.add(c.fileId)
-      authors.set(c.authorId, c.authorLabel ?? c.authorId)
+      // AQU-1233: one filter entry per person — drop the "(via agent)" marker
+      // an agent-posted comment carries, or the filter for a real translator
+      // reads as their tool depending on which comment was seen last.
+      authors.set(c.authorId, stripAgentCommentMarker(c.authorLabel ?? c.authorId))
     }
     // Resolve each fileId to its display name; tombstone deleted files
     const fileOptions = Array.from(fileIds)

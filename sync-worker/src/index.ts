@@ -71,6 +71,7 @@ import { handleCommentsReadRequest } from "./events/comments-read-route"
 import { handleConceptsReadRequest } from "./events/concepts-read-route"
 import { handleCellBacktranslationsReadRequest } from "./events/cell-backtranslations-read-route"
 import { handleExternalReadRequest } from "./external/read-routes"
+import { handleExternalCommentsRequest } from "./external/comments-route"
 import { handleExternalMcpRequest } from "./external/mcp-route"
 import { handleExternalDiscoveryRequest } from "./external/discovery-route"
 export { ProjectSync } from "./project-do"
@@ -355,6 +356,11 @@ const worker = {
     if (btReadResponse) return withCors(btReadResponse, request)
     const externalReadResponse = await handleExternalReadRequest(request, env)
     if (externalReadResponse) return withCors(externalReadResponse, request)
+    // AQU-1233: agent-facing comment reads. Its own module (rather than another
+    // arm of read-routes) because it re-uses that file's auth/scope gate —
+    // registering it here keeps the dependency one-directional.
+    const externalCommentsResponse = await handleExternalCommentsRequest(request, env)
+    if (externalCommentsResponse) return withCors(externalCommentsResponse, request)
     // /search/passages must be checked BEFORE /search — PATH_RE for /search is
     // anchored with $ so it won't match /search/passages, but ordering here
     // makes the intent explicit and guards against future regex changes.

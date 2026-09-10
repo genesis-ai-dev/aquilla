@@ -25,6 +25,7 @@ import { eventQualifiedParentKey } from './chain-claims'
 import { ROLE } from './role-policy'
 import { trackPatchRequiresExisting } from './track-editing-authority'
 import { usableCorpusMarker } from './corpus-marker'
+import { commentAuthorLabel } from './comment-authorship'
 
 // A single event row as it lives in Postgres. JSON.parse on `payload` is the
 // caller's responsibility — `payload` here is already an object.
@@ -1737,6 +1738,12 @@ case 'cell.audio.attach': {
       const scopeKind = scope.kind
       const fileId = scopeKind === 'cell' ? scope.fileId : scopeKind === 'file' ? scope.fileId : null
       const cellId = scopeKind === 'cell' ? scope.cellId : null
+      // AQU-1233: author_id is always the human the credential was minted by —
+      // permissions, foreign-comment floors and "my comments" filters all key
+      // on it. The agent marker rides author_label, which is what the comments
+      // UI renders (`authorLabel ?? authorId`), so a reviewer sees who is
+      // answering AND that a tool typed it.
+      const authorLabel = commentAuthorLabel(event.author, p.viaAgent)
       stmts.push(
         db
           .prepare(
@@ -1759,7 +1766,7 @@ case 'cell.audio.attach': {
             p.parentCommentId,
             p.body,
             event.author,
-            event.author,
+            authorLabel,
             event.serverTs,
             event.serverTs,
             p.createdForTranslated ?? null,

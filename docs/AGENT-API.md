@@ -334,7 +334,7 @@ CRUD surface with MCP bolted on.
 | Projects | `list_projects`, `get_project`, `create_project`, `update_project` |
 | Artifacts | `create_artifact_upload`, `inspect_artifact` |
 | Ingestion | `preview_import`, `prepare_import` — **implemented**: both parse an already-uploaded source artifact server-side with the built-in DOM-free parsers (txt, md, json, po, properties, obs, vtt, srt, sbv, csv, tsv, usfm; 5000-cell cap) — preview returns cells without staging, prepare stages a `PlanImport` changeset linking the artifact. Upload stays REST-only (`POST …/artifacts`, 25MB). REST equivalent: `POST …/artifacts/:artifactId/parse` (body `{ "stage": true }` to stage). DOM-bound formats (docx, pptx, html, xliff, tmx, usx, idml) are not yet server-parseable. |
-| Reading | `search_project`, `read_content`, `read_history` |
+| Reading | `search_project`, `read_content`, `read_history`, `read_comments` |
 | Translation | `prepare_translations` |
 | Verification | `run_checks` — structured, actionable failures (e.g. `"term 'covenant' rendered 3 ways: [refs]"`), never a bare 400 |
 | Changesets | `get_changeset`, `confirm_changeset`, `discard_changeset` |
@@ -542,3 +542,35 @@ The command layer is now the **shared write spine for both agent surfaces** (see
   `credential_id = 'session'`, forced ask mode, `channel: "app"` provenance, and the existing
   `/api/v2/changesets/:id/approval|approve|reject` human gate; the SPA's live ChangesetCard
   commits after approval (per-item confirmation for testimony kinds).
+
+## Status addendum (2026-09-10, AQU-1233 — cell comments)
+
+Comments are now part of the agent surface, so reviewer feedback and an agent's answer to
+it live in the same thread the people on the project are reading.
+
+- **Read** — `read_comments` (MCP) / `GET /api/v1/external/projects/:projectId/comments`
+  (REST). Optional `fileId`, or `fileId` + `cellId` for one cell's threads; `limit`
+  (default 50, max 200) and `cursor` page it. Returns `{ data, nextCursor }` oldest-first,
+  each item `{ commentId, scopeKind, fileId, cellId, cellRef, parentCommentId, body,
+  resolved, author, viaAgent, createdAt, updatedAt, deletedAt }`; `parentCommentId: null`
+  marks a thread root. The route delegates to the in-app comments read
+  (`sync-worker/src/events/comments-read-route.ts`), so a page is by construction the page
+  the comments drawer renders.
+- **Reply** — no new command: one `EmitEvents` changeset carrying a `comment.create` with
+  the thread root's `commentId` as `parentCommentId` (plus the cell's `fileId`/`cellId`).
+  A `parentCommentId` that does not exist is rejected at prepare with `validation_failed`,
+  before any approval is burned.
+- **Authorship** — an agent-posted comment is authored **as the credential's minting
+  user**: `comments.author_id` is that human, so foreign-comment role floors and edit/
+  delete authority are unchanged. The fact that a tool typed it rides `author_label`
+  (`"<user> (via agent)"` — `sync-worker/src/events/comment-authorship.ts`), which is what
+  the comment surfaces display, and is reported back to agents as the boolean `viaAgent`.
+  The marker is stamped server-side at compile; a caller supplying `viaAgent` is rejected
+  as a server-resolved field, so it can be neither forged nor suppressed.
+- **Notifications** — replies route through the `/events` perimeter like any other comment,
+  so the existing mention/thread-participant email path fires unchanged.
+- **Identity** — `author` is a stable per-project pseudonym (`u_3f9ab21c`,
+  HMAC-SHA256(`SYNC_SECRET_KEY`, `<projectId> <author>`)) unless the credential carries the
+  `pii` grant; the raw `authorLabel` never leaves the worker. Same scheme as AQU-1180's
+  `external/pii.ts`, so the ids agree once that lands and this collapses into a `mapAuthor()`
+  call (which additionally honours a project's `agentAuthorship: none` opt-out).

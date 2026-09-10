@@ -28,8 +28,11 @@ Status against the §6 release gates:
 | 10 | Cold-start test | **Not run** — no evidence of an executed cold-start session in this repo. Cold-start hardening landed 2026-07-21 after real-world agent feedback: unauthenticated discovery root (`GET /api/v1/external` — machine-readable API map), REST bootstrap pair (`GET /me`, `GET /projects`), JSON 404s with hints on unmatched external paths, teaching 401/405 messages, a `quickstart` in `get_capabilities`, and a hand-to-your-agent [`docs/api/QUICKSTART.md`](api/QUICKSTART.md). |
 
 Also not yet implemented, called out explicitly rather than left silent: `run_checks`, jobs
-(`get_job`), export (`prepare_export`/`get_export`), OAuth 2.1, and an MCP staging
-tool for `PlanImport` (REST-only). Full detail in `docs/api/agent-api.md` §8 and the running list
+(`get_job`), the job-shaped export pair (`prepare_export`/`get_export`), OAuth 2.1, and an MCP
+staging tool for `PlanImport` (REST-only). Single-file **round-trip export ships** (AQU-858) as
+one synchronous call instead of that pair — `export_file` (MCP) and
+`GET .../files/:fileId/export` (REST), gated at the org export floor; a whole-project bundle
+and target-format writers beyond the imported original are still open. Full detail in `docs/api/agent-api.md` §8 and the running list
 in `docs/swarm/AGENT-API-TRACES.md`. Rate limiting is now complete: `/search` (2026-07-30 pen
 test), changeset prepare/commit, and artifact upload (2026-08-20 pen test), plus `/me`,
 `/projects`, project/file/cell GETs, artifact meta/content/inspect, and changeset GET/discard
@@ -339,7 +342,7 @@ CRUD surface with MCP bolted on.
 | Verification | `run_checks` — structured, actionable failures (e.g. `"term 'covenant' rendered 3 ways: [refs]"`), never a bare 400 |
 | Changesets | `get_changeset`, `confirm_changeset`, `discard_changeset` |
 | Jobs | `get_job` |
-| Export | `prepare_export`, `get_export` |
+| Export | `prepare_export`, `get_export` — shipped instead as the synchronous `export_file` (AQU-858); the job-shaped pair is still open |
 
 `get_capabilities` + `get_identity_and_scope` are what make the cold-start test (§6)
 passable: an agent must be able to learn what it may do before trying to do it.

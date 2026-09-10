@@ -108,14 +108,16 @@ async function authenticateCredential(
   return { ok: true, credential }
 }
 
-interface AuthedContext {
+export interface AuthedContext {
   credential: ApiCredentialContext
   /** Live-resolved role level (>= ROLE.VIEWER), NOT the credential's own
    *  (nonexistent) role field — the credential only carries autonomy/scope. */
   role: number
 }
 
-async function authenticateAndScope(
+/** Exported for the sibling external routes that need the same gate without
+ *  re-deriving it (export-route.ts — AQU-858). */
+export async function authenticateAndScope(
   request: Request,
   env: ExternalReadsEnv,
   projectId: string,
@@ -165,7 +167,7 @@ async function authenticateAndScope(
  *  existing internal route handlers in-process without re-deriving their
  *  auth/ETag/anchor-chain logic. `fileId` is only meaningful to the doc-scoped
  *  verifier the DO uses; project-scoped read routes ignore it. */
-async function mintInternalToken(
+export async function mintInternalToken(
   env: ExternalReadsEnv,
   ctx: AuthedContext,
   projectId: string,

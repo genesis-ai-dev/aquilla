@@ -58,6 +58,7 @@ function apiMap(): Record<string, unknown> {
       'GET /api/v1/external/projects': 'List accessible projects (up to 100).',
       'GET /api/v1/external/projects/:projectId/files': 'List a project’s files.',
       'GET /api/v1/external/projects/:projectId/files/:fileId/cells': 'Read a file’s cells (source + target). Supports since/limit/cursor, and lane=<tag> to filter targets to one target-language lane (see multiLanguage).',
+      'GET /api/v1/external/projects/:projectId/files/:fileId/export': 'Export a file in its delivered format (round-trip: the original artifact with current translations substituted in). Optional lane=<tag>. See "exporting" below.',
       'GET /api/v1/external/projects/:projectId/search?q=': 'Full-text search cells. Optional side=source|target.',
       'GET /api/v1/external/projects/:projectId/cells/:cellId/history': 'Append-only event history for one cell.',
       'POST /api/v1/external/projects/:projectId/artifacts': 'Upload raw bytes (max 25MB). Headers: x-artifact-name (required), content-type, x-artifact-kind (source|audio).',
@@ -85,6 +86,25 @@ function apiMap(): Record<string, unknown> {
       serverParseableFormats: ['csv', 'json', 'md', 'obs', 'po', 'properties', 'sbv', 'srt', 'tsv', 'txt', 'usfm', 'vtt'],
       unsupportedFormats:
         'docx, pptx, doc, html, xliff, tmx, usx, idml, paratext-project, zip need DOM/browser parsers and are not yet server-parseable — import them through the in-app Import dialog, or parse them yourself and stage raw PlanImport cells (POST .../changesets with a PlanImport command). A multi-book USFM artifact parses into one file per book; stage each book separately via resultIndex.',
+    },
+    exporting: {
+      note:
+        'The other end of the import loop (AQU-858): pull a finished file back out in the format its consumer actually reads — USFM for Paratext, say — without a human clicking Export in the app. The export reconstructs the ORIGINAL artifact preserved at import time with the current translations substituted in; untranslated segments keep their source text so the file stays valid. The MCP tool export_file wraps the same route.',
+      workflow: [
+        `1. GET ${EXTERNAL_ROOT}/projects/:projectId/files — find the fileId.`,
+        `2. GET ${EXTERNAL_ROOT}/projects/:projectId/files/:fileId/export (add ?lane=<tag> for one target-language lane) → the file bytes, with Content-Disposition naming it.`,
+        '3. Check the fidelity headers before delivering (below), then hand the bytes to whatever consumes them.',
+      ],
+      fidelityHeaders: {
+        'X-Export-Mode':
+          'Absent = round-trip (translations were substituted). "raw-original" / "raw-sidecar" = this format has no server-side target serializer yet, so the response is the preserved ORIGINAL bytes with NO translations in them — do not deliver it as a translation.',
+        'X-Usfm-Lossy-Verse-Count':
+          'USFM only: verses whose intra-verse markers (footnotes, poetry, character markers) the plain-text substitution dropped. 0 = clean round-trip.',
+      },
+      roleFloor:
+        'Export is gated HIGHER than reading: the floor is the org\'s exportMinRole setting, MAINTAINER by default (an org may raise or lower it). A VIEWER/CONTRIBUTOR credential that can read a project still gets permission_denied here, and retrying will not change that.',
+      notes:
+        'A file with no preserved source artifact returns not_found — it must be re-imported before it can be exported. Binary results (docx/pptx/idml side-cars) come back as raw bytes over REST; the MCP export_file tool cannot carry them (JSON-RPC is text) and fails with validation_failed naming this URL instead.',
     },
     multiLanguage: {
       note:

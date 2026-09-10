@@ -71,6 +71,7 @@ import { handleCommentsReadRequest } from "./events/comments-read-route"
 import { handleConceptsReadRequest } from "./events/concepts-read-route"
 import { handleCellBacktranslationsReadRequest } from "./events/cell-backtranslations-read-route"
 import { handleExternalReadRequest } from "./external/read-routes"
+import { handleExternalExportRequest } from "./external/export-route"
 import { handleExternalMcpRequest } from "./external/mcp-route"
 import { handleExternalDiscoveryRequest } from "./external/discovery-route"
 export { ProjectSync } from "./project-do"
@@ -355,6 +356,11 @@ const worker = {
     if (btReadResponse) return withCors(btReadResponse, request)
     const externalReadResponse = await handleExternalReadRequest(request, env)
     if (externalReadResponse) return withCors(externalReadResponse, request)
+    // AQU-858: agent-callable round-trip export (the mirror of the artifact
+    // import tools). Its path (.../files/:fileId/export) is disjoint from the
+    // external read routes above, so ordering is for readability only.
+    const externalExportResponse = await handleExternalExportRequest(request, env)
+    if (externalExportResponse) return withCors(externalExportResponse, request)
     // /search/passages must be checked BEFORE /search — PATH_RE for /search is
     // anchored with $ so it won't match /search/passages, but ordering here
     // makes the intent explicit and guards against future regex changes.

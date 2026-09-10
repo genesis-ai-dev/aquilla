@@ -20,7 +20,7 @@ import { EditorTable, type EditorTableHandle } from "./EditorTable"
 import { ScrollToGroupHandler } from "./ScrollToGroupHandler"
 import { EditorActionsProvider } from "@/context/EditorActionsContext"
 import { EditorScrollProvider, useEditorScroll } from "@/context/EditorScrollContext"
-import { CellStore } from "@/hooks/useActiveCellStore"
+import { CellStore, useCellStoreVersion } from "@/hooks/useActiveCellStore"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { CellRow } from "@/lib/sync/cells-read-types"
 import {
@@ -85,8 +85,20 @@ const CELLS = [
   { id: "cell-ch3-b", ref: "GEN 3:2" },
 ] as const
 
-function makeStore(): CellStore {
-  const rows: CellRow[] = CELLS.flatMap(({ id, ref }, i) => [
+// A second file, for the cross-file click (a chapter under a file that is not
+// the open one).
+const OTHER_FILE_ID = "file-2"
+const OTHER_CELLS = [
+  { id: "cell-1pe-ch1-a", ref: "1PE 1:1" },
+  { id: "cell-1pe-ch1-b", ref: "1PE 1:2" },
+  { id: "cell-1pe-ch2-a", ref: "1PE 2:1" },
+  { id: "cell-1pe-ch2-b", ref: "1PE 2:2" },
+  { id: "cell-1pe-ch3-a", ref: "1PE 3:1" },
+  { id: "cell-1pe-ch3-b", ref: "1PE 3:2" },
+] as const
+
+function makeRows(cells: readonly { id: string; ref: string }[]): CellRow[] {
+  return cells.flatMap(({ id, ref }, i) => [
     {
       cellId: id, side: "source", value: `source ${i}`, valueHtml: null, type: "text",
       canonicalRef: ref, anchorCellId: null, eventId: `${id}-source`, sourceEventId: null,
@@ -98,16 +110,22 @@ function makeStore(): CellStore {
       lastEditor: "tester", lastEditAt: 2, validated: false, wordCount: 1,
     },
   ] satisfies CellRow[])
+}
 
-  const store = new CellStore()
+function loadFile(store: CellStore, fileId: string, cells: readonly { id: string; ref: string }[]) {
   store.setRuntime({
     projectId: project.id,
-    fileId: FILE_ID,
+    fileId,
     username: "tester",
     requiredValidations: 1,
     auditStats: new Map(),
   })
-  store.replaceRows(rows, { full: true, maxServerSeq: 1 })
+  store.replaceRows(makeRows(cells), { full: true, maxServerSeq: 1 })
+}
+
+function makeStore(): CellStore {
+  const store = new CellStore()
+  loadFile(store, FILE_ID, CELLS)
   return store
 }
 
@@ -121,6 +139,17 @@ function SectionRequestProbe({ captureRef }: { captureRef: { current: RequestSec
   return null
 }
 
+/** Mirrors ProjectWorkspace's wiring: the handler is driven by the live store
+ *  version, so a file switch on the store re-runs its effect the way it does in
+ *  the app (a pending cross-file request is parked until the store catches up). */
+function LiveScrollToGroupHandler({ store, editorRef }: {
+  store: CellStore
+  editorRef: React.RefObject<EditorTableHandle | null>
+}) {
+  const storeVersion = useCellStoreVersion(store)
+  return <ScrollToGroupHandler cellStore={store} storeVersion={storeVersion} editorRef={editorRef} />
+}
+
 function renderWorkspace(store: CellStore) {
   const editorRef = createRef<EditorTableHandle>()
   const requestSection: { current: RequestSection | null } = { current: null }
@@ -130,7 +159,7 @@ function renderWorkspace(store: CellStore) {
       <EditorActionsProvider value={{}}>
         <EditorScrollProvider>
           <SectionRequestProbe captureRef={requestSection} />
-          <ScrollToGroupHandler cellStore={store} storeVersion={1} editorRef={editorRef} />
+          <LiveScrollToGroupHandler store={store} editorRef={editorRef} />
           <EditorTable
             ref={editorRef}
             project={project}
@@ -169,10 +198,10 @@ function sectionKey(store: CellStore, chapterIndex: number): string {
   return entry.key
 }
 
-async function requestSectionScroll(request: RequestSection | null, label: string) {
+async function requestSectionScroll(request: RequestSection | null, label: string, fileId = FILE_ID) {
   expect(request).toBeTruthy()
   act(() => {
-    request?.(label, FILE_ID)
+    request?.(label, fileId)
   })
   // The handler defers the jump a tick so the list has the latest cell ids.
   await act(async () => {
@@ -219,6 +248,36 @@ describe("ScrollToGroupHandler — section requests (AQU-1244)", () => {
     expect(cellRow("cell-ch1-a")).toBeTruthy()
     expect(cellRow("cell-ch1-b")).toBeTruthy()
     expect(cellRow("cell-ch2-a")).toBeNull()
+  })
+
+  // The Files panel fires this shape when the clicked chapter belongs to a file
+  // that is not the open one: it selects the file, then submits the section
+  // request stamped with that file's id. The handler parks the request until the
+  // store carries the new file, so the jump must still land on the requested
+  // milestone rather than the file's first one.
+  it("opens another file on the requested milestone, not on its first", async () => {
+    setMilestoneSplit(true)
+    const store = makeStore()
+    const { requestSection } = renderWorkspace(store)
+    expect(cellRow("cell-ch1-a")).toBeTruthy()
+
+    // Request the other file's chapter 3 while file-1 is still the loaded file.
+    const otherStore = new CellStore()
+    loadFile(otherStore, OTHER_FILE_ID, OTHER_CELLS)
+    await requestSectionScroll(requestSection.current, sectionKey(otherStore, 2), OTHER_FILE_ID)
+    // Nothing to jump to yet — the request is parked, not burned.
+    expect(cellRow("cell-1pe-ch3-a")).toBeNull()
+
+    // The file switch lands: the store is replaced with the other file's cells.
+    await act(async () => {
+      loadFile(store, OTHER_FILE_ID, OTHER_CELLS)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+
+    expect(cellRow("cell-1pe-ch3-a")).toBeTruthy()
+    expect(cellRow("cell-1pe-ch3-b")).toBeTruthy()
+    // Chapter 1 is the file's FIRST milestone — the page it used to land on.
+    expect(cellRow("cell-1pe-ch1-a")).toBeNull()
   })
 
   it("still scrolls the continuous file to the section's first cell when the split is off", async () => {

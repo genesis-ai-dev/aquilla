@@ -63,6 +63,11 @@ export class Scheduler {
   private readonly settled = new Set<number>()
   private placement: PlacementIndex | undefined
   private stopping = false
+  /** Set for the duration of a `runOnce({ only })` call so `ready()` only
+   *  surfaces jobs belonging to that one project — otherwise the drain in
+   *  `step()` claims every ready job in the queue, not just the requested
+   *  project's. */
+  private projectFilter: number | undefined
 
   constructor(ctx: SchedulerCtx) {
     this.ctx = ctx
@@ -81,6 +86,7 @@ export class Scheduler {
     return this.ctx.db
       .listJobs(stage)
       .filter((j) => j.next_run_at <= now && !this.inFlight.has(j.id) && !this.settled.has(j.id))
+      .filter((j) => this.projectFilter === undefined || j.project_id === this.projectFilter)
   }
 
   private advance(job: JobRow, to: JobStage, patch: { plan_path?: string } = {}): void {
@@ -98,13 +104,18 @@ export class Scheduler {
   invalidatePlacement(): void { this.placement = undefined }
 
   async runOnce(opts: { only?: number; force?: boolean } = {}): Promise<void> {
-    if (opts.only !== undefined) {
-      const p = await this.ctx.gitlab.project(opts.only)
-      if (!p) throw new Error(`GitLab project ${opts.only} not found`)
-      const outcome = await registerProject(await this.detectDeps(), p, null)
-      this.ctx.log(`register ${opts.only}: ${outcome}`)
+    this.projectFilter = opts.only
+    try {
+      if (opts.only !== undefined) {
+        const p = await this.ctx.gitlab.project(opts.only)
+        if (!p) throw new Error(`GitLab project ${opts.only} not found`)
+        const outcome = await registerProject(await this.detectDeps(), p, null)
+        this.ctx.log(`register ${opts.only}: ${outcome}`)
+      }
+      while (await this.step(opts.force === true)) { /* drain */ }
+    } finally {
+      this.projectFilter = undefined
     }
-    while (await this.step(opts.force === true)) { /* drain */ }
   }
 
   /** One scheduling tick. Returns false when no stage had a ready job. */

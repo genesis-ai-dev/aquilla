@@ -236,6 +236,7 @@ import { runDeterministicCheck, type CheckRunResult } from "@/lib/check/determin
 import { SearchDockPanel } from "./SearchDockPanel"
 import { SearchResultsView } from "./search/SearchResultsView"
 import { LeftDock, type DockTab } from "./LeftDock"
+import { usePersistedDockTab } from "@/hooks/usePersistedDockTab"
 import { TranslationNotesSidebar, readTnSidebarVisible, writeTnSidebarVisible } from "./TranslationNotesSidebar"
 import { ParallelBiblesSidebar, readParallelBiblesOpen, writeParallelBiblesOpen } from "./ParallelBiblesSidebar"
 import { InactiveProjectBanner } from "./InactiveProjectBanner"
@@ -960,8 +961,10 @@ export function ProjectWorkspace() {
   const [parallelOpen, setParallelOpen] = useState(false)
   const [parallelMode, setParallelMode] = useState<ParallelPanelMode>("search")
   const [parallelScope, setParallelScope] = useState<ParallelPanelScope>("project")
-  // FRO-308: left dock active tab (null = collapsed rail only)
-  const [dockTab, setDockTab] = useState<DockTab | null>("files")
+  // FRO-308: left dock active tab (null = collapsed rail only). Last real tab
+  // is restored from localStorage per project so reload returns to Files /
+  // Voices / Agent / Search instead of always landing on Files.
+  const [dockTab, setDockTab] = usePersistedDockTab(projectId)
   const lgUp = useIsLgUp()
   // The mobile sheet is an overlay, not a rail — keep a tab selected so the
   // sheet opens onto the files list instead of a 40px icon strip.

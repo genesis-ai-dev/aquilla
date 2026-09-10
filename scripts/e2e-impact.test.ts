@@ -23,7 +23,7 @@ const specs = [
 
 describe("changed-file E2E impact selection", () => {
   it("selects billing for catalog, client, and shared-contract changes", () => {
-    for (const file of ["config/pricing/stripe-sandbox.json", "db/shared/billing-offers.ts", "db/shared/billing-workspace.ts",
+    for (const file of ["config/pricing/stripe-sandbox.json", "db/shared/billing-offers.ts", "db/shared/billing-workspace.ts", "src/pages/Login.tsx", "src/components/onboarding/OnboardingWizard.tsx",
       "auth-worker/src/services/org-permissions.ts", "db/postgres/migrations/0092_workspace_billing.sql",
       "src/components/org/BillingOffers.tsx", "auth-worker/src/lib/billing/catalog.ts"]) {
       expect(selectAffectedE2E([file], specs).specs).toContain(
@@ -63,6 +63,7 @@ describe("changed-file E2E impact selection", () => {
         "e2e/specs/auth/login-account-setup-status.smoke.spec.ts",
         "e2e/specs/auth/session-expired-banner.smoke.spec.ts",
         "e2e/specs/orgs/account-switcher.smoke.spec.ts",
+        ...(file === "src/pages/Login.tsx" ? ["e2e/specs/orgs/org-settings-billing.smoke.spec.ts"] : []),
       ])
     }
   })

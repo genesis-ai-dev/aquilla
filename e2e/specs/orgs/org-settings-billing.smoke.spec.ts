@@ -33,4 +33,6 @@ test("new workspace scope survives billing navigation and reload", async ({ bob 
   await billing.expectWorkspaceScope("team")
   await billing.openWorkspace(bob.orgId)
   await billing.expectWorkspaceScope("personal")
+  await billing.reviewSelectedPlan({ offer: "pro", interval: "year", quantity: 1 }, "Billing team")
+  await billing.expectIncompatibleWorkspace()
 })

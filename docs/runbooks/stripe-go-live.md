@@ -235,6 +235,65 @@ E2E_SHARD=3/3 npx tsx scripts/e2e-up.ts -- \
 npm run build
 ```
 
+## Selected-offer continuity checkpoint — 2026-09-10
+
+- [x] Add `/billing/select` as the app entry for a selected paid offer.
+  Preserve supported marketing aliases through sign-in and account creation.
+- [x] Preserve the selection after returning-account login and new-account
+  setup completion, including creating or skipping a project. Ordinary Free
+  onboarding retains its existing completion destinations.
+- [x] Require an explicit workspace choice from the current account. Show only
+  workspaces with billing authority; the review API still rechecks authority,
+  scope, covered access, and prices. Never assign or purchase automatically.
+- [x] Reject malformed/duplicate selection parameters, unsupported quantities,
+  browser amounts, invalid audiences, and unknown offers or billing intervals.
+  Late workspace responses from another account do not populate the chooser.
+- [ ] Wire and verify public paid-plan links against the deployed app route.
+  The marketing checkout currently has separate uncommitted edits; this app
+  slice preserves them. Paid marketing CTAs remain gated in the inspected source.
+- [ ] Complete the dedicated pricing-aware onboarding rework dispatch item.
+
+Integration contract: the app accepts a paid-selection link such as
+`/billing/select?offer=max-20x&interval=annual&quantity=1&audience=individual`.
+Supported marketing offer names are `pro`, `max-5x`, `max-20x`, `team`, and
+`team-20x`; monthly/annual normalize to month/year. Internal underscore names
+and month/year also work. Quantity must be one. Optional audience must match.
+Only these selection parameters are accepted. Pass this complete URL as the
+safe `next` parameter to `/login`; its Create account link preserves the same
+selection in `/onboarding`. URLs carry preferences, never authorization or
+prices. Reloading retains the selection because it stays in the URL; no shared
+localStorage purchase intent can leak between accounts.
+
+Changed contracts: marketing-style selection → canonical app path → safe login
+return or signup continuation → explicit workspace choice → existing server
+review. Parser/composition, Login, wizard returning/new-account completion, and
+chooser RTL tests cover this chain. The existing billing smoke uses the real
+selection-path producer, workspace directory, authenticated review, and UI to
+reject an Individual offer for a team workspace. The billing E2E sentinel now
+also covers Login and onboarding-wizard changes.
+
+Targeted verification: 79 unit/RTL/impact/determinism tests pass. Both billing
+smoke tests pass. No worker implementation changes occur in this slice.
+All eight affected login/session/account-switching smoke tests pass. The final
+production build passes. No slow-request logs appear in the auth smoke run.
+Behavior-spec checkpoint: `6942245`.
+
+```sh
+npx vitest run src/lib/billing/intent.test.ts \
+  src/pages/BillingSelection.test.tsx src/pages/Login.test.tsx \
+  src/components/onboarding/__tests__/OnboardingWizard.skip.test.tsx \
+  src/components/onboarding/__tests__/OnboardingWizard.fork.test.tsx \
+  scripts/e2e-impact.test.ts scripts/e2e-determinism.test.ts \
+  src/components/AuthRedirectFlow.test.tsx --maxWorkers=2
+E2E_SHARD=3/3 npx tsx scripts/e2e-up.ts -- \
+  e2e/specs/orgs/org-settings-billing.smoke.spec.ts --shard=1/1
+E2E_SHARD=3/3 npx tsx scripts/e2e-up.ts -- \
+  e2e/specs/auth/login-account-setup-status.smoke.spec.ts \
+  e2e/specs/auth/session-expired-banner.smoke.spec.ts \
+  e2e/specs/orgs/account-switcher.smoke.spec.ts --shard=1/1
+npm run build
+```
+
 ## Production launch checklist
 
 **Status: not ready to enable paid checkout.** Prices are ready in sandbox;

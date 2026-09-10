@@ -1,3 +1,5 @@
+import { billingSelectionPath } from '../../../src/lib/billing/intent'
+import type { BillingPlanSelection } from '../../../db/shared/billing-review'
 import { expect, type Page } from '@playwright/test'
 
 export class BillingSettingsPage {
@@ -5,6 +7,19 @@ export class BillingSettingsPage {
 
   constructor(page: Page) {
     this.page = page
+  }
+
+  async reviewSelectedPlan(selection: BillingPlanSelection, workspaceName: string) {
+    await this.page.goto(billingSelectionPath(selection))
+    await expect(this.page.getByRole('heading', { name: 'Choose a workspace for this plan' })).toBeVisible()
+    await expect(this.page.getByRole('region', { name: 'Review selected plan' })).toHaveCount(0)
+    await this.page.getByRole('button', { name: `Review for ${workspaceName}`, exact: true }).click()
+  }
+
+  async expectIncompatibleWorkspace() {
+    await expect(this.page.getByRole('region', { name: 'Review selected plan' }))
+      .toContainText('This plan does not match the workspace type')
+    await expect(this.page.getByRole('button', { name: 'Checkout coming soon' })).toHaveCount(0)
   }
 
   async openWorkspace(orgId: number) {

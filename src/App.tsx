@@ -17,6 +17,7 @@ import { JoinOrgPage } from "@/components/JoinOrgPage"
 import { VerifyEmailPage } from "@/components/VerifyEmailPage"
 import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard"
 import { ResetPassword } from "@/pages/ResetPassword"
+import { BillingSelection } from "@/pages/BillingSelection"
 import { Login } from "@/pages/Login"
 import { PrivacyPolicy } from "@/pages/PrivacyPolicy"
 import { NotFound } from "@/pages/NotFound"
@@ -328,6 +329,7 @@ function AppRoutes() {
         <Route path="/onboarding" element={<OnboardingWizard />} />
         {/* AQU-282: dedicated login — eagerly loaded (public, no auth required) */}
         <Route path="/login" element={<Login />} />
+        <Route path="/billing/select" element={<BillingSelection />} />
         {/* AQU-270: account recovery — eagerly loaded (public, no auth required) */}
         <Route path="/reset-password" element={<ResetPassword />} />
         <Route path="/privacy-policy" element={<PrivacyPolicy />} />

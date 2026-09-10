@@ -241,6 +241,7 @@ export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): Inge
   for (const c of pair.target?.cells ?? []) targetById.set(c.metadata.id, c)
 
   let prevCellId: string | null = null
+  let warnedMissingValidatorIdentity = false
   for (let physicalOrder = 0; physicalOrder < orderedCells.length; physicalOrder++) {
     const ordered = orderedCells[physicalOrder]
     const cellId = ordered.metadata.id
@@ -422,13 +423,38 @@ export function mapFilePairToEvents(pair: FilePairInput, opts: MapOptions): Inge
     // preserved; soft-deleted validators are dropped.
     for (const v of headEdit?.validatedBy ?? []) {
       if (v.isDeleted) continue
+      const username = typeof v.username === "string" ? v.username.trim() : ""
+      // Some legacy notebooks carry validator entries whose username never
+      // got recorded (the validating user's identity was lost upstream).
+      // `cell.validate` requires a non-empty `author` (sync-worker rejects
+      // the whole ingest chunk otherwise — project 65, AQU-TBD), so fall back
+      // to fallbackAuthor. The event id is keyed on the validator string too
+      // (see validateEventId/ids.ts), so an empty username would collide
+      // across every such validator on the same cell — key the id on the
+      // validation's own creationTimestamp instead, which is what actually
+      // distinguishes one validator slot from another when the name is gone.
+      // If there's no timestamp either, there is nothing left to make this
+      // validation identifiable or unique: skip it and warn once per file.
+      const validatorKey = username || (
+        typeof v.creationTimestamp === "number" ? `~ts:${v.creationTimestamp}` : ""
+      )
+      if (!validatorKey) {
+        if (!warnedMissingValidatorIdentity) {
+          console.warn(
+            `[migrate/map] skipping cell.validate with no username and no creationTimestamp ` +
+              `(file ${pair.relPath}, cell ${cellId}) — no identifying information to key the event on`,
+          )
+          warnedMissingValidatorIdentity = true
+        }
+        continue
+      }
       events.push({
-        id: validateEventId(projectId, fileId, cellId, v.username),
+        id: validateEventId(projectId, fileId, cellId, validatorKey),
         kind: "cell.validate",
         fileId,
         cellId,
         parentId: null,
-        author: v.username,
+        author: username || fallbackAuthor,
         clientTs: typeof v.creationTimestamp === "number" ? v.creationTimestamp : fallbackTs,
         payload: { editEventId: parent },
       })

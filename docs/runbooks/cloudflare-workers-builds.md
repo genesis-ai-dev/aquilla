@@ -232,3 +232,34 @@ as part of this recovery.
 Never refresh the development Neon branch or development R2 buckets while an
 environment-crossing incident is under recovery. First compare event IDs and blob
 keys against production and reconcile any development-only records.
+
+## Automatic QA links on pull requests
+
+After all three branch previews deploy, `scripts/cloudflare-preview-comment.mjs`
+creates or updates one **QA preview** comment on matching open PRs. It includes
+the actual frontend URL, deployed commit, and GitHub build-check/logs link.
+Cloudflare performs this API call directly; no GitHub Action runs.
+
+Configure `PREVIEW_GITHUB_TOKEN` as an encrypted **build** variable on
+`aquilla-web-preview` (Settings → Build → Variables and secrets). Use a dedicated
+GitHub fine-grained personal access token with resource owner `genesis-ai-dev`,
+repository access limited to `aquilla`, and **Pull requests: Read and write**.
+GitHub grants Metadata read access automatically. Complete any organization
+approval required for the token. Do not use a developer's broad CLI OAuth token.
+Do not put the token in Worker runtime secrets, `VITE_*` variables, or Git.
+Restrict builds carrying this credential to trusted repository branches.
+
+The script edits only comments authored by the token's user with its own marker.
+It rechecks the current PR head before writing, skips closed/fork/stale PRs,
+and bounds GitHub requests with one 30-second deadline. Missing credentials or
+notification failures produce a warning but do not fail the deployment.
+
+Only successful deployments publish comments. A later failed build leaves the
+last successful commit visible; the comment does not claim it tests newer commits.
+If a PR opens after its branch build finishes, retry that Cloudflare build to
+publish the comment. This build-driven approach has no PR-open webhook. After
+adding or rotating the token, retry a build for an open PR and check its comment.
+
+Validation: `node --test scripts/cloudflare-preview-comment.test.mjs` covers
+GitHub comment creation/update, commit checks, missing credentials, and failures.
+The stack preview contract test verifies notification follows all five uploads.

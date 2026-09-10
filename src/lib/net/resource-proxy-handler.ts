@@ -32,6 +32,7 @@ export const EXTERNAL_CONTENT_HOSTS: readonly string[] = [
   "cdn.door43.org", // Door43 media (OBS images)
   "bible.helloao.org", // Free Use Bible API (helloao)
   "raw.githubusercontent.com", // BibleNLP/ebible corpus + translations.csv
+  "tile.openstreetmap.org", // basemap tiles for the verse-resources locator map (AQU-461)
 ]
 
 /** True when `host` is an allow-listed content host we're willing to proxy. */

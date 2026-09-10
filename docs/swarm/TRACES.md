@@ -436,3 +436,9 @@ merge base). Tests not weakened — removals are exactly the deleted components'
 `it()` blocks went 47 removed / 99 added. `roles.ts` keeps `roleName()` untranslated for
 comparisons. Placeholder agreement across all six Arabic plural forms: 163/163 keys, 0
 mismatches. RTL conversion correctly left media timelines/waveforms/playheads physical.
+
+# PERF-BURST swarm (AQU-1146 / 1147 / 1016 / 1160) — 2026-09-03
+## BLOCKERS
+## Deferred
+## Quality / polish
+## [DONE]

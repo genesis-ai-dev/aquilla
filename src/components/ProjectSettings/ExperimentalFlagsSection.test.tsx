@@ -28,22 +28,37 @@ beforeEach(async () => {
 })
 
 describe("ExperimentalFlagsSection", () => {
-  it("renders the Autopilot controls toggle, on by default", async () => {
-    // Default-on: the flag gates whether the play button is discoverable, and
-    // a run still costs nothing until someone clicks it.
+  it("renders the Autopilot controls toggle, OFF by default", async () => {
+    // AQU-1103: Autopilot is opt-in. A project with no stored flag shows the
+    // toggle unchecked, and no Autopilot surface renders until someone flips it.
     await createProject(makeProject())
     render(<ExperimentalFlagsSection projectId="p1" />)
     const toggle = await screen.findByRole("switch", { name: "Show Autopilot controls" })
-    expect(toggle).toBeChecked()
+    expect(toggle).not.toBeChecked()
     expect(screen.getByText(/Turning this on does not start work/)).toBeInTheDocument()
     expect(screen.getByText(/hiding the controls does not stop a run/)).toBeInTheDocument()
     expect(screen.getByText(/suggestions stay in review/)).toBeInTheDocument()
   })
 
-  it("toggle persists the opt-out to the IDB record and isFlagEnabled reads it back", async () => {
+  it("toggle persists the opt-IN to the IDB record and isFlagEnabled reads it back", async () => {
     await createProject(makeProject())
     render(<ExperimentalFlagsSection projectId="p1" />)
     const toggle = await screen.findByRole("switch", { name: "Show Autopilot controls" })
+    fireEvent.click(toggle)
+    await waitFor(async () => {
+      const stored = await getProject("p1")
+      expect(stored?.experimentalFlags).toEqual({ contextualTranslation: true })
+      expect(isFlagEnabled(stored!, "contextualTranslation")).toBe(true)
+    })
+  })
+
+  it("an opted-in project can still be switched back off", async () => {
+    // The flip only changes the default; both directions of the control must
+    // keep working for someone who has an explicit stored value.
+    await createProject(makeProject({ experimentalFlags: { contextualTranslation: true } }))
+    render(<ExperimentalFlagsSection projectId="p1" />)
+    const toggle = await screen.findByRole("switch", { name: "Show Autopilot controls" })
+    await waitFor(() => expect(toggle).toBeChecked())
     fireEvent.click(toggle)
     await waitFor(async () => {
       const stored = await getProject("p1")
@@ -62,9 +77,9 @@ describe("ExperimentalFlagsSection", () => {
     fireEvent.click(toggle)
     await waitFor(async () => {
       const stored = await getProject("p-server-only")
-      expect(stored?.experimentalFlags).toEqual({ contextualTranslation: false })
+      expect(stored?.experimentalFlags).toEqual({ contextualTranslation: true })
       expect(stored?.name).toBe("Test Project")
-      expect(isFlagEnabled(stored!, "contextualTranslation")).toBe(false)
+      expect(isFlagEnabled(stored!, "contextualTranslation")).toBe(true)
     })
   })
 

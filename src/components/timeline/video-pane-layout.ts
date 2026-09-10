@@ -14,16 +14,16 @@ export const VIDEO_PANE_MIN_WIDTH = 220
  *  big picture, then raised by a quarter inch (24px, the CSS definition) when
  *  the far end proved a touch too far. */
 export const VIDEO_PANE_TABLE_MIN_WIDTH = 544
-/**
- * How much of the band the picture may take at the far right of the drag.
- *
- * Which of the two limits actually stops you depends on the window: this share
- * binds on a wide one, the table's pixel floor on a narrow one (they cross over
- * around a 1300px band). Sam asked for the far end to come in about a quarter
- * inch, so BOTH moved — otherwise the change would be invisible at whichever
- * width he happened not to be testing.
- */
-export const VIDEO_PANE_MAX_SHARE = "58%"
+// There used to be a ceiling here too — `VIDEO_PANE_MAX_SHARE = "58%"`, how
+// much of the band the picture could take at the far right of the drag. It
+// bound on wide windows, the table's floor above on narrow ones (crossing over
+// around a 1300px band), and on 2026-08-08 Sam brought the far end in "about a
+// quarter inch" by moving both. AQU-1119 retired it (2026-09-03): dragging the
+// video wider is no longer the way to a bigger picture, folding sections is —
+// and the ceiling was the one thing stopping the TABLE from folding by drag,
+// since its only divider is the one it shares with the video and the cap
+// stopped that drag ~230px before the table's snap point. The floor above is
+// now the only stop, in every state.
 
 const VIDEO_PANE_WIDTH_KEY = "aquilla:video-pane-width"
 

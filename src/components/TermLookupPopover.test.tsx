@@ -26,7 +26,11 @@ describe("TermLookupPopover", () => {
 
   it("renders children directly when no concepts match", () => {
     render(
-      <TermLookupPopover sourceTerm="unrelated" concepts={CONCEPTS} onApply={vi.fn()}>
+      <TermLookupPopover
+        sourceTerm="unrelated"
+        concepts={CONCEPTS}
+        onViewConcept={vi.fn()}
+      >
         <span>hover me</span>
       </TermLookupPopover>,
     )
@@ -40,7 +44,11 @@ describe("TermLookupPopover", () => {
   it("does not show popover for draft concepts", () => {
     const draftConcept = makeConcept({ status: "draft" })
     render(
-      <TermLookupPopover sourceTerm="spirit" concepts={[draftConcept]} onApply={vi.fn()}>
+      <TermLookupPopover
+        sourceTerm="spirit"
+        concepts={[draftConcept]}
+        onViewConcept={vi.fn()}
+      >
         <span>hover me</span>
       </TermLookupPopover>,
     )
@@ -52,7 +60,11 @@ describe("TermLookupPopover", () => {
 
   it("renders preferred and admitted renderings", () => {
     render(
-      <TermLookupPopover sourceTerm="spirit" concepts={CONCEPTS} onApply={vi.fn()}>
+      <TermLookupPopover
+        sourceTerm="spirit"
+        concepts={CONCEPTS}
+        onViewConcept={vi.fn()}
+      >
         <span>spirit</span>
       </TermLookupPopover>,
     )
@@ -65,6 +77,24 @@ describe("TermLookupPopover", () => {
     expect(screen.getByText("spook")).toBeInTheDocument()
   })
 
+  it.each(["spirit;", "spirit,"])(
+    "opens when the highlighted token includes punctuation: %s",
+    (sourceTerm) => {
+      render(
+        <TermLookupPopover
+          sourceTerm={sourceTerm}
+          concepts={CONCEPTS}
+          onViewConcept={vi.fn()}
+        >
+          <span>{sourceTerm}</span>
+        </TermLookupPopover>,
+      )
+
+      fireEvent.click(screen.getByText(sourceTerm))
+      expect(screen.getByText("Holy Spirit")).toBeInTheDocument()
+    },
+  )
+
   // ── Status labels ─────────────────────────────────────────────────────────
 
   it("shows correct status labels (required / alternate / forbidden)", () => {
@@ -73,7 +103,11 @@ describe("TermLookupPopover", () => {
     // other five status-label call sites said "forbidden" — reconciled to the
     // 5-of-6 majority (also what the underlying RenderingStatus id itself is).
     render(
-      <TermLookupPopover sourceTerm="spirit" concepts={CONCEPTS} onApply={vi.fn()}>
+      <TermLookupPopover
+        sourceTerm="spirit"
+        concepts={CONCEPTS}
+        onViewConcept={vi.fn()}
+      >
         <span>spirit</span>
       </TermLookupPopover>,
     )
@@ -84,62 +118,54 @@ describe("TermLookupPopover", () => {
     expect(screen.getByText("forbidden")).toBeInTheDocument()
   })
 
-  // ── Apply buttons: present for preferred/admitted, absent for forbidden ────
+  // ── Terminology entry navigation ─────────────────────────────────────────
 
-  it("shows Apply buttons for preferred and admitted, not for forbidden", () => {
-    const onApply = vi.fn()
+  it("shows one terminology-entry action instead of rendering Apply buttons", () => {
     render(
-      <TermLookupPopover sourceTerm="spirit" concepts={CONCEPTS} onApply={onApply}>
-        <span>spirit</span>
-      </TermLookupPopover>,
-    )
-    fireEvent.click(screen.getByText("spirit"))
-
-    // Two Apply buttons (preferred + admitted)
-    const applyButtons = screen.getAllByRole("button", { name: /Apply rendering/i })
-    expect(applyButtons).toHaveLength(2)
-
-    // No Apply for the forbidden rendering
-    expect(
-      screen.queryByRole("button", { name: /Apply rendering: spook/i }),
-    ).not.toBeInTheDocument()
-  })
-
-  // ── onApply callback ──────────────────────────────────────────────────────
-
-  it("calls onApply with the correct rendering when Apply is clicked", () => {
-    const onApply = vi.fn()
-    render(
-      <TermLookupPopover sourceTerm="spirit" concepts={CONCEPTS} onApply={onApply}>
-        <span>spirit</span>
-      </TermLookupPopover>,
-    )
-    fireEvent.click(screen.getByText("spirit"))
-
-    fireEvent.click(
-      screen.getByRole("button", { name: /Apply rendering: Holy Spirit/i }),
-    )
-    expect(onApply).toHaveBeenCalledWith("Holy Spirit")
-  })
-
-  // ── Read-only mode: no onApply ────────────────────────────────────────────
-
-  it("hides all Apply buttons when onApply is not provided (read-only mode)", () => {
-    render(
-      <TermLookupPopover sourceTerm="spirit" concepts={CONCEPTS}>
+      <TermLookupPopover
+        sourceTerm="spirit"
+        concepts={CONCEPTS}
+        onViewConcept={vi.fn()}
+      >
         <span>spirit</span>
       </TermLookupPopover>,
     )
     fireEvent.click(screen.getByText("spirit"))
 
     expect(screen.queryByRole("button", { name: /Apply rendering/i })).not.toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: /Go to Terminology page.*spirit/i }),
+    ).toBeInTheDocument()
+  })
+
+  it("opens the matching concept when the terminology action is clicked", () => {
+    const onViewConcept = vi.fn()
+    render(
+      <TermLookupPopover
+        sourceTerm="spirit"
+        concepts={CONCEPTS}
+        onViewConcept={onViewConcept}
+      >
+        <span>spirit</span>
+      </TermLookupPopover>,
+    )
+    fireEvent.click(screen.getByText("spirit"))
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /Go to Terminology page.*spirit/i }),
+    )
+    expect(onViewConcept).toHaveBeenCalledWith("c1")
   })
 
   // ── Notes displayed ────────────────────────────────────────────────────────
 
   it("shows concept notes when present", () => {
     render(
-      <TermLookupPopover sourceTerm="spirit" concepts={CONCEPTS} onApply={vi.fn()}>
+      <TermLookupPopover
+        sourceTerm="spirit"
+        concepts={CONCEPTS}
+        onViewConcept={vi.fn()}
+      >
         <span>spirit</span>
       </TermLookupPopover>,
     )
@@ -160,7 +186,11 @@ describe("TermLookupPopover", () => {
       }),
     ]
     render(
-      <TermLookupPopover sourceTerm="spirit" concepts={concepts} onApply={vi.fn()}>
+      <TermLookupPopover
+        sourceTerm="spirit"
+        concepts={concepts}
+        onViewConcept={vi.fn()}
+      >
         <span>spirit</span>
       </TermLookupPopover>,
     )
@@ -168,5 +198,8 @@ describe("TermLookupPopover", () => {
 
     expect(screen.getByText("Note A")).toBeInTheDocument()
     expect(screen.getByText("Note B")).toBeInTheDocument()
+    expect(
+      screen.getAllByRole("button", { name: /Go to Terminology page/i }),
+    ).toHaveLength(2)
   })
 })

@@ -17,6 +17,9 @@ Break a plan into independently-grabbable issues using vertical slices (tracer b
 - **Every issue is created from one of the Aquilla team's issue templates** (`Bug Report`,
   `Feature Request`, or `Task` — see step 6). The template applies the category label
   (**`Bug`**, **`Feature`**, or **`Improvement`** for `Task`) by itself.
+- **Every issue carries a Prototype Debugging milestone** — the Road to V1 area it belongs
+  to (see step 6). An issue with no milestone is uncategorized and invisible to the Road to
+  V1 views.
 
 ## Process
 
@@ -42,7 +45,7 @@ Slices may be 'HITL' or 'AFK'. HITL slices require human interaction, such as an
 
 ### 4. Discover the destination FIRST
 
-Before quizzing the user, query the issue tracker to enumerate the available **teams and projects** — do not guess from memory or recent context. Every issue needs both a team AND a project. The project is not optional and not an afterthought; an unassigned issue is a defect.
+Before quizzing the user, query the issue tracker to enumerate the available **teams and projects** — do not guess from memory or recent context. Every issue needs both a team AND a project. The project is not optional and not an afterthought; an unassigned issue is a defect. In `Prototype Debugging`, every issue also needs a **milestone** (its Road to V1 area) — `list_milestones` the project for the live list.
 
 Confirm the target team and project with the user using the real options you just fetched. If a plausible project already exists (e.g. a debugging/triage project for bug-style work), surface it by name rather than making the user paste a URL.
 
@@ -52,6 +55,7 @@ Present the proposed breakdown as a numbered list. For each slice, show:
 
 - **Title**: short descriptive name
 - **Type**: HITL / AFK
+- **Milestone**: the Prototype Debugging milestone (Road to V1 area) the slice lands in
 - **Blocked by**: which other slices (if any) must complete first
 - **User stories covered**: which user stories this addresses (if the source material has them)
 
@@ -95,6 +99,13 @@ acceptance criteria for isn't AFK — it's HITL.
 
 **Set BOTH the team and the project on every issue.** Verify the publish response actually
 shows the project assigned — do not assume it stuck.
+
+**Set a milestone on every issue** (`milestone` on `save_issue`, by name). Prototype
+Debugging's milestones are the Road to V1 areas: `Media Timeline`, `Living Memory`, `Dashboard`, `Project Management`, `Autopilot`, `Editor`, `Importing`, `Exporting`, `Login/Logout`, plus the catch-all buckets `Audio & Voice`, `Agents & Agent API`, `Comments & Notifications`, `Codex Migration`, `Infra & Deploy`, `Process & Docs`, `Marketing & Billing`.
+Fetch the live list with `list_milestones` rather than trusting this text. When the source
+is an existing issue, inherit its milestone; otherwise pick the area the slice's user-facing
+surface belongs to and confirm it in step 5. If the parent issue is in a cycle, pass the same
+`cycle` so the slice stays in the cycle. Verify the create response shows the milestone.
 
 Publish issues in dependency order (blockers first) so you can reference real issue
 identifiers in the "Blocked by" field.

@@ -45,7 +45,13 @@ export function deriveCellAreaState(input: CellAreaStateInput): CellAreaState {
       return { kind: "syncing-empty" }
     }
     if (input.cellsError) return { kind: "load-error" }
-    if (input.syncStatus === "connecting") return { kind: "syncing-empty" }
+    // Socket not open yet: the projection may still be on its way, so keep
+    // the skeleton rather than claiming the file is empty. `useFileSync` now
+    // reports "reconnecting" for this; "connecting" is kept for any legacy
+    // producer.
+    if (input.syncStatus === "connecting" || input.syncStatus === "reconnecting") {
+      return { kind: "syncing-empty" }
+    }
     return { kind: "ready-empty" }
   }
   return { kind: "ready" }

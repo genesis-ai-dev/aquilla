@@ -28,14 +28,16 @@ No production entitlement or reset behavior changed yet.
 ## Active parallel work — 2026-09-10
 
 Primary worktree: `/private/tmp/aquilla-aqu-837`, base `194c894d4`.
+Workspace slice committed as `9b1240273`.
 The primary slice owns explicit workspace billing scope, eligibility, initial
 paid entitlement storage, and the workspace summary in billing settings.
 It adds `billing-workspace.ts` routes and `workspace*.ts` billing services;
 it does not change webhook receipt/application or `billing.ts`.
 Migration `0092_workspace_billing.sql` is reserved for this slice.
 
-The parallel agent owns webhook retry recovery in a separate worktree. Its
-handoff belongs in `docs/runbooks/aqu-837-webhook-recovery-handoff.md`.
+The parallel agent completes webhook retry recovery in a separate worktree.
+Its implementation and evidence are integrated as `4275e43e5` and `96ec91a6a`.
+Handoff: `docs/runbooks/aqu-837-webhook-recovery-handoff.md`.
 The primary agent integrates verified commits and maintains this checklist.
 Do not mark payment journeys complete from either slice's isolated tests.
 
@@ -322,8 +324,9 @@ this checklist does not approve proposed commercial behavior.
   covered-access inquiries available.
 - [ ] Carry the selected offer through sign-in and confirm the target workspace
   before checkout. Reject invalid or obsolete selections on the server.
-- [ ] Verify personal versus team workspace eligibility and server-side billing
+- [x] Verify personal versus team workspace eligibility and server-side billing
   authority. Test another workspace's ID and a member without billing authority.
+  `9b1240273` verifies this for explicit new scopes; existing scope needs review.
 - [ ] Show the current plan, capacity, usage, reset date, renewal date, and
   eligible portal actions in billing settings.
 
@@ -331,8 +334,9 @@ this checklist does not approve proposed commercial behavior.
 
 - [x] Prepare the approved ten-price sandbox manifest and offer composition.
   Evidence: `config/pricing/stripe-sandbox.json` and prior contract checks below.
-- [ ] Retrieve and validate Stripe Prices through the billing API. Hide amounts
+- [x] Retrieve and validate Stripe Prices through the billing API. Hide amounts
   and purchase actions when Stripe pricing cannot be verified.
+  Catalog-to-app checkpoint `194c894d4`; environment secrets remain uninstalled.
 - [ ] Resolve the selected offer from server-approved Price IDs and the persisted
   workspace cohort. Reject browser-supplied prices, amounts, and cohort overrides.
 - [ ] Connect all five paid offer shapes for monthly and annual checkout:
@@ -355,7 +359,7 @@ this checklist does not approve proposed commercial behavior.
   payload shape. Local unsigned bypass does not verify Stripe signatures.
 - [ ] Persist subscription identity, approved prices, entitlement and price
   versions, scope, capacity, and the original weekly usage anchor.
-- [ ] Make event application and deduplication recoverable together. Test a
+- [x] Make event application and deduplication recoverable together. Test a
   failure after receipt recording, then redelivery of the same Stripe event.
 - [ ] Test duplicate and out-of-order events, simultaneous delivery, and an
   invoice arriving before subscription-to-workspace mapping exists.
@@ -364,9 +368,35 @@ this checklist does not approve proposed commercial behavior.
 - [ ] Preserve legacy and covered access through subscription updates and replay.
   Reject events whose subscription/customer mapping conflicts with the workspace.
 
-Inspection identifies a retry risk: the current handler records an event before
-applying its subscription update. A later failure can leave redelivery classified
-as a duplicate. Verify and fix this boundary before checking off event recovery.
+Recovery is verified locally in integrated commit `4275e43e5`: receipt and
+projection effects commit atomically under a workspace lock. Failure after
+receipt insertion or at commit rolls back both; redelivery applies successfully.
+Database lookup/schema failures return errors, never successful acknowledgements.
+Combined workspace and legacy billing worker coverage passes 63 tests. The
+separate live-Postgres gate passes 14 tests, including observable lock contention.
+Worker TypeScript and the integrated production build pass. The targeted
+billing smoke passes both journeys again after integration, with no slow-request
+logs. The agent's handoff records its original reproduction,
+commit identities, commands, and remaining limits. Spec commit: `cdf1ef9`.
+
+Integrated commands:
+
+```sh
+# auth-worker directory
+npx vitest run src/__tests__/billing-webhook-recovery.test.ts \
+  src/__tests__/billing-workspace.test.ts \
+  src/__tests__/billing-routes.test.ts \
+  src/__tests__/admin-billing.test.ts \
+  src/__tests__/billing-plans.test.ts --maxWorkers=2
+npx vitest run --config vitest.webhook-postgres.config.ts
+```
+
+Synthetic signed HTTP payloads exercise signature checks and retry recovery;
+no actual Stripe destination delivery has run. Out-of-order events, missing
+subscription mappings, historical receipt repair, and same-workspace covered
+access reconciliation remain open. Initial new-entitlement persistence is not
+yet called by the webhook; future effects must share its transaction. These
+checks do not complete the full payment or launch gates.
 
 ### Workspace access → actual allowed work
 

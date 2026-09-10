@@ -9,6 +9,7 @@ import { execFileSync } from "node:child_process"
 
 const WEB = "http://127.0.0.1:5173"
 const IDENTITY = "http://127.0.0.1:8788"
+const SYNC = "http://127.0.0.1:8789"
 const PROJECT = "dev-project"
 const FILE = "019f9000-0000-7000-8000-000000000001" // Genesis 1 (i18n sample).md — untimed, 15 cells
 const SHOTS = "/tmp/claude-501/-Users-sampjvv-Code-codex/bc75a9c8-7dc9-45e3-8d84-95c07f53caa5/scratchpad/shots-1068"
@@ -98,6 +99,58 @@ async function main() {
     `${structural0} structural entries in ${menus0.length} menus`,
   )
   await page.screenshot({ path: `${SHOTS}/01-default-off.png` })
+
+  // ── 1b. ...and the SERVER now accepts what the buttons refuse ─────────────
+  //
+  // AQU-1068, 2026-09-09. This is the whole point of the rework and nothing
+  // else covers it. The tier used to be enforced at the /events perimeter,
+  // where the default "none" refused everyone including owners — and that
+  // silently broke audio-cue re-import, DCS upstream import and diarization,
+  // all of which emit `source.cell.create` through the user's own outbox.
+  //
+  // The tier is now a rule about which buttons exist (check 1 above), and the
+  // perimeter takes the write. Posting one directly, with the project still on
+  // "No one", is the only way to see the two halves disagree on purpose.
+  const syncTokenRes = await fetch(`${IDENTITY}/api/v2/sync-token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${access_token}` },
+    body: JSON.stringify({ projectId: PROJECT, fileId: FILE }),
+  })
+  const syncToken = syncTokenRes.ok ? (await syncTokenRes.json()).token : null
+  const probeCellId = `019f9000-0000-7000-8000-0000000d${Date.now().toString(16).slice(-4)}`
+  let directStatus = 0
+  let directAccepted = 0
+  if (syncToken) {
+    const res = await fetch(`${SYNC}/events`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${syncToken}` },
+      body: JSON.stringify({
+        events: [{
+          id: crypto.randomUUID(),
+          schemaVersion: 1,
+          kind: "source.cell.create",
+          projectId: PROJECT,
+          fileId: FILE,
+          cellId: probeCellId,
+          parentId: null,
+          author: username,
+          clientTs: Date.now(),
+          payload: { cellId: probeCellId, anchorCellId: null, value: "server-accepts-me" },
+        }],
+      }),
+    })
+    directStatus = res.status
+    if (res.ok) directAccepted = ((await res.json()).accepted ?? []).length
+  }
+  check(
+    "the SERVER accepts a source.cell.create while the tier says 'No one'",
+    directAccepted === 1,
+    `HTTP ${directStatus}, ${directAccepted} accepted`,
+  )
+  // Put the file back the way it was found — a pass that mutates a fixture and
+  // does not clean up makes the next run's counts lie.
+  sql(`DELETE FROM cells WHERE file_id='${FILE}' AND cell_id='${probeCellId}'`)
+  sql(`DELETE FROM events WHERE file_id='${FILE}' AND cell_id='${probeCellId}'`)
 
   // ── 2. Opt in through the settings UI ──────────────────────────────────────
   // The tier lives in the General pane (`section-cell-editing`), not

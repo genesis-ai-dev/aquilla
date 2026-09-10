@@ -71,6 +71,7 @@ import { handleCommentsReadRequest } from "./events/comments-read-route"
 import { handleConceptsReadRequest } from "./events/concepts-read-route"
 import { handleCellBacktranslationsReadRequest } from "./events/cell-backtranslations-read-route"
 import { handleExternalReadRequest } from "./external/read-routes"
+import { handleExternalMemoryReadRequest } from "./external/memory-read-routes"
 import { handleExternalMcpRequest } from "./external/mcp-route"
 import { handleExternalDiscoveryRequest } from "./external/discovery-route"
 export { ProjectSync } from "./project-do"
@@ -355,6 +356,12 @@ const worker = {
     if (btReadResponse) return withCors(btReadResponse, request)
     const externalReadResponse = await handleExternalReadRequest(request, env)
     if (externalReadResponse) return withCors(externalReadResponse, request)
+    // AQU-1229: Living Memory reads. Mounted after the general external reads —
+    // both regexes are $-anchored so neither can shadow the other, but the
+    // memory paths extend .../files/:fileId/cells, so keeping the narrower
+    // suffix routes second matches the ordering convention above.
+    const externalMemoryReadResponse = await handleExternalMemoryReadRequest(request, env)
+    if (externalMemoryReadResponse) return withCors(externalMemoryReadResponse, request)
     // /search/passages must be checked BEFORE /search — PATH_RE for /search is
     // anchored with $ so it won't match /search/passages, but ordering here
     // makes the intent explicit and guards against future regex changes.

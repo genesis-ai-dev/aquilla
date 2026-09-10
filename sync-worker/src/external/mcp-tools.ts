@@ -141,6 +141,66 @@ export const MCP_TOOLS: McpToolDef[] = [
     },
   },
   {
+    name: 'list_memory',
+    description:
+      'Read a project’s Living Memory: the human-authored project brief plus every memory ' +
+      'entry the copilot learns from — examples (source→target pairs), decisions (standing ' +
+      'rendering rules), notes (per-cell rationale), and observations. Same rows a human ' +
+      'sees on the project’s Memory page, newest first. Each entry carries its path, kind, ' +
+      'status (proposed|approved|rejected|archived), full content, humanEdited, and ' +
+      '`inRetrieval` — whether the copilot is ACTUALLY being given it (only approved entries ' +
+      'within the index render cap are). Call this BEFORE proposing a memory entry: it shows ' +
+      'whether one already exists at that path, whether a human approved it, and whether a ' +
+      'human has edited it (human-edited entries are human-owned — raise a question instead ' +
+      'of re-proposing over them). Author fields are per-project pseudonyms, never usernames. ' +
+      'Args: projectId, optional status, kind, limit, cursor. Errors: permission_denied, ' +
+      'scope_denied, validation_failed (unknown status/kind), rate_limited.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        status: {
+          type: 'string',
+          enum: ['proposed', 'approved', 'rejected', 'archived'],
+          description: 'Only entries in this state. Omit for all states (what the in-app page shows).',
+        },
+        kind: {
+          type: 'string',
+          enum: ['example', 'decision', 'note', 'observation', 'other'],
+          description: 'Only entries of this kind (derived from the path prefix).',
+        },
+        limit: { type: 'number', description: 'Entries per page (1-200, default 50).' },
+        cursor: { type: 'string', description: 'Opaque cursor from a previous nextCursor.' },
+      },
+      required: ['projectId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'read_cell_memory',
+    description:
+      'Show what the copilot’s memory retrieval would inject for ONE cell’s draft: the ' +
+      'project brief plus the approved-memory index it is given (path + first line per ' +
+      'entry, which is all the prompt carries — full text is fetched just-in-time). Use it ' +
+      'to predict what the copilot is working from before asking it to draft, or to explain ' +
+      'a draft after the fact. NOTE the `retrieval.scope` field: retrieval is currently ' +
+      'PROJECT-scoped, i.e. the same brief and index for every cell in the project, with no ' +
+      'per-cell ranking or filtering — do not assume this returned set was narrowed to your ' +
+      'cell. `retrieval.truncated` tells you approved entries exist that are NOT being ' +
+      'injected. Args: projectId, fileId, cellId. Errors: not_found (no such cell), ' +
+      'permission_denied, scope_denied, rate_limited.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        fileId: { type: 'string', description: 'File the cell lives in.' },
+        cellId: { type: 'string', description: 'Cell whose retrieval context to preview.' },
+      },
+      required: ['projectId', 'fileId', 'cellId'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'prepare_translations',
     description:
       'Stage a batch of commands as an immutable changeset (execution plan) WITHOUT applying ' +

@@ -20,6 +20,7 @@ import { PLAN_IMPORT_MAX_CELLS } from './commands'
 import { MAX_ARTIFACT_BYTES, handleExternalArtifactsRequest } from './artifacts-route'
 import { SERVER_PARSEABLE_FILE_TYPES, CLIENT_ONLY_FORMATS } from './import-parse'
 import { handleExternalReadRequest } from './read-routes'
+import { handleExternalMemoryReadRequest } from './memory-read-routes'
 import { handleExternalChangesetsRequest } from './changesets-route'
 import { listProjectsForCredential } from './projects-list'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
@@ -101,7 +102,7 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
     quickstart: [
       '1. get_identity_and_scope — confirm who you are, your mode (ask|act), and your org/project scope.',
       '2. list_projects — find a projectId.',
-      '3. read_content with just projectId to list files; add fileId to read cells. search_project for full-text search.',
+      '3. read_content with just projectId to list files; add fileId to read cells. search_project for full-text search. list_memory for what the copilot has learned about the project (and read_cell_memory for what it is given on one cell).',
       '4. prepare_translations — stage your writes as a changeset. Nothing is applied yet. Returns { changesetId, digest, summary, mode, approvalUrl? }.',
       '5. confirm_changeset with that changesetId + digest. act mode: applies immediately. ask mode: first show the approvalUrl to a human and wait for them to approve in their browser, then call confirm_changeset — until then it returns confirmation_required and applies nothing.',
     ],
@@ -287,6 +288,57 @@ async function runRead(env: ExternalEnv, token: string, path: string): Promise<M
   if (!res) return fail('not_found', 'read route did not match')
   if (!res.ok) return delegatedError(res)
   return ok(await res.json())
+}
+
+/** Same in-process delegation as runRead, against the Living Memory read
+ *  router (AQU-1229) — a separate module, so a separate entry point. */
+async function runMemoryRead(
+  env: ExternalEnv,
+  token: string,
+  path: string,
+): Promise<McpToolResult> {
+  const req = new Request(`${EXTERNAL_BASE}/${path}`, { headers: bearer(token) })
+  const res = await handleExternalMemoryReadRequest(req, env)
+  if (!res) return fail('not_found', 'memory read route did not match')
+  if (!res.ok) return delegatedError(res)
+  return ok(await res.json())
+}
+
+async function listMemory(
+  env: ExternalEnv,
+  token: string,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const projectId = str(args, 'projectId')
+  if (!projectId) return fail('validation_failed', 'projectId is required')
+  const params = new URLSearchParams()
+  const status = str(args, 'status')
+  if (status) params.set('status', status)
+  const kind = str(args, 'kind')
+  if (kind) params.set('kind', kind)
+  if (typeof args.limit === 'number') params.set('limit', String(args.limit))
+  const cursor = str(args, 'cursor')
+  if (cursor) params.set('cursor', cursor)
+  const qs = params.toString() ? `?${params.toString()}` : ''
+  return runMemoryRead(env, token, `${encodeURIComponent(projectId)}/memory${qs}`)
+}
+
+async function readCellMemory(
+  env: ExternalEnv,
+  token: string,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const projectId = str(args, 'projectId')
+  const fileId = str(args, 'fileId')
+  const cellId = str(args, 'cellId')
+  if (!projectId) return fail('validation_failed', 'projectId is required')
+  if (!fileId) return fail('validation_failed', 'fileId is required')
+  if (!cellId) return fail('validation_failed', 'cellId is required')
+  return runMemoryRead(
+    env,
+    token,
+    `${encodeURIComponent(projectId)}/files/${encodeURIComponent(fileId)}/cells/${encodeURIComponent(cellId)}/memory`,
+  )
 }
 
 async function searchProject(
@@ -622,6 +674,10 @@ export async function callTool(
       return readContent(env, token, args)
     case 'read_history':
       return readHistory(env, token, args)
+    case 'list_memory':
+      return listMemory(env, token, args)
+    case 'read_cell_memory':
+      return readCellMemory(env, token, args)
     case 'prepare_translations':
       return prepareTranslations(env, token, args, ctx)
     case 'preview_import':

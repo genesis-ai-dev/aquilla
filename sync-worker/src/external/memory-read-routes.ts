@@ -1,0 +1,422 @@
+// External Living Memory read surface (AQU-1229).
+//
+//   GET /api/v1/external/projects/:projectId/memory?status=&kind=&limit=&cursor=
+//   GET /api/v1/external/projects/:projectId/files/:fileId/cells/:cellId/memory
+//
+// Why these exist: Living Memory is the product story — the brief, the
+// approved examples/decisions/notes the copilot learns from — and an agent
+// holding a PAT could read none of it. The write commands (AQU-1228) can stage
+// entries; nothing could read them back, so an agent could not tell whether an
+// entry already existed, had been approved, or was reaching the prompt at all.
+//
+// Contract: **parity with the in-app Memory surface** (AQU-932). Whatever a
+// human sees on the project's Living Memory page, an agent reads here — same
+// rows, same statuses, same ordering (most-recently-updated first) — with
+// author identities pseudonymized per the agent-facing PII default (AQU-1180).
+//
+// Both routes delegate to `db/shared/agent-memory.ts`, the same module the
+// in-app surface and the copilot's own prompt assembly use. No query or
+// retrieval logic is reimplemented here: the per-cell route calls
+// `buildMemoryContext`, i.e. the copilot's actual retrieval path, so what it
+// reports is what the next draft would be given rather than a second
+// description of it.
+//
+// Auth/scope/throttle: identical to the rest of the read tier — a shared
+// `authenticateAndScope` (credential validity → org/project scope → live role
+// floor of VIEWER) plus the shared per-credential read budget, both imported
+// from read-routes.ts.
+
+import {
+  buildMemoryContext,
+  getBrief,
+  listMemories,
+  memoryFirstLine,
+  memoryKindForPath,
+  MEMORY_INDEX_RENDER_CAP,
+  type AgentMemory,
+  type MemoryKind,
+  type MemoryProvenance,
+  type MemoryStatus,
+} from "../../../db/shared/agent-memory"
+import { externalError } from "./errors"
+import {
+  authenticateAndScope,
+  checkReadRateLimit,
+  type ExternalReadsEnv,
+} from "./read-routes"
+import { paginate, parsePageParams } from "./pagination"
+
+const MEMORY_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/memory$/
+const CELL_MEMORY_RE =
+  /^\/api\/v1\/external\/projects\/([^/]+)\/files\/([^/]+)\/cells\/([^/]+)\/memory$/
+
+const MEMORY_MAX_LIMIT = 200
+
+const STATUSES: readonly MemoryStatus[] = ["proposed", "approved", "rejected", "archived"]
+const KINDS: readonly MemoryKind[] = ["example", "decision", "note", "observation", "other"]
+
+// ---------------------------------------------------------------------------
+// PII: pseudonymous author identities (AQU-1180 default)
+// ---------------------------------------------------------------------------
+
+// `agent_memories.created_by` / `reviewed_by` and `project_briefs.updated_by`
+// hold USERNAMES (see db/postgres/schema.sql), which name real translators.
+// Agent-facing reads therefore never echo them; each is replaced by a stable
+// pseudonym.
+//
+// Keyed HMAC, not a bare hash: usernames are low-entropy and the caller
+// already knows the projectId, so an unkeyed digest would be trivially
+// reversible by hashing candidate names. The key is SYNC_SECRET_KEY — already
+// required by every route in this tier.
+//
+// Scoped per project on purpose: the same person is a different pseudonym in
+// two projects, so an agent with credentials on both cannot correlate
+// contributors across them. Within one project the pseudonym is stable, so
+// "these four decisions came from one person" survives — which is the part
+// that has legitimate analytical value.
+
+const PSEUDONYM_BYTES = 6
+
+/** Build a memoized `username -> "author_<hex>"` mapper for one project. */
+function createPseudonymizer(
+  secret: string,
+  projectId: string,
+): (name: string | null) => Promise<string | null> {
+  const cache = new Map<string, string>()
+  let keyPromise: Promise<CryptoKey> | null = null
+
+  const getKey = (): Promise<CryptoKey> => {
+    keyPromise ??= crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(secret),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"],
+    )
+    return keyPromise
+  }
+
+  return async (name: string | null): Promise<string | null> => {
+    if (name === null || name === "") return null
+    const cached = cache.get(name)
+    if (cached !== undefined) return cached
+    const sig = await crypto.subtle.sign(
+      "HMAC",
+      await getKey(),
+      // NUL separator: usernames and project ids can share a character
+      // set, so an unseparated concatenation could collide across
+      // (project, user) pairs. NUL appears in neither.
+      new TextEncoder().encode(`${projectId}\u0000${name}`),
+    )
+    const hex = Array.from(new Uint8Array(sig).slice(0, PSEUDONYM_BYTES))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("")
+    const pseudonym = `author_${hex}`
+    cache.set(name, pseudonym)
+    return pseudonym
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Response shapes
+// ---------------------------------------------------------------------------
+
+interface ExternalMemoryEntry {
+  id: string
+  path: string
+  kind: MemoryKind
+  status: MemoryStatus
+  humanEdited: boolean
+  content: string
+  firstLine: string
+  rationale: string | null
+  /** Pseudonymous — see createPseudonymizer. */
+  createdBy: string | null
+  reviewedBy: string | null
+  /** Agent run/session that proposed the entry. `credentialId` is dropped: it
+   *  names another person's token, which is the same PII class as the author. */
+  provenance: { runId?: string; sessionId?: string } | null
+  version: number
+  createdAt: string
+  updatedAt: string
+  /** True when this entry is inside the slice retrieval actually injects —
+   *  approved AND within MEMORY_INDEX_RENDER_CAP of the most-recently-updated
+   *  approved entries. An approved entry past the cap reads `false`: it exists
+   *  and a human sees it, but no draft is currently getting it. */
+  inRetrieval: boolean
+}
+
+interface ExternalBrief {
+  content: string
+  version: number
+  updatedAt: string | null
+  updatedBy: string | null
+}
+
+/** Keep the run/session ids (they identify an agent run, which is what a
+ *  caller legitimately wants to trace) and drop `credentialId`, which names a
+ *  person's token — the same PII class as the author fields. A provenance
+ *  blob carrying nothing else becomes null rather than an empty object, so a
+ *  caller can test truthiness instead of counting keys. */
+function scrubProvenance(
+  p: MemoryProvenance | null,
+): { runId?: string; sessionId?: string } | null {
+  if (p === null) return null
+  const out = {
+    ...(p.runId !== undefined ? { runId: p.runId } : {}),
+    ...(p.sessionId !== undefined ? { sessionId: p.sessionId } : {}),
+  }
+  return Object.keys(out).length > 0 ? out : null
+}
+
+function toExternalEntry(
+  m: AgentMemory,
+  inRetrieval: boolean,
+  createdBy: string | null,
+  reviewedBy: string | null,
+): ExternalMemoryEntry {
+  return {
+    id: m.id,
+    path: m.path,
+    kind: memoryKindForPath(m.path),
+    status: m.status,
+    humanEdited: m.humanEdited,
+    content: m.content,
+    firstLine: memoryFirstLine(m.content),
+    rationale: m.rationale,
+    createdBy,
+    reviewedBy,
+    provenance: scrubProvenance(m.provenance),
+    version: m.version,
+    createdAt: m.createdAt,
+    updatedAt: m.updatedAt,
+    inRetrieval,
+  }
+}
+
+/** Paths retrieval is currently injecting, in prompt order. Derived from the
+ *  same list + ordering + cap `buildMemoryContext` uses, so it cannot disagree
+ *  with the prompt. */
+function injectedPaths(all: readonly AgentMemory[]): Set<string> {
+  return new Set(
+    all
+      .filter((m) => m.status === "approved")
+      .slice(0, MEMORY_INDEX_RENDER_CAP)
+      .map((m) => m.path),
+  )
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/external/projects/:projectId/memory
+// ---------------------------------------------------------------------------
+
+async function handleMemoryList(
+  request: Request,
+  env: ExternalReadsEnv,
+  projectId: string,
+): Promise<Response> {
+  const authed = await authenticateAndScope(request, env, projectId)
+  if (!authed.ok) return authed.response
+  const db = env.AQUILLA_PG as AquillaDb
+  const limited = await checkReadRateLimit(db, authed.ctx.credential.credentialId)
+  if (limited) return limited
+
+  const url = new URL(request.url)
+
+  const qStatus = url.searchParams.get("status")
+  if (qStatus !== null && !STATUSES.includes(qStatus as MemoryStatus)) {
+    return externalError(
+      "validation_failed",
+      `invalid status "${qStatus}" — one of ${STATUSES.join("|")}`,
+      400,
+    )
+  }
+  const qKind = url.searchParams.get("kind")
+  if (qKind !== null && !KINDS.includes(qKind as MemoryKind)) {
+    return externalError(
+      "validation_failed",
+      `invalid kind "${qKind}" — one of ${KINDS.join("|")}`,
+      400,
+    )
+  }
+
+  const { limit, offset } = parsePageParams(url, { defaultLimit: 50, maxLimit: MEMORY_MAX_LIMIT })
+
+  // Fetch every status once (a project's memory is path-keyed and 10KB-capped
+  // per entry, so this is a small table) and filter in memory: `inRetrieval`
+  // and the retrieval counts below are properties of the WHOLE approved set,
+  // and a status-filtered query could not compute them.
+  const all = await listMemories(db, projectId)
+  const injected = injectedPaths(all)
+  const approvedCount = all.filter((m) => m.status === "approved").length
+
+  const filtered = all.filter(
+    (m) =>
+      (qStatus === null || m.status === qStatus) &&
+      (qKind === null || memoryKindForPath(m.path) === qKind),
+  )
+  const page = paginate(filtered, offset, limit)
+
+  const pseudonymize = createPseudonymizer(env.SYNC_SECRET_KEY as string, projectId)
+  const brief = await getBrief(db, projectId)
+  const data: ExternalMemoryEntry[] = await Promise.all(
+    page.data.map(async (m) =>
+      toExternalEntry(
+        m,
+        injected.has(m.path) && m.status === "approved",
+        await pseudonymize(m.createdBy),
+        await pseudonymize(m.reviewedBy),
+      ),
+    ),
+  )
+
+  const briefOut: ExternalBrief = {
+    content: brief.content,
+    version: brief.version,
+    updatedAt: brief.updatedAt,
+    updatedBy: await pseudonymize(brief.updatedBy),
+  }
+
+  return Response.json({
+    brief: briefOut,
+    data,
+    nextCursor: page.nextCursor,
+    retrieval: {
+      scope: "project",
+      indexRenderCap: MEMORY_INDEX_RENDER_CAP,
+      approvedCount,
+      injectedCount: injected.size,
+    },
+    hints: {
+      kinds:
+        'kind is derived from the path prefix: examples/ -> example, decisions/ -> decision, notes/ -> note, observations/ -> observation. Filter with ?kind= or ?status=.',
+      identities:
+        "createdBy/reviewedBy/brief.updatedBy are per-project pseudonyms, not usernames — stable within this project, uncorrelatable across projects.",
+      perCell:
+        "GET /api/v1/external/projects/:projectId/files/:fileId/cells/:cellId/memory returns what retrieval would inject for one cell's draft.",
+    },
+  })
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/external/projects/:projectId/files/:fileId/cells/:cellId/memory
+// ---------------------------------------------------------------------------
+
+// Honesty note, and the reason this route reports its own scope: retrieval is
+// **project-scoped today**. `buildMemoryContext` injects the brief plus the
+// capped approved-memory index for the project, identically for every cell —
+// there is no per-cell narrowing (no embedding search, no anchor filter). So
+// this route returns that set for the named cell rather than inventing a
+// per-cell ranking the copilot does not actually perform, and says so in
+// `retrieval.scope`/`retrieval.note`. An agent that assumed otherwise would
+// mis-predict its own drafts. If per-cell retrieval later lands (AQU-1232's
+// similarity search is the likely vehicle), this route narrows with it and the
+// `scope` field is how a caller detects the change.
+//
+// The cell is still validated (404 when it does not exist): the route answers
+// "what would this cell's draft be given" and a caller typo'ing a cell id
+// deserves an error, not a project-wide dump that looks like an answer.
+
+async function handleCellMemory(
+  request: Request,
+  env: ExternalReadsEnv,
+  projectId: string,
+  fileId: string,
+  cellId: string,
+): Promise<Response> {
+  const authed = await authenticateAndScope(request, env, projectId)
+  if (!authed.ok) return authed.response
+  const db = env.AQUILLA_PG as AquillaDb
+  const limited = await checkReadRateLimit(db, authed.ctx.credential.credentialId)
+  if (limited) return limited
+
+  const cell = await db
+    .prepare(
+      "SELECT 1 AS ok FROM cells WHERE project_id = ? AND file_id = ? AND cell_id = ? LIMIT 1",
+    )
+    .bind(projectId, fileId, cellId)
+    .first<{ ok: number }>()
+  if (!cell) {
+    return externalError("not_found", `no cell ${cellId} in file ${fileId}`, 404)
+  }
+
+  // The copilot's own retrieval path — not a reimplementation of it.
+  const memory = await buildMemoryContext(db, projectId)
+  const shown = memory.memoryIndex.slice(0, MEMORY_INDEX_RENDER_CAP)
+  const overflow = memory.memoryIndex.length - shown.length
+
+  const pseudonymize = createPseudonymizer(env.SYNC_SECRET_KEY as string, projectId)
+  const brief = await getBrief(db, projectId)
+
+  return Response.json({
+    cell: { fileId, cellId },
+    brief: {
+      content: memory.brief,
+      version: brief.version,
+      updatedAt: brief.updatedAt,
+      updatedBy: await pseudonymize(brief.updatedBy),
+    } satisfies ExternalBrief,
+    // Index entries only — path + first line + human-edited marker — because
+    // that is literally what the prompt carries. Full text is fetched
+    // just-in-time by the copilot's read_memory tool, and by an agent from the
+    // list route above.
+    entries: shown.map((e) => ({
+      path: e.path,
+      kind: memoryKindForPath(e.path),
+      firstLine: e.firstLine,
+      humanEdited: e.humanEdited,
+    })),
+    retrieval: {
+      scope: "project",
+      indexRenderCap: MEMORY_INDEX_RENDER_CAP,
+      approvedCount: memory.memoryIndex.length,
+      injectedCount: shown.length,
+      truncated: overflow > 0,
+      note:
+        "Retrieval is project-scoped: the copilot injects the project brief plus the most-recently-updated approved memory index, capped at indexRenderCap, identically for every cell in this project. No per-cell narrowing happens yet — entries are not ranked or filtered against this cell. Only paths and first lines are injected; the copilot pulls full text just-in-time, and so can you via GET /api/v1/external/projects/:projectId/memory." +
+        (overflow > 0
+          ? ` ${overflow} further approved ${overflow === 1 ? "entry is" : "entries are"} NOT injected (past the cap).`
+          : ""),
+    },
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Router
+// ---------------------------------------------------------------------------
+
+export async function handleExternalMemoryReadRequest(
+  request: Request,
+  env: ExternalReadsEnv,
+): Promise<Response | null> {
+  const url = new URL(request.url)
+
+  const listMatch = url.pathname.match(MEMORY_RE)
+  const cellMatch = url.pathname.match(CELL_MEMORY_RE)
+  if (!listMatch && !cellMatch) return null
+
+  // Claim the path even on the wrong verb, so a POST here gets a 405 that
+  // names the right method instead of falling through to discovery-route's
+  // "no external API route matches" 404 (which would be a lie — it matches,
+  // it is just read-only).
+  if (request.method !== "GET") {
+    return Response.json(
+      {
+        error: {
+          code: "validation_failed",
+          message: `${url.pathname} is read-only — use GET. Memory entries are written through the changeset prepare/approve flow (POST .../changesets), never by writing to this path.`,
+        },
+      },
+      { status: 405, headers: { Allow: "GET" } },
+    )
+  }
+
+  if (listMatch) return handleMemoryList(request, env, decodeURIComponent(listMatch[1]))
+  return handleCellMemory(
+    request,
+    env,
+    decodeURIComponent((cellMatch as RegExpMatchArray)[1]),
+    decodeURIComponent((cellMatch as RegExpMatchArray)[2]),
+    decodeURIComponent((cellMatch as RegExpMatchArray)[3]),
+  )
+}

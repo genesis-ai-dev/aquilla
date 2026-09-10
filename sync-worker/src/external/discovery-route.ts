@@ -60,6 +60,8 @@ function apiMap(): Record<string, unknown> {
       'GET /api/v1/external/projects/:projectId/files/:fileId/cells': 'Read a file’s cells (source + target). Supports since/limit/cursor, and lane=<tag> to filter targets to one target-language lane (see multiLanguage).',
       'GET /api/v1/external/projects/:projectId/search?q=': 'Full-text search cells. Optional side=source|target.',
       'GET /api/v1/external/projects/:projectId/cells/:cellId/history': 'Append-only event history for one cell.',
+      'GET /api/v1/external/projects/:projectId/memory': 'Living Memory: the project brief plus every memory entry (examples, decisions, notes, observations) with its status — the same rows the in-app Memory page shows. Filter with ?status=proposed|approved|rejected|archived and ?kind=example|decision|note|observation|other. Each entry carries inRetrieval: whether the copilot is actually being given it.',
+      'GET /api/v1/external/projects/:projectId/files/:fileId/cells/:cellId/memory': 'What the copilot’s retrieval would inject for that cell’s draft: the brief plus the capped approved-memory index. Retrieval is project-scoped today (no per-cell narrowing) — the response says so in retrieval.scope.',
       'POST /api/v1/external/projects/:projectId/artifacts': 'Upload raw bytes (max 25MB). Headers: x-artifact-name (required), content-type, x-artifact-kind (source|audio).',
       'GET /api/v1/external/projects/:projectId/artifacts/:artifactId': 'Artifact metadata (/content for bytes, /inspect for a format sniff).',
       'POST /api/v1/external/projects/:projectId/artifacts/:artifactId/parse': 'Parse a source artifact with the built-in importers. Default = preview { fileName, fileType, totalCells, sampleCells, warnings }; body { "stage": true } also stages a PlanImport changeset linking the artifact. See "importing" below.',
@@ -85,6 +87,16 @@ function apiMap(): Record<string, unknown> {
       serverParseableFormats: ['csv', 'json', 'md', 'obs', 'po', 'properties', 'sbv', 'srt', 'tsv', 'txt', 'usfm', 'vtt'],
       unsupportedFormats:
         'docx, pptx, doc, html, xliff, tmx, usx, idml, paratext-project, zip need DOM/browser parsers and are not yet server-parseable — import them through the in-app Import dialog, or parse them yourself and stage raw PlanImport cells (POST .../changesets with a PlanImport command). A multi-book USFM artifact parses into one file per book; stage each book separately via resultIndex.',
+    },
+    livingMemory: {
+      note:
+        'Living Memory is what the copilot has learned about a project: one human-authored brief plus path-keyed entries (examples/<slug>.md, decisions/<slug>.md, notes/<file>/<cell>-<digest>.md, observations/…) that move proposed -> approved -> archived under human review. Only APPROVED entries reach a prompt, and only the most-recently-updated indexRenderCap of them; the copilot is given each one as path + first line and pulls full text just-in-time.',
+      reading: [
+        `GET ${EXTERNAL_ROOT}/projects/:projectId/memory — brief + entries + per-entry inRetrieval. Read this before proposing an entry: it tells you whether one already exists at that path and whether it was approved.`,
+        `GET ${EXTERNAL_ROOT}/projects/:projectId/files/:fileId/cells/:cellId/memory — exactly what retrieval would inject for that cell's draft, so you can predict what the copilot is working from.`,
+      ],
+      privacy:
+        'Author fields (createdBy/reviewedBy/brief.updatedBy) are per-project pseudonyms, never usernames — stable within a project, uncorrelatable across projects. Translator identity is not agent-readable.',
     },
     multiLanguage: {
       note:

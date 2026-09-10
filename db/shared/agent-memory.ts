@@ -755,7 +755,46 @@ export interface MemoryContext {
   readMemory(path: string): Promise<string | null>
 }
 
-function firstLine(content: string): string {
+/**
+ * Max approved-memory entries rendered into the copilot's prompt index
+ * (adversarial-panel mem-m1). The index is ordered most-recently-updated
+ * first; entries past the cap are NOT injected — they are reachable only via
+ * `readMemory`/`read_memory`.
+ *
+ * Lives here rather than beside the prompt assembly (auth-worker
+ * `lib/agent/prompt-augment.ts`) because the Agent API's read model reports
+ * what retrieval *would* inject (AQU-1229) and must use the same cap — a
+ * second copy of the number would silently drift from the prompt it claims to
+ * describe.
+ */
+export const MEMORY_INDEX_RENDER_CAP = 50
+
+/**
+ * Kind of a memory entry, derived from its path prefix. The write commands
+ * (AQU-1228) key entries by path — `examples/<slug>.md`, `decisions/<slug>.md`,
+ * `notes/<file>/<cell>-<digest>.md` — and the in-app agent proposes under
+ * `observations/`. The prefix IS the kind; nothing else records it.
+ */
+export type MemoryKind = "example" | "decision" | "note" | "observation" | "other"
+
+const KIND_BY_PREFIX: ReadonlyArray<{ prefix: string; kind: MemoryKind }> = [
+  { prefix: "examples/", kind: "example" },
+  { prefix: "decisions/", kind: "decision" },
+  { prefix: "notes/", kind: "note" },
+  { prefix: "observations/", kind: "observation" },
+]
+
+/** Classify a memory path into its kind; anything unprefixed is "other". */
+export function memoryKindForPath(path: string): MemoryKind {
+  for (const { prefix, kind } of KIND_BY_PREFIX) {
+    if (path.startsWith(prefix)) return kind
+  }
+  return "other"
+}
+
+/** First non-empty line of an entry — the one-line summary the prompt index
+ *  and the Agent API read model both show in place of full content. */
+export function memoryFirstLine(content: string): string {
   for (const line of content.split("\n")) {
     const trimmed = line.trim()
     if (trimmed) return trimmed
@@ -778,7 +817,7 @@ export async function buildMemoryContext(
   const approved = await listMemories(db, projectId, "approved")
   const memoryIndex: MemoryIndexEntry[] = approved.map((m) => ({
     path: m.path,
-    firstLine: firstLine(m.content),
+    firstLine: memoryFirstLine(m.content),
     humanEdited: m.humanEdited,
   }))
 

@@ -108,14 +108,17 @@ async function authenticateCredential(
   return { ok: true, credential }
 }
 
-interface AuthedContext {
+export interface AuthedContext {
   credential: ApiCredentialContext
   /** Live-resolved role level (>= ROLE.VIEWER), NOT the credential's own
    *  (nonexistent) role field — the credential only carries autonomy/scope. */
   role: number
 }
 
-async function authenticateAndScope(
+/** Exported so sibling read modules (memory-read-routes.ts) reuse this exact
+ *  gate rather than re-deriving credential validation, org/project scope, and
+ *  the live-role floor — the three checks every external read must pass. */
+export async function authenticateAndScope(
   request: Request,
   env: ExternalReadsEnv,
   projectId: string,
@@ -250,10 +253,12 @@ const SEARCH_MAX_PER_CREDENTIAL = 300
 // are comparably cheap, paginated reads.
 const READ_MAX_PER_CREDENTIAL = 300
 
-/** Shared throttle for the plain read routes below. Returns a 429 Response if
- *  the credential is over budget (and records nothing further), else records
- *  this call and returns null. */
-async function checkReadRateLimit(db: AquillaDb, credentialId: string): Promise<Response | null> {
+/** Shared throttle for the plain read routes below (and for the sibling
+ *  memory reads, which share this budget — they are the same class of cheap
+ *  authenticated GET). Returns a 429 Response if the credential is over
+ *  budget (and records nothing further), else records this call and returns
+ *  null. */
+export async function checkReadRateLimit(db: AquillaDb, credentialId: string): Promise<Response | null> {
   const identifier = `credential:${credentialId}`
   const recent = await countRecentRateLimitEvents(db, "external_read", identifier)
   if (recent >= READ_MAX_PER_CREDENTIAL) {

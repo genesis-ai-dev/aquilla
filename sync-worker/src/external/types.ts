@@ -55,11 +55,11 @@ export interface ChangesetSummary {
   artifactLinked?: string
   /** LinkMedia: number of cells an audio artifact is attached to. */
   mediaLinked?: number
-  /** Receipt-only (CreateProject / UpdateProjectSettings / PatchSettings): the
-   *  command kind, so the human on /approve/:id sees WHICH lifecycle op they're
-   *  approving instead of an empty "No changes summarized." box (design §2 /
-   *  blind-approval fix). */
-  command?: 'CreateProject' | 'UpdateProjectSettings' | 'PatchSettings'
+  /** Receipt-only (CreateProject / UpdateProjectSettings / PatchSettings /
+   *  SetBrief): the command kind, so the human on /approve/:id sees WHICH
+   *  lifecycle op they're approving instead of an empty "No changes
+   *  summarized." box (design §2 / blind-approval fix). */
+  command?: 'CreateProject' | 'UpdateProjectSettings' | 'PatchSettings' | 'SetBrief'
   /** CreateProject: the project name being created. */
   projectName?: string
   /** CreateProject: the definitive new project id. */
@@ -71,9 +71,11 @@ export interface ChangesetSummary {
   /** UpdateProjectSettings: the pinned settings version this write guards on. */
   ifMatchVersion?: number
   /** UpdateProjectSettings / PatchSettings: one truncated "key → preview" per
-   *  top-level settings key being written. Rendered as individual lines on the
-   *  approval page (an object, so the page's flat number/string filter ignores
-   *  it — the page reads it explicitly). */
+   *  top-level settings key being written. SetBrief uses the same shape, keyed
+   *  per brief section (`translationBrief.<fieldId>`), so the approval page
+   *  renders which sections change without a second summary field. Rendered as
+   *  individual lines on the approval page (an object, so the page's flat
+   *  number/string filter ignores it — the page reads it explicitly). */
   settingsChanges?: Record<string, string>
   /** EmitEvents: per-kind effect lines (kind, count, testimony flag). */
   events?: EmitEventsSummaryEntry[]
@@ -118,6 +120,9 @@ export interface PlannedEventIds {
   /** PatchSettings (receipt-only): the settings version pinned at prepare —
    *  same guard semantics as updateProjectSettings. */
   patchSettings?: { version: number }
+  /** SetBrief (receipt-only): the settings version pinned at prepare — the
+   *  brief lives in the settings blob, so it takes the same version guard. */
+  setBrief?: { version: number }
   /** EmitEvents: one entry per plan event, in event order — the compiled event
    *  id plus any payload ids minted at prepare (comment.create's commentId /
    *  assignment.create's assignmentId when the caller omitted them), so a
@@ -154,13 +159,13 @@ export interface ReceiptOnlyReceipt {
   credentialId: string
   channel: ProvenanceChannel
   changesetId: string
-  command: 'CreateProject' | 'UpdateProjectSettings' | 'PatchSettings'
+  command: 'CreateProject' | 'UpdateProjectSettings' | 'PatchSettings' | 'SetBrief'
   appliedAt: string
   /** CreateProject: the created project id. UpdateProjectSettings /
-   *  PatchSettings: the updated project id. */
+   *  PatchSettings / SetBrief: the updated project id. */
   projectId: string
-  /** UpdateProjectSettings / PatchSettings: the new settings version after the
-   *  write. */
+  /** UpdateProjectSettings / PatchSettings / SetBrief: the new settings version
+   *  after the write. */
   version?: number
 }
 

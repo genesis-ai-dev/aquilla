@@ -24,10 +24,16 @@ import {
   validateEmitEventsCommand,
   type EmitEventsCommand,
 } from './commands-emit-events'
+import {
+  SET_BRIEF_REQUIRED_ROLE,
+  validateSetBriefCommand,
+  type SetBriefCommand,
+} from './commands-set-brief'
 
 export type { PlanImportCell, PlanImportManifest, PlanImportVariant } from './import-manifest'
 export type { PatchSettingsCommand, PatchSettingsOp } from './commands-patch-settings'
 export type { EmitEventsCommand, EmitEventInput } from './commands-emit-events'
+export type { SetBriefCommand } from './commands-set-brief'
 export { cellKey, laneCellKey } from './cell-keys'
 
 /** Set (or update) a single cell's translation. Compiles to target.cell.commit. */
@@ -109,6 +115,7 @@ export type Command =
   | LinkMediaCommand
   | PatchSettingsCommand
   | EmitEventsCommand
+  | SetBriefCommand
 
 /** Hard cap on source cells per PlanImport changeset. Above this the plan is
  *  rejected with validation_failed — the manifest-in-R2 pattern for larger
@@ -440,6 +447,11 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
       if (cmd) commands.push(cmd)
       return
     }
+    if (c.kind === 'SetBrief') {
+      const cmd = validateSetBriefCommand(c, index, issues)
+      if (cmd) commands.push(cmd)
+      return
+    }
     if (c.kind === 'LinkMedia') {
       if (!isNonEmptyString(c.fileId)) {
         issues.push({ index, message: 'LinkMedia.fileId must be a non-empty string' })
@@ -495,6 +507,11 @@ export function requiredRoleForCommand(c: Command): number {
   // index-filtering floor per the command catalog.
   if (c.kind === 'PatchSettings') {
     return staticPatchSettingsFloor(c)
+  }
+  // SetBrief also takes its own receipt-only path; MAINTAINER is the honest
+  // floor (the same one PatchSettings applies to the translationBrief key).
+  if (c.kind === 'SetBrief') {
+    return SET_BRIEF_REQUIRED_ROLE
   }
   // EmitEvents: max REQUIRED_ROLE across the batch's event kinds — the same
   // floors its compiled events hit at the /events perimeter (dynamic bumps,

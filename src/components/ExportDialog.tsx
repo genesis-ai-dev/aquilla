@@ -51,7 +51,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Input } from "@/components/ui/input"
 import { downloadBlob } from "@/lib/export/export-service"
 import { collectInlineStyleWarnings, type ExportFidelityWarning } from "@/lib/export/fidelity"
-import { downloadSourceFile, downloadProjectZip, fetchSourceSidecar } from "@/lib/sync/source-export"
+import { downloadSourceFile, downloadProjectZip, fetchSourceSidecar, fetchRemovedCells } from "@/lib/sync/source-export"
 import { exportPlainTextStructured } from "@/lib/export/exporters/plaintext"
 import { exportMarkdownStructured } from "@/lib/export/exporters/markdown"
 import { exportTsv } from "@/lib/export/exporters/tsv"
@@ -88,7 +88,7 @@ import {
   idmlOrgEligible,
 } from "@/lib/idml/release-gate"
 import { idmlTelemetryProperties } from "@/lib/idml/telemetry"
-import { isUserAddedLine } from "@/lib/timeline/user-line-origin"
+import { hasPackageLocators } from "@/lib/export/import-locators"
 
 export type ExportFormat = "usfm" | "txt" | "md" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "srt" | "audio-by-character" | "audio-by-line" | "character-sheets" | "project-report" | "docx" | "pptx" | "idml" | "plain-text-dump" | "metadata-csv" | "sdbh-xml"
 export type ExportScope = "file" | "project"
@@ -417,19 +417,44 @@ export function ExportDialog({
   const nativeOption = nativeFormatId ? formatOptions.find((f) => f.id === nativeFormatId)! : null
 
   /**
-   * AQU-1068: how many cells in this file were ADDED here rather than imported.
+   * AQU-1068 (2026-09-09): what a native round-trip export does with content
+   * added or removed in the app, in this file, in plain words.
    *
-   * The native formats round-trip by substituting translations back into the
-   * client's own file — USFM by canonical ref, docx/pptx/IDML by position in
-   * the original package. A cell born in the app has nothing to substitute
-   * into, so it cannot appear in that output. That is inherent, not a bug.
+   * Sam reversed August's decision: an added cell is ALWAYS content the client's
+   * file is missing, so USFM, Word and PowerPoint now carry it. This replaced a
+   * WARNING that said the opposite — and that warning was wrong twice over, so
+   * the scoping below is part of the fix rather than cosmetic:
    *
-   * Saying so is what keeps it from being a silent loss: someone types a
-   * missing verse into an added row, exports, and their file quietly does not
-   * contain it. Sam settled this on 2026-08-30 — allow the inserts everywhere,
-   * and make the omission loud at the moment it applies.
+   *   - It fired for every type in NATIVE_EXPORT_BY_FILE_TYPE, which includes
+   *     md, txt, xliff, tmx, csv and tsv. Those render from scratch and have
+   *     always included added lines (exporters/added-lines.test.ts pins it), so
+   *     the warning was false on six of the ten types it reached.
+   *   - InDesign cannot take an added or removed cell AT ALL — the editor
+   *     refuses the actions on every IDML row — so "won't be included" described
+   *     a situation that cannot arise.
+   *
+   * Null means say nothing: either the file has no added or removed content, or
+   * the format re-renders and simply carries everything.
    */
-  const addedLineCount = useMemo(() => cells.filter(isUserAddedLine).length, [cells])
+  const structuralNote = useMemo(() => {
+    if (!nativeFormatId) return null
+    // Word and PowerPoint place content by a per-paragraph locator recorded at
+    // import. A file imported before that existed is matched BY POSITION, where
+    // an inserted or dropped paragraph shifts every later one onto the wrong
+    // text — so those files carry neither, and should say so.
+    if (nativeFormatId === "docx" || nativeFormatId === "pptx") {
+      if (!hasPackageLocators(cells)) return "importExport.dialog.structuralNoteLegacy" as const
+      return nativeFormatId === "docx"
+        ? ("importExport.dialog.structuralNoteDocx" as const)
+        : ("importExport.dialog.structuralNotePptx" as const)
+    }
+    if (nativeFormatId === "usfm") return "importExport.dialog.structuralNoteUsfm" as const
+    // IDML, and sdbh-xml, which addresses by LEXID and has the same problem.
+    if (nativeFormatId === "idml" || nativeFormatId === "sdbh-xml") {
+      return "importExport.dialog.structuralNoteUnplaceable" as const
+    }
+    return null
+  }, [nativeFormatId, cells])
 
   const [format, setFormat] = useState<ExportFormat>(nativeFormatId ?? "tsv")
   const [scope, setScope] = useState<ExportScope>("file")
@@ -985,7 +1010,12 @@ export function ExportDialog({
         const rawBytes = await fetchSourceSidecar({ projectId, fileId: activeFileId, getToken, targetLang })
         setStatus({ kind: "busy", msg: t("importExport.status.injectingTranslations") })
         const { exportDocx } = await import("@/lib/export/exporters/docx")
-        const result = await exportDocx(rawBytes, cells)
+        // AQU-1068: what this file LOST. Without it a removed paragraph is
+        // indistinguishable from an untranslated one, and the exporter keeps
+        // the client's original words for a line somebody deliberately took
+        // out. Fails soft to an empty list — never blocks the download.
+        const removedCells = await fetchRemovedCells({ projectId, fileId: activeFileId, getToken })
+        const result = await exportDocx(rawBytes, cells, { removedCells })
         const baseName = buildExportStem(false) // AQU-437: user-chosen stem
         downloadBlob(result.blob, `${baseName}.docx`)
         setFidelityWarnings([
@@ -1011,7 +1041,9 @@ export function ExportDialog({
         const rawBytes = await fetchSourceSidecar({ projectId, fileId: activeFileId, getToken, targetLang })
         setStatus({ kind: "busy", msg: t("importExport.status.injectingTranslations") })
         const { exportPptx } = await import("@/lib/export/exporters/pptx")
-        const result = await exportPptx(rawBytes, cells)
+        // See the docx branch above.
+        const removedCells = await fetchRemovedCells({ projectId, fileId: activeFileId, getToken })
+        const result = await exportPptx(rawBytes, cells, { removedCells })
         const baseName = buildExportStem(false)
         downloadBlob(result.blob, `${baseName}.pptx`)
         setFidelityWarnings([
@@ -1905,8 +1937,7 @@ export function ExportDialog({
             <p className="text-xs text-muted-foreground text-center leading-relaxed">
               {t("importExport.dialog.nativeFormatHint", { label: t(nativeOption.labelKey) })}
               {nativeOption.lossy && ` ${t("importExport.dialog.someFormattingMayNotCarryOver")}`}
-              {addedLineCount > 0 &&
-                ` ${t("importExport.dialog.addedLinesNotIncluded", { count: addedLineCount })}`}
+              {structuralNote && ` ${t(structuralNote)}`}
             </p>
           </div>
         )}

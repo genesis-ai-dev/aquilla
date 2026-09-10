@@ -49,7 +49,13 @@
 import JSZip from "jszip"
 import type { CellData } from "@/hooks/useCells"
 import { htmlToSpans, spansToRunXml } from "./docx-runs"
-import { packageBlockKey, translationsByPackageBlock } from "../import-locators"
+import {
+  packageBlockKey,
+  translationsByPackageBlock,
+  removedPackageBlockKeys,
+  insertionsAfterPackageBlock,
+  type RemovedCellLocatorSource,
+} from "../import-locators"
 import { isUserAddedLine } from "@/lib/timeline/user-line-origin"
 
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -60,6 +66,10 @@ export interface DocxExportResult {
   injected: number
   /** Number of paragraphs that were left as-is (no translation). */
   untouched: number
+  /** AQU-1068: paragraphs dropped because their cell was removed in the app. */
+  removed: number
+  /** AQU-1068: new paragraphs written for cells added in the app. */
+  inserted: number
   /** Per-paragraph inline-style warnings: translated paragraphs whose source
    *  had MIXED run formatting keep only the dominant run's styling as the base —
    *  surfaced so users know the output was simplified (additive field). */
@@ -122,9 +132,18 @@ export function buildLegacyGroups(cells: CellData[]): {
   return { groups, groupToData }
 }
 
+export interface DocxExportOptions {
+  /** AQU-1068: source cells this file has LOST, from the server's event log
+   *  (`fetchRemovedCells`). Their paragraphs leave the document. Without this
+   *  a removed paragraph is indistinguishable from an untranslated one and the
+   *  removal is silently undone. */
+  removedCells?: readonly RemovedCellLocatorSource[]
+}
+
 export async function exportDocx(
   rawDocxBytes: ArrayBuffer,
   cells: CellData[],
+  options: DocxExportOptions = {},
 ): Promise<DocxExportResult> {
   const zip = await JSZip.loadAsync(rawDocxBytes)
 
@@ -136,6 +155,12 @@ export async function exportDocx(
   const { groups, groupToData } = buildLegacyGroups(cells)
   const locatedTranslations = translationsByPackageBlock(cells)
   const hasLocatedTranslations = locatedTranslations.size > 0
+  // AQU-1068. BOTH lookups are built BEFORE the package walk, which is the
+  // point of the guard in buildLegacyGroups: an added cell that consumed a
+  // positional slot would shift every mapping after it and write translations
+  // into the wrong paragraphs of the client's document.
+  const removedKeys = removedPackageBlockKeys(options.removedCells ?? [])
+  const insertions = insertionsAfterPackageBlock(cells, isUserAddedLine)
 
   // Surgical paragraph scan: match both full <w:p …>…</w:p> and self-closing <w:p …/>.
   // We do NOT use DOMParser/XMLSerializer — raw string splice only.
@@ -152,8 +177,37 @@ export async function exportDocx(
   let paragraphIndex = 0
   let injected = 0
   let untouched = 0
+  let removed = 0
+  let inserted = 0
   const warnings: { segment: string; detail: string }[] = []
   let match: RegExpExecArray | null
+
+  /**
+   * AQU-1068: write out any cells added UNDER this paragraph, as new
+   * paragraphs of their own in the anchor's style.
+   *
+   * Cheap because the rebuild is plain string concatenation and
+   * `paragraphIndex` is driven by the INPUT scan — an inserted paragraph
+   * cannot shift a later locator, which is what makes this safe here and not
+   * in the positional fallback path.
+   */
+  function appendInsertions(blockKey: string, anchorXml: string): void {
+    const texts = insertions.get(blockKey)
+    if (!texts || texts.length === 0) return
+    const anchorInner = anchorXml.includes("</w:p>") ? extractInner(anchorXml) : ""
+    const pPrXml = extractPPr(anchorInner)
+    const afterPPr = pPrXml ? anchorInner.slice(anchorInner.indexOf(pPrXml) + pPrXml.length) : anchorInner
+    const baseRprXml = extractFirstRunRpr(afterPPr)
+    const openTag = anchorXml.includes("</w:p>") ? extractOpenTag(anchorXml) : "<w:p>"
+    for (const text of texts) {
+      const spans = htmlToSpans(text)
+      const effective = spans.length > 0
+        ? spans
+        : [{ text, marks: new Set<import("./docx-runs").Mark>() }]
+      rebuilt += `${openTag}${pPrXml}${spansToRunXml(effective, baseRprXml)}</w:p>`
+      inserted++
+    }
+  }
 
   while ((match = paraRegex.exec(xml)) !== null) {
     const full = match[0]
@@ -184,15 +238,23 @@ export async function exportDocx(
 
     // Normalized imports address the exact source paragraph. Only legacy rows
     // use the positional group fallback.
-    const located = locatedTranslations.get(
-      packageBlockKey("word/document.xml", `w:p[${paragraphIndex}]`),
-    )
+    const blockKey = packageBlockKey("word/document.xml", `w:p[${paragraphIndex}]`)
+    const located = locatedTranslations.get(blockKey)
     const group = groups[nonEmptyIdx]
     nonEmptyIdx++
+
+    // AQU-1068: this paragraph's cell was REMOVED. Emit nothing at all — the
+    // paragraph leaves the document. `paragraphIndex` counts the INPUT scan, so
+    // every later locator still resolves; nothing shifts.
+    if (removedKeys.has(blockKey)) {
+      removed++
+      continue
+    }
 
     if (!located && (hasLocatedTranslations || !group)) {
       rebuilt += full
       untouched++
+      appendInsertions(blockKey, full)
       continue
     }
 
@@ -202,6 +264,7 @@ export async function exportDocx(
     if (!html) {
       rebuilt += full
       untouched++
+      appendInsertions(blockKey, full)
       continue
     }
 
@@ -237,6 +300,7 @@ export async function exportDocx(
     // Reconstruct: open tag + pPr (verbatim) + new runs + close tag.
     rebuilt += `${openTag}${pPrXml}${runsXml}</w:p>`
     injected++
+    appendInsertions(blockKey, full)
   }
 
   // Append any trailing content after the last paragraph match.
@@ -246,7 +310,7 @@ export async function exportDocx(
   zip.file("word/document.xml", rebuilt)
 
   const blob = await zip.generateAsync({ type: "blob", mimeType: DOCX_MIME })
-  return { blob, injected, untouched, warnings }
+  return { blob, injected, untouched, removed, inserted, warnings }
 }
 
 /** Extract the content between the opening and closing w:p tags. */

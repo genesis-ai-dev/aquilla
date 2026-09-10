@@ -526,13 +526,30 @@ export const importExport = defineNamespace({
     "importExport.dialog.downloadFile": "Download {fileName}",
     "importExport.dialog.nativeFormatHint": "{label} — your file in its original format, with current translations.",
     "importExport.dialog.someFormattingMayNotCarryOver": "Some inline formatting may not carry over.",
-    // AQU-1068: shown beside the native (round-trip) format only. These
-    // exports patch translations back into the client's own file, so a cell
-    // added here has nothing to be patched into and cannot appear.
-    "importExport.dialog.addedLinesNotIncluded": plural({
-      one: "{count} cell added here isn\u2019t part of the original file, so it won\u2019t be included.",
-      other: "{count} cells added here aren\u2019t part of the original file, so they won\u2019t be included.",
-    }),
+    // AQU-1068 (rewritten 2026-09-09): shown beside a native round-trip format
+    // when this file has cells somebody added or removed in the app. These
+    // exports put translations back into the client's OWN file, so what happens
+    // to that content differs per format and is worth saying plainly rather
+    // than warning about.
+    //
+    // Its predecessor said added cells could never be included. That is no
+    // longer true for USFM, Word or PowerPoint, and it was never true for the
+    // rendered formats it also reached (csv, tsv, xliff, tmx, md, txt all carry
+    // added lines fine — see exporters/added-lines.test.ts).
+    "importExport.dialog.structuralNoteUsfm":
+      "Content added here is written into the verse it follows, with no new verse number. " +
+      "Content removed here is left out.",
+    "importExport.dialog.structuralNoteDocx":
+      "Content added here becomes a new paragraph after the one it follows. " +
+      "Content removed here is left out.",
+    "importExport.dialog.structuralNotePptx":
+      "Content added here becomes a new paragraph after the one it follows, and a slide may " +
+      "overflow. Content removed here is left out.",
+    "importExport.dialog.structuralNoteUnplaceable":
+      "Cells can\u2019t be added or removed on this kind of file, so this export matches the original.",
+    "importExport.dialog.structuralNoteLegacy":
+      "This file was imported before we recorded where each paragraph came from, so content " +
+      "added or removed here can\u2019t be placed in it.",
     "importExport.dialog.formatOptionAriaLabel": "{label} ({ext})",
     "importExport.dialog.lossyBadge": "lossy",
     "importExport.dialog.permissionRequiredAriaLabel": "Export permission required",
@@ -1315,16 +1332,36 @@ export const importExport = defineNamespace({
         description: "Label of the primary download button on the Export dialog, naming the exact file it will produce.",
         placeholders: { fileName: "Filename (with extension) the download will produce — not translated." },
       },
-      "importExport.dialog.addedLinesNotIncluded": {
+      "importExport.dialog.structuralNoteUsfm": {
         description:
-          "Appended to the native (round-trip) format's hint in the Export dialog, and only " +
-          "when the file contains cells somebody added inside the app. Those formats work by " +
-          "putting translations back into the user's ORIGINAL file, so a cell that was never " +
-          "in that file has nowhere to go and is left out. Warns them before they download.",
-        placeholders: {
-          count:
-            "How many added cells the file has; it also selects which plural form is used.",
-        },
+          "Appended to the USFM format's hint in the Export dialog, when this file has cells " +
+          "somebody added or removed in the app. Says exactly what the export does with them. " +
+          "'The verse it follows' matters: an added cell gets no verse number of its own, so " +
+          "the client's numbering never changes.",
+      },
+      "importExport.dialog.structuralNoteDocx": {
+        description:
+          "The same note for a Word export: an added cell becomes its own paragraph after the " +
+          "one it follows, and a removed cell's paragraph is dropped from the document.",
+      },
+      "importExport.dialog.structuralNotePptx": {
+        description:
+          "The same note for a PowerPoint export, plus the caveat that a text box has a fixed " +
+          "size and does not reflow, so added content can push past the edge of a slide and " +
+          "need the box resizing by hand.",
+      },
+      "importExport.dialog.structuralNoteUnplaceable": {
+        description:
+          "Shown for a format where cells cannot be added or removed at all — InDesign today, " +
+          "whose layout is addressed by position so new or missing paragraphs cannot be " +
+          "expressed. Reassures the reader that the export matches their original.",
+      },
+      "importExport.dialog.structuralNoteLegacy": {
+        description:
+          "Shown for a Word or PowerPoint file imported before we recorded a locator for each " +
+          "paragraph. Those files are matched to the document by POSITION, where inserting or " +
+          "dropping a paragraph would shift every later one onto the wrong text, so added and " +
+          "removed content cannot be carried at all.",
       },
       "importExport.dialog.nativeFormatHint": {
         description: "Caption below the primary download button, naming the file's own format.",

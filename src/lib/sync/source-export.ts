@@ -101,6 +101,51 @@ export async function fetchSourceSidecar(args: Omit<DownloadSourceArgs, "downloa
   return res.arrayBuffer()
 }
 
+/** One source cell this file has lost, as the server reports it. */
+export interface RemovedCellRecord {
+  cellId: string
+  /** Verse address, for USFM. Null for every other format. */
+  canonicalRef: string | null
+  /** The cell's create-time metadata, verbatim. The package locator that docx
+   *  and pptx export by lives inside it — decoded by `import-locators.ts`,
+   *  which owns that shape. */
+  metadata: Record<string, unknown> | null
+}
+
+/**
+ * AQU-1068: which source cells did this file lose?
+ *
+ * The docx and pptx exporters patch translations into the client's original
+ * package, and leave a paragraph alone when it has no translation. A REMOVED
+ * cell has no translation either — its row is gone from the projection
+ * entirely — so without this the two are indistinguishable and every removal is
+ * silently undone at export. The USFM exporter runs on the server and reads the
+ * event log directly; these two run in the browser and cannot.
+ *
+ * Returns an empty list on ANY failure rather than throwing. The worst case of
+ * an empty list is today's behaviour, where a removed paragraph keeps the
+ * client's original words; a throw would take the whole download with it.
+ */
+export async function fetchRemovedCells(args: {
+  projectId: string
+  fileId: string
+  getToken: (fileId: string) => Promise<string | null>
+}): Promise<RemovedCellRecord[]> {
+  try {
+    const token = await args.getToken(args.fileId)
+    if (!token) return []
+    const url =
+      `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(args.projectId)}` +
+      `/files/${encodeURIComponent(args.fileId)}/removed-cells`
+    const res = await fetch(url, { method: "GET", headers: { Authorization: `Bearer ${token}` } })
+    if (!res.ok) return []
+    const body = (await res.json()) as { removed?: RemovedCellRecord[] }
+    return Array.isArray(body.removed) ? body.removed : []
+  } catch {
+    return []
+  }
+}
+
 function triggerDownload(blob: Blob, filename: string): void {
   const objectUrl = URL.createObjectURL(blob)
   const a = document.createElement("a")

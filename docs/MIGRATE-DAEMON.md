@@ -176,6 +176,16 @@ Everything lives under `MIGRATE_HOME` (`~/aquilla-migrate` on the box):
   failed pull or install here just leaves the current version running instead of
   crash-looping the service.
 
+- **What `systemctl restart` actually does**: the unit sends SIGTERM to the
+  daemon's main process only (`KillMode=mixed`); `withLock` in `main.ts`
+  catches it, aborts the scheduler loop, lets any in-flight chunk finish, and
+  releases the R2 run lock before exiting — so `update.sh` never leaves the
+  lock lease to expire on its own. systemd allows up to `TimeoutStopSec=600`
+  (10 minutes) for that drain before escalating to SIGKILL. Duplicate SIGTERMs
+  arriving within ~2s of the first (pnpm/tsx forwarding their own copy of the
+  signal is normal and harmless) are folded into the same drain; a second,
+  later SIGTERM still forces an immediate exit without releasing gracefully.
+
 - **Read status**: `pnpm migrate:daemon status` (from `~/aquilla` on the box, or
   point `MIGRATE_HOME` at a copy of `daemon.db` from elsewhere).
 

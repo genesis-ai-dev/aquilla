@@ -476,7 +476,7 @@ export async function commitMemoryCommand(
     if (retired.status === 'not_found' && wasStaged) {
       return errorResponse('not_found', `no approved example at ${path} to retire`, { path })
     }
-    return finishMemoryReceipt(db, cred, cs, projectId, path, 'archived', confirmationId, channel)
+    return finishMemoryReceipt(db, cred, cs, cmd, projectId, path, 'archived', confirmationId, channel)
   }
 
   // The changeset's human confirmation stands in for the Memory-tab review —
@@ -503,7 +503,7 @@ export async function commitMemoryCommand(
   }
 
   if (!approve) {
-    return finishMemoryReceipt(db, cred, cs, projectId, path, 'proposed', confirmationId, channel)
+    return finishMemoryReceipt(db, cred, cs, cmd, projectId, path, 'proposed', confirmationId, channel)
   }
 
   const reviewed = await reviewMemory(db, {
@@ -523,13 +523,14 @@ export async function commitMemoryCommand(
   // widen-to-MemoryStatus is a type artifact, so re-narrow rather than
   // reporting a status this branch cannot produce.
   const status = reviewed.status === 'ok' && reviewed.memory.status === 'proposed' ? 'proposed' : 'approved'
-  return finishMemoryReceipt(db, cred, cs, projectId, path, status, confirmationId, channel)
+  return finishMemoryReceipt(db, cred, cs, cmd, projectId, path, status, confirmationId, channel)
 }
 
 async function finishMemoryReceipt(
   db: AquillaDb,
   cred: ApiCredentialContext,
   cs: StoredChangeset,
+  cmd: MemoryCommand,
   projectId: string,
   path: string,
   status: 'proposed' | 'approved' | 'archived',
@@ -540,7 +541,7 @@ async function finishMemoryReceipt(
     credentialId: cred.credentialId,
     channel,
     changesetId: cs.id,
-    command: cs.commands[0].kind as MemoryCommand['kind'],
+    command: cmd.kind,
     appliedAt: new Date().toISOString(),
     projectId,
     memoryPath: path,

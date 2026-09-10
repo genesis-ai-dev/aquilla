@@ -373,9 +373,8 @@ projects.post(
         createdBy: user.id,
       })
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
       console.error("project create failed:", err)
-      return c.json({ error: `create failed: ${message}` }, 500)
+      return c.json({ error: "create failed" }, 500)
     }
 
     return c.json({
@@ -697,9 +696,8 @@ projects.patch(
         return c.json({ error: "not found" }, 404)
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
       console.error("project rename failed:", err)
-      return c.json({ error: `rename failed: ${message}` }, 500)
+      return c.json({ error: "rename failed" }, 500)
     }
 
     return c.json({ id: projectId, name })
@@ -730,9 +728,8 @@ projects.post("/:projectId/archive", authMiddleware, async (c) => {
       .bind(user.id, projectId)
       .run()
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
     console.error("project archive failed:", err)
-    return c.json({ error: `archive failed: ${message}` }, 500)
+    return c.json({ error: "archive failed" }, 500)
   }
 
   const row = await c.env.AQUILLA_PG.prepare(
@@ -776,9 +773,8 @@ projects.delete("/:projectId/archive", authMiddleware, async (c) => {
       .bind(projectId)
       .run()
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
     console.error("project restore failed:", err)
-    return c.json({ error: `restore failed: ${message}` }, 500)
+    return c.json({ error: "restore failed" }, 500)
   }
 
   c.executionCtx.waitUntil(notifySyncWorkerOfArchive(c.env, projectId, null, null))
@@ -1302,9 +1298,8 @@ projects.delete("/:projectId/files/:fileId", authMiddleware, async (c) => {
         .bind(fileId, projectId)
         .run()
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
       console.error("delete file projection failed:", err)
-      return c.json({ error: `delete failed: ${message}` }, 500)
+      return c.json({ error: "delete failed" }, 500)
     }
   }
 

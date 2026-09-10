@@ -206,7 +206,8 @@ export async function handleMigrateSourceArtifactCopyRequest(
     await env.AQUILLA_PG.batch(statements)
   } catch (error) {
     if (copied && !existing) await env.SNAPSHOTS.delete(key)
-    return Response.json({ error: `source metadata write failed: ${String(error)}` }, { status: 500 })
+    console.error("[migrate-source-artifact-copy] metadata write failed:", error)
+    return Response.json({ error: "source metadata write failed" }, { status: 500 })
   }
 
   return Response.json({

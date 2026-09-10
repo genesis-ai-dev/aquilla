@@ -285,7 +285,8 @@ export async function handleParseArtifact(
       ...(body.excludeFrontMatter !== undefined ? { excludeFrontMatter: body.excludeFrontMatter } : {}),
     })
   } catch (err) {
-    return errorResponse('validation_failed', `parse failed for fileType "${fileType}": ${String(err)}`, {
+    console.error(`[external-import-parse] parse failed for fileType "${fileType}":`, err)
+    return errorResponse('validation_failed', `parse failed for fileType "${fileType}"`, {
       fileType,
       ...(detectedFormat ? { detectedFormat } : {}),
     })

@@ -217,7 +217,8 @@ export async function handleVoiceConvertRequest(
       body: modalForm,
     })
   } catch (err) {
-    return new Response(`voice conversion upstream unreachable: ${String(err)}`, { status: 502 })
+    console.error("[voice-convert] upstream unreachable:", err)
+    return new Response("voice conversion upstream unreachable", { status: 502 })
   }
   if (!modalRes.ok) {
     const detail = await modalRes.text().catch(() => "")

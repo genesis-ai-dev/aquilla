@@ -206,10 +206,12 @@ describe('MCP tools/list', () => {
         'confirm_changeset', 'discard_changeset', 'get_capabilities', 'get_changeset',
         'get_identity_and_scope', 'get_project', 'list_projects', 'prepare_import',
         'prepare_translations', 'preview_import', 'read_content', 'read_history',
+        // AQU-1231 quality reads.
+        'read_quality', 'read_term_consistency',
         'search_project',
       ].sort(),
     )
-    expect(body.result.tools).toHaveLength(13)
+    expect(body.result.tools).toHaveLength(15)
     for (const tool of body.result.tools) {
       expect(typeof tool.description).toBe('string')
       expect(tool.description.length).toBeGreaterThan(20)
@@ -313,6 +315,31 @@ describe('MCP tools/call — reads', () => {
     const cells = toolPayload(((await cellsRes.json()) as any).result)
     expect((cells.payload as any).data.length).toBeGreaterThan(0)
     expect((cells.payload as any).data[0].cellId).toBe('cell-1')
+  })
+
+  it('read_quality and read_term_consistency reach the quality router (AQU-1231)', async () => {
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb)
+
+    const qualityRes = await rpc(env, token, {
+      jsonrpc: '2.0', id: 20, method: 'tools/call',
+      params: { name: 'read_quality', arguments: { projectId: PROJECT, fileId: FILE } },
+    })
+    const quality = toolPayload(((await qualityRes.json()) as any).result)
+    expect(quality.isError).toBe(false)
+    expect((quality.payload as any).projectId).toBe(PROJECT)
+    expect((quality.payload as any).data[0].fileId).toBe(FILE)
+    expect(typeof (quality.payload as any).data[0].coverage.totalCells).toBe('number')
+
+    const termsRes = await rpc(env, token, {
+      jsonrpc: '2.0', id: 21, method: 'tools/call',
+      params: { name: 'read_term_consistency', arguments: { projectId: PROJECT, onlyDrift: true } },
+    })
+    const terms = toolPayload(((await termsRes.json()) as any).result)
+    expect(terms.isError).toBe(false)
+    expect((terms.payload as any).onlyDrift).toBe(true)
+    // No termbase seeded in this suite — the scan runs and finds nothing.
+    expect((terms.payload as any).data).toEqual([])
   })
 
   it('a tool argument error is an isError tool result, not a transport error', async () => {

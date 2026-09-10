@@ -108,14 +108,14 @@ async function authenticateCredential(
   return { ok: true, credential }
 }
 
-interface AuthedContext {
+export interface AuthedContext {
   credential: ApiCredentialContext
   /** Live-resolved role level (>= ROLE.VIEWER), NOT the credential's own
    *  (nonexistent) role field — the credential only carries autonomy/scope. */
   role: number
 }
 
-async function authenticateAndScope(
+export async function authenticateAndScope(
   request: Request,
   env: ExternalReadsEnv,
   projectId: string,
@@ -165,7 +165,7 @@ async function authenticateAndScope(
  *  existing internal route handlers in-process without re-deriving their
  *  auth/ETag/anchor-chain logic. `fileId` is only meaningful to the doc-scoped
  *  verifier the DO uses; project-scoped read routes ignore it. */
-async function mintInternalToken(
+export async function mintInternalToken(
   env: ExternalReadsEnv,
   ctx: AuthedContext,
   projectId: string,
@@ -253,7 +253,7 @@ const READ_MAX_PER_CREDENTIAL = 300
 /** Shared throttle for the plain read routes below. Returns a 429 Response if
  *  the credential is over budget (and records nothing further), else records
  *  this call and returns null. */
-async function checkReadRateLimit(db: AquillaDb, credentialId: string): Promise<Response | null> {
+export async function checkReadRateLimit(db: AquillaDb, credentialId: string): Promise<Response | null> {
   const identifier = `credential:${credentialId}`
   const recent = await countRecentRateLimitEvents(db, "external_read", identifier)
   if (recent >= READ_MAX_PER_CREDENTIAL) {

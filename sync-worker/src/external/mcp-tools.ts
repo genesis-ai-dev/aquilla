@@ -285,9 +285,9 @@ export const MCP_TOOLS: McpToolDef[] = [
       'round-trip export later. (2) preview_import to check the parse. (3) prepare_import ' +
       'to stage a PlanImport changeset. (4) the normal confirm_changeset / approval flow. ' +
       'Server-parseable formats: txt, md, json, po, properties, obs, vtt, srt, sbv, csv, ' +
-      'tsv, usfm (format is auto-detected; pass fileType to override — required for po/' +
-      'properties/obs/sbv, which are not sniffable). DOM-bound formats (docx, pptx, html, ' +
-      'xliff, tmx, usx, idml) are NOT server-parseable — they return validation_failed ' +
+      'tsv, usfm, docx (format is auto-detected; pass fileType to override — required for ' +
+      'po/properties/obs/sbv, which are not sniffable). Still DOM-bound: pptx, html, ' +
+      'xliff, tmx, usx, idml are NOT server-parseable — they return validation_failed ' +
       'naming the client-side alternatives (in-app Import dialog, or raw PlanImport cells). ' +
       'Returns { fileName, fileType, totalCells, sampleCells (first 10), warnings, ' +
       'results } — `results` lists every parsed file when a multi-book USFM splits into ' +

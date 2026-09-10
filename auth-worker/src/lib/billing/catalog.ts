@@ -37,7 +37,7 @@ export function unavailableOffers(): BillingOffers {
 }
 
 /** No fallback catalog, amounts, or automatic exposure/cohort assignment. */
-export async function readBillingOffers(env: Env): Promise<BillingOffers> {
+export async function readValidatedBillingCatalog(env: Env) {
   const catalog = catalogSchema.parse(JSON.parse(env.STRIPE_PRICE_CATALOG ?? 'null'))
   const secret = requireStripeSecret(env)
   const live = /^(sk|rk)_live_/.test(secret)
@@ -56,5 +56,10 @@ export async function readBillingOffers(env: Env): Promise<BillingOffers> {
         env, 'GET', `/prices/${encodeURIComponent(binding.priceId)}`,
       )))))
   }
-  return presentBillingOffers(catalog, prices)
+  const offers = presentBillingOffers(catalog, prices)
+  return { catalog, prices, offers }
+}
+
+export async function readBillingOffers(env: Env): Promise<BillingOffers> {
+  return (await readValidatedBillingCatalog(env)).offers
 }

@@ -54,11 +54,12 @@ export async function recordInitialWorkspaceEntitlement(
       || !workspace.eligibility.offers.includes(quote.offer)) {
       throw new Error('Workspace is not eligible for this offer')
     }
+    // Bind serialized JSON as text first: postgres.js otherwise encodes it twice.
     await tx.prepare(`INSERT INTO workspace_plan_entitlements
       (org_id, offer, scope, quantity, entitlement_version, price_version,
        price_ids, stripe_subscription_id, stripe_customer_id,
        billing_interval, usage_anchor)
-      VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?::timestamptz)`)
+      VALUES (?, ?, ?, ?, ?, ?, ?::text::jsonb, ?, ?, ?, ?::timestamptz)`)
       .bind(input.orgId, quote.offer, quote.scope, quote.quantity,
         quote.entitlementVersion, quote.priceVersion, JSON.stringify(ids),
         input.subscriptionId, input.customerId, quote.interval, anchor.toISOString()).run()

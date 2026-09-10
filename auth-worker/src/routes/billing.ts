@@ -216,6 +216,13 @@ billing.post("/billing/webhook", async (c) => {
   }
 
   const obj = event.data?.object ?? {}
+  const metadata = obj.metadata as Record<string, unknown> | undefined
+  const invoiceMetadata = (obj.parent as { subscription_details?: { metadata?: Record<string, unknown> } } | undefined)?.subscription_details?.metadata
+  const legacyInvoiceMetadata = (obj.subscription_details as { metadata?: Record<string, unknown> } | undefined)?.metadata
+  if (metadata?.kind === "workspace_plan_rehearsal" || invoiceMetadata?.kind === "workspace_plan_rehearsal"
+    || legacyInvoiceMetadata?.kind === "workspace_plan_rehearsal") {
+    return c.json({ error: "workspace_activation_not_ready" }, 503)
+  }
   const type = event.type ?? ""
   const eventId = typeof event.id === "string" ? event.id : null
 

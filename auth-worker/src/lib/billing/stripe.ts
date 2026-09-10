@@ -39,6 +39,7 @@ export async function stripeForm(
   method: "GET" | "POST",
   path: string,
   params: Record<string, string | number | undefined> = {},
+  idempotencyKey?: string,
 ): Promise<Record<string, unknown>> {
   const secret = requireStripeSecret(env)
   const body = new URLSearchParams()
@@ -51,6 +52,7 @@ export async function stripeForm(
     signal: AbortSignal.timeout(10_000),
     headers: {
       Authorization: `Bearer ${secret}`,
+      ...(method === "POST" && idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
       "Content-Type": "application/x-www-form-urlencoded",
     },
     body: method === "GET" ? undefined : body,

@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { startWorkspaceCheckoutRehearsal, workspaceCheckoutInput, workspaceCheckoutRehearsalEnabled, WorkspaceCheckoutConflict } from '../lib/billing/workspace-checkout'
 import { z } from 'zod'
 import { readBillingOffers, unavailableOffers } from '../lib/billing/catalog'
 import { paidOffers } from '../lib/billing/catalog-view'
@@ -50,6 +51,25 @@ billingWorkspace.post('/orgs/:orgId/billing/review', authMiddleware, async c => 
     return c.json(reviewBillingPlan(workspace, selection.data, await readBillingOffers(c.env)))
   } catch {
     return c.json({ error: 'pricing_unavailable' }, 503)
+  }
+})
+billingWorkspace.post('/orgs/:orgId/billing/checkout-rehearsal', authMiddleware, async c => {
+  // A live key, deployed hostname, missing local flag, or absent opt-in stays off.
+  if (!workspaceCheckoutRehearsalEnabled(c.env, c.req.url)) return c.json({ error: 'checkout_disabled' }, 503)
+  const raw = c.req.param('orgId') ?? ''
+  const orgId = Number(raw)
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(orgId) || orgId < 1) return c.json({ error: 'invalid_org' }, 400)
+  const role = await getEffectiveOrgRole(c.env, orgId, c.get('user'))
+  if (role == null || role < ROLE.MAINTAINER) return c.json({ error: 'forbidden' }, 403)
+  const parsed = workspaceCheckoutInput.safeParse(await c.req.json().catch(() => null))
+  if (!parsed.success) return c.json({ error: 'invalid_selection' }, 400)
+  c.header('Cache-Control', 'private, no-store')
+  try {
+    return c.json(await startWorkspaceCheckoutRehearsal(c.env, orgId,
+      c.get('user').email, parsed.data, c.req.url))
+  } catch (error) {
+    if (error instanceof WorkspaceCheckoutConflict) return c.json({ error: 'checkout_conflict', message: error.message }, 409)
+    return c.json({ error: 'checkout_unavailable' }, 503)
   }
 })
 export default billingWorkspace

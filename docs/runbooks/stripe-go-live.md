@@ -294,6 +294,91 @@ E2E_SHARD=3/3 npx tsx scripts/e2e-up.ts -- \
 npm run build
 ```
 
+## Durable sandbox checkout checkpoint — 2026-09-10
+
+This increment implements a local sandbox rehearsal path, not production
+checkout or paid activation. The public UI remains disabled. No actual Stripe
+session, charge, secret installation, or deployment occurs during verification;
+Stripe responses are mocked while database and HTTP handlers are real.
+
+- [x] Pass the real review response into server-side checkout validation for all
+  five offers and both billing intervals. Confirm price version, currency, and
+  full total against a freshly validated catalog; browser values never price
+  a session. Team 20× contains one platform line and one capacity line.
+- [x] Persist one immutable request per workspace before contacting Stripe.
+  Keep approved catalog/price/quote snapshots, request parameters, account,
+  and a durable idempotency key. Network calls run outside the database lock.
+- [x] Reuse that key and exact parameters after an ambiguous Stripe response or
+  a failure saving the returned session. Concurrent attempts share the same
+  request. Persisted sessions are retrieved before reuse; closed sessions block.
+- [x] Recheck workspace eligibility under the lock and block conflicting
+  existing pricing assignments. Refuse changed offers or stale/expired attempts
+  until their external outcome is reconciled. Never rotate a key on uncertainty.
+- [x] Validate the returned session identity, workspace reference, test mode,
+  subscription mode, attempt metadata, and Stripe-hosted HTTPS redirect.
+- [x] Prevent rehearsal events from entering the legacy Field webhook path.
+  Signed rehearsal events return a retryable error with no receipt or plan
+  grant until new-plan activation is integrated.
+- [x] Fix the JSON representation boundary in both checkout requests and initial
+  entitlement price IDs. Real postgres.js previously double-encoded serialized
+  JSON; bind as text before casting to JSONB. Assert object/array shapes through
+  the production adapter and enforce checkout shapes in the database.
+- [ ] Connect successful payment reconciliation to the stored attempt and
+  atomic initial entitlement activation. Verify full payment-to-access behavior.
+- [ ] Add confirmed expiration/cancellation reconciliation before permitting a
+  replacement checkout. Do not delete an ambiguous attempt to create another.
+- [ ] Connect the UI and production checkout only after the remaining payment,
+  lifecycle, metering, and release gates pass.
+
+Migration `0093_workspace_checkout_attempts.sql` is prepared, not deployed.
+The endpoint is `POST /orgs/:orgId/billing/checkout-rehearsal`, with billing
+maintainer authorization. It requires all of: loopback request hostname,
+`WRANGLER_LOCAL=1`, `BILLING_WORKSPACE_CHECKOUT_REHEARSAL=true`, a test Stripe key,
+and a loopback `BASE_URL` for app return links. No deployment config enables it.
+Never set the local bypass on a deployed worker. The request accepts the offer,
+interval, quantity one, and `confirmedPriceVersion`, `confirmedTotalAmount`,
+`confirmedCurrency` from the review. Unknown fields are rejected.
+
+Sessions expire after 23 hours; retries stop 30 minutes before that boundary.
+These are technical rehearsal limits, not subscription policies. Stripe may
+prune idempotency keys after 24 hours; unresolved attempts remain blocked instead
+of silently creating another session. See [Stripe idempotent requests](https://docs.stripe.com/api/idempotent_requests)
+and [Checkout Session creation](https://docs.stripe.com/api/checkout/sessions/create).
+The stored request holds no Stripe secret. Its confirmed result grants no access.
+
+Test impact: authenticated review produces the values consumed by checkout;
+validated catalog composition produces line items consumed by the Stripe REST
+adapter. The durable database record produces parameters for both initial send
+and retry. Signed rehearsal metadata is consumed by the webhook guard. Tests
+cover all these boundaries with real handlers and schema. A real-Postgres run
+caught the JSON bug despite passing PGlite tests; that regression remains in the
+production-adapter suite, including the initial-entitlement writer.
+
+Verification so far: 92 worker tests pass, 35 tests pass against disposable real
+Postgres databases, 33 app/impact/determinism tests pass, and worker TypeScript
+passes. The production build and both billing smoke journeys pass, with no
+slow-request logs. The signed rehearsal guard covers checkout, subscription
+updates/deletion, and both invoice metadata formats. Spec commit: `4a91e97`.
+
+```sh
+# auth-worker directory
+npx vitest run src/__tests__/billing-workspace-checkout.test.ts \
+  src/__tests__/billing-workspace.test.ts src/__tests__/billing-review.test.ts \
+  src/lib/billing/catalog.test.ts \
+  src/__tests__/billing-workspace-migration.test.ts \
+  src/__tests__/billing-routes.test.ts \
+  src/__tests__/billing-webhook-recovery.test.ts --maxWorkers=2
+npx vitest run --config vitest.webhook-postgres.config.ts
+# worktree root
+npx vitest run scripts/e2e-impact.test.ts scripts/e2e-determinism.test.ts \
+  src/components/org/BillingOffers.test.tsx \
+  src/components/org/BillingPlanReview.test.tsx --maxWorkers=2
+npx tsc --noEmit -p auth-worker/tsconfig.json
+E2E_SHARD=3/3 npx tsx scripts/e2e-up.ts -- \
+  e2e/specs/orgs/org-settings-billing.smoke.spec.ts --shard=1/1
+npm run build
+```
+
 ## Production launch checklist
 
 **Status: not ready to enable paid checkout.** Prices are ready in sandbox;

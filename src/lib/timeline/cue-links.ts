@@ -169,6 +169,16 @@ function dice(shared: number, lenA: number, lenB: number): number {
   return lenA + lenB === 0 ? 0 : (2 * shared) / (lenA + lenB)
 }
 
+/** Non-overlapping codepoint ranges checked in `dominantScript`. Latin has no
+ * single contiguous range, so it stays a regex test outside this table. */
+const SCRIPT_CODEPOINT_RANGES: ReadonlyArray<{ name: string; min: number; max: number }> = [
+  { name: "hebrew", min: 0x0590, max: 0x05ff },
+  { name: "arabic", min: 0x0600, max: 0x06ff },
+  { name: "greek", min: 0x0370, max: 0x03ff },
+  { name: "cyrillic", min: 0x0400, max: 0x04ff },
+  { name: "han", min: 0x4e00, max: 0x9fff },
+]
+
 /**
  * Which writing system a cue is in, or null when it has no letters to judge by
  * (a cue of pure digits or punctuation commits to nothing).
@@ -182,16 +192,6 @@ function dice(shared: number, lenA: number, lenB: number): number {
  * ones can only ever score zero against each other, so the script is what to
  * detect.
  */
-/** Non-overlapping codepoint ranges checked in `dominantScript`. Latin has no
- * single contiguous range, so it stays a regex test outside this table. */
-const SCRIPT_CODEPOINT_RANGES: ReadonlyArray<{ name: string; min: number; max: number }> = [
-  { name: "hebrew", min: 0x0590, max: 0x05ff },
-  { name: "arabic", min: 0x0600, max: 0x06ff },
-  { name: "greek", min: 0x0370, max: 0x03ff },
-  { name: "cyrillic", min: 0x0400, max: 0x04ff },
-  { name: "han", min: 0x4e00, max: 0x9fff },
-]
-
 export function dominantScript(text: string): string | null {
   const counts = new Map<string, number>()
   const bump = (name: string) => counts.set(name, (counts.get(name) ?? 0) + 1)

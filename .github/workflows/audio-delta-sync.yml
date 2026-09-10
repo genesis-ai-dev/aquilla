@@ -11,12 +11,18 @@ name: Delta sync (content + audio)
 # Required repo secrets (Settings → Secrets and variables → Actions):
 #   FRONTIER_USERNAME, FRONTIER_PASSWORD   GitLab creds (Frontier password grant), OR
 #   FRONTIER_TOKEN, GITLAB_URL             GitLab token escape hatch (skips Frontier login)
+#     NOTE: when BOTH sets are present the direct FRONTIER_TOKEN wins
+#     (src/lib/migrate/gitlab/auth.ts resolveCredentialsFromEnv), so an expired
+#     FRONTIER_TOKEN shadows a valid username/password. A "401 Unauthorized"
+#     from GitLab names the path it used — rotate that secret (or delete
+#     FRONTIER_TOKEN to fall through to the password grant).
 #   FRONTIER_D1_ACCOUNT_ID                 account containing frontier-db-v2
 #   FRONTIER_D1_DATABASE_ID                frontier-db-v2 database UUID
 #   FRONTIER_D1_API_TOKEN                  API token scoped to D1 Read only
 #   NEON_PG_HOST/DB/ROLE/PASSWORD          production Neon direct connection
 #   SYNC_SECRET_KEY                        trusted ingest/upsert auth (prod sync-worker)
-#   R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY R2 S3 token (read LFS bucket, write snapshots, state)
+#   R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY R2 S3 token (read LFS bucket, write snapshots, state,
+#                                          and the _migrate/*.lock run lock every --apply takes)
 #   DISCORD_WEBHOOK_URL                    channel webhook for the run report
 # Optional:
 #   R2_ACCOUNT_ID (defaults to the Frontier R&D account baked into the script)
@@ -55,6 +61,13 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # migrate-users.ts imports auth-worker/src/** (frontier-d1, legacy-user-
+      # migration → utils/password → bcryptjs). auth-worker is its own npm
+      # package, not a pnpm workspace member, so the root install leaves its
+      # node_modules empty and the users step died with ERR_MODULE_NOT_FOUND.
+      - name: Install auth-worker deps (imported by migrate-users.ts)
+        run: npm ci --prefix auth-worker
+
       # Restore the delta state (HEAD-sha-per-project, for BOTH passes:
       # contentSha + audioFastSha) so unchanged projects are skipped without
       # cloning. Missing object → first run → full sweep.
@@ -91,7 +104,9 @@ jobs:
           npx tsx scripts/migrate-users.ts --apply 2>&1 | tee users.log
 
       # 2) CONTENT: orgs/teams (created in Neon) + projects + cells. The group
-      #    sync runs inline, so new orgs are fully pulled in. No R2 needed here.
+      #    sync runs inline, so new orgs are fully pulled in. R2 creds are for
+      #    the run lock (_migrate/audio-migrate-state.lock) that every --apply
+      #    acquires so a stray local run can never overlap this one.
       # Step-level timeouts (not just the job's): a JOB-level timeout kills
       # `if: always()` steps too, so the state-persist step never ran and every
       # nightly full sweep restarted from zero (run 28809824118: content took
@@ -108,6 +123,8 @@ jobs:
           FRONTIER_TOKEN: ${{ secrets.FRONTIER_TOKEN }}
           GITLAB_URL: ${{ secrets.GITLAB_URL }}
           SYNC_SECRET_KEY: ${{ secrets.SYNC_SECRET_KEY }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
           set -o pipefail
           npx tsx scripts/migrate-all.ts --apply 2>&1 | tee content.log

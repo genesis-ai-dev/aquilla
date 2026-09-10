@@ -64,7 +64,7 @@ export async function extractReach4LifeStrings(
 
   const strings = selection.notes.map((note) => {
     if (note.bookCode && !bookCodes.includes(note.bookCode)) bookCodes.push(note.bookCode)
-    const value = idmlUnitToTranslatableString(note.unit)
+    const value = idmlUnitToTranslatableString(note.unit, result.styleCatalog)
     const milestone = milestoneFor(note.bookCode, note.section.id, note.section.label, sectionOrdinals)
     return {
       ...value,

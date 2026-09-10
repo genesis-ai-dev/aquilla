@@ -19,7 +19,7 @@ import { useWorkspaceTabs, readLastActiveFileId } from "@/hooks/useWorkspaceTabs
 import { clearLastLocation, readLastLocation, writeLastLocation } from "@/lib/frontier/last-location-store"
 import { ROLE } from "@/lib/frontier/roles"
 import { languagesEqual } from "@/lib/language-normalize"
-import { readAtVersion, useActiveCellStore, useCellStoreVersion, type CellStore, type CellSummary } from "@/hooks/useActiveCellStore"
+import { readAtVersion, useActiveCellStore, useCellStoreVersion, type CellSummary } from "@/hooks/useActiveCellStore"
 import { useStaleSourceCells } from "@/hooks/useStaleSourceCells"
 import { triggerLinkSync } from "@/lib/sync/archive"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
@@ -293,7 +293,8 @@ import { useFootnotesPreference } from "@/hooks/useFootnotesPreference"
 import type { VisibleFootnoteEntry } from "@/lib/footnotes/types"
 import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
 import { useFileFontSizes, setFileViewPref } from "@/lib/store/file-view-prefs"
-import { EditorScrollProvider, useEditorScroll } from "@/context/EditorScrollContext"
+import { EditorScrollProvider } from "@/context/EditorScrollContext"
+import { ScrollToGroupHandler } from "@/components/ScrollToGroupHandler"
 import { EditorActionsProvider } from "@/context/EditorActionsContext"
 import { detectSuggestions, type RenameSuggestion } from "@/lib/file-labeling/detect"
 import { canExportSourceFile, exportSourceFile } from "@/lib/file-source-export"
@@ -12242,58 +12243,6 @@ function MoveToCorpusDialog({
       </DialogContent>
     </Dialog>
   )
-}
-
-// ── ScrollToGroupHandler ───────────────────────────────────────────────────
-// Must render inside <EditorScrollProvider> so useEditorScroll() has context.
-// Watches editorScroll.pending and scrolls the first matching cell into view
-// via the forwarded editorRef.
-
-interface ScrollToGroupHandlerProps {
-  cellStore: CellStore
-  storeVersion: number
-  editorRef: React.RefObject<EditorTableHandle | null>
-}
-
-function ScrollToGroupHandler({ cellStore, storeVersion, editorRef }: ScrollToGroupHandlerProps) {
-  const editorScroll = useEditorScroll()
-
-  useEffect(() => {
-    void storeVersion
-    const pending = editorScroll.pending
-    if (!pending) return
-    const { group: groupId, section: sectionLabel, fileId: targetFileId } = pending
-
-    // FRO-250/254: only consume() when the active store belongs to the requested
-    // file. During a file-switch the pending request may already carry the NEW
-    // file's id while the store is still clearing/loading; consuming early would
-    // jump nowhere and burn the request.
-    const currentFileId = cellStore.getFileId()
-    if (targetFileId !== null && currentFileId !== targetFileId) {
-      // Leave the request pending until the store has been replaced.
-      return
-    }
-
-    editorScroll.consume()
-    if (!groupId && !sectionLabel) return
-
-    let idx = -1
-    if (sectionLabel) {
-      idx = cellStore.findIndexBySection(sectionLabel)
-    } else if (groupId) {
-      idx = cellStore.getAllSummaries().findIndex((cell) => (cell.group ?? "Ungrouped") === groupId)
-    }
-
-    if (idx >= 0) {
-      // Defer a tick so the virtualized list has the latest cell list after any
-      // file-switch that preceded this request.
-      setTimeout(() => {
-        editorRef.current?.scrollToCellIndex(idx)
-      }, 0)
-    }
-  }, [cellStore, editorScroll, editorRef, storeVersion])
-
-  return null
 }
 
 interface TrashedProjectScreenProps {

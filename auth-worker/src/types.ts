@@ -1,5 +1,7 @@
 // Shared types for the aquilla-identity worker.
 //
+import type { RequestMemo } from "./lib/request-memo"
+//
 // A single Postgres database (Neon) owns everything codex-web touches —
 // identity, orgs, projects, members, invites, plus the file/cell projections
 // the sync worker writes. Schema lives in `db/postgres/schema.sql`.
@@ -29,6 +31,10 @@ export interface Env {
    *  Injected per-request in index.ts from HYPERDRIVE; the sync worker uses the
    *  same database. NOT a binding itself. */
   AQUILLA_PG: AquillaDb
+
+  /** Per-request read memo, attached by index.ts's fetch wrapper. Absent on
+   *  direct service calls (unit tests, cron). See lib/request-memo.ts. */
+  requestMemo?: RequestMemo
 
   /** Postgres (Neon) via Hyperdrive — the sole datastore. index.ts builds
    *  AQUILLA_PG from this; required (the worker fails fast when absent). */

@@ -11,7 +11,7 @@
  * compilation (which read active concepts) need no changes.
  */
 import { useMemo, useState, useCallback, useRef, useEffect } from "react"
-import { useNavigate, useParams } from "react-router-dom"
+import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { BookOpen, Download, Upload, Sparkles, ChevronDown, ChevronRight, ShieldAlert, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -29,6 +29,10 @@ import { useProject } from "@/hooks/useProject"
 import type { UseProjectSettings } from "@/hooks/useProjectSettings"
 import { useProjectCells } from "@/hooks/useProjectCells"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { useConcepts } from "@/hooks/useConcepts"
+
+/** Stable identity so the memo below holds when a workspace project has none. */
+const EMPTY_SERVER_CONCEPTS: Concept[] = []
 import type { Concept, TermRendering } from "@/lib/terminology/types"
 import {
   addConcept,
@@ -88,6 +92,7 @@ export function GlossaryEditor({
   const t = useT()
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const ownedProject = useProject(id!, {
     initialProject: workspaceProject,
     enabled: workspaceProject == null,
@@ -134,7 +139,25 @@ export function GlossaryEditor({
     enabled: Boolean(project?.id && projectFiles.length > 0 && cellDataRequested),
   })
 
-  const serverConcepts = useMemo(() => project?.terminology ?? [], [project?.terminology])
+  // AQU-1006 follow-up: concepts come from the sync-worker projection, not the
+  // retired `project.terminology` settings key.
+  //
+  // Two paths, mirroring how this component already resolves `project`:
+  //   - WORKSPACE-OWNED (`workspaceProject` passed in): its `terminology` is
+  //     ALREADY projection-sourced — ProjectWorkspace folds `useConcepts` onto
+  //     the record it hands down (see `editorProject`). Reuse it and skip the
+  //     fetch, exactly as `ownedProject` is disabled on this path; fetching
+  //     again would be the "duplicate project resolve" this path exists to
+  //     avoid, and would flash an empty glossary before it landed.
+  //   - STANDALONE (routed directly): fetch for ourselves.
+  const fetched = useConcepts({
+    projectId: id ?? null,
+    getToken,
+    tokenReady: !!frontierSession?.jwt && workspaceProject == null,
+  })
+  const serverConcepts = workspaceProject
+    ? workspaceProject.terminology ?? EMPTY_SERVER_CONCEPTS
+    : fetched.concepts
   const conceptsRef = useRef<Concept[]>(serverConcepts)
   const pendingWritesRef = useRef(0)
   const [optimisticConcepts, setOptimisticConcepts] = useState<Concept[] | null>(null)
@@ -156,7 +179,7 @@ export function GlossaryEditor({
 
   const [showArchived, setShowArchived] = useState(false)
   const [view, setView] = useState<"glossary" | "violations">("glossary")
-  const [selectedConceptId, setSelectedConceptId] = useState<string | null>(null)
+  const selectedConceptId = searchParams.get("concept")
   const [suggestRequested, setSuggestRequested] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
   const [newSource, setNewSource] = useState("")
@@ -321,8 +344,8 @@ export function GlossaryEditor({
     const corpus = cellFiles.flatMap((f) =>
       (f.cells ?? []).map((c: { original?: string }) => c.original ?? ""),
     )
-    const candidates = extractCandidates(corpus, { managed: project.terminology ?? [] })
-    const existing = new Set((project.terminology ?? []).map((c) => c.sourceTerm.trim().toLowerCase()))
+    const candidates = extractCandidates(corpus, { managed: serverConcepts })
+    const existing = new Set(serverConcepts.map((c) => c.sourceTerm.trim().toLowerCase()))
     let working = project
     for (const cand of candidates) {
       if (cand.isManaged || existing.has(cand.term.trim().toLowerCase())) continue
@@ -335,8 +358,29 @@ export function GlossaryEditor({
 
   const handleOpenDetails = useCallback((conceptId: string) => {
     setCellDataRequested(true)
-    setSelectedConceptId(conceptId)
-  }, [])
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current)
+      next.set("concept", conceptId)
+      return next
+    })
+  }, [setSearchParams])
+
+  const handleCloseDetails = useCallback(() => {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current)
+      next.delete("concept")
+      return next
+    })
+  }, [setSearchParams])
+
+  useEffect(() => {
+    if (selectedConcept) setCellDataRequested(true)
+  }, [selectedConcept])
+
+  useEffect(() => {
+    const fromUrl = searchParams.get("concept")
+    if (fromUrl) handleOpenDetails(fromUrl)
+  }, [searchParams, handleOpenDetails])
 
   const handlePromoteRendering = useCallback(
     (conceptId: string, target: string) => {
@@ -379,23 +423,24 @@ export function GlossaryEditor({
   }
 
   if (selectedConcept) {
-    if (!cellDataReady) {
-      return <LoadingPanel label={t("terminology.editor.loadingTermDetails")} />
-    }
     return (
       <TerminologyTermDetail
         concept={selectedConcept}
         cells={detailCells}
+        examplesLoading={!cellDataReady}
         canEdit={!hasOrigin || (project?.syncRole?.level ?? 0) >= 400}
         projectId={id!}
         username={frontierSession?.username ?? project?.username ?? "local"}
-        onClose={() => setSelectedConceptId(null)}
+        onClose={handleCloseDetails}
         onCellCommitted={() => {}}
         onOptimisticEdit={(cellId, patch) => {
           setOptimisticTargets((current) => ({ ...current, [cellId]: patch }))
         }}
         canManageTermbase={canManage}
         onPromoteRendering={handlePromoteRendering}
+        onJumpToCell={({ cellId, fileId }) => {
+          navigate(`/project/${id}/editor/file/${encodeURIComponent(fileId)}?cellId=${encodeURIComponent(cellId)}`)
+        }}
       />
     )
   }

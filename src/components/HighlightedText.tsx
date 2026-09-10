@@ -78,13 +78,21 @@ export function HighlightedText({
     <span>
       {chunks.map((chunk, i) => {
         if (chunk.range) {
+          const isTerminologyRange = chunk.range.ruleId.startsWith("term:")
           return (
             <span
               key={i}
               role={onRangeClick ? "button" : undefined}
               tabIndex={onRangeClick ? 0 : undefined}
-              onClick={onRangeClick ? (e) => onRangeClick(chunk.range!.ruleId, e.currentTarget) : undefined}
+              onClick={onRangeClick ? (e) => {
+                // A terminology blot can sit inside the managed-term popover
+                // trigger. Keep this click owned by the blot so one gesture
+                // never opens both popovers (AQU-1006 review regression).
+                e.stopPropagation()
+                onRangeClick(chunk.range!.ruleId, e.currentTarget)
+              } : undefined}
               className={cn(
+                isTerminologyRange && "terminology-highlight",
                 chunk.range.kind === "violation-major" && "decoration-wavy decoration-red-500 underline underline-offset-[3px]",
                 chunk.range.kind === "violation-minor" && "decoration-wavy decoration-amber-500 underline underline-offset-[3px]",
                 chunk.range.kind === "violation-waived" && "decoration-wavy decoration-muted-foreground/60 underline underline-offset-[3px] opacity-60",

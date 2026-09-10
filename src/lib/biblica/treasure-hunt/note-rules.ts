@@ -176,8 +176,8 @@ export function parseTreasureHuntReference(text: string): TreasureHuntReference 
   const chapters = chapterNumbers(normalized.slice(match.name.length))
   if (chapters.length === 0) return { bookCode: match.bookCode }
 
-  const first = chapters[0]!
-  const last = chapters[chapters.length - 1]!
+  const first = chapters[0]
+  const last = chapters[chapters.length - 1]
   return {
     bookCode: match.bookCode,
     chapter: first,
@@ -202,7 +202,7 @@ function chapterNumbers(tail: string): string[] {
   )
   let inVerseList = false
   for (const token of tokens) {
-    const number = token[1]!
+    const number = token[1]
     const separator = token[2] ?? ""
     if (separator === ":" || separator === ".") {
       chapters.push(number)

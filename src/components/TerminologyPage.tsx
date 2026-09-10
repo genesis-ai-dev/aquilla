@@ -42,7 +42,9 @@ import {
 } from "@/components/ui/select"
 import type { Concept, TermRendering, RenderingStatus } from "@/lib/terminology/types"
 import { renderingStatusLabelKey } from "@/lib/terminology/types"
-import { addConcept, updateConcept, deleteConcept, mergeConcepts, approveConcept, rejectConcept } from "@/lib/terminology/store"
+import { mergeConcepts } from "@/lib/terminology/store"
+import { useConcepts } from "@/hooks/useConcepts"
+import { emitTermCreate, emitTermUpdate, emitTermDelete, emitTermApprove, emitTermReject } from "@/lib/sync/events-emit"
 import { importConceptsCsv, exportConceptsCsv } from "@/lib/terminology/csv"
 import { importConceptsTbx, exportConceptsTbx } from "@/lib/terminology/tbx"
 import { humanRoleName } from "@/lib/frontier/roles"
@@ -749,10 +751,7 @@ export function TerminologyPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
 
-  const { project, loading, patchSettings } = useProject(id!)
-
-  // Derive concepts from the project record — single source of truth
-  const concepts = project?.terminology ?? []
+  const { project, loading } = useProject(id!)
 
   // Role-gating: AQU-822 — the floor is the org's configured
   // termbaseEditMinRole (project_lead 500 unless the org lowered or raised it),
@@ -796,6 +795,17 @@ export function TerminologyPage() {
         project.origin?.kind === "git" ? project.origin.gitlabProjectId : undefined,
     })
   }, [project?.id, project?.name, project?.origin])
+
+  // AQU-1006 follow-up: concepts come from the sync-worker projection.
+  // `project.terminology` (the settings-blob key) is retired — it could only
+  // express "here is the entire termbase", which is why concurrent adds
+  // destroyed each other. Declared here rather than at the top of the
+  // component because it needs `getToken`, defined just above.
+  const { concepts, refresh: refreshConcepts } = useConcepts({
+    projectId: id ?? null,
+    getToken,
+    tokenReady: !!frontierSession?.jwt,
+  })
 
   const cellsEnabled = Boolean(project?.id && projectFiles.length > 0)
   const { files: projectFileCells } = useProjectCells({
@@ -934,9 +944,24 @@ export function TerminologyPage() {
 
   // ── Persist helper ─────────────────────────────────────────────────────────
 
-  async function persistConcepts(updatedConcepts: Concept[]) {
-    await patchSettings({ terminology: updatedConcepts })
-  }
+  // AQU-1006 follow-up: there is deliberately NO `persistConcepts(array)`
+  // helper any more. Writing the whole termbase in one PATCH — rebuilt from
+  // this component's snapshot — is exactly what silently destroyed concurrent
+  // adds on 2026-09-04. Every mutation below names ONE concept and emits one
+  // event. Do not reintroduce a bulk-array write; if you need to write many
+  // concepts (an import), emit one event per concept.
+  const author = frontierSession?.username || project?.username || "local"
+
+  /**
+   * Re-read the projection after a write so the list reflects the server.
+   *
+   * useCallback, not a bare function: the memoized handlers below depend on
+   * it, and a fresh identity per render would either bust their memos or (worse)
+   * be silently omitted from their dependency arrays.
+   */
+  const afterWrite = useCallback(async () => {
+    await refreshConcepts()
+  }, [refreshConcepts])
 
   // ── Export helpers ─────────────────────────────────────────────────────────
 
@@ -974,21 +999,40 @@ export function TerminologyPage() {
     partial: Omit<Concept, "id" | "createdAt"> & { id?: string },
   ) {
     if (!project) throw new Error("Project not loaded")
-    let updated
     if (partial.id) {
       const { id: conceptId, ...patch } = partial
-      updated = updateConcept(project, conceptId, patch)
+      await emitTermUpdate({
+        projectId: project.id,
+        conceptId,
+        // Only the keys actually present are sent; the projector leaves every
+        // absent column alone, so a concurrent edit to a DIFFERENT field of
+        // this same concept survives.
+        ...(patch.sourceTerm !== undefined ? { sourceTerm: patch.sourceTerm } : {}),
+        ...(patch.renderings !== undefined ? { renderings: patch.renderings } : {}),
+        ...(patch.notes !== undefined ? { notes: patch.notes } : {}),
+        ...(patch.caseSensitive !== undefined ? { caseSensitive: patch.caseSensitive } : {}),
+        author,
+      })
     } else {
-      updated = addConcept(project, partial)
+      await emitTermCreate({
+        projectId: project.id,
+        conceptId: crypto.randomUUID(),
+        sourceTerm: partial.sourceTerm,
+        renderings: partial.renderings ?? [],
+        status: partial.status ?? "draft",
+        ...(partial.notes !== undefined ? { notes: partial.notes } : {}),
+        ...(partial.caseSensitive ? { caseSensitive: true } : {}),
+        author,
+      })
     }
-    await persistConcepts(updated.terminology ?? [])
+    await afterWrite()
   }
 
   async function handleDelete(conceptId: string) {
     if (!project) return
     try {
-      const updated = deleteConcept(project, conceptId)
-      await persistConcepts(updated.terminology ?? [])
+      await emitTermDelete({ projectId: project.id, conceptId, author })
+      await afterWrite()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Delete failed")
     }
@@ -1011,21 +1055,32 @@ export function TerminologyPage() {
       )
       if (exists) return
       try {
-        const updated = addConcept(project, {
+        const conceptId = crypto.randomUUID()
+        await emitTermCreate({
+          projectId: project.id,
+          conceptId,
           sourceTerm: candidate.term,
           renderings: [],
           status: "draft",
+          author,
         })
-        await persistConcepts(updated.terminology ?? [])
-        const created = (updated.terminology ?? []).find(
-          (c) => c.sourceTerm === candidate.term && c.status === "draft",
-        )
-        if (created) setEditTarget(created)
+        await afterWrite()
+        // Open the edit dialog on the concept we just minted. Identified by
+        // the id we generated rather than by searching the list for a matching
+        // sourceTerm — the search could pick up somebody else's concurrently
+        // created draft for the same term.
+        setEditTarget({
+          id: conceptId,
+          sourceTerm: candidate.term,
+          renderings: [],
+          status: "draft",
+          createdAt: new Date().toISOString(),
+        })
       } catch (err) {
         setError(err instanceof Error ? err.message : "Promote failed")
       }
     },
-    [project, canManageTermbase, concepts],
+    [project, canManageTermbase, concepts, author, afterWrite],
   )
 
   // Promote a predicted equivalent to an admitted (alternate) rendering on the
@@ -1033,7 +1088,7 @@ export function TerminologyPage() {
   const handlePromoteRendering = useCallback(
     async (conceptId: string, target: string) => {
       if (!project) return
-      const concept = (project.terminology ?? []).find((c) => c.id === conceptId)
+      const concept = concepts.find((c) => c.id === conceptId)
       if (!concept) return
       const trimmed = target.trim()
       if (!trimmed) return
@@ -1050,10 +1105,13 @@ export function TerminologyPage() {
         { rendering: trimmed, status: "admitted" },
       ]
       try {
-        const updated = updateConcept(project, conceptId, {
+        await emitTermUpdate({
+          projectId: project.id,
+          conceptId,
           renderings: nextRenderings,
+          author,
         })
-        await persistConcepts(updated.terminology ?? [])
+        await afterWrite()
         // Reflect the new rendering in the open drill-down view.
         setDrillDownConcept(
           (prev) =>
@@ -1065,7 +1123,7 @@ export function TerminologyPage() {
         setError(err instanceof Error ? err.message : "Promote failed")
       }
     },
-    [project],
+    [project, author, afterWrite, concepts],
   )
 
   // ── Review queue handlers ─────────────────────────────────────────────────
@@ -1073,8 +1131,8 @@ export function TerminologyPage() {
   async function handleApprove(conceptId: string) {
     if (!project) return
     try {
-      const updated = approveConcept(project, conceptId)
-      await persistConcepts(updated.terminology ?? [])
+      await emitTermApprove({ projectId: project.id, conceptId, author })
+      await afterWrite()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Approve failed")
     }
@@ -1084,27 +1142,91 @@ export function TerminologyPage() {
     if (!project) return
     try {
       // Reject = delete (removes draft from list entirely)
-      const updated = rejectConcept(project, conceptId, "delete")
-      await persistConcepts(updated.terminology ?? [])
+      await emitTermReject({ projectId: project.id, conceptId, mode: "delete", author })
+      await afterWrite()
     } catch (err) {
       setError(err instanceof Error ? err.message : "Reject failed")
     }
   }
 
+  // AQU-1006 follow-up: replace a concept's rendering list from the detail
+  // page — add, remove, or change required / allowed / forbidden. One
+  // `term.update` per change; renderings replace wholesale because they have
+  // no per-item identity to merge on.
+  const handleRenderingsChange = useCallback(
+    async (conceptId: string, renderings: TermRendering[]) => {
+      if (!project) return
+      try {
+        await emitTermUpdate({ projectId: project.id, conceptId, renderings, author })
+        await afterWrite()
+        // Keep the open drill-down in step with what was just written.
+        setDrillDownConcept((prev) =>
+          prev && prev.id === conceptId ? { ...prev, renderings } : prev,
+        )
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Could not update renderings")
+      }
+    },
+    [project, author, afterWrite],
+  )
+
   // ── Merge handler ─────────────────────────────────────────────────────────
 
   async function handleMerge(mergeIds: string[], survivorId: string) {
     if (!project) return
-    const updated = mergeConcepts(project, mergeIds, survivorId)
-    await persistConcepts(updated.terminology ?? [])
+    // Merge is expressed as: write the survivor's merged renderings, then
+    // tombstone each loser. One event per concept — a merge is several
+    // single-concept writes, never one whole-termbase write.
+    const merged = mergeConcepts(project ? { ...project, terminology: concepts } : project, mergeIds, survivorId)
+    const survivor = (merged.terminology ?? []).find((c) => c.id === survivorId)
+    if (survivor) {
+      await emitTermUpdate({
+        projectId: project.id,
+        conceptId: survivorId,
+        renderings: survivor.renderings,
+        ...(survivor.notes !== undefined ? { notes: survivor.notes } : {}),
+        author,
+      })
+    }
+    for (const loserId of mergeIds.filter((cid) => cid !== survivorId)) {
+      await emitTermDelete({ projectId: project.id, conceptId: loserId, author })
+    }
+    await afterWrite()
   }
 
   async function handleImported(imported: Concept[]) {
     if (!project) return
-    // Merge by sourceTerm dedup — imported wins on collision
-    const map = new Map(concepts.map((c) => [c.sourceTerm, c]))
-    for (const c of imported) map.set(c.sourceTerm, c)
-    await persistConcepts([...map.values()])
+    // Dedup by sourceTerm, imported wins on collision — but expressed as ONE
+    // EVENT PER CONCEPT rather than a single array write. An import is the
+    // most tempting place to write the whole termbase at once and the worst
+    // place to do it: it is the largest write, so it had the widest window in
+    // which to clobber a colleague's concurrent add.
+    const byTerm = new Map(concepts.map((c) => [c.sourceTerm, c]))
+    for (const c of imported) {
+      const existing = byTerm.get(c.sourceTerm)
+      if (existing) {
+        await emitTermUpdate({
+          projectId: project.id,
+          conceptId: existing.id,
+          renderings: c.renderings,
+          ...(c.notes !== undefined ? { notes: c.notes } : {}),
+          ...(c.caseSensitive !== undefined ? { caseSensitive: c.caseSensitive } : {}),
+          author,
+        })
+      } else {
+        await emitTermCreate({
+          projectId: project.id,
+          conceptId: c.id || crypto.randomUUID(),
+          sourceTerm: c.sourceTerm,
+          renderings: c.renderings ?? [],
+          status: c.status ?? "draft",
+          ...(c.notes !== undefined ? { notes: c.notes } : {}),
+          ...(c.caseSensitive ? { caseSensitive: true } : {}),
+          author,
+        })
+      }
+    }
+    await afterWrite()
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -1129,6 +1251,7 @@ export function TerminologyPage() {
         onOptimisticEdit={() => {}}
         canManageTermbase={canManageTermbase}
         onPromoteRendering={handlePromoteRendering}
+        onRenderingsChange={handleRenderingsChange}
       />
     )
   }

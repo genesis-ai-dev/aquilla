@@ -76,7 +76,7 @@ describe("listProjectsPage", () => {
 
   it("GETs /api/v2/projects with limit, q, cursor, and orgId", async () => {
     const fetchMock = vi.fn<typeof fetch>(async (input) => {
-      const url = typeof input === "string" ? input : input.url
+      const url = input instanceof Request ? input.url : String(input)
       expect(url).toContain(`${API}/api/v2/projects?`)
       expect(url).toContain("q=mar")
       expect(url).toContain("limit=40")

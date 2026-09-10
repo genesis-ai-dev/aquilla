@@ -150,7 +150,10 @@ describe("OrgProjectsDataTable lane chips (AQU-538 §3.2)", () => {
     )
 
     const table = screen.getByTestId("project-table")
-    expect(table).toHaveClass("min-w-0", "w-full", "overflow-hidden")
+    expect(table).toHaveClass("min-w-0", "w-full", "mx-0")
+    // No overflow-hidden on a virtualized fillHeight root: it clips the
+    // LegendList scrollbar track (the bounded Section contains the pane).
+    expect(table).not.toHaveClass("overflow-hidden")
     expect(table.className).not.toContain("overflow-x-hidden")
     expect(screen.getByTestId("legend-list-mock")).toBeInTheDocument()
     expect(table.querySelector(".overflow-x-auto")).toBeTruthy()

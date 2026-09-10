@@ -24,10 +24,11 @@ afterEach(() => {
 describe("useProjectDirectory", () => {
   it("does not fetch until enabled with a jwt and at least one org", async () => {
     getPortfolioPage.mockResolvedValue({ projects: [], nextCursor: null })
+    type Props = { jwt: string | null; enabled: boolean; orgIds: number[] }
+    const initialProps: Props = { jwt: null, enabled: true, orgIds: [1] }
     const { rerender } = renderHook(
-      (props: { jwt: string | null; enabled: boolean; orgIds: number[] }) =>
-        useProjectDirectory({ query: "", ...props }),
-      { initialProps: { jwt: null, enabled: true, orgIds: [1] } },
+      (props: Props) => useProjectDirectory({ query: "", ...props }),
+      { initialProps },
     )
     expect(getPortfolioPage).not.toHaveBeenCalled()
     rerender({ jwt: "jwt", enabled: false, orgIds: [1] })

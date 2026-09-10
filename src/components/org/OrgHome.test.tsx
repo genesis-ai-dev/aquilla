@@ -99,8 +99,8 @@ vi.mock("@/lib/frontier/portfolio", async (importActual) => {
         nextCursor: null,
       }
     }),
-    getPortfoliosPage: vi.fn(async (_jwt: string, orgIds: number[], opts?: { q?: string }) => {
-      const portfolios = await getPortfolios(_jwt, orgIds)
+    getPortfoliosPage: vi.fn(async (_jwt: string, _orgIds: number[], opts?: { q?: string }) => {
+      const portfolios = await getPortfolios()
       const list = portfolios.flatMap(({ orgId, projects: rows }) =>
         rows.map((project) => ({ ...project, orgId })),
       )
@@ -995,7 +995,7 @@ describe("OrgHome — project-directory load failure (AQU-883)", () => {
       const list = (portfolios as Array<{ orgId: number; projects: Array<{ name: string }> }>).flatMap(
         ({ orgId, projects: rows }) => rows.map((project) => ({ ...project, orgId })),
       )
-      return { projects: list, nextCursor: null }
+      return { projects: list, nextCursor: null } as never
     })
     return render(
       <MemoryRouter initialEntries={["/orgs/all"]}>

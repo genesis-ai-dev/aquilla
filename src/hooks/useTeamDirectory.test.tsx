@@ -21,10 +21,11 @@ afterEach(() => {
 describe("useTeamDirectory", () => {
   it("does not fetch until enabled with a jwt and orgId", async () => {
     listTeamsPage.mockResolvedValue({ groups: [], nextCursor: null })
+    type Props = { jwt: string | null; enabled: boolean; orgId: number | null }
+    const initialProps: Props = { jwt: null, enabled: true, orgId: 1 }
     const { rerender } = renderHook(
-      (props: { jwt: string | null; enabled: boolean; orgId: number | null }) =>
-        useTeamDirectory({ query: "", visibility: "all", ...props }),
-      { initialProps: { jwt: null, enabled: true, orgId: 1 } },
+      (props: Props) => useTeamDirectory({ query: "", visibility: "all", ...props }),
+      { initialProps },
     )
     expect(listTeamsPage).not.toHaveBeenCalled()
     rerender({ jwt: "jwt", enabled: false, orgId: 1 })
@@ -82,10 +83,12 @@ describe("useTeamDirectory", () => {
         nextCursor: null,
       })
 
+    type Props = { visibility: "all" | "internal" | "public" }
+    const initialProps: Props = { visibility: "internal" }
     const { result, rerender } = renderHook(
-      ({ visibility }: { visibility: "all" | "internal" | "public" }) =>
+      ({ visibility }: Props) =>
         useTeamDirectory({ jwt: "jwt", enabled: true, orgId: 1, query: "", visibility }),
-      { initialProps: { visibility: "internal" as const } },
+      { initialProps },
     )
 
     await waitFor(() => expect(result.current.teams.map((t) => t.name)).toEqual(["Internal"]))

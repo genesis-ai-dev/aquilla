@@ -72,7 +72,8 @@ function VirtualizedDataTableBody<TData>({
   header: React.ReactNode
   renderRow: (row: Row<TData>) => React.ReactNode
   onEndReached?: () => void
-  footer: React.ReactNode
+  /** Element or null — LegendList's ListFooterComponent does not take arbitrary ReactNode. */
+  footer: React.ReactElement | null
   columnWidthHints: (number | null)[]
 }) {
   const scrollerRef = React.useRef<HTMLDivElement>(null)

@@ -432,22 +432,55 @@ describe("withLock", () => {
     expect(proc.exit).not.toHaveBeenCalled() // no signal-triggered hard exit path here; fn returned normally
   })
 
-  it("second signal during drain hard-exits immediately, release called at most once", async () => {
+  it("duplicate signal within the grace window is ignored — still draining, no exit", async () => {
+    // Regression for the systemd KillMode=control-group bug: pnpm/tsx forward
+    // their own SIGTERM to this process within ~ms of the daemon's own, so
+    // two SIGTERMs arriving close together must not trip the hard-exit path.
     const lock = fakeLock()
     const proc = fakeProc()
+    let t = 0
+    let resolveDrain: () => void = () => {}
+    const drainGate = new Promise<void>((resolve) => { resolveDrain = resolve })
+
+    const done = withLock(
+      loadConfig(ENV, { home: root }),
+      async () => { await drainGate },
+      { lock, proc, now: () => t, onSignal: () => {} },
+    )
+
+    await new Promise((r) => setTimeout(r, 0))
+    const sigterm = proc.handlers.get("SIGTERM")!
+    sigterm("SIGTERM") // first signal at t=0 -> starts draining
+    t = 10
+    sigterm("SIGTERM") // second signal 10ms later -> still within the grace window, ignored
+
+    await new Promise((r) => setTimeout(r, 5))
+    expect(proc.exit).not.toHaveBeenCalled()
+    expect(lock.release).not.toHaveBeenCalled()
+
+    resolveDrain()
+    await done
+    expect(lock.release).toHaveBeenCalledTimes(1)
+    expect(proc.exit).not.toHaveBeenCalled()
+  })
+
+  it("signal after the grace window hard-exits immediately, release called at most once", async () => {
+    const lock = fakeLock()
+    const proc = fakeProc()
+    let t = 0
     let resolveDrain: () => void = () => {}
     const drainGate = new Promise<void>((resolve) => { resolveDrain = resolve })
 
     void withLock(
       loadConfig(ENV, { home: root }),
       async () => { await drainGate },
-      { lock, proc, onSignal: () => {} },
+      { lock, proc, now: () => t, onSignal: () => {} },
     )
 
     await new Promise((r) => setTimeout(r, 0))
     const sigint = proc.handlers.get("SIGINT")!
-    sigint("SIGINT") // first signal -> starts draining, onSignal is a no-op so drainGate never resolves on its own
-    await new Promise((r) => setTimeout(r, 5))
+    sigint("SIGINT") // first signal at t=0 -> starts draining, onSignal is a no-op so drainGate never resolves on its own
+    t = 3_000 // well past the duplicate-signal grace window
     sigint("SIGINT") // second signal -> hard exit
 
     await new Promise((r) => setTimeout(r, 10))

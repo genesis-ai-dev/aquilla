@@ -18,6 +18,7 @@ import { withCors } from "../cors"
 import { ROLE } from "./role-policy"
 import { resolveExportFloor } from "./export-floor"
 import { parseUsfmLossless, serializeUsfmLossless } from "../lib/usfm-lossless"
+import { buildUsfmExportPlan } from "./usfm-export-plan"
 import { makeZip, type ZipEntry } from "../lib/zip"
 
 export interface ExportBundleEnv {
@@ -92,28 +93,11 @@ export async function handleExportBundleRequest(
       .bind(file_id, projectId)
       .first<{ name: string }>()
 
-    const cells = await db
-      .prepare(
-        `SELECT s.canonical_ref AS canonical_ref, t.value AS value
-           FROM cells t
-           JOIN cells s
-             ON s.project_id = t.project_id
-            AND s.file_id    = t.file_id
-            AND s.cell_id    = t.cell_id
-            AND s.side       = 'source'
-            AND s.target_lang = ''
-          WHERE t.project_id = ?
-            AND t.file_id    = ?
-            AND t.side       = 'target'
-            AND t.target_lang = ?
-            AND s.canonical_ref IS NOT NULL
-            AND t.value <> ''`,
-      )
-      .bind(projectId, file_id, lane)
-      .all<{ canonical_ref: string; value: string }>()
-
-    const overrides = new Map<string, string>()
-    for (const row of cells.results ?? []) overrides.set(row.canonical_ref, row.value)
+    // Translations, plus the file's structural edits — content added under a
+    // verse and verses removed outright. AQU-1068 moved this into a shared
+    // builder: the query above used to be a character-for-character copy of
+    // export-route.ts's, with nothing enforcing that they stayed identical.
+    const { overrides, edits } = await buildUsfmExportPlan(db, projectId, file_id, lane)
 
     let original = raw_source
     if (!original && r2_key) {
@@ -133,7 +117,7 @@ export async function handleExportBundleRequest(
       )
     }
 
-    const out = serializeUsfmLossless(parseUsfmLossless(original), overrides)
+    const out = serializeUsfmLossless(parseUsfmLossless(original), overrides, edits)
     entries.push({ name: sfmName(meta?.name ?? "", file_id), data: enc.encode(out) })
   }
 

@@ -1,7 +1,7 @@
 // Typed fetch wrapper for the sync-worker AD-13 branching-search route.
 //
 //   GET /api/v1/projects/:projectId/branching-search
-//     ?q=<text>[&topK=N][&validatedOnly=true][&excludeCellId=<uuid>]
+//     ?q=<text>[&topK=N][&validatedOnly=true][&excludeCellId=<uuid>][&targetLang=<lane>]
 //
 // Returns the deterministic top-K cells the spec algorithm picked, plus a
 // provenance map of which contiguous sub-query each result satisfied. Used
@@ -46,6 +46,9 @@ export interface BranchingSearchArgs {
   /** Exclude this cellId from the corpus (e.g., the cell the copilot is
    *  completing — we never want it to retrieve itself). */
   excludeCellId?: string
+  /** Lane tag (`activeLane`). Always sent, including `""` for the default
+   *  lane — do not send the Settings display name. */
+  targetLang?: string
   /** Optional AbortSignal so cancelling a completion cancels the fetch. */
   signal?: AbortSignal
 }
@@ -62,6 +65,7 @@ export async function fetchBranchingSearch(
   if (args.topK !== undefined) qs.set("topK", String(args.topK))
   if (args.validatedOnly) qs.set("validatedOnly", "true")
   if (args.excludeCellId) qs.set("excludeCellId", args.excludeCellId)
+  qs.set("targetLang", args.targetLang ?? "")
 
   const url =
     `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(args.projectId)}` +

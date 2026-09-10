@@ -3,9 +3,13 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import {
   prepareReadOnlyRichTextHtml,
-  sanitizeIdmlEditorHtml,
   sanitizeSourceDisplayHtml,
 } from "@/lib/richtext/editor-content"
+import {
+  looksLikeIdmlHtml,
+  prepareIdmlDisplayHtml,
+  type IdmlStyleCatalog,
+} from "@/lib/richtext/idml-style-display"
 import {
   segmentUsfmForDisplay,
   type UsfmNoteSegment,
@@ -55,8 +59,21 @@ export function UsfmNoteChip({
 }
 
 /** Sanitized source-rich-text surface shared by the grid and agent workbench. */
-export function SanitizedRichHtml({ html }: { html: string }) {
-  const safeHtml = useMemo(() => sanitizeSourceDisplayHtml(html), [html])
+export function SanitizedRichHtml({
+  html,
+  idmlStyleCatalog,
+  idmlParagraphStyleId,
+}: {
+  html: string
+  idmlStyleCatalog?: IdmlStyleCatalog
+  idmlParagraphStyleId?: string
+}) {
+  const safeHtml = useMemo(
+    () => looksLikeIdmlHtml(html)
+      ? prepareIdmlDisplayHtml(html, idmlStyleCatalog, idmlParagraphStyleId)
+      : sanitizeSourceDisplayHtml(html),
+    [html, idmlParagraphStyleId, idmlStyleCatalog],
+  )
   const innerHtml = useMemo(() => ({ __html: safeHtml }), [safeHtml])
 
   return (
@@ -93,8 +110,19 @@ export function TargetRichHtml({
   )
 }
 
-export function TargetIdmlHtml({ html }: { html: string }) {
-  const safeHtml = useMemo(() => sanitizeIdmlEditorHtml(html), [html])
+export function TargetIdmlHtml({
+  html,
+  idmlStyleCatalog,
+  idmlParagraphStyleId,
+}: {
+  html: string
+  idmlStyleCatalog?: IdmlStyleCatalog
+  idmlParagraphStyleId?: string
+}) {
+  const safeHtml = useMemo(
+    () => prepareIdmlDisplayHtml(html, idmlStyleCatalog, idmlParagraphStyleId),
+    [html, idmlParagraphStyleId, idmlStyleCatalog],
+  )
   const innerHtml = useMemo(() => ({ __html: safeHtml }), [safeHtml])
   return (
     <div

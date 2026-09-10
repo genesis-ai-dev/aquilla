@@ -11,7 +11,7 @@
 
 import { sign } from "hono/jwt"
 import type { AuthUser, Env, RoleResolution, SyncTokenClaims } from "../types"
-import { resolveProjectRole, RoleLookupError } from "./project-permissions"
+import { loadProjectRow, resolveProjectRole, RoleLookupError } from "./project-permissions"
 
 /** 15-minute lifetime — matches docs/SYNC.md. */
 export const SYNC_TOKEN_TTL_SECONDS = 15 * 60
@@ -138,11 +138,8 @@ export async function mintSyncTokenForUser(
     return { ok: false, reason: "unsafe_id" }
   }
 
-  const project = await env.AQUILLA_PG.prepare(
-    `SELECT id, archived_at, is_active FROM projects WHERE id = ?`,
-  )
-    .bind(projectId)
-    .first<{ id: string; archived_at: string | null; is_active: boolean }>()
+  // Memoised per request — resolveProjectRole below reuses this same row.
+  const project = await loadProjectRow(env, projectId)
 
   if (!project) return { ok: false, reason: "project_not_found" }
   if (project.archived_at) return { ok: false, reason: "project_archived" }

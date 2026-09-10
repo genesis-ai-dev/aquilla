@@ -390,6 +390,10 @@ export const editor = defineNamespace({
     "editor.bibles.hide": "Hide parallel bibles",
     "editor.bibles.edgeTab": "Bibles",
     "editor.bibles.title": "Parallel Bibles",
+    "editor.bibles.noReferences": "No Bible references",
+    "editor.bibles.noReferencesDescription":
+      "The current cells have no Bible references with chapter and verse numbers. " +
+      "Parallel Bibles needs these references to show matching text.",
     "editor.bibles.scrollHint":
       "Scroll the editor to a verse to see it in other bible versions.",
     "editor.bibles.noVersions":
@@ -2913,6 +2917,14 @@ export const editor = defineNamespace({
           "Heading of the open parallel-bibles sidebar. 'Parallel' means shown " +
           "side by side with the user's own translation for comparison.",
         maxLength: 22,
+      },
+      "editor.bibles.noReferences": {
+        description: "Empty-state title when no usable Bible reference is available.",
+      },
+      "editor.bibles.noReferencesDescription": {
+        description:
+          "Explains why parallel text is unavailable for the current cells. " +
+          "Do not imply that the entire file lacks references or suggest scrolling fixes it.",
       },
       "editor.bibles.scrollHint": {
         description:

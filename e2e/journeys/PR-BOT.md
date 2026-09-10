@@ -24,8 +24,36 @@ Do not walk the app. Leave one comment with status **BLOCKED** and stop.
 
 - The PR has merge conflicts with `dev`. The team's review standard gives
   conflicts back to the author unfixed. Do not "QA around" them.
-- There is no preview URL, or the preview does not load.
+- There is no preview URL, or the preview does not load. Exception:
+  docs-only diffs (`e2e/journeys/*.md`, README, comments) have no UI
+  claim; skip the walk, do not BLOCKED-loop on a failed SPA preview.
 - Sign-in on the preview fails.
+
+**Not a hard stop:** the branch is behind `dev` but mergeable, with a
+preview of *this* HEAD. Walk it. Note how far behind in the comment.
+Skipping every stale PR means the bot walks almost nothing in a large
+queue, and the preview is still that branch's code.
+
+**Do not pick up** unless a human names the number:
+
+- Deploy PRs (`Deploy YYYY-MM-DD`, base `main`). Those are grouping
+  records, not a feature claim.
+- Dependabot / chore PRs with no user-visible surface.
+
+**One comment per HEAD.** If you already commented on this SHA, stop.
+If HEAD moved, one new comment for the new SHA. Do not stack BLOCKED
+notes on the same docs PR.
+
+## Status
+
+- **FAIL** if any walked checklist item missed its named effect. A 500
+  on the grant path is FAIL even when the instructions page looks
+  right (PR 628). HOLD is illegal when the table contains a FAIL.
+- **HOLD** only when every walked item showed the effect, and every
+  unwalked item is listed under **Did not walk** with why. A 2-org
+  account does not satisfy a >100-org AC; that row is NOT CHECKED,
+  not a pass (PR 509).
+- **BLOCKED** only for a hard stop above.
 
 ## Steps
 
@@ -104,10 +132,10 @@ Those are notes, not a walk.
 
 ## Comment template
 
-Status is exactly one of: **HOLD** (every walked item showed the named
-effect), **FAIL** (at least one item missed), **BLOCKED** (hard stop).
-Never "LGTM", "looks good", "PASS", or "approved." HOLD means "here is
-what I saw"; a person still looks.
+Status is exactly one of: **HOLD**, **FAIL**, **BLOCKED** (see **Status**
+above). Never "LGTM", "looks good", "PASS", "walked", or "approved."
+HOLD means "here is what I saw"; a person still looks. If the table has
+a FAIL row, the header is FAIL.
 
 ```
 ## Bot walk — PR <n>

@@ -53,7 +53,7 @@
 
 import { externalError } from "./errors"
 import { listProjectsForCredential } from "./projects-list"
-import { handleExternalOrgReadRequest } from "./org-read-routes"
+import { assertOrgInCredentialScope, handleExternalOrgReadRequest } from "./org-read-routes"
 import { handleExternalCrossProjectSearch, handleExternalSearch } from "./search-reads"
 import {
   authenticateCredential,
@@ -121,8 +121,13 @@ async function handleExternalProjects(request: Request, env: ExternalReadsEnv): 
 
   const orgId = new URL(request.url).searchParams.get("orgId")
   const cred = authed.credential
-  if (orgId !== null && cred.orgId !== null && cred.orgId !== orgId) {
-    return externalError("scope_denied", "credential is not scoped to this org", 403)
+  if (orgId !== null) {
+    // Same gate as /orgs/:orgId/projects, deliberately shared: the two spellings
+    // of "this org's projects" must answer an out-of-scope org identically
+    // (scope_denied), or one of them would quietly return [] and make "not
+    // yours" indistinguishable from "empty".
+    const denied = await assertOrgInCredentialScope(env.AQUILLA_PG, cred, orgId)
+    if (denied) return denied
   }
 
   const projects = await listProjectsForCredential(

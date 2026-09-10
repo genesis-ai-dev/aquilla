@@ -37,7 +37,7 @@ const ORG_PROJECTS_RE = /^\/api\/v1\/external\/orgs\/([^/]+)\/projects$/
  * any org; whether it can actually *see* it is then decided by the membership
  * filter in the list query, which is the same check the portal applies.
  */
-async function assertOrgInCredentialScope(
+export async function assertOrgInCredentialScope(
   db: AquillaDb,
   cred: ApiCredentialContext,
   orgId: string,

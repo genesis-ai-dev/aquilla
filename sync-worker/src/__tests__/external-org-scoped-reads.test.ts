@@ -284,6 +284,16 @@ describe("org-scoped external reads (AQU-1236)", () => {
       expect(await errorCode(res)).toBe("scope_denied")
     })
 
+    it("?orgId= answers an out-of-scope org identically — scope_denied, not an empty list", async () => {
+      // Both spellings of "this org's projects" must agree, or one of them makes
+      // "not yours" look like "empty".
+      const token = await seedCredential(testDb, { userId: BOB, projectId: "proj-beta" })
+      const viaPath = await get(testDb, `/api/v1/external/orgs/${ALPHA}/projects`, token)
+      const viaQuery = await get(testDb, `/api/v1/external/projects?orgId=${ALPHA}`, token)
+      expect(viaQuery.status).toBe(viaPath.status)
+      expect(await errorCode(viaQuery)).toBe("scope_denied")
+    })
+
     it("returns an empty list for an org the user has no membership in", async () => {
       // In scope (unscoped credential) but not a member — visible-to-nobody,
       // not an error, exactly like /projects.

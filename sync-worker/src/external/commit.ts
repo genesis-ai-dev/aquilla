@@ -12,6 +12,7 @@
 import { errorResponse, toErrorResponse } from './errors'
 import {
   cellKey,
+  isStructureCommandKind,
   laneCellKey,
   requiredRoleForCommand,
   type CreateProjectCommand,
@@ -20,10 +21,12 @@ import {
   type PatchSettingsCommand,
   type PlanImportCommand,
   type SetTranslationCommand,
+  type StructureCommand,
   type UpdateProjectSettingsCommand,
 } from './commands'
 import { changedPolicyKeys, commitPatchSettings } from './commands-patch-settings'
 import { commitEmitEvents } from './emit-events-engine'
+import { commitStructure } from './structure-engine'
 import {
   buildProvenance,
   receiptOnlyGates,
@@ -347,6 +350,20 @@ export async function commitChangesetCore(
       .prepare(`UPDATE changesets SET confirmation_id = ? WHERE id = ? AND status = 'committing'`)
       .bind(confirmationId, id)
       .run()
+  }
+
+  // ── Cell-structure commands take their own compile/commit path (AQU-1234) ─
+  // The shared gates above handled expiry, the ask confirmation, and the flip;
+  // the engine re-checks its OWN pins (the chain heads it will use as parent
+  // ids) rather than the shared precondition list — see structure-engine.ts.
+  const structure = cs.commands.find(
+    (c): c is StructureCommand => isStructureCommandKind(c.kind),
+  )
+  if (structure) {
+    return commitStructure(
+      request, env, db, cred, cs, structure, confirmationId, channel,
+      cs.status === 'staged', ctx,
+    )
   }
 
   // ── PlanImport takes its own compile/commit path ──────────────────────────

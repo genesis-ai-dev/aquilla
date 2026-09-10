@@ -22,7 +22,8 @@ import {
   catalogIndexLines,
   describeCommand,
 } from '../../../db/shared/command-catalog'
-import { validateCommands } from '../external/commands'
+import { requiredRoleForCommand, validateCommands } from '../external/commands'
+import { structureCommandFloor } from '../external/commands-structure'
 import { POLICY_SETTINGS_KEYS } from '../external/commands-patch-settings'
 import { ALLOWED_EMIT_KINDS, TESTIMONY_EMIT_KINDS } from '../external/commands-emit-events'
 import { ROLE } from '../events/role-policy'
@@ -59,6 +60,9 @@ describe('command catalog — invariants', () => {
       UpdateProjectSettings: { kind: 'UpdateProjectSettings', projectId: 'p', settings: {}, ifMatchVersion: 0 },
       PatchSettings: { kind: 'PatchSettings', projectId: 'p', ops: [{ key: 'brief', value: 1 }], ifMatchVersion: 0 },
       EmitEvents: { kind: 'EmitEvents', events: [{ kind: 'comment.create', payload: { body: 'hi' } }] },
+      InsertCell: { kind: 'InsertCell', fileId: 'f', value: 'v' },
+      DeleteCell: { kind: 'DeleteCell', fileId: 'f', cellId: 'c' },
+      SplitCell: { kind: 'SplitCell', fileId: 'f', cellId: 'c', offset: 3, targets: 'blank' },
     }
     for (const entry of COMMAND_CATALOG) {
       const sample = minimal[entry.kind]
@@ -74,6 +78,20 @@ describe('command catalog — invariants', () => {
     expect(describeCommand('EmitEvents')?.minRoleLevel).toBe(ROLE.COMMENTER)
     expect(describeCommand('UpdateProjectSettings')?.minRoleLevel).toBe(ROLE.MAINTAINER)
     expect(describeCommand('Bogus')).toBeNull()
+  })
+
+  it('the structure commands publish the floor their engine enforces (AQU-1234)', () => {
+    for (const kind of ['InsertCell', 'DeleteCell', 'SplitCell']) {
+      const entry = describeCommand(kind)
+      expect(entry, `${kind} missing from the catalog`).not.toBeNull()
+      expect(entry!.minRoleLevel).toBe(structureCommandFloor())
+      expect(entry!.tier).toBe('structural')
+    }
+    // The catalog floor IS the prepare/commit floor — one source of truth.
+    expect(structureCommandFloor()).toBe(ROLE.PROJECT_LEAD)
+    expect(
+      requiredRoleForCommand({ kind: 'SplitCell', fileId: 'f', cellId: 'c', offset: 1, targets: 'blank' }),
+    ).toBe(describeCommand('SplitCell')!.minRoleLevel)
   })
 
   it('the role-filtered index narrows with level and formats one line per command', () => {

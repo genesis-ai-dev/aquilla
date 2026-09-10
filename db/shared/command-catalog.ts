@@ -131,6 +131,59 @@ Gotchas:
 - Every referenced cell/comment/file/assignment must exist at prepare — one bad reference rejects the whole plan (no silent skips).
 - payload shapes match the app's event vocabulary — call describe_command or docs before hand-building unfamiliar payloads.`,
   },
+  {
+    kind: 'InsertCell',
+    title: 'Insert cell',
+    oneLiner: 'Add a source cell at a position in a file’s order.',
+    minRoleLevel: PROJECT_LEAD,
+    tier: 'structural',
+    agentReachable: true,
+    paramsDoc: `### InsertCell
+Params: \`{ fileId, afterCellId?, cellId?, value, type?, canonicalRef?, startMs?, endMs?, metadata? }\` — sole command in its changeset.
+\`afterCellId\` names the cell the new one follows; null/omitted inserts at the head of the file. Compiles to \`source.cell.create\` plus a \`source.cell.reorder\` for whatever was anchored at that position, so chain order (what exporters read) matches the intended document order.
+Gotchas:
+- Refused on a file imported with preserved export slots (IDML/OOXML locators) — a cell without a locator makes the whole export throw. Restructure before import instead.
+- \`canonicalRef\` must be unused in the file: lossless USFM export overlays translations BY ref, so a duplicate would silently drop one of the two.
+- \`value\` may be empty — a blank row with timings is a real thing (an added subtitle cue keeps its cue).
+- The row is stamped with a server-written origin marker; a caller-supplied \`metadata.aquillaOrigin\` is rejected.
+Example: \`{ "kind": "InsertCell", "fileId": "f1", "afterCellId": "c7", "value": "A new sentence." }\``,
+  },
+  {
+    kind: 'DeleteCell',
+    title: 'Delete cell',
+    oneLiner: 'Remove a source cell and its translations from a file.',
+    minRoleLevel: PROJECT_LEAD,
+    tier: 'structural',
+    agentReachable: true,
+    paramsDoc: `### DeleteCell
+Params: \`{ fileId, cellId }\` — sole command in its changeset.
+Compiles to a \`source.cell.reorder\` for each following row (so the chain closes over the gap rather than stranding the rest of the file at the tail), a \`target.cell.delete\` per translated lane, then \`source.cell.delete\`.
+Gotchas:
+- Refused while the cell still owns validators, waivers, comments, back-translations, audio takes, cell links or assignment rows: the delete projection removes ONE row and cleans up nothing else, so those would be orphaned. Clear them first — the error names what is holding it.
+- Refused on a file imported with preserved export slots (IDML/OOXML locators): removing one slice of a note block makes the export refuse to assemble it.
+- A lane that gains a translation between prepare and commit makes the plan stale rather than silently leaving an orphan.`,
+  },
+  {
+    kind: 'SplitCell',
+    title: 'Split cell',
+    oneLiner: 'Cut one cell’s source text at an offset into two cells.',
+    minRoleLevel: PROJECT_LEAD,
+    tier: 'structural',
+    agentReachable: true,
+    paramsDoc: `### SplitCell
+Params: \`{ fileId, cellId, offset, targets: "blank" | "divide", targetOffsets?, newCellId? }\` — sole command in its changeset.
+The original keeps \`value.slice(0, offset)\` (a \`source.cell.commit\`, so its chain head advances); a new cell carrying \`value.slice(offset)\` is created directly after it.
+\`targets\` is required and never inferred:
+- \`"blank"\` deletes the existing translations outright.
+- \`"divide"\` cuts each lane's translation at an explicit offset — \`targetOffsets: [{ laneId?, offset }]\` must name EVERY lane that has a translation, or the plan is rejected. A lane you leave out is never silently blanked.
+VALIDATION: both halves come out unvalidated either way — 'blank' removes the target rows that held the validation, and 'divide' re-commits them, which resets validation because the chain head moved.
+Gotchas:
+- \`offset\` must be inside the text (both halves non-empty), else validation_failed at prepare.
+- Refused on cells carrying structured source/target HTML — a plain-text offset cannot cut markup safely; use \`"blank"\` and re-translate.
+- Refused on a file with preserved export slots (IDML/OOXML), and on a cell addressed by canonical ref in a file whose original source is kept for lossless export: the second half cannot reuse the ref, so it would vanish from the deliverable.
+- The second half inherits the original's \`type\` but NOT its canonical ref.
+Example: \`{ "kind": "SplitCell", "fileId": "f1", "cellId": "c3", "offset": 42, "targets": "divide", "targetOffsets": [{ "offset": 51 }] }\``,
+  },
 ] as const
 
 export function describeCommand(kind: string): CommandCatalogEntry | null {

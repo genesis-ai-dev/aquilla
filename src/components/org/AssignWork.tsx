@@ -67,6 +67,11 @@ export interface AssignWorkProps {
   callerUserId?: number | null
   /** Called after a successful assign so the parent can refresh rollups. */
   onAssigned?: () => void
+  /**
+   * Target-language lane for the assignment. '' = the project's default lane
+   * (omitted on the wire, same contract as AssignModal).
+   */
+  targetLang?: string
 }
 
 const DEFAULT_ROLE_LEVEL = 500
@@ -80,6 +85,7 @@ export function AssignWork({
   allowSelfAssignment = false,
   callerUserId = null,
   onAssigned,
+  targetLang = "",
 }: AssignWorkProps) {
   const t = useT()
   const isSelfAssignMode = roleLevel < DEFAULT_ROLE_LEVEL
@@ -202,6 +208,7 @@ export function AssignWork({
         scope,
         scopeKind,
         scopeLabel,
+        targetLang: targetLang || undefined,
         deadline: deadline || null,
       })
       setSelectedChapters([])

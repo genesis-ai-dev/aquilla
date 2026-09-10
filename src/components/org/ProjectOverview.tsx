@@ -1508,6 +1508,7 @@ export function ProjectOverview() {
                         files={project?.files ?? []}
                         jwt={jwt ?? ""}
                         author={session?.username ?? ""}
+                        targetLang={selectedLaneTag ?? ""}
                         onAssigned={handleAssigned}
                       />
                     </div>

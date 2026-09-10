@@ -1,3 +1,4 @@
+import { CheckingLinkCreator } from "@/components/checking/CheckingLinkCreator"
 // Experimental feature toggles (src/lib/features/flags.ts registry).
 //
 // Flags are DEVICE-LOCAL by design: they live on the IDB project record
@@ -71,6 +72,7 @@ export function ExperimentalFlagsSection({
           />
         ))}
       </SettingsGroup>
+      {flags?.communityChecking === true && <CheckingLinkCreator key={projectId} projectId={projectId} />}
       <p className="mt-2 px-4 text-xs text-muted-foreground">
         {t("autopilot.settings.experimentalDescription")}
       </p>

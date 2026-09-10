@@ -129,3 +129,5 @@ UI chrome that used to be one smoke file per click is covered under
 
 When you change one of these surfaces, update the matching `*.test.tsx`. If RTL
 is missing, add it — then delete any leftover smoke, do not park it as non-smoke.
+
+AQU-1249: `e2e/specs/collab/cross-user-comment.smoke.spec.ts` also covers a named anonymous guest joining a PIN checking link and saving feedback visible to the project owner. Default-off experimental discovery and hierarchical selection are covered in RTL (`ExperimentalFlagsSection.test.tsx`, `CheckingScopePicker.test.tsx`).

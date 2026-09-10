@@ -1,9 +1,11 @@
-import { describe, it, expect, beforeEach } from "vitest"
+import { describe, it, expect, beforeEach, vi } from "vitest"
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react"
 import { ExperimentalFlagsSection } from "./ExperimentalFlagsSection"
 import { createProject, getProject, _resetDbForTesting } from "@/lib/store/project-index"
 import { isFlagEnabled } from "@/lib/features/flags"
 import type { ProjectRecord } from "@/lib/parsers/types"
+
+vi.mock("@/components/checking/CheckingLinkCreator", () => ({ CheckingLinkCreator: () => <div>Checking link creator</div> }))
 
 function makeProject(overrides: Partial<ProjectRecord> = {}): ProjectRecord {
   return {
@@ -28,6 +30,18 @@ beforeEach(async () => {
 })
 
 describe("ExperimentalFlagsSection", () => {
+  it("keeps checking WIP off until explicitly enabled and persists the flag", async () => {
+    await createProject(makeProject())
+    render(<ExperimentalFlagsSection projectId="p1" />)
+    const toggle = await screen.findByRole("switch", { name: "Community checking (WIP)" })
+    expect(toggle).not.toBeChecked()
+    expect(screen.queryByText("Checking link creator")).not.toBeInTheDocument()
+    fireEvent.click(toggle)
+    expect(await screen.findByText("Checking link creator")).toBeVisible()
+    await waitFor(async () => expect(isFlagEnabled((await getProject("p1"))!, "communityChecking")).toBe(true))
+    fireEvent.click(toggle)
+    await waitFor(() => expect(screen.queryByText("Checking link creator")).not.toBeInTheDocument())
+  })
   it("renders the Autopilot controls toggle, on by default", async () => {
     // Default-on: the flag gates whether the play button is discoverable, and
     // a run still costs nothing until someone clicks it.

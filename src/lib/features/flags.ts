@@ -20,6 +20,11 @@ export interface FeatureFlagDefinition {
 }
 
 export const FLAGS: Record<string, FeatureFlagDefinition> = {
+  communityChecking: {
+    labelKey: "projectSettings.checking.flagLabel",
+    descriptionKey: "projectSettings.checking.flagDescription",
+    default: false,
+  },
   contextualTranslation: {
     labelKey: "autopilot.settings.controlsLabel",
     descriptionKey: "autopilot.settings.controlsDescription",

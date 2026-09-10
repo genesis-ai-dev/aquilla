@@ -1,3 +1,4 @@
+import { CheckingPage } from "@/components/checking/CheckingPage"
 import { Suspense, lazy, useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { Navigate, Routes, Route, useParams, useLocation, type Location } from "react-router-dom"
 import { OrgHome } from "@/components/org/OrgHome"
@@ -320,6 +321,7 @@ function AppRoutes() {
         <Route path="/join/:token" element={<JoinPage />} />
         {/* AQU-626: per-user deep link + PIN — public, eager (fresh-browser
             diode-zone flow lands here with no session and no onboarding). */}
+        <Route path="/check/:token" element={<CheckingPage />} />
         <Route path="/link/:token" element={<AccessLinkPage />} />
         {/* Agent API (AQU-533 §3) — one-time human approval for ask-mode changesets. */}
         <Route path="/approve/:changesetId" element={<LazyRoute><ApproveChangeset /></LazyRoute>} />

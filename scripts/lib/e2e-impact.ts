@@ -7,6 +7,10 @@ const CORE_SENTINELS = [
 
 const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
   {
+    source: /^(?:src\/(?:components|lib)\/checking\/|sync-worker\/src\/checking\/|db\/postgres\/migrations\/0090_community_checking)/,
+    sentinels: ["e2e/specs/collab/cross-user-comment.smoke.spec.ts"],
+  },
+  {
     source: /^(?:auth-worker\/|src\/(?:pages|components|lib|hooks|context)\/.*(?:auth|account|login|signup|password|session|credential|outbox))/i,
     sentinels: [
       "e2e/specs/auth/login-account-setup-status.smoke.spec.ts",

@@ -1020,6 +1020,27 @@ CREATE TABLE IF NOT EXISTS project_member_scopes (
     PRIMARY KEY (project_id, user_id, kind, value)
 );
 
+-- Per-lane role grants (0090_project_member_lane_roles.sql, AQU-730). The third
+-- permission tier (org -> project -> LANE), REPLACING the kind='lane' rows of
+-- project_member_scopes with an ADDITIVE, LEVELED grant model: a row grants
+-- (project,user) access to one lane at role_level. Below Maintainer (600),
+-- access to a lane REQUIRES a grant here (no grant = no access — the inversion
+-- of the scopes model above); role >= 600 cascades to every lane. Effective
+-- role in a lane = max(base project role, grant role_level) — grants only
+-- elevate, never demote. kind='file' scopes stay in project_member_scopes.
+-- Backfill/enforcement land later and MUST follow AQU-1240 (no default lane).
+CREATE TABLE IF NOT EXISTS project_member_lane_roles (
+    project_id TEXT    NOT NULL,
+    user_id    BIGINT  NOT NULL,
+    lane       TEXT    NOT NULL,
+    role_level INTEGER NOT NULL,
+    granted_by BIGINT,
+    granted_at TIMESTAMPTZ DEFAULT now(),
+    PRIMARY KEY (project_id, user_id, lane)
+);
+CREATE INDEX IF NOT EXISTS idx_pmlr_project_user
+    ON project_member_lane_roles(project_id, user_id);
+
 -- AQU-533 Agent API: immutable changeset execution plans (0055). External
 -- callers submit domain commands; prepare compiles them into a staged plan
 -- with server-computed preconditions, effect summary, and content digest.

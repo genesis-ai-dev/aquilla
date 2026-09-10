@@ -2456,7 +2456,20 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         )}
 
         {sectionsToRender.some((s) => s.id === "section-experimental") && id && (
-          <ExperimentalFlagsSection projectId={id} serverProject={project ?? undefined} />
+          <ExperimentalFlagsSection
+            projectId={id}
+            serverProject={project ?? undefined}
+            // AQU-1246: the Autopilot opt-in is a project-wide synced setting,
+            // not a device-local flag, so it reads from and writes through the
+            // shared settings blob. It saves immediately rather than joining
+            // the deferred Save bar — it is one switch with no dependent
+            // fields, and its role floor (project_lead) is lower than the bar's
+            // (maintainer), so folding it in would lock leads out of the one
+            // control they are allowed to touch.
+            autopilotEnabled={sharedSettingsBlob.autopilotEnabled}
+            roleLevel={project?.syncRole?.level ?? null}
+            onSetAutopilotEnabled={(enabled) => { void patchShared({ autopilotEnabled: enabled }) }}
+          />
         )}
           </div>
     </Page>

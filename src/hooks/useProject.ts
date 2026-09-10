@@ -69,6 +69,11 @@ function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): 
   // or the add-track button and the colour menu would be invisible everywhere,
   // since they render only when this is on.
   assign("allowTrackEditing", settings.allowTrackEditing)
+  // AQU-1246: the Autopilot opt-in. Must reach the workspace and the project
+  // overview or the gate reads false everywhere and an opted-in project would
+  // see no Autopilot at all — the surfaces render only when this is on (or the
+  // legacy device-local flag was already stored true).
+  assign("autopilotEnabled", settings.autopilotEnabled)
   assign("bibleResourcesEnabled", settings.bibleResourcesEnabled)
   assign("draftContext", settings.draftContext)
   // AQU-646 SUB-53: the Media lens reads this to decide whether to draw the

@@ -65,7 +65,7 @@ import type { WorkspaceAction } from "@/lib/workspace-actions/types"
 import type { FileReference } from "@/lib/parsers/types"
 import { fileHasSections, fileOrderedBy, isMediaFileType, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
 import { isAudioCueFile, isSubtitleImportFile, resolveFileTimingMode, type AudioTimingMode } from "@/lib/parsers/types"
-import { isFlagEnabled } from "@/lib/features/flags"
+import { isAutopilotVisible } from "@/lib/features/flags"
 import { isDiscourseFile } from "@/lib/contextual/discourse-file"
 import {
   applyRemoteFrame as applyContextualFrame,
@@ -1660,7 +1660,7 @@ export function ProjectWorkspace() {
   // carried only part of a wave. Failing soft is deliberate — a missing
   // review surface must never keep a file from opening.
   const contextualAutopilotEnabled = Boolean(
-    project && isFlagEnabled(project, "contextualTranslation"),
+    project && isAutopilotVisible(project),
   )
   const contextualDraftScopeRef = useRef<ContextualDraftsScope | null>(null)
   const refreshContextualDrafts = useCallback(async (requestedScope?: ContextualDraftsScope) => {

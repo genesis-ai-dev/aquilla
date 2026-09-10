@@ -449,6 +449,15 @@ export interface ProjectRecord {
    * projects without this field fall back to registry defaults.
    */
   experimentalFlags?: Record<string, boolean>
+  /**
+   * AQU-1246: project-wide opt-in to the experimental Autopilot surface.
+   * Absent/false → no Autopilot UI renders anywhere for this project. Synced
+   * (see ProjectWideSettings.autopilotEnabled) rather than device-local, and
+   * writable only at project_lead(500)+ — server-enforced in auth-worker.
+   * Read through `isAutopilotVisible`, never directly, so the legacy
+   * device-local grandfather is honoured with it.
+   */
+  autopilotEnabled?: boolean
   /** AD-14 decay tunables. Absent → use DECAY_DEFAULTS. */
   decaySettings?: DecaySettings
   /** Required distinct validators for a text cell to count as "fully validated". Clamped [1, 15]. Default 1. Mirrors desktop manifest. */

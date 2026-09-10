@@ -1,135 +1,191 @@
-// RACE-5: Tests for the commit-time lock guard.
+// AQU-1154: the focus lock is ADVISORY on the write path.
 //
-// The core RACE-5 client gap: `lockHolderLabel` in EditorRow is derived from
-// React state (cellLockHolders), which is updated asynchronously via setState.
-// A commit queued in the debounce window (1.2 s) may fire after the WS frame
-// arrives but before React re-renders with the new state. The fix:
-//   • `cellLockHoldersRef` in ProjectWorkspace is updated synchronously inside
-//     the WS `onMessage` handler (before any setState).
-//   • `checkLockHolder` reads from the ref — always returns the latest value.
-//   • handleEditorCommit uses `checkLockHolder?.(cell.id) ?? lockHolderLabel`.
+// This file used to pin the opposite (RACE-5): `handleEditorCommit` consulted
+// the presence-derived lock map (`checkLockHolder(cell.id) ?? lockHolderLabel`)
+// and silently returned when it named someone else. Under a flaky link that
+// threw the user's text away: a socket flap made the DO release their lease,
+// the reconnect did not re-claim, a peer claimed the cell, and the next
+// idle/blur commit was dropped with only a console.warn — while their editor
+// still showed the text. The server is the arbiter (POST /events never
+// consulted leases; the head-check does the real conflict detection), so the
+// client must always hand the commit to the outbox and let stale handling
+// surface any loss.
 //
-// This file tests the logical contract of that guard rather than the component
-// internals (which would require a 50+-prop harness).
+// The contract now:
+//   • presence/lock frames drive ONLY the read-only affordance + the
+//     "X is editing" label (`cellLockHolders`, see cell-lock-state.ts);
+//   • a commit from an editor that is already open proceeds even when the
+//     lock map names another holder.
+//
+// Part 1 renders the real EditorTable → TranslatedEditor commit path with a
+// mocked `emitTargetCellCommit`; part 2 keeps the B4 object-identity
+// invariants for the label-driving helpers.
 
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, afterEach, vi } from "vitest"
+import { render, screen, cleanup, act, fireEvent, waitFor } from "@testing-library/react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { createElement, Fragment, forwardRef, useImperativeHandle, type ReactNode } from "react"
+import type { Editor } from "@tiptap/core"
+import { EditorTable } from "@/components/EditorTable"
+import { EditorActionsProvider } from "@/context/EditorActionsContext"
+import { CellStore } from "@/hooks/useActiveCellStore"
+import type { ProjectRecord } from "@/lib/parsers/types"
+import type { CellRow } from "@/lib/sync/cells-read-types"
+import { emitTargetCellCommit } from "./events-emit"
 import {
   applyPresenceFrame,
   applyLockClaimed,
   applyLockReleased,
 } from "./cell-lock-state"
 
-// ── Helpers mirroring the production implementation ──────────────────────────
+vi.mock("./events-emit", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./events-emit")>()
+  return { ...actual, emitTargetCellCommit: vi.fn(async () => "evt-commit-1") }
+})
 
-/**
- * Simulates the ref-backed lock-check function created in ProjectWorkspace:
- *   const checkLockHolder = useCallback((cellId) =>
- *     cellLockHoldersRef.current.get(cellId) ?? null, [])
- *
- * Returns a factory that wraps a mutable map (the "ref") so tests can drive
- * synchronous updates independently of React state.
- */
-function makeLiveLockCheck(): {
-  lockMap: Map<string, string>
-  checkLockHolder: (cellId: string) => string | null
-} {
-  const lockMap = new Map<string, string>()
-  const checkLockHolder = (cellId: string) => lockMap.get(cellId) ?? null
-  return { lockMap, checkLockHolder }
+// happy-dom has no layout engine, so LegendList may render no rows. Replace it
+// with a trivial "render every row" stand-in (same stand-in as the other
+// EditorTable RTL suites).
+vi.mock("@legendapp/list/react", () => ({
+  LegendList: forwardRef(function MockLegendList({
+    data,
+    renderItem,
+    keyExtractor,
+  }: {
+    data: string[]
+    renderItem: (props: { item: string; index: number }) => ReactNode
+    keyExtractor?: (item: string, index: number) => string
+  }, ref) {
+    useImperativeHandle(ref, () => ({
+      getState: () => ({ scroll: 0, positionAtIndex: (i: number) => i * 140, sizeAtIndex: () => 140 }),
+      scrollToIndex: async () => undefined,
+      scrollToOffset: async () => undefined,
+    }))
+    return createElement(
+      "div",
+      null,
+      data.map((item, index) =>
+        createElement(Fragment, { key: keyExtractor?.(item, index) ?? item }, renderItem({ item, index })),
+      ),
+    )
+  }),
+}))
+
+afterEach(() => {
+  cleanup()
+  vi.mocked(emitTargetCellCommit).mockClear()
+})
+
+const project: ProjectRecord = {
+  id: "proj-1",
+  name: "Test Project",
+  sourceLanguage: "en",
+  targetLanguage: "fr",
+  createdAt: "2026-01-01T00:00:00Z",
+  files: [],
+  members: [],
 }
 
-/**
- * The effective-holder computation from handleEditorCommit.
- * Returns the holder label if the commit should abort, or null if it may proceed.
- */
-function getEffectiveHolder(
-  cellId: string,
-  lockHolderLabel: string | null,
-  checkLockHolder?: (cellId: string) => string | null,
-): string | null {
-  return checkLockHolder?.(cellId) ?? lockHolderLabel
+const rows: CellRow[] = [
+  {
+    cellId: "cell-1", side: "source", value: "hello", valueHtml: null, type: "text",
+    canonicalRef: "GEN 1:1", anchorCellId: null, eventId: "cell-1-source",
+    sourceEventId: null, lastEditor: null, lastEditAt: 1, validated: false, wordCount: 1,
+  },
+  {
+    cellId: "cell-1", side: "target", value: "bonjour", valueHtml: null, type: "text",
+    canonicalRef: "GEN 1:1", anchorCellId: null, eventId: "cell-1-target",
+    sourceEventId: "cell-1-source", lastEditor: "tester", lastEditAt: 2, validated: false,
+    wordCount: 1,
+  },
+]
+
+function makeStore(): CellStore {
+  const store = new CellStore()
+  store.setRuntime({ projectId: project.id, fileId: "file-1", username: "tester", requiredValidations: 1, auditStats: new Map() })
+  store.replaceRows(rows, { full: true, maxServerSeq: 1 })
+  return store
 }
 
-// ── Tests ─────────────────────────────────────────────────────────────────────
+function tableElement(store: CellStore, cellLockHolders: ReadonlyMap<string, string>, onCellCommitted: (cellId: string) => void) {
+  return createElement(
+    QueryClientProvider,
+    { client: new QueryClient() },
+    createElement(EditorActionsProvider, {
+      value: {},
+      children: createElement(EditorTable, {
+        project,
+        cellStore: store,
+        username: "tester",
+        cellLockHolders,
+        onCellCommitted,
+        isCompletionConfigured: false,
+        isCompletionAvailable: false,
+        completing: new Map(),
+        examples: new Map(),
+        errors: new Map(),
+        previews: new Map(),
+        onCompleteSingle: () => {},
+        onCompleteBatch: () => {},
+        healthMap: new Map(),
+        lineNumbersEnabled: false,
+        cellLabelsEnabled: true,
+        sourceTextDirection: "ltr",
+        targetTextDirection: "ltr",
+      }),
+    }),
+  )
+}
 
-describe("RACE-5 commit-time lock guard", () => {
-  describe("getEffectiveHolder (the guard used in handleEditorCommit)", () => {
-    it("returns null when neither the prop nor the live check report a holder", () => {
-      const { checkLockHolder } = makeLiveLockCheck()
-      expect(getEffectiveHolder("cell-1", null, checkLockHolder)).toBeNull()
+describe("AQU-1154 — the focus lock never drops a commit", () => {
+  it("hands the commit to the outbox even when presence now names another holder", async () => {
+    const store = makeStore()
+    const onCellCommitted = vi.fn()
+    const view = render(tableElement(store, new Map(), onCellCommitted))
+    await screen.findByText("hello")
+
+    // Open the editor while the cell is free.
+    const readSurface = document.querySelector('[data-editor-cell-surface="target-read"]')
+    expect(readSurface).not.toBeNull()
+    fireEvent.click(readSurface!)
+    const pm = await waitFor(() => {
+      const el = document.querySelector(".ProseMirror") as (HTMLElement & { editor?: Editor }) | null
+      if (!el?.editor) throw new Error("editor not mounted yet")
+      return el
     })
 
-    it("returns the prop holder when checkLockHolder is not wired (offline / no-WS)", () => {
-      // Advisory design: when the socket is absent, fall back to the last known
-      // prop value — offline users must still be able to edit.
-      expect(getEffectiveHolder("cell-1", "alice", undefined)).toBe("alice")
+    // The user types; meanwhile the DO dropped our lease and a peer claimed
+    // the cell — presence now says "alice is editing" (label only).
+    act(() => {
+      pm.editor!.commands.focus("end")
+      pm.editor!.commands.insertContent(" tout le monde")
     })
+    view.rerender(tableElement(store, new Map([["cell-1", "alice"]]), onCellCommitted))
 
-    it("returns the prop holder when checkLockHolder reports no holder but the prop says someone holds it", () => {
-      // e.g. lock.released arrived but prop wasn't cleared yet (opposite stale case).
-      const { checkLockHolder } = makeLiveLockCheck()
-      // lockMap is empty, but the prop still says alice (lagging release)
-      expect(getEffectiveHolder("cell-1", "alice", checkLockHolder)).toBe("alice")
+    // Blur flushes the pending text. The old guard returned here without
+    // emitting; the commit must reach the outbox and ping the parent.
+    act(() => {
+      fireEvent.blur(pm)
     })
-
-    it("returns the live holder when the prop is null but the ref was just updated (the RACE-5 gap)", () => {
-      // This is the key regression test.
-      // Scenario:
-      //   1. lockHolderLabel = null (React state from last render, stale)
-      //   2. lock.claimed(cell-1, alice) arrives synchronously → ref updated
-      //   3. React hasn't re-rendered yet → prop still null
-      //   4. handleEditorCommit fires → should abort because alice holds the lock
-      const { lockMap, checkLockHolder } = makeLiveLockCheck()
-
-      // Step 1: render just happened, lockHolderLabel is null
-      const staleLabel: string | null = null
-
-      // Step 2: WS frame arrives — ref is updated synchronously
-      lockMap.set("cell-1", "alice")
-
-      // Step 4: commit check runs — must see alice even though the prop is null
-      expect(getEffectiveHolder("cell-1", staleLabel, checkLockHolder)).toBe("alice")
+    await waitFor(() => expect(emitTargetCellCommit).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(emitTargetCellCommit).mock.calls[0][0]).toMatchObject({
+      cellId: "cell-1",
+      value: "bonjour tout le monde",
     })
-
-    it("returns null when the ref holder was released and the prop is also null", () => {
-      const { lockMap, checkLockHolder } = makeLiveLockCheck()
-      lockMap.set("cell-1", "alice")
-      lockMap.delete("cell-1")
-      expect(getEffectiveHolder("cell-1", null, checkLockHolder)).toBeNull()
-    })
-
-    it("is cell-specific: a holder on a different cell does not block commits on this cell", () => {
-      const { lockMap, checkLockHolder } = makeLiveLockCheck()
-      lockMap.set("cell-2", "bob")
-      // cell-1 is free even though cell-2 is held by bob
-      expect(getEffectiveHolder("cell-1", null, checkLockHolder)).toBeNull()
-    })
+    // The parent is pinged with the just-assigned event id so revalidate runs.
+    await waitFor(() => expect(onCellCommitted).toHaveBeenCalledTimes(1))
+    expect(onCellCommitted.mock.calls[0].slice(0, 2)).toEqual(["cell-1", "evt-commit-1"])
   })
 
-  describe("ref synchrony invariant", () => {
-    it("checkLockHolder always reads from the mutable ref, not a captured snapshot", () => {
-      // The ref-backed function must read the CURRENT map state at call time,
-      // not a snapshot captured when the function was created.
-      const { lockMap, checkLockHolder } = makeLiveLockCheck()
-
-      // Function created before the lock is set
-      const savedCheck = checkLockHolder
-
-      // Lock arrives (simulates the WS onMessage handler running)
-      lockMap.set("cell-X", "carol")
-
-      // The saved reference must still return the live value
-      expect(savedCheck("cell-X")).toBe("carol")
-    })
-
-    it("reflects deletions immediately, same frame", () => {
-      const { lockMap, checkLockHolder } = makeLiveLockCheck()
-      lockMap.set("cell-Y", "dave")
-      expect(checkLockHolder("cell-Y")).toBe("dave")
-
-      lockMap.delete("cell-Y")
-      expect(checkLockHolder("cell-Y")).toBeNull()
-    })
+  it("still keeps a held cell read-only before the editor opens (advisory affordance)", async () => {
+    const store = makeStore()
+    render(tableElement(store, new Map([["cell-1", "alice"]]), vi.fn()))
+    await screen.findByText("hello")
+    const readSurface = document.querySelector('[data-editor-cell-surface="target-read"]')
+    expect(readSurface?.getAttribute("aria-readonly")).toBe("true")
+    fireEvent.click(readSurface!)
+    expect(document.querySelector(".ProseMirror")).toBeNull()
+    expect(emitTargetCellCommit).not.toHaveBeenCalled()
   })
 })
 
@@ -142,7 +198,8 @@ describe("RACE-5 commit-time lock guard", () => {
 // fired and the UI never updated for lone lock frames.
 //
 // The helpers in cell-lock-state.ts always return a NEW Map.  These tests pin
-// that contract so a future regression is caught immediately.
+// that contract so a future regression is caught immediately. The map now
+// drives only the "X is editing" label and read-only affordance.
 
 describe("B4 — cell-lock-state helpers never alias input (bail-out invariant)", () => {
   describe("applyPresenceFrame", () => {
@@ -244,13 +301,6 @@ describe("B4 — cell-lock-state helpers never alias input (bail-out invariant)"
     // React bail-out would fire and the cell would stay visually locked.
 
     it("produces distinct Map objects on every step (no object aliasing)", () => {
-      // Simulate the ref + setState calls using the helpers.
-      // In production code:
-      //   cellLockHoldersRef.current = newMap
-      //   setCellLockHolders(newMap)   ← same object
-      //
-      // Each step captures what the ref / state would hold after the frame.
-
       // Step 1: presence frame
       const afterPresence = applyPresenceFrame(
         [{ userId: "alice", focusedCell: "GEN 1:1" }],
@@ -271,29 +321,6 @@ describe("B4 — cell-lock-state helpers never alias input (bail-out invariant)"
       // Critically: the intermediate maps are unchanged
       expect(afterPresence.get("GEN 1:1")).toBe("alice") // step-1 map untouched
       expect(afterClaimed.get("GEN 1:1")).toBe("alice")  // step-2 map untouched
-    })
-
-    it("ref reflects release immediately (RACE-5 synchrony preserved)", () => {
-      // Simulate the ref pointer — always updated synchronously with the new Map.
-      let refCurrent: Map<string, string> = new Map()
-
-      // presence frame
-      refCurrent = applyPresenceFrame(
-        [{ userId: "alice", focusedCell: "GEN 1:1" }],
-        "me",
-      )
-
-      // lock.claimed
-      refCurrent = applyLockClaimed(refCurrent, "GEN 1:1", "alice")
-      expect(refCurrent.get("GEN 1:1")).toBe("alice")
-
-      // lone lock.released
-      refCurrent = applyLockReleased(refCurrent, "GEN 1:1")
-
-      // The ref must immediately reflect the release — checkLockHolder must
-      // return null so a commit is not wrongly blocked.
-      const checkLockHolder = (cellId: string) => refCurrent.get(cellId) ?? null
-      expect(checkLockHolder("GEN 1:1")).toBeNull()
     })
   })
 })

@@ -97,6 +97,12 @@ describe("role-policy (client mirror)", () => {
     expect(requiredRoleFor("file.track.set")).toBe(ROLE.MAINTAINER)
   })
 
+  it("keeps sidebar folder moves at the file.rename floor", () => {
+    expect(requiredRoleFor("file.corpus.set")).toBe(ROLE.CONTRIBUTOR)
+    expect(canPerform("file.corpus.set", ROLE.CONTRIBUTOR)).toBe(true)
+    expect(canPerform("file.corpus.set", ROLE.REVIEWER)).toBe(false)
+  })
+
   // ── The setup/handoff line (AQU-646, Sam 2026-08-18) ────────────────────
   //
   // The client's own process settles the film, the cue pairings and the

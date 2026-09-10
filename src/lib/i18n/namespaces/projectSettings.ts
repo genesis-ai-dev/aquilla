@@ -211,6 +211,9 @@ export const projectSettings = defineNamespace({
     "projectSettings.timeline.addLinesLabel": "Let people add new lines into the timeline's silences",
     "projectSettings.timeline.addLinesHint":
       "Off by default. With this on, a pencil appears over each stretch of the timeline that no line covers, and a microphone beside it that creates a line and starts recording. It is never offered on a file with imported audio cues \u2014 there the cues already say where the lines are. Deleting an empty line somebody added stays available either way, so turning this back off can never strand one.",
+    "projectSettings.timeline.trackEditingLabel": "Let maintainers add and edit timeline tracks",
+    "projectSettings.timeline.trackEditingHint":
+      "Off by default. With this on, a maintainer can add extra tracks to a file's timeline, group them into folders, give them colours and delete them. Deleting a track deletes every recording on it, and asks first. Renaming a track and dragging one up or down the list are not affected by this \u2014 a maintainer can always do both. Turning this back off leaves every track exactly as it is and everything still plays; it only stops the tracks being changed.",
     // model → projectSettings.advancedLlm.modelLabel
     "projectSettings.field.temperature": "temperature",
     "projectSettings.field.healthPenalty": "health penalty",
@@ -617,6 +620,9 @@ export const projectSettings = defineNamespace({
     "projectSettings.monday.structureStaleWarning": "Board structure changed — review the mapping below.",
     "projectSettings.monday.linkedBoardPrefix": "Linked board:",
     "projectSettings.monday.oneItemPerLabel": "One item per {granularity}.",
+    "projectSettings.monday.lastPushOk": "Last push {date} — ok.",
+    "projectSettings.monday.lastPushFailed": "Last push {date} — failed.",
+    "projectSettings.monday.notPushedYet": "Not pushed yet.",
     "projectSettings.monday.syncToggleLabel": "Sync",
     "projectSettings.monday.syncNowButton": "Sync now",
     "projectSettings.monday.removeBoardLinkAriaLabel": "Remove board link",
@@ -1148,6 +1154,27 @@ export const projectSettings = defineNamespace({
         placeholders: {
           granularity: "The literal, untranslated word 'file' or 'project' (data) — matches the value stored on the link's itemGranularity setting, not a separately translated enum.",
         },
+      },
+      "projectSettings.monday.lastPushOk": {
+        description:
+          "Status sentence under the linked-board row after a successful Monday.com " +
+          "progress push; {date} is a hover-dated relative timestamp.",
+        placeholders: {
+          date: "A DateTooltip element rendering the last push time (data, not translated).",
+        },
+      },
+      "projectSettings.monday.lastPushFailed": {
+        description:
+          "Status sentence under the linked-board row after the last Monday.com " +
+          "progress push failed; a red error line follows it.",
+        placeholders: {
+          date: "A DateTooltip element rendering the last push time (data, not translated).",
+        },
+      },
+      "projectSettings.monday.notPushedYet": {
+        description:
+          "Status sentence under the linked-board row when no Monday.com progress " +
+          "push has happened yet for this project.",
       },
       "projectSettings.monday.boardSelectAriaLabel": {
         description:

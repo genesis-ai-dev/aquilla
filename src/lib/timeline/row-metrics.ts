@@ -158,6 +158,32 @@ export const MIN_LABEL_SUB_H_PX = 40
  *  out to see many of them at once. */
 export const MIN_SPEAKER_FULL_H_PX = 34
 
+/**
+ * AQU-646 stage 4b: a FOLDER row's height. Folders are not tracks (Sam,
+ * 2026-08-24), and stage 4b makes that visible: a folder is a slim fixed
+ * heading — a triangle and a name — not a lane-height row, so collapsing a
+ * stack actually reclaims vertical space instead of trading three tall rows
+ * for one tall row.
+ *
+ * 28px holds everything a folder row contains: the 16px disclosure button, the
+ * 16px name line and the 22px ⋯ trigger, inside the 27px content box that
+ * border-box + border-b leaves. Folders have no speaker and (as of 4b) no
+ * sub-line, so nothing taller exists to fit.
+ */
+export const FOLDER_ROW_H_PX = 28
+
+/**
+ * Clamped so a folder NEVER stands taller than the tracks around it (Sam's
+ * ruling): the row-height dial goes down to 24px, and at that compression a
+ * fixed 28px heading would stick up above the rows it is meant to be less
+ * than. Everything just gets uniformly small instead. Independent of the dial
+ * in the other direction — a 160px dial still gets a 28px heading, which is
+ * the point.
+ */
+export function folderRowHPx(rowH: number): number {
+  return Math.min(FOLDER_ROW_H_PX, clampRowHeight(rowH))
+}
+
 // The row/chip box classes, in one place, so the 10-46-10 numbers are not
 // re-typed at nine sites (four row containers, five chip boxes).
 //

@@ -56,6 +56,7 @@ const REQUIRED_ROLE: Record<string, number> = {
   "cell.audio.remove": ROLE.CONTRIBUTOR,
   "cell.audio.rename": ROLE.CONTRIBUTOR,
   "cell.audio.trim": ROLE.CONTRIBUTOR,
+  "cell.audio.place": ROLE.CONTRIBUTOR,
   // AQU-646: project lead, not contributor. The pairings are settled during
   // setup and handed off; a contributor re-cutting one silently moves which
   // line a recording belongs to, for everyone.
@@ -64,11 +65,21 @@ const REQUIRED_ROLE: Record<string, number> = {
 
   "file.create": ROLE.PROJECT_LEAD,
   "file.rename": ROLE.CONTRIBUTOR,
+  "file.corpus.set": ROLE.CONTRIBUTOR,
   "file.delete": ROLE.PROJECT_LEAD,
   "file.restore": ROLE.PROJECT_LEAD,
 
   // These are the SELF floors — the bar to touch your own comment. Acting on
   // someone else's carries a second, higher floor; see FOREIGN_COMMENT_ROLE.
+  // Terminology: CONTRIBUTOR buys a SUGGESTION (`term.create` status 'draft').
+  // Every binding write additionally needs the org's `termbaseEditMinRole`,
+  // which only the server can resolve — this client table is the optimistic
+  // floor, and the server is the authority (sync-worker termbase-authority.ts).
+  "term.create": ROLE.CONTRIBUTOR,
+  "term.update": ROLE.CONTRIBUTOR,
+  "term.delete": ROLE.CONTRIBUTOR,
+  "term.approve": ROLE.CONTRIBUTOR,
+  "term.reject": ROLE.CONTRIBUTOR,
   "comment.create": ROLE.COMMENTER,
   "comment.edit": ROLE.COMMENTER,
   "comment.delete": ROLE.COMMENTER,

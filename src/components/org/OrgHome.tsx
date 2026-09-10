@@ -22,7 +22,7 @@ import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { OrgCreateDialog } from "./OrgCreateDialog"
 import { LaneChips } from "./LaneChips"
 import { ProjectMetricHeader } from "./ProjectMetricHeader"
-import { displayLanes } from "./project-lanes"
+import { displayLanes, resolveDefaultLaneLabel } from "./project-lanes"
 import { ProjectStatusFilter } from "./ProjectStatusFilter"
 import { OrgProjectsDataTable } from "./OrgProjectsDataTable"
 import type { StatusFilter } from "@/hooks/useOrgPortfolio"
@@ -47,6 +47,7 @@ import { cn } from "@/lib/utils"
 import { Search, Building2, Sparkles, CircleCheck, Mic, AlertTriangle } from "lucide-react"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
+import { SignedOutWorkspace } from "./SignedOutWorkspace"
 
 const PANEL_MAX_H =
   "max-h-[clamp(14rem,calc(100dvh-22rem),28rem)]"
@@ -484,7 +485,7 @@ export function ProjectTable({
                   <LaneChips
                     projectId={p.id}
                     lanes={displayLanes(p)}
-                    defaultLaneLabel={defaultLaneLabelByProjectId?.get(p.id) ?? ""}
+                    defaultLaneLabel={resolveDefaultLaneLabel(p, defaultLaneLabelByProjectId?.get(p.id))}
                     maxVisible={2}
                     className="w-full"
                   />
@@ -626,24 +627,8 @@ export function OrgHome() {
   // Never show zero-stat fake-empty cards for unauthenticated visitors.
   if (!sessionLoading && !jwt) {
     return (
-      <AppShell
-        sidebar={<OrgSidebar />}
+      <SignedOutWorkspace
         header={<OrgBreadcrumb section="Overview" isProjectsLanding />}
-        statusBar={null}
-        main={
-          <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
-            <p className="text-lg font-medium">{t("org.orgHome.signedOut.heading")}</p>
-            <p className="text-sm text-muted-foreground max-w-xs">
-              {t("org.orgHome.signedOut.description")}
-            </p>
-            <Link
-              to={`/login?next=${encodeURIComponent("/")}`}
-              className={cn(buttonVariants())}
-            >
-              {t("auth.login.submitDefault")}
-            </Link>
-          </div>
-        }
       />
     )
   }
@@ -787,8 +772,11 @@ export function OrgHome() {
   // invitee still gets the same projects table, just without fake 0/0/0 stats.
   const showOrgRollup = orgs.length > 0
   // AQU-538 §3.2: the '' (default) lane chip is labeled with the project's
-  // target language — portfolio alone doesn't join file languages; empty map
-  // falls back to generic "Default" labels.
+  // target language. This all-orgs view has no per-file language hints to join,
+  // so the map stays empty — AQU-606: `resolveDefaultLaneLabel` reads the
+  // project-level `targetLanguage` off the row itself, so the chip still shows
+  // the real language and only a genuinely untargeted project falls back to the
+  // neutral placeholder.
   const defaultLaneLabelByProjectId = new Map<string, string>()
 
   const orgSummaries: OrgPortfolioSummary[] = orgs

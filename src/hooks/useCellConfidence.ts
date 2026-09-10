@@ -10,6 +10,12 @@ import { fetchCellConfidence } from "@/lib/sync/cell-confidence-read"
 // read rather than treating this as an all-cells aggregate.
 const MAX_QUERY_CELLS = 100
 
+// Content changes are scored after a quiet period, not per commit: the editor
+// commits on idle while the user keeps typing, and every commit used to fire a
+// fresh POST scoring up to 100 cells (the abort only cancels the client side —
+// the server had already started the FTS5 work).
+export const CONFIDENCE_RESCORE_DEBOUNCE_MS = 1_500
+
 function textFingerprint(value: string): string {
   // Fast FNV-1a-style signature: enough to invalidate a read when source or
   // target text changes without retaining every full string in the effect key.
@@ -19,6 +25,15 @@ function textFingerprint(value: string): string {
     hash = Math.imul(hash, 16777619)
   }
   return (hash >>> 0).toString(36)
+}
+
+/** True when `next` differs from `prev` only in `cellId`'s entry (present in both). */
+function onlyCellChanged(prev: Map<string, string>, next: Map<string, string>, cellId: string): boolean {
+  if (prev.size !== next.size || !prev.has(cellId) || !next.has(cellId)) return false
+  for (const [id, fp] of next) {
+    if (id !== cellId && prev.get(id) !== fp) return false
+  }
+  return true
 }
 
 export interface CellConfidenceResult {
@@ -37,6 +52,14 @@ export interface CellConfidenceResult {
  * editor from source-side retrieval support. Server confidence for translated,
  * unvalidated cells loads in and adjusts. Refetches when source/target content,
  * the query set, or validation state changes.
+ *
+ * Request shaping:
+ *   - A new file / enable fires immediately.
+ *   - Content or validation changes fire once after a trailing debounce.
+ *   - Changes confined to the cell the user is currently editing
+ *     (`focusedCellId`) are NOT scored — that cell's commits land on idle while
+ *     typing continues. It is scored once focus leaves it (or anything else
+ *     changes alongside it).
  */
 export function useCellConfidence(args: {
   projectId?: string
@@ -47,8 +70,10 @@ export function useCellConfidence(args: {
   enabled: boolean
   /** Per-hop authority decay (project setting); server defaults to 0.8. */
   perHopDecay?: number
+  /** The cell being edited right now; its mid-edit commits don't trigger a re-score. */
+  focusedCellId?: string | null
 }): CellConfidenceResult {
-  const { projectId, fileId, getToken, cells, enabled, perHopDecay } = args
+  const { projectId, fileId, getToken, cells, enabled, perHopDecay, focusedCellId } = args
   const [healthMap, setHealthMap] = useState<Map<string, number>>(new Map())
   const [topNeighbor, setTopNeighbor] = useState<Map<string, string | null>>(new Map())
   const [lastTookMs, setLastTookMs] = useState<number | null>(null)
@@ -69,35 +94,78 @@ export function useCellConfidence(args: {
     .map((c) => c.id)
     .join(",")
   const querySet = new Set(toQuery)
-  const contentSig = cells
-    .filter((cell) => querySet.has(cell.id))
-    .map((cell) => `${cell.id}:${textFingerprint(cell.original)}:${textFingerprint(cell.translated)}`)
-    .join(",")
-  const sig = `${projectId}|${fileId}|${validatedSig}|${contentSig}|${perHopDecay ?? ""}`
+  const contentMap = new Map<string, string>()
+  for (const cell of cells) {
+    if (querySet.has(cell.id)) {
+      contentMap.set(cell.id, `${textFingerprint(cell.original)}:${textFingerprint(cell.translated)}`)
+    }
+  }
+  const contentSig = Array.from(contentMap, ([id, fp]) => `${id}:${fp}`).join(",")
+  const scopeKey = `${projectId}|${fileId}|${perHopDecay ?? ""}`
+  const sig = `${scopeKey}|${validatedSig}|${contentSig}`
 
   const cellsRef = useRef(cells)
   cellsRef.current = cells
   const getTokenRef = useRef(getToken)
   getTokenRef.current = getToken
+  // What the last request actually scored: the full signature, plus the
+  // validated set and per-cell content it was computed from.
+  const scoredRef = useRef<{
+    sig: string
+    scopeKey: string
+    validated: string
+    content: Map<string, string>
+  } | null>(null)
+  const focusedRef = useRef(focusedCellId)
+  focusedRef.current = focusedCellId
+  const contentRef = useRef(contentMap)
+  contentRef.current = contentMap
+  const validatedRef = useRef(validatedSig)
+  validatedRef.current = validatedSig
 
   useEffect(() => {
     // Fully inert when disabled: local-only projects retain their local health
     // path; synced projects use this evidence map as the ribbon source.
-    if (!enabled) return
+    if (!enabled) {
+      scoredRef.current = null
+      return
+    }
+
+    const last = scoredRef.current
+    const sameScope = last !== null && last.scopeKey === scopeKey
 
     // Optimistic local seed (instant, no round-trip): a just-validated cell
     // snaps to 100 immediately, then the server ripple adjusts its neighbors.
-    // Untranslated cells are skipped: no target exists to score yet.
-    const base = new Map<string, number>()
-    for (const c of cellsRef.current) {
-      if (c.status === "validated") base.set(c.id, 100)
-    }
-    setHealthMap(base)
+    // Untranslated cells are skipped: no target exists to score yet. Within a
+    // scope, merge onto the scores already fetched so a debounced (or skipped)
+    // re-score doesn't blank the overlay; a new file starts from scratch.
+    setHealthMap((prev) => {
+      const next = sameScope ? new Map(prev) : new Map<string, number>()
+      for (const c of cellsRef.current) {
+        if (c.status === "validated") next.set(c.id, 100)
+      }
+      return next
+    })
 
     if (!projectId || !fileId || toQuery.length === 0) return
 
+    if (last?.sig === sig) return
+    // Mid-edit: the only difference from what was last scored is the focused
+    // cell's own text. Score it when focus moves on.
+    if (
+      sameScope &&
+      focusedRef.current &&
+      last.validated === validatedRef.current &&
+      onlyCellChanged(last.content, contentRef.current, focusedRef.current)
+    ) {
+      return
+    }
+
     const ctrl = new AbortController()
-    ;(async () => {
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const run = async () => {
+      timer = null
+      scoredRef.current = { sig, scopeKey, validated: validatedRef.current, content: contentRef.current }
       const token = await getTokenRef.current?.()
       if (!token || ctrl.signal.aborted) return
       try {
@@ -122,10 +190,16 @@ export function useCellConfidence(args: {
           console.warn("[cell-confidence] fetch failed:", e.message)
         }
       }
-    })()
-    return () => ctrl.abort()
+    }
+    // First read for this file/scope is immediate; content churn is debounced.
+    if (sameScope) timer = setTimeout(() => { void run() }, CONFIDENCE_RESCORE_DEBOUNCE_MS)
+    else void run()
+    return () => {
+      if (timer !== null) clearTimeout(timer)
+      ctrl.abort()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sig, enabled])
+  }, [sig, enabled, focusedCellId])
 
   return { healthMap, topNeighbor, lastTookMs }
 }

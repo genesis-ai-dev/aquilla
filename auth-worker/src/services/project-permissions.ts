@@ -30,6 +30,7 @@
 import type { Env } from "../types"
 import type { AuthUser, RoleResolution } from "../types"
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
+import { memoize } from "../lib/request-memo"
 
 export const ROLE_NAMES: Record<number, string> = {
   100: "viewer",
@@ -142,26 +143,62 @@ async function pathFirst<T>(
   }
 }
 
+export interface ProjectRow {
+  id: string
+  org_id: number | null
+  created_by: number
+  archived_at: string | null
+  is_active: boolean
+}
+
+/**
+ * The `projects` row as role resolution and sync-token minting need it,
+ * memoised per request (lib/request-memo.ts) so the two no longer read it
+ * separately.
+ */
+export function loadProjectRow(env: Env, projectId: string): Promise<ProjectRow | null> {
+  return memoize(env.requestMemo, `project:${projectId}`, () =>
+    env.AQUILLA_PG.prepare(
+      `SELECT id, org_id, created_by, archived_at, is_active FROM projects WHERE id = ?`,
+    )
+      .bind(projectId)
+      .first<ProjectRow>(),
+  )
+}
+
+/**
+ * Drop the memoised role for (project, user) so a re-resolve later in the
+ * SAME request sees a grant change this request just wrote. Only the
+ * member-removal route needs it today (it re-resolves the removed user to
+ * decide whether to eject their live sessions).
+ */
+export function forgetProjectRole(env: Env, projectId: string, userId: number): void {
+  env.requestMemo?.entries.delete(`role:${projectId}:${userId}`)
+}
+
 async function resolveProjectRoleInternal(
   env: Env,
   user: AuthUser,
   projectId: string,
   opts: { includeArchived: boolean },
 ): Promise<ResolvedRole | null> {
-  const project = await env.AQUILLA_PG.prepare(
-    `SELECT id, org_id, created_by, archived_at FROM projects WHERE id = ?`,
-  )
-    .bind(projectId)
-    .first<{
-      id: string
-      org_id: number | null
-      created_by: number
-      archived_at: string | null
-    }>()
-
+  const project = await loadProjectRow(env, projectId)
   if (!project) return null
   if (!opts.includeArchived && project.archived_at) return null
 
+  // The grant paths don't depend on archived-ness, so both entry points share
+  // one memo slot per (project, user) within a request.
+  return memoize(env.requestMemo, `role:${projectId}:${user.id}`, () =>
+    resolveGrantPaths(env, user, projectId, project),
+  )
+}
+
+async function resolveGrantPaths(
+  env: Env,
+  user: AuthUser,
+  projectId: string,
+  project: ProjectRow,
+): Promise<ResolvedRole | null> {
   // All four path queries run in parallel — they're independent reads.
   // Each path is wrapped so a single missing/pending-migration table
   // (e.g. group_project_grants before 0007 has applied on a target env)

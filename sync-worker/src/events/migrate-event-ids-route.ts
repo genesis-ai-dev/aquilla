@@ -39,6 +39,14 @@ export async function handleMigrateEventIdsRequest(
 
   const projectId = url.searchParams.get('projectId')
   if (!projectId) return new Response('projectId query param required', { status: 400 })
+
+  if (url.searchParams.get('count') === '1') {
+    const row = await env.AQUILLA_PG.prepare(`SELECT COUNT(*)::int AS count FROM events WHERE project_id = ?`)
+      .bind(projectId)
+      .first<{ count: number }>()
+    return Response.json({ count: row?.count ?? 0 })
+  }
+
   const after = Number(url.searchParams.get('after') ?? '0') || 0
   const limit = Math.min(Number(url.searchParams.get('limit') ?? String(MAX_LIMIT)) || MAX_LIMIT, MAX_LIMIT)
 

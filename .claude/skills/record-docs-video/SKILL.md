@@ -165,3 +165,8 @@ ffmpeg -y -ss 5 -i "$M" -frames:v 1 -vf crop=260:70:1020:0 /tmp/m.png   # the AQ
 - Anonymize: seeded data, invented names, never real customer corpora.
 - Don't `git push` while recording (pre-push smoke fights for the ports). Output is git-ignored.
 - **Coverage over polish.** A video that shows all 6 features at decent pacing beats a gorgeous video that only shows 3. Get the content right first, then refine timing.
+
+---
+
+## Non-app footage -> use the global `edit-video` skill
+This skill drives the REAL app. For footage that is NOT the app — talking-head explainers, a VSL, lead-gen or founder content, or motion-graphics scenes — use the global `edit-video` skill. It is app-agnostic, shares one `brand-kit.md`, and can intercut a doc-mode `.mp4`/`.webm` from here as proof footage. For copy-level brand rules, keep a `brand-kit.md` (template in the `edit-video` skill) so app and non-app cuts match.

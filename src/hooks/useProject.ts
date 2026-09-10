@@ -65,6 +65,10 @@ function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): 
   assign("validationNamedUsers", settings.validationNamedUsers)
   assign("allowSelfValidation", settings.allowSelfValidation)
   assign("allowLineCreation", settings.allowLineCreation)
+  // AQU-646 stage 2: the second gate on track editing. Must reach the workspace
+  // or the add-track button and the colour menu would be invisible everywhere,
+  // since they render only when this is on.
+  assign("allowTrackEditing", settings.allowTrackEditing)
   assign("bibleResourcesEnabled", settings.bibleResourcesEnabled)
   assign("draftContext", settings.draftContext)
   // AQU-646 SUB-53: the Media lens reads this to decide whether to draw the

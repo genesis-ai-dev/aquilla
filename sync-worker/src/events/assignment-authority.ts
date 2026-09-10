@@ -2,17 +2,25 @@
 //
 // `assignment.create`'s static floor (role-policy.ts REQUIRED_ROLE) is
 // PROJECT_LEAD (500) — a manager assigns work to members. This resolver backs
-// an opt-in carve-out: when the project's org has `allowSelfAssignment: true`
-// in its org_settings blob, a below-lead member may still emit
-// `assignment.create` for THEMSELVES (assigneeUserId === caller) — never for
-// anyone else, and never below CONTRIBUTOR (400). Leads/maintainers are
-// unaffected — their role already clears the static floor in authorize().
+// two org-level policies read from the same org_settings blob:
+//
+//   - `assignmentMinRole` (AQU-1037): the org-configured floor for
+//     assignment.create / reassign / unassign for ANYONE. Defaults to
+//     PROJECT_LEAD when unset or off the role ladder.
+//   - `allowSelfAssignment` (AQU-496): an opt-in carve-out — when `true`, a
+//     below-floor member may still emit `assignment.create` for THEMSELVES
+//     (assigneeUserId === caller) — never for anyone else, and never below
+//     CONTRIBUTOR (400). Leads/maintainers are unaffected — their role already
+//     clears the floor in authorize().
 //
 // Mirrors resolveExportFloor's shape exactly (export-floor.ts): same
 // project -> org_id -> org_settings lookup, same fail-safe default on any
-// missing/malformed data. Default here is `false` (leads-only), not a role
-// level, because this is a boolean carve-out rather than a floor — `false`
-// preserves pre-AQU-496 behavior byte-for-byte when the org hasn't opted in.
+// missing/malformed data. The self-assign default is `false` (leads-only),
+// not a role level, because it is a boolean carve-out rather than a floor —
+// `false` preserves pre-AQU-496 behavior byte-for-byte when the org hasn't
+// opted in.
+
+import { makeRequestCache, type RequestCache } from './request-cache'
 
 export const DEFAULT_ASSIGNMENT_MIN_ROLE = 500
 
@@ -34,44 +42,45 @@ const VALID_ROLE_LEVELS = new Set([100, 200, 300, 400, 500, 600, 700])
 export async function resolveAssignmentAuthority(
   db: AquillaDb,
   projectId: string,
+  // Per-request memo (request-cache.ts): the two rows below are read at most
+  // once per request however many events consult them. A fresh throwaway
+  // cache when the caller has none keeps the old signature working.
+  cache: RequestCache = makeRequestCache(db),
 ): Promise<AssignmentAuthority> {
-  const fallback = {
+  const fallback: AssignmentAuthority = {
     minRole: DEFAULT_ASSIGNMENT_MIN_ROLE,
     allowSelfAssignment: false,
   }
-  const project = await db
-    .prepare(`SELECT org_id FROM projects WHERE id = ?`)
-    .bind(projectId)
-    .first<{ org_id: number | null }>()
+  const orgId = await cache.projectOrgId(projectId)
+  if (!orgId) return fallback
 
-  if (!project?.org_id) return fallback
+  // The cache resolves `null` for a missing row AND for a blob that will not
+  // parse — both are "no policy configured" here, exactly as before.
+  const parsed = await cache.orgSettings(orgId)
+  if (!parsed) return fallback
 
-  const settings = await db
-    .prepare(`SELECT settings FROM org_settings WHERE org_id = ?`)
-    .bind(project.org_id)
-    .first<{ settings: string }>()
-
-  if (!settings) return fallback
-
-  try {
-    const parsed = JSON.parse(settings.settings) as Record<string, unknown> | null
-    const rawMinRole = parsed?.assignmentMinRole
-    return {
-      minRole:
-        typeof rawMinRole === 'number' && VALID_ROLE_LEVELS.has(rawMinRole)
-          ? rawMinRole
-          : DEFAULT_ASSIGNMENT_MIN_ROLE,
-      allowSelfAssignment: parsed?.allowSelfAssignment === true,
-    }
-  } catch {
-    return fallback
+  const rawMinRole = parsed.assignmentMinRole
+  return {
+    minRole:
+      typeof rawMinRole === 'number' && VALID_ROLE_LEVELS.has(rawMinRole)
+        ? rawMinRole
+        : DEFAULT_ASSIGNMENT_MIN_ROLE,
+    allowSelfAssignment: parsed.allowSelfAssignment === true,
   }
 }
 
-/** Backwards-compatible narrow resolver used by existing callers/tests. */
+/**
+ * Backwards-compatible narrow resolver used by existing callers/tests.
+ *
+ * Returns `false` (safe default — leads-only, current behavior) when:
+ *   - the project has no org, OR
+ *   - the org has no settings row, OR
+ *   - allowSelfAssignment is missing or not exactly `true`.
+ */
 export async function resolveAllowSelfAssignment(
   db: AquillaDb,
   projectId: string,
+  cache: RequestCache = makeRequestCache(db),
 ): Promise<boolean> {
-  return (await resolveAssignmentAuthority(db, projectId)).allowSelfAssignment
+  return (await resolveAssignmentAuthority(db, projectId, cache)).allowSelfAssignment
 }

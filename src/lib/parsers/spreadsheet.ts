@@ -495,22 +495,6 @@ export function splitCastName(raw: string): SplitCastName {
   return { voice, cameraState }
 }
 
-// ─── Cell-label template generation (AQU-314) ────────────────────────────────
-
-/**
- * Generate a downloadable CSV template for cell-label / cast import.
- * The template has one row per source cell ref from the project.
- * The PM fills in the "cast_name" column and re-imports.
- *
- * Returns a CSV string with a BOM so Excel opens it in UTF-8 correctly.
- */
-export function generateLabelTemplate(refs: string[]): string {
-  const BOM = "﻿"
-  const header = "ref,cast_name,note"
-  const rows = refs.map((r) => `"${r.replace(/"/g, '""')}",,`)
-  return BOM + [header, ...rows].join("\r\n") + "\r\n"
-}
-
 // ─── Paired source+target import (AQU-315) ───────────────────────────────────
 
 /** Minimal source cell descriptor for matching (mirrors SourceCellRef from import.ts). */

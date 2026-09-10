@@ -21,12 +21,14 @@ export class AccountSwitcherPage {
     await expect(this.page.getByRole("menu")).toBeVisible({ timeout: 10_000 })
   }
 
-  /** Log out the active account after verifying another session can take over. */
-  async logOutCurrentAccount(activeUsername: string, nextUsername: string): Promise<void> {
+  /** Log out the active account, optionally verifying another session can take over. */
+  async logOutCurrentAccount(activeUsername: string, nextUsername?: string): Promise<void> {
     await this.openMenu(activeUsername)
-    await expect(
-      this.page.getByRole("menuitem", { name: new RegExp(nextUsername, "i") }),
-    ).toBeVisible({ timeout: 10_000 })
+    if (nextUsername) {
+      await expect(
+        this.page.getByRole("menuitem", { name: new RegExp(nextUsername, "i") }),
+      ).toBeVisible({ timeout: 10_000 })
+    }
     await this.page.getByRole("menuitem", { name: /^Log out$/i }).click()
   }
 

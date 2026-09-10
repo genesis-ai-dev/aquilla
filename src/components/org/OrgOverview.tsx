@@ -45,6 +45,7 @@ import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { portfolioAttentionReasons, type ProjectAttentionReason } from "@/lib/project-status"
 import { DateTooltip } from "@/components/ui/date-tooltip"
+import { SignedOutWorkspace } from "./SignedOutWorkspace"
 
 const PROJECT_PREVIEW_LIMIT = 10
 
@@ -209,24 +210,8 @@ export function OrgOverview() {
 
   if (!sessionLoading && !jwt) {
     return (
-      <AppShell
-        sidebar={<OrgSidebar />}
+      <SignedOutWorkspace
         header={<OrgBreadcrumb section="Overview" isProjectsLanding />}
-        statusBar={null}
-        main={
-          <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
-            <p className="text-lg font-medium">{t("org.orgHome.signedOut.heading")}</p>
-            <p className="max-w-xs text-sm text-muted-foreground">
-              {t("org.orgHome.signedOut.description")}
-            </p>
-            <Link
-              to={`/login?next=${encodeURIComponent("/")}`}
-              className={cn(buttonVariants())}
-            >
-              {t("auth.login.submitDefault")}
-            </Link>
-          </div>
-        }
       />
     )
   }

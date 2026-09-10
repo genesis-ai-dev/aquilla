@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest"
 import type { Concept } from "./types"
 import { compileConceptsToRules } from "./compile"
+import { checkRules } from "@/lib/rules/rule-engine"
+import type { CellData } from "@/hooks/useCells"
 import { addConcept, updateConcept, deleteConcept } from "./store"
 import { importConceptsCsv, exportConceptsCsv } from "./csv"
 import { importConceptsTbx, exportConceptsTbx } from "./tbx"
@@ -107,6 +109,61 @@ describe("compileConceptsToRules", () => {
       expect(new RegExp(rule.check.targetPattern, "i").test("wrong rendering")).toBe(false)
       expect(new RegExp(rule.check.targetPattern, "i").test("espíritu")).toBe(true)
     }
+  })
+
+  it("two source instances with one rendering fail through compile → rule-engine", () => {
+    const concept = makeConcept({
+      sourceTerm: "spirit",
+      renderings: [{ rendering: "espíritu", status: "preferred" }],
+    })
+    const rules = compileConceptsToRules([concept])
+    const cell: CellData = {
+      id: "c1",
+      original: "the spirit and the spirit",
+      translated: "el espíritu only once",
+      fileId: "f1",
+      context: "",
+      group: "",
+      type: "text",
+      originalHtml: undefined,
+      status: "validated",
+      validationStatus: "none",
+      activeValidators: [],
+      validationHistory: [],
+      history: [],
+      threads: [],
+    }
+    const inf = checkRules(new Map([["f1", [cell]]]), rules).get("c1")?.[0]
+    expect(inf?.ruleId).toBe("term:c1:approved")
+    expect(inf?.reasonParams).toEqual({ sourceCount: "2", targetCount: "1" })
+  })
+
+  it("extra renderings fail through compile → rule-engine", () => {
+    const concept = makeConcept({
+      sourceTerm: "spirit",
+      renderings: [{ rendering: "espíritu", status: "preferred" }],
+    })
+    const rules = compileConceptsToRules([concept])
+    const cell: CellData = {
+      id: "c1",
+      original: "the spirit once",
+      translated: "el espíritu and espíritu again",
+      fileId: "f1",
+      context: "",
+      group: "",
+      type: "text",
+      originalHtml: undefined,
+      status: "validated",
+      validationStatus: "none",
+      activeValidators: [],
+      validationHistory: [],
+      history: [],
+      threads: [],
+    }
+    const inf = checkRules(new Map([["f1", [cell]]]), rules).get("c1")?.[0]
+    expect(inf?.reasonParams).toEqual({ sourceCount: "1", targetCount: "2" })
+    expect(inf?.spans).toHaveLength(1)
+    expect(inf?.spans[0].side).toBe("target")
   })
 
   it("admitted rendering satisfies the source-requires-target check", () => {

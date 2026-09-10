@@ -8,6 +8,7 @@ import {
   TranslatedEditor,
   COMMIT_IDLE_MS,
   isPresenceWordBoundary,
+  presenceDraftIdleAction,
   shouldPublishPresenceDraft,
 } from "./TranslatedEditor"
 
@@ -22,6 +23,23 @@ describe("TranslatedEditor — plain TipTap commit path", () => {
     expect(shouldPublishPresenceDraft("one two", "one two three four")).toBe(true)
     expect(shouldPublishPresenceDraft("", "one,two ")).toBe(true)
     expect(shouldPublishPresenceDraft("", "don't ")).toBe(false)
+  })
+
+  it("defers a mid-word or sub-batch draft once, then publishes it regardless", () => {
+    // A continuous typist who pauses mid-word must still show up as typing
+    // within two idle windows — the gates delay a draft, they never bury it.
+    const midWord = { atWordBoundary: false, previous: "one", next: "one tw" }
+    expect(presenceDraftIdleAction({ ...midWord, alreadyDeferred: false })).toBe("defer")
+    expect(presenceDraftIdleAction({ ...midWord, alreadyDeferred: true })).toBe("publish")
+    const oneWord = { atWordBoundary: true, previous: "one", next: "one two " }
+    expect(presenceDraftIdleAction({ ...oneWord, alreadyDeferred: false })).toBe("defer")
+    expect(presenceDraftIdleAction({ ...oneWord, alreadyDeferred: true })).toBe("publish")
+    expect(presenceDraftIdleAction({
+      atWordBoundary: true, alreadyDeferred: false, previous: "one", next: "one two three ",
+    })).toBe("publish")
+    expect(presenceDraftIdleAction({
+      atWordBoundary: false, alreadyDeferred: true, previous: "same", next: "same",
+    })).toBe("skip")
   })
 
   it("recognizes only whitespace and Unicode punctuation as publish boundaries", () => {

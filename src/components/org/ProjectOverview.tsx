@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { useParams, useNavigate, useLocation, Link } from "react-router-dom"
-import { MoreHorizontal, ChevronRight, Copy, Check, Download, Search, SlidersHorizontal, Archive, PlayCircle, PauseCircle, Settings, Pencil } from "lucide-react"
+import { MoreHorizontal, Download, SlidersHorizontal, Archive, PlayCircle, PauseCircle, Settings, Pencil } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { DateTooltip } from "@/components/ui/date-tooltip"
@@ -30,22 +30,20 @@ import { AssignWork } from "./AssignWork"
 import { MemberActivityPanel } from "./MemberActivityPanel"
 import { ProjectAutopilotPanel } from "./ProjectAutopilotPanel"
 import { isFlagEnabled } from "@/lib/features/flags"
-import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "@/lib/frontier/portfolio"
+import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "@/lib/frontier/portfolio"
 import { OverviewLaneTable } from "./OverviewLaneTable"
+import { downloadBlob } from "@/lib/export/export-service"
+import { PlanBoard } from "./plan/PlanBoard"
+import { PlanInspector } from "./plan/PlanInspector"
+import { RightSidebarPanel } from "@/components/RightSidebarPanel"
+import { useIsLgUp } from "@/components/AppShell"
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
+import { planHasAudio } from "@/lib/plan/plan-status"
+import { useProjectPlan } from "@/hooks/useProjectPlan"
+import { planUnitId, planUnitLabel, type PlanUnit } from "@/lib/plan/plan-status"
+import { planRowsToCsv, planCsvFilename } from "@/lib/progress/plan-csv"
 import { fetchProjectFiles, type FileSummary } from "@/lib/sync/cells-read"
 import { fetchSyncToken } from "@/lib/sync/sync-token"
-import {
-  progressToCanonicalRollup,
-  sectionProgressToVerseRollup,
-  formatFlatSectionKey,
-  type BookRollup,
-  type ChapterRollup,
-  type VerseRollup,
-} from "@/lib/progress/canonical-rollup"
-import { getFileProgress, getFileSectionProgress } from "@/lib/progress/file-progress-resource"
-import { sortFiles, filterFilesByName, FILE_SORT_MODES, type FileSortMode } from "@/lib/progress/file-sort"
-import { progressRowsToCsv, progressCsvFilename } from "@/lib/progress/progress-csv"
-import { downloadBlob } from "@/lib/export/export-service"
 import { getProjectAssignments, type AssigneeWorkload } from "@/lib/sync/assignments"
 import { useOrgSettings, canEditRosterProgressFloor } from "@/hooks/useOrgSettings"
 import { ROLE } from "@/lib/frontier/roles"
@@ -86,11 +84,6 @@ import {
 } from "@/lib/metrics/hidden-stats"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@/components/ui/input-group"
-import {
   Select,
   SelectContent,
   SelectGroup,
@@ -103,26 +96,8 @@ import { LoadingTemplate } from "@/components/ui/loading-overlay"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { bidiIsolate } from "@/lib/i18n/format"
 import { SegmentTabs } from "@/components/ui/tabs"
+import { SignedOutWorkspace } from "./SignedOutWorkspace"
 
-/** Max per-file rows shown on the overview; the rest are counted as "+N more". */
-const FILE_ROW_CAP = 12
-
-type FileProgressSnapshot = Awaited<ReturnType<typeof getFileProgress>>
-type ProgressSection = FileProgressSnapshot["sections"][number]
-
-interface FlatSectionRollup {
-  key: string
-  totalCount: number
-  filledCount: number
-  approvedCount: number
-  filledPct: number
-  approvedPct: number
-}
-
-interface FileRollup {
-  books: BookRollup[] | null
-  sections: FlatSectionRollup[]
-}
 
 function ProjectOverviewSkeleton() {
   return (
@@ -245,19 +220,15 @@ function MetaFieldEditButton({
 
 // ── Stat tiles (big %) ────────────────────────────────────────────────────────
 
-function StatTile({ label, pct, colorClass, tooltip, display }: {
+function StatTile({ label, pct, colorClass, tooltip }: {
   label: string
   pct: number
   colorClass: string
   tooltip?: string
-  /** AQU-490: override the rendered value (e.g. "N/A") when there is no real
-   *  metric to show a percentage for. `pct` is still required by callers but
-   *  ignored visually when `display` is set. */
-  display?: string
 }) {
   const tile = (
     <div className="flex flex-col items-center rounded-lg bg-muted/40 px-5 py-3 text-center">
-      <p className={`text-2xl font-bold tabular-nums ${colorClass}`}>{display ?? `${Math.round(pct * 100)}%`}</p>
+      <p className={`text-2xl font-bold tabular-nums ${colorClass}`}>{`${Math.round(pct * 100)}%`}</p>
       <p className="mt-0.5 text-[11px] text-muted-foreground">{label}</p>
     </div>
   )
@@ -313,244 +284,15 @@ function StatBar({ label, value, total, fillClass, suffix }: {
 
 // ── Per-file mini-bars ────────────────────────────────────────────────────────
 
-function FileProgressBars({ tPct, vPct }: { tPct: number; vPct: number }) {
-  return (
-    <span className="flex flex-1 flex-col gap-[3px]">
-      <span className="block h-1.5 rounded-full bg-muted overflow-hidden">
-        <span className="block h-full rounded-full bg-amber-500 transition-all" style={{ width: `${tPct}%` }} />
-      </span>
-      <span className="block h-1.5 rounded-full bg-muted overflow-hidden">
-        <span className="block h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${vPct}%` }} />
-      </span>
-    </span>
-  )
-}
 
 // ── Chapter/verse rollup (AQU-493) ───────────────────────────────────────────
 
-/** Small inline "N%" bar reused for the book/chapter rows of the rollup tree. */
-function MiniRollupBar({ filledPct, approvedPct }: { filledPct: number; approvedPct: number }) {
-  return (
-    <span className="flex w-24 shrink-0 flex-col gap-[3px]">
-      <span className="block h-1 rounded-full bg-muted overflow-hidden">
-        <span className="block h-full rounded-full bg-amber-500" style={{ width: `${filledPct}%` }} />
-      </span>
-      <span className="block h-1 rounded-full bg-muted overflow-hidden">
-        <span className="block h-full rounded-full bg-emerald-500" style={{ width: `${approvedPct}%` }} />
-      </span>
-    </span>
-  )
-}
 
-function toFlatSectionRollup(section: ProgressSection): FlatSectionRollup {
-  const filledPct = section.totalCount > 0
-    ? Math.round((section.filledCount / section.totalCount) * 100)
-    : 0
-  const approvedPct = section.totalCount > 0
-    ? Math.round((section.validatedCount / section.totalCount) * 100)
-    : 0
-  return {
-    key: section.key,
-    totalCount: section.totalCount,
-    filledCount: section.filledCount,
-    approvedCount: section.validatedCount,
-    filledPct,
-    approvedPct,
-  }
-}
 
-function progressToFileRollup(progress: FileProgressSnapshot): FileRollup {
-  return {
-    books: progressToCanonicalRollup(progress),
-    sections: progress.sections.map(toFlatSectionRollup),
-  }
-}
 
-function FlatSectionRow({ section }: { section: FlatSectionRollup }) {
-  return (
-    <li
-      data-testid="section-row"
-      className="flex w-full items-center gap-2 py-0.5 text-xs"
-    >
-      <span className="w-14 shrink-0 font-medium">{formatFlatSectionKey(section.key)}</span>
-      <MiniRollupBar filledPct={section.filledPct} approvedPct={section.approvedPct} />
-      <span className="text-[10px] tabular-nums text-muted-foreground">
-        {section.filledCount}/{section.approvedCount}/{section.totalCount}
-      </span>
-    </li>
-  )
-}
 
-function ChapterRow({
-  chapter,
-  loadVerses,
-}: {
-  chapter: ChapterRollup
-  loadVerses: (sectionKey: string) => Promise<VerseRollup[]>
-}) {
-  const t = useT()
-  const [open, setOpen] = useState(false)
-  const [verses, setVerses] = useState<VerseRollup[] | null>(chapter.verses.length > 0 ? chapter.verses : null)
-  const [loading, setLoading] = useState(false)
-  const [failed, setFailed] = useState(false)
 
-  const load = useCallback(async () => {
-    if (verses != null || loading) return
-    setLoading(true)
-    setFailed(false)
-    try {
-      setVerses(await loadVerses(chapter.chapter))
-    } catch {
-      setFailed(true)
-    } finally {
-      setLoading(false)
-    }
-  }, [chapter.chapter, loadVerses, loading, verses])
 
-  const toggle = useCallback(() => {
-    const nextOpen = !open
-    setOpen(nextOpen)
-    if (nextOpen) void load()
-  }, [load, open])
-
-  return (
-    <li>
-      <button
-        type="button"
-        data-testid="chapter-row"
-        className="flex w-full items-center gap-2 rounded-sm py-0.5 text-start text-xs hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        onClick={toggle}
-        aria-expanded={open}
-      >
-        <ChevronRight className={cn("h-3 w-3 shrink-0 text-muted-foreground", open && "rotate-90")} />
-        <span className="w-10 shrink-0 text-muted-foreground">
-          {t("org.projectOverview.chapterAbbrevLabel", { chapter: chapter.chapterLabel })}
-        </span>
-        <MiniRollupBar filledPct={chapter.filledPct} approvedPct={chapter.approvedPct} />
-        <span className="text-[10px] tabular-nums text-muted-foreground">
-          {chapter.filledCount}/{chapter.approvedCount}/{chapter.cellCount}
-        </span>
-      </button>
-      {open && loading && <p className="ms-5 py-1 text-[10px] text-muted-foreground">{t("org.projectOverview.loadingVerses")}</p>}
-      {open && failed && (
-        <button type="button" className="ms-5 py-1 text-[10px] text-destructive underline" onClick={() => void load()}>
-          {t("org.projectOverview.verseProgressUnavailable")}
-        </button>
-      )}
-      {open && verses != null && (
-        <ul className="ms-5 mt-0.5 mb-1 grid grid-cols-[repeat(auto-fill,minmax(2.5rem,1fr))] gap-1" aria-label={t("org.projectOverview.versesAria", { chapter: chapter.chapter })}>
-          {verses.map((verse, index) => (
-            <AppTooltip key={`${verse.ref}:${index}`} content={verse.ref}>
-            <li
-              data-testid="verse-cell"
-              className={cn(
-                "rounded px-1.5 py-0.5 text-center text-[10px] tabular-nums",
-                verse.approved ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
-                  : verse.filled ? "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
-                  : "bg-muted text-muted-foreground",
-              )}
-            >
-              {verse.verseLabel}
-            </li>
-            </AppTooltip>
-          ))}
-        </ul>
-      )}
-    </li>
-  )
-}
-
-function BookRow({
-  book,
-  loadVerses,
-}: {
-  book: BookRollup
-  loadVerses: (sectionKey: string) => Promise<VerseRollup[]>
-}) {
-  const t = useT()
-  const [open, setOpen] = useState(false)
-  return (
-    <li>
-      <button
-        type="button"
-        data-testid="book-row"
-        className="flex w-full items-center gap-2 py-0.5 text-start text-xs font-medium hover:text-foreground"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-      >
-        <ChevronRight className={cn("h-3 w-3 shrink-0 text-muted-foreground", open && "rotate-90")} />
-        <span className="w-10 shrink-0">{book.book}</span>
-        <MiniRollupBar filledPct={book.filledPct} approvedPct={book.approvedPct} />
-        <span className="text-[10px] tabular-nums text-muted-foreground">
-          {book.filledCount}/{book.approvedCount}/{book.cellCount}
-        </span>
-      </button>
-      {open && (
-        <ul className="ms-5 mt-0.5" aria-label={t("org.projectOverview.chaptersAria", { book: book.book })}>
-          {book.chapters.map((c) => (
-            <ChapterRow key={c.chapter} chapter={c} loadVerses={loadVerses} />
-          ))}
-        </ul>
-      )}
-    </li>
-  )
-}
-
-/**
- * Nested book › chapter progress rollup shown under a file row once expanded,
- * with a flat section fallback for files whose sections are meaningful but
- * not chapter-shaped. Verse progress is fetched separately only when a
- * chapter opens.
- */
-function FileCanonicalRollup({
-  rollup,
-  loading,
-  error,
-  onRetry,
-  loadVerses,
-}: {
-  rollup: FileRollup | undefined
-  loading: boolean
-  error: boolean
-  onRetry: () => void
-  loadVerses: (sectionKey: string) => Promise<VerseRollup[]>
-}) {
-  const t = useT()
-  if (loading) {
-    return <p className="ms-7 mt-1 text-xs text-muted-foreground">{t("org.projectOverview.loadingChapterBreakdown")}</p>
-  }
-  if (error) {
-    return (
-      <button type="button" className="ms-7 mt-1 text-xs text-destructive underline" onClick={onRetry}>
-        {t("org.projectOverview.chapterProgressUnavailable")}
-      </button>
-    )
-  }
-  if (!rollup || (rollup.books === null && rollup.sections.length === 0)) {
-    return (
-      <p className="ms-7 mt-1 text-xs text-muted-foreground">
-        {t("org.projectOverview.noChapterStructure")}
-      </p>
-    )
-  }
-  if (rollup.books === null) {
-    return (
-      <ul className="ms-7 mt-1 border-s ps-3" data-testid="flat-section-rollup" aria-label={t("org.projectOverview.sectionBreakdownAria")}>
-        {rollup.sections.map((section) => (
-          <FlatSectionRow key={section.key} section={section} />
-        ))}
-      </ul>
-    )
-  }
-  if (rollup.books.length === 0) return null
-  return (
-    <ul className="ms-7 mt-1 border-s ps-3" data-testid="canonical-rollup-books" aria-label={t("org.projectOverview.chapterBreakdownAria")}>
-      {rollup.books.map((b) => (
-        <BookRow key={b.book} book={b} loadVerses={loadVerses} />
-      ))}
-    </ul>
-  )
-}
 
 // ── Main component ────────────────────────────────────────────────────────────
 
@@ -601,7 +343,6 @@ export function ProjectOverview() {
   // stringified userId, or "" for unassigned) while the dialog is open.
   const [pmDialogOpen, setPmDialogOpen] = useState(false)
   const [pmSelection, setPmSelection] = useState<string>("")
-  const [showAllFiles, setShowAllFiles] = useState(false)
   const [workload, setWorkload] = useState<AssigneeWorkload[]>([])
 
   // AQU-538 §3.3: the lane filter tab selection. `null` = "All" — today's
@@ -625,7 +366,6 @@ export function ProjectOverview() {
   // default lane tab both map to '' server-side (the default lane == the
   // no-param request), so the drill-down only ever diverges for a selected
   // non-default lane.
-  const fileLane = selectedLaneTag ?? ""
 
   // AQU-498: which teammate's activity detail is expanded in the Team card
   // (null = none selected). Username, not userId, since that's the events
@@ -644,27 +384,13 @@ export function ProjectOverview() {
   // who have ever committed an event" endpoint independent of both floors.
   const [selectedMemberUsername, setSelectedMemberUsername] = useState<string | null>(null)
 
-  // AQU-499: sort/filter controls for the per-file breakdown list. Default
-  // sort is last-updated (most-recently-progressed first) per acceptance
-  // criteria — a PM opening the overview should see recent activity without
-  // configuring anything.
-  const [fileSortMode, setFileSortMode] = useState<FileSortMode>("last-updated")
-  const [fileNameFilter, setFileNameFilter] = useState("")
-  const fileSortItems = FILE_SORT_MODES.map((m) => ({ value: m.value, label: t(m.labelKey) }))
-
   // AQU-500: transient "copied" feedback for the CSV-export control, mirroring
   // the copy-affordance pattern used elsewhere (e.g. ChatMarkdown's code-block
   // copy button).
-  const [csvCopied, setCsvCopied] = useState(false)
 
   // AQU-493/AQU-517: compact progress rollup, lazily fetched per file on
   // first expand. `undefined` = not yet fetched; loaded values choose between
   // canonical book/chapter rows, flat section rows, or a true no-structure note.
-  const [expandedFileId, setExpandedFileId] = useState<string | null>(null)
-  const [rollups, setRollups] = useState<Record<string, FileRollup>>({})
-  const [rollupLoading, setRollupLoading] = useState<Record<string, boolean>>({})
-  const [rollupErrors, setRollupErrors] = useState<Record<string, boolean>>({})
-  const chapterVerseRequests = useRef(new Map<string, Promise<VerseRollup[]>>())
 
   // AQU-474: project-only invitees (direct project_members grant, no org
   // membership) have `activeOrgId == null` or an org that doesn't include this
@@ -760,62 +486,101 @@ export function ProjectOverview() {
     }
   }, [jwt, id, firstFileId, project?.name])
 
-  // AQU-517: expand/collapse a file row's compact server progress. This never
-  // downloads cell text or rich HTML.
-  const loadFileRollup = useCallback(async (file: FileSummary) => {
-    if (!jwt) return
-    setRollupLoading((s) => ({ ...s, [file.fileId]: true }))
-    setRollupErrors((s) => ({ ...s, [file.fileId]: false }))
-    try {
-      const tok = await fetchSyncToken(jwt, id, file.fileId, { projectName: project?.name })
-      const progress = await getFileProgress(id, file.fileId, async () => tok.token, fileLane)
-      setRollups((r) => ({ ...r, [file.fileId]: progressToFileRollup(progress) }))
-    } catch (e) {
-      console.warn("[ProjectOverview] chapter/verse rollup fetch failed:", e)
-      setRollupErrors((s) => ({ ...s, [file.fileId]: true }))
-    } finally {
-      setRollupLoading((s) => ({ ...s, [file.fileId]: false }))
+
+
+
+  // ── AQU-1092…1098: the plan board ──────────────────────────────────────
+  // `tableNow` is captured once per render pass so every status, group and
+  // summary on the page agrees about "now" — a unit must not read Overdue in
+  // the summary and Due soon in its row because two clocks disagreed.
+  const [selectedPlanUnitId, setSelectedPlanUnitId] = useState<string | null>(null)
+  const [planCsvCopied, setPlanCsvCopied] = useState(false)
+  const getPlanToken = useMemo(() => {
+    if (!id || !jwt) return null
+    return async () => {
+      const token = await fetchSyncToken(jwt, id, firstFileId ?? id, { projectName: project?.name })
+      return token.token
     }
-  }, [jwt, id, project?.name, fileLane])
-
-  const toggleFileRollup = useCallback((file: FileSummary) => {
-    if (expandedFileId === file.fileId) {
-      setExpandedFileId(null)
-      return
-    }
-    setExpandedFileId(file.fileId)
-    if (!(file.fileId in rollups)) void loadFileRollup(file)
-  }, [expandedFileId, loadFileRollup, rollups])
-
-  const loadChapterVerses = useCallback((fileId: string, sectionKey: string): Promise<VerseRollup[]> => {
-    const cacheKey = `${fileId}:${sectionKey}`
-    const existing = chapterVerseRequests.current.get(cacheKey)
-    if (existing) return existing
-    const request = (async () => {
-      if (!jwt) throw new Error("session unavailable")
-      const tok = await fetchSyncToken(jwt, id, fileId, { projectName: project?.name })
-      const detail = await getFileSectionProgress(id, fileId, sectionKey, async () => tok.token, fileLane)
-      return sectionProgressToVerseRollup(detail)
-    })().catch((error) => {
-      chapterVerseRequests.current.delete(cacheKey)
-      throw error
-    })
-    chapterVerseRequests.current.set(cacheKey, request)
-    return request
-  }, [id, jwt, project?.name, fileLane])
-
-  // AQU-538 §3.3: the per-file rollup + verse caches are lane-agnostic keys, so
-  // switching lanes must drop them (and collapse any open row) — otherwise a
-  // re-expand would show the previous lane's chapter/verse breakdown. Resetting
-  // on `fileLane` keeps the drill-down lane-true. On first mount fileLane is ''
-  // and these are already empty, so this is a no-op for the default view.
+  }, [id, jwt, firstFileId, project?.name])
+  const {
+    units: planUnits,
+    patchUnit: patchPlanUnit,
+    status: planStatus,
+    refresh: refreshPlan,
+  } = useProjectPlan({ projectId: id ?? null, lane: selectedLaneTag ?? "", getToken: getPlanToken })
+  /**
+   * The rows the board is actually drawing, in drawn order. The board owns the
+   * filter, the arrangement and the folds that decide this, so the inspector's
+   * prev/next buttons have to read it from there rather than re-deriving it —
+   * re-deriving is how they ended up stepping onto rows nobody could see.
+   */
+  const planOrderRef = useRef<PlanUnit[]>([])
+  const tableNow = useMemo(() => Date.now(), [planUnits])
+  const planLgUp = useIsLgUp()
+  const selectedPlanUnit = useMemo(
+    () => planUnits.find((u) => planUnitId(u) === selectedPlanUnitId) ?? null,
+    [planUnits, selectedPlanUnitId],
+  )
+  const planShowAudio = useMemo(() => planHasAudio(planUnits), [planUnits])
+  // AQU-1094/1095: setting a date and marking a unit done are maintainer work,
+  // the same floor the project deadline uses. Read the FRESH role from
+  // useProject, not the cached syncRole snapshot.
+  const canPlan = (roleLevel ?? 0) >= 600
+  const stepPlanUnit = useCallback(
+    (delta: number) => {
+      const ordered = planOrderRef.current
+      if (ordered.length === 0) return
+      const index = ordered.findIndex((u) => planUnitId(u) === selectedPlanUnitId)
+      const next = index < 0
+        ? ordered[0]
+        : ordered[Math.min(ordered.length - 1, Math.max(0, index + delta))]
+      if (next) setSelectedPlanUnitId(planUnitId(next))
+    },
+    [selectedPlanUnitId],
+  )
+  // The lane whose numbers the inspector is showing, named the way the lane
+  // tabs name it — so nobody reads a French percentage as a Spanish one.
+  // Labeled exactly as the lane tabs label it: the project's target language
+  // for the default lane, the lane tag itself for any other. Derived here
+  // rather than read off `selectedLane`, which is declared further down.
+  const planLanguageLabel = selectedLaneTag || project?.targetLanguage || null
+  const planInspector = selectedPlanUnit ? (
+    <PlanInspector
+      key={planUnitId(selectedPlanUnit)}
+      unit={selectedPlanUnit}
+      now={tableNow}
+      canPlan={canPlan}
+      showAudio={planShowAudio}
+      projectId={id ?? null}
+      getToken={getPlanToken}
+      lane={selectedLaneTag ?? ""}
+      languageLabel={planLanguageLabel}
+      onPatch={patchPlanUnit}
+      onClose={() => setSelectedPlanUnitId(null)}
+      onStep={stepPlanUnit}
+    />
+  ) : null
+  // Selecting a unit that a refetch removed (a file deleted elsewhere) would
+  // leave the inspector pointing at nothing.
   useEffect(() => {
-    setExpandedFileId(null)
-    setRollups({})
-    setRollupLoading({})
-    setRollupErrors({})
-    chapterVerseRequests.current.clear()
-  }, [fileLane])
+    if (selectedPlanUnitId && !planUnits.some((u) => planUnitId(u) === selectedPlanUnitId)) {
+      setSelectedPlanUnitId(null)
+    }
+  }, [planUnits, selectedPlanUnitId])
+
+  const planCsv = useCallback(() => planRowsToCsv(planUnits, tableNow), [planUnits, tableNow])
+  const handleCopyPlanCsv = useCallback(() => {
+    void navigator.clipboard.writeText(planCsv()).then(() => {
+      setPlanCsvCopied(true)
+      window.setTimeout(() => setPlanCsvCopied(false), 1500)
+    })
+  }, [planCsv])
+  const handleDownloadPlanCsv = useCallback(() => {
+    downloadBlob(
+      new Blob([planCsv()], { type: "text/csv;charset=utf-8;" }),
+      planCsvFilename(project?.name ?? "project"),
+    )
+  }, [planCsv, project?.name])
 
   const isOwner = (project?.syncRole?.level ?? 0) >= 700
   const canManage = (project?.syncRole?.level ?? 0) >= 600
@@ -977,6 +742,14 @@ export function ProjectOverview() {
       project?.targetLanguage ?? project?.sourceLanguage ?? null
     )
 
+  if (status === "no-session") {
+    return (
+      <SignedOutWorkspace
+        header={<OrgBreadcrumb section={project?.name ?? t("common.project")} orgId={project?.orgId} />}
+      />
+    )
+  }
+
   const nonReadyContent =
     status === "loading" ? (
       <LoadingTemplate
@@ -999,18 +772,6 @@ export function ProjectOverview() {
           {t("common.retry")}
         </Button>
       </div>
-    ) : status === "no-session" ? (
-      <div className="rounded-lg border bg-card px-4 py-3 text-sm text-muted-foreground">
-        <p>{t("org.projectOverview.signInMessage")}</p>
-        <Button
-          type="button"
-          variant="outline"
-          className="mt-3"
-          onClick={() => navigate(`/login?next=${encodeURIComponent(`/projects/${id}`)}`)}
-        >
-          {t("auth.login.title")}
-        </Button>
-      </div>
     ) : null
 
   return (
@@ -1018,6 +779,24 @@ export function ProjectOverview() {
       sidebar={<OrgSidebar />}
       header={<OrgBreadcrumb section={project?.name ?? t("common.project")} orgId={project?.orgId} />}
       statusBar={null}
+      // AQU-1094…1098: wide enough, the inspector takes REAL width and the
+      // board reflows beside it — no dim, no covering, so you can keep
+      // clicking rows and watch one move to Done as you mark it. Narrower, it
+      // becomes an overlay, which is the same trade AppShell makes for the
+      // navigation rail at this breakpoint.
+      aside={
+        planInspector && planLgUp ? (
+          <RightSidebarPanel
+            storageKey="plan-inspector"
+            defaultWidth={384}
+            minWidth={300}
+            maxWidth={560}
+            resizeLabel={t("org.projectOverview.plan.resizeInspector")}
+          >
+            {planInspector}
+          </RightSidebarPanel>
+        ) : null
+      }
       main={
         <div className="h-full overflow-y-auto">
           {openingOverlay}
@@ -1363,17 +1142,6 @@ export function ProjectOverview() {
                   with project access can see it. The badge is read-only
                   (informational), matching that reality rather than implying
                   a toggle that doesn't exist server-side. */}
-              {/*
-               * SWARM-TODO(AQU-490): verify live — open an oral/dubbed project
-               * overview with partial audio validation and confirm the Progress
-               * card shows "Has Audio" (coverage, relabeled from "Audio") and a
-               * separate "Audio Validated" tile reading "N/A" with a tooltip
-               * explaining validation isn't tracked per-medium yet; then open a
-               * text-only project and confirm neither audio tile renders (no
-               * misleading figure). Blocked on new server work — see the
-               * in-card comment above the "Audio Validated" tile for exactly
-               * what's missing.
-               */}
               {audio && audio.totalCells > 0 && (
                 <div className="rounded-lg border bg-card p-5" data-testid="progress-card">
                   <div className="mb-3 flex items-center justify-between gap-2">
@@ -1463,35 +1231,34 @@ export function ProjectOverview() {
                           />
                         )}
                         {/*
-                         * AQU-490 (was TODO(AQU-168)): a distinct audio-VALIDATION metric
-                         * is not reachable today. Investigated 2026-07-08:
-                         *   - `cells.validated` (db/postgres/schema.sql) is ONE boolean per
-                         *     cell, shared by text and audio review — there is no per-medium
-                         *     validated flag.
-                         *   - `cell_audio` (the per-take audio table) has no
-                         *     validated/approved column at all.
-                         *   - The `cell.validate` event payload
-                         *     (sync-worker/src/events/types.ts) is `{ editEventId }` only —
-                         *     no medium/kind field distinguishing "validated the text" from
-                         *     "validated the audio".
-                         *   - `readValidationCountAudio` (src/lib/progress/read-validation-count.ts)
-                         *     is a live, unrelated setting: the *required number of
-                         *     validators* for audio-bearing projects, not a count of
-                         *     validated audio cells. AQU-298's "possibly dead" flag was
-                         *     about a different symbol; this one is alive but doesn't help.
-                         * Needs new server work: either a `cell_audio.approved` column (or
-                         * equivalent) populated by a medium-aware validate event, or a
-                         * `validated_audio_cells` rollup column on `files`/portfolio SQL
-                         * analogous to `approved_count`. Until then this is an honest
-                         * placeholder, not a fabricated metric.
+                         * AQU-1092: the metric the old placeholder said was missing now
+                         * exists. `cell_audio.approved` landed with AQU-508 and the org
+                         * portfolio counts it (auth-worker org-permissions: audio cells
+                         * whose SELECTED take is approved), so this reads a real number.
+                         *
+                         * AQU-1093: denominator is `totalCells`, like every other tile
+                         * here AND like the plan board below, whose audio bar divides by
+                         * every cell in the unit. It used to divide by `audioCells`, so
+                         * one project reported two different audio-validated percentages
+                         * on one page. The share of RECORDED audio that is validated is
+                         * the more natural reviewer's question, so it survives in the
+                         * tooltip rather than being dropped.
+                         *
+                         * Greyed with the cross-lane tooltip like "Has Audio": takes hang
+                         * off the cell, not a language lane, so there is nothing per-lane
+                         * to show.
                          */}
                         {statVisible("audio-validated") && (
                           <StatTile
                             label={t("org.projectOverview.audioValidated")}
-                            pct={0}
-                            display="N/A"
-                            colorClass="text-muted-foreground"
-                            tooltip={t("org.projectOverview.audioValidatedTooltip")}
+                            pct={audioValidatedPct(audio)}
+                            colorClass={activeLane ? "text-muted-foreground/60" : "text-sky-700"}
+                            tooltip={activeLane ? CROSS_LANE_TOOLTIP : [
+                              t("org.projectOverview.audioValidatedTooltip"),
+                              t("org.projectOverview.audioValidatedOfRecorded", {
+                                percent: Math.round(audioValidatedOfRecordedPct(audio) * 100),
+                              }),
+                            ].join(" ")}
                           />
                         )}
                       </>
@@ -1593,246 +1360,70 @@ export function ProjectOverview() {
               )}
 
               {/* ── Per-file rows (always fully visible per user decision) ── */}
-              {files.length > 0 && (() => {
-                // AQU-499: filter by name, then sort by the selected mode.
-                // Expansion state (rollups/expandedFileId) is keyed by
-                // fileId, not row index, so re-sorting/filtering never
-                // disturbs an already-expanded row's chapter/verse rollup.
-                const filtered = filterFilesByName(files, fileNameFilter)
-                const sorted = sortFiles(filtered, fileSortMode)
-                const shown = showAllFiles ? sorted : sorted.slice(0, FILE_ROW_CAP)
-                const hidden = sorted.length - shown.length
-
-                // AQU-500: export the full sorted+filtered list (honoring
-                // AQU-499's current sort/filter), not just the `shown` slice
-                // — the FILE_ROW_CAP is a display truncation for readability,
-                // not a data filter, so a PM exporting "what I see" should
-                // get every row matching their filter/sort, not just the
-                // first FILE_ROW_CAP rows.
-                async function handleCopyCsv() {
-                  const csv = progressRowsToCsv(sorted)
-                  try {
-                    await navigator.clipboard.writeText(csv)
-                    setCsvCopied(true)
-                    setTimeout(() => setCsvCopied(false), 1500)
-                  } catch (e) {
-                    setError(e instanceof Error ? e.message : t("org.projectOverview.copyCsvFailed"))
-                  }
-                }
-
-                function handleDownloadCsv() {
-                  const csv = progressRowsToCsv(sorted)
-                  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
-                  downloadBlob(blob, progressCsvFilename(project?.name ?? "project"))
-                }
-
-                return (
-                  <div className="rounded-lg border bg-card p-5">
-                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                      <h2 className="text-xs font-semibold text-muted-foreground">
-                        {!showAllFiles && hidden > 0
-                          ? t("org.projectOverview.filesHeadingTruncated", { cap: FILE_ROW_CAP, total: sorted.length })
-                          : t("org.projectOverview.filesHeadingCount", { count: sorted.length })}
-                      </h2>
-                      <span className="flex items-center gap-3 text-[10px] text-muted-foreground">
-                        <span className="flex items-center gap-1">
-                          <span className="h-1.5 w-3 rounded-full bg-amber-500" />{t("org.projectOverview.legendTranslated")}
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <span className="h-1.5 w-3 rounded-full bg-emerald-500" />{t("editor.state.validated")}
-                        </span>
-                      </span>
-                    </div>
-                    {/*
-                      SWARM-TODO(AQU-500): verify live — as a role WITH the org's
-                      export permission, open a Scripture project overview,
-                      change the file sort/filter (AQU-499), then click "Copy
-                      CSV" and paste into a spreadsheet: confirm the rows/columns
-                      match on-screen (file, filled, approved, total, words) in
-                      the same order as the table, and that a file name with a
-                      comma/quote lands in one cell correctly. Click "Download
-                      CSV" and confirm the .csv opens with the same rows. Then,
-                      as a role WITHOUT the org's export permission (org
-                      settings → exportMinRole set above that role), confirm
-                      neither Copy CSV nor Download CSV control renders.
-                    */}
-                    {/*
-                      SWARM-TODO(AQU-499): verify live — open a Scripture
-                      project overview, change the "Sort files by" dropdown
-                      to "Canonical order" and confirm Genesis-before-Exodus
-                      (and OT-before-NT) row order; switch to "Alphabetical"
-                      and confirm plain name order; type into the filter box
-                      and confirm rows narrow to matching file names; expand
-                      a file's chapter/verse rollup (AQU-493), change sort,
-                      and confirm the same file's rollup is still expanded
-                      after its row moves.
-                    */}
-                    <div className="mb-3 flex flex-wrap items-center gap-3">
-                      <InputGroup className="max-w-xs">
-                        <InputGroupAddon>
-                          <Search />
-                        </InputGroupAddon>
-                        <InputGroupInput
-                          type="text"
-                          placeholder={t("org.projectOverview.filterFilesPlaceholder")}
-                          aria-label={t("org.projectOverview.filterFilesAria")}
-                          value={fileNameFilter}
-                          onChange={(e) => setFileNameFilter(e.target.value)}
-                        />
-                      </InputGroup>
-                      <Select
-                        items={fileSortItems}
-                        value={fileSortMode}
-                        onValueChange={(v) => setFileSortMode((v as FileSortMode) ?? "last-updated")}
-                      >
-                        <SelectTrigger aria-label={t("org.projectOverview.sortFilesByAria")} className="w-44!">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectGroup>
-                            {fileSortItems.map((m) => (
-                              <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
-                            ))}
-                          </SelectGroup>
-                        </SelectContent>
-                      </Select>
-                      {orgSettings.canExport && sorted.length > 0 && (
-                        <ButtonGroup className="ms-auto shadow-xs">
-                          <AppTooltip content={t("org.projectOverview.copyCsvTooltip")}>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              onClick={() => void handleCopyCsv()}
-                              data-testid="export-csv-copy"
-                            >
-                              {csvCopied ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
-                              {csvCopied ? t("nav.version.copiedLabel") : t("org.projectOverview.copyCsv")}
-                            </Button>
-                          </AppTooltip>
-                          <AppTooltip content={t("org.projectOverview.downloadCsvTooltip")}>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              onClick={handleDownloadCsv}
-                              data-testid="export-csv-download"
-                            >
-                              <Download data-icon="inline-start" />
-                              {t("org.projectOverview.downloadCsv")}
-                            </Button>
-                          </AppTooltip>
-                        </ButtonGroup>
-                      )}
-                    </div>
-                    {sorted.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">
-                        {t("org.projectOverview.noFilesMatch", { query: fileNameFilter })}
-                      </p>
-                    ) : (
-                    <>
-                      {/*
-                        AQU-492: two-level layout — a header row labels each
-                        numeric column once, so per-row values (below) never
-                        need to be re-explained. Header and row cell widths
-                        must stay in lockstep (same width + gap classes) for
-                        the columns to line up; the tooltip on each row is
-                        kept as a redundant, not load-bearing, explainer.
-                      */}
-                      <div
-                        className="mb-1.5 flex items-center gap-3 text-xs font-medium text-muted-foreground"
-                        data-testid="file-breakdown-header"
-                      >
-                        <span className="w-5 shrink-0" />
-                        <span className="w-32 shrink-0">{t("common.file")}</span>
-                        <span className="flex-1">{t("fileDetails.progress")}</span>
-                        <span className="flex shrink-0 items-center gap-4">
-                          <span className="w-10 text-end">{t("org.projectOverview.columnFilled")}</span>
-                          <span className="w-14 text-end">{t("org.projectOverview.columnApproved")}</span>
-                          <span className="w-10 text-end">{t("org.projectOverview.columnTotal")}</span>
-                          <span className="w-12 text-end">{t("org.projectOverview.columnWords")}</span>
-                        </span>
-                      </div>
-                      <ul className="space-y-2" aria-label={t("org.projectOverview.filesListAria")}>
-                        {shown.map((f) => {
-                          const tPct = f.cellCount > 0 ? Math.round((f.filledCount / f.cellCount) * 100) : 0
-                          const vPct = f.cellCount > 0 ? Math.round((f.approvedCount / f.cellCount) * 100) : 0
-                          const isExpanded = expandedFileId === f.fileId
-                          return (
-                            <li key={f.fileId} data-testid="file-row">
-                              <div className="flex items-center gap-3 text-sm">
-                                <button
-                                  type="button"
-                                  aria-label={
-                                    isExpanded
-                                      ? t("org.projectOverview.collapseFileAria", { fileName: f.name })
-                                      : t("org.projectOverview.expandFileAria", { fileName: f.name })
-                                  }
-                                  aria-expanded={isExpanded}
-                                  onClick={() => void toggleFileRollup(f)}
-                                  className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent/40 hover:text-foreground"
-                                >
-                                  <ChevronRight className={cn("h-3.5 w-3.5", isExpanded && "rotate-90")} />
-                                </button>
-                                {/* AQU-491: full name was hover-only (tooltip); ExpandableName
-                                    adds a click-to-reveal Popover so a truncated file name is
-                                    discoverable without hovering. Tooltip kept for parity/hover
-                                    users; both read from the same fixed w-32 column. */}
-                                <AppTooltip content={f.name}>
-                                  <span className="w-32 shrink-0 text-sm font-medium">
-                                    <ExpandableName name={f.name} />
-                                  </span>
-                                </AppTooltip>
-                                <FileProgressBars tPct={tPct} vPct={vPct} />
-                                <AppTooltip content={t("org.projectOverview.fileStatsTooltip")}>
-                                  <span
-                                    className="flex shrink-0 items-center gap-4 text-xs tabular-nums text-muted-foreground"
-                                    aria-label={t("org.projectOverview.fileStatsAria", {
-                                      filled: f.filledCount,
-                                      approved: f.approvedCount,
-                                      total: f.cellCount,
-                                      words: f.wordCount,
-                                    })}
-                                  >
-                                    <span className="w-10 text-end">{f.filledCount}</span>
-                                    <span className="w-14 text-end">{f.approvedCount}</span>
-                                    <span className="w-10 text-end">{f.cellCount}</span>
-                                    <span className="w-12 text-end">{f.wordCount}</span>
-                                  </span>
-                                </AppTooltip>
-                              </div>
-                              {isExpanded && (
-                                <FileCanonicalRollup
-                                  rollup={rollups[f.fileId]}
-                                  loading={rollupLoading[f.fileId] ?? false}
-                                  error={rollupErrors[f.fileId] ?? false}
-                                  onRetry={() => void loadFileRollup(f)}
-                                  loadVerses={(sectionKey) => loadChapterVerses(f.fileId, sectionKey)}
-                                />
-                              )}
-                            </li>
-                          )
+              {/* AQU-1092…1098: the plan replaces the old file breakdown.
+                  That card listed files with progress bars and a nested
+                  book/chapter/verse drill-down; it answered "how far along is
+                  this file", never "are we finishing on time". The plan groups
+                  planning units by status, and the per-unit detail moved into
+                  the inspector beside it. */}
+              {planInspector && !planLgUp && (
+                <Sheet open onOpenChange={(open) => { if (!open) setSelectedPlanUnitId(null) }}>
+                  <SheetContent side="right" className="w-full p-0 sm:max-w-md!">
+                    <SheetHeader className="sr-only">
+                      <SheetTitle>
+                        {t("org.projectOverview.plan.inspectorAria", {
+                          unit: selectedPlanUnit ? planUnitLabel(selectedPlanUnit) : "",
                         })}
-                      </ul>
-                    </>
-                    )}
-                    {!showAllFiles && hidden > 0 && (
-                      <button
-                        className="mt-3 text-xs text-muted-foreground hover:text-foreground underline"
-                        onClick={() => setShowAllFiles(true)}
+                      </SheetTitle>
+                    </SheetHeader>
+                    {planInspector}
+                  </SheetContent>
+                </Sheet>
+              )}
+              <PlanBoard
+                units={planUnits}
+                now={tableNow}
+                projectId={id ?? null}
+                status={planStatus}
+                onRetry={refreshPlan}
+                orderRef={planOrderRef}
+                selectedId={selectedPlanUnitId}
+                onSelect={setSelectedPlanUnitId}
+                emptyAction={
+                  <Button
+                    size="sm"
+                    data-testid="plan-empty-import"
+                    disabled={openPending}
+                    onClick={() => openWorkspace(`/project/${id}/editor`)}
+                  >
+                    {t("org.projectOverview.plan.importSource")}
+                  </Button>
+                }
+                actions={
+                  orgSettings.canExport && planUnits.length > 0 ? (
+                    <ButtonGroup>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        data-testid="plan-csv-copy"
+                        onClick={handleCopyPlanCsv}
                       >
-                        {t("org.projectOverview.moreFilesShowAll", { count: hidden })}
-                      </button>
-                    )}
-                    {showAllFiles && sorted.length > FILE_ROW_CAP && (
-                      <button
-                        className="mt-3 text-xs text-muted-foreground hover:text-foreground underline"
-                        onClick={() => setShowAllFiles(false)}
+                        {planCsvCopied
+                          ? t("common.copied")
+                          : t("org.projectOverview.copyCsv")}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        data-testid="plan-csv-download"
+                        onClick={handleDownloadPlanCsv}
                       >
-                        {t("org.projectOverview.showFewer")}
-                      </button>
-                    )}
-                  </div>
-                )
-              })()}
+                        {t("org.projectOverview.downloadCsv")}
+                      </Button>
+                    </ButtonGroup>
+                  ) : null
+                }
+              />
 
               {/* ── Team / Assignments card ── */}
               {/* AQU-486: per-assignee progress is gated by the AQU-485

@@ -57,7 +57,10 @@ describe("useRules — subscribed concept merge", () => {
     const subscribed = [concept("sub1", "grace"), concept("sub2", "mercy")]
     const local = [concept("loc1", "peace")]
     const { result } = renderHook(() =>
-      useRules(project(local), noop, undefined, undefined, subscribed),
+      // AQU-1006 follow-up: local concepts now arrive as the `localConcepts`
+      // parameter (from useConcepts / the projection), not on the project
+      // record. The ordering contract under test is unchanged.
+      useRules(project(local), noop, undefined, undefined, subscribed, undefined, local),
     )
     const ids = termRuleIds(result.current.rules)
     expect(ids).toEqual([
@@ -81,7 +84,7 @@ describe("useRules — subscribed concept merge", () => {
 
   it("behaves identically to no-subscriptions when subscribedConcepts is omitted", () => {
     const local = [concept("loc1", "peace")]
-    const { result } = renderHook(() => useRules(project(local), noop))
+    const { result } = renderHook(() => useRules(project(local), noop, undefined, undefined, undefined, undefined, local))
     expect(termRuleIds(result.current.rules)).toEqual(["term:loc1:approved"])
   })
 })

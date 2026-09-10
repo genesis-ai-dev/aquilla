@@ -6338,6 +6338,7 @@ function EditorRow({
                     editable={editable && !isLoading && !lockHolderLabel}
                     subdued={showCompletionOverlay}
                     empty={!visibleTranslated?.trim()}
+                    preserveWhitespace={Boolean(idmlConfiguration)}
                     onClick={(event) => {
                       event.stopPropagation()
                       requestTargetEdit(idmlConfiguration

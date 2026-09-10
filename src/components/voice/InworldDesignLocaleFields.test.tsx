@@ -155,6 +155,7 @@ describe("InworldDesignLocaleFields", () => {
     const options = screen.getAllByRole("option")
     expect(options[0]).toHaveAccessibleName(/^Default$/)
     expect(screen.getByRole("option", { name: /American/ })).toBeTruthy()
+    expect(screen.queryByRole("separator")).toBeNull()
     expect(onLanguageChange).toHaveBeenCalledWith("en")
     await user.click(options[0])
     expect(onLanguageChange).toHaveBeenCalledWith("en")

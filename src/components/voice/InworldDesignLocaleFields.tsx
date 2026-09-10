@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { ChevronDownIcon } from "lucide-react"
 import { Combobox as ComboboxPrimitive } from "@base-ui/react/combobox"
 import { Field, FieldLabel } from "@/components/ui/field"
@@ -15,7 +15,6 @@ import {
   SelectContent,
   SelectGroup,
   SelectItem,
-  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
@@ -253,16 +252,13 @@ export function InworldDesignLocaleFields({
             className="max-h-80"
           >
             <SelectGroup>
-              {accents.map((row, index) => (
-                <Fragment key={row.code}>
-                  {index === 1 ? <SelectSeparator /> : null}
-                  <SelectItem value={row.code}>
-                    <span className="flex min-w-0 items-center gap-2">
-                      <AccentFlag region={regionOf(row.code)} />
-                      <span className="truncate">{accentLabel(row.code)}</span>
-                    </span>
-                  </SelectItem>
-                </Fragment>
+              {accents.map((row) => (
+                <SelectItem key={row.code} value={row.code}>
+                  <span className="flex min-w-0 items-center gap-2">
+                    <AccentFlag region={regionOf(row.code)} />
+                    <span className="truncate">{accentLabel(row.code)}</span>
+                  </span>
+                </SelectItem>
               ))}
             </SelectGroup>
           </SelectContent>

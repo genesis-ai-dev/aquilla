@@ -403,9 +403,9 @@ function NewVoiceModalBody({
                   if (!providerInfo(current).supportsCloning) pickProvider(DEFAULT_TTS_PROVIDER)
                 }
               }}
-              className="gap-0"
+              className="w-full gap-0"
             >
-              <TabsList size="lg" aria-label={t("audio.newVoice.kindGroupLabel")}>
+              <TabsList size="lg" className="grid w-full grid-cols-2" aria-label={t("audio.newVoice.kindGroupLabel")}>
                 <TabsTrigger value="tts">
                   <Sparkles /> {t("audio.newVoice.tabTts")}
                 </TabsTrigger>

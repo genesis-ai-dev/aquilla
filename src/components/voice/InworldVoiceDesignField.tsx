@@ -340,7 +340,7 @@ export function InworldVoiceDesignField({
 
   return (
     <form
-      className="space-y-3"
+      className="flex flex-col gap-5 space-y-4"
       onSubmit={(e) => {
         e.preventDefault()
         void form.handleSubmit()

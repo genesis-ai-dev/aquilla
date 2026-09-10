@@ -410,9 +410,11 @@ export async function fetchProjectSettings(
 }
 
 /**
- * PATCH /api/v2/projects/:id/settings. The server merges top-level keys.
- * Caller must include `ifMatchVersion`; mismatched version returns
- * `{kind: "conflict", latest}`. Sub-PROJECT_LEAD callers get
+ * PATCH /api/v2/projects/:id/settings. The HTTP handler replaces the entire
+ * settings blob (no per-key merge) — send a complete blob. Per-key merge is
+ * only available via the `useProjectSettings` hook and the Agent API
+ * PatchSettings command. Caller must include `ifMatchVersion`; mismatched
+ * version returns `{kind: "conflict", latest}`. Sub-PROJECT_LEAD callers get
  * `{kind: "forbidden", required, role}`.
  */
 export async function patchProjectSettings(

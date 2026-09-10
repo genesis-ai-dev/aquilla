@@ -1,6 +1,6 @@
 # Stripe launch and covered-access playbook
 
-Updated: 2026-09-09. Tickets: AQU-837 (billing readiness), AQU-1091 (pricing and app UI).
+Updated: 2026-09-10. Tickets: AQU-837 (billing readiness), AQU-1091 (pricing and app UI).
 
 ## Latest launch decisions: weekly usage and Pro AI tools
 
@@ -24,6 +24,83 @@ copy. Test feature access, ownership isolation, shared usage across tools, reset
 boundaries, concurrent consumption, and renewals that do not reset weekly usage.
 Earlier passing monthly tests do not verify deployed weekly enforcement.
 No production entitlement or reset behavior changed yet.
+
+## Active parallel work — 2026-09-10
+
+Primary worktree: `/private/tmp/aquilla-aqu-837`, base `194c894d4`.
+The primary slice owns explicit workspace billing scope, eligibility, initial
+paid entitlement storage, and the workspace summary in billing settings.
+It adds `billing-workspace.ts` routes and `workspace*.ts` billing services;
+it does not change webhook receipt/application or `billing.ts`.
+Migration `0092_workspace_billing.sql` is reserved for this slice.
+
+The parallel agent owns webhook retry recovery in a separate worktree. Its
+handoff belongs in `docs/runbooks/aqu-837-webhook-recovery-handoff.md`.
+The primary agent integrates verified commits and maintains this checklist.
+Do not mark payment journeys complete from either slice's isolated tests.
+
+- [x] Verify new personal/team creation → persisted scope → billing eligibility.
+- [x] Verify initial approved offer → entitlement persistence → workspace reads.
+- [x] Verify replay, subscription uniqueness, and project ownership isolation.
+- [x] Verify billing settings explain the target and preserve covered access.
+- [x] Checkpoint this slice with test evidence and reconcile the behavior spec.
+  Specification commit: `cdf1ef9`; implementation commit contains this record.
+
+## Workspace implementation evidence — 2026-09-10
+
+New lazy personal workspaces persist `personal`; named workspace creation
+persists `team`. Existing workspaces retain an unconfirmed scope until reviewed.
+Names and member counts do not silently reclassify existing organizations.
+The authenticated workspace summary checks maintainer authority and excludes
+existing billing, agreed allowances, partner coverage, and unreviewed personal
+collaboration from new purchases. Project ownership selects the workspace;
+a member's personal plan is never a fallback.
+
+The internal initial-entitlement writer validates an approved quote and stores
+its subscription, customer, versions, interval, and original weekly anchor.
+Transactions serialize activation; exact replay preserves the anchor and
+conflicting subscription assignments fail. No public route grants a plan.
+Migration `0092_workspace_billing.sql` is prepared, not deployed. Checkout,
+webhook-to-new-entitlement wiring, lifecycle changes, and actual weekly metering
+remain incomplete. The UI reports unavailable usage rather than inventing a
+percentage. It preserves the existing billing and covered-access surfaces.
+
+Changed contracts and evidence:
+
+- Organization creation → persisted scope → authenticated workspace API:
+  worker tests and the existing billing smoke cover personal/team creation.
+- Approved quote → initial entitlement → workspace API: worker tests cover
+  persistence, stable replay, invalid quotes, duplicate subscriptions, covered
+  access, permission rejection, and project ownership isolation.
+- Workspace API → real client → settings summary: RTL covers restrictions,
+  mismatched workspace IDs, and stale responses. The browser smoke covers
+  navigation, reload, and switching back to the personal workspace.
+- Migration tests preserve legacy rows, support rerunning the migration, and
+  enforce one explicit personal workspace per owner.
+- Worker scope/migration/org-list tests: 19 pass. App summary/settings: 11 pass.
+  E2E impact/determinism: 24 pass. Targeted billing smoke: two pass on the
+  isolated local Postgres/worker/browser stack. No slow-request logs appear.
+  Worker TypeScript and the production build pass. The build first caught an
+  unsupported test-helper parameter property; explicit field initialization fixes
+  it without changing test behavior. No test assertions were weakened.
+
+Commands actually run:
+
+```sh
+# auth-worker directory
+npx vitest run src/__tests__/billing-workspace.test.ts \
+  src/__tests__/billing-workspace-migration.test.ts \
+  src/__tests__/orgs-list.test.ts --maxWorkers=2
+# worktree root
+npx vitest run src/pages/settings/OrgSettingsBilling.test.tsx \
+  src/components/org/BillingWorkspaceSummary.test.tsx --maxWorkers=2
+npx vitest run scripts/e2e-impact.test.ts \
+  scripts/e2e-determinism.test.ts --maxWorkers=2
+npx tsc --noEmit -p auth-worker/tsconfig.json
+E2E_SHARD=3/3 npx tsx scripts/e2e-up.ts -- \
+  e2e/specs/orgs/org-settings-billing.smoke.spec.ts --shard=1/1
+npm run build
+```
 
 ## Product implementation checkpoint — 2026-09-09
 

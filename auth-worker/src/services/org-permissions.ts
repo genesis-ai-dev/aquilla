@@ -42,8 +42,10 @@ export async function getOrCreateUserOrg(
 
   const name = `${user.username}'s workspace`
   const inserted = await env.AQUILLA_PG.prepare(
-    `INSERT INTO organizations (name, owner_user_id)
-     VALUES (?, ?) RETURNING id`,
+    `INSERT INTO organizations (name, owner_user_id, billing_scope)
+     VALUES (?, ?, 'personal')
+     ON CONFLICT (owner_user_id) WHERE billing_scope = 'personal'
+     DO UPDATE SET billing_scope = EXCLUDED.billing_scope RETURNING id`,
   )
     .bind(name, user.id)
     .first<{ id: number }>()
@@ -62,7 +64,7 @@ export async function getOrCreateUserOrg(
 
 export async function createOrgForUser(env: Env, user: AuthUser, name: string): Promise<{ id: number; name: string }> {
   const inserted = await env.AQUILLA_PG.prepare(
-    "INSERT INTO organizations (name, owner_user_id) VALUES (?, ?) RETURNING id",
+    "INSERT INTO organizations (name, owner_user_id, billing_scope) VALUES (?, ?, 'team') RETURNING id",
   ).bind(name, user.id).first<{ id: number }>()
   if (!inserted) throw new Error("failed to insert organization")
   await env.AQUILLA_PG.prepare(

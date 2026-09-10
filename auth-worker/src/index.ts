@@ -94,6 +94,7 @@ import agentArtifactsRoutes from "./routes/agent-artifacts"
 import { projectKnowledge, orgKnowledge } from "./routes/knowledge"
 import mondayRoutes from "./routes/monday"
 import contactRoutes from "./routes/contact"
+import billingWorkspaceRoutes from "./routes/billing-workspace"
 import billingRoutes from "./routes/billing"
 import { flushDirtyLinks } from "./lib/monday/push"
 import { createRequestMemo } from "./lib/request-memo"
@@ -294,6 +295,7 @@ app.route("/api/v2/invites", invitesRoutes)
 app.route("/api/v2/contact", contactRoutes)
 // Stripe Field Plan: org checkout/portal + unsigned webhook (signature-verified).
 app.route("/api/v2", billingRoutes)
+app.route("/api/v2", billingWorkspaceRoutes)
 // AQU-626: per-user deep link + PIN (fresh-browser / diode-zone flow). Mint is
 // project_lead-gated; redeem is public (the link + PIN is the credential).
 app.route("/api/v2/access-links", accessLinksRoutes)

@@ -28,6 +28,12 @@ vi.mock("@/lib/sync/cloud-projects", () => ({
   fetchAccessibleProjectsResult: vi.fn(async () => ({ ok: true, projects: [] })),
 }))
 
+vi.mock("@/lib/sync/billing-workspace", () => ({
+  getBillingWorkspace: vi.fn(async () => ({ orgId: 1, name: "Come and See", scope: null,
+    eligibility: { reason: "scope_unconfirmed", offers: [] }, entitlement: null,
+    usagePercent: null, checkoutEnabled: false })),
+}))
+
 const mockGet = vi.mocked(getOrgBilling)
 
 const unpaid: OrgBilling = {

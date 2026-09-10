@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { ExternalLink } from "lucide-react"
+import { BillingWorkspaceSummary } from "@/components/org/BillingWorkspaceSummary"
 import { BillingOffers } from "@/components/org/BillingOffers"
 import { Badge } from "@/components/ui/badge"
 import { Button, buttonVariants } from "@/components/ui/button"
@@ -140,6 +141,7 @@ export function OrgSettingsBilling() {
             ) : null}
           </SettingsGroup>
 
+          {jwt && activeOrgId != null ? <BillingWorkspaceSummary key={`workspace-${activeOrgId}`} jwt={jwt} orgId={activeOrgId} /> : null}
           {jwt && activeOrgId != null ? <BillingOffers key={activeOrgId} jwt={jwt} orgId={activeOrgId} /> : null}
           <SettingsGroup label="Plans and covered access">
             <SettingsRow

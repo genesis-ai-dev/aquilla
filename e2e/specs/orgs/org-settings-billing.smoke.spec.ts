@@ -1,3 +1,6 @@
+import { BillingSettingsPage } from "../../helpers/page-objects/BillingSettings"
+import { createOrg } from "../../helpers/frontier-api"
+import { ensureAuthState } from "../../helpers/auth"
 import { test, expect, orgRoute } from "../../helpers/multi-user"
 
 /** Existing organization billing boundary: auth → API → billing UI. */
@@ -14,4 +17,20 @@ test("org billing settings preserves access while new pricing is unavailable", a
   await expect(alice.getByTestId("subscribe-field-plan")).toHaveCount(0)
   await expect(alice.getByRole("link", { name: "Check covered access" })).toHaveAttribute("href", /ETEN%20affiliate/)
   await expect(alice.getByTestId("billing-plan")).toHaveText("Free")
+  await new BillingSettingsPage(alice).expectWorkspaceScope("unconfirmed")
+})
+
+
+test("new workspace scope survives billing navigation and reload", async ({ bob }) => {
+  const billing = new BillingSettingsPage(bob)
+  await billing.openWorkspace(bob.orgId)
+  await billing.expectWorkspaceScope("personal")
+  const session = await ensureAuthState("bob")
+  const team = await createOrg(session.jwt, "Billing team")
+  await billing.openWorkspace(team.id)
+  await billing.expectWorkspaceScope("team")
+  await bob.reload()
+  await billing.expectWorkspaceScope("team")
+  await billing.openWorkspace(bob.orgId)
+  await billing.expectWorkspaceScope("personal")
 })

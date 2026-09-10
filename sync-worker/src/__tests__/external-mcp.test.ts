@@ -203,13 +203,13 @@ describe('MCP tools/list', () => {
     const names = body.result.tools.map((t: any) => t.name).sort()
     expect(names).toEqual(
       [
-        'confirm_changeset', 'discard_changeset', 'get_capabilities', 'get_changeset',
-        'get_identity_and_scope', 'get_project', 'list_projects', 'prepare_import',
-        'prepare_translations', 'preview_import', 'read_content', 'read_history',
-        'search_project',
+        'confirm_changeset', 'discard_changeset', 'find_similar_cells', 'get_capabilities',
+        'get_changeset', 'get_identity_and_scope', 'get_project', 'list_projects',
+        'prepare_import', 'prepare_translations', 'preview_import', 'read_content',
+        'read_history', 'search_project',
       ].sort(),
     )
-    expect(body.result.tools).toHaveLength(13)
+    expect(body.result.tools).toHaveLength(14)
     for (const tool of body.result.tools) {
       expect(typeof tool.description).toBe('string')
       expect(tool.description.length).toBeGreaterThan(20)
@@ -282,6 +282,40 @@ describe('MCP tools/call — reads', () => {
     const projects = (payload as any).projects
     expect(projects).toHaveLength(1)
     expect(projects[0]).toMatchObject({ id: PROJECT, name: 'Project A', role_source: 'member' })
+  })
+
+  // AQU-1232: the tool is pure argument marshalling over the REST route, so
+  // what needs proving here is that the delegation actually reaches it — a
+  // typo'd path would surface as a not_found tool error, not a compile failure.
+  it('find_similar_cells delegates to the similarity route', async () => {
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb)
+    // Give cell-1 a target and add a near-duplicate so there is a precedent.
+    await tdb.pg.query(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, word_count)
+       VALUES ($1, $2, 'cell-2', 'source', 'In the beginning God', 'src-evt-2', 1, 4),
+              ($1, $2, 'cell-2', 'target', 'Au commencement Dieu', 'tgt-evt-2', 1, 3)`,
+      [PROJECT, FILE],
+    )
+
+    const res = await rpc(env, token, {
+      jsonrpc: '2.0', id: 20, method: 'tools/call',
+      params: { name: 'find_similar_cells', arguments: { projectId: PROJECT, cellId: 'cell-1' } },
+    })
+    const { payload, isError } = toolPayload(((await res.json()) as any).result)
+    expect(isError).toBe(false)
+    expect((payload as any).data).toHaveLength(1)
+    expect((payload as any).data[0]).toMatchObject({
+      cellId: 'cell-2',
+      targetValue: 'Au commencement Dieu',
+    })
+
+    // Argument validation happens in the tool, before any delegation.
+    const bad = await rpc(env, token, {
+      jsonrpc: '2.0', id: 21, method: 'tools/call',
+      params: { name: 'find_similar_cells', arguments: { projectId: PROJECT } },
+    })
+    expect(toolPayload(((await bad.json()) as any).result).isError).toBe(true)
   })
 
   it('search_project + read_content round trip', async () => {

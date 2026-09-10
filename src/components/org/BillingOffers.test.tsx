@@ -34,7 +34,7 @@ describe('Stripe catalog → billing client → plan comparison', () => {
     await user.click(screen.getByRole('combobox', { name: 'Plan billing period' }))
     await user.click(screen.getByRole('option', { name: 'Monthly' }))
     expect(await screen.findByText('$20.00/month')).toBeVisible()
-    expect(screen.getByRole('button', { name: 'Pro coming soon' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Review Pro' })).toBeEnabled()
     expect(document.body.textContent).not.toMatch(/credits|\b4000\b|\b1000\b|price_1/)
     expect(document.body.textContent).toContain('every seven days')
   })

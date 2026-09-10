@@ -180,6 +180,61 @@ npm run build
 git diff --check
 ```
 
+## Selected-plan review checkpoint — 2026-09-10
+
+- [x] Add **Review plan** actions to the authenticated comparison surface.
+  Show the selected offer, owning workspace, billing cadence, full charge,
+  annual monthly equivalent, and weekly-reset explanation.
+- [x] Recheck maintainer authority, workspace eligibility, and current Stripe
+  catalog prices on the server. Reject unsupported quantities, legacy offers,
+  and browser-provided amounts, prices, scope, or cohort overrides.
+- [x] Explain ineligible workspaces and preserve existing or covered access.
+  Reviews create no subscription, entitlement, event receipt, or cohort row.
+- [x] Discard review state when the workspace, session, audience, or interval
+  changes. Reject responses for a different workspace, offer, or interval.
+  Focus the review region and keep checkout disabled.
+- [ ] Carry selected offers through marketing and sign-in into this review.
+- [ ] Connect a confirmed review to server-approved checkout and activation.
+  Review does not reserve a price or authorize future purchasing; checkout
+  must revalidate current eligibility and prices before creating a session.
+
+The onboarding dispatch item appears under **Marketing → sign-in → workspace**.
+It is a distinct follow-up, not a completed onboarding redesign.
+
+Test impact: real organization creation produces scope and membership consumed
+by the authenticated review route. The route consumes Stripe catalog validation
+and workspace eligibility. The review presenter produces the response consumed
+by the real billing client and UI. Worker tests cover all ten offer/cadence
+combinations, restrictions, authority, tampering, current-price failure, and
+absence of billing/cohort writes. RTL covers confirmed totals, covered access,
+response mismatch, retry, stale responses, interval changes, and review focus.
+The existing billing smoke still verifies unavailable prices and workspace
+navigation; read-only review controls are covered in RTL, not a new smoke.
+`e2e/JOURNEYS.md` records that boundary. Existing billing impact patterns select
+all new billing paths.
+
+Verification: worker review/workspace tests pass (28); app review/comparison/
+settings tests pass (13); E2E impact/determinism pass (24); both existing billing
+smoke journeys pass, with no slow-request logs. Worker TypeScript and the
+production build pass. The final focus/layout refinement also passes its five
+RTL tests, and the worker review suite passes all 13 after adding the no-cohort
+assertion. Behavior-spec commit: `e5af737`. Commands:
+
+```sh
+# auth-worker directory
+npx vitest run src/__tests__/billing-review.test.ts \
+  src/__tests__/billing-workspace.test.ts --maxWorkers=2
+# worktree root
+npx vitest run src/components/org/BillingPlanReview.test.tsx \
+  src/components/org/BillingOffers.test.tsx \
+  src/pages/settings/OrgSettingsBilling.test.tsx \
+  scripts/e2e-impact.test.ts scripts/e2e-determinism.test.ts --maxWorkers=2
+npx tsc --noEmit -p auth-worker/tsconfig.json
+E2E_SHARD=3/3 npx tsx scripts/e2e-up.ts -- \
+  e2e/specs/orgs/org-settings-billing.smoke.spec.ts --shard=1/1
+npm run build
+```
+
 ## Production launch checklist
 
 **Status: not ready to enable paid checkout.** Prices are ready in sandbox;
@@ -314,6 +369,13 @@ this checklist does not approve proposed commercial behavior.
 
 ### Marketing → sign-in → workspace
 
+- [ ] Dispatch a dedicated, more comprehensive onboarding rework for the pricing
+  tiers. Cover selected-offer continuity, personal versus team workspace setup,
+  roles/invites, covered-access discovery, plan capabilities, and first useful
+  work. Define its acceptance criteria and coordinate ownership with this
+  billing integration before dispatch; do not assume a plan selection grants
+  access. Requested by Ryder on 2026-09-10. Track the assigned task and handoff
+  here when dispatched.
 - [ ] AQU-1091: implement Individual and Team & Enterprise tabs, defaulting to
   Team & Enterprise. Preserve audience, offer, interval, and quantity in links.
 - [ ] Replace superseded Field copy across cards, comparisons, FAQs, and app UI.

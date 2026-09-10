@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { BillingPlanReview } from './BillingPlanReview'
+import type { BillingPlanSelection } from '@/lib/sync/billing-review'
 import { Button } from '@/components/ui/button'
 import { SettingsGroup, SettingsRow } from '@/components/ui/page'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -8,11 +10,13 @@ import { getBillingOffers, type BillingOffers as Offers } from '@/lib/sync/billi
 export function BillingOffers({ jwt, orgId }: { jwt: string; orgId: number }) {
   const [result, setResult] = useState<{ orgId: number; jwt: string; data: Offers } | null>(null)
   const [unavailable, setUnavailable] = useState(false)
+  const [selected, setSelected] = useState<{ orgId: number; jwt: string; selection: BillingPlanSelection } | null>(null)
   const [interval, setInterval] = useState<'month' | 'year'>('year')
   useEffect(() => {
     let canceled = false
     setResult(null)
     setUnavailable(false)
+    setSelected(null)
     void getBillingOffers(jwt, orgId).then(data => {
       if (!canceled) setResult({ orgId, jwt, data })
     }).catch(() => {
@@ -31,13 +35,16 @@ export function BillingOffers({ jwt, orgId }: { jwt: string; orgId: number }) {
         Compare personal and shared team capacity. Paid checkout is coming soon.
         Your current workspace plan stays unchanged.
       </p>
-      <Tabs defaultValue="team">
+      <Tabs defaultValue="team" onValueChange={() => setSelected(null)}>
         <TabsList aria-label="Plan audience">
           <TabsTrigger value="personal">Individual</TabsTrigger>
           <TabsTrigger value="team">Team &amp; Enterprise</TabsTrigger>
         </TabsList>
         <Select value={interval} onValueChange={value => {
-          if (value === 'month' || value === 'year') setInterval(value)
+          if (value === 'month' || value === 'year') {
+            setInterval(value)
+            setSelected(null)
+          }
         }}>
           <SelectTrigger aria-label="Plan billing period">
             <SelectValue>{interval === 'year' ? 'Annual' : 'Monthly'}</SelectValue>
@@ -68,7 +75,9 @@ export function BillingOffers({ jwt, orgId }: { jwt: string; orgId: number }) {
                       <span className="text-sm text-muted-foreground">
                         {interval === 'year' ? `${money(offer.totalAmount, offer.currency)} billed annually` : 'Billed monthly'}
                       </span>
-                      <Button disabled aria-label={`${offer.label} coming soon`}>Coming soon</Button>
+                      <Button variant="outline" onClick={() => setSelected({ orgId, jwt,
+                        selection: { offer: offer.offer, interval, quantity: 1 },
+                      })}>Review {offer.label}</Button>
                     </div>
                   }
                 />
@@ -80,6 +89,11 @@ export function BillingOffers({ jwt, orgId }: { jwt: string; orgId: number }) {
           </TabsContent>
         ))}
       </Tabs>
+      {selected?.orgId === orgId && selected.jwt === jwt && <BillingPlanReview
+        key={`${orgId}:${jwt}:${selected.selection.offer}:${selected.selection.interval}`}
+        jwt={jwt} orgId={orgId} selection={selected.selection}
+        onDismiss={() => setSelected(null)}
+      />}
       <p className="text-sm text-muted-foreground">
         New plans reset AI capacity every seven days, with no rollover.
         Monthly or annual billing does not change usage resets.

@@ -1,7 +1,7 @@
 // AD-13 branching-search PASSAGES route.
 //
 //   GET /api/v1/projects/:projectId/branching-search/passages
-//     ?q=<query>[&topK=N][&radius=N][&validatedOnly=true][&excludeCellId=<uuid>]
+//     ?q=<query>[&topK=N][&radius=N][&validatedOnly=true][&excludeCellId=<uuid>][&targetLang=<lane>]
 //
 // Same retrieval as the flat `/branching-search` route, then expands each
 // top-K hit into a passage of ±radius cells from the same file via the
@@ -101,6 +101,7 @@ export async function handleBranchingSearchPassagesRequest(
 
   const validatedOnly = url.searchParams.get("validatedOnly") === "true"
   const excludeCellId = url.searchParams.get("excludeCellId") ?? undefined
+  const targetLang = url.searchParams.get("targetLang") ?? ""
 
   let corpus
   try {
@@ -108,6 +109,7 @@ export async function handleBranchingSearchPassagesRequest(
       projectId,
       validatedOnly,
       excludeCellId,
+      targetLang,
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)

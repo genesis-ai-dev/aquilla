@@ -91,7 +91,7 @@ describe("BUG-TERM-6 — terminology rules reach useHealth infractions via useRu
     // Render both hooks together (simulates the editor path in ProjectWorkspace)
     const refresh = () => {}
     const { result } = renderHook(() => {
-      const { rules } = useRules(project, refresh)
+      const { rules } = useRules(project, refresh, undefined, undefined, undefined, undefined, project?.terminology)
       const health = useHealth(fileCells, rules)
       return { rules, health }
     })
@@ -120,7 +120,7 @@ describe("BUG-TERM-6 — terminology rules reach useHealth infractions via useRu
 
     const refresh = () => {}
     const { result } = renderHook(() => {
-      const { rules } = useRules(project, refresh)
+      const { rules } = useRules(project, refresh, undefined, undefined, undefined, undefined, project?.terminology)
       const health = useHealth(fileCells, rules)
       return { rules, health }
     })
@@ -142,7 +142,7 @@ describe("BUG-TERM-6 — terminology rules reach useHealth infractions via useRu
 
     const refresh = () => {}
     const { result } = renderHook(() => {
-      const { rules } = useRules(project, refresh)
+      const { rules } = useRules(project, refresh, undefined, undefined, undefined, undefined, project?.terminology)
       const health = useHealth(fileCells, rules)
       return { rules, health }
     })
@@ -165,7 +165,7 @@ describe("BUG-TERM-6 — terminology rules reach useHealth infractions via useRu
 
     const refresh = () => {}
     const { result } = renderHook(() => {
-      const { rules } = useRules(project, refresh)
+      const { rules } = useRules(project, refresh, undefined, undefined, undefined, undefined, project?.terminology)
       const health = useHealth(fileCells, rules)
       return { rules, health }
     })
@@ -193,7 +193,7 @@ describe("BUG-TERM-6 — terminology rules reach useHealth infractions via useRu
     let currentProject = projectWithout
 
     const { result, rerender } = renderHook(() => {
-      const { rules } = useRules(currentProject, refresh)
+      const { rules } = useRules(currentProject, refresh, undefined, undefined, undefined, undefined, currentProject?.terminology)
       const health = useHealth(fileCells, rules)
       return { rules, health }
     })

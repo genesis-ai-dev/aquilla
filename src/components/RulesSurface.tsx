@@ -21,6 +21,8 @@ import {
 } from "@/components/ui/dialog"
 import { BuiltinChecksList } from "./BuiltinChecksList"
 import { RuleEditor } from "./RuleEditor"
+import { LaneCombobox } from "@/components/LaneCombobox"
+import { lanesWithRules, filterRulesForDisplay } from "@/lib/rules/rule-engine"
 import { RuleImportDialog } from "./RuleImportDialog"
 import { RuleSuggestFromEditsDialog } from "./RuleSuggestFromEditsDialog"
 import { cn } from "@/lib/utils"
@@ -113,6 +115,29 @@ export function RulesSurface({
   const [requestingRuleId, setRequestingRuleId] = useState<string | null>(null)
   const [requestNotice, setRequestNotice] = useState<Map<string, string>>(new Map())
 
+  // AQU-609: lane scope for PROJECT rules. Named lanes come from the project
+  // record; `''` (the default lane) is labeled with the base target language.
+  const projectLanes = project.targetLanes ?? []
+  const defaultLaneLabel = project.targetLanguage || undefined
+  const laneBadgeLabel = (rule: TranslationRule): string =>
+    (rule.lane ?? "") === ""
+      ? defaultLaneLabel || t("rules.editor.lane.defaultLane")
+      : rule.lane ?? ""
+
+  // AQU-609: display filter for the Project Rules list. Options list only
+  // lanes that actually hold rules — a 150-lane project must not produce a
+  // 150-item dropdown. Falls back to "all" if the selected lane's last rule
+  // was deleted (its option disappears with it).
+  const [laneFilter, setLaneFilter] = useState<string>("all")
+  const laneFilterLanes = lanesWithRules(userRules)
+  const effectiveLaneFilter =
+    laneFilter === "all" || laneFilter === "project" ||
+    laneFilterLanes.includes(laneFilter.slice("lane:".length))
+      ? laneFilter
+      : "all"
+  const visibleUserRules = filterRulesForDisplay(userRules, effectiveLaneFilter)
+  const showLaneFilter = projectLanes.length > 0 || laneFilterLanes.length > 0
+
   useEffect(() => {
     const focusId = searchParams.get("ruleId")
     const focus = searchParams.get("focus")
@@ -138,6 +163,7 @@ export function RulesSurface({
       ...rule,
       id: uuid(),
       scope: "org",
+      lane: undefined, // an org rule applies everywhere — drop any lane pin
       sourceProjectId: projectId,
       createdAt: new Date().toISOString(),
     }
@@ -187,6 +213,7 @@ export function RulesSurface({
       ...req.rule,
       id: uuid(),
       scope: "org",
+      lane: undefined, // an org rule applies everywhere — drop any lane pin
       sourceProjectId: req.sourceProjectId,
       createdAt: new Date().toISOString(),
     }
@@ -269,9 +296,14 @@ export function RulesSurface({
             <DialogTitle>{t("rules.surface.createRuleDialog.title")}</DialogTitle>
             <DialogDescription>{t("rules.surface.createRuleDialog.description")}</DialogDescription>
           </DialogHeader>
+          {/* shrink-0: the editor root clips its own overflow, so as a flex
+              item it would shrink to the dialog height and hide its footer
+              instead of letting DialogContent scroll. */}
           <RuleEditor
-            className="rounded-none border-0"
+            className="shrink-0 rounded-none border-0"
             cells={cells}
+            lanes={projectLanes}
+            defaultLaneLabel={defaultLaneLabel}
             onSave={async (rule) => {
               await addRule(rule)
               setEditingRuleId(null)
@@ -294,8 +326,11 @@ export function RulesSurface({
             <DialogTitle>{t("rules.surface.createOrgRuleDialog.title")}</DialogTitle>
             <DialogDescription>{t("rules.surface.createOrgRuleDialog.description")}</DialogDescription>
           </DialogHeader>
+          {/* shrink-0: the editor root clips its own overflow, so as a flex
+              item it would shrink to the dialog height and hide its footer
+              instead of letting DialogContent scroll. */}
           <RuleEditor
-            className="rounded-none border-0"
+            className="shrink-0 rounded-none border-0"
             cells={cells}
             onSave={async (rule) => {
               await addOrgRule(rule)
@@ -314,11 +349,206 @@ export function RulesSurface({
           </AppTooltip>
         )}
 
-        <BuiltinChecksList
-          builtinRules={builtinRules}
-          infractions={infractions}
-          onSetOverride={setBuiltinOverride}
-        />
+        {/* Card order is most-specific scope first: project rules (incl.
+            lane-scoped) → org rules → app built-ins (AQU-609 feedback). */}
+        <Card>
+          <CardHeader>
+            <div className="flex flex-wrap items-center gap-2">
+              <CardTitle>{t("rules.surface.projectRulesCardTitle", { count: userRules.length })}</CardTitle>
+              {showLaneFilter && (
+                <LaneCombobox
+                  options={[
+                    { value: "all", label: t("rules.surface.laneFilter.all") },
+                    { value: "project", label: t("rules.surface.laneFilter.projectWide") },
+                    ...laneFilterLanes.map((lane) => ({
+                      value: `lane:${lane}`,
+                      label: lane === "" ? defaultLaneLabel || t("rules.editor.lane.defaultLane") : lane,
+                    })),
+                  ]}
+                  value={effectiveLaneFilter}
+                  onValueChange={setLaneFilter}
+                  searchPlaceholder={t("editor.lane.searchPlaceholder")}
+                  searchAriaLabel={t("editor.lane.searchAriaLabel")}
+                  emptyText={t("editor.lane.searchEmpty")}
+                  align="end"
+                  trigger={
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="ms-auto"
+                      aria-label={t("rules.surface.laneFilterAriaLabel")}
+                    >
+                      {effectiveLaneFilter === "all"
+                        ? t("rules.surface.laneFilter.all")
+                        : effectiveLaneFilter === "project"
+                          ? t("rules.surface.laneFilter.projectWide")
+                          : (() => {
+                              const lane = effectiveLaneFilter.slice("lane:".length)
+                              return lane === ""
+                                ? defaultLaneLabel || t("rules.editor.lane.defaultLane")
+                                : lane
+                            })()}
+                      <ChevronDown className="size-3.5 text-muted-foreground" />
+                    </Button>
+                  }
+                />
+              )}
+            </div>
+          </CardHeader>
+          <CardContent>
+            {userRules.length === 0 ? (
+              <EmptyState
+                variant="inline"
+                className="px-0 py-4"
+                icon={ScrollText}
+                title={t("rules.surface.noProjectRules.title")}
+                description={
+                  <>
+                    {t("rules.surface.noProjectRules.description")}
+                    {canEditOrgRules && orgRules.length > 0 && ` ${t("rules.surface.noProjectRules.orgRulesNote")}`}
+                  </>
+                }
+              />
+            ) : visibleUserRules.length === 0 ? (
+              <p className="py-2 text-xs text-muted-foreground">
+                {t("rules.surface.laneFilterNoMatches")}
+              </p>
+            ) : (
+              <ul className="flex flex-col gap-2">
+                {visibleUserRules.map((rule) => {
+                  const expanded = expandedRuleId === rule.id
+                  const laneScoped = rule.scope === "lane"
+                  return (
+                    <li key={rule.id} id={`rule-row-${rule.id}`} className="rounded-md border p-3">
+                      {/* Two-row layout: text + badges get the full width (with
+                          compact icon actions on the right); the wide buttons
+                          and the Enabled switch live on their own line below —
+                          one long name must never smush into the action row. */}
+                      <div className="flex items-start gap-3">
+                        <SeverityIcon severity={rule.severity} />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="text-sm font-medium">{rule.name}</span>
+                            <SeverityBadge severity={rule.severity} />
+                            <Badge variant="secondary">{rule.source}</Badge>
+                            {laneScoped && (
+                              <Badge variant="outline">{laneBadgeLabel(rule)}</Badge>
+                            )}
+                            {rule.autofix && <Badge variant="outline">{t("rules.surface.autofixBadge")}</Badge>}
+                          </div>
+                          {rule.description && <p className="mt-0.5 text-xs text-muted-foreground truncate">{rule.description}</p>}
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <AppTooltip content={t("rules.editor.editRuleHeading")}>
+                            <Button
+                              variant="ghost"
+                              onClick={() => setEditingRuleId(editingRuleId === rule.id ? null : rule.id)}
+                              disabled={editingRuleId !== null && editingRuleId !== rule.id}
+                              aria-label={t("rules.editor.editRuleHeading")}
+                            >
+                              <Pencil />
+                            </Button>
+                          </AppTooltip>
+                          <Button variant="ghost" onClick={() => toggleExpanded(rule.id)}>
+                            {expanded ? <ChevronUp /> : <ChevronDown />}
+                          </Button>
+                          <Button variant="ghost" onClick={() => deleteRule(rule.id)}>
+                            <Trash2 />
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-2 ps-7">
+                        <AppTooltip content={t("rules.surface.tryToFixAllTooltip")}>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => navigate(`/project/${projectId}/editor?openRule=${rule.id}`)}
+                          >
+                            <Wand2 data-icon="inline-start" />
+                            {t("rules.surface.tryToFixAllButton")}
+                          </Button>
+                        </AppTooltip>
+                        {canEditOrgRules && patchOrgSettings && (
+                          <AppTooltip content={t("rules.surface.promoteToOrgTooltip")}>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setPromoteRule(rule)}
+                          >
+                            <ArrowUpCircle data-icon="inline-start" />
+                            {t("rules.surface.promoteToOrgButton")}
+                          </Button>
+                          </AppTooltip>
+                        )}
+                        {!canEditOrgRules && canRequestPromotion && requestPromotion && (
+                          (() => {
+                            const alreadyRequested = requestedRuleIds.has(rule.id) ||
+                              promotionRequests.some((r) => r.rule.id === rule.id && r.sourceProjectId === projectId)
+                            const notice = requestNotice.get(rule.id)
+                            const isRequesting = requestingRuleId === rule.id
+                            return alreadyRequested || notice ? (
+                              <Badge variant="secondary">
+                                <Clock data-icon="inline-start" />
+                                {notice ?? t("rules.surface.requestedBadge")}
+                              </Badge>
+                            ) : (
+                              <AppTooltip content={t("rules.surface.requestPromotionTooltip")}>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleRequestPromotion(rule)}
+                                  disabled={isRequesting}
+                                >
+                                  <ArrowUpCircle data-icon="inline-start" />
+                                  {isRequesting ? t("rules.surface.requestingButton") : t("rules.surface.requestPromotionButton")}
+                                </Button>
+                              </AppTooltip>
+                            )
+                          })()
+                        )}
+                        <div className="flex-1" />
+                        <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                          <Switch
+                            size="sm"
+                            checked={rule.enabled}
+                            onCheckedChange={(checked) => updateRule(rule.id, { enabled: checked })}
+                            aria-label={
+                              rule.enabled
+                                ? t("rules.surface.disableRuleAriaLabel", { name: rule.name })
+                                : t("rules.surface.enableRuleAriaLabel", { name: rule.name })
+                            }
+                          />
+                          {t("rules.surface.enabledLabel")}
+                        </label>
+                      </div>
+
+                      {expanded && (
+                        <AutofixEditor rule={rule} onUpdate={(af) => updateRule(rule.id, { autofix: af })} />
+                      )}
+                      {editingRuleId === rule.id && (
+                        <>
+                          <Separator className="my-3" />
+                          <RuleEditor
+                            initialRule={rule}
+                            cells={cells}
+                            lanes={projectLanes}
+                            defaultLaneLabel={defaultLaneLabel}
+                            onSave={async (updates) => {
+                              await updateRule(rule.id, updates)
+                              setEditingRuleId(null)
+                            }}
+                            onCancel={() => setEditingRuleId(null)}
+                          />
+                        </>
+                      )}
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
 
         {/* Org rules */}
         {(orgRules.length > 0 || canEditOrgRules) && (
@@ -486,139 +716,11 @@ export function RulesSurface({
           </Dialog>
         )}
 
-        <Card>
-          <CardHeader><CardTitle>{t("rules.surface.projectRulesCardTitle", { count: userRules.length })}</CardTitle></CardHeader>
-          <CardContent>
-            {userRules.length === 0 ? (
-              <EmptyState
-                variant="inline"
-                className="px-0 py-4"
-                icon={ScrollText}
-                title={t("rules.surface.noProjectRules.title")}
-                description={
-                  <>
-                    {t("rules.surface.noProjectRules.description")}
-                    {canEditOrgRules && orgRules.length > 0 && ` ${t("rules.surface.noProjectRules.orgRulesNote")}`}
-                  </>
-                }
-              />
-            ) : (
-              <ul className="flex flex-col gap-2">
-                {userRules.map((rule) => {
-                  const expanded = expandedRuleId === rule.id
-                  return (
-                    <li key={rule.id} id={`rule-row-${rule.id}`} className="rounded-md border p-3">
-                      <div className="flex items-center gap-3">
-                        <SeverityIcon severity={rule.severity} />
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <span className="text-sm font-medium">{rule.name}</span>
-                            <SeverityBadge severity={rule.severity} />
-                            <Badge variant="secondary">{rule.source}</Badge>
-                            {rule.autofix && <Badge variant="outline">{t("rules.surface.autofixBadge")}</Badge>}
-                          </div>
-                          {rule.description && <p className="mt-0.5 text-xs text-muted-foreground truncate">{rule.description}</p>}
-                        </div>
-                        <AppTooltip content={t("rules.surface.tryToFixAllTooltip")}>
-                          <Button
-                            variant="outline"
-                            onClick={() => navigate(`/project/${projectId}/editor?openRule=${rule.id}`)}
-                          >
-                            <Wand2 data-icon="inline-start" />
-                            {t("rules.surface.tryToFixAllButton")}
-                          </Button>
-                        </AppTooltip>
-                        {canEditOrgRules && patchOrgSettings && (
-                          <AppTooltip content={t("rules.surface.promoteToOrgTooltip")}>
-                          <Button
-                            variant="outline"
-                            onClick={() => setPromoteRule(rule)}
-                          >
-                            <ArrowUpCircle data-icon="inline-start" />
-                            {t("rules.surface.promoteToOrgButton")}
-                          </Button>
-                          </AppTooltip>
-                        )}
-                        {!canEditOrgRules && canRequestPromotion && requestPromotion && (
-                          (() => {
-                            const alreadyRequested = requestedRuleIds.has(rule.id) ||
-                              promotionRequests.some((r) => r.rule.id === rule.id && r.sourceProjectId === projectId)
-                            const notice = requestNotice.get(rule.id)
-                            const isRequesting = requestingRuleId === rule.id
-                            return alreadyRequested || notice ? (
-                              <Badge variant="secondary">
-                                <Clock data-icon="inline-start" />
-                                {notice ?? t("rules.surface.requestedBadge")}
-                              </Badge>
-                            ) : (
-                              <AppTooltip content={t("rules.surface.requestPromotionTooltip")}>
-                                <Button
-                                  variant="outline"
-                                  onClick={() => handleRequestPromotion(rule)}
-                                  disabled={isRequesting}
-                                >
-                                  <ArrowUpCircle data-icon="inline-start" />
-                                  {isRequesting ? t("rules.surface.requestingButton") : t("rules.surface.requestPromotionButton")}
-                                </Button>
-                              </AppTooltip>
-                            )
-                          })()
-                        )}
-                        <AppTooltip content={t("rules.editor.editRuleHeading")}>
-                          <Button
-                            variant="ghost"
-                            onClick={() => setEditingRuleId(editingRuleId === rule.id ? null : rule.id)}
-                            disabled={editingRuleId !== null && editingRuleId !== rule.id}
-                            aria-label={t("rules.editor.editRuleHeading")}
-                          >
-                            <Pencil />
-                          </Button>
-                        </AppTooltip>
-                        <Button variant="ghost" onClick={() => toggleExpanded(rule.id)}>
-                          {expanded ? <ChevronUp /> : <ChevronDown />}
-                        </Button>
-                        <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                          <Switch
-                            size="sm"
-                            checked={rule.enabled}
-                            onCheckedChange={(checked) => updateRule(rule.id, { enabled: checked })}
-                            aria-label={
-                              rule.enabled
-                                ? t("rules.surface.disableRuleAriaLabel", { name: rule.name })
-                                : t("rules.surface.enableRuleAriaLabel", { name: rule.name })
-                            }
-                          />
-                          {t("rules.surface.enabledLabel")}
-                        </label>
-                        <Button variant="ghost" onClick={() => deleteRule(rule.id)}>
-                          <Trash2 />
-                        </Button>
-                      </div>
-
-                      {expanded && (
-                        <AutofixEditor rule={rule} onUpdate={(af) => updateRule(rule.id, { autofix: af })} />
-                      )}
-                      {editingRuleId === rule.id && (
-                        <>
-                          <Separator className="my-3" />
-                          <RuleEditor
-                            initialRule={rule}
-                            cells={cells}
-                            onSave={async (updates) => {
-                              await updateRule(rule.id, updates)
-                              setEditingRuleId(null)
-                            }}
-                            onCancel={() => setEditingRuleId(null)}
-                          />
-                        </>
-                      )}
-                    </li>
-                  )
-                })}
-              </ul>
-            )}
-          </CardContent>
-        </Card>
+        <BuiltinChecksList
+          builtinRules={builtinRules}
+          infractions={infractions}
+          onSetOverride={setBuiltinOverride}
+        />
         </div>
       </div>
     </div>

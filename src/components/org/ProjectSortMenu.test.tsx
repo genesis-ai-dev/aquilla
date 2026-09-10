@@ -9,7 +9,7 @@ import { describe, it, expect, vi } from "vitest"
 import { fireEvent, render, screen } from "@testing-library/react"
 import type { ComponentProps } from "react"
 import { ProjectSortMenu } from "./ProjectSortMenu"
-import { PM_FILTER_ALL, pmFilterFor } from "./project-pm-filter"
+import { PM_FILTER_ALL, PM_FILTER_MINE, pmFilterFor } from "./project-pm-filter"
 import { ROLE_FILTER_ALL, roleFilterFor } from "./project-role-filter"
 import { UPDATED_FILTER_ANY, updatedFilterFor } from "./project-updated-filter"
 
@@ -88,5 +88,31 @@ describe("ProjectSortMenu (AQU-1044)", () => {
     expect(options.map((el) => el.textContent)).toEqual(["All roles", "Contributor", "Owner"])
     // The all-roles default is the checked radio.
     expect(options[0]).toHaveAttribute("aria-checked", "true")
+  })
+
+  it("pins 'Managed by me' under All PMs for a signed-in viewer and reports it as the identity value (AQU-1027)", async () => {
+    const props = renderMenu({ viewerUsername: "anna", pmUsernames: ["mark"] })
+
+    fireEvent.click(screen.getByTestId("project-sort-menu"))
+    fireEvent.click(await screen.findByRole("menuitem", { name: /^pm/i }))
+    const options = await screen.findAllByRole("menuitemradio")
+    expect(options.map((el) => el.textContent)).toEqual([
+      "All PMs",
+      "Managed by me",
+      "mark",
+      "Unassigned",
+    ])
+
+    fireEvent.click(options[1])
+    expect(props.onPmChange).toHaveBeenCalledWith(PM_FILTER_MINE)
+  })
+
+  it("offers no identity option without a signed-in viewer (AQU-1027)", async () => {
+    renderMenu({ viewerUsername: null })
+
+    fireEvent.click(screen.getByTestId("project-sort-menu"))
+    fireEvent.click(await screen.findByRole("menuitem", { name: /^pm/i }))
+    const options = (await screen.findAllByRole("menuitemradio")).map((el) => el.textContent)
+    expect(options).toEqual(["All PMs", "anna", "mark", "Unassigned"])
   })
 })

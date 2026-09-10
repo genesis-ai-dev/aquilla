@@ -251,6 +251,9 @@ export const editor = defineNamespace({
     "editor.milestone.cellRange": "Cells {range}",
     "editor.milestone.percentTranslated": "{percent}% translated",
     "editor.milestone.percentValidated": "{percent}% validated",
+    "editor.milestone.splitAria": "Split into milestones",
+    "editor.milestone.splitHint":
+      "Show only the cells in the current division. Use the arrows to move to the next one.",
 
     "editor.milestone.chapter.moveBetween": "Move between chapters",
     "editor.milestone.chapter.previous": "Previous chapter",
@@ -360,6 +363,11 @@ export const editor = defineNamespace({
     "editor.view.showLineNumbers": "Show line numbers",
     "editor.view.showCellLabels": "Show cell labels",
     "editor.view.showTranslationNotes": "Show translation notes",
+    "editor.view.showHealthIndicators": "Show health indicators",
+    "editor.view.targetKeyTerms": "Target key terms",
+    "editor.view.targetKeyTermsAlways": "Always",
+    "editor.view.targetKeyTermsFocused": "Focused cell only",
+    "editor.view.targetKeyTermsNever": "Never",
     "editor.view.footnotesHidden": "Hidden",
     "editor.view.footnotesInline": "Inline under cells",
     "editor.view.footnotesTray": "Bottom tray",
@@ -479,6 +487,8 @@ export const editor = defineNamespace({
     }),
     "editor.history.promote": "Promote to current",
     "editor.history.promoteConfirm": "Make this the current value?",
+    "editor.history.restore": "Restore this version",
+    "editor.history.restoreConfirm": "Replace the current text with this version?",
     "editor.history.showIntermediate": "Show intermediate edits",
     "editor.history.hideIntermediate": "Hide intermediate edits",
 
@@ -662,6 +672,13 @@ export const editor = defineNamespace({
     // affordances. Keyed 2026-08-20 — these surfaces were authored inline
     // while the dubbing workflow was being designed.
     "editor.timeline.videoPaneTitle": "Video",
+    // AQU-1119: the section heading over the dialogue table, opposite the
+    // Video header. It says "Text" and not "Source text" because SOURCE and
+    // TARGET are the two columns underneath it — the section holds both, and
+    // naming it after one of its columns read as a mislabel. Deliberately not
+    // the track row's name: `TRACK_KIND_LABELS` still calls those "Source
+    // text" / "Target text", which is right, because a track IS one side.
+    "editor.timeline.textPaneTitle": "Text",
     "editor.timeline.videoPaneLinked": "Linked video",
     "editor.timeline.videoPaneStart": "Click to start the picture",
     "editor.timeline.videoPanePicture": "picture",
@@ -725,6 +742,23 @@ export const editor = defineNamespace({
     // line, and the summary band says what is inside better.)
     "editor.timeline.gutterCollapseAria": "Narrow the track names",
     "editor.timeline.gutterExpandAria": "Show the track names",
+    // AQU-1119: collapsing a whole section of the media lens down to a rail of
+    // one icon, and bringing it back. Each pair is one button in two states —
+    // the collapse control lives in the section's own header, the expand
+    // control IS the rail.
+    "editor.timeline.collapseVideoAria": "Hide the video",
+    "editor.timeline.expandVideoAria": "Show the video",
+    "editor.timeline.collapseTimelineAria": "Hide the timeline",
+    "editor.timeline.expandTimelineAria": "Show the timeline",
+    "editor.timeline.collapseTextAria": "Hide the text",
+    "editor.timeline.expandTextAria": "Show the text",
+    // AQU-1119: the other control beside each body section's chevron. Where
+    // the chevron folds ITS OWN section, this one folds the others so this
+    // section has the lens to itself — one button in two states.
+    "editor.timeline.fullscreenVideoAria": "Fill the lens with the video",
+    "editor.timeline.restoreVideoAria": "Put the video back in its column",
+    "editor.timeline.fullscreenTextAria": "Fill the lens with the text",
+    "editor.timeline.restoreTextAria": "Put the text back in its column",
     "editor.timeline.folderExpandAria": "Show the tracks in {name}",
     "editor.timeline.folderCollapseAria": "Hide the tracks in {name}",
     "editor.timeline.trackMenuAria": "Track options for {name}",
@@ -1147,6 +1181,10 @@ export const editor = defineNamespace({
     "editor.row.editorAria": "{ref} — {state}",
     "editor.row.selectedTooltip": "Selected. Drag up or down to extend the range.",
     "editor.row.selectTooltip": "Select cell. Drag up or down to select a range.",
+    // -- CellPresenceBadges: per-row live-collaborator chips --
+    "editor.presence.viewing": "viewing",
+    "editor.presence.editing": "editing",
+    "editor.presence.typing": "typing…",
     "editor.row.selectedAria": "Selected cell. Drag to extend selection.",
     "editor.row.selectAria": "Select cell. Drag to select a range.",
     "editor.state.empty": "empty",
@@ -1168,6 +1206,9 @@ export const editor = defineNamespace({
     "editor.lane.setTargetLanguage": "Set target language",
     "editor.lane.changeTargetLanguage": "Change target language",
     "editor.lane.changeTargetLanguageItem": "Change target language…",
+    "editor.lane.searchPlaceholder": "Search lanes…",
+    "editor.lane.searchAriaLabel": "Search lanes",
+    "editor.lane.searchEmpty": "No lanes found.",
     "editor.lane.showArchived": "Show archived ({count})",
     "editor.empty.noMediaSegments": "No media segments yet",
     "editor.empty.mediaLayerHint":
@@ -1234,32 +1275,35 @@ export const editor = defineNamespace({
     // — Expansion tab: back-translation ————————————————————————————
     "editor.bt.label": "Back-translation",
     "editor.bt.explainTooltip":
-      "A reading of this translation back in your reference language. " +
-      "AI can misread, and the project's own pairs can be rough — treat both " +
-      "as checks, not proof.",
+      "A literal back-translation into your source language, for comparing with " +
+      "the original. AI can misread, and the statistical gloss tracks your corpus " +
+      "— treat both as checks, not proof.",
     "editor.bt.needsAiTooltip":
       "Sign in or add an AI model in project settings to generate back-translations",
-    "editor.bt.regenerateTooltip": "Regenerate with AI",
+    "editor.bt.regenerateTooltip": "Regenerate back-translation",
     "editor.bt.regenerateAria": "Regenerate the back-translation",
     "editor.bt.editTooltip": "Edit the back-translation",
     "editor.bt.contributorRequired": "Contributor+ required to edit back-translations",
     "editor.bt.failed": "Back-translation failed",
-    "editor.bt.translateFirst": "Translate this cell to read it back.",
-    "editor.bt.staleWarning": "This reading describes an earlier version of the translation",
+    "editor.bt.translateFirst":
+      "Translate this cell first to generate a back-translation.",
+    "editor.bt.staleWarning":
+      "This back-translation describes an earlier version of the translation",
     "editor.bt.emptyPitch":
-      "See what your translation says when read back, so you can check the " +
-      "meaning carried over.",
-    "editor.bt.readingItBack": "Reading it back…",
-    "editor.bt.readItBack": "Read it back with AI",
+      "Reverse-translate this cell literally, then compare the result with the source.",
+    "editor.bt.readingItBack": "Generating back-translation…",
+    "editor.bt.readItBack": "Generate back-translation",
     "editor.bt.needsAiHint":
-      "Sign in or add an AI model in project settings to generate one.",
-    "editor.bt.contributorCanGenerate": "A contributor can generate one with AI.",
-    "editor.bt.originAi": "AI reading",
-    "editor.bt.originCorrected": "Corrected reading",
+      "Sign in or add an AI model in project settings to generate a back-translation.",
+    "editor.bt.contributorCanGenerate":
+      "A contributor can generate a back-translation.",
+    "editor.bt.originAi": "AI back-translation",
+    "editor.bt.originCorrected": "Hand-corrected",
     "editor.bt.freshLabel": "Matches this translation",
-    "editor.bt.pairsDisagree": "This project's pairs read it differently",
-    "editor.bt.pairsLive": "From this project's own pairs — updates as you translate",
-    "editor.bt.usePairsInstead": "Use this reading",
+    "editor.bt.pairsDisagree": "Statistical gloss differs",
+    "editor.bt.pairsLive":
+      "Statistical gloss from project pairs — updates as you translate",
+    "editor.bt.usePairsInstead": "Use this gloss",
     "editor.bt.statisticalGloss": "Statistical gloss",
     "editor.bt.statisticalGlossSub": "— word-for-word, from this project's own pairs",
     "editor.bt.glossNotEnoughPairs":
@@ -1330,7 +1374,15 @@ export const editor = defineNamespace({
 
     // — Per-file sync status chip (WS connection to the sync-worker) ————
     "editor.sync.live": "Live",
-    "editor.sync.liveTooltip": "Live — changes are syncing to Cloudflare and across devices",
+    "editor.sync.liveTooltip": "Live — all changes are saved to the server and syncing across devices",
+    "editor.sync.syncing": "Syncing",
+    "editor.sync.syncingTooltip": "Syncing — some changes are still being sent to the server",
+    "editor.sync.retrying": "Retrying",
+    "editor.sync.retryingTooltip":
+      "Retrying — the last attempt to send your changes failed. Edits are saved locally and will be retried.",
+    "editor.sync.reconnecting": "Reconnecting",
+    "editor.sync.reconnectingTooltip":
+      "Reconnecting — the live connection dropped. Edits are saved locally; changes from others may be delayed.",
     "editor.sync.connecting": "Connecting",
     "editor.sync.connectingTooltip": "Connecting to the sync server…",
     "editor.sync.offline": "Offline",
@@ -1497,6 +1549,79 @@ export const editor = defineNamespace({
           "timeline's track-name column back out, so every track's full name " +
           "and description are readable again. Affects every row at once. " +
           "Doubles as the button's hover tooltip.",
+      },
+      "editor.timeline.collapseVideoAria": {
+        description:
+          "Screen-reader name and tooltip of the button in the video's own " +
+          "header that collapses the whole video section to a 40px rail of one " +
+          "icon, giving its width to the text beside it. Doubles as the " +
+          "button's hover tooltip. Pairs with expandVideoAria.",
+      },
+      "editor.timeline.expandVideoAria": {
+        description:
+          "Screen-reader name and tooltip of the collapsed video rail — the " +
+          "strip of one icon that is all that remains of the video section, " +
+          "and which is itself the button that brings the picture back. The " +
+          "name is only ever seen on hover, so it carries the whole label.",
+      },
+      "editor.timeline.fullscreenVideoAria": {
+        description:
+          "Screen-reader name and tooltip of the button beside the video " +
+          "header's collapse chevron, which folds the OTHER sections — the " +
+          "timeline and the text — so the picture has the whole media lens " +
+          "to itself. Not browser fullscreen: the app window is unchanged. " +
+          "Pairs with restoreVideoAria, which is the same button pressed.",
+      },
+      "editor.timeline.restoreVideoAria": {
+        description:
+          "Screen-reader name and tooltip of that same button once the video " +
+          "already has the lens to itself: pressing it puts the sections that " +
+          "were folded to make room back the way they were. 'Its column' is " +
+          "the video's normal place beside the text, not a table column.",
+      },
+      "editor.timeline.fullscreenTextAria": {
+        description:
+          "Screen-reader name and tooltip of the button beside the text " +
+          "header's collapse chevron, which folds the OTHER sections — the " +
+          "timeline and the video — so the cells have the whole media lens " +
+          "to themselves. Not browser fullscreen: the app window is " +
+          "unchanged. Pairs with restoreTextAria, the same button pressed.",
+      },
+      "editor.timeline.restoreTextAria": {
+        description:
+          "Screen-reader name and tooltip of that same button once the text " +
+          "already has the lens to itself: pressing it puts the sections that " +
+          "were folded to make room back the way they were. 'Its column' is " +
+          "the text's normal place beside the video.",
+      },
+      "editor.timeline.collapseTimelineAria": {
+        description:
+          "Screen-reader name and tooltip of the button in the timeline's " +
+          "toolbar that collapses the whole timeline to a 40px rail of one " +
+          "icon, giving its height to the video and text below it. Doubles as " +
+          "the button's hover tooltip. Pairs with expandTimelineAria.",
+      },
+      "editor.timeline.expandTimelineAria": {
+        description:
+          "Screen-reader name and tooltip of the collapsed timeline rail — the " +
+          "strip of one icon that is all that remains of the timeline, and " +
+          "which is itself the button that brings it back. The name is only " +
+          "ever seen on hover, so it carries the whole label.",
+      },
+      "editor.timeline.collapseTextAria": {
+        description:
+          "Screen-reader name and tooltip of the button in the text section's " +
+          "header that collapses the dialogue table to a 40px rail of one " +
+          "icon, giving its width to the video beside it. 'Text' here is the " +
+          "section holding the source and target columns, not one of them. " +
+          "Doubles as the button's hover tooltip. Pairs with expandTextAria.",
+      },
+      "editor.timeline.expandTextAria": {
+        description:
+          "Screen-reader name and tooltip of the collapsed text rail — the " +
+          "strip of one icon that is all that remains of the dialogue table, " +
+          "and which is itself the button that brings it back. The name is " +
+          "only ever seen on hover, so it carries the whole label.",
       },
       "editor.timeline.folderExpandAria": {
         description:
@@ -2206,6 +2331,22 @@ export const editor = defineNamespace({
           percent: "Whole-number percentage, already rounded, without the % sign.",
         },
       },
+      "editor.milestone.splitAria": {
+        description:
+          "Label of the switch in ⋯ → Editor settings. It switches the table " +
+          "between a continuous list of every cell and a paged view that shows " +
+          "only the current division. On means the paged view is active. A " +
+          "switch label, so it names the thing being toggled on.",
+        maxLength: 28,
+        screenshot: "editor-table",
+      },
+      "editor.milestone.splitHint": {
+        description:
+          "Tooltip explaining that same switch: what the on state does, and that " +
+          "the chapter/section arrows then turn the page. 'Division' stays " +
+          "generic because the unit differs by file type (chapter, slide, section…).",
+        screenshot: "editor-table",
+      },
       "editor.milestone.chapter.moveBetween": {
         description: MILESTONE_MOVE_BETWEEN + MILESTONE_KIND_CHAPTER,
       },
@@ -2604,6 +2745,34 @@ export const editor = defineNamespace({
           "published exegetical notes for the verse in focus, fetched from a notes " +
           "resource. Not the user's own comments.",
         maxLength: 32,
+      },
+      "editor.view.showHealthIndicators": {
+        description:
+          "Label of the switch that turns the per-row health ribbon, rule " +
+          "infractions, and the confidence overlay on or off. Turning it off " +
+          "lightens the editor on very large files. Applies to this browser only.",
+        maxLength: 32,
+      },
+      "editor.view.targetKeyTerms": {
+        description:
+          "Section heading for the setting that controls subtle highlights on approved " +
+          "terminology found in translated target cells.",
+        maxLength: 28,
+      },
+      "editor.view.targetKeyTermsAlways": {
+        description:
+          "Option that shows approved target key-term highlights in every visible cell.",
+        maxLength: 16,
+      },
+      "editor.view.targetKeyTermsFocused": {
+        description:
+          "Option that shows approved target key-term highlights only in the focused cell.",
+        maxLength: 24,
+      },
+      "editor.view.targetKeyTermsNever": {
+        description:
+          "Option that hides approved target key-term highlights. Violation markers remain visible.",
+        maxLength: 16,
       },
       "editor.view.footnotesHidden": {
         description:
@@ -3129,6 +3298,18 @@ export const editor = defineNamespace({
       "editor.history.promoteConfirm": {
         description:
           "Inline confirmation question shown after clicking Promote, with Confirm " +
+          "and Cancel beside it. A question, so keep the question mark.",
+      },
+      "editor.history.restore": {
+        description:
+          "Link on an older (non-current, non-stale) history entry that makes that " +
+          "entry's text the cell's current value again, as a new edit. Imperative. " +
+          "Nothing is deleted; the newer edits stay in the history.",
+        maxLength: 26,
+      },
+      "editor.history.restoreConfirm": {
+        description:
+          "Inline confirmation question shown after clicking Restore, with Confirm " +
           "and Cancel beside it. A question, so keep the question mark.",
       },
       "editor.history.showIntermediate": {
@@ -4101,6 +4282,21 @@ export const editor = defineNamespace({
           "Tooltip on the selection checkbox when the row is NOT selected: what a " +
           "click does, then what a drag does.",
       },
+      "editor.presence.viewing": {
+        description:
+          "Tiny lowercase state word after a collaborator's name on a cell row and " +
+          "in the online-peers list: they have the row selected but hold no edit lock.",
+      },
+      "editor.presence.editing": {
+        description:
+          "Tiny lowercase state word after a collaborator's name on a cell row and " +
+          "in the online-peers list: they hold the edit lock on that cell.",
+      },
+      "editor.presence.typing": {
+        description:
+          "Tiny lowercase state word after a collaborator's name on a cell row while " +
+          "their live draft text is changing (last change within ~2 seconds).",
+      },
       "editor.row.selectedAria": {
         description:
           "Screen-reader name of the selection checkbox when the row is selected. " +
@@ -4174,6 +4370,10 @@ export const editor = defineNamespace({
           "Menu item inside the lane switcher that opens the target-language " +
           "editor. Trailing ellipsis means 'opens a further dialog' — keep it.",
         maxLength: 28,
+      },
+      "editor.lane.searchAriaLabel": {
+        description:
+          "Accessible label for the search field inside every lane-picker combobox (editor lane switcher, rule scope picker, rules lane filter). Filters the lane list as the user types.",
       },
       "editor.lane.showArchived": {
         description:
@@ -4438,10 +4638,10 @@ export const editor = defineNamespace({
       },
       "editor.bt.regenerateTooltip": {
         description:
-          "Tooltip on the enabled regenerate button; it asks the model to read the " +
-          "current translation back again, replacing the existing reading. " +
-          "Imperative.",
-        maxLength: 24,
+          "Tooltip on the enabled regenerate button; it asks the model to " +
+          "back-translate the current target text again, replacing the existing " +
+          "back-translation. Imperative.",
+        maxLength: 28,
       },
       "editor.bt.regenerateAria": {
         description:
@@ -4470,7 +4670,7 @@ export const editor = defineNamespace({
       "editor.bt.translateFirst": {
         description:
           "Empty state of the back-translation tab when the cell has no translation " +
-          "yet: there is nothing to read back. Full sentence.",
+          "yet: there is nothing to back-translate. Full sentence.",
       },
       "editor.bt.staleWarning": {
         description:
@@ -4482,20 +4682,20 @@ export const editor = defineNamespace({
       "editor.bt.emptyPitch": {
         description:
           "Invitation shown when no back-translation exists yet, explaining what the " +
-          "feature is for before the user spends a model call on it. One sentence, " +
-          "wrapped at about 34 characters, so avoid very long words.",
+          "feature is for before the user spends a model call on it. Uses standard " +
+          "Bible-translation / LQA terminology (literal reverse translation, compare " +
+          "to source). One sentence, wrapped at about 34 characters.",
       },
       "editor.bt.readingItBack": {
         description:
           "Label of the generate button while the model is working. Present " +
-          "participle of the same idiom as editor.bt.readItBack.",
-        maxLength: 24,
+          "participle parallel to editor.bt.readItBack.",
+        maxLength: 28,
       },
       "editor.bt.readItBack": {
         description:
-          "Primary button that generates the first back-translation. 'Read it back' " +
-          "is the plain-language version of 'back-translate' — keep it approachable " +
-          "rather than technical. Imperative.",
+          "Primary button that generates the first back-translation. Standard " +
+          "industry noun phrase — same term as the tab label. Imperative.",
         maxLength: 26,
       },
       "editor.bt.needsAiHint": {
@@ -4511,15 +4711,15 @@ export const editor = defineNamespace({
       },
       "editor.bt.originAi": {
         description:
-          "Quiet provenance chip on a model-produced reading. Names the source so " +
-          "the user does not mistake it for a human check. A noun phrase, not a verb.",
-        maxLength: 18,
+          "Quiet provenance chip on a model-produced back-translation. Names the " +
+          "source so the user does not mistake it for a human check. A noun phrase.",
+        maxLength: 22,
       },
       "editor.bt.originCorrected": {
         description:
-          "Quiet provenance chip when a contributor has edited the AI reading. " +
-          "Signals that a human stands behind this wording.",
-        maxLength: 22,
+          "Quiet provenance chip when a contributor has edited the AI " +
+          "back-translation. Signals that a human stands behind this wording.",
+        maxLength: 18,
       },
       "editor.bt.freshLabel": {
         description:
@@ -4529,21 +4729,21 @@ export const editor = defineNamespace({
       },
       "editor.bt.pairsDisagree": {
         description:
-          "Heading of the statistical-clue card when the project's own pairs " +
-          "produce a different wording from the AI reading. This disagreement is " +
-          "the point of the card — keep the contrast.",
+          "Heading of the statistical-clue card when the project's statistical " +
+          "gloss differs from the AI back-translation. This disagreement is the " +
+          "point of the card — keep the contrast.",
       },
       "editor.bt.pairsLive": {
         description:
-          "Heading of the live statistical gloss shown before an AI reading exists. " +
-          "It updates as the translator types. Emphasize that it comes from this " +
-          "project, not from a model.",
+          "Heading of the live statistical gloss shown before an AI back-translation " +
+          "exists. It updates as the translator types. Emphasize project pairs, not " +
+          "a model.",
       },
       "editor.bt.usePairsInstead": {
         description:
-          "Button that adopts the statistical gloss as the saved reading, replacing " +
-          "the AI wording with a human-confirmed project-pairs reading. Imperative.",
-        maxLength: 22,
+          "Button that adopts the statistical gloss as the saved back-translation, " +
+          "replacing the AI wording. Imperative.",
+        maxLength: 18,
       },
       "editor.bt.statisticalGloss": {
         description:
@@ -4838,6 +5038,34 @@ export const editor = defineNamespace({
       },
       "editor.sync.liveTooltip": {
         description: "Tooltip/aria-label of the sync chip in the editor.sync.live state.",
+      },
+      "editor.sync.syncing": {
+        description:
+          "Label of the sync status chip while queued local edits are still being " +
+          "sent to the server and no attempt has failed yet. A state adjective " +
+          "beside a colored dot.",
+        maxLength: 12,
+      },
+      "editor.sync.syncingTooltip": {
+        description: "Tooltip/aria-label of the sync chip in the editor.sync.syncing state.",
+      },
+      "editor.sync.retrying": {
+        description:
+          "Label of the sync status chip when queued local edits exist and the last " +
+          "attempt to send them failed; the app keeps retrying automatically.",
+        maxLength: 12,
+      },
+      "editor.sync.retryingTooltip": {
+        description: "Tooltip/aria-label of the sync chip in the editor.sync.retrying state.",
+      },
+      "editor.sync.reconnecting": {
+        description:
+          "Label of the sync status chip when the browser is online but the live " +
+          "websocket connection to the sync server is currently closed and being re-established.",
+        maxLength: 14,
+      },
+      "editor.sync.reconnectingTooltip": {
+        description: "Tooltip/aria-label of the sync chip in the editor.sync.reconnecting state.",
       },
       "editor.sync.connecting": {
         description:

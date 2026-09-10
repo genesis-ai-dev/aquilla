@@ -11,7 +11,7 @@ beforeEach(() => {
   })))
 })
 
-describe("FileChapterToolbar translate as read", () => {
+describe("FileChapterToolbar draft as you read", () => {
   it("offers Agent beside the Text and Audio editor modes", async () => {
     const onAgentSelect = vi.fn()
     render(
@@ -102,7 +102,7 @@ describe("FileChapterToolbar translate as read", () => {
     expect(await screen.findByRole("tooltip", { name: "Text" })).toBeVisible()
   })
 
-  it("moves Translate as read into File options and reports the requested state", async () => {
+  it("labels the read-along drafting mode \"Draft as you read\" in File options and reports the requested state", async () => {
     const onChange = vi.fn()
     render(
       <FileChapterToolbar
@@ -118,15 +118,53 @@ describe("FileChapterToolbar translate as read", () => {
       />,
     )
 
-    expect(screen.queryByRole("switch", { name: "Translate as read" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("switch", { name: "Draft as you read" })).not.toBeInTheDocument()
     await userEvent.click(screen.getByRole("button", { name: "File options" }))
-    const toggle = screen.getByRole("menuitemcheckbox", { name: "Translate as read" })
+    // AQU-1078: the old "Translate as read" label is gone for good.
+    expect(screen.queryByRole("menuitemcheckbox", { name: "Translate as read" })).not.toBeInTheDocument()
+    const toggle = screen.getByRole("menuitemcheckbox", { name: "Draft as you read" })
     expect(toggle).not.toBeChecked()
     await userEvent.click(toggle)
     expect(onChange).toHaveBeenCalledWith(true)
   })
 
-  it("keeps Translate as read disabled in File options when unavailable", async () => {
+  it("explains what Draft as you read does behind an info icon, and exposes it as the item's accessible description", async () => {
+    const onChange = vi.fn()
+    render(
+      <FileChapterToolbar
+        lens="text"
+        onLensChange={vi.fn()}
+        checkOpen={false}
+        checkRunning={false}
+        checkResult={null}
+        onCheckToggle={vi.fn()}
+        menuItems={[]}
+        translateAsReadEnabled
+        onTranslateAsReadChange={onChange}
+      />,
+    )
+
+    await userEvent.click(screen.getByRole("button", { name: "File options" }))
+    const toggle = screen.getByRole("menuitemcheckbox", { name: "Draft as you read" })
+    // On/off state is carried by the checkbox role, so the mode-ness is
+    // visible without extra copy.
+    expect(toggle).toBeChecked()
+    // The four guarantees from AQU-1078 reach assistive tech as the item's
+    // description, never as part of its name.
+    const help = "While on, AI drafts empty cells as you scroll and refreshes existing AI drafts when better validated examples appear. Every draft needs human review. Cells a person translated are never touched."
+    expect(toggle).toHaveAccessibleName("Draft as you read")
+    expect(toggle).toHaveAccessibleDescription(help)
+    // Sighted users get the same text from the info icon at the end of the
+    // row: hover shows it, and clicking the icon must not flip the toggle.
+    const hint = toggle.querySelector("[data-slot=tooltip-trigger]") as HTMLElement
+    expect(hint).not.toBeNull()
+    await userEvent.hover(hint)
+    expect(await screen.findByRole("tooltip", { name: help })).toBeVisible()
+    await userEvent.click(hint)
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it("keeps Draft as you read disabled in File options when unavailable", async () => {
     render(
       <FileChapterToolbar
         lens="text"
@@ -142,7 +180,7 @@ describe("FileChapterToolbar translate as read", () => {
     )
 
     await userEvent.click(screen.getByRole("button", { name: "File options" }))
-    expect(screen.getByRole("menuitemcheckbox", { name: "Translate as read" })).toHaveAttribute("aria-disabled", "true")
+    expect(screen.getByRole("menuitemcheckbox", { name: "Draft as you read" })).toHaveAttribute("aria-disabled", "true")
   })
 
   it("moves Check file into File options as a stateful item", async () => {

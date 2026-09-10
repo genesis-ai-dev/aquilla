@@ -250,14 +250,29 @@ describe('parseRealtimeMessage — invalid inputs return null', () => {
 })
 
 // ---------------------------------------------------------------------------
-// PROJECTION_TABLES sanity — Set size must match union arity
+// PROJECTION_TABLES exhaustiveness — Set contents must match the union
 // ---------------------------------------------------------------------------
 
 describe('PROJECTION_TABLES', () => {
-  it('contains exactly 10 entries, matching the ProjectionTable union arity', () => {
-    // If you add a new ProjectionTable variant, update PROJECTION_TABLES too.
-    // This test catches the drift.
-    const expectedArity = 10 // events | cells | files | cell_validators | cell_waivers | cell_audio | comments | cell_backtranslations | assignments | assignment_cells
-    expect(PROJECTION_TABLES.size).toBe(expectedArity)
+  it('contains exactly the members of the ProjectionTable union', () => {
+    // Type-to-runtime bridge: the compiler rejects this object if a union
+    // member is missing (and rejects an extra key), so adding a variant to
+    // ProjectionTable without listing it here fails to compile; adding it
+    // here without updating PROJECTION_TABLES fails the assertion below.
+    const ALL: Record<ProjectionTable, true> = {
+      events: true,
+      cells: true,
+      files: true,
+      cell_validators: true,
+      cell_waivers: true,
+      cell_audio: true,
+      comments: true,
+      cell_backtranslations: true,
+      assignments: true,
+      assignment_cells: true,
+      cell_links: true,
+      concepts: true,
+    }
+    expect([...PROJECTION_TABLES].sort()).toEqual(Object.keys(ALL).sort())
   })
 })

@@ -1,6 +1,7 @@
 import type { ComponentType, ReactNode } from "react"
 import {
   Archive,
+  CalendarClock,
   CircleDashed,
   Clock,
   type LucideIcon,
@@ -75,6 +76,9 @@ const KIND_CONFIG: Record<
   { icon: StatusIcon; tone: StatusTone; label: string }
 > = {
   overdue: { icon: TrendLineDownIcon, tone: "danger", label: PROJECT_STATUS_LABEL.overdue },
+  // Amber, not red: the project's own deadline is still intact. Red here
+  // would recreate in colour the confusion the separate label just removed.
+  "behind-plan": { icon: CalendarClock, tone: "warning", label: PROJECT_STATUS_LABEL.behindPlan },
   soon: { icon: Clock, tone: "warning", label: PROJECT_STATUS_LABEL.soon },
   stalled: { icon: CircleDashed, tone: "muted", label: PROJECT_STATUS_LABEL.stalled },
   "on-track": { icon: TrendLineIcon, tone: "success", label: PROJECT_STATUS_LABEL.onTrack },

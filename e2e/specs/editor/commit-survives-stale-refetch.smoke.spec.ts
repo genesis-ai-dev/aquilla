@@ -70,8 +70,10 @@ test("a commit made while a slow stale refetch is in flight never blanks or lose
   await expect(ws.cellRow(0)).toContainText(text)
 
   // And survive a real reload (server projection has it).
-  await alice.unroute(/\/cells\?since=\d+(?:&.*)?$/)
-  await alice.unroute(/\/cells\?(?=.*side=)(?!.*cellIds=).*/)
+  // AQU-1220: another full refetch can already be inside route.fetch(),
+  // even after the first source/target pair was delivered. Drain every
+  // in-flight handler before reload cancels its intercepted request.
+  await alice.unrouteAll({ behavior: "wait" })
   await alice.reload()
   await ws.openFileBySubstring("sample")
   await ws.waitForEditor()

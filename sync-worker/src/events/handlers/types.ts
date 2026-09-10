@@ -56,6 +56,13 @@ export interface DispatchResult {
    */
   chainSlot?: ChainSlot
   /**
+   * AQU-1154: index into `stmts` of the claim + head-CAS gated cells write
+   * (set together with chainSlot). After commit the route checks that
+   * statement's row count: 0 rows means the event lost the in-flight race
+   * (claim or head compare-and-swap) and is reported stale.
+   */
+  headStmtIndex?: number
+  /**
    * Set when the per-event file-counter recompute was deferred
    * (opts.deferFileCounters) — the route appends one recompute per
    * (file, chunk) instead (QW-10).

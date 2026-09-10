@@ -203,19 +203,35 @@ export async function handleMigrateIngestRequest(
   // transaction (measured in minutes during the Aug 25–26 storms). With
   // pre-allocation the lock is held for a single round trip. Replayed ids
   // still consume their seq — gaps are harmless, seq is an ordering key.
+  // Replay pre-filter: ON CONFLICT (id) DO NOTHING already drops the events
+  // row for a retried id, but the projection statements built above would
+  // still run and overwrite the cell with the retry's payload. Drop replayed
+  // ids up front so a retried chunk is a true no-op.
+  const ids = prepared.map((p) => p.row.id)
+  const replayed = new Set<string>()
+  for (let i = 0; i < ids.length; i += 500) {
+    const slice = ids.slice(i, i + 500)
+    const found = await db
+      .prepare(`SELECT id FROM events WHERE project_id = ? AND id IN (${slice.map(() => '?').join(',')})`)
+      .bind(body.projectId, ...slice)
+      .all<{ id: string }>()
+    for (const r of found.results ?? []) replayed.add(r.id)
+  }
+  const fresh = replayed.size ? prepared.filter((p) => !replayed.has(p.row.id)) : prepared
+  if (fresh.length === 0) return Response.json({ accepted: 0, replayed: replayed.size })
+
   let nextSeq: number
   let seqBase: number
   try {
-    seqBase = nextSeq = await allocateSeqRange(db, body.projectId, prepared.length)
+    seqBase = nextSeq = await allocateSeqRange(db, body.projectId, fresh.length)
   } catch (err) {
     return Response.json({ error: `seq allocation failed: ${String(err)}` }, { status: 500 })
   }
 
   // Pass 2: stamp seqs from the pre-allocated block, in body order, and emit
   // each event's insert ahead of its own projection statements (the ordering
-  // pass 1 preserved). id-replays are skipped via ON CONFLICT (id) DO NOTHING
-  // (their seq is consumed — harmless gap).
-  for (const { row, projStmts } of prepared) {
+  // pass 1 preserved). Replayed ids were already dropped above.
+  for (const { row, projStmts } of fresh) {
     const insertRow: SeqEventInsertRow = { ...row, serverSeq: nextSeq++ }
     if (eventsOnly) {
       // Firehose path: collapse into multi-row INSERTs below.
@@ -261,5 +277,5 @@ export async function handleMigrateIngestRequest(
     return Response.json({ error: `DB batch failed: ${String(err)}` }, { status: 500 })
   }
 
-  return Response.json({ accepted: body.events.length })
+  return Response.json({ accepted: fresh.length, replayed: replayed.size })
 }

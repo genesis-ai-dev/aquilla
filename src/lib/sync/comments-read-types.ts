@@ -36,9 +36,25 @@ export interface CommentRecord {
 
 export interface CommentsResponse {
   comments: CommentRecord[]
+  /**
+   * Opaque keyset cursor for the next page; null (or absent, from a worker
+   * that predates paging) when this was the last page.
+   */
+  nextCursor?: string | null
 }
 
 export interface FetchCommentsOptions {
   fileId?: string
   cellId?: string
+  /** Page size; the worker defaults to 200 and caps at 1000. */
+  limit?: number
+  /** `nextCursor` from the previous page. */
+  cursor?: string
+}
+
+/** GET /comments/counts — open (unresolved, non-deleted) root threads. */
+export interface CommentCounts {
+  unresolved: number
+  /** Keyed by fileId; project-scoped threads key on "". */
+  byFile: Record<string, number>
 }

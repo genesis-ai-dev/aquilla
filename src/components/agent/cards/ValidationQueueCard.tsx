@@ -85,7 +85,7 @@ export function ValidationQueueCard({ proposal, applyContext, onApplied, canVali
                 </span>
               ) : (
                 <AppTooltip
-                  content={canValidate ? undefined : "Your role can't validate in this project"}
+                  content={canValidate ? undefined : t("agent.validation.roleCannotValidate")}
                   disabled={canValidate}
                 >
                   <Button

@@ -1,7 +1,7 @@
 // CORS for browser-facing CQRS endpoints.
 //
 // The sync-worker is otherwise reached either as a partyserver WebSocket
-// (no preflight needed) or by frontier-server using SYNC_SECRET_KEY
+// (no preflight needed) or by auth-worker using SYNC_SECRET_KEY
 // (server-to-server, no preflight). The CQRS HTTP routes — /events,
 // /cells/audit-stats, /cell-validators — are the only paths the browser
 // hits cross-origin, so we add CORS headers narrowly here rather than

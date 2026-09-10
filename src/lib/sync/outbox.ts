@@ -212,10 +212,10 @@ async function openDb(): Promise<IDBDatabase> {
   return dbPromise
 }
 
-export async function enqueueOutboxEvent(event: CqrsRawEvent): Promise<void> {
+export async function enqueueOutboxEvent(event: CqrsRawEvent, scope?: OutboxOwnerScope): Promise<void> {
   // Capture before IndexedDB opens. A transition that lands during that await
   // must not reclassify an edit initiated by the previous account.
-  const ownerKey = activeOwnerKey
+  const ownerKey = ownerForScope(scope)
   const db = await openDb()
   const rec: OutboxRecord = {
     id: event.id,

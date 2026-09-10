@@ -1,3 +1,4 @@
+import { handleCheckingRequest } from "./checking/route"
 // Aquilla sync worker.
 //
 // AD-1 keeps realtime state transient and project-scoped: ProjectSync owns
@@ -301,6 +302,11 @@ const worker = {
     if (rebuildFtsResponse) return rebuildFtsResponse
     const adminResponse = await handleAdminRequest(request, env)
     if (adminResponse) return adminResponse
+    const checkingResponse = await handleCheckingRequest(request, env, ctx)
+    if (checkingResponse) {
+      checkingResponse.headers.set("Cache-Control", "no-store")
+      return withCors(checkingResponse, request)
+    }
     const audioResponse = await handleAudioRequest(request, env)
     if (audioResponse) return audioResponse
     const voiceConvertResponse = await handleVoiceConvertRequest(request, env)

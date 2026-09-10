@@ -86,3 +86,40 @@ test("alice posts comment; bob sees it on the comments page", async ({ alice, bo
     await expect(bob.getByText(commentText).first()).toBeVisible({ timeout: 1_500 })
   }).toPass({ timeout: 15_000 })
 })
+
+// AQU-1249: anonymous checking is the same cross-user comment contract,
+// with a capability-scoped guest instead of a project member.
+test("checking guest submits feedback through a PIN link; owner sees it in project comments", async ({ alice, browser }) => {
+  const { seedProjectWithFile } = await import("../../helpers/seed-project")
+  const { Checking } = await import("../../helpers/page-objects/Checking")
+  const owner = await ensureAuthState("alice")
+  const seeded = await seedProjectWithFile(owner.jwt, { name: "Community checking" })
+  const { seedCheckingRecordings } = await import("../../helpers/checking-audio")
+  await seedCheckingRecordings(owner.jwt, seeded)
+  const creator = new Checking(alice)
+  await creator.openCreator(seeded.projectId)
+  const url = await creator.createProjectLink("Kathryn's listening link", "1234")
+  const context = await browser.newContext()
+  try {
+    const page = await context.newPage()
+    const pageErrors: string[] = []
+    page.on("pageerror", error => pageErrors.push(error.message))
+    page.on("response", response => { if (response.url().includes("/checking/") && response.status() >= 400) pageErrors.push(`Checking response: ${response.status()}`) })
+    const guest = new Checking(page)
+    await guest.join(url, "Kathryn", "1234")
+    await page.getByRole("button", { name: "Play continuously", exact: true }).click()
+    await expect(page.getByText("You have reached the end of the recordings.")).toBeVisible()
+    await expect(page.getByRole("region", { name: "Passage player" })).toContainText(`2 of ${seeded.cellIds.length}`)
+    const feedback = `community-feedback-${Date.now()}`
+    await guest.leaveFeedback(feedback)
+    await alice.goto(`/project/${seeded.projectId}/comments`)
+    await expect(alice.getByText(feedback, { exact: true })).toBeVisible({ timeout: 30_000 })
+    await expect(alice.getByText(/Kathryn \(guest /).first()).toBeVisible()
+    await page.reload()
+    await expect(page.getByRole("region", { name: "Passage player" })).toBeVisible({ timeout: 30_000 })
+    await page.screenshot({ path: "test-results/checking-guest.png", fullPage: true })
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.screenshot({ path: "test-results/checking-guest-mobile.png", fullPage: true })
+    expect(pageErrors).toEqual([])
+  } finally { await context.close() }
+})

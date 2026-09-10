@@ -65,7 +65,7 @@ There is no refresh token. Reconnect after expiry or a lost redemption response.
 - Polling is atomically claimed; early polls increase the interval. Initiation
   and browser-code attempts use existing indexed rate-limit infrastructure.
 - Credentials appear in the existing token list and use its revoke endpoint.
-- Migration `0085_agent_authorizations.sql` is required before deployment.
+- Migration `0090_agent_authorizations.sql` is required before deployment.
   `BASE_URL` must point to the matching SPA, including for local/dev deployments.
 
 ## Verification

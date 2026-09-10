@@ -23,12 +23,15 @@ import {
  *
  * The two rules that keep the regression dead:
  *
- *  1. Nothing is highlighted until the user explicitly arrows or hovers
- *     (`activeIndex` starts at -1). Enter on free-typed text therefore never
- *     matches a suggestion — the key falls through to whatever the field
- *     already did (commit a chip, add a lane, submit the form).
+ *  1. A highlight exists only while the list has matches to offer. AQU-1116
+ *     pre-highlights the top-ranked row so type-then-Enter picks it, but the
+ *     moment the query has no catalog match — or is already exactly one
+ *     (`isSettledLanguage`) — `items` is empty, `activeIndex` falls back to -1
+ *     and Enter falls through to whatever the field already did (commit a
+ *     chip, add a lane, submit the form). Free-typed text like
+ *     "Grade 7 English" therefore still never matches a suggestion.
  *  2. The list never writes back into the input on its own. Only an explicit
- *     click, or Enter on a row the user highlighted, calls `onSelect`.
+ *     click, or Enter on a highlighted row, calls `onSelect`/`onEnterSelect`.
  *
  * Opening is deliberately narrow: the list appears only when a real keystroke
  * produced the edit (or on ArrowDown), never on bare focus and never on a
@@ -70,6 +73,14 @@ export type UseLanguageSuggestionsOptions = {
   disabled?: boolean
   /** Fires only on an explicit pick (click, or Enter on a highlighted row). */
   onSelect: (name: string) => void
+  /**
+   * AQU-1116 — overrides `onSelect` for the Enter path only. Fields that
+   * already commit on Enter (the add-lane input) use this to commit the
+   * *match* rather than the typed prefix, since their own `onKeyDown` never
+   * runs once Enter has been claimed by a highlighted row. Clicking a row
+   * still goes through `onSelect`, which only fills the field.
+   */
+  onEnterSelect?: (name: string) => void
 }
 
 export type LanguageSuggestions = {
@@ -102,6 +113,7 @@ export function useLanguageSuggestions({
   exclude,
   disabled = false,
   onSelect,
+  onEnterSelect,
 }: UseLanguageSuggestionsOptions): LanguageSuggestions {
   const t = useT()
   const [open, setOpen] = React.useState(false)
@@ -126,9 +138,14 @@ export function useLanguageSuggestions({
     setActiveIndex(-1)
   }, [])
 
-  // A query edit can shrink the list out from under the highlight.
+  // A query edit can shrink the list out from under the highlight. With
+  // matches left the top row takes over (AQU-1116); with none, nothing is
+  // highlighted, which is what keeps Enter falling through to free text.
   React.useEffect(() => {
-    setActiveIndex((current) => (current >= items.length ? -1 : current))
+    setActiveIndex((current) => {
+      if (items.length === 0) return -1
+      return current >= items.length ? 0 : current
+    })
   }, [items.length])
 
   React.useEffect(() => {
@@ -164,12 +181,13 @@ export function useLanguageSuggestions({
   }, [])
 
   const pick = React.useCallback(
-    (entry: LanguageEntry) => {
+    (entry: LanguageEntry, via: "click" | "enter") => {
       close()
-      onSelect(entry.name)
+      const handler = (via === "enter" && onEnterSelect) || onSelect
+      handler(entry.name)
       anchorRef.current?.focus()
     },
-    [close, onSelect],
+    [close, onEnterSelect, onSelect],
   )
 
   const getInputProps: LanguageSuggestions["getInputProps"] = React.useCallback(
@@ -192,10 +210,13 @@ export function useLanguageSuggestions({
         typedRef.current = false
         props.onChange?.(event)
         if (disabled) return
-        // Typing re-opens and drops any highlight, so Enter stays free-text.
-        setActiveIndex(-1)
         // Only a keystroke on the focused field raises the list.
-        setOpen(typed && field.ownerDocument.activeElement === field)
+        const raise = typed && field.ownerDocument.activeElement === field
+        // AQU-1116: typing re-ranks the list, so the highlight goes back to
+        // the new best match. If the edit leaves no matches at all, the clamp
+        // effect above drops this to -1 before Enter can see it.
+        setActiveIndex(raise ? 0 : -1)
+        setOpen(raise)
       },
       onBlur: (event) => {
         props.onBlur?.(event)
@@ -231,12 +252,14 @@ export function useLanguageSuggestions({
               return
             }
           } else if (event.key === "Enter") {
-            // Only a row the user deliberately highlighted wins Enter.
+            // Only a highlighted row wins Enter — and a row is highlighted
+            // only while the list actually has matches, so free text still
+            // falls through to the field's own handler.
             const entry = open && activeIndex >= 0 ? items[activeIndex] : undefined
             if (entry) {
               event.preventDefault()
               event.stopPropagation()
-              pick(entry)
+              pick(entry, "enter")
               return
             }
           } else if (event.key === "Escape" && open) {
@@ -294,7 +317,7 @@ export function useLanguageSuggestions({
                       index === activeIndex && "bg-accent/40 text-accent-foreground",
                     )}
                     onMouseEnter={() => setActiveIndex(index)}
-                    onClick={() => pick(entry)}
+                    onClick={() => pick(entry, "click")}
                   >
                     <span className="truncate">{entry.name}</span>
                     <span className="shrink-0 text-xs text-muted-foreground">
@@ -319,6 +342,12 @@ export type LanguageComboboxInputProps = Omit<
   value: string
   /** Fires for both typing and picking a suggestion — always a plain string. */
   onValueChange: (next: string) => void
+  /**
+   * AQU-1116 — replaces `onValueChange` when Enter picks a highlighted row,
+   * for fields that commit on Enter and so need the match itself, not just
+   * the text. See `UseLanguageSuggestionsOptions.onEnterSelect`.
+   */
+  onEnterSelect?: (name: string) => void
   /** Values already chosen elsewhere in the same field group. */
   exclude?: readonly string[]
 }
@@ -331,6 +360,7 @@ export type LanguageComboboxInputProps = Omit<
 export function LanguageComboboxInput({
   value,
   onValueChange,
+  onEnterSelect,
   exclude,
   disabled,
   onChange,
@@ -345,6 +375,7 @@ export function LanguageComboboxInput({
     exclude,
     disabled,
     onSelect: onValueChange,
+    onEnterSelect,
   })
 
   return (

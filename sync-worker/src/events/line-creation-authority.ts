@@ -19,6 +19,8 @@
 // PROJECT_LEAD floor either way. That check lives in authorize.ts beside this
 // module's.
 
+import { makeRequestCache, type RequestCache } from './request-cache'
+
 /**
  * Has this project opted into people adding lines?
  *
@@ -30,20 +32,16 @@
 export async function resolveAllowLineCreation(
   db: AquillaDb,
   projectId: string,
+  // Per-request memo (request-cache.ts) — one project_settings read per
+  // request, not per created line. Absent → a throwaway cache, old behaviour.
+  cache: RequestCache = makeRequestCache(db),
 ): Promise<boolean> {
   // THE QUERY IS INSIDE THE TRY — same perimeter discipline as
   // resolveTimingLocked: an exception here does not degrade to a 403, it
   // escapes `authorize` and 500s the whole batch, which can wedge a durable
   // outbox on a poisoned event. An unreachable settings row reads as OFF.
   try {
-    const row = await db
-      .prepare(`SELECT settings FROM project_settings WHERE project_id = ?`)
-      .bind(projectId)
-      .first<{ settings: string | null }>()
-
-    if (!row?.settings) return false
-
-    const parsed = JSON.parse(row.settings) as { allowLineCreation?: unknown }
+    const parsed = await cache.projectSettings(projectId)
     return parsed?.allowLineCreation === true
   } catch {
     return false

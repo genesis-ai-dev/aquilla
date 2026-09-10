@@ -21,6 +21,8 @@ export interface EditorActionsContextValue {
   onInfractionClick?: (ruleId: string) => void
   onOpenComments?: (cellId: string) => void
   onOpenHistory?: (cellId: string) => void
+  /** Opens the matching concept in the Terminology page. */
+  onOpenTerminologyConcept?: (conceptId: string) => void
   onAiSetupNeeded?: () => void
   onOpenRecording?: (cellId: string) => void
   /**

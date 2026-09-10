@@ -177,7 +177,7 @@ export class Workspace {
       )
     }
     const skipChecklist = this.page.getByRole("button", { name: /Skip for now/i })
-    if (await skipChecklist.isVisible({ timeout: 1_500 }).catch(() => false)) {
+    if (await skipChecklist.isVisible()) {
       await skipChecklist.click()
       await expect(skipChecklist).toBeHidden({ timeout: 5_000 })
     }
@@ -260,52 +260,31 @@ export class Workspace {
 
   private async openImportDialog(): Promise<void> {
     const uploadCard = this.uploadFilesCard()
-    if (await uploadCard.isVisible({ timeout: 250 }).catch(() => false)) return
+    const importButton = this.page
+      .getByRole("button", { name: /^Import(?: a file)?$/i })
+      .filter({ visible: true })
+      .first()
+    const moreButton = this.page.getByRole("banner")
+      .getByRole("button", { name: /^More$/i })
 
-    // Header controls can be replaced while project data hydrates. Retry the
-    // opener, but first check whether the previous click already opened the
-    // dialog so we never click through its overlay.
-    for (let attempt = 0; attempt < 2; attempt++) {
-      if (await uploadCard.isVisible({ timeout: 250 }).catch(() => false)) return
+    // Wait for cold project hydration before choosing the available surface.
+    // An already-open dialog is also valid (for example, setup opened it).
+    await expect(uploadCard.or(importButton).or(moreButton).first())
+      .toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+    // These immediate probes only select between the ready UI branches.
+    if (await uploadCard.isVisible()) return
 
-      // Import is a visible header button beside the ⋯ overflow menu.
-      const banner = this.page.getByRole("banner")
-      const importBtn = banner.getByRole("button", { name: /^Import$/i })
-      if (await importBtn.isVisible({ timeout: 1_000 }).catch(() => false)) {
-        await importBtn.click()
-      } else {
-        const moreActionsBtn = banner.getByRole("button", { name: /^More$/i })
-        if (await moreActionsBtn.isVisible({ timeout: 1_000 }).catch(() => false)) {
-          await moreActionsBtn.click()
-          const importItem = this.page
-            .getByRole("menuitem", { name: /^Import$/i })
-            .filter({ visible: true })
-            .last()
-          await expect(importItem).toBeVisible({ timeout: 5_000 })
-          try {
-            await importItem.click({ timeout: 2_000 })
-          } catch (error) {
-            if (!(await uploadCard.isVisible({ timeout: 500 }).catch(() => false))) {
-              throw error
-            }
-            return
-          }
-        } else {
-          // A fully hydrated project with no files uses the editor empty-state
-          // CTA ("Import a file") instead of the header Import button.
-          const directImportBtn = this.page
-            .getByRole("button", { name: /^Import(?: a file)?$/i })
-            .filter({ visible: true })
-            .first()
-          await expect(directImportBtn).toBeVisible({ timeout: 10_000 })
-          await directImportBtn.click()
-        }
-      }
-
-      if (await uploadCard.isVisible({ timeout: 3_000 }).catch(() => false)) return
+    if (await importButton.isVisible()) {
+      await importButton.click()
+    } else {
+      await moreButton.click()
+      await this.page.getByRole("menuitem", { name: /^Import$/i })
+        .filter({ visible: true }).last().click()
     }
 
-    throw new Error("Import dialog did not open")
+    // ImportDialog is lazy-loaded. isVisible() does not wait;
+    // retrying clicks races the module load and can hit a modal overlay.
+    await expect(uploadCard).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
   }
 
   /** Click a file row in the sidebar, identified by a substring of its name.
@@ -386,7 +365,7 @@ export class Workspace {
 
     const target = this.editableTarget(index)
     let activatedFromReadView = false
-    if (!(await target.isVisible({ timeout: 250 }).catch(() => false))) {
+    if (!(await target.isVisible())) {
       const readView = this.targetReadView(index)
       await expect(readView).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
       await readView.click()
@@ -914,6 +893,81 @@ export class Workspace {
   /** Read the currently active target cell's text (empty string if untranslated). */
   async readTargetText(index: number): Promise<string> {
     return ((await this.targetColumn(index).textContent()) ?? "").trim()
+  }
+
+  /** The mounted rich-text editor for a target cell (absent while the row
+   * shows its read view). TipTap mirrors read-only into
+   * `contenteditable="false"`, so this is the observable for "another user
+   * holds the focus lock" while the editor stays mounted. */
+  targetEditor(index: number): Locator {
+    return this.editableTarget(index)
+  }
+
+  /** True when the target column is currently blocked by another user's
+   * focus lock: either the mounted editor went `contenteditable="false"` or
+   * the read view carries `aria-readonly="true"`. */
+  async isTargetLockedByOther(index: number): Promise<boolean> {
+    const column = this.targetColumn(index)
+    const blocked = column.locator(
+      '.ProseMirror[contenteditable="false"], [data-target-read-view][aria-readonly="true"]',
+    )
+    return (await blocked.count()) > 0
+  }
+
+  /** Replace the text of an ALREADY active editor in place (no blur, no
+   * commit wait) — the idle debounce commits it. Callers pace themselves on
+   * the resulting `POST /events` request. */
+  async replaceActiveTargetText(index: number, text: string): Promise<void> {
+    const target = this.editableTarget(index)
+    await expect(target).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+    await target.fill(text)
+  }
+
+  /** Leave the active editor by clicking sidebar chrome. Unlike editCell this
+   * does not wait for a commit — the value may already be committed by the
+   * idle debounce, in which case blur only releases the focus lock. */
+  async blurEditor(): Promise<void> {
+    await this.page.locator("aside").click()
+  }
+
+  private actionRail(index: number): Locator {
+    return this.cellRow(index).locator('[data-slot="cell-action-rail"]')
+  }
+
+  /** Open the per-cell "Edit history" drawer from the row's action rail. The
+   * rail springs out on row hover (data-revealed) — same reveal handshake as
+   * clickSparkleOnFirstCell. */
+  async openHistoryDrawer(index: number): Promise<void> {
+    const row = this.cellRow(index)
+    await row.scrollIntoViewIfNeeded()
+    await row.hover()
+    await expect(this.actionRail(index)).toHaveAttribute("data-revealed", "true", { timeout: 5_000 })
+    const button = row.getByRole("button", { name: "Edit history" }).first()
+    await expect(button).toBeVisible()
+    // The unrevealed rail wrapper can intercept the hit-test if idle-hide
+    // races the click; the button is already asserted visible.
+    await button.click({ force: true })
+    await expect(this.page.getByRole("heading", { name: /^Edit history/ })).toBeVisible()
+  }
+
+  /** A history-drawer revision card whose shown (terminal) value is `text`. */
+  historyEntry(text: string): Locator {
+    return this.page.locator("ol > li").filter({ hasText: text })
+  }
+
+  /** A history card flagged "bumped by a concurrent edit" (stale branch)
+   * showing `text`. */
+  bumpedHistoryEntry(text: string): Locator {
+    return this.historyEntry(text).filter({ hasText: "bumped by a concurrent edit" })
+  }
+
+  /** "Promote to current" → Confirm on the bumped card showing `text`. The
+   * promoted value is emitted as a new commit chained on the current head. */
+  async promoteBumpedHistoryEntry(text: string): Promise<void> {
+    const entry = this.bumpedHistoryEntry(text)
+    await expect(entry).toHaveCount(1)
+    await entry.getByRole("button", { name: "Promote to current" }).click()
+    await entry.getByRole("button", { name: "Confirm" }).click()
   }
 
   /**

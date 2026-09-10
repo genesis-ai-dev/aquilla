@@ -2,8 +2,10 @@ import {
   renderIdmlUnitHtml,
   type IdmlParseResult,
   type IdmlProgress,
+  type IdmlStyleCatalog,
   type IdmlTranslationUnit,
 } from "@aquilla/idml-roundtrip"
+import { idmlStyleDisplayMetadata } from "@/lib/idml/style-catalog"
 import {
   parseIdmlInWorker,
   type IdmlWorkerCallOptions,
@@ -66,7 +68,10 @@ function emptyProtectedTarget(unit: IdmlTranslationUnit): {
  * protected anchors, locator, and v2 metadata regardless of which units the
  * adapter chose to import.
  */
-export function idmlUnitToTranslatableString(unit: IdmlTranslationUnit): TranslatableString {
+export function idmlUnitToTranslatableString(
+  unit: IdmlTranslationUnit,
+  styleCatalog?: IdmlStyleCatalog,
+): TranslatableString {
   const target = emptyProtectedTarget(unit)
   return {
     id: unit.id,
@@ -80,6 +85,14 @@ export function idmlUnitToTranslatableString(unit: IdmlTranslationUnit): Transla
     sourceLocator: unit.locator,
     metadata: {
       idml: unit.metadata,
+      ...(unit.paragraphStyleId ? { idmlParagraphStyle: unit.paragraphStyleId } : {}),
+      ...idmlStyleDisplayMetadata(
+        styleCatalog,
+        [
+          ...unit.slots.map((slot) => slot.characterStyleId),
+          ...(unit.paragraphStyleId ? [unit.paragraphStyleId] : []),
+        ],
+      ),
     },
   }
 }
@@ -101,5 +114,5 @@ export async function extractIdmlStrings(
   options?: IdmlImportParseOptions,
 ): Promise<TranslatableString[]> {
   const result = await parse(buffer, profile, options)
-  return result.units.map(idmlUnitToTranslatableString)
+  return result.units.map((unit) => idmlUnitToTranslatableString(unit, result.styleCatalog))
 }

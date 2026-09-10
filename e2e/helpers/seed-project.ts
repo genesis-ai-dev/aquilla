@@ -57,7 +57,7 @@ export interface SeededProject {
   cellIds: string[]
 }
 
-async function mintSyncToken(jwt: string, projectId: string, fileId: string): Promise<string> {
+export async function mintSyncToken(jwt: string, projectId: string, fileId: string): Promise<string> {
   const r = await fetch(`${FRONTIER_BASE}/api/v2/sync-token`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` },
@@ -65,6 +65,29 @@ async function mintSyncToken(jwt: string, projectId: string, fileId: string): Pr
   })
   if (!r.ok) throw new Error(`sync-token failed: HTTP ${r.status} — ${await r.text()}`)
   return ((await r.json()) as { token: string }).token
+}
+
+export interface SeededFileEvent {
+  id: string
+  kind: string
+  author: string
+  payload: unknown
+}
+
+/** Read the real event log through the same JWT → sync-token boundary as the SPA. */
+export async function readSeededFileEvents(
+  jwt: string,
+  projectId: string,
+  fileId: string,
+): Promise<SeededFileEvent[]> {
+  const token = await mintSyncToken(jwt, projectId, fileId)
+  const response = await fetch(`${SYNC_BASE}/events?fileId=${encodeURIComponent(fileId)}&limit=200`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!response.ok) {
+    throw new Error(`event read failed: HTTP ${response.status} — ${await response.text()}`)
+  }
+  return ((await response.json()) as { events: SeededFileEvent[] }).events
 }
 
 /** Create a project and import a markdown fixture entirely server-side.
@@ -142,6 +165,8 @@ export interface ProjectedCellRow {
   value: string
   validated: boolean
   aiDrafted: boolean
+  /** Chain head for this side/lane — the event id the projection last applied. */
+  eventId: string
 }
 
 /** Read a seeded file's cell rows straight from the sync-worker projection —
@@ -161,6 +186,36 @@ export async function readProjectedCells(
   const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
   if (!r.ok) throw new Error(`cells read failed: HTTP ${r.status} — ${await r.text()}`)
   return ((await r.json()) as { cells: ProjectedCellRow[] }).cells
+}
+
+/** One event on a cell's chain as returned by the per-cell history route
+ * (sync-worker `cell-history-read-route.ts`), newest-first. */
+export interface CellHistoryEventRow {
+  id: string
+  parentId: string | null
+  kind: string
+  author: string
+  serverSeq: number
+  payload: unknown
+}
+
+/** Read a cell's full event log (newest-first) from
+ * `GET /api/v1/projects/:p/files/:f/cells/:c/history` — the audit truth the
+ * history drawer renders. Stale (bumped) commits are in here too: they never
+ * advanced the projection but are still logged. */
+export async function readCellHistory(
+  jwt: string,
+  seeded: Pick<SeededProject, "projectId" | "fileId">,
+  cellId: string,
+  limit = 200,
+): Promise<CellHistoryEventRow[]> {
+  const token = await mintSyncToken(jwt, seeded.projectId, seeded.fileId)
+  const url =
+    `${SYNC_BASE}/api/v1/projects/${seeded.projectId}/files/${seeded.fileId}` +
+    `/cells/${encodeURIComponent(cellId)}/history?limit=${limit}`
+  const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+  if (!r.ok) throw new Error(`cell history read failed: HTTP ${r.status} — ${await r.text()}`)
+  return ((await r.json()) as { events: CellHistoryEventRow[] }).events
 }
 
 /** Navigate an authed page straight into the seeded file's editor and wait

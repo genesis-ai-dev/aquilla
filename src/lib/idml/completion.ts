@@ -339,7 +339,7 @@ export function tryDeterministicIdmlSlotStitch(
   }
   const plain = draftPlainTextFromBrokenIdml(brokenDraft)
   if (!plain) return undefined
-  const index = metadata.editableSlotIndexes[0]!
+  const index = metadata.editableSlotIndexes[0]
   try {
     return stitchIdmlSlotTexts(cell, new Map([[index, plain]]))
   } catch {
@@ -473,7 +473,7 @@ function repairEditableSlotCompletion(
     && !generatedContainer.querySelector("[data-idml-version], [data-idml-slot], [data-idml-token]")
   ) {
     translatedSlots.set(
-      metadata.editableSlotIndexes[0]!,
+      metadata.editableSlotIndexes[0],
       textWithLineBreaks(generatedContainer),
     )
   }

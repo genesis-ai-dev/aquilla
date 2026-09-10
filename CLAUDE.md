@@ -123,9 +123,10 @@ repository commands; unnamed profiles use local-only Worker names. See
 - **Source of truth:** the append-only `events` table in Postgres (owned by sync-worker).
   Every write is an event with a `parent_id` (prior winning event on the same
   `(project, file, cell)`); the projection (`cells`, `files`, `cell_validators`) lands as
-  events apply. Cell events are `source.*` (importer) or `target.*` (contributor). For v1
-  single-editor reliability, `*.cell.commit` projects **last-write-wins**; chain-mutating
-  events keep first-child.
+  events apply. Cell events are `source.*` (importer) or `target.*` (contributor). Chain-mutating
+  events (`*.cell.create|commit|delete|reorder`) are a **head compare-and-swap**: they project
+  only if `parentId` is the cell's current head for that side/lane; stale siblings are
+  logged, `200`-accepted, and reported in `stale[]` (AQU-1154).
 - **Reads (thin client, AD-3):** read hooks under `src/lib/sync/*-read.ts` fetch from
   sync-worker HTTP on demand (`useCells`, `useProject`, `useCellHistory`, …). Plain
   `useState` + race-guarded `useEffect` — React Query is installed but only `useQueryClient`
@@ -165,3 +166,5 @@ TypeScript, no `any`. ES6+ (`const`/`let`, arrow fns, async/await, `?.`/`??`). R
 Tailwind v4 + shadcn/ui (`components.json`, primitives in `src/components/ui/`) + `@base-ui/react`;
 icons are lucide. Use the `components.json` aliases (`@/components/ui`, `@/lib/utils`).
 Target files under ~500 lines. See `AGENTS.md` for the (non-negotiable) testing rules.
+When opening a PR, structure the title and body per `.github/pull_request_template.md`
+(API-created PRs don't get GitHub's auto-fill — see AGENTS.md).

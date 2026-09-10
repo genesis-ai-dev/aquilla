@@ -284,7 +284,7 @@ export const workspace = defineNamespace({
     // -- SourceSelectionToolbar --
     "workspace.sourceSelection.viewTerm": "View term",
     "workspace.sourceSelection.askAi": "Ask AI",
-    "workspace.sourceSelection.addToTermbase": "Add to termbase",
+    "workspace.sourceSelection.addToTermbase": "Add to terminology",
 
     // -- StatusBar --
     "workspace.statusBar.summary": "{total} cells · {translated} translated {pct}",
@@ -1320,8 +1320,8 @@ export const workspace = defineNamespace({
       "workspace.sourceSelection.addToTermbase": {
         description:
           "Button in the same floating source-selection toolbar that starts " +
-          "adding the selected text as a new termbase/glossary entry.",
-        maxLength: 20,
+          "adding the selected text as a new terminology entry.",
+        maxLength: 24,
       },
 
       "workspace.statusBar.summary": {

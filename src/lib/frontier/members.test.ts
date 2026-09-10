@@ -201,6 +201,53 @@ describe("addProjectMembers (batch, AQU-736)", () => {
   });
 });
 
+// perf/client-fanout: useProjectMembers and useSetupChecklist both read the
+// roster on workspace mount. One in-flight request / a 30s cache means that
+// costs one GET, while writes and explicit refreshes still hit the server.
+describe("fetchProjectRoster coalescing", () => {
+  const members: ProjectMember[] = [
+    { userId: 1, username: "wendy", role: { level: 700, name: "owner", source: "creator" }, secondarySources: [] },
+  ];
+  const ok = () => new Response(JSON.stringify({ members }), { status: 200 });
+
+  it("shares one request between concurrent identical callers and caches the result", async () => {
+    (global.fetch as any).mockImplementation(async () => ok());
+    const [a, b] = await Promise.all([fetchProjectRoster("jwt", "p1"), listProjectMembers("jwt", "p1")]);
+    expect(a).toEqual({ kind: "ok", members });
+    expect(b).toEqual(members);
+    await fetchProjectRoster("jwt", "p1");
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("keys the cache by project, jwt and minRole", async () => {
+    (global.fetch as any).mockImplementation(async () => ok());
+    await fetchProjectRoster("jwt", "p1");
+    await fetchProjectRoster("jwt", "p2");
+    await fetchProjectRoster("jwt2", "p1");
+    await fetchPrivilegedProjectMembers("jwt", "p1");
+    expect(global.fetch).toHaveBeenCalledTimes(4);
+  });
+
+  it("`fresh` bypasses the cache — callers refreshing after a write must see the server", async () => {
+    (global.fetch as any).mockImplementation(async () => ok());
+    await fetchProjectRoster("jwt", "p1");
+    await fetchProjectRoster("jwt", "p1", { fresh: true });
+    await listProjectMembers("jwt", "p1", { fresh: true });
+    expect(global.fetch).toHaveBeenCalledTimes(3);
+  });
+
+  it("a membership write invalidates the cached roster", async () => {
+    (global.fetch as any).mockImplementation(async () => ok());
+    await fetchProjectRoster("jwt", "p1");
+    (global.fetch as any).mockResolvedValueOnce(
+      new Response(JSON.stringify(members[0]), { status: 200 })
+    );
+    await addProjectMember("jwt", "p1", "anna", 300);
+    await fetchProjectRoster("jwt", "p1");
+    expect(global.fetch).toHaveBeenCalledTimes(3);
+  });
+});
+
 describe("removeProjectMember", () => {
   it("DELETEs by user id", async () => {
     (global.fetch as any).mockResolvedValueOnce(

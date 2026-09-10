@@ -10,6 +10,9 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import type { RuleWaiver } from "@/lib/parsers/types"
 import { syncWorkerHttpOrigin } from "@/lib/sync/sync-worker-url"
+import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
+import type { CellRow } from "@/lib/sync/cells-read-types"
+import { contentHash } from "@/lib/dcs/content-hash"
 
 export interface CellAuditStats {
   cellId: string
@@ -33,6 +36,41 @@ interface UseCellsAuditStatsOptions {
   enabled: boolean
   fileId: string | null
   getTokenForFile: (fileId: string) => Promise<string | null>
+  /** AQU-538 active target lane ('' = default). Picks which target row's
+   *  head a derived stats entry follows when a cell has several lanes. */
+  lane?: string
+}
+
+/**
+ * The audit-stats entry the server would return for a cell whose projected
+ * rows are `rows` — the same reading `/cells/audit-stats` does: the target
+ * row wins over source, `lastEditEventId` is the row's chain head, and
+ * validators are keyed on that head (a fresh head has none). `contentHash`
+ * uses the verbatim port of the server's djb2. Waivers and `editCount` are
+ * not on the row and carry over from `prev`.
+ */
+export function deriveCommittedCellStats(
+  cellId: string,
+  rows: readonly CellRow[],
+  lane: string,
+  prev: CellAuditStats | undefined,
+): CellAuditStats | null {
+  const targets = rows.filter((r) => r.cellId === cellId && r.side === "target")
+  const row =
+    targets.find((r) => (r.targetLang ?? "") === lane) ??
+    targets[0] ??
+    rows.find((r) => r.cellId === cellId && r.side === "source")
+  if (!row) return null
+  const headChanged = prev?.lastEditEventId !== row.eventId
+  return {
+    cellId,
+    editCount: prev?.editCount ?? 0,
+    contentHash: contentHash(row.value),
+    lastEditAt: row.lastEditAt ?? null,
+    lastEditEventId: row.eventId,
+    activeValidators: headChanged ? [] : (prev?.activeValidators ?? []),
+    waivers: prev?.waivers ?? [],
+  }
 }
 
 export interface UseCellsAuditStatsResult {
@@ -44,6 +82,10 @@ export interface UseCellsAuditStatsResult {
    *  commit/validate/waive), merged into the existing map. Avoids
    *  re-fetching the whole file's stats on every single-cell commit. */
   revalidateCellStats: (cellId: string) => void
+  /** Merge the stats entry implied by a cell's freshly-projected rows (from
+   *  the `POST /events` response) instead of a targeted GET. Returns false
+   *  when nothing was merged (hook disabled, no target row, other file). */
+  applyCommittedCellStats: (cellId: string, rows: readonly CellRow[]) => boolean
 }
 
 const EMPTY_AUDIT_STATS = new Map<string, CellAuditStats>()
@@ -114,7 +156,7 @@ async function fetchCellAuditStats(
 }
 
 export function useCellsAuditStats(opts: UseCellsAuditStatsOptions): UseCellsAuditStatsResult {
-  const { enabled, fileId, getTokenForFile } = opts
+  const { enabled, fileId, getTokenForFile, lane = "" } = opts
 
   const [data, setData] = useState<Map<string, CellAuditStats>>(EMPTY_AUDIT_STATS)
   const [isLoading, setIsLoading] = useState(false)
@@ -123,11 +165,15 @@ export function useCellsAuditStats(opts: UseCellsAuditStatsOptions): UseCellsAud
   const fileRef = useRef(fileId)
   const tokenRef = useRef(getTokenForFile)
   const enabledRef = useRef(enabled)
+  const laneRef = useRef(lane)
+  const dataRef = useRef(data)
+  dataRef.current = data
   const generationRef = useRef(0)
 
   fileRef.current = fileId
   tokenRef.current = getTokenForFile
   enabledRef.current = enabled
+  laneRef.current = lane
 
   const doFetch = useCallback(async () => {
     const fid = fileRef.current
@@ -167,22 +213,7 @@ export function useCellsAuditStats(opts: UseCellsAuditStatsOptions): UseCellsAud
 
   useEffect(() => {
     if (typeof window === "undefined") return
-    function onFocus() { void doFetch() }
-    function onVis() {
-      if (typeof document !== "undefined" && document.visibilityState === "visible") {
-        void doFetch()
-      }
-    }
-    window.addEventListener("focus", onFocus)
-    if (typeof document !== "undefined") {
-      document.addEventListener("visibilitychange", onVis)
-    }
-    return () => {
-      window.removeEventListener("focus", onFocus)
-      if (typeof document !== "undefined") {
-        document.removeEventListener("visibilitychange", onVis)
-      }
-    }
+    return subscribeWindowRegainedFocus(() => { void doFetch() })
   }, [doFetch])
 
   const revalidate = useCallback(() => {
@@ -211,5 +242,18 @@ export function useCellsAuditStats(opts: UseCellsAuditStatsOptions): UseCellsAud
     })()
   }, [])
 
-  return { byCellId: data, isLoading, isError, revalidate, revalidateCellStats }
+  const applyCommittedCellStats = useCallback((cellId: string, rows: readonly CellRow[]): boolean => {
+    if (!enabledRef.current || !fileRef.current) return false
+    // Read the latest map synchronously (a setData updater runs lazily, so
+    // the caller could not learn whether anything merged).
+    const stats = deriveCommittedCellStats(cellId, rows, laneRef.current, dataRef.current.get(cellId))
+    if (!stats) return false
+    const next = new Map(dataRef.current)
+    next.set(cellId, stats)
+    dataRef.current = next
+    setData(next)
+    return true
+  }, [])
+
+  return { byCellId: data, isLoading, isError, revalidate, revalidateCellStats, applyCommittedCellStats }
 }

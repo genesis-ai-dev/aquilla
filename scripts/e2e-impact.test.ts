@@ -7,12 +7,14 @@ import {
 } from "./lib/e2e-run-mode"
 
 const specs = [
+  "e2e/specs/ai/completion.smoke.spec.ts",
   "e2e/specs/auth/login-account-setup-status.smoke.spec.ts",
   "e2e/specs/auth/session-expired-banner.smoke.spec.ts",
   "e2e/specs/collab/concurrent-edit.smoke.spec.ts",
   "e2e/specs/editor/import-and-edit.smoke.spec.ts",
   "e2e/specs/editor/search.smoke.spec.ts",
   "e2e/specs/editor/workspace-actions-dropdown.smoke.spec.ts",
+  "e2e/specs/orgs/account-switcher.smoke.spec.ts",
   "e2e/specs/projects/project-settings.smoke.spec.ts",
   "e2e/specs/projects/route-health.smoke.spec.ts",
   "e2e/specs/rules/violation.smoke.spec.ts",
@@ -38,7 +40,7 @@ describe("changed-file E2E impact selection", () => {
     )
   })
 
-  it("maps auth/session changes to both login and expiry journeys", () => {
+  it("maps auth/session changes to login, expiry, and multi-account isolation journeys", () => {
     for (const file of [
       "src/pages/Login.tsx",
       "src/components/ExpiredSessionGate.tsx",
@@ -50,7 +52,21 @@ describe("changed-file E2E impact selection", () => {
       expect(selectAffectedE2E([file], specs).specs, file).toEqual([
         "e2e/specs/auth/login-account-setup-status.smoke.spec.ts",
         "e2e/specs/auth/session-expired-banner.smoke.spec.ts",
+        "e2e/specs/orgs/account-switcher.smoke.spec.ts",
       ])
+    }
+  })
+
+  it("maps branching-search retrieval to the AI completion journey", () => {
+    for (const file of [
+      "sync-worker/src/lib/branching-search/corpus.ts",
+      "sync-worker/src/events/branching-search-route.ts",
+      "src/lib/sync/branching-search-read.ts",
+      "src/lib/sync/branching-search-passages-read.ts",
+    ]) {
+      expect(selectAffectedE2E([file], specs).specs, file).toContain(
+        "e2e/specs/ai/completion.smoke.spec.ts",
+      )
     }
   })
 
@@ -59,6 +75,17 @@ describe("changed-file E2E impact selection", () => {
       "src/components/knowledge/KnowledgeBaseSurface.tsx",
       "auth-worker/src/routes/knowledge.ts",
     ], specs).specs).toContain("e2e/specs/projects/project-settings.smoke.spec.ts")
+  })
+
+  it("maps a format parser to the import journey rather than shared runtime", () => {
+    for (const file of [
+      "src/lib/parsers/biblica-ebl.ts",
+      "src/lib/biblica/ebl/notes.ts",
+    ]) {
+      expect(selectAffectedE2E([file], specs).specs, file).toContain(
+        "e2e/specs/editor/import-and-edit.smoke.spec.ts",
+      )
+    }
   })
 
   it("uses core sentinels for unclassified runtime code", () => {

@@ -82,9 +82,14 @@ pass. For each oversized issue:
 1. Split it into **tracer-bullet vertical slices** — each independently shippable and verifiable
    (lean on the `to-issues` skill's slicing discipline if helpful).
 2. `save_issue` to create each slice as a **sub-issue** (`parentId` = the big issue), in the same
-   project + team, **status `Triage`** — new issues are never created in `Todo` (see AGENTS.md →
-   "Agent-ready vs. human-in-the-loop"), priority inherited, with a one-line scope + acceptance
-   criterion.
+   project + team, **from the team's issue template** (`template`: `Bug Report` / `Feature
+   Request` / `Task` — fill the template's section headings in the description; the template
+   applies the category label), **status `Triage`** — new issues are never created in `Todo`
+   (see AGENTS.md → "Agent-ready vs. human-in-the-loop"; ⚠️ the templates embed `Todo`, so
+   pass `state: Triage` explicitly and confirm the response says `Triage`), **unassigned**
+   (the team rotation auto-assigns at create time — if the response shows an assignee, clear
+   it with a follow-up `assignee: null` save), priority inherited, with a one-line scope +
+   acceptance criterion.
 3. Leave the parent as a tracking umbrella (do not work it directly; its children carry the work).
 4. Comment on the parent listing the sub-issues created.
 5. The slices now sit in the human queue, so **this run does not work them** (they are not
@@ -147,7 +152,8 @@ already-merged work; this is a recorded field lesson). Up to `--max` concurrent;
 live-UI verification slot (Step 6) reserved.
 
 **Claim the issue BEFORE spawning its agent.** The orchestrator moves the issue to **`Dispatched`**
-(`539bcf69-8c7a-4282-93d0-5631430b66ed`), assigns it to me, and records the agent id + branch in §3.
+(`539bcf69-8c7a-4282-93d0-5631430b66ed`), **keeps the existing assignee** (assign to me only if it
+is unassigned), and records the agent id + branch in §3.
 This claim is the lock that stops any other agent or `/swarm` re-run from double-grabbing it. Only
 after the status flip do you spawn the agent. (The agent then advances `Dispatched → Fixed` itself on
 success, per `/issue`.)
@@ -161,8 +167,8 @@ ln -sfn "$ROOT/node_modules" "$ROOT/.worktrees/aqu-###/node_modules"
 **Each brief MUST be fully self-contained** (the agent has no memory of this conversation) and include:
 - **Worktree path** (work ONLY here; `cd` here first) and its branch.
 - **The task = run the `/issue` lifecycle for AQU-###**: read `.claude/commands/issue.md` and follow it
-  for this issue. The orchestrator has already moved it to **`Dispatched`** and assigned it to you — do
-  not re-claim; just restate repro/acceptance, fix surgically (systematic-debugging for bugs /
+  for this issue. The orchestrator has already moved it to **`Dispatched`** (the `Todo` assignee is
+  kept) — do not re-claim or reassign; just restate repro/acceptance, fix surgically (systematic-debugging for bugs /
   brainstorming for improvements), verify, reconcile the spec (Step 2.5), then move the issue
   **`Dispatched → Fixed`** and post a Linear comment. A user-facing change without its corresponding journey
   tests is unfinished. **Leave it in `Dispatched` if you cannot finish**

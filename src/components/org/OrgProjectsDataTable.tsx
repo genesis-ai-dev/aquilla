@@ -21,6 +21,7 @@ import { RoleLabel } from "@/components/RoleLabel"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { DataTable, DataTableColumnHeader, DataTableRowActionsButton } from "@/components/ui/data-table"
 import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { TableEmptyState } from "@/components/ui/page"
@@ -30,7 +31,8 @@ import { OrgWithAvatar } from "@/components/OrgWithAvatar"
 import { LaneChips } from "./LaneChips"
 import { ProjectLaneSubRows } from "./ProjectLaneSubRows"
 import { OrgLaneAssignModal } from "./OrgLaneAssignModal"
-import { displayLanes } from "./project-lanes"
+import { displayLanes, resolveDefaultLaneLabel } from "./project-lanes"
+import { isManagedBy } from "./project-pm-filter"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/I18nProvider"
@@ -85,6 +87,7 @@ export function OrgProjectsDataTable({
   orgId = null,
   jwt,
   author,
+  viewerUsername = null,
   allowSelfAssignment = false,
   callerUserId = null,
   onLanesChanged,
@@ -104,7 +107,11 @@ export function OrgProjectsDataTable({
   testId?: string
   /** `page` = panel shell; `embedded` = in-Section admin table chrome. */
   layout?: "page" | "embedded"
-  /** AQU-538 §3.2: project → default target language, labeling the '' lane chip. */
+  /**
+   * AQU-538 §3.2: project → per-file target-language hint for the '' lane chip.
+   * AQU-606: only a *fallback* — `resolveDefaultLaneLabel` prefers the project's
+   * own `targetLanguage`, which is where migrated projects carry it.
+   */
   defaultLaneLabelByProjectId?: Map<string, string>
   /** AQU-538 §3.2: project → its files, for the lane sub-row "Assign…" action. */
   filesByProjectId?: Map<string, { id: string; name: string }[]>
@@ -114,6 +121,12 @@ export function OrgProjectsDataTable({
   jwt?: string | null
   /** Current username — stamped as the assignment event author. */
   author?: string
+  /**
+   * AQU-1027: signed-in username, used only to mark the PM column's own row
+   * "(you)". Deliberately separate from `author`, which happens to hold the
+   * same value but means "who to credit for an assignment event".
+   */
+  viewerUsername?: string | null
   allowSelfAssignment?: boolean
   callerUserId?: number | null
   /** Called after an assign/staff lane action, so the parent can refetch the
@@ -223,7 +236,7 @@ export function OrgProjectsDataTable({
                 <LaneChips
                   projectId={p.id}
                   lanes={displayLanes(p)}
-                  defaultLaneLabel={defaultLaneLabelByProjectId?.get(p.id) ?? ""}
+                  defaultLaneLabel={resolveDefaultLaneLabel(p, defaultLaneLabelByProjectId?.get(p.id))}
                   onOverflowClick={embedded ? undefined : () => toggleExpand(p.id)}
                   maxVisible={embedded ? 2 : undefined}
                   className={cn("w-full", embedded && "flex-nowrap")}
@@ -307,6 +320,59 @@ export function OrgProjectsDataTable({
             )
           },
         },
+        {
+          // AQU-1097: "which units are done" at org scale. Sorts by share
+          // done so the projects furthest from finished surface first;
+          // projects with nothing to plan sort last rather than reading as 0%.
+          id: "units",
+          accessorFn: (p) =>
+            missingLast(p.unitsTotal ? (p.unitsDone ?? 0) / p.unitsTotal : undefined),
+          sortUndefined: SORT_MISSING_LAST,
+          header: ({ column }) => (
+            <DataTableColumnHeader
+              column={column}
+              title={t("org.orgProjectsDataTable.unitsColumn")}
+              className="justify-end"
+              data-testid="project-table-units-header"
+            />
+          ),
+          meta: { align: "right", className: embedded ? "w-[5rem] whitespace-nowrap" : "w-[7rem]" },
+          cell: ({ row }) => {
+            const p = row.original
+            const total = p.unitsTotal ?? 0
+            // A project with no plannable files has nothing to say here. An
+            // em dash is honest; "0 of 0" reads like a failure.
+            if (total === 0) {
+              return (
+                <div data-testid="project-table-units-value" className="text-right text-muted-foreground">
+                  —
+                </div>
+              )
+            }
+            const done = p.unitsDone ?? 0
+            const overdue = p.unitsOverdue ?? 0
+            return (
+              <div
+                data-testid="project-table-units-value"
+                data-units-overdue={overdue > 0 ? "true" : undefined}
+                className="flex items-center justify-end gap-1.5 text-right tabular-nums text-muted-foreground"
+                aria-label={t("org.orgProjectsDataTable.unitsDoneAria", { done, total })}
+              >
+                <span>{t("org.orgProjectsDataTable.unitsDoneValue", { done, total })}</span>
+                {overdue > 0 && (
+                  <AppTooltip content={t("org.orgProjectsDataTable.unitsOverdueTooltip", { count: overdue })}>
+                    <span
+                      data-testid="project-table-units-overdue"
+                      className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive/12 px-1 text-[10px] font-semibold text-destructive"
+                    >
+                      {overdue}
+                    </span>
+                  </AppTooltip>
+                )}
+              </div>
+            )
+          },
+        },
       )
 
       if (!embedded) {
@@ -345,7 +411,19 @@ export function OrgProjectsDataTable({
                   username={username}
                   size="xs"
                   nameClassName="font-normal"
-                />
+                >
+                  {/* AQU-1027: lets a PM spot their own projects while
+                      scrolling the unfiltered list. Reuses the existing
+                      "(you)" string rather than minting a second one. */}
+                  {isManagedBy(row.original, viewerUsername) && (
+                    <span
+                      data-testid="project-pm-you"
+                      className="shrink-0 text-xs text-muted-foreground"
+                    >
+                      {t("editor.validation.you")}
+                    </span>
+                  )}
+                </UsernameWithAvatar>
               )
             },
           },
@@ -414,6 +492,7 @@ export function OrgProjectsDataTable({
       toggleExpand,
       defaultLaneLabelByProjectId,
       embedded,
+      viewerUsername,
       t,
     ],
   )
@@ -464,7 +543,7 @@ export function OrgProjectsDataTable({
                   <ProjectLaneSubRows
                     projectId={p.id}
                     lanes={displayLanes(p)}
-                    defaultLaneLabel={defaultLaneLabelByProjectId?.get(p.id) ?? ""}
+                    defaultLaneLabel={resolveDefaultLaneLabel(p, defaultLaneLabelByProjectId?.get(p.id))}
                     colSpan={colSpan}
                     orgId={orgId}
                     onAssign={
@@ -540,7 +619,10 @@ export function OrgProjectsDataTable({
           targetLanes={displayLanes(assignProject)
             .map((l) => l.lane)
             .filter((l) => l !== "")}
-          defaultLaneLabel={defaultLaneLabelByProjectId?.get(assignTarget.projectId) ?? ""}
+          defaultLaneLabel={resolveDefaultLaneLabel(
+            assignProject,
+            defaultLaneLabelByProjectId?.get(assignTarget.projectId),
+          )}
           files={filesByProjectId?.get(assignTarget.projectId) ?? []}
           roleLevel={roleByProjectId?.get(assignTarget.projectId)?.level ?? ROLE.PROJECT_LEAD}
           jwt={jwt}

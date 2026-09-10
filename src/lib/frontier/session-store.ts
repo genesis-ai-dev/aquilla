@@ -283,6 +283,26 @@ export async function listSessions(): Promise<SessionSummary[]> {
   return summaries(env)
 }
 
+export interface StoredSession {
+  key: string
+  session: FrontierSession
+}
+
+/**
+ * Credential-bearing snapshot for trusted background services. UI callers
+ * should use listSessions(), which deliberately omits JWTs.
+ */
+export async function listStoredSessions(): Promise<StoredSession[]> {
+  const env = await readEnvelope()
+  return Object.entries(env.sessions).map(([key, session]) => ({ key, session }))
+}
+
+/** Exact owner/JWT fence used immediately before a background send. */
+export async function isStoredSessionCurrent(ownerKey: string, jwt: string): Promise<boolean> {
+  const env = await readEnvelope()
+  return env.sessions[ownerKey]?.jwt === jwt
+}
+
 /**
  * Sessions whose email is not yet stored (legacy logins — JWT has no email
  * claim). Used to backfill via GET /auth/me per account JWT.

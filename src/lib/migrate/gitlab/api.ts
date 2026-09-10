@@ -13,7 +13,7 @@
 // { format: "scripture burrito", projectName, meta: {...}, languages: [...] }.
 // Note projectName can be empty, so ANY of the three keys is sufficient.
 
-import type { GitLabCredentials } from "./auth"
+import { describeCredentialSource, type GitLabCredentials } from "./auth"
 
 /** Subset of a GitLab project relevant to discovery + clone. */
 export interface GitLabProject {
@@ -81,8 +81,12 @@ export async function listProjects(
       headers: { Authorization: `Bearer ${creds.gitlabToken}` },
     })
     if (!response.ok) {
+      const hint =
+        response.status === 401 || response.status === 403
+          ? ` — GitLab rejected the token resolved from ${describeCredentialSource(creds.source)}; rotate that secret`
+          : ""
       throw new Error(
-        `Failed to list GitLab projects (${response.status} ${response.statusText})`,
+        `Failed to list GitLab projects (${response.status} ${response.statusText})${hint}`,
       )
     }
 

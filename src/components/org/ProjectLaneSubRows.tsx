@@ -59,7 +59,7 @@ export function ProjectLaneSubRows({
       <TableCell colSpan={colSpan} className="bg-muted/20 p-0">
         <div className="divide-y">
           {lanes.map((lane) => {
-            const label = laneChipLabel(lane.lane, defaultLaneLabel)
+            const label = laneChipLabel(lane.lane, defaultLaneLabel, t("org.projectOverview.laneDefaultFallback"))
             const tpct = safePct(laneTranslatedPct(lane))
             const vpct = safePct(laneValidatedPct(lane))
             const lastEdit = lane.lastEditAt

@@ -6,7 +6,6 @@ import { useProject } from "@/hooks/useProject"
 import {
   broadcastProjectSettingsUpdated,
   describePatchFailure,
-  SETTINGS_EDIT_ROLE_FLOOR,
 } from "@/hooks/useProjectSettings"
 import { useNavHistoryTitle } from "@/context/NavHistoryContext"
 import { deriveNavTitleKey } from "@/lib/navigation/deriveTitle"
@@ -24,7 +23,12 @@ import { readAtVersion, useActiveCellStore, useCellStoreVersion, type CellStore,
 import { useStaleSourceCells } from "@/hooks/useStaleSourceCells"
 import { triggerLinkSync } from "@/lib/sync/archive"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
-import { useCompletion, FALLBACK_COMPLETION_SETTINGS } from "@/hooks/useCompletion"
+import {
+  useCompletion,
+  FALLBACK_COMPLETION_SETTINGS,
+  type CompletedCellDraft,
+  type CommitCompletedCellsResult,
+} from "@/hooks/useCompletion"
 import { useTranslateAsReadPreference } from "@/hooks/useTranslateAsReadPreference"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
 import {
@@ -39,7 +43,11 @@ import type { ScoredPair } from "@/lib/search/dual-index"
 import type { PassageHit } from "@/hooks/useSearchIndex"
 import { useHealth } from "@/hooks/useHealth"
 import { needsAttentionFromConfidence, resolveDecayConfig } from "@/lib/health/decay-engine"
-import { buildHealthRibbon, preTranslationEvidence } from "@/lib/health/health-ribbon"
+import { buildHealthRibbon, type HealthRibbonPoint } from "@/lib/health/health-ribbon"
+import { ribbonInputFor, type RibbonEvidenceReaders } from "@/lib/health/ribbon-inputs"
+import { chapterHealthBuilderFor } from "@/lib/health/chapter-health"
+import { useHealthCalculationsEnabled, setHealthCalculationsEnabled } from "@/lib/health/kill-switch"
+import { resolveWorkbenchWindow } from "@/lib/agent/workbench-window"
 import { partitionInfractions } from "@/lib/rules/waivers"
 import { useCellConfidence } from "@/hooks/useCellConfidence"
 import { useRules } from "@/hooks/useRules"
@@ -136,6 +144,7 @@ import { extractCuesFromCells } from "@/lib/video/vtt-generator"
 import { useFileSync } from "@/hooks/useFileSync"
 import { useFileMeta } from "@/hooks/useFileMeta"
 import { useCellLabelsPreference } from "@/hooks/useCellLabelsPreference"
+import { useTargetKeyTermHighlightPreference } from "@/hooks/useTargetKeyTermHighlightPreference"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
@@ -150,7 +159,7 @@ import {
   buildFileScopedTokenFetcher,
   buildProjectAwareMinter,
 } from "@/lib/sync/cqrs-bridge"
-import { emitCastAssign, emitTargetCellCommit, emitCellBacktranslationSet, emitFileRename, emitFileDelete, emitFileRestore, emitCellValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, enqueueEvents } from "@/lib/sync/events-emit"
+import { emitCastAssign, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitFileRename, emitFileCorpusSet, emitFileDelete, emitFileRestore, emitCellValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, enqueueEvents } from "@/lib/sync/events-emit"
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
 import { resolveTimingLocked } from "@/lib/sync/project-settings"
@@ -197,11 +206,13 @@ import { useFocusLock } from "@/hooks/useFocusLock"
 import type { WsReconciler } from "@/lib/sync/ws-reconciler"
 import {
   createProjectPresenceStore,
-  usePresencePeers,
+  presentCellOf,
   type ProjectPresencePeer,
   type TargetPresenceSelection,
 } from "@/lib/sync/presence-store"
-import { flushOutboxBatch, type ForbiddenEntry } from "@/lib/sync/outbox-flush"
+import { flushOutboxBatch, subscribeStaleSiblings, subscribeAppliedEvents, type ForbiddenEntry } from "@/lib/sync/outbox-flush"
+import { createLiveApplier } from "@/lib/sync/live-apply"
+import { createFlushAppliedTracker } from "@/lib/sync/flush-applied"
 import { acknowledgeOutboxEvents, getOutboxRecords } from "@/lib/sync/outbox"
 import { forbiddenBannerMessage } from "@/lib/sync/forbidden-copy"
 import { useForbiddenOutboxRecords } from "@/hooks/useForbiddenOutboxRecords"
@@ -232,6 +243,8 @@ import { OfflineBanner } from "./OfflineBanner"
 import { useProjectLifecycle } from "@/hooks/useProjectLifecycle"
 import { restoreProject } from "@/lib/store/project-index"
 import { AppShell, useIsLgUp } from "./AppShell"
+import { SignedOutWorkspace } from "./org/SignedOutWorkspace"
+import { OrgBreadcrumb } from "./org/OrgBreadcrumb"
 import { WorkspaceHeader } from "./WorkspaceHeader"
 import { DcsSyncBadgeMount } from "@/components/dcs/DcsSyncBadge"
 import { useEditorLensPreference } from "@/hooks/useEditorLensPreference"
@@ -252,21 +265,12 @@ import { TimingVideoWarningDialog } from "./timeline/TimingVideoWarningDialog"
 import { LinkVideoUrlDialog } from "./timeline/LinkVideoUrlDialog"
 import { ImportAudioVttDialog } from "./timeline/ImportAudioVttDialog"
 import { MediaVideoPane } from "./timeline/MediaVideoPane"
-import {
-  shouldShowVideoPane,
-  readStoredVideoPaneWidth,
-  writeStoredVideoPaneWidth,
-  VIDEO_PANE_MIN_WIDTH,
-  VIDEO_PANE_MAX_SHARE,
-  VIDEO_PANE_TABLE_MIN_WIDTH,
-} from "./timeline/video-pane-layout"
-import {
-  readStoredTimelinePaneHeight,
-  writeStoredTimelinePaneHeight,
-  MEDIA_BODY_MIN_HEIGHT,
-  TIMELINE_PANE_MAX_SHARE,
-  TIMELINE_PANE_MIN_HEIGHT,
-} from "./timeline/timeline-pane-layout"
+// AQU-1119: the panels' min/max come from `mediaPanelConstraints`, since
+// several of them depend on which sections are collapsed, and the stored sizes
+// are written by `useMediaSectionCollapse` at the end of a gesture. What is
+// left here is reading them for `defaultSize`.
+import { shouldShowVideoPane, readStoredVideoPaneWidth } from "./timeline/video-pane-layout"
+import { readStoredTimelinePaneHeight } from "./timeline/timeline-pane-layout"
 import {
   getVideoClockPlaying,
   setVideoClockSec,
@@ -277,12 +281,8 @@ import {
 import { setVideoDurationSec, useVideoDurationSec } from "@/lib/timeline/video-duration"
 import { uiSlotRef } from "@/lib/ui-slots"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
-// Straight from the library, because `ui/resizable` wraps the COMPONENTS and
-// has no hooks to re-export. The timeline panel needs the imperative handle:
-// `defaultSize` is read once at mount and the panel is not remounted on a file
-// switch, so a stored per-file height can only be applied by asking the panel
-// to resize itself (see the effect that does it).
-import { usePanelRef } from "react-resizable-panels"
+import { MediaSectionRail } from "@/components/timeline/MediaSectionRail"
+import { useMediaSectionCollapse } from "@/components/timeline/useMediaSectionCollapse"
 import { TimingModeChangedDialog } from "./timeline/TimingModeChangedDialog"
 import { useTimingModeAck } from "@/hooks/useTimingModeAck"
 import { PeerPresence } from "./PeerPresence"
@@ -314,7 +314,12 @@ import {
 } from "@/components/ui/select"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { readValidationCount } from "@/lib/progress/read-validation-count"
-import { resolveTextDirection, summarizeTextDirections } from "@/lib/text-direction"
+import {
+  detectStrongTextDirection,
+  resolveTextDirection,
+  summarizeDetectedDirections,
+  type TextDirection,
+} from "@/lib/text-direction"
 import { useSetupChecklist } from "@/hooks/useSetupChecklist"
 import { SetupChecklistDrawer } from "./onboarding/SetupChecklistDrawer"
 import { SystemPromptNudge } from "./onboarding/SystemPromptNudge"
@@ -333,7 +338,10 @@ import {
   writeLocalBacktranslation,
   type BacktranslationRecord,
 } from "@/lib/completion/bt-record"
-import { normalizeProtectedCompletion } from "@/lib/idml/completion"
+import {
+  normalizeProtectedCompletion,
+  type NormalizedCompletion,
+} from "@/lib/idml/completion"
 import { hasIdmlMetadata, replaceProtectedIdmlText } from "@/lib/idml/protected-html"
 import {
   hasIdmlCellMetadata,
@@ -341,8 +349,9 @@ import {
   validateIdmlEditorCommit,
 } from "@/lib/richtext/idml-editor"
 import { shouldAutoValidateHumanEdit } from "@/lib/review/auto-validation"
-import { addConcept } from "@/lib/terminology/store"
-import type { Concept } from "@/lib/terminology/types"
+import { useConcepts } from "@/hooks/useConcepts"
+import { resolveTermbaseEditFloor } from "@/lib/terminology/glossary-view"
+import type { ConceptDraft } from "@/lib/terminology/types"
 import { buildGlosser, type BtSeed, type Glosser } from "@/lib/completion/bt-glosser"
 import { memMark } from "@/lib/perf-log"
 import { buildAlignmentModel, type AlignmentModel } from "@/lib/completion/interlinear"
@@ -355,6 +364,12 @@ import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useMyScopes } from "@/hooks/useMyScopes"
 import { isInMemberScope } from "@/lib/sync/member-scopes"
 import { clearSelection, getSelectedIds, setSelection } from "@/lib/audio/selection"
+import {
+  setVisibleCellIds as setEditorViewportVisibleCellIds,
+  setTrackedCellRef as setEditorViewportTrackedCellRef,
+  useVisibleCellIds as useEditorViewportVisibleCellIds,
+  useTrackedCellRef as useEditorViewportTrackedCellRef,
+} from "@/hooks/useEditorViewportStore"
 
 // Import runs inline in the workspace (upload + eBible corpus tabs). The
 // AD-11 plan carves import into a standalone apps/import Worker, but that
@@ -403,6 +418,37 @@ const PROJECT_MEMORY_PATH_RE = /^\/project\/[^/]+\/memory(\/[^/]+)?$/
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let _lastImportWrite: Promise<any> = Promise.resolve(undefined)
 const EMPTY_CELL_DATA: CellData[] = []
+const EMPTY_CHAPTER_HEALTH: BookHealthChapter[] = []
+const EMPTY_SCORED_PAIRS: ScoredPair[] = []
+
+type PreparedCompletionDraft = {
+  index: number
+  draft: CompletedCellDraft
+  liveCell: CellData
+  completed: NormalizedCompletion
+  parentId: string | null
+}
+
+type RetryCompletionDraft = PreparedCompletionDraft & {
+  rebasedParent: string
+  sourceEventId: string | null
+}
+
+// AQU-1104: the store keeps a summary's identity across commits for cells the
+// commit did not touch, so direction detection (a regex walk over every cell's
+// markup) is cached per summary object instead of re-run per commit.
+const directionBySummary = new WeakMap<CellSummary, { source: TextDirection | null; target: TextDirection | null }>()
+function summaryDirections(summary: CellSummary): { source: TextDirection | null; target: TextDirection | null } {
+  let directions = directionBySummary.get(summary)
+  if (!directions) {
+    directions = {
+      source: detectStrongTextDirection(summary.originalHtml ?? summary.original),
+      target: detectStrongTextDirection(summary.translatedHtml ?? summary.translated),
+    }
+    directionBySummary.set(summary, directions)
+  }
+  return directions
+}
 
 function projectRecordsEquivalent(a: ProjectRecord | null, b: ProjectRecord | null): boolean {
   if (a === b) return true
@@ -415,6 +461,8 @@ function projectRecordsEquivalent(a: ProjectRecord | null, b: ProjectRecord | nu
 }
 
 const PRESENCE_LOCK_STALE_CLEAR_MS = 31_000
+/** Trailing throttle for row-selection presence (`viewingCell`). */
+const VIEWING_CELL_PRESENCE_THROTTLE_MS = 250
 
 function sameStringMap(a: ReadonlyMap<string, string>, b: ReadonlyMap<string, string>): boolean {
   if (a.size !== b.size) return false
@@ -863,17 +911,20 @@ export function ProjectWorkspace() {
   const agentOpen = centerSurface === "agent"
   const [translateAsReadEnabled, setTranslateAsReadEnabled] = useTranslateAsReadPreference(projectId)
   const [translateAsReadActiveCellId, setTranslateAsReadActiveCellId] = useState<string | null>(null)
-  const [visibleCellIds, setVisibleCellIds] = useState<string[]>([])
+  // AQU-1016: visible-cell-ids used to be `useState` here — every virtualized
+  // scroll step re-rendered this whole shell. It now lives in a small
+  // external store (src/hooks/useEditorViewportStore.ts); the shell writes to
+  // it without triggering its own re-render, and this read subscribes only
+  // while translate-as-read is actually enabled (the sole consumer below —
+  // its own `available` gate no-ops the effect otherwise), so a scroll on
+  // the common "translate-as-read off" file causes zero extra shell renders.
+  const visibleCellIds = useEditorViewportVisibleCellIds(translateAsReadEnabled)
   const translateAsReadEnabledRef = useRef(false)
   translateAsReadEnabledRef.current = translateAsReadEnabled
   const translateAsReadAttemptsRef = useRef(new Map<string, string>())
   const translateAsReadRunRef = useRef(0)
   const handleVisibleCellIdsChange = useCallback((next: string[]) => {
-    setVisibleCellIds((current) => (
-      current.length === next.length && current.every((id, index) => id === next[index])
-        ? current
-        : next
-    ))
+    setEditorViewportVisibleCellIds(next)
   }, [])
   const editorReturnPath = useMemo(() => {
     if (!projectId) return null
@@ -1084,7 +1135,6 @@ export function ProjectWorkspace() {
     () => createProjectPresenceStore(currentUsername),
     [currentUsername, project?.id],
   )
-  const presencePeers = usePresencePeers(presenceStore)
   const jwtRef = useRef<string | null>(null)
   useEffect(() => {
     jwtRef.current = frontierSession?.jwt ?? null
@@ -1138,6 +1188,21 @@ export function ProjectWorkspace() {
     project?.origin?.kind,
     project?.origin?.kind === "git" ? project?.origin.gitlabProjectId : undefined,
   ])
+
+  // AQU-1006 follow-up: this project's concepts, read from the sync-worker
+  // projection. `project.terminology` (the settings-blob key) is retired — it
+  // could only express "here is the entire termbase", so every add rewrote the
+  // whole array from a stale snapshot and concurrent adds destroyed each other.
+  //
+  // Declared HIGH in the component, directly after `getTokenForFile`, because
+  // `editorProject` below folds these concepts onto the record it hands the
+  // editor. `refreshConcepts` runs after each term.* write acks so blots track
+  // the termbase without a reload.
+  const { concepts: localConcepts, refresh: refreshConcepts } = useConcepts({
+    projectId: project?.id ?? null,
+    getToken: getTokenForFile,
+    tokenReady: !!frontierSession?.jwt,
+  })
 
   // Project-AWARE fetcher for the outbox flusher. The outbox is global across
   // every project the user touches, so the flusher must mint a token for each
@@ -1233,21 +1298,6 @@ export function ProjectWorkspace() {
   // out-of-scope cells (no guaranteed-403) rather than silently reverting.
   const myScopes = useMyScopes(project?.id ?? null)
 
-  // Server-backed (Postgres) audit stats for the active file with the client outbox applied
-  // on top — pending commits/validates show up immediately, before the next
-  // 30s refetch. Source of truth for project-wide validation views.
-  const auditStatsEnabled = Boolean(project?.id && activeFileId && frontierSession?.jwt)
-  const {
-    byCellId: auditStatsByCellId,
-    revalidate: revalidateAuditStats,
-    revalidateCellStats,
-  } = useCellsAuditStatsWithOverlay({
-    enabled: auditStatsEnabled,
-    fileId: activeFileId,
-    getTokenForFile,
-  })
-
-  const validationCount = project ? readValidationCount(project) : 1
   // AQU-538: the active target lane. Declared here (above useActiveCellStore)
   // because the store's cell list is lane-filtered on this value. Persisted
   // per-project; N=1 is always `''` (no switcher rendered, byte-identical).
@@ -1258,6 +1308,23 @@ export function ProjectWorkspace() {
   useEffect(() => {
     setActiveLaneState(projectId ? readPersistedActiveLane(projectId) : "")
   }, [projectId])
+  // Server-backed (Postgres) audit stats for the active file with the client outbox applied
+  // on top — pending commits/validates show up immediately, before the next
+  // 30s refetch. Source of truth for project-wide validation views.
+  const auditStatsEnabled = Boolean(project?.id && activeFileId && frontierSession?.jwt)
+  const {
+    byCellId: auditStatsByCellId,
+    revalidate: revalidateAuditStats,
+    revalidateCellStats,
+    applyCommittedCellStats,
+  } = useCellsAuditStatsWithOverlay({
+    enabled: auditStatsEnabled,
+    fileId: activeFileId,
+    getTokenForFile,
+    lane: activeLane,
+  })
+
+  const validationCount = project ? readValidationCount(project) : 1
   // AQU-538: useActiveCellStore serves the ACTUAL workspace cell list; it now
   // filters target rows to `activeLane` (same `(r.targetLang ?? '') === lane`
   // rule as useCells) before the one-target-per-cell pairing. N=1 is
@@ -1422,6 +1489,44 @@ export function ProjectWorkspace() {
     [applyOptimisticTargetEdit],
   )
 
+  // Live sync: event.applied frames now carry the cell's projected rows and
+  // server_seq (sync-worker route), so the client applies them straight into
+  // the store — no per-cell GET, no range refresh — with a per-cell seq guard.
+  // Frames without rows fall through to the existing refresh path.
+  const liveApplier = useMemo(
+    () => createLiveApplier({ store: cellStore, revalidateCell }),
+    [cellStore, revalidateCell],
+  )
+  useEffect(() => { liveApplier.reset() }, [liveApplier, activeFileId])
+
+  // Own writes: the POST /events response carries the same frames as the WS
+  // broadcast (`applied[]`). Land them through liveApplier and derive the
+  // audit-stats entry, so a commit costs ONE request — the POST — and the
+  // handlers below skip their by-ids + audit-stats GETs (`confirmCommitted`).
+  // Subscribed tab-wide because most inline "flush now" calls and the
+  // app-shell drain never pass `onApplied`.
+  const flushAppliedTracker = useMemo(
+    () => createFlushAppliedTracker({
+      liveApplier,
+      isActive: (pid, fid) => pid === project?.id && fid === activeFileIdRef.current,
+      applyCommittedCellStats,
+    }),
+    [liveApplier, project?.id, applyCommittedCellStats],
+  )
+  useEffect(() => { flushAppliedTracker.reset() }, [flushAppliedTracker, activeFileId])
+  useEffect(
+    () => subscribeAppliedEvents((frames) => flushAppliedTracker.onFrames(frames)),
+    [flushAppliedTracker],
+  )
+  /** Post-flush confirmation for a single committed cell: refetch only what
+   *  the POST response did not already land (older server, >cap batch,
+   *  validate/unvalidate stats). */
+  const confirmCommitted = useCallback((cellId: string, eventId?: string) => {
+    const { refetchCell, refetchStats } = flushAppliedTracker.confirm(cellId, eventId)
+    if (refetchStats) revalidateCellStats(cellId)
+    if (refetchCell) revalidateCell(cellId)
+  }, [flushAppliedTracker, revalidateCellStats, revalidateCell])
+
   const getPendingTargetEventId = useCallback((cellId: string) => {
     return pendingTargetCommitHeadsRef.current.get(laneCellKey(cellId))?.eventId ?? null
   }, [laneCellKey])
@@ -1439,6 +1544,29 @@ export function ProjectWorkspace() {
   const rememberPendingTargetCommit = useCallback((cellId: string, eventId: string, parentId: string | null) => {
     pendingTargetCommitHeadsRef.current.set(laneCellKey(cellId), { eventId, parentId })
   }, [laneCellKey])
+
+  // I2: a stale sibling is a REJECTION of this client's commit, not a save.
+  // Left alone, the losing writer keeps its optimistic shadow (which makes
+  // mergeProtectedRows discard every server row for the cell) and keeps the
+  // losing event id as the parent of its next commit — so it never sees the
+  // winner and every follow-up commit is stale too. Drop the shadow, forget
+  // the pending head (the next commit chains on `cell.targetEventId`, the
+  // real head), and pull the winner's row. The banner stays as the route to
+  // History / promote. Subscribed tab-wide because the inline "flush now"
+  // after a commit does not go through useOutboxFlusher's callback.
+  useEffect(() => {
+    if (!activeFileId) return
+    return subscribeStaleSiblings((entries) => {
+      for (const entry of entries) {
+        if (!entry.cellId || entry.fileId !== activeFileId) continue
+        const key = laneCellKey(entry.cellId)
+        pendingTargetCommitHeadsRef.current.delete(key)
+        pendingCompletionEventIdRef.current.delete(key)
+        cellStore.clearOptimisticForCell(entry.cellId)
+        revalidateCell(entry.cellId)
+      }
+    })
+  }, [activeFileId, cellStore, laneCellKey, revalidateCell])
 
   useEffect(() => {
     if (pendingTargetCommitHeadsRef.current.size === 0) return
@@ -1510,6 +1638,22 @@ export function ProjectWorkspace() {
   syncStaleSourceNowRef.current = syncStaleSourceNow
   const revalidateCellsRef = useRef<() => void>(() => {})
   revalidateCellsRef.current = revalidateCells
+
+  // A validation-threshold change re-projects `cells.validated` on the server
+  // WITHOUT cell events (db/shared/projects.ts validationProjectionStmts), so
+  // a `?since=` delta cannot see it. Whether the change was made here or by a
+  // remote maintainer (DO `project.settings.updated` → settings re-GET →
+  // fresh validationCount on the project record), drop the delta watermark
+  // once and read one authoritative snapshot. Skipped on mount — the initial
+  // read is a full stream already.
+  const lastValidationCountRef = useRef<number | null>(null)
+  useEffect(() => {
+    const prev = lastValidationCountRef.current
+    lastValidationCountRef.current = validationCount
+    if (prev === null || prev === validationCount) return
+    cellStore.setMaxServerSeq(null)
+    revalidateCellsRef.current()
+  }, [validationCount, cellStore])
 
   // Autopilot drafts: the WebSocket burst is the fast path, this is the
   // authoritative one. Called on file open, and whenever a burst reports it
@@ -1703,33 +1847,45 @@ export function ProjectWorkspace() {
     deepLinkLaneAppliedRef.current = true
     if (resolved !== null) setActiveLane(resolved)
   }, [projectId, project, searchParams, availableLanes, setActiveLane])
+  // AQU-1006 follow-up: `terminology` on this record is now sourced from the
+  // CONCEPTS PROJECTION, never from project settings.
+  //
+  // This is the one adapter seam where the projection re-enters the record the
+  // editor already threads six layers deep to its rows (EditorRow reads
+  // `project.terminology` for the term-lookup popover and the blots). Folding
+  // it on here — rather than adding a parallel `concepts` prop to every layer
+  // — keeps EditorTable's internal contract untouched.
+  //
+  // THE FIELD IS READ-ONLY FROM HERE DOWN. Nothing may write it: every
+  // terminology mutation is a `term.*` event (see events-emit.ts). Writing
+  // this array back through patchSettings is precisely the bug this change set
+  // removed.
   const editorProject = useMemo<ProjectRecord | null>(() => {
     if (!project) return null
     const sourceLanguage = activeSourceLanguage ?? project.sourceLanguage
     const targetLanguage = activeLaneTargetLanguage ?? project.targetLanguage
-    if (sourceLanguage === project.sourceLanguage && targetLanguage === project.targetLanguage) {
-      return project
-    }
-    return { ...project, sourceLanguage, targetLanguage }
-  }, [activeSourceLanguage, activeLaneTargetLanguage, project])
+    return { ...project, sourceLanguage, targetLanguage, terminology: localConcepts }
+  }, [activeSourceLanguage, activeLaneTargetLanguage, project, localConcepts])
   const fileMeta = useFileMeta(activeFileId, activeSourceLanguage, activeLaneTargetLanguage, {
     sourceTextDirection: activeFile?.sourceTextDirection,
     targetTextDirection: activeFile?.targetTextDirection,
   })
   const activeFileDirectionSummary = useMemo(() => {
-    function* sourceValues() {
-      for (const summary of cellSummaries) yield summary.originalHtml ?? summary.original
+    function* sourceDirections() {
+      for (const summary of cellSummaries) yield summaryDirections(summary).source
     }
-    function* targetValues() {
-      for (const summary of cellSummaries) yield summary.translatedHtml ?? summary.translated
+    function* targetDirections() {
+      for (const summary of cellSummaries) yield summaryDirections(summary).target
     }
     return {
-      source: summarizeTextDirections(sourceValues()),
-      target: summarizeTextDirections(targetValues()),
+      source: summarizeDetectedDirections(sourceDirections()),
+      target: summarizeDetectedDirections(targetDirections()),
     }
   }, [cellSummaries])
   const [cellLabelsEnabled, setCellLabelsEnabled] = useCellLabelsPreference(projectId!)
   const [footnoteViewMode, setFootnoteViewMode] = useFootnotesPreference(projectId!)
+  const [targetKeyTermHighlightMode, setTargetKeyTermHighlightMode] =
+    useTargetKeyTermHighlightPreference(projectId!)
   const [visibleFootnotes, setVisibleFootnotes] = useState<VisibleFootnoteEntry[]>([])
   const visibleFootnotesKeyRef = useRef("")
   // FRO-251: per-file, per-side font sizes — adjusted from the View settings
@@ -2756,7 +2912,11 @@ export function ProjectWorkspace() {
       //
       // The cells are still consulted for the OTHER axis — writing a camera
       // pick must not blank the name — but never for the axis being decided.
-      const views = readAtVersion(cellStoreVersion, () => cellStore.getAllCellViews())
+      // AQU-1147: read the store fresh at call time (no version dependency) —
+      // this only ever runs from a user click, so there's no memoization to
+      // keep in sync and no reason to make this component re-render on every
+      // commit just so this handler's closure stays "current."
+      const views = cellStore.getAllCellViews()
       const textById = new Map(views.map((c) => [c.id, c]))
       const nameOf = (c: { metadata?: Record<string, unknown> | null } | undefined) =>
         c?.metadata && typeof c.metadata.cast_name === "string" ? c.metadata.cast_name : ""
@@ -2818,7 +2978,6 @@ export function ProjectWorkspace() {
       audioCueSibling?.id,
       audioCues,
       cellStore,
-      cellStoreVersion,
       currentUsername,
       getTokenForProjectFile,
       refreshAudioCues,
@@ -2855,7 +3014,8 @@ export function ProjectWorkspace() {
     frozenAgreement.current = characterAgreement
     setCharacterWrite({ done: 0, total: entries.length, phase: "writing" })
     const toastId = toast.add({ type: "loading", title: `Undoing ${entries.length} decisions…`, timeout: 0 })
-    const views = readAtVersion(cellStoreVersion, () => cellStore.getAllCellViews())
+    // AQU-1147: fresh read at call time, no version dependency (see handleResolveCharacter).
+    const views = cellStore.getAllCellViews()
     const textById = new Map(views.map((c) => [c.id, c]))
     const cueById = new Map((audioCues ?? []).map((c) => [c.id, c]))
     const nameOf = (c: { metadata?: Record<string, unknown> | null } | undefined) =>
@@ -2908,7 +3068,6 @@ export function ProjectWorkspace() {
     audioCueSibling?.id,
     audioCues,
     cellStore,
-    cellStoreVersion,
     currentUsername,
     getTokenForProjectFile,
     refreshAudioCues,
@@ -3234,13 +3393,14 @@ export function ProjectWorkspace() {
     if (!activeFileId) return
     await runCharacterClear({
       fileId: activeFileId,
-      cells: readAtVersion(cellStoreVersion, () => cellStore.getAllCellViews()),
+      // AQU-1147: fresh read at call time, no version dependency (see handleResolveCharacter).
+      cells: cellStore.getAllCellViews(),
       noun: "subtitle lines",
       after: () => {
         revalidateCells()
       },
     })
-  }, [activeFileId, cellStore, cellStoreVersion, runCharacterClear, revalidateCells])
+  }, [activeFileId, cellStore, runCharacterClear, revalidateCells])
 
   /** The sheet keyed to the HEARD lines. Clearing this side degrades gently:
    *  `resolveCueCharacter` prefers a cue's own name and falls back to the
@@ -3359,8 +3519,9 @@ export function ProjectWorkspace() {
       setCueLinksPending(true)
       try {
         toast.update(importToastId, { type: "loading", title: `Imported ${uploaded.cellCount} audio cues — pairing them with the subtitles…` })
+        // AQU-1147: fresh read at call time, no version dependency (see handleResolveCharacter).
         const plans = autoLinkable(planCueLinks({
-          textCells: readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()),
+          textCells: cellStore.getAllSummaries(),
           audioCues: uploaded.cues,
         }))
         for (const plan of plans) {
@@ -3404,7 +3565,7 @@ export function ProjectWorkspace() {
           ? `Imported ${uploaded.cellCount} audio cues, and paired ${linkCount} of them with subtitle lines.`
           : `Imported ${uploaded.cellCount} audio cues.` })
     },
-    [project?.id, activeFile, audioCueSiblings, currentUsername, getTokenForFile, getTokenForProjectFile, refresh, refreshCueLinks, cellStore, cellStoreVersion],
+    [project?.id, activeFile, audioCueSiblings, currentUsername, getTokenForFile, getTokenForProjectFile, refresh, refreshCueLinks, cellStore],
   )
 
   /**
@@ -3551,9 +3712,10 @@ export function ProjectWorkspace() {
             // Only what may be written without asking. A cross-script or
             // weak-wording match is surfaced in the review drawer instead —
             // nothing verified what those two lines say.
+            // AQU-1147: fresh read at call time, no version dependency (see handleResolveCharacter).
             wanted: autoLinkable(
               planCueLinks({
-                textCells: readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()),
+                textCells: cellStore.getAllSummaries(),
                 audioCues: cuesAfter,
               }),
             ),
@@ -3611,7 +3773,7 @@ export function ProjectWorkspace() {
     },
     [
       project?.id, activeFile, audioCueSibling, audioCues, cueLinks, currentUsername,
-      getTokenForProjectFile, refreshAudioCues, refreshCueLinks, cellStore, cellStoreVersion,
+      getTokenForProjectFile, refreshAudioCues, refreshCueLinks, cellStore,
     ],
   )
 
@@ -3739,9 +3901,15 @@ export function ProjectWorkspace() {
     refresh,
     patchSettings as Parameters<typeof useRules>[2],
     orgRules,
+    undefined,
+    // AQU-609: every consumer of this instance's `rules` evaluates against the
+    // active lane's cell view, so lane-scoped rules for other lanes drop here.
+    activeLane,
+    localConcepts,
   )
   const {
     comments: allProjectComments,
+    counts: commentCounts,
     addComment: addCommentEvent,
     resolveThread: resolveCommentThread,
     refresh: refreshComments,
@@ -3749,6 +3917,9 @@ export function ProjectWorkspace() {
     projectId: project?.id ?? null,
     getToken: getTokenForFile,
     author: currentUsername,
+    // The open file's threads load first; the rest of the project pages in
+    // behind them, so the editor's per-cell markers never wait on history.
+    priorityFileId: activeFileId,
   })
 
   // AQU-599: per-cell "has comment" indicator. useHealth also exposes a
@@ -3896,6 +4067,7 @@ export function ProjectWorkspace() {
           topK: limit,
           validatedOnly: true,
           excludeCellId: excludeId,
+          targetLang: activeLane,
         })
         return res.results.map((r) => ({
           cellId: r.cellId,
@@ -3911,7 +4083,7 @@ export function ProjectWorkspace() {
         return []
       }
     },
-    [project?.id, activeFileId, getTokenForFile],
+    [project?.id, activeFileId, getTokenForFile, activeLane],
   )
 
   const branchingSearchPassages = useCallback(
@@ -3933,6 +4105,7 @@ export function ProjectWorkspace() {
           topK: hits,
           radius,
           validatedOnly: true,
+          targetLang: activeLane,
         })
         // Map server `Passage` → existing `PassageHit` shape. Drops
         // `hitCellId` (derivable from cells.find(c => c.hit)) and
@@ -3951,7 +4124,7 @@ export function ProjectWorkspace() {
         return []
       }
     },
-    [project?.id, activeFileId, getTokenForFile],
+    [project?.id, activeFileId, getTokenForFile, activeLane],
   )
 
   const commitCompletedCell = useCallback(async (cell: CellData, text: string, author: string, provenance: AiDraftProvenance) => {
@@ -4111,14 +4284,297 @@ export function ProjectWorkspace() {
       revalidateCell(cell.id)
       throw new Error("The draft was outdated by another change to this cell and was not saved — try again")
     }
-    // Targeted: we just changed exactly one cell. Pull only that row's stats
-    // and cell data back (its authoritative event_id becomes the next
-    // commit's parent) instead of re-fetching stats for all ~30k cells in
-    // the file. The optimistic shadow keeps the value visible until this
-    // confirms; the WS event.applied also pokes the same cell (coalesced).
-    revalidateCellStats(cell.id)
-    revalidateCell(cell.id)
-  }, [project?.id, project?.syncRole?.level, applyOptimisticTargetEdit, activeLane, laneCellKey, getActiveCell, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, refreshOutboxPending, revalidateCellStats, revalidateCell])
+    // Targeted: we just changed exactly one cell. The POST response normally
+    // landed its row + stats already (flushAppliedTracker); otherwise pull
+    // only that row's stats and cell data back (its authoritative event_id
+    // becomes the next commit's parent) instead of re-fetching the file.
+    confirmCommitted(cell.id, eventId)
+  }, [project?.id, project?.syncRole?.level, applyOptimisticTargetEdit, activeLane, laneCellKey, getActiveCell, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, refreshOutboxPending, revalidateCellStats, revalidateCell, confirmCommitted])
+
+  const commitCompletedCells = useCallback(async (
+    drafts: CompletedCellDraft[],
+  ): Promise<CommitCompletedCellsResult> => {
+    if (!project?.id || !canPerform("target.cell.commit", project.syncRole?.level ?? null)) {
+      const error = new Error("You do not have permission to commit target cells")
+      return drafts.map(() => ({ status: "rejected", reason: error }))
+    }
+    if (drafts.length === 0) return []
+
+    const results: CommitCompletedCellsResult = drafts.map(() => ({
+      status: "rejected",
+      reason: new Error("The draft could not be prepared"),
+    }))
+    const prepared: PreparedCompletionDraft[] = []
+    for (let index = 0; index < drafts.length; index++) {
+      const draft = drafts[index]
+      try {
+        const liveCell = getActiveCell(draft.cell.id) ?? draft.cell
+        const completed = normalizeProtectedCompletion(liveCell, draft.text)
+        const parentId = resolveTargetCommitParentId(liveCell)
+        prepared.push({ index, draft, liveCell, completed, parentId })
+        results[index] = { status: "fulfilled", value: undefined }
+      } catch (error) {
+        results[index] = { status: "rejected", reason: error }
+      }
+    }
+    if (prepared.length === 0) return results
+    const inputs = prepared.map(({ draft, liveCell, completed, parentId }) => ({
+      projectId: project.id,
+      fileId: draft.cell.fileId,
+      cellId: draft.cell.id,
+      parentId,
+      sourceEventId: liveCell.sourceEventId ?? null,
+      value: completed.value,
+      ...(completed.valueHtml ? { valueHtml: completed.valueHtml } : {}),
+      author: draft.author,
+      targetLang: activeLane,
+      aiSuggestion: true,
+      aiDraft: draft.provenance,
+    }))
+
+    const optimisticPatches = prepared.map(({ draft, completed }) => ({
+      cellId: draft.cell.id,
+      value: completed.value,
+      ...(completed.valueHtml ? { valueHtml: completed.valueHtml } : {}),
+    }))
+    const restorePatches: Array<{
+      cellId: string
+      value: string
+      valueHtml?: string
+    }> = prepared.map(({ draft, liveCell }) => ({
+      cellId: draft.cell.id,
+      value: liveCell.translated ?? "",
+      ...(liveCell.translatedHtml
+        ? { valueHtml: liveCell.translatedHtml }
+        : {}),
+    }))
+    // The outbox overlay disappears as soon as accepted rows leave IDB. Keep
+    // one direct store shadow per draft until the confirming delta replaces
+    // it, so the UI cannot flash back to the pre-response text.
+    applyOptimisticTargetEdits(optimisticPatches)
+
+    let eventIds: string[]
+    try {
+      // enqueueOutboxEvents is atomic and notifies the pending-overlay reader
+      // once, so ten drafts become one optimistic store mutation. Keep the
+      // streaming previews mounted until the flush and confirming delta land.
+      eventIds = await emitTargetCellCommits(inputs)
+    } catch (error) {
+      applyOptimisticTargetEdits(restorePatches)
+      revalidateCells()
+      for (const item of prepared) {
+        results[item.index] = { status: "rejected", reason: error }
+      }
+      return results
+    }
+
+    const initialIndexByEventId = new Map(eventIds.map((eventId, index) => [eventId, index]))
+    for (let index = 0; index < eventIds.length; index++) {
+      const eventId = eventIds[index]
+      const cellId = prepared[index].draft.cell.id
+      pendingCompletionEventIdRef.current.set(laneCellKey(cellId), eventId)
+      rememberPendingTargetCommit(cellId, eventId, prepared[index].parentId)
+    }
+
+    const staleIndexes = new Set<number>()
+    const rejectedIndexes = new Map<number, Error>()
+    const noteRejectedEntries = (
+      entries: Array<{ id: string; status: number; reason: string }>,
+    ) => {
+      for (const entry of entries) {
+        const preparedIndex = initialIndexByEventId.get(entry.id)
+        if (preparedIndex === undefined) continue
+        rejectedIndexes.set(
+          preparedIndex,
+          new Error(entry.reason || `The server refused this draft (${entry.status})`),
+        )
+      }
+    }
+    await flushOutboxBatch({
+      getTokenForFile: getTokenForProjectFile,
+      onStaleSiblings: (entries) => {
+        for (const entry of entries) {
+          const index = initialIndexByEventId.get(entry.id)
+          if (index !== undefined) staleIndexes.add(index)
+        }
+      },
+      onRejected: noteRejectedEntries,
+      onForbidden: noteRejectedEntries,
+    })
+    await refreshOutboxPending()
+
+    if (rejectedIndexes.size > 0) {
+      const rejectedPatches: typeof restorePatches = []
+      for (const [preparedIndex, error] of rejectedIndexes) {
+        const item = prepared[preparedIndex]
+        const key = laneCellKey(item.draft.cell.id)
+        pendingCompletionEventIdRef.current.delete(key)
+        pendingTargetCommitHeadsRef.current.delete(key)
+        results[item.index] = { status: "rejected", reason: error }
+        rejectedPatches.push(restorePatches[preparedIndex])
+      }
+      applyOptimisticTargetEdits(rejectedPatches)
+    }
+    if (
+      staleIndexes.size > 0 &&
+      [...staleIndexes].some((preparedIndex) => !rejectedIndexes.has(preparedIndex))
+    ) {
+      const stalePrepared: PreparedCompletionDraft[] = []
+      for (const preparedIndex of staleIndexes) {
+        if (!rejectedIndexes.has(preparedIndex)) {
+          stalePrepared.push(prepared[preparedIndex])
+        }
+      }
+      for (const { draft } of stalePrepared) {
+        const key = laneCellKey(draft.cell.id)
+        pendingCompletionEventIdRef.current.delete(key)
+        pendingTargetCommitHeadsRef.current.delete(key)
+      }
+
+      try {
+        // One authoritative read supplies the current parents for every stale
+        // draft in this model response. Retry only cells whose head advanced;
+        // an unchanged head would dead-letter identically.
+        const fileId = stalePrepared[0].draft.cell.fileId
+        const mint = await getTokenForProjectFile(project.id, fileId)
+        const staleCellIds = stalePrepared.map(({ draft }) => draft.cell.id)
+        const rows = mint.token
+          ? await fetchCellsByIds(
+            project.id,
+            fileId,
+            staleCellIds,
+            mint.token,
+            activeLane || undefined,
+          )
+          : []
+        const retryItems: RetryCompletionDraft[] = []
+        for (const item of stalePrepared) {
+          const targetRow = rows.find((row) => (
+            row.cellId === item.draft.cell.id &&
+            row.side === "target" &&
+            (row.targetLang ?? "") === activeLane
+          ))
+          const sourceRow = rows.find((row) => (
+            row.cellId === item.draft.cell.id && row.side === "source"
+          ))
+          const rebasedParent = targetRow?.eventId ?? sourceRow?.eventId ?? null
+          if (!rebasedParent || rebasedParent === item.parentId) {
+            results[item.index] = {
+              status: "rejected",
+              reason: new Error("The draft was outdated by another change and was not saved"),
+            }
+            continue
+          }
+          retryItems.push({
+            ...item,
+            rebasedParent,
+            sourceEventId: sourceRow?.eventId ?? item.liveCell.sourceEventId ?? null,
+          })
+        }
+
+        if (retryItems.length > 0) {
+          applyOptimisticTargetEdits(retryItems.map((item) => ({
+            cellId: item.draft.cell.id,
+            value: item.completed.value,
+            ...(item.completed.valueHtml
+              ? { valueHtml: item.completed.valueHtml }
+              : {}),
+          })))
+          const retryEventIds = await emitTargetCellCommits(retryItems.map((item) => ({
+            projectId: project.id,
+            fileId: item.draft.cell.fileId,
+            cellId: item.draft.cell.id,
+            parentId: item.rebasedParent,
+            sourceEventId: item.sourceEventId,
+            value: item.completed.value,
+            ...(item.completed.valueHtml ? { valueHtml: item.completed.valueHtml } : {}),
+            author: item.draft.author,
+            targetLang: activeLane,
+            aiSuggestion: true,
+            aiDraft: item.draft.provenance,
+          })))
+          const retryIndexByEventId = new Map(
+            retryEventIds.map((eventId, index) => [eventId, retryItems[index].index]),
+          )
+          for (let index = 0; index < retryEventIds.length; index++) {
+            const item = retryItems[index]
+            const eventId = retryEventIds[index]
+            pendingCompletionEventIdRef.current.set(laneCellKey(item.draft.cell.id), eventId)
+            rememberPendingTargetCommit(item.draft.cell.id, eventId, item.rebasedParent)
+          }
+          const retryRejectedIndexes = new Map<number, Error>()
+          const noteRetryRejected = (
+            entries: Array<{ id: string; status: number; reason: string }>,
+          ) => {
+            for (const entry of entries) {
+              const index = retryIndexByEventId.get(entry.id)
+              if (index === undefined) continue
+              retryRejectedIndexes.set(
+                index,
+                new Error(entry.reason || `The server refused this draft (${entry.status})`),
+              )
+            }
+          }
+          await flushOutboxBatch({
+            getTokenForFile: getTokenForProjectFile,
+            onStaleSiblings: (entries) => {
+              for (const entry of entries) {
+                const index = retryIndexByEventId.get(entry.id)
+                if (index === undefined) continue
+                results[index] = {
+                  status: "rejected",
+                  reason: new Error("The draft was outdated by another change and was not saved"),
+                }
+              }
+            },
+            onRejected: noteRetryRejected,
+            onForbidden: noteRetryRejected,
+          })
+          await refreshOutboxPending()
+          for (const [index, error] of retryRejectedIndexes) {
+            const item = prepared.find((candidate) => candidate.index === index)
+            if (!item) continue
+            const key = laneCellKey(item.draft.cell.id)
+            pendingCompletionEventIdRef.current.delete(key)
+            pendingTargetCommitHeadsRef.current.delete(key)
+            cellStore.clearOptimisticForCell(item.draft.cell.id)
+            results[index] = { status: "rejected", reason: error }
+          }
+        }
+      } catch (error) {
+        for (const preparedIndex of staleIndexes) {
+          const item = prepared[preparedIndex]
+          const key = laneCellKey(item.draft.cell.id)
+          pendingCompletionEventIdRef.current.delete(key)
+          pendingTargetCommitHeadsRef.current.delete(key)
+          cellStore.clearOptimisticForCell(item.draft.cell.id)
+          results[item.index] = { status: "rejected", reason: error }
+        }
+      }
+    }
+
+    // One file-level delta consumes the complete server sequence range and
+    // applies every confirmed draft with one replaceRows/emit cycle. Refresh
+    // audit stats as one projection read too; N targeted reads would feed N
+    // successive audit maps back through CellStore.setRuntime.
+    revalidateCells()
+    revalidateAuditStats()
+    return results
+  }, [
+    activeLane,
+    applyOptimisticTargetEdits,
+    cellStore,
+    getActiveCell,
+    getTokenForProjectFile,
+    laneCellKey,
+    project?.id,
+    project?.syncRole?.level,
+    refreshOutboxPending,
+    rememberPendingTargetCommit,
+    resolveTargetCommitParentId,
+    revalidateAuditStats,
+    revalidateCells,
+  ])
 
   /**
    * AD-2 sibling promotion: emit a new target-cell commit whose parentId is
@@ -4162,10 +4618,9 @@ export function ProjectWorkspace() {
     rememberPendingTargetCommit(cell.id, eventId, parentId)
     await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
     await refreshOutboxPending()
-    // Single-cell promotion — targeted refetch (see commitCompletedCell).
-    revalidateCellStats(cell.id)
-    revalidateCell(cell.id)
-  }, [project?.id, historyCellId, getActiveCell, applyOptimisticTargetEdit, activeLane, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, currentUsername, refreshOutboxPending, revalidateCellStats, revalidateCell])
+    // Single-cell promotion — confirm from the POST response (see commitCompletedCell).
+    confirmCommitted(cell.id, eventId)
+  }, [project?.id, historyCellId, getActiveCell, applyOptimisticTargetEdit, activeLane, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, currentUsername, refreshOutboxPending, confirmCommitted])
 
   const { completeSingle, prepareSingleEvidence, completeBatch, completeParagraph, clearCellError, isConfigured, isAvailable: isCompletionAvailable, completing, examples, errors, previews } = useCompletion(
     // AQU-538/AQU-602: when a non-default lane is active, its tag IS the target
@@ -4174,6 +4629,8 @@ export function ProjectWorkspace() {
     // lane-aware derivation as the editor project + file metadata.
     project?.completionSettings, project?.sourceLanguage || "", activeLaneTargetLanguage || "", branchingSearch, branchingSearchPassages, frontierSession, commitCompletedCell, rules, getActiveCells, project?.translationBrief?.l1Summary ?? undefined,
     project?.draftContext ?? DEFAULT_DRAFT_CONTEXT,
+    activeLane,
+    commitCompletedCells,
   )
 
   // AQU-620: adapter so the editor's per-cell AI action can request a plain
@@ -4215,14 +4672,11 @@ export function ProjectWorkspace() {
     async (_eventIds: string[], cellIds: string[]) => {
       await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
       await refreshOutboxPending()
-      // Targeted: the agent only touched cellIds — pull just those rows'
-      // stats instead of the whole file's (see commitCompletedCell).
-      for (const cellId of cellIds) {
-        revalidateCellStats(cellId)
-        revalidateCell(cellId)
-      }
+      // Targeted: the agent only touched cellIds — confirm each from the
+      // POST response, refetching only what it did not land.
+      for (const cellId of cellIds) confirmCommitted(cellId)
     },
-    [getTokenForProjectFile, refreshOutboxPending, revalidateCellStats, revalidateCell],
+    [getTokenForProjectFile, refreshOutboxPending, confirmCommitted],
   )
 
   // ── Back-translation: LLM generation on demand ─────────────────────────────
@@ -4319,7 +4773,9 @@ export function ProjectWorkspace() {
   // target-ngram x source-ngram graph even when the user only wanted to scroll.
   // Keep it cached for feature paths that actually need BT generation.
   const getGlosser = useCallback((): Glosser => {
-    const terminology = project?.terminology
+    // AQU-1006 follow-up: from the concepts projection, not the retired
+    // `project.terminology` settings key.
+    const terminology = localConcepts
     const cached = glosserCacheRef.current
     if (
       cached &&
@@ -4352,7 +4808,7 @@ export function ProjectWorkspace() {
     }
     // Seed from project termbase: active concepts feed preferred/admitted/forbidden
     // renderings into the glosser so terminology constraints propagate to BTs.
-    for (const concept of project?.terminology ?? []) {
+    for (const concept of localConcepts) {
       if (concept.status !== "active") continue
       for (const rendering of concept.renderings) {
         const weight =
@@ -4371,7 +4827,7 @@ export function ProjectWorkspace() {
       glosser: g,
     }
     return g
-  }, [corpusCells, backtranslationCache, project?.terminology])
+  }, [corpusCells, backtranslationCache, localConcepts])
 
   // Build the interlinear alignment model lazily. It is only used inside an
   // expanded row's BT tab, so constructing it on workspace open just burns heap
@@ -4519,7 +4975,7 @@ export function ProjectWorkspace() {
         // controlled-vocabulary source headwords for the renderings the
         // translator chose. The service derives the relevant hints from
         // the cell's source text; behavior is unchanged when nothing matches.
-        concepts: project?.terminology ?? [],
+        concepts: localConcepts,
         sourceText: effectiveSourceText(cell),
       })
       if (!btText.trim()) throw new Error("The model returned an empty back-translation.")
@@ -4530,7 +4986,7 @@ export function ProjectWorkspace() {
     } finally {
       setBacktranslatingState((prev) => { const n = new Set(prev); n.delete(cellId); return n })
     }
-  }, [isBacktranslationConfigured, project?.completionSettings, project?.sourceLanguage, project?.targetLanguage, project?.terminology, frontierSession, persistBt, backtranslationCache, corpusCells, getGlosser])
+  }, [isBacktranslationConfigured, project?.completionSettings, project?.sourceLanguage, project?.targetLanguage, localConcepts, frontierSession, persistBt, backtranslationCache, corpusCells, getGlosser])
 
   /**
    * On-demand statistical gloss for the BT tab's collapsed "statistical
@@ -4548,41 +5004,89 @@ export function ProjectWorkspace() {
     return norm(gloss) === norm(translatedText) ? "" : gloss
   }, [getGlosser])
 
-  // Add-from-selection: create a DRAFT concept from a source-side selection in
-  // the editor and persist it via the same project-settings sync path the
-  // terminology page uses. Renderings start empty — the translator fills them
-  // in later from the Terminology page.
-  const handleAddConceptFromSelection = useCallback(async (sourceTerm: string) => {
+  // Add-from-selection: create a concept from a source-side selection in the
+  // editor. A rendering in the payload activates the concept immediately;
+  // otherwise it lands as a draft. Progress is toasted so the popover can close.
+  const handleAddConceptFromSelection = useCallback(async (draft: ConceptDraft) => {
     if (!project) return
-    const trimmed = sourceTerm.trim()
+    const trimmed = draft.sourceTerm.trim()
     if (!trimmed) return
-    const draft: Omit<Concept, "id" | "createdAt"> = {
-      sourceTerm: trimmed,
-      renderings: [],
-      status: "draft",
-      createdBy: currentUsername,
+    const rendering = draft.rendering?.trim()
+    const toastId = toast.add({
+      type: "loading",
+      title: t("terminology.addConcept.savingToast"),
+      timeout: 0,
+      id: `term-save:${crypto.randomUUID()}`,
+    })
+    try {
+      // AQU-1006 follow-up: ONE `term.create` event, not a whole-termbase
+      // PATCH. The previous implementation rebuilt `project.terminology` from
+      // this component's snapshot and wrote the entire array back, so a
+      // concurrent add by anyone else was silently overwritten — the 2026-09-04
+      // outage. The concept id is minted here and is the projection's primary
+      // key, which also makes a retried outbox flush idempotent.
+      const conceptId = crypto.randomUUID()
+      await emitTermCreate({
+        projectId: project.id,
+        conceptId,
+        sourceTerm: trimmed,
+        renderings: rendering ? [{ rendering, status: "preferred" }] : [],
+        // The popover's approve toggle decides this, not the presence of a
+        // rendering. It used to be `rendering ? active : draft`, which quietly
+        // enforced a term the moment someone typed a rendering and gave no way
+        // to propose one otherwise.
+        //
+        // Note an approved term with NO rendering is still unenforced — it
+        // compiles to zero rules (compileConceptsToRules) because there is
+        // nothing to check for. The popover says so at the point of entry;
+        // that silence was the demo's other complaint.
+        status: draft.approve ? "active" : "draft",
+        ...(draft.caseSensitive ? { caseSensitive: true } : {}),
+        author: currentUsername,
+      })
+      const created = { id: conceptId }
+      // Re-read the projection so the new term's blot appears without a reload.
+      await refreshConcepts()
+      toast.update(toastId, {
+        type: "success",
+        title: t("terminology.addConcept.savedToast", { term: trimmed }),
+        timeout: 8000,
+        actionProps: created
+          ? {
+              children: t("terminology.addConcept.viewEntry"),
+              onClick: () => {
+                navigate(`/project/${project.id}/terminology?concept=${encodeURIComponent(created.id)}`)
+              },
+            }
+          : undefined,
+      })
+    } catch (err) {
+      toast.update(toastId, {
+        type: "error",
+        title: err instanceof Error ? err.message : t("terminology.addConcept.saveFailed"),
+      })
     }
-    const updated = addConcept(project, draft)
-    // AQU-754: patchSettings never rejects — it resolves a PatchOutcome. The
-    // prior code ignored it, so an "add concept" from the editor silently
-    // no-op'd whenever the write was rejected (below Maintainer, offline,
-    // version conflict, or a 5xx) — the same silent-failure the Terminology
-    // page hit in AQU-749. Surface it so AddConceptDialog keeps the dialog open
-    // and shows why, instead of closing as if the concept was saved.
-    const failure = describePatchFailure(await patchSettings({ terminology: updated.terminology ?? [] }))
-    if (failure) throw new Error(failure)
-  }, [project, currentUsername, patchSettings])
+  }, [project, currentUsername, refreshConcepts, t, navigate])
 
-  // AQU-754 follow-up: when the caller is on a synced project below the
-  // termbase write floor, open AddConceptDialog pre-blocked (input + Create
-  // draft disabled, reason shown, Cancel active) instead of letting them type
-  // a draft that patchSettings is guaranteed to reject. serverRoleLevel is the
-  // server-resolved role (null = unsynced/local-only project, which saves
-  // locally and must stay writable).
+  // AQU-1006 follow-up: terminology now has TWO authority levels, so this is
+  // two questions rather than one.
+  //
+  // SUGGESTING is contributor work — a draft compiles to no rules, so it binds
+  // nobody. It used to be blocked at the settings floor, which is why a
+  // translator who met an important word mid-verse could do nothing about it.
+  // APPROVING (adding the term enforced) keeps the org's configured termbase
+  // floor. Both are re-enforced server-side in termbase-authority.ts; this is
+  // only the affordance.
+  //
+  // serverRoleLevel is the server-resolved role — null means an unsynced,
+  // local-only project, which saves locally and must stay fully writable.
   const addConceptBlockedReason =
-    serverRoleLevel != null && serverRoleLevel < SETTINGS_EDIT_ROLE_FLOOR
+    serverRoleLevel != null && serverRoleLevel < ROLE.CONTRIBUTOR
       ? describePatchFailure({ kind: "blocked", reason: "role" })
       : null
+  const canApproveConcept =
+    serverRoleLevel == null ||
+    serverRoleLevel >= resolveTermbaseEditFloor(project?.termbaseEditMinRole)
 
   /** Called when a user manually saves an edited BT from the BT tab. */
   const saveBacktranslation = useCallback((cell: CellData, btText: string, polished: boolean) => {
@@ -4692,6 +5196,7 @@ export function ProjectWorkspace() {
     })
   }, [clearCellError])
 
+  const healthCalculationsEnabled = useHealthCalculationsEnabled()
   const requiredValidations = project ? readValidationCount(project) : 1
   const healthFileCells = useMemo(() => {
     const map = new Map<string, readonly CellSummary[]>()
@@ -4701,10 +5206,12 @@ export function ProjectWorkspace() {
 
   // AD-14: health derives from decay (endorsement_count). The legacy
   // four-sub-score "composite-health" path is retired.
+  // Per-browser off switch (lib/health/kill-switch.ts), exposed in the
+  // editor's view settings for users on very large files.
   const health = useHealth(
     healthFileCells,
     rules,
-    { decaySettings: project?.decaySettings, requiredValidations },
+    { decaySettings: project?.decaySettings, requiredValidations, enabled: healthCalculationsEnabled },
   )
   // AQU-599: cellOpenCommentCount from useHealth is intentionally not consumed
   // here — see liveCellOpenCommentCount above (health's copy is empty in Phase
@@ -4766,8 +5273,13 @@ export function ProjectWorkspace() {
       return true
     }
   }, [])
-  const confidenceOverlayActive = confidenceOverlayEnabled
+  const confidenceOverlayActive = healthCalculationsEnabled
+    && confidenceOverlayEnabled
     && Boolean(project?.id && activeFileId && frontierSession?.jwt)
+  // Reactive version of focusedCellIdRef (declared further down) for the agent
+  // panel's context wiring and for confidence scoring, which skips the cell
+  // being edited until focus leaves it.
+  const [focusedCellId, setFocusedCellId] = useState<string | null>(null)
   const confidence = useCellConfidence({
     projectId: project?.id,
     fileId: activeFileId ?? undefined,
@@ -4775,6 +5287,7 @@ export function ProjectWorkspace() {
     cells: cellSummaries,
     enabled: confidenceOverlayActive,
     perHopDecay: project?.decaySettings?.perHopDecay,
+    focusedCellId,
   })
   const effectiveHealthMap = useMemo(() => {
     if (!confidenceOverlayActive) return healthMap
@@ -4784,34 +5297,33 @@ export function ProjectWorkspace() {
     return confidence.healthMap
   }, [confidenceOverlayActive, healthMap, confidence.healthMap])
 
+  // AQU-1104: built incrementally. Every commit bumps the store version, and
+  // rebuilding this map from all summaries (a fresh Map plus an object per
+  // cell) was one of the per-commit whole-file walks behind the "Draft all"
+  // lag on a 31k-cell file. The builder keeps identities for unchanged cells
+  // and chapters, so the sidebar's chapter grid also skips re-rendering.
+  const chapterHealthBuilder = useMemo(() => chapterHealthBuilderFor(cellStore), [cellStore])
   const activeChapterHealth = useMemo<BookHealthChapter[]>(() => {
-    if (!activeFileId) return []
+    if (!activeFileId) return EMPTY_CHAPTER_HEALTH
     return readAtVersion(cellStoreVersion, () => {
-      const summaries = new Map(cellSummaries.map((cell) => [cell.id, cell]))
-      return cellStore.getNavigationIndex().map((chapter) => ({
-        key: chapter.key,
-        label: chapter.label,
-        translated: chapter.translated,
-        validated: chapter.validated,
-        total: chapter.total,
-        cells: chapter.cellIds.flatMap((cellId) => {
-          const cell = summaries.get(cellId)
-          if (!cell) return []
-          const stage = cell.status === "validated"
-            ? "validated" as const
-            : cell.status === "empty" || !cell.translated.trim()
-              ? "untranslated" as const
-              : "automatic" as const
-          return [{
-            id: cellId,
-            stage,
-            health: stage === "validated" ? 100 : effectiveHealthMap.get(cellId),
-            hasIssue: (infractions.get(cellId)?.length ?? 0) > 0,
-          }]
-        }),
-      }))
+      // Summaries sit in store order, so the store's index is a direct lookup;
+      // the id check guards the (never observed) case of a skipped row, falling
+      // back to a map built once for this pass.
+      let summaryById: Map<string, CellSummary> | null = null
+      const getSummary = (cellId: string): CellSummary | undefined => {
+        const index = cellStore.findIndexByCellId(cellId)
+        const direct = index >= 0 ? cellSummaries[index] : undefined
+        if (direct && direct.id === cellId) return direct
+        summaryById ??= new Map(cellSummaries.map((cell) => [cell.id, cell]))
+        return summaryById.get(cellId)
+      }
+      return chapterHealthBuilder.build(cellStore.getNavigationIndex(), {
+        getSummary,
+        health: (cellId) => effectiveHealthMap.get(cellId),
+        hasIssue: (cellId) => (infractions.get(cellId)?.length ?? 0) > 0,
+      })
     })
-  }, [activeFileId, cellStore, cellStoreVersion, cellSummaries, effectiveHealthMap, infractions])
+  }, [activeFileId, cellStore, cellStoreVersion, cellSummaries, chapterHealthBuilder, effectiveHealthMap, infractions])
 
   // AD-14: the four-sub-score breakdown popover is retired. The project ring
   // shows decay-derived health; the "biggest drags" popover redesign (cells
@@ -4948,14 +5460,16 @@ export function ProjectWorkspace() {
     const targetFileId = peer.currentFileId ?? activeFileId
     if (!targetFileId) return
     if (targetFileId !== activeFileId) {
+      const peerCellId = presentCellOf(peer)
       pendingPresenceJumpRef.current = {
         fileId: targetFileId,
-        ...(peer.focusedCell ? { cellId: peer.focusedCell } : {}),
+        ...(peerCellId ? { cellId: peerCellId } : {}),
       }
       workspaceTabs.openFile(targetFileId)
       return
     }
-    if (peer.focusedCell) jumpToCellId(peer.focusedCell)
+    const peerCellId = presentCellOf(peer)
+    if (peerCellId) jumpToCellId(peerCellId)
   }, [activeFileId, jumpToCellId, workspaceTabs])
 
   useEffect(() => {
@@ -4984,11 +5498,12 @@ export function ProjectWorkspace() {
     setCheckOpen(true)
     setCheckRunning(true)
     try {
+      // AQU-1147: fresh read at call time, no version dependency (see handleResolveCharacter).
       const result = await runDeterministicCheck({
         fileId: activeFileId,
-        cells: readAtVersion(cellStoreVersion, getActiveCells),
+        cells: getActiveCells(),
         rules,
-        concepts: project?.terminology ?? [],
+        concepts: localConcepts,
       })
       // Bail if the active file changed mid-run — don't clobber the new file's
       // state with this (now stale) file's findings.
@@ -4997,7 +5512,7 @@ export function ProjectWorkspace() {
     } finally {
       setCheckRunning(false)
     }
-  }, [activeFileId, checkRunning, cellStoreVersion, getActiveCells, rules, project?.terminology])
+  }, [activeFileId, checkRunning, getActiveCells, rules, localConcepts])
 
   // A check run describes one file's cells; switching files invalidates it.
   useEffect(() => {
@@ -5033,9 +5548,10 @@ export function ProjectWorkspace() {
       workspaceTabs.openFile(a.fileId)
       return
     }
-    const idx = readAtVersion(cellStoreVersion, () => resolveScopeLabelIndex(a.scopeLabel))
+    // AQU-1147: fresh read at call time, no version dependency (see handleResolveCharacter).
+    const idx = resolveScopeLabelIndex(a.scopeLabel)
     editorRef.current?.scrollToCellIndex(idx >= 0 ? idx : 0)
-  }, [activeFileId, cellStoreVersion, resolveScopeLabelIndex, setActiveLane, workspaceTabs])
+  }, [activeFileId, resolveScopeLabelIndex, setActiveLane, workspaceTabs])
 
   // Consume a parked assignment scroll once the target file's cells have
   // loaded (AQU-690; mirrors the presence-peer deferred jump).
@@ -5116,20 +5632,6 @@ export function ProjectWorkspace() {
     return () => document.removeEventListener("keydown", handler)
   }, [activeFileId, hasUnfinished, handleJumpNextUnfinished])
 
-  // Legacy sync status shim. AD-1 live coordination uses the project
-  // WebSocket below; this hook only feeds the existing status indicator.
-  const { status: fileSyncStatus } = useFileSync({
-    doc,
-    projectId: project?.id ?? null,
-    fileId: activeFileId || null,
-    username: currentUsername,
-    enabled: Boolean(project && activeFileId),
-    session: frontierSession,
-    projectName: project?.name ?? null,
-    gitlabProjectId:
-      project?.origin?.kind === "git" ? project.origin.gitlabProjectId : null,
-  })
-
   // Phase 2c-gamma: cross-collaborator settings sync was piggybacked on the
   // active file's Y.Doc meta; that broadcast channel is gone. Settings still
   // persist locally and via the project record fetch.
@@ -5139,20 +5641,25 @@ export function ProjectWorkspace() {
   // The outbox flusher (above) ships writes; this connection drives reads.
   const [cellLockHolders, setCellLockHolders] = useState<Map<string, string>>(() => new Map())
   // RACE-5: ref that mirrors cellLockHolders, updated synchronously on each WS
-  // frame so handleEditorCommit (checkLockHolder) always reads the latest state
-  // rather than a stale React closure captured at the last render.
+  // frame so checkLockHolder (agent commit path, translate-as-read) always
+  // reads the latest state rather than a stale React closure captured at the
+  // last render. Human commits no longer consult it (AQU-1154): the lock is
+  // advisory and the server head check is the arbiter.
   const cellLockHoldersRef = useRef<Map<string, string>>(new Map())
   const [cellsWithRemoteChange, setCellsWithRemoteChange] = useState<Set<string>>(() => new Set())
   const focusedCellIdRef = useRef<string | null>(null)
-  // Reactive version of focusedCellIdRef for the agent panel's context wiring.
-  const [focusedCellId, setFocusedCellId] = useState<string | null>(null)
+  // Reactive `focusedCellId` (the mirror of focusedCellIdRef) is declared
+  // above useCellConfidence, which needs it as an input.
 
   const agentWorkbenchWorkspace = useMemo(() => {
     const scopeAvailable = Boolean(activeFileId && activeFile)
     const sourceLanguage = activeFile?.sourceLanguage || project?.sourceLanguage
     const targetLanguage = activeLaneTargetLanguage || activeFile?.targetLanguage || project?.targetLanguage
 
-    if (!scopeAvailable) {
+    // AQU-1104: the workbench is mounted only on the agent surface, yet this
+    // memo re-ran on every cell commit and walked every cell view in the file.
+    // Off the agent surface nothing reads it, so return the empty shape.
+    if (!scopeAvailable || !agentOpen) {
       return {
         cells: [],
         fileName: activeFile?.name,
@@ -5166,40 +5673,33 @@ export function ProjectWorkspace() {
     }
 
     // Keep rendering bounded around the focused cell for very large files.
-    const allCells = readAtVersion(cellStoreVersion, getActiveCells).filter(
-      (cell) => cell.fileId === activeFileId,
-    )
-    const healthRibbonByCellId = buildHealthRibbon(allCells.map((cell) => {
-      const stage = cell.status === "validated"
-        ? "validated" as const
-        : cell.status === "empty" || !cell.translated.trim()
-          ? "untranslated" as const
-          : "automatic" as const
-      const preTranslation = stage === "untranslated"
-        ? preTranslationEvidence(effectiveSourceText(cell), examples.get(cell.id) ?? [])
-        : null
-      return {
-        id: cell.id,
-        scope: `${cell.fileId}:${cell.group || cell.section || "document"}`,
-        stage,
-        rawScore: stage === "validated"
-          ? 100
-          : stage === "automatic"
-            ? effectiveHealthMap.get(cell.id)
-            : preTranslation?.score,
-        evidenceWeight: preTranslation?.evidenceWeight ?? 1,
-      }
-    }))
+    // The ribbon kernel reaches only a few dozen cells, so reading a padded
+    // window around the focus reproduces the full-file ribbon for every cell
+    // shown without deriving every view in the file (see workbench-window.ts).
+    const { order, window, readCells } = readAtVersion(cellStoreVersion, () => {
+      const order = cellStore.getCellIds()
+      const focusIndex = focusedCellId ? Math.max(0, cellStore.findIndexByCellId(focusedCellId)) : 0
+      const window = resolveWorkbenchWindow(order.length, focusIndex)
+      const readCells = cellStore
+        .getCellsByIds(order.slice(window.readStart, window.readEnd))
+        .filter((cell) => cell.fileId === activeFileId)
+      return { order, window, readCells }
+    })
+    const ribbonReaders: RibbonEvidenceReaders<CellData> = {
+      sourceText: effectiveSourceText,
+      health: (cellId: string) => effectiveHealthMap.get(cellId),
+      examples: (cellId: string) => examples.get(cellId) ?? EMPTY_SCORED_PAIRS,
+    }
+    const healthRibbonByCellId = healthCalculationsEnabled
+      ? buildHealthRibbon(readCells.map((cell) => ribbonInputFor(cell.id, cell, ribbonReaders)))
+      : new Map<string, HealthRibbonPoint>()
     const ruleById = new Map(rules.map((rule) => [rule.id, rule]))
     const validationRequirement = project ? readValidationCount(project) : 1
     const decayConfig = resolveDecayConfig(project?.decaySettings, validationRequirement)
     const roleCanValidate = canPerform("cell.validate", project?.syncRole?.level ?? null)
-    const focusIndex = focusedCellId
-      ? Math.max(0, allCells.findIndex((cell) => cell.id === focusedCellId))
-      : 0
-    const windowSize = 80
-    const start = Math.max(0, Math.min(focusIndex - Math.floor(windowSize / 2), allCells.length - windowSize))
-    const cells = allCells.slice(start, start + windowSize).map((cell, index) => {
+    const shownIds = new Set(order.slice(window.start, window.end))
+    const start = window.start
+    const cells = readCells.filter((cell) => shownIds.has(cell.id)).map((cell, index) => {
       const healthRibbonPoint = healthRibbonByCellId.get(cell.id)
       const activeInfractions = partitionInfractions(infractions.get(cell.id) ?? [], cell.waivers).active
       const hasMajorHealthIssue = activeInfractions.some(
@@ -5245,7 +5745,7 @@ export function ProjectWorkspace() {
       sourceLanguage,
       targetLanguage,
       focusedCellId,
-      totalCells: allCells.length,
+      totalCells: order.length,
       scopeAvailable: true,
       loading: cellsLoading,
     }
@@ -5254,6 +5754,8 @@ export function ProjectWorkspace() {
     activeFile,
     activeLane,
     activeLaneTargetLanguage,
+    agentOpen,
+    cellStore,
     cellStoreVersion,
     cellsLoading,
     effectiveHealthMap,
@@ -5261,7 +5763,7 @@ export function ProjectWorkspace() {
     fileMeta.targetDirectionMode,
     fileMeta.targetTextDirection,
     focusedCellId,
-    getActiveCells,
+    healthCalculationsEnabled,
     infractions,
     myScopes,
     project,
@@ -5301,17 +5803,40 @@ export function ProjectWorkspace() {
   const [parallelBiblesOpen, setParallelBiblesOpen] = useState<boolean>(() =>
     projectId ? readParallelBiblesOpen(projectId) : false,
   )
-  const [trackedCellRef, setTrackedCellRef] = useState<string | null>(null)
+  // AQU-1016: was `useState` here — every scroll step re-rendered this whole
+  // shell to feed a value only the parallel-bibles panel reads. It now lives
+  // in the shared editor-viewport store (src/hooks/useEditorViewportStore.ts);
+  // writes below go straight to the store, and this read only subscribes
+  // (and thus only re-renders the shell) while a parallel-bibles panel is
+  // actually shown for the active file — the same gate the render sites use.
+  const parallelBiblesPanelActive = centerSurface === "editor" && !!activeFile && fileHasSections(activeFile)
+  const trackedCellRef = useEditorViewportTrackedCellRef(parallelBiblesPanelActive)
   // Drop the tracked ref when switching files so the previous file's verse
   // doesn't leak into the new file's panel (the new EditorTable re-fires).
   useEffect(() => {
-    setTrackedCellRef(null)
+    setEditorViewportTrackedCellRef(null)
   }, [activeFileId])
   const reconcilerRef = useRef<import("@/lib/sync/ws-reconciler").WsReconciler | null>(null)
   // FRO-288: Reactive reconciler state so useFocusLock can access it.
   // reconcilerRef is still the write target (set inside the async connect effect)
   // and is used by the claim/release callbacks declared below.
   const [liveReconciler, setLiveReconciler] = useState<WsReconciler | null>(null)
+  // AQU-1155: the status pill is a pure function of real signals — browser
+  // online state, the project WS socket, and the outbox queue/failure streak.
+  const { status: fileSyncStatus } = useFileSync({
+    doc,
+    projectId: project?.id ?? null,
+    fileId: activeFileId || null,
+    username: currentUsername,
+    enabled: Boolean(project && activeFileId),
+    session: frontierSession,
+    projectName: project?.name ?? null,
+    gitlabProjectId:
+      project?.origin?.kind === "git" ? project.origin.gitlabProjectId : null,
+    reconciler: liveReconciler,
+    pendingCount: Math.max(0, outboxPending - outboxFailed),
+    failureStreak: outboxFailures,
+  })
   // Read the current file list inside the WS connect path without making it a
   // reconnect trigger — otherwise every file-list change (e.g. each batch of a
   // large import landing) tears the socket down and recreates it.
@@ -5334,21 +5859,38 @@ export function ProjectWorkspace() {
   const sendPresenceUpdate = useCallback((patch: {
     currentFileId?: string | null
     focusedCell?: string | null
+    viewingCell?: string | null
     selection?: TargetPresenceSelection | null
   }) => {
     reconcilerRef.current?.send({ t: "presence.update", ...patch })
   }, [])
+  // AQU-1154: lets the WS onOpen handler (declared before the focus-lock hook
+  // below) re-claim the cell the user is still editing after a reconnect.
+  const focusLockClaimRef = useRef<((cellId: string) => void) | null>(null)
+  // The row this user is on (focus-pinned in the table), lease or not. Kept
+  // in a ref so a reconnect can re-announce it; the DO drops presence on close.
+  const viewingCellRef = useRef<string | null>(null)
+  const viewingCellTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     if (!project?.id || !frontierSession?.jwt) return
     let cancelled = false
     let reconciler: import("@/lib/sync/ws-reconciler").WsReconciler | null = null
+    let appliedRefreshScheduler:
+      import("@/lib/sync/ws-reconciler").ScopedRefreshScheduler | null = null
     void (async () => {
-      const { createWsReconciler, isOwnWriteEcho, isValidationEvent, createLinkUpstreamChangedHandler, createReconnectResyncHandler, fileInventoryChanged } =
+      const { createWsReconciler, createScopedRefreshScheduler, isOwnWriteEcho, createLinkUpstreamChangedHandler, createReconnectResyncHandler, fileInventoryChanged } =
         await import("@/lib/sync/ws-reconciler")
       const { syncWorkerHttpOrigin } = await import("@/lib/sync/sync-worker-url")
       if (cancelled || !project?.id) return
       const pid = project.id
+      appliedRefreshScheduler = createScopedRefreshScheduler({
+        currentScope: () => {
+          const fileId = activeFileIdRef.current
+          return fileId ? { projectId: pid, fileId } : null
+        },
+        refresh: () => revalidateCellsRef.current(),
+      })
       // FRO-479: link.upstream-changed frames → refetch staleness immediately
       // (cheap GET, reflects the frame as soon as possible), and — debounced —
       // AWAIT the mirror sync, then revalidate BOTH staleness and cells.
@@ -5400,16 +5942,26 @@ export function ProjectWorkspace() {
           },
         },
         {
-          onOpen() {
+          onOpen({ connId }) {
+            // Presence rows are per socket; the store hides only THIS socket's
+            // row, so a second tab (or a colleague on the same account) shows.
+            presenceStore.setSelfConnId(connId)
             if (cancelled) return
             clearPresenceStaleTimer()
             sendPresenceUpdate({
               currentFileId: activeFileIdRef.current,
+              viewingCell: viewingCellRef.current,
               selection: null,
             })
+            // AQU-1154: the DO released our lease + focusedCell when the old
+            // socket dropped. If the user is still in a cell, claim it again
+            // (focus.claim is the only frame that grants focusedCell) so peers
+            // keep seeing "X is editing" instead of taking the cell over.
+            const editingCellId = focusedCellIdRef.current
+            if (editingCellId) focusLockClaimRef.current?.(editingCellId)
             // Skips the first open (the initial read is already in flight);
             // every reconnect after that closes the missed-broadcast gap.
-            handleReconnectResync()
+            handleReconnectResync.handleOpen()
             // The project relay is intentionally lossy. A reconnect may have
             // missed terminal progress or staged-draft frames, so reconcile
             // both mirrors from their durable sources for the exact scope
@@ -5425,6 +5977,7 @@ export function ProjectWorkspace() {
           },
           onClose() {
             if (cancelled) return
+            handleReconnectResync.handleClose()
             if (presenceStaleTimerRef.current !== null) return
             presenceStaleTimerRef.current = setTimeout(() => {
               presenceStaleTimerRef.current = null
@@ -5484,29 +6037,48 @@ export function ProjectWorkspace() {
               // remain visually stale after the progress count turns green.
               // The committing handler's earlier refresh can race the app-shell
               // outbox drain; this frame only arrives after projection commits.
-              if (msg.kind === "cell.validate" || msg.kind === "cell.unvalidate") {
+              if (
+                msg.file === activeFileIdRef.current &&
+                (msg.kind === "cell.validate" || msg.kind === "cell.unvalidate")
+              ) {
                 revalidateCellStats(msg.cell)
               }
-              // Targeted single-cell refetch — avoids re-streaming every
-              // cell in the file for one remote change. Falls back to a
-              // full revalidate inside useCells on error.
+              // Applied-event frames are lossy refresh hints. The scheduler
+              // below groups a burst, then the active store consumes the
+              // complete server-sequence delta in one derivation pass.
               //
               // Skip it for our OWN writes: the committing handler already
-              // pulled the authoritative row after its outbox flush, so the
-              // echo's refetch is pure duplication (and the in-flight coalescer
-              // misses it because the handler's refetch is gated behind the
-              // flush — see isOwnWriteEcho). The FRO-247 shadow keeps the value
-              // visible until the handler's read lands. This is the dominant
-              // edit-cycle cost: every commit + validate + auto-BT echo was
-              // firing a redundant targeted GET (~5 of 8 per edit cycle).
-              if (!ownWrite) {
-                revalidateCell(msg.cell)
-                // activeValidators (the validation pill) comes from the
-                // audit-stats projection, not /files/:fileId/cells — a remote
-                // validate/unvalidate must poke that read too, or the pill
-                // stays stale until the next full stats poll.
-                if (isValidationEvent(msg.kind)) {
-                  revalidateCellStats(msg.cell)
+              // pulled authoritative state after its outbox flush, so the
+              // echo's refresh is pure duplication. The FRO-247 shadow keeps
+              // the value visible until the handler's read lands.
+              //
+              // AQU-1154 follow-up: "own write" means the same USERNAME, not
+              // this tab. A second tab of the same user (or a tab whose post-
+              // flush refetch failed) got no refetch at all and kept the old
+              // head, so its next commit chained on a stale parent and was
+              // refused as bumped. Refetch own echoes too unless this tab's
+              // store already holds the echoed event as the cell's head — the
+              // committing tab does after its post-flush read, so the common
+              // case still costs no extra GET.
+              const alreadyApplied = ownWrite && (() => {
+                const view = cellStore.getCellView(msg.cell!)
+                if (!view) return false
+                if (msg.kind?.startsWith("target.cell.")) return view.targetEventId === msg.id
+                if (msg.kind?.startsWith("source.cell.")) return view.sourceEventId === msg.id
+                return true
+              })()
+              const liveResult = msg.file === activeFileIdRef.current
+                ? liveApplier.apply(msg)
+                : "refetch"
+              if (liveResult !== "applied" && (!ownWrite || !alreadyApplied)) {
+                // A model response or collaborator burst arrives as several
+                // frames. Consume the file's server-sequence range once so
+                // the store derives and emits once for the whole burst.
+                if (msg.file) {
+                  appliedRefreshScheduler?.schedule({
+                    projectId: msg.project,
+                    fileId: msg.file,
+                  })
                 }
               }
               // Audio attachment events project into cell_audio (not cells);
@@ -5525,7 +6097,10 @@ export function ProjectWorkspace() {
               // and fall through to the legacy "always banner on focused cell"
               // path so the user can still tell something happened.
               if (ownWrite) return
-              if (focusedCellIdRef.current === msg.cell) {
+              if (
+                msg.file === activeFileIdRef.current &&
+                focusedCellIdRef.current === msg.cell
+              ) {
                 setCellsWithRemoteChange((cur) => {
                   if (cur.has(msg.cell!)) return cur
                   const next = new Set(cur)
@@ -5570,11 +6145,12 @@ export function ProjectWorkspace() {
                 // The next normal sidebar refresh retries a transient token or
                 // network failure.
               })
-              // Settings projection changes `cells.validated` without adding
-              // cell events, so a `?since=` delta would be empty. Drop the
-              // watermark to make the active editor read one authoritative
-              // snapshot and keep row validation UI in sync.
-              cellStore.setMaxServerSeq(null)
+              // Only a validationCount change re-projects `cells.validated`
+              // server-side without cell events (db/shared/projects.ts), and
+              // the threshold effect near revalidateCellsRef handles that by
+              // dropping the watermark for one authoritative snapshot. Every
+              // other setting keeps the `?since=` cursor: a cheap delta, not a
+              // full re-stream of the open file on every connected client.
               revalidateCellsRef.current()
             } else if (msg.t === "contextual.activity") {
               // Slice D2: live contextual-run progress. The run-store is a
@@ -5616,6 +6192,23 @@ export function ProjectWorkspace() {
               if (sameStringMap(cellLockHoldersRef.current, next)) return
               cellLockHoldersRef.current = next
               setCellLockHolders(next)
+            } else if (msg.t === "presence.diff" || msg.t === "presence.left") {
+              // Diff presence (SYNC-LIVE): the DO no longer rebroadcasts the
+              // roster per update. Apply the diff to the store, then derive
+              // the lock-holder map and the focus-lock feed from the store's
+              // snapshots, which still have the full-roster shape.
+              if (msg.t === "presence.diff") presenceStore.applyPresenceDiff(msg.user)
+              else presenceStore.applyPresenceLeft(msg.connId)
+              const users = presenceStore.getUserSnapshots()
+              focusLockFeedFrameRef.current({ t: "presence", users })
+              const next = applyPresenceFrame(users, currentUsername)
+              if (sameStringMap(cellLockHoldersRef.current, next)) return
+              cellLockHoldersRef.current = next
+              setCellLockHolders(next)
+            } else if (msg.t === "presence.draft") {
+              // Cell-scoped: notifies only that cell's subscribers (EditorRow's
+              // useCellPresence), never the workspace root.
+              presenceStore.applyPresenceDraft(msg.connId, msg.cellId, msg.draftText, msg.ts)
             } else if (msg.t === "lock.claimed") {
               presenceStore.applyLockClaimed(msg.cellId, msg.by.userId)
               // FRO-288: forward lock.claimed to the hook so it can update
@@ -5679,14 +6272,13 @@ export function ProjectWorkspace() {
       clearPresenceStaleTimer()
       reconcilerRef.current = null
       setLiveReconciler(null)
+      appliedRefreshScheduler?.dispose()
       reconciler?.close()
     }
   }, [
     project?.id,
     frontierSession?.jwt,
     getTokenForFile,
-    revalidateCells,
-    revalidateCell,
     revalidateCellStats,
     currentUsername,
     refresh,
@@ -5716,6 +6308,7 @@ export function ProjectWorkspace() {
   })
   const focusLockFeedFrameRef = useRef(focusLockFeedFrame)
   useEffect(() => { focusLockFeedFrameRef.current = focusLockFeedFrame }, [focusLockFeedFrame])
+  useEffect(() => { focusLockClaimRef.current = focusLockState.claim }, [focusLockState.claim])
 
   const writeLocTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const handleClaimCell = useCallback((cellId: string) => {
@@ -5726,7 +6319,7 @@ export function ProjectWorkspace() {
     setFocusedCellCanonicalRef(focusedCell?.group ?? null)
     // Parallel-bibles panel: navigating to a cell is a stronger "looking at"
     // signal than the scroll position — the panel follows whichever moved last.
-    if (focusedCell?.group) setTrackedCellRef(focusedCell.group)
+    if (focusedCell?.group) setEditorViewportTrackedCellRef(focusedCell.group)
     // FRO-288: focusLockState.claim() replaces the bare focus.claim send.
     // The hook sends focus.claim and starts the half-period renewal timer so
     // the 30s DO lease never silently expires mid-edit.
@@ -5770,15 +6363,40 @@ export function ProjectWorkspace() {
       selection,
     })
   }, [sendPresenceUpdate])
+  // Non-lock-bearing "where I am": the focus-pinned row. Trailing-throttled
+  // so holding an arrow key through twenty rows sends a handful of frames,
+  // not twenty; the last position always lands. No draft text rides on it.
+  const handleViewCell = useCallback((cellId: string | null) => {
+    if (viewingCellRef.current === cellId) return
+    viewingCellRef.current = cellId
+    if (viewingCellTimerRef.current !== null) return
+    viewingCellTimerRef.current = setTimeout(() => {
+      viewingCellTimerRef.current = null
+      sendPresenceUpdate({
+        currentFileId: activeFileIdRef.current,
+        viewingCell: viewingCellRef.current,
+      })
+    }, VIEWING_CELL_PRESENCE_THROTTLE_MS)
+  }, [sendPresenceUpdate])
+  useEffect(() => () => {
+    if (viewingCellTimerRef.current !== null) clearTimeout(viewingCellTimerRef.current)
+  }, [])
+  /** Verse label for the peer roster: the cell's label, else its group ref. */
+  const resolvePresenceCellLabel = useCallback((cellId: string): string | undefined => {
+    const cell = getActiveCell(cellId)
+    return cell?.cellLabel || cell?.group || undefined
+  }, [getActiveCell])
   // Last-focused context is per-file: a cell from the previous file is stale
   // once the user opens another one.
   useEffect(() => {
     focusedCellIdRef.current = null
     setFocusedCellId(null)
     setFocusedCellCanonicalRef(null)
+    viewingCellRef.current = null
     sendPresenceUpdate({
       currentFileId: activeFileId,
       focusedCell: null,
+      viewingCell: null,
       selection: null,
     })
   }, [activeFileId, sendPresenceUpdate])
@@ -5984,10 +6602,16 @@ export function ProjectWorkspace() {
 
   /** Stable wrapper over the ref above — see `audioHomeRef`. */
   const audioHomeFor = useCallback((cell: CellData) => audioHomeRef.current(cell), [])
+  const handleOpenTerminologyConcept = useCallback((conceptId: string) => {
+    navigate(
+      `/project/${projectId}/terminology?concept=${encodeURIComponent(conceptId)}`,
+    )
+  }, [navigate, projectId])
   const editorActionsValue = useMemo(() => ({
     onInfractionClick: handleInfractionClick,
     onOpenComments: handleOpenComments,
     onOpenHistory: handleOpenHistory,
+    onOpenTerminologyConcept: handleOpenTerminologyConcept,
     onAiSetupNeeded: handleAiSetupNeeded,
     onOpenRecording: handleOpenRecording,
     onMediaRowActivate: handleMediaRowActivate, // 2026-08-07: row click → timeline (stacked lens only)
@@ -5996,7 +6620,7 @@ export function ProjectWorkspace() {
     onTakeSaved: handleTakeSaved, // AQU-646: a take gives a text-less line a target row
     audioHomeFor, // AQU-646 stage 3f: where this row's audio belongs
     myScopes, // AQU-633: per-cell validate scope gate
-  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleTakeSaved, audioHomeFor, myScopes])
+  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleTakeSaved, audioHomeFor, myScopes])
 
   const handleAssignVoice = useCallback(async (cellId: string, voiceId: string) => {
     if (!audioProject || !frontierSession) return
@@ -6086,8 +6710,7 @@ export function ProjectWorkspace() {
     rememberPendingTargetCommit(cell.id, eventId, parentId)
     await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
     await refreshOutboxPending()
-    revalidateCellStats(cell.id)
-    revalidateCell(cell.id)
+    confirmCommitted(cell.id, eventId)
   }, [
     project?.id,
     project?.syncRole?.level,
@@ -6100,8 +6723,7 @@ export function ProjectWorkspace() {
     currentUsername,
     getTokenForProjectFile,
     refreshOutboxPending,
-    revalidateCellStats,
-    revalidateCell,
+    confirmCommitted,
   ])
 
   ensureTargetRowForTakeRef.current = (cellId: string) => void ensureTargetRowForTake(cellId)
@@ -6144,8 +6766,7 @@ export function ProjectWorkspace() {
     rememberPendingTargetCommit(cell.id, eventId, parentId)
     await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
     await refreshOutboxPending()
-    revalidateCellStats(cell.id)
-    revalidateCell(cell.id)
+    confirmCommitted(cell.id, eventId)
   }, [
     project?.id,
     project?.syncRole?.level,
@@ -6157,8 +6778,7 @@ export function ProjectWorkspace() {
     currentUsername,
     getTokenForProjectFile,
     refreshOutboxPending,
-    revalidateCellStats,
-    revalidateCell,
+    confirmCommitted,
   ])
 
   const validatedEvidenceVersion = useMemo(() => (
@@ -6341,9 +6961,8 @@ export function ProjectWorkspace() {
     rememberPendingTargetCommit(cell.id, eventId, parentId)
     await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
     await refreshOutboxPending()
-    // Single-cell edit — targeted refetch (see commitCompletedCell).
-    revalidateCellStats(cell.id)
-    revalidateCell(cell.id)
+    // Single-cell edit — confirm from the POST response (see commitCompletedCell).
+    confirmCommitted(cell.id, eventId)
   }, [
     project?.id,
     project?.syncRole?.level,
@@ -6356,8 +6975,7 @@ export function ProjectWorkspace() {
     currentUsername,
     getTokenForProjectFile,
     refreshOutboxPending,
-    revalidateCellStats,
-    revalidateCell,
+    confirmCommitted,
   ])
 
   const handleTrayFootnoteSave = useCallback((cellId: string, footnoteIndex: number, newText: string) => {
@@ -6737,13 +7355,17 @@ export function ProjectWorkspace() {
       return map
     })
     setClientProject(next)
-    // Persist corpus/originalName locally (server file.rename only carries name).
+    // Persist corpus/originalName locally; file.rename carries the label,
+    // file.corpus.set carries the sidebar folder.
     await updateProject(next)
     const nameChanges = effective.filter((s) => s.currentName !== s.suggestedName)
-    if (nameChanges.length > 0) {
+    const corpusChanges = effective.filter((s) =>
+      s.suggestedCorpus !== undefined && s.suggestedCorpus !== s.currentCorpus,
+    )
+    if (nameChanges.length > 0 || corpusChanges.length > 0) {
       try {
-        await Promise.all(
-          nameChanges.map((s) =>
+        await Promise.all([
+          ...nameChanges.map((s) =>
             emitFileRename({
               projectId: project.id,
               fileId: s.fileId,
@@ -6751,12 +7373,20 @@ export function ProjectWorkspace() {
               author: currentUsername,
             }),
           ),
-        )
+          ...corpusChanges.map((s) =>
+            emitFileCorpusSet({
+              projectId: project.id,
+              fileId: s.fileId,
+              corpusMarker: s.suggestedCorpus ?? null,
+              author: currentUsername,
+            }),
+          ),
+        ])
       } catch (e) {
         // AQU-374: a failed enqueue must not masquerade as success. Roll back the
         // optimistic overlay + local record and surface the error instead of
         // showing the "Applied renames." toast.
-        console.error("[rename] file.rename emit failed during suggestion apply", e)
+        console.error("[rename] file.rename / file.corpus.set emit failed during suggestion apply", e)
         setOptimisticRenames((current) => {
           const map = new Map(current)
           for (const s of effective) map.delete(s.fileId)
@@ -6787,9 +7417,12 @@ export function ProjectWorkspace() {
           setClientProject(reverted)
           void updateProject(reverted)
           const undoNameChanges = applied.filter((s) => s.currentName !== s.suggestedName)
-          if (undoNameChanges.length > 0) {
-            void Promise.all(
-              undoNameChanges.map((s) =>
+          const undoCorpusChanges = applied.filter((s) =>
+            s.suggestedCorpus !== undefined && s.suggestedCorpus !== s.currentCorpus,
+          )
+          if (undoNameChanges.length > 0 || undoCorpusChanges.length > 0) {
+            void Promise.all([
+              ...undoNameChanges.map((s) =>
                 emitFileRename({
                   projectId: p.id,
                   fileId: s.fileId,
@@ -6797,7 +7430,15 @@ export function ProjectWorkspace() {
                   author: currentUsername,
                 }),
               ),
-            ).then(() => refresh())
+              ...undoCorpusChanges.map((s) =>
+                emitFileCorpusSet({
+                  projectId: p.id,
+                  fileId: s.fileId,
+                  corpusMarker: s.currentCorpus ?? null,
+                  author: currentUsername,
+                }),
+              ),
+            ]).then(() => refresh())
           }
           setOptimisticRenames((current) => {
             const next = new Map(current)
@@ -6819,9 +7460,20 @@ export function ProjectWorkspace() {
 
   const handleRenameCorpus = useCallback(async (oldMarker: string, newMarker: string) => {
     if (!project) return
+    const members = project.files.filter((f) => f.corpusMarker === oldMarker)
     await patchProject(project.id, (p) => renameCorpus(p, oldMarker, newMarker))
-    refresh()
-  }, [project, refresh])
+    const nextMarker = newMarker.trim() || null
+    void Promise.all(
+      members.map((f) =>
+        emitFileCorpusSet({
+          projectId: project.id,
+          fileId: f.id,
+          corpusMarker: nextMarker,
+          author: currentUsername,
+        }),
+      ),
+    ).then(() => refresh())
+  }, [project, currentUsername, refresh])
 
   const handleDismissBanner = useCallback(async () => {
     setSuggestionsDismissed(true)
@@ -6938,7 +7590,11 @@ export function ProjectWorkspace() {
       // Pinned below Comments: Terminology and Recently deleted stay visible.
       // Unpinned items (none today) still collapse into "More".
       { id: "comments", labelKey: "common.comments" as const, icon: MessagesSquare, pinned: true,
-        badge: Array.from(openCommentCount.values()).reduce((a, b) => a + b, 0),
+        // Open-thread total from the worker's counts aggregate — independent
+        // of how much of the comment list has paged in. Health's per-file
+        // count is the fallback until the first aggregate lands.
+        badge: commentCounts?.unresolved
+          ?? Array.from(openCommentCount.values()).reduce((a, b) => a + b, 0),
         onClick: () => openOverlay("comments") },
       { id: "terminology", labelKey: "nav.sidebarSection.terminology" as const, icon: BookOpen, pinned: true,
         onClick: () => openOverlay("terminology") },
@@ -6955,7 +7611,7 @@ export function ProjectWorkspace() {
         : []),
     ]
     return items
-  }, [openCommentCount, currentRoleLevel, openOverlay])
+  }, [commentCounts, openCommentCount, currentRoleLevel, openOverlay])
 
   // AQU-646 P0: cells from the store never carry audio attachments — only
   // mergeCellsWithAudio adds them (EditorTable and VoicePlaybackBar each merge
@@ -7377,11 +8033,12 @@ export function ProjectWorkspace() {
     if (!project?.id || !activeFile || !audioCueSibling || !audioCues) return
     setCueLinksPending(true)
     try {
+      // AQU-1147: fresh read at call time, no version dependency (see handleResolveCharacter).
       const diff = diffCueLinks({
         current: cueLinks,
         wanted: autoLinkable(
           planCueLinks({
-            textCells: readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()),
+            textCells: cellStore.getAllSummaries(),
             audioCues,
           }),
         ),
@@ -7416,7 +8073,7 @@ export function ProjectWorkspace() {
     }
   }, [
     project?.id, activeFile, audioCueSibling, audioCues, cueLinks, currentUsername,
-    getTokenForProjectFile, refreshCueLinks, cellStore, cellStoreVersion,
+    getTokenForProjectFile, refreshCueLinks, cellStore,
   ])
 
   /** The subtitle rows a take on this cell counts towards. Without audio cues
@@ -7859,12 +8516,42 @@ export function ProjectWorkspace() {
     })
   }, [t])
 
-  const timelinePanelRef = usePanelRef()
+  // AQU-1119: which media-lens sections are collapsed, per file, plus the
+  // panel handles and the constraint rows that follow from it.
+  const mediaSections = useMediaSectionCollapse({
+    fileId: activeFileId,
+    timelineStacked,
+    hasVideo: Boolean(activeFile?.coreMediaUrl),
+    // The rows stay mounted behind the rail — frozen and clipped, not
+    // unmounted — so a cell being edited would keep focus and keep taking
+    // keystrokes out of sight. Blurring runs the editor's real path: TipTap
+    // commits the text, and the row releases its collaboration lease.
+    onBeforeCollapseText: () => {
+      const active = document.activeElement
+      if (active instanceof HTMLElement && active.closest("[data-media-section='text']")) {
+        active.blur()
+      }
+    },
+  })
+  const timelinePanelRef = mediaSections.panelRefs.timeline
   useEffect(() => {
-    if (!activeFileId) return
-    timelinePanelRef.current?.resize(readStoredTimelinePaneHeight(activeFileId))
+    // `timelineStacked` is a dependency, not just a guard, and it is the whole
+    // fix for a bug this effect shipped with (AQU-1119): in the text lens the
+    // timeline panel is not rendered, so the ref is null and the resize is
+    // skipped. Without the dep the effect never re-ran on the way back, and the
+    // panel does not re-read `defaultSize` either — the group restores the
+    // layout it cached against the same panel ids. So a lens round-trip left
+    // the PREVIOUS file's height on screen, and the per-file height Sam asked
+    // for silently stopped being per file the moment anyone visited the text
+    // lens.
+    if (!activeFileId || !timelineStacked) return
+    // `restoreStoredSize` skips a collapsed section — a height restored under
+    // its rail is exactly the desync the pin exists to prevent — and tolerates
+    // the first commit, where the group has not laid out yet and `resize`
+    // would throw rather than no-op.
+    mediaSections.restoreStoredSize("timeline")
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the panel ref is stable
-  }, [activeFileId])
+  }, [activeFileId, timelineStacked, mediaSections.collapsed])
 
   /**
    * Does the PICTURE own this file's transport?
@@ -8894,13 +9581,13 @@ export function ProjectWorkspace() {
     // cellId (older call sites).
     const changed = cellId ?? pendingEdit?.cellId
     if (changed) {
-      revalidateCellStats(changed)
-      revalidateCell(changed)
+      // Common case (own commit, rows on the POST response): no GET at all.
+      confirmCommitted(changed, committedEventId)
     } else {
       revalidateAuditStats()
       revalidateCells()
     }
-  }, [getTokenForProjectFile, rememberPendingTargetCommit, refreshOutboxPending, revalidateAuditStats, revalidateCellStats, revalidateCell, revalidateCells])
+  }, [getTokenForProjectFile, rememberPendingTargetCommit, refreshOutboxPending, revalidateAuditStats, confirmCommitted, revalidateCells])
 
   // Target edits made beside the agent use the editor's normal commit chain;
   // the workbench is another view of the document, not a separate draft store.
@@ -9262,18 +9949,9 @@ export function ProjectWorkspace() {
   if (status === "loading") return <WorkspaceSkeleton />
   if (status === "no-session") {
     return (
-      <div className="p-8 text-muted-foreground">
-        <RichMessage
-          k="workspace.status.notOnDevice"
-          values={{
-            signIn: (
-              <button className="underline" onClick={goToProjects}>
-                {t("auth.login.submitDefault")}
-              </button>
-            ),
-          }}
-        />
-      </div>
+      <SignedOutWorkspace
+        header={<OrgBreadcrumb section={project?.name ?? t("common.project")} orgId={project?.orgId} />}
+      />
     )
   }
   // RES-5: distinguish server-unreachable from a genuinely missing project.
@@ -9590,7 +10268,11 @@ export function ProjectWorkspace() {
           cellLabelsEnabled={cellLabelsEnabled}
           footnoteViewMode={footnoteViewMode}
           onFootnoteViewModeChange={setFootnoteViewMode}
+          targetKeyTermHighlightMode={targetKeyTermHighlightMode}
+          onTargetKeyTermHighlightModeChange={setTargetKeyTermHighlightMode}
           tnSidebarEnabled={tnSidebarVisible}
+          healthCalculationsEnabled={healthCalculationsEnabled}
+          onHealthCalculationsChange={setHealthCalculationsEnabled}
           sourceFontSize={fontSizes.source}
           targetFontSize={fontSizes.target}
           onLineNumbersChange={fileMeta.setLineNumbersEnabled}
@@ -10138,6 +10820,7 @@ export function ProjectWorkspace() {
               cellLockHolders,
               onClaimCell: handleClaimCell,
               onReleaseCell: handleReleaseCell,
+              onViewCell: handleViewCell,
               onTargetPresenceSelection: handleTargetPresenceSelection,
               onVisibleCellIdsChange: handleVisibleCellIdsChange,
             }}
@@ -10197,21 +10880,64 @@ export function ProjectWorkspace() {
                   tree, so toggling the lens never remounts it and loses its
                   virtualization state (and the separator stays a direct DOM
                   child of its Group, which the library requires). */}
-              <ResizablePanelGroup orientation="vertical" className="min-h-0">
+              <ResizablePanelGroup
+                // Named rather than left to useId: the library resolves a
+                // group by scanning ids and returns the first match, so two
+                // groups that ever shared one would read stale state and write
+                // fresh. Also what `data-group` shows in the inspector.
+                id="media-lens-rows"
+                orientation="vertical"
+                className="min-h-0"
+                // AQU-1119: fires once per gesture, at pointer-up. A drag that
+                // shut a section is heard here, after the group has settled.
+                onLayoutChanged={(_layout, meta) => mediaSections.noteLayoutSettled(meta)}
+                // Fires on every pointer MOVE, where the one above fires
+                // once at the release. Paints the rail over a section the
+                // drag has already shrunk to 40px; commits nothing.
+                onLayoutChange={() => mediaSections.notePointerLayout()}
+              >
               {timelineStacked && activeFile ? (
                 <>
                   <ResizablePanel
                     id="media-timeline"
                     panelRef={timelinePanelRef}
                     defaultSize={readStoredTimelinePaneHeight(activeFile.id)}
-                    minSize={TIMELINE_PANE_MIN_HEIGHT}
-                    maxSize={TIMELINE_PANE_MAX_SHARE}
+                    {...mediaSections.constraints.timeline}
                     groupResizeBehavior="preserve-pixel-size"
-                    onResize={(size) => {
-                      if (size.inPixels >= TIMELINE_PANE_MIN_HEIGHT) {
-                        writeStoredTimelinePaneHeight(activeFile.id, size.inPixels)
-                      }
-                    }}
+                    // The rail is positioned against this box.
+                    className="relative"
+                    // AQU-1119: a collapsed panel clips rather than reflows.
+                    // The library's own content box is `overflow: auto` and
+                    // spreads this after it, so without `hidden` the frozen
+                    // content would SCROLL inside the rail instead of being
+                    // hidden behind it.
+                    style={mediaSections.showsRail("timeline") ? { overflow: "hidden" } : undefined}
+                    // Records only. The remembered height is written once the
+                    // gesture ENDS (the group's onLayoutChanged), so a drag that
+                    // finishes collapsed never overwrites it on the way past
+                    // the floor.
+                    onResize={(size) => mediaSections.noteResize("timeline", size.inPixels)}
+                  >
+                  {/* Rendered unconditionally, and only its inline style
+                      changes: adding or removing this wrapper on collapse
+                      would remount TimelineEditor, taking the portaled text
+                      header with it and resetting the per-file prefs guard,
+                      the viewport measurement and the follow state. Frozen at
+                      its last real size so nothing inside ever learns it got
+                      small. */}
+                  <div
+                    ref={mediaSections.registerContent("timeline")}
+                    data-media-section="timeline"
+                    className="flex h-full min-h-0 w-full min-w-0 flex-col"
+                    style={
+                      mediaSections.isCollapsed("timeline") && mediaSections.frozen.timeline
+                        ? {
+                            minWidth: mediaSections.frozen.timeline.width,
+                            minHeight: mediaSections.frozen.timeline.height,
+                          }
+                        : undefined
+                    }
+                    inert={mediaSections.isCollapsed("timeline") || undefined}
                   >
                   <TimelineEditor
                     cells={audioMergedCells}
@@ -10291,8 +11017,28 @@ export function ProjectWorkspace() {
                     // maintainer can change this" title would be a lie — a
                     // maintainer cannot change it here either.
                     hideTimingMode={isSubtitleFile}
-                    // …and what the text column under the timeline is called.
-                    isSubtitleImport={isSubtitleFile}
+                    // AQU-1119: the timeline's own collapse control, and the
+                    // text section's — the latter because TimelineEditor owns
+                    // the header it portals into the table column's slot.
+                    onCollapseSection={() => mediaSections.collapse("timeline")}
+                    onCollapseTextSection={
+                      // Withheld on a file with no linked video: the table is
+                      // then the only thing in its row, and a flex row with
+                      // nothing in it is the one arrangement the layout cannot
+                      // hold.
+                      activeFile.coreMediaUrl ? () => mediaSections.collapse("text") : undefined
+                    }
+                    // Full screen has its own gate. The text may take the
+                    // lens on a file with no film — folding the timeline is
+                    // all that takes — where collapsing it cannot.
+                    onToggleTextFullscreen={
+                      mediaSections.isFullscreen("text")
+                        ? () => mediaSections.exitFullscreen("text")
+                        : mediaSections.canFullscreen("text")
+                          ? () => mediaSections.enterFullscreen("text")
+                          : undefined
+                    }
+                    isTextFullscreen={mediaSections.isFullscreen("text")}
                     onOpenRecording={handleOpenRecording}
                     project={editorProject ?? project ?? undefined}
                     onSelectCell={setTimelineSelectedCellId}
@@ -10343,8 +11089,29 @@ export function ProjectWorkspace() {
                     }}
                     linkingModeRequest={linkingModeRequest}
                   />
+                  </div>
+                  {mediaSections.showsRail("timeline") && (
+                    <MediaSectionRail
+                      section="timeline"
+                      orientation="horizontal"
+                      // The one rail wide enough to keep its name. Its tools go
+                      // with its body — every one of them acts on tracks that
+                      // are no longer on screen — and the rail painting over
+                      // the toolbar is what takes them away.
+                      label={t("editor.timeline.title")}
+                      preview={mediaSections.isPreviewingRail("timeline")}
+                      onExpand={() => mediaSections.expand("timeline")}
+                    />
+                  )}
                   </ResizablePanel>
-                  <ResizableHandle withHandle />
+                  {/* A pinned panel cannot be dragged, so the handle beside it
+                      must stop claiming it can: disabled drops its tab stop
+                      and its key handling rather than announcing a slider that
+                      will not move. */}
+                  <ResizableHandle
+                    withHandle
+                    disabled={mediaSections.separatorDisabled("timeline-body")}
+                  />
                 </>
               ) : null}
               {/* `minSize` is the only thing keeping the dialogue table usable
@@ -10352,31 +11119,58 @@ export function ProjectWorkspace() {
                   is the mechanism behind an existing browser pass's floor check
                   (browser-verify-media-table-sync.mjs asserts the table clears
                   80px on a 1280x700 window). */}
-              <ResizablePanel
-                id="media-body"
-                minSize={timelineStacked ? MEDIA_BODY_MIN_HEIGHT : undefined}
-              >
+              <ResizablePanel id="media-body" {...mediaSections.constraints.body}>
               {/* AQU-646: in the media lens a linked video docks to the LEFT of
                   the table, under the chip strip. Dragging the divider shut is
                   how you hide it; the table carries a pixel floor so a narrow
                   window collapses the picture rather than crushing the text. */}
-              <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
+              <ResizablePanelGroup
+                id="media-lens-body"
+                orientation="horizontal"
+                className="min-h-0 flex-1"
+                onLayoutChanged={(_layout, meta) => mediaSections.noteLayoutSettled(meta)}
+                // Fires on every pointer MOVE, where the one above fires
+                // once at the release. Paints the rail over a section the
+                // drag has already shrunk to 40px; commits nothing.
+                onLayoutChange={() => mediaSections.notePointerLayout()}
+              >
               {showVideoPane && activeFile?.coreMediaUrl ? (
                 <>
                   <ResizablePanel
                     id="media-video"
+                    panelRef={mediaSections.panelRefs.video}
                     defaultSize={readStoredVideoPaneWidth()}
-                    minSize={VIDEO_PANE_MIN_WIDTH}
-                    // 2026-08-08 (Sam): let the divider travel well past half —
+                    // 2026-08-08 (Sam): the divider travels well past half —
                     // the table's own pixel floor is what protects legibility.
-                    maxSize={VIDEO_PANE_MAX_SHARE}
-                    collapsible
-                    collapsedSize={0}
+                    // AQU-1119 moved the rest of these here: the pane is
+                    // collapsible while OPEN so dragging it shut still works,
+                    // and pinned to the rail once closed so only the rail's
+                    // button can reopen it.
+                    {...mediaSections.constraints.video}
                     groupResizeBehavior="preserve-pixel-size"
-                    onResize={(size) => {
-                      if (size.inPixels >= VIDEO_PANE_MIN_WIDTH) writeStoredVideoPaneWidth(size.inPixels)
-                    }}
+                    className="relative"
+                    style={mediaSections.showsRail("video") ? { overflow: "hidden" } : undefined}
+                    // Records only; the width is remembered at pointer-up, and
+                    // only if the gesture ended with the picture open — a drag
+                    // that ends in the rail used to write 220 on its way past
+                    // the floor, so the rail reopened the picture at its bare
+                    // minimum instead of where the reader had left it.
+                    onResize={(size) => mediaSections.noteResize("video", size.inPixels)}
                   >
+                    <div
+                      ref={mediaSections.registerContent("video")}
+                      data-media-section="video"
+                      className="flex h-full min-h-0 w-full min-w-0 flex-col"
+                      style={
+                        mediaSections.isCollapsed("video") && mediaSections.frozen.video
+                          ? {
+                              minWidth: mediaSections.frozen.video.width,
+                              minHeight: mediaSections.frozen.video.height,
+                            }
+                          : undefined
+                      }
+                      inert={mediaSections.isCollapsed("video") || undefined}
+                    >
                     <MediaVideoPane
                       key={activeFile.id}
                       src={activeFile.coreMediaUrl}
@@ -10395,13 +11189,57 @@ export function ProjectWorkspace() {
                       targetDirectionMode={fileMeta.targetDirectionMode}
                       sourceTextDirection={fileMeta.sourceTextDirection}
                       targetTextDirection={fileMeta.targetTextDirection}
+                      onCollapse={
+                        timelineStacked ? () => mediaSections.collapse("video") : undefined
+                      }
+                      onToggleFullscreen={
+                        mediaSections.isFullscreen("video")
+                          ? () => mediaSections.exitFullscreen("video")
+                          : mediaSections.canFullscreen("video")
+                            ? () => mediaSections.enterFullscreen("video")
+                            : undefined
+                      }
+                      isFullscreen={mediaSections.isFullscreen("video")}
                     />
+                    </div>
+                    {mediaSections.showsRail("video") && (
+                      <MediaSectionRail
+                        section="video"
+                        orientation="vertical"
+                        label={t("editor.timeline.videoPaneTitle")}
+                      preview={mediaSections.isPreviewingRail("video")}
+                        onExpand={() => mediaSections.expand("video")}
+                      />
+                    )}
                   </ResizablePanel>
-                  <ResizableHandle withHandle />
+                  <ResizableHandle
+                    withHandle
+                    disabled={mediaSections.separatorDisabled("video-table")}
+                  />
                 </>
               ) : null}
-              <ResizablePanel id="media-table" minSize={timelineStacked ? VIDEO_PANE_TABLE_MIN_WIDTH : undefined}>
-              <div className="flex h-full min-h-0 min-w-0 flex-col">
+              <ResizablePanel
+                id="media-table"
+                panelRef={mediaSections.panelRefs.text}
+                {...mediaSections.constraints.table}
+                className="relative"
+                style={mediaSections.showsRail("text") ? { overflow: "hidden" } : undefined}
+                onResize={(size) => mediaSections.noteResize("text", size.inPixels)}
+              >
+              <div
+                ref={mediaSections.registerContent("text")}
+                data-media-section="text"
+                className="flex h-full min-h-0 min-w-0 flex-col"
+                style={
+                  mediaSections.isCollapsed("text") && mediaSections.frozen.text
+                    ? {
+                        minWidth: mediaSections.frozen.text.width,
+                        minHeight: mediaSections.frozen.text.height,
+                      }
+                    : undefined
+                }
+                inert={mediaSections.isCollapsed("text") || undefined}
+              >
               {/* 2026-08-08 (Sam): the chip strip heads the TEXT column only —
                   TimelineEditor portals it here, and the video column carries
                   its own "Video" header at the same height. */}
@@ -10413,6 +11251,7 @@ export function ProjectWorkspace() {
             showFootnotesInline={footnoteViewMode === "inline"}
             footnotePanelActive={footnoteViewMode !== "off"}
             footnoteViewMode={footnoteViewMode}
+            targetKeyTermHighlightMode={targetKeyTermHighlightMode}
             onVisibleFootnotesChange={footnoteViewMode === "tray" ? handleVisibleFootnotesChange : undefined}
             username={currentUsername}
             activeLane={activeLane}
@@ -10466,6 +11305,7 @@ export function ProjectWorkspace() {
             onProjectChanged={refresh}
             onAddConceptFromSelection={handleAddConceptFromSelection}
             addConceptBlockedReason={addConceptBlockedReason}
+            canApproveConcept={canApproveConcept}
             onAskAiFromSelection={handleAskAiFromSelection}
             onAttachMediaFile={handleAttachMediaFile}
             onAttachMediaUrl={handleAttachMediaUrl}
@@ -10477,14 +11317,21 @@ export function ProjectWorkspace() {
             cellsWithRemoteChange={cellsWithRemoteChange}
             onClaimCell={handleClaimCell}
             onReleaseCell={handleReleaseCell}
+            onViewCell={handleViewCell}
             onTargetPresenceSelection={handleTargetPresenceSelection}
             onAckRemoteChange={handleAckRemoteChange}
-            checkLockHolder={checkLockHolder}
             staleCellIds={staleCellIds}
             upstreamStaleCellIds={upstreamStaleCellIds}
             assignmentsByCellId={assignmentsByCellId}
-            onVisibleRefChange={setTrackedCellRef}
-            onVisibleCellIdsChange={handleVisibleCellIdsChange}
+            onVisibleRefChange={setEditorViewportTrackedCellRef}
+            // AQU-1119: the rows stay mounted behind the rail, frozen at their
+            // last real size — so without this they would keep reporting
+            // themselves as "on screen" and translate-as-read would queue work
+            // for lines nobody can see. Undefined short-circuits the whole
+            // reporter, and its cleanup emits an empty set on the way in.
+            onVisibleCellIdsChange={
+              mediaSections.isCollapsed("text") ? undefined : handleVisibleCellIdsChange
+            }
             // Stacked mode already shows the toolbar in the media header row
             // above the timeline — don't render it twice. Chapter picker +
             // file options live in the in-editor row above Source/Target.
@@ -10492,6 +11339,15 @@ export function ProjectWorkspace() {
           />
               </div>
               </div>
+              {mediaSections.showsRail("text") && (
+                <MediaSectionRail
+                  section="text"
+                  orientation="vertical"
+                  label={t("editor.timeline.textPaneTitle")}
+                  preview={mediaSections.isPreviewingRail("text")}
+                  onExpand={() => mediaSections.expand("text")}
+                />
+              )}
               </ResizablePanel>
               </ResizablePanelGroup>
               </ResizablePanel>
@@ -10704,7 +11560,11 @@ export function ProjectWorkspace() {
                 className={showAudioToolbar ? "px-0 py-0.5" : undefined}
                 left={
                   <div className="flex min-w-0 items-center gap-1.5">
-                    <PeerPresence peers={presencePeers} onJumpToPeer={handleJumpToPresencePeer} />
+                    <PeerPresence
+                      store={presenceStore}
+                      onJumpToPeer={handleJumpToPresencePeer}
+                      resolveCellLabel={resolvePresenceCellLabel}
+                    />
                     <SyncStatusIndicator status={fileSyncStatus} />
                     <OutboxSyncIndicator
                       pendingCount={Math.max(0, outboxPending - outboxFailed)}
@@ -11282,7 +12142,12 @@ export function ProjectWorkspace() {
           onSave={async (next) => {
             if (!project) return
             await patchProject(project.id, (p) => moveFileToCorpus(p, moveTargetId, next))
-            refresh()
+            void emitFileCorpusSet({
+              projectId: project.id,
+              fileId: moveTargetId,
+              corpusMarker: next.trim() || null,
+              author: currentUsername,
+            }).then(() => refresh())
             setMoveTargetId(null)
           }}
         />

@@ -255,11 +255,10 @@ describe("NewVoiceModal engine selection", () => {
   it("explains that playground knobs do not affect Voice Design previews", async () => {
     const user = userEvent.setup()
     renderCreate({ provider: "inworld" })
-    expect(screen.queryByText(/options below only apply/)).toBeNull()
-    expect(screen.queryByText(/Previews ignore audio quality/)).toBeNull()
+    expect(screen.queryByText(/These options only apply/)).toBeNull()
     await user.click(screen.getByRole("tab", { name: /Voice design/ }))
-    expect(screen.getByText("Previews ignore audio quality, delivery, and talking speed.")).toBeTruthy()
-    expect(screen.getByText("The options below only apply when you generate a line with this voice. They don't affect the voices you hear in this dialog.")).toBeTruthy()
+    expect(screen.getByText("These options only apply when you generate a line with this voice. They don't affect the previews you hear in this dialog.")).toBeTruthy()
+    expect(screen.queryByText(/Previews ignore audio quality/)).toBeNull()
   })
 
   it("defaults Inworld voices to Highest quality with Stable delivery", () => {
@@ -605,7 +604,7 @@ describe("NewVoiceModal Inworld Voice Design", () => {
     expect(screen.queryByRole("combobox", { name: "Voice" })).toBeNull()
     expect(screen.getByLabelText("Describe the voice")).toBeTruthy()
     expect(screen.getByLabelText("Preview script")).toBeTruthy()
-    expect(screen.getByRole("button", { name: "Generate previews" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Generate previews" })).toBeEnabled()
   })
 
   it("always offers Language and Accent on Voice design, without Other", async () => {

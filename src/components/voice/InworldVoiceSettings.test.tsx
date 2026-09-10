@@ -69,12 +69,12 @@ describe("InworldVoiceSettings", () => {
   it("explains that Voice Design previews ignore these knobs", () => {
     render(<InworldVoiceSettings voice={{}} onChange={vi.fn()} previewIgnored />)
     expect(
-      screen.getByText("The options below only apply when you generate a line with this voice. They don't affect the voices you hear in this dialog."),
+      screen.getByText("These options only apply when you generate a line with this voice. They don't affect the previews you hear in this dialog."),
     ).toBeTruthy()
   })
 
   it("hides the Voice Design knobs hint on prebuilt and clone", () => {
     renderSettings()
-    expect(screen.queryByText(/options below only apply/)).toBeNull()
+    expect(screen.queryByText(/These options only apply/)).toBeNull()
   })
 })

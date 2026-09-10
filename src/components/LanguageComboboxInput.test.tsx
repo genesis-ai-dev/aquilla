@@ -9,6 +9,11 @@ import { LanguageComboboxInput } from "./LanguageComboboxInput"
  * field is not a Base-UI Combobox: the previous version cleared free-typed
  * text on Enter. The real-browser proof lives in
  * `e2e/specs/projects/language-combobox.spec.ts` — these cover the wiring.
+ *
+ * AQU-1116 pre-highlights the top-ranked match so type-then-Enter selects it.
+ * That narrows, but does not lift, the AQU-988 guarantee: Enter is claimed
+ * only while the list has matches, so free text ("Grade 7 English") and a
+ * settled exact name ("French") both still fall through untouched.
  */
 function Harness({ initial = "", exclude }: { initial?: string; exclude?: string[] }) {
   const [value, setValue] = useState(initial)
@@ -69,28 +74,118 @@ describe("LanguageComboboxInput", () => {
     expect(screen.getByTestId("committed").textContent).toBe("Grade 7 English")
   })
 
-  it("leaves Enter alone even when suggestions are showing, until one is highlighted", async () => {
+  /**
+   * AQU-1116 — the top match is pre-highlighted so type-then-Enter selects it.
+   * This is the one AQU-988 rule that was deliberately relaxed; the guard that
+   * replaces it is "a highlight exists only while there are matches", covered
+   * by the free-text cases above and below.
+   */
+  it("pre-highlights the top match as soon as the list has one", async () => {
     render(<Harness />)
     const input = screen.getByLabelText("Language")
-    // "English" matches the catalog, but nothing is highlighted yet — so
-    // Enter must not overwrite what the user actually typed.
+    typeInto(input, "Eng")
+    await screen.findByRole("listbox")
+
+    const options = screen.getAllByRole("option")
+    expect(options[0]!.textContent).toContain("English")
+    expect(options[0]!.getAttribute("aria-selected")).toBe("true")
+    // Only the top row — the rest stay unhighlighted.
+    expect(options.slice(1).every((o) => o.getAttribute("aria-selected") === "false")).toBe(true)
+  })
+
+  it("selects the pre-highlighted top match on Enter, without arrowing first", async () => {
+    render(<Harness />)
+    const input = screen.getByLabelText("Language")
     typeInto(input, "Englis")
     await screen.findByRole("listbox")
     fireEvent.keyDown(input, { key: "Enter" })
 
-    expect(screen.getByTestId("committed").textContent).toBe("Englis")
+    expect(screen.getByTestId("committed").textContent).toBe("English")
+    expect((input as HTMLInputElement).value).toBe("English")
+    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull())
   })
 
-  it("commits the highlighted suggestion once the user arrows to it", async () => {
+  it("ranks a code match first, so typing a code then Enter picks that language", async () => {
     render(<Harness />)
     const input = screen.getByLabelText("Language")
     typeInto(input, "fr")
     await screen.findByRole("listbox")
+    fireEvent.keyDown(input, { key: "Enter" })
+
+    expect(screen.getByTestId("committed").textContent).toBe("French")
+  })
+
+  it("moves the highlight off the top row with ArrowDown", async () => {
+    render(<Harness />)
+    const input = screen.getByLabelText("Language")
+    typeInto(input, "fr")
+    await screen.findByRole("listbox")
+    // Second row before arrowing — Enter after one ArrowDown must land here,
+    // i.e. the arrow steps *from* the pre-highlight rather than re-seeding it.
+    const second = screen.getAllByRole("option")[1]!.textContent
 
     fireEvent.keyDown(input, { key: "ArrowDown" })
     fireEvent.keyDown(input, { key: "Enter" })
 
+    const committed = screen.getByTestId("committed").textContent!
+    expect(committed).not.toBe("French")
+    expect(second).toContain(committed)
+  })
+
+  it("re-seeds the highlight to the new best match as the query changes", async () => {
+    render(<Harness />)
+    const input = screen.getByLabelText("Language")
+    typeInto(input, "g")
+    await screen.findByRole("listbox")
+    typeInto(input, "ger")
+
+    const options = screen.getAllByRole("option")
+    expect(options[0]!.getAttribute("aria-selected")).toBe("true")
+    expect(options[0]!.textContent).toContain("German")
+
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(screen.getByTestId("committed").textContent).toBe("German")
+  })
+
+  it("drops the highlight when an edit leaves no matches, so Enter stays free text", async () => {
+    render(<Harness />)
+    const input = screen.getByLabelText("Language")
+    typeInto(input, "Eng")
+    await screen.findByRole("listbox")
+    // Extending a matching prefix into free text must release Enter again.
+    typeInto(input, "Grade 7 English")
+    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull())
+
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(screen.getByTestId("committed").textContent).toBe("Grade 7 English")
+    expect((input as HTMLInputElement).value).toBe("Grade 7 English")
+  })
+
+  it("leaves Enter alone once the text is exactly a catalog name", async () => {
+    render(<Harness />)
+    const input = screen.getByLabelText("Language")
+    typeInto(input, "Frenc")
+    await screen.findByRole("listbox")
+    // The list hides itself here (isSettledLanguage), so Enter must not fire a
+    // second, duplicate selection.
+    typeInto(input, "French")
+    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull())
+
+    fireEvent.keyDown(input, { key: "Enter" })
     expect(screen.getByTestId("committed").textContent).toBe("French")
+  })
+
+  it("keeps the typed text when Escape dismisses a pre-highlighted list", async () => {
+    render(<Harness />)
+    const input = screen.getByLabelText("Language")
+    typeInto(input, "Eng")
+    await screen.findByRole("listbox")
+
+    fireEvent.keyDown(input, { key: "Escape" })
+    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull())
+
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(screen.getByTestId("committed").textContent).toBe("Eng")
   })
 
   it("never opens on a programmatic value change (no focus)", async () => {
@@ -159,6 +254,66 @@ describe("LanguageComboboxInput", () => {
 
     await waitFor(() => {
       expect(screen.queryByRole("listbox")).toBeNull()
+    })
+  })
+
+  /**
+   * AQU-1116 — `onEnterSelect` is how a field that commits on Enter (the
+   * add-lane input) commits the *match* instead of the typed prefix: Enter has
+   * already been claimed by the highlighted row, so the field's own onKeyDown
+   * never runs and it cannot read the resolved name any other way.
+   */
+  describe("onEnterSelect", () => {
+    function CommitHarness({ commits }: { commits: string[] }) {
+      const [value, setValue] = useState("")
+      return (
+        <LanguageComboboxInput
+          aria-label="Language"
+          value={value}
+          onValueChange={setValue}
+          onEnterSelect={(name) => {
+            setValue(name)
+            commits.push(name)
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") commits.push(`typed:${value}`)
+          }}
+        />
+      )
+    }
+
+    it("hands Enter the matched name, not the typed prefix", async () => {
+      const commits: string[] = []
+      render(<CommitHarness commits={commits} />)
+      const input = screen.getByLabelText("Language")
+      typeInto(input, "Spa")
+      await screen.findByRole("listbox")
+
+      fireEvent.keyDown(input, { key: "Enter" })
+
+      expect(commits).toEqual(["Spanish"])
+    })
+
+    it("still falls through to the field's own Enter for free text", async () => {
+      const commits: string[] = []
+      render(<CommitHarness commits={commits} />)
+      const input = screen.getByLabelText("Language")
+      typeInto(input, "Grade 7 English")
+
+      fireEvent.keyDown(input, { key: "Enter" })
+
+      expect(commits).toEqual(["typed:Grade 7 English"])
+    })
+
+    it("is not used for a mouse click, which only fills the field", async () => {
+      const commits: string[] = []
+      render(<CommitHarness commits={commits} />)
+      typeInto(screen.getByLabelText("Language"), "Spa")
+
+      fireEvent.click(await screen.findByRole("option", { name: /Spanish/ }))
+
+      expect(commits).toEqual([])
+      expect((screen.getByLabelText("Language") as HTMLInputElement).value).toBe("Spanish")
     })
   })
 })

@@ -100,6 +100,11 @@ export async function signSyncTokenWithRole(
     value: r.value,
   }))
 
+  const grantRows = await env.AQUILLA_PG.prepare(
+    "SELECT lane, role_level FROM project_member_lane_roles WHERE project_id = ? AND user_id = ? ORDER BY lane",
+  ).bind(projectId, user.id).all<{ lane: string; role_level: number }>()
+  const laneGrants = (grantRows.results ?? []).map((r) => ({ lane: r.lane, level: r.role_level }))
+
   const now = Math.floor(Date.now() / 1000)
   const claims: SyncTokenClaims = {
     userId: user.id,
@@ -113,6 +118,8 @@ export async function signSyncTokenWithRole(
     src: resolved.source,
     // AQU-553: omit entirely when unscoped (no rows).
     ...(scopes.length > 0 ? { scopes } : {}),
+    // AQU-730: omit entirely when the user has no lane grants (dual-read).
+    ...(laneGrants.length > 0 ? { laneGrants } : {}),
     aud: "sync",
     iat: now,
     exp: now + SYNC_TOKEN_TTL_SECONDS,

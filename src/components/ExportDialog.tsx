@@ -841,6 +841,16 @@ export function ExportDialog({
     return Array.from(names).sort()
   }, [cells])
 
+  // Same Base UI label rule as `chapterItems` below: without `items` the
+  // "All voices" option ("") renders an empty trigger.
+  const voiceItems = useMemo(
+    () => [
+      { value: "", label: t("importExport.dialog.allVoices") },
+      ...distinctVoices.map((v) => ({ value: v, label: v })),
+    ],
+    [distinctVoices, t],
+  )
+
   // Reset voice filter when dialog closes or cells change.
   useEffect(() => {
     if (!open) setVoiceFilter("")
@@ -855,6 +865,48 @@ export function ExportDialog({
     return cs.filter((c) => getCellVoice(c) === voiceFilter)
   }
 
+<<<<<<< Updated upstream
+=======
+  // AQU-465: Chapter scope — the middle ground between "current file" and
+  // "whole project". "" = every chapter, the same "no filter" contract the
+  // voice filter uses.
+  const [chapterFilter, setChapterFilter] = useState<string>("")
+
+  const chapterLabels = useMemo(() => listChapterLabels(cells), [cells])
+
+  // Base UI resolves the trigger's label from the root's `items`, not from
+  // the mounted <SelectItem>s, and falls back to the raw value string when
+  // there are none. "GEN 2" is its own label so it looked fine; "" — the
+  // "All chapters" option — rendered an empty trigger.
+  const chapterItems = useMemo(
+    () => [
+      { value: "", label: t("importExport.dialog.allChapters") },
+      ...chapterLabels.map((c) => ({ value: c, label: c })),
+    ],
+    [chapterLabels, t],
+  )
+
+  /** Only offered where it means something: a file with more than one chapter,
+   *  exporting itself (not the project) through a cell-array format. */
+  const canScopeToChapter =
+    effectiveScope === "file" && supportsChapterScope(format) && chapterLabels.length > 1
+  const activeChapter = canScopeToChapter ? chapterFilter : ""
+
+  // Drop the chapter on close, on a file switch, and whenever the remembered
+  // label is not in the current file. WITHOUT THE LAST CLAUSE a "GEN 3" left
+  // over from the previous file would filter every cell away and export an
+  // empty document — the same trap the format-reset effect above guards.
+  useEffect(() => {
+    if (!open) setChapterFilter("")
+  }, [open])
+  useEffect(() => {
+    setChapterFilter("")
+  }, [activeFileId])
+  useEffect(() => {
+    if (chapterFilter && !chapterLabels.includes(chapterFilter)) setChapterFilter("")
+  }, [chapterFilter, chapterLabels])
+
+>>>>>>> Stashed changes
   // Load cells for all project files when project scope is selected and the
   // format is a client-side one. Disabled until the user actually picks
   // project scope so we don't fan-out N fetches on dialog open.
@@ -2031,6 +2083,48 @@ export function ExportDialog({
           )}
         </fieldset>
 
+<<<<<<< Updated upstream
+=======
+        {/* AQU-465: Chapter scope — only shown when the file has chapters to
+            choose between and the format can be sliced by one */}
+        {canScopeToChapter && (
+          <fieldset className="flex flex-col gap-1.5">
+            <legend className="text-xs font-medium text-muted-foreground mb-1.5">
+              {t("editor.milestone.vocab.chapterPlural")}
+            </legend>
+            <Select
+              value={chapterFilter}
+              onValueChange={(v) => setChapterFilter(v ?? "")}
+              items={chapterItems}
+            >
+              <SelectTrigger
+                size="sm"
+                className="w-full"
+                aria-label={t("importExport.dialog.chapterFilterAriaLabel")}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="">{t("importExport.dialog.allChapters")}</SelectItem>
+                  {chapterLabels.map((c) => (
+                    <SelectItem key={c} value={c}>{c}</SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+            {chapterFilter && (
+              <p className="text-[10px] text-muted-foreground">
+                <RichMessage
+                  k="importExport.dialog.chapterFilterHint"
+                  values={{ chapter: <strong>{chapterFilter}</strong> }}
+                />
+              </p>
+            )}
+          </fieldset>
+        )}
+
+>>>>>>> Stashed changes
         {/* AQU-439: Voice filter — only shown when cells have cast assignments */}
         {distinctVoices.length > 0 && (
           <fieldset className="flex flex-col gap-1.5">
@@ -2040,6 +2134,7 @@ export function ExportDialog({
             <Select
               value={voiceFilter}
               onValueChange={(v) => setVoiceFilter(v ?? "")}
+              items={voiceItems}
             >
               <SelectTrigger
                 size="sm"

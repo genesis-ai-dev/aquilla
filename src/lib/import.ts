@@ -1103,6 +1103,7 @@ export async function importMacula(
       parserVersion: "macula-tsv-v1",
       sourceLanguage,
       bookCode,
+      corpusMarker: sourceLanguage === "hbo" ? "OT" : "NT",
     },
     cells,
     rawBytes,
@@ -1701,6 +1702,7 @@ export async function emitParsedFile(
       targetTextDirection: ctx.targetTextDirection,
       orderedBy,
       ...(result.bookCode ? { bookCode: result.bookCode } : {}),
+      ...(result.corpusMarker ? { corpusMarker: result.corpusMarker } : {}),
     },
     cells,
     rawSource: result.rawSource,
@@ -1735,6 +1737,7 @@ export async function emitParsedFile(
       ...(result.corpusMarker ? { corpusMarker: result.corpusMarker } : {}),
       ...(result.originalName ? { originalName: result.originalName } : {}),
       ...(result.bookCode ? { bookCode: result.bookCode } : {}),
+      ...(result.rawBytes || result.rawSource ? { hasOriginalSource: true as const } : {}),
     },
     speakerPairs,
   }
@@ -2375,6 +2378,7 @@ export async function importParatextAsTarget(
           targetLanguage: ctx.targetLanguage,
           targetTextDirection: plan.project.settings.rightToLeft ? "rtl" : ctx.targetTextDirection,
           bookCode: bookPlan.bookId,
+          ...(bookPlan.corpusMarker ? { corpusMarker: bookPlan.corpusMarker } : {}),
         },
         cells,
         rawSource: bookPlan.rawSource,
@@ -2634,6 +2638,15 @@ export async function parseFile(
       throw new Error("SDBH lexicon editions import via importSdbh(), not importFile()")
     case "custom":
       throw new Error("Custom formats must be prepared by the AI-assisted recipe service")
+    case "codex":
+    case "source":
+      // AQU-997: server-side file KINDS, not upload formats. They only ever
+      // arrive already-parsed — a migrated Codex notebook's cells come in as
+      // events (lib/migrate/map.ts), and "source" is the role fallback for a
+      // row carrying no kind at all. `detectFileType` returns neither, so
+      // nothing routes an upload here; this is the same defensive guard the
+      // media arms below are.
+      throw new Error("codex/source are server-side file kinds, not import formats")
     case "audio":
     case "video":
       // Media files have no text parser; importFile() routes them to

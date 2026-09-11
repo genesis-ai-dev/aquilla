@@ -27,17 +27,17 @@
 > PR gate is red on `dev` and fails in the first of three sequential phases, so
 > the worker test suites and the SPA build never execute at all; reported with
 > patches rather than fixed, since none of it is auth/session work.
-> `docs/OPSEC-REVIEW-2026-08-27.md` is the most recent pass — the second on API
-> security & data exposure, closing the two items the first one deliberately
-> deferred: OPS-22 (rate limiting completed on every remaining external Agent
-> API route — reads, artifact meta/content/inspect, changeset GET/discard) and
+> `docs/OPSEC-REVIEW-2026-08-27.md` covers the second pass on API security &
+> data exposure, closing the two items the first one deliberately deferred:
+> OPS-22 (rate limiting completed on every remaining external Agent API
+> route — reads, artifact meta/content/inspect, changeset GET/discard) and
 > OPS-23 (two audio-id fields that bypassed the codebase's own `isPathSafeId`
 > convention). It also records OPS-24 — a confirmed check-then-act race in
 > credit-cap enforcement across concurrent chat requests, traced to its
 > mechanics but reported rather than fixed, since a correct fix means
 > redesigning the credit-guard/ledger interaction, not a same-day patch.
-> `docs/OPSEC-REVIEW-2026-08-31.md` is the third pass on
-> auth & session management, taking up the invite-storage question 08-24
+> `docs/OPSEC-REVIEW-2026-08-31.md` covers the third pass on auth & session
+> management, taking up the invite-storage question 08-24
 > handed forward. It adds OPS-25 (the three public invite-preview routes each
 > hand-rolled a "best-effort caller" helper that checked only signature and
 > `exp`, skipping *both* the `jti` logout denylist and the
@@ -47,18 +47,32 @@
 > rather than fixed, because three product surfaces deliberately re-display a
 > live invite token and hashing them is a product decision, not a port of
 > OPS-20's migration).
+> `docs/OPSEC-REVIEW-2026-09-03.md` covers the fourth pass on
+> API security & data exposure. It adds OPS-27: the first-party
+> `/api/v1/chat/completions`, `/api/v1/ai/agent/run`, and `/api/v1/voice/tts`
+> proxies had no rate limiting at all, and every spend guard on them
+> (`AI_BUDGET_ENFORCE`/`CREDIT_ENFORCE`/`TTS_BUDGET_ENFORCE`) defaults to
+> log-only in every deployed environment — fixed with a per-user throttle on
+> each route; whether to ever flip the enforce flags is flagged as a separate
+> product decision, not auto-changed. OPS-28 closes two routes that echoed
+> raw database error text to the caller.
 > `docs/OPSEC-REVIEW-2026-09-07.md` is the most recent pass. A parallel
 > session ran the broad auth/session sweep the same morning (PR #569), so this
-> one is deliberately narrow: it adds OPS-27 (0080's plaintext-token
+> one is deliberately narrow: it adds OPS-29 (0080's plaintext-token
 > compatibility arm outlived its own 24h/7d rollover window by two weeks —
 > both `token` columns now dropped by migration 0087, with the hash-only
 > guarantee asserted structurally; and the reset tests, which had drifted onto
 > that compatibility arm, had left the *production* digest path with no
-> end-to-end coverage at all for those two weeks) and OPS-28 (an adversarial
+> end-to-end coverage at all for those two weeks) and OPS-30 (an adversarial
 > read of #569's own change: its per-source-IP PAT throttle is a hard lockout
 > that rejects valid tokens from a shared egress IP, and by its own DB-load
 > rationale likely costs more round trips than it saves — reported to that PR,
 > not patched here).
+>
+> **Numbering note:** the 09-03 and 09-07 passes ran concurrently on separate
+> branches and both originally claimed OPS-27/OPS-28. 09-03 merged first, so
+> its numbers stand; 09-07's two findings were renumbered to **OPS-29/OPS-30**
+> when it rebased onto them. No finding was lost or renamed twice.
 
 _Standing OPSEC review of Aquilla's handling of sensitive data. Complements
 `docs/SECURITY-NOTES-2026-06-10.md` (application-security findings, June audit)
@@ -89,7 +103,7 @@ Ranked by what it would cost us if it leaked, not by volume.
 | D2 | **Unpublished translation drafts** — per-cell target text, comments, backtranslations | Postgres `cells`/`events`, R2 source blobs | Pre-publication scripture text for named languages. In restricted-access regions, *which* language is being worked on and *by whom* is the sensitive part, not the prose. |
 | D3 | **Translator identity + activity** — emails, usernames, org/project membership, presence, focus locks, `last_used_at` | Postgres; the `ProjectSync` DO in memory | Presence and focus-lock data is a working-hours and collaboration graph. Combined with D2 this answers "who is translating what, and when" — the question that makes this product a target rather than a curiosity. |
 | D4 | **Third-party credentials** — `OPENROUTER_API_KEY`, Monday client/signing secrets, GitLab admin token, Neon/Hyperdrive connection strings, R2 keys, `CLOUDFLARE_API_TOKEN`, Apple/Windows/Tauri signing keys | Worker secrets + GitHub Actions secrets | Direct financial loss (LLM spend), or — for the code-signing keys — the ability to ship a signed malicious desktop build. |
-| D5 | **Bearer tokens in circulation** — 30-day access JWTs, 15-minute sync tokens, `aqk_` Agent-API PATs, password-reset and email-verification tokens, invite tokens | Client IndexedDB / localStorage; `api_credentials`, `password_reset_tokens`, `email_verification_tokens` (hashed — the latter two since migration 0080, OPS-20, with the plaintext columns themselves dropped by 0087, OPS-27); `project_invites`, `org_invites` (**plaintext** — OPS-26) | Each is a live credential. A password-reset token is account takeover on its own for 24 hours. For the two auth-token tables the guarantee is now structural rather than behavioural: since migration 0087 there is no plaintext column to write to, so restoring a pre-0080 backup into the live schema can no longer re-introduce readable reset links. Invite tokens ride in a URL path, which is the least protected place a bearer token can be — **and they remain the exception to this row's "hashed" claim**: both invite tables store the raw token, so a DB read hands over working invite links (OPS-26, `docs/OPSEC-REVIEW-2026-08-31.md`). |
+| D5 | **Bearer tokens in circulation** — 30-day access JWTs, 15-minute sync tokens, `aqk_` Agent-API PATs, password-reset and email-verification tokens, invite tokens | Client IndexedDB / localStorage; `api_credentials`, `password_reset_tokens`, `email_verification_tokens` (hashed — the latter two since migration 0080, OPS-20, with the plaintext columns themselves dropped by 0087, OPS-29); `project_invites`, `org_invites` (**plaintext** — OPS-26) | Each is a live credential. A password-reset token is account takeover on its own for 24 hours. For the two auth-token tables the guarantee is now structural rather than behavioural: since migration 0087 there is no plaintext column to write to, so restoring a pre-0080 backup into the live schema can no longer re-introduce readable reset links. Invite tokens ride in a URL path, which is the least protected place a bearer token can be — **and they remain the exception to this row's "hashed" claim**: both invite tables store the raw token, so a DB read hands over working invite links (OPS-26, `docs/OPSEC-REVIEW-2026-08-31.md`). |
 | D6 | **Voice recordings and cloned voices** | R2 `aquilla-snapshots`, Modal services | Biometric-adjacent. A cloned voice is not revocable the way a password is. |
 | D7 | **User-supplied vendor API keys** (Gemini/TTS/completion) | Browser `localStorage`, org settings in Postgres | Someone else's credential that we chose to hold. |
 | D8 | **Session replays** | PostHog (third party) | Inputs are masked, but the page body is deliberately visible — so D2 draft text leaves our infrastructure by design. |
@@ -219,14 +233,12 @@ nothing, including for the credential scan added in V5.
 the first thing to resolve, because it gates whether anything else in §5 is
 actually enforced.
 
-**Update (2026-08-12, dev merge): resolved by relocation, not repair.** AQU-564
-retired Actions as the pull-request gate entirely: `ci.yml` now has no
-`pull_request`/`push` trigger (dispatch-only fallback), and PR validation runs
-in Cloudflare Workers Builds via `scripts/cloudflare-ci-checks.mjs`. The
-credential scan from V5 accordingly runs in that script's `lint` lane — the
-enforced path — with the `ci.yml` lint step retained as a mirror for dispatch
-runs. "CI is green" is meaningful again, provided the Workers Builds check is
-required on the target branch.
+**Update (2026-09-09, AQU-1219): validation runs before push.** Cloudflare
+Workers Builds now compiles previews only. `.husky/pre-push` runs
+`pnpm scan:secrets` before the existing commit-based affected E2E gate. The dispatch-only `ci.yml` retains manual equivalents.
+A green preview check confirms compilation, not security or functional testing.
+Local hooks can be bypassed; API-created commits do not execute them. QA reviews
+published previews under this explicitly chosen policy.
 
 ### V5 — No credential scanning in the toolchain — **FIXED IN THIS CHANGE** [FACT]
 
@@ -333,19 +345,17 @@ resolved by AQU-564 — see its section above.)
 | Fail closed on the sync auth bypass in deployed environments | `sync-worker/src/environment-guard.ts`, `index.ts`, `project-do.ts` |
 | Baseline HTTP security headers on the web surface | `worker/security-headers.ts` |
 | Invite tokens fingerprinted, never logged whole | `src/lib/sync/invites.ts` |
-| Credential scanning as a required CI check | `scripts/secret-scan.ts`; lint lane of `scripts/cloudflare-ci-checks.mjs` (the enforced PR gate), mirrored in `.github/workflows/ci.yml` (`lint`) |
-| SPA Worker suite actually runs | `pnpm run test:worker` — spa lane of `scripts/cloudflare-ci-checks.mjs`, mirrored in the ci.yml `unit` job |
+| Credential scanning before push | `scripts/secret-scan.ts`; first command in `.husky/pre-push`; manual fallback in `.github/workflows/ci.yml` |
+| SPA Worker suite available for targeted/manual validation | `pnpm run test:worker`; manual ci.yml `unit` job |
 | auth-worker `hono` floor raised above the SEC-7 advisory | `auth-worker/package.json` |
 
 Every one has a test. A control without a test is V4 waiting to happen again.
 
 ### Recommended next, in order
 
-0. ~~**Get CI actually running again (V4a).**~~ Done via AQU-564: the PR gate
-   moved off Actions to Cloudflare Workers Builds
-   (`scripts/cloudflare-ci-checks.mjs`); every control above now rides an
-   enforced lane there. Residual: confirm the Workers Builds check is marked
-   required on `dev`/`main` branch protection.
+0. **Validation ownership (AQU-1219).** Local push hooks run automated checks;
+   Cloudflare compiles previews for QA. Do not interpret its branch-protection
+   check as evidence that tests or credential scanning ran.
 1. **Split `SECRET_KEY` / `SYNC_SECRET_KEY` per environment (V7).** Highest
    leverage remaining. Replace cross-env token portability with a dev-only test
    fixture — the testing convenience it buys is not worth prod credentials

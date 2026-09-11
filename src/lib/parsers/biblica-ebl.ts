@@ -68,7 +68,7 @@ export async function extractEblStrings(
   })
 
   const strings = selection.notes.map((note) => {
-    const value = idmlUnitToTranslatableString(note.unit)
+    const value = idmlUnitToTranslatableString(note.unit, result.styleCatalog)
     const milestone: ImportMilestone | undefined = note.division
       ? {
           key: note.division.key,

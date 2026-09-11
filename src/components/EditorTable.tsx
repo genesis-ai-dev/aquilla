@@ -175,6 +175,7 @@ import { useEditorActions } from "@/context/EditorActionsContext"
 import { isInMemberScope } from "@/lib/sync/member-scopes"
 import { SourceSelectionToolbar } from "./SourceSelectionToolbar"
 import { buildSourceChip, type ContextChip } from "@/lib/agent/context-chip"
+import { ownCastName } from "@/lib/timeline/cue-character"
 import { parseTimestampRange } from "@/lib/video/vtt-generator"
 import { FootnoteInline } from "./footnotes/FootnoteInline"
 import {
@@ -225,8 +226,18 @@ const ESTIMATED_ROW_HEIGHT_PX = 140
 
 /** The gutter track widens by the character circle's w-6 when the cast
  *  gutter is on (stacked media lens). One shared type keeps the header row,
- *  paragraph bar, and rows in the same template. */
-type EditorGridCols = "grid-cols-[84px_1fr_1fr]" | "grid-cols-[132px_1fr_1fr]"
+ *  paragraph bar, and rows in the same template.
+ *
+ *  AQU-1101: the text tracks are `minmax(0,1fr)`, never a bare `1fr`. A bare
+ *  `1fr` carries an implicit `min-width: auto`, so a single unbreakable token
+ *  (a URL, a long identifier) widens ITS track to min-content and steals the
+ *  width from the sibling — source and target stop lining up with each other
+ *  and with the header row. Flooring the minimum at 0 makes the two tracks
+ *  equal fractions of the row whatever the content is; the cell surfaces then
+ *  break the token with `break-words` (see EditorCellSurface). */
+type EditorGridCols =
+  | "grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]"
+  | "grid-cols-[132px_minmax(0,1fr)_minmax(0,1fr)]"
 const LEGEND_LIST_DRAW_DISTANCE_PX = 240
 
 /**
@@ -1808,7 +1819,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // fixed width keeps Source header-aligned. No right gutter; the floating
   // action rail is absolutely positioned. Target reserves pe-9 for the
   // expand chevron.
-  const gridCols: EditorGridCols = castGutter ? "grid-cols-[132px_1fr_1fr]" : "grid-cols-[84px_1fr_1fr]"
+  const gridCols: EditorGridCols = castGutter
+    ? "grid-cols-[132px_minmax(0,1fr)_minmax(0,1fr)]"
+    : "grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]"
 
   const handleMouseUp = useCallback(() => {
     if (isDragging.current && dragCells.current.size > 1) {
@@ -4479,6 +4492,12 @@ function EditorRow({
     () => resolveIdmlEditorConfiguration(cell.metadata, cell.originalHtml),
     [cell.metadata, cell.originalHtml],
   )
+  const idmlStyleCatalog = idmlConfiguration?.kind === "ready"
+    ? idmlConfiguration.context.styleCatalog
+    : undefined
+  const idmlParagraphStyleId = idmlConfiguration?.kind === "ready"
+    ? idmlConfiguration.context.paragraphStyleId
+    : undefined
   const canEditSourceForCell = canEditSource && !idmlConfiguration
   // AQU-847: an imported MEDIA section's `value` (→ `cell.original`) is the
   // import FILENAME; its real source text is the transcript. The read surface
@@ -5386,11 +5405,24 @@ function EditorRow({
   // parsers produce (<b>, <i>, <u>, <s>, <code>). Anything else in an imported
   // document — notably <img>/<a>, which DOMPurify's defaults let through —
   // is dropped rather than rendered. See OPS-8.
-  // Prefer the explicitly-assigned cast member's name; fall back to the cell's
-  // own label (e.g. a chapter/verse marker from USFM), then nothing.
+  // Prefer the explicitly-assigned cast member's name; then the character the
+  // cell itself names; then the cell's own label (e.g. a chapter/verse marker
+  // from USFM), then nothing.
+  //
+  // AQU-1018: `ownCastName` is the middle rung, and it is what makes a freshly
+  // imported subtitle row say who is speaking. The assigned-voice name only
+  // resolves once `castAssignments` has landed AND the voice is still in the
+  // library, and neither holds at the moment the client actually needs the
+  // label: on import there are no targets yet to read the name off, the
+  // character sheet's `cast.assign` events land BEFORE the `saveTts` that mints
+  // the voices (a documented degraded-success window in
+  // ProjectWorkspace.handleImportCharacters), and deleting a voice later strands
+  // every assignment pointing at it. In all three the sheet's `cast_name` is
+  // sitting right there on the cell — the cast gutter has always drawn it — and
+  // the two corners went blank anyway.
   const castVoiceId = cellLabelsEnabled ? assignedCastVoiceId(project.ttsSettings, cell.id) : undefined
   const castName = castVoiceId ? findVoice(project.ttsSettings, castVoiceId)?.name : undefined
-  const labelText = castName ?? cell.cellLabel ?? null
+  const labelText = castName ?? ownCastName(cell) ?? cell.cellLabel ?? null
   const showCellLabel = cellLabelsEnabled && labelText
 
   // The cell number tints by worst severity. That's the whole signal — the
@@ -6037,7 +6069,12 @@ function EditorRow({
               // source column. pe-7 clears the floating pencil.
               // select-text: global chrome disables selection; source must stay
               // selectable for add-to-termbase / Ask AI from selection.
-              "relative flex h-full min-h-[40px] flex-col rounded-lg px-2 py-1.5 pe-7 select-text transition-[colors,opacity]",
+              // AQU-1101: min-w-0 + break-words. `minmax(0,1fr)` floors the
+              // TRACK, but a grid item keeps `min-width: auto` and would still
+              // overflow its area on an unbreakable token; min-w-0 lets it
+              // shrink and break-words (inherited by the text below) breaks the
+              // token instead of blowing the column out.
+              "relative flex h-full min-h-[40px] min-w-0 flex-col break-words rounded-lg px-2 py-1.5 pe-7 select-text transition-[colors,opacity]",
               // Match the target well — same muted fill + ring (not a darker
               // primary-tinted edit chrome).
               "focus-within:bg-muted focus-within:ring-1 focus-within:ring-ring/40 focus-within:ring-inset",
@@ -6120,13 +6157,14 @@ function EditorRow({
                   2026-08-26) — "put that character label also in the top left
                   of source cells… we'll just scoot the time range over".
 
-                  THE SAME VALUE THE TARGET CORNER SHOWS, deliberately: the two
-                  names in this app are not interchangeable (the sheet's
-                  `cast_name` is what the timeline, the recorder and the exports
-                  print), and Sam's call was that these two corners agree with
-                  each other rather than with those. It therefore rides the
-                  same "Show cell labels" preference and goes blank in the same
-                  places.
+                  THE SAME VALUE THE TARGET CORNER SHOWS, deliberately: Sam's
+                  call was that these two corners agree with EACH OTHER, so both
+                  read the one `labelText` and both ride the "Show cell labels"
+                  preference. AQU-1018 did not weaken that — it only gave
+                  `labelText` a `cast_name` rung beneath the assigned voice, so
+                  the corners now agree with the timeline/recorder/exports in the
+                  cases where they used to agree on NOTHING. The two names still
+                  are not interchangeable, and an assigned voice still wins.
 
                   `dir="auto"` because the lane is forced LTR for timecodes and
                   a name is not a timecode. The width cap is what does the
@@ -6164,7 +6202,11 @@ function EditorRow({
                 className="w-full !px-0"
               />
             ) : (cell.medium !== "media" && (sourceDraft?.valueHtml || cell.originalHtml)) ? (
-              <SanitizedRichHtml html={sourceDraft?.valueHtml || cell.originalHtml || ""} />
+              <SanitizedRichHtml
+                html={sourceDraft?.valueHtml || cell.originalHtml || ""}
+                idmlStyleCatalog={idmlStyleCatalog}
+                idmlParagraphStyleId={idmlParagraphStyleId}
+              />
             ) : (
               <UsfmSourceText
                 // AQU-646: an imported media segment's stored `value` is the
@@ -6328,6 +6370,7 @@ function EditorRow({
                     editable={editable && !isLoading && !lockHolderLabel}
                     subdued={showCompletionOverlay}
                     empty={!visibleTranslated?.trim()}
+                    preserveWhitespace={Boolean(idmlConfiguration)}
                     onClick={(event) => {
                       event.stopPropagation()
                       requestTargetEdit(idmlConfiguration
@@ -6354,7 +6397,11 @@ function EditorRow({
                           {overlayDraftText}
                         </span>
                       ) : idmlConfiguration && visibleTranslatedHtml ? (
-                        <TargetIdmlHtml html={visibleTranslatedHtml} />
+                        <TargetIdmlHtml
+                          html={visibleTranslatedHtml}
+                          idmlStyleCatalog={idmlStyleCatalog}
+                          idmlParagraphStyleId={idmlParagraphStyleId}
+                        />
                       ) : targetHasRichFormatting && visibleTranslatedHtml ? (
                         <TargetRichHtml
                           html={visibleTranslatedHtml}

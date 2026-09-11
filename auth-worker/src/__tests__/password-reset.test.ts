@@ -21,7 +21,7 @@ function register(username: string, email: string, password: string): Promise<Re
 }
 
 /** Plant a reset token in the shape the route actually writes: digest only
- *  (OPS-20/OPS-27). The plaintext is never stored, so a test that needs a
+ *  (OPS-20/OPS-29). The plaintext is never stored, so a test that needs a
  *  usable token has to hash it in the same way the handler will.
  *
  *  Until 2026-09-07 this helper seeded PLAINTEXT rows, which meant every test
@@ -156,11 +156,11 @@ describe("password reset — request (AQU-675: never creates an account)", () =>
   // 24-hour account-takeover credential; it must not be readable from the
   // table, so a snapshot/replica/support query of password_reset_tokens is not
   // a set of live takeover links.
-  // Since OPS-27 (migration 0087) the guarantee is structural: there is no
+  // Since OPS-29 (migration 0087) the guarantee is structural: there is no
   // column a plaintext reset token could be written to. Assert the schema as
   // well as the value, so re-adding the column fails here rather than
   // silently restoring a readable-credential table.
-  it("stores the reset token as a digest, with no plaintext column to leak (OPS-20/OPS-27)", async () => {
+  it("stores the reset token as a digest, with no plaintext column to leak (OPS-20/OPS-29)", async () => {
     await register("ops20user", "ops20user@example.com", "old-password-1")
     await reqJson("/api/v2/auth/password-reset/request", { email: "ops20user@example.com" })
 
@@ -179,13 +179,13 @@ describe("password reset — request (AQU-675: never creates an account)", () =>
     expect(plaintextColumn).toBeNull()
   })
 
-  // [Pen test] Auth & session mgmt (2026-09-07), OPS-27. The rollover test
+  // [Pen test] Auth & session mgmt (2026-09-07), OPS-29. The rollover test
   // that used to sit here ("still accepts a pre-0080 plaintext token row")
   // was deleted with the compatibility arm it covered: the 24-hour window
   // closed on 2026-08-25, and migration 0087 dropped the column it read.
   // Its replacement is the assertion below — a row with no digest match is
   // rejected, which is now the only shape a plaintext row could take.
-  it("rejects a reset token that has no matching digest (post-OPS-27)", async () => {
+  it("rejects a reset token that has no matching digest (post-OPS-29)", async () => {
     await register("ops27user", "ops27user@example.com", "old-password-1")
     await seedToken("ops27user", "the-real-token-1", soon())
 

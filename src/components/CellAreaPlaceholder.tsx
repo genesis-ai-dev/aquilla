@@ -13,7 +13,7 @@ import { useT } from "@/lib/i18n/I18nProvider"
 /** Matches EditorTable's default gridCols (the Text lens shape — the stacked
  *  media lens widens the gutter, but this skeleton always precedes text
  *  mode). Keep in sync if the table's columns change. */
-const GRID_COLS = "grid-cols-[84px_1fr_1fr]"
+const GRID_COLS = "grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]"
 
 interface CellAreaPlaceholderProps {
   state: CellAreaState

@@ -176,7 +176,7 @@ describe("password-reset verify/reset attempt throttling", () => {
 })
 
 /** Plant a reset token in the shape the route actually writes: digest only
- *  (OPS-20/OPS-27). The plaintext is never stored, so a test that needs a
+ *  (OPS-20/OPS-29). The plaintext is never stored, so a test that needs a
  *  usable token has to hash it in the same way the handler will. */
 async function seedToken(username: string, token: string, expiresAt: string): Promise<void> {
   const u = await env.AQUILLA_PG.prepare("SELECT id FROM users WHERE username = ?")

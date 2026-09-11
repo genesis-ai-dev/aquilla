@@ -1,6 +1,6 @@
 -- Migration 0087: drop the plaintext `token` columns left behind by 0080
 -- ([Pen test] Auth & session mgmt weekly review, 2026-09-07 — Monday theme;
--- finding OPS-27 in docs/OPSEC-REVIEW-2026-09-07.md).
+-- finding OPS-29 in docs/OPSEC-REVIEW-2026-09-07.md).
 --
 -- This is the FOLLOW-UP step migration 0080 wrote down and left for later:
 --

@@ -53,6 +53,7 @@ import { syncGroupsToNeon, type Placement } from "../src/lib/migrate/group-sync"
 import { parseCodexNotebook } from "../src/lib/codex-editor/parse-codex"
 import { mapFilePairToEvents, collectSpeakers, type FilePairInput } from "../src/lib/migrate/map"
 import { computeOrphanRetractions } from "./lib/migrate-orphans"
+import { eventHash } from "./migrate-daemon/plan"
 import { collectCellAudio, audioAttachEvent } from "../src/lib/migrate/audio"
 import type { AudioImport } from "../src/lib/migrate/audio"
 import { buildOidIndex, planCellAudio, buildCellAudioEvents } from "../src/lib/migrate/audio-copy"
@@ -85,6 +86,8 @@ installMigrateRunnerHeader()
 const SYNC = process.env.SYNC_BASE ?? "https://api.aquilla.app/sync"
 const INGEST_CHUNK = 2500
 const FALLBACK_AUTHOR = "legacy-import"
+// parity gate only: freezes fallbackTs so migrate-all and the daemon hash identically
+const NOW = process.env.MIGRATE_FIXED_NOW ? Number(process.env.MIGRATE_FIXED_NOW) : undefined
 const execFileP = promisify(execFile)
 
 // ── fast asset copy (--audio-fast): server-side R2 CopyObject (no bytes move,
@@ -171,7 +174,15 @@ function writeGroupSyncState(v: GroupSyncState): void {
 }
 // Cross-machine mutex for --apply, alongside the state object in R2
 // (_migrate/audio-migrate-state.json → _migrate/audio-migrate-state.lock).
+// The content pass shares this key with the migrate daemon (scripts/migrate-
+// daemon/main.ts), which is the sole content writer post-cutover — they must
+// stay mutually exclusive. --audio-fast gets its OWN key below: it only does
+// R2 CopyObject of take bytes + emits cell.audio.* events, disjoint from what
+// the daemon writes, and the nightly workflow runs it while the daemon holds
+// a continuous lease — sharing the content key would fail it every night with
+// LockHeldError (see docs/MIGRATE-DAEMON.md, Cutover checklist).
 const LOCK_KEY = process.env.MIGRATE_LOCK_KEY ?? "_migrate/audio-migrate-state.lock"
+const AUDIO_FAST_LOCK_KEY = process.env.MIGRATE_AUDIO_FAST_LOCK_KEY ?? "_migrate/audio-fast.lock"
 const LOCK_TTL_MS = 30 * 60_000
 const LOCK_HEARTBEAT_MS = 5 * 60_000
 function lockHolder(): string {
@@ -211,6 +222,7 @@ interface Args {
   force: boolean
   concurrency: number
   eventsOnly: boolean
+  dumpPlan?: string
 }
 function parseArgs(): Args {
   const a = process.argv.slice(2)
@@ -230,6 +242,7 @@ function parseArgs(): Args {
     force: a.includes("--force"),
     concurrency: val("--concurrency") ? Number(val("--concurrency")) : 8,
     eventsOnly: a.includes("--events-only"),
+    dumpPlan: val("--dump-plan"),
   }
 }
 
@@ -513,7 +526,7 @@ async function doProject(
         projectId,
         projectKey: String(p.id),
         fallbackAuthor: FALLBACK_AUTHOR,
-        fallbackTs: Date.now(),
+        fallbackTs: NOW ?? Date.now(),
         ...(assessment ? { idmlAssessment: assessment } : {}),
       }),
     )
@@ -522,7 +535,7 @@ async function doProject(
   if (fs.existsSync(commentsPath)) {
     try {
       const cf: unknown = JSON.parse(fs.readFileSync(commentsPath, "utf8"))
-      events.push(...mapComments(cf, { projectId, projectKey: String(p.id), fallbackTs: Date.now() }))
+      events.push(...mapComments(cf, { projectId, projectKey: String(p.id), fallbackTs: NOW ?? Date.now() }))
     } catch {
       /* skip bad comments */
     }
@@ -538,6 +551,11 @@ async function doProject(
         `  [idml] ${plan.pair.name}: ${plan.assessment.readiness}`
         + (plan.original ? ` ← ${plan.original.relativePath}` : " (missing pointers/originals attachment)"),
       )
+    }
+    if (args.dumpPlan) {
+      const lines = events.map((e) => `${JSON.stringify({ id: e.id, hash: eventHash(e), fileId: e.fileId ?? null, kind: e.kind })}\n`)
+      fs.mkdirSync(args.dumpPlan, { recursive: true })
+      fs.writeFileSync(path.join(args.dumpPlan, `${p.id}.ndjson`), lines.join(""))
     }
     console.log("  [dry-run] no writes")
     return
@@ -573,7 +591,7 @@ async function doProject(
     events,
     existingEventIds: existing,
     fallbackAuthor: FALLBACK_AUTHOR,
-    fallbackTs: Date.now(),
+    fallbackTs: NOW ?? Date.now(),
   })
   if (retractions.length) {
     console.log(`  ↳ retracting ${retractions.length} cell(s) removed from Codex since the last migration`)
@@ -884,13 +902,14 @@ async function main() {
       )
     }
     const client = R2
+    const lockKey = args.audioFast ? AUDIO_FAST_LOCK_KEY : LOCK_KEY
     lock = new RunLock({
       store: {
         get: (k) => client.getObject(DEST_BUCKET, k),
         put: (k, body, o) => client.putObject(DEST_BUCKET, k, body, o),
         delete: (k) => client.deleteObject(DEST_BUCKET, k),
       },
-      key: LOCK_KEY,
+      key: lockKey,
       holder: lockHolder(),
       ttlMs: LOCK_TTL_MS,
     })
@@ -903,7 +922,7 @@ async function main() {
       }
       throw e
     }
-    console.log(`Run lock acquired: ${DEST_BUCKET}/${LOCK_KEY} (holder ${lockHolder()}, lease ${LOCK_TTL_MS / 60_000}m)`)
+    console.log(`Run lock acquired: ${DEST_BUCKET}/${lockKey} (holder ${lockHolder()}, lease ${LOCK_TTL_MS / 60_000}m)`)
   }
   const held = lock
   const beat = held

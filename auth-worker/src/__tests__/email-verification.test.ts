@@ -62,7 +62,7 @@ describe("email verification", () => {
 
   // [Pen test] Auth & session mgmt (2026-08-24), OPS-20: the token minted at
   // registration must not be recoverable from the table — a read-only copy of
-  // this row is not supposed to be a usable verification link. Since OPS-27
+  // this row is not supposed to be a usable verification link. Since OPS-29
   // (migration 0087) the guarantee is structural: there is no column a
   // plaintext token could be written to, so assert the schema, not just the
   // value. A future change that re-added the column would fail here.
@@ -101,7 +101,7 @@ describe("email verification", () => {
     expect(again.status).toBe(404)
   })
 
-  // [Pen test] Auth & session mgmt (2026-09-07), OPS-27: this used to seed a
+  // [Pen test] Auth & session mgmt (2026-09-07), OPS-29: this used to seed a
   // PLAINTEXT row to cover 0080's `token_hash IS NULL` fallback arm. The
   // 7-day window closed on 2026-08-31 and migration 0087 dropped the column,
   // so the row is now seeded in the shipping digest shape — the expiry

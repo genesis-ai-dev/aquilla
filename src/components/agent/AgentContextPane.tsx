@@ -168,6 +168,12 @@ export function AgentContextPane({
             const editorLabel = `${cell.ref || "Cell"} — ${cell.status || "unvalidated"}`
             const canEditCell = targetEditable && !heldByLabel
             const targetHasRichFormatting = hasMeaningfulRichText(cell.targetHtml)
+            const idmlStyleCatalog = cell.idmlConfiguration?.kind === "ready"
+              ? cell.idmlConfiguration.context.styleCatalog
+              : undefined
+            const idmlParagraphStyleId = cell.idmlConfiguration?.kind === "ready"
+              ? cell.idmlConfiguration.context.paragraphStyleId
+              : undefined
             const completionState = completing?.get(cell.cellId)
             const isLoading = completionState === "searching" || completionState === "generating"
             const actionsRevealed = !isSource && (actionCellId === cell.cellId || activeEditingCellId === cell.cellId)
@@ -202,7 +208,11 @@ export function AgentContextPane({
                   >
                     <div className={cn("whitespace-pre-wrap break-words leading-relaxed", !text && "italic text-muted-foreground")}>
                       {cell.sourceHtml ? (
-                        <SanitizedRichHtml html={cell.sourceHtml} />
+                        <SanitizedRichHtml
+                          html={cell.sourceHtml}
+                          idmlStyleCatalog={idmlStyleCatalog}
+                          idmlParagraphStyleId={idmlParagraphStyleId}
+                        />
                       ) : (
                         <EditorPlainReadText text={text} emptyLabel={t("agentWorkspace.noSourceText")} />
                       )}
@@ -315,6 +325,7 @@ export function AgentContextPane({
                           tabIndex={canEditCell ? 0 : undefined}
                           editable={canEditCell}
                           empty={!text}
+                          preserveWhitespace={Boolean(cell.idmlConfiguration)}
                           onClick={() => canEditCell && setEditingCellId(cell.cellId)}
                           onKeyDown={(event) => {
                             if (!canEditCell || event.key !== "Enter") return
@@ -323,7 +334,11 @@ export function AgentContextPane({
                           }}
                         >
                           {cell.idmlConfiguration && cell.targetHtml ? (
-                            <TargetIdmlHtml html={cell.targetHtml} />
+                            <TargetIdmlHtml
+                              html={cell.targetHtml}
+                              idmlStyleCatalog={idmlStyleCatalog}
+                              idmlParagraphStyleId={idmlParagraphStyleId}
+                            />
                           ) : targetHasRichFormatting && cell.targetHtml ? (
                             <TargetRichHtml html={cell.targetHtml} />
                           ) : (

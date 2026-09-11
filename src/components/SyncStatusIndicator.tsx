@@ -3,7 +3,15 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { useT } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 
-export type SyncStatus = "live" | "connecting" | "offline" | "idle" | "disabled"
+export type SyncStatus =
+  | "live"
+  | "syncing"
+  | "retrying"
+  | "reconnecting"
+  | "connecting"
+  | "offline"
+  | "idle"
+  | "disabled"
 
 interface SyncStatusIndicatorProps {
   status: SyncStatus
@@ -13,9 +21,12 @@ interface SyncStatusIndicatorProps {
 /**
  * A tiny dot + label indicating whether the file is syncing to the sync-worker.
  * Dot colors:
- *   live       — green  → WS connected AND initial sync complete
- *   connecting — amber  → WS not yet established, or handshake in progress
- *   offline    — red    → was connected and now isn't (reconnect backoff)
+ *   live         — green  → online, WS open, outbox empty (nothing unsaved)
+ *   syncing      — amber  → outbox has queued writes, no failed attempt yet
+ *   retrying     — red    → outbox has queued writes and a drain has failed
+ *   reconnecting — amber  → online but the project WS is not open
+ *   connecting   — amber  → WS not yet established, or handshake in progress
+ *   offline      — red    → navigator.onLine is false
  *   idle       — grey   → intentionally disconnected while the tab is hidden,
  *                         will resume when the user returns
  *   disabled   — grey   → no session, no project/file selected, or sync turned off
@@ -38,7 +49,8 @@ export function SyncStatusIndicator({ status, className }: SyncStatusIndicatorPr
           className={cn(
             "h-1.5 w-1.5 rounded-full",
             dot,
-            status === "connecting" && "animate-pulse"
+            (status === "connecting" || status === "syncing" || status === "reconnecting") &&
+              "animate-pulse"
           )}
         />
         <span className="leading-none">{label}</span>
@@ -60,6 +72,24 @@ function describeStatus(status: SyncStatus): {
         dot: "bg-green-500",
         labelKey: "editor.sync.live",
         tooltipKey: "editor.sync.liveTooltip",
+      }
+    case "syncing":
+      return {
+        dot: "bg-amber-500",
+        labelKey: "editor.sync.syncing",
+        tooltipKey: "editor.sync.syncingTooltip",
+      }
+    case "retrying":
+      return {
+        dot: "bg-red-500",
+        labelKey: "editor.sync.retrying",
+        tooltipKey: "editor.sync.retryingTooltip",
+      }
+    case "reconnecting":
+      return {
+        dot: "bg-amber-500",
+        labelKey: "editor.sync.reconnecting",
+        tooltipKey: "editor.sync.reconnectingTooltip",
       }
     case "connecting":
       return {

@@ -1,10 +1,11 @@
 import { ExportPermissionsSection } from "@/components/settings/ExportPermissionsSection"
 import { AssignmentAuthoritySection } from "@/components/settings/AssignmentAuthoritySection"
+import { CommentPermissionsSection } from "@/components/settings/CommentPermissionsSection"
 import { RosterProgressSection } from "@/components/settings/RosterProgressSection"
 import { TermbaseEditSection } from "@/components/settings/TermbaseEditSection"
 import { SettingsGroup } from "@/components/ui/page"
 import { useActiveOrg } from "@/context/OrgContext"
-import { useOrgSettings, canEditRosterProgressFloor } from "@/hooks/useOrgSettings"
+import { useOrgSettings, canEditRosterProgressFloor, canEditCommentFloors } from "@/hooks/useOrgSettings"
 import { ORG_SETTINGS_SECTION_DESCRIPTIONS, ORG_SETTINGS_SECTION_TITLES } from "./constants"
 import { OrgSettingsDetailPage } from "./OrgSettingsDetailPage"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -21,6 +22,10 @@ export function OrgSettingsSecurity() {
       description={ORG_SETTINGS_SECTION_DESCRIPTIONS.security}
     >
       <RosterProgressSection orgSettings={orgSettings} canEdit={canEdit} />
+      <CommentPermissionsSection
+        orgSettings={orgSettings}
+        canEdit={canEditCommentFloors(activeOrg?.role?.level)}
+      />
       <SettingsGroup
         label={t("org.settingsSecurity.groupLabel")}
         description={t("org.settingsSecurity.groupDescription")}

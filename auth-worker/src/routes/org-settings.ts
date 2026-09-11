@@ -77,6 +77,12 @@ const PERMISSION_POLICY_KEYS: Record<string, string> = {
   // AQU-822: who may manage a project's termbase. Role-ladder valued,
   // OWNER-only on write like the rest of this table.
   termbaseEditMinRole: "termbaseEditMinRole",
+  // AQU-1002: who may open a comment thread, and (separately) who may resolve
+  // or reopen a thread they did not author. Role-ladder valued, OWNER-only on
+  // write like the rest of this table. Enforced in sync-worker, which owns
+  // comments — this route only governs who may SET the policy.
+  commentCreateMinRole: "commentCreateMinRole",
+  commentResolveMinRole: "commentResolveMinRole",
 }
 
 /**

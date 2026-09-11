@@ -30,12 +30,20 @@ const STATIC_REASON_KEY: Partial<Record<RuleInfractionReason, MessageKey>> = {
   "builtin:abbreviation-mismatch": "rules.infraction.builtin.abbreviationMismatch",
 }
 
-/** Just the predicate — "target contains forbidden pattern", "Placeholder {age} missing…". */
+/** Just the predicate — "This term is in the source…", "Placeholder {age} missing…". */
 export function formatInfractionReason(infraction: RuleInfraction, t: TFunction): string {
   if (infraction.reason === "builtin:placeholder-integrity") {
     const tokens = infraction.reasonParams?.tokens ?? ""
     const count = infraction.reasonParams?.count ?? "0"
     return t("rules.infraction.builtin.placeholderIntegrity", { tokens, count })
+  }
+  if (infraction.reason === "source-requires-target") {
+    const sourceCount = infraction.reasonParams?.sourceCount ?? "1"
+    const targetCount = infraction.reasonParams?.targetCount ?? "0"
+    if (sourceCount !== "1" || targetCount !== "0") {
+      return t("rules.infraction.sourceRequiresTargetCount", { sourceCount, targetCount })
+    }
+    return t("rules.infraction.sourceRequiresTarget")
   }
   const key = STATIC_REASON_KEY[infraction.reason]
   return key ? t(key) : infraction.reason

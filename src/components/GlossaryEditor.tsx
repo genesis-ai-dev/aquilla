@@ -462,7 +462,7 @@ export function GlossaryEditor({
             <input
               ref={importInputRef}
               type="file"
-              accept=".csv,.tbx"
+              accept=".csv,.tsv,.tbx"
               className="hidden"
               onChange={(e) => {
                 const f = e.target.files?.[0]

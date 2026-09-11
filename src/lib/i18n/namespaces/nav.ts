@@ -976,7 +976,11 @@ export const nav = defineNamespace({
           "Tooltip and accessible name for the non-production warning chip, spelling " +
           "out that the data on screen is not production data. {host} is the API " +
           "hostname the build talks to.",
-        placeholders: { host: "Untranslated API hostname, e.g. api.dev.aquilla.app." },
+        placeholders: {
+          host:
+            "Untranslated API hostname of the backend this build talks to " +
+            "(the dev environment's API host, a preview Worker, or a local port).",
+        },
       },
 
       // -- TabStrip --

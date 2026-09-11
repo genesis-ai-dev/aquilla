@@ -85,13 +85,31 @@ vi.mock("@/lib/frontier/portfolio", async (importActual) => {
       targetLanguage: null,
     },
   ]
+  const getPortfolio = vi.fn(async () => projects)
+  const getPortfolios = vi.fn(async () => [{ orgId: 1, projects }])
   return {
     ...actual,
-    getPortfolio: vi.fn(async () => projects),
-    // AQU-883: the all-orgs dashboard fans out through getPortfolios; tests
-    // that exercise that scope override this (default matches the member
-    // overview fixture so overview assertions stay hermetic).
-    getPortfolios: vi.fn(async () => [{ orgId: 1, projects }]),
+    getPortfolio,
+    getPortfolios,
+    getPortfolioPage: vi.fn(async (_jwt: string, _orgId: number, opts?: { q?: string }) => {
+      const list = await getPortfolio()
+      const q = opts?.q?.trim().toLowerCase() ?? ""
+      return {
+        projects: q ? list.filter((p) => p.name.toLowerCase().includes(q)) : list,
+        nextCursor: null,
+      }
+    }),
+    getPortfoliosPage: vi.fn(async (_jwt: string, _orgIds: number[], opts?: { q?: string }) => {
+      const portfolios = await getPortfolios()
+      const list = portfolios.flatMap(({ orgId, projects: rows }) =>
+        rows.map((project) => ({ ...project, orgId })),
+      )
+      const q = opts?.q?.trim().toLowerCase() ?? ""
+      return {
+        projects: q ? list.filter((p) => p.name.toLowerCase().includes(q)) : list,
+        nextCursor: null,
+      }
+    }),
   }
 })
 
@@ -146,6 +164,8 @@ const defaultOrgSettingsMock = (): OrgSettingsMock => ({
   allowSelfAssignment: false,
   // AQU-822: default termbase-edit floor (project_lead), as the server resolves it.
   termbaseEditMinRole: 500,
+  commentCreateMinRole: 200,
+  commentResolveMinRole: 400,
   refresh: vi.fn(async () => null),
   patch: vi.fn(async () => ({ kind: "ok" as const, value: { orgId: 1, settings: {}, version: 2, updatedAt: null, updatedBy: null } })),
   requestPromotion: vi.fn(async () => ({ kind: "blocked" as const })),
@@ -167,7 +187,7 @@ beforeEach(async () => {
   vi.mocked(listMyOrgs).mockResolvedValue([{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }])
   const { getWorkload } = await import("@/lib/sync/assignments")
   vi.mocked(getWorkload).mockResolvedValue([])
-  const { getPortfolio } = await import("@/lib/frontier/portfolio")
+  const { getPortfolio, getPortfolioPage, getPortfolios, getPortfoliosPage } = await import("@/lib/frontier/portfolio")
   vi.mocked(getPortfolio).mockImplementation(async () => {
     const now = Date.now()
     return [
@@ -202,6 +222,26 @@ beforeEach(async () => {
         targetLanguage: null,
       },
     ]
+  })
+  vi.mocked(getPortfolios).mockImplementation(async () => [{ orgId: 1, projects: await getPortfolio("jwt", 1) }])
+  vi.mocked(getPortfolioPage).mockImplementation(async (_jwt, _orgId, opts) => {
+    const list = await getPortfolio("jwt", 1)
+    const q = opts?.q?.trim().toLowerCase() ?? ""
+    return {
+      projects: q ? list.filter((p) => p.name.toLowerCase().includes(q)) : list,
+      nextCursor: null,
+    }
+  })
+  vi.mocked(getPortfoliosPage).mockImplementation(async (_jwt, orgIds, opts) => {
+    const portfolios = await getPortfolios("jwt", orgIds)
+    const list = portfolios.flatMap(({ orgId, projects: rows }) =>
+      rows.map((project) => ({ ...project, orgId })),
+    )
+    const q = opts?.q?.trim().toLowerCase() ?? ""
+    return {
+      projects: q ? list.filter((p) => p.name.toLowerCase().includes(q)) : list,
+      nextCursor: null,
+    }
   })
   // Reset to the default (no invites); the pending-invites test overrides this.
   // restoreAllMocks does not reset vi.fn implementations, so without this a
@@ -407,11 +447,16 @@ describe("ProjectTable", () => {
 
 describe("OrgOverview / OrgProjects", () => {
   it("never paints a false-empty projects page while the current portfolio is unresolved", async () => {
-    const { getPortfolio } = await import("@/lib/frontier/portfolio")
+    const { getPortfolio, getPortfolioPage } = await import("@/lib/frontier/portfolio")
     let resolvePortfolio!: (projects: PortfolioProject[]) => void
-    vi.mocked(getPortfolio).mockImplementation(
-      () => new Promise((resolve) => { resolvePortfolio = resolve }),
-    )
+    const pending = new Promise<PortfolioProject[]>((resolve) => {
+      resolvePortfolio = resolve
+    })
+    vi.mocked(getPortfolio).mockImplementation(() => pending)
+    vi.mocked(getPortfolioPage).mockImplementation(async () => ({
+      projects: await pending,
+      nextCursor: null,
+    }))
 
     const container = document.createElement("div")
     document.body.appendChild(container)
@@ -448,6 +493,7 @@ describe("OrgOverview / OrgProjects", () => {
 
       // Keep subsequent refetches empty so the empty-state isn't replaced by default mock data.
       vi.mocked(getPortfolio).mockResolvedValue([])
+      vi.mocked(getPortfolioPage).mockResolvedValue({ projects: [], nextCursor: null })
       await act(async () => { resolvePortfolio([]) })
       await waitFor(() =>
         expect(screen.queryByRole("status", { name: "Loading projects" })).not.toBeInTheDocument(),
@@ -586,6 +632,13 @@ describe("OrgOverview / OrgProjects", () => {
     expect(screen.queryByTestId("pending-invitations")).not.toBeInTheDocument()
   })
 
+  it("keeps the overview projects scrollbar inside the card", async () => {
+    renderMemberOverview()
+    const table = await screen.findByTestId("org-overview-projects-table")
+    expect(table).toHaveClass("mx-0")
+    expect(table).not.toHaveClass("-mx-2")
+  })
+
   it("shows the project count in the rollup strip", async () => {
     renderMemberOverview()
     await waitFor(() => expect(screen.getByText("Avg translated")).toBeInTheDocument())
@@ -615,7 +668,7 @@ describe("OrgOverview / OrgProjects", () => {
     expect(screen.queryByRole("button", { name: /view projects/i })).not.toBeInTheDocument()
   })
 
-  it("shows the ten most recently updated projects first and expands the rest inline", async () => {
+  it("shows every project in a continuous list, with no show-more pager", async () => {
     const { getPortfolio } = await import("@/lib/frontier/portfolio")
     const now = Date.now()
     vi.mocked(getPortfolio).mockResolvedValue(
@@ -641,21 +694,10 @@ describe("OrgOverview / OrgProjects", () => {
     const table = await screen.findByTestId("org-overview-projects-table")
     expect(within(table).getByText("Project 01")).toBeInTheDocument()
     expect(within(table).getByText("Project 10")).toBeInTheDocument()
-    expect(within(table).queryByText("Project 11")).not.toBeInTheDocument()
-
-    const showAll = within(table).getByRole("button", { name: "Show 2 more" })
-    expect(showAll).toHaveAttribute("aria-expanded", "false")
-    expect(showAll.closest("tr")).toBe(table.querySelector("tbody tr:last-child"))
-    fireEvent.click(showAll)
-
     expect(within(table).getByText("Project 11")).toBeInTheDocument()
     expect(within(table).getByText("Project 12")).toBeInTheDocument()
-    const showFewer = within(table).getByRole("button", { name: "Show fewer" })
-    expect(showFewer).toHaveAttribute("aria-expanded", "true")
-    expect(showFewer.closest("tr")).toBe(table.querySelector("tbody tr:last-child"))
-
-    fireEvent.click(showFewer)
-    expect(within(table).queryByText("Project 11")).not.toBeInTheDocument()
+    expect(within(table).queryByRole("button", { name: /show \d+ more/i })).not.toBeInTheDocument()
+    expect(within(table).queryByRole("button", { name: /show fewer/i })).not.toBeInTheDocument()
   })
 
   it("shows the audio rollup card and per-project audio % on the projects table", async () => {
@@ -708,7 +750,9 @@ describe("OrgOverview / OrgProjects", () => {
       target: { value: "testament" },
     })
 
-    expect(screen.queryByText("Legacy Translation")).not.toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.queryByText("Legacy Translation")).not.toBeInTheDocument()
+    })
     expect(screen.getByText("New Testament")).toBeInTheDocument()
   })
 
@@ -947,8 +991,14 @@ describe("OrgHome — project-directory load failure (AQU-883)", () => {
   ) {
     const { listMyOrgs } = await import("@/lib/frontier/orgs")
     vi.mocked(listMyOrgs).mockResolvedValue(twoOrgs)
-    const { getPortfolios } = await import("@/lib/frontier/portfolio")
+    const { getPortfolios, getPortfoliosPage } = await import("@/lib/frontier/portfolio")
     vi.mocked(getPortfolios).mockResolvedValue(portfolios as never)
+    vi.mocked(getPortfoliosPage).mockImplementation(async () => {
+      const list = (portfolios as Array<{ orgId: number; projects: Array<{ name: string }> }>).flatMap(
+        ({ orgId, projects: rows }) => rows.map((project) => ({ ...project, orgId })),
+      )
+      return { projects: list, nextCursor: null } as never
+    })
     return render(
       <MemoryRouter initialEntries={["/orgs/all"]}>
         <OrgProvider><OrgHome /></OrgProvider>

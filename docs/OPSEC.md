@@ -27,17 +27,17 @@
 > PR gate is red on `dev` and fails in the first of three sequential phases, so
 > the worker test suites and the SPA build never execute at all; reported with
 > patches rather than fixed, since none of it is auth/session work.
-> `docs/OPSEC-REVIEW-2026-08-27.md` is the most recent pass — the second on API
-> security & data exposure, closing the two items the first one deliberately
-> deferred: OPS-22 (rate limiting completed on every remaining external Agent
-> API route — reads, artifact meta/content/inspect, changeset GET/discard) and
+> `docs/OPSEC-REVIEW-2026-08-27.md` covers the second pass on API security &
+> data exposure, closing the two items the first one deliberately deferred:
+> OPS-22 (rate limiting completed on every remaining external Agent API
+> route — reads, artifact meta/content/inspect, changeset GET/discard) and
 > OPS-23 (two audio-id fields that bypassed the codebase's own `isPathSafeId`
 > convention). It also records OPS-24 — a confirmed check-then-act race in
 > credit-cap enforcement across concurrent chat requests, traced to its
 > mechanics but reported rather than fixed, since a correct fix means
 > redesigning the credit-guard/ledger interaction, not a same-day patch.
-> `docs/OPSEC-REVIEW-2026-08-31.md` is the most recent pass — the third on
-> auth & session management, taking up the invite-storage question 08-24
+> `docs/OPSEC-REVIEW-2026-08-31.md` covers the third pass on auth & session
+> management, taking up the invite-storage question 08-24
 > handed forward. It adds OPS-25 (the three public invite-preview routes each
 > hand-rolled a "best-effort caller" helper that checked only signature and
 > `exp`, skipping *both* the `jti` logout denylist and the
@@ -47,6 +47,15 @@
 > rather than fixed, because three product surfaces deliberately re-display a
 > live invite token and hashing them is a product decision, not a port of
 > OPS-20's migration).
+> `docs/OPSEC-REVIEW-2026-09-03.md` is the most recent pass — the fourth on
+> API security & data exposure. It adds OPS-27: the first-party
+> `/api/v1/chat/completions`, `/api/v1/ai/agent/run`, and `/api/v1/voice/tts`
+> proxies had no rate limiting at all, and every spend guard on them
+> (`AI_BUDGET_ENFORCE`/`CREDIT_ENFORCE`/`TTS_BUDGET_ENFORCE`) defaults to
+> log-only in every deployed environment — fixed with a per-user throttle on
+> each route; whether to ever flip the enforce flags is flagged as a separate
+> product decision, not auto-changed. OPS-28 closes two routes that echoed
+> raw database error text to the caller.
 
 _Standing OPSEC review of Aquilla's handling of sensitive data. Complements
 `docs/SECURITY-NOTES-2026-06-10.md` (application-security findings, June audit)

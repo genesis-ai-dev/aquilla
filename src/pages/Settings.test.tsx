@@ -56,12 +56,16 @@ vi.mock("@/hooks/useOrgSettings", () => ({
     allowSelfAssignment: false,
     // AQU-822: terminology floor — default Project lead.
     termbaseEditMinRole: 500,
+    // AQU-1002: comment floors — defaults reproduce post-AQU-999 behaviour.
+    commentCreateMinRole: 200,
+    commentResolveMinRole: 400,
     refresh: vi.fn(async () => null),
     requestPromotion: vi.fn(async () => ({ kind: "blocked" })),
   }),
   canEditRosterProgressFloor: (level: number | null | undefined) => (level ?? 0) >= 700,
   canEditAssignmentAuthority: (level: number | null | undefined) => (level ?? 0) >= 700,
   canEditTermbaseFloor: (level: number | null | undefined) => (level ?? 0) >= 700,
+  canEditCommentFloors: (level: number | null | undefined) => (level ?? 0) >= 700,
 }))
 
 beforeEach(() => {

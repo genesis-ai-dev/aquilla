@@ -32,6 +32,8 @@
  * - **Positional fallback.** With no recognizable header the original fixed
  *   layout (sourceTerm, rendering, status, notes) still applies and the first
  *   row is read as data — headerless files import exactly as they used to.
+ *   A first row that merely starts with a source synonym (`word`, `key`, …)
+ *   but carries a status value in the positional status slot is still data.
  *
  * Either way:
  * - `status` is "preferred" | "admitted" | "forbidden". Partner vocabulary
@@ -56,6 +58,9 @@ const DELIMITERS = [",", "\t", ";", "|"] as const
 
 /** Separators inside a single cell that split one column into several renderings. */
 const MULTI_VALUE_SEPARATORS = [";", "|", "\n"] as const
+
+/** Index of the status cell in the positional (headerless) layout. */
+const POSITIONAL_STATUS_COLUMN = 2
 
 /** Export Concept[] to a CSV string with the documented column layout. */
 export function exportConceptsCsv(concepts: Concept[]): string {
@@ -155,7 +160,8 @@ export function importConceptsCsv(text: string): Concept[] {
 const SOURCE_HEADERS = new Set([
   "sourceterm", "sourceterms", "source", "sourcelemma", "sourceword", "sourcetext",
   "sourcelanguage", "sourceheadword", "term", "terms", "headword", "lemma", "entry",
-  "concept", "word", "key", "english",
+  "concept", "word", "key", "english", "keyterm", "keyterms", "keyword", "keywords",
+  "biblicalterm", "biblicalterms", "keybiblicalterm", "keybiblicalterms",
 ])
 
 /** Column holding a rendering, with the status taken from elsewhere. */
@@ -281,6 +287,18 @@ function detectLayout(header: string[]): Layout | null {
 
   if (source === undefined) return null
 
+  // A headerless legacy row whose first term happens to be a source synonym
+  // (`word,palabra,preferred,`) must not be mistaken for a header. What gives
+  // it away: the positional status slot holds a status VALUE, where a real
+  // header would name the role (`status`). So when nothing beyond the source
+  // column is named — a lone status word in that slot is a value, not a column
+  // name — read the row as data.
+  const namedBeyondSource =
+    status !== undefined ||
+    notes !== undefined ||
+    renderings.some((col) => col.index !== POSITIONAL_STATUS_COLUMN || col.status === undefined)
+  if (!namedBeyondSource && isCanonicalStatus(header[POSITIONAL_STATUS_COLUMN] ?? "")) return null
+
   // A sheet that names its target column by language (`English | Kilisusu`)
   // has no header word we can recognize — read the first unmapped column after
   // the source as the renderings rather than dropping them on the floor.
@@ -309,6 +327,12 @@ function normalizeHeader(raw: string): string {
 
 function parseStatus(raw: string): RenderingStatus {
   return STATUS_VALUES.get(normalizeHeader(raw)) ?? "preferred"
+}
+
+/** True for the three values our own export writes into the positional status slot. */
+function isCanonicalStatus(raw: string): boolean {
+  const key = normalizeHeader(raw)
+  return key === "preferred" || key === "admitted" || key === "forbidden"
 }
 
 /** Pick the delimiter that splits the header line into the most columns. */

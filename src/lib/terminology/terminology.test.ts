@@ -474,6 +474,34 @@ describe("flexible terminology import", () => {
     ])
   })
 
+  it("recognizes Key Term / Keyword / Biblical Terms source headers", () => {
+    const csv = "Key Term,Rendering,Status\nfaith,fe,preferred\nfaith,creencia,admitted"
+    const imported = importConceptsCsv(csv)
+    expect(imported).toHaveLength(1)
+    expect(imported[0].sourceTerm).toBe("faith")
+    expect(imported[0].renderings).toEqual([
+      { rendering: "fe", status: "preferred" },
+      { rendering: "creencia", status: "admitted" },
+    ])
+    expect(importConceptsCsv("Keyword,Translation\nlight,terang")[0].sourceTerm).toBe("light")
+    expect(importConceptsCsv("Biblical Terms,Translation\nlight,terang")[0].sourceTerm).toBe("light")
+  })
+
+  it("does not mistake a headerless row that starts with a source synonym for a header", () => {
+    // `word` is a source-header synonym, but this is a legacy positional file:
+    // its status slot holds a status VALUE, which no real header row would.
+    const csv = "word,palabra,preferred,\nlife,vida,preferred,"
+    const imported = importConceptsCsv(csv)
+    expect(imported.map((c) => c.sourceTerm)).toEqual(["word", "life"])
+    expect(imported[0].renderings).toEqual([{ rendering: "palabra", status: "preferred" }])
+    expect(imported[1].renderings).toEqual([{ rendering: "vida", status: "preferred" }])
+    // A real header whose only recognizable word is the source still works.
+    const languageOnly = importConceptsCsv("English,Kilisusu\nword,firman")
+    expect(languageOnly).toHaveLength(1)
+    expect(languageOnly[0].sourceTerm).toBe("word")
+    expect(languageOnly[0].renderings).toEqual([{ rendering: "firman", status: "preferred" }])
+  })
+
   it("lands imported concepts active so they compile to rules immediately", () => {
     const csv = "Term,Translation\nfaith,fe"
     const imported = importConceptsCsv(csv)

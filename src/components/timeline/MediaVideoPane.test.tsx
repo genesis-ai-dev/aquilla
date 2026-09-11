@@ -560,6 +560,89 @@ describe("MediaVideoPane", () => {
     })
   })
 
+  // ── AQU-1117: "Play from this cue" — a seek that also rolls ──────────────
+  //
+  // The press promised "play from here" and delivered a frame. The start now
+  // rides down WITH the seek rather than being issued from the press site,
+  // which is what makes it start at the cue: the element is at (or seeking to)
+  // the cue's second by the time anything calls play, so the first frame heard
+  // is the right one.
+  describe("a seek that also asks for playback", () => {
+    const subs = [
+      cell({ id: "s1", medium: "text", original: "Line one", translated: "Ligne un", startTime: 0, endTime: 5 }),
+      cell({ id: "s2", medium: "text", original: "Line two", translated: "Ligne deux", startTime: 10, endTime: 15 }),
+    ]
+
+    const plant = (video: HTMLVideoElement, o: { readyState?: number; seeking?: boolean } = {}) => {
+      Object.defineProperty(video, "readyState", { value: o.readyState ?? 4, configurable: true })
+      Object.defineProperty(video, "seeking", { value: o.seeking ?? false, configurable: true })
+      const play = vi.fn(() => Promise.resolve())
+      video.play = play as unknown as HTMLVideoElement["play"]
+      video.pause = vi.fn() as unknown as HTMLVideoElement["pause"]
+      return play
+    }
+
+    /** Mount, arm the element, then deliver one nonce'd seek. */
+    const seek = (
+      stamp: { sec: number; nonce: number; play?: boolean },
+      props: Partial<React.ComponentProps<typeof MediaVideoPane>> = {},
+      planted: { readyState?: number; seeking?: boolean } = {},
+    ) => {
+      const base = { src: "https://cdn/episode.webm", fileId: "f1", cells: subs, onVideoTime: vi.fn(), ...props }
+      const view = render(<MediaVideoPane {...base} />)
+      const video = screen.getByTestId("video-pane-media") as HTMLVideoElement
+      const play = plant(video, planted)
+      view.rerender(<MediaVideoPane {...base} seekSec={stamp} />)
+      return { video, play }
+    }
+
+    beforeEach(() => {
+      resetVideoClockForTests()
+    })
+
+    it("starts the film, at the cue's second", () => {
+      const { video, play } = seek({ sec: 10, nonce: 1, play: true })
+      expect(video.currentTime).toBe(10)
+      expect(play).toHaveBeenCalledTimes(1)
+    })
+
+    it("a plain cue moves the frame and leaves the film stopped", () => {
+      // The row click / chip click contract, unchanged — this is the assertion
+      // that stops the fix leaking onto every other way of pointing at a line.
+      const { video, play } = seek({ sec: 10, nonce: 1 })
+      expect(video.currentTime).toBe(10)
+      expect(play).not.toHaveBeenCalled()
+    })
+
+    it("holds the start until the seek lands, then plays once", () => {
+      // A cold or streaming element is still seeking when the command arrives.
+      // Starting it then would sound the position it is leaving.
+      const { video, play } = seek({ sec: 10, nonce: 1, play: true }, {}, { readyState: 0 })
+      expect(play).not.toHaveBeenCalled()
+      expect(getVideoBuffering()).toBe(true)
+      fireEvent.seeked(video)
+      fireEvent.canPlay(video)
+      expect(play).toHaveBeenCalledTimes(1)
+    })
+
+    it("stands down while the recorder holds the floor", () => {
+      // `suspended` has a 250ms watchdog that would pause it back — 250ms of
+      // the soundtrack in the take. Never starting it is the honest answer.
+      const { play } = seek({ sec: 10, nonce: 1, play: true }, { suspended: true })
+      expect(play).not.toHaveBeenCalled()
+    })
+
+    it("stands down when the QUEUE owns the picture — two writers would fight", () => {
+      // Slaved, the queue re-issues play and corrective seeks every tick. A
+      // second driver is the failure the transport module exists to prevent.
+      // `CELLS` carry attachments, which is what makes the pane slaved — the
+      // seek still lands (it is deliberately ungated) but the start does not.
+      const { video, play } = seek({ sec: 10, nonce: 1, play: true }, { cells: CELLS })
+      expect(video.currentTime).toBe(10)
+      expect(play).not.toHaveBeenCalled()
+    })
+  })
+
   // ── Round 6: publishing where the picture is ─────────────────────────────
   describe("the position it publishes", () => {
     const subs = [

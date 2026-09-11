@@ -61,8 +61,3 @@ export function getVideoController(): VideoController | null {
 export function useVideoController(): VideoController | null {
   return useSyncExternalStore(subscribe, () => current, () => null)
 }
-
-export function resetVideoControllerForTests(): void {
-  current = null
-  notify()
-}

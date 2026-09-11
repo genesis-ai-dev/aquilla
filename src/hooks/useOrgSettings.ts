@@ -105,6 +105,17 @@ const DEFAULT_ALLOW_SELF_ASSIGNMENT = false
 // default) — all three must agree.
 const TERMBASE_FLOOR_WRITE_MIN_ROLE = ROLE.OWNER
 const DEFAULT_TERMBASE_EDIT_MIN_ROLE = ROLE.PROJECT_LEAD
+const EMPTY_RULES: TranslationRule[] = []
+
+// AQU-1002: the two comment floors are the same OWNER-only permission-policy
+// shape again. Their defaults are the pre-AQU-1002 static floors, so an org
+// that never touches them behaves exactly as before: COMMENTER (200) to open a
+// thread, CONTRIBUTOR (400) to resolve one somebody else opened (AQU-999's
+// hardened default). Must agree with DEFAULT_COMMENT_FLOORS in both
+// src/lib/sync/role-policy.ts and sync-worker/src/events/comment-floors.ts.
+const COMMENT_FLOOR_WRITE_MIN_ROLE = ROLE.OWNER
+const DEFAULT_COMMENT_CREATE_MIN_ROLE = ROLE.COMMENTER
+const DEFAULT_COMMENT_RESOLVE_MIN_ROLE = ROLE.CONTRIBUTOR
 
 export interface UseOrgSettings {
   /** Current org settings (rules, etc). Always defined (empty when unloaded). */
@@ -198,6 +209,19 @@ export interface UseOrgSettings {
    * Settings surface rather than for project-level gating.
    */
   termbaseEditMinRole: number
+  /**
+   * AQU-1002: effective floor to OPEN a comment thread or post a reply.
+   * Explicit org setting, or COMMENTER (200) when unset. Server-enforced on
+   * both write paths; see `resolveCommentFloors` in
+   * `sync-worker/src/events/comment-floors.ts`.
+   */
+  commentCreateMinRole: number
+  /**
+   * AQU-1002: effective floor to resolve/reopen a thread somebody ELSE opened.
+   * Explicit org setting, or CONTRIBUTOR (400) when unset. A thread's author
+   * always keeps the static COMMENTER floor on their own thread regardless.
+   */
+  commentResolveMinRole: number
   /** Force a re-GET. */
   refresh: () => Promise<OrgSettingsResponse | null>
   /** Patch org settings (adds/replaces top-level keys). Blocked if !canEdit —
@@ -317,6 +341,20 @@ export function useOrgSettings(
     return DEFAULT_TERMBASE_EDIT_MIN_ROLE
   })()
 
+  // AQU-1002: effective comment floors — explicit org settings, or the
+  // pre-AQU-1002 static floors when unset / out of the role ladder.
+  const commentCreateMinRole = (() => {
+    const raw = server?.settings?.commentCreateMinRole
+    if (typeof raw === "number" && Number.isFinite(raw) && raw >= 100 && raw <= 700) return raw
+    return DEFAULT_COMMENT_CREATE_MIN_ROLE
+  })()
+
+  const commentResolveMinRole = (() => {
+    const raw = server?.settings?.commentResolveMinRole
+    if (typeof raw === "number" && Number.isFinite(raw) && raw >= 100 && raw <= 700) return raw
+    return DEFAULT_COMMENT_RESOLVE_MIN_ROLE
+  })()
+
   // AQU-496: effective self-assignment authority — explicit org setting, or
   // false (leads-only) when unset.
   const allowSelfAssignment = server?.settings?.allowSelfAssignment === true
@@ -399,7 +437,9 @@ export function useOrgSettings(
   )
 
   const settings = server?.settings ?? {}
-  const orgRules: TranslationRule[] = settings.rules ?? []
+  // AQU-1104: a stable empty array. `orgRules` feeds useRules' merged list,
+  // and a fresh `[]` per render re-ran every rules consumer on every render.
+  const orgRules: TranslationRule[] = settings.rules ?? EMPTY_RULES
   const promotionRequests: PromotionRequest[] = (settings.promotionRequests as PromotionRequest[] | undefined) ?? []
   // AQU-433: org-level provider keys; default to empty object when unset.
   const orgProviderKeys: OrgProviderKeys = settings.orgProviderKeys ?? {}
@@ -438,6 +478,8 @@ export function useOrgSettings(
     memberProgressViewMinRole,
     allowSelfAssignment,
     termbaseEditMinRole,
+    commentCreateMinRole,
+    commentResolveMinRole,
     refresh,
     patch,
     requestPromotion,
@@ -471,4 +513,13 @@ export function canEditAssignmentAuthority(callerRoleLevel: number | null | unde
  */
 export function canEditTermbaseFloor(callerRoleLevel: number | null | undefined): boolean {
   return (callerRoleLevel ?? 0) >= TERMBASE_FLOOR_WRITE_MIN_ROLE
+}
+
+/**
+ * AQU-1002: True when `callerRoleLevel` is allowed to CHANGE either comment
+ * floor (OWNER-only, same rationale again — who may settle other people's
+ * discussion threads is an org policy, not a maintainer's call).
+ */
+export function canEditCommentFloors(callerRoleLevel: number | null | undefined): boolean {
+  return (callerRoleLevel ?? 0) >= COMMENT_FLOOR_WRITE_MIN_ROLE
 }

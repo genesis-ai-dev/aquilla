@@ -13,9 +13,12 @@
 //      `EXISTS (… chain_claims … AND event_id = <this event>)` — so the
 //      transaction that loses the claim still logs its event (history) but
 //      its projection writes are no-ops.
-//   3. After commit, the route reads the claims back (`readClaimWinners`)
-//      and reports losers via the response `stale` array so the existing
-//      client banner fires (M1-2).
+//   3. The same cells write is ALSO a compare-and-swap on the row's current
+//      head (`cells.event_id = parentId`, AQU-1154) — the claim alone is
+//      first-child-of-parent, which let a stale branch climb back onto the
+//      head via an unclaimed (cell, loser) slot. After commit the route
+//      reads that write's row count back (0 == lost) and reports losers via
+//      the response `stale` array so the existing client banner fires (M1-2).
 //
 // Ordering guarantee: the per-project seq counter row lock (event-insert.ts)
 // serializes same-project transactions, and the claim is taken inside that

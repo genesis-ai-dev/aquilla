@@ -17,17 +17,17 @@ A deep module (as opposed to a shallow module) is one which encapsulates a lot o
 
 Check with the user that these modules match their expectations. Check with the user which modules they want tests written for.
 
-3. Write the PRD using the template below, then publish it to the project issue tracker. Apply the `ready-for-agent` triage label - no need for additional triage.
+3. Write the PRD using the template below, then publish it to the project issue tracker as an issue **created from the team's `Feature Request` issue template** (pass `template: "Feature Request"` to `save_issue` — it applies the `Feature` label itself). The PRD body below starts with the template's `## Summary` / `## Problem` headings and extends them with the PRD-specific sections. Create it with status `Triage` (⚠️ the template embeds `Todo`; pass `state: Triage` explicitly — it overrides — and confirm the response), and leave it **unassigned** (the team rotation auto-assigns at create time; if the response shows an assignee, clear it with a follow-up `assignee: null` save). Since the user just reviewed the PRD interactively, that review *is* the triage decision: promote it to `Todo` after creation if the user confirms it's agent-ready — no need for additional triage.
 
 <prd-template>
 
-## Problem Statement
-
-The problem that the user is facing, from the user's perspective.
-
-## Solution
+## Summary
 
 The solution to the problem, from the user's perspective.
+
+## Problem
+
+The problem that the user is facing, from the user's perspective.
 
 ## User Stories
 

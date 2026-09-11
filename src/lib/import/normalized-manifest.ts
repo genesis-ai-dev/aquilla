@@ -366,6 +366,13 @@ function fidelityFor(fileType: FileType): RoundTripFidelity {
     case "sdbh":
     case "custom":
       return "content-only"
+    case "codex":
+    case "source":
+      // AQU-997: wire-only file kinds — no upload ever normalizes through
+      // here as one (see parseFile). Claiming "native" for an unreachable arm
+      // would overstate a round-trip guarantee for no gain, so they take the
+      // conservative floor the rest of the parser-fed formats sit on.
+      return "content-only"
   }
 }
 

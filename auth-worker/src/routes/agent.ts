@@ -76,6 +76,22 @@ const agent = new Hono<{ Bindings: Env; Variables: Variables }>()
 // Overridable so the dev stack / e2e can point the loop at a scripted mock
 // (scripts/mock-openrouter.ts) when no real key is configured. Prod ignores it.
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+/**
+ * The run-scoped env: base env plus this run's own PG shim.
+ *
+ * Prototype-chained (NOT spread): index.ts hands routes an env built with
+ * `Object.create(reqEnv)`, so every binding and secret (OPENROUTER_API_KEY, R2,
+ * …) lives on the PROTOTYPE. A spread copies own properties only and drops all
+ * of them — the agent loop then called OpenRouter with no key and every agent
+ * message failed `openrouter_error 401`, while /chat (which uses `c.env`
+ * directly) kept working.
+ */
+export function runScopedEnv(base: Env, shim: unknown | null): Env {
+  if (!shim) return base
+  return Object.assign(Object.create(base) as Env, {
+    AQUILLA_PG: shim as Env["AQUILLA_PG"],
+  })
+}
 
 // [Pen test] API security & data exposure (2026-09-03): see the matching
 // comment in routes/chat.ts — every spend guard on this route is log-only in
@@ -582,7 +598,7 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
   // connection for the loop's lifetime; tests (no PG_CONNECTION_STRING)
   // keep using the injected AQUILLA_PG.
   const runShim = c.env.PG_CONNECTION_STRING ? makePostgres(c.env.PG_CONNECTION_STRING) : null
-  const env: Env = runShim ? { ...c.env, AQUILLA_PG: runShim as unknown as Env["AQUILLA_PG"] } : c.env
+  const env: Env = runScopedEnv(c.env, runShim)
   const signal = c.req.raw.signal
   const runId = crypto.randomUUID()
   const lastUserMessage = [...body.messages].reverse().find((m) => m.role === "user")

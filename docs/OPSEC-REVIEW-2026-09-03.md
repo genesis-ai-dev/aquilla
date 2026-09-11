@@ -1,13 +1,23 @@
 # Operational Security Review — 2026-09-03
 
-_Ninth pass in the standing series. Follows `docs/OPSEC-REVIEW-2026-08-27.md`
-(OPS-22…OPS-24), `docs/OPSEC-REVIEW-2026-08-24.md` (OPS-18…OPS-21),
+_Tenth pass in the standing series. Follows `docs/OPSEC-REVIEW-2026-08-31.md`
+(OPS-25…OPS-26), `docs/OPSEC-REVIEW-2026-08-27.md` (OPS-22…OPS-24),
+`docs/OPSEC-REVIEW-2026-08-24.md` (OPS-18…OPS-21),
 `docs/OPSEC-REVIEW-2026-08-20.md` (OPS-15…OPS-17),
 `docs/OPSEC-REVIEW-2026-08-17.md` (OPS-11…OPS-13),
 `docs/OPSEC-REVIEW-2026-08-13.md` (OPS-8…OPS-10),
 `docs/OPSEC-REVIEW-2026-08-11.md`, `docs/OPSEC-REVIEW-2026-08-10.md`
 (OPS-1…OPS-7) and `docs/OPSEC.md` (V1…V9). New findings continue the **OPS-n**
-series at OPS-25._
+series at OPS-27._
+
+_Numbering note: this pass ran on 2026-09-03 against a tree that did not yet
+contain `docs/OPSEC-REVIEW-2026-08-31.md`, and originally took OPS-25/OPS-26
+for its two findings — the same numbers the 08-31 pass had already assigned
+to the invite-preview session check and invite-token storage. Reconciled on
+2026-09-11 when the branch was brought up to `dev`, in the 08-31 pass's favour
+(it landed first, per the 08-12 precedent): this pass's findings are
+**OPS-27 and OPS-28** everywhere below. The findings themselves are unrelated
+to 08-31's; only the numbers moved._
 
 **Scope for this pass: API security & data exposure**, the fourth pass on
 this theme (`docs/OPSEC-REVIEW-2026-08-13.md`, `-08-20.md`, `-08-27.md` were
@@ -40,7 +50,7 @@ sweep turned up.
 
 ## Findings
 
-### OPS-25 — The AI chat, agent-run, and TTS proxies had no rate limiting, and every spend guard on them defaults to off in production — **FIXED (rate limiting); enforcement flags flagged for product decision** [FACT]
+### OPS-27 — The AI chat, agent-run, and TTS proxies had no rate limiting, and every spend guard on them defaults to off in production — **FIXED (rate limiting); enforcement flags flagged for product decision** [FACT]
 
 **Files:**
 - `auth-worker/src/lib/ai-budget.ts:191`, `auth-worker/src/lib/credits.ts:42,64`,
@@ -94,7 +104,7 @@ pass. Recorded here so it isn't silently lost: whoever owns billing/product
 for this should decide per-environment defaults deliberately, informed by
 the log-only warnings these guards have been emitting.
 
-### OPS-26 — Two authenticated write routes echoed raw database error text — **FIXED** [FACT]
+### OPS-28 — Two authenticated write routes echoed raw database error text — **FIXED** [FACT]
 
 **Files:** `auth-worker/src/routes/knowledge.ts:202`,
 `auth-worker/src/routes/agent-artifacts.ts:149`.
@@ -124,8 +134,8 @@ generic message, mirroring `toErrorResponse`'s pattern.
 
 | ID | Finding | Likelihood | Impact | Risk | State |
 |---|---|---|---|---|---|
-| OPS-25 | No rate limit on chat/agent-run/TTS proxies; spend guards log-only in prod | Medium — any self-registered account, no special access needed | High — unbounded spend against the shared OpenRouter key / Modal GPU endpoint | **High** | Rate limiting fixed; enforce-flag decision flagged for product/ops |
-| OPS-26 | Raw DB error text returned on two insert-failure paths | Low — requires an authenticated session and a triggerable constraint failure | Low — schema-fingerprinting only, no data disclosure | **Low** | Fixed |
+| OPS-27 | No rate limit on chat/agent-run/TTS proxies; spend guards log-only in prod | Medium — any self-registered account, no special access needed | High — unbounded spend against the shared OpenRouter key / Modal GPU endpoint | **High** | Rate limiting fixed; enforce-flag decision flagged for product/ops |
+| OPS-28 | Raw DB error text returned on two insert-failure paths | Low — requires an authenticated session and a triggerable constraint failure | Low — schema-fingerprinting only, no data disclosure | **Low** | Fixed |
 
 ---
 
@@ -161,13 +171,13 @@ when another user has flooded the same window.
   step-up, org-settings secret redaction, `/users/lookup` PII scope, SQL
   injection, artifact `Content-Type` handling, auth/session middleware** —
   all re-swept this pass against the newer surface (chat/agent/TTS routes
-  specifically); no gap found beyond OPS-25/OPS-26 above.
+  specifically); no gap found beyond OPS-27/OPS-28 above.
 
 ## Not fixed here — needs follow-up
 
 - **OPS-24** — the credit-guard check-then-act race, unchanged; still needs a
   billing-scoped pass rather than a side effect of this one.
-- **OPS-25's enforce-flag question** — whether/when to flip
+- **OPS-27's enforce-flag question** — whether/when to flip
   `AI_BUDGET_ENFORCE`/`CREDIT_ENFORCE`/`TTS_BUDGET_ENFORCE` to `true` in any
   environment is a product/billing decision, not a mechanical security patch;
   flagged for whoever owns that call.

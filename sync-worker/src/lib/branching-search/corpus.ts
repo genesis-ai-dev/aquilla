@@ -47,6 +47,11 @@ export interface LoadCorpusArgs {
   /** If provided, excludes this cellId from the corpus (e.g., the cell the
    *  copilot is currently completing — we don't want it to retrieve itself). */
   excludeCellId?: string
+  /** Lane tag stored on `cells.target_lang`. Default lane is `""` (omitted
+   *  param treated the same so old clients stay single-lane). Extra-lane
+   *  tags (`French`, `es`, …) are the tag itself — not the Settings display
+   *  name. AQU-1025: without this bind a cell contributes every target lane. */
+  targetLang?: string
 }
 
 export interface LoadCorpusResult {
@@ -94,10 +99,16 @@ export async function loadCorpus(
     "  ON t.project_id = ?",  // bind: projectId (target side always local)
     " AND t.cell_id    = s.cell_id",
     " AND t.side       = 'target'",
+    " AND t.target_lang = ?",  // bind: targetLang ('' = default lane)
     "WHERE s.project_id = COALESCE(?, ?)",  // bind: upstream, projectId
     "  AND s.side = 'source'",
   ]
-  const binds: unknown[] = [args.projectId, upstreamProjectId, args.projectId]
+  const binds: unknown[] = [
+    args.projectId,
+    args.targetLang ?? "",
+    upstreamProjectId,
+    args.projectId,
+  ]
 
   if (args.validatedOnly) {
     parts.push("AND t.validated = 1")

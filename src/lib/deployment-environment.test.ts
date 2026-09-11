@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs"
 import { describe, it, expect } from "vitest"
 import {
   apiHostname,
@@ -40,6 +41,15 @@ describe("classifyApiHost", () => {
     expect(classifyApiHost("api.dev.aquilla.app/sync")).toBe("development")
   })
 
+  it("classifies any environment-scoped aquilla API host by shape, not by name", () => {
+    // `api.<env>.aquilla.app` is the environment matrix's naming scheme
+    // (docs/DEPLOYMENT-ENVIRONMENTS.md). A future or retired environment is
+    // still a non-production backend and must warn, without this module ever
+    // spelling its host out (see the bundle guard below).
+    expect(classifyApiHost("https://api.staging.aquilla.app")).toBe("development")
+    expect(classifyApiHost("api.qa-2.aquilla.app/sync")).toBe("development")
+  })
+
   it("recognizes local dev-stack hosts", () => {
     expect(classifyApiHost("127.0.0.1:8787")).toBe("local")
     expect(classifyApiHost("http://localhost:5173")).toBe("local")
@@ -54,9 +64,12 @@ describe("classifyApiHost", () => {
   })
 
   it("never guesses production for an unrecognized or empty host", () => {
-    expect(classifyApiHost("https://api.staging.aquilla.app")).toBe("unknown")
-    // Lookalike hosts must not slip through as production.
+    expect(classifyApiHost("https://api.example.test")).toBe("unknown")
+    // Lookalike hosts must not slip through as production or development.
     expect(classifyApiHost("https://api.aquilla.app.evil.test")).toBe("unknown")
+    expect(classifyApiHost("https://api.dev.aquilla.app.evil.test")).toBe("unknown")
+    expect(classifyApiHost("https://evil.api.dev.aquilla.app")).toBe("unknown")
+    expect(classifyApiHost("https://api.dev.evil.aquilla.app")).toBe("unknown")
     expect(classifyApiHost("https://aquilla.app")).toBe("unknown")
     expect(classifyApiHost("")).toBe("unknown")
   })
@@ -127,5 +140,23 @@ describe("resolveBackendEnvironment", () => {
     expect(env.kind).toBe("unknown")
     expect(env.isProduction).toBe(false)
     expect(env.host).toBe("api.somewhere-else.test")
+  })
+})
+
+describe("production bundle hygiene", () => {
+  // scripts/verify-live-environment.mjs refuses to promote a production SPA
+  // whose JavaScript graph contains a non-production API host
+  // (`ENVIRONMENTS.production.forbiddenBundleHosts`). Both of these modules
+  // ship in every bundle, so a dev-host literal in either one blocks the
+  // production deploy at the promotion gate — which is how AQU-1258 happened.
+  // Keep the host out of shipped source; tests (this file) may name it freely.
+  const FORBIDDEN_PRODUCTION_BUNDLE_HOSTS = ["api.dev.aquilla.app"]
+  const SHIPPED_SOURCES = ["./deployment-environment.ts", "./i18n/namespaces/nav.ts"]
+
+  it.each(SHIPPED_SOURCES)("%s does not embed a non-production host", (relativePath) => {
+    const source = readFileSync(new URL(relativePath, import.meta.url), "utf8")
+    for (const host of FORBIDDEN_PRODUCTION_BUNDLE_HOSTS) {
+      expect(source, `${relativePath} mentions ${host}`).not.toContain(host)
+    }
   })
 })

@@ -48,7 +48,18 @@ vi.mock("@/lib/sync/cloud-projects", () => ({
 const getPortfolio = vi.fn()
 vi.mock("@/lib/frontier/portfolio", async (importActual) => {
   const actual = await importActual<typeof import("@/lib/frontier/portfolio")>()
-  return { ...actual, getPortfolio: (...a: unknown[]) => getPortfolio(...a) }
+  return {
+    ...actual,
+    getPortfolio: (...a: unknown[]) => getPortfolio(...a),
+    getPortfolioPage: async (_jwt: string, _orgId: number, opts?: { q?: string }) => {
+      const projects = (await getPortfolio()) as Array<{ name: string }>
+      const q = opts?.q?.trim().toLowerCase() ?? ""
+      return {
+        projects: q ? projects.filter((p) => p.name.toLowerCase().includes(q)) : projects,
+        nextCursor: null,
+      }
+    },
+  }
 })
 
 const now = Date.now()
@@ -188,7 +199,7 @@ describe("org Projects PM filter (AQU-1040)", () => {
     fireEvent.change(screen.getByRole("textbox", { name: /search projects/i }), {
       target: { value: "psal" },
     })
-    expect(rowNames()).toEqual(["Psalms"])
+    await waitFor(() => expect(rowNames()).toEqual(["Psalms"]))
   })
 
   it("shows the table's empty state, not a blank table, when nothing matches", async () => {

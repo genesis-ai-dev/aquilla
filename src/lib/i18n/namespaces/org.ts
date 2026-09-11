@@ -28,6 +28,7 @@ export const org = defineNamespace({
     "org.switcher.retryOrganizationsAriaLabel": "Retry loading organizations",
     "org.switcher.retrySharedOrganizationsAriaLabel": "Retry loading shared organizations",
     "org.switcher.couldNotLoadSharedOrganizations": "Couldn’t load shared organizations",
+    "org.switcher.searchFailed": "Couldn’t search organizations",
 
     // -- LaneChips: per-lane progress chips on an OrgHome project row --
     "org.laneChips.tooltip": "{label} — {pct} translated",
@@ -1095,6 +1096,7 @@ export const org = defineNamespace({
     // "Find an organization…" placeholder → org.switcher.searchPlaceholder (identical text)
     // "Find an organization" aria-label → org.switcher.searchAriaLabel (identical text)
     // "No organizations found." → org.switcher.noOrganizationsFound (identical text)
+    // "Couldn't search organizations" → org.switcher.searchFailed (identical text)
     // "Create" → org.switcher.create (identical text)
 
     // -- OverviewLaneTable: per-project lane table (AQU-538 §3.3) --
@@ -1251,6 +1253,10 @@ export const org = defineNamespace({
       "org.switcher.retrySharedOrganizationsAriaLabel": {
         description:
           "Accessible name for the retry control shown when loading the project directory that backs shared/guest organizations failed. Used both when it replaces the whole switcher (no member orgs) and on the inline retry row inside the open dropdown (member orgs still shown).",
+      },
+      "org.switcher.searchFailed": {
+        description:
+          "Empty-state copy in the org switcher when a server-side organization search failed. Distinct from the member-list load failure, which replaces the whole switcher with a retry affordance.",
       },
       "org.laneChips.tooltip": {
         description:

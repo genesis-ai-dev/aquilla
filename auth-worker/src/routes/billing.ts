@@ -33,6 +33,9 @@ import { readOrgBilling, readWordSnapshot } from "../lib/billing/words"
 
 import { readBillingOffers, unavailableOffers } from "../lib/billing/catalog"
 
+import { workspaceCheckoutRehearsalEnabled } from "../lib/billing/workspace-checkout"
+import { reconcileWorkspacePayment } from "../lib/billing/workspace-payment"
+
 const billing = new Hono<AuthHonoEnv>()
 
 function spaOrigin(env: { BASE_URL?: string }): string {
@@ -208,7 +211,7 @@ billing.post("/billing/webhook", async (c) => {
     return c.json({ error: "webhook_unconfigured" }, 503)
   }
 
-  let event: { id?: string; type?: string; data?: { object?: Record<string, unknown> } }
+  let event: { id?: string; type?: string; created?: number; livemode?: boolean; account?: string; data?: { object?: Record<string, unknown> } }
   try {
     event = JSON.parse(payload) as typeof event
   } catch {
@@ -219,14 +222,10 @@ billing.post("/billing/webhook", async (c) => {
   const metadata = obj.metadata as Record<string, unknown> | undefined
   const invoiceMetadata = (obj.parent as { subscription_details?: { metadata?: Record<string, unknown> } } | undefined)?.subscription_details?.metadata
   const legacyInvoiceMetadata = (obj.subscription_details as { metadata?: Record<string, unknown> } | undefined)?.metadata
-  if (metadata?.kind === "workspace_plan_rehearsal" || invoiceMetadata?.kind === "workspace_plan_rehearsal"
-    || legacyInvoiceMetadata?.kind === "workspace_plan_rehearsal") {
-    return c.json({ error: "workspace_activation_not_ready" }, 503)
-  }
   const type = event.type ?? ""
   const eventId = typeof event.id === "string" ? event.id : null
 
-  const handled = ["checkout.session.completed", "customer.subscription.updated",
+  const handled = ["checkout.session.completed", "checkout.session.async_payment_succeeded", "customer.subscription.updated",
     "customer.subscription.deleted", "invoice.paid"].includes(type)
   if (handled && !eventId?.trim()) {
     return c.json({ error: "missing_event_id" }, 400)
@@ -239,6 +238,34 @@ billing.post("/billing/webhook", async (c) => {
   }
 
   try {
+    // Stored identities still isolate new plans if later events omit metadata.
+    const subscriptionId = type.startsWith("customer.subscription.") ? obj.id
+      : typeof obj.subscription === "string" ? obj.subscription
+      : (obj.parent as { subscription_details?: { subscription?: unknown } } | undefined)
+        ?.subscription_details?.subscription
+    const markedWorkspace = [metadata, invoiceMetadata, legacyInvoiceMetadata]
+      .some(meta => meta?.kind === "workspace_plan_rehearsal" || meta?.checkoutAttemptId != null)
+    const storedWorkspace = !markedWorkspace && (
+      (type.startsWith("checkout.session.") && typeof obj.id === "string"
+        && await c.env.AQUILLA_PG.prepare(
+          "SELECT id FROM workspace_checkout_attempts WHERE session_id = ?",
+        ).bind(obj.id).first())
+      || (typeof subscriptionId === "string" && await c.env.AQUILLA_PG.prepare(
+        "SELECT org_id FROM workspace_plan_entitlements WHERE stripe_subscription_id = ?",
+      ).bind(subscriptionId).first())
+    )
+    if (markedWorkspace || storedWorkspace) {
+      if (!secret || !workspaceCheckoutRehearsalEnabled(c.env, c.req.url)) {
+        return c.json({ error: "workspace_activation_disabled" }, 503)
+      }
+      if (!["checkout.session.completed", "checkout.session.async_payment_succeeded"].includes(type)) {
+        return c.json({ error: "workspace_lifecycle_not_ready" }, 503)
+      }
+      const applied = await reconcileWorkspacePayment(c.env, {
+        id: eventId!, type, created: event.created!, livemode: event.livemode!, account: event.account,
+      }, obj)
+      return c.json(applied ? { ok: true } : { ok: true, duplicate: true })
+    }
     if (type === "checkout.session.completed") {
       const orgId = orgIdFromMetadata(obj.metadata)
       if (orgId == null) return c.json({ ok: true, ignored: "no_org" })

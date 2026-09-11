@@ -317,14 +317,16 @@ Stripe responses are mocked while database and HTTP handlers are real.
 - [x] Validate the returned session identity, workspace reference, test mode,
   subscription mode, attempt metadata, and Stripe-hosted HTTPS redirect.
 - [x] Prevent rehearsal events from entering the legacy Field webhook path.
-  Signed rehearsal events return a retryable error with no receipt or plan
-  grant until new-plan activation is integrated.
+  Initial signed payment activation is now implemented in the 2026-09-11
+  checkpoint below. Unsupported lifecycle events still return a retryable error.
 - [x] Fix the JSON representation boundary in both checkout requests and initial
   entitlement price IDs. Real postgres.js previously double-encoded serialized
   JSON; bind as text before casting to JSONB. Assert object/array shapes through
   the production adapter and enforce checkout shapes in the database.
-- [ ] Connect successful payment reconciliation to the stored attempt and
-  atomic initial entitlement activation. Verify full payment-to-access behavior.
+- [x] Connect signed sandbox payment reconciliation to the stored attempt and
+  atomic initial entitlement activation in local integration tests.
+- [ ] Verify the real Stripe payment-to-access journey, including feature gates
+  and usage enforcement; local mocked-Stripe activation does not satisfy this gate.
 - [ ] Add confirmed expiration/cancellation reconciliation before permitting a
   replacement checkout. Do not delete an ambiguous attempt to create another.
 - [ ] Connect the UI and production checkout only after the remaining payment,
@@ -379,6 +381,84 @@ E2E_SHARD=3/3 npx tsx scripts/e2e-up.ts -- \
 npm run build
 ```
 
+## Initial sandbox payment checkpoint — 2026-09-11
+
+Signed payment reconciliation now connects the saved checkout request to a
+workspace plan in the local rehearsal. Actual paid feature enforcement and the
+complete customer journey remain unfinished. No real Stripe request, charge,
+secret installation, live catalog copy, or deployment occurs in these tests.
+
+- [x] Retrieve the completed, paid test session and active subscription from
+  Stripe before acquiring the workspace lock. Match the account, customer,
+  subscription, workspace, immutable request metadata, approved price IDs,
+  quantities, currency, and totals. Team 20× requires both expected lines.
+- [x] Use the saved catalog and quote rather than a newer price configuration.
+  Require a valid webhook signature even when the local auth bypass is enabled.
+- [x] Atomically commit the receipt, recovered session ID, and initial entitlement.
+  Failures in any write roll back all three. Concurrent retries grant one plan;
+  exact replay preserves its first seven-day usage anchor.
+- [x] Handle paid `checkout.session.completed` and
+  `checkout.session.async_payment_succeeded`. An earlier unpaid completion cannot
+  establish the activation anchor, even if a later Stripe read reports payment.
+- [x] Expose the saved plan and weekly period through the authorized workspace
+  API. A different workspace retains its own entitlement and allowance context.
+- [x] Keep subscription lifecycle events out of legacy Field handling, including
+  events without metadata when the subscription identity is already stored.
+- [ ] Configure and verify async-success delivery on the sandbox webhook before
+  testing delayed payment methods. The existing disabled endpoint has four
+  events and has not been changed by this checkpoint.
+- [ ] Implement renewal, failed-payment, cancellation, and plan-change
+  reconciliation after the launch policies are approved. These events currently
+  remain retryable; no lifecycle state or feature enforcement is implied.
+- [ ] Replace the legacy Free/Field billing card with the persisted new-plan
+  presentation before opening customer checkout. The workspace summary reads
+  the new plan context; the legacy billing card still reads the old store.
+
+The rehearsal remains restricted to loopback requests, explicit local opt-in,
+`WRANGLER_LOCAL=1`, test credentials, and a configured signing secret. Live mode
+is rejected. Discounts, tax-adjusted totals, trials, and manual invoicing are
+not supported by this initial exact-quote rehearsal. Do not enable customer
+checkout until the complete pricing and lifecycle policy is implemented.
+
+Test impact: the real review/checkout producer supplies persisted parameters to
+Stripe-shaped fixtures, then the signed webhook consumes them through the real
+Postgres adapter. The workspace API consumes the resulting entitlement. Tests
+cover all ten offer/cadence combinations, invalid payment mappings, delayed
+payment, duplicate delivery, cross-workspace isolation, and transaction rollback.
+The existing billing UI's paid-period branch has RTL coverage; the billing smoke
+remains the browser sentinel. Stripe transport is mocked throughout.
+
+Validation commands (2026-09-11):
+
+```sh
+# auth-worker: targeted worker tests, 115 passing
+npx vitest run src/__tests__/billing-workspace-checkout.test.ts \
+  src/__tests__/billing-workspace.test.ts \
+  src/__tests__/billing-webhook-recovery.test.ts \
+  src/__tests__/billing-routes.test.ts \
+  src/lib/billing/catalog.test.ts --maxWorkers=2
+
+# auth-worker: disposable local Postgres, 73 passing
+npx vitest run --config vitest.webhook-postgres.config.ts
+
+# repository root: paid-period RTL and test selection, 32 passing
+npx vitest run src/components/org/BillingWorkspaceSummary.test.tsx \
+  scripts/e2e-impact.test.ts scripts/e2e-determinism.test.ts \
+  --maxWorkers=2
+npx tsc --noEmit -p auth-worker/tsconfig.json
+npm run build
+E2E_SHARD=3/3 npx tsx scripts/e2e-up.ts -- \
+  e2e/specs/orgs/org-settings-billing.smoke.spec.ts --shard=1/1
+```
+
+Worker TypeScript and the production build pass. Both billing smoke journeys
+pass with no slow-request logs. The first smoke attempt could not launch
+Chromium inside the filesystem sandbox; the permitted local-browser run passes.
+No application assertion was weakened or retried to mask a failure.
+
+See [Stripe fulfillment](https://docs.stripe.com/checkout/fulfillment) for payment
+status checks, duplicate fulfillment, and delayed-payment event handling.
+
 ## Production launch checklist
 
 **Status: not ready to enable paid checkout.** Prices are ready in sandbox;
@@ -396,7 +476,9 @@ older Field launch instructions below. Ryder requests production launch on
 - [ ] Install sandbox secrets, enable the dev webhook, and test a complete
   payment → correct workspace access → renewal/cancellation journey. Verify
   duplicate events, failed payments, and the customer portal.
-- [ ] Complete Stripe business/payout activation; create and verify live prices,
+- [x] Owner reports completing business verification in Chrome on 2026-09-11.
+  This records Ryder’s confirmation; charge/payout readiness still needs verification.
+- [ ] Confirm Stripe charge/payout readiness; create and verify live prices,
   the production webhook, live secrets, and customer portal configuration.
 - [ ] Connect plan/cohort properties to billing and product activity for retention.
   Apply the cohort migration if used; keep price experiments off at launch.
@@ -405,6 +487,12 @@ older Field launch instructions below. Ryder requests production launch on
 - [ ] Verify production configuration, enable paid checkout, and confirm the first
   authorized purchase grants the right access. Monitor webhook/payment failures;
   disable new checkout if the payment-to-access path fails.
+
+**Live catalog preparation — 2026-09-11:** defer copying everything from sandbox.
+Finish the payment-to-access rehearsal, then promote only the approved catalog
+and verify its live price mappings. Configure and verify live secrets, webhook,
+and customer portal separately. Reuse the approved pricing model; no wholesale
+reimplementation is needed. Sandbox testing does not depend on a live copy.
 
 **Still open:** the maximum self-service block quantity. Keep quantities above
 one unavailable until approved. Sandbox setup alone does not make billing ready.
@@ -874,7 +962,9 @@ The active product catalog was empty before preparation. On 2026-09-08:
   Initially blocked by approval review; approval and creation are now complete.
   See the current webhook ID and disabled state above.
 - No API or webhook secrets were retrieved or installed.
-- Account activation is 10% complete. Business type currently displays
+- Historical account observation (superseded by Ryder’s 2026-09-11 report of
+  completed business verification; see the production checklist): activation
+  was 10% complete. Business type displayed
   individual/sole proprietorship, which requires owner confirmation given the
   Ltd. name. Business details, products/services, public details, security,
   and review/submission remain unfinished. No activation form was submitted.

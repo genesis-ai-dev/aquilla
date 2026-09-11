@@ -4,7 +4,7 @@ import type { Env } from '../../types'
 import { paidOffers, presentBillingOffers } from './catalog-view'
 import { requireStripeSecret, stripeForm } from './stripe'
 
-const catalogSchema = z.object({
+export const catalogSchema = z.object({
   version: z.string().min(1),
   entitlementVersion: z.literal('2026-09-weekly'),
   accountId: z.string().startsWith('acct_'),
@@ -19,7 +19,7 @@ const catalogSchema = z.object({
     maxQuantity: z.literal(1),
   })).length(10),
 })
-const priceSchema = z.object({
+export const priceSchema = z.object({
   id: z.string(), product: z.union([z.string(), z.object({ id: z.string() })]),
   active: z.boolean(), livemode: z.boolean(), type: z.string(),
   billing_scheme: z.string(), currency: z.string(),

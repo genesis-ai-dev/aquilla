@@ -31,6 +31,22 @@ describe('billing workspace API → client → settings', () => {
     expect(await screen.findByText(message)).toBeVisible()
     expect(screen.queryByRole('button')).toBeNull()
   })
+  it('shows the persisted paid-plan period without inventing measured usage', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ ...workspace,
+      eligibility: { reason: 'already_subscribed', offers: [] },
+      entitlement: { offer: 'team_20x', scope: 'team',
+        priceVersion: '2026-09-baseline', entitlementVersion: '2026-09-weekly',
+        usagePeriodStart: '2026-09-11T12:00:00.000Z',
+        usagePeriodEnd: '2026-09-18T12:00:00.000Z' },
+    })))
+    render(<BillingWorkspaceSummary jwt="jwt" orgId={7} />)
+    expect(await screen.findByText(/already has a paid plan/)).toBeVisible()
+    expect(screen.getByText(/Usage period ends/)).toHaveTextContent(
+      new Date('2026-09-18T12:00:00.000Z').toLocaleString())
+    expect(screen.getByText(/Usage measurement is not available yet/)).toBeVisible()
+    expect(document.body.textContent).not.toMatch(/credits|0%|100%/)
+    expect(screen.queryByRole('button')).toBeNull()
+  })
   it('rejects a response for another workspace', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json({ ...workspace, orgId: 8 })))
     render(<BillingWorkspaceSummary jwt="jwt" orgId={7} />)

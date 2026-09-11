@@ -186,7 +186,7 @@ it('never grants a legacy plan for signed rehearsal payment events', async () =>
     const signature = createHmac('sha256', 'whsec_fixture').update(`${timestamp}.${payload}`).digest('hex')
     const response = await app.request('http://127.0.0.1/api/v2/billing/webhook', {
       method: 'POST', body: payload, headers: { 'stripe-signature': `t=${timestamp},v1=${signature}` },
-    }, { ...config(), STRIPE_WEBHOOK_SECRET: 'whsec_fixture' })
+    }, { ...config(), BILLING_WORKSPACE_CHECKOUT_REHEARSAL: undefined, STRIPE_WEBHOOK_SECRET: 'whsec_fixture' })
     expect(response.status).toBe(503)
   }
   for (const table of ['org_billing', 'org_billing_events', 'workspace_plan_entitlements']) {
@@ -220,4 +220,191 @@ it('rechecks eligibility after reading prices and before saving the checkout req
   expect((await checkout(input)).status).toBe(409)
   expect(stripe.requests).toHaveLength(0)
   expect(await env.AQUILLA_PG.prepare('SELECT count(*)::int AS n FROM workspace_checkout_attempts').first()).toEqual({ n: 0 })
+})
+
+// Real review → checkout parameters → Stripe-shaped payment → signed handler → DB.
+async function completedPayment(offer = 'pro', interval = 'year') {
+  const stripe = await setup(offer.startsWith('team') ? 'team' : 'personal')
+  expect((await checkout(await reviewed(offer, interval))).status).toBe(200)
+  const params = new URLSearchParams(stripe.requests[0]!.body)
+  const metadata = Object.fromEntries([...params.entries()]
+    .filter(([key]) => key.startsWith('metadata['))
+    .map(([key, value]) => [key.slice(9, -1), value]))
+  const items = []
+  for (let i = 0; params.has(`line_items[${i}][price]`); i++) {
+    items.push({ quantity: Number(params.get(`line_items[${i}][quantity]`)),
+      price: stripeCatalogResponse(`/v1/prices/${params.get(`line_items[${i}][price]`)}`) as StripePriceInput })
+  }
+  const total = items.reduce((sum, item) => sum + item.price.unit_amount! * item.quantity, 0)
+  const session = { id: 'cs_test_123', mode: 'subscription', status: 'complete',
+    payment_status: 'paid', livemode: false, client_reference_id: params.get('client_reference_id')!,
+    metadata, subscription: 'sub_rehearsal', customer: 'cus_rehearsal',
+    currency: 'usd', amount_subtotal: total, amount_total: total }
+  const subscription = { id: session.subscription, customer: session.customer,
+    status: 'active', livemode: false, currency: 'usd', collection_method: 'charge_automatically',
+    metadata: { ...metadata }, items: { has_more: false, data: items } }
+  stripe.sessions.set(stripe.requests[0]!.key, session)
+  vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+    if (new URL(url).pathname.startsWith('/v1/subscriptions/')) return Response.json(subscription)
+    return stripe.fetch(url, init)
+  })
+  const event = { id: 'evt_workspace_paid', type: 'checkout.session.completed', livemode: false,
+    created: Math.floor(Date.now() / 1000) - 1, data: { object: structuredClone(session) } }
+  const send = (settings: Env = { ...config(), STRIPE_WEBHOOK_SECRET: 'whsec_fixture' }, signed = true) => {
+    const body = JSON.stringify(event)
+    const t = Math.floor(Date.now() / 1000)
+    const sig = createHmac('sha256', 'whsec_fixture').update(`${t}.${body}`).digest('hex')
+    return app.request('http://127.0.0.1/api/v2/billing/webhook', { method: 'POST', body,
+      headers: signed ? { 'stripe-signature': `t=${t},v1=${sig}` } : {} }, settings)
+  }
+  return { stripe, session, subscription, event, send }
+}
+async function expectNoPaymentGrant() {
+  for (const table of ['org_billing', 'org_billing_events', 'workspace_plan_entitlements']) {
+    expect(await env.AQUILLA_PG.prepare(`SELECT count(*)::int AS n FROM ${table}`).first()).toEqual({ n: 0 })
+  }
+}
+it.each(manifest.bindings.map(b => [b.offer, b.interval] as const))(
+  'activates %s %s and exposes its weekly plan only to its workspace', async (offer, interval) => {
+    const payment = await completedPayment(offer, interval)
+    expect((await payment.send()).status).toBe(200)
+    const getWorkspace = async (org: number, user: string) => app.request(`/api/v2/orgs/${org}/billing/workspace`, {
+      headers: authHeader(await jwtFor(user)),
+    }, config())
+    const response = await getWorkspace(1, 'alice')
+    expect(response.status).toBe(200)
+    const anchor = new Date(payment.event.created * 1000).toISOString()
+    expect(await response.json()).toMatchObject({ orgId: 1,
+      eligibility: { reason: 'already_subscribed', offers: [] },
+      entitlement: { offer, priceVersion: manifest.version, usagePeriodStart: anchor,
+        usagePeriodEnd: new Date(payment.event.created * 1000 + 7 * 86400000).toISOString() },
+      checkoutEnabled: false, usagePercent: null })
+    expect((await getWorkspace(1, 'bob')).status).toBe(403)
+    expect((await app.request('/api/v2/orgs/me', { headers: authHeader(await jwtFor('bob')) }, env)).status).toBe(200)
+    expect(await (await getWorkspace(2, 'bob')).json()).toMatchObject({ entitlement: null })
+    expect(await env.AQUILLA_PG.prepare('SELECT count(*)::int AS n FROM org_billing').first()).toEqual({ n: 0 })
+    expect(await (await payment.send()).json()).toEqual({ ok: true, duplicate: true })
+    payment.event.id = 'evt_workspace_async_paid'
+    payment.event.type = 'checkout.session.async_payment_succeeded'
+    payment.event.created++
+    expect((await payment.send()).status).toBe(200)
+    expect(await (await getWorkspace(1, 'alice')).json()).toMatchObject({ entitlement: { usagePeriodStart: anchor } })
+  },
+)
+it('serializes payment receipts and recovers a missing checkout session ID', async () => {
+  const payment = await completedPayment()
+  await env.AQUILLA_PG.prepare('UPDATE workspace_checkout_attempts SET session_id = NULL').run()
+  const responses = await Promise.all([payment.send(), payment.send()])
+  expect(responses.map(r => r.status)).toEqual([200, 200])
+  expect(await Promise.all(responses.map(r => r.json()))).toContainEqual({ ok: true, duplicate: true })
+  expect(await env.AQUILLA_PG.prepare('SELECT count(*)::int AS n FROM workspace_plan_entitlements').first()).toEqual({ n: 1 })
+  expect(await env.AQUILLA_PG.prepare('SELECT count(*)::int AS n FROM org_billing_events').first()).toEqual({ n: 1 })
+  expect(await env.AQUILLA_PG.prepare('SELECT session_id FROM workspace_checkout_attempts').first()).toEqual({ session_id: payment.session.id })
+})
+it.each(['workspace_plan_entitlements', 'org_billing_events', 'workspace_checkout_attempts'])(
+  'rolls back payment when %s fails, then retries', async table => {
+    const payment = await completedPayment()
+    await env.AQUILLA_PG.prepare('UPDATE workspace_checkout_attempts SET session_id = NULL').run()
+    await env.AQUILLA_PG.exec(`CREATE FUNCTION reject_payment_fn() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected activation failure'; END $$`)
+    await env.AQUILLA_PG.exec(`CREATE TRIGGER reject_payment BEFORE INSERT OR UPDATE ON ${table} FOR EACH ROW EXECUTE FUNCTION reject_payment_fn()`)
+    try {
+      expect((await payment.send()).status).toBe(500)
+      await expectNoPaymentGrant()
+      expect(await env.AQUILLA_PG.prepare('SELECT session_id FROM workspace_checkout_attempts').first()).toEqual({ session_id: null })
+    } finally {
+      await env.AQUILLA_PG.exec(`DROP TRIGGER reject_payment ON ${table}`)
+      await env.AQUILLA_PG.exec('DROP FUNCTION reject_payment_fn()')
+    }
+    expect((await payment.send()).status).toBe(200)
+  },
+)
+it.each(['unpaid', 'wrong_customer', 'wrong_org', 'wrong_subscription', 'unknown_price',
+  'changed_amount', 'changed_recurring_price', 'wrong_quantity', 'extra_item', 'missing_item',
+  'truncated_items', 'live_session', 'live_subscription', 'live_event', 'inactive',
+  'wrong_attempt', 'missing_metadata', 'future_event'])(
+  'rejects %s without a receipt or plan', async fault => {
+    const payment = await completedPayment('team_20x')
+    const { session, subscription, event } = payment
+    switch (fault) {
+      case 'unpaid': session.payment_status = 'unpaid'; break
+      case 'wrong_customer': subscription.customer = 'cus_other'; break
+      case 'wrong_org': session.client_reference_id = '2'; break
+      case 'wrong_subscription': subscription.id = 'sub_other'; break
+      case 'unknown_price': subscription.items.data[0]!.price.id = 'price_unknown'; break
+      case 'changed_amount': session.amount_total++; break
+      case 'changed_recurring_price': subscription.items.data[0]!.price.unit_amount!++; break
+      case 'wrong_quantity': subscription.items.data[0]!.quantity = 2; break
+      case 'extra_item': subscription.items.data.push(subscription.items.data[0]!); break
+      case 'missing_item': subscription.items.data.pop(); break
+      case 'truncated_items': subscription.items.has_more = true; break
+      case 'live_session': session.livemode = true; break
+      case 'live_subscription': subscription.livemode = true; break
+      case 'live_event': event.livemode = true; break
+      case 'inactive': subscription.status = 'past_due'; break
+      case 'wrong_attempt': session.metadata.checkoutAttemptId = crypto.randomUUID(); break
+      case 'missing_metadata': delete subscription.metadata.orgId; break
+      case 'future_event': event.created += 3600; break
+    }
+    expect((await payment.send()).status).toBe(500)
+    await expectNoPaymentGrant()
+  },
+)
+it('requires signatures even locally and rejects disabled or live configuration', async () => {
+  const payment = await completedPayment()
+  expect((await payment.send(undefined, false)).status).toBe(400)
+  expect((await payment.send(config(), false)).status).toBe(503)
+  for (const override of [{ STRIPE_SECRET_KEY: 'sk_live_fixture' },
+    { WRANGLER_LOCAL: undefined }, { BILLING_WORKSPACE_CHECKOUT_REHEARSAL: undefined }]) {
+    expect((await payment.send({ ...config(), STRIPE_WEBHOOK_SECRET: 'whsec_fixture', ...override })).status).toBe(503)
+  }
+  await expectNoPaymentGrant()
+})
+it('rejects a different Stripe account', async () => {
+  const payment = await completedPayment()
+  const original = globalThis.fetch
+  vi.stubGlobal('fetch', (url: string, init?: RequestInit) => new URL(url).pathname === '/v1/account'
+    ? Promise.resolve(Response.json({ id: 'acct_other' })) : original(url, init))
+  expect((await payment.send()).status).toBe(500)
+  await expectNoPaymentGrant()
+})
+it('rechecks eligibility and pricing assignment at payment time', async () => {
+  const payment = await completedPayment()
+  await env.AQUILLA_PG.prepare("UPDATE organizations SET billing_scope = 'team' WHERE id = 1").run()
+  expect((await payment.send()).status).toBe(500)
+  await expectNoPaymentGrant()
+  await env.AQUILLA_PG.prepare("UPDATE organizations SET billing_scope = 'personal' WHERE id = 1").run()
+  await env.AQUILLA_PG.prepare("INSERT INTO billing_price_cohorts (org_id, experiment_key, variant, price_version) VALUES (1, 'other', 'other', 'different')").run()
+  expect((await payment.send()).status).toBe(500)
+  await expectNoPaymentGrant()
+})
+it('isolates lifecycle events when subscription metadata disappears', async () => {
+  const payment = await completedPayment()
+  expect((await payment.send()).status).toBe(200)
+  payment.event.id = 'evt_workspace_updated'
+  payment.event.type = 'customer.subscription.updated'
+  payment.event.data.object.id = payment.subscription.id
+  payment.event.data.object.metadata = {}
+  expect((await payment.send()).status).toBe(503)
+  expect(await env.AQUILLA_PG.prepare('SELECT count(*)::int AS n FROM org_billing').first()).toEqual({ n: 0 })
+  expect(await env.AQUILLA_PG.prepare('SELECT count(*)::int AS n FROM org_billing_events').first()).toEqual({ n: 1 })
+})
+it('waits for paid async success instead of anchoring usage to an earlier unpaid completion', async () => {
+  const payment = await completedPayment()
+  payment.event.data.object.payment_status = 'unpaid'
+  // Stripe now reports paid, but this signed completion predates payment.
+  expect((await payment.send()).status).toBe(500)
+  await expectNoPaymentGrant()
+  payment.event.id = 'evt_delayed_success'
+  payment.event.type = 'checkout.session.async_payment_succeeded'
+  payment.event.data.object.payment_status = 'paid'
+  expect((await payment.send()).status).toBe(200)
+})
+it('keeps Stripe read failures retryable without writing a receipt', async () => {
+  const payment = await completedPayment()
+  const original = globalThis.fetch
+  vi.stubGlobal('fetch', () => Promise.reject(new Error('Stripe unavailable')))
+  expect((await payment.send()).status).toBe(500)
+  await expectNoPaymentGrant()
+  vi.stubGlobal('fetch', original)
+  expect((await payment.send()).status).toBe(200)
 })

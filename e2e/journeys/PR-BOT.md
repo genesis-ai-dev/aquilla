@@ -59,20 +59,27 @@ after Matthew merged it.
 
 ## Status
 
-- **FAIL** if any walked checklist item missed its named effect. A 500
-  on the grant path is FAIL even when the instructions page looks
-  right (PR 628). HOLD is illegal when the table contains a FAIL.
-- **HOLD** only when every walked item showed the effect, and every
-  unwalked item is listed under **Did not walk** with why. A 2-org
-  account does not satisfy a >100-org AC; that row is NOT CHECKED,
-  not a pass (PR 509).
+Every checklist item is walked **three times** in fresh sessions (five
+for anything that touches sync, timing, or a second user). The status
+comes from the counts, not from the best run.
+
+- **PASS** when every walked item showed its effect on every run
+  (3/3, 5/5), and every unwalked item is named with why. A 2-org
+  account does not satisfy a >100-org AC; that item is not walked, not
+  passed (PR 509). PASS is a nod, not an approval: a person still looks.
+- **FAIL** when an item missed its effect on every run. A 500 on the
+  grant path is FAIL even when the instructions page looks right (PR
+  628). PASS is illegal when any item failed.
+- **FLAKY** when an item showed on some runs and not others (2/3, 4/5).
+  That is a harness suspect first and an app bug second. Say which
+  runs missed; do not call it a bug until a cold walk misses too.
 - **BLOCKED** only for a hard stop above.
 - A step the PR body itself leaves unticked ("secret not configured
-  yet") is **NOT CHECKED** with that reason, not FAIL. FAIL is for an
-  effect the PR claims and the preview does not show (PR 630).
-- One server fault is one row. If two checklist items die on the same
-  HTTP 500, say so in the second row instead of counting two bugs
-  (PR 628: the consent page's error was the same 500 as the grant).
+  yet") is not walked, with that reason; it is not FAIL. FAIL is for
+  an effect the PR claims and the preview does not show (PR 630).
+- One server fault is one item. If two checklist items die on the same
+  HTTP 500, say so once (PR 628: the consent page's error was the same
+  500 as the grant).
 
 ## Steps
 
@@ -103,10 +110,12 @@ after Matthew merged it.
    against the copied checklist, not against "the page still loads."
 
 4. **Run the regression replays** against the same preview
-   (`AQUILLA_BASE=<preview> sh e2e/journeys/streak.sh <slug> 1` per story),
+   (`AQUILLA_BASE=<preview> sh e2e/journeys/streak.sh <slug> 3` per story),
    then cold-walk any story whose replay failed, so a harness miss is not
    reported as a bug. If the runtime has no agent-browser, cold-walk the
    matching stories in the computer instead, and say that in the comment.
+   Repeat the claim walk from step 3 the same way: three runs, fresh
+   session each. Only n/n is a pass.
 
 5. **Comment on the PR.** One issue comment, never a GitHub review
    approval. Use the template below. Do not fix the app. Do not push.
@@ -175,9 +184,8 @@ from those errors.
   `bestalu-bible` project id in `projects-route-health.md` is not on
   development storage; do not try it on a preview.
 - **Evidence is a quote or a measurement, not a filename.** A
-  screenshot nobody can open is not evidence. Until uploads work from
-  the runner, the Evidence column holds the quoted string or the
-  measured value, and the filename is an aside.
+  screenshot nobody can open is not evidence. On a FAIL, quote the
+  string or the value you saw; on a PASS, nothing.
 - **Say what you did to reach a surface.** The recording modal needs
   the cell expanded and a microphone permission; a walk that skips that
   cannot be repeated by a person.
@@ -186,7 +194,7 @@ from those errors.
 
 ## False greens to refuse
 
-Do not write HOLD or anything that reads as "good" when the only evidence
+Do not write PASS or anything that reads as "good" when the only evidence
 is any of:
 
 - The control moved.
@@ -199,35 +207,55 @@ Those are notes, not a walk.
 
 ## Comment template
 
-Status is exactly one of: **HOLD**, **FAIL**, **BLOCKED** (see **Status**
-above). Never "LGTM", "looks good", "PASS", "walked", or "approved."
-HOLD means "here is what I saw"; a person still looks. If the table has
-a FAIL row, the header is FAIL.
+Short. A reviewer reads the first line and knows whether to look. Status
+is exactly one of **PASS**, **FAIL**, **FLAKY**, **BLOCKED**. Never
+"approved" or "LGTM": the bot may say the change looks good; it may not
+say it is accepted.
+
+On a PASS, the whole comment is the nod:
 
 ```
-## Bot walk — PR <n>
+## Bot walk — PR <n> @ <sha>
 
-**Status:** HOLD | FAIL | BLOCKED
+**PASS** 3/3 · <preview url> · as <role>
 
-**Claim** (quoted from the QA checklist / AC, not paraphrased)
-
-**Preview:** <url>
-**Signed in as:** <role, not just the email>
-**Stories:** <slugs, or "none">
-
-### Walked
-| Checklist item (verbatim) | Result | When it showed | Evidence |
-| --- | --- | --- | --- |
-| … | yes / no / NOT CHECKED | immediate / after navigation / after reload / never | screenshot or quote |
-
-### Did not walk
-- <item>: <why, one line>
-
-### What a human should look at first
-One sentence. On a FAIL, name the screen and the missing effect. On a
-HOLD, name the riskiest check you did not do (a second role, a second
-browser, a reload you skipped).
+Walked: <checklist items, one line, in the PR's words>.
+Not walked: <items and why, one line; or "none">.
 ```
+
+On a FAIL or FLAKY, add only what a person needs to reproduce and
+decide:
+
+```
+## Bot walk — PR <n> @ <sha>
+
+**FAIL** 0/3 · <preview url> · as <role>
+
+<Checklist item, verbatim>: expected <effect> on <screen>; saw
+`<quoted string or measured value>` on every run.
+
+Check: <one sentence, the screen and the step>.
+```
+
+```
+**FLAKY** 2/3 · …
+
+<Checklist item>: showed on runs 1 and 3, missed on run 2 at <step>.
+Harness suspect; re-run before treating as a bug.
+```
+
+On a BLOCKED, one line: the hard stop and what unblocks it.
+
+What stays out: a "Tried" narrative, a "Worked" table on a pass,
+screenshot filenames, timings, notes on how the runner was configured,
+and anything the bot saw that it did not measure. The 22 comments of
+2026-09-10 averaged 2,700 characters; the tables were right and nobody
+read past them.
+
+**Outside this PR.** If the walk trips over a bug the PR did not touch,
+reproduce it twice, then add one line under the heading **Outside this
+PR:** with the screen and the quoted string. One line, no ticket
+unless a person asks. Do not mention anything seen once.
 
 ## What the comment is for
 

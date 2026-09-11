@@ -204,7 +204,7 @@ describe("ProjectCreateDialog — linked-target creation flow", () => {
       expect(settings).toEqual({
         sourceLanguage: "English",
         targetLanguage: "French",
-        targetLanes: ["es"],
+        targetLanes: ["French", "es"],
       })
       expect(version).toBe(0)
     })

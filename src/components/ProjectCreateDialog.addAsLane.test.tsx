@@ -286,6 +286,42 @@ describe("ProjectCreateDialog — add-as-lane recommendation (AQU-538 slice 3)",
     expect(mockCreateCloudProject).not.toHaveBeenCalled()
   })
 
+  it("allows adding the upstream's primary language when it is not yet a registered lane", async () => {
+    mockFetchProjectSettings.mockResolvedValueOnce({
+      version: 3,
+      updatedAt: "2026-07-13T00:00:00.000Z",
+      updatedBy: null,
+      settings: { targetLanguage: "English", targetLanes: ["es"] },
+    })
+
+    render(<ProjectCreateDialog onCreated={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: /new project/i }))
+    fireEvent.change(screen.getByPlaceholderText("My Translation Project"), {
+      target: { value: "English Episode 1" },
+    })
+    fireEvent.change(screen.getByPlaceholderText(/English, Grade 7 English/i), {
+      target: { value: "English" },
+    })
+    fireEvent.change(screen.getByPlaceholderText(/French, conversational Swahili/i), {
+      target: { value: "English" },
+    })
+    fireEvent.click(screen.getByText("Advanced: project shape"))
+    fireEvent.click(screen.getByText(/Linked target/i))
+    await pickSelectOption(/Upstream project/i, /English Source/i)
+    pickCorpusSource()
+    fireEvent.click(screen.getByTestId("add-as-lane-btn"))
+
+    await waitFor(() => {
+      expect(mockPatchProjectSettings).toHaveBeenCalledWith(
+        "tok",
+        "upstream-1",
+        { targetLanes: ["es", "English"] },
+        3,
+      )
+    })
+    expect(screen.queryByText(/already .* default target language/i)).toBeNull()
+  })
+
   it("rejects a duplicate/case-insensitive lane before PATCHing", async () => {
     mockFetchProjectSettings.mockResolvedValueOnce({
       version: 3,

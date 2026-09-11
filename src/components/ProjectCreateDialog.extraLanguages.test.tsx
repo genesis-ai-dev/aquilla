@@ -1,9 +1,8 @@
-// AQU-538 "creation fix" (spec §5 / QA-AQU538-LANES.md "UX gaps" #1): the
-// self-contained shape's target field is one text box per lane, stacked, with
-// a plus button that appends another. Box 0 is targetLanguage, the rest become
-// settings.targetLanes in the same create settings PATCH. The linked-target shape stays
-// single-field — see ProjectCreateDialog.linked.test.tsx /
-// ProjectCreateDialog.addAsLane.test.tsx.
+// AQU-538 / AQU-1240: the self-contained shape's target field is one text
+// box per lane, stacked, with a plus button that appends another. Box 0 is
+// targetLanguage and the first settings.targetLanes entry; later boxes are
+// extras. One create settings PATCH writes the complete registry. See also
+// ProjectCreateDialog.linked.test.tsx / ProjectCreateDialog.addAsLane.test.tsx.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
@@ -244,6 +243,7 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
       expect(mockPatchProjectSettings).toHaveBeenCalledTimes(1)
       const [, , settings] = mockPatchProjectSettings.mock.calls[0]!
       expect((settings as { targetLanes: string[] }).targetLanes).toEqual([
+        "French",
         "lang-1", "lang-2", "lang-3", "lang-4", "lang-5",
         "lang-6", "lang-7", "lang-8", "lang-9",
         "Swahili", "Yoruba", "Hausa",
@@ -296,14 +296,14 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     expect(settings).toEqual({
       sourceLanguage: "English",
       targetLanguage: "French",
-      targetLanes: ["es", "pt-BR"],
+      targetLanes: ["French", "es", "pt-BR"],
     })
     expect(version).toBe(0)
 
     expect(mockCreateProject).toHaveBeenCalledTimes(1)
   })
 
-  it("submits with no extras and issues no targetLanes PATCH", async () => {
+  it("submits with no extras and still writes targetLanes as [primary]", async () => {
     openDialogWithBasics()
     fireEvent.click(screen.getByRole("button", { name: /Create Project/i }))
 
@@ -317,6 +317,7 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     expect(mockPatchProjectSettings.mock.calls[0]![2]).toEqual({
       sourceLanguage: "English",
       targetLanguage: "French",
+      targetLanes: ["French"],
     })
     expect(mockPatchProjectSettings.mock.calls[0]![3]).toBe(0)
   })
@@ -339,8 +340,10 @@ describe("ProjectCreateDialog — self-contained target language chips (AQU-538)
     await waitFor(() => {
       expect(mockPatchProjectSettings).toHaveBeenCalledTimes(1)
     })
-    expect(mockPatchProjectSettings.mock.calls[0]![2]).toMatchObject({
+    expect(mockPatchProjectSettings.mock.calls[0]![2]).toEqual({
+      sourceLanguage: "English",
       targetLanguage: "Swahili",
+      targetLanes: ["Swahili"],
     })
     expect(mockFetchProjectSettings).not.toHaveBeenCalled()
   })

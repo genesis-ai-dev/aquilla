@@ -115,14 +115,33 @@ const MAX_TARGET_LANES = 50
 const MAX_TARGET_LANE_BOXES = 10
 
 /**
- * AQU-538 creation fix (spec §5): the self-contained shape's target field
- * becomes multi-entry — first/primary stays the project's targetLanguage,
- * the rest land in settings.targetLanes in the same settings PATCH as the
- * languages. That write is best-effort: the project itself is already
- * created and should not be rolled back if it fails.
+ * AQU-1240 slice 1: the self-contained shape's target field is multi-entry —
+ * first/primary stays the project's targetLanguage AND is the first entry in
+ * settings.targetLanes (the complete lane registry), followed by extras.
+ * That write is best-effort: the project itself is already created and
+ * should not be rolled back if it fails.
  */
 const EXTRA_LANGUAGES_WARNING =
   "Project created; adding extra languages failed — add them in Settings → Languages."
+
+/**
+ * Complete lane registry for the create settings PATCH: primary first, then
+ * extras, case-insensitively deduped (trim + lower, matching collectExtras).
+ * Always includes the primary — `settings.targetLanes` is the full registry.
+ */
+function completeTargetLanes(primary: string, extras: readonly string[]): string[] {
+  const claimed = new Set<string>()
+  const lanes: string[] = []
+  for (const raw of [primary, ...extras]) {
+    const trimmed = raw.trim()
+    if (!trimmed) continue
+    const key = trimmed.toLowerCase()
+    if (claimed.has(key)) continue
+    claimed.add(key)
+    lanes.push(trimmed)
+  }
+  return lanes
+}
 
 /** How many filled target-language boxes govern create-dialog copy inflection.
  *  Empty extra boxes don't count; an unused form still reads as singular. */
@@ -149,8 +168,8 @@ const projectSchema = z
     name: requiredString("Project title"),
     sourceLanguage: requiredString("Source language"),
     targetLanguage: optionalString,
-    // Self-contained shape only (spec §5): extras beyond the primary target,
-    // applied as settings.targetLanes in the create settings PATCH.
+    // Self-contained shape only (spec §5 / AQU-1240): extras beyond the
+    // primary; the PATCH writes targetLanes as [primary, ...extras].
     extraLanguages: z.array(z.string()),
     shape: z.enum(["self-contained", "linked-target"]),
     upstreamProjectId: optionalString,
@@ -263,7 +282,7 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
             {
               sourceLanguage: project.sourceLanguage,
               targetLanguage: project.targetLanguage,
-              ...(extrasToApply.length > 0 ? { targetLanes: extrasToApply } : {}),
+              targetLanes: completeTargetLanes(project.targetLanguage, extrasToApply),
             },
             PROJECT_SETTINGS_VERSION_INITIAL,
           )
@@ -750,10 +769,10 @@ export function ProjectCreateDialog({ onCreated, orgId, linkableProjects: suppli
  *
  * Save flow mirrors ProjectSettings/LanguagesSection.tsx's "add a lane":
  * fetchProjectSettings for the current version + existing lanes, a
- * case-insensitive duplicate/default-lane check, then patchProjectSettings
- * with ifMatchVersion. Unlike LanguagesSection this targets the UPSTREAM
- * project (not the project being created), and on success no project is
- * created at all — the dialog just closes.
+ * case-insensitive duplicate check against registered lanes, then
+ * patchProjectSettings with ifMatchVersion. Unlike LanguagesSection this
+ * targets the UPSTREAM project (not the project being created), and on
+ * success no project is created at all — the dialog just closes.
  */
 function AddAsLaneRecommendation({
   jwt,
@@ -825,13 +844,7 @@ function AddAsLaneRecommendation({
     try {
       const current = await fetchProjectSettings(jwt, project.id)
       const existingLanes = current?.settings.targetLanes ?? []
-      const defaultLane = (current?.settings.targetLanguage ?? "").trim()
       const lower = trimmed.toLowerCase()
-      if (lower === defaultLane.toLowerCase()) {
-        setStatus("error")
-        setMessage(`"${trimmed}" is already ${project.name}'s default target language.`)
-        return
-      }
       if (existingLanes.some((l) => l.toLowerCase() === lower)) {
         setStatus("error")
         setMessage(`"${trimmed}" is already a lane on ${project.name}.`)
@@ -915,10 +928,10 @@ function AddAsLaneRecommendation({
 }
 
 /**
- * AQU-538 creation fix (spec §5): the self-contained shape's target field is
- * one text box per lane, stacked, with a plus button that appends another.
- * Box 0 is the project's targetLanguage; the rest become settings.targetLanes
- * in the create settings PATCH.
+ * AQU-538 / AQU-1240: the self-contained shape's target field is one text
+ * box per lane, stacked, with a plus button that appends another. Box 0 is
+ * the project's targetLanguage and the first settings.targetLanes entry;
+ * later boxes are the remaining registry extras.
  *
  * Freeform tags (any label) stay the contract — AQU-988's suggestion list
  * rides on each row through LanguageComboboxInput but never constrains what

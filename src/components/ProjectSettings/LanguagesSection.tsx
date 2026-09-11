@@ -1,10 +1,7 @@
-// LanguagesSection — AQU-538 slice 2 "project settings UI: manage target lanes".
-//
-// Project-data-model decision (docs/superpowers/specs/2026-07-11-project-data-model-decision.md):
-// one source, N target lanes; '' (the empty string) is the default lane and is
-// always omitted on the wire. This section shows the default target language
-// (read-only — set on Project Info) plus the registry of *extra* named lanes
-// stored in `settings.targetLanes`.
+// LanguagesSection — AQU-538 slice 2 "project settings UI: manage target lanes",
+// AQU-1240 slice 1: `settings.targetLanes` is the COMPLETE lane registry
+// (primary included). This section still shows the primary target language
+// read-only (set on Project Info) plus the registered lanes in `targetLanes`.
 //
 // AQU-601: lanes are ARCHIVED, not deleted. Archiving records a lane's tag in
 // `settings.archivedLanes` — the lane stays in `targetLanes` (its cell data and
@@ -33,11 +30,11 @@ import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 const MAX_LANE_LENGTH = 64
 
 export interface LanguagesSectionProps {
-  /** The project's default target language — read-only here, edited on the
-   *  "Project Info" section. Corresponds to the '' (default) lane. */
+  /** The project's primary target language — read-only here, edited on the
+   *  "Project Info" section. Also the first entry in a complete `targetLanes`. */
   defaultTargetLanguage: string
-  /** Extra named target lanes currently registered on the project (includes
-   *  archived tags — split locally via project-lane-archive). */
+  /** Registered target lanes (includes archived tags — split locally via
+   *  project-lane-archive). After AQU-1240 this is the complete registry. */
   targetLanes: string[]
   /** AQU-601: subset of `targetLanes` that is archived (hidden by default). */
   archivedLanes?: string[]
@@ -61,7 +58,6 @@ function normalizeLane(lane: string): string {
 
 function validateNewLane(
   candidate: string,
-  defaultTargetLanguage: string,
   existingLanes: string[],
   t: TFunction,
 ): string | null {
@@ -71,9 +67,9 @@ function validateNewLane(
     return t("projectSettings.create.extraLanguagesTooLongError", { max: MAX_LANE_LENGTH })
   }
   const lower = trimmed.toLowerCase()
-  if (lower === defaultTargetLanguage.trim().toLowerCase()) {
-    return t("projectSettings.languages.alreadyDefaultError")
-  }
+  // AQU-1240: the primary target language legitimately lives in targetLanes.
+  // Re-adding it is a duplicate of an existing lane, not a special "already
+  // the default" error. Blank / over-long / other-lane dupes still reject.
   if (existingLanes.some((l) => l.toLowerCase() === lower)) {
     return t("projectSettings.languages.alreadyExistsError")
   }
@@ -112,9 +108,10 @@ export function LanguagesSection({
   const active = activeLanes(targetLanes, archivedLanes)
   const archived = archivedRegisteredLanes(targetLanes, archivedLanes)
 
-  // AQU-988: mirror validateNewLane's dedupe set (default lane + every
-  // registered lane, active or archived) so the dropdown never offers a
-  // language that "add" would immediately reject as a duplicate.
+  // AQU-988 / AQU-1240: suggestions skip the primary and every registered
+  // lane (active or archived) so the dropdown never offers a pointless
+  // re-add. The primary is excluded from *suggestions only* — typing it is
+  // not an error unless it is already in targetLanes.
   const excludeFromSuggestions = [defaultTargetLanguage, ...targetLanes]
 
   async function handleAdd() {
@@ -122,7 +119,7 @@ export function LanguagesSection({
     const trimmed = normalizeLane(newLane)
     // Dedupe against every registered lane (active + archived) so a tag can't
     // be re-added while an archived copy still holds its cell data.
-    const validationError = validateNewLane(trimmed, defaultTargetLanguage, targetLanes, t)
+    const validationError = validateNewLane(trimmed, targetLanes, t)
     if (validationError) {
       setAddError(validationError)
       return

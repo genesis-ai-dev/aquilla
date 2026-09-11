@@ -6,6 +6,7 @@
 
 import { sourceArtifactDescriptor } from "../../../shared/import-contract"
 import { isAuthorizedAdminBearer } from "../lib/admin-auth"
+import type { ReadonlyR2Bucket } from "../lib/readonly-r2"
 import { gitlabLfsKey } from "./migrate-audio-copy-route"
 import { buildSourceArtifactPersistenceStatements } from "./source-artifact-persistence"
 import { sourceObjectKey } from "./source-upload-route"
@@ -16,7 +17,9 @@ const UUID_NAMESPACE = "7f3c8a91-2b4d-4e6f-9a8c-1d3e5f2b4a6c"
 
 export interface MigrateSourceArtifactCopyEnv {
   SNAPSHOTS: R2Bucket
-  LFS_SRC?: R2Bucket
+  /** GitLab's LFS object-storage bucket. Enforced read-only — see
+   *  lib/readonly-r2.ts — not just documented as such. */
+  LFS_SRC?: ReadonlyR2Bucket
   AQUILLA_PG?: AquillaDb
   ADMIN_SECRET?: string
   SYNC_SECRET_KEY?: string

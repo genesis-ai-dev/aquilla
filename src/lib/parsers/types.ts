@@ -13,10 +13,28 @@ import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { PersistedTrackOverrides } from "@/lib/timeline/tracks"
 import type { CameraState } from "@/lib/sync/cells-read-types"
 
-export type FileType = "md" | "docx" | "pptx" | "idml" | "xlsx" | "txt" | "html" | "epub" | "json" | "po" | "properties" | "vtt" | "srt" | "sbv" | "usfm" | "ebible" | "helloao" | "xliff" | "tmx" | "csv" | "tsv" | "audio" | "video" | "obs" | "sdbh" | "custom"
+/**
+ * AQU-997: `"codex"` and `"source"` were reaching the client from the wire long
+ * before they were admitted here — `files.fileType` is the server's
+ * `kind ?? role`, so a migrated Codex notebook arrives as `"codex"` and a row
+ * with no `kind` falls back to its `role`, `"source"`. `cloud-projects.ts`
+ * widens both in with `f.type as FileType`, which is exactly why the gap went
+ * unnoticed: nothing type-errored, the values simply failed every predicate
+ * that tests membership of a literal set.
+ */
+export type FileType = "md" | "docx" | "pptx" | "idml" | "xlsx" | "txt" | "html" | "epub" | "json" | "po" | "properties" | "vtt" | "srt" | "sbv" | "usfm" | "ebible" | "helloao" | "xliff" | "tmx" | "csv" | "tsv" | "audio" | "video" | "obs" | "sdbh" | "codex" | "source" | "custom"
 
-/** File types whose parsers produce scripture-style sections (globalReferences populated, section labels meaningful). */
-export const SCRIPTURE_FILE_TYPES: ReadonlySet<FileType> = new Set(["usfm", "ebible", "helloao"])
+/** File types whose parsers produce scripture-style sections (globalReferences
+ *  populated, section labels meaningful).
+ *
+ *  AQU-997: `"codex"` — Aquilla's native Scripture notebook format, what every
+ *  book of a migrated Codex project is stored as — belongs here for the same
+ *  reason `"usfm"` does: its cells are verses, addressed canonically. Its
+ *  absence is what hid the Parallel Bibles panel (and its collapsed edge tab,
+ *  and file-tree expandability) for a project whose books are all codex files.
+ *  `"source"` is deliberately NOT here: it is the generic `role` fallback for
+ *  a row carrying no `kind`, not a Scripture format. */
+export const SCRIPTURE_FILE_TYPES: ReadonlySet<FileType> = new Set(["usfm", "ebible", "helloao", "codex"])
 export function fileTypeHasSections(type: FileType): boolean {
   return SCRIPTURE_FILE_TYPES.has(type)
 }

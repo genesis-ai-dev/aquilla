@@ -81,12 +81,6 @@ export async function fetchHelloaoTranslations(): Promise<HelloaoTranslation[]> 
   return translationsCache
 }
 
-export function __setHelloaoTranslationsCacheForTest(
-  cache: HelloaoTranslation[] | null
-): void {
-  translationsCache = cache
-}
-
 export async function fetchHelloaoBooks(
   translationId: string,
   signal?: AbortSignal

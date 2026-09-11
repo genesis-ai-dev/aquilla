@@ -20,8 +20,9 @@
 // already exists) and sets updateProjection=false. For IN-FLIGHT races the
 // pre-check is a TOCTOU (audit RACE-2), so chain-mutating events also take
 // an atomic chain_claims row here and their cells writes are gated on
-// holding it (see chain-claims.ts). The route reads the claims back after
-// commit to flag losers as stale in the response.
+// holding it AND on the row's current head still being this event's parent
+// (head compare-and-swap, AQU-1154 — see event-projection.ts). The route
+// reads the gated write's row count after commit to flag losers as stale.
 
 import type { AuthorizedEvent } from '../authorize'
 import type { RealtimeMessage, ProjectionTable } from '../realtime'
@@ -65,6 +66,29 @@ export interface HandleCellEventOptions {
 /** Cell-level kinds that this handler accepts. */
 export type CellEventKind = Exclude<EventKind, 'file.create'>
 
+/**
+ * AQU-1093: audio events that change the per-unit audio ROLLUP.
+ *
+ * Audio projections only touch `cell_audio`, so before this they never
+ * triggered a progress recompute — file/section/book audio counts would drift
+ * the moment anyone recorded or approved a take, and only a full rebuild would
+ * repair them.
+ *
+ * Deliberately not every `cell.audio.*` kind: rename, trim, place and measure
+ * are frequent (one timeline drag emits a stream of them) and change no count.
+ */
+const AUDIO_ROLLUP_KINDS: ReadonlySet<string> = new Set([
+  'cell.audio.attach',
+  'cell.audio.select',
+  'cell.audio.remove',
+  'cell.audio.validate',
+  'cell.audio.unvalidate',
+])
+
+function touchesAudioRollup(kind: string, touches: readonly ProjectionTable[]): boolean {
+  return touches.includes('cell_audio') && AUDIO_ROLLUP_KINDS.has(kind)
+}
+
 function projectionTablesFor(touches: readonly ProjectionTable[]): ProjectionTable[] {
   // Always include `events` so dirty-table broadcasts invalidate the
   // event-log query caches.
@@ -106,6 +130,7 @@ export function handleCellEvent(
   // A parent-null cell delete is a tombstone, not a chain extension — it takes
   // no claim and projects ungated, matching rebuild's replay rule (AQU-931).
   let chainGate: ChainSlot | undefined
+  let headStmtIndex: number | undefined
   if (
     opts.updateProjection &&
     isChainArbitrated(event.kind, event.parentId ?? null) &&
@@ -122,6 +147,11 @@ export function handleCellEvent(
       parentKey: eventQualifiedParentKey(event.parentId, event.kind, event.payload),
     }
     stmts.push(buildChainClaimStmt(db, chainGate, event.id))
+    // The FIRST statement buildEventProjectionStmts pushes for every
+    // chain-arbitrated kind (create/commit/delete/reorder) is the gated
+    // cells write — the one whose row count tells the route whether this
+    // event actually advanced the head (AQU-1154).
+    headStmtIndex = stmts.length
   }
 
   if (opts.updateProjection) {
@@ -143,7 +173,11 @@ export function handleCellEvent(
       chainGate,
       validationCount: opts.validationCount,
     })
-    if (opts.deferFileCounters && event.fileId && projectionTouches.includes('files')) {
+    if (
+      opts.deferFileCounters &&
+      event.fileId &&
+      (projectionTouches.includes('files') || touchesAudioRollup(event.kind, projectionTouches))
+    ) {
       counterFile = { projectId: event.projectId, fileId: event.fileId }
     }
   }
@@ -164,6 +198,7 @@ export function handleCellEvent(
     eventFrame,
     dirtyTables: projectionTablesFor(projectionTouches),
     chainSlot: chainGate,
+    headStmtIndex,
     counterFile,
   }
 }

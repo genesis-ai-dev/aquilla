@@ -10,6 +10,7 @@
 // Mirrors notifySyncWorkerOfArchive in routes/projects.ts.
 
 import type { Env } from "../types"
+import { invalidateContextualReads } from "../lib/contextual/read-cache"
 
 export async function notifySyncWorkerOfMemberRemoval(
   env: Pick<Env, "SYNC_WORKER_URL" | "SYNC_SECRET_KEY">,
@@ -123,6 +124,10 @@ export async function notifySyncWorkerOfContextualActivity(
   projectId: string,
   frame: { type: string },
 ): Promise<void> {
+  // Every contextual writer (tick loop, run controls, project fan-out) funnels
+  // its live frame through here AFTER the durable write — the single choke
+  // point for dropping this isolate's cached poll responses.
+  invalidateContextualReads(projectId)
   if (!env.SYNC_WORKER_URL || !env.SYNC_SECRET_KEY) return
   try {
     await fetch(

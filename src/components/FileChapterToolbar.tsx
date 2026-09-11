@@ -64,6 +64,7 @@ export function FileChapterToolbar({
         id: "translate-as-read",
         type: "checkbox" as const,
         label: t("agentWorkspace.translateAsRead"),
+        description: t("agentWorkspace.translateAsReadHelp"),
         icon: translateAsReadActive ? LoaderCircle : WandSparkles,
         checked: translateAsReadEnabled,
         disabled: translateAsReadDisabled,

@@ -261,6 +261,7 @@ export const agent = defineNamespace({
     "agent.validation.testimonyNotice":
       "Validation is your testimony — confirm each line yourself. There is no confirm-all.",
     "agent.validation.confirmAriaLabel": "Validate {ref}",
+    "agent.validation.roleCannotValidate": "Your role can't validate in this project",
 
     // ── Composer slash commands (slash-commands.ts, shown in AgentEmptyState's
     //    shortcuts list). The /draft, /check, /find, /status TOKENS themselves
@@ -743,6 +744,11 @@ export const agent = defineNamespace({
         placeholders: {
           ref: "The row's canonical reference, a truncated cell id, or the literal fallback word 'cell' when neither is known — not translated.",
         },
+      },
+      "agent.validation.roleCannotValidate": {
+        description:
+          "Tooltip on a disabled per-row Validate button in the validation queue " +
+          "when the signed-in user's project role is below the validation floor.",
       },
     },
   },

@@ -5,7 +5,9 @@ import {
   getProject,
   createProject,
   updateProject,
+  patchProject,
   deleteProject,
+  subscribeProjectRecords,
   tombstoneProject,
   restoreProject,
   storeOriginalFile,
@@ -320,5 +322,67 @@ describe("mergeServerProjectWithLocalCache — client-local overlays", () => {
     const merged = mergeServerProjectWithLocalCache(server, local)
     expect(merged.ttsSettings?.provider).toBe("kokoro")
     expect(merged.ttsSettings?.apiKey).toBe("AIzaLocalKey1234567890123")
+  })
+})
+
+// AQU-1103: device-local fields (experimentalFlags, …) live only on this
+// record, and their writer runs as a route-modal over a still-mounted reader.
+// The reader (useProject) relies on every write path here announcing itself.
+describe("subscribeProjectRecords", () => {
+  it("notifies with the record id after create, update, patch, and delete", async () => {
+    const seen: string[] = []
+    const unsubscribe = subscribeProjectRecords((id) => seen.push(id))
+    try {
+      await createProject(makeProject({ id: "p1" }))
+      await updateProject({ ...(await getProject("p1"))!, name: "Renamed" })
+      await patchProject("p1", (p) => ({
+        ...p,
+        experimentalFlags: { contextualTranslation: true },
+      }))
+      await deleteProject("p1")
+      expect(seen).toEqual(["p1", "p1", "p1", "p1"])
+    } finally {
+      unsubscribe()
+    }
+  })
+
+  it("notifies only once the write is durable, so a listener re-reading sees the new value", async () => {
+    await createProject(makeProject({ id: "p1" }))
+    const observed: Array<Record<string, boolean> | undefined> = []
+    const settled: Promise<void>[] = []
+    const unsubscribe = subscribeProjectRecords((id) => {
+      settled.push(getProject(id).then((p) => { observed.push(p?.experimentalFlags) }))
+    })
+    try {
+      await patchProject("p1", (p) => ({
+        ...p,
+        experimentalFlags: { contextualTranslation: true },
+      }))
+      await Promise.all(settled)
+      expect(observed).toEqual([{ contextualTranslation: true }])
+    } finally {
+      unsubscribe()
+    }
+  })
+
+  it("stops notifying after unsubscribe", async () => {
+    const seen: string[] = []
+    const unsubscribe = subscribeProjectRecords((id) => seen.push(id))
+    await createProject(makeProject({ id: "p1" }))
+    unsubscribe()
+    await updateProject({ ...(await getProject("p1"))!, name: "After unsubscribe" })
+    expect(seen).toEqual(["p1"])
+  })
+
+  it("does not notify for a patch that found no record to change", async () => {
+    const seen: string[] = []
+    const unsubscribe = subscribeProjectRecords((id) => seen.push(id))
+    try {
+      const result = await patchProject("missing", (p) => p)
+      expect(result).toBeUndefined()
+      expect(seen).toEqual([])
+    } finally {
+      unsubscribe()
+    }
   })
 })

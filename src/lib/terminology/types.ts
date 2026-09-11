@@ -56,4 +56,28 @@ export interface Concept {
   createdAt: string
   createdBy?: string
   updatedAt?: string
+  /**
+   * When true, source-term matching is case-sensitive. Omitted/false keeps the
+   * default case-insensitive match used everywhere else in the term pipeline.
+   */
+  caseSensitive?: boolean
+}
+
+/** Payload from the editor "Add to terminology" popover. */
+export interface ConceptDraft {
+  sourceTerm: string
+  rendering?: string
+  caseSensitive?: boolean
+  /**
+   * True = add the concept ENFORCED (`status: 'active'`); false/absent = add it
+   * as a SUGGESTION (`status: 'draft'`) for someone to review.
+   *
+   * The distinction is not cosmetic: a draft compiles to no rules at all
+   * (see compileConceptsToRules), so it changes nothing for anyone else —
+   * which is exactly why any contributor may write one, while approving takes
+   * the org's configured termbase floor. The server enforces that split
+   * independently (sync-worker termbase-authority.ts); this flag only decides
+   * what the client ASKS for.
+   */
+  approve?: boolean
 }

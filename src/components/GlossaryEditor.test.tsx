@@ -12,16 +12,46 @@ vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { username: "tester" }, loading: false }),
 }))
 let projectCellsEnabled = false
+let projectCellsLoading = false
+let projectCellFiles: Array<{ id: string; cells: Array<{
+  id: string
+  fileId: string
+  original: string
+  translated: string
+  context: string
+  group: string
+  type: string
+  status: string
+  validationStatus: string
+  activeValidators: string[]
+  validationHistory: unknown[]
+  history: unknown[]
+  threads: unknown[]
+}> }> = []
 vi.mock("@/hooks/useProjectCells", () => ({
   useProjectCells: ({ enabled }: { enabled?: boolean }) => {
     projectCellsEnabled = Boolean(enabled)
-    return { files: [], isLoading: false, isTruncated: false }
+    return { files: projectCellFiles, isLoading: projectCellsLoading, isTruncated: false }
   },
 }))
 
 const patchSettings = vi.fn().mockResolvedValue({ kind: "ok" })
 let mockProject: ProjectRecord
 let mockProjectLoading = false
+// AQU-1006 follow-up: concepts come from the sync-worker projection via
+// useConcepts, not from `project.terminology`. These tests keep seeding
+// `mockProject.terminology` as their fixture and this mock feeds that same
+// array through the new hook, so each test's INTENT is unchanged — only the
+// transport moved.
+vi.mock("@/hooks/useConcepts", () => ({
+  useConcepts: vi.fn(() => ({
+    concepts: mockProject?.terminology ?? [],
+    isLoading: false,
+    error: null,
+    refresh: vi.fn(async () => {}),
+  })),
+}))
+
 vi.mock("@/hooks/useProject", () => ({
   useProject: vi.fn(() => ({
     project: mockProject,
@@ -47,6 +77,8 @@ function concept(p: Partial<Concept>): Concept {
 beforeEach(() => {
   patchSettings.mockClear()
   projectCellsEnabled = false
+  projectCellsLoading = false
+  projectCellFiles = []
   mockProjectLoading = false
   mockProject = {
     id: "p1",
@@ -55,9 +87,12 @@ beforeEach(() => {
   } as unknown as ProjectRecord
 })
 
-function renderEditor(props: React.ComponentProps<typeof GlossaryEditor> = {}) {
+function renderEditor(
+  props: React.ComponentProps<typeof GlossaryEditor> = {},
+  initialEntry = "/project/p1/terminology",
+) {
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[initialEntry]}>
       <GlossaryEditor {...props} />
     </MemoryRouter>,
   )
@@ -79,6 +114,15 @@ describe("GlossaryEditor", () => {
     renderEditor()
     expect(screen.getByText("grace")).toBeInTheDocument()
     expect(screen.getByText("favor")).toBeInTheDocument()
+  })
+
+  it("opens the concept named by the terminology deep link", async () => {
+    renderEditor({}, "/project/p1/terminology?concept=c1")
+
+    expect(
+      await screen.findByRole("button", { name: /close detail/i }),
+    ).toBeInTheDocument()
+    expect(screen.getByText("grace")).toBeInTheDocument()
   })
 
   it("renders the workspace-owned glossary immediately without a duplicate project resolve", () => {
@@ -155,6 +199,19 @@ describe("GlossaryEditor", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Violations" }))
     expect(projectCellsEnabled).toBe(true)
+  })
+
+  it("opens a concept immediately while examples still load", () => {
+    mockProject.files = [{ id: "f1", name: "sample.md", type: "md", createdAt: "", cellCount: 1 }]
+    projectCellsLoading = true
+    renderEditor()
+
+    fireEvent.click(screen.getByRole("button", { name: /open details for grace/i }))
+
+    expect(screen.getByText("grace")).toBeInTheDocument()
+    expect(screen.getAllByText("favor").length).toBeGreaterThan(0)
+    expect(screen.queryByRole("status", { name: "Loading term details" })).not.toBeInTheDocument()
+    expect(screen.getByText(/loading examples/i)).toBeInTheDocument()
   })
 
   it("derives rapid rendering mutations from the latest optimistic glossary", async () => {

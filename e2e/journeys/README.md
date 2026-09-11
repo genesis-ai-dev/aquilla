@@ -14,6 +14,17 @@ called it good; the Autopilot panel on Overview stayed hidden until a
 reload. A comment that says the walk passed without that check is a
 failed bot run, not a review.
 
+Calibration record, 2026-09-11: the 22 Grokbot comments from 2026-09-10
+were re-walked on the same previews with a fresh account. Every walked
+table row that could be re-checked held (556, 611, 612, 619, 620, 621,
+627, 628, 509, 513). The errors were in the prose: a wrong behind-count
+(26 for 41), a mislabelled timezone, a punctuation change in a quoted
+button label, a two-level menu path collapsed to one, a workaround that
+did not reproduce, request shapes taken from the diff instead of the
+network, a HOLD over an HTTP 500, a BLOCKED on a preview that had
+already deployed, and a walk posted after the PR had merged. Those rules
+now live in `PR-BOT.md` under "Say only what you measured".
+
 ## Where this sits in the pipeline
 
 | Stage | What runs | Where |

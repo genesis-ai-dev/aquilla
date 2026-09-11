@@ -15,7 +15,12 @@ the PR, never request changes as a GitHub review, never merge, never push.
 - The branch's full-stack preview URL. Cloudflare builds one per branch
   (`docs/runbooks/cloudflare-workers-builds.md`, "Pull-request previews");
   the build log prints it as `app=`. It serves the web app with that
-  branch's auth and sync workers on development storage.
+  branch's auth and sync workers on development storage. The alias is
+  per branch, never per commit: `ci-<branch slug>-<hash>` serves the
+  branch's latest successful build. Read `<preview>/version.json` and
+  compare its `sha` to the PR HEAD. That file is the readiness check;
+  the Cloudflare comment on the PR lags it by minutes. A URL such as
+  `ci-dev-<commit>` does not exist, so a 404 there proves nothing.
 - A QA account on development storage. Never a production account.
 
 ## Hard stops
@@ -24,9 +29,12 @@ Do not walk the app. Leave one comment with status **BLOCKED** and stop.
 
 - The PR has merge conflicts with `dev`. The team's review standard gives
   conflicts back to the author unfixed. Do not "QA around" them.
-- There is no preview URL, or the preview does not load. Exception:
-  docs-only diffs (`e2e/journeys/*.md`, README, comments) have no UI
-  claim; skip the walk, do not BLOCKED-loop on a failed SPA preview.
+- There is no preview URL, or the preview does not load, or
+  `version.json` shows an older sha than HEAD after the build for HEAD
+  has finished. Decide from `version.json`, not from the Cloudflare
+  comment. Exception: docs-only diffs (`e2e/journeys/*.md`, README,
+  comments) have no UI claim; skip the walk, do not BLOCKED-loop on a
+  failed SPA preview.
 - Sign-in on the preview fails.
 
 **Not a hard stop:** the branch is behind `dev` but mergeable, with a
@@ -44,6 +52,11 @@ queue, and the preview is still that branch's code.
 If HEAD moved, one new comment for the new SHA. Do not stack BLOCKED
 notes on the same docs PR.
 
+**Re-read the PR right before posting.** A walk takes long enough for
+the PR to merge or move. If it is merged or closed, or HEAD is no
+longer the sha you walked, do not post; PR 513 got its walk 34 minutes
+after Matthew merged it.
+
 ## Status
 
 - **FAIL** if any walked checklist item missed its named effect. A 500
@@ -54,6 +67,12 @@ notes on the same docs PR.
   account does not satisfy a >100-org AC; that row is NOT CHECKED,
   not a pass (PR 509).
 - **BLOCKED** only for a hard stop above.
+- A step the PR body itself leaves unticked ("secret not configured
+  yet") is **NOT CHECKED** with that reason, not FAIL. FAIL is for an
+  effect the PR claims and the preview does not show (PR 630).
+- One server fault is one row. If two checklist items die on the same
+  HTTP 500, say so in the second row instead of counting two bugs
+  (PR 628: the consent page's error was the same 500 as the grant).
 
 ## Steps
 
@@ -116,6 +135,54 @@ is a fail against an absence claim.
 Persistence claims get a reload. Appearance claims get navigation without
 reload *and* a reload. The 626 miss was an appearance claim treated as a
 click claim.
+
+## Say only what you measured
+
+The 2026-09-11 re-walk of 22 bot comments found every walked table row
+true and every error in the prose around the tables. These rules come
+from those errors.
+
+- **Numbers come from an API or a snapshot, never from memory.**
+  "Commits behind" is `behind_by` from
+  `GET /repos/genesis-ai-dev/aquilla/compare/<dev sha>...<head sha>`;
+  the bot wrote "26 commits behind" on two PRs where GitHub said 41,
+  and the author repeated the wrong number. Row counts come from the
+  snapshot you took.
+- **Times are UTC and say so.** The Cloudflare API reports UTC; "17:48
+  PT" on PR 630 was UTC mislabelled.
+- **UI strings are copied from the snapshot, byte for byte.** No added
+  punctuation: the button read `Copied`, the comment said "Copied.".
+  Call an element by what the snapshot says it is (a paragraph is not
+  a heading). A reference label is quoted as rendered; if the panel
+  shows `GEN 2 1`, do not write `GEN 2:1`.
+- **Menu paths list every level.** "⋯ → Split into milestones" was
+  wrong; the switch lives at ⋯ (File options) → Editor settings →
+  Split into milestones. Take the path from the snapshots you walked.
+- **Default-state claims need a fresh fixture.** "OFF by default" is
+  only evidence on a project nobody has touched. Create one; do not
+  reuse a shared QA project. If a setting is on by default, say "on by
+  default", not "after enabling".
+- **Observation and hypothesis go in different sentences.** "HTTP 500
+  on device_authorization" is observed. "Consistent with migration
+  0090 not applied" is a guess; label it as one.
+- **Request shapes come from captured requests, not from the diff.**
+  PR 509's comment told the reviewer to confirm `GET /orgs?q&limit=40`
+  and `POST /orgs/portfolio {q, limit}`; the page sends neither shape.
+- **A workaround is reported only if it reproduced twice.** The
+  "Cloudflare 1010 blocks non-browser user agents" note on PR 627 did
+  not reproduce; it went into the record anyway.
+- **Seed ids in stories exist on the local stack only.** The
+  `bestalu-bible` project id in `projects-route-health.md` is not on
+  development storage; do not try it on a preview.
+- **Evidence is a quote or a measurement, not a filename.** A
+  screenshot nobody can open is not evidence. Until uploads work from
+  the runner, the Evidence column holds the quoted string or the
+  measured value, and the filename is an aside.
+- **Say what you did to reach a surface.** The recording modal needs
+  the cell expanded and a microphone permission; a walk that skips that
+  cannot be repeated by a person.
+- **Tokens minted on one preview work on every preview** (shared
+  credential store). Mint once, say which preview minted it.
 
 ## False greens to refuse
 

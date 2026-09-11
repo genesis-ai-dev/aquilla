@@ -1544,4 +1544,66 @@ describe("imported originals on the overview (AQU-656)", () => {
     expect(screen.queryByTestId("download-originals-zip")).not.toBeInTheDocument()
     expect(screen.queryByTestId("download-original-file")).not.toBeInTheDocument()
   })
+
+  const manyOriginals = (n: number) =>
+    Array.from({ length: n }, (_, i) =>
+      fileWith(`f${i + 1}`, `Book${String(i + 1).padStart(2, "0")}.usfm`, true),
+    )
+
+  it("caps the list at five rows and reveals the rest a batch at a time or all at once", async () => {
+    useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), canExport: true })
+    useFiles(manyOriginals(12))
+
+    renderOverview()
+
+    const card = await screen.findByTestId("imported-originals")
+    expect(within(card).getAllByTestId("download-original-file")).toHaveLength(5)
+    expect(within(card).getByText("Book05.usfm")).toBeInTheDocument()
+    expect(within(card).queryByText("Book06.usfm")).not.toBeInTheDocument()
+    expect(within(card).getByRole("button", { name: "Show 5 more" })).toBeInTheDocument()
+    expect(within(card).getByRole("button", { name: "Show all (12)" })).toBeInTheDocument()
+
+    fireEvent.click(within(card).getByRole("button", { name: "Show 5 more" }))
+    expect(within(card).getAllByTestId("download-original-file")).toHaveLength(10)
+    expect(within(card).getByText("Book10.usfm")).toBeInTheDocument()
+    // Only two rows are left hidden, so another batch would equal "Show all".
+    expect(within(card).queryByRole("button", { name: "Show 5 more" })).not.toBeInTheDocument()
+
+    fireEvent.click(within(card).getByRole("button", { name: "Show all (12)" }))
+    expect(within(card).getAllByTestId("download-original-file")).toHaveLength(12)
+    expect(within(card).getByText("Book12.usfm")).toBeInTheDocument()
+    expect(within(card).queryByRole("button", { name: "Show all (12)" })).not.toBeInTheDocument()
+
+    fireEvent.click(within(card).getByRole("button", { name: "Show fewer" }))
+    expect(within(card).getAllByTestId("download-original-file")).toHaveLength(5)
+    expect(within(card).queryByText("Book06.usfm")).not.toBeInTheDocument()
+  })
+
+  it("expands everything at once from the first page", async () => {
+    useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), canExport: true })
+    useFiles(manyOriginals(23))
+
+    renderOverview()
+
+    const card = await screen.findByTestId("imported-originals")
+    expect(within(card).getAllByTestId("download-original-file")).toHaveLength(5)
+
+    fireEvent.click(within(card).getByRole("button", { name: "Show all (23)" }))
+    expect(within(card).getAllByTestId("download-original-file")).toHaveLength(23)
+    expect(within(card).queryByRole("button", { name: "Show 5 more" })).not.toBeInTheDocument()
+    expect(within(card).getByRole("button", { name: "Show fewer" })).toBeInTheDocument()
+  })
+
+  it("shows no paging controls when five or fewer files have an original", async () => {
+    useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), canExport: true })
+    useFiles(manyOriginals(5))
+
+    renderOverview()
+
+    const card = await screen.findByTestId("imported-originals")
+    expect(within(card).getAllByTestId("download-original-file")).toHaveLength(5)
+    expect(within(card).queryByTestId("imported-originals-show-more")).not.toBeInTheDocument()
+    expect(within(card).queryByTestId("imported-originals-show-all")).not.toBeInTheDocument()
+    expect(within(card).queryByTestId("imported-originals-show-fewer")).not.toBeInTheDocument()
+  })
 })

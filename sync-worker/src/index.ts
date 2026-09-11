@@ -37,6 +37,7 @@ import { handleSessionChangesetsRequest } from "./external/session-routes"
 import { handleExternalArtifactsRequest } from "./external/artifacts-route"
 import { handleFilesReadRequest } from "./events/files-read-route"
 import { handleProgressReadRequest } from "./events/progress-read-route"
+import { handlePlanRequest } from "./events/plan-route"
 import { handleBulkImportRequest } from "./events/import-route"
 import { handleImportReconcileRequest } from "./events/import-reconcile-route"
 import { handleBulkMorphImportRequest } from "./events/import-morph-route"
@@ -52,6 +53,7 @@ import { handleMigrateSourceArtifactCopyRequest } from "./events/migrate-source-
 import { handleMigrateOrgTeamMapsRequest } from "./events/migrate-org-team-maps-route"
 import { handleMigrateGroupsRequest } from "./events/migrate-groups-route"
 import { handleMigrateUsersReadRequest } from "./events/migrate-users-read-route"
+import { handleMigrateWebhookRequest } from "./events/migrate-webhook-route"
 import { handleSourceUploadRequest } from "./events/source-upload-route"
 import { handleExportSourceRequest } from "./events/export-route"
 import { handleExportBundleRequest } from "./events/export-bundle-route"
@@ -66,6 +68,7 @@ import { handleValidatorsReadRequest } from "./events/validators-read-route"
 import { handleBranchingSearchRequest } from "./events/branching-search-route"
 import { handleBranchingSearchPassagesRequest } from "./events/branching-search-passages-route"
 import { handleCommentsReadRequest } from "./events/comments-read-route"
+import { handleConceptsReadRequest } from "./events/concepts-read-route"
 import { handleCellBacktranslationsReadRequest } from "./events/cell-backtranslations-read-route"
 import { handleExternalReadRequest } from "./external/read-routes"
 import { handleExternalMcpRequest } from "./external/mcp-route"
@@ -106,6 +109,9 @@ declare global {
       HYPERDRIVE?: Hyperdrive
       /** Shared HMAC key with identity that mints /sync-token JWTs. */
       SYNC_SECRET_KEY?: string
+      /** Shared secret GitLab sends as `X-Gitlab-Token` on webhook deliveries
+       *  to `/migrate/webhook/gitlab`. See events/migrate-webhook-route.ts. */
+      GITLAB_WEBHOOK_SECRET?: string
       /**
        * OPS-2: dedicated bearer for the operator-only routes (`/admin/files/*`,
        * `DELETE /audio/*`), so ops calls never carry the token-signing key.
@@ -315,6 +321,10 @@ const worker = {
     if (filesReadResponse) return withCors(filesReadResponse, request)
     const progressReadResponse = await handleProgressReadRequest(request, env)
     if (progressReadResponse) return withCors(progressReadResponse, request)
+
+    // AQU-1092…1098: the project's plan board (units + target dates + Done).
+    const planResponse = await handlePlanRequest(request, env)
+    if (planResponse) return withCors(planResponse, request)
     const cellsReadResponse = await handleCellsReadRequest(request, env)
     if (cellsReadResponse) return withCors(cellsReadResponse, request)
     const cellConfidenceResponse = await handleCellConfidenceRequest(request, env)
@@ -339,6 +349,8 @@ const worker = {
     if (linkCursorBatchesResponse) return withCors(linkCursorBatchesResponse, request)
     const commentsReadResponse = await handleCommentsReadRequest(request, env)
     if (commentsReadResponse) return withCors(commentsReadResponse, request)
+    const conceptsReadResponse = await handleConceptsReadRequest(request, env)
+    if (conceptsReadResponse) return withCors(conceptsReadResponse, request)
     const btReadResponse = await handleCellBacktranslationsReadRequest(request, env)
     if (btReadResponse) return withCors(btReadResponse, request)
     const externalReadResponse = await handleExternalReadRequest(request, env)
@@ -360,6 +372,12 @@ const worker = {
     if (importReconcileResponse) return importReconcileResponse
     const bulkMorphImportResponse = await handleBulkMorphImportRequest(request, env)
     if (bulkMorphImportResponse) return bulkMorphImportResponse
+    // GitLab webhook receiver + daemon inbox (AQU-XXXX). The receiver is called by
+    // GitLab itself, which cannot send x-migrate-runner, so it sits before the fence.
+    if (new URL(request.url).pathname === "/migrate/webhook/gitlab") {
+      const r = await handleMigrateWebhookRequest(request, env)
+      if (r) return r
+    }
     // AQU-1005/AQU-1007: identification fence over the whole /migrate/*
     // surface — blocks header-less runners (503 + source log) and gives every
     // allowed run an audit trail. See lib/migrate-fence.ts.
@@ -389,6 +407,8 @@ const worker = {
     if (migrateGroupsResponse) return migrateGroupsResponse
     const migrateUsersReadResponse = await handleMigrateUsersReadRequest(request, env)
     if (migrateUsersReadResponse) return migrateUsersReadResponse
+    const migrateWebhookInbox = await handleMigrateWebhookRequest(request, env)
+    if (migrateWebhookInbox) return migrateWebhookInbox
     const sourceUploadResponse = await handleSourceUploadRequest(request, env)
     if (sourceUploadResponse) return sourceUploadResponse
     const exportSourceResponse = await handleExportSourceRequest(request, env)

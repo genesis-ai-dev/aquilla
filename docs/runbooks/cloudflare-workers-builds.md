@@ -23,8 +23,9 @@ bindings, or promote traffic in either environment.
 
 The route-free Workers Builds helpers fail closed unless Cloudflare provides
 `WORKERS_CI`, `WORKERS_CI_BRANCH`, and `WORKERS_CI_COMMIT_SHA`. The preview
-uploader always names `aquilla-web-preview`, always builds the SPA against
-development APIs, and never invokes a traffic promotion or trigger deployment.
+deployer uses only `aquilla-web-preview`, `aquilla-auth-preview`, and
+`aquilla-sync-preview`. The three named previews share development storage and
+never promote a production/development version or deploy live routes.
 
 The identity and sync build wrappers install their package-local lockfiles only
 after Cloudflare has installed the root lockfile. This two-level install is
@@ -39,7 +40,7 @@ application and must not be given a placeholder build command.
 | Connection | Branch | Binding profile | Operation | Changes live traffic |
 | --- | --- | --- | --- | --- |
 | All live Workers | Any | N/A | no automatic build; Git disconnected | No |
-| `aquilla-web-preview` | Any repository branch | development API hosts | lint, tests, build, route-free preview upload | No |
+| `aquilla-web-preview` | Any repository branch | branch auth/sync previews, development storage | TypeScript/Vite build, three named previews | No |
 
 Both environments and their routes remain controlled by the explicit operator
 commands below.
@@ -93,7 +94,7 @@ Playwright smoke on a dedicated Hetzner box is also separate — see
 [hetzner-ci.md](hetzner-ci.md). It is `workflow_dispatch`-only until a
 self-hosted runner is Idle.
 
-## Pull-request validation
+## Pull-request previews
 
 Connect only `aquilla-web-preview` to `genesis-ai-dev/aquilla`. Configure:
 
@@ -102,17 +103,65 @@ Connect only `aquilla-web-preview` to `genesis-ai-dev/aquilla`. Configure:
 - root directory: `/`
 - non-production branch builds: enabled
 
-The build runs root lint/unit/IDML/schema/build gates, both identity and sync
-typecheck/test suites, and the agent-worker typecheck/tests. Independent lanes
-run concurrently in three bounded-memory phases so the complete gate fits both
-Cloudflare's build-duration and memory limits; any failed phase prevents later
-phases and fails the whole build. The long root and sync Vitest suites run in
-separate phases so they cannot starve each other's asynchronous tests. The IDML
-browser-conformance lane uses its pinned, serverless Chromium binary without
-requiring root access. The deploy step uploads only a route-free
-`aquilla-web-preview` version. Slash-named branches are normalized and hashed
-into stable lowercase aliases. No preview command can name `aquilla-web`,
-`aquilla-web-development`, either identity Worker, or either sync Worker.
+The build installs auth/sync dependencies and runs `tsc -b`. The deploy command
+runs `scripts/cloudflare-stack-preview.mjs` using the root Wrangler version:
+
+1. Create/update auth and sync previews with the same branch-derived name.
+2. Read their actual URLs from Wrangler's structured output.
+3. Run Vite once with those URLs, then upload the web preview.
+4. Update backend callback URLs to the matching web/auth/sync previews.
+
+The first uploads use a non-resolving callback origin until all URLs are known.
+An interrupted deployment can leave an incomplete preview; rerun the same branch
+build to finish it. The job reports success only after all five uploads finish.
+The preview's stable URL stays the same across commits on that branch.
+
+No lint, secret scan, unit/worker suites, IDML gate, or browser tests run inside
+Cloudflare. QA tests the published app. A green check confirms compilation and
+uploads, not a tested user journey. No GitHub Action is required.
+
+### One-time preview setup
+
+Provision `aquilla-auth-preview` and `aquilla-sync-preview` in the same account.
+Keep them disconnected from Git: the web Worker's existing repo integration
+coordinates the complete stack. Allow its build token to deploy all three
+preview parents. Never grant it access to live Worker routes for this purpose.
+
+Configure runtime secrets in **Previews Base**, not Production, for each parent:
+
+- auth: `SECRET_KEY`, `SYNC_SECRET_KEY`, `ADMIN_SECRET`.
+- sync: the same `SYNC_SECRET_KEY` and `ADMIN_SECRET`.
+- auth: `OPENROUTER_API_KEY` if QA needs chat/agent features.
+
+Use preview-specific signing/admin keys. The deployment script never reads
+local `.dev.vars` or copies production secrets. Enable Preview Deployments URLs
+for all three parents. The script fails if Wrangler returns no preview URL.
+
+Generated `previews` configs bind both backends to development Hyperdrive
+`53581197ff7a4202a5ed0ef08537d4a6` and `aquilla-snapshots-dev`. This isolates code
+and Durable Objects, **not database rows or blobs**. QA should use a separate
+project per preview; development and preview sessions of the same project do
+not share a Durable Object broadcast namespace. Schema-changing PRs need a
+separate database branch. Automatic migrations, legacy identity migration,
+cron jobs, outbound email, and local authentication bypasses are not enabled.
+Password login uses existing development accounts. Email/invite delivery,
+external integrations, and optional agent infrastructure need separate preview
+configuration before QA can rely on those journeys.
+
+Before push, `.husky/pre-push` runs `pnpm scan:secrets`, then
+`pnpm test:e2e:affected`. The existing selector uses the commits being pushed
+and domain sentinels; it does not run the full smoke suite. Git's pushed refs
+are preserved for selection, while inherited repository variables are cleared
+so test fixtures can safely create their own Git repositories.
+
+Pushes do not run the full root/worker suites, lint, or IDML/schema validation.
+Run directly affected unit/worker tests during implementation. The manual CI
+workflow retains broader validation when explicitly requested.
+
+Hooks apply only to pushes that execute them: `--no-verify`, `HUSKY=0`, and
+API-created commits bypass local validation. Cloudflare still builds these
+commits without running tests. QA owns functional review of each preview.
+The full smoke suite remains the explicit merge/deploy/release gate.
 
 GitHub's removed Actions contexts (`lint`, `typecheck`, `unit`, and `build`)
 must not remain required. After the first successful Workers Build establishes

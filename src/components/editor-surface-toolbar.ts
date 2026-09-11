@@ -12,7 +12,7 @@ export const EDITOR_SURFACE_OVERFLOW_TRIGGER_CLASS = "size-8 p-0 bg-card shadow-
 
 /**
  * File-identity actions that still apply on Agent. Editor-only tools
- * (Check file, Translate as read, View settings, Next unfinished, Diarize)
+ * (Check file, Draft as you read, View settings, Next unfinished, Diarize)
  * stay on the chapter row — they operate on the translation grid, not the
  * agent working set.
  */

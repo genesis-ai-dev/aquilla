@@ -31,11 +31,17 @@ export async function fetchWithTimeout(
   init: RequestInit,
   ms: number = DEFAULT_TIMEOUT_MS
 ): Promise<Response> {
-  const { signal, cancel } = withTimeout(ms);
+  const { signal: timeoutSignal, cancel } = withTimeout(ms);
+  const callerSignal = init.signal;
+  const signal =
+    callerSignal && typeof AbortSignal.any === "function"
+      ? AbortSignal.any([callerSignal, timeoutSignal])
+      : timeoutSignal;
   try {
     return await fetch(url, { ...init, signal });
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") {
+      if (callerSignal?.aborted) throw err;
       throw new Error(`Request timed out after ${ms / 1000}s — server may be unreachable`);
     }
     throw err;
@@ -113,6 +119,42 @@ export async function listMyOrgs(jwt: string): Promise<OrgSummary[]> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs`, { headers: authHeaders(jwt) })
   if (!res.ok) throw new UserError(res.status, "", "org")
   return ((await res.json()) as { orgs: OrgSummary[] }).orgs
+}
+
+/** First page size for the org-switcher catalog (matches auth-worker default). */
+export const ORG_SWITCHER_PAGE_SIZE = 40
+
+export interface OrgDirectoryPage {
+  orgs: OrgSummary[]
+  nextCursor: string | null
+}
+
+/**
+ * Paged org-switcher catalog. Pass `limit` (and optional `q` / `cursor`) so
+ * platform-admin tenancy rows load a page at a time instead of dumping every
+ * org into the memberships list.
+ */
+export async function listOrgsPage(
+  jwt: string,
+  opts: {
+    q?: string
+    limit?: number
+    cursor?: string | null
+    signal?: AbortSignal
+  } = {},
+): Promise<OrgDirectoryPage> {
+  const params = new URLSearchParams()
+  const q = opts.q?.trim()
+  if (q) params.set("q", q)
+  params.set("limit", String(opts.limit ?? ORG_SWITCHER_PAGE_SIZE))
+  if (opts.cursor) params.set("cursor", opts.cursor)
+  const res = await fetchWithTimeout(
+    `${FRONTIER_BASE}/api/v2/orgs?${params.toString()}`,
+    { headers: authHeaders(jwt), signal: opts.signal },
+  )
+  if (!res.ok) throw new UserError(res.status, "", "org")
+  const body = (await res.json()) as { orgs: OrgSummary[]; nextCursor?: string | null }
+  return { orgs: body.orgs ?? [], nextCursor: body.nextCursor ?? null }
 }
 
 export async function createOrg(jwt: string, name: string): Promise<OrgSummary> {

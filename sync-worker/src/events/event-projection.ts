@@ -77,6 +77,10 @@ function countWords(text: string): number {
 export function buildBulkTargetCellCommitStmt(
   db: AquillaDb,
   events: PersistedEvent<'target.cell.commit'>[],
+  // AQU-1240: project's resolved default-lane tag (see laneOfEvent). Undefined
+  // => legacy '' , byte-identical while default_lane_migration is empty. All
+  // events in one bulk statement share a project, so a single tag applies.
+  projectDefaultLane?: string | null,
 ): AquillaStatement {
   if (events.length === 0) throw new Error('buildBulkTargetCellCommitStmt: empty events')
   const byCellLane = new Map<string, PersistedEvent<'target.cell.commit'>>()
@@ -85,7 +89,7 @@ export function buildBulkTargetCellCommitStmt(
       throw new Error(`target.cell.commit event ${event.id} is missing fileId or cellId`)
     }
     const payload = event.payload as EventPayloads['target.cell.commit']
-    byCellLane.set(`${event.cellId}\u0000${laneOfEvent(event.kind, payload)}`, event)
+    byCellLane.set(`${event.cellId}\u0000${laneOfEvent(event.kind, payload, projectDefaultLane)}`, event)
   }
 
   const rows = [...byCellLane.values()]
@@ -97,7 +101,7 @@ export function buildBulkTargetCellCommitStmt(
       event.projectId,
       event.fileId,
       event.cellId,
-      laneOfEvent(event.kind, payload),
+      laneOfEvent(event.kind, payload, projectDefaultLane),
       value,
       payload.valueHtml ?? null,
       event.id,
@@ -140,11 +144,35 @@ export function buildBulkTargetCellCommitStmt(
  * all lanes and never carry a lane). Part of the cells row key and, for
  * non-default lanes, of the AD-2 chain slot (chain-claims.ts
  * laneQualifiedParentKey).
+ *
+ * AQU-1240 (the replay shim): `projectDefaultLane` is the real lane tag the
+ * eliminated '' default lane was named for this project (from
+ * default_lane_migration, resolved by resolveDefaultLane). When known, a
+ * target event with an absent/'' `targetLang` resolves to that tag instead of
+ * '', so that '' and the tag denote the SAME lane at every read/replay/auth
+ * site and 4-then-5 / 5-then-4 converge (design §2.5, §6).
+ *
+ * BEHAVIOR-NEUTRAL WHILE UNPOPULATED: `default_lane_migration` is empty until
+ * the enable step, so the resolver yields null, this returns '' , and every
+ * key/scope is byte-identical to pre-1240. The '' -> tag flip is switched on
+ * ONLY together with slice 4 (stop writing '') and slice 5 (backfill); enabling
+ * it earlier forks history against new writes. Absent 3rd arg == legacy null.
+ *
+ * NOTE (deferred hardening, design §2.3/§2.5): post-cutover the resolver gains
+ * a project_settings.target_language fallback and THROWS when a legacy-shaped
+ * event meets a project with no mapping — "cannot determine the lane" is only
+ * safely answered by refusing. Not enabled here; it would take down projection
+ * for every unmapped project while the table is still empty.
  */
-export function laneOfEvent(kind: string, payload: unknown): string {
+export function laneOfEvent(
+  kind: string,
+  payload: unknown,
+  projectDefaultLane?: string | null,
+): string {
   if (!kind.startsWith('target.cell.')) return ''
   const lang = (payload as { targetLang?: unknown } | null | undefined)?.targetLang
-  return typeof lang === 'string' ? lang : ''
+  if (typeof lang === 'string' && lang !== '') return lang
+  return projectDefaultLane != null && projectDefaultLane !== '' ? projectDefaultLane : ''
 }
 
 // FTS index maintenance: none. Postgres auto-maintains the cells.value_tsv
@@ -394,6 +422,16 @@ export function buildEventProjectionStmts(
      * current-head validators. Default 1 (N=1 projects: byte-identical behavior).
      */
     validationCount?: number
+    /**
+     * AQU-1240: the project's resolved default-lane tag (from
+     * default_lane_migration via resolveDefaultLane), passed to laneOfEvent so
+     * a lane-less target event keys at that tag. Undefined/null => legacy ''
+     * (the state while the mapping table is empty), so leaving it unset here is
+     * byte-identical to pre-1240. The live route wires + memoizes it only at
+     * the enable step (with slices 4/5); resolving + passing it before then,
+     * without also always emitting the tag on the wire, would fork history.
+     */
+    projectDefaultLane?: string | null
   },
 ): ProjectionTouches[] {
   // AQU-927: one un-rounded ms value would otherwise reject the whole batch.
@@ -475,7 +513,7 @@ export function buildEventProjectionStmts(
       // AQU-538: the lane is part of the row key. '' for source creates and
       // default-lane target creates; a non-'' target lane creates that lane's
       // own row beside its siblings.
-      const lane = laneOfEvent(event.kind, p)
+      const lane = laneOfEvent(event.kind, p, opts?.projectDefaultLane)
       stmts.push(
         db
           .prepare(
@@ -636,7 +674,7 @@ export function buildEventProjectionStmts(
         const aiDrafted = tp.ai_suggestion ? 1 : 0
         // AQU-538: the lane this commit addresses ('' = default lane). Part of
         // the row key — each lane's first commit INSERTs that lane's row.
-        const lane = laneOfEvent(event.kind, tp)
+        const lane = laneOfEvent(event.kind, tp, opts?.projectDefaultLane)
 
         // NOTE: start_ms/end_ms are intentionally NOT written here — they are set once at
         // *.cell.create time and never overwritten by target commits.
@@ -865,7 +903,7 @@ export function buildEventProjectionStmts(
       // lane 'fr' leaves the default lane and every sibling lane intact.
       // Source deletes bind lane '' (source rows always live on '').
       const side = event.kind === 'target.cell.delete' ? 'target' : 'source'
-      const lane = laneOfEvent(event.kind, event.payload)
+      const lane = laneOfEvent(event.kind, event.payload, opts?.projectDefaultLane)
 
       // FTS5 maintenance (pre-DML): remove the indexed value BEFORE deleting
       // the cells row so the OLD value is still readable for the 'delete'
@@ -893,7 +931,7 @@ export function buildEventProjectionStmts(
       const side = event.kind === 'target.cell.reorder' ? 'target' : 'source'
       // AQU-538: reorder advances one lane's chain head; source reorders bind
       // lane '' (source rows always live on '').
-      const lane = laneOfEvent(event.kind, p)
+      const lane = laneOfEvent(event.kind, p, opts?.projectDefaultLane)
       stmts.push(
         db
           .prepare(

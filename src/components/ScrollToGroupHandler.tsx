@@ -45,6 +45,17 @@ export function ScrollToGroupHandler({ cellStore, storeVersion, editorRef }: Scr
       return
     }
 
+    // AQU-1244 round 2: matching file ids is NOT enough to consume. On a
+    // cross-file click the runtime file id flips first (useActiveCellStore's
+    // setRuntime effect) and `doFetch` then resets the store, so there is a
+    // window where getFileId() already reports the requested file while the
+    // store holds no rows at all. The Files panel submits its request ~100ms
+    // after selecting the file — squarely inside that window — and consuming
+    // there resolves the section against an empty navigation index, burning
+    // the request and leaving the file on its first milestone. Wait for the
+    // rows instead; this effect re-runs as the store version advances.
+    if (cellStore.getCellCount() === 0) return
+
     editorScroll.consume()
     if (!groupId && !sectionLabel) return
 

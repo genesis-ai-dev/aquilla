@@ -112,7 +112,11 @@ function makeRows(cells: readonly { id: string; ref: string }[]): CellRow[] {
   ] satisfies CellRow[])
 }
 
-function loadFile(store: CellStore, fileId: string, cells: readonly { id: string; ref: string }[]) {
+/** Phase 1 of a file switch, as the app performs it: useActiveCellStore's
+ *  setRuntime effect flips the runtime file id, then `doFetch` resets the store.
+ *  Between this and the rows landing, getFileId() already reports the NEW file
+ *  while the store is empty — the window AQU-1244 round 2 was burning requests in. */
+function beginFileSwitch(store: CellStore, fileId: string) {
   store.setRuntime({
     projectId: project.id,
     fileId,
@@ -120,7 +124,17 @@ function loadFile(store: CellStore, fileId: string, cells: readonly { id: string
     requiredValidations: 1,
     auditStats: new Map(),
   })
+  store.reset(project.id, fileId)
+}
+
+/** Phase 2: the fetch resolves and the new file's rows land. */
+function completeFileSwitch(store: CellStore, cells: readonly { id: string; ref: string }[]) {
   store.replaceRows(makeRows(cells), { full: true, maxServerSeq: 1 })
+}
+
+function loadFile(store: CellStore, fileId: string, cells: readonly { id: string; ref: string }[]) {
+  beginFileSwitch(store, fileId)
+  completeFileSwitch(store, cells)
 }
 
 function makeStore(): CellStore {
@@ -252,31 +266,41 @@ describe("ScrollToGroupHandler — section requests (AQU-1244)", () => {
 
   // The Files panel fires this shape when the clicked chapter belongs to a file
   // that is not the open one: it selects the file, then submits the section
-  // request stamped with that file's id. The handler parks the request until the
-  // store carries the new file, so the jump must still land on the requested
-  // milestone rather than the file's first one.
+  // request stamped with that file's id ~100ms later. By then the store already
+  // reports the new file id but has not received its rows, so the request must
+  // survive that window and still land on the requested milestone rather than
+  // the file's first one.
   it("opens another file on the requested milestone, not on its first", async () => {
     setMilestoneSplit(true)
     const store = makeStore()
     const { requestSection } = renderWorkspace(store)
     expect(cellRow("cell-ch1-a")).toBeTruthy()
 
-    // Request the other file's chapter 3 while file-1 is still the loaded file.
     const otherStore = new CellStore()
     loadFile(otherStore, OTHER_FILE_ID, OTHER_CELLS)
-    await requestSectionScroll(requestSection.current, sectionKey(otherStore, 2), OTHER_FILE_ID)
-    // Nothing to jump to yet — the request is parked, not burned.
+    const targetSection = sectionKey(otherStore, 2)
+
+    // The file switch starts: id flipped, rows gone, fetch in flight.
+    await act(async () => {
+      beginFileSwitch(store, OTHER_FILE_ID)
+    })
+    expect(store.getFileId()).toBe(OTHER_FILE_ID)
+    expect(store.getCellCount()).toBe(0)
+
+    // The request lands in that window. It must be parked, NOT burned against
+    // the empty navigation index.
+    await requestSectionScroll(requestSection.current, targetSection, OTHER_FILE_ID)
     expect(cellRow("cell-1pe-ch3-a")).toBeNull()
 
-    // The file switch lands: the store is replaced with the other file's cells.
+    // The fetch resolves.
     await act(async () => {
-      loadFile(store, OTHER_FILE_ID, OTHER_CELLS)
+      completeFileSwitch(store, OTHER_CELLS)
       await new Promise((resolve) => setTimeout(resolve, 0))
     })
 
     expect(cellRow("cell-1pe-ch3-a")).toBeTruthy()
     expect(cellRow("cell-1pe-ch3-b")).toBeTruthy()
-    // Chapter 1 is the file's FIRST milestone — the page it used to land on.
+    // Chapter 1 is the file's FIRST milestone — the page it wrongly landed on.
     expect(cellRow("cell-1pe-ch1-a")).toBeNull()
   })
 

@@ -388,10 +388,23 @@ export const org = defineNamespace({
     "org.projectOverview.filesHeadingTruncated": "Files (top {cap} of {total})",
     "org.projectOverview.filesHeadingCount": "Files ({count})",
     "org.projectOverview.filesListAria": "File list",
+    "org.projectOverview.fileListActionsAria": "File list actions",
     "org.projectOverview.copyCsvTooltip": "Copy the file list below as CSV",
     "org.projectOverview.copyCsv": "Copy CSV",
+    "org.projectOverview.copyCsvCopied": "CSV copied to clipboard",
     "org.projectOverview.downloadCsvTooltip": "Download the file list below as a .csv file",
     "org.projectOverview.downloadCsv": "Download CSV",
+    "org.projectOverview.downloadOriginals": "Download all originals",
+    "org.projectOverview.downloadOriginalsTooltip":
+      "Download every original imported source file as a zip",
+    "org.projectOverview.downloadOriginalAria": "Download original {fileName}",
+    "org.projectOverview.importedOriginalsHeading": "Imported originals",
+    "org.projectOverview.importedOriginalsListAria": "Imported original files",
+    "org.projectOverview.importedOriginalsShowMore": plural({
+      one: "Show {count} more",
+      other: "Show {count} more",
+    }),
+    "org.projectOverview.importedOriginalsShowAll": "Show all ({count})",
     "org.projectOverview.copyCsvFailed": "Couldn't copy to clipboard.",
     "org.projectOverview.filterFilesPlaceholder": "Filter files by name…",
     "org.projectOverview.filterFilesAria": "Filter files by name",
@@ -1524,6 +1537,14 @@ export const org = defineNamespace({
       "org.projectOverview.sortFilesByAria": {
         description: "Accessible name for the dropdown that chooses the sort order of the per-file breakdown list.",
       },
+      "org.projectOverview.fileListActionsAria": {
+        description:
+          "Accessible name for the icon-only overflow (⋯) button beside the file-list filter/sort controls. Distinct from org.projectOverview.moreActionsAria, which names the project-header overflow.",
+      },
+      "org.projectOverview.copyCsvCopied": {
+        description:
+          "Success toast shown after Copy CSV writes the filtered file list to the clipboard. The menu item itself stays labeled Copy CSV.",
+      },
       "org.projectOverview.filesListAria": {
         description:
           "Accessible name for the list element wrapping the per-file breakdown rows, distinguishing it from other lists on the page for screen-reader navigation.",
@@ -1573,6 +1594,37 @@ export const org = defineNamespace({
           total: "Total number of cells in this file.",
           words: "Total word count in this file.",
         },
+      },
+      "org.projectOverview.downloadOriginalAria": {
+        description:
+          "Accessible name for the icon-only button on a project-overview imported-originals row that downloads the exact original imported file.",
+        placeholders: { fileName: "The file's display name — not translated." },
+      },
+      "org.projectOverview.downloadOriginals": {
+        description:
+          "Button on the project-overview imported-originals card that downloads every stored original as a zip. Distinct from Download CSV, which is the plan progress table.",
+      },
+      "org.projectOverview.downloadOriginalsTooltip": {
+        description:
+          "Tooltip on Download all originals explaining that the zip contains the raw imported source files, not a translation-injected export.",
+      },
+      "org.projectOverview.importedOriginalsHeading": {
+        description:
+          "Heading of the project-overview card that lists imported source files a PM can download as originals. Distinct from the Plan board, which is progress, not assets.",
+      },
+      "org.projectOverview.importedOriginalsListAria": {
+        description:
+          "Accessible name for the list of imported original files on the project overview, distinguishing it from the plan and team lists.",
+      },
+      "org.projectOverview.importedOriginalsShowMore": {
+        description:
+          "Text button under the imported-originals list on the project overview, which starts capped at five rows. Reveals the next batch of rows; count is the batch size, not how many are still hidden. Sits beside org.projectOverview.importedOriginalsShowAll and is hidden once fewer than a full batch remains.",
+        placeholders: { count: "Number of additional rows the next batch reveals (always five)." },
+      },
+      "org.projectOverview.importedOriginalsShowAll": {
+        description:
+          "Text button under the capped imported-originals list on the project overview that reveals every remaining row at once. Count is the total number of files that have a stored original, not how many are still hidden. Replaced by org.projectOverview.showFewer once everything is visible.",
+        placeholders: { count: "Total number of imported original files in the list." },
       },
       "org.projectOverview.moreFilesShowAll": {
         description: "Link below the per-file breakdown list that reveals the files hidden past the display cap.",

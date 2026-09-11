@@ -1737,6 +1737,7 @@ export async function emitParsedFile(
       ...(result.corpusMarker ? { corpusMarker: result.corpusMarker } : {}),
       ...(result.originalName ? { originalName: result.originalName } : {}),
       ...(result.bookCode ? { bookCode: result.bookCode } : {}),
+      ...(result.rawBytes || result.rawSource ? { hasOriginalSource: true as const } : {}),
     },
     speakerPairs,
   }

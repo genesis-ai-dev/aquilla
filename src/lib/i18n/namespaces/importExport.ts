@@ -677,6 +677,8 @@ export const importExport = defineNamespace({
     "importExport.status.downloadedFilesCount": plural({ one: "Downloaded {count} file", other: "Downloaded {count} files" }),
     "importExport.status.downloadedFile": "Downloaded {fileName}",
     "importExport.status.exportFailed": "Export failed.",
+    "importExport.errors.originalMissing":
+      "Original isn't in storage. Re-import to restore it.",
 
     // — Thrown-error triage: src/lib/import.ts (AQU-832 wave 3 error sweep) —
     // These are messages parser/upload helpers throw that reach the user
@@ -1506,6 +1508,10 @@ export const importExport = defineNamespace({
       "importExport.status.downloadedFile": {
         description: "Success-status message after a single-file client-side export (txt/md/tsv/csv/xlf/tmx/vtt/srt/plain-text-dump/metadata-csv).",
         placeholders: { fileName: "Name of the downloaded file — not translated." },
+      },
+      "importExport.errors.originalMissing": {
+        description:
+          "Toast when Download original fails because the stored blob pointer exists but the bytes are gone from storage. Tells the user to re-import.",
       },
       "importExport.errors.ebibleEmptyCorpus": {
         description: "Thrown when a chosen eBible translation's corpus file downloads but contains no text (often copyright-restricted).",

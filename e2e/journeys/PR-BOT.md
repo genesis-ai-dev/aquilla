@@ -21,7 +21,9 @@ the PR, never request changes as a GitHub review, never merge, never push.
   compare its `sha` to the PR HEAD. That file is the readiness check;
   the Cloudflare comment on the PR lags it by minutes. A URL such as
   `ci-dev-<commit>` does not exist, so a 404 there proves nothing.
-- A QA account on development storage. Never a production account.
+- A QA account on development storage. Never a production account. The
+  standing fixtures, by name, are in `README.md` under "Fixtures on
+  development storage"; use those before building anything.
 
 ## Hard stops
 

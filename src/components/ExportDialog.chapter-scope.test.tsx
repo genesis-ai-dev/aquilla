@@ -108,6 +108,21 @@ describe("ExportDialog — chapter scope (AQU-465)", () => {
     expect(name).toBe("notes_GEN-2.md")
   })
 
+  it("reads 'All chapters' until a chapter is chosen, and again once it is unpicked", async () => {
+    render(<ExportDialog {...BASE_PROPS} />)
+    openFoldAsMarkdown()
+    const trigger = screen.getByRole("combobox", { name: /filter export by chapter/i })
+    // Base UI resolves the trigger label from the root's `items`; the ""
+    // option has no value text of its own to fall back on, so this was blank.
+    expect(trigger.textContent).toContain("All chapters")
+
+    await pickChapter("GEN 2")
+    expect(trigger.textContent).not.toContain("All chapters")
+
+    await pickChapter("All chapters")
+    expect(trigger.textContent).toContain("All chapters")
+  })
+
   it("exports the whole file when no chapter is chosen", async () => {
     render(<ExportDialog {...BASE_PROPS} />)
     openFoldAsMarkdown()

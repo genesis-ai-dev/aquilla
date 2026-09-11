@@ -1177,6 +1177,11 @@ export const org = defineNamespace({
     "org.projectOverview.plan.noMatchTitle": "Nothing matches",
     "org.projectOverview.plan.noMatch": "No unit matches the filters you have set. Clear them to see the whole plan again.",
     "org.projectOverview.plan.showingCount": "Showing {shown} of {total}.",
+    // AQU-1255: the card draws the first few rows and stops. The count lives
+    // in the label so the button says what it opens, to a reader and a screen
+    // reader alike.
+    "org.projectOverview.plan.showAll": "Show all {count}",
+    "org.projectOverview.plan.showFewer": "Show fewer",
     "org.projectOverview.plan.viewStatus": "By status",
     "org.projectOverview.plan.viewOrder": "In order",
     "org.projectOverview.plan.needsDate": "Needs a date",
@@ -2387,6 +2392,19 @@ export const org = defineNamespace({
           shown: "Units passing the filter \u2014 a number.",
           total: "Units in the project \u2014 a number.",
         },
+      },
+      "org.projectOverview.plan.showAll": {
+        description:
+          "Button below a truncated plan list that draws every remaining row in place. The count is the total number of rows the list would draw right now (after any filter), not the project total.",
+        placeholders: {
+          count: "Rows the list would draw once expanded — a number.",
+        },
+        maxLength: 18,
+      },
+      "org.projectOverview.plan.showFewer": {
+        description:
+          "Button at the bottom of a fully expanded plan list that collapses it back to the first few rows. Paired with 'Show all'.",
+        maxLength: 16,
       },
       "org.projectOverview.plan.viewStatus": {
         description:

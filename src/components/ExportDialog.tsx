@@ -856,6 +856,16 @@ export function ExportDialog({
     return Array.from(names).sort()
   }, [cells])
 
+  // Same Base UI label rule as `chapterItems` below: without `items` the
+  // "All voices" option ("") renders an empty trigger.
+  const voiceItems = useMemo(
+    () => [
+      { value: "", label: t("importExport.dialog.allVoices") },
+      ...distinctVoices.map((v) => ({ value: v, label: v })),
+    ],
+    [distinctVoices, t],
+  )
+
   // Reset voice filter when dialog closes or cells change.
   useEffect(() => {
     if (!open) setVoiceFilter("")
@@ -876,6 +886,18 @@ export function ExportDialog({
   const [chapterFilter, setChapterFilter] = useState<string>("")
 
   const chapterLabels = useMemo(() => listChapterLabels(cells), [cells])
+
+  // Base UI resolves the trigger's label from the root's `items`, not from
+  // the mounted <SelectItem>s, and falls back to the raw value string when
+  // there are none. "GEN 2" is its own label so it looked fine; "" — the
+  // "All chapters" option — rendered an empty trigger.
+  const chapterItems = useMemo(
+    () => [
+      { value: "", label: t("importExport.dialog.allChapters") },
+      ...chapterLabels.map((c) => ({ value: c, label: c })),
+    ],
+    [chapterLabels, t],
+  )
 
   /** Only offered where it means something: a file with more than one chapter,
    *  exporting itself (not the project) through a cell-array format. */
@@ -2094,6 +2116,7 @@ export function ExportDialog({
             <Select
               value={chapterFilter}
               onValueChange={(v) => setChapterFilter(v ?? "")}
+              items={chapterItems}
             >
               <SelectTrigger
                 size="sm"
@@ -2131,6 +2154,7 @@ export function ExportDialog({
             <Select
               value={voiceFilter}
               onValueChange={(v) => setVoiceFilter(v ?? "")}
+              items={voiceItems}
             >
               <SelectTrigger
                 size="sm"

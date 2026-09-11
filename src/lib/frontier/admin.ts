@@ -444,3 +444,75 @@ export async function getAdminActivity(jwt: string, limit = 100): Promise<AdminA
   if (!res.ok) throw new UserError(res.status, "")
   return ((await res.json()) as { activity: AdminActivity[] }).activity
 }
+
+/**
+ * One agent session in the list response (metadata only, no full convo).
+ * For weekly qualitative product review: see missed tool calls, unhelpful loops,
+ * users having to rephrase.
+ */
+export interface AdminAgentSession {
+  sessionId: string
+  projectId: string
+  userId: number
+  username: string | null
+  projectName: string | null
+  title: string
+  messageCount: number
+  runCount: number
+  lastStatus: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+/**
+ * One agent session's full transcript plus its runs. The convo may contain
+ * unpublished scripture — this is admin-gated and should never be exposed to
+ * non-admins.
+ */
+export interface AdminAgentSessionDetail {
+  session: {
+    sessionId: string
+    projectId: string
+    userId: number
+    username: string | null
+    projectName: string | null
+    title: string
+    convo: unknown[]
+    untrustedActive: boolean
+    createdAt: number
+    updatedAt: number
+  }
+  runs: Array<{
+    runId: string
+    prompt: string
+    model: string
+    status: string
+    promptTokens: number
+    completionTokens: number
+    costCents: number
+    steps: number
+    stagedCount: number
+    startedAt: number
+    endedAt: number | null
+  }>
+}
+
+export async function getAdminAgentSessions(
+  jwt: string,
+  limit = 50,
+  cursor?: string,
+): Promise<{ sessions: AdminAgentSession[]; nextCursor: number | null }> {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (cursor) params.set("cursor", cursor)
+  const url = `${FRONTIER_BASE}/api/v2/admin/agent-sessions?${params.toString()}`
+  const res = await fetchWithTimeout(url, { headers: authHeaders(jwt) })
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+  return (await res.json()) as { sessions: AdminAgentSession[]; nextCursor: number | null }
+}
+
+export async function getAdminAgentSession(jwt: string, sessionId: string): Promise<AdminAgentSessionDetail> {
+  const url = `${FRONTIER_BASE}/api/v2/admin/agent-sessions/${encodeURIComponent(sessionId)}`
+  const res = await fetchWithTimeout(url, { headers: authHeaders(jwt) })
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+  return (await res.json()) as AdminAgentSessionDetail
+}

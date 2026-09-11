@@ -7,7 +7,26 @@ reads a story, drives the browser, judges the end state, and reports.
 They exist for one job: QA on every pull request, done by bots against the
 PR's own full-stack preview, with a comment a reviewer can act on. That
 flow is written out in `PR-BOT.md`. The stories are the bots' briefs. The
-replays are the parts of a story a bot no longer has to think about.
+replays are the parts of a story a bot no longer has to think about. The
+comment reports the *effect* on the named screen, not that a control
+moved: the first Grokbot walk of PR 626 flipped **Try Autopilot** and
+called it good; the Autopilot panel on Overview stayed hidden until a
+reload. A comment that says the walk passed without that check is a
+failed bot run, not a review.
+
+Calibration record, 2026-09-11: the 22 Grokbot comments from 2026-09-10
+were re-walked on the same previews with a fresh account. Every walked
+table row that could be re-checked held (556, 611, 612, 619, 620, 621,
+627, 628, 509, 513). The errors were in the prose: a wrong behind-count
+(26 for 41), a mislabelled timezone, a punctuation change in a quoted
+button label, a two-level menu path collapsed to one, a workaround that
+did not reproduce, request shapes taken from the diff instead of the
+network, a HOLD over an HTTP 500, a BLOCKED on a preview that had
+already deployed, and a walk posted after the PR had merged. Those rules
+now live in `PR-BOT.md` under "Say only what you measured". The same
+day Kieran cut the comment down: a pass is a two-line nod, a fail is the
+item, the quoted string, and one thing to check, and every item is
+walked three times so that 2/3 reads as a harness suspect, not a bug.
 
 ## Where this sits in the pipeline
 

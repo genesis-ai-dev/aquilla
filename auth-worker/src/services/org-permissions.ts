@@ -1821,3 +1821,56 @@ export async function getTermbaseEditMinRoleForProject(
   return getTermbaseEditMinRole(env, project.org_id)
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// AQU-1002: configurable comment floors
+//
+// Two more write floors on the same org_settings pattern. Partners split on
+// this one — AQU-999 hardened foreign resolve to CONTRIBUTOR, and some orgs
+// then wanted it lower (translators settle the threads on files they
+// translate) while others wanted it reserved for maintainers. A floor, not a
+// global default, is the only answer that serves both.
+//
+// Defaults reproduce post-AQU-999 behaviour exactly, so an org that never sets
+// them sees no change: COMMENTER (200) to open a thread, CONTRIBUTOR (400) to
+// resolve one somebody else opened.
+//
+// ENFORCEMENT LIVES IN SYNC-WORKER, which owns comments — see
+// sync-worker/src/events/comment-floors.ts, which reads the same two keys with
+// the same defaults. auth-worker only resolves them here so the floors can
+// travel with the project record for client gating (below), exactly as
+// termbaseEditMinRole does.
+// ──────────────────────────────────────────────────────────────────────────
+
+/** Default floor to open a comment thread when the org hasn't set one. */
+export const DEFAULT_COMMENT_CREATE_MIN_ROLE = 200 // ROLE.COMMENTER
+/** Default floor to resolve/reopen someone else's thread when unset. */
+export const DEFAULT_COMMENT_RESOLVE_MIN_ROLE = 400 // ROLE.CONTRIBUTOR
+
+export interface CommentFloors {
+  commentCreateMinRole: number
+  commentResolveMinRole: number
+}
+
+/** The floors in force for an org, each falling back independently. */
+export async function getCommentFloors(env: Env, orgId: number): Promise<CommentFloors> {
+  const settings = await loadOrgSettingsBlob(env, orgId)
+  return {
+    commentCreateMinRole: extractRoleFloor(
+      settings,
+      "commentCreateMinRole",
+      DEFAULT_COMMENT_CREATE_MIN_ROLE,
+    ),
+    commentResolveMinRole: extractRoleFloor(
+      settings,
+      "commentResolveMinRole",
+      DEFAULT_COMMENT_RESOLVE_MIN_ROLE,
+    ),
+  }
+}
+
+/** Defaults for a project with no org to consult (personal / not attached). */
+export const DEFAULT_COMMENT_FLOORS: CommentFloors = {
+  commentCreateMinRole: DEFAULT_COMMENT_CREATE_MIN_ROLE,
+  commentResolveMinRole: DEFAULT_COMMENT_RESOLVE_MIN_ROLE,
+}
+

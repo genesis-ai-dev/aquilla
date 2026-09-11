@@ -348,3 +348,16 @@ describe("useRules — lane scoping (AQU-609)", () => {
     expect(ids).toContain("es-rule")
   })
 })
+
+describe("rules identity (AQU-1104)", () => {
+  it("keeps the same rules array across re-renders when the project has no rules", () => {
+    // A fresh `[]` fallback per render gave `rules` a new identity every
+    // workspace render, which re-ran every downstream memo (useHealth's
+    // checkRules pass among them) on projects that had never added a rule.
+    const project = { ...baseProject(), rules: undefined }
+    const { result, rerender } = renderHook(() => useRules(project, noop))
+    const first = result.current.rules
+    rerender()
+    expect(result.current.rules).toBe(first)
+  })
+})

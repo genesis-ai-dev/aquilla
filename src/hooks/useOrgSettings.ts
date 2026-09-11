@@ -105,6 +105,7 @@ const DEFAULT_ALLOW_SELF_ASSIGNMENT = false
 // default) — all three must agree.
 const TERMBASE_FLOOR_WRITE_MIN_ROLE = ROLE.OWNER
 const DEFAULT_TERMBASE_EDIT_MIN_ROLE = ROLE.PROJECT_LEAD
+const EMPTY_RULES: TranslationRule[] = []
 
 // AQU-1002: the two comment floors are the same OWNER-only permission-policy
 // shape again. Their defaults are the pre-AQU-1002 static floors, so an org
@@ -436,7 +437,9 @@ export function useOrgSettings(
   )
 
   const settings = server?.settings ?? {}
-  const orgRules: TranslationRule[] = settings.rules ?? []
+  // AQU-1104: a stable empty array. `orgRules` feeds useRules' merged list,
+  // and a fresh `[]` per render re-ran every rules consumer on every render.
+  const orgRules: TranslationRule[] = settings.rules ?? EMPTY_RULES
   const promotionRequests: PromotionRequest[] = (settings.promotionRequests as PromotionRequest[] | undefined) ?? []
   // AQU-433: org-level provider keys; default to empty object when unset.
   const orgProviderKeys: OrgProviderKeys = settings.orgProviderKeys ?? {}

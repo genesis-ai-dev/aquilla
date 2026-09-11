@@ -24,6 +24,8 @@ export interface CloudFileSummary {
   anchorFileId?: string | null
   bookCode?: string | null
   hasScriptureContent?: boolean
+  /** Sidebar folder. Absent when the file is ungrouped. */
+  corpusMarker?: string | null
   sourceLanguage?: string | null
   targetLanguage?: string | null
   /** Timeline-segment-model order lens ('time' | 'sequence'); absent ⇒ sequence. */
@@ -390,6 +392,7 @@ export function minimalProjectRecord(summary: CloudProjectSummary): ProjectRecor
       ...(f.anchorFileId ? { anchorFileId: f.anchorFileId } : {}),
       ...(f.bookCode ? { bookCode: f.bookCode } : {}),
       ...(f.hasScriptureContent ? { hasScriptureContent: true } : {}),
+      ...(f.corpusMarker?.trim() ? { corpusMarker: f.corpusMarker.trim() } : {}),
       ...(f.sourceLanguage ? { sourceLanguage: f.sourceLanguage } : {}),
       ...(f.targetLanguage ? { targetLanguage: f.targetLanguage } : {}),
       ...(f.orderedBy === "time" || f.orderedBy === "sequence" ? { orderedBy: f.orderedBy } : {}),

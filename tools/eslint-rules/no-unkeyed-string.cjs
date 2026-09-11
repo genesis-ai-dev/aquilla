@@ -82,7 +82,12 @@ function visibleStringsOf(node) {
     case 'ConditionalExpression':
       return [...visibleStringsOf(node.consequent), ...visibleStringsOf(node.alternate)]
     case 'LogicalExpression':
+      return [...visibleStringsOf(node.left), ...visibleStringsOf(node.right)]
     case 'BinaryExpression':
+      // Only concatenation renders its operands. In a comparison such as
+      // `status === "shared" && <Badge/>` the literal is a discriminator the
+      // user never sees, so walking it produced false positives.
+      if (node.operator !== '+') return []
       return [...visibleStringsOf(node.left), ...visibleStringsOf(node.right)]
     case 'ArrayExpression':
       return node.elements.flatMap((element) => visibleStringsOf(element))

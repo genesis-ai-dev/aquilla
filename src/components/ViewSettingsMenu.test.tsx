@@ -1,7 +1,12 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import type { ComponentProps } from "react"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { toast, Toaster } from "@/components/ui/toast"
+import {
+  getMilestoneSplit,
+  resetMilestoneSplitCacheForTests,
+  setMilestoneSplit,
+} from "@/lib/store/milestone-split-pref"
 import { DIRECTION_MISMATCH_TOAST_ID, ViewSettingsMenu } from "./ViewSettingsMenu"
 
 function renderViewSettings(overrides: Partial<ComponentProps<typeof ViewSettingsMenu>> = {}) {
@@ -13,6 +18,7 @@ function renderViewSettings(overrides: Partial<ComponentProps<typeof ViewSetting
     onSourceFontSizeChange: vi.fn(),
     onTargetFontSizeChange: vi.fn(),
     onTnSidebarChange: vi.fn(),
+    onTargetKeyTermHighlightModeChange: vi.fn(),
   }
   render(
     <>
@@ -28,6 +34,7 @@ function renderViewSettings(overrides: Partial<ComponentProps<typeof ViewSetting
         tnSidebarEnabled={false}
         sourceFontSize={14}
         targetFontSize={14}
+        targetKeyTermHighlightMode="never"
         {...handlers}
         {...overrides}
       />
@@ -39,6 +46,12 @@ function renderViewSettings(overrides: Partial<ComponentProps<typeof ViewSetting
 function directionWarning() {
   return screen.getByRole("dialog", { name: /is forced/i })
 }
+
+beforeEach(() => {
+  localStorage.clear()
+  resetMilestoneSplitCacheForTests()
+  setMilestoneSplit(false)
+})
 
 afterEach(() => {
   toast.close(DIRECTION_MISMATCH_TOAST_ID)
@@ -52,14 +65,40 @@ describe("ViewSettingsMenu popover", () => {
 
     const panel = screen.getByTestId("view-settings-popover")
     expect(panel).toBeTruthy()
+    expect(screen.getByRole("switch", { name: "Split into milestones" })).toBeTruthy()
     expect(screen.getByText("Show line numbers")).toBeTruthy()
     expect(screen.getByText("Show cell labels")).toBeTruthy()
+    expect(screen.getByText("Target key terms")).toBeTruthy()
     expect(screen.getByText("Text Direction")).toBeTruthy()
     expect(screen.getByText("Font Size")).toBeTruthy()
 
     fireEvent.click(screen.getByRole("switch", { name: /Show line numbers/i }))
     expect(handlers.onLineNumbersChange).toHaveBeenCalledWith(false)
     expect(screen.getByTestId("view-settings-popover")).toBeTruthy()
+  })
+
+  it("toggles split-into-milestones and keeps the popover open", () => {
+    renderViewSettings()
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const toggle = screen.getByRole("switch", { name: "Split into milestones" })
+    expect(toggle).not.toBeChecked()
+
+    fireEvent.click(toggle)
+
+    expect(screen.getByRole("switch", { name: "Split into milestones" })).toBeChecked()
+    expect(getMilestoneSplit()).toBe(true)
+    expect(screen.getByTestId("view-settings-popover")).toBeTruthy()
+  })
+
+  it("changes when target key terms are highlighted", () => {
+    const handlers = renderViewSettings()
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    const targetTermOptions = screen.getByRole("radiogroup", { name: "Target key terms" })
+    fireEvent.click(within(targetTermOptions).getByRole("radio", { name: "Focused cell only" }))
+
+    expect(handlers.onTargetKeyTermHighlightModeChange).toHaveBeenCalledWith("focused")
   })
 
   it("changes source direction via the tabs", () => {

@@ -35,6 +35,11 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
     sentinels: ["e2e/specs/ai/completion.smoke.spec.ts"],
   },
   {
+    // AQU-1025: few-shot retrieval is the AI predict journey, not collab.
+    source: /(?:sync-worker\/.*branching-search|src\/lib\/sync\/branching-search)/i,
+    sentinels: ["e2e/specs/ai/completion.smoke.spec.ts"],
+  },
+  {
     source: /^(?:src\/(?:components|lib|pages)\/.*knowledge|auth-worker\/.*knowledge|db\/shared\/knowledge)/i,
     sentinels: ["e2e/specs/projects/project-settings.smoke.spec.ts"],
   },
@@ -53,8 +58,15 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
     sentinels: ["e2e/specs/validation/validate.smoke.spec.ts"],
   },
   {
-    source: /^(?:src\/(?:components|lib)\/(?:editor|cell|workspace-actions|import|export|audio|voice|video|search|sidebar|timeline|storage)|packages\/idml)/i,
+    // `parsers`/`biblica` are the importer's own reading layer — a change there
+    // only reaches a user through an import, so it selects the import sentinel
+    // rather than falling through to the generic shared-runtime one.
+    source: /^(?:src\/(?:components|lib)\/(?:editor|cell|workspace-actions|import|export|parsers|biblica|audio|voice|video|search|sidebar|timeline|storage)|packages\/idml)/i,
     sentinels: ["e2e/specs/editor/import-and-edit.smoke.spec.ts"],
+  },
+  {
+    source: /(?:original-download|originals-bundle|file-original-download|useOriginalSourceFlags|original-source)/i,
+    sentinels: ["e2e/specs/editor/export.smoke.spec.ts"],
   },
 ]
 

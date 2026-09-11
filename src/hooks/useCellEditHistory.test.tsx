@@ -102,6 +102,43 @@ describe("useCellEditHistory (Phase 2b)", () => {
     expect(entry.validated).toBe(false)
   })
 
+  it("flags commits off the current head's parent chain as stale (AQU-1154 bumped branch)", async () => {
+    // Exact shape the cell-history route returns after the AQU-1154 A/B
+    // scenario: H → A1 (won) / B1 (lost CAS) → B2 (parent B1, lost) → A2
+    // (parent A1, won). Head is A2. Newest-first by serverSeq.
+    fetchCellHistoryMock.mockResolvedValueOnce([
+      makeEvent({ id: "evt-A2", serverSeq: 5, parentId: "evt-A1", payload: { value: "A2" } }),
+      makeEvent({ id: "evt-B2", serverSeq: 4, parentId: "evt-B1", payload: { value: "B2" }, author: "bob" }),
+      makeEvent({ id: "evt-B1", serverSeq: 3, parentId: "evt-H", payload: { value: "B1" }, author: "bob" }),
+      makeEvent({ id: "evt-A1", serverSeq: 2, parentId: "evt-H", payload: { value: "A1" } }),
+      makeEvent({ id: "evt-H", serverSeq: 1, parentId: null, payload: { value: "head" } }),
+    ])
+    const { result } = renderHook(() =>
+      useCellEditHistory({
+        enabled: true,
+        projectId: "proj-a",
+        fileId: "file-abc",
+        cellId: "cell-1",
+        getTokenForFile,
+        currentEventId: "evt-A2",
+      }),
+    )
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    const stale = Object.fromEntries(
+      result.current.history.map((e) => [e.eventId, e.isStale]),
+    )
+    // The bumped branch is kept (never lost) and flagged; the winning
+    // lineage — including the shared ancestor H — is not.
+    expect(stale).toEqual({
+      "evt-H": false,
+      "evt-A1": false,
+      "evt-B1": true,
+      "evt-B2": true,
+      "evt-A2": false,
+    })
+    expect(result.current.history.find((e) => e.eventId === "evt-B2")?.value).toBe("B2")
+  })
+
   it("filters out events that aren't *.cell.commit", async () => {
     fetchCellHistoryMock.mockResolvedValueOnce([
       makeEvent({ id: "v", serverSeq: 9, kind: "cell.validate", payload: {} }),

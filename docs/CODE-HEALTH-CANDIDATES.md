@@ -184,11 +184,21 @@ future pass (verify each still applies — code moves):
     (389: 13 errors, 376 warnings) once accounting for the `packages/idml-roundtrip/dist`
     build-artifact noise below, no test file touched. Baseline and final were each run in
     a fully isolated `git worktree`/checkout to rule out read races with the edits.
-  - **Remaining**: `src/lib/export/audio-bwf.ts:85`,
-    `src/lib/export/audio-by-character.ts:326`, `src/lib/audio/whisper-worker.ts:186`,
-    `src/hooks/useActiveCellStore.ts:1366`, `src/components/MultiProjectInviteDialog.tsx:126`,
-    `src/lib/import/normalized-manifest.ts:471` — 6 files, not attempted this run to stay
-    inside the ≤8-file budget.
+  - **Status**: `src/lib/export/audio-bwf.ts`, `src/lib/export/audio-by-character.ts`,
+    `src/hooks/useActiveCellStore.ts`, `src/components/MultiProjectInviteDialog.tsx`, and
+    `src/lib/import/normalized-manifest.ts` done in the 2026-09-11 run — 5 redundant
+    array/index non-null assertions removed (each a loop-bounded array index or a
+    `Record<string, T>` index-signature read, both typed non-optional without
+    `noUncheckedIndexedAccess`). `src/lib/audio/whisper-worker.ts:186` was in this list but
+    turned out **not** redundant: `npx tsc -b` failed after removing it —
+    `c.timestamp` is `[number | null, number | null]` (an explicit nullable tuple, not an
+    inferred-non-optional index read), and the `!` narrows past a `.filter(c =>
+    c.timestamp[0] != null && ...)` guard that TS can't carry through the chained `.map()`.
+    Reverted that one site; left as a genuine assertion, not a candidate for a future pass.
+    `npx tsc -b --force` clean on the other 5, `pnpm lint` byte-identical to baseline (once
+    excluding `packages/idml-roundtrip/dist`, rebuilt as a side effect of `tsc -b` — see the
+    build-artifact-noise entry below), `pnpm test` 1058/1058 files identical pass count
+    before and after, no test file touched.
 - **Proof needed when revisited**: same as this run — isolate with `npx tsc --noEmit -p
   tsconfig.app.json` scoped to the touched file(s) plus full `pnpm test`/`pnpm lint`
   byte-identical-failure-list comparison; no test files touched.

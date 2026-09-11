@@ -3,6 +3,7 @@
 import type { Env, AuthUser } from "../types"
 import { ORG_WIDE_ACCESS_FLOOR, resolveProjectRole } from "./project-permissions"
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
+import { planUnitCountsSql, aoeTodayIso } from "../../../db/shared/plan-units"
 
 /** Map numeric role level to a human-readable name. Used for secondarySources. */
 function roleNameForLevel(level: number): string {
@@ -221,6 +222,15 @@ export async function listOrgMembersWithUsers(
   }))
 }
 
+export const ORG_ACTIVITY_DEBOUNCE_MS = 5 * 60 * 1000
+/** Isolate-local "(orgId:userId) → last bump ms". */
+const orgActivityBumpedAt = new Map<string, number>()
+
+/** Test hook: forget every isolate-local bump timestamp. */
+export function clearOrgActivityDebounce(): void {
+  orgActivityBumpedAt.clear()
+}
+
 /**
  * Bump org_members.last_active_at for (userId, orgId), debounced to once per
  * 5 minutes per pair. Fire-and-forget: a failed write doesn't fail the
@@ -232,6 +242,15 @@ export async function bumpOrgActivity(
   orgId: number | null,
 ): Promise<void> {
   if (orgId == null) return
+  // Perf (2026-09): the WHERE clause below only debounced the ROW; the UPDATE
+  // statement itself still ran on every /orgs/me. Skip the statement entirely
+  // when this isolate bumped the pair within the window. Another isolate may
+  // still issue a no-op UPDATE — the WHERE clause remains the row guard.
+  const key = `${orgId}:${userId}`
+  const now = Date.now()
+  const last = orgActivityBumpedAt.get(key)
+  if (last != null && now - last < ORG_ACTIVITY_DEBOUNCE_MS) return
+  orgActivityBumpedAt.set(key, now)
   try {
     await env.AQUILLA_PG.prepare(
       `UPDATE org_members
@@ -872,7 +891,7 @@ export interface PortfolioLane {
   lastEditAt: number | null
 }
 
-export interface PortfolioRow { id: string; name: string; totalCells: number; validatedCells: number; filledCells: number; lastEditAt: number | null; audioCells: number; validatedAudioCells: number; recordedMs: number; deadlineAt: string | null; aiDraftedCells: number; sourceLanguage: string | null; targetLanguage: string | null; lanes: PortfolioLane[] }
+export interface PortfolioRow { id: string; name: string; totalCells: number; validatedCells: number; filledCells: number; lastEditAt: number | null; audioCells: number; validatedAudioCells: number; recordedMs: number; deadlineAt: string | null; aiDraftedCells: number; sourceLanguage: string | null; targetLanguage: string | null; lanes: PortfolioLane[]; unitsTotal: number; unitsDone: number; unitsOverdue: number }
 export interface OrgPortfolioRow extends PortfolioRow { orgId: number }
 
 /** Soft-deleted file in an org the caller can see (Archived → Recently deleted). */
@@ -903,6 +922,11 @@ interface PortfolioDbRow {
   // (the canonical per-project source useProject overlays). Null when unset.
   source_language: string | null
   target_language: string | null
+  // AQU-1097: planning units — how many this project has, how many a manager
+  // has marked done, and how many are past their target date without a mark.
+  units_total: number
+  units_done: number
+  units_overdue: number
 }
 
 function mapPortfolioRow(r: PortfolioDbRow, lanesByProject: Map<string, PortfolioLane[]>): PortfolioRow {
@@ -923,6 +947,9 @@ function mapPortfolioRow(r: PortfolioDbRow, lanesByProject: Map<string, Portfoli
     sourceLanguage: r.source_language || null,
     targetLanguage: r.target_language || null,
     lanes: lanesByProject.get(r.id) ?? [],
+    unitsTotal: Number(r.units_total) || 0,
+    unitsDone: Number(r.units_done) || 0,
+    unitsOverdue: Number(r.units_overdue) || 0,
   }
 }
 
@@ -1081,6 +1108,7 @@ export async function getOrgPortfolio(
   env: Env,
   orgId: number,
   viewer: { userId: number; isAdmin: boolean },
+  now: number = Date.now(),
 ): Promise<PortfolioRow[]> {
   // Perf (dashboard 15s timeout fix):
   //  - The AQU-523 language pair reads the STORED generated columns on
@@ -1103,6 +1131,8 @@ export async function getOrgPortfolio(
         WHERE ca.deleted = 0
           AND ca.project_id IN (SELECT id FROM projects WHERE org_id = ?)
         GROUP BY ca.project_id
+     ), pu AS MATERIALIZED (
+       ${planUnitCountsSql("f.project_id IN (SELECT id FROM projects WHERE org_id = ?)")}
      )
      SELECT p.org_id AS org_id, p.id AS id, p.name AS name, p.deadline_at AS deadline_at,
             COALESCE(SUM(f.cell_count), 0)          AS total_cells,
@@ -1114,17 +1144,23 @@ export async function getOrgPortfolio(
             MAX(ps.target_language)                 AS target_language,
             COALESCE(MAX(au.audio_cells), 0)           AS audio_cells,
             COALESCE(MAX(au.validated_audio_cells), 0) AS validated_audio_cells,
-            COALESCE(MAX(au.recorded_ms), 0)           AS recorded_ms
+            COALESCE(MAX(au.recorded_ms), 0)           AS recorded_ms,
+            COALESCE(MAX(pu.units_total), 0)           AS units_total,
+            COALESCE(MAX(pu.units_done), 0)            AS units_done,
+            COALESCE(MAX(pu.units_overdue), 0)         AS units_overdue
        FROM projects p
        LEFT JOIN files f ON f.project_id = p.id
        LEFT JOIN project_settings ps ON ps.project_id = p.id
        LEFT JOIN au ON au.project_id = p.id
+       LEFT JOIN pu ON pu.project_id = p.id
       WHERE p.org_id = ? AND p.archived_at IS NULL
         AND ${PORTFOLIO_VISIBILITY_PREDICATE}
       GROUP BY p.id, p.name
       ORDER BY LOWER(p.name)`,
   ).bind(
-    orgId, orgId,
+    orgId,
+    aoeTodayIso(now), orgId,
+    orgId,
     viewer.isAdmin ? 1 : 0, viewer.userId, viewer.userId, viewer.userId, viewer.userId,
   ).all<PortfolioDbRow>()
   const lanesByProject = await fetchPortfolioLanes(env, [orgId])
@@ -1182,6 +1218,7 @@ export async function getOrgPortfolios(
   env: Env,
   orgIds: number[],
   viewer: { userId: number; isAdmin: boolean },
+  now: number = Date.now(),
 ): Promise<OrgPortfolioRow[]> {
   const uniqueOrgIds = [...new Set(orgIds)].filter((id) => Number.isInteger(id) && id > 0)
   if (uniqueOrgIds.length === 0) return []
@@ -1202,6 +1239,8 @@ export async function getOrgPortfolios(
         WHERE ca.deleted = 0
           AND ca.project_id IN (SELECT id FROM projects WHERE org_id IN (${placeholders}))
         GROUP BY ca.project_id
+     ), pu AS MATERIALIZED (
+       ${planUnitCountsSql(`f.project_id IN (SELECT id FROM projects WHERE org_id IN (${placeholders}))`)}
      )
      SELECT p.org_id AS org_id, p.id AS id, p.name AS name, p.deadline_at AS deadline_at,
             COALESCE(SUM(f.cell_count), 0)          AS total_cells,
@@ -1213,17 +1252,23 @@ export async function getOrgPortfolios(
             MAX(ps.target_language)                 AS target_language,
             COALESCE(MAX(au.audio_cells), 0)           AS audio_cells,
             COALESCE(MAX(au.validated_audio_cells), 0) AS validated_audio_cells,
-            COALESCE(MAX(au.recorded_ms), 0)           AS recorded_ms
+            COALESCE(MAX(au.recorded_ms), 0)           AS recorded_ms,
+            COALESCE(MAX(pu.units_total), 0)           AS units_total,
+            COALESCE(MAX(pu.units_done), 0)            AS units_done,
+            COALESCE(MAX(pu.units_overdue), 0)         AS units_overdue
        FROM projects p
        LEFT JOIN files f ON f.project_id = p.id
        LEFT JOIN project_settings ps ON ps.project_id = p.id
        LEFT JOIN au ON au.project_id = p.id
+       LEFT JOIN pu ON pu.project_id = p.id
       WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL
         AND ${PORTFOLIO_VISIBILITY_PREDICATE}
       GROUP BY p.org_id, p.id, p.name
       ORDER BY p.org_id, LOWER(p.name)`,
   ).bind(
-    ...uniqueOrgIds, ...uniqueOrgIds,
+    ...uniqueOrgIds,
+    aoeTodayIso(now), ...uniqueOrgIds,
+    ...uniqueOrgIds,
     viewer.isAdmin ? 1 : 0, viewer.userId, viewer.userId, viewer.userId, viewer.userId,
   ).all<PortfolioDbRow>()
   const lanesByProject = await fetchPortfolioLanes(env, uniqueOrgIds)
@@ -1568,5 +1613,58 @@ export async function getTermbaseEditMinRoleForProject(
     .first<{ org_id: number | null }>()
   if (!project?.org_id) return DEFAULT_TERMBASE_EDIT_MIN_ROLE
   return getTermbaseEditMinRole(env, project.org_id)
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// AQU-1002: configurable comment floors
+//
+// Two more write floors on the same org_settings pattern. Partners split on
+// this one — AQU-999 hardened foreign resolve to CONTRIBUTOR, and some orgs
+// then wanted it lower (translators settle the threads on files they
+// translate) while others wanted it reserved for maintainers. A floor, not a
+// global default, is the only answer that serves both.
+//
+// Defaults reproduce post-AQU-999 behaviour exactly, so an org that never sets
+// them sees no change: COMMENTER (200) to open a thread, CONTRIBUTOR (400) to
+// resolve one somebody else opened.
+//
+// ENFORCEMENT LIVES IN SYNC-WORKER, which owns comments — see
+// sync-worker/src/events/comment-floors.ts, which reads the same two keys with
+// the same defaults. auth-worker only resolves them here so the floors can
+// travel with the project record for client gating (below), exactly as
+// termbaseEditMinRole does.
+// ──────────────────────────────────────────────────────────────────────────
+
+/** Default floor to open a comment thread when the org hasn't set one. */
+export const DEFAULT_COMMENT_CREATE_MIN_ROLE = 200 // ROLE.COMMENTER
+/** Default floor to resolve/reopen someone else's thread when unset. */
+export const DEFAULT_COMMENT_RESOLVE_MIN_ROLE = 400 // ROLE.CONTRIBUTOR
+
+export interface CommentFloors {
+  commentCreateMinRole: number
+  commentResolveMinRole: number
+}
+
+/** The floors in force for an org, each falling back independently. */
+export async function getCommentFloors(env: Env, orgId: number): Promise<CommentFloors> {
+  const settings = await loadOrgSettingsBlob(env, orgId)
+  return {
+    commentCreateMinRole: extractRoleFloor(
+      settings,
+      "commentCreateMinRole",
+      DEFAULT_COMMENT_CREATE_MIN_ROLE,
+    ),
+    commentResolveMinRole: extractRoleFloor(
+      settings,
+      "commentResolveMinRole",
+      DEFAULT_COMMENT_RESOLVE_MIN_ROLE,
+    ),
+  }
+}
+
+/** Defaults for a project with no org to consult (personal / not attached). */
+export const DEFAULT_COMMENT_FLOORS: CommentFloors = {
+  commentCreateMinRole: DEFAULT_COMMENT_CREATE_MIN_ROLE,
+  commentResolveMinRole: DEFAULT_COMMENT_RESOLVE_MIN_ROLE,
 }
 

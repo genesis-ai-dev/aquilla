@@ -24,6 +24,7 @@ import type { ChainSlot } from './chain-claims'
 import { eventQualifiedParentKey } from './chain-claims'
 import { ROLE } from './role-policy'
 import { trackPatchRequiresExisting } from './track-editing-authority'
+import { usableCorpusMarker } from './corpus-marker'
 
 // A single event row as it lives in Postgres. JSON.parse on `payload` is the
 // caller's responsibility — `payload` here is already an object.
@@ -169,6 +170,13 @@ export function laneOfEvent(kind: string, payload: unknown): string {
  *   word_count     — total target-side words (translation output)
  *   last_edit_at   — most recent cell edit on the file (also drives file sort)
  *
+ * cell_count deliberately avoids COUNT(DISTINCT cell_id): that sorts the whole
+ * row set (value included, ~170 B/row) and spilled to disk on every
+ * 30K+-cell file under prod's 4 MB work_mem (4.6 GB temp over 8.6 days).
+ * GROUP BY cell_id over cells_pkey (project_id, file_id, cell_id, …) is an
+ * ordered Index Only Scan + Group — no sort at any work_mem. Guarded by
+ * __tests__/hot-query-plans.test.ts.
+ *
  * NOTE: this is what was always meant by file-create's "counters are
  * maintained by the cell commit projection path" comment — that maintenance
  * never actually existed before, so every `files` row sat at cell_count=0.
@@ -182,7 +190,11 @@ export function fileCountersRecomputeStmt(
   return db
     .prepare(
       `WITH counters AS (
-         SELECT COUNT(DISTINCT cell_id)::integer AS cell_count,
+         SELECT (SELECT COUNT(*) FROM (
+                   SELECT 1 FROM cells
+                    WHERE project_id = ? AND file_id = ?
+                    GROUP BY cell_id
+                 ) AS distinct_cells)::integer AS cell_count,
                 COUNT(*) FILTER (WHERE validated = 1)::integer AS approved_count,
                 COUNT(*) FILTER (
                   WHERE side = 'target' AND TRIM(value) != ''
@@ -206,6 +218,7 @@ export function fileCountersRecomputeStmt(
        WHERE files.id = ? AND files.project_id = ?`,
     )
     .bind(
+      projectId, fileId,
       projectId, fileId,
       serverTs,
       fileId, projectId,
@@ -306,7 +319,7 @@ export function buildBulkSourceCellCreateStmt(
 }
 
 /** Caller hint: which projection tables this event will touch. */
-export type ProjectionTouches = 'cells' | 'cell_validators' | 'cell_waivers' | 'files' | 'cell_audio' | 'comments' | 'cell_backtranslations' | 'cell_links'
+export type ProjectionTouches = 'cells' | 'cell_validators' | 'cell_waivers' | 'files' | 'cell_audio' | 'comments' | 'cell_backtranslations' | 'cell_links' | 'concepts'
 
 /**
  * Apply one event to the projection (without the AD-2 sibling guard — the
@@ -386,14 +399,27 @@ export function buildEventProjectionStmts(
   // AQU-927: one un-rounded ms value would otherwise reject the whole batch.
   const event = coerceIntegerMsPayload(rawEvent)
   // Gate fragments for chain-advancing cells writes. `gateWhere` suffixes an
-  // INSERT…SELECT row source; `gateAnd` extends an UPDATE/DELETE WHERE.
+  // INSERT…SELECT row source; `gateAnd` extends an UPDATE/DELETE WHERE;
+  // `gateConflictWhere` suffixes an UPSERT's ON CONFLICT DO UPDATE.
+  //
+  // AQU-1154 (invariant I1): besides holding the chain claim, the write is a
+  // compare-and-swap on the cell's CURRENT head — an existing row is only
+  // advanced when `cells.event_id` still equals this event's parentId. The
+  // claim alone is first-child-of-parent, which let a stale branch climb back
+  // onto the head (B1 loses to A1, then B2 chained on B1 found the (cell, B1)
+  // slot free and overwrote A1). A row that does not exist yet has no head to
+  // compare, so the INSERT path is claim-gated only (a cell's first target
+  // commit legitimately chains on the SOURCE head). The route reads each
+  // gated statement's row count back: 0 rows == lost the CAS == stale.
   const gate = opts?.chainGate
   const GATE_EXISTS =
     'EXISTS (SELECT 1 FROM chain_claims WHERE project_id = ? AND file_id = ? AND cell_id = ? AND parent_key = ? AND event_id = ?)'
+  const HEAD_CAS = 'cells.event_id = ?'
   const gateWhere = gate ? ` WHERE ${GATE_EXISTS}` : ''
-  const gateAnd = gate ? ` AND ${GATE_EXISTS}` : ''
+  const gateConflictWhere = gate ? ` WHERE ${HEAD_CAS}` : ''
+  const gateAnd = gate ? ` AND ${GATE_EXISTS} AND ${HEAD_CAS}` : ''
   const gateBinds: unknown[] = gate
-    ? [gate.projectId, gate.fileId, gate.cellId, gate.parentKey, event.id]
+    ? [gate.projectId, gate.fileId, gate.cellId, gate.parentKey, event.id, event.parentId]
     : []
 
   switch (event.kind) {
@@ -479,7 +505,7 @@ export function buildEventProjectionStmts(
               sequence_index = excluded.sequence_index,
               transcription  = excluded.transcription,
               camera_state   = excluded.camera_state,
-              metadata       = excluded.metadata`,
+              metadata       = excluded.metadata${gateConflictWhere}`,
           )
           .bind(
             event.projectId,
@@ -648,7 +674,7 @@ export function buildEventProjectionStmts(
                 validated         = 0,
                 endorsement_count = 0,
                 ai_drafted        = excluded.ai_drafted,
-                ai_draft          = excluded.ai_draft`,
+                ai_draft          = excluded.ai_draft${gateConflictWhere}`,
             )
             .bind(
               event.projectId,
@@ -1476,6 +1502,8 @@ case 'cell.audio.attach': {
       if (p.r2Key) langMeta.r2Key = p.r2Key
       if (p.importFormat) langMeta.importFormat = p.importFormat
       if (p.parserVersion) langMeta.parserVersion = p.parserVersion
+      const corpusMarker = usableCorpusMarker(p.corpusMarker)
+      if (corpusMarker) langMeta.corpusMarker = corpusMarker
       stmts.push(
         db
           .prepare(
@@ -1576,6 +1604,131 @@ case 'cell.audio.attach': {
           .bind(event.fileId, event.projectId),
       )
       return ['files']
+    }
+
+    // ── Terminology concepts (AQU-1006 follow-up) ───────────────────────
+    //
+    // Every case here writes ONE concept, named by `conceptId` in the payload.
+    // That is the whole reason these events exist: the settings blob they
+    // replace could only express "here is the entire termbase", so a writer
+    // working from a stale array silently deleted everyone else's entries.
+    // No statement below may ever widen to `WHERE project_id = ?` alone.
+    case 'term.create': {
+      const p = event.payload as EventPayloads['term.create']
+      stmts.push(
+        db
+          .prepare(
+            // ON CONFLICT DO NOTHING, matching comment.create: the concept id
+            // is client-minted, so a retried outbox flush or a rebuild replay
+            // is an idempotent no-op rather than a duplicate concept.
+            `INSERT INTO concepts (
+              concept_id, project_id, source_term, renderings, notes,
+              status, case_sensitive, created_by, created_at, updated_at, deleted_at
+            ) VALUES (?, ?, ?, ?::text::jsonb, ?, ?, ?, ?, ?, ?, NULL)
+            ON CONFLICT(concept_id) DO NOTHING`,
+          )
+          .bind(
+            p.conceptId,
+            event.projectId,
+            p.sourceTerm,
+            JSON.stringify(p.renderings ?? []),
+            p.notes ?? null,
+            p.status,
+            p.caseSensitive ? 1 : 0,
+            event.author,
+            event.serverTs,
+            event.serverTs,
+          ),
+      )
+      return ['concepts']
+    }
+
+    case 'term.update': {
+      const p = event.payload as EventPayloads['term.update']
+      // COALESCE-per-column, not a whole-row UPDATE. An absent payload key
+      // leaves that column alone, so two people editing different fields of
+      // the same concept both survive — the per-field analogue of why this
+      // table exists at all. `renderings` is the deliberate exception: a
+      // rendering list has no per-item identity to merge on, so it replaces
+      // wholesale when present and is left untouched when absent.
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE concepts SET
+               source_term    = COALESCE(?, source_term),
+               renderings     = COALESCE(?::text::jsonb, renderings),
+               notes          = COALESCE(?, notes),
+               case_sensitive = COALESCE(?, case_sensitive),
+               updated_at     = ?
+             WHERE concept_id = ? AND project_id = ? AND deleted_at IS NULL`,
+          )
+          .bind(
+            p.sourceTerm ?? null,
+            p.renderings === undefined ? null : JSON.stringify(p.renderings),
+            p.notes ?? null,
+            p.caseSensitive === undefined ? null : p.caseSensitive ? 1 : 0,
+            event.serverTs,
+            p.conceptId,
+            event.projectId,
+          ),
+      )
+      return ['concepts']
+    }
+
+    case 'term.delete': {
+      const p = event.payload as EventPayloads['term.delete']
+      // Soft-delete. The concept stays for the audit trail; the read route and
+      // the partial index both filter on deleted_at IS NULL.
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE concepts SET deleted_at = ?, updated_at = ?
+             WHERE concept_id = ? AND project_id = ? AND deleted_at IS NULL`,
+          )
+          .bind(event.serverTs, event.serverTs, p.conceptId, event.projectId),
+      )
+      return ['concepts']
+    }
+
+    case 'term.approve': {
+      const p = event.payload as EventPayloads['term.approve']
+      // Only a draft is promotable. Guarding on status here (rather than
+      // setting 'active' unconditionally) means an approve that races a
+      // reject cannot resurrect a deprecated concept.
+      stmts.push(
+        db
+          .prepare(
+            `UPDATE concepts SET status = 'active', updated_at = ?
+             WHERE concept_id = ? AND project_id = ?
+               AND status = 'draft' AND deleted_at IS NULL`,
+          )
+          .bind(event.serverTs, p.conceptId, event.projectId),
+      )
+      return ['concepts']
+    }
+
+    case 'term.reject': {
+      const p = event.payload as EventPayloads['term.reject']
+      if (p.mode === 'deprecate') {
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE concepts SET status = 'deprecated', updated_at = ?
+               WHERE concept_id = ? AND project_id = ? AND deleted_at IS NULL`,
+            )
+            .bind(event.serverTs, p.conceptId, event.projectId),
+        )
+      } else {
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE concepts SET deleted_at = ?, updated_at = ?
+               WHERE concept_id = ? AND project_id = ? AND deleted_at IS NULL`,
+            )
+            .bind(event.serverTs, event.serverTs, p.conceptId, event.projectId),
+        )
+      }
+      return ['concepts']
     }
 
     case 'comment.create': {
@@ -1935,6 +2088,15 @@ case 'cell.audio.attach': {
       return ['files']
     }
 
+    case 'file.corpus.set': {
+      const p = event.payload as EventPayloads['file.corpus.set']
+      if (!event.fileId) {
+        throw new Error(`file.corpus.set event ${event.id} is missing fileId`)
+      }
+      stmts.push(buildFileCorpusSetStmt(db, event.projectId, event.fileId, event.id, p.corpusMarker))
+      return ['files']
+    }
+
     case 'file.track.set': {
       // Per-track presentation overrides — rebuild path; the dispatch path
       // (handlers/file-track-set.ts) uses the same shared SQL builder.
@@ -2201,12 +2363,39 @@ case 'cell.audio.attach': {
 }
 
 /**
- * Shared meta-merge for the file's audio timing mode. Same shape as
- * buildFileVideoSetStmt below (one files.meta JSON key, merged or removed);
- * used by both the live handler (handlers/file-timing-set.ts) and the rebuild
- * projection case. Null clears the key — the file falls back to the
- * project-level default.
+ * Shared meta-merge for the file's sidebar corpus group. Same shape as
+ * buildFileTimingSetStmt (one files.meta JSON key, merged or removed).
+ * Null / blank clears the key — the file lands in Ungrouped.
  */
+export function buildFileCorpusSetStmt(
+  db: AquillaDb,
+  projectId: string,
+  fileId: string,
+  eventId: string,
+  corpusMarker: string | null,
+): AquillaStatement {
+  const NOW = "(extract(epoch from now()) * 1000)::bigint"
+  const usable = usableCorpusMarker(corpusMarker)
+  if (usable == null) {
+    return db
+      .prepare(
+        `UPDATE files
+            SET meta = (COALESCE(NULLIF(meta, ''), '{}')::jsonb - 'corpusMarker')::text,
+                event_id = ?, updated_at = ${NOW}
+          WHERE id = ? AND project_id = ?`,
+      )
+      .bind(eventId, fileId, projectId)
+  }
+  return db
+    .prepare(
+      `UPDATE files
+          SET meta = (COALESCE(NULLIF(meta, ''), '{}')::jsonb || jsonb_build_object('corpusMarker', ?::text))::text,
+              event_id = ?, updated_at = ${NOW}
+        WHERE id = ? AND project_id = ?`,
+    )
+    .bind(usable, eventId, fileId, projectId)
+}
+
 export function buildFileTimingSetStmt(
   db: AquillaDb,
   projectId: string,

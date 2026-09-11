@@ -44,13 +44,16 @@ function SelectionCaptureHarness({
   const [dialogOpen, setDialogOpen] = useState(false)
   const [dialogTerm, setDialogTerm] = useState("")
 
-  // Mirrors handleSourceMouseUp: capture selection into both state and ref.
+  // Mirrors handleSourceMouseUp: capture a NON-EMPTY selection into both
+  // state and ref. An empty/collapsed mouseup must not wipe a prior capture —
+  // that is what happens when a toolbar click bubbles to the source cell
+  // after the popover has already collapsed the browser selection (AQU-1006).
   const handleSourceMouseUp = useCallback(() => {
     const sel = window.getSelection()
     const text = sel && !sel.isCollapsed ? sel.toString().trim() : ""
-    const captured = text.length > 0 ? text : null
-    capturedSelectionRef.current = captured
-    setSourceSelection(captured)
+    if (!text) return
+    capturedSelectionRef.current = text
+    setSourceSelection(text)
   }, [])
 
   // Mirrors handleAddSelectionToTermbase: reads from ref, not state.
@@ -170,6 +173,24 @@ describe("AQU-260 — selection-capture race fix", () => {
 
     fireEvent.mouseUp(screen.getByTestId("source-text"))
     fireEvent.mouseDown(screen.getByTestId("add-to-termbase"))
+    fireEvent.click(screen.getByTestId("add-to-termbase"))
+
+    expect(screen.getByTestId("dialog")).toBeInTheDocument()
+    expect(screen.getByTestId("dialog-term")).toHaveTextContent("grace")
+  })
+
+  it("AQU-1006: collapsed mouseup bubbling from the toolbar does not wipe the capture", () => {
+    const onAdd = vi.fn()
+    render(<SelectionCaptureHarness onAddToTermbase={onAdd} />)
+
+    mockSelection("grace")
+    fireEvent.mouseUp(screen.getByTestId("source-text"))
+    fireEvent.mouseDown(screen.getByTestId("add-to-termbase"))
+
+    // Popover/input focus collapsed the selection; mouseup then bubbles to
+    // the source cell (toolbar lives inside it).
+    collapseSelection()
+    fireEvent.mouseUp(screen.getByTestId("source-text"))
     fireEvent.click(screen.getByTestId("add-to-termbase"))
 
     expect(screen.getByTestId("dialog")).toBeInTheDocument()

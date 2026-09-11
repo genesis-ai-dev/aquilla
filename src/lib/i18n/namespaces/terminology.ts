@@ -186,6 +186,17 @@ export const terminology = defineNamespace({
     "terminology.termDetail.verdictInfringed": "infringed",
     "terminology.termDetail.noOccurrences": "No occurrences found in the loaded cells.",
     "terminology.termDetail.columnRef": "Ref",
+    "terminology.termDetail.loadingExamples": "Loading examples…",
+    "terminology.termDetail.addRenderingPlaceholder": "Add rendering…",
+    "terminology.termDetail.addRenderingAria": "Add a rendering to this term",
+    "terminology.termDetail.addRenderingButton": "Add",
+    "terminology.termDetail.renderingEditHint":
+      "Click a rendering to change required / allowed / forbidden, or remove it.",
+    "terminology.termDetail.cycleStatusTitle": "Change status",
+    "terminology.termDetail.cycleStatusAria":
+      "{rendering} is {status} — change status",
+    "terminology.termDetail.removeRenderingAria": "Remove rendering {rendering}",
+    "terminology.termDetail.goToCellAria": "Go to {ref}",
     "terminology.termDetail.enforcedCount": plural({
       one: "{count} enforced",
       other: "{count} enforced",
@@ -228,21 +239,17 @@ export const terminology = defineNamespace({
     }),
 
     // ── EquivalentsPanel.tsx ─────────────────────────────────────────────────
-    "terminology.equivalents.sourceBoth": "χ² + EM agree",
-    "terminology.equivalents.sourceEm": "EM only",
-    "terminology.equivalents.sourceChi2": "χ² only",
     "terminology.equivalents.promoteTooltip":
-      "Promote to a managed rendering (crosses the deterministic line)",
-    "terminology.equivalents.promoteButton": "Promote",
-    "terminology.equivalents.managedSubtitle": "(your decisions)",
-    "terminology.equivalents.noManagedRenderings": "No managed renderings yet for “{term}”.",
-    "terminology.equivalents.aiAssumedHeading": "AI-assumed",
-    "terminology.equivalents.aiAssumedSubtitle": "(predicted)",
+      "Add this suggestion as an approved translation",
+    "terminology.equivalents.promoteButton": "Add",
+    "terminology.equivalents.approvedHeading": "Approved translations",
+    "terminology.equivalents.noManagedRenderings": "No approved translations yet for “{term}”.",
+    "terminology.equivalents.suggestedHeading": "Suggested translations",
+    "terminology.equivalents.suggestedSubtitle":
+      "Based on translated examples in this project",
     "terminology.equivalents.noPredicted":
-      "No predicted equivalents — the corpus has too little signal yet.",
-    "terminology.equivalents.confidenceHigh": "HIGH",
-    "terminology.equivalents.confidenceAmber": "AMBER",
-    "terminology.equivalents.confidenceLow": "LOW",
+      "There are not enough translated examples to suggest a translation yet.",
+    "terminology.equivalents.confidence": "{confidence} confidence",
 
     // ── TermLookupPopover.tsx ────────────────────────────────────────────────
     "terminology.lookup.applyAria": "Apply rendering: {rendering}",
@@ -322,7 +329,7 @@ export const terminology = defineNamespace({
     "terminology.compile.ruleName": "Term: {term}",
     "terminology.compile.ruleNameForbidden": "Term: {term} — forbidden rendering",
     "terminology.compile.approvedRequired":
-      '"{term}" must be rendered with an approved rendering ({renderings})',
+      'Each "{term}" in the source needs an approved rendering ({renderings})',
     "terminology.compile.forbiddenRendering":
       '"{rendering}" is a forbidden rendering for "{term}"',
 
@@ -335,14 +342,30 @@ export const terminology = defineNamespace({
     "terminology.common.notesLabel": "Notes",
     "terminology.common.statusLabel": "Status",
 
-    // ── AddConceptDialog.tsx ("Add to term base" confirm dialog) ────────────
-    "terminology.addConcept.title": "Add to term base",
+    // ── AddConceptDialog.tsx ("Add to terminology" popover) ────────────────
+    "terminology.addConcept.title": "Add to terminology",
     "terminology.addConcept.description":
-      "Creates a draft concept with this source term. Add renderings and " +
-      "activate it from the Terminology page.",
+      "Creates an entry from this source term. Add a rendering now, or later " +
+      "from the Terminology page.",
     "terminology.addConcept.sourceTermPlaceholder": "Source term…",
     "terminology.addConcept.sourceTermAriaLabel": "Source term for new concept",
-    "terminology.addConcept.createDraftAriaLabel": "Create draft concept",
+    "terminology.addConcept.createDraftAriaLabel": "Add term",
+    "terminology.addConcept.renderingPlaceholder": "Optional rendering",
+    "terminology.addConcept.renderingAriaLabel": "Rendering for new concept",
+    "terminology.addConcept.caseInsensitiveLabel": "Case insensitive",
+    "terminology.addConcept.approveLabel": "Approve now (enforce this term)",
+    "terminology.addConcept.approveEnforcedHint":
+      "This term will be checked against every translation right away.",
+    "terminology.addConcept.approveSuggestionHint":
+      "Saved as a suggestion for review. Suggestions are not checked until approved.",
+    "terminology.addConcept.approveNoPermissionHint":
+      "Saved as a suggestion — approving terms needs a higher role on this project.",
+    "terminology.addConcept.noRenderingNotEnforcedHint":
+      "Add a rendering to enforce this term — without one there is nothing to check for.",
+    "terminology.addConcept.savingToast": "Saving term…",
+    "terminology.addConcept.savedToast": "Added “{term}”",
+    "terminology.addConcept.viewEntry": "View entry",
+    "terminology.addConcept.saveFailed": "Couldn't save this term.",
 
     // ── RenameSuggestionsDialog.tsx (bulk file/corpus rename suggestions) ───
     "terminology.renameSuggestions.title": "Review suggested names",
@@ -467,6 +490,26 @@ export const terminology = defineNamespace({
           "Accessible name for the button removing one rendering; {position} is its " +
           "1-based position among the concept's renderings.",
         placeholders: { position: "1-based position of this rendering in the list." },
+      },
+      "terminology.termDetail.addRenderingAria": {
+        description:
+          "Accessible name for the text input on the term detail page where a new rendering is typed.",
+      },
+      "terminology.termDetail.cycleStatusAria": {
+        description:
+          "Accessible name for the button on the term detail page that cycles one rendering's " +
+          "status (required / allowed / forbidden); {rendering} is the rendering text and " +
+          "{status} its current status word.",
+        placeholders: {
+          rendering: "The rendering's text as typed by the translator.",
+          status: "The rendering's current status label (required, allowed, or forbidden).",
+        },
+      },
+      "terminology.termDetail.removeRenderingAria": {
+        description:
+          "Accessible name for the button on the term detail page that removes one rendering; " +
+          "{rendering} is the rendering text.",
+        placeholders: { rendering: "The rendering's text as typed by the translator." },
       },
       "terminology.row.collapseRenderingsAria": {
         description: "Accessible name for the row expander toggle when it is open.",
@@ -629,6 +672,15 @@ export const terminology = defineNamespace({
           "headword, shown inside curly quotes (not translated).",
         placeholders: { term: "The concept's source headword, verbatim (not translated)." },
       },
+      "terminology.equivalents.confidence": {
+        description:
+          "Confidence label beside a suggested translation; {confidence} is a " +
+          "locale-formatted percentage showing how consistently the source term and " +
+          "suggestion occur together across the project's translated examples.",
+        placeholders: {
+          confidence: "A locale-formatted percentage, such as 67%.",
+        },
+      },
       "terminology.lookup.applyAria": {
         description:
           "Accessible name for the Apply button on one rendering row in the lookup " +
@@ -738,35 +790,49 @@ export const terminology = defineNamespace({
       },
       "terminology.addConcept.title": {
         description:
-          "Title of the confirm dialog shown when the user selects source text and " +
-          "chooses 'Add to term base' — creates a draft concept from the selection. " +
-          "'Term base' is this project's terminology/glossary store.",
+          "Title of the popover shown when the user selects source text and " +
+          "chooses 'Add to terminology' — creates an entry from the selection.",
       },
       "terminology.addConcept.description": {
         description:
-          "Body text under the 'Add to term base' dialog title, explaining what " +
-          "confirming will do: create a draft concept the user can flesh out later on " +
-          "the Terminology page.",
+          "Body text under the 'Add to terminology' popover title, explaining that " +
+          "confirming creates an entry the user can flesh out now or later on the " +
+          "Terminology page.",
       },
       "terminology.addConcept.sourceTermPlaceholder": {
         description:
-          "Placeholder text in the empty source-term input of the 'Add to term base' " +
-          "dialog, before the user has typed or the selection has pre-filled it.",
+          "Placeholder text in the empty source-term input of the 'Add to terminology' " +
+          "popover, before the user has typed or the selection has pre-filled it.",
       },
       "terminology.addConcept.sourceTermAriaLabel": {
         description:
-          "Accessible name for the source-term input in the 'Add to term base' dialog. " +
-          "The field also has a visible label (terminology.common's 'Source term' — see " +
-          "terminology.editor.sourceTermLabel), but this aria-label is the value " +
-          "react-aria/the input actually announces, so it must independently read as a " +
-          "complete description of the field.",
+          "Accessible name for the source-term input in the 'Add to terminology' popover. " +
+          "The field also has a visible label (terminology.editor.sourceTermLabel), but " +
+          "this aria-label is the value the input actually announces, so it must " +
+          "independently read as a complete description of the field.",
       },
       "terminology.addConcept.createDraftAriaLabel": {
         description:
-          "Accessible name for the primary submit button in the 'Add to term base' " +
-          "dialog. The button's visible text toggles to a busy 'Saving…' label while " +
-          "the request is in flight; this accessible name states what the button DOES " +
-          "regardless of that transient visible state.",
+          "Accessible name for the primary submit button in the 'Add to terminology' " +
+          "popover. Same act as terminology.editor.addTerm; kept as its own name " +
+          "because this control sits in a popover, not the glossary page header.",
+      },
+      "terminology.addConcept.renderingAriaLabel": {
+        description:
+          "Accessible name for the optional rendering input in the 'Add to terminology' " +
+          "popover. The field also has a visible label (terminology.editor.renderingLabel).",
+      },
+      "terminology.addConcept.savedToast": {
+        description:
+          "Success toast after a source-selection add saves. {term} is the source " +
+          "headword the user just added, verbatim.",
+        placeholders: { term: "The source headword just saved, verbatim (not translated)." },
+      },
+      "terminology.termDetail.goToCellAria": {
+        description:
+          "Accessible name for the jump-to-editor control on a term-detail occurrence. " +
+          "{ref} is the cell's scripture/context reference (e.g. ROM 3:24).",
+        placeholders: { ref: "The cell's reference label, verbatim (not translated)." },
       },
       "terminology.renameSuggestions.title": {
         description:

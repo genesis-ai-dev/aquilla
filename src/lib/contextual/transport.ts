@@ -90,6 +90,48 @@ function runsBase(projectId: string): string {
   return `${AUTH_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/contextual/runs`
 }
 
+// ── Conditional polling ──────────────────────────────────────────────────────
+// The overview / snapshot / activity endpoints are polled every 4s while a run
+// works. auth-worker serves them from a short isolate cache and answers a
+// matching `If-None-Match` with 304 + no body, so an unchanged poll moves no
+// bytes. We keep the last body per URL and replay it on 304. Bounded so a
+// long session paging through run history cannot grow it without limit.
+const CONDITIONAL_CACHE_MAX = 64
+const conditional = new Map<string, { etag: string; body: unknown }>()
+
+/** GET with `If-None-Match`; a 304 yields the retained body as if it were a
+ *  fresh 200. Anything else is handed back untouched for the caller's own
+ *  404/501/error handling. */
+async function conditionalGet(
+  url: string,
+  jwt: string,
+): Promise<{ res: Response; body: unknown }> {
+  const retained = conditional.get(url)
+  const headers: Record<string, string> = {
+    ...(authHeaders(jwt) as Record<string, string>),
+    ...(retained ? { "If-None-Match": retained.etag } : {}),
+  }
+  const res = await fetchWithTimeout(url, { headers })
+  if (res.status === 304 && retained) return { res, body: retained.body }
+  if (!res.ok) return { res, body: undefined }
+  const body: unknown = await res.json()
+  const etag = res.headers.get("ETag")
+  if (etag) {
+    conditional.delete(url)
+    conditional.set(url, { etag, body })
+    if (conditional.size > CONDITIONAL_CACHE_MAX) {
+      const oldest = conditional.keys().next().value
+      if (oldest !== undefined) conditional.delete(oldest)
+    }
+  }
+  return { res, body }
+}
+
+/** True when a conditional response should be treated as a successful read. */
+function conditionalOk(res: Response): boolean {
+  return res.ok || res.status === 304
+}
+
 /** runId → projectId, recorded when a run is observed (snapshot) or started.
  * Needed because the transport interface addresses runs by id alone. */
 const runProjects = new Map<string, string>()
@@ -534,13 +576,13 @@ const EMPTY_OVERVIEW: ContextualOverview = {
  *  throwing when the backend isn't deployed, so the overview renders without it. */
 export async function fetchContextualOverview(projectId: string): Promise<ContextualOverview> {
   const jwt = await requireJwt()
-  const res = await fetchWithTimeout(
+  const { res, body: raw } = await conditionalGet(
     `${AUTH_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/contextual/overview`,
-    { headers: authHeaders(jwt) },
+    jwt,
   )
   if (res.status === 404 || res.status === 501) return EMPTY_OVERVIEW
-  if (!res.ok) return throwFromResponse(res, "fetch autopilot overview failed")
-  const body = (await res.json()) as Partial<ContextualOverview>
+  if (!conditionalOk(res)) return throwFromResponse(res, "fetch autopilot overview failed")
+  const body = raw as Partial<ContextualOverview>
   return { ...EMPTY_OVERVIEW, ...body, available: true }
 }
 
@@ -559,12 +601,12 @@ export async function fetchContextualRuns(
   if (options.proposedOnly) queryParams.set("proposedOnly", "true")
   if (options.limit !== undefined) queryParams.set("limit", String(options.limit))
   const query = queryParams.size > 0 ? `?${queryParams.toString()}` : ""
-  const res = await fetchWithTimeout(`${runsBase(projectId)}${query}`, { headers: authHeaders(jwt) })
+  const { res, body: raw } = await conditionalGet(`${runsBase(projectId)}${query}`, jwt)
   if (res.status === 404 || res.status === 501) {
     return { available: false, runs: [], truncated: false, nextCursor: null }
   }
-  if (!res.ok) return throwFromResponse(res, "fetch autopilot runs failed")
-  const body = objectValue(await res.json())
+  if (!conditionalOk(res)) return throwFromResponse(res, "fetch autopilot runs failed")
+  const body = objectValue(raw)
   const runs = Array.isArray(body?.runs) ? body.runs : []
   const normalizedRuns = runs.flatMap((value) => {
     const run = normalizeRun(value)
@@ -604,9 +646,9 @@ export async function fetchContextualRunActivity(
     query.set("draftBeforeId", options.draftCursor.draftId)
   }
   const queryString = query.size > 0 ? `?${query.toString()}` : ""
-  const res = await fetchWithTimeout(
+  const { res, body: raw } = await conditionalGet(
     `${runsBase(projectId)}/${encodeURIComponent(runId)}/activity${queryString}`,
-    { headers: authHeaders(jwt) },
+    jwt,
   )
   if (res.status === 404 || res.status === 501) {
     return {
@@ -620,8 +662,8 @@ export async function fetchContextualRunActivity(
       draftNextCursor: null,
     }
   }
-  if (!res.ok) return throwFromResponse(res, "fetch autopilot activity failed")
-  const body = objectValue(await res.json()) ?? {}
+  if (!conditionalOk(res)) return throwFromResponse(res, "fetch autopilot activity failed")
+  const body = objectValue(raw) ?? {}
   const run = normalizeRun(body.run)
   if (run) runProjects.set(run.runId, projectId)
   const rawTruncation = objectValue(body.truncatedCollections)
@@ -833,4 +875,5 @@ export function installContextualTransport(): void {
 export function resetContextualTransportForTesting(): void {
   _installed = false
   runProjects.clear()
+  conditional.clear()
 }

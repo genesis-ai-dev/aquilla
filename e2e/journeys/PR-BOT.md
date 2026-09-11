@@ -59,20 +59,32 @@ after Matthew merged it.
 
 ## Status
 
-Every checklist item is walked **three times** in fresh sessions (five
-for anything that touches sync, timing, or a second user). The status
-comes from the counts, not from the best run.
+A walk is a walk. A person walks a claim once and tries again only
+when something smells off; the bot does the same. Repetition belongs
+in two narrower places: a miss, and the replays.
 
-- **PASS** when every walked item showed its effect on every run
-  (3/3, 5/5), and every unwalked item is named with why. A 2-org
-  account does not satisfy a >100-org AC; that item is not walked, not
-  passed (PR 509). PASS is a nod, not an approval: a person still looks.
-- **FAIL** when an item missed its effect on every run. A 500 on the
-  grant path is FAIL even when the instructions page looks right (PR
-  628). PASS is illegal when any item failed.
-- **FLAKY** when an item showed on some runs and not others (2/3, 4/5).
-  That is a harness suspect first and an app bug second. Say which
-  runs missed; do not call it a bug until a cold walk misses too.
+- **Walk each checklist item once.** If it shows its effect, that item
+  is done: 1/1.
+- **On a miss, walk that item twice more** in fresh sessions before
+  deciding. The bot does not yet know whether it found a bug or tripped
+  over its own harness, and that is the moment to look again.
+- **Run the replays three times** (`streak.sh <slug> 3`). They are
+  scripts; their job is to be deterministic, and a replay that passes
+  2/3 is telling you the script is loose. Only n/n counts as a passing
+  replay.
+
+- **PASS** when every walked item showed its effect on its first walk,
+  every replay passed n/n, and every unwalked item is named with why.
+  A 2-org account does not satisfy a >100-org AC; that item is not
+  walked, not passed (PR 509). PASS is a nod, not an approval: a
+  person still looks.
+- **FAIL** when an item missed its effect on all three walks. A 500 on
+  the grant path is FAIL even when the instructions page looks right
+  (PR 628). PASS is illegal when any item failed.
+- **FLAKY** when an item missed once and then showed on a retry (1/3,
+  2/3), or a replay passed on some runs and not others. That is a
+  harness suspect first and an app bug second. Say which item and
+  which run missed; do not call it a bug until a cold walk misses too.
 - **BLOCKED** only for a hard stop above.
 - A step the PR body itself leaves unticked ("secret not configured
   yet") is not walked, with that reason; it is not FAIL. FAIL is for
@@ -114,8 +126,8 @@ comes from the counts, not from the best run.
    then cold-walk any story whose replay failed, so a harness miss is not
    reported as a bug. If the runtime has no agent-browser, cold-walk the
    matching stories in the computer instead, and say that in the comment.
-   Repeat the claim walk from step 3 the same way: three runs, fresh
-   session each. Only n/n is a pass.
+   The claim walk in step 3 is not repeated unless an item missed;
+   then that item alone gets two more fresh sessions (see **Status**).
 
 5. **Comment on the PR.** One issue comment, never a GitHub review
    approval. Use the template below. Do not fix the app. Do not push.
@@ -212,12 +224,14 @@ is exactly one of **PASS**, **FAIL**, **FLAKY**, **BLOCKED**. Never
 "approved" or "LGTM": the bot may say the change looks good; it may not
 say it is accepted.
 
-On a PASS, the whole comment is the nod:
+The counts are items, not repetitions: "walk 4/4" means four checklist
+items, each seen once; "replays 9/9" means three stories at three runs
+each. On a PASS, the whole comment is the nod:
 
 ```
 ## Bot walk — PR <n> @ <sha>
 
-**PASS** 3/3 · <preview url> · as <role>
+**PASS** · walk 4/4 · replays 9/9 · <preview url> · as <role>
 
 Walked: <checklist items, one line, in the PR's words>.
 Not walked: <items and why, one line; or "none">.
@@ -229,19 +243,27 @@ decide:
 ```
 ## Bot walk — PR <n> @ <sha>
 
-**FAIL** 0/3 · <preview url> · as <role>
+**FAIL** · walk 3/4, one item 0/3 · <preview url> · as <role>
 
 <Checklist item, verbatim>: expected <effect> on <screen>; saw
-`<quoted string or measured value>` on every run.
+`<quoted string or measured value>` on all three walks.
 
 Check: <one sentence, the screen and the step>.
 ```
 
 ```
-**FLAKY** 2/3 · …
+**FLAKY** · one item 2/3 · …
 
-<Checklist item>: showed on runs 1 and 3, missed on run 2 at <step>.
-Harness suspect; re-run before treating as a bug.
+<Checklist item>: missed on the first walk at <step>, showed on both
+retries. Harness suspect; a person should cold-walk it once before
+anyone calls it a bug.
+```
+
+```
+**FLAKY** · replays 8/9 · …
+
+<story slug>: run 2 failed at <step>; the claim walk passed 4/4.
+Replay suspect; see streaks.tsv before treating it as a bug.
 ```
 
 On a BLOCKED, one line: the hard stop and what unblocks it.

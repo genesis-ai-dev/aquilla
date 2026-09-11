@@ -25,8 +25,9 @@ network, a HOLD over an HTTP 500, a BLOCKED on a preview that had
 already deployed, and a walk posted after the PR had merged. Those rules
 now live in `PR-BOT.md` under "Say only what you measured". The same
 day Kieran cut the comment down: a pass is a two-line nod, a fail is the
-item, the quoted string, and one thing to check, and every item is
-walked three times so that 2/3 reads as a harness suspect, not a bug.
+item, the quoted string, and one thing to check. Each item is walked
+once, like a person would; a miss earns two retries, and the replays
+run three times, so a 2/3 reads as a harness suspect, not a bug.
 
 ## Where this sits in the pipeline
 

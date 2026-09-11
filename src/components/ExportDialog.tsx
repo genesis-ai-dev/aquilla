@@ -51,6 +51,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Input } from "@/components/ui/input"
 import { downloadBlob } from "@/lib/export/export-service"
 import { collectInlineStyleWarnings, type ExportFidelityWarning } from "@/lib/export/fidelity"
+import { chapterFilenameSuffix, filterCellsByChapter, listChapterLabels } from "@/lib/export/chapter-scope"
 import { downloadSourceFile, downloadProjectZip, fetchSourceSidecar } from "@/lib/sync/source-export"
 import { exportPlainTextStructured } from "@/lib/export/exporters/plaintext"
 import { exportMarkdownStructured } from "@/lib/export/exporters/markdown"
@@ -749,6 +750,20 @@ export function ExportDialog({
   const isProjectOnlyFormat = format === "sdbh-xml" || format === "project-report"
   const effectiveScope: ExportScope = isProjectOnlyFormat ? "project" : isFileOnlyFormat ? "file" : scope
 
+  /**
+   * AQU-465: the formats a chapter can be sliced out of.
+   *
+   * Exactly the formats built from the in-memory cell array (the `filteredCells`
+   * branch of handleExport). The round-trip formats are deliberately absent:
+   * USFM/DOCX/PPTX/IDML reinject translations into the ORIGINAL document —
+   * USFM server-side — so there is no cell array to filter, and handing back a
+   * one-chapter .docx would mean rebuilding the document rather than exporting
+   * it. Those stay whole-file.
+   */
+  const chapterScopeFormats = ["txt", "md", "tsv", "csv", "xlf", "tmx", "vtt", "srt", "plain-text-dump", "metadata-csv"] as const
+  const supportsChapterScope = (fmt: ExportFormat): boolean =>
+    (chapterScopeFormats as readonly string[]).includes(fmt)
+
   // SDBH XML export needs the original MARBLE edition as the skeleton.
   const [sdbhSkeleton, setSdbhSkeleton] = useState<File | null>(null)
   const hasSdbhFiles = projectFiles.some((f) => f.type === "sdbh")
@@ -865,8 +880,6 @@ export function ExportDialog({
     return cs.filter((c) => getCellVoice(c) === voiceFilter)
   }
 
-<<<<<<< Updated upstream
-=======
   // AQU-465: Chapter scope — the middle ground between "current file" and
   // "whole project". "" = every chapter, the same "no filter" contract the
   // voice filter uses.
@@ -906,7 +919,6 @@ export function ExportDialog({
     if (chapterFilter && !chapterLabels.includes(chapterFilter)) setChapterFilter("")
   }, [chapterFilter, chapterLabels])
 
->>>>>>> Stashed changes
   // Load cells for all project files when project scope is selected and the
   // format is a client-side one. Disabled until the user actually picks
   // project scope so we don't fan-out N fetches on dialog open.
@@ -1398,13 +1410,24 @@ export function ExportDialog({
         // the AUDIO character sheet was imported — so filtering here would
         // silently hand back an empty file on every project that imported only
         // the subtitle sheet.
-        const filteredCells = opts?.audioCues ? (audioCells ?? []) : applyVoiceFilter(cells)
+        //
+        // AQU-465: the chapter narrows the same array, after the voice. It is
+        // NOT applied to the cues (they are the sibling's rows, filtered above
+        // for the same reason the voice filter skips them) and not to the
+        // primary "Download <file>" action — that one means "give me my file
+        // back", whole, whatever chapter the fold happens to be showing.
+        const chapter = overrideFormat || opts?.audioCues ? "" : activeChapter
+        const filteredCells = opts?.audioCues
+          ? (audioCells ?? [])
+          : [...filterCellsByChapter(applyVoiceFilter(cells), chapter)]
         let blob: Blob
         // `_audio` rather than the sibling's own name (`<file> · audio cues`),
         // which carries a space and a middle dot and would need sanitising
         // into something unrecognisable anyway. This matches the audio zips'
         // suffixes, so all four of this file's audio deliverables sort together.
-        const baseName = buildExportStem(false) + (opts?.audioCues ? "_audio" : "")
+        const baseName = buildExportStem(false)
+          + chapterFilenameSuffix(chapter)
+          + (opts?.audioCues ? "_audio" : "")
         const ext = fmtOption.ext
         switch (fmt) {
           case "txt":
@@ -2083,8 +2106,6 @@ export function ExportDialog({
           )}
         </fieldset>
 
-<<<<<<< Updated upstream
-=======
         {/* AQU-465: Chapter scope — only shown when the file has chapters to
             choose between and the format can be sliced by one */}
         {canScopeToChapter && (
@@ -2124,7 +2145,6 @@ export function ExportDialog({
           </fieldset>
         )}
 
->>>>>>> Stashed changes
         {/* AQU-439: Voice filter — only shown when cells have cast assignments */}
         {distinctVoices.length > 0 && (
           <fieldset className="flex flex-col gap-1.5">

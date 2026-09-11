@@ -403,6 +403,18 @@ export interface ProjectRecord {
    * every terminology write, so this is an affordance value, not authority.
    */
   termbaseEditMinRole?: number | null
+  /**
+   * AQU-1002: the org's effective comment floors — the minimum role to open a
+   * thread (`commentCreateMinRole`) and to resolve/reopen a thread somebody
+   * else opened (`commentResolveMinRole`). Sent by the single-project endpoint
+   * so the comments drawer and Comments page can gate their controls honestly
+   * without an org-settings fetch of their own. Absent (older server /
+   * local-only project) ⇒ the defaults in `src/lib/sync/role-policy.ts`.
+   * sync-worker re-resolves both on every comment write, so these are
+   * affordance values, not authority.
+   */
+  commentCreateMinRole?: number | null
+  commentResolveMinRole?: number | null
   sourceLanguage: string
   targetLanguage: string
   /**

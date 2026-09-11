@@ -49,7 +49,9 @@ import { getFileChapters, getMyAssignments, getProjectAssignmentRoster } from ".
 import {
   bumpOrgActivity,
   canViewRoster,
+  DEFAULT_COMMENT_FLOORS,
   DEFAULT_TERMBASE_EDIT_MIN_ROLE,
+  getCommentFloors,
   getEffectiveOrgRole,
   getOrCreateUserOrg,
   getRosterViewMinRole,
@@ -625,11 +627,22 @@ projects.get("/:projectId", authMiddleware, async (c) => {
       ? await getTermbaseEditMinRole(c.env, row.org_id)
       : DEFAULT_TERMBASE_EDIT_MIN_ROLE
 
+  // AQU-1002: the org's comment floors ride along for the same reason — the
+  // comments drawer and Comments page gate their controls off the project
+  // record and have no org-settings read of their own. Advisory only:
+  // sync-worker re-resolves both floors on every comment write.
+  const commentFloors =
+    row.org_id != null
+      ? await getCommentFloors(c.env, row.org_id)
+      : DEFAULT_COMMENT_FLOORS
+
   return c.json({
     id: row.id,
     name: row.name,
     orgId: row.org_id,
     termbaseEditMinRole,
+    commentCreateMinRole: commentFloors.commentCreateMinRole,
+    commentResolveMinRole: commentFloors.commentResolveMinRole,
     archivedAt: row.archived_at,
     archivedBy: row.archived_by
       ? { id: row.archived_by, username: row.archived_by_username }

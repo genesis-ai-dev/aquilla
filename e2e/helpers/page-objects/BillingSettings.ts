@@ -28,6 +28,12 @@ export class BillingSettingsPage {
     await expect(this.page.getByTestId('billing-workspace')).toBeVisible()
   }
 
+  async expectFreeAllowanceAfterFailure() {
+    await expect(this.page.getByTestId('billing-access')).toContainText('Payment failed.')
+    await expect(this.page.getByTestId('billing-access')).toContainText('falls back to Free')
+    await expect(this.page.getByTestId('billing-access')).toContainText('This week’s usage still counts')
+  }
+
   async expectRecordedPlan(label: string) {
     await expect(this.page.getByTestId('billing-plan')).toHaveText(label)
     await expect(this.page.getByText('Billed annually.')).toBeVisible()

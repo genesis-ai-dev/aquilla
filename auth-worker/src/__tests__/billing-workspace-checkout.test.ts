@@ -232,7 +232,8 @@ async function completedPayment(offer = 'pro', interval = 'year') {
     .map(([key, value]) => [key.slice(9, -1), value]))
   const items = []
   for (let i = 0; params.has(`line_items[${i}][price]`); i++) {
-    items.push({ quantity: Number(params.get(`line_items[${i}][quantity]`)),
+    items.push({ current_period_start: Math.floor(Date.now() / 1000) - 60,
+      current_period_end: Math.floor(Date.now() / 1000) + 86400 * 30, quantity: Number(params.get(`line_items[${i}][quantity]`)),
       price: stripeCatalogResponse(`/v1/prices/${params.get(`line_items[${i}][price]`)}`) as StripePriceInput })
   }
   const total = items.reduce((sum, item) => sum + item.price.unit_amount! * item.quantity, 0)
@@ -242,9 +243,19 @@ async function completedPayment(offer = 'pro', interval = 'year') {
     currency: 'usd', amount_subtotal: total, amount_total: total }
   const subscription = { id: session.subscription, customer: session.customer,
     status: 'active', livemode: false, currency: 'usd', collection_method: 'charge_automatically',
+    cancel_at_period_end: false, latest_invoice: 'in_current',
     metadata: { ...metadata }, items: { has_more: false, data: items } }
+  const invoice = { id: 'in_current', customer: session.customer, livemode: false,
+    status: 'paid', paid: true, attempt_count: 1, amount_due: total,
+    amount_paid: total, amount_remaining: 0, currency: 'usd',
+    parent: { subscription_details: { subscription: subscription.id } },
+    lines: { has_more: false, data: items.map(item => ({
+      period: { start: item.current_period_start, end: item.current_period_end },
+      pricing: { price_details: { price: item.price.id } },
+    })) } }
   stripe.sessions.set(stripe.requests[0]!.key, session)
   vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+    if (new URL(url).pathname.startsWith('/v1/invoices/')) return Response.json(invoice)
     if (new URL(url).pathname.startsWith('/v1/subscriptions/')) return Response.json(subscription)
     return stripe.fetch(url, init)
   })
@@ -257,7 +268,7 @@ async function completedPayment(offer = 'pro', interval = 'year') {
     return app.request('http://127.0.0.1/api/v2/billing/webhook', { method: 'POST', body,
       headers: signed ? { 'stripe-signature': `t=${t},v1=${sig}` } : {} }, settings)
   }
-  return { stripe, session, subscription, event, send }
+  return { stripe, session, subscription, invoice, event, send }
 }
 async function expectNoPaymentGrant() {
   for (const table of ['org_billing', 'org_billing_events', 'workspace_plan_entitlements']) {
@@ -384,9 +395,9 @@ it('isolates lifecycle events when subscription metadata disappears', async () =
   payment.event.type = 'customer.subscription.updated'
   payment.event.data.object.id = payment.subscription.id
   payment.event.data.object.metadata = {}
-  expect((await payment.send()).status).toBe(503)
+  expect((await payment.send()).status).toBe(200)
   expect(await env.AQUILLA_PG.prepare('SELECT count(*)::int AS n FROM org_billing').first()).toEqual({ n: 0 })
-  expect(await env.AQUILLA_PG.prepare('SELECT count(*)::int AS n FROM org_billing_events').first()).toEqual({ n: 1 })
+  expect(await env.AQUILLA_PG.prepare('SELECT count(*)::int AS n FROM org_billing_events').first()).toEqual({ n: 2 })
 })
 it('waits for paid async success instead of anchoring usage to an earlier unpaid completion', async () => {
   const payment = await completedPayment()
@@ -531,4 +542,152 @@ it('never expires a completed checkout or permits another user to abandon it', a
   expect(await (await reconcileCheckout('alice', config(), 'expire')).json()).toEqual({ status: 'payment_pending' })
   expect(calls).toEqual([])
   expect((await payment.send()).status).toBe(200)
+})
+
+async function lifecycleWorkspace() {
+  const response = await app.request('/api/v2/orgs/1/billing/workspace', {
+    headers: authHeader(await jwtFor('alice')),
+  }, config())
+  expect(response.status).toBe(200)
+  return response.json() as Promise<import('../../../db/shared/billing-workspace').BillingWorkspace>
+}
+function lifecycleEvent(payment: Awaited<ReturnType<typeof completedPayment>>, type: string, id: string) {
+  payment.event.type = type
+  payment.event.id = id
+  Object.assign(payment.event.data.object, type.startsWith('invoice.')
+    ? structuredClone(payment.invoice) : structuredClone(payment.subscription))
+}
+it('falls back to Free on failure and restores paid access without resetting the usage week', async () => {
+  const p = await completedPayment('max_20x')
+  expect((await p.send()).status).toBe(200)
+  const initial = (await lifecycleWorkspace()).entitlement!
+  p.invoice.paid = false; p.invoice.status = 'open'; p.invoice.amount_remaining = p.invoice.amount_due
+  p.invoice.amount_paid = 0
+  // Stripe can remain active after some payment failures; invoice state matters.
+  lifecycleEvent(p, 'invoice.payment_failed', 'evt_failed')
+  expect((await p.send()).status).toBe(200)
+  expect((await lifecycleWorkspace()).entitlement).toMatchObject({
+    offer: 'max_20x', usagePeriodStart: initial.usagePeriodStart,
+    access: { offer: 'free', reason: 'payment_failed' },
+  })
+  p.invoice.paid = true; p.invoice.status = 'paid'; p.invoice.amount_remaining = 0
+  p.invoice.amount_paid = p.invoice.amount_due
+  lifecycleEvent(p, 'invoice.paid', 'evt_recovered')
+  expect((await p.send()).status).toBe(200)
+  expect((await lifecycleWorkspace()).entitlement).toMatchObject({
+    usagePeriodStart: initial.usagePeriodStart, access: { offer: 'max_20x', reason: 'paid' },
+  })
+  // A delayed failed event reads the paid invoice, rather than revoking recovered access.
+  lifecycleEvent(p, 'invoice.payment_failed', 'evt_old_failure')
+  expect((await p.send()).status).toBe(200)
+  expect((await lifecycleWorkspace()).entitlement!.access!.offer).toBe('max_20x')
+  expect(await (await p.send()).json()).toEqual({ ok: true, duplicate: true })
+})
+it('retains already-paid access when canceled, then falls back at the exact paid boundary', async () => {
+  const p = await completedPayment()
+  expect((await p.send()).status).toBe(200)
+  const initial = (await lifecycleWorkspace()).entitlement!
+  p.subscription.cancel_at_period_end = true
+  lifecycleEvent(p, 'customer.subscription.updated', 'evt_cancel_scheduled')
+  expect((await p.send()).status).toBe(200)
+  expect((await lifecycleWorkspace()).entitlement!.access).toMatchObject({ offer: 'pro', cancelAtPeriodEnd: true })
+  p.subscription.status = 'canceled'
+  p.subscription.items.data[0]!.current_period_end = Math.floor(Date.now() / 1000)
+  lifecycleEvent(p, 'customer.subscription.deleted', 'evt_canceled')
+  expect((await p.send()).status).toBe(200)
+  expect((await lifecycleWorkspace()).entitlement!.access!.paidThrough).toBe(initial.access!.paidThrough)
+  const { readBillingWorkspace } = await import('../lib/billing/workspace')
+  const ended = await readBillingWorkspace(env.AQUILLA_PG, 1, new Date(initial.access!.paidThrough))
+  expect(ended!.entitlement!.access).toMatchObject({ offer: 'free', reason: 'paid_period_ended' })
+  expect(await env.AQUILLA_PG.prepare('SELECT count(*)::int AS n FROM org_billing').first()).toEqual({ n: 0 })
+})
+it('extends a paid renewal without changing the weekly usage anchor', async () => {
+  const p = await completedPayment()
+  expect((await p.send()).status).toBe(200)
+  const initial = (await lifecycleWorkspace()).entitlement!
+  const item = p.subscription.items.data[0]!
+  item.current_period_start = item.current_period_end
+  item.current_period_end += 86400 * 30
+  p.invoice.lines.data[0]!.period.start = item.current_period_start
+  p.invoice.lines.data[0]!.period.end = item.current_period_end
+  lifecycleEvent(p, 'invoice.paid', 'evt_renewal')
+  const { reconcileWorkspaceLifecycle } = await import('../lib/billing/workspace-lifecycle')
+  await reconcileWorkspaceLifecycle(config(), p.event, p.event.data.object,
+    new Date(item.current_period_start * 1000 + 1000))
+  const next = (await lifecycleWorkspace()).entitlement!
+  expect(next.usagePeriodStart).toBe(initial.usagePeriodStart)
+  expect(Date.parse(next.access!.paidThrough)).toBe(Date.parse(initial.access!.paidThrough) + 86400000 * 30)
+})
+it.each(['account', 'customer', 'live', 'price', 'invoice_subscription', 'invoice_period'])(
+  'rejects unverified lifecycle %s without consuming its receipt', async field => {
+    const p = await completedPayment()
+    expect((await p.send()).status).toBe(200)
+    if (field === 'account') Object.assign(p.event, { account: 'acct_other' })
+    if (field === 'customer') p.subscription.customer = 'cus_other'
+    if (field === 'live') p.subscription.livemode = true
+    if (field === 'price') p.subscription.items.data[0]!.price.id = 'price_other'
+    if (field === 'invoice_subscription') p.invoice.parent.subscription_details.subscription = 'sub_other'
+    if (field === 'invoice_period') p.invoice.lines.data[0]!.period.end++
+    lifecycleEvent(p, 'invoice.paid', 'evt_invalid_lifecycle')
+    expect((await p.send()).status).toBe(500)
+    expect(await env.AQUILLA_PG.prepare("SELECT count(*)::int AS n FROM org_billing_events WHERE stripe_event_id = 'evt_invalid_lifecycle'").first()).toEqual({ n: 0 })
+  },
+)
+it('rolls back a lifecycle receipt on storage failure and permits retry', async () => {
+  const p = await completedPayment()
+  expect((await p.send()).status).toBe(200)
+  lifecycleEvent(p, 'customer.subscription.updated', 'evt_lifecycle_retry')
+  await env.AQUILLA_PG.exec(`CREATE FUNCTION reject_lifecycle_fn() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected state failure'; END $$`)
+  await env.AQUILLA_PG.exec('CREATE TRIGGER reject_lifecycle BEFORE UPDATE ON workspace_subscription_state FOR EACH ROW EXECUTE FUNCTION reject_lifecycle_fn()')
+  try {
+    expect((await p.send()).status).toBe(500)
+    expect(await env.AQUILLA_PG.prepare("SELECT count(*)::int AS n FROM org_billing_events WHERE stripe_event_id = 'evt_lifecycle_retry'").first()).toEqual({ n: 0 })
+  } finally {
+    await env.AQUILLA_PG.exec('DROP TRIGGER reject_lifecycle ON workspace_subscription_state')
+    await env.AQUILLA_PG.exec('DROP FUNCTION reject_lifecycle_fn()')
+  }
+  expect((await p.send()).status).toBe(200)
+})
+it('rejects a stale concurrent Stripe read and retries it against the recovered state', async () => {
+  const p = await completedPayment()
+  expect((await p.send()).status).toBe(200)
+  const originalFetch = globalThis.fetch
+  let arrived!: () => void
+  let resume!: () => void
+  const blocked = new Promise<void>(resolve => { arrived = resolve })
+  const released = new Promise<void>(resolve => { resume = resolve })
+  let first = true
+  vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+    if (first && new URL(url).pathname.startsWith('/v1/subscriptions/')) {
+      first = false
+      const stale = { ...structuredClone(p.subscription), status: 'past_due' }
+      arrived()
+      await released
+      return Response.json(stale)
+    }
+    return originalFetch(url, init)
+  })
+  lifecycleEvent(p, 'invoice.payment_failed', 'evt_concurrent_failure')
+  const oldRequest = p.send()
+  await blocked
+  lifecycleEvent(p, 'invoice.paid', 'evt_concurrent_recovery')
+  try { expect((await p.send()).status).toBe(200) } finally { resume() }
+  expect((await oldRequest).status).toBe(500)
+  expect((await lifecycleWorkspace()).entitlement!.access!.offer).toBe('pro')
+  expect(await env.AQUILLA_PG.prepare("SELECT count(*)::int AS n FROM org_billing_events WHERE stripe_event_id = 'evt_concurrent_failure'").first()).toEqual({ n: 0 })
+  lifecycleEvent(p, 'invoice.payment_failed', 'evt_concurrent_failure')
+  expect((await p.send()).status).toBe(200)
+  expect((await lifecycleWorkspace()).entitlement!.access!.offer).toBe('pro')
+})
+it('does not clear a failed cancellation using an invoice for a different paid period', async () => {
+  const p = await completedPayment()
+  expect((await p.send()).status).toBe(200)
+  p.subscription.status = 'past_due'
+  lifecycleEvent(p, 'customer.subscription.updated', 'evt_past_due')
+  expect((await p.send()).status).toBe(200)
+  p.subscription.status = 'canceled'
+  p.invoice.lines.data[0]!.period.end++
+  lifecycleEvent(p, 'customer.subscription.deleted', 'evt_wrong_canceled_invoice')
+  expect((await p.send()).status).toBe(500)
+  expect((await lifecycleWorkspace()).entitlement!.access!.reason).toBe('payment_failed')
 })

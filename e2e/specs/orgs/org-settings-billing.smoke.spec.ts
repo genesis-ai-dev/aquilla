@@ -1,4 +1,4 @@
-import { recordTestWorkspacePlan } from "../../helpers/billing"
+import { recordTestWorkspacePlan, recordTestWorkspaceFailure } from "../../helpers/billing"
 import { BillingSettingsPage } from "../../helpers/page-objects/BillingSettings"
 import { createOrg } from "../../helpers/frontier-api"
 import { ensureAuthState } from "../../helpers/auth"
@@ -54,4 +54,8 @@ test("recorded paid plan survives reload and stays with its workspace", async ({
   await expect(bob.getByTestId("billing-plan")).toHaveText("Free")
   await billing.openWorkspace(team.id)
   await billing.expectRecordedPlan("Team 20×")
+  await recordTestWorkspaceFailure(team.id)
+  await bob.reload()
+  await billing.expectFreeAllowanceAfterFailure()
+  await bob.screenshot({ path: testInfo.outputPath("failed-payment-billing.png"), fullPage: true })
 })

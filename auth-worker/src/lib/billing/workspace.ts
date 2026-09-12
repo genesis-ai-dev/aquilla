@@ -1,5 +1,6 @@
 import type { AquillaDb } from '../../../../db/shim/postgres'
 import type { BillingWorkspace, WorkspaceScope } from '../../../../db/shared/billing-workspace'
+import { resolveWorkspaceAccess } from '../../../../db/shared/workspace-access'
 import type { Offer } from './pricing-model'
 import { weeklyUsagePeriod } from './pricing-model'
 
@@ -71,12 +72,16 @@ export async function readBillingWorkspace(
     // Reviewer permissions remain a launch decision; do not silently classify guests.
     reason = 'personal_collaboration_review'
   }
+  const state = stored ? await readWorkspaceSubscriptionState(db, orgId) : null
   const period = stored ? weeklyUsagePeriod(stored.usage_anchor, now.toISOString()) : null
   return {
     orgId: org.id, name: org.name, scope: org.billing_scope,
     eligibility: { reason, offers: reason !== 'ready' ? [] : org.billing_scope === 'personal'
       ? ['pro', 'max_5x', 'max_20x'] : ['team', 'team_20x'] },
     entitlement: stored && period ? {
+      ...(state ? { access: resolveWorkspaceAccess({ offer: stored.offer,
+        paymentFailed: state.payment_failed, paidThrough: state.paid_through,
+        cancelAtPeriodEnd: state.cancel_at_period_end }, now) } : {}),
       offer: stored.offer, scope: stored.scope, billingInterval: stored.billing_interval,
       priceVersion: stored.price_version, entitlementVersion: stored.entitlement_version,
       usagePeriodStart: period.start, usagePeriodEnd: period.end,
@@ -93,4 +98,11 @@ export async function readProjectBillingWorkspace(
     .bind(projectId).first<{ org_id: number | null }>()
   if (!project?.org_id) return null
   return readBillingWorkspace(db, project.org_id, now)
+}
+
+export function readWorkspaceSubscriptionState(db: AquillaDb, orgId: number) {
+  return db.prepare(`SELECT revision, payment_failed, paid_through::text,
+    cancel_at_period_end FROM workspace_subscription_state WHERE org_id = ?`)
+    .bind(orgId).first<{ revision: number; payment_failed: boolean;
+      paid_through: string; cancel_at_period_end: boolean }>()
 }

@@ -65,3 +65,20 @@ it('upgrades checkout history to one unresolved attempt without losing rows', as
       .toEqual([{ id: 'original', resolution: 'expired' }, { id: 'next', resolution: null }])
   } finally { await db.close() }
 })
+
+it('adds lifecycle facts without inventing paid periods and preserves them on replay', async () => {
+  const db = new PGlite()
+  try {
+    await db.exec('CREATE TABLE workspace_plan_entitlements (org_id bigint PRIMARY KEY); INSERT INTO workspace_plan_entitlements VALUES (1)')
+    const migration = readFileSync(new URL('../../../db/postgres/migrations/0095_workspace_subscription_state.sql', import.meta.url), 'utf8')
+    await db.exec(migration)
+    expect((await db.query('SELECT * FROM workspace_subscription_state')).rows).toEqual([])
+    await db.exec(`INSERT INTO workspace_subscription_state
+      (org_id, payment_failed, paid_through, cancel_at_period_end)
+      VALUES (1, true, '2026-10-01T00:00:00Z', false)`)
+    await db.exec(migration)
+    expect((await db.query('SELECT org_id, revision, payment_failed FROM workspace_subscription_state')).rows)
+      .toEqual([{ org_id: 1, revision: 1, payment_failed: true }])
+    await expect(db.exec('UPDATE workspace_subscription_state SET revision = 0')).rejects.toThrow()
+  } finally { await db.close() }
+})

@@ -15,6 +15,7 @@ export async function recordInitialWorkspaceEntitlementInTransaction(
     subscriptionId: string
     customerId: string
     activatedAt: string
+    paidThrough?: string
   },
   now = new Date(),
 ) {
@@ -61,6 +62,14 @@ export async function recordInitialWorkspaceEntitlementInTransaction(
     .bind(input.orgId, quote.offer, quote.scope, quote.quantity,
       quote.entitlementVersion, quote.priceVersion, JSON.stringify(ids),
       input.subscriptionId, input.customerId, quote.interval, anchor.toISOString()).run()
+  if (input.paidThrough) {
+    const end = new Date(input.paidThrough)
+    if (!Number.isFinite(end.getTime()) || end <= anchor) throw new Error('Invalid paid period')
+    await tx.prepare(`INSERT INTO workspace_subscription_state
+      (org_id, payment_failed, paid_through, cancel_at_period_end)
+      VALUES (?, false, ?::timestamptz, false)`)
+      .bind(input.orgId, end.toISOString()).run()
+  }
   const saved = await readWorkspaceEntitlement(tx, input.orgId)
   if (!saved) throw new Error('Entitlement was not persisted')
   return saved

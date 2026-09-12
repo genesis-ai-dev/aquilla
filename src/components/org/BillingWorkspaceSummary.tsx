@@ -43,6 +43,17 @@ export function BillingWorkspaceDetails({ data }: { data: BillingWorkspace }) {
           description={data.scope === 'personal' ? 'Personal workspace' : data.scope === 'team' ? 'Team workspace — shared billing' : 'Workspace type needs confirmation'}
         />
         <p className="text-sm text-muted-foreground">{explanations[data.eligibility.reason]}</p>
+        {data.entitlement?.access ? (
+          <p className="text-sm text-muted-foreground" data-testid="billing-access" role="status">
+            {data.entitlement.access.reason === 'payment_failed'
+              ? 'Payment failed. Your AI allowance falls back to Free. This week’s usage still counts; if it exceeds Free’s allowance, AI pauses until the weekly reset or payment recovery.'
+              : data.entitlement.access.reason === 'paid_period_ended'
+                ? 'Your paid period has ended. Your AI allowance follows Free, with this week’s usage still counted.'
+                : data.entitlement.access.cancelAtPeriodEnd
+                  ? `Your subscription is canceled. Paid access continues through ${new Date(data.entitlement.access.paidThrough).toLocaleString()}.`
+                  : `Paid access is confirmed through ${new Date(data.entitlement.access.paidThrough).toLocaleString()}.`}
+          </p>
+        ) : null}
         <p className="text-sm text-muted-foreground">
           Work on this workspace’s projects uses this workspace’s allowance.
           A collaborator’s personal subscription does not add capacity here.

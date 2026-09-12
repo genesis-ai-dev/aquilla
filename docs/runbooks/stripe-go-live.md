@@ -556,10 +556,78 @@ E2E_SHARD=3/3 npx tsx scripts/e2e-up.ts -- \
 See [Stripe session states](https://docs.stripe.com/api/checkout/sessions/object)
 and [explicit session expiry](https://docs.stripe.com/api/checkout/sessions/expire).
 
-**Next dependency:** Ryder's answers on payment-failure grace, cancellation timing,
-and upgrade/downgrade timing were requested on 2026-09-11 and remain pending.
-No default was accepted on Ryder's behalf. These rules govern subscription
-lifecycle reconciliation and when paid AI access changes.
+### Subscription policy and lifecycle checkpoint (2026-09-11)
+
+Ryder approves immediate Free fallback after failed payment, retained access for
+already-paid time after cancellation, and immediate upgrades/downgrades. Plan
+changes preserve this week's consumption; upgrades raise the cap rather than
+refilling it. A lower cap can leave no remaining usage until the next weekly reset.
+
+- [x] Persist verified payment failure, paid-through, and cancellation facts in
+  migration `0095_workspace_subscription_state.sql` (prepared, not deployed).
+- [x] Reconcile signed local sandbox renewal, failure, recovery, subscription
+  update, and cancellation events against current Stripe subscription/invoice
+  reads. Match account, customer, subscription, price IDs, and paid periods.
+- [x] Commit lifecycle facts and webhook receipt atomically. Reject a concurrent
+  stale read by revision, roll back its receipt, and permit a fresh retry.
+- [x] Preserve the usage anchor through lifecycle events and preserve already-paid
+  time after cancellation. Free fallback applies at the exact paid-through boundary.
+- [x] Expose effective allowance state through the workspace API and billing page.
+  Subscription identity stays visible while the page explains Free fallback.
+- [x] Define remaining allowance as `max(0, current cap - this week's usage)`;
+  test failure fallback, recovery, upgrades, and over-cap downgrades.
+- [ ] Connect the effective allowance to timestamped usage accounting and AI
+  request enforcement. The calculation is tested; it does not yet gate AI calls.
+- [ ] Implement reviewed immediate plan mutations after the charge/credit policy
+  is confirmed. Changed Stripe price sets remain retryable rather than granting
+  an unreviewed plan. No financial defaults were approved.
+- [ ] Reconcile any older rehearsal entitlement without a verified paid-through
+  date. Migration 0095 never invents dates or classifies existing billing.
+
+Initial signed payment records the subscription's verified paid period. Renewals
+extend that period only from a paid invoice matching the current subscription
+items and their periods. Failed invoices can trigger Free fallback even when
+Stripe still reports an active subscription. Delayed notifications read current
+Stripe facts; they do not replay obsolete event payloads over recovered access.
+Canceled subscriptions retain the last proven paid-through date. Existing Field
+and covered-access records remain outside this new-plan path.
+
+The local rehearsal gate, signature requirement, and disabled production checkout
+remain in place. No live Stripe changes, new billing charges, deployment, or
+release smoke gate occurs in this checkpoint. External Stripe responses are mocked.
+
+Verification: 124 worker tests, 100 real-Postgres tests, 46 UI/supporting
+tests, and all three billing browser journeys pass. Worker TypeScript and the
+production build pass. Browser output contains no slow-request warnings.
+
+Verification commands:
+
+```sh
+pnpm --dir auth-worker exec vitest run \
+  src/__tests__/billing-workspace-checkout.test.ts \
+  src/__tests__/billing-workspace-migration.test.ts \
+  src/__tests__/billing-workspace.test.ts \
+  src/lib/billing/pricing-model.test.ts --maxWorkers=2
+pnpm --dir auth-worker exec vitest run \
+  --config vitest.webhook-postgres.config.ts
+npx vitest run src/pages/settings/OrgSettingsBilling.test.tsx \
+  src/components/org/BillingWorkspaceSummary.test.tsx \
+  scripts/e2e-impact.test.ts scripts/e2e-determinism.test.ts --maxWorkers=2
+pnpm --dir auth-worker exec tsc --noEmit
+npm run build
+E2E_SHARD=3/3 npx tsx scripts/e2e-up.ts -- \
+  e2e/specs/orgs/org-settings-billing.smoke.spec.ts --shard=1/1
+```
+
+Test contract: review/checkout → signed payment → lifecycle reconciliation →
+Postgres → workspace API. Browser tests additionally consume persisted failure
+facts through the API and show Free allowance with usage retained. Regression
+cases include duplicate and delayed delivery, concurrent stale reads, rollback,
+wrong account/customer/price/invoice, exact cancellation boundary, and renewal
+without a usage reset. RTL verifies all three access messages without ledger units.
+
+References: [Stripe subscription webhooks](https://docs.stripe.com/billing/subscriptions/webhooks)
+and [pending updates](https://docs.stripe.com/billing/subscriptions/pending-updates).
 
 ## Production launch checklist
 
@@ -683,14 +751,21 @@ this checklist does not approve proposed commercial behavior.
 
 - [ ] Maximum self-service 20× block quantity: **pending**.
   Keep quantity above one unavailable until approval and enforcement are complete.
-- [ ] Failed-payment rule: **pending**. Specify grace duration, access during
-  retries, recovery behavior, and the final unpaid state.
-- [ ] Upgrade rule: **pending**. Specify effective time, Stripe proration,
-  additional allowance, and payment requirements before granting capacity.
-- [ ] Downgrade rule: **pending**. Specify effective time, allowance treatment,
-  and handling when current usage or membership exceeds the lower plan.
-- [ ] Cancellation rule: **pending**. Specify period-end versus immediate
-  cancellation, refunds, remaining allowance, and the resulting workspace plan.
+- [x] Failed-payment access rule: **approved by Ryder, 2026-09-11**. Immediately
+  fall back to Free. Existing weekly usage counts against Free's cap; usage at or
+  above that cap leaves no remaining allowance. Confirmed recovery restores the
+  paid cap without resetting usage.
+- [x] Upgrade allowance rule: **approved by Ryder, 2026-09-11**. Immediate cap
+  increase, with already-used weekly allowance unchanged.
+- [x] Downgrade allowance rule: **approved by Ryder, 2026-09-11**. Immediate lower
+  cap, with usage retained; over-cap workspaces wait for reset or raise their cap.
+- [x] Cancellation access rule: **approved by Ryder, 2026-09-11**. Cancellation
+  does not remove already-paid access. At the paid period's end, use Free's cap
+  with the current week's usage retained.
+- [ ] Plan-change financial rule: confirm immediate upgrade charges and downgrade
+  credits/proration. Question requested after access rules were approved.
+- [ ] Define downgrade membership handling and any cancellation refund policy;
+  approval of access timing does not authorize refunds or membership removal.
 - [ ] Individual reviewer permissions: **pending**. Define allowed actions and
   confirm the proposed three active guest reviewers across the workspace.
 - [ ] Team collaborator limit: **pending**. Confirm whether 20 includes the owner

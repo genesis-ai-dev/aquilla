@@ -13,6 +13,12 @@ export function weeklyAllowance(offer: Offer, quantity = 1): number {
   return allowance
 }
 
+/** Plan changes replace the cap without forgiving this week's consumption. */
+export function remainingWeeklyAllowance(offer: Offer, used: number, quantity = 1) {
+  if (!Number.isFinite(used) || used < 0) throw new Error('Invalid weekly usage')
+  return Math.max(0, weeklyAllowance(offer, quantity) - used)
+}
+
 /** Full seven-day periods, anchored to activation; billing never resets usage. */
 export function weeklyUsagePeriod(anchorIso: string, nowIso: string) {
   const anchor = Date.parse(anchorIso)

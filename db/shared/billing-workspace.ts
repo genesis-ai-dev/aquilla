@@ -1,3 +1,4 @@
+import type { WorkspaceAccess } from './workspace-access'
 import type { BillingOffer } from './billing-offers'
 
 export type WorkspaceScope = 'personal' | 'team'
@@ -16,6 +17,7 @@ export interface BillingWorkspace {
   }
   entitlement: {
     offer: BillingOffer['offer']
+    access?: WorkspaceAccess
     scope: WorkspaceScope
     billingInterval: 'month' | 'year'
     priceVersion: string

@@ -7,6 +7,8 @@ import { quoteOffer } from './pricing-model'
 import { stripeForm } from './stripe'
 import { recordInitialWorkspaceEntitlementInTransaction } from './workspace-entitlements'
 
+import { paidPeriodItems, subscriptionPaidThrough } from './workspace-lifecycle'
+
 const selectionSchema = z.object({
   offer: z.enum(paidOffers), interval: z.enum(['month', 'year']), quantity: z.literal(1),
 })
@@ -26,6 +28,7 @@ const subscriptionSchema = z.object({
   metadata: z.record(z.string(), z.string()),
   items: z.object({ has_more: z.literal(false), data: z.array(z.object({
     quantity: z.literal(1), price: priceSchema,
+    current_period_start: z.number(), current_period_end: z.number(),
   })).min(1).max(2) }),
 })
 interface Attempt {
@@ -113,6 +116,7 @@ export async function reconcileWorkspacePayment(
       orgId: attempt.org_id, catalog, prices, ...selection,
       subscriptionId: subscription.id, customerId: session.customer,
       activatedAt: new Date(event.created * 1000).toISOString(),
+      paidThrough: subscriptionPaidThrough(paidPeriodItems.parse(subscription.items), now),
     }, now)
   })
 }

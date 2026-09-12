@@ -194,3 +194,20 @@ describe("OrgSettingsBilling", () => {
     expect(screen.queryByRole("button", { name: /Upgrade to Field/ })).toBeNull()
   })
 })
+
+it.each(['payment_failed', 'paid_period_ended', 'paid'] as const)(
+  'renders authoritative %s access without changing the subscription or showing ledger units', async reason => {
+    const workspace = paidWorkspace('pro')
+    workspace.entitlement!.access = { offer: reason === 'paid' ? 'pro' : 'free', reason,
+      paidThrough: '2026-10-01T00:00:00.000Z', cancelAtPeriodEnd: reason === 'paid' }
+    vi.mocked(getBillingWorkspace).mockResolvedValue(workspace)
+    renderBilling()
+    const access = await screen.findByTestId('billing-access')
+    expect(access).toHaveTextContent(reason === 'payment_failed' ? 'Payment failed.'
+      : reason === 'paid_period_ended' ? 'Your paid period has ended.' : 'Paid access continues through')
+    if (reason !== 'paid') expect(access).toHaveTextContent('Free')
+    expect(access).not.toHaveTextContent(/credits|25|50/)
+    expect(screen.getByTestId('billing-plan')).toHaveTextContent('Pro')
+    expect(mockGet).not.toHaveBeenCalled()
+  },
+)

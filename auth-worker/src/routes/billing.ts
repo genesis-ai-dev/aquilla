@@ -1,3 +1,4 @@
+import { reconcileWorkspaceLifecycle, workspaceLifecycleEvents } from '../lib/billing/workspace-lifecycle'
 // Org billing — Field Plan checkout, word add-ons, customer portal, Stripe webhook.
 //
 // Authenticated org routes require maintainer+ (600). The webhook is public
@@ -226,7 +227,7 @@ billing.post("/billing/webhook", async (c) => {
   const eventId = typeof event.id === "string" ? event.id : null
 
   const handled = ["checkout.session.completed", "checkout.session.async_payment_succeeded", "customer.subscription.updated",
-    "customer.subscription.deleted", "invoice.paid"].includes(type)
+    "customer.subscription.deleted", "invoice.paid", "invoice.payment_failed"].includes(type)
   if (handled && !eventId?.trim()) {
     return c.json({ error: "missing_event_id" }, 400)
   }
@@ -257,6 +258,12 @@ billing.post("/billing/webhook", async (c) => {
     if (markedWorkspace || storedWorkspace) {
       if (!secret || !workspaceCheckoutRehearsalEnabled(c.env, c.req.url)) {
         return c.json({ error: "workspace_activation_disabled" }, 503)
+      }
+      if (workspaceLifecycleEvents.includes(type)) {
+        const applied = await reconcileWorkspaceLifecycle(c.env, {
+          id: eventId!, type, created: event.created!, livemode: event.livemode!, account: event.account,
+        }, obj)
+        return c.json(applied ? { ok: true } : { ok: true, duplicate: true })
       }
       if (!["checkout.session.completed", "checkout.session.async_payment_succeeded"].includes(type)) {
         return c.json({ error: "workspace_lifecycle_not_ready" }, 503)

@@ -71,3 +71,19 @@ describe('new pricing contract', () => {
     ]) expect(() => resolveApprovedPrice([binding], { ...price, ...patch }, 1)).toThrow()
   })
 })
+
+it('retains spent usage through immediate upgrades, downgrades, and Free fallback', async () => {
+  const { remainingWeeklyAllowance } = await import('./pricing-model')
+  const { resolveWorkspaceAccess } = await import('../../../../db/shared/workspace-access')
+  const now = new Date('2026-09-12T12:00:00Z')
+  const paidThrough = '2026-10-01T12:00:00Z'
+  const access = resolveWorkspaceAccess({ offer: 'max_20x', paymentFailed: true,
+    paidThrough, cancelAtPeriodEnd: false }, now)
+  expect(remainingWeeklyAllowance(access.offer, 30)).toBe(0)
+  expect(remainingWeeklyAllowance(access.offer, 10)).toBe(15)
+  expect(remainingWeeklyAllowance('pro', 30)).toBe(20)
+  expect(remainingWeeklyAllowance('max_5x', 30)).toBe(220)
+  expect(remainingWeeklyAllowance('pro', 200)).toBe(0)
+  expect(() => remainingWeeklyAllowance('pro', -1)).toThrow()
+  expect(() => remainingWeeklyAllowance('pro', NaN)).toThrow()
+})

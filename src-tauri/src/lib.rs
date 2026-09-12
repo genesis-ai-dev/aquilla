@@ -1,10 +1,18 @@
+mod auth;
+mod connectivity;
 mod fs_bridge;
+mod keychain;
+mod llm_proxy;
 mod repo_root;
+
+use llm_proxy::LlmConfig;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -13,6 +21,23 @@ pub fn run() {
                         .build(),
                 )?;
             }
+
+            auth::setup_deep_link_handler(app)?;
+
+            connectivity::start_connectivity_loop(app.handle().clone());
+
+            let llm_config = LlmConfig::default();
+            let router = llm_proxy::build_router(llm_config.clone());
+            tokio::spawn(async move {
+                let listener = tokio::net::TcpListener::bind("127.0.0.1:49152")
+                    .await
+                    .expect("failed to bind axum server");
+                axum::serve(listener, router)
+                    .await
+                    .expect("axum server error");
+            });
+            app.manage(llm_config);
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -24,6 +49,14 @@ pub fn run() {
             fs_bridge::fs_readdir,
             fs_bridge::fs_stat,
             fs_bridge::fs_reset_repo,
+            keychain::get_token,
+            keychain::set_token,
+            keychain::clear_token,
+            keychain::get_refresh_token,
+            auth::open_auth_browser,
+            connectivity::get_connectivity,
+            llm_proxy::set_llm_config,
+            llm_proxy::get_llm_config,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

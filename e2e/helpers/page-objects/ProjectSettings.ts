@@ -103,4 +103,38 @@ export class ProjectSettings {
     await dialog.getByRole("tab", { name: /^Invite link$/i }).click()
     return dialog
   }
+
+  /**
+   * Open Settings as the route-modal over the project overview
+   * ("/projects/:id" → settings cog). The overview stays mounted underneath
+   * (App.tsx `backgroundLocation`) — the situation AQU-1103's live-flag
+   * contract is about: a device-local toggle flipped here must reach the
+   * overview without a reload.
+   */
+  async openFromOverview(): Promise<Locator> {
+    await this.page.getByTestId("overview-project-settings").click()
+    const dialog = this.page.getByTestId("project-settings-dialog")
+    await expect(dialog).toBeVisible({ timeout: 10_000 })
+    return dialog
+  }
+
+  /**
+   * Settings index → Experimental → "Show Autopilot controls" ON. Asserts the
+   * AQU-1103 default on the way: the device-local flag is OFF until someone
+   * opts in here. Same DOM on the full page and in the modal.
+   */
+  async enableAutopilotControls(): Promise<void> {
+    await this.page.getByRole("link", { name: /^Experimental\b/ }).click()
+    const flagSwitch = this.page.getByRole("switch", { name: "Show Autopilot controls" })
+    await expect(flagSwitch).toBeVisible({ timeout: 10_000 })
+    await expect(flagSwitch).not.toBeChecked()
+    await flagSwitch.click()
+    await expect(flagSwitch).toBeChecked()
+  }
+
+  /** Dismiss the settings modal; the background route comes back via history. */
+  async closeDialog(): Promise<void> {
+    await this.page.keyboard.press("Escape")
+    await expect(this.page.getByTestId("project-settings-dialog")).toBeHidden({ timeout: 10_000 })
+  }
 }

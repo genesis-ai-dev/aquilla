@@ -45,19 +45,32 @@ type PageSize = "default" | "wide" | "full"
  */
 function Page({
   size = "default",
+  fill = false,
   className,
   children,
   ...props
 }: {
   size?: PageSize
+  /**
+   * Pin the page well to the AppShell card and let a `fillHeight` DataTable
+   * (or other flex-1 child) own remaining height — used by directory lists.
+   */
+  fill?: boolean
   className?: string
   children: React.ReactNode
 } & Omit<React.ComponentProps<"div">, "children" | "className">) {
   return (
-    <div className="h-full overflow-y-auto px-6 scrollbar-gutter-stable" {...props}>
+    <div
+      className={cn(
+        "h-full px-6 scrollbar-gutter-stable",
+        fill ? "flex min-h-0 flex-col overflow-hidden" : "overflow-y-auto",
+      )}
+      {...props}
+    >
       <div
         className={cn(
-          "mx-auto w-full py-18",
+          "mx-auto w-full",
+          fill ? "flex min-h-0 flex-1 flex-col py-18" : "py-18",
           size === "default" && "max-w-2xl",
           size === "wide" && "max-w-6xl",
           size === "full" && "max-w-none",

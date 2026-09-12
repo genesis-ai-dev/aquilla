@@ -4,6 +4,34 @@ Bigger opportunities spotted during `/code-health` runs that exceeded that run's
 (one theme, ≤300 lines, ≤8 files). Not done yet — pick one up in a future run. Prune entries
 a later run completes.
 
+## `src/components/ExportDialog.tsx` — `fmt === "..."` export-format ladder, ~930-1330+
+
+- **Found**: 2026-09-09 run, surveying complexity-reduction candidates (this run shipped the
+  smaller `dominantScript()` lookup-table conversion in `src/lib/timeline/cue-links.ts`
+  instead — see git history).
+- **Friction**: 9 branches keyed on export format (`usfm`, `docx`, `pptx`, `idml`,
+  `audio-by-character`, `audio-by-line`, `character-sheets`, `project-report`, `sdbh-xml`)
+  look like the same if/else-ladder-to-lookup-table smell, but each branch is 30-100+ lines
+  of async, side-effecting work (dynamic `import()`, toast lifecycle via `exportToastRef`,
+  shared mutable locals like `idmlTelemetryStartedAt`/`recoverableIdmlOriginal`, early
+  `return`s that abort the whole handler, PostHog telemetry).
+- **Why deferred**: a lookup-table dispatch would need each branch extracted into a
+  same-signature async handler capturing a dozen closure variables — a real refactor, not a
+  mechanical one. Spans 400+ lines (blows the ≤300-line budget on its own), no dedicated
+  unit test found for this component, and the risk of subtly changing early-return/toast-state
+  behavior is high for a routine that can't touch tests to pin the new behavior.
+- **Proof needed**: would need either a new characterization test (out of scope for this
+  routine) or a human-supervised manual QA pass per export format before/after, given no
+  existing test coverage to lean on.
+
+## `auth-worker/src/lib/contextual/tick.ts` — nested ternaries in `spanReasonCodes`/`eventOutcome`
+
+- **Found**: 2026-09-09 run, same survey as above.
+- **Friction**: deep nested-ternary logic, mechanically improvable to guard clauses.
+- **Why deferred**: this is the durable contextual-run engine with dense cross-function
+  invariants — too much blast radius for a routine cleanup pass without a human familiar
+  with the invariants reviewing the rewrite.
+
 ## `src/components/org/ArchivedProjects.test.tsx` — flaky in the full `pnpm test` run
 
 Spotted in the 2026-08-28 run's baseline (unrelated to that run's `milestones.ts` change —

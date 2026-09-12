@@ -559,9 +559,13 @@ and [explicit session expiry](https://docs.stripe.com/api/checkout/sessions/expi
 ### Subscription policy and lifecycle checkpoint (2026-09-11)
 
 Ryder approves immediate Free fallback after failed payment, retained access for
-already-paid time after cancellation, and immediate upgrades/downgrades. Plan
-changes preserve this week's consumption; upgrades raise the cap rather than
-refilling it. A lower cap can leave no remaining usage until the next weekly reset.
+already-paid time after cancellation, and immediate upgrades. On 2026-09-12,
+Ryder supersedes the earlier immediate-downgrade decision: downgrades take effect
+at the next billing cycle. Upgrades charge the prorated difference immediately.
+Plan changes preserve this week's consumption; upgrades raise the cap rather than
+refilling it. The existing plan and cap remain in force until a scheduled downgrade
+takes effect. At that point, usage above the lower cap leaves no remaining allowance
+until the next weekly reset.
 
 - [x] Persist verified payment failure, paid-through, and cancellation facts in
   migration `0095_workspace_subscription_state.sql` (prepared, not deployed).
@@ -578,9 +582,11 @@ refilling it. A lower cap can leave no remaining usage until the next weekly res
   test failure fallback, recovery, upgrades, and over-cap downgrades.
 - [ ] Connect the effective allowance to timestamped usage accounting and AI
   request enforcement. The calculation is tested; it does not yet gate AI calls.
-- [ ] Implement reviewed immediate plan mutations after the charge/credit policy
-  is confirmed. Changed Stripe price sets remain retryable rather than granting
-  an unreviewed plan. No financial defaults were approved.
+- [ ] Implement reviewed immediate upgrades with an immediate prorated charge,
+  and schedule downgrades for the next billing cycle. Grant an upgrade after its
+  payment succeeds; retain current weekly usage. Keep the current plan and cap
+  until the scheduled downgrade takes effect. Changed Stripe price sets remain
+  retryable until this implementation is verified.
 - [ ] Reconcile any older rehearsal entitlement without a verified paid-through
   date. Migration 0095 never invents dates or classifies existing billing.
 
@@ -757,13 +763,19 @@ this checklist does not approve proposed commercial behavior.
   paid cap without resetting usage.
 - [x] Upgrade allowance rule: **approved by Ryder, 2026-09-11**. Immediate cap
   increase, with already-used weekly allowance unchanged.
-- [x] Downgrade allowance rule: **approved by Ryder, 2026-09-11**. Immediate lower
-  cap, with usage retained; over-cap workspaces wait for reset or raise their cap.
+- [x] Downgrade timing and allowance rule: **revised by Ryder, 2026-09-12**.
+  Take effect at the next billing cycle. Keep the current plan and cap until then.
+  Preserve weekly consumption when the lower cap takes effect; do not reset the
+  usage week at the billing boundary. This supersedes the 2026-09-11 immediate
+  downgrade rule.
 - [x] Cancellation access rule: **approved by Ryder, 2026-09-11**. Cancellation
   does not remove already-paid access. At the paid period's end, use Free's cap
   with the current week's usage retained.
-- [ ] Plan-change financial rule: confirm immediate upgrade charges and downgrade
-  credits/proration. Question requested after access rules were approved.
+- [x] Upgrade financial rule: **approved by Ryder, 2026-09-12**. Charge the
+  prorated upgrade difference immediately. The increased cap preserves usage.
+- [x] Downgrade billing rule: **approved by Ryder, 2026-09-12**. Apply the lower
+  plan at the next billing cycle, with the current paid period retained. No
+  immediate downgrade or unused-time credit is required by this flow.
 - [ ] Define downgrade membership handling and any cancellation refund policy;
   approval of access timing does not authorize refunds or membership removal.
 - [ ] Individual reviewer permissions: **pending**. Define allowed actions and

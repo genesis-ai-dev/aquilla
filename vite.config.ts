@@ -108,7 +108,10 @@ export default defineConfig(({ mode }) => ({
   ],
   // Audio workers must not inherit Node shims. phonemizer is rewritten onto
   // the browser unpack path in this worker plugin (and the root plugin above).
+  // format: "es" is required by LiveStore's web adapter (its worker/shared-worker
+  // entries are ES modules, imported via the `?worker`/`?sharedworker` suffixes).
   worker: {
+    format: "es",
     plugins: () => [phonemizerBrowserUnpackPlugin()],
   },
   resolve: {

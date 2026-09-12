@@ -276,7 +276,7 @@ it.each(manifest.bindings.map(b => [b.offer, b.interval] as const))(
     const anchor = new Date(payment.event.created * 1000).toISOString()
     expect(await response.json()).toMatchObject({ orgId: 1,
       eligibility: { reason: 'already_subscribed', offers: [] },
-      entitlement: { offer, priceVersion: manifest.version, usagePeriodStart: anchor,
+      entitlement: { offer, billingInterval: interval, priceVersion: manifest.version, usagePeriodStart: anchor,
         usagePeriodEnd: new Date(payment.event.created * 1000 + 7 * 86400000).toISOString() },
       checkoutEnabled: false, usagePercent: null })
     expect((await getWorkspace(1, 'bob')).status).toBe(403)

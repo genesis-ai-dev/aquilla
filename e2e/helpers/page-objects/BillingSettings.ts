@@ -28,6 +28,15 @@ export class BillingSettingsPage {
     await expect(this.page.getByTestId('billing-workspace')).toBeVisible()
   }
 
+  async expectRecordedPlan(label: string) {
+    await expect(this.page.getByTestId('billing-plan')).toHaveText(label)
+    await expect(this.page.getByText('Billed annually.')).toBeVisible()
+    await expect(this.page.getByText('Your workspace’s plan, billing, and AI usage.')).toBeVisible()
+    await expect(this.page.getByTestId('billing-usage')).toContainText('every seven days from your plan’s activation')
+    await expect(this.page.getByTestId('billing-usage')).not.toContainText('rolling seven-day')
+    await expect(this.page.getByTestId('manage-billing')).toHaveCount(0)
+  }
+
   async expectWorkspaceScope(scope: 'personal' | 'team' | 'unconfirmed') {
     const label = scope === 'personal' ? 'Personal workspace'
       : scope === 'team' ? 'Team workspace — shared billing'

@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
-import { MemoryRouter, Route, Routes } from "react-router-dom"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { Link, MemoryRouter, Route, Routes } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { OrgSettingsBilling } from "./OrgSettingsBilling"
 import { getOrgBilling, getBillingOffers } from "@/lib/sync/billing"
+import { getBillingWorkspace, type BillingWorkspace } from "@/lib/sync/billing-workspace"
+import { billingOfferLabels } from "../../../db/shared/billing-offers"
 import type { OrgBilling } from "@/lib/sync/billing"
 
 vi.mock("@/pages/settings/OrgSettingsShell", () => ({
@@ -14,7 +16,7 @@ vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "jwt", username: "wendi", createdAt: "x" }, loading: false }),
 }))
 vi.mock("@/lib/frontier/orgs", () => ({
-  listMyOrgs: vi.fn(async () => [{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }]),
+  listMyOrgs: vi.fn(async () => [{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }, { id: 2, name: "Other workspace", role: { level: 700, name: "owner" } }]),
   renameOrg: vi.fn(async () => {}),
 }))
 vi.mock("@/lib/sync/billing", () => ({
@@ -29,12 +31,20 @@ vi.mock("@/lib/sync/cloud-projects", () => ({
 }))
 
 vi.mock("@/lib/sync/billing-workspace", () => ({
-  getBillingWorkspace: vi.fn(async () => ({ orgId: 1, name: "Come and See", scope: null,
-    eligibility: { reason: "scope_unconfirmed", offers: [] }, entitlement: null,
-    usagePercent: null, checkoutEnabled: false })),
+  getBillingWorkspace: vi.fn(),
 }))
 
 const mockGet = vi.mocked(getOrgBilling)
+const emptyWorkspace: BillingWorkspace = { orgId: 1, name: "Come and See", scope: null,
+  eligibility: { reason: "scope_unconfirmed", offers: [] }, entitlement: null,
+  usagePercent: null, checkoutEnabled: false }
+function paidWorkspace(offer: keyof typeof billingOfferLabels, orgId = 1): BillingWorkspace {
+  return { ...emptyWorkspace, orgId, scope: offer.startsWith('team') ? 'team' : 'personal',
+    eligibility: { reason: 'already_subscribed', offers: [] },
+    entitlement: { offer, scope: offer.startsWith('team') ? 'team' : 'personal', billingInterval: 'year',
+      priceVersion: 'baseline', entitlementVersion: '2026-09-weekly',
+      usagePeriodStart: '2026-09-11T12:00:00.000Z', usagePeriodEnd: '2026-09-18T12:00:00.000Z' } }
+}
 
 const unpaid: OrgBilling = {
   plan: "explore",
@@ -77,6 +87,9 @@ const unpaid: OrgBilling = {
 
 beforeEach(() => {
   localStorage.clear()
+  mockGet.mockReset()
+  vi.mocked(getBillingWorkspace).mockReset()
+  vi.mocked(getBillingWorkspace).mockResolvedValue(emptyWorkspace)
   vi.mocked(getBillingOffers).mockResolvedValue({ available: false, priceVersion: null,
     entitlementVersion: null, usageInterval: "week", checkoutEnabled: false, offers: [] })
 })
@@ -86,6 +99,7 @@ function renderBilling() {
   return render(
     <MemoryRouter initialEntries={["/orgs/1/settings/billing"]}>
       <OrgProvider>
+        <Link to="/orgs/2/settings/billing">Switch workspace</Link>
         <Routes>
           <Route path="/orgs/:orgId/settings/billing" element={<OrgSettingsBilling />} />
         </Routes>
@@ -95,6 +109,42 @@ function renderBilling() {
 }
 
 describe("OrgSettingsBilling", () => {
+  it.each(Object.entries(billingOfferLabels))('shows the recorded %s plan without legacy usage or prices', async (offer, label) => {
+    vi.mocked(getBillingWorkspace).mockResolvedValue(paidWorkspace(offer as keyof typeof billingOfferLabels))
+    renderBilling()
+    expect(await screen.findByTestId('billing-plan')).toHaveTextContent(label)
+    expect(screen.getByText('Billed annually.')).toBeVisible()
+    expect(screen.getByText('Your workspace’s plan, billing, and AI usage.')).toBeVisible()
+    expect(document.body.textContent).not.toMatch(/agent credits|Explore \/ Field/)
+    expect(screen.getByTestId('billing-usage')).toHaveTextContent('every seven days from your plan’s activation')
+    expect(screen.getByTestId('billing-usage')).not.toHaveTextContent('rolling seven-day')
+    expect(screen.queryByTestId('manage-billing')).toBeNull()
+    expect(mockGet).not.toHaveBeenCalled()
+    expect(getBillingWorkspace).toHaveBeenCalledTimes(1)
+  })
+  it('shows an unavailable state instead of claiming Free or insufficient permissions', async () => {
+    vi.mocked(getBillingWorkspace).mockRejectedValueOnce(new Error('offline'))
+    renderBilling()
+    expect(await screen.findByRole('alert')).toHaveTextContent('Billing details are unavailable')
+    expect(screen.queryByTestId('billing-plan')).toBeNull()
+    expect(mockGet).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry billing' }))
+    mockGet.mockResolvedValue(unpaid)
+    expect(await screen.findByTestId('billing-plan')).toHaveTextContent('Free')
+  })
+  it('discards an older workspace response after navigation', async () => {
+    let resolve!: (workspace: BillingWorkspace) => void
+    vi.mocked(getBillingWorkspace).mockImplementationOnce(() => new Promise(r => { resolve = r }))
+      .mockResolvedValueOnce(paidWorkspace('team_20x', 2))
+    renderBilling()
+    await waitFor(() => expect(getBillingWorkspace).toHaveBeenCalledTimes(1))
+    fireEvent.click(screen.getByRole('link', { name: 'Switch workspace' }))
+    expect(await screen.findByTestId('billing-plan')).toHaveTextContent('Team 20×')
+    await act(async () => { resolve(paidWorkspace('pro')) })
+    expect(screen.getByTestId('billing-plan')).toHaveTextContent('Team 20×')
+    expect(mockGet).not.toHaveBeenCalled()
+  })
+
   it("shows the current Free plan and safe new-plan comparison", async () => {
     mockGet.mockResolvedValueOnce(unpaid)
     renderBilling()

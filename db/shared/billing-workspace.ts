@@ -17,6 +17,7 @@ export interface BillingWorkspace {
   entitlement: {
     offer: BillingOffer['offer']
     scope: WorkspaceScope
+    billingInterval: 'month' | 'year'
     priceVersion: string
     entitlementVersion: string
     usagePeriodStart: string

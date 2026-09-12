@@ -24,11 +24,20 @@ export function BillingWorkspaceSummary({ jwt, orgId }: { jwt: string; orgId: nu
     return () => { canceled = true }
   }, [jwt, orgId])
   const data = result?.jwt === jwt && result.data.orgId === orgId ? result.data : null
+  return data ? <BillingWorkspaceDetails data={data} /> : (
+    <SettingsGroup label="Workspace billing">
+      <p className="text-sm text-muted-foreground" role="status">
+        {failed ? 'Workspace billing details are unavailable. Your current access stays unchanged.' : 'Loading workspace billing…'}
+      </p>
+    </SettingsGroup>
+  )
+}
+
+/** Shares the page's authoritative response instead of fetching a second snapshot. */
+export function BillingWorkspaceDetails({ data }: { data: BillingWorkspace }) {
   return (
     <SettingsGroup label="Workspace billing">
-      {!data ? <p className="text-sm text-muted-foreground" role="status">
-        {failed ? 'Workspace billing details are unavailable. Your current access stays unchanged.' : 'Loading workspace billing…'}
-      </p> : <div className="flex flex-col gap-4" data-testid="billing-workspace">
+      <div className="flex flex-col gap-4" data-testid="billing-workspace">
         <SettingsRow
           label={data.name ?? 'Current workspace'}
           description={data.scope === 'personal' ? 'Personal workspace' : data.scope === 'team' ? 'Team workspace — shared billing' : 'Workspace type needs confirmation'}
@@ -42,7 +51,7 @@ export function BillingWorkspaceSummary({ jwt, orgId }: { jwt: string; orgId: nu
           Usage period ends {new Date(data.entitlement.usagePeriodEnd).toLocaleString()}.
           Usage measurement is not available yet.
         </p> : null}
-      </div>}
+      </div>
     </SettingsGroup>
   )
 }

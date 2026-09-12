@@ -1,3 +1,4 @@
+import { recordTestWorkspacePlan } from "../../helpers/billing"
 import { BillingSettingsPage } from "../../helpers/page-objects/BillingSettings"
 import { createOrg } from "../../helpers/frontier-api"
 import { ensureAuthState } from "../../helpers/auth"
@@ -35,4 +36,22 @@ test("new workspace scope survives billing navigation and reload", async ({ bob 
   await billing.expectWorkspaceScope("personal")
   await billing.reviewSelectedPlan({ offer: "pro", interval: "year", quantity: 1 }, "Billing team")
   await billing.expectIncompatibleWorkspace()
+})
+
+
+test("recorded paid plan survives reload and stays with its workspace", async ({ bob }, testInfo) => {
+  const session = await ensureAuthState("bob")
+  const team = await createOrg(session.jwt, "Paid billing team")
+  await recordTestWorkspacePlan(team.id)
+  const billing = new BillingSettingsPage(bob)
+  await billing.openWorkspace(team.id)
+  await billing.expectRecordedPlan("Team 20×")
+  await bob.reload()
+  await billing.expectRecordedPlan("Team 20×")
+  await bob.screenshot({ path: testInfo.outputPath("paid-workspace-billing.png"), fullPage: true })
+  await billing.openWorkspace(bob.orgId)
+  await billing.expectWorkspaceScope("personal")
+  await expect(bob.getByTestId("billing-plan")).toHaveText("Free")
+  await billing.openWorkspace(team.id)
+  await billing.expectRecordedPlan("Team 20×")
 })

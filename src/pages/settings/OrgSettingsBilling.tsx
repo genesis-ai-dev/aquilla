@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { ExternalLink } from "lucide-react"
-import { BillingWorkspaceSummary } from "@/components/org/BillingWorkspaceSummary"
+import { BillingWorkspaceDetails } from "@/components/org/BillingWorkspaceSummary"
+import { getBillingWorkspace, type BillingWorkspace } from "@/lib/sync/billing-workspace"
+import { billingOfferLabels } from "../../../db/shared/billing-offers"
 import { BillingOffers } from "@/components/org/BillingOffers"
 import { Badge } from "@/components/ui/badge"
 import { Button, buttonVariants } from "@/components/ui/button"
@@ -37,8 +39,16 @@ export function OrgSettingsBilling() {
   const jwt = session?.jwt ?? null
   const canManage = (activeOrg?.role?.level ?? 0) >= ROLE.MAINTAINER
 
-  const [data, setData] = useState<OrgBilling | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [result, setResult] = useState<{
+    jwt: string; orgId: number; workspace: BillingWorkspace; legacy: OrgBilling | null
+  } | null>(null)
+  const [reload, setReload] = useState(0)
+  const request = useRef(0)
+  const current = result?.jwt === jwt && result.orgId === activeOrgId ? result : null
+  const data = current?.legacy ?? null
+  const workspace = current?.workspace ?? null
+  const paid = workspace?.entitlement ?? null
+  const [pending, setPending] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState<"portal" | null>(null)
 
@@ -47,39 +57,43 @@ export function OrgSettingsBilling() {
 
   useEffect(() => {
     const checkout = searchParams.get("checkout")
-    if (checkout !== "success" && checkout !== "cancel") return
-    setNotice(checkout === "success" ? "Checkout completed. Your plan updates after payment is confirmed." : "Checkout canceled.")
+    if (!["success", "cancel", "rehearsal"].includes(checkout ?? "")) return
+    setNotice(checkout === "rehearsal" ? "Test checkout returned. Refresh billing to check payment confirmation." : checkout === "success" ? "Checkout completed. Your plan updates after payment is confirmed." : "Checkout canceled.")
     const next = new URLSearchParams(searchParams)
     next.delete("checkout")
     setSearchParams(next, { replace: true })
   }, [searchParams, setSearchParams])
 
-  const load = useCallback(async () => {
-    if (!jwt || activeOrgId == null) return
-    setLoading(true)
-    setError(null)
-    try {
-      setData(await getOrgBilling(jwt, activeOrgId))
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't load billing.")
-      setData(null)
-    } finally {
-      setLoading(false)
-    }
-  }, [jwt, activeOrgId])
-
   useEffect(() => {
-    void load()
-  }, [load])
+    const generation = ++request.current
+    setResult(null)
+    setError(null)
+    setBusy(null)
+    setPending(true)
+    if (!jwt || activeOrgId == null || !canManage) return
+    void (async () => {
+      const workspace = await getBillingWorkspace(jwt, activeOrgId)
+      const legacy = workspace.entitlement ? null : await getOrgBilling(jwt, activeOrgId)
+      if (!workspace.entitlement && !legacy) throw new Error("Billing details are unavailable.")
+      if (request.current === generation) setResult({ jwt, orgId: activeOrgId, workspace, legacy })
+    })().catch(() => {
+      if (request.current === generation) setError("Billing details are unavailable. Try again; your access stays unchanged.")
+    }).finally(() => {
+      if (request.current === generation) setPending(false)
+    })
+    return () => { request.current++ }
+  }, [jwt, activeOrgId, canManage, reload])
 
   async function go(kind: "portal") {
     if (!jwt || activeOrgId == null) return
+    const generation = request.current
     setBusy(kind)
     setError(null)
     try {
       const url = await startBillingPortal(jwt, activeOrgId)
-      window.location.assign(url)
+      if (request.current === generation) window.location.assign(url)
     } catch (err) {
+      if (request.current !== generation) return
       setError(err instanceof Error ? err.message : "Couldn't start Stripe.")
       setBusy(null)
     }
@@ -97,32 +111,33 @@ export function OrgSettingsBilling() {
         </p>
       ) : null}
 
-      {loading ? (
-        <div className="flex items-center gap-2 text-muted-foreground">
+      {!canManage ? (
+        <p className="text-sm text-muted-foreground">{t("billing.maintainersOnly")}</p>
+      ) : pending || (!current && !error) ? (
+        <div className="flex items-center gap-2 text-muted-foreground" role="status">
           <Spinner className="size-3.5" />
           <span className="text-sm">{t("billing.loading")}</span>
         </div>
-      ) : !canManage || data == null ? (
-        <p className="text-sm text-muted-foreground">
-          {t("billing.maintainersOnly")}
-        </p>
+      ) : !workspace ? (
+        <Button variant="outline" onClick={() => setReload(value => value + 1)}>Retry billing</Button>
       ) : (
         <div className="flex flex-col gap-10">
           <SettingsGroup label={t("billing.plan.group")}>
             <SettingsRow
               label={t("billing.plan.current")}
               description={
-                data.plan === "enterprise"
+                paid ? (paid.billingInterval === "year" ? "Billed annually." : "Billed monthly.")
+                  : data?.plan === "enterprise"
                   ? "Custom annual quote for support and platform usage."
                   : "Your organization’s plan covers its projects and collaborators."
               }
               control={
-                <Badge variant={normalizeBillingPlan(data.plan) === "explore" ? "outline" : "default"} data-testid="billing-plan">
-                  {planLabel(data.plan)}
+                <Badge variant={!paid && normalizeBillingPlan(data?.plan ?? "none") === "explore" ? "outline" : "default"} data-testid="billing-plan">
+                  {paid ? billingOfferLabels[paid.offer] : planLabel(data!.plan)}
                 </Badge>
               }
             />
-            {data.canManage ? (
+            {!paid && data?.canManage ? (
               <SettingsRow
                 label={t("billing.plan.manage")}
                 description={t("billing.plan.manageHelp")}
@@ -141,7 +156,8 @@ export function OrgSettingsBilling() {
             ) : null}
           </SettingsGroup>
 
-          {jwt && activeOrgId != null ? <BillingWorkspaceSummary key={`workspace-${activeOrgId}`} jwt={jwt} orgId={activeOrgId} /> : null}
+          <Button variant="outline" onClick={() => setReload(value => value + 1)}>Refresh billing</Button>
+          <BillingWorkspaceDetails data={workspace} />
           {jwt && activeOrgId != null ? <BillingOffers key={activeOrgId} jwt={jwt} orgId={activeOrgId} /> : null}
           <SettingsGroup label="Plans and covered access">
             <SettingsRow
@@ -165,7 +181,10 @@ export function OrgSettingsBilling() {
           <SettingsGroup label="AI usage">
             <div data-testid="billing-usage" className="flex flex-col gap-3 text-sm text-muted-foreground">
               <p>Collaborators share your organization’s AI allowance across its projects.</p>
-              <p>Weekly limits use a rolling seven-day window. Capacity returns as older usage leaves the window. Daily limits may also apply.</p>
+              {paid ? <>
+                <p>AI capacity resets every seven days from your plan’s activation, with no rollover. Monthly or annual billing does not change this schedule.</p>
+                <p>Usage measurement is not available yet.</p>
+              </> : <p>Weekly limits use a rolling seven-day window. Capacity returns as older usage leaves the window. Daily limits may also apply.</p>}
               <p>Usage limits may pause affected AI requests until capacity is available again. Your projects remain available for manual editing and review.</p>
               <p>Self-service allowance purchases are not available. Contact us if your organization needs more capacity.</p>
               <a href="mailto:support@aquilla.app?subject=Organization%20AI%20capacity" className="underline">Discuss AI capacity</a>

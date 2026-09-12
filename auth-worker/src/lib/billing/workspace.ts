@@ -77,7 +77,7 @@ export async function readBillingWorkspace(
     eligibility: { reason, offers: reason !== 'ready' ? [] : org.billing_scope === 'personal'
       ? ['pro', 'max_5x', 'max_20x'] : ['team', 'team_20x'] },
     entitlement: stored && period ? {
-      offer: stored.offer, scope: stored.scope,
+      offer: stored.offer, scope: stored.scope, billingInterval: stored.billing_interval,
       priceVersion: stored.price_version, entitlementVersion: stored.entitlement_version,
       usagePeriodStart: period.start, usagePeriodEnd: period.end,
     } : null,

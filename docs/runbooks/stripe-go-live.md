@@ -410,9 +410,9 @@ secret installation, live catalog copy, or deployment occurs in these tests.
 - [ ] Implement renewal, failed-payment, cancellation, and plan-change
   reconciliation after the launch policies are approved. These events currently
   remain retryable; no lifecycle state or feature enforcement is implied.
-- [ ] Replace the legacy Free/Field billing card with the persisted new-plan
-  presentation before opening customer checkout. The workspace summary reads
-  the new plan context; the legacy billing card still reads the old store.
+- [x] Show the persisted new plan and billing cadence in the main billing card.
+  Use anchored weekly usage wording for new plans and retain legacy billing
+  behavior for existing subscriptions. See the display checkpoint below.
 
 The rehearsal remains restricted to loopback requests, explicit local opt-in,
 `WRANGLER_LOCAL=1`, test credentials, and a configured signing secret. Live mode
@@ -458,6 +458,48 @@ No application assertion was weakened or retried to mask a failure.
 
 See [Stripe fulfillment](https://docs.stripe.com/checkout/fulfillment) for payment
 status checks, duplicate fulfillment, and delayed-payment event handling.
+
+## Workspace plan display checkpoint — 2026-09-11
+
+- [x] Use one authorized workspace response for the main plan and workspace
+  summary. Show Pro, Max 5×, Max 20×, Team, or Team 20× and monthly/annual cadence.
+  New-plan pages do not request the legacy billing endpoint or infer Free.
+- [x] Describe new usage as anchored seven-day periods with no rollover. Preserve
+  legacy rolling-window copy and existing customer portal actions for old plans.
+- [x] Discard responses after workspace/session changes. Show billing unavailable
+  with retry on failure, rather than a false plan or permissions message.
+- [x] Add refresh after checkout return without treating a redirect as payment.
+- [x] Remove the old Explore/Field subtitle and customer-facing credit wording.
+- [x] Exercise entitlement writer → Postgres → workspace API → browser across
+  reload and workspace changes. Keep existing Free and Field checks.
+- [ ] Connect new-plan portal actions after lifecycle policy and configuration
+  are ready; payment renewal dates and measured usage remain pending.
+
+Verification: 19 billing UI tests plus 24 impact/determinism checks pass; 85
+worker tests cover the producer's billing interval and catalog composition.
+The expanded billing smoke has three passing journeys. It records a Team 20×
+plan through the actual entitlement writer in the isolated E2E database and
+checks paid-plan persistence, legacy isolation, reload, and navigation. The
+browser screenshot confirms the plan/cadence and weekly period. No slow-request
+logs appear. The JSON fixture loader supports both Node and the worker compiler;
+shared catalog validation remains independent of Worker environment types.
+
+Commands:
+
+```sh
+npx vitest run src/pages/settings/OrgSettingsBilling.test.tsx \
+  src/components/org/BillingWorkspaceSummary.test.tsx \
+  scripts/e2e-impact.test.ts scripts/e2e-determinism.test.ts --maxWorkers=2
+# auth-worker
+npx vitest run src/__tests__/billing-workspace-checkout.test.ts \
+  src/__tests__/billing-workspace.test.ts src/lib/billing/catalog.test.ts \
+  --maxWorkers=2
+# repository root
+npx tsc --noEmit -p auth-worker/tsconfig.json
+npm run build
+E2E_SHARD=3/3 npx tsx scripts/e2e-up.ts -- \
+  e2e/specs/orgs/org-settings-billing.smoke.spec.ts --shard=1/1
+```
 
 ## Production launch checklist
 

@@ -1,15 +1,15 @@
 // Auth module: system browser OAuth flow + deep-link token capture
 
 use tauri::Emitter;
-use tauri_plugin_shell::ShellExt;
+use tauri_plugin_opener::OpenerExt;
 use url::Url;
 
 /// Opens the given URL in the system browser to begin the OAuth flow.
 /// The `auth_url` is supplied by the SPA from its `VITE_AUTH_BASE` env var.
 #[tauri::command]
 pub async fn open_auth_browser(app: tauri::AppHandle, auth_url: String) -> Result<(), String> {
-    app.shell()
-        .open(auth_url, None)
+    app.opener()
+        .open_url(auth_url, None::<&str>)
         .map_err(|e| e.to_string())
 }
 

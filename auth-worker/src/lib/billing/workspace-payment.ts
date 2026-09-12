@@ -102,7 +102,8 @@ export async function reconcileWorkspacePayment(
   return applyBillingEvent(env.AQUILLA_PG, attempt.org_id, event.id, event.type, object, async tx => {
     // Recover a webhook arriving before the checkout response was saved. Never replace an ID.
     const saved = await tx.prepare(`UPDATE workspace_checkout_attempts SET session_id = ?
-      WHERE id = ? AND (session_id IS NULL OR session_id = ?) RETURNING id`)
+      WHERE id = ? AND resolved_at IS NULL
+        AND (session_id IS NULL OR session_id = ?) RETURNING id`)
       .bind(session.id, attempt.id, session.id).first()
     if (!saved) throw new Error('Checkout session changed during reconciliation')
     const otherCohort = await tx.prepare(`SELECT price_version FROM billing_price_cohorts

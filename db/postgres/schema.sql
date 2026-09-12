@@ -1642,7 +1642,7 @@ CREATE TABLE IF NOT EXISTS workspace_plan_entitlements (
 -- Never delete/reuse an attempt to recover an ambiguous Stripe response.
 CREATE TABLE IF NOT EXISTS workspace_checkout_attempts (
   id TEXT PRIMARY KEY,
-  org_id BIGINT NOT NULL UNIQUE REFERENCES organizations(id) ON DELETE CASCADE,
+  org_id BIGINT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
   account_id TEXT NOT NULL,
   fingerprint TEXT NOT NULL,
   catalog_json JSONB NOT NULL CHECK (jsonb_typeof(catalog_json) = 'object'),
@@ -1652,5 +1652,12 @@ CREATE TABLE IF NOT EXISTS workspace_checkout_attempts (
   expires_at BIGINT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   session_id TEXT UNIQUE,
+  resolved_at TIMESTAMPTZ,
+  resolution TEXT,
+  CONSTRAINT workspace_checkout_resolution_check
+    CHECK ((resolved_at IS NULL AND resolution IS NULL)
+      OR (resolved_at IS NOT NULL AND resolution IS NOT NULL AND resolution = 'expired')),
   sandbox BOOLEAN NOT NULL DEFAULT TRUE CHECK (sandbox = TRUE)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS workspace_checkout_pending_org
+  ON workspace_checkout_attempts (org_id) WHERE resolved_at IS NULL;

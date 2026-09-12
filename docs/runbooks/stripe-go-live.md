@@ -327,8 +327,9 @@ Stripe responses are mocked while database and HTTP handlers are real.
   atomic initial entitlement activation in local integration tests.
 - [ ] Verify the real Stripe payment-to-access journey, including feature gates
   and usage enforcement; local mocked-Stripe activation does not satisfy this gate.
-- [ ] Add confirmed expiration/cancellation reconciliation before permitting a
-  replacement checkout. Do not delete an ambiguous attempt to create another.
+- [x] Reconcile confirmed expiry and explicitly abandoned checkout sessions
+  before permitting replacement. Preserve history; unknown session identities
+  remain blocked. See the recovery checkpoint below.
 - [ ] Connect the UI and production checkout only after the remaining payment,
   lifecycle, metering, and release gates pass.
 
@@ -501,6 +502,65 @@ E2E_SHARD=3/3 npx tsx scripts/e2e-up.ts -- \
   e2e/specs/orgs/org-settings-billing.smoke.spec.ts --shard=1/1
 ```
 
+## Checkout recovery checkpoint — 2026-09-11
+
+- [x] Preserve every checkout request. Permit only one unresolved request per
+  workspace with a partial unique index; migration `0094` preserves old rows.
+- [x] Reconcile the saved session with the same Stripe account. Release it only
+  when Stripe confirms `expired`, `unpaid`, and no subscription. Elapsed time,
+  browser cancellation, or a missing session ID never proves a safe replacement.
+- [x] Add an explicit abandon-checkout operation. Only an open checkout is
+  expired, using its own idempotency key. A completed session never reaches the
+  expiry endpoint, and no operation cancels an existing subscription.
+- [x] Recover a lost expiry response by retrieving the session before retrying.
+  Database failures leave the attempt unresolved. Concurrent confirmations
+  preserve history and one pending request. A replacement gets a fresh key.
+- [x] Reject late payment application to a resolved attempt atomically, without
+  leaving an acknowledged event receipt or granting a plan.
+- [ ] Verify actual sandbox expiry and replacement with configured credentials.
+  The tests below mock Stripe transport; they create no external sessions.
+
+Local-only, maintainer-authorized POST endpoints:
+
+- `/orgs/:orgId/billing/checkout-rehearsal/reconcile`: read and reconcile state.
+- `/orgs/:orgId/billing/checkout-rehearsal/expire`: explicitly abandon an open
+  checkout, then reconcile the confirmed result.
+
+Both retain the existing loopback, test-key, and explicit rehearsal gates.
+They return `none`, `open`, `payment_pending`, or `expired`; these statuses do
+not grant entitlements. A session with unknown identity requires reconciliation
+before replacement. Migration `0094_workspace_checkout_recovery.sql` is prepared,
+not deployed. Apply migrations before deploying code that reads the new columns.
+
+Validation: 105 targeted worker tests, 88 real-Postgres tests, worker TypeScript,
+production build, and all three billing browser journeys pass. The migration
+replay test preserves history and enforces the partial uniqueness constraint.
+No slow-request logs appear in the final smoke run. Contract coverage composes
+real checkout requests with expiry responses, persistence, replacement creation,
+and signed payment rejection; assertions cover both adapters and real HTTP routes.
+
+```sh
+pnpm --dir auth-worker exec vitest run \
+  src/__tests__/billing-workspace-checkout.test.ts \
+  src/__tests__/billing-workspace-migration.test.ts \
+  src/__tests__/billing-workspace.test.ts \
+  src/__tests__/billing-webhook-recovery.test.ts --maxWorkers=2
+pnpm --dir auth-worker exec vitest run \
+  --config vitest.webhook-postgres.config.ts
+pnpm --dir auth-worker exec tsc --noEmit
+npm run build
+E2E_SHARD=3/3 npx tsx scripts/e2e-up.ts -- \
+  e2e/specs/orgs/org-settings-billing.smoke.spec.ts --shard=1/1
+```
+
+See [Stripe session states](https://docs.stripe.com/api/checkout/sessions/object)
+and [explicit session expiry](https://docs.stripe.com/api/checkout/sessions/expire).
+
+**Next dependency:** Ryder's answers on payment-failure grace, cancellation timing,
+and upgrade/downgrade timing were requested on 2026-09-11 and remain pending.
+No default was accepted on Ryder's behalf. These rules govern subscription
+lifecycle reconciliation and when paid AI access changes.
+
 ## Production launch checklist
 
 **Status: not ready to enable paid checkout.** Prices are ready in sandbox;
@@ -643,6 +703,9 @@ this checklist does not approve proposed commercial behavior.
 
 ### Marketing → sign-in → workspace
 
+- [x] Prepare the [pricing-aware onboarding handoff](pricing-onboarding-handoff.md)
+  with acceptance criteria, test boundaries, and coordination with AQU-837.
+  It is prepared, not dispatched; role and support decisions remain explicit.
 - [ ] Dispatch a dedicated, more comprehensive onboarding rework for the pricing
   tiers. Cover selected-offer continuity, personal versus team workspace setup,
   roles/invites, covered-access discovery, plan capabilities, and first useful

@@ -40,3 +40,28 @@ it('preserves checkout attempts on migration replay and rejects a second attempt
     await expect(db.exec('UPDATE workspace_checkout_attempts SET sandbox = FALSE')).rejects.toThrow()
   } finally { await db.close() }
 })
+
+it('upgrades checkout history to one unresolved attempt without losing rows', async () => {
+  const db = new PGlite()
+  try {
+    await db.exec('CREATE TABLE organizations (id bigint PRIMARY KEY); INSERT INTO organizations VALUES (1)')
+    await db.exec(readFileSync(new URL('../../../db/postgres/migrations/0093_workspace_checkout_attempts.sql', import.meta.url), 'utf8'))
+    await db.exec(`INSERT INTO workspace_checkout_attempts
+      (id, org_id, account_id, fingerprint, catalog_json, prices_json, quote_json, request_params, expires_at)
+      VALUES ('original', 1, 'acct_test', 'same', '{}', '[]', '{}', '{}', 123)`)
+    const migration = readFileSync(new URL('../../../db/postgres/migrations/0094_workspace_checkout_recovery.sql', import.meta.url), 'utf8')
+    await db.exec(migration)
+    await db.exec(migration)
+    await expect(db.exec("UPDATE workspace_checkout_attempts SET resolved_at = now()")).rejects.toThrow()
+    await expect(db.exec("UPDATE workspace_checkout_attempts SET resolution = 'expired'")).rejects.toThrow()
+    const second = `INSERT INTO workspace_checkout_attempts
+      (id, org_id, account_id, fingerprint, catalog_json, prices_json, quote_json, request_params, expires_at)
+      VALUES ('next', 1, 'acct_test', 'same', '{}', '[]', '{}', '{}', 456)`
+    await expect(db.exec(second)).rejects.toThrow()
+    await db.exec("UPDATE workspace_checkout_attempts SET resolved_at = now(), resolution = 'expired'")
+    await db.exec(second)
+    await db.exec(migration)
+    expect((await db.query('SELECT id, resolution FROM workspace_checkout_attempts ORDER BY expires_at')).rows)
+      .toEqual([{ id: 'original', resolution: 'expired' }, { id: 'next', resolution: null }])
+  } finally { await db.close() }
+})

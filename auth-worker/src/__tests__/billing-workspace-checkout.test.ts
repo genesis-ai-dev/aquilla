@@ -31,16 +31,16 @@ async function setup(scope: 'personal' | 'team' = 'personal') {
       expect(key).toMatch(/^aquilla-workspace-/)
       expect(await env.AQUILLA_PG.prepare('SELECT jsonb_typeof(request_params) AS kind FROM workspace_checkout_attempts').first()).toEqual({ kind: 'object' })
       const params = new URLSearchParams(String(init?.body))
-      expect(await env.AQUILLA_PG.prepare('SELECT count(*)::int AS n FROM workspace_checkout_attempts').first()).toEqual({ n: 1 })
+      expect(await env.AQUILLA_PG.prepare('SELECT count(*)::int AS n FROM workspace_checkout_attempts WHERE resolved_at IS NULL').first()).toEqual({ n: 1 })
       requests.push({ key, body: params.toString() })
-      if (!sessions.has(key)) sessions.set(key, { id: 'cs_test_123', mode: 'subscription',
+      if (!sessions.has(key)) sessions.set(key, { id: `cs_test_${123 + sessions.size}`, mode: 'subscription',
         status: 'open', livemode: false, client_reference_id: params.get('client_reference_id'),
         metadata: { checkoutAttemptId: params.get('metadata[checkoutAttemptId]') },
-        url: 'https://checkout.stripe.com/c/pay/cs_test_123' })
+        url: `https://checkout.stripe.com/c/pay/cs_test_${123 + sessions.size}` })
       if (loseResponse) { loseResponse = false; throw new Error('Connection lost after Stripe created session') }
       return Response.json({ ...sessions.get(key), ...(invalidUrl ? { url: 'https://evil.test/collect' } : {}) })
     }
-    if (path.startsWith('/v1/checkout/sessions/')) return Response.json([...sessions.values()][0])
+    if (path.startsWith('/v1/checkout/sessions/')) return Response.json([...sessions.values()].find(s => path.endsWith(`/${s.id}`)))
     return Response.json(stripeCatalogResponse(path))
   })
   vi.stubGlobal('fetch', fetch)
@@ -406,5 +406,129 @@ it('keeps Stripe read failures retryable without writing a receipt', async () =>
   expect((await payment.send()).status).toBe(500)
   await expectNoPaymentGrant()
   vi.stubGlobal('fetch', original)
+  expect((await payment.send()).status).toBe(200)
+})
+
+async function reconcileCheckout(user = 'alice', settings = config(), action = 'reconcile') {
+  return app.request(`http://127.0.0.1/api/v2/orgs/1/billing/checkout-rehearsal/${action}`, {
+    method: 'POST', headers: authHeader(await jwtFor(user)),
+  }, settings)
+}
+it('replaces only confirmed expired checkout, keeping history and a new request key', async () => {
+  const stripe = await setup()
+  expect((await checkout(await reviewed())).status).toBe(200)
+  const first = stripe.requests[0]!
+  Object.assign(stripe.sessions.get(first.key)!, { status: 'expired', payment_status: 'unpaid', subscription: null })
+  expect(await (await reconcileCheckout()).json()).toEqual({ status: 'expired' })
+  expect(await (await reconcileCheckout()).json()).toEqual({ status: 'none' })
+  expect((await checkout(await reviewed('max_5x'))).status).toBe(200)
+  expect(stripe.requests[1]!.key).not.toBe(first.key)
+  expect(stripe.sessions.size).toBe(2)
+  expect(await env.AQUILLA_PG.prepare('SELECT count(*)::int AS n FROM workspace_checkout_attempts').first()).toEqual({ n: 2 })
+  expect(await env.AQUILLA_PG.prepare("SELECT resolution, resolved_at IS NOT NULL AS resolved FROM workspace_checkout_attempts WHERE session_id = 'cs_test_123'").first())
+    .toEqual({ resolution: 'expired', resolved: true })
+  await expectNoPaymentGrant()
+})
+it.each(['open', 'complete', 'unconfirmed', 'paid', 'wrong_account', 'wrong_workspace', 'live'])(
+  'does not release %s checkout state', async fault => {
+    const stripe = await setup()
+    expect((await checkout(await reviewed())).status).toBe(200)
+    const session = stripe.sessions.get(stripe.requests[0]!.key)!
+    Object.assign(session, { status: 'expired', payment_status: 'unpaid', subscription: null })
+    let status = 503
+    if (fault === 'open' || fault === 'complete') { session.status = fault; status = 200 }
+    if (fault === 'unconfirmed') {
+      await env.AQUILLA_PG.prepare('UPDATE workspace_checkout_attempts SET session_id = NULL').run()
+      status = 409
+    }
+    if (fault === 'paid') session.payment_status = 'paid'
+    if (fault === 'wrong_workspace') session.client_reference_id = '2'
+    if (fault === 'live') session.livemode = true
+    if (fault === 'wrong_account') {
+      const original = globalThis.fetch
+      vi.stubGlobal('fetch', (url: string, init?: RequestInit) => new URL(url).pathname === '/v1/account'
+        ? Promise.resolve(Response.json({ id: 'acct_other' })) : original(url, init))
+    }
+    const response = await reconcileCheckout()
+    expect(response.status).toBe(status)
+    if (status === 200) expect(await response.json()).toEqual({ status: fault === 'open' ? 'open' : 'payment_pending' })
+    expect(await env.AQUILLA_PG.prepare('SELECT resolution, resolved_at FROM workspace_checkout_attempts').first())
+      .toEqual({ resolution: null, resolved_at: null })
+    expect(stripe.requests).toHaveLength(1)
+  },
+)
+it('requires billing authority and local test configuration for reconciliation', async () => {
+  const stripe = await setup()
+  expect((await checkout(await reviewed())).status).toBe(200)
+  const calls = stripe.fetch.mock.calls.length
+  expect((await reconcileCheckout('bob')).status).toBe(403)
+  expect((await reconcileCheckout('alice', { ...config(), STRIPE_SECRET_KEY: 'sk_live_fixture' })).status).toBe(503)
+  expect(stripe.fetch.mock.calls).toHaveLength(calls)
+})
+it('serializes concurrent expiry confirmations without deleting history', async () => {
+  const stripe = await setup()
+  expect((await checkout(await reviewed())).status).toBe(200)
+  Object.assign(stripe.sessions.get(stripe.requests[0]!.key)!, { status: 'expired', payment_status: 'unpaid', subscription: null })
+  const responses = await Promise.all([reconcileCheckout(), reconcileCheckout()])
+  expect(responses.map(r => r.status)).toEqual([200, 200])
+  expect(await Promise.all(responses.map(r => r.json()))).toContainEqual({ status: 'expired' })
+  expect(await env.AQUILLA_PG.prepare('SELECT count(*)::int AS n FROM workspace_checkout_attempts').first()).toEqual({ n: 1 })
+})
+it('rolls back expiry resolution on a database failure and permits retry', async () => {
+  const stripe = await setup()
+  expect((await checkout(await reviewed())).status).toBe(200)
+  Object.assign(stripe.sessions.get(stripe.requests[0]!.key)!, { status: 'expired', payment_status: 'unpaid', subscription: null })
+  await env.AQUILLA_PG.exec(`CREATE FUNCTION reject_checkout_save_fn() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected resolution failure'; END $$`)
+  await env.AQUILLA_PG.exec('CREATE TRIGGER reject_checkout_save BEFORE UPDATE ON workspace_checkout_attempts FOR EACH ROW EXECUTE FUNCTION reject_checkout_save_fn()')
+  expect((await reconcileCheckout()).status).toBe(503)
+  expect(await env.AQUILLA_PG.prepare('SELECT resolution FROM workspace_checkout_attempts').first()).toEqual({ resolution: null })
+  await env.AQUILLA_PG.exec('DROP TRIGGER reject_checkout_save ON workspace_checkout_attempts')
+  expect(await (await reconcileCheckout()).json()).toEqual({ status: 'expired' })
+})
+it('rejects payment for a resolved attempt without a receipt or entitlement', async () => {
+  const payment = await completedPayment()
+  await env.AQUILLA_PG.prepare("UPDATE workspace_checkout_attempts SET resolution = 'expired', resolved_at = now()").run()
+  expect((await payment.send()).status).toBe(500)
+  await expectNoPaymentGrant()
+})
+
+it.each([false, true])('abandons an open checkout and recovers a lost expiry response: %s', async loseResponse => {
+  const stripe = await setup()
+  expect((await checkout(await reviewed())).status).toBe(200)
+  const session = stripe.sessions.get(stripe.requests[0]!.key)!
+  const expireKeys: string[] = []
+  const original = globalThis.fetch
+  vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+    if (new URL(url).pathname.endsWith('/expire')) {
+      expect(init?.method).toBe('POST')
+      expireKeys.push(new Headers(init?.headers).get('Idempotency-Key')!)
+      Object.assign(session, { status: 'expired', payment_status: 'unpaid', subscription: null })
+      if (loseResponse) throw new Error('Response lost after successful expiry')
+      return Response.json(session)
+    }
+    return original(url, init)
+  })
+  const response = await reconcileCheckout('alice', config(), 'expire')
+  expect(response.status).toBe(loseResponse ? 503 : 200)
+  if (loseResponse) {
+    expect(await env.AQUILLA_PG.prepare('SELECT resolution FROM workspace_checkout_attempts').first()).toEqual({ resolution: null })
+    expect(await (await reconcileCheckout('alice', config(), 'expire')).json()).toEqual({ status: 'expired' })
+  }
+  expect(expireKeys).toHaveLength(1)
+  expect(expireKeys[0]).toMatch(/^aquilla-workspace-expire-/)
+  expect(await env.AQUILLA_PG.prepare('SELECT resolution FROM workspace_checkout_attempts').first()).toEqual({ resolution: 'expired' })
+  await expectNoPaymentGrant()
+})
+it('never expires a completed checkout or permits another user to abandon it', async () => {
+  const payment = await completedPayment()
+  const calls: string[] = []
+  const original = globalThis.fetch
+  vi.stubGlobal('fetch', (url: string, init?: RequestInit) => {
+    if (init?.method === 'POST') calls.push(url)
+    return original(url, init)
+  })
+  expect((await reconcileCheckout('bob', config(), 'expire')).status).toBe(403)
+  expect(await (await reconcileCheckout('alice', config(), 'expire')).json()).toEqual({ status: 'payment_pending' })
+  expect(calls).toEqual([])
   expect((await payment.send()).status).toBe(200)
 })

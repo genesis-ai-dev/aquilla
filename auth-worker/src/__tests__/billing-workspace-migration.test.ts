@@ -82,3 +82,19 @@ it('adds lifecycle facts without inventing paid periods and preserves them on re
     await expect(db.exec('UPDATE workspace_subscription_state SET revision = 0')).rejects.toThrow()
   } finally { await db.close() }
 })
+
+it('preserves immutable plan-change review facts across migration replay', async () => {
+  const db = new PGlite()
+  try {
+    await db.exec('CREATE TABLE workspace_plan_entitlements (org_id bigint PRIMARY KEY); INSERT INTO workspace_plan_entitlements VALUES (1)')
+    const migration = readFileSync(new URL('../../../db/postgres/migrations/0096_workspace_plan_change_reviews.sql', import.meta.url), 'utf8')
+    await db.exec(migration)
+    await db.exec(`INSERT INTO workspace_plan_change_reviews
+      (id, org_id, account_id, direction, source_json, quote_json, request_params, invoice_json, review_json, expires_at)
+      VALUES ('review', 1, 'acct_test', 'upgrade', '{"revision":1}', '{}', '{"proration_date":123}', '{}', '{"amountDueNow":365}', now())`)
+    await db.exec(migration)
+    expect((await db.query('SELECT source_json, request_params, review_json FROM workspace_plan_change_reviews')).rows)
+      .toEqual([{ source_json: { revision: 1 }, request_params: { proration_date: 123 }, review_json: { amountDueNow: 365 } }])
+    await expect(db.exec("UPDATE workspace_plan_change_reviews SET direction = 'immediate_downgrade'")).rejects.toThrow()
+  } finally { await db.close() }
+})

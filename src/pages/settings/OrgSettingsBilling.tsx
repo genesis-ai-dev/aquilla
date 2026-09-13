@@ -158,7 +158,7 @@ export function OrgSettingsBilling() {
 
           <Button variant="outline" onClick={() => setReload(value => value + 1)}>Refresh billing</Button>
           <BillingWorkspaceDetails data={workspace} />
-          {jwt && activeOrgId != null ? <BillingOffers key={activeOrgId} jwt={jwt} orgId={activeOrgId} /> : null}
+          {jwt && activeOrgId != null ? <BillingOffers key={activeOrgId} jwt={jwt} orgId={activeOrgId} changingPlan={Boolean(paid)} currentInterval={paid?.billingInterval} /> : null}
           <SettingsGroup label="Plans and covered access">
             <SettingsRow
               label="ETEN affiliate or Bible-translation team?"

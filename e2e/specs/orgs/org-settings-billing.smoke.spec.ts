@@ -1,3 +1,4 @@
+import { resetBackend } from '../../helpers/seed'
 import { recordTestWorkspacePlan, recordTestWorkspaceFailure } from "../../helpers/billing"
 import { BillingSettingsPage } from "../../helpers/page-objects/BillingSettings"
 import { createOrg } from "../../helpers/frontier-api"
@@ -5,6 +6,8 @@ import { ensureAuthState } from "../../helpers/auth"
 import { test, expect, orgRoute } from "../../helpers/multi-user"
 
 /** Existing organization billing boundary: auth → API → billing UI. */
+test.beforeEach(async () => { await resetBackend() })
+
 test("org billing settings preserves access while new pricing is unavailable", async ({ alice }) => {
   await alice.goto(orgRoute(alice, "/settings"))
   await expect(alice.locator("h1").filter({ hasText: /Organization settings/i })).toBeVisible()

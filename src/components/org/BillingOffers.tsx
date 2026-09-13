@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { BillingChangeReview } from './BillingChangeReview'
 import { BillingPlanReview } from './BillingPlanReview'
 import type { BillingPlanSelection } from '@/lib/sync/billing-review'
 import { Button } from '@/components/ui/button'
@@ -7,28 +8,32 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { getBillingOffers, type BillingOffers as Offers } from '@/lib/sync/billing'
 
-export function BillingOffers({ jwt, orgId }: { jwt: string; orgId: number }) {
+export function BillingOffers({ jwt, orgId, changingPlan = false, currentInterval }: {
+  jwt: string; orgId: number; changingPlan?: boolean; currentInterval?: 'month' | 'year'
+}) {
   const [result, setResult] = useState<{ orgId: number; jwt: string; data: Offers } | null>(null)
   const [unavailable, setUnavailable] = useState(false)
   const [selected, setSelected] = useState<{ orgId: number; jwt: string; selection: BillingPlanSelection } | null>(null)
-  const [interval, setInterval] = useState<'month' | 'year'>('year')
+  const [interval, setInterval] = useState<'month' | 'year'>(currentInterval ?? 'year')
   useEffect(() => {
     let canceled = false
     setResult(null)
     setUnavailable(false)
     setSelected(null)
+    setInterval(currentInterval ?? 'year')
     void getBillingOffers(jwt, orgId).then(data => {
       if (!canceled) setResult({ orgId, jwt, data })
     }).catch(() => {
       if (!canceled) setUnavailable(true)
     })
     return () => { canceled = true }
-  }, [jwt, orgId])
+  }, [jwt, orgId, changingPlan, currentInterval])
   const data = result?.orgId === orgId && result.jwt === jwt ? result.data : null
   const money = (amount: number, currency: string) => new Intl.NumberFormat(undefined, {
     style: 'currency', currency: currency.toUpperCase(), maximumFractionDigits: 2,
   }).format(amount / 100)
 
+  const Review = changingPlan ? BillingChangeReview : BillingPlanReview
   return (
     <SettingsGroup label="Compare new plans">
       <p className="text-sm text-muted-foreground">
@@ -89,7 +94,7 @@ export function BillingOffers({ jwt, orgId }: { jwt: string; orgId: number }) {
           </TabsContent>
         ))}
       </Tabs>
-      {selected?.orgId === orgId && selected.jwt === jwt && <BillingPlanReview
+      {selected?.orgId === orgId && selected.jwt === jwt && <Review
         key={`${orgId}:${jwt}:${selected.selection.offer}:${selected.selection.interval}`}
         jwt={jwt} orgId={orgId} selection={selected.selection}
         onDismiss={() => setSelected(null)}

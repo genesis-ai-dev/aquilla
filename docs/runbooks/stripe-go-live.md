@@ -635,6 +635,75 @@ without a usage reset. RTL verifies all three access messages without ledger uni
 References: [Stripe subscription webhooks](https://docs.stripe.com/billing/subscriptions/webhooks)
 and [pending updates](https://docs.stripe.com/billing/subscriptions/pending-updates).
 
+### Plan-change review checkpoint (2026-09-12)
+
+- [x] Review an existing paid plan separately from initial checkout. The billing
+  page starts with the workspace's current billing interval.
+- [x] Persist the selected target, current subscription/revision, exact upgrade
+  proration timestamp and request parameters, Stripe preview, and expiry in
+  migration `0096_workspace_plan_change_reviews.sql` (prepared, not deployed).
+- [x] Use Stripe's returned upgrade amount. The preview requests immediate
+  proration with an unchanged billing anchor; stored execution parameters require
+  `pending_if_incomplete` so a future upgrade handler cannot grant unpaid capacity.
+- [x] Review downgrades for the current subscription period's end, with zero due
+  now and no immediate invoice preview. Keep the existing plan and usage untouched.
+- [x] Retain the Team platform item once when adding/removing Team 20× capacity.
+- [x] Reject wrong scope, cadence changes, quantities above one, existing schedules,
+  pending updates, cancellation, failure, stale state, unapproved prices, and
+  previews containing unrelated charges, non-proration lines, balances, or
+  unsupported adjustments. No local arithmetic substitutes for Stripe amounts.
+- [x] Show upgrade amount or downgrade date, retained weekly usage, and review
+  expiry in the app. Discard stale workspace/session responses; allow explicit retry.
+- [ ] Confirm a persisted review, create the immediate upgrade or renewal schedule,
+  recover ambiguous Stripe responses, and reconcile paid/scheduled plan changes.
+  Review responses report `changesEnabled: false`; the action stays disabled.
+- [ ] Verify these requests against actual sandbox subscriptions. Tests mock Stripe
+  HTTP, and the browser visual probe uses controlled preview responses.
+
+The maintainer-only endpoint is
+`POST /api/v2/orgs/:orgId/billing/change-rehearsal/review`. It uses the existing
+loopback/test-key/local-flag/explicit-opt-in gate. It accepts only offer, billing
+interval, and quantity one. It creates no charge, subscription update, schedule,
+entitlement, or usage reset. Reviews expire after 15 minutes or at the current
+billing boundary, whichever comes first. A concurrent lifecycle change prevents
+review persistence. Existing billing and covered-access rules remain separate.
+
+Validation: 118 targeted worker/migration tests, 127 real-Postgres tests, and
+62 UI/impact/determinism tests pass. The three billing smoke journeys pass. A
+separate temporary browser probe verifies the downgrade review on the real billing
+page using preview fixtures; screenshot: `/private/tmp/aqu-837-downgrade-review.png`.
+The probe contains no browser page errors and is removed after inspection; UI-only
+coverage remains in RTL. Worker TypeScript and the production build pass.
+
+Commands:
+
+```sh
+pnpm --dir auth-worker exec vitest run \
+  src/__tests__/billing-workspace-change.test.ts \
+  src/__tests__/billing-workspace-checkout.test.ts \
+  src/__tests__/billing-workspace-migration.test.ts --maxWorkers=2
+pnpm --dir auth-worker exec vitest run \
+  --config vitest.webhook-postgres.config.ts
+npx vitest run src/components/org/Billing*.test.tsx \
+  src/pages/settings/OrgSettingsBilling.test.tsx \
+  scripts/e2e-impact.test.ts scripts/e2e-determinism.test.ts --maxWorkers=2
+pnpm --dir auth-worker exec tsc --noEmit
+npm run build
+E2E_SHARD=3/3 npx tsx scripts/e2e-up.ts -- \
+  e2e/specs/orgs/org-settings-billing.smoke.spec.ts --shard=1/1
+```
+
+Test-impact notes: the real checkout and signed activation producer feeds the
+change-review service, route, and JSON persistence through the production Postgres
+adapter. RTL drives the real API client into the review UI. The existing billing
+smoke has explicit reset setup so Bob-only cases do not depend on the first test.
+The affected-test map now includes lifecycle/change migrations and shared access
+rules. Shared catalog fixture loading also works in Node and the browser-like test
+environment. No release/deploy gate, live Stripe copy, or deployed change occurs.
+
+Reference: [Stripe invoice previews](https://docs.stripe.com/api/invoices/create_preview)
+and [payment-gated pending updates](https://docs.stripe.com/billing/subscriptions/pending-updates).
+
 ## Production launch checklist
 
 **Status: not ready to enable paid checkout.** Prices are ready in sandbox;

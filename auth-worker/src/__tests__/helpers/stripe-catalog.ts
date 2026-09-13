@@ -1,9 +1,10 @@
 import { readFileSync } from 'node:fs'
-import { URL } from 'node:url'
+import { fileURLToPath } from 'node:url'
+import { dirname, resolve } from 'node:path'
 import { catalogSchema } from '../../lib/billing/catalog-schema'
 // Node (Playwright) and Vitest share the same validated fixture.
 export const testStripeCatalog = catalogSchema.parse(JSON.parse(readFileSync(
-  new URL('../../../../config/pricing/stripe-sandbox.json', import.meta.url), 'utf8',
+  resolve(dirname(fileURLToPath(import.meta.url)), '../../../../config/pricing/stripe-sandbox.json'), 'utf8',
 )))
 const manifest = testStripeCatalog
 const amounts: Record<string, number> = {

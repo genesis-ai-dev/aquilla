@@ -10,6 +10,7 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/__tests__/billing-workspace-checkout.test.ts",
+      "src/__tests__/billing-workspace-change.test.ts",
       "src/__tests__/billing-webhook-recovery.test.ts",
       "src/__tests__/billing-webhook-concurrency.postgres.ts"],
     setupFiles: ["src/__tests__/helpers/webhook-postgres-setup.ts"],

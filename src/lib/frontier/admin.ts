@@ -516,3 +516,55 @@ export async function getAdminAgentSession(jwt: string, sessionId: string): Prom
   if (!res.ok) throw new UserError(res.status, await readError(res))
   return (await res.json()) as AdminAgentSessionDetail
 }
+
+// ── Retention (GET /api/v2/admin/retention) ──────────────────────────────
+// Mirrors auth-worker/src/lib/retention.ts — see there for definitions.
+
+export interface AdminDayNRetention {
+  eligible: number
+  retained: number
+  rate: number | null
+}
+
+export interface AdminWeeklyCohort {
+  weekStart: string
+  size: number
+  retained: number[]
+}
+
+export interface AdminRetention {
+  asOf: string
+  dau: number
+  avgDau7: number
+  wau: number
+  mau: number
+  stickiness: number | null
+  newUsers7: number
+  newUsers30: number
+  totalUsers: number
+  retention: { d1: AdminDayNRetention; d7: AdminDayNRetention; d30: AdminDayNRetention }
+  daily: Array<{ day: string; active: number }>
+  cohorts: AdminWeeklyCohort[]
+}
+
+export async function getAdminRetention(jwt: string, days = 90): Promise<AdminRetention> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/retention?days=${days}`, {
+    headers: authHeaders(jwt),
+  })
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+  return (await res.json()) as AdminRetention
+}
+
+/** Email the weekly|monthly recap to the calling admin now. */
+export async function sendAdminRetentionReport(
+  jwt: string,
+  period: "weekly" | "monthly",
+): Promise<{ subject: string }> {
+  const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/admin/retention/report`, {
+    method: "POST",
+    headers: { ...authHeaders(jwt), "Content-Type": "application/json" },
+    body: JSON.stringify({ period }),
+  })
+  if (!res.ok) throw new UserError(res.status, await readError(res))
+  return (await res.json()) as { subject: string }
+}

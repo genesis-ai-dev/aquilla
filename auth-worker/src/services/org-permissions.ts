@@ -367,14 +367,23 @@ export async function bumpOrgActivity(
   if (last != null && now - last < ORG_ACTIVITY_DEBOUNCE_MS) return
   orgActivityBumpedAt.set(key, now)
   try {
+    // One round-trip: bump the org row AND record "this user used the app
+    // today" for retention (user_activity_days, see migration 0090). The CTE
+    // keeps the day insert independent of the UPDATE's WHERE, so a user whose
+    // row another isolate bumped seconds ago still gets today's activity day.
     await env.AQUILLA_PG.prepare(
-      `UPDATE org_members
-          SET last_active_at = CURRENT_TIMESTAMP
-        WHERE org_id = ? AND user_id = ?
-          AND (last_active_at IS NULL
-               OR last_active_at < now() - interval '5 minutes')`,
+      `WITH bump AS (
+         UPDATE org_members
+            SET last_active_at = CURRENT_TIMESTAMP
+          WHERE org_id = ? AND user_id = ?
+            AND (last_active_at IS NULL
+                 OR last_active_at < now() - interval '5 minutes')
+       )
+       INSERT INTO user_activity_days (user_id, day)
+       VALUES (?, (now() AT TIME ZONE 'UTC')::date)
+       ON CONFLICT DO NOTHING`,
     )
-      .bind(orgId, userId)
+      .bind(orgId, userId, userId)
       .run()
   } catch (err) {
     console.warn("bumpOrgActivity failed (non-fatal):", err)

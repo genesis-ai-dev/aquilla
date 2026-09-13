@@ -14,6 +14,8 @@
 //   GET /users                 — every user
 //   GET /projects              — every project + org/creator + cell/word rollup + shared flag
 //   GET /activity              — cross-tenant activity_logs feed (?limit, ?since)
+//   GET /retention             — DAU/WAU/MAU, Day-N + weekly cohort retention (?days, ?asOf)
+//   POST /retention/report     — email the weekly|monthly recap to the caller now
 //   GET /credits/orgs          — all orgs with day/week credit spend + caps
 //   PATCH /credits/org/:orgId  — update per-org credit config (org_settings.credits)
 
@@ -27,7 +29,9 @@ import { loadPlatformSettings, savePlatformSettings } from "../lib/platform-sett
 import { getAllowedModels } from "../lib/ai-budget"
 import { aggregateAbResults } from "../lib/model-ab"
 import adminBillingRoutes from "./admin-billing"
-import { sendAdminElevationCodeEmail } from "../services/email"
+import { sendAdminElevationCodeEmail, sendRetentionReportEmail } from "../services/email"
+import { loadRetentionMetrics } from "../lib/retention-load"
+import { buildRetentionReport, reportWindow } from "../lib/retention-report"
 import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
 import {
   ADMIN_ELEVATION_VERIFY_MAX_FAILURES,
@@ -967,5 +971,52 @@ admin.get("/ab-results", async (c) => {
 })
 
 admin.route("/", adminBillingRoutes)
+
+/**
+ * GET /api/v2/admin/retention — active-user + retention metrics computed from
+ * the user_activity_days rollup (see lib/retention.ts for definitions).
+ * ?days (30–365, default 90) sizes the daily series; ?asOf=YYYY-MM-DD pins
+ * the window end (default today, UTC).
+ */
+const retentionQuerySchema = z.object({
+  days: z.coerce.number().int().min(30).max(365).optional(),
+  asOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+})
+
+admin.get("/retention", zValidator("query", retentionQuerySchema), async (c) => {
+  const { days, asOf } = c.req.valid("query")
+  return c.json(await loadRetentionMetrics(c.env, { days, asOf }))
+})
+
+/**
+ * POST /api/v2/admin/retention/report — send the weekly|monthly recap to the
+ * calling operator right now (same builder the cron uses). Lets an admin get
+ * the email on demand and lets us verify the cron's output without waiting
+ * for Monday. 503 when EMAIL isn't bound (local/e2e).
+ */
+const retentionReportSchema = z.object({ period: z.enum(["weekly", "monthly"]) })
+
+admin.post("/retention/report", zValidator("json", retentionReportSchema), async (c) => {
+  const user = c.get("user")
+  const { period } = c.req.valid("json")
+  const window = reportWindow(period, new Date())
+  const [current, previous] = await Promise.all([
+    loadRetentionMetrics(c.env, { asOf: window.asOf }),
+    loadRetentionMetrics(c.env, { asOf: window.previous }),
+  ])
+  const environment = c.env.ENVIRONMENT ?? "development"
+  const report = buildRetentionReport({
+    period,
+    current,
+    previous,
+    environment,
+    dashboardUrl: environment === "production" ? "https://aquilla.app/admin" : null,
+  })
+  const sent = await sendRetentionReportEmail(c.env, [user.email], report)
+  if (!sent) {
+    return c.json({ error: "email_unavailable", message: "Email is not configured in this environment." }, 503)
+  }
+  return c.json({ ok: true, subject: report.subject, asOf: current.asOf })
+})
 
 export default admin

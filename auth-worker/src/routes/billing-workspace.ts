@@ -1,3 +1,4 @@
+import { startWorkspacePortalRehearsal } from '../lib/billing/workspace-portal'
 import { changeSelectionSchema, reviewWorkspaceChange } from '../lib/billing/workspace-change-review'
 import { Hono } from 'hono'
 import { reconcileWorkspaceCheckoutRehearsal, startWorkspaceCheckoutRehearsal, workspaceCheckoutInput, workspaceCheckoutRehearsalEnabled, WorkspaceCheckoutConflict } from '../lib/billing/workspace-checkout'
@@ -105,6 +106,22 @@ billingWorkspace.post('/orgs/:orgId/billing/change-rehearsal/review', authMiddle
   } catch (error) {
     if (error instanceof WorkspaceCheckoutConflict) return c.json({ error: 'change_conflict', message: error.message }, 409)
     return c.json({ error: 'change_review_unavailable' }, 503)
+  }
+})
+billingWorkspace.post('/orgs/:orgId/billing/portal-rehearsal', authMiddleware, async c => {
+  c.header('Cache-Control', 'private, no-store')
+  if (!workspaceCheckoutRehearsalEnabled(c.env, c.req.url)) return c.json({ error: 'portal_disabled' }, 503)
+  const raw = c.req.param('orgId') ?? ''
+  const orgId = Number(raw)
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(orgId) || orgId < 1) return c.json({ error: 'invalid_org' }, 400)
+  const role = await getEffectiveOrgRole(c.env, orgId, c.get('user'))
+  if (role == null || role < ROLE.MAINTAINER) return c.json({ error: 'forbidden' }, 403)
+  // No customer, configuration, or return URL is accepted from the browser.
+  try {
+    return c.json(await startWorkspacePortalRehearsal(c.env, orgId, c.req.url))
+  } catch (error) {
+    if (error instanceof WorkspaceCheckoutConflict) return c.json({ error: 'portal_conflict' }, 409)
+    return c.json({ error: 'portal_unavailable' }, 503)
   }
 })
 export default billingWorkspace

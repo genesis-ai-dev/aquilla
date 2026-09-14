@@ -260,6 +260,9 @@ export interface Env {
   BILLING_WORKSPACE_CHECKOUT_REHEARSAL?: string
   /** Approved environment-specific catalog JSON. Amounts are fetched from Stripe. */
   STRIPE_PRICE_CATALOG?: string
+  /** Explicit sandbox portal configurations; invoice/payment management only. */
+  STRIPE_PORTAL_PERSONAL_CONFIGURATION?: string
+  STRIPE_PORTAL_TEAM_CONFIGURATION?: string
   STRIPE_PRICE_FIELD_MONTHLY?: string
   STRIPE_PRICE_FIELD_ANNUAL?: string
   STRIPE_PRICE_FIELD?: string

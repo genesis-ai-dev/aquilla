@@ -91,6 +91,11 @@ MONDAY_REDIRECT_URI="http://localhost:5173/oauth/callback"
 # STRIPE_PUBLISHABLE_KEY="pk_test_..."
 # STRIPE_PRICE_FIELD="price_..."
 # STRIPE_PRICE_ADDON="price_..."
+# Local workspace portal rehearsal: explicit configurations with invoice history
+# and payment-method updates enabled; subscription updates/cancellation disabled.
+# Requires the existing BILLING_WORKSPACE_CHECKOUT_REHEARSAL local/test-key gate.
+# STRIPE_PORTAL_PERSONAL_CONFIGURATION="bpc_..."
+# STRIPE_PORTAL_TEAM_CONFIGURATION="bpc_..."
 
 # Admin panel access. Comma-separated emails; elevation adds a re-auth step.
 # ADMIN_EMAILS=""

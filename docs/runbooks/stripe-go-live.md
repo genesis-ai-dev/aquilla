@@ -54,8 +54,11 @@ Execution checklist, in dependency order:
   upgrades, downgrade timing/credit, failed payment/3DS, cancellation, and recovery.
 - [ ] Finalize the minimal supported catalog and portal settings; record IDs and
   exact policy outcomes. Do not mark mocked Stripe responses as this proof.
-- [ ] Add authenticated workspace portal sessions using the stored customer,
-  explicit scope-specific configuration, and trusted return URL.
+- [x] Add the local sandbox workspace portal-session endpoint using the stored
+  customer, explicit scope-specific configuration, and trusted return URL.
+  This slice supports invoices/payment methods only; see evidence below.
+- [ ] Connect the paid billing UI to the verified portal configuration and enable
+  subscription management only after the real sandbox/lifecycle proof.
 - [ ] Reconcile portal-originated Price changes and paid access from verified
   Stripe state. Cover prorations, pending payment, scheduled changes, cancellation
   timestamps, duplicate/out-of-order webhooks, and unchanged weekly consumption.
@@ -75,6 +78,58 @@ Sources checked 2026-09-13:
 [Portal configuration](https://docs.stripe.com/customer-management/configure-portal),
 [portal limitations](https://docs.stripe.com/customer-management), and
 [hosted confirmation flows](https://docs.stripe.com/customer-management/portal-deep-links).
+
+## Hosted workspace portal connection — 2026-09-13
+
+AQU-837 adds `POST /api/v2/orgs/:orgId/billing/portal-rehearsal`.
+It requires authenticated maintainer authority, the existing explicit local
+checkout-rehearsal flag, a test key, and a loopback request/return origin.
+`STRIPE_PORTAL_PERSONAL_CONFIGURATION` and `STRIPE_PORTAL_TEAM_CONFIGURATION`
+select explicit server-owned configurations. No default portal is assumed.
+
+The endpoint reads the persisted entitlement and checkout account, verifies the
+current Stripe subscription/customer and configuration, and creates a hosted
+session. Browser-supplied customer/configuration/return URL values have no effect.
+Shared legacy/other-workspace customers require reconciliation. Responses are
+not cached; errors never expose Stripe messages or unverified session URLs.
+
+This incremental configuration requires invoice history and payment-method
+updates enabled, with subscription updates and cancellation disabled. It does
+not alter the approved cancellation policy; those actions remain a later slice.
+Failed-payment users can reach payment settings without this endpoint restoring
+access. No billing or usage state is written, and the paid UI is not connected yet.
+The existing default sandbox portal may allow cancellation: do not pass its ID
+without creating/verifying a configuration matching this limited slice.
+
+The new regression suite passes real checkout and signed activation output into
+portal creation through the database. It covers personal/Team selection, access
+control, malformed IDs, local-only gating, account/customer/configuration mismatch,
+unsafe session URLs, shared customers, failed-payment access, and no state writes.
+29 focused tests pass with PGlite; the same 29 pass against real Postgres.
+The three existing billing browser journeys pass after granting Chromium its
+required macOS launch permission; the first attempt failed before browser launch.
+No slow-request log entries appear. Worker TypeScript and `npm run build` pass.
+Behavior spec checkpoint: `d9dc1bc`.
+
+Commands run for this slice:
+
+```sh
+pnpm --dir auth-worker exec vitest run \
+  src/__tests__/billing-workspace-portal.test.ts --maxWorkers=2
+pnpm --dir auth-worker exec vitest run \
+  --config vitest.webhook-postgres.config.ts \
+  src/__tests__/billing-workspace-portal.test.ts
+pnpm --dir auth-worker exec tsc --noEmit
+npm run build
+E2E_SHARD=3/3 npx tsx scripts/e2e-up.ts -- \
+  e2e/specs/orgs/org-settings-billing.smoke.spec.ts --shard=1/1
+```
+The billing journey inventory records this boundary. Existing impact selection
+already selects billing source files; no new sentinel is required.
+
+Real Stripe verification remains pending: both browser-connection attempts time
+out and neither checked auth-worker environment contains a configured Stripe key.
+No real session, purchase, catalog change, deployment, or live configuration occurs.
 
 ## Latest launch decisions: weekly usage and Pro AI tools
 

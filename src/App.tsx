@@ -97,6 +97,9 @@ const OrgSettingsKnowledge = lazy(() =>
   import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsKnowledge })),
 )
 // Monday OAuth landing — Monday's registered redirect URI is this SPA route.
+const ConnectAgent = lazy(() =>
+  import("@/pages/ConnectAgent").then((m) => ({ default: m.ConnectAgent })),
+)
 const MondayOAuthCallback = lazy(() =>
   import("@/pages/settings/MondayOAuthCallback").then((m) => ({ default: m.MondayOAuthCallback })),
 )
@@ -316,6 +319,7 @@ function AppRoutes() {
         <Route path="/" element={<AppEntry />} />
         {/* The workspace entry. `/` is marketing at the edge, so this is the
             URL that opens the app — marketing "Open app" CTAs point here. */}
+        <Route path="/connect-agent" element={<LazyRoute><ConnectAgent /></LazyRoute>} />
         <Route path="/app" element={<AppEntry />} />
         <Route path="/projects" element={<Navigate to={resumeOrgPath()} replace />} />
         <Route path="/projects/:id" element={<ProjectOverview />} />

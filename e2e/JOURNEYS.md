@@ -20,6 +20,7 @@ not a micro-spec farm.
 | Projects | Project settings rename/save persists | `e2e/specs/projects/project-settings.smoke.spec.ts` |
 | Projects | Knowledge Base upload, extracted-text read, and delete persist through Postgres + R2 (via Living Memory → Knowledge, `/project/:id/memory/knowledge`) | `e2e/specs/projects/project-settings.smoke.spec.ts` |
 | Projects | Setup checklist survives refresh | `e2e/specs/editor/setup-checklist-survives-refresh.smoke.spec.ts` |
+| Agent connection | Browser consent issues a scoped credential; revocation blocks Agent API access | `e2e/specs/agent/agent-connection.smoke.spec.ts` |
 | Orgs | Add member to org, member sees it | `e2e/specs/orgs/members.smoke.spec.ts` |
 | Orgs | Account switcher sessions | `e2e/specs/orgs/account-switcher.smoke.spec.ts` |
 | Orgs | Preferences persist across reload | `e2e/specs/orgs/preferences-persist-reload.smoke.spec.ts` |

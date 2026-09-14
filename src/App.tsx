@@ -59,6 +59,9 @@ import { useSessionRefresh } from "@/hooks/useSessionRefresh"
 const ProjectWorkspace = lazy(() =>
   import("@/components/ProjectWorkspace").then((m) => ({ default: m.ProjectWorkspace })),
 )
+const OrgDataEgress = lazy(() =>
+  import("@/pages/OrgDataEgress").then((m) => ({ default: m.OrgDataEgress })),
+)
 const ProjectSettings = lazy(() =>
   import("@/components/ProjectSettings").then((m) => ({ default: m.ProjectSettings })),
 )
@@ -350,6 +353,7 @@ function AppRoutes() {
           <Route path="assigned" element={<AssignedToMe />} />
           <Route path="archived" element={<ArchivedProjects />} />
           <Route path="archived/files" element={<ArchivedProjects />} />
+          <Route path="egress" element={<OrgLazyRoute><OrgDataEgress /></OrgLazyRoute>} />
           <Route path="teams" element={<OrgLazyRoute><TeamsList /></OrgLazyRoute>} />
           <Route path="teams/:groupId" element={<OrgLazyRoute><TeamDetail /></OrgLazyRoute>} />
           <Route path="teams/:groupId/settings" element={<OrgLazyRoute><TeamSettingsIndex /></OrgLazyRoute>} />

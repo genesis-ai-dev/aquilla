@@ -333,7 +333,7 @@ CRUD surface with MCP bolted on.
 | Discovery | `get_capabilities`, `get_identity_and_scope` |
 | Projects | `list_projects`, `get_project`, `create_project`, `update_project` |
 | Artifacts | `create_artifact_upload`, `inspect_artifact` |
-| Ingestion | `preview_import`, `prepare_import` — **implemented**: both parse an already-uploaded source artifact server-side with the built-in DOM-free parsers (txt, md, json, po, properties, obs, vtt, srt, sbv, csv, tsv, usfm; 5000-cell cap) — preview returns cells without staging, prepare stages a `PlanImport` changeset linking the artifact. Upload stays REST-only (`POST …/artifacts`, 25MB). REST equivalent: `POST …/artifacts/:artifactId/parse` (body `{ "stage": true }` to stage). DOM-bound formats (docx, pptx, html, xliff, tmx, usx, idml) are not yet server-parseable. |
+| Ingestion | `preview_import`, `prepare_import` — **implemented**: both parse an already-uploaded source artifact server-side with the built-in DOM-free parsers (txt, md, json, po, properties, obs, vtt, srt, sbv, csv, tsv, usfm, docx; 5000-cell cap) — preview returns cells without staging, prepare stages a `PlanImport` changeset linking the artifact. Upload stays REST-only (`POST …/artifacts`, 25MB). REST equivalent: `POST …/artifacts/:artifactId/parse` (body `{ "stage": true }` to stage). `docx` is parsed by the SAME `extractDocxStrings` the in-app Import dialog runs (AQU-1237 moved it off `DOMParser`/JSZip onto the platform-only `xml-lite`/`zip-lite` readers), so an agent import and a browser import of one file yield identical cells. Still DOM-bound and not yet server-parseable: pptx, html, xliff, tmx, usx, idml. |
 | Reading | `search_project`, `read_content`, `read_history` |
 | Translation | `prepare_translations` |
 | Verification | `run_checks` — structured, actionable failures (e.g. `"term 'covenant' rendered 3 ways: [refs]"`), never a bare 400 |
@@ -537,6 +537,14 @@ The command layer is now the **shared write spine for both agent surfaces** (see
   waives, validations (testimony-flagged), back-translation, repin, file rename/delete/restore,
   assignments incl. reassign; head pins are server-resolved, whole-plan rejection on any bad
   reference). `UpdateProjectSettings` is deprecated and now rejects policy-key changes.
+- **Living Memory writes (AQU-1228)** — `AddExample` / `AddDecision` / `AddNote` (CONTRIBUTOR)
+  and `RetireExample` (PROJECT_LEAD), each a sole-command receipt-only changeset writing the
+  `agent_memories` table (Living Memory is not event-sourced, so these do NOT ride
+  `EmitEvents`). The changeset's human confirmation stands in for the in-app Memory review,
+  but only when the APPROVING user's live role is PROJECT_LEAD+; otherwise the entry lands
+  `proposed` and the receipt's `memoryStatus` says so. Retirement archives (out of retrieval,
+  still auditable); human-edited entries are never overwritten or retired through this
+  surface. See `docs/COMMAND-REGISTRY.md` §2.
 - **Session principal** — the in-app agent stages changesets through the same engine via
   session sync-token routes (`/api/v1/changesets/:projectId[...]` on the sync host), with
   `credential_id = 'session'`, forced ask mode, `channel: "app"` provenance, and the existing

@@ -159,6 +159,35 @@ describe("ApproveChangeset", () => {
     expect(screen.queryByText(/No changes summarized/i)).not.toBeInTheDocument()
   })
 
+  it("renders the entry path and content preview for a Living Memory changeset", async () => {
+    // AQU-1228: approving IS the memory review, so the human must see WHAT the
+    // entry says — "Command: AddDecision" alone is a blind approval.
+    const data = {
+      ...APPROVAL_DATA,
+      summary: {
+        command: "AddDecision",
+        projectId: "proj-1",
+        memoryWrites: [
+          {
+            path: "decisions/divine-name.md",
+            action: "add",
+            preview: "add decision: Render Lord as Господь, never Пан.",
+          },
+        ],
+        warnings: [],
+      },
+    }
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(data), { status: 200 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    renderPage()
+
+    expect(await screen.findByText(/Living Memory changes/i)).toBeInTheDocument()
+    expect(screen.getByText("decisions/divine-name.md")).toBeInTheDocument()
+    expect(screen.getByText(/never Пан/)).toBeInTheDocument()
+    expect(screen.queryByText(/No changes summarized/i)).not.toBeInTheDocument()
+  })
+
   it("renders per-cell before/after changes and a back-to-project link", async () => {
     const data = {
       ...APPROVAL_DATA,

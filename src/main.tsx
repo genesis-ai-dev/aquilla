@@ -8,6 +8,7 @@ import { brand } from "./branding/current-brand"
 import { applyTheme } from "./branding/apply-theme"
 import { BrandProvider } from "./branding/BrandProvider"
 import { ThemeModeProvider } from "./branding/ThemeMode"
+import { FontSizeProvider } from "./branding/FontSize"
 import { ErrorBoundary } from "./components/ErrorBoundary"
 import { I18nProvider } from "./lib/i18n/I18nProvider"
 import { AccountsProvider } from "./hooks/useAccounts"
@@ -41,9 +42,11 @@ createRoot(document.getElementById("root")!).render(
           <I18nProvider>
             <BrandProvider>
               <ThemeModeProvider>
-                <BrowserRouter>
-                  <App />
-                </BrowserRouter>
+                <FontSizeProvider>
+                  <BrowserRouter>
+                    <App />
+                  </BrowserRouter>
+                </FontSizeProvider>
               </ThemeModeProvider>
             </BrandProvider>
           </I18nProvider>

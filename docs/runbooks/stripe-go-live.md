@@ -1,6 +1,80 @@
 # Stripe launch and covered-access playbook
 
-Updated: 2026-09-10. Tickets: AQU-837 (billing readiness), AQU-1091 (pricing and app UI).
+Updated: 2026-09-13. Tickets: AQU-837 (billing readiness), AQU-1091 (pricing and app UI).
+
+## Stripe-hosted billing direction — 2026-09-13
+
+Ryder approves using Stripe for every supported billing operation and modest
+policy adjustments that fit standard Stripe behavior. This supersedes the plan
+to build custom plan-change confirmation, proration, and schedule execution.
+Earlier custom-review evidence remains historical; it is not a launch requirement.
+The existing custom review code is checkpointed in `811cdb474`, not deployed.
+
+Ownership:
+
+- Stripe Checkout handles the first purchase.
+- Stripe Customer Portal handles plan changes, proration confirmation, payment
+  authentication, payment methods, invoices, and cancellation where supported.
+- Stripe Billing handles recurring collection, retries, and billing schedules.
+- Aquilla authorizes workspace maintainers, maps verified Stripe state to access,
+  and measures/enforces weekly usage without resetting consumption on plan changes.
+- Redirects from Stripe never grant access; verified server-side state does.
+
+Prefer a simple fixed-price, single-item subscription for each launch offer,
+with quantity one and separate personal/team portal configurations. Preserve
+approved commercial totals; a simpler catalog representation is not a price change.
+Keep existing catalog IDs and historical subscriptions readable during transition.
+Do not copy sandbox objects wholesale into live mode.
+
+Policy selection must follow an actual sandbox proof. Prefer immediate prorated
+upgrades and cancellation at period end. Retain renewal-time downgrades wherever
+Stripe supports them natively. If the launch catalog cannot support that directly,
+use immediate prorated downgrades, with Stripe displaying the timing and credit
+before confirmation. Record the selected behavior and update product copy/specs
+before enabling it. Credits do not imply automatic cash refunds. Weekly usage
+remains consumed when the cap changes. Do not build a custom scheduling engine
+solely to preserve the earlier downgrade preference.
+
+Stripe documents renewal-time downgrades only between Prices on the same Product.
+Its portal also restricts duplicate Product/recurring-interval Price choices.
+Our current Max variants share a Product and interval; Pro uses another Product.
+Team20x has two items on one Product: test it explicitly rather than treating it
+as the documented multiple-Product restriction. A new single-item bundled Price
+is the preferred fallback if that composition prevents native management.
+
+Execution checklist, in dependency order:
+
+- [x] Record approval for Stripe-hosted billing and retire custom execution as
+  the default implementation plan.
+- [x] Preserve implementation checkpoint and recover the temporary checkout.
+  Its Git link and 3,803 missing tracked files were restored from `811cdb474`;
+  surviving files matched HEAD and were not overwritten. Git reports clean
+  before this documentation update. No committed work was lost.
+- [ ] Prove a real sandbox portal configuration against personal and Team offers:
+  upgrades, downgrade timing/credit, failed payment/3DS, cancellation, and recovery.
+- [ ] Finalize the minimal supported catalog and portal settings; record IDs and
+  exact policy outcomes. Do not mark mocked Stripe responses as this proof.
+- [ ] Add authenticated workspace portal sessions using the stored customer,
+  explicit scope-specific configuration, and trusted return URL.
+- [ ] Reconcile portal-originated Price changes and paid access from verified
+  Stripe state. Cover prorations, pending payment, scheduled changes, cancellation
+  timestamps, duplicate/out-of-order webhooks, and unchanged weekly consumption.
+- [ ] Replace the custom review surface with hosted billing management; retire
+  unused preview/persistence code after the replacement passes its tests.
+- [ ] Complete actual weekly metering/enforcement across AI execution paths.
+- [ ] Update pricing/onboarding copy and behavior specs to the verified rules.
+  The dedicated pricing-aware onboarding rework still needs dispatch.
+- [ ] Run affected worker/Postgres/RTL/billing smoke coverage and the build;
+  complete real sandbox checkout-to-portal-to-access tests before live enablement.
+
+Documentation-only validation for this decision: `git diff --check`. No runtime
+contract, producer/consumer, or test changed in this checkpoint. Earlier passing
+tests do not establish portal compatibility. Live checkout remains disabled.
+
+Sources checked 2026-09-13:
+[Portal configuration](https://docs.stripe.com/customer-management/configure-portal),
+[portal limitations](https://docs.stripe.com/customer-management), and
+[hosted confirmation flows](https://docs.stripe.com/customer-management/portal-deep-links).
 
 ## Latest launch decisions: weekly usage and Pro AI tools
 
@@ -832,7 +906,8 @@ this checklist does not approve proposed commercial behavior.
   paid cap without resetting usage.
 - [x] Upgrade allowance rule: **approved by Ryder, 2026-09-11**. Immediate cap
   increase, with already-used weekly allowance unchanged.
-- [x] Downgrade timing and allowance rule: **revised by Ryder, 2026-09-12**.
+- [x] Downgrade timing and allowance rule: **2026-09-12 preference; conditional
+  on native Stripe support as of 2026-09-13 (see direction above)**.
   Take effect at the next billing cycle. Keep the current plan and cap until then.
   Preserve weekly consumption when the lower cap takes effect; do not reset the
   usage week at the billing boundary. This supersedes the 2026-09-11 immediate
@@ -842,7 +917,8 @@ this checklist does not approve proposed commercial behavior.
   with the current week's usage retained.
 - [x] Upgrade financial rule: **approved by Ryder, 2026-09-12**. Charge the
   prorated upgrade difference immediately. The increased cap preserves usage.
-- [x] Downgrade billing rule: **approved by Ryder, 2026-09-12**. Apply the lower
+- [x] Downgrade billing rule: **2026-09-12 preference; conditional on native
+  Stripe support as of 2026-09-13 (see direction above)**. Apply the lower
   plan at the next billing cycle, with the current paid period retained. No
   immediate downgrade or unused-time credit is required by this flow.
 - [ ] Define downgrade membership handling and any cancellation refund policy;

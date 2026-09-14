@@ -238,6 +238,7 @@ import { SearchResultsView } from "./search/SearchResultsView"
 import { LeftDock, type DockTab } from "./LeftDock"
 import { TranslationNotesSidebar, readTnSidebarVisible, writeTnSidebarVisible } from "./TranslationNotesSidebar"
 import { ParallelBiblesSidebar, readParallelBiblesOpen, writeParallelBiblesOpen } from "./ParallelBiblesSidebar"
+import { VerseResourcesSidebar, readVerseResourcesOpen, writeVerseResourcesOpen } from "./VerseResourcesSidebar"
 import { InactiveProjectBanner } from "./InactiveProjectBanner"
 import { OfflineBanner } from "./OfflineBanner"
 import { useProjectLifecycle } from "@/hooks/useProjectLifecycle"
@@ -297,6 +298,8 @@ import { EditorScrollProvider, useEditorScroll } from "@/context/EditorScrollCon
 import { EditorActionsProvider } from "@/context/EditorActionsContext"
 import { detectSuggestions, type RenameSuggestion } from "@/lib/file-labeling/detect"
 import { canExportSourceFile, exportSourceFile } from "@/lib/file-source-export"
+import { downloadImportedOriginal } from "@/lib/file-original-download"
+import { useOriginalSourceFlags } from "@/hooks/useOriginalSourceFlags"
 import { applySuggestions, buildUndo, hasEffectiveChange } from "@/lib/file-labeling/apply"
 import { renameFile, moveFileToCorpus, renameCorpus, deleteFile } from "@/lib/store/file-operations"
 import { deleteFileProjection } from "@/lib/sync/file-projection"
@@ -1188,6 +1191,8 @@ export function ProjectWorkspace() {
     project?.origin?.kind,
     project?.origin?.kind === "git" ? project?.origin.gitlabProjectId : undefined,
   ])
+
+  const originalSourceIds = useOriginalSourceFlags(project?.id, project?.files ?? [], getTokenForFile)
 
   // AQU-1006 follow-up: this project's concepts, read from the sync-worker
   // projection. `project.terminology` (the settings-blob key) is retired — it
@@ -5815,12 +5820,19 @@ export function ProjectWorkspace() {
   const [parallelBiblesOpen, setParallelBiblesOpen] = useState<boolean>(() =>
     projectId ? readParallelBiblesOpen(projectId) : false,
   )
+  // Verse-resources sidebar (AQU-461, Aquifer): same tracked ref as the
+  // parallel bibles, its own open state.
+  const [verseResourcesOpen, setVerseResourcesOpen] = useState<boolean>(() =>
+    projectId ? readVerseResourcesOpen(projectId) : false,
+  )
   // AQU-1016: was `useState` here — every scroll step re-rendered this whole
   // shell to feed a value only the parallel-bibles panel reads. It now lives
   // in the shared editor-viewport store (src/hooks/useEditorViewportStore.ts);
   // writes below go straight to the store, and this read only subscribes
   // (and thus only re-renders the shell) while a parallel-bibles panel is
   // actually shown for the active file — the same gate the render sites use.
+  // The AQU-461 verse-resources panel renders under a subset of that gate,
+  // so the same subscription serves both.
   const parallelBiblesPanelActive = centerSurface === "editor" && !!activeFile && fileHasSections(activeFile)
   const trackedCellRef = useEditorViewportTrackedCellRef(parallelBiblesPanelActive)
   // Drop the tracked ref when switching files so the previous file's verse
@@ -9923,6 +9935,20 @@ export function ProjectWorkspace() {
         },
       })
     }
+    if (activeFile && projectId && canExportByOrgPolicy && originalSourceIds.has(activeFile.id)) {
+      items.push({
+        id: "file-download-original",
+        label: t("fileDetails.downloadOriginal"),
+        icon: Download,
+        onClick: () => {
+          void downloadImportedOriginal({
+            projectId,
+            file: activeFile,
+            getToken: getTokenForFile,
+          })
+        },
+      })
+    }
     if (currentRoleLevel >= ROLE.PROJECT_LEAD) {
       items.push({ id: "sep-file-delete", type: "separator" })
       items.push({
@@ -9957,6 +9983,7 @@ export function ProjectWorkspace() {
     hasUnfinished,
     lens,
     openExportFlow,
+    originalSourceIds,
     project,
     projectId,
     suggestions.length,
@@ -10772,7 +10799,10 @@ export function ProjectWorkspace() {
             <Suspense fallback={<LoadingPanel label={t("terminology.loadingLabel")} />}>
               <GlossaryEditorContent
                 files={projectFiles}
-                project={project}
+                // The projection-folded record: `project.terminology` is the retired
+                // settings blob, so a glossary handed the raw record shows the blob
+                // and never a term that was created through the event log.
+                project={editorProject ?? project}
                 patchSettings={patchSettings}
               />
             </Suspense>
@@ -11404,8 +11434,19 @@ export function ProjectWorkspace() {
         aside={(() => {
           const showParallelBibles =
             centerSurface === "editor" && !!activeFile && fileHasSections(activeFile)
+          // AQU-461: verse resources ride the same scripture-editor condition,
+          // plus the project's Bible-resources gate (the aquifer routes 404
+          // when it's off, so an ungated tab would only ever show an error).
+          const showVerseResources =
+            showParallelBibles &&
+            !!project &&
+            resolveBibleResourcesEnabled(
+              project.bibleResourcesEnabled,
+              projectHasScriptureFiles(project.files),
+            )
           const hasRightAside =
             (showParallelBibles && parallelBiblesOpen) ||
+            (showVerseResources && verseResourcesOpen) ||
             tnSidebarVisible ||
             checkOpen ||
             drawerRuleId !== null ||
@@ -11428,6 +11469,22 @@ export function ProjectWorkspace() {
                     const next = !parallelBiblesOpen
                     setParallelBiblesOpen(next)
                     if (projectId) writeParallelBiblesOpen(projectId, next)
+                  }}
+                />
+              )}
+              {/* AQU-461: Verse Resources (Aquifer) — open panel only; the
+                  collapsed edge tab rides in asideEdge alongside the bibles'. */}
+              {showVerseResources && verseResourcesOpen && (
+                <VerseResourcesSidebar
+                  key={activeFile!.id}
+                  projectId={project!.id}
+                  trackedRef={trackedCellRef}
+                  getJwt={() => jwtRef.current}
+                  open
+                  onToggle={() => {
+                    const next = !verseResourcesOpen
+                    setVerseResourcesOpen(next)
+                    if (projectId) writeVerseResourcesOpen(projectId, next)
                   }}
                 />
               )}
@@ -11557,23 +11614,50 @@ export function ProjectWorkspace() {
             </>
           )
         })()}
-        asideEdge={
-          centerSurface === "editor" &&
-          activeFile &&
-          fileHasSections(activeFile) &&
-          !parallelBiblesOpen ? (
-            <ParallelBiblesSidebar
-              key={`${activeFile.id}-edge`}
-              trackedRef={trackedCellRef}
-              open={false}
-              onToggle={() => {
-                const next = !parallelBiblesOpen
-                setParallelBiblesOpen(next)
-                if (projectId) writeParallelBiblesOpen(projectId, next)
-              }}
-            />
-          ) : null
-        }
+        asideEdge={(() => {
+          const inScriptureEditor =
+            centerSurface === "editor" && !!activeFile && fileHasSections(activeFile)
+          if (!inScriptureEditor) return null
+          // AQU-461: two collapsed tabs can stack here — bibles and verse
+          // resources — each shown only while its own panel is closed.
+          const verseResourcesAvailable =
+            !!project &&
+            resolveBibleResourcesEnabled(
+              project.bibleResourcesEnabled,
+              projectHasScriptureFiles(project.files),
+            )
+          if (parallelBiblesOpen && !(verseResourcesAvailable && !verseResourcesOpen)) return null
+          return (
+            <>
+              {!parallelBiblesOpen && (
+                <ParallelBiblesSidebar
+                  key={`${activeFile!.id}-edge`}
+                  trackedRef={trackedCellRef}
+                  open={false}
+                  onToggle={() => {
+                    const next = !parallelBiblesOpen
+                    setParallelBiblesOpen(next)
+                    if (projectId) writeParallelBiblesOpen(projectId, next)
+                  }}
+                />
+              )}
+              {verseResourcesAvailable && !verseResourcesOpen && (
+                <VerseResourcesSidebar
+                  key={`${activeFile!.id}-resources-edge`}
+                  projectId={project!.id}
+                  trackedRef={trackedCellRef}
+                  getJwt={() => jwtRef.current}
+                  open={false}
+                  onToggle={() => {
+                    const next = !verseResourcesOpen
+                    setVerseResourcesOpen(next)
+                    if (projectId) writeVerseResourcesOpen(projectId, next)
+                  }}
+                />
+              )}
+            </>
+          )
+        })()}
         statusBar={
           (() => {
             // Audio playback chrome belongs to the open file — hide it on

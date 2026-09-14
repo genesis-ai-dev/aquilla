@@ -160,6 +160,53 @@ describe("chat /api/v1/chat/completions — allowlist guard", () => {
   })
 })
 
+// [Pen test] API security & data exposure (2026-09-03): every spend guard
+// below (AI budget, credit cap, word cap) is log-only in every deployed
+// environment — this per-user sliding-window throttle is the only thing that
+// actually blocks a flood against the shared OPENROUTER_API_KEY.
+describe("chat /api/v1/chat/completions — rate limiting", () => {
+  it("429s a user that has flooded the window, without calling upstream", async () => {
+    await seedUser(7, "grace")
+    const jwt = await jwtFor("grace")
+    const upstream = mockUpstreamSuccess()
+    await pg.exec(
+      `INSERT INTO auth_rate_limit_events (kind, identifier, success)
+       SELECT 'chat_completions', 'user:7', 1 FROM generate_series(1, 300)`,
+    )
+    const testEnv = withEnvOverrides({ OPENROUTER_API_KEY: "test-key" })
+
+    const res = await app.request(
+      "/api/v1/chat/completions",
+      { method: "POST", headers: authHeader(jwt), body: chatBody(ALLOWED_MODEL) },
+      testEnv,
+    )
+
+    expect(res.status).toBe(429)
+    const body = (await res.json()) as { error: string }
+    expect(body.error).toBe("rate_limited")
+    expect(upstream).not.toHaveBeenCalled()
+  })
+
+  it("does not throttle a fresh user, even when another user has flooded the window", async () => {
+    await seedUser(8, "heidi")
+    const jwt = await jwtFor("heidi")
+    mockUpstreamSuccess()
+    await pg.exec(
+      `INSERT INTO auth_rate_limit_events (kind, identifier, success)
+       SELECT 'chat_completions', 'user:999', 1 FROM generate_series(1, 300)`,
+    )
+    const testEnv = withEnvOverrides({ OPENROUTER_API_KEY: "test-key" })
+
+    const res = await app.request(
+      "/api/v1/chat/completions",
+      { method: "POST", headers: authHeader(jwt), body: chatBody(ALLOWED_MODEL) },
+      testEnv,
+    )
+
+    expect(res.status).toBe(200)
+  })
+})
+
 describe("chat /api/v1/chat/completions — budget enforcement", () => {
   it("returns 200 for an in-budget request (happy path)", async () => {
     await seedUser(3, "carol")

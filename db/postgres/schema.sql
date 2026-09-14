@@ -601,6 +601,15 @@ CREATE TABLE plan_units (
       CHECK ((done_at IS NULL) = (done_by IS NULL))
 );
 
+-- Retention rollup: one row per user per UTC day they used the app. Written by
+-- auth-worker bumpOrgActivity; read by the admin retention view + recap email.
+-- See db/postgres/migrations/0090_user_activity_days.sql for the rationale.
+CREATE TABLE user_activity_days (
+    user_id BIGINT NOT NULL,
+    day     DATE   NOT NULL,
+    PRIMARY KEY (user_id, day)
+);
+
 CREATE TABLE cell_validators (
     project_id  TEXT NOT NULL,
     file_id     TEXT NOT NULL,
@@ -834,6 +843,7 @@ CREATE TABLE cell_word_morph (
 
 CREATE INDEX idx_activity_logs_timestamp ON activity_logs(timestamp);
 CREATE INDEX idx_activity_logs_user_id ON activity_logs(user_id);
+CREATE INDEX idx_user_activity_days_day ON user_activity_days(day);
 CREATE INDEX assignment_cells_by_assignment ON assignment_cells(assignment_id);
 CREATE INDEX assignments_assignee ON assignments(assignee_user_id);
 CREATE INDEX assignments_project ON assignments(project_id);

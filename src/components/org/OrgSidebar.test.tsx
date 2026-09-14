@@ -15,10 +15,12 @@ vi.mock("@/hooks/usePlatformAdmin", () => ({
   usePlatformAdmin: () => ({ isAdmin: platformAdmin.isAdmin, loading: false }),
 }))
 
-const rosterSettings = vi.hoisted(() => ({ canViewRoster: true }))
+const rosterSettings = vi.hoisted(() => ({ canViewRoster: true, canEgress: true }))
 vi.mock("@/hooks/useOrgSettings", () => ({
   useOrgSettings: () => ({
     canViewRoster: rosterSettings.canViewRoster,
+    canEgress: rosterSettings.canEgress,
+    egressMinRole: 700,
     hasFetched: true,
     rosterViewMinRole: 600,
     canViewMemberProgress: true,
@@ -70,6 +72,7 @@ beforeEach(() => {
   listMyOrgs.mockReset()
   fetchAccessibleProjects.mockReset()
   rosterSettings.canViewRoster = true
+  rosterSettings.canEgress = true
   platformAdmin.isAdmin = false
 })
 afterEach(() => vi.clearAllMocks())
@@ -146,6 +149,44 @@ describe("OrgSidebar all-organizations scope", () => {
     expect(overview).toHaveAttribute("data-tour", "nav-overview")
     expect(screen.queryByRole("link", { name: "Projects" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Teams" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Data egress" })).not.toBeInTheDocument()
+  })
+})
+
+describe("OrgSidebar Data egress entry (AQU-907)", () => {
+  it("shows the org-scoped link when the egress policy admits the caller", async () => {
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "Acme", role: { level: 700, name: "owner" } }])
+    fetchAccessibleProjects.mockResolvedValue([])
+
+    renderSidebar("/orgs/1")
+
+    expect(await screen.findByRole("link", { name: "Data egress" })).toHaveAttribute("href", "/orgs/1/egress")
+  })
+
+  it("shows the entry to a below-admin role the owner opened the surface to", async () => {
+    // egressMinRole is org policy, not the admin block: a contributor (400)
+    // in an org whose owner set the floor at 400 gets the entry even though
+    // Archived/Settings stay hidden.
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "Acme", role: { level: 400, name: "contributor" } }])
+    fetchAccessibleProjects.mockResolvedValue([])
+
+    renderSidebar("/orgs/1")
+
+    expect(await screen.findByRole("link", { name: "Data egress" })).toHaveAttribute("href", "/orgs/1/egress")
+    expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument()
+  })
+
+  it("hides the entry when the egress policy excludes the caller", async () => {
+    // Default policy is owner-only — a maintainer without an opened floor
+    // has no entry.
+    rosterSettings.canEgress = false
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "Acme", role: { level: 600, name: "maintainer" } }])
+    fetchAccessibleProjects.mockResolvedValue([])
+
+    renderSidebar("/orgs/1")
+
+    await screen.findByRole("link", { name: "Teams" })
+    expect(screen.queryByRole("link", { name: "Data egress" })).not.toBeInTheDocument()
   })
 })
 

@@ -144,3 +144,8 @@ MONDAY_REDIRECT_URI="http://localhost:5173/oauth/callback"
 
 # R2 object key prefix override for agent artifacts (routes/agent-artifacts.ts).
 # R2_KEY_PREFIX=""
+
+# Stripe keys
+#STRIPE_SECRET_KEY=sk_live_1234.... (Or sk_test_ for sandbox key)
+#STRIPE_PUBLISHABLE_KEY=pk_live_1234....
+

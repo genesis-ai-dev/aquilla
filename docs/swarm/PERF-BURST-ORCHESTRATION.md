@@ -39,14 +39,31 @@ Ordering intent: 1146 → 1147 (prod profile gate first) → 1016 → 1160; 1160
 ## §3 Workstream registry
 | WS | Issue | Status | Branch / worktree | Owns | Notes |
 | --- | --- | --- | --- | --- | --- |
-| WS-1146 | AQU-1146 | Dispatched | `swarm/aqu-1146` / `.worktrees/aqu-1146` | `src/components/EditorTable.tsx`, `src/components/EditorTable.*.test.tsx` | store API read-only (`getCellVersion`, `readAtVersion`) |
-| WS-1160 | AQU-1160 | Dispatched | `swarm/aqu-1160` / `.worktrees/aqu-1160` | `sync-worker/src/events/cells-read-route.ts`, `sync-worker/src/__tests__/cells-read.test.ts`, `read-routes.test.ts`, `db/postgres/migrations/0083_*.sql`, `db/postgres/schema.sql`, comments in `src/lib/sync/cells-read.ts` | salvage index/paging from reverted `ef249e914` |
-| WS-PROF | AQU-1147 gate | Dispatched | none (read-only; uses root dev stack + `pnpm build`/`vite preview`) | `docs/swarm/PERF-BURST-PROFILE.md` | records numbers on AQU-1147 |
-| WS-1147 | AQU-1147 | Dispatched 06:07Z | `swarm/aqu-1147` / `.worktrees/aqu-1147` | `src/components/ProjectWorkspace.tsx`, new hooks under `src/hooks/`, `ProjectWorkspace.*.test.ts` | |
-| WS-1016 | AQU-1016 | Dispatched 06:07Z | `swarm/aqu-1016` / `.worktrees/aqu-1016` | `ProjectWorkspace.tsx` scroll state, `EditorTable.tsx` scroll callbacks, health recompute scheduling | |
+| WS-1146 | AQU-1146 | Merged to dev | `swarm/aqu-1146` / `.worktrees/aqu-1146` | `src/components/EditorTable.tsx`, `src/components/EditorTable.*.test.tsx` | store API read-only (`getCellVersion`, `readAtVersion`) |
+| WS-1160 | AQU-1160 | Merged to dev | `swarm/aqu-1160` / `.worktrees/aqu-1160` | `sync-worker/src/events/cells-read-route.ts`, `sync-worker/src/__tests__/cells-read.test.ts`, `read-routes.test.ts`, `db/postgres/migrations/0083_*.sql`, `db/postgres/schema.sql`, comments in `src/lib/sync/cells-read.ts` | salvage index/paging from reverted `ef249e914` |
+| WS-PROF | AQU-1147 gate | Done | none (read-only; uses root dev stack + `pnpm build`/`vite preview`) | `docs/swarm/PERF-BURST-PROFILE.md` | records numbers on AQU-1147 |
+| WS-1147 | AQU-1147 | Merged to dev (scaled down) | `swarm/aqu-1147` / `.worktrees/aqu-1147` | `src/components/ProjectWorkspace.tsx`, new hooks under `src/hooks/`, `ProjectWorkspace.*.test.ts` | |
+| WS-1016 | AQU-1016 | Merged to dev | `swarm/aqu-1016` / `.worktrees/aqu-1016` | `ProjectWorkspace.tsx` scroll state, `EditorTable.tsx` scroll callbacks, health recompute scheduling | |
 
 ## §1b Release plan (operator, 2026-09-04)
 Dev team will test on the dev environment. Gate for push+deploy to `dev` / dev.aquilla.app: `pnpm build` + affected Vitest + worker tests + `pnpm test:e2e:affected`; full `test:e2e:smoke` runs AFTER deploy in the background and is reported honestly. Deploy command: `pnpm run deploy:aquilla:dev` (verifies branch `dev`).
 
 ## §M Merge log
 <!-- date · WS · branch · sha · build · vitest · targeted smoke · notes -->
+- 2026-09-04 · WS-1160 · `swarm/aqu-1160` · merge `9b50a80b5` · tsc/tests NOT run at merge time (operator waived) · no smoke · ordered-id chain cache + `idx_cells_file_scan`.
+- 2026-09-04 · WS-1146 · `swarm/aqu-1146` · merge after `32901cf40` · `tsc -b` clean · 26 EditorTable files / 142 tests green · no smoke.
+- 2026-09-04 · WS-1147 · `swarm/aqu-1147` · merge after `a1acd5c94` · `tsc -b` clean · covered by the combined run below · no smoke. **Scaled down** per the profile: only the eight handlers that carried `cellStoreVersion` for nothing; the ~20-memo extraction and render-count probes were dropped. The parallel `origin/agent/AQU-1147-workspace-version-derivations` (`eec110d25`, six handlers) is a strict subset of this and can be deleted.
+- 2026-09-04 · WS-1016 · `swarm/aqu-1016` · merge after `58c28a51c` · `tsc -b` clean · 33 files / 189 tests green across EditorTable + ProjectWorkspace + useEditorViewportStore · no smoke.
+
+**Full unit suite, merged `dev` (2026-09-04):** 1008 files / 10,657 tests, 6 files
+failing. Each was re-run in isolation against the pre-merge baseline `0fd61d9e3`:
+`no-duplicates.test.ts` (i18n catalog exception for a key that no longer exists) and
+both `ContextualRunPill` cases fail there too — **pre-existing, not from this work**.
+`RecordingVideoSurface`, `AgentWorkbench`, `ProjectsList`, `TeamDetail` pass 3/3 in
+isolation on BOTH trees — timing flakes under full-suite parallel load. No regression
+attributable to 1146/1147/1016/1160.
+
+**Verification debt (honest):** none of the four was verified on the live dev
+stack, and `pnpm test:e2e:smoke` was NOT run — the operator waived both for this
+pass. §0's live-UI and smoke boxes are therefore still open, and the dev team's
+testing on `dev.aquilla.app` is the first real exercise of this work.

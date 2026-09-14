@@ -27,6 +27,7 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { toast } from "@/components/ui/toast"
 import { cn } from "@/lib/utils"
 import { MIN_FONT_SIZE, MAX_FONT_SIZE, FONT_SIZE_STEP } from "@/lib/store/file-view-prefs"
+import { setMilestoneSplit, useMilestoneSplit } from "@/lib/store/milestone-split-pref"
 import type { FootnoteViewMode } from "@/lib/footnotes/types"
 import type { TargetKeyTermHighlightMode } from "@/hooks/useTargetKeyTermHighlightPreference"
 import type { DirectionMode, TextDirection, TextDirectionSummary } from "@/lib/text-direction"
@@ -55,6 +56,8 @@ interface ViewSettingsMenuProps {
   directionWarningScope?: string | null
   cellLabelsEnabled: boolean
   tnSidebarEnabled: boolean
+  /** Per-browser switch for health ribbons, rule checks and the confidence overlay. */
+  healthCalculationsEnabled?: boolean
   /** AQU-317: USFM \f...\f* footnote display mode. */
   footnoteViewMode?: FootnoteViewMode
   /** When approved target renderings receive the quiet key-term highlight. */
@@ -70,6 +73,7 @@ interface ViewSettingsMenuProps {
   onSourceFontSizeChange: (v: number) => void
   onTargetFontSizeChange: (v: number) => void
   onTnSidebarChange: (v: boolean) => void
+  onHealthCalculationsChange?: (v: boolean) => void
   onFootnoteViewModeChange?: (v: FootnoteViewMode) => void
   onTargetKeyTermHighlightModeChange?: (v: TargetKeyTermHighlightMode) => void
 }
@@ -92,6 +96,7 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
   directionWarningScope,
   cellLabelsEnabled,
   tnSidebarEnabled,
+  healthCalculationsEnabled = true,
   footnoteViewMode = "off",
   targetKeyTermHighlightMode = "never",
   sourceFontSize,
@@ -103,11 +108,13 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
   onSourceFontSizeChange,
   onTargetFontSizeChange,
   onTnSidebarChange,
+  onHealthCalculationsChange,
   onFootnoteViewModeChange,
   onTargetKeyTermHighlightModeChange,
 }, ref) {
   const t = useT()
   const [menuOpen, setMenuOpen] = useState(false)
+  const splitByMilestone = useMilestoneSplit()
   const mismatch = useMemo(
     () =>
       getManualDirectionMismatch({
@@ -278,6 +285,13 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
 
           <FieldGroup className="gap-3">
             <SwitchRow
+              id="view-split-milestones"
+              label={t("editor.milestone.splitAria")}
+              checked={splitByMilestone}
+              disabled={!fileOpen}
+              onCheckedChange={setMilestoneSplit}
+            />
+            <SwitchRow
               id="view-show-line-numbers"
               label={t("editor.view.showLineNumbers")}
               checked={lineNumbersEnabled}
@@ -296,6 +310,14 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
               checked={tnSidebarEnabled}
               onCheckedChange={onTnSidebarChange}
             />
+            {onHealthCalculationsChange && (
+              <SwitchRow
+                id="view-show-health-indicators"
+                label={t("editor.view.showHealthIndicators")}
+                checked={healthCalculationsEnabled}
+                onCheckedChange={onHealthCalculationsChange}
+              />
+            )}
           </FieldGroup>
 
           {onTargetKeyTermHighlightModeChange && (

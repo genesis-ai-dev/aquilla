@@ -96,6 +96,8 @@ import mondayRoutes from "./routes/monday"
 import contactRoutes from "./routes/contact"
 import billingRoutes from "./routes/billing"
 import { flushDirtyLinks } from "./lib/monday/push"
+import { createRequestMemo } from "./lib/request-memo"
+import { pruneExpiredRevokedTokens } from "./utils/token-revocation"
 import { sweepStrandedContextualRuns } from "./routes/contextual"
 import {
   deploymentEnvironmentError,
@@ -105,6 +107,7 @@ import {
 type HonoEnv = { Bindings: Env; Variables: Variables }
 
 import { makePostgres } from "../../db/shim/postgres"
+import { sendScheduledRetentionReport } from "./lib/retention-cron"
 import { shipLog, shipErrorResponse } from "./posthog-logs"
 
 const app = new Hono<HonoEnv>()
@@ -373,7 +376,14 @@ app.fetch = (async (request: Request, env: Env, ctx: ExecutionContext): Promise<
     )
   }
 
-  if (env?.AQUILLA_PG) return baseFetch(request, env, ctx)
+  // Every entry gets its own read memo (lib/request-memo.ts) on a fresh env
+  // copy — tests pass one shared env across many requests, so the memo must
+  // never be attached to the shared object. Prototype-chained (not spread) so
+  // test envs built with Object.create(env) keep their inherited bindings.
+  if (env?.AQUILLA_PG) {
+    const memoEnv = Object.assign(Object.create(env) as Env, { requestMemo: createRequestMemo() })
+    return baseFetch(request, memoEnv, ctx)
+  }
   if (!env?.HYPERDRIVE) {
     return new Response(
       "HYPERDRIVE not bound — Postgres is required (D1 has been removed as a datastore)",
@@ -391,6 +401,7 @@ app.fetch = (async (request: Request, env: Env, ctx: ExecutionContext): Promise<
     AQUILLA_PG: shim as unknown as AquillaDb,
     HYPERDRIVE: undefined,
     PG_CONNECTION_STRING: env.HYPERDRIVE.connectionString,
+    requestMemo: createRequestMemo(),
   }
   try {
     return await baseFetch(request, reqEnv, ctx)
@@ -404,7 +415,7 @@ app.fetch = (async (request: Request, env: Env, ctx: ExecutionContext): Promise<
 // The scheduled entrypoint doesn't pass through the fetch wrapper above, so it
 // builds its own request-scoped Postgres shim the same way.
 const scheduled = async (
-  _controller: ScheduledController,
+  controller: ScheduledController,
   env: Env,
   ctx: ExecutionContext,
 ): Promise<void> => {
@@ -431,8 +442,18 @@ const scheduled = async (
   // is configured). The close below must wait for them.
   let sweepDone: Promise<void> = Promise.resolve()
   try {
+    // The retention recap crons (weekly Monday / monthly 1st) share this
+    // handler; they do their one job and return without the 5-minute chores.
+    const recap = await sendScheduledRetentionReport(runEnv, controller.cron, new Date())
+    if (recap !== "not-a-recap-cron") {
+      console.log(`[retention cron] ${controller.cron}: ${recap}`)
+      return
+    }
     const flushed = await flushDirtyLinks(runEnv, 20)
     if (flushed > 0) console.log(`[monday cron] flushed ${flushed} dirty link(s)`)
+    // revoked_tokens hygiene lives here now, off the request path (it used to
+    // be a random 2%-of-logouts DELETE). Non-throwing.
+    await pruneExpiredRevokedTokens(runEnv.AQUILLA_PG)
     // Contextual autopilot: restart runs whose driver died and wake runs that
     // parked with spans still queued, so long files finish unattended. Failing
     // here must never take the Monday flush down with it.

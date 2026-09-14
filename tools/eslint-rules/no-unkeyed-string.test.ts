@@ -35,6 +35,10 @@ ruleTester.run("no-unkeyed-string", noUnkeyedString, {
     // Dynamic content and keyed calls contain no authored visible copy.
     { code: "const x = <p>{serverMessage}</p>", filename: "src/components/Foo.tsx" },
     { code: "const x = <p>{t('knowledgeBase.empty')}</p>", filename: "src/components/Foo.tsx" },
+    // A string literal compared against a value is a discriminator, not copy.
+    { code: "const x = <p>{origin === 'shared' && <b>{t('org.shared')}</b>}</p>", filename: "src/components/Foo.tsx" },
+    { code: "const x = <p>{state !== 'error' ? t('a.ready') : t('a.failed')}</p>", filename: "src/components/Foo.tsx" },
+    { code: "const x = <Tip content={mode === 'clone' ? t('a.clone') : undefined} />", filename: "src/components/Foo.tsx" },
     // Notification call with a dynamic (non-literal) message is out of scope.
     { code: "toast.error(errorMessage)", filename: "src/components/Foo.tsx" },
     // Escape hatch: inline exemption comment.

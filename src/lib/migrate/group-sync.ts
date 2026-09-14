@@ -16,6 +16,7 @@ import {
 import { planGroupImport, type GitLabSubgroupNode, type ResolvedMember, type GroupImportPlan } from "./groups"
 import { orgLegacyUuidFor, teamLegacyUuidFor } from "./ids"
 import type { GitLabCredentials } from "./gitlab/auth"
+import { createHash } from "node:crypto"
 
 /** A GitLab namespace (full_path) → its aquilla org + (optional) team, by the
  *  stable legacy_uuids. Used to place each project. */
@@ -29,9 +30,14 @@ export interface GroupSyncResult {
   placeIdx: Map<string, Placement>
   /** The planned structure (orgs/teams/members + conflicts) — for reporting. */
   plan: GroupImportPlan
-  /** legacy_uuid → id, after upsert (empty when apply=false). */
+  /** legacy_uuid → id, after upsert (empty when apply=false or skipped). */
   orgIdByUuid: Map<string, number>
   teamIdByUuid: Map<string, number>
+  /** Stable digest of `plan` — persist it and pass back as `lastPlanHash`. */
+  planHash: string
+  /** True when apply was requested but the plan matched `lastPlanHash`, so the
+   *  /migrate/groups upsert was not sent. */
+  skipped: boolean
 }
 
 export interface GroupSyncHttp {
@@ -45,6 +51,22 @@ export interface GroupSyncHttp {
 
 const lc = (v: string): string => v.trim().toLowerCase()
 
+/** sha256 of the plan with object keys sorted, so two walks that produce the
+ *  same structure hash identically regardless of key insertion order. */
+export function hashGroupPlan(plan: GroupImportPlan): string {
+  const canon = (v: unknown): unknown =>
+    Array.isArray(v)
+      ? v.map(canon)
+      : v && typeof v === "object"
+        ? Object.fromEntries(
+            Object.keys(v as Record<string, unknown>)
+              .sort()
+              .map((k) => [k, canon((v as Record<string, unknown>)[k])]),
+          )
+        : v
+  return createHash("sha256").update(JSON.stringify(canon(plan))).digest("hex")
+}
+
 /**
  * Build the placement index + a group import plan from the live GitLab tree,
  * resolving members against Neon users, and (when apply) upsert orgs/teams/
@@ -53,7 +75,14 @@ const lc = (v: string): string => v.trim().toLowerCase()
 export async function syncGroupsToNeon(
   creds: GitLabCredentials,
   http: GroupSyncHttp,
-  opts: { apply: boolean },
+  opts: {
+    apply: boolean
+    /** planHash from the previous applied run; an identical plan skips the
+     *  upsert (every re-send is ~3.7K no-op member inserts on Neon). */
+    lastPlanHash?: string
+    /** Send the upsert even when the hash matches (e.g. rows were removed in Neon). */
+    force?: boolean
+  },
 ): Promise<GroupSyncResult> {
   const doFetch = http.fetchFn ?? fetch
 
@@ -109,8 +138,12 @@ export async function syncGroupsToNeon(
     existing: { orgUuids: new Set(), teamUuids: new Set() },
   })
 
+  const planHash = hashGroupPlan(plan)
   if (!opts.apply) {
-    return { placeIdx, plan, orgIdByUuid: new Map(), teamIdByUuid: new Map() }
+    return { placeIdx, plan, orgIdByUuid: new Map(), teamIdByUuid: new Map(), planHash, skipped: false }
+  }
+  if (!opts.force && opts.lastPlanHash && opts.lastPlanHash === planHash) {
+    return { placeIdx, plan, orgIdByUuid: new Map(), teamIdByUuid: new Map(), planHash, skipped: true }
   }
 
   // 4) Upsert into Neon, get back the legacy_uuid→id maps.
@@ -126,5 +159,7 @@ export async function syncGroupsToNeon(
     plan,
     orgIdByUuid: new Map(Object.entries(body.orgIdByUuid)),
     teamIdByUuid: new Map(Object.entries(body.teamIdByUuid)),
+    planHash,
+    skipped: false,
   }
 }

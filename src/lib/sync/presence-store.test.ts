@@ -275,4 +275,113 @@ describe("ProjectPresenceStore", () => {
     })
     expect(store.getCellPresence("cell-1")[0]?.selection?.draftText).toBeUndefined()
   })
+
+  it("shows a peer on the row they merely view (no lock) and marks them not editing", () => {
+    // A viewer/reviewer, or a contributor whose lease claim was denied, has
+    // viewingCell but no focusedCell — the row must still show them.
+    const store = createProjectPresenceStore("me")
+    const cell = vi.fn()
+    store.subscribeCell("cell-3", cell)
+    store.applyPresenceDiff({ userId: "bob", currentFileId: "f", viewingCell: "cell-3", ts: 1 })
+    expect(cell).toHaveBeenCalledTimes(1)
+    expect(store.getCellPresence("cell-3")).toMatchObject([
+      { peerId: "bob", viewingCell: "cell-3", isEditing: false },
+    ])
+    expect(store.getPeers()).toMatchObject([{ peerId: "bob", viewingCell: "cell-3" }])
+
+    // Moving to another row clears the old one and lights the new one.
+    store.applyPresenceDiff({ userId: "bob", currentFileId: "f", viewingCell: "cell-4", ts: 2 })
+    expect(store.getCellPresence("cell-3")).toEqual([])
+    expect(store.getCellPresence("cell-4")).toMatchObject([{ peerId: "bob", isEditing: false }])
+  })
+
+  it("lets the lease-held cell win over viewingCell and never lists the peer twice", () => {
+    const store = createProjectPresenceStore("me")
+    store.applyPresenceDiff({
+      userId: "bob", focusedCell: "cell-1", viewingCell: "cell-1", ts: 1,
+    })
+    expect(store.getCellPresence("cell-1")).toMatchObject([{ peerId: "bob", isEditing: true }])
+    expect(store.getCellPresence("cell-1")).toHaveLength(1)
+    // Lease swept while the user stays on the row: still visible, no longer editing.
+    store.applyPresenceDiff({ userId: "bob", viewingCell: "cell-1", ts: 2 })
+    expect(store.getCellPresence("cell-1")).toMatchObject([{ peerId: "bob", isEditing: false }])
+  })
+
+  // Presence rows are per CONNECTION. Two tabs — or two people on one shared
+  // test account — must both be visible to everyone else, and each must see
+  // the other. "Self" is our own socket's connId, never the username.
+  describe("per-connection rows for one account", () => {
+    const rows = [
+      { connId: "tab-a", userId: "me", currentFileId: "file-1", viewingCell: "cell-1", ts: 1 },
+      { connId: "tab-b", userId: "me", currentFileId: "file-1", viewingCell: "cell-2", ts: 2 },
+      { connId: "alice-1", userId: "alice", currentFileId: "file-1", focusedCell: "cell-1", ts: 3 },
+    ]
+
+    it("hides only this socket's row and shows the same account's other connection", () => {
+      const store = createProjectPresenceStore("me")
+      store.setSelfConnId("tab-a")
+      store.applyPresenceFrame(rows)
+      expect(store.getPeers().map((p) => [p.peerId, p.username])).toEqual([
+        ["alice-1", "alice"],
+        ["tab-b", "me"],
+      ])
+      expect(store.getCellPresence("cell-1").map((p) => p.peerId)).toEqual(["alice-1"])
+      expect(store.getCellPresence("cell-2").map((p) => p.peerId)).toEqual(["tab-b"])
+    })
+
+    it("re-filters when the connId arrives after the roster", () => {
+      const store = createProjectPresenceStore("me")
+      const roster = vi.fn()
+      store.subscribeRoster(roster)
+      store.applyPresenceFrame(rows)
+      expect(store.getPeers()).toHaveLength(3)
+      store.setSelfConnId("tab-b")
+      expect(store.getPeers().map((p) => p.peerId)).toEqual(["alice-1", "tab-a"])
+      expect(roster).toHaveBeenCalledTimes(2)
+    })
+
+    it("lists both connections of one account to a third party", () => {
+      const store = createProjectPresenceStore("carol")
+      store.setSelfConnId("carol-1")
+      store.applyPresenceFrame(rows)
+      expect(store.getPeers().map((p) => p.peerId)).toEqual(["alice-1", "tab-a", "tab-b"])
+      // Same account → same colour and name; distinct peer ids keep React keys stable.
+      const [, a, b] = store.getPeers()
+      expect(a.color).toBe(b.color)
+      expect(a.username).toBe(b.username)
+    })
+
+    it("a presence.left for one connection leaves the account's other row in place", () => {
+      const store = createProjectPresenceStore("carol")
+      store.setSelfConnId("carol-1")
+      store.applyPresenceFrame(rows)
+      store.applyPresenceLeft("tab-a")
+      expect(store.getPeers().map((p) => p.peerId)).toEqual(["alice-1", "tab-b"])
+      expect(store.getCellPresence("cell-1").map((p) => p.peerId)).toEqual(["alice-1"])
+    })
+
+    it("keys drafts by connection so two tabs of one account do not clobber each other", () => {
+      const store = createProjectPresenceStore("carol")
+      store.setSelfConnId("carol-1")
+      store.applyPresenceFrame([
+        { connId: "tab-a", userId: "me", focusedCell: "cell-1", selection: { side: "target", anchor: 0, head: 0 }, ts: 1 },
+        { connId: "tab-b", userId: "me", focusedCell: "cell-2", selection: { side: "target", anchor: 0, head: 0 }, ts: 2 },
+      ])
+      store.applyPresenceDraft("tab-a", "cell-1", "one", 3)
+      store.applyPresenceDraft("tab-b", "cell-2", "two", 4)
+      expect(store.getCellPresence("cell-1")[0]?.selection?.draftText).toBe("one")
+      expect(store.getCellPresence("cell-2")[0]?.selection?.draftText).toBe("two")
+    })
+
+    it("still hides the synthetic lock-holder row for our own username (locks are per user)", () => {
+      // Our own focus.claim echoes as lock.claimed by username; with no other
+      // row on the cell that must not surface as a fake peer.
+      const store = createProjectPresenceStore("me")
+      store.setSelfConnId("tab-a")
+      store.applyLockClaimed("cell-9", "me")
+      expect(store.getCellPresence("cell-9")).toHaveLength(0)
+      store.applyLockClaimed("cell-8", "alice")
+      expect(store.getCellPresence("cell-8").map((p) => p.username)).toEqual(["alice"])
+    })
+  })
 })

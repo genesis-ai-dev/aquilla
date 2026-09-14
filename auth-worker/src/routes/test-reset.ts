@@ -15,6 +15,7 @@
 import { Hono } from "hono"
 import type { AuthHonoEnv } from "../middleware/auth"
 import { hashPasswordWerkzeugScrypt } from "../utils/password"
+import { clearSessionCache } from "../lib/session-cache"
 
 const testReset = new Hono<AuthHonoEnv>()
 
@@ -36,6 +37,8 @@ testReset.post("/reset", async (c) => {
   }
 
   const db = c.env.AQUILLA_PG
+  // Cached sessions would otherwise outlive the rows they were hydrated from.
+  clearSessionCache()
   // Order matters: drop dependent rows before parents. The hand-rolled
   // delete-everything is safer than a real TRUNCATE because some tables
   // may not exist in older migration states and we want this to no-op

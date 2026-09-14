@@ -333,7 +333,7 @@ export async function assessIdmlPair(
       )
       return emptyAssessment("ambiguous-locator", [...diagnostics, diagnostic])
     }
-    const unit = candidates[0]!
+    const unit = candidates[0]
     if (matchedUnitIds.has(unit.id)) {
       return emptyAssessment("ambiguous-locator", [
         ...diagnostics,
@@ -414,7 +414,7 @@ export function buildIdmlMetadataPatchEvents(
   const events: IngestEvent[] = []
 
   for (let physicalOrder = 0; physicalOrder < ordered.length; physicalOrder++) {
-    const orderedCell = ordered[physicalOrder]!
+    const orderedCell = ordered[physicalOrder]
     const source = sourceById.get(orderedCell.metadata.id)
     const target = targetById.get(orderedCell.metadata.id)
     if (!hasIdmlCellMetadata(source) && !hasIdmlCellMetadata(target)) continue

@@ -58,7 +58,7 @@ import { StaleSourceIndicator } from "./StaleSourceIndicator"
 import { HealthRibbon } from "./HealthRibbon"
 import { type HealthRibbonPoint } from "@/lib/health/health-ribbon"
 import { ribbonInputCacheFor, type RibbonInputCache } from "@/lib/health/ribbon-inputs"
-import { HEALTH_CALCULATIONS_ENABLED } from "@/lib/health/kill-switch"
+import { useHealthCalculationsEnabled } from "@/lib/health/kill-switch"
 import { TranslatedEditor, type FootnoteInsertionAnchor, type TranslatedEditorHandle } from "./TranslatedEditor"
 import { TimelineAddMedia } from "./TimelineAddMedia"
 import { CellTtsButton } from "./CellTtsButton"
@@ -109,6 +109,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { CellPresenceBadges } from "./CellPresenceBadges"
 import { isLaneArchived } from "@/components/project-lane-archive"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
@@ -128,6 +129,8 @@ import {
 import { TargetDraftActions, TargetReferenceActions } from "./cell/TargetCellActions"
 import { TargetValidationControl } from "./cell/TargetValidationControl"
 import { MilestoneNavigator, type MilestoneNavigationItem } from "./ChapterNavigator"
+import { cellIdsForMilestonePage } from "@/lib/milestone-navigation"
+import { getMilestoneSplit, useMilestoneSplit } from "@/lib/store/milestone-split-pref"
 import { EDITOR_SURFACE_TOOLBAR_CLASS } from "./editor-surface-toolbar"
 import { CellVoicePanel } from "./cell/CellVoicePanel"
 // CellAudioRecordButton: getUnsupportedReason used by the rail mic denied-help
@@ -172,6 +175,7 @@ import { useEditorActions } from "@/context/EditorActionsContext"
 import { isInMemberScope } from "@/lib/sync/member-scopes"
 import { SourceSelectionToolbar } from "./SourceSelectionToolbar"
 import { buildSourceChip, type ContextChip } from "@/lib/agent/context-chip"
+import { ownCastName } from "@/lib/timeline/cue-character"
 import { parseTimestampRange } from "@/lib/video/vtt-generator"
 import { FootnoteInline } from "./footnotes/FootnoteInline"
 import {
@@ -222,8 +226,18 @@ const ESTIMATED_ROW_HEIGHT_PX = 140
 
 /** The gutter track widens by the character circle's w-6 when the cast
  *  gutter is on (stacked media lens). One shared type keeps the header row,
- *  paragraph bar, and rows in the same template. */
-type EditorGridCols = "grid-cols-[84px_1fr_1fr]" | "grid-cols-[132px_1fr_1fr]"
+ *  paragraph bar, and rows in the same template.
+ *
+ *  AQU-1101: the text tracks are `minmax(0,1fr)`, never a bare `1fr`. A bare
+ *  `1fr` carries an implicit `min-width: auto`, so a single unbreakable token
+ *  (a URL, a long identifier) widens ITS track to min-content and steals the
+ *  width from the sibling — source and target stop lining up with each other
+ *  and with the header row. Flooring the minimum at 0 makes the two tracks
+ *  equal fractions of the row whatever the content is; the cell surfaces then
+ *  break the token with `break-words` (see EditorCellSurface). */
+type EditorGridCols =
+  | "grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]"
+  | "grid-cols-[132px_minmax(0,1fr)_minmax(0,1fr)]"
 const LEGEND_LIST_DRAW_DISTANCE_PX = 240
 
 /**
@@ -700,6 +714,10 @@ interface EditorTableProps {
   /** Parent-managed focus claim/release (per-cell). */
   onClaimCell?: (cellId: string) => void
   onReleaseCell?: (cellId: string) => void
+  /** Fires with the row that owns keyboard/pointer focus (any surface in it),
+   *  or null when focus leaves the table. Non-lock-bearing presence: peers see
+   *  this user on the row even when they never activate the editor. */
+  onViewCell?: (cellId: string | null) => void
   onTargetPresenceSelection?: (cellId: string, selection: TargetPresenceSelection | null) => void
   /** Drop the "remote-changed-while-editing" flag for a cell. */
   onAckRemoteChange?: (cellId: string) => void
@@ -794,6 +812,8 @@ interface EditorTableProps {
   /** Non-null when the user cannot write terminology (below Maintainer) —
    *  the add-term popover opens blocked with this reason instead of accepting input. */
   addConceptBlockedReason?: string | null
+  /** May this user APPROVE a term (enforce it), vs only suggest one? */
+  canApproveConcept?: boolean
   onAskAiFromSelection?: (chip: ContextChip) => void
   /** Called when the user drops a voice chip onto a cell's audio area.
    *  Parent should assign the voice then trigger TTS generation. */
@@ -867,14 +887,14 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   audioLens, castGutter = false, ttsSettings, onOpenAudioSetup,
   onAttachMediaFile, onAttachMediaUrl,
   orderedBy,
-  onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, onAskAiFromSelection, onAssignVoice,
+  onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onAskAiFromSelection, onAssignVoice,
   onCellCommitted,
   getPendingTargetEventId,
   onOptimisticEdit,
   cellLockHolders,
   presenceStore,
   cellsWithRemoteChange,
-  onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
+  onClaimCell, onReleaseCell, onViewCell, onTargetPresenceSelection, onAckRemoteChange,
   staleCellIds,
   upstreamStaleCellIds,
   getTokenForFile,
@@ -917,6 +937,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     subsectionKey?: string
   } | null>(null)
   const clearChapterNavigationSelection = useCallback(() => {
+    if (getMilestoneSplit()) return
     setChapterNavigationSelection(null)
   }, [])
   const [activeEditorCellId, setActiveEditorCellId] = useState<string | null>(null)
@@ -942,6 +963,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     // just left must not wipe it.
     setFocusedRailCellId((cur) => railFocusOwnerOnBlur(cur, cellId))
   }, [])
+  // The focus-pinned row IS "where this user is" — publish it as presence so
+  // colleagues see the row even before (or without) an editor activation.
+  useEffect(() => {
+    onViewCell?.(focusedRailCellId)
+  }, [focusedRailCellId, onViewCell])
   useEffect(() => {
     const handleDocumentFocusIn = (event: FocusEvent) => {
       const target = event.target
@@ -971,7 +997,56 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const [hoveredFootnote, setHoveredFootnote] = useState<{ cellId: string; index: number } | null>(null)
   const isDragging = useRef(false)
   const dragCells = useRef<Set<string>>(new Set())
-  const displayCellIds = useCellIds(cellStore, orderedBy, !!audioLens)
+  const fileCellIds = useCellIds(cellStore, orderedBy, !!audioLens)
+  const cellStoreVersion = useCellStoreVersion(cellStore)
+  const audioFileId = cellStore.getFileId()
+  const splitByMilestone = useMilestoneSplit()
+  const pendingJumpCellIdRef = useRef<string | null>(null)
+  const milestoneNavigation = useMemo(() =>
+    readAtVersion(cellStoreVersion, () => cellStore.getNavigationIndex(fileCellIds)),
+  [cellStore, cellStoreVersion, fileCellIds])
+  const milestoneKeyByCellId = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const entry of milestoneNavigation) {
+      for (const cellId of entry.cellIds) map.set(cellId, entry.key)
+    }
+    return map
+  }, [milestoneNavigation])
+  const idmlMilestoneNavigation = useMemo(() =>
+    fileType === "idml" || readAtVersion(cellStoreVersion, () => milestoneNavigation.some((entry) => {
+      const view = cellStore.getCellView(entry.firstCellId)
+      return Boolean(view && resolveIdmlEditorConfiguration(view.metadata, view.originalHtml))
+    })),
+  [cellStore, cellStoreVersion, fileType, milestoneNavigation])
+  const subsectionKeyByCellId = useMemo(() => {
+    const map = new Map<string, string>()
+    if (!idmlMilestoneNavigation) return map
+    for (const entry of milestoneNavigation) {
+      for (const subsection of entry.subsections) {
+        for (const cellId of subsection.cellIds) map.set(cellId, subsection.key)
+      }
+    }
+    return map
+  }, [idmlMilestoneNavigation, milestoneNavigation])
+  const displayCellIds = useMemo(() => {
+    if (!splitByMilestone) return fileCellIds
+    const selected = chapterNavigationSelection?.fileId === audioFileId
+      ? chapterNavigationSelection
+      : null
+    const key = selected?.label && milestoneNavigation.some((entry) => entry.key === selected.label)
+      ? selected.label
+      : milestoneNavigation[0]?.key
+    if (!key) return fileCellIds
+    // The 50-cell ranges are picker jump targets, not extra pages: a 74-cell
+    // section stays one page when this toggle is on.
+    return cellIdsForMilestonePage(milestoneNavigation, key) ?? fileCellIds
+  }, [
+    audioFileId,
+    chapterNavigationSelection,
+    fileCellIds,
+    milestoneNavigation,
+    splitByMilestone,
+  ])
   const displayCellIdsRef = useRef<readonly string[]>(displayCellIds)
   const selectionDragRef = useRef<{
     pointerId: number
@@ -1085,9 +1160,34 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     }
   }, [setFollowHoverLock, hasListRows])
   const handleFollowRest = useCallback(() => setFollowHoverLock(false), [setFollowHoverLock])
+  const revealCellPage = useCallback((cellId: string): boolean => {
+    if (displayCellIdsRef.current.includes(cellId)) return true
+    if (!splitByMilestone) return false
+    const key = milestoneKeyByCellId.get(cellId)
+    if (!key) return false
+    const subsectionKey = idmlMilestoneNavigation
+      ? subsectionKeyByCellId.get(cellId)
+      : undefined
+    setChapterNavigationSelection({
+      fileId: audioFileId,
+      label: key,
+      ...(subsectionKey ? { subsectionKey } : {}),
+    })
+    pendingJumpCellIdRef.current = cellId
+    return true
+  }, [
+    audioFileId,
+    idmlMilestoneNavigation,
+    milestoneKeyByCellId,
+    splitByMilestone,
+    subsectionKeyByCellId,
+  ])
   const followScrollToCell = useCallback((cellId: string) => {
     const index = displayCellIdsRef.current.indexOf(cellId)
-    if (index < 0) return
+    if (index < 0) {
+      if (revealCellPage(cellId)) setFollowHoverLock(true)
+      return
+    }
     setFollowHoverLock(true)
     // A range picked in the segment navigator must not stay latched while
     // playback walks past it — drop it so the trigger quietly tracks the
@@ -1096,12 +1196,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     // 0.35: the running row rides high enough to leave reading room below.
     // Animated (Sam 2026-08-08): the follow glides instead of teleporting.
     programmaticListScroll(index, { viewPosition: 0.35, animated: true })
-  }, [clearChapterNavigationSelection, programmaticListScroll, setFollowHoverLock])
+  }, [clearChapterNavigationSelection, programmaticListScroll, revealCellPage, setFollowHoverLock])
 
   // Durable cell audio (AD-2 cell.audio.* grammar). Per-file read; overlay each
   // visible row's attachments + selected clips at render time, rather than
   // cloning the entire active file into audio-enriched CellData objects.
-  const audioFileId = cellStore.getFileId()
   const { byCellId: audioByCellId } = useFileAudioAttachments(project.id, audioFileId)
 
   // Timeline-segment-model (Scope A): the rendered row list. For a `'time'`-
@@ -1114,7 +1213,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // Combined-voice range lookup resolves through the active store at call time
   // so the editor does not keep a second full CellData[] just for audio.
   const isTimeOrdered = orderedBy === "time"
-  const cellStoreVersion = useCellStoreVersion(cellStore)
 
   useEffect(() => {
     if (!activeEditorCellId) return
@@ -1198,8 +1296,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // The cache is keyed to the store instance: per-cell versions are only
   // comparable within one store, so a new store gets a fresh cache.
   const ribbonInputCache = useMemo<RibbonInputCache>(() => ribbonInputCacheFor(cellStore), [cellStore])
+  const healthCalculationsEnabled = useHealthCalculationsEnabled()
   const healthRibbonByCellId = useMemo(() =>
-    !HEALTH_CALCULATIONS_ENABLED ? EMPTY_RIBBON :
+    !healthCalculationsEnabled ? EMPTY_RIBBON :
     readAtVersion(cellStoreVersion, () => ribbonInputCache.ribbon<CellData>(displayCellIds, {
       getCellVersion: cellStore.getCellVersion,
       getCell: (id) => cellStore.getCellView(id),
@@ -1207,7 +1306,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       health: (id) => healthMap.get(id),
       examples: (id) => examples.get(id) ?? EMPTY_EXAMPLES,
     })),
-  [cellStore, cellStoreVersion, displayCellIds, examples, healthMap, ribbonInputCache])
+  [cellStore, cellStoreVersion, displayCellIds, examples, healthCalculationsEnabled, healthMap, ribbonInputCache])
 
   // FRO-251: per-file, per-side font size. Persisted in localStorage keyed by
   // fileId; adjusted from the View settings (eye) menu in the header.
@@ -1379,7 +1478,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       // STORE order — but the list renders displayCellIds, which time-ordered
       // files re-sort by timing, so those jumps could land on the wrong row.
       const index = displayCellIdsRef.current.indexOf(cellId)
-      if (index < 0) return false
+      if (index < 0) return revealCellPage(cellId)
       clearChapterNavigationSelection()
       // Default "release": a jump the user is INSPECTING (search, presence,
       // findings) must not have playback yank the table back a beat later.
@@ -1426,7 +1525,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     pulseCells(cellIds) {
       pulseCellsDom(cellIds)
     },
-  }), [clearChapterNavigationSelection, displayCellIds.length, cellStore, focusCellEditorByIndex, getListQueryRoot, flashCellDom, pulseCellsDom, programmaticListScroll, issueFollowCommand])
+  }), [clearChapterNavigationSelection, displayCellIds.length, cellStore, focusCellEditorByIndex, getListQueryRoot, flashCellDom, pulseCellsDom, programmaticListScroll, issueFollowCommand, revealCellPage])
 
   // FRO-297: Focus the grid-row wrapper div (not TipTap) at `index`.
   // Used for Esc-to-grid and arrow-key navigation while NOT in edit mode.
@@ -1720,7 +1819,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // fixed width keeps Source header-aligned. No right gutter; the floating
   // action rail is absolutely positioned. Target reserves pe-9 for the
   // expand chevron.
-  const gridCols: EditorGridCols = castGutter ? "grid-cols-[132px_1fr_1fr]" : "grid-cols-[84px_1fr_1fr]"
+  const gridCols: EditorGridCols = castGutter
+    ? "grid-cols-[132px_minmax(0,1fr)_minmax(0,1fr)]"
+    : "grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]"
 
   const handleMouseUp = useCallback(() => {
     if (isDragging.current && dragCells.current.size > 1) {
@@ -1746,24 +1847,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   }, [cellStore])
 
   const firstVisibleCellId = displayCellIds[firstVisibleIndex] ?? null
-  const milestoneNavigation = useMemo(() =>
-    readAtVersion(cellStoreVersion, () => cellStore.getNavigationIndex(displayCellIds)),
-  [cellStore, cellStoreVersion, displayCellIds])
-
-  const milestoneKeyByCellId = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const entry of milestoneNavigation) {
-      for (const cellId of entry.cellIds) map.set(cellId, entry.key)
-    }
-    return map
-  }, [milestoneNavigation])
-
-  const idmlMilestoneNavigation = useMemo(() =>
-    fileType === "idml" || readAtVersion(cellStoreVersion, () => milestoneNavigation.some((entry) => {
-      const view = cellStore.getCellView(entry.firstCellId)
-      return Boolean(view && resolveIdmlEditorConfiguration(view.metadata, view.originalHtml))
-    })),
-  [cellStore, cellStoreVersion, fileType, milestoneNavigation])
 
   const currentMilestoneKey = useMemo(() => {
     const visibleIndex = chapterVisibleIndex ?? firstVisibleIndex
@@ -1823,30 +1906,46 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // cell and stays gap-free even when front matter, introductions, or other
   // paratextual cells sit before/among the content. Scripture files number by
   // canonical verse ref and don't consult this map.
+  // AQU-1146: per-cell "does this cell get a sequential number" is a
+  // structural fact (type + import metadata) that never changes on an
+  // ordinary target edit — cache it per cell, keyed by the store's per-cell
+  // version (same idiom as `ribbonInputCache` in ribbon-inputs.ts), so a
+  // commit that touches a handful of cells re-derives only those cells
+  // instead of re-resolving every cell view in the file. The ordinal count
+  // itself is still one cheap linear pass — only the `getCellView` +
+  // metadata check is skipped for unchanged cells.
+  const sequentialEntryCacheRef = useRef<Map<string, { version: number; isNumbered: boolean }>>(new Map())
   const sequentialNumberByCellId = useMemo(() =>
     readAtVersion(cellStoreVersion, () => {
+      const cache = sequentialEntryCacheRef.current
+      const nextCache = new Map<string, { version: number; isNumbered: boolean }>()
       const map = new Map<string, number>()
       let ordinal = 0
-      for (const id of displayCellIds) {
-        const view = cellStore.getCellView(id)
-        if (!view) continue
-        if (
-          view.type === "paratext"
-          || view.type === "heading"
-          || importDisplayLabel(view.metadata) === null
-        ) continue
-        map.set(id, ++ordinal)
+      for (const id of fileCellIds) {
+        const version = cellStore.getCellVersion(id)
+        let entry = cache.get(id)
+        if (!entry || entry.version !== version) {
+          const view = cellStore.getCellView(id)
+          const isNumbered = view != null
+            && view.type !== "paratext"
+            && view.type !== "heading"
+            && importDisplayLabel(view.metadata) !== null
+          entry = { version, isNumbered }
+        }
+        nextCache.set(id, entry)
+        if (entry.isNumbered) map.set(id, ++ordinal)
       }
+      sequentialEntryCacheRef.current = nextCache
       return map
     }),
-  [cellStore, cellStoreVersion, displayCellIds])
+  [cellStore, cellStoreVersion, fileCellIds])
 
   // p1-paragraph-ui-wiring (Task 3 + coordinator follow-up): paragraph group
   // info, keyed by the group's start cell id — drives the "Draft paragraph"
   // rail button's visibility/label/dialog copy and its in-flight guard. Only
   // start cells (the only ones the button can render on) need an entry, but
   // deriveParagraphs needs the full ordered per-file cell list to find file/
-  // paragraph boundaries, so this walks displayCellIds once, same idiom as
+  // paragraph boundaries, so this walks fileCellIds once, same idiom as
   // sequentialNumberByCellId above. Legacy imports (no paragraphStart flags
   // anywhere) still produce one group per file — harmless, since the rail
   // button is separately gated on `cell.paragraphStart === true`, which never
@@ -1864,37 +1963,45 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // boolean from the `completing` map (any member cell mid-draft ⇒ the
   // button disables/pulses, and a click can't re-fire while a previous
   // click's fan-out is still running).
+  // AQU-1146: same per-cell version cache idiom as sequentialNumberByCellId
+  // above. `fileId`/`paragraphStart` are structural (import-time) facts;
+  // `validated` changes on an ordinary commit but is cheap to carry in the
+  // same cached entry, which also means the draftable-count pass below reads
+  // it from the cache instead of calling `getCellView` a second time per
+  // group member.
+  const paragraphEntryCacheRef = useRef<
+    Map<string, { version: number; fileId: string; paragraphStart?: boolean; validated: boolean }>
+  >(new Map())
   const paragraphGroupInfoByCellId = useMemo(() =>
     readAtVersion(cellStoreVersion, () => {
-      const map = new Map<string, { size: number; draftableCount: number; memberIds: string[] }>()
+      const cache = paragraphEntryCacheRef.current
+      const nextCache = new Map<string, { version: number; fileId: string; paragraphStart?: boolean; validated: boolean }>()
       const orderedCells: { id: string; fileId: string; paragraphStart?: boolean }[] = []
-      for (const id of displayCellIds) {
-        const view = cellStore.getCellView(id)
-        if (!view) continue
-        orderedCells.push({ id: view.id, fileId: view.fileId, paragraphStart: view.paragraphStart })
+      for (const id of fileCellIds) {
+        const version = cellStore.getCellVersion(id)
+        let entry = cache.get(id)
+        if (!entry || entry.version !== version) {
+          const view = cellStore.getCellView(id)
+          if (!view) continue
+          entry = { version, fileId: view.fileId, paragraphStart: view.paragraphStart, validated: view.status === "validated" }
+        }
+        nextCache.set(id, entry)
+        orderedCells.push({ id, fileId: entry.fileId, paragraphStart: entry.paragraphStart })
       }
+      paragraphEntryCacheRef.current = nextCache
+      const map = new Map<string, { size: number; draftableCount: number; memberIds: string[] }>()
       for (const group of deriveParagraphs(orderedCells)) {
         if (group.length <= 1) continue
         let draftableCount = 0
         for (const id of group) {
-          if (cellStore.getCellView(id)?.status !== "validated") draftableCount++
+          if (!nextCache.get(id)?.validated) draftableCount++
         }
         map.set(group[0], { size: group.length, draftableCount, memberIds: group })
       }
       return map
     }),
-  [cellStore, cellStoreVersion, displayCellIds])
+  [cellStore, cellStoreVersion, fileCellIds])
 
-  const subsectionKeyByCellId = useMemo(() => {
-    const map = new Map<string, string>()
-    if (!idmlMilestoneNavigation) return map
-    for (const entry of milestoneNavigation) {
-      for (const subsection of entry.subsections) {
-        for (const cellId of subsection.cellIds) map.set(cellId, subsection.key)
-      }
-    }
-    return map
-  }, [idmlMilestoneNavigation, milestoneNavigation])
   const viewportCellId = displayCellIds[chapterVisibleIndex ?? firstVisibleIndex]
   const currentSubsectionKey = subsectionKeyByCellId.get(viewportCellId ?? "")
   const selectedChapterLabel = chapterNavigationSelection?.fileId === audioFileId
@@ -1941,21 +2048,79 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   const handleChapterSelect = useCallback((key: string, subsectionKey?: string) => {
     const entry = milestoneNavigation.find((candidate) => candidate.key === key)
-    const subsection = entry?.subsections.find((candidate) => candidate.key === subsectionKey)
-    const index = subsection?.firstIndex ?? entry?.firstIndex ?? -1
-    if (index < 0) return
+    const subsection = idmlMilestoneNavigation
+      ? entry?.subsections.find((candidate) => candidate.key === subsectionKey)
+      : undefined
+    const targetCellId = subsection?.firstCellId ?? entry?.firstCellId
+    if (!targetCellId) return
     setChapterNavigationSelection({
       fileId: audioFileId,
       label: key,
       ...(subsection ? { subsectionKey: subsection.key } : {}),
     })
+    if (splitByMilestone) {
+      pendingJumpCellIdRef.current = targetCellId
+      return
+    }
+    const index = subsection?.firstIndex ?? entry?.firstIndex ?? -1
+    if (index < 0) return
     setFirstVisibleIndex(index)
     setChapterVisibleIndex(index)
     // Picking a range mid-playback is deliberate navigation AWAY — release
     // following (its long smooth scroll used to trip the truce as a fake
     // "user scroll" and kill follow as a side effect; now it's explicit).
     programmaticListScroll(index, { viewPosition: 0, animated: true, follow: "release" })
-  }, [audioFileId, milestoneNavigation, programmaticListScroll])
+  }, [audioFileId, idmlMilestoneNavigation, milestoneNavigation, programmaticListScroll, splitByMilestone])
+
+  // Settings can flip the split pref while this table is still mounted
+  // (the settings dialog sits over the editor). Pin the current visible
+  // cell's division before paint so paging does not jump to the first
+  // milestone.
+  useLayoutEffect(() => {
+    if (!splitByMilestone || !audioFileId) return
+    const selected = chapterNavigationSelection?.fileId === audioFileId
+      ? chapterNavigationSelection
+      : null
+    if (selected?.label && milestoneNavigation.some((entry) => entry.key === selected.label)) {
+      return
+    }
+    const visibleId = fileCellIds[chapterVisibleIndex ?? firstVisibleIndex]
+    const key = (visibleId && milestoneKeyByCellId.get(visibleId)) ?? milestoneNavigation[0]?.key
+    if (!key) return
+    const subsectionKey = idmlMilestoneNavigation && visibleId
+      ? subsectionKeyByCellId.get(visibleId)
+      : undefined
+    if (visibleId) pendingJumpCellIdRef.current = visibleId
+    setChapterNavigationSelection({
+      fileId: audioFileId,
+      label: key,
+      ...(subsectionKey ? { subsectionKey } : {}),
+    })
+  }, [
+    audioFileId,
+    chapterNavigationSelection,
+    chapterVisibleIndex,
+    fileCellIds,
+    firstVisibleIndex,
+    idmlMilestoneNavigation,
+    milestoneKeyByCellId,
+    milestoneNavigation,
+    splitByMilestone,
+  ])
+
+  useLayoutEffect(() => {
+    const cellId = pendingJumpCellIdRef.current
+    if (!cellId) return
+    const index = displayCellIds.indexOf(cellId)
+    if (index < 0) {
+      pendingJumpCellIdRef.current = null
+      return
+    }
+    pendingJumpCellIdRef.current = null
+    setFirstVisibleIndex(index)
+    setChapterVisibleIndex(index)
+    programmaticListScroll(index, { viewPosition: 0, animated: false, follow: "release" })
+  }, [displayCellIds, programmaticListScroll])
 
   // Parallel-bibles sidebar tracking: report the first visible row's canonical
   // ref as the user scrolls. Keyed on the derived ref string
@@ -2109,6 +2274,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           const paragraphGroupInfo = cell.paragraphStart === true
             ? paragraphGroupInfoByCellId.get(cell.id)
             : undefined
+          // AQU-1146: resolved here (once per rendered row) instead of inside
+          // MemoizedRow so the row's props stay per-cell scalars — see
+          // `MemoizedRowProps.paragraphGroupInFlight`.
+          const paragraphGroupInFlight = paragraphGroupInfo?.memberIds?.some((id) => {
+            const state = completing.get(id)
+            return state === "searching" || state === "generating"
+          }) ?? false
           // AQU-646: the row's STRUCTURAL controls — add a line into the
           // silence after it, take an empty added line back. One map lookup and
           // one predicate call per row; no scans.
@@ -2204,10 +2376,10 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onAckRemoteChange={onAckRemoteChange}
           isCompletionConfigured={isCompletionConfigured}
           isCompletionAvailable={isCompletionAvailable}
-          examples={examples}
-          completing={completing}
-          errors={errors}
-          previews={previews}
+          cellExamples={examples.get(cell.id) ?? EMPTY_EXAMPLES}
+          completingState={completing.get(cell.id)}
+          cellError={errors.get(cell.id)}
+          previewText={previews.get(cell.id)}
           healthRibbonPoint={healthRibbonByCellId.get(cell.id) ?? HEALTH_DISABLED_POINT}
           infractions={infractions}
           ruleMap={ruleMap}
@@ -2215,7 +2387,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onCompleteParagraph={onCompleteParagraph}
           paragraphGroupSize={paragraphGroupInfo?.size}
           paragraphDraftableCount={paragraphGroupInfo?.draftableCount}
-          paragraphGroupMemberIds={paragraphGroupInfo?.memberIds}
+          paragraphGroupInFlight={paragraphGroupInFlight}
           isBacktranslationConfigured={isBacktranslationConfigured}
           backtranslating={backtranslating}
           backtranslationErrors={backtranslationErrors}
@@ -2249,6 +2421,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onProjectChanged={onProjectChanged}
           onAddConceptFromSelection={onAddConceptFromSelection}
           addConceptBlockedReason={addConceptBlockedReason}
+        canApproveConcept={canApproveConcept}
           onAskAiFromSelection={onAskAiFromSelection}
           onAssignVoice={onAssignVoice}
           onDragStart={handleDragStart}
@@ -2403,6 +2576,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 activeKey={activeChapterLabel!}
                 activeSubsectionKey={activeSubsectionKey}
                 onSelect={handleChapterSelect}
+                pageByMilestone={splitByMilestone}
               />
             </div>
           </div>
@@ -2427,12 +2601,15 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     <div className="flex h-full min-h-0 flex-col" onMouseUp={handleMouseUp}>
       {showStripNav && stripNavSlot
         ? createPortal(
-            <MilestoneNavigator
-              items={milestoneNavigationItems}
-              activeKey={activeChapterLabel}
-              activeSubsectionKey={activeSubsectionKey}
-              onSelect={handleChapterSelect}
-            />,
+            <div className="flex min-w-0 items-center gap-2">
+              <MilestoneNavigator
+                items={milestoneNavigationItems}
+                activeKey={activeChapterLabel}
+                activeSubsectionKey={activeSubsectionKey}
+                onSelect={handleChapterSelect}
+                pageByMilestone={splitByMilestone}
+              />
+            </div>,
             stripNavSlot,
           )
         : null}
@@ -2865,10 +3042,15 @@ interface MemoizedRowProps {
   onAckRemoteChange?: (cellId: string) => void
   isCompletionConfigured: boolean
   isCompletionAvailable: boolean
-  examples: Map<string, ScoredPair[]>
-  completing: Map<string, string>
-  errors: Map<string, string>
-  previews: Map<string, string>
+  /** AQU-1146: per-cell slice of the table's `examples` map, resolved by the
+   *  parent so this row's props are scalars — the map's identity changes on
+   *  every batch commit, and a `Map` prop would defeat `React.memo` on every
+   *  row even when only one cell's entry changed. Same reasoning for
+   *  `completingState`, `cellError`, and `previewText` below. */
+  cellExamples: ScoredPair[]
+  completingState?: string
+  cellError?: string
+  previewText?: string
   healthRibbonPoint: HealthRibbonPoint
   infractions: Map<string, RuleInfraction[]>
   ruleMap: Map<string, TranslationRule>
@@ -2886,12 +3068,11 @@ interface MemoizedRowProps {
    *  "N of M" copy and the button's hide-when-nothing-to-draft gate. Set
    *  alongside `paragraphGroupSize`. */
   paragraphDraftableCount?: number
-  /** p1-paragraph-ui-wiring (coordinator follow-up): every cell id in this
-   *  cell's paragraph group (including itself) — MemoizedRow-only, used to
-   *  derive `paragraphGroupInFlight` from the `completing` map. Never
-   *  forwarded to EditorRow (which gets the derived boolean instead, keeping
-   *  its prop surface a stable scalar). */
-  paragraphGroupMemberIds?: string[]
+  /** p1-paragraph-ui-wiring (coordinator follow-up): true while ANY cell in
+   *  this row's paragraph group is actively completing. AQU-1146: resolved
+   *  by the parent (from the `completing` map and the group's member ids) so
+   *  this row's prop is a stable scalar instead of the whole map. */
+  paragraphGroupInFlight: boolean
   isBacktranslationConfigured?: boolean
   backtranslating?: Set<string>
   backtranslationErrors?: Map<string, string>
@@ -2922,6 +3103,8 @@ interface MemoizedRowProps {
   /** Add-from-selection: create a terminology entry from selected source text. */
   onAddConceptFromSelection?: (draft: ConceptDraft) => void | Promise<void>
   addConceptBlockedReason?: string | null
+  /** May this user APPROVE a term (enforce it), vs only suggest one? */
+  canApproveConcept?: boolean
   onAskAiFromSelection?: (chip: ContextChip) => void
   onAssignVoice?: (cellId: string, voiceId: string) => void
   onDragStart: (cellId: string) => void
@@ -2966,7 +3149,7 @@ interface MemoizedRowProps {
 
 const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   const {
-    cell, linkedTakes, examples, completing, errors, previews, healthRibbonPoint, infractions,
+    cell, linkedTakes, cellExamples, completingState, cellError, previewText, healthRibbonPoint, infractions,
     backtranslating, backtranslationErrors, cellOpenCommentCount,
     rowIndex, contentNumber, gridCols, castGutter, ttsSettings,
     onDragStart: onDragStartParent, onDragEnter: onDragEnterParent,
@@ -2990,12 +3173,12 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     onDeactivateEditor,
     project, username, activeLane, editable, canValidate, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable,
     ruleMap, onCompleteSingle, onCompleteParagraph, paragraphGroupSize,
-    paragraphDraftableCount, paragraphGroupMemberIds,
+    paragraphDraftableCount, paragraphGroupInFlight,
     isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation, getStatisticalBt,
     getFootnoteDetails,
     onSeekToCue, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled,
     sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, isAnonymous,
-    onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, onAskAiFromSelection, onAssignVoice,
+    onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onAskAiFromSelection, onAssignVoice,
     audioLens, onOpenAudioSetup,
     onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
     onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
@@ -3016,7 +3199,6 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     const key = cellId.slice(0, 8)
     rowRenders.set(key, (rowRenders.get(key) ?? 0) + 1)
   }
-  const cellExamples = useMemo(() => examples.get(cellId) ?? EMPTY_EXAMPLES, [examples, cellId])
   const highlights = useMemo(() => buildHighlightsFromExamples(cellExamples), [cellExamples])
   const cellInfractions = useMemo(() => infractions.get(cellId) ?? EMPTY_INFRACTIONS, [infractions, cellId])
 
@@ -3025,37 +3207,26 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     [cellInfractions, cell.waivers],
   )
 
-  const completingState = completing.get(cellId)
   const isLoading = completingState === "searching" || completingState === "generating"
-  // p1-paragraph-ui-wiring (coordinator follow-up): true while ANY cell in
-  // this row's paragraph group is ACTIVELY completing — not just this row's
-  // own (a validated start cell never gets one post-skip, so relying on
-  // `isLoading` alone would let a second click re-fire completeParagraph
-  // mid-fan-out). Only paragraph-start rows with a >1-cell group carry
-  // `paragraphGroupMemberIds`; every other row's guard is trivially false.
-  // Matches `isLoading`'s value check above (searching/generating only) —
-  // presence alone is wrong: a stuck "error" entry (none of useCompletion's
-  // three catch paths clear it) would otherwise permanently disable/pulse
-  // the button for that group.
-  const paragraphGroupInFlight = useMemo(
-    () => paragraphGroupMemberIds?.some((id) => {
-      const state = completing.get(id)
-      return state === "searching" || state === "generating"
-    }) ?? false,
-    [paragraphGroupMemberIds, completing],
-  )
+  // p1-paragraph-ui-wiring (coordinator follow-up): `paragraphGroupInFlight`
+  // is true while ANY cell in this row's paragraph group is ACTIVELY
+  // completing — not just this row's own (a validated start cell never gets
+  // one post-skip, so relying on `isLoading` alone would let a second click
+  // re-fire completeParagraph mid-fan-out). AQU-1146: resolved by the parent
+  // from the full `completing` map + the group's member ids, and handed to
+  // this row as a stable boolean prop (see `MemoizedRowProps`).
   // Streaming preview text — populated chunk-by-chunk by useCompletion's
   // onChunk handler. We surface it in the target column so the user sees
   // tokens arrive in real time instead of waiting for the LLM to finish
   // AND the commit-to-outbox chain to land (which adds a network hop).
-  const completionPreview = previews.get(cellId)
+  const completionPreview = previewText
   const loadingPhase: "searching" | "generating" | null =
     completingState === "searching"
       ? "searching"
       : completingState === "generating"
         ? "generating"
         : null
-  const error = errors.get(cellId)
+  const error = cellError
   const isBacktranslating = backtranslating?.has(cellId)
   const backtranslationError = backtranslationErrors?.get(cellId)
   const openCommentCount = cellOpenCommentCount?.get(cellId) ?? 0
@@ -3156,6 +3327,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onProjectChanged={onProjectChanged}
         onAddConceptFromSelection={onAddConceptFromSelection}
         addConceptBlockedReason={addConceptBlockedReason}
+        canApproveConcept={canApproveConcept}
         onAskAiFromSelection={onAskAiFromSelection}
         onAssignVoice={onAssignVoice}
         onDragStart={handleDragStart}
@@ -3320,6 +3492,8 @@ interface EditorRowProps {
   /** Add-from-selection: create a terminology entry from selected source text. */
   onAddConceptFromSelection?: (draft: ConceptDraft) => void | Promise<void>
   addConceptBlockedReason?: string | null
+  /** May this user APPROVE a term (enforce it), vs only suggest one? */
+  canApproveConcept?: boolean
   onAskAiFromSelection?: (chip: ContextChip) => void
   onAssignVoice?: (cellId: string, voiceId: string) => void
   getTokenForFile?: (fileId: string) => Promise<string | null>
@@ -4102,7 +4276,7 @@ function EditorRow({
   onEscapeToGrid, onGridRowKeyNav,
   rowIndex, contentNumber, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols, castGutter, ttsSettings,
   isAnonymous, micDenied,
-  audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection, addConceptBlockedReason, onAskAiFromSelection,
+  audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onAskAiFromSelection,
   onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
   onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
   isStaleSource,
@@ -4121,6 +4295,7 @@ function EditorRow({
   targetFootnoteNumberOffset,
 }: EditorRowProps) {
   const t = useT()
+  const healthCalculationsEnabled = useHealthCalculationsEnabled()
   // FRO perf cleanup: pure pass-through openers (never consumed by
   // EditorTable/MemoizedRow) come from context instead of the prop chain —
   // keeps them out of MemoizedRow's React.memo compare surface.
@@ -4317,6 +4492,12 @@ function EditorRow({
     () => resolveIdmlEditorConfiguration(cell.metadata, cell.originalHtml),
     [cell.metadata, cell.originalHtml],
   )
+  const idmlStyleCatalog = idmlConfiguration?.kind === "ready"
+    ? idmlConfiguration.context.styleCatalog
+    : undefined
+  const idmlParagraphStyleId = idmlConfiguration?.kind === "ready"
+    ? idmlConfiguration.context.paragraphStyleId
+    : undefined
   const canEditSourceForCell = canEditSource && !idmlConfiguration
   // AQU-847: an imported MEDIA section's `value` (→ `cell.original`) is the
   // import FILENAME; its real source text is the transcript. The read surface
@@ -5224,11 +5405,24 @@ function EditorRow({
   // parsers produce (<b>, <i>, <u>, <s>, <code>). Anything else in an imported
   // document — notably <img>/<a>, which DOMPurify's defaults let through —
   // is dropped rather than rendered. See OPS-8.
-  // Prefer the explicitly-assigned cast member's name; fall back to the cell's
-  // own label (e.g. a chapter/verse marker from USFM), then nothing.
+  // Prefer the explicitly-assigned cast member's name; then the character the
+  // cell itself names; then the cell's own label (e.g. a chapter/verse marker
+  // from USFM), then nothing.
+  //
+  // AQU-1018: `ownCastName` is the middle rung, and it is what makes a freshly
+  // imported subtitle row say who is speaking. The assigned-voice name only
+  // resolves once `castAssignments` has landed AND the voice is still in the
+  // library, and neither holds at the moment the client actually needs the
+  // label: on import there are no targets yet to read the name off, the
+  // character sheet's `cast.assign` events land BEFORE the `saveTts` that mints
+  // the voices (a documented degraded-success window in
+  // ProjectWorkspace.handleImportCharacters), and deleting a voice later strands
+  // every assignment pointing at it. In all three the sheet's `cast_name` is
+  // sitting right there on the cell — the cast gutter has always drawn it — and
+  // the two corners went blank anyway.
   const castVoiceId = cellLabelsEnabled ? assignedCastVoiceId(project.ttsSettings, cell.id) : undefined
   const castName = castVoiceId ? findVoice(project.ttsSettings, castVoiceId)?.name : undefined
-  const labelText = castName ?? cell.cellLabel ?? null
+  const labelText = castName ?? ownCastName(cell) ?? cell.cellLabel ?? null
   const showCellLabel = cellLabelsEnabled && labelText
 
   // The cell number tints by worst severity. That's the whole signal — the
@@ -5875,7 +6069,12 @@ function EditorRow({
               // source column. pe-7 clears the floating pencil.
               // select-text: global chrome disables selection; source must stay
               // selectable for add-to-termbase / Ask AI from selection.
-              "relative flex h-full min-h-[40px] flex-col rounded-lg px-2 py-1.5 pe-7 select-text transition-[colors,opacity]",
+              // AQU-1101: min-w-0 + break-words. `minmax(0,1fr)` floors the
+              // TRACK, but a grid item keeps `min-width: auto` and would still
+              // overflow its area on an unbreakable token; min-w-0 lets it
+              // shrink and break-words (inherited by the text below) breaks the
+              // token instead of blowing the column out.
+              "relative flex h-full min-h-[40px] min-w-0 flex-col break-words rounded-lg px-2 py-1.5 pe-7 select-text transition-[colors,opacity]",
               // Match the target well — same muted fill + ring (not a darker
               // primary-tinted edit chrome).
               "focus-within:bg-muted focus-within:ring-1 focus-within:ring-ring/40 focus-within:ring-inset",
@@ -5900,6 +6099,7 @@ function EditorRow({
                 onAskAi={handleAskAiFromSelection}
                 onAddToTermbase={onAddConceptFromSelection ? handleCreateTerm : undefined}
                 addConceptBlockedReason={addConceptBlockedReason}
+        canApproveConcept={canApproveConcept}
                 onAddOpenChange={handleAddTermOpenChange}
                 onViewConcept={onOpenTerminologyConcept}
                 onToolbarMouseDown={handleToolbarMouseDown}
@@ -5957,13 +6157,14 @@ function EditorRow({
                   2026-08-26) — "put that character label also in the top left
                   of source cells… we'll just scoot the time range over".
 
-                  THE SAME VALUE THE TARGET CORNER SHOWS, deliberately: the two
-                  names in this app are not interchangeable (the sheet's
-                  `cast_name` is what the timeline, the recorder and the exports
-                  print), and Sam's call was that these two corners agree with
-                  each other rather than with those. It therefore rides the
-                  same "Show cell labels" preference and goes blank in the same
-                  places.
+                  THE SAME VALUE THE TARGET CORNER SHOWS, deliberately: Sam's
+                  call was that these two corners agree with EACH OTHER, so both
+                  read the one `labelText` and both ride the "Show cell labels"
+                  preference. AQU-1018 did not weaken that — it only gave
+                  `labelText` a `cast_name` rung beneath the assigned voice, so
+                  the corners now agree with the timeline/recorder/exports in the
+                  cases where they used to agree on NOTHING. The two names still
+                  are not interchangeable, and an assigned voice still wins.
 
                   `dir="auto"` because the lane is forced LTR for timecodes and
                   a name is not a timecode. The width cap is what does the
@@ -6001,7 +6202,11 @@ function EditorRow({
                 className="w-full !px-0"
               />
             ) : (cell.medium !== "media" && (sourceDraft?.valueHtml || cell.originalHtml)) ? (
-              <SanitizedRichHtml html={sourceDraft?.valueHtml || cell.originalHtml || ""} />
+              <SanitizedRichHtml
+                html={sourceDraft?.valueHtml || cell.originalHtml || ""}
+                idmlStyleCatalog={idmlStyleCatalog}
+                idmlParagraphStyleId={idmlParagraphStyleId}
+              />
             ) : (
               <UsfmSourceText
                 // AQU-646: an imported media segment's stored `value` is the
@@ -6057,7 +6262,7 @@ function EditorRow({
           )}
           fontSize={targetFontSize}
           busy={isSynthBusy}
-          leading={HEALTH_CALCULATIONS_ENABLED ? (
+          leading={healthCalculationsEnabled ? (
             <HealthRibbon
               point={healthRibbonPoint}
               hasMajorIssue={hasMajorInfraction}
@@ -6073,6 +6278,7 @@ function EditorRow({
                 </span>
               </AppTooltip>
             )}
+            <CellPresenceBadges peers={remoteCellPresence} />
             {/* AQU-1041: no AI-draft tag here. The cell header renders the same
                 for a machine draft as for a human-typed one. The underlying
                 `cell.aiDrafted` provenance stays — the org overview's AI-drafted
@@ -6164,6 +6370,7 @@ function EditorRow({
                     editable={editable && !isLoading && !lockHolderLabel}
                     subdued={showCompletionOverlay}
                     empty={!visibleTranslated?.trim()}
+                    preserveWhitespace={Boolean(idmlConfiguration)}
                     onClick={(event) => {
                       event.stopPropagation()
                       requestTargetEdit(idmlConfiguration
@@ -6190,7 +6397,11 @@ function EditorRow({
                           {overlayDraftText}
                         </span>
                       ) : idmlConfiguration && visibleTranslatedHtml ? (
-                        <TargetIdmlHtml html={visibleTranslatedHtml} />
+                        <TargetIdmlHtml
+                          html={visibleTranslatedHtml}
+                          idmlStyleCatalog={idmlStyleCatalog}
+                          idmlParagraphStyleId={idmlParagraphStyleId}
+                        />
                       ) : targetHasRichFormatting && visibleTranslatedHtml ? (
                         <TargetRichHtml
                           html={visibleTranslatedHtml}

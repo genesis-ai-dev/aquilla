@@ -102,6 +102,12 @@ describe("buildProjectWsUrl", () => {
       "wss://example.com/parties/project-sync/p?token=tok&user=ry%20der",
     )
   })
+
+  it("appends the per-socket connId so the DO keys presence per connection", () => {
+    expect(buildProjectWsUrl("https://example.com", "p", "tok", null, "conn-abc-123")).toBe(
+      "wss://example.com/parties/project-sync/p?token=tok&connId=conn-abc-123",
+    )
+  })
 })
 
 describe("parseProjectWsMessage", () => {
@@ -265,6 +271,26 @@ describe("parseProjectWsMessage", () => {
     }
   })
 
+  // Presence is per connection: the DO stamps every row/left/draft with the
+  // socket's connId. A pre-connId worker sends none — fall back to userId so
+  // legacy rosters still key one row per user (and self-filter by username).
+  it("carries connId through presence frames and falls back to userId without one", () => {
+    const withId = parseProjectWsMessage(JSON.stringify({
+      t: "presence",
+      users: [
+        { connId: "tab-a", userId: "alice", ts: 1 },
+        { connId: "tab-b", userId: "alice", ts: 2 },
+        { userId: "bob", ts: 3 },
+      ],
+    }))
+    expect(withId?.t === "presence" && withId.users.map((u) => u.connId)).toEqual(["tab-a", "tab-b", "bob"])
+    expect(parseProjectWsMessage(JSON.stringify({ t: "presence.left", userId: "alice", connId: "tab-a" })))
+      .toEqual({ t: "presence.left", userId: "alice", connId: "tab-a" })
+    expect(parseProjectWsMessage(JSON.stringify({
+      t: "presence.draft", userId: "alice", connId: "tab-b", cellId: "c1", draftText: "hi", ts: 7,
+    }))).toMatchObject({ connId: "tab-b", userId: "alice" })
+  })
+
   it("rejects oversized presence drafts", () => {
     expect(parseProjectWsMessage(JSON.stringify({
       t: "presence",
@@ -287,15 +313,15 @@ describe("parseProjectWsMessage", () => {
     }))).toEqual({
       t: "presence.diff",
       user: {
-        userId: "alice", focusedCell: "c1", currentFileId: "file-1",
+        connId: "alice", userId: "alice", focusedCell: "c1", currentFileId: "file-1",
         selection: { side: "target", anchor: 2, head: 5 }, ts: 100,
       },
     })
     expect(parseProjectWsMessage(JSON.stringify({ t: "presence.left", userId: "alice" })))
-      .toEqual({ t: "presence.left", userId: "alice" })
+      .toEqual({ t: "presence.left", userId: "alice", connId: "alice" })
     expect(parseProjectWsMessage(JSON.stringify({
       t: "presence.draft", userId: "alice", cellId: "c1", draftText: "hello", ts: 7,
-    }))).toEqual({ t: "presence.draft", userId: "alice", cellId: "c1", draftText: "hello", ts: 7 })
+    }))).toEqual({ t: "presence.draft", userId: "alice", connId: "alice", cellId: "c1", draftText: "hello", ts: 7 })
 
     // Strict field validation — same posture as the full-roster frame.
     expect(parseProjectWsMessage(JSON.stringify({ t: "presence.diff", user: { userId: "alice" } }))).toBeNull()
@@ -511,6 +537,41 @@ describe("createWsReconciler", () => {
     ws.open()
     expect(onOpen).toHaveBeenCalledTimes(1)
     expect(r.isConnected()).toBe(true)
+    r.close()
+  })
+
+  it("sends a fresh per-socket connId on connect and hands it to onOpen", async () => {
+    const onOpen = vi.fn()
+    const r = createWsReconciler(
+      {
+        projectId: "p",
+        baseUrl: "https://example.com",
+        getToken: async () => "tok",
+        webSocketCtor: FakeWsCtor,
+        minBackoffMs: 1,
+        maxBackoffMs: 1,
+      },
+      { onOpen },
+    )
+    await Promise.resolve()
+    await Promise.resolve()
+    const ws = FakeWebSocket.instances[0]
+    const first = new URL(ws.url).searchParams.get("connId")
+    expect(first).toMatch(/^[A-Za-z0-9_-]{8,64}$/)
+    ws.open()
+    // The store filters "self" by this id — it must be the one on the wire.
+    expect(onOpen).toHaveBeenCalledWith({ connId: first })
+    expect(r.getConnId()).toBe(first)
+
+    // A reconnect is a new socket session on the DO → new presence row → new id.
+    r.reconnect()
+    await Promise.resolve()
+    await Promise.resolve()
+    const ws2 = FakeWebSocket.instances[1]
+    expect(ws2).toBeDefined()
+    const second = new URL(ws2.url).searchParams.get("connId")
+    expect(second).toMatch(/^[A-Za-z0-9_-]{8,64}$/)
+    expect(second).not.toBe(first)
     r.close()
   })
 
@@ -946,37 +1007,72 @@ describe("createScopedRefreshScheduler (AQU-1145 applied-event bursts)", () => {
 describe("createReconnectResyncHandler (AQU-845 missed-broadcast recovery)", () => {
   it("does not resync on the first open — the initial read is already in flight", () => {
     const onResync = vi.fn()
-    const onOpen = createReconnectResyncHandler(onResync)
+    const h = createReconnectResyncHandler(onResync)
 
-    onOpen()
+    h.handleOpen()
 
     expect(onResync).not.toHaveBeenCalled()
   })
 
-  it("resyncs on every reopen after the first", () => {
+  it("resyncs on every reopen after the first when the gap length is unknown", () => {
     const onResync = vi.fn()
-    const onOpen = createReconnectResyncHandler(onResync)
+    const h = createReconnectResyncHandler(onResync)
 
-    onOpen() // initial connect
-    onOpen() // reconnect after a sync-worker redeploy
+    h.handleOpen() // initial connect
+    h.handleOpen() // reconnect after a sync-worker redeploy (no close observed)
     expect(onResync).toHaveBeenCalledTimes(1)
 
-    onOpen() // and again after the next drop
-    onOpen()
+    h.handleOpen() // and again after the next drop
+    h.handleOpen()
     expect(onResync).toHaveBeenCalledTimes(3)
   })
 
   it("keeps each project's reconciler on its own first-open ledger", () => {
     const a = vi.fn()
     const b = vi.fn()
-    const onOpenA = createReconnectResyncHandler(a)
-    const onOpenB = createReconnectResyncHandler(b)
+    const hA = createReconnectResyncHandler(a)
+    const hB = createReconnectResyncHandler(b)
 
-    onOpenA()
-    onOpenA()
-    onOpenB()
+    hA.handleOpen()
+    hA.handleOpen()
+    hB.handleOpen()
 
     expect(a).toHaveBeenCalledTimes(1)
     expect(b).not.toHaveBeenCalled()
+  })
+
+  it("skips the resync for a blip shorter than minDownMs — the ?since= cursor catches up on the next read", () => {
+    let t = 0
+    const onResync = vi.fn()
+    const h = createReconnectResyncHandler(onResync, { minDownMs: 3_000, now: () => t })
+
+    h.handleOpen() // initial
+    t = 10_000
+    h.handleClose()
+    t = 12_000 // down 2s
+    h.handleOpen()
+    expect(onResync).not.toHaveBeenCalled()
+
+    t = 20_000
+    h.handleClose()
+    t = 23_000 // down exactly 3s → resync
+    h.handleOpen()
+    expect(onResync).toHaveBeenCalledTimes(1)
+  })
+
+  it("measures the gap from the FIRST close when several closes precede one reopen", () => {
+    let t = 0
+    const onResync = vi.fn()
+    const h = createReconnectResyncHandler(onResync, { minDownMs: 3_000, now: () => t })
+
+    h.handleOpen()
+    t = 10_000
+    h.handleClose()
+    t = 12_500
+    h.handleClose() // a failed reconnect attempt closing again
+    t = 13_500 // 3.5s since the socket first dropped
+    h.handleOpen()
+
+    expect(onResync).toHaveBeenCalledTimes(1)
   })
 })

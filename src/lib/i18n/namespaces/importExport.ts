@@ -151,9 +151,25 @@ export const importExport = defineNamespace({
       "bullet advice — always arrive as one cell per line. Optionally, longer " +
       "paragraphs can also be split into one cell per sentence; export puts each one " +
       "back together as InDesign set it.",
+    "importExport.biblica.descriptionEbl":
+      "Upload the InDesign (.idml) package for an Equipping Biblical Leaders " +
+      "facilitator or participant guide. Every text-bearing paragraph is imported — " +
+      "the guide is written material throughout rather than a Bible with notes around " +
+      "it — and each cell keeps its InDesign formatting locked. The guide's own " +
+      "headings become the file's sections, so the navigator moves a topic or a lesson " +
+      "at a time. Lists that InDesign holds in a single paragraph — objectives, " +
+      "materials, contents entries — always arrive as one cell per line. Optionally, " +
+      "longer paragraphs can also be split into one cell per sentence; export puts " +
+      "each one back together as InDesign set it.",
     "importExport.biblica.chooseFile": "Choose study Bible IDML file",
     "importExport.biblica.chooseFileTreasureHunt": "Choose Treasure Hunt IDML file",
     "importExport.biblica.chooseFileReach4Life": "Choose Reach 4 Life IDML file",
+    "importExport.biblica.chooseFileEbl": "Choose EBL IDML file",
+    "importExport.biblica.editionQuestion": "Which Biblica title is this?",
+    "importExport.biblica.editionQuestionHint":
+      "Each title uses its own InDesign template, and nothing in the package says " +
+      "which one it is. Tick at most one. Leave all three unticked to read the " +
+      "package as Biblica Study Bible notes.",
     "importExport.biblica.treasureHuntLabel": "This is a Treasure Hunt Bible file",
     "importExport.biblica.treasureHuntHint":
       "The Treasure Hunt Bible uses a different InDesign template. Tick this to " +
@@ -164,6 +180,11 @@ export const importExport = defineNamespace({
       "Reach 4 Life uses a third InDesign template. Tick this to import its " +
       "lessons, journeys, hot topics, book introductions and front matter instead " +
       "of looking for study notes.",
+    "importExport.biblica.eblLabel": "This is an EBL file",
+    "importExport.biblica.eblHint":
+      "Equipping Biblical Leaders guides use a fourth InDesign template. Tick this " +
+      "to import the whole guide, split into sections by its own topic and lesson " +
+      "headings, instead of looking for study notes.",
     "importExport.biblica.splitSentencesLabel": "Split long notes into one cell per sentence",
     "importExport.biblica.splitSentencesHint":
       "Leave unchecked to import each note line as one larger cell. Lists still split per line either way.",
@@ -535,6 +556,9 @@ export const importExport = defineNamespace({
     "importExport.dialog.voiceFilterAriaLabel": "Filter export by voice",
     "importExport.dialog.allVoices": "All voices",
     "importExport.dialog.voiceFilterHint": "Export will include only cells assigned to {voice}, across all camera angles.",
+    "importExport.dialog.chapterFilterAriaLabel": "Filter export by chapter",
+    "importExport.dialog.allChapters": "All chapters",
+    "importExport.dialog.chapterFilterHint": "Export will include only the cells in {chapter}.",
     "importExport.dialog.filenameLegend": "Filename",
     "importExport.dialog.filenameAriaLabel": "Export filename (without extension)",
     "importExport.dialog.projectScopeUsesProjectName": "Project-scope exports use the project name.",
@@ -656,6 +680,8 @@ export const importExport = defineNamespace({
     "importExport.status.downloadedFilesCount": plural({ one: "Downloaded {count} file", other: "Downloaded {count} files" }),
     "importExport.status.downloadedFile": "Downloaded {fileName}",
     "importExport.status.exportFailed": "Export failed.",
+    "importExport.errors.originalMissing":
+      "Original isn't in storage. Re-import to restore it.",
 
     // — Thrown-error triage: src/lib/import.ts (AQU-832 wave 3 error sweep) —
     // These are messages parser/upload helpers throw that reach the user
@@ -1049,6 +1075,18 @@ export const importExport = defineNamespace({
         description:
           "Visible label AND the checkbox's own accessible name (identical text, reused directly) for switching the Biblica importer to the Reach 4 Life InDesign template. 'Reach 4 Life' is a product title — keep it recognizable.",
       },
+      "importExport.biblica.eblLabel": {
+        description:
+          "Visible label AND the checkbox's own accessible name (identical text, reused directly) for switching the Biblica importer to the Equipping Biblical Leaders InDesign template. 'EBL' is the programme's own abbreviation of 'Equipping Biblical Leaders' and is how Biblica names these files — keep the abbreviation rather than expanding or translating it. Note the article agrees with the abbreviation, not the expansion.",
+      },
+      "importExport.biblica.editionQuestion": {
+        description:
+          "Caption above the three mutually exclusive Biblica title checkboxes (Treasure Hunt Bible, Reach 4 Life, EBL). It also names the group for screen readers, so it must read as a question about the file being imported, not as a command.",
+      },
+      "importExport.biblica.editionQuestionHint": {
+        description:
+          "Hint under that caption. Explains why the person importing has to answer — the package does not identify its own title — that at most one box applies, and that leaving all three clear reads the file as a Biblica Study Bible notes package (the importer's default).",
+      },
       "importExport.biblica.readingPackageWithProgress": {
         description: "Parse-phase progress line on the Biblica panel while unpacking the IDML package, once a file count is known.",
         placeholders: {
@@ -1310,6 +1348,13 @@ export const importExport = defineNamespace({
         description: "Hint below the voice filter once a specific voice is chosen. {voice} is bold-styled, rendered by RichMessage.",
         placeholders: { voice: "Bold-styled name of the selected cast voice." },
       },
+      "importExport.dialog.chapterFilterAriaLabel": {
+        description: "Accessible name for the chapter-scope select on the Export dialog.",
+      },
+      "importExport.dialog.chapterFilterHint": {
+        description: "Hint below the chapter scope once a single chapter is chosen. {chapter} is bold-styled, rendered by RichMessage.",
+        placeholders: { chapter: "Bold-styled label of the selected chapter, e.g. 'GEN 1'." },
+      },
       "importExport.dialog.filenameAriaLabel": {
         description: "Accessible name for the export filename input.",
       },
@@ -1473,6 +1518,10 @@ export const importExport = defineNamespace({
       "importExport.status.downloadedFile": {
         description: "Success-status message after a single-file client-side export (txt/md/tsv/csv/xlf/tmx/vtt/srt/plain-text-dump/metadata-csv).",
         placeholders: { fileName: "Name of the downloaded file — not translated." },
+      },
+      "importExport.errors.originalMissing": {
+        description:
+          "Toast when Download original fails because the stored blob pointer exists but the bytes are gone from storage. Tells the user to re-import.",
       },
       "importExport.errors.ebibleEmptyCorpus": {
         description: "Thrown when a chosen eBible translation's corpus file downloads but contains no text (often copyright-restricted).",

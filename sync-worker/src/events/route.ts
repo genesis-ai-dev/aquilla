@@ -45,6 +45,7 @@ import { broadcastRealtime } from './broadcast'
 import type { BroadcastEnv } from './broadcast'
 import { checkProjectMembership, type MembershipCheck } from './membership'
 import { ROLE, isForeignCommentKind, requiredRoleForForeignComment, roleLabel } from './role-policy'
+import { createCommentFloorsCache } from './comment-floors'
 import { sendCommentNotifications, type EmailService } from '../notification-email'
 import { laneRelevantHeadSeq } from './link-sync'
 import {
@@ -52,6 +53,7 @@ import {
   fullProgressRecomputeStmts,
   sectionsProgressRecomputeStmt,
 } from './progress-projection'
+import { makeRequestCache } from './request-cache'
 
 // Max statements per batch() transaction — a conservative self-imposed cap (Postgres has no hard limit; keeps any single transaction bounded).
 const BATCH_LIMIT = 100
@@ -300,6 +302,57 @@ async function readEventAppliedRows(
     return null
   }
   return out
+}
+
+/** One `event.applied` frame — the DO broadcast body and the `applied[]`
+ *  entry in the POST /events response share this exact shape. */
+export interface AppliedFrame {
+  t: 'event.applied'
+  id: string
+  kind: string
+  project: string
+  file?: string
+  cell?: string
+  by: string
+  via?: 'external'
+  serverSeq?: number
+  rows?: CellRowOut[]
+}
+
+function buildAppliedFrame(
+  entry: {
+    eventFrame: { id: string; kind: string; project: string; file?: string; cell?: string }
+    author: string
+    viaExternal?: boolean
+    serverSeq: number
+  },
+  rowsByCell: Map<string, CellRowOut[]> | null,
+): AppliedFrame {
+  const frame = entry.eventFrame
+  const carriesRows =
+    frame.file !== undefined && frame.cell !== undefined && isEventAppliedRowsKind(frame.kind)
+  return {
+    t: 'event.applied',
+    id: frame.id,
+    kind: frame.kind,
+    project: frame.project,
+    ...(frame.file ? { file: frame.file } : {}),
+    ...(frame.cell ? { cell: frame.cell } : {}),
+    // Verified author — lets the author's own client skip the
+    // "changed elsewhere" banner when its write bounces back.
+    by: entry.author,
+    // Agent-API channel marker — forces the credential owner's own
+    // browser to treat the frame as remote (no local outbox write
+    // exists to have already refetched). See PendingEntry.viaExternal.
+    ...(entry.viaExternal ? { via: 'external' as const } : {}),
+    // Additive: server_seq + current rows for cell-content events.
+    // `rows` is omitted (not empty) when the request exceeded the
+    // per-request cell cap — clients then refetch as before.
+    ...(carriesRows ? { serverSeq: entry.serverSeq } : {}),
+    ...(carriesRows && rowsByCell
+      ? { rows: rowsByCell.get(cellRowsKey(frame.project, frame.file!, frame.cell!)) ?? [] }
+      : {}),
+  }
 }
 
 export interface EventsRouteEnv {
@@ -731,6 +784,9 @@ export async function handleEventsWriteRequest(
   let seqBase = 0
 
   const accepted: AcceptedEntry[] = []
+  /** `event.applied`-shaped frames for every committed entry — built once,
+   *  broadcast to peers AND returned to the author as `applied[]`. */
+  const appliedFrames: AppliedFrame[] = []
   const rejected: RejectedEntry[] = []
   // Chain-mutating events that were accepted (logged) but did NOT advance
   // the projection — stale siblings. Keyed by event id so we can `has`-check
@@ -831,32 +887,26 @@ export async function handleEventsWriteRequest(
       prefetchLastEditors(db, [...validateCells.values()]),
     ])
 
-  // PERF-2: project_settings is read at most once per (request, project).
-  // No event kind mutates project_settings (its only writers are the
-  // migrate-settings route and auth-worker), so the memo cannot serve a
-  // stale read to any event in this batch. Read/parse failures memoize as
-  // null — the same per-event fallback as before (validate: skip
-  // enforcement; harmonize: hard floor).
-  const settingsCache = new Map<string, Record<string, unknown> | null>()
+  // PERF-2: project_settings is read at most once per (request, project) —
+  // and, since perf/events-write-path, that ONE memo is shared with the
+  // authority carve-outs inside authorize() (request-cache.ts), which used to
+  // re-read the same row per event. No event kind mutates project_settings /
+  // org_settings / projects.org_id (their only writers are the
+  // migrate-settings route and auth-worker), so the memo cannot serve a stale
+  // read to any event in this batch. Read/parse failures read as null — the
+  // same per-event fallback as before (validate: skip enforcement;
+  // harmonize: hard floor).
+  const requestCache = makeRequestCache(db)
   const readProjectSettings = async (
     projectId: string,
   ): Promise<Record<string, unknown> | null> => {
-    if (settingsCache.has(projectId)) return settingsCache.get(projectId) ?? null
-    let parsed: Record<string, unknown> | null = null
     try {
-      const row = await db
-        .prepare(`SELECT settings FROM project_settings WHERE project_id = ?`)
-        .bind(projectId)
-        .first<{ settings: string | null }>()
-      if (row?.settings) {
-        parsed = JSON.parse(row.settings) as Record<string, unknown>
-      }
+      return await requestCache.projectSettings(projectId)
     } catch {
       // Settings load failure is non-fatal — callers fall back to their
       // defaults rather than blocking the batch.
+      return null
     }
-    settingsCache.set(projectId, parsed)
-    return parsed
   }
 
   // FRO-346: live membership re-check, once per (project, user) per request.
@@ -877,9 +927,14 @@ export async function handleEventsWriteRequest(
     return pending
   }
 
+  // AQU-1002: the org's configurable comment floors, resolved at most once per
+  // project per request. A batch of comment mutations would otherwise repeat
+  // the same two reads for every entry; non-comment batches never touch it.
+  const commentFloorsFor = createCommentFloorsCache(db)
+
   for (const [eventIndex, rawEvent] of rawEvents.entries()) {
     // Authorize.
-    const authResult = await authorize(token, rawEvent, env.SYNC_SECRET_KEY, db)
+    const authResult = await authorize(token, rawEvent, env.SYNC_SECRET_KEY, db, requestCache)
     if (!authResult.ok) {
       rejected.push({
         id: rawEvent.id ?? '(unknown)',
@@ -1089,15 +1144,38 @@ export async function handleEventsWriteRequest(
     const callerRole = authResult.event.claims.roleLevel
     const callerUsername = authResult.event.claims.username
 
+    // AQU-1002: org-configurable floor to OPEN a thread or post a reply.
+    // authorize() has already applied the static COMMENTER floor; this only
+    // ever RAISES it, for an org that wants discussion reserved to reviewers
+    // and above. A configured floor below COMMENTER is a no-op — VIEWER is the
+    // only rung underneath and viewers have no write path at all.
+    if (rawEvent.kind === 'comment.create') {
+      const { createMinRole } = await commentFloorsFor(rawEvent.projectId)
+      if (callerRole < createMinRole) {
+        rejected.push({
+          id: rawEvent.id ?? '(unknown)',
+          status: 403,
+          reason: `role too low to create a comment (requires ${roleLabel(createMinRole)})`,
+        })
+        continue
+      }
+    }
+
     if (isForeignCommentKind(rawEvent.kind)) {
       const p = rawEvent.payload as { commentId?: string }
       if (p.commentId) {
         const authorId = commentAuthors.get(p.commentId)
 
         if (authorId !== undefined && authorId !== callerUsername) {
-          // Foreign comment mutation — floor per FOREIGN_COMMENT_ROLE
-          // (AQU-999): maintainer for edit/delete, contributor for resolve.
-          const foreignFloor = requiredRoleForForeignComment(rawEvent.kind)
+          // Foreign comment mutation. edit/delete keep the static
+          // FOREIGN_COMMENT_ROLE maintainer floor — rewriting or removing
+          // another person's words is not a policy orgs asked to tune.
+          // AQU-1002: resolve/reopen instead reads the org's configurable
+          // floor, defaulting to AQU-999's CONTRIBUTOR.
+          const foreignFloor =
+            rawEvent.kind === 'comment.resolve'
+              ? (await commentFloorsFor(rawEvent.projectId)).resolveMinRole
+              : requiredRoleForForeignComment(rawEvent.kind)
           if (callerRole < foreignFloor) {
             const verb = rawEvent.kind === 'comment.resolve' ? 'resolve' : 'mutate'
             rejected.push({
@@ -1330,17 +1408,30 @@ export async function handleEventsWriteRequest(
     interface PendingChunk {
       entries: PendingEntry[]
       stmts: AquillaStatement[]
+      /** QW-10 recompute statements — run in a SECOND batch after `stmts` commit. */
+      recompute: AquillaStatement[]
     }
 
     const chunks: PendingChunk[] = []
-    let currentChunk: PendingChunk = { entries: [], stmts: [] }
+    let currentChunk: PendingChunk = { entries: [], stmts: [], recompute: [] }
 
     // QW-10: the deferred file-counter recompute runs once per (file, chunk),
-    // appended when the chunk is sealed so it commits in the SAME transaction
-    // as the chunk's events — committed chunks always leave correct counters,
-    // exactly like the old per-event recompute, at 1/N the aggregate scans.
-    // (A sealed chunk may exceed BATCH_LIMIT by the handful of per-file
-    // recomputes; the limit is a self-imposed soft cap, not a Postgres one.)
+    // built when the chunk is sealed — 1/N the aggregate scans of the old
+    // per-event recompute.
+    //
+    // perf/events-write-path: it runs in its OWN transaction, immediately
+    // after the chunk's write transaction commits (same request, awaited
+    // before the broadcast — never waitUntil), rather than inside it. The
+    // recompute is a full-file aggregate scan over `cells`; carrying it inside
+    // the write transaction meant the events/cells row locks stayed held for
+    // the whole scan, which on prod showed up as 200ms+ lock waits and
+    // deadlocks on single-row commits. The contract is therefore: counters
+    // are consistent by the time this request RESPONDS (and broadcasts), not
+    // by the time the events commit. The window between the two is only
+    // observable to a concurrent reader, who would see counters at most one
+    // chunk behind — and that reader's own next commit recomputes them again.
+    // A recompute failure is logged loudly and does not un-accept the events
+    // (they are durably committed); the next commit on the file self-heals.
     const sealChunk = (chunk: PendingChunk): void => {
       const counterFiles = new Map<string, {
         projectId: string
@@ -1365,13 +1456,13 @@ export async function handleEventsWriteRequest(
       }
       const recomputeTs = Date.now()
       for (const f of counterFiles.values()) {
-        chunk.stmts.push(fileCountersRecomputeStmt(db, f.projectId, f.fileId, recomputeTs))
+        chunk.recompute.push(fileCountersRecomputeStmt(db, f.projectId, f.fileId, recomputeTs))
         if (f.fullSections) {
-          chunk.stmts.push(...fullProgressRecomputeStmts(db, f.projectId, f.fileId, recomputeTs))
+          chunk.recompute.push(...fullProgressRecomputeStmts(db, f.projectId, f.fileId, recomputeTs))
         } else {
-          chunk.stmts.push(fileProgressRecomputeStmt(db, f.projectId, f.fileId, recomputeTs))
+          chunk.recompute.push(fileProgressRecomputeStmt(db, f.projectId, f.fileId, recomputeTs))
           if (f.cellIds.size > 0) {
-            chunk.stmts.push(
+            chunk.recompute.push(
               sectionsProgressRecomputeStmt(db, f.projectId, f.fileId, recomputeTs, [...f.cellIds]),
             )
           }
@@ -1400,7 +1491,7 @@ export async function handleEventsWriteRequest(
         currentChunk.stmts.length + eventStmts.length > BATCH_LIMIT
       ) {
         sealChunk(currentChunk)
-        currentChunk = { entries: [], stmts: [] }
+        currentChunk = { entries: [], stmts: [], recompute: [] }
       }
 
       currentChunk.entries.push(entry)
@@ -1420,7 +1511,9 @@ export async function handleEventsWriteRequest(
     // the batch result's row count for that statement is 0. Without this the
     // client would treat "accepted" as "saved" (the old silent-loss bug).
     // Reading the row count back from the same transaction is race-free:
-    // no later request can change what THIS write did.
+    // no later request can change what THIS write did. (The recompute
+    // statements are NOT in this batch — see sealChunk — so `results` indexes
+    // line up with `chunk.stmts` exactly as the per-entry offsets assume.)
     const flagChainLosers = (
       chunk: PendingChunk,
       results: ReadonlyArray<{ meta: { changes: number } }>,
@@ -1440,11 +1533,32 @@ export async function handleEventsWriteRequest(
       }
     }
 
+    // Pipelined when the shim offers it (postgres.js over Hyperdrive): the
+    // chunk's statements stream in waves instead of one round-trip each, and
+    // the transaction — and the row locks it holds — is open for a fraction of
+    // the time. Same atomicity and result order/shape as batch() (see
+    // db/shim/postgres.ts batchPipelined), which flagChainLosers relies on.
+    const runBatch = (stmts: AquillaStatement[]) =>
+      db.batchPipelined ? db.batchPipelined(stmts) : db.batch(stmts)
+
     try {
       for (const chunk of chunks) {
-        const results = await db.batch(chunk.stmts)
+        const results = await runBatch(chunk.stmts)
         flagChainLosers(chunk, results)
         committedEntries.push(...chunk.entries)
+        if (chunk.recompute.length > 0) {
+          try {
+            await runBatch(chunk.recompute)
+          } catch (recomputeErr) {
+            // The events are committed; only the derived counters are behind.
+            // Loud, because a silent miss here is a counter drift nobody can
+            // trace back — but not fatal, and NOT reported as a rejection.
+            console.error(
+              `[events] file counter recompute failed after commit (${chunk.entries.length} events accepted; counters self-heal on the next commit):`,
+              recomputeErr,
+            )
+          }
+        }
       }
     } catch (err) {
       const committed = new Set(committedEntries.map((entry) => entry.id))
@@ -1547,54 +1661,33 @@ export async function handleEventsWriteRequest(
       await Promise.all(broadcasts)
     }
 
+    // Inline each committed cell's CURRENT projected rows (post-commit) so
+    // clients apply the head directly instead of a GET …/cells?cellIds=
+    // round-trip per event. ONE SELECT for every cell this request touched;
+    // skipped when none qualify. The same frames go to two places: the
+    // ProjectSync DO broadcast (peers) and the HTTP response `applied[]`
+    // (the author's own client, which would otherwise refetch after its
+    // outbox flush — see src/lib/sync/outbox-flush.ts onApplied).
+    const rowsByCell = await readEventAppliedRows(db, committedEntries)
+    for (const entry of committedEntries) {
+      appliedFrames.push(buildAppliedFrame(entry, rowsByCell))
+    }
+
     // Fan-out event.applied frames to ProjectSync DO so UI clients receive
     // real-time updates via the per-project WebSocket. Non-fatal — a missed
     // broadcast means the client will reconcile on its next poll/revalidate.
     if (env.ProjectSync && env.SYNC_SECRET_KEY) {
       // Group by project — one DO stub per project.
-      const byProject = new Map<string, typeof committedEntries>()
-      for (const entry of committedEntries) {
-        const project = entry.eventFrame.project
-        const list = byProject.get(project)
-        if (list) list.push(entry)
-        else byProject.set(project, [entry])
+      const byProject = new Map<string, AppliedFrame[]>()
+      for (const frame of appliedFrames) {
+        const list = byProject.get(frame.project)
+        if (list) list.push(frame)
+        else byProject.set(frame.project, [frame])
       }
-      // Inline each committed cell's CURRENT projected rows (post-commit) on
-      // its event.applied frame so clients apply the head directly instead
-      // of a GET …/cells?cellIds= round-trip per frame. ONE SELECT for every
-      // cell this request touched; skipped when none qualify.
-      const rowsByCell = await readEventAppliedRows(db, committedEntries)
       const doFanOut: Promise<void>[] = []
-      for (const [project, entries] of byProject) {
+      for (const [project, messages] of byProject) {
         const id = env.ProjectSync.idFromName(project)
         const stub = env.ProjectSync.get(id)
-        const messages = entries.map((entry) => {
-          const frame = entry.eventFrame
-          const carriesRows =
-            frame.file !== undefined && frame.cell !== undefined && isEventAppliedRowsKind(frame.kind)
-          return {
-            t: 'event.applied',
-            id: frame.id,
-            kind: frame.kind,
-            project: frame.project,
-            ...(frame.file ? { file: frame.file } : {}),
-            ...(frame.cell ? { cell: frame.cell } : {}),
-            // Verified author — lets the author's own client skip the
-            // "changed elsewhere" banner when its write bounces back.
-            by: entry.author,
-            // Agent-API channel marker — forces the credential owner's own
-            // browser to treat the frame as remote (no local outbox write
-            // exists to have already refetched). See PendingEntry.viaExternal.
-            ...(entry.viaExternal ? { via: 'external' as const } : {}),
-            // Additive: server_seq + current rows for cell-content events.
-            // `rows` is omitted (not empty) when the request exceeded the
-            // per-request cell cap — clients then refetch as before.
-            ...(carriesRows ? { serverSeq: entry.serverSeq } : {}),
-            ...(carriesRows && rowsByCell
-              ? { rows: rowsByCell.get(cellRowsKey(frame.project, frame.file!, frame.cell!)) ?? [] }
-              : {}),
-          }
-        })
         // PERF-8: ONE __broadcast subrequest per (project, request) — the
         // per-event fan-out burned ~1 subrequest per committed event against
         // the 1000/invocation cap. Single events keep the legacy one-message
@@ -1689,5 +1782,10 @@ export async function handleEventsWriteRequest(
       .filter((a) => staleEntries.has(a.id))
       .map((a) => staleEntries.get(a.id)!),
     staleSource: staleSourceEntries,
+    // Same shape as the `event.applied` WS frame, one per committed event.
+    // Lets the author's client land its own write's projected rows straight
+    // from the POST (no by-ids GET after the outbox flush). Omitted on the
+    // partial-commit (batch-failure) path above — clients refetch as before.
+    applied: appliedFrames,
   })
 }

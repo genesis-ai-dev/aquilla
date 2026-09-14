@@ -702,6 +702,112 @@ describe('discard — a committing changeset is rejected', () => {
   })
 })
 
+// ── AQU-1225: pre-creation changesets must be discardable ────────────────────
+// A CreateProject changeset is staged under a project id that does not exist
+// yet, so discard's membership check could never resolve a role and always
+// returned permission_denied — leaving undiscardable junk in the approval queue
+// until it expired an hour later. Authorization falls back to the staging
+// credential; a different credential still cannot discard it.
+
+describe('AQU-1225: discard — pre-creation (CreateProject) changesets', () => {
+  it('the staging credential discards its own pre-creation changeset — it leaves the approval queue immediately', async () => {
+    const env = makeEnv(tdb.db)
+    await seedOrgMember(tdb, 1, 600) // alice: org maintainer
+    const token = await credToken(tdb, {
+      credentialId: '00000000-0000-0000-0000-000000001225', userId: 1, username: 'alice',
+      orgId: String(ORG_ID), projectId: null, mode: 'act',
+    })
+
+    const { body: prep } = await prepare(env, 'never-created', token, [
+      { kind: 'CreateProject', name: 'Never Created', orgId: ORG_ID },
+    ])
+    expect(prep.changeset.status).toBe('staged')
+    // Precondition of the bug: the target project genuinely does not exist yet.
+    expect((await tdb.rows<{ id: string }>('projects')).filter((p) => p.id === 'never-created')).toHaveLength(0)
+
+    const res = (await handleExternalChangesetsRequest(
+      new Request(`${changesetsUrl('never-created')}/${prep.changeset.id}/discard`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      env,
+    ))!
+    // The step that used to permission_denied now succeeds.
+    expect(res.status).toBe(200)
+    expect((await res.json() as any).changeset.status).toBe('discarded')
+
+    const rows = await tdb.rows<{ id: string; status: string }>('changesets')
+    expect(rows.find((c) => c.id === prep.changeset.id)?.status).toBe('discarded')
+  })
+
+  it('a DIFFERENT credential still cannot discard a pre-creation changeset', async () => {
+    const env = makeEnv(tdb.db)
+    await seedOrgMember(tdb, 1, 600) // alice: org maintainer
+    const alice = await credToken(tdb, {
+      credentialId: '00000000-0000-0000-0000-000000001226', userId: 1, username: 'alice',
+      orgId: String(ORG_ID), projectId: null, mode: 'act',
+    })
+    // bob: a second org maintainer with his own credential — high enough org
+    // role that only the per-credential ownership rule can be what denies him.
+    // credToken seeds his users row, so his org membership goes in after it.
+    const bob = await credToken(tdb, {
+      credentialId: '00000000-0000-0000-0000-000000001227', userId: 2, username: 'bob',
+      orgId: String(ORG_ID), projectId: null, mode: 'act',
+    })
+    await tdb.pg.query(
+      `INSERT INTO org_members (org_id, user_id, role_level) VALUES ($1, 2, 600)`,
+      [ORG_ID],
+    )
+
+    const { body: prep } = await prepare(env, 'alice-only', alice, [
+      { kind: 'CreateProject', name: 'Alice Only', orgId: ORG_ID },
+    ])
+
+    const res = (await handleExternalChangesetsRequest(
+      new Request(`${changesetsUrl('alice-only')}/${prep.changeset.id}/discard`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${bob}` },
+      }),
+      env,
+    ))!
+    expect(res.status).toBe(403)
+    expect((await res.json() as any).error.code).toBe('permission_denied')
+
+    // Untouched — still staged, still alice's to discard.
+    const rows = await tdb.rows<{ id: string; status: string }>('changesets')
+    expect(rows.find((c) => c.id === prep.changeset.id)?.status).toBe('staged')
+  })
+
+  it('a POST-creation changeset keeps the membership check: the same credential is denied once membership is gone', async () => {
+    const env = makeEnv(tdb.db)
+    await seedSettingsProject(tdb, 'proj-live', 1, {}, 0)
+    const token = await credToken(tdb, {
+      credentialId: '00000000-0000-0000-0000-000000001228', userId: 1, username: 'alice',
+      orgId: null, projectId: 'proj-live', mode: 'act',
+    })
+    const { body: prep } = await prepare(env, 'proj-live', token, [
+      { kind: 'UpdateProjectSettings', projectId: 'proj-live', settings: { a: 1 }, ifMatchVersion: 0 },
+    ])
+
+    // The project EXISTS, so removing membership must still deny — the
+    // pre-creation fallback must not leak into the normal path.
+    await tdb.pg.query(`DELETE FROM project_members WHERE project_id = 'proj-live'`)
+
+    const res = (await handleExternalChangesetsRequest(
+      new Request(`${changesetsUrl('proj-live')}/${prep.changeset.id}/discard`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      env,
+    ))!
+    expect(res.status).toBe(403)
+    expect((await res.json() as any).error.code).toBe('permission_denied')
+
+    const rows = await tdb.rows<{ id: string; status: string }>('changesets')
+    expect(rows.find((c) => c.id === prep.changeset.id)?.status).toBe('staged')
+  })
+})
+
 // ── blocker 4: receipt-only changesets stage a NON-EMPTY renderable summary ───
 
 describe('blocker 4: receipt-only summary is renderable (no blind approval)', () => {

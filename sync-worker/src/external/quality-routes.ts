@@ -43,13 +43,8 @@ import { handleConceptsReadRequest } from "../events/concepts-read-route"
 import { handleFilesReadRequest } from "../events/files-read-route"
 import { externalError } from "./errors"
 import { paginate, parsePageParams } from "./pagination"
-import {
-  authenticateAndScope,
-  checkReadRateLimit,
-  mintInternalToken,
-  type AuthedContext,
-  type ExternalReadsEnv,
-} from "./read-routes"
+import { mintInternalToken, type AuthedContext } from "./read-routes"
+import { authenticateAndScope, checkReadRateLimit, type ExternalReadsEnv } from "./read-auth"
 import {
   scanTermConsistency,
   type CheckableCell,

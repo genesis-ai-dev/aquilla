@@ -73,6 +73,10 @@ export interface ChangesetApprovalSummary {
   settingsChanges?: Record<string, string>
   /** EmitEvents changesets: per-kind counts with testimony marks. */
   events?: ChangesetSummaryEvent[]
+  /** AQU-1228 Living Memory writes: the entry path being written or retired
+   *  plus a one-line preview of its content — the approval page renders these
+   *  explicitly, because approving IS the memory review. */
+  memoryWrites?: { path: string; action: string; preview: string }[]
   [key: string]: unknown
 }
 

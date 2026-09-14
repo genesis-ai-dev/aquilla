@@ -94,6 +94,31 @@ export const MCP_TOOLS: McpToolDef[] = [
     },
   },
   {
+    name: 'find_similar_cells',
+    description:
+      'Translation memory (the "how did we render lines like this before?" primitive). ' +
+      'Returns the source cells most SIMILAR to a given line, each with its current ' +
+      'target and a score in [0,1] (1 = identical wording), so you can reuse an existing ' +
+      'rendering instead of inventing one. Args: projectId (required), then exactly one of ' +
+      'cellId (a source cell in the project — it is excluded from its own results) or text ' +
+      '(free text); limit (optional, default 10, max 50). Returns { data, nextCursor } where ' +
+      'each row is { cellId, fileId, sourceValue, targetValue, targetLang, score }; cells ' +
+      'with no target yet are never returned. SIMILARITY IS LEXICAL (shared terms), NOT ' +
+      'semantic — a paraphrase with no words in common scores 0. Prefer search_project when ' +
+      'you already know which words to look for.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        cellId: { type: 'string', description: 'Source cell to find precedents for.' },
+        text: { type: 'string', description: 'Free text to find precedents for.' },
+        limit: { type: 'number', description: 'Max results (default 10, max 50).' },
+      },
+      required: ['projectId'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'read_content',
     description:
       'Read project content. Omit fileId to LIST the project\'s files; provide fileId to ' +
@@ -341,9 +366,9 @@ export const MCP_TOOLS: McpToolDef[] = [
       'round-trip export later. (2) preview_import to check the parse. (3) prepare_import ' +
       'to stage a PlanImport changeset. (4) the normal confirm_changeset / approval flow. ' +
       'Server-parseable formats: txt, md, json, po, properties, obs, vtt, srt, sbv, csv, ' +
-      'tsv, usfm (format is auto-detected; pass fileType to override — required for po/' +
-      'properties/obs/sbv, which are not sniffable). DOM-bound formats (docx, pptx, html, ' +
-      'xliff, tmx, usx, idml) are NOT server-parseable — they return validation_failed ' +
+      'tsv, usfm, docx (format is auto-detected; pass fileType to override — required for ' +
+      'po/properties/obs/sbv, which are not sniffable). Still DOM-bound: pptx, html, ' +
+      'xliff, tmx, usx, idml are NOT server-parseable — they return validation_failed ' +
       'naming the client-side alternatives (in-app Import dialog, or raw PlanImport cells). ' +
       'Returns { fileName, fileType, totalCells, sampleCells (first 10), warnings, ' +
       'results } — `results` lists every parsed file when a multi-book USFM splits into ' +

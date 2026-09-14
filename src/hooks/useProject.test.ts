@@ -41,6 +41,7 @@ vi.mock("@/hooks/useProjectSettings", () => ({
 
 vi.mock("@/lib/store/project-index", () => ({
   getProject: vi.fn(async () => undefined),
+  subscribeProjectRecords: vi.fn(() => () => {}),
 }))
 
 // Import after mocks are registered.

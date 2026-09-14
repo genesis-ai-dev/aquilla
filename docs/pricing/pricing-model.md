@@ -1,6 +1,6 @@
 # Aquilla pricing model
 
-Updated: 2026-09-09
+Updated: 2026-09-14
 
 This document defines Aquilla’s target pricing model for Stripe, in-app billing, sales, and aquilla-marketing. It supersedes earlier Field pricing descriptions for new implementation. It describes the intended offer, not current implementation status. Unresolved launch decisions appear at the end.
 
@@ -22,7 +22,8 @@ All multipliers compare allowances over the same weekly usage period. **Max 5× 
 | Team, 20× capacity, quantity N | 1,000 × N | Shared capacity with Team capabilities. $600 + $120 × N USD/month, or $6,000 + $1,200 × N USD/year. |
 | Enterprise | Agreed in contract | Custom annual quote covering platform usage, rollout, and support. |
 
-N is a positive integer. Selecting 20× capacity replaces the base allowance: one block totals 1,000 internal units per week, two total 2,000. It does not add the base 250 units. Capacity purchases do not add collaborators or permissions.
+The launch catalog fixes N to one. Higher quantities remain a future capability
+and require an explicit supported checkout/portal contract. Selecting 20× capacity replaces the base allowance: one block totals 1,000 internal units per week, two total 2,000. It does not add the base 250 units. Capacity purchases do not add collaborators or permissions.
 
 Usage resets weekly; monthly and annual billing remain unchanged. Each week's
 internal allowance equals the previous monthly reference amount divided by four.
@@ -115,14 +116,14 @@ extra allocation at monthly/annual renewal, and preserved usage during upgrades.
 
 **Stripe is authoritative for purchasable monetary amounts, currencies, and billing intervals.** This document defines packaging; application entitlements define capabilities and allowances. Never infer entitlements from a displayed amount or editable product name.
 
-- Free has no paid subscription. Create paid catalog entries for Pro, Max, and Team. Max has 5× and 20× capacity variants; Team has base and 20× variants. Use recurring quantity for 20× blocks within one workspace subscription.
+- Free has no paid subscription. Create paid catalog entries for Pro, Max, and Team. Max has 5× and 20× capacity variants; Team has base and 20× variants. At launch, use one subscription item with quantity one for each offer; higher capacity quantities remain unavailable.
 - Team base requires USD Prices of $600/month and $6,000/year. Pro is $20/month or $200/year; Max 5× is $60/month or $600/year; Max 20× blocks are $120/month or $1,200/year. All prices are USD. Enterprise uses an agreed quote and provisioned entitlements, not public self-serve checkout.
-- Maintain an explicit server-side mapping from approved Stripe Price IDs to plan, capacity, renewal interval, and allowed quantity. Permit quantity above one only for 20× variants. Reject unsupported combinations.
-- Team 20× pricing must include the Team platform charge once. Use the Team platform price at quantity one plus the recurring 20× capacity price at quantity N; do not multiply the Team platform charge by block quantity accidentally.
+- Maintain an explicit server-side mapping from approved Stripe Price IDs to plan, capacity, renewal interval, and allowed quantity. Reject quantity above one in the launch catalog. Any future multi-block support is limited to 20× variants and requires separate verification.
+- Team 20× includes the Team platform charge once. The native launch catalog bundles the total into one Price: $720/month or $7,200/year. Historical two-item catalog records remain readable; they are not the launch checkout shape.
 - In-app monetary amounts must come from Stripe through the authenticated billing API, including customer-specific subscription prices. Never display hard-coded or fallback prices. If Stripe pricing is unavailable, show plan and usage information without amounts and make purchase actions unavailable.
 - In-app billing shows plan, allowance scope, percentage of allowance used, reset date, relative capacity, renewal date, and available billing actions. Annual amounts show both the full annual charge and its monthly equivalent.
 - Checkout and billing changes use server-approved prices. Verified, idempotently processed Stripe events reconcile paid subscription state; a success redirect alone never grants access or credits.
-- Define proration, credit allocation during upgrades, payment-failure grace, cancellation, and downgrade behavior before checkout launches. Capacity changes must not reset consumed usage or grant duplicate allowances.
+- Stripe Customer Portal handles immediate price changes with prorations invoiced immediately. Upgrades raise the cap after verified payment; downgrades take effect immediately and can create account credit, without promising cash refunds. Cancellation retains already-paid access through period end. Failed payment immediately applies the Free cap. Every cap change preserves consumed weekly usage.
 - Preserve existing subscriptions and negotiated access until an explicit migration is approved. Renaming Field does not authorize repricing or changing existing renewal schedules.
 
 ## Sales and marketing contract
@@ -140,8 +141,8 @@ Keep Enterprise’s custom quote and rollout action. Preserve the existing cover
 1. Confirm maximum self-service 20× block quantity. Baseline prices and monthly/annual intervals are approved.
 2. Confirm guest-reviewer actions and whether the Team collaborator limit includes its owner.
 3. Specify Team versus Enterprise onboarding and support commitments.
-4. Finalize upgrade/proration, downgrade, cancellation, payment-failure, and existing-customer migration policies.
-5. Verify that credit metering and all feature permissions enforce this offer across producers and consumers.
+4. Verify the approved native lifecycle policies across remaining real sandbox cases and finalize existing-customer migration.
+5. Resolve the internal accounting-unit mismatch (cost-based versus word-based ledgers), then verify metering and feature permissions across all producers and consumers.
 
 Implement and test the complete pricing path: Stripe catalog → billing API → in-app/marketing display → checkout → webhook → workspace allowance and permissions. Include weekly resets independent of billing renewals, recurring quantities, personal/team isolation, and usage-preserving plan changes.
 

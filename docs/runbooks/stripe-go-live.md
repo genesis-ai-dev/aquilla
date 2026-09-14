@@ -43,6 +43,10 @@ Production payments and deployed configuration remain unchanged.
 - [ ] Retire unused custom plan-review backend/persistence after hosted coverage.
 - [ ] Wire weekly metering and enforcement through every AI execution path.
   Preserving the usage anchor does not establish that usage is measured/enforced.
+- [x] Map existing AI producers and accounting gaps in
+  [weekly usage implementation](weekly-usage-implementation.md).
+- [ ] Resolve the cost-based versus word-based accounting unit before applying
+  the approved weekly counts. The existing ledgers disagree; user input pending.
 - [ ] Resolve migration numbering against current main, then run release gates.
 - [ ] Provision and validate the production catalog, portal settings, endpoint
   signing secret, tax configuration, and controlled live rollout separately.

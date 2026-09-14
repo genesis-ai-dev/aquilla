@@ -257,6 +257,10 @@ Configure three encrypted **build** variables on `aquilla-web-preview`
   base64 line: `base64 -w0 <file>.pem`. Cloudflare's variable form does not keep
   the line breaks a PEM needs; a raw PEM is accepted when it survives intact.
 
+The short names `APP_ID`, `INSTALLATION_ID` and `PRIVATE_KEY` are accepted as
+aliases (the first setup used them). Prefer the prefixed names: a bare
+`PRIVATE_KEY` in a build environment does not say which key it is.
+
 Give the build its own key rather than reusing another holder's. An App can hold
 several private keys, each revocable on its own, so a leak in one place never
 forces a rotation in the other. Do not put any of these in Worker runtime

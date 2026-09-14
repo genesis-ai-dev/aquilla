@@ -41,6 +41,14 @@ test("signs a JWT the App's public key verifies, issued by the App id", () => {
   verifier.update(`${header}.${payload}`)
   assert.equal(verifier.verify(publicKey, signature, "base64url"), true)
 })
+test("accepts the short variable names the first setup used", () => {
+  const short = {
+    WORKERS_CI: env.WORKERS_CI, WORKERS_CI_BRANCH: env.WORKERS_CI_BRANCH, WORKERS_CI_COMMIT_SHA: env.WORKERS_CI_COMMIT_SHA,
+    PREVIEW_GITHUB_APP_ID: env.PREVIEW_GITHUB_APP_ID, INSTALLATION_ID: "160934738", PRIVATE_KEY: env.PREVIEW_GITHUB_APP_PRIVATE_KEY,
+  }
+  assert.deepEqual(appCredentials(short), { appId: APP_ID, installationId: 160934738, privateKey: pem })
+  assert.deepEqual(appCredentials({ ...short, INSTALLATION_ID: "" }).problems, ["PREVIEW_GITHUB_APP_INSTALLATION_ID is missing"])
+})
 test("accepts a raw PEM as well as base64", () => {
   assert.equal(appCredentials({ ...env, PREVIEW_GITHUB_APP_PRIVATE_KEY: pem }).privateKey, pem.trim())
   assert.equal(appCredentials(env).privateKey, pem)

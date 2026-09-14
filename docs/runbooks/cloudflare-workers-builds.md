@@ -240,16 +240,34 @@ creates or updates one **QA preview** comment on matching open PRs. It includes
 the actual frontend URL, deployed commit, and GitHub build-check/logs link.
 Cloudflare performs this API call directly; no GitHub Action runs.
 
-Configure `PREVIEW_GITHUB_TOKEN` as an encrypted **build** variable on
-`aquilla-web-preview` (Settings → Build → Variables and secrets). Use a dedicated
-GitHub fine-grained personal access token with resource owner `genesis-ai-dev`,
-repository access limited to `aquilla`, and **Pull requests: Read and write**.
-GitHub grants Metadata read access automatically. Complete any organization
-approval required for the token. Do not use a developer's broad CLI OAuth token.
-Do not put the token in Worker runtime secrets, `VITE_*` variables, or Git.
-Restrict builds carrying this credential to trusted repository branches.
+The comment is posted by the org's **Aquilla QA** GitHub App (`aquilla-qa-bot`),
+the same App Grokbot uses, so it shows as `aquilla-qa-bot[bot]` and never under a
+person's name. The App needs **Pull requests: Read and write** on `aquilla`; it
+already holds that. No permission change is needed for this feature.
 
-The script edits only comments authored by the token's user with its own marker.
+Configure three encrypted **build** variables on `aquilla-web-preview`
+(Settings → Build → Variables and secrets):
+
+- `PREVIEW_GITHUB_APP_ID`: the App ID from the App's settings page.
+- `PREVIEW_GITHUB_APP_INSTALLATION_ID`: the App's installation id on the
+  `genesis-ai-dev` org (Organization settings → GitHub Apps → Aquilla QA →
+  Configure; the number at the end of that page's URL).
+- `PREVIEW_GITHUB_APP_PRIVATE_KEY`: a private key generated for this build under
+  the App's settings (Private keys → Generate a private key), stored as one
+  base64 line: `base64 -w0 <file>.pem`. Cloudflare's variable form does not keep
+  the line breaks a PEM needs; a raw PEM is accepted when it survives intact.
+
+Give the build its own key rather than reusing another holder's. An App can hold
+several private keys, each revocable on its own, so a leak in one place never
+forces a rotation in the other. Do not put any of these in Worker runtime
+secrets, `VITE_*` variables, or Git. Restrict builds carrying this credential to
+trusted repository branches: anyone who can push a branch can read a build secret.
+
+At run time the script signs a five-minute JWT with the key, exchanges it for a
+one-hour installation token limited to `pull_requests: write` (narrower than the
+App's full grant), and uses that token for every GitHub call.
+
+The script edits only comments GitHub stamps with this App's id and its own marker.
 It rechecks the current PR head before writing, skips closed/fork/stale PRs,
 and bounds GitHub requests with one 30-second deadline. Missing credentials or
 notification failures produce a warning but do not fail the deployment.
@@ -258,8 +276,9 @@ Only successful deployments publish comments. A later failed build leaves the
 last successful commit visible; the comment does not claim it tests newer commits.
 If a PR opens after its branch build finishes, retry that Cloudflare build to
 publish the comment. This build-driven approach has no PR-open webhook. After
-adding or rotating the token, retry a build for an open PR and check its comment.
+adding or rotating the key, retry a build for an open PR and check its comment.
 
 Validation: `node --test scripts/cloudflare-preview-comment.test.mjs` covers
-GitHub comment creation/update, commit checks, missing credentials, and failures.
+the JWT signature, the installation-token exchange, GitHub comment
+creation/update, commit checks, missing credentials, and failures.
 The stack preview contract test verifies notification follows all five uploads.

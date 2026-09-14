@@ -144,6 +144,18 @@ sidebar. Resolution — `| dock | conversation | optional step inspector |`:
   and selection jumps to the new conversation.
 - One shared refcounted poller (team-conversations.ts) feeds both columns.
 
+## Header refinement (2026-09-14)
+
+The Team surface uses one conversation header: the active conversation's name
+is the headline, its run status is secondary, and the three clickable persona
+avatars share that row. The roster retains its accessible name and live
+indicators without a separate visible roster strip. Empty Team chat uses the
+same header; opening a run or the questions conversation updates its headline.
+The workbench toolbar omits its redundant Agent icon/title while Team is
+selected, but retains its tabs and session controls. Chat and Project knowledge
+keep their existing toolbar identity. File tabs, project navigation, message
+content, review actions, and inspector interactions are unchanged.
+
 ## Testing
 
 Vitest: personas mapping totality (every region/tool kind attributes — the social
@@ -154,3 +166,7 @@ expand reveals raw); AgentEmptyState (roster, prefill behavior); shell-routing
 (resolveSidebarAgentClick). Worker: draft-tool empty-reply text. No new smoke
 (UI-only; AGENTS.md rule 3); existing agent e2e selectors verified unaffected
 ("Ask the agent" composer, TabStrip "Agent" tab, data-frame-type attrs unchanged).
+Header refinement is covered in TeamThreadsView RTL (empty/channel/run/questions
+headlines, avatar-card access, live indicators, and Escape navigation) and
+AgentWorkbench RTL (Team toolbar identity and switching back to the document
+workspace).

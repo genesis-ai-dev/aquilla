@@ -56,6 +56,15 @@ vi.mock("@/lib/agent/agent-client", () => ({
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "test-jwt", username: "alice" }, loading: false }),
 }))
+vi.mock("@/lib/contextual/transport", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/contextual/transport")>(),
+  fetchContextualRuns: vi.fn().mockResolvedValue({
+    available: true, runs: [], truncated: false, nextCursor: null,
+  }),
+  fetchContextualDecisions: vi.fn().mockResolvedValue({
+    decisions: [], openCount: 0, cap: 3,
+  }),
+}))
 vi.mock("@/lib/agent/memory-api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/agent/memory-api")>("@/lib/agent/memory-api")
   return {
@@ -378,6 +387,25 @@ describe("AgentWorkbench review loop", () => {
 })
 
 describe("AgentWorkbench Chat | Project knowledge tab slot (AQU-AGENT §5)", () => {
+  it("lets the conversation headline identify Team without repeating Agent in the toolbar", async () => {
+    render(<AgentWorkbench {...workbenchProps()} />)
+    const teamTab = screen.getByRole("tab", { name: "Team" })
+    const toolbar = teamTab.closest("[role=tablist]")!.parentElement!
+
+    fireEvent.click(teamTab)
+    expect(await screen.findByRole("heading", { name: "Team chat", level: 2 })).toBeInTheDocument()
+    expect(within(toolbar).queryByText("Agent", { exact: true })).not.toBeInTheDocument()
+    expect(within(toolbar).getByRole("tab", { name: "Chat" })).toBeInTheDocument()
+    expect(within(toolbar).getByRole("tab", { name: "Project knowledge" })).toBeInTheDocument()
+    expect(within(toolbar).getByRole("button", { name: /New session/ })).toBeInTheDocument()
+    expect(within(toolbar).getByRole("button", { name: /Collapse Agent pane/ })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("tab", { name: "Chat" }))
+    expect(within(toolbar).getByText("Agent", { exact: true })).toBeInTheDocument()
+    expect(screen.getByLabelText("Source pane")).toBeInTheDocument()
+    expect(screen.getByLabelText("Target pane")).toBeInTheDocument()
+  })
+
   it("defaults to Chat and offers Project knowledge that lazy-loads its content", async () => {
     render(<AgentWorkbench {...workbenchProps()} />)
 

@@ -223,6 +223,12 @@ describe("TeamThreadsView — the active conversation surface", () => {
     for (const name of ["Drafter", "Reviewer", "Coordinator"]) {
       expect(screen.getAllByText(name).length).toBeGreaterThan(0)
     }
+    const header = screen.getByTestId("team-conversation-header")
+    expect(within(header).getByRole("heading", { name: "Team chat", level: 2 })).toBeInTheDocument()
+    expect(within(header).getByRole("list", { name: "Your translation team" })).toBeInTheDocument()
+    expect(screen.queryByText("Your translation team")).not.toBeInTheDocument()
+    fireEvent.click(within(header).getByRole("button", { name: "About Drafter" }))
+    expect(await screen.findByText("What it can do")).toBeInTheDocument()
     view.unmount()
   })
 
@@ -257,6 +263,8 @@ describe("TeamThreadsView — the active conversation surface", () => {
     expect(
       within(channel).getByRole("button", { name: "Open the thread for Mark" }),
     ).toHaveTextContent("View updates")
+    expect(screen.getAllByRole("heading", { name: "Team chat", level: 2 })).toHaveLength(1)
+    expect(screen.getAllByTestId("team-roster")).toHaveLength(1)
     view.unmount()
   })
 
@@ -270,6 +278,12 @@ describe("TeamThreadsView — the active conversation surface", () => {
     expect(await screen.findByText("Put 3 drafts out for your review.")).toBeInTheDocument()
     // The composer says exactly who it is talking to.
     expect(screen.getByTestId("team-composer-scope")).toHaveTextContent("Drafter · MRK 4:1–4:8")
+    const header = screen.getByTestId("team-conversation-header")
+    expect(within(header).getByRole("heading", { name: "Mark", level: 2 })).toBeInTheDocument()
+    expect(within(header).getByTestId("team-roster-live-drafter")).toBeInTheDocument()
+    for (const name of ["Drafter", "Reviewer", "Coordinator"]) {
+      expect(within(header).getByRole("button", { name: `About ${name}` })).toBeInTheDocument()
+    }
     view.unmount()
   })
 
@@ -368,6 +382,8 @@ describe("TeamThreadsView — the active conversation surface", () => {
     expect(await screen.findByTestId("team-thread-detail")).toBeInTheDocument()
     fireEvent.keyDown(window, { key: "Escape" })
     expect(await screen.findByTestId("team-channel")).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Team chat", level: 2 })).toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "Mark", level: 2 })).not.toBeInTheDocument()
     // Back on Team chat, the composer addresses the team, not a subagent.
     expect(screen.queryByTestId("team-composer-scope")).not.toBeInTheDocument()
     expect(screen.getByLabelText("Ask the agent")).toHaveAttribute(
@@ -409,6 +425,9 @@ describe("TeamThreadsView — the active conversation surface", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Open this question" }))
 
     expect(await screen.findByTestId("team-questions")).toBeInTheDocument()
+    const header = screen.getByTestId("team-conversation-header")
+    expect(within(header).getByRole("heading", { name: "Needs your expertise", level: 2 })).toBeInTheDocument()
+    expect(within(header).getByTestId("team-roster")).toBeInTheDocument()
     expect(screen.getByTestId("contextual-decision-card")).toBeInTheDocument()
     // DecisionCard owns its own Answer input — the channel composer stands down.
     expect(screen.queryByLabelText("Ask the agent")).not.toBeInTheDocument()

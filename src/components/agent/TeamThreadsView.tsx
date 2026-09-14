@@ -78,24 +78,36 @@ export interface TeamThreadsViewProps {
   roleLevel?: number | null
 }
 
-function TeamRoster({
+function TeamConversationHeader({
+  title,
+  status,
   activePersonas,
   projectId,
   t,
 }: {
+  title: string
+  status?: string
   activePersonas: ReadonlySet<string>
   projectId: string
   t: TFunction
 }) {
   return (
-    <div className="flex shrink-0 items-center gap-2 border-b border-border/60 px-3 py-1.5">
-      <span className="text-[11px] font-medium text-foreground/90">
-        {t("agent.team.rosterTitle")}
-      </span>
-      <ul className="flex items-center gap-1.5" data-testid="team-roster">
+    <header
+      className="flex shrink-0 items-center gap-3 border-b border-border/60 px-4 py-3"
+      data-testid="team-conversation-header"
+    >
+      <div className="flex min-w-0 flex-1 items-baseline gap-2">
+        <h2 className="min-w-0 truncate text-base font-semibold" title={title}>{title}</h2>
+        {status && <span className="shrink-0 text-xs text-muted-foreground">{status}</span>}
+      </div>
+      <ul
+        className="flex shrink-0 items-center gap-2"
+        aria-label={t("agent.team.rosterTitle")}
+        data-testid="team-roster"
+      >
         {AGENT_PERSONA_IDS.map((id) => (
           <li key={id} className="flex items-center gap-1">
-            <AgentCardTrigger personaId={id} projectId={projectId} size="sm" />
+            <AgentCardTrigger personaId={id} projectId={projectId} size="md" />
             {activePersonas.has(id) && (
               <span
                 data-testid={`team-roster-live-${id}`}
@@ -106,7 +118,7 @@ function TeamRoster({
           </li>
         ))}
       </ul>
-    </div>
+    </header>
   )
 }
 
@@ -334,7 +346,12 @@ export function TeamThreadsView({
   if (isEmpty) {
     return (
       <div className="flex min-h-0 flex-1 flex-col">
-        <TeamRoster activePersonas={activePersonas} projectId={projectId} t={t} />
+        <TeamConversationHeader
+          title={t("agent.team.teamChat")}
+          activePersonas={activePersonas}
+          projectId={projectId}
+          t={t}
+        />
         <TeamEmptyState projectId={projectId} t={t} />
         {showComposer && (
           <TeamChannelComposer
@@ -407,18 +424,15 @@ export function TeamThreadsView({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <TeamRoster activePersonas={activePersonas} projectId={projectId} t={t} />
+      <TeamConversationHeader
+        title={conversationTitle}
+        status={openRun ? t(runStatusKey(openRun)) : undefined}
+        activePersonas={activePersonas}
+        projectId={projectId}
+        t={t}
+      />
       <div className="flex min-h-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col">
-          {/* Flat conversation header: name + quiet status. */}
-          <div className="flex shrink-0 items-center gap-1.5 border-b border-border/60 px-3 py-1.5">
-            <span className="min-w-0 truncate text-sm font-medium">{conversationTitle}</span>
-            {openRun && (
-              <span className="shrink-0 text-[11px] text-muted-foreground">
-                {t(runStatusKey(openRun))}
-              </span>
-            )}
-          </div>
           {conversation}
           {showComposer && (
             <TeamChannelComposer

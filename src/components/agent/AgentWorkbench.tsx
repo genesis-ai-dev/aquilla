@@ -385,8 +385,12 @@ export function AgentWorkbench({ agent, credits, fileNames, onClose, onJumpToCel
       >
         {/* One compact workbench header: identity, navigation, and actions. */}
         <div className="flex shrink-0 items-center gap-2 border-b px-3 py-1.5">
-          <Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <span className="shrink-0 text-sm font-medium">{t("agentWorkspace.agent")}</span>
+          {tab !== "team" && (
+            <>
+              <Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="shrink-0 text-sm font-medium">{t("agentWorkspace.agent")}</span>
+            </>
+          )}
           {activeRun && (
             <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground" role="status">
               <Spinner className="h-3 w-3 shrink-0" />

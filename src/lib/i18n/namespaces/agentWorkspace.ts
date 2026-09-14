@@ -13,6 +13,7 @@ export const agentWorkspace = defineNamespace({
     "agentWorkspace.collapseHelp": "Collapse the Agent pane",
     "agentWorkspace.collapsePane": "Collapse Agent pane",
     "agentWorkspace.collapse": "Collapse",
+    "agentWorkspace.backToEditor": "Back to editor",
     "agentWorkspace.resizeSourceAgent": "Resize source and Agent panes",
     "agentWorkspace.agentPane": "Agent pane",
     "agentWorkspace.minimize": "Minimize Agent",
@@ -52,6 +53,9 @@ export const agentWorkspace = defineNamespace({
       description: "Labels, status copy, accessible names, and explanatory text in the three-pane agent translation workspace and its health indicators.",
     },
     keys: {
+      "agentWorkspace.backToEditor": {
+        description: "Navigate back to the editor without closing the Agent tab, stopping work, or resetting chat.",
+      },
       "agentWorkspace.editing": { description: "Presence status below a target cell.", placeholders: { name: "Display name of the collaborator editing the cell." } },
       "agentWorkspace.chapterPercentProgress": { description: "Chapter progress summary when only percentages are available.", placeholders: { validated: "Validated percentage.", translated: "Translated percentage." } },
       "agentWorkspace.chapterCountProgress": { description: "Chapter progress summary using cell counts.", placeholders: { validated: "Validated cell count.", automatic: "Translated cells awaiting validation.", untranslated: "Untranslated cell count." } },

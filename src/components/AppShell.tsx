@@ -313,7 +313,7 @@ export function AppShell({
             )}
           >
             <BetaBadge />
-            <NavHistoryControls />
+            <NavHistoryControls vertical={railCollapsed} />
             {logoAccessory ? (
               <div className="flex shrink-0 items-center">{logoAccessory}</div>
             ) : null}
@@ -321,17 +321,18 @@ export function AppShell({
         </div>
       )}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">{dockContent}</div>
-      {/* Keep build and shared utilities in one footer row in both sidebar
-          layouts. Help stays compact beside localization; the org-only Tour
-          remains hidden in the project editor. */}
+      {/* Narrow rails stack their controls rather than clipping a full-width row. */}
       <div
         data-slot="app-shell-sidebar-footer"
-        className="flex shrink-0 items-center justify-between gap-2 px-2 pb-2"
+        className={cn(
+          "flex shrink-0 items-center gap-2 pb-2",
+          railCollapsed ? "flex-col" : "justify-between px-2",
+        )}
       >
-        <div className="min-w-0">
+        <div className="min-w-0 max-w-full">
           <VersionTag />
         </div>
-        <div className="flex shrink-0 items-center gap-1">
+        <div className={cn("flex shrink-0 items-center gap-1", railCollapsed && "flex-col")}>
           <HelpMenu compact showTour={!useDockResize} />
           {i18n && (
             <LanguageSwitcher

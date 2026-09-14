@@ -193,7 +193,8 @@ import { FileChapterToolbar } from "./FileChapterToolbar"
 import { runDeterministicCheck, type CheckRunResult } from "@/lib/check/deterministic-check"
 import { SearchDockPanel } from "./SearchDockPanel"
 import { SearchResultsView } from "./search/SearchResultsView"
-import { LeftDock, type DockTab } from "./LeftDock"
+import { LeftDock } from "./LeftDock"
+import { useWorkspaceDockTabs } from "@/hooks/useWorkspaceDockTabs"
 import { TranslationNotesSidebar, readTnSidebarVisible, writeTnSidebarVisible } from "./TranslationNotesSidebar"
 import { ParallelBiblesSidebar, readParallelBiblesOpen, writeParallelBiblesOpen } from "./ParallelBiblesSidebar"
 import { InactiveProjectBanner } from "./InactiveProjectBanner"
@@ -884,44 +885,16 @@ export function ProjectWorkspace() {
   const [parallelOpen, setParallelOpen] = useState(false)
   const [parallelMode, setParallelMode] = useState<ParallelPanelMode>("search")
   const [parallelScope, setParallelScope] = useState<ParallelPanelScope>("project")
-  // FRO-308: left dock active tab (null = collapsed rail only)
-  // Deep-loading straight onto the agent surface should land with the
-  // threads list open (v2.2) — the takeover effect below only fires on
-  // surface TRANSITIONS, so the initial value must be surface-aware.
-  const [dockTab, setDockTab] = useState<DockTab | null>(() =>
-    centerSurface === "agent" ? "agent" : "files",
-  )
-  // Agent editor tab is in the strip while the workbench is open. Minimize
-  // and the tab's × dismiss it. Switching to a file tab leaves the surface
-  // but keeps the tab until then.
+  const {
+    activeTab: dockTab,
+    setActiveTab: setDockTab,
+    lastOpenTab: lastDockTab,
+    selectVisibleTab: selectDockTab,
+  } = useWorkspaceDockTabs(centerSurface === "agent")
+  // Back to editor and file-tab navigation retain the Agent tab; only its × closes it.
   const [agentTabOpen, setAgentTabOpen] = useState(
     () => centerSurface === "agent" || readAgentTabOpen(projectId),
   )
-  // Agent workbench (agent-mode-v2 §4) is a takeover surface: collapse the
-  // dock to the rail on entry (a second agent chat beside the workbench is
-  // confusing) and restore the user's tab on exit. Manual reopen still wins —
-  // this only fires on surface transitions.
-  const dockTabBeforeAgentRef = useRef<DockTab | null>("files")
-  const prevSurfaceRef = useRef(centerSurface)
-  useEffect(() => {
-    const prev = prevSurfaceRef.current
-    prevSurfaceRef.current = centerSurface
-    if (centerSurface === "agent" && prev !== "agent") {
-      dockTabBeforeAgentRef.current = dockTab
-      // v2.2 three-column layout: the Agent panel is the THREADS LIST — on
-      // the agent surface it is the natural left column. The file explorer
-      // (the workbench's scope picker) stays one rail click away.
-      setDockTab("agent")
-    } else if (centerSurface !== "agent" && prev === "agent") {
-      // Entry forced the threads list ("agent"), so treat that forced default
-      // (or a collapsed rail) as "no manual choice" and restore the saved tab.
-      // Any other tab was picked manually mid-takeover — keep it.
-      setDockTab((cur) =>
-        cur === null || cur === "agent" ? dockTabBeforeAgentRef.current : cur,
-      )
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- dockTab read on transition only
-  }, [centerSurface])
   // Agent working area (agent-complete follow-up): in the workbench the file
   // explorer doubles as the SCOPE PICKER — clicking a file designates what the
   // agent works on instead of opening the editor. Falls back to the editor's
@@ -1003,7 +976,7 @@ export function ProjectWorkspace() {
   // ISSUE-3 fix: /project/:id/voice deep-link activates audio lens on mount,
   // and surfaces the Voices dock tab (where the voice controls now live).
   useEffect(() => {
-    if (location.pathname.endsWith("/voice")) { switchLens("audio"); setDockTab("voices") }
+    if (location.pathname.endsWith("/voice")) { switchLens("audio"); selectDockTab("voices") }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname])
   // A2: "Open audio setup" CTA from the cell error popover must navigate to a
@@ -8679,7 +8652,7 @@ export function ProjectWorkspace() {
       lens={lens}
       onLensChange={(l) => {
         switchLens(l)
-        if (l === "audio") setDockTab("voices")
+        if (l === "audio") selectDockTab("voices")
       }}
       onAgentSelect={openAgentTab}
       timeOrdered={activeFile ? fileOrderedBy(activeFile) === "time" : false}
@@ -8745,12 +8718,12 @@ export function ProjectWorkspace() {
         dockStorageKey={projectId}
         logoAccessory={
           dockTab !== null ? (
-            <AppTooltip content={t("workspace.sidebar.collapse")} side="bottom">
+            <AppTooltip content={t("nav.dock.hidePanel")} side="bottom">
               <Button
                 type="button"
                 variant="ghost"
                 size="icon-sm"
-                aria-label={t("workspace.sidebar.collapse")}
+                aria-label={t("nav.dock.hidePanel")}
                 onClick={() => setDockTab(null)}
               >
                 <PanelLeftClose className="h-3.5 w-3.5" />
@@ -8761,6 +8734,7 @@ export function ProjectWorkspace() {
         leftDock={
           <LeftDock
             activeTab={dockTab}
+            restoreTab={lastDockTab}
             railActiveTab={centerSurface === "agent" ? "agent" : null}
             onActiveTabChange={(t) => {
               // The Agent rail opens the threads-list panel everywhere (v2.2);
@@ -9227,7 +9201,7 @@ export function ProjectWorkspace() {
             }}
             credits={jwt && projectOrg ? { jwt, orgId: projectOrg.id, orgRoleLevel: projectOrg.role.level } : null}
             fileNames={agentFileNames}
-            onClose={closeAgentTab}
+            editorHref={editorReturnPath ?? `/project/${project.id}/editor`}
             onChooseFile={() => setDockTab("files")}
             onJumpToCell={(fileId, cellId) =>
               navigate(`/project/${projectId}/editor/file/${fileId}?cellId=${encodeURIComponent(cellId)}`)

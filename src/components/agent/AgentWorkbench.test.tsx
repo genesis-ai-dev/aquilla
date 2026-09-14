@@ -10,16 +10,10 @@
  */
 
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
+import { render as renderUI, screen, fireEvent, waitFor, within } from "@testing-library/react"
+import type { ReactNode } from "react"
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom"
 import type { AgentFrame } from "@/lib/agent/protocol"
-
-// The workbench reads the conversation query param (v2.2) to decide its
-// landing tab; these tests exercise the review loop, not routing — a bare
-// empty-params stub keeps them router-free.
-vi.mock("react-router-dom", async () => {
-  const actual = await vi.importActual<typeof import("react-router-dom")>("react-router-dom")
-  return { ...actual, useSearchParams: () => [new URLSearchParams(), vi.fn()] as const }
-})
 
 // Stub the chat rail but keep the workbench seam: render each proposal
 // through renderProposalOverride so the RECEIPT (counters + Undo) is real.
@@ -82,10 +76,32 @@ vi.mock("@/lib/agent/memory-api", async () => {
 })
 
 import { agentSessionStore } from "@/lib/agent/session-store"
+import { runAgent } from "@/lib/agent/agent-client"
 import { getOutboxRecords, outboxRecordCountAllOwners } from "@/lib/sync/outbox"
 import { AgentWorkbench, type AgentWorkbenchProps } from "./AgentWorkbench"
 
 const PROJECT = `wb-test-${Math.random().toString(36).slice(2)}`
+
+function LocationProbe() {
+  const location = useLocation()
+  return <output data-testid="workbench-location">{location.pathname}{location.search}</output>
+}
+
+function TestRouter({ children }: { children: ReactNode }) {
+  return (
+    <MemoryRouter initialEntries={[`/project/${PROJECT}/agent`]}>
+      <Routes>
+        <Route path="/project/:projectId/agent" element={<>{children}</>} />
+        <Route path="/project/:projectId/editor/*" element={<p>Editor destination</p>} />
+      </Routes>
+      <LocationProbe />
+    </MemoryRouter>
+  )
+}
+
+function render(ui: ReactNode) {
+  return renderUI(ui, { wrapper: TestRouter })
+}
 
 function draftRunFrames(): AgentFrame[] {
   return [
@@ -161,7 +177,7 @@ function workbenchProps(): AgentWorkbenchProps {
       resolveCell: () => undefined,
       onApplied: vi.fn(),
     },
-    onClose: () => {},
+    editorHref: `/project/${PROJECT}/editor/file/f1?lane=it`,
     onChooseFile: vi.fn(),
     workspace: {
       fileName: "Mark.md",
@@ -256,7 +272,8 @@ describe("AgentWorkbench three-pane layout", () => {
     expect(sourcePane).toBeInTheDocument()
     const agentPane = screen.getByLabelText("Agent pane")
     expect(agentPane).toBeInTheDocument()
-    expect(within(agentPane).getByRole("button", { name: "Minimize Agent" })).toBeInTheDocument()
+    expect(within(agentPane).queryByRole("button", { name: "Minimize Agent" })).not.toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Back to editor" })).toBeInTheDocument()
     expect(targetPane).toBeInTheDocument()
     expect(sourcePane).toHaveTextContent("The beginning")
     expect(targetPane).toHaveTextContent("L'inizio")
@@ -362,6 +379,31 @@ describe("AgentWorkbench three-pane layout", () => {
 })
 
 describe("AgentWorkbench review loop", () => {
+  it("navigates back to the editor without stopping or resetting the shared chat", async () => {
+    vi.mocked(runAgent).mockImplementationOnce(({ onFrame, signal }) => {
+      onFrame({ type: "run_start", runId: "navigation-run" })
+      if (!signal) throw new Error("Expected the session store's abort signal")
+      return new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }))
+    })
+    const store = agentSessionStore(PROJECT, "alice")
+    store.send({ wire: "continue working", display: "continue working", jwt: "jwt", request: { projectId: PROJECT } })
+    const before = store.getState()
+    try {
+      render(<AgentWorkbench {...workbenchProps()} />)
+      const back = screen.getByRole("link", { name: "Back to editor" })
+      expect(back).toHaveAttribute("href", `/project/${PROJECT}/editor/file/f1?lane=it`)
+      fireEvent.click(back)
+      expect(await screen.findByText("Editor destination")).toBeInTheDocument()
+      expect(screen.getByTestId("workbench-location")).toHaveTextContent(`/project/${PROJECT}/editor/file/f1?lane=it`)
+      expect(store.getState().sessionId).toBe(before.sessionId)
+      expect(store.getState().runs).toEqual(before.runs)
+      expect(store.getState().isStreaming).toBe(true)
+    } finally {
+      store.stop()
+      await waitFor(() => expect(store.getState().isStreaming).toBe(false))
+    }
+  })
+
   it("confirms chat reset without undoing or deleting already-applied events", async () => {
     await primeSessionWithDraftRun()
     const props = workbenchProps()
@@ -466,7 +508,7 @@ describe("AgentWorkbench Chat | Project knowledge tab slot (AQU-AGENT §5)", () 
     expect(within(toolbar).getByRole("tab", { name: "Project knowledge" })).toBeInTheDocument()
     expect(within(toolbar).getByRole("button", { name: "Chat options" })).toBeInTheDocument()
     expect(within(toolbar).queryByRole("button", { name: /New session/ })).not.toBeInTheDocument()
-    expect(within(toolbar).getByRole("button", { name: /Collapse Agent pane/ })).toBeInTheDocument()
+    expect(within(toolbar).getByRole("link", { name: "Back to editor" })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("tab", { name: "Chat" }))
     expect(within(toolbar).getByText("Agent", { exact: true })).toBeInTheDocument()
@@ -486,7 +528,7 @@ describe("AgentWorkbench Chat | Project knowledge tab slot (AQU-AGENT §5)", () 
     expect(header).not.toBeNull()
     expect(within(header!).getByText("Agent")).toBeInTheDocument()
     expect(within(header!).getByRole("button", { name: "Chat options" })).toBeInTheDocument()
-    expect(within(header!).getByRole("button", { name: /Collapse Agent pane/ })).toBeInTheDocument()
+    expect(within(header!).getByRole("link", { name: "Back to editor" })).toBeInTheDocument()
 
     fireEvent.click(memoryTab)
     await waitFor(() => expect(memoryTab).toHaveAttribute("aria-selected", "true"))

@@ -11,12 +11,11 @@
  */
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useSearchParams } from "react-router-dom"
-import { Bot, Minimize2, Square } from "lucide-react"
+import { Link, useSearchParams } from "react-router-dom"
+import { ArrowLeft, Bot, Square } from "lucide-react"
 import type { Layout } from "react-resizable-panels"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
-import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { applyStagedEvents, type ApplyContext } from "@/lib/agent/apply"
@@ -64,8 +63,8 @@ export interface AgentWorkbenchProps {
   credits?: CreditsDialProps | null
   /** File display names for the Team tab's thread titles. */
   fileNames?: ReadonlyMap<string, string>
-  /** Minimize to the dock and dismiss the editor Agent tab. */
-  onClose: () => void
+  /** Return destination; following it leaves the Agent tab available. */
+  editorHref: string
   /** Jump the editor to a cell ("open" on a working-set row). */
   onJumpToCell?: (fileId: string, cellId: string) => void
   /** Reveal the file explorer while remaining in Agent mode. */
@@ -103,7 +102,7 @@ export interface AgentWorkbenchProps {
   }
 }
 
-export function AgentWorkbench({ agent, credits, fileNames, onClose, onJumpToCell, onChooseFile, workspace }: AgentWorkbenchProps) {
+export function AgentWorkbench({ agent, credits, fileNames, editorHref, onJumpToCell, onChooseFile, workspace }: AgentWorkbenchProps) {
   const t = useT()
   const { state, stop, reset, decide } = useAgentSession(agent.projectId, agent.author)
   // Decisions per proposal row (key: proposalId:cellId) live in the SESSION
@@ -434,19 +433,10 @@ export function AgentWorkbench({ agent, credits, fileNames, onClose, onJumpToCel
               onReset={reset}
               disabled={applying}
             />
-            <AppTooltip content={t("agentWorkspace.collapseHelp")}>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-6 text-[11px] text-muted-foreground"
-                onClick={onClose}
-                aria-label={t("agentWorkspace.collapsePane")}
-              >
-                <Minimize2 data-icon="inline-start" />
-                {t("agentWorkspace.collapse")}
-              </Button>
-            </AppTooltip>
+            <Link to={editorHref} className={buttonVariants({ variant: "ghost", size: "sm" })}>
+              <ArrowLeft aria-hidden data-icon="inline-start" className="rtl:rotate-180" />
+              {t("agentWorkspace.backToEditor")}
+            </Link>
           </span>
         </div>
 
@@ -493,27 +483,10 @@ export function AgentWorkbench({ agent, credits, fileNames, onClose, onJumpToCel
             <ResizablePanel
               id="agent"
               minSize="24%"
-              collapsible
-              collapsedSize={0}
-              onResize={(size, _id, previousSize) => {
-                if (previousSize && previousSize.inPixels > 0 && size.inPixels === 0) onClose()
-              }}
             >
               <section aria-label={t("agentWorkspace.agentPane")} className="flex h-full min-h-0 flex-col bg-background">
                 <div className="flex h-9 shrink-0 items-center border-b border-border/70 px-3">
                   <span className="text-[11px] font-semibold tracking-tight text-foreground/90">{t("agentWorkspace.agent")}</span>
-                  <AppTooltip content={t("agentWorkspace.minimize")}>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      className="ml-auto h-6 w-6 rounded-md text-muted-foreground hover:text-foreground"
-                      onClick={onClose}
-                      aria-label={t("agentWorkspace.minimize")}
-                    >
-                      <Minimize2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </AppTooltip>
                 </div>
                 <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
                   <AgentDockView

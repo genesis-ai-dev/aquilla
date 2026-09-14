@@ -116,6 +116,12 @@ UI chrome that used to be one smoke file per click is covered under
 - Agent chat options, confirmed reset, preserved applied events, and pinned
   Team chat navigation: covered in RTL (`AgentChatOptions.test.tsx`,
   `AgentWorkbench.test.tsx`, `AgentDockPanel.test.tsx`)
+- Workspace sidebar hide/show restoration and Agent Back navigation:
+  covered in RTL (`LeftDock.test.tsx`, `useDockTabs.test.ts`,
+  `useWorkspaceDockTabs.test.ts`, `AgentWorkbench.test.tsx`,
+  `workbench-layout.test.ts`)
+- Collapsed-rail history and footer controls: covered in RTL
+  (`NavHistoryControls.test.tsx`, `AppShell.test.tsx`)
 - View settings, tab strip, selection bar, outbox inspector, term-lookup popover,
   video attachment dialog, cell-expansion Escape close, setup-checklist expand/skip
   (except survives-refresh, which stays smoke)

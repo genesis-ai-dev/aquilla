@@ -29,26 +29,27 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { cn } from "@/lib/utils"
 
 /** Muted, slightly faded — the default disabled:opacity-50 washes these out. */
 const disabledChrome = "cursor-default text-muted-foreground/70 disabled:opacity-100"
 
-export function NavHistoryControls() {
+export function NavHistoryControls({ vertical = false }: { vertical?: boolean }) {
   const nav = useNavHistory()
   const t = useT()
   if (!nav) return null
   return (
-    <div className="flex items-center gap-1" role="group" aria-label={t("nav.historyControls.groupLabel")}>
-      <HistoryMenuButton nav={nav} />
-      <ButtonGroup>
-        <NavArrowButton direction="back" nav={nav} />
-        <NavArrowButton direction="forward" nav={nav} />
+    <div className={cn("flex items-center gap-1", vertical && "flex-col")} role="group" aria-label={t("nav.historyControls.groupLabel")}>
+      <HistoryMenuButton nav={nav} vertical={vertical} />
+      <ButtonGroup orientation={vertical ? "vertical" : "horizontal"}>
+        <NavArrowButton direction="back" nav={nav} vertical={vertical} />
+        <NavArrowButton direction="forward" nav={nav} vertical={vertical} />
       </ButtonGroup>
     </div>
   )
 }
 
-function HistoryMenuButton({ nav }: { nav: NavHistoryValue }) {
+function HistoryMenuButton({ nav, vertical }: { nav: NavHistoryValue; vertical: boolean }) {
   const t = useT()
   const [open, setOpen] = useState(false)
   const list = nav.recent.slice(0, MAX_RECENT_VISITS)
@@ -57,7 +58,7 @@ function HistoryMenuButton({ nav }: { nav: NavHistoryValue }) {
 
   if (!hasRecent) {
     return (
-      <AppTooltip content={t("nav.historyControls.noPreviouslyViewed")} side="bottom" disabled={open}>
+      <AppTooltip content={t("nav.historyControls.noPreviouslyViewed")} side={vertical ? "right" : "bottom"} disabled={open}>
         <Button
           type="button"
           variant="ghost"
@@ -74,7 +75,7 @@ function HistoryMenuButton({ nav }: { nav: NavHistoryValue }) {
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
-      <AppTooltip content={previouslyViewedLabel} side="bottom" disabled={open}>
+      <AppTooltip content={previouslyViewedLabel} side={vertical ? "right" : "bottom"} disabled={open}>
         <DropdownMenuTrigger
           render={
             <Button
@@ -88,7 +89,7 @@ function HistoryMenuButton({ nav }: { nav: NavHistoryValue }) {
           }
         />
       </AppTooltip>
-      <DropdownMenuContent align="end" side="bottom" sideOffset={4} className="min-w-56 w-max max-w-96 text-sm">
+      <DropdownMenuContent align={vertical ? "start" : "end"} side={vertical ? "right" : "bottom"} sideOffset={4} className="min-w-56 w-max max-w-96 text-sm">
         <DropdownMenuGroup>
           <DropdownMenuLabel className="px-2 py-1 text-sm font-normal">
             {previouslyViewedLabel}
@@ -144,7 +145,7 @@ function RecentItem({ entry, onPick }: { entry: RecentEntity; onPick: () => void
   )
 }
 
-function NavArrowButton({ direction, nav }: { direction: "back" | "forward"; nav: NavHistoryValue }) {
+function NavArrowButton({ direction, nav, vertical }: { direction: "back" | "forward"; nav: NavHistoryValue; vertical: boolean }) {
   const t = useT()
   const isBack = direction === "back"
   const enabled = isBack ? nav.canGoBack : nav.canGoForward
@@ -161,7 +162,7 @@ function NavArrowButton({ direction, nav }: { direction: "back" | "forward"; nav
           ? plainLabel
           : t(isBack ? "nav.historyControls.noBackHistory" : "nav.historyControls.noForwardHistory")
       }
-      side="bottom"
+      side={vertical ? "right" : "bottom"}
     >
       <Button
         type="button"

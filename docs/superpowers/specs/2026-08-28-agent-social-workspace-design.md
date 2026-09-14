@@ -227,6 +227,31 @@ confirmation rather than retargeting it to another chat. Confirming calls the
 existing session-store reset without navigating, creating a task, or emitting
 document events.
 
+## Separate visibility, navigation, and closing (2026-09-14)
+
+The workbench has one **Back to editor** link. It follows the existing editor
+return destination without closing the Agent tab, stopping the agent, or
+resetting chat. The tab-strip **Close Agent** control remains the explicit way
+to dismiss that tab. The duplicate inner Minimize Agent control is removed.
+
+Source/chat/target dividers only resize their panes. The chat pane retains its
+24% minimum and is not drag-collapsible; dragging or keyboard resizing must
+never navigate away. Legacy zero-width saved layouts continue to fall back to
+the usable default layout.
+
+**Hide sidebar panel** hides content while retaining the icon rail and current
+main view. **Show sidebar panel** restores the last selected panel instead of
+always opening Files. The workspace owns that selection memory so responsive
+dock unmounts do not lose it. If a remembered panel is no longer available, an
+available panel is shown instead.
+Automatic panel choices during Agent/editor navigation or audio-mode changes
+only affect an already-visible sidebar. A hidden panel and its remembered
+selection stay hidden until an explicit panel control reopens them; navigation
+must not undo a manual collapse.
+The collapsed rail stacks Previously viewed, Back, and Forward vertically so
+the history controls remain inside the viewport. Footer utilities also stack
+within the narrow rail; expanded sidebars retain their horizontal arrangement.
+
 ## Testing
 
 Vitest: personas mapping totality (every region/tool kind attributes — the social
@@ -257,3 +282,11 @@ and the real session-store reset. The workbench integration test preserves
 already-applied outbox records and verifies reset emits no undo/delete writes.
 Existing session-store tests cover stopping queued work and persistence of the
 fresh session.
+Visibility/navigation coverage lives in `useDockTabs.test.ts`, `LeftDock.test.tsx`,
+`AgentWorkbench.test.tsx`, and `workbench-layout.test.ts`: controlled/uncontrolled
+panel restoration, responsive remounts, unavailable panels, actual Back-link
+navigation without stopping the shared run, and legacy layout compatibility.
+`useWorkspaceDockTabs.test.ts` guards sticky visibility across view transitions
+and preserves manually selected panels.
+`NavHistoryControls.test.tsx` and `AppShell.test.tsx` cover the collapsed-rail
+history/footer layout that previously clipped the Previously viewed trigger.

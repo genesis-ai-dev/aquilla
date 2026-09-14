@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { NavHistoryControls } from "./NavHistoryControls"
 import type { NavHistoryValue } from "@/context/NavHistoryContext"
 
@@ -38,5 +38,17 @@ describe("NavHistoryControls", () => {
     expect(back).toHaveAttribute("data-variant", "ghost")
     expect(forward).toHaveAttribute("data-variant", "ghost")
     expect(previouslyViewed).toHaveAttribute("data-variant", "ghost")
+  })
+
+  it("stacks the clock and both arrows when placed in a collapsed rail", () => {
+    render(<NavHistoryControls vertical />)
+    expect(screen.getByRole("group", { name: "Page history" })).toHaveClass("flex-col")
+    const back = screen.getByRole("button", { name: "Back to Alpha" })
+    const forward = screen.getByRole("button", { name: "Forward" })
+    expect(back.closest("[data-slot=button-group]")).toHaveAttribute("data-orientation", "vertical")
+    expect(back.closest("[data-slot=button-group]")).toContainElement(forward)
+    expect(screen.getByRole("button", { name: "Previously viewed" })).toBeInTheDocument()
+    fireEvent.click(back)
+    expect(nav.goBack).toHaveBeenCalledTimes(1)
   })
 })

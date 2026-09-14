@@ -44,8 +44,9 @@ test("signs a JWT the App's public key verifies, issued by the App id", () => {
 test("accepts a raw PEM as well as base64", () => {
   assert.equal(appCredentials({ ...env, PREVIEW_GITHUB_APP_PRIVATE_KEY: pem }).privateKey, pem.trim())
   assert.equal(appCredentials(env).privateKey, pem)
-  assert.equal(appCredentials({ ...env, PREVIEW_GITHUB_APP_PRIVATE_KEY: "not a key" }), null)
-  assert.equal(appCredentials({ ...env, PREVIEW_GITHUB_APP_ID: "abc" }), null)
+  assert.deepEqual(appCredentials({ ...env, PREVIEW_GITHUB_APP_PRIVATE_KEY: "not a key" }).problems, ["PREVIEW_GITHUB_APP_PRIVATE_KEY is neither a PEM nor base64 of one"])
+  assert.deepEqual(appCredentials({ ...env, PREVIEW_GITHUB_APP_ID: "abc", PREVIEW_GITHUB_APP_INSTALLATION_ID: "" }).problems,
+    ["PREVIEW_GITHUB_APP_ID is not a positive integer", "PREVIEW_GITHUB_APP_INSTALLATION_ID is missing"])
 })
 test("mints a pull-request-write installation token with the JWT, then uses it for every call", async () => {
   const h = harness()
@@ -93,12 +94,14 @@ test("no open PR is a quiet no-op after minting the token", async () => {
   assert.equal(h.calls.length, 2)
   assert.equal(h.warnings.length, 0)
 })
-test("missing App credentials perform no network calls", async () => {
+test("missing App credentials perform no network calls and name the variable, never its value", async () => {
   for (const missing of ["PREVIEW_GITHUB_APP_ID", "PREVIEW_GITHUB_APP_INSTALLATION_ID", "PREVIEW_GITHUB_APP_PRIVATE_KEY"]) {
     const h = harness()
     await commentOnPreview({ ...h.options, env: { ...env, [missing]: "" } })
     assert.equal(h.calls.length, 0)
     assert.equal(h.warnings.length, 1)
+    assert.ok(h.warnings[0].includes(`${missing} is missing`))
+    assert.ok(!h.warnings[0].includes(env.PREVIEW_GITHUB_APP_PRIVATE_KEY.slice(0, 20)))
   }
 })
 test("API errors warn without leaking the key or failing deployment", async () => {

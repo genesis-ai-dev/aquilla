@@ -13,14 +13,21 @@ const API_VERSION = "2026-03-10"
 // short-lived JWT, then trades that for a one-hour installation token scoped
 // to pull-request writes only.
 export function appCredentials(env = process.env) {
-  const appId = Number(env.PREVIEW_GITHUB_APP_ID)
-  const installationId = Number(env.PREVIEW_GITHUB_APP_INSTALLATION_ID)
-  const raw = env.PREVIEW_GITHUB_APP_PRIVATE_KEY?.trim()
-  if (!Number.isSafeInteger(appId) || appId <= 0 || !Number.isSafeInteger(installationId) || installationId <= 0 || !raw) return null
+  const problems = []
+  const id = (name) => {
+    const value = Number(env[name])
+    if (!Number.isSafeInteger(value) || value <= 0) problems.push(`${name} ${env[name] ? "is not a positive integer" : "is missing"}`)
+    return value
+  }
+  const appId = id("PREVIEW_GITHUB_APP_ID")
+  const installationId = id("PREVIEW_GITHUB_APP_INSTALLATION_ID")
   // Cloudflare build variables do not reliably keep PEM line breaks, so the
   // key is stored base64-encoded. A raw PEM is accepted too.
-  const privateKey = raw.startsWith("-----BEGIN") ? raw : Buffer.from(raw, "base64").toString("utf8")
-  if (!privateKey.startsWith("-----BEGIN")) return null
+  const raw = env.PREVIEW_GITHUB_APP_PRIVATE_KEY?.trim()
+  const privateKey = !raw ? "" : raw.startsWith("-----BEGIN") ? raw : Buffer.from(raw, "base64").toString("utf8")
+  if (!raw) problems.push("PREVIEW_GITHUB_APP_PRIVATE_KEY is missing")
+  else if (!privateKey.startsWith("-----BEGIN")) problems.push("PREVIEW_GITHUB_APP_PRIVATE_KEY is neither a PEM nor base64 of one")
+  if (problems.length) return { problems }
   return { appId, installationId, privateKey }
 }
 
@@ -37,8 +44,9 @@ export function appJwt({ appId, privateKey }, now = Math.floor(Date.now() / 1000
 // Notification errors must never turn a successful deployment into a failure.
 export async function commentOnPreview({ env = process.env, urls, fetchImpl = fetch, warn = console.warn }) {
   const credentials = appCredentials(env)
-  if (!credentials) {
-    warn("[preview-comment] Configure PREVIEW_GITHUB_APP_ID, PREVIEW_GITHUB_APP_INSTALLATION_ID and PREVIEW_GITHUB_APP_PRIVATE_KEY to publish QA links on PRs.")
+  if (credentials.problems) {
+    // Names only, never values: the build log is readable by the whole team.
+    warn(`[preview-comment] Cannot publish QA links on PRs: ${credentials.problems.join("; ")}. Set the build variables on aquilla-web-preview.`)
     return
   }
   try {

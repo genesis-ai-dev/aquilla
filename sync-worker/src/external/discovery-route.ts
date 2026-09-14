@@ -59,6 +59,7 @@ function apiMap(): Record<string, unknown> {
       'GET /api/v1/external/projects/:projectId/files': 'List a project’s files.',
       'GET /api/v1/external/projects/:projectId/files/:fileId/cells': 'Read a file’s cells (source + target). Supports since/limit/cursor, and lane=<tag> to filter targets to one target-language lane (see multiLanguage).',
       'GET /api/v1/external/projects/:projectId/search?q=': 'Full-text search cells. Optional side=source|target.',
+      'GET /api/v1/external/projects/:projectId/similar?cellId=': 'Translation memory: source cells most LIKE this one, each with its current target and a score in [0,1]. Pass cellId (the query cell is excluded) or text=<free text>, not both. Optional limit (default 10, max 50). LEXICAL ONLY — scored by term overlap, NOT by meaning: it will not find a paraphrase that shares no words. Use search when you know the words you want; use this when you have a line and want prior renderings of similar lines.',
       'GET /api/v1/external/projects/:projectId/cells/:cellId/history': 'Append-only event history for one cell.',
       'GET /api/v1/external/projects/:projectId/memory': 'Living Memory: the project brief plus every memory entry (examples, decisions, notes, observations) with its status — the same rows the in-app Memory page shows. Filter with ?status=proposed|approved|rejected|archived and ?kind=example|decision|note|observation|other. Each entry carries inRetrieval: whether the copilot is actually being given it.',
       'GET /api/v1/external/projects/:projectId/files/:fileId/cells/:cellId/memory': 'What the copilot’s retrieval would inject for that cell’s draft: the brief plus the capped approved-memory index. Retrieval is project-scoped today (no per-cell narrowing) — the response says so in retrieval.scope.',
@@ -84,9 +85,9 @@ function apiMap(): Record<string, unknown> {
         maxArtifactBytes: 25 * 1024 * 1024,
         planImportMaxCells: 5000,
       },
-      serverParseableFormats: ['csv', 'json', 'md', 'obs', 'po', 'properties', 'sbv', 'srt', 'tsv', 'txt', 'usfm', 'vtt'],
+      serverParseableFormats: ['csv', 'docx', 'json', 'md', 'obs', 'po', 'properties', 'sbv', 'srt', 'tsv', 'txt', 'usfm', 'vtt'],
       unsupportedFormats:
-        'docx, pptx, doc, html, xliff, tmx, usx, idml, paratext-project, zip need DOM/browser parsers and are not yet server-parseable — import them through the in-app Import dialog, or parse them yourself and stage raw PlanImport cells (POST .../changesets with a PlanImport command). A multi-book USFM artifact parses into one file per book; stage each book separately via resultIndex.',
+        'pptx, doc, html, xliff, tmx, usx, idml, paratext-project, zip need DOM/browser parsers and are not yet server-parseable — import them through the in-app Import dialog, or parse them yourself and stage raw PlanImport cells (POST .../changesets with a PlanImport command). A multi-book USFM artifact parses into one file per book; stage each book separately via resultIndex.',
     },
     livingMemory: {
       note:

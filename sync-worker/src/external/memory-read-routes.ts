@@ -39,11 +39,7 @@ import {
   type MemoryStatus,
 } from "../../../db/shared/agent-memory"
 import { externalError } from "./errors"
-import {
-  authenticateAndScope,
-  checkReadRateLimit,
-  type ExternalReadsEnv,
-} from "./read-routes"
+import { authenticateAndScope, checkReadRateLimit, type ExternalReadsEnv } from "./read-auth"
 import { paginate, parsePageParams } from "./pagination"
 
 const MEMORY_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/memory$/

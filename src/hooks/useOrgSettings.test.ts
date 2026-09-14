@@ -14,7 +14,13 @@
 
 import { describe, it, expect, vi, afterEach } from "vitest"
 import { renderHook, waitFor, act } from "@testing-library/react"
-import { useOrgSettings, canEditRosterProgressFloor, canEditTermbaseFloor } from "./useOrgSettings"
+import {
+  useOrgSettings,
+  canEditRosterProgressFloor,
+  canEditTermbaseFloor,
+  canEditEgressFloor,
+  canEditCommentFloors,
+} from "./useOrgSettings"
 import * as restClient from "@/lib/sync/org-settings"
 import type { OrgSettingsResponse, OrgPatchResult } from "@/lib/sync/org-settings"
 import type { TranslationRule } from "@/lib/parsers/types"
@@ -453,6 +459,148 @@ describe("canEditTermbaseFloor — owner-only write gate (AQU-822)", () => {
   it("denies when the caller's role is unknown (null/undefined)", () => {
     expect(canEditTermbaseFloor(null)).toBe(false)
     expect(canEditTermbaseFloor(undefined)).toBe(false)
+  })
+})
+
+describe("useOrgSettings — canEgress OWNER default floor (AQU-907)", () => {
+  // The Data egress surface hands out the org's ENTIRE corpus in one action,
+  // so absence of egressMinRole must resolve to the most restrictive default
+  // (OWNER) — a regression to exportMinRole's null-means-allow pattern here
+  // would silently expose every org's bulk export to every maintainer.
+  it("maintainer (600) in an org with NO explicit egressMinRole is DENIED (default=Owner)", async () => {
+    mockFetchResponse = makeEgressResponse() // no egressMinRole key at all
+    const { result } = renderHook(() => useOrgSettings(1, 600))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+
+    expect(result.current.egressMinRole).toBe(700) // resolved default, not null
+    expect(result.current.canEgress).toBe(false)
+  })
+
+  it("an owner (700) is permitted BEFORE the fetch resolves — owners meet every valid floor", () => {
+    // Owners never wait on the settings GET: valid floors are capped at 700,
+    // so 700 passes unconditionally and the primary persona gets no flash of
+    // an absent surface.
+    const { result } = renderHook(() => useOrgSettings(1, 700))
+    expect(result.current.hasFetched).toBe(false)
+    expect(result.current.canEgress).toBe(true)
+  })
+
+  it("below-owner callers stay closed before the fetch (disclosure gate, like the roster)", () => {
+    const { result } = renderHook(() => useOrgSettings(1, 600))
+    expect(result.current.hasFetched).toBe(false)
+    expect(result.current.canEgress).toBe(false)
+  })
+
+  it("an owner-opened floor (600) admits a maintainer but not a project lead", async () => {
+    mockFetchResponse = makeEgressResponse(600)
+    const { result: maintainer } = renderHook(() => useOrgSettings(1, 600))
+    await waitFor(() => expect(maintainer.current.hasFetched).toBe(true))
+    expect(maintainer.current.canEgress).toBe(true)
+
+    const { result: lead } = renderHook(() => useOrgSettings(1, 500))
+    await waitFor(() => expect(lead.current.hasFetched).toBe(true))
+    expect(lead.current.canEgress).toBe(false)
+  })
+
+  it("a garbage server floor (9999) resolves to the OWNER default, not to open", async () => {
+    mockFetchResponse = makeEgressResponse(9999)
+    const { result } = renderHook(() => useOrgSettings(1, 600))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    expect(result.current.egressMinRole).toBe(700)
+    expect(result.current.canEgress).toBe(false)
+  })
+})
+
+function makeEgressResponse(egressMinRole?: number): OrgSettingsResponse {
+  return {
+    orgId: 1,
+    settings: egressMinRole !== undefined ? { egressMinRole } : {},
+    version: 1,
+    updatedAt: "2026-01-01T00:00:00Z",
+    updatedBy: 1,
+  }
+}
+
+describe("canEditEgressFloor — owner-only write gate (AQU-907)", () => {
+  it("denies a maintainer (600) — a maintainer must not widen the bulk-export surface", () => {
+    expect(canEditEgressFloor(600)).toBe(false)
+  })
+
+  it("permits an owner (700)", () => {
+    expect(canEditEgressFloor(700)).toBe(true)
+  })
+
+  it("denies when the caller's role is unknown (null/undefined)", () => {
+    expect(canEditEgressFloor(null)).toBe(false)
+    expect(canEditEgressFloor(undefined)).toBe(false)
+  })
+})
+
+// AQU-1002: the two comment floors. Defaults reproduce post-AQU-999 behaviour
+// exactly — COMMENTER (200) to open a thread, CONTRIBUTOR (400) to resolve one
+// somebody else opened — so an org that never sets them sees no change.
+describe("useOrgSettings — comment floors (AQU-1002)", () => {
+  function makeCommentResponse(settings: Record<string, unknown>): OrgSettingsResponse {
+    return {
+      orgId: 1,
+      settings,
+      version: 1,
+      updatedAt: "2026-01-01T00:00:00Z",
+      updatedBy: 1,
+    }
+  }
+
+  it("defaults to commenter (200) / contributor (400) when the org has set neither", async () => {
+    mockFetchResponse = makeCommentResponse({})
+    const { result } = renderHook(() => useOrgSettings(1, 700))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    expect(result.current.commentCreateMinRole).toBe(200)
+    expect(result.current.commentResolveMinRole).toBe(400)
+  })
+
+  it("reads explicitly configured floors", async () => {
+    mockFetchResponse = makeCommentResponse({
+      commentCreateMinRole: 400,
+      commentResolveMinRole: 600,
+    })
+    const { result } = renderHook(() => useOrgSettings(1, 700))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    expect(result.current.commentCreateMinRole).toBe(400)
+    expect(result.current.commentResolveMinRole).toBe(600)
+  })
+
+  it("keeps the floors independent — setting one leaves the other at its default", async () => {
+    mockFetchResponse = makeCommentResponse({ commentResolveMinRole: 200 })
+    const { result } = renderHook(() => useOrgSettings(1, 700))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    expect(result.current.commentCreateMinRole).toBe(200)
+    expect(result.current.commentResolveMinRole).toBe(200)
+  })
+
+  it("falls back to the defaults for out-of-ladder values", async () => {
+    mockFetchResponse = makeCommentResponse({
+      commentCreateMinRole: 9999,
+      commentResolveMinRole: -1,
+    })
+    const { result } = renderHook(() => useOrgSettings(1, 700))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    expect(result.current.commentCreateMinRole).toBe(200)
+    expect(result.current.commentResolveMinRole).toBe(400)
+  })
+})
+
+describe("canEditCommentFloors — owner-only write gate (AQU-1002)", () => {
+  it("denies a maintainer (600) — who settles other people's threads is org policy", () => {
+    expect(canEditCommentFloors(600)).toBe(false)
+  })
+
+  it("permits an owner (700)", () => {
+    expect(canEditCommentFloors(700)).toBe(true)
+  })
+
+  it("denies when the caller's role is unknown (null/undefined)", () => {
+    expect(canEditCommentFloors(null)).toBe(false)
+    expect(canEditCommentFloors(undefined)).toBe(false)
   })
 })
 

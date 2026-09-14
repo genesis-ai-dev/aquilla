@@ -114,11 +114,6 @@
       "count": 4
     }
   },
-  "src/components/RulesPage.tsx": {
-    "i18n/no-unkeyed-string": {
-      "count": 2
-    }
-  },
   "src/components/StaffLanePopover.tsx": {
     "i18n/no-unkeyed-string": {
       "count": 2

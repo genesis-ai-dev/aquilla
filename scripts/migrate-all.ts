@@ -174,7 +174,15 @@ function writeGroupSyncState(v: GroupSyncState): void {
 }
 // Cross-machine mutex for --apply, alongside the state object in R2
 // (_migrate/audio-migrate-state.json → _migrate/audio-migrate-state.lock).
+// The content pass shares this key with the migrate daemon (scripts/migrate-
+// daemon/main.ts), which is the sole content writer post-cutover — they must
+// stay mutually exclusive. --audio-fast gets its OWN key below: it only does
+// R2 CopyObject of take bytes + emits cell.audio.* events, disjoint from what
+// the daemon writes, and the nightly workflow runs it while the daemon holds
+// a continuous lease — sharing the content key would fail it every night with
+// LockHeldError (see docs/MIGRATE-DAEMON.md, Cutover checklist).
 const LOCK_KEY = process.env.MIGRATE_LOCK_KEY ?? "_migrate/audio-migrate-state.lock"
+const AUDIO_FAST_LOCK_KEY = process.env.MIGRATE_AUDIO_FAST_LOCK_KEY ?? "_migrate/audio-fast.lock"
 const LOCK_TTL_MS = 30 * 60_000
 const LOCK_HEARTBEAT_MS = 5 * 60_000
 function lockHolder(): string {
@@ -894,13 +902,14 @@ async function main() {
       )
     }
     const client = R2
+    const lockKey = args.audioFast ? AUDIO_FAST_LOCK_KEY : LOCK_KEY
     lock = new RunLock({
       store: {
         get: (k) => client.getObject(DEST_BUCKET, k),
         put: (k, body, o) => client.putObject(DEST_BUCKET, k, body, o),
         delete: (k) => client.deleteObject(DEST_BUCKET, k),
       },
-      key: LOCK_KEY,
+      key: lockKey,
       holder: lockHolder(),
       ttlMs: LOCK_TTL_MS,
     })
@@ -913,7 +922,7 @@ async function main() {
       }
       throw e
     }
-    console.log(`Run lock acquired: ${DEST_BUCKET}/${LOCK_KEY} (holder ${lockHolder()}, lease ${LOCK_TTL_MS / 60_000}m)`)
+    console.log(`Run lock acquired: ${DEST_BUCKET}/${lockKey} (holder ${lockHolder()}, lease ${LOCK_TTL_MS / 60_000}m)`)
   }
   const held = lock
   const beat = held

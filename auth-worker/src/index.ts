@@ -107,6 +107,7 @@ import {
 type HonoEnv = { Bindings: Env; Variables: Variables }
 
 import { makePostgres } from "../../db/shim/postgres"
+import { sendScheduledRetentionReport } from "./lib/retention-cron"
 import { shipLog, shipErrorResponse } from "./posthog-logs"
 
 const app = new Hono<HonoEnv>()
@@ -414,7 +415,7 @@ app.fetch = (async (request: Request, env: Env, ctx: ExecutionContext): Promise<
 // The scheduled entrypoint doesn't pass through the fetch wrapper above, so it
 // builds its own request-scoped Postgres shim the same way.
 const scheduled = async (
-  _controller: ScheduledController,
+  controller: ScheduledController,
   env: Env,
   ctx: ExecutionContext,
 ): Promise<void> => {
@@ -441,6 +442,13 @@ const scheduled = async (
   // is configured). The close below must wait for them.
   let sweepDone: Promise<void> = Promise.resolve()
   try {
+    // The retention recap crons (weekly Monday / monthly 1st) share this
+    // handler; they do their one job and return without the 5-minute chores.
+    const recap = await sendScheduledRetentionReport(runEnv, controller.cron, new Date())
+    if (recap !== "not-a-recap-cron") {
+      console.log(`[retention cron] ${controller.cron}: ${recap}`)
+      return
+    }
     const flushed = await flushDirtyLinks(runEnv, 20)
     if (flushed > 0) console.log(`[monday cron] flushed ${flushed} dirty link(s)`)
     // revoked_tokens hygiene lives here now, off the request path (it used to

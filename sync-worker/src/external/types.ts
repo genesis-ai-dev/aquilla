@@ -59,7 +59,17 @@ export interface ChangesetSummary {
    *  command kind, so the human on /approve/:id sees WHICH lifecycle op they're
    *  approving instead of an empty "No changes summarized." box (design §2 /
    *  blind-approval fix). */
-  command?: 'CreateProject' | 'UpdateProjectSettings' | 'PatchSettings'
+  command?:
+    | 'CreateProject'
+    | 'UpdateProjectSettings'
+    | 'PatchSettings'
+    | 'AddExample'
+    | 'AddDecision'
+    | 'RetireExample'
+    | 'AddNote'
+  /** AQU-1228 memory commands: the memory path being written or retired, plus
+   *  a one-line preview, so the human on /approve/:id sees the actual effect. */
+  memoryWrites?: { path: string; action: 'add' | 'retire'; preview: string }[]
   /** CreateProject: the project name being created. */
   projectName?: string
   /** CreateProject: the definitive new project id. */
@@ -118,6 +128,11 @@ export interface PlannedEventIds {
   /** PatchSettings (receipt-only): the settings version pinned at prepare —
    *  same guard semantics as updateProjectSettings. */
   patchSettings?: { version: number }
+  /** AQU-1228 memory commands: the resolved memory path, and (for the adding
+   *  kinds) the pre-minted agent_memories row id, so a crash-retry re-finds
+   *  its own proposal instead of inserting a second one. RetireExample writes
+   *  no row, so it carries the path only. */
+  memory?: { path: string; memoryId?: string }
   /** EmitEvents: one entry per plan event, in event order — the compiled event
    *  id plus any payload ids minted at prepare (comment.create's commentId /
    *  assignment.create's assignmentId when the caller omitted them), so a
@@ -164,6 +179,24 @@ export interface ReceiptOnlyReceipt {
   version?: number
 }
 
+/** AQU-1228 receipt for the Living Memory write commands. Also receipt-only (a
+ *  row write, not events), but it reports WHERE the memory landed and in WHAT
+ *  state — `proposed` still needs an in-app review before the copilot reads it,
+ *  so the caller must never have to infer that from silence. */
+export interface MemoryWriteReceipt {
+  credentialId: string
+  channel: ProvenanceChannel
+  changesetId: string
+  command: 'AddExample' | 'AddDecision' | 'RetireExample' | 'AddNote'
+  appliedAt: string
+  projectId: string
+  /** The `agent_memories.path` written or retired. */
+  memoryPath: string
+  memoryStatus: 'proposed' | 'approved' | 'archived'
+  /** Present when the write still needs a human review to take effect. */
+  note?: string
+}
+
 /** The full stored plan, as persisted in `changesets`. */
 export interface StoredChangeset {
   id: string
@@ -194,7 +227,7 @@ export interface StoredChangeset {
    *  landed — commit falls back to minting for backward compat. */
   plannedIds: PlannedEventIds | null
   digest: string
-  receipt: ChangesetReceipt | ReceiptOnlyReceipt | null
+  receipt: ChangesetReceipt | ReceiptOnlyReceipt | MemoryWriteReceipt | null
   confirmationId: string | null
   createdAt: string
   expiresAt: string

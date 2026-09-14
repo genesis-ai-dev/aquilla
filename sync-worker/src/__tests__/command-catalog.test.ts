@@ -59,6 +59,10 @@ describe('command catalog — invariants', () => {
       UpdateProjectSettings: { kind: 'UpdateProjectSettings', projectId: 'p', settings: {}, ifMatchVersion: 0 },
       PatchSettings: { kind: 'PatchSettings', projectId: 'p', ops: [{ key: 'brief', value: 1 }], ifMatchVersion: 0 },
       EmitEvents: { kind: 'EmitEvents', events: [{ kind: 'comment.create', payload: { body: 'hi' } }] },
+      AddExample: { kind: 'AddExample', slug: 'lord-as-hospod', source: 'the LORD', target: 'Господь' },
+      AddDecision: { kind: 'AddDecision', slug: 'divine-name', decision: 'Render Lord as Господь.' },
+      AddNote: { kind: 'AddNote', fileId: 'f', cellId: 'c', note: 'why this rendering' },
+      RetireExample: { kind: 'RetireExample', slug: 'lord-as-hospod' },
     }
     for (const entry of COMMAND_CATALOG) {
       const sample = minimal[entry.kind]

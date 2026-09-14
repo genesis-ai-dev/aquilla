@@ -4,6 +4,7 @@ import type { Command } from './commands'
 import type { CellPrecondition } from './preconditions'
 import type {
   ChangesetReceipt,
+  MemoryWriteReceipt,
   ChangesetSummary,
   PlannedEventIds,
   ReceiptOnlyReceipt,
@@ -67,7 +68,7 @@ function rowToStored(row: ChangesetRow): StoredChangeset {
     summary,
     plannedIds,
     digest: row.digest,
-    receipt: row.receipt == null ? null : parseJson<ChangesetReceipt | ReceiptOnlyReceipt>(row.receipt),
+    receipt: row.receipt == null ? null : parseJson<ChangesetReceipt | ReceiptOnlyReceipt | MemoryWriteReceipt>(row.receipt),
     confirmationId: row.confirmation_id,
     createdAt: toIso(row.created_at),
     expiresAt: toIso(row.expires_at),

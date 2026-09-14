@@ -537,6 +537,14 @@ The command layer is now the **shared write spine for both agent surfaces** (see
   waives, validations (testimony-flagged), back-translation, repin, file rename/delete/restore,
   assignments incl. reassign; head pins are server-resolved, whole-plan rejection on any bad
   reference). `UpdateProjectSettings` is deprecated and now rejects policy-key changes.
+- **Living Memory writes (AQU-1228)** — `AddExample` / `AddDecision` / `AddNote` (CONTRIBUTOR)
+  and `RetireExample` (PROJECT_LEAD), each a sole-command receipt-only changeset writing the
+  `agent_memories` table (Living Memory is not event-sourced, so these do NOT ride
+  `EmitEvents`). The changeset's human confirmation stands in for the in-app Memory review,
+  but only when the APPROVING user's live role is PROJECT_LEAD+; otherwise the entry lands
+  `proposed` and the receipt's `memoryStatus` says so. Retirement archives (out of retrieval,
+  still auditable); human-edited entries are never overwritten or retired through this
+  surface. See `docs/COMMAND-REGISTRY.md` §2.
 - **Session principal** — the in-app agent stages changesets through the same engine via
   session sync-token routes (`/api/v1/changesets/:projectId[...]` on the sync host), with
   `credential_id = 'session'`, forced ask mode, `channel: "app"` provenance, and the existing

@@ -1,6 +1,56 @@
 # Stripe launch and covered-access playbook
 
-Updated: 2026-09-13. Tickets: AQU-837 (billing readiness), AQU-1091 (pricing and app UI).
+Updated: 2026-09-14. Tickets: AQU-837 (billing readiness), AQU-1091 (pricing and app UI).
+
+## Correct admin sandbox and local credentials — 2026-09-14
+
+Ryder confirms the verified admin@frontierrnd.com account mapping:
+
+- Production account: `acct_1U47k85Mw0X7gcTS`.
+- Separate sandbox: `acct_1U47kG7SR91OrWMS`.
+
+The current `stripe-sandbox.json` records the production account ID alongside
+historically test-mode prices. That does not establish these are live prices:
+Stripe's account test mode and a separate sandbox are different environments.
+Do not relabel historical objects as live or assume they exist in the separate
+sandbox. The old catalog must not be enabled using the separate sandbox key.
+This correction supersedes earlier references calling that account our sandbox.
+
+Direct authenticated reads verify the separate sandbox contains only the legacy
+Field Plan (`price_1U487L7SR91OrWMSAwgtPRxU`, $500 every four weeks) and one-time
+capacity add-on (`price_1U487M7SR91OrWMStnLewx15`, $200). Product/price listings are
+complete, not truncated. No newer Pro/Max/Team prices, webhook endpoints, or portal
+configurations existed there before this step. No live API requests were made.
+
+- [x] Verify exactly one active sandbox secret/publishable key in the main
+  auth-worker local environment and validate its account through Stripe.
+- [x] Copy only sandbox credentials into the AQU-837 worktree's ignored
+  `auth-worker/.dev.vars`; no secret enters source control or tool output.
+- [x] Obtain the local Stripe CLI signing secret and save it as
+  `STRIPE_WEBHOOK_SECRET` in that worktree file. This is for CLI forwarding,
+  not the separate development/production endpoint signing secret.
+- [x] Create and read-verify personal/team sandbox portal configurations with
+  invoice history and payment-method updates enabled, subscription update and
+  cancellation disabled. IDs and allowed features are recorded in
+  `config/pricing/stripe-sandbox-portal.json` and the ignored local environment.
+- [ ] Build/verify the Stripe-native Pro/Max/Team catalog in this separate sandbox;
+  replace the account and all relevant Price/Product bindings together. Do not
+  simply replace the old account ID while retaining its Price IDs.
+- [ ] Start a local Stripe CLI listener against the explicitly configured local
+  worker, verify its signing secret matches, and exercise actual event delivery.
+  Secret retrieval alone does not mean a listener is running or webhooks pass.
+- [ ] Verify real checkout/portal plan changes and resulting workspace access.
+
+Portal configurations: personal `bpc_1UFa3g7SR91OrWMS1h3q73NA`,
+team `bpc_1UFa3g7SR91OrWMSwwoRyyWP`. Stable idempotency keys protect creation
+retries. Configurations are test-mode and active. Local feature flags and the
+new catalog are not enabled by installing credentials. No subscriptions, charges,
+live objects, or deployed worker configuration changed.
+
+Validation: real Stripe account/catalog/configuration API responses and
+`git diff --check`. This checkpoint changes operational documentation and adds an
+informational portal manifest; runtime producers/consumers and tests do not change.
+Earlier mocked tests remain distinct from real payment/portal journey evidence.
 
 ## Stripe-hosted billing direction — 2026-09-13
 

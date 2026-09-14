@@ -1,0 +1,16 @@
+{
+  "accountId": "acct_1U47kG7SR91OrWMS",
+  "configurations": {
+    "personal": "bpc_1UFa3g7SR91OrWMS1h3q73NA",
+    "team": "bpc_1UFa3g7SR91OrWMSwwoRyyWP"
+  },
+  "verifiedAt": "2026-09-14",
+  "livemode": false,
+  "features": {
+    "invoice_history": true,
+    "payment_method_update": true,
+    "subscription_update": false,
+    "subscription_cancel": false
+  },
+  "catalogReady": false
+}

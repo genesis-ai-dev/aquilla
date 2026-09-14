@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { ExternalLink } from "lucide-react"
 import { BillingWorkspaceDetails } from "@/components/org/BillingWorkspaceSummary"
-import { getBillingWorkspace, type BillingWorkspace } from "@/lib/sync/billing-workspace"
+import { getBillingWorkspace, startWorkspaceBillingPortal, type BillingWorkspace } from "@/lib/sync/billing-workspace"
 import { billingOfferLabels } from "../../../db/shared/billing-offers"
 import { BillingOffers } from "@/components/org/BillingOffers"
 import { Badge } from "@/components/ui/badge"
@@ -90,7 +90,9 @@ export function OrgSettingsBilling() {
     setBusy(kind)
     setError(null)
     try {
-      const url = await startBillingPortal(jwt, activeOrgId)
+      const url = paid && workspace?.portalEnabled === true
+        ? await startWorkspaceBillingPortal(jwt, activeOrgId)
+        : await startBillingPortal(jwt, activeOrgId)
       if (request.current === generation) window.location.assign(url)
     } catch (err) {
       if (request.current !== generation) return
@@ -137,19 +139,19 @@ export function OrgSettingsBilling() {
                 </Badge>
               }
             />
-            {!paid && data?.canManage ? (
+            {(paid ? workspace.portalEnabled === true : data?.canManage) ? (
               <SettingsRow
                 label={t("billing.plan.manage")}
-                description={t("billing.plan.manageHelp")}
+                description={paid ? "Manage your plan, invoices, and payment methods securely with Stripe." : t("billing.plan.manageHelp")}
                 control={
                   <Button
                     variant="outline"
                     onClick={() => void go("portal")}
-                    disabled={!data.canManage || busy != null}
+                    disabled={busy != null}
                     data-testid="manage-billing"
                   >
                     <ExternalLink data-icon="inline-start" />
-                    {busy === "portal" ? "Redirecting…" : "Open customer portal"}
+                    {busy === "portal" ? "Redirecting…" : paid ? "Manage billing" : "Open customer portal"}
                   </Button>
                 }
               />
@@ -158,7 +160,7 @@ export function OrgSettingsBilling() {
 
           <Button variant="outline" onClick={() => setReload(value => value + 1)}>Refresh billing</Button>
           <BillingWorkspaceDetails data={workspace} />
-          {jwt && activeOrgId != null ? <BillingOffers key={activeOrgId} jwt={jwt} orgId={activeOrgId} changingPlan={Boolean(paid)} currentInterval={paid?.billingInterval} /> : null}
+          {!paid && jwt && activeOrgId != null ? <BillingOffers key={activeOrgId} jwt={jwt} orgId={activeOrgId} /> : null}
           <SettingsGroup label="Plans and covered access">
             <SettingsRow
               label="ETEN affiliate or Bible-translation team?"

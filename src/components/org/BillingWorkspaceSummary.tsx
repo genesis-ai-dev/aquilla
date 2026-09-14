@@ -42,7 +42,9 @@ export function BillingWorkspaceDetails({ data }: { data: BillingWorkspace }) {
           label={data.name ?? 'Current workspace'}
           description={data.scope === 'personal' ? 'Personal workspace' : data.scope === 'team' ? 'Team workspace — shared billing' : 'Workspace type needs confirmation'}
         />
-        <p className="text-sm text-muted-foreground">{explanations[data.eligibility.reason]}</p>
+        <p className="text-sm text-muted-foreground">{data.eligibility.reason === 'already_subscribed' && data.portalEnabled === true
+          ? 'Use Manage billing to update this workspace’s subscription in Stripe.'
+          : explanations[data.eligibility.reason]}</p>
         {data.entitlement?.access ? (
           <p className="text-sm text-muted-foreground" data-testid="billing-access" role="status">
             {data.entitlement.access.reason === 'payment_failed'

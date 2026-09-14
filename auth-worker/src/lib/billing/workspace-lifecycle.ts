@@ -1,4 +1,6 @@
 import { z } from 'zod'
+import { readValidatedBillingCatalog } from './catalog'
+import { quoteOffer } from './pricing-model'
 import type { Env } from '../../types'
 import { applyBillingEvent } from './apply'
 import { stripeForm } from './stripe'
@@ -28,17 +30,21 @@ export function subscriptionPaidThrough(items: z.infer<typeof paidPeriodItems>, 
 const subscriptionSchema = z.object({
   id: z.string(), customer: z.string(), livemode: z.literal(false),
   status: z.enum(['active', 'past_due', 'unpaid', 'canceled']),
-  cancel_at_period_end: z.boolean(), latest_invoice: z.string().regex(/^in_[\w]+$/),
+  cancel_at_period_end: z.boolean(), cancel_at: timestamp.nullable().optional(), latest_invoice: z.string().regex(/^in_[\w]+$/),
   items: paidPeriodItems,
 })
 const invoiceSchema = z.object({
   id: z.string(), customer: z.string(), livemode: z.literal(false),
   status: z.enum(['paid', 'open', 'uncollectible', 'void', 'draft']),
-  paid: z.boolean(), attempt_count: z.number().int().nonnegative(),
+  paid: z.boolean().optional(), billing_reason: z.string().optional(), attempt_count: z.number().int().nonnegative(),
   amount_due: z.number().int().nonnegative(), amount_paid: z.number().int().nonnegative(),
   amount_remaining: z.number().int().nonnegative(), currency: z.literal('usd'),
   parent: z.object({ subscription_details: z.object({ subscription: z.string() }) }),
   lines: z.object({ has_more: z.literal(false), data: z.array(z.object({
+    amount: z.number().int().optional(), quantity: z.number().int().optional(),
+    parent: z.object({ subscription_item_details: z.object({
+      subscription: z.string(), proration: z.boolean(),
+    }).nullable().optional() }).optional(),
     period: z.object({ start: timestamp, end: timestamp }),
     pricing: z.object({ price_details: z.object({ price: z.string() }) }),
   })).min(1).max(2) }),
@@ -73,34 +79,68 @@ export async function reconcileWorkspaceLifecycle(env: Env, event: {
     throw new Error('Workspace subscription account mismatch')
   }
   const sub = subscriptionSchema.parse(await stripeForm(env, 'GET', `/subscriptions/${id}`))
-  if (sub.id !== id || sub.customer !== stored.stripe_customer_id
-    || JSON.stringify(sub.items.data.map(item => item.price.id).sort())
-      !== JSON.stringify([...stored.price_ids].sort())) {
-    // Plan mutations require reviewed proration/payment, not metadata or a name.
-    throw new Error('Subscription change is not approved')
+  if (sub.id !== id || sub.customer !== stored.stripe_customer_id) {
+    throw new Error('Subscription identity mismatch')
   }
+  const currentPriceIds = sub.items.data.map(item => item.price.id).sort()
+  const changed = JSON.stringify(currentPriceIds) !== JSON.stringify([...stored.price_ids].sort())
   const invoice = invoiceSchema.parse(await stripeForm(env, 'GET', `/invoices/${sub.latest_invoice}`))
   if (invoice.id !== sub.latest_invoice || invoice.customer !== sub.customer
     || invoice.parent.subscription_details.subscription !== id) {
     throw new Error('Subscription invoice identity mismatch')
   }
-  const paid = invoice.status === 'paid' && invoice.paid && invoice.amount_remaining === 0
+  // Modern Stripe invoices omit `paid`; status and settled amounts are authoritative.
+  const paid = invoice.status === 'paid' && invoice.paid !== false && invoice.amount_remaining === 0
     && invoice.amount_paid >= invoice.amount_due
+  let target: ReturnType<typeof quoteOffer> | null = null
+  const prorated = invoice.billing_reason === 'subscription_update'
+  if (changed || prorated) {
+    const { catalog, prices } = await readValidatedBillingCatalog(env)
+    if (catalog.checkoutLayout !== 'single_item' || catalog.accountId !== attempt.account_id
+      || catalog.version !== stored.price_version
+      || catalog.entitlementVersion !== stored.entitlement_version || sub.items.data.length !== 1) {
+      throw new Error('Subscription change is not approved')
+    }
+    const binding = catalog.bindings.find(b => b.priceId === currentPriceIds[0])
+    if (!binding || (binding.offer.startsWith('team') ? 'team' : 'personal') !== stored.scope) {
+      throw new Error('Subscription change crosses workspace scope')
+    }
+    target = quoteOffer(catalog, prices, binding.offer, binding.interval)
+    if (paid && prorated) {
+      const item = sub.items.data[0]!
+      const allowed = new Set(catalog.bindings.filter(b =>
+        (b.offer.startsWith('team') ? 'team' : 'personal') === stored.scope).map(b => b.priceId))
+      // Stripe owns the proration amount. Verify that this settled invoice pays
+      // for the current item and that remaining lines only credit approved plans.
+      const charges = invoice.lines.data.filter(line => line.pricing.price_details.price === item.price.id
+        && line.amount !== undefined && line.amount >= 0)
+      if (charges.length !== 1 || invoice.lines.data.some(line => {
+        const details = line.parent?.subscription_item_details
+        return !allowed.has(line.pricing.price_details.price) || line.quantity !== 1
+          || details?.subscription !== id || details.proration !== true
+          || line.amount === undefined
+          || (line !== charges[0] && line.amount > 0)
+          || (line === charges[0] && (line.period.end !== item.current_period_end
+            || line.period.start < item.current_period_start))
+          || line.period.start >= line.period.end || line.period.start * 1000 > now.getTime()
+      })) throw new Error('Proration does not pay for the current subscription')
+    }
+  }
   let paidThrough = before.paid_through
   if (paid) {
     const first = sub.items.data[0]!
     const expectedEnd = sub.status === 'canceled'
       ? Date.parse(before.paid_through) / 1000 : first.current_period_end
-    if (JSON.stringify(invoice.lines.data.map(line => line.pricing.price_details.price).sort())
-        !== JSON.stringify([...stored.price_ids].sort())
+    if (!prorated && (JSON.stringify(invoice.lines.data.map(line => line.pricing.price_details.price).sort())
+        !== JSON.stringify(currentPriceIds)
       || invoice.lines.data.some(line => line.period.end !== expectedEnd
         || line.period.start >= line.period.end
-        || (sub.status !== 'canceled' && line.period.start !== first.current_period_start))) {
+        || (sub.status !== 'canceled' && line.period.start !== first.current_period_start)))) {
       throw new Error('Invoice does not pay for the current subscription period')
     }
     if (sub.status === 'active') {
       const end = subscriptionPaidThrough(sub.items, now)
-      if (Date.parse(end) > Date.parse(paidThrough)) paidThrough = end
+      if (target || Date.parse(end) > Date.parse(paidThrough)) paidThrough = end
     }
   }
   const failed = (before.payment_failed && !paid) || ['past_due', 'unpaid'].includes(sub.status)
@@ -110,9 +150,15 @@ export async function reconcileWorkspaceLifecycle(env: Env, event: {
   return applyBillingEvent(env.AQUILLA_PG, owner.org_id, event.id, event.type, object, async tx => {
     const current = await readWorkspaceSubscriptionState(tx, owner.org_id)
     if (current?.revision !== before.revision) throw new Error('Subscription state changed; retry')
+    if (changed && paid && target && sub.status === 'active') {
+      await tx.prepare(`UPDATE workspace_plan_entitlements SET offer = ?, quantity = ?,
+        price_ids = ?::text::jsonb, billing_interval = ? WHERE org_id = ?`)
+        .bind(target.offer, target.quantity, JSON.stringify(target.lineItems.map(line => line.price)),
+          target.interval, owner.org_id).run()
+    }
     await tx.prepare(`UPDATE workspace_subscription_state SET revision = revision + 1,
       payment_failed = ?, paid_through = ?::timestamptz,
       cancel_at_period_end = ?, updated_at = now() WHERE org_id = ?`)
-      .bind(failed, paidThrough, sub.cancel_at_period_end || sub.status === 'canceled', owner.org_id).run()
+      .bind(failed, paidThrough, sub.cancel_at_period_end || sub.cancel_at != null || sub.status === 'canceled', owner.org_id).run()
   })
 }

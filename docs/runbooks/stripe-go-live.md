@@ -2,6 +2,81 @@
 
 Updated: 2026-09-14. Tickets: AQU-837 (billing readiness), AQU-1091 (pricing and app UI).
 
+## Native hosted billing implementation — 2026-09-14
+
+This checkpoint supersedes the limited portal configuration and custom paid-plan
+review UI below. Everything remains sandbox-only and gated to local rehearsal.
+Production payments and deployed configuration remain unchanged.
+
+- [x] Provision and read-verify all ten approved monthly/annual prices in the
+  separate admin sandbox. `config/pricing/stripe-sandbox-native.json` records
+  one Product per offer and one subscription item, quantity one. Team20× bundles
+  the approved $720/month or $7,200/year total; no commercial price changes.
+- [x] Create and read-verify personal/team native portal configurations. See
+  `config/pricing/stripe-sandbox-portal.json`; limited configurations remain
+  recorded separately. Every product explicitly disables adjustable quantity.
+- [x] Verify actual Stripe-hosted personal upgrade, downgrade, and cancellation.
+  Pro → Max5× charges $40 immediately in the sandbox. Max5× → Pro takes effect
+  immediately and creates a $40 account credit, with no automatic cash refund.
+  Renewal date stays unchanged. Cancellation preserves the paid period.
+- [x] Adopt that native downgrade policy, under the approved Stripe-native
+  fallback. Stripe displays the timing and credit before confirmation.
+- [x] Reconcile native changes against current Stripe subscription, approved
+  catalog, and settled invoice. Reject scope changes, unapproved prices,
+  quantity changes, and mismatched proration proof. Preserve the usage anchor.
+- [x] Handle actual API shapes: paid invoices may omit `paid`; scheduled
+  cancellation may use `cancel_at` while `cancel_at_period_end` remains false.
+- [x] Connect the paid workspace **Manage billing** surface to the authorized
+  hosted portal. Remove its custom plan-review entry point. Keep old backend
+  review code checkpointed until the remaining lifecycle cases pass.
+- [x] Complete real sandbox Checkout → Stripe CLI signed webhook → local Hono
+  handler → disposable Postgres activation, then hosted Pro → Max5× upgrade.
+  The stored plan changes and its weekly usage anchor stays unchanged.
+- [x] Reproduce early invoice delivery and overlapping updates at the signed
+  webhook/Postgres boundary. Both return retryable failures before successful
+  replay; duplicate successful deliveries leave revision and usage unchanged.
+- [ ] Verify actual Stripe redelivery after an endpoint failure. The real CLI
+  run observed two HTTP 500 deliveries; regression tests prove recovery using
+  signed fixture replay, not automatic Stripe redelivery. Do not conflate them.
+- [ ] Exercise real Team plan changes, failed payment/3DS recovery, monthly/annual
+  switches, renewal, and final cancellation expiry before live enablement.
+- [ ] Retire unused custom plan-review backend/persistence after hosted coverage.
+- [ ] Wire weekly metering and enforcement through every AI execution path.
+  Preserving the usage anchor does not establish that usage is measured/enforced.
+- [ ] Resolve migration numbering against current main, then run release gates.
+- [ ] Provision and validate the production catalog, portal settings, endpoint
+  signing secret, tax configuration, and controlled live rollout separately.
+- [ ] Dispatch the dedicated pricing-aware onboarding rework and finish Team
+  membership/reviewer limits before advertising those capabilities as complete.
+
+Verification evidence:
+
+- Actual sandbox subscription `sub_1UFaeo7SR91OrWMSGzwSpA6K` activates Pro and
+  upgrades to Max5× through original CLI-forwarded Stripe signatures. The local
+  harness passes (one test). It uses actual application handlers and disposable
+  Postgres; the browser return page is a verification page, not the full SPA.
+- Captured Stripe lifecycle/configuration fields in worker fixtures exercise
+  the producer → parser → transaction → workspace response boundary. Fixtures
+  contain no signing secrets, payment details, or session URLs.
+- Worker targeted checks pass: 159 tests across native catalog/lifecycle,
+  checkout, change review, and portal; additional targeted checks pass after
+  capability/rollback additions. Real Postgres gate passes 174 tests across
+  seven files before the two new recovery regressions; the updated native
+  lifecycle file passes all nine tests against real Postgres.
+- RTL/client/impact/determinism checks pass (55 tests); the final billing summary
+  and settings check passes 23 tests. Existing billing smoke plus the temporary
+  visual probe pass four browser tests; the final visual probe passes after
+  the copy correction. The temporary probe is removed; RTL retains coverage.
+- Commands: `pnpm --dir auth-worker exec vitest run --config
+  vitest.webhook-postgres.config.ts`; targeted recovery adds
+  `src/__tests__/billing-native-lifecycle.test.ts`. Worker tests use their named
+  files; RTL uses `npx vitest run ... --maxWorkers=2`. Browser checks use
+  `E2E_SHARD=3/3 npx tsx scripts/e2e-up.ts --
+  e2e/specs/orgs/org-settings-billing.smoke.spec.ts ... --shard=1/1`.
+- `pnpm --dir auth-worker exec tsc --noEmit`, `npm run build`, and
+  `git diff --check` are the final local gates. Full release smoke remains
+  required at merge/deploy; no deployment occurs in this checkpoint.
+
 ## Correct admin sandbox and local credentials — 2026-09-14
 
 Ryder confirms the verified admin@frontierrnd.com account mapping:
@@ -33,13 +108,14 @@ configurations existed there before this step. No live API requests were made.
   invoice history and payment-method updates enabled, subscription update and
   cancellation disabled. IDs and allowed features are recorded in
   `config/pricing/stripe-sandbox-portal.json` and the ignored local environment.
-- [ ] Build/verify the Stripe-native Pro/Max/Team catalog in this separate sandbox;
+- [x] Build/verify the Stripe-native Pro/Max/Team catalog in this separate sandbox;
   replace the account and all relevant Price/Product bindings together. Do not
   simply replace the old account ID while retaining its Price IDs.
-- [ ] Start a local Stripe CLI listener against the explicitly configured local
+- [x] Start a local Stripe CLI listener against the explicitly configured local
   worker, verify its signing secret matches, and exercise actual event delivery.
   Secret retrieval alone does not mean a listener is running or webhooks pass.
-- [ ] Verify real checkout/portal plan changes and resulting workspace access.
+- [x] Verify real personal checkout/portal upgrade and resulting workspace access.
+  Remaining lifecycle/Team cases are listed above.
 
 Portal configurations: personal `bpc_1UFa3g7SR91OrWMS1h3q73NA`,
 team `bpc_1UFa3g7SR91OrWMSwwoRyyWP`. Stable idempotency keys protect creation
@@ -102,12 +178,12 @@ Execution checklist, in dependency order:
   before this documentation update. No committed work was lost.
 - [ ] Prove a real sandbox portal configuration against personal and Team offers:
   upgrades, downgrade timing/credit, failed payment/3DS, cancellation, and recovery.
-- [ ] Finalize the minimal supported catalog and portal settings; record IDs and
+- [x] Finalize the minimal supported catalog and portal settings; record IDs and
   exact policy outcomes. Do not mark mocked Stripe responses as this proof.
 - [x] Add the local sandbox workspace portal-session endpoint using the stored
   customer, explicit scope-specific configuration, and trusted return URL.
   This slice supports invoices/payment methods only; see evidence below.
-- [ ] Connect the paid billing UI to the verified portal configuration and enable
+- [x] Connect the paid billing UI to the verified portal configuration and enable
   subscription management only after the real sandbox/lifecycle proof.
 - [ ] Reconcile portal-originated Price changes and paid access from verified
   Stripe state. Cover prorations, pending payment, scheduled changes, cancellation

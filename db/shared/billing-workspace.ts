@@ -27,5 +27,7 @@ export interface BillingWorkspace {
   } | null
   // The new metering consumer has not shipped. Never invent a percentage.
   usagePercent: null
+  /** Explicit server capability; absent means unavailable. */
+  portalEnabled?: boolean
   checkoutEnabled: false
 }

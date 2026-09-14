@@ -4,7 +4,7 @@ import { Link, MemoryRouter, Route, Routes } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { OrgSettingsBilling } from "./OrgSettingsBilling"
 import { getOrgBilling, getBillingOffers } from "@/lib/sync/billing"
-import { getBillingWorkspace, type BillingWorkspace } from "@/lib/sync/billing-workspace"
+import { getBillingWorkspace, startWorkspaceBillingPortal, type BillingWorkspace } from "@/lib/sync/billing-workspace"
 import { billingOfferLabels } from "../../../db/shared/billing-offers"
 import type { OrgBilling } from "@/lib/sync/billing"
 
@@ -32,6 +32,7 @@ vi.mock("@/lib/sync/cloud-projects", () => ({
 
 vi.mock("@/lib/sync/billing-workspace", () => ({
   getBillingWorkspace: vi.fn(),
+  startWorkspaceBillingPortal: vi.fn(),
 }))
 
 const mockGet = vi.mocked(getOrgBilling)
@@ -211,3 +212,17 @@ it.each(['payment_failed', 'paid_period_ended', 'paid'] as const)(
     expect(mockGet).not.toHaveBeenCalled()
   },
 )
+
+it('routes native paid billing to the workspace portal and preserves access on failure', async () => {
+  vi.mocked(getBillingWorkspace).mockResolvedValue({ ...paidWorkspace('pro'), portalEnabled: true })
+  vi.mocked(startWorkspaceBillingPortal).mockRejectedValueOnce(new Error('Portal temporarily unavailable'))
+  renderBilling()
+  fireEvent.click(await screen.findByRole('button', { name: 'Manage billing' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('Portal temporarily unavailable')
+  expect(startWorkspaceBillingPortal).toHaveBeenCalledWith('jwt', 1)
+  expect(screen.getByText('Use Manage billing to update this workspace’s subscription in Stripe.')).toBeVisible()
+  expect(screen.queryByText(/Changes will be available when billing management is ready/)).toBeNull()
+  expect(screen.getByTestId('billing-plan')).toHaveTextContent('Pro')
+  expect(screen.getByRole('button', { name: 'Manage billing' })).toBeEnabled()
+  expect(getBillingOffers).not.toHaveBeenCalled()
+})

@@ -6,13 +6,13 @@ import type { Env } from '../../types'
 import type { StripePriceInput } from '../../lib/billing/pricing-model'
 import { seedUser, jwtFor, authHeader } from './db'
 import { stripeCatalogResponse } from './stripe-catalog'
-import manifest from '../../../../config/pricing/stripe-sandbox.json'
+import { testStripeCatalog as manifest } from './stripe-catalog'
 import type { BillingPlanReview } from '../../../../db/shared/billing-review'
 
-export function config(): Env { return { ...env, WRANGLER_LOCAL: '1',
+export function config(catalog = manifest): Env { return { ...env, WRANGLER_LOCAL: '1',
   BILLING_WORKSPACE_CHECKOUT_REHEARSAL: 'true', STRIPE_SECRET_KEY: 'sk_test_fixture',
-  STRIPE_PRICE_CATALOG: JSON.stringify(manifest), BASE_URL: 'http://127.0.0.1:5173' } }
-export async function setup(scope: 'personal' | 'team' = 'personal') {
+  STRIPE_PRICE_CATALOG: JSON.stringify(catalog), BASE_URL: 'http://127.0.0.1:5173' } }
+export async function setup(scope: 'personal' | 'team' = 'personal', catalog = manifest) {
   await seedUser(1, 'alice'); await seedUser(2, 'bob')
   const created = await app.request(scope === 'team' ? '/api/v2/orgs' : '/api/v2/orgs/me', {
     method: scope === 'team' ? 'POST' : 'GET', headers: authHeader(await jwtFor('alice')),
@@ -40,17 +40,17 @@ export async function setup(scope: 'personal' | 'team' = 'personal') {
       return Response.json({ ...sessions.get(key), ...(invalidUrl ? { url: 'https://evil.test/collect' } : {}) })
     }
     if (path.startsWith('/v1/checkout/sessions/')) return Response.json([...sessions.values()].find(s => path.endsWith(`/${s.id}`)))
-    return Response.json(stripeCatalogResponse(path))
+    return Response.json(stripeCatalogResponse(path, catalog))
   })
   vi.stubGlobal('fetch', fetch)
   return { fetch, sessions, requests, loseNextResponse: () => { loseResponse = true },
     useInvalidUrl: () => { invalidUrl = true } }
 }
-export async function reviewed(offer = 'pro', interval = 'year') {
+export async function reviewed(offer = 'pro', interval = 'year', catalog = manifest) {
   const response = await app.request('http://127.0.0.1/api/v2/orgs/1/billing/review', {
     method: 'POST', headers: authHeader(await jwtFor('alice')),
     body: JSON.stringify({ offer, interval, quantity: 1 }),
-  }, config())
+  }, config(catalog))
   expect(response.status).toBe(200)
   const review = await response.json() as BillingPlanReview
   if (!review.ready) throw new Error('Expected eligible review')
@@ -63,9 +63,9 @@ export async function checkout(body: unknown, username = 'alice', settings = con
     method: 'POST', headers: authHeader(await jwtFor(username)), body: JSON.stringify(body),
   }, settings)
 }
-export async function completedPayment(offer = 'pro', interval = 'year') {
-  const stripe = await setup(offer.startsWith('team') ? 'team' : 'personal')
-  expect((await checkout(await reviewed(offer, interval))).status).toBe(200)
+export async function completedPayment(offer = 'pro', interval = 'year', catalog = manifest) {
+  const stripe = await setup(offer.startsWith('team') ? 'team' : 'personal', catalog)
+  expect((await checkout(await reviewed(offer, interval, catalog), 'alice', config(catalog))).status).toBe(200)
   const params = new URLSearchParams(stripe.requests[0]!.body)
   const metadata = Object.fromEntries([...params.entries()]
     .filter(([key]) => key.startsWith('metadata['))
@@ -74,7 +74,7 @@ export async function completedPayment(offer = 'pro', interval = 'year') {
   for (let i = 0; params.has(`line_items[${i}][price]`); i++) {
     items.push({ id: `si_line_${i}`, current_period_start: Math.floor(Date.now() / 1000) - 60,
       current_period_end: Math.floor(Date.now() / 1000) + 86400 * 30, quantity: Number(params.get(`line_items[${i}][quantity]`)),
-      price: stripeCatalogResponse(`/v1/prices/${params.get(`line_items[${i}][price]`)}`) as StripePriceInput })
+      price: stripeCatalogResponse(`/v1/prices/${params.get(`line_items[${i}][price]`)}`, catalog) as StripePriceInput })
   }
   const total = items.reduce((sum, item) => sum + item.price.unit_amount! * item.quantity, 0)
   const session = { id: 'cs_test_123', mode: 'subscription', status: 'complete',
@@ -101,7 +101,7 @@ export async function completedPayment(offer = 'pro', interval = 'year') {
   })
   const event = { id: 'evt_workspace_paid', type: 'checkout.session.completed', livemode: false,
     created: Math.floor(Date.now() / 1000) - 1, data: { object: structuredClone(session) } }
-  const send = (settings: Env = { ...config(), STRIPE_WEBHOOK_SECRET: 'whsec_fixture' }, signed = true) => {
+  const send = (settings: Env = { ...config(catalog), STRIPE_WEBHOOK_SECRET: 'whsec_fixture' }, signed = true) => {
     const body = JSON.stringify(event)
     const t = Math.floor(Date.now() / 1000)
     const sig = createHmac('sha256', 'whsec_fixture').update(`${t}.${body}`).digest('hex')

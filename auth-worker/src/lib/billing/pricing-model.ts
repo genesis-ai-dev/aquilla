@@ -37,7 +37,7 @@ export function weeklyUsagePeriod(anchorIso: string, nowIso: string) {
 export interface ApprovedPriceBinding {
   priceId: string
   productId: string
-  // team_20x is the capacity line; checkout also requires team at quantity one.
+  // Legacy catalogs use a capacity add-on; native catalogs use a complete plan price.
   offer: Exclude<Offer, 'free'>
   interval: 'month' | 'year'
   currency: string
@@ -92,6 +92,8 @@ export function resolveApprovedPrice(
 
 
 export interface PriceCatalog {
+  /** Omitted on historical records, which use the Team base plus capacity line. */
+  checkoutLayout?: 'single_item' | 'team_addon'
   version: string
   entitlementVersion: string
   bindings: readonly ApprovedPriceBinding[]
@@ -105,8 +107,11 @@ export function quoteOffer(
   interval: 'month' | 'year',
   quantity = 1,
 ) {
+  if (catalog.checkoutLayout === 'single_item' && quantity !== 1) {
+    throw new Error('Single-item launch plans require quantity one')
+  }
   const components: Array<{ offer: Exclude<Offer, 'free'>; quantity: number }> =
-    offer === 'team_20x'
+    offer === 'team_20x' && catalog.checkoutLayout !== 'single_item'
       ? [{ offer: 'team', quantity: 1 }, { offer: 'team_20x', quantity }]
       : [{ offer, quantity }]
   const lines = components.map(component => {

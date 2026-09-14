@@ -1,4 +1,4 @@
-import { startWorkspacePortalRehearsal } from '../lib/billing/workspace-portal'
+import { startWorkspacePortalRehearsal, workspacePortalAvailable } from '../lib/billing/workspace-portal'
 import { changeSelectionSchema, reviewWorkspaceChange } from '../lib/billing/workspace-change-review'
 import { Hono } from 'hono'
 import { reconcileWorkspaceCheckoutRehearsal, startWorkspaceCheckoutRehearsal, workspaceCheckoutInput, workspaceCheckoutRehearsalEnabled, WorkspaceCheckoutConflict } from '../lib/billing/workspace-checkout'
@@ -25,7 +25,9 @@ billingWorkspace.get('/orgs/:orgId/billing/workspace', authMiddleware, async c =
   c.header('Cache-Control', 'private, no-store')
   const workspace = await readBillingWorkspace(c.env.AQUILLA_PG, orgId)
   if (!workspace) return c.json({ error: 'not_found' }, 404)
-  return c.json(workspace)
+  return c.json({ ...workspace,
+    ...(workspacePortalAvailable(c.env, c.req.url, workspace) ? { portalEnabled: true } : {}),
+  })
 })
 const selectionSchema = z.object({
   offer: z.enum(paidOffers), interval: z.enum(['month', 'year']), quantity: z.literal(1),

@@ -19,6 +19,12 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
     sentinels: ["e2e/specs/orgs/account-switcher.smoke.spec.ts"],
   },
   {
+    // AQU-1169: app-wide font size is device-scoped like theme; the persist-reload
+    // journey is the cross-layer contract (boot script + Preferences control).
+    source: /^(?:src\/(?:pages\/Preferences|branding\/FontSize|lib\/store\/file-view-prefs)|index\.html$)/,
+    sentinels: ["e2e/specs/orgs/preferences-persist-reload.smoke.spec.ts"],
+  },
+  {
     source: /^(?:src\/(?:pages|components|lib)\/(?:project|onboarding|admin)|auth-worker\/.*project)/i,
     sentinels: ["e2e/specs/projects/route-health.smoke.spec.ts"],
   },
@@ -73,7 +79,7 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
 const NON_RUNTIME = /^(?:docs\/|\.github\/|\.claude\/|\.agents\/|test-results|playwright-report|.*\.(?:md|mdx|txt|png|jpe?g|gif|svg|mp4|mov|csv))$/i
 const UNIT_TEST = /(?:^|\/)(?:__tests__\/.*|[^/]+\.(?:test|spec)\.[cm]?[jt]sx?)$/i
 const E2E_INFRA = /^(?:e2e\/(?:config|helpers|reporters)\/|scripts\/(?:e2e-|lib\/spawn-worker)|package\.json$|pnpm-lock\.yaml$|vite\.config|tsconfig)/i
-const PRODUCT_RUNTIME = /^(?:src\/|auth-worker\/|sync-worker\/|packages\/)/
+const PRODUCT_RUNTIME = /^(?:src\/|auth-worker\/|sync-worker\/|packages\/|index\.html$)/
 
 function normalize(file: string): string {
   return file.trim().replaceAll("\\", "/").replace(/^\.\//, "")

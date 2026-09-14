@@ -116,7 +116,7 @@ UI chrome that used to be one smoke file per click is covered under
 - Auth form micro-UI: show/hide password, signup checklist, forgot/reset form chrome
 - Project settings pane links / toggles (except rename/save persistence smoke)
 - Import dialog chrome / specialized options landing (except persist-reload journeys), including the mutually exclusive Biblica title choice and its independent sentence-split option (`ImportDialog.biblicaEdition.test.tsx`)
-- Preferences toggles / theme (except persist-reload)
+- Preferences toggles / theme / app font size (except persist-reload)
 - Rules page toggles / severity / regex mode (RTL on RulesPage + rule editor)
 - Comments page empty / filter / sort chrome (RTL + comments-page surface session)
 - Living-memory empty states and section IA (index → brief/instructions/quality/knowledge/examples panes, collapsed prediction prompt, role gates — RTL in `LivingMemoryPage.component.test.tsx`; entry points and legacy settings redirects in `ProjectSettings.subMenuIA.test.tsx` + `shell-routing.test.ts`)

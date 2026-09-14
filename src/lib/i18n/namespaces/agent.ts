@@ -173,6 +173,14 @@ export const agent = defineNamespace({
       "When Autopilot runs, each file becomes a thread where the team narrates its work — what it read, what it drafted, and what is waiting for you.",
     "agent.team.emptyHint": "Start Autopilot from its pill in the editor to see the team at work.",
     "agent.team.threadEmpty": "No detailed activity was recorded for this run.",
+    "agent.team.showActivityUpdates": plural({
+      one: "Show {count} activity update",
+      other: "Show {count} activity updates",
+    }),
+    "agent.team.hideActivityUpdates": plural({
+      one: "Hide {count} activity update",
+      other: "Hide {count} activity updates",
+    }),
     "agent.team.reviewDrafts": "Review drafts",
     "agent.team.unnamedThread": "Autopilot run",
     // v2.1 typical-chat layout: conversations list + active conversation.
@@ -904,6 +912,14 @@ export const agent = defineNamespace({
           "One-line preview on a run's row in the conversations list when staged " +
           "drafts await the human — the row's badge shows the same count.",
         placeholders: { count: "How many staged drafts await review." },
+      },
+      "agent.team.showActivityUpdates": {
+        description: "Expand adjacent routine reading, drafting, or checking updates in a task conversation.",
+        placeholders: { count: "Number of activity messages in this group, not passages or pending drafts." },
+      },
+      "agent.team.hideActivityUpdates": {
+        description: "Collapse routine activity updates again; notes, review links, and outcomes remain visible.",
+        placeholders: { count: "Number of activity messages in this group." },
       },
       "agent.team.msg.started": {
         description:

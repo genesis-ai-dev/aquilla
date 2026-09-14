@@ -156,6 +156,22 @@ selected, but retains its tabs and session controls. Chat and Project knowledge
 keep their existing toolbar identity. File tabs, project navigation, message
 content, review actions, and inspector interactions are unchanged.
 
+## Task conversation refinement (2026-09-14)
+
+Consecutive messages from the same persona share one avatar, name, and opening
+timestamp. Another persona starts a new group; events are never reordered
+across speakers. Within a group, two or more adjacent reading/drafting/checking
+updates start collapsed behind a count-labelled disclosure. A single routine
+update stays visible. Starts, situation notes, staged-draft review links, and
+all outcomes remain visible in their original order.
+
+Expanding activity reveals the original messages, each still inspectable with
+its original timestamp and raw receipt in the step inspector. Expansion
+survives polling refreshes and new activity; an inspected step is not hidden
+when an arriving phase turns a single update into a collapsible group. This is
+presentation only: no new summaries, claims of approval, or backend writes.
+The main Team chat and the document-workspace Chat tab are unchanged.
+
 ## Testing
 
 Vitest: personas mapping totality (every region/tool kind attributes — the social
@@ -170,3 +186,8 @@ Header refinement is covered in TeamThreadsView RTL (empty/channel/run/questions
 headlines, avatar-card access, live indicators, and Escape navigation) and
 AgentWorkbench RTL (Team toolbar identity and switching back to the document
 workspace).
+Task grouping is covered by `buildRunFeed` output passed through `groupRunFeed`
+and the real thread UI, plus TeamThreadsView RTL for disclosure-to-inspector
+behavior and visible notes, failures, and review links. TeamThreadDetail RTL
+covers singleton activity, refresh/append stability, and inspected-step
+visibility.

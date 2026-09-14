@@ -307,6 +307,49 @@ describe("TeamThreadsView — the active conversation surface", () => {
     view.unmount()
   })
 
+  it("folds routine updates while keeping notes, review links, and failures visible", async () => {
+    fetchContextualRuns.mockResolvedValue(runsPage([runRecord()]))
+    fetchContextualDecisions.mockResolvedValue(decisionsPage())
+    fetchContextualRunActivity.mockResolvedValue({
+      ...activity([
+        { ...stagedEvent, id: "started", kind: "span_started", createdAt: "2026-08-28T12:00:00Z" },
+        { ...stagedEvent, id: "read-1", kind: "phase", phase: "reading", details: { step: "read-first" }, createdAt: "2026-08-28T12:00:01Z" },
+        { ...stagedEvent, id: "read-2", kind: "phase", phase: "reading", spanId: "s2", spanLabel: "MRK 4:9–4:12", createdAt: "2026-08-28T12:00:02Z" },
+        { ...stagedEvent, id: "note", kind: "scene_ready", createdAt: "2026-08-28T12:00:03Z" },
+        stagedEvent,
+        { ...stagedEvent, id: "failed", kind: "span_outcome", status: "failed", createdAt: "2026-08-28T12:00:06Z" },
+      ]),
+      sceneBriefs: [{ spanLabel: "MRK 4:1–4:8", l1Summary: "The speaker addresses a crowd." }],
+    })
+    const view = renderView({ initialEntry: "/project/p1/agent?conversation=run%3Arun-1" })
+    const thread = await screen.findByTestId("team-thread-detail")
+    const toggle = await within(thread).findByRole("button", { name: "Show 2 activity updates" })
+
+    expect(toggle).toHaveAttribute("aria-expanded", "false")
+    expect(within(thread).queryByText(/Reading the situation/)).not.toBeInTheDocument()
+    expect(within(thread).getAllByText("Drafter", { exact: true })).toHaveLength(1)
+    expect(within(thread).getAllByText("Coordinator", { exact: true })).toHaveLength(2)
+    expect(within(thread).getByText(/Starting on MRK/)).toBeVisible()
+    expect(within(thread).getByText("The speaker addresses a crowd.")).toBeVisible()
+    expect(within(thread).getByRole("link", { name: "Review drafts" })).toBeVisible()
+    expect(within(thread).getByText(/Hit a problem/)).toBeVisible()
+
+    fireEvent.click(toggle)
+    expect(toggle).toHaveAttribute("aria-expanded", "true")
+    const steps = within(thread).getAllByText(/Reading the situation/)
+    expect(steps).toHaveLength(2)
+    fireEvent.click(steps[0])
+    const inspector = await screen.findByTestId("team-step-inspector")
+    fireEvent.click(within(inspector).getByRole("button", { name: "Details" }))
+    expect(within(inspector).getByText("phase")).toBeVisible()
+    expect(within(inspector).getByText("read-first")).toBeVisible()
+    fireEvent.click(within(inspector).getByRole("button", { name: "Close step detail" }))
+    fireEvent.click(within(thread).getByRole("button", { name: "Hide 2 activity updates" }))
+    expect(within(thread).queryByText(/Reading the situation/)).not.toBeInTheDocument()
+    expect(within(thread).getByRole("link", { name: "Review drafts" })).toBeVisible()
+    view.unmount()
+  })
+
   it("sends a thread message to that run as steering, never to the chat", async () => {
     fetchContextualRuns.mockResolvedValue(runsPage([runRecord({ runId: "run-7" })]))
     fetchContextualDecisions.mockResolvedValue(decisionsPage())

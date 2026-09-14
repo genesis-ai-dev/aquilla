@@ -56,6 +56,21 @@
 > each route; whether to ever flip the enforce flags is flagged as a separate
 > product decision, not auto-changed. OPS-28 closes two routes that echoed
 > raw database error text to the caller.
+>
+> `docs/OPSEC-REVIEW-2026-09-14.md` is the most recent pass, and the first on
+> **third-party data egress from the browser** rather than on what an attacker
+> can pull out of our servers. OPS-29: the five routes that carry a bearer
+> credential in the URL (`/join/:token`, `/join-org/:token`, `/link/:token`,
+> `?token=` on `/reset-password` and `/verify-email`) had that credential
+> exported verbatim to PostHog on every event — `$current_url`/`$pathname`, the
+> persisted `$initial_*` person properties, and the session replay's own rrweb
+> `href` — because input/text masking covers rendered DOM text and a URL is
+> neither; fixed with a `before_send` redaction hook plus a drift guard. OPS-30:
+> four parsers quoted the imported document's own text into the thrown message,
+> which the import surfaces send on as `IMPORT_FAILED.error_message` and
+> `captureException`. That pass also flags — without changing — that analytics
+> consent defaults to *enabled* before any choice is recorded, which is exactly
+> the `/link/:token` fresh-browser case.
 
 _Standing OPSEC review of Aquilla's handling of sensitive data. Complements
 `docs/SECURITY-NOTES-2026-06-10.md` (application-security findings, June audit)
@@ -290,6 +305,14 @@ generic invite unfurl copy so no org/project/inviter name reaches link scrapers
 (AQU-471), and V2 now pins `Referrer-Policy`. The residual risk is a token
 forwarded in a screenshot or a pasted URL, which is a user-behaviour problem, not
 a code one. See §5.
+
+**Update (2026-09-14, OPS-29):** those mitigations did not cover our *own*
+outbound analytics — PostHog exported these URLs verbatim in `$current_url`,
+in the persisted `$initial_*` person properties, and in the session replay's
+rrweb `href`. Now redacted at the event boundary
+(`src/lib/analytics-redaction.ts`); see `docs/OPSEC-REVIEW-2026-09-14.md`. That
+pass also extends this row to the three token-bearing routes that post-date it:
+`/link/:token`, `/reset-password?token=` and `/verify-email?token=`.
 
 ---
 

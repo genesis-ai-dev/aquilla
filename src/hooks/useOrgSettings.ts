@@ -17,7 +17,7 @@ import type { OrgProviderKeys } from "@/lib/sync/org-settings"
 // ─── Cross-instance sync ───────────────────────────────────────────────────
 // Several surfaces mount their own useOrgSettings for the SAME org at the same
 // time: ProjectWorkspace (rule evaluation → health → editor underlines),
-// RulesSection / Living Memory (management), RulesPage, settings dialogs. Each
+// RulesSection / Living Memory (management), settings dialogs. Each
 // instance fetched once on mount and nothing else ever invalidated it, so an
 // org rule created or promoted on the rules page never reached the
 // already-mounted editor until a full reload — org rules looked "not applied"

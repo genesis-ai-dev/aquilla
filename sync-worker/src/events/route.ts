@@ -45,6 +45,7 @@ import { broadcastRealtime } from './broadcast'
 import type { BroadcastEnv } from './broadcast'
 import { checkProjectMembership, type MembershipCheck } from './membership'
 import { ROLE, isForeignCommentKind, requiredRoleForForeignComment, roleLabel } from './role-policy'
+import { createCommentFloorsCache } from './comment-floors'
 import { sendCommentNotifications, type EmailService } from '../notification-email'
 import { laneRelevantHeadSeq } from './link-sync'
 import {
@@ -926,6 +927,11 @@ export async function handleEventsWriteRequest(
     return pending
   }
 
+  // AQU-1002: the org's configurable comment floors, resolved at most once per
+  // project per request. A batch of comment mutations would otherwise repeat
+  // the same two reads for every entry; non-comment batches never touch it.
+  const commentFloorsFor = createCommentFloorsCache(db)
+
   for (const [eventIndex, rawEvent] of rawEvents.entries()) {
     // Authorize.
     const authResult = await authorize(token, rawEvent, env.SYNC_SECRET_KEY, db, requestCache)
@@ -1138,15 +1144,38 @@ export async function handleEventsWriteRequest(
     const callerRole = authResult.event.claims.roleLevel
     const callerUsername = authResult.event.claims.username
 
+    // AQU-1002: org-configurable floor to OPEN a thread or post a reply.
+    // authorize() has already applied the static COMMENTER floor; this only
+    // ever RAISES it, for an org that wants discussion reserved to reviewers
+    // and above. A configured floor below COMMENTER is a no-op — VIEWER is the
+    // only rung underneath and viewers have no write path at all.
+    if (rawEvent.kind === 'comment.create') {
+      const { createMinRole } = await commentFloorsFor(rawEvent.projectId)
+      if (callerRole < createMinRole) {
+        rejected.push({
+          id: rawEvent.id ?? '(unknown)',
+          status: 403,
+          reason: `role too low to create a comment (requires ${roleLabel(createMinRole)})`,
+        })
+        continue
+      }
+    }
+
     if (isForeignCommentKind(rawEvent.kind)) {
       const p = rawEvent.payload as { commentId?: string }
       if (p.commentId) {
         const authorId = commentAuthors.get(p.commentId)
 
         if (authorId !== undefined && authorId !== callerUsername) {
-          // Foreign comment mutation — floor per FOREIGN_COMMENT_ROLE
-          // (AQU-999): maintainer for edit/delete, contributor for resolve.
-          const foreignFloor = requiredRoleForForeignComment(rawEvent.kind)
+          // Foreign comment mutation. edit/delete keep the static
+          // FOREIGN_COMMENT_ROLE maintainer floor — rewriting or removing
+          // another person's words is not a policy orgs asked to tune.
+          // AQU-1002: resolve/reopen instead reads the org's configurable
+          // floor, defaulting to AQU-999's CONTRIBUTOR.
+          const foreignFloor =
+            rawEvent.kind === 'comment.resolve'
+              ? (await commentFloorsFor(rawEvent.projectId)).resolveMinRole
+              : requiredRoleForForeignComment(rawEvent.kind)
           if (callerRole < foreignFloor) {
             const verb = rawEvent.kind === 'comment.resolve' ? 'resolve' : 'mutate'
             rejected.push({

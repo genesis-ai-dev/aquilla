@@ -90,9 +90,12 @@ the box), or `tsx scripts/migrate-daemon/main.ts <command>` directly.
   it.
 
 - **`once [--only <gitlab-id>] [--dry-run] [--force]`** — drains every ready job
-  once and exits. `--only` first registers/looks up a single GitLab project id
-  before draining (used for the canary). `--force` forces re-materialization
-  even if the checkout looks unchanged. Example output:
+  once and exits. `--only` first registers/looks up a single GitLab project id,
+  then scopes the drain to that project's jobs only — other projects' ready jobs
+  are left untouched, and the weekly reseed pass is skipped (used for the
+  canary). Without `--only`, `once` drains every ready job for every project.
+  `--force` forces re-materialization even if the checkout looks unchanged.
+  Example output:
   ```
   once: 3 job(s) done, 0 planned, 1 with errors
     job 42 project 913: verify mismatch persisted after ledger reseed and forced re-materialize
@@ -176,6 +179,16 @@ Everything lives under `MIGRATE_HOME` (`~/aquilla-migrate` on the box):
   failed pull or install here just leaves the current version running instead of
   crash-looping the service.
 
+- **What `systemctl restart` actually does**: the unit sends SIGTERM to the
+  daemon's main process only (`KillMode=mixed`); `withLock` in `main.ts`
+  catches it, aborts the scheduler loop, lets any in-flight chunk finish, and
+  releases the R2 run lock before exiting — so `update.sh` never leaves the
+  lock lease to expire on its own. systemd allows up to `TimeoutStopSec=600`
+  (10 minutes) for that drain before escalating to SIGKILL. Duplicate SIGTERMs
+  arriving within ~2s of the first (pnpm/tsx forwarding their own copy of the
+  signal is normal and harmless) are folded into the same drain; a second,
+  later SIGTERM still forces an immediate exit without releasing gracefully.
+
 - **Read status**: `pnpm migrate:daemon status` (from `~/aquilla` on the box, or
   point `MIGRATE_HOME` at a copy of `daemon.db` from elsewhere).
 
@@ -256,23 +269,33 @@ empty-ledger run emits no reconciliation events at all and `order` reports 0.
 
 From the design spec's Rollout plan:
 
-1. Ship the sync-worker PR (webhook inbox, idempotent projection, count
-   endpoint) and deploy it.
-2. Bring the daemon up on the box in `DRY_RUN=1` for a **2-hour window**:
-   `reconcile` + fetch + materialize run for every project, nothing is pushed.
-   Then run `pnpm migrate:daemon status` and the parity gate against a fresh
-   `--dump-plan` from the Mac. Expect `status` to show roughly ≥419 projects
-   `ok`, ~26 `unmapped`, 0 stale-checkout failures, and the parity gate to
-   report zero differences. Attach both outputs to the PR.
-3. Canary: flip `DRY_RUN=0` with `PUSH_EVENTS_PER_SEC=100`, restart the service,
-   then `pnpm migrate:daemon once --only <id>` against a project already in
-   prod. Watch Neon `sweet-paper-88472094` query latency and the PostHog
-   `/migrate/*` log for 15 minutes.
-4. Raise `PUSH_EVENTS_PER_SEC` to `400` (steady state) and let the daemon drain
-   the full backlog overnight (UTC).
-5. Remove the content-migration step from `.github/workflows/audio-delta-sync.yml`
-   and register the GitLab system hook (see above) so the daemon is the sole
-   path going forward.
+- [x] Ship the sync-worker PR (webhook inbox, idempotent projection, count
+      endpoint) and deploy it.
+- [x] Bring the daemon up on the box in `DRY_RUN=1` for a **2-hour window**:
+      `reconcile` + fetch + materialize run for every project, nothing is
+      pushed. Then run `pnpm migrate:daemon status` and the parity gate
+      against a fresh `--dump-plan` from the Mac. Expect `status` to show
+      roughly ≥419 projects `ok`, ~26 `unmapped`, 0 stale-checkout failures,
+      and the parity gate to report zero differences. Attach both outputs to
+      the PR.
+- [x] Canary: flip `DRY_RUN=0` with `PUSH_EVENTS_PER_SEC=100`, restart the
+      service, then `pnpm migrate:daemon once --only <id>` against a project
+      already in prod. Watch Neon `sweet-paper-88472094` query latency and
+      the PostHog `/migrate/*` log for 15 minutes.
+- [x] Raise `PUSH_EVENTS_PER_SEC` to `400` (steady state) and let the daemon
+      drain the full backlog overnight (UTC). Daemon has been live since
+      2026-09-09.
+- [x] Remove the Mac crontab entry that ran `migrate-all --apply` every 15
+      minutes (removed 2026-09-10 — it contended for the same R2 run lock
+      the daemon now holds continuously).
+- [x] Remove the content-migration step from
+      `.github/workflows/audio-delta-sync.yml` so the daemon is the sole
+      content-writing path going forward. The nightly audio pass
+      (`--audio-fast --apply`) now takes its own R2 run lock
+      (`_migrate/audio-fast.lock`) so it no longer contends with the
+      daemon's continuous content-pass lease.
+- [ ] Register the GitLab system hook (see above) so the daemon's
+      near-real-time inbox path is live, not just its periodic reconcile.
 
 ## Known gaps
 

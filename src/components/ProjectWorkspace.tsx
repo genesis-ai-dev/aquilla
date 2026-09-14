@@ -10799,7 +10799,10 @@ export function ProjectWorkspace() {
             <Suspense fallback={<LoadingPanel label={t("terminology.loadingLabel")} />}>
               <GlossaryEditorContent
                 files={projectFiles}
-                project={project}
+                // The projection-folded record: `project.terminology` is the retired
+                // settings blob, so a glossary handed the raw record shows the blob
+                // and never a term that was created through the event log.
+                project={editorProject ?? project}
                 patchSettings={patchSettings}
               />
             </Suspense>

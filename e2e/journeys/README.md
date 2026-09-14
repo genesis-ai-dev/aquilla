@@ -25,8 +25,9 @@ network, a HOLD over an HTTP 500, a BLOCKED on a preview that had
 already deployed, and a walk posted after the PR had merged. Those rules
 now live in `PR-BOT.md` under "Say only what you measured". The same
 day Kieran cut the comment down: a pass is a two-line nod, a fail is the
-item, the quoted string, and one thing to check, and every item is
-walked three times so that 2/3 reads as a harness suspect, not a bug.
+item, the quoted string, and one thing to check. Each item is walked
+once, like a person would; a miss earns two retries, and the replays
+run three times, so a 2/3 reads as a harness suspect, not a bug.
 
 ## Where this sits in the pipeline
 
@@ -91,6 +92,38 @@ that route does not exist; set `AQUILLA_QA_USER` and `AQUILLA_QA_PASSWORD`
 and `login` signs in through the real form. Use a QA account on
 development storage, never a production account.
 
+## Fixtures on development storage
+
+Every branch preview and dev.aquilla.app read and write one development
+database, so the fixtures below are visible everywhere and shared with
+everyone. Name them in stories; never paste an id.
+
+- **Org:** QA Bot Workspace. **Accounts:** `qa-bot` (owner) and
+  `qa-bot-2` (a plain member, for two-user and presence stories).
+  Passwords live with the bot runner, not in this repo.
+- **Projects:** `english to burmese` (Bible in Basic English from eBible)
+  for Scripture stories; `QA Scripture Verse Resources` (Berean Standard
+  Bible) for Verse Resources and Parallel Bibles; `QA Smoke Project` and
+  `QA Org Search B`, both empty, for org, search, and import stories;
+  `subtitle-test` for media.
+- **Media:** in `subtitle-test`, files `001` to `012` are the repo's
+  synthetic parity corpus (`parity/corpus/files/vtt/`). They have no
+  film, no audio cues, and no takes; silence there is not a bug.
+  `voices-roundtrip.vtt` has four cues and the cast Mary and John.
+  `voices-roundtrip-film.mp4` is a 10-second test-pattern video imported
+  as its own `video` file with five cells and its own sound. Any story
+  that must hear something uses that file.
+- **Where sound comes from:** a linked film plays muted beside the
+  text; "Audio cues" is a transcript, not audio; what plays is the
+  timeline, either takes on Target audio or the source audio of a
+  media-imported file. The timeline's Sources menu says which of the
+  three a file has.
+- The seeded ids in the stories (`bestalu-bible`, org `9`) exist on the
+  local stack only.
+- Leave the workspace as you found it. Create throwaways under your own
+  prefix and archive them when the walk ends. Never rename, archive, or
+  delete the standing projects or the accounts.
+
 ## Running a story by hand
 
 Install once: `npm i -g agent-browser && agent-browser install`. Boot the
@@ -137,6 +170,24 @@ that is one more reason the bots should run against previews.
 - Popovers and dialogs portal outside the row. Scope snapshots to `main` or
   `body` to see them; `-i` hides non-interactive text, so read a posted
   comment with `get text`.
+
+- **Recording needs a fake microphone.** Headless Chromium reports the
+  mic permission as denied, and the app hides the record button behind a
+  help popover when it sees that. Launch with
+  `agent-browser --args --use-fake-ui-for-media-stream,--use-fake-device-for-media-stream,--use-file-for-fake-audio-capture=<wav> --init-script <script>`
+  where the script overrides `navigator.permissions.query` for
+  `microphone` to return `granted`. The WAV plays as the microphone, so a
+  take has sound in it. The flags apply only on a fresh launch; `close`
+  the session first.
+- **The Whisper prompt.** After the first media import or recording in a
+  browser, the app asks once whether to download Whisper for local
+  transcription. Choose Cancel; a story that needs transcripts imports a
+  VTT instead.
+- **The player is not in the DOM.** Playback goes through a detached
+  `new Audio(url)`, so `document.querySelector("video,audio")` finds
+  nothing while sound plays. To see the source, wrap
+  `HTMLMediaElement.prototype.play`; to prove the audio is audible, fetch
+  the URL in the page, `decodeAudioData` it, and report RMS and peak.
 
 ## Relationship to the repo's skills
 

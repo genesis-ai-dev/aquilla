@@ -24,6 +24,7 @@ import {
 } from './commands'
 import { changedPolicyKeys, preparePatchSettings, previewSettingValue } from './commands-patch-settings'
 import { prepareSetBrief } from './commands-set-brief'
+import { isMemoryCommand, prepareMemoryCommand } from './commands-memory'
 import { prepareEmitEvents } from './emit-events-engine'
 import { resolveCellStates, type CellPrecondition } from './preconditions'
 import { uuidv7 } from './uuid'
@@ -174,6 +175,20 @@ export async function prepareChangesetCore(
       return errorResponse('validation_failed', 'SetBrief must be the only command in a changeset')
     }
     return prepareSetBrief(db, cred, projectId, id, autonomyMode, setBrief, env)
+  }
+
+  // AQU-1228 Living Memory writes: sole command; receipt-only like
+  // PatchSettings, with its own floors (propose vs. review tier) and the
+  // human-edited guard, so it also skips the generic role gate below.
+  const memoryCommand = validated.commands.find(isMemoryCommand)
+  if (memoryCommand) {
+    if (validated.commands.length !== 1) {
+      return errorResponse(
+        'validation_failed',
+        `${memoryCommand.kind} must be the only command in a changeset`,
+      )
+    }
+    return prepareMemoryCommand(db, cred, projectId, id, autonomyMode, memoryCommand, env)
   }
 
   // Live role/membership gate (§2 — resolve the caller's CURRENT role on every

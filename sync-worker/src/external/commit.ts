@@ -25,6 +25,7 @@ import {
 } from './commands'
 import { changedPolicyKeys, commitPatchSettings } from './commands-patch-settings'
 import { commitSetBrief } from './commands-set-brief'
+import { commitMemoryCommand, isMemoryCommand } from './commands-memory'
 import { commitEmitEvents } from './emit-events-engine'
 import {
   buildProvenance,
@@ -39,6 +40,7 @@ import { isPlanSatisfied } from './supersede'
 import { resolveSupersedeState } from './supersede-state'
 import { compilePlanImport } from './import-manifest'
 import { loadChangeset } from './store'
+import { SOURCE_ARTIFACT_FORMATS } from '../../../shared/import-contract'
 import { assertCredentialScope, mintInternalSyncToken } from './token-bridge'
 import { uuidv7 } from './uuid'
 import { audioObjectKey } from '../audio'
@@ -218,6 +220,13 @@ export async function commitChangesetCore(
   const setBriefCmd = cs.commands.find((c): c is SetBriefCommand => c.kind === 'SetBrief')
   if (setBriefCmd) {
     return commitSetBrief(db, cred, cs, setBriefCmd, channel)
+  }
+
+  // AQU-1228 Living Memory writes: receipt-only, with their own floors and the
+  // human-edited guard — the module re-runs the full guard sequence.
+  const memoryCmd = cs.commands.find(isMemoryCommand)
+  if (memoryCmd) {
+    return commitMemoryCommand(db, cred, cs, memoryCmd, channel)
   }
 
   // ── Live role/membership precheck (§2) ────────────────────────────────────
@@ -514,6 +523,17 @@ export async function commitChangesetCore(
 const PLAN_IMPORT_CHUNK = 100
 
 /**
+ * AQU-1120: the `file_source_blobs.format` the export route switches on, derived
+ * from the caller's declared `fileType`. A format the shared registry doesn't
+ * know maps to `custom-original`, which the export route serves as verbatim
+ * bytes — an honest round trip is better than claiming a serializer we lack.
+ */
+function sourceBlobFormat(fileType: string): string {
+  const normalized = fileType.trim().toLowerCase().replace(/^\./, '')
+  return normalized in SOURCE_ARTIFACT_FORMATS ? normalized : 'custom-original'
+}
+
+/**
  * Compile a PlanImport into one file.create + N genesis source.cell.create
  * events (chained by anchorCellId, mirroring the SPA import + bulk /import
  * semantics), route them through the SAME /events perimeter Wave 1 uses (source.*
@@ -708,6 +728,42 @@ async function commitPlanImport(
       .prepare(`UPDATE artifacts SET file_id = ? WHERE id::text = ? AND project_id = ?`)
       .bind(fileId, cmd.artifactId, projectId)
       .run()
+
+    // AQU-1120: browser import writes the `file_source_blobs` side-car (see
+    // events/source-artifact-persistence.ts) alongside the artifact rows; the
+    // Agent API used to write the artifact + binding only. The export route
+    // resolves original bytes through the side-car, so an agent-imported file
+    // 404'd on export ("no source blob recorded for this file"). Point the
+    // side-car at the artifact's existing R2 object — no byte copy, and the
+    // export route already resolves an r2_key-only row for every format.
+    const artifactObject = await db
+      .prepare(`SELECT r2_key, size_bytes FROM artifacts WHERE id::text = ? AND project_id = ?`)
+      .bind(cmd.artifactId, projectId)
+      .first<{ r2_key: string | null; size_bytes: number | string | null }>()
+    if (artifactObject?.r2_key) {
+      await db
+        .prepare(
+          `INSERT INTO file_source_blobs (file_id, project_id, format, raw_source, r2_key, size_bytes, created_at)
+           VALUES (?, ?, ?, NULL, ?, ?, ?)
+           ON CONFLICT (file_id) DO UPDATE SET
+             project_id = EXCLUDED.project_id,
+             format     = EXCLUDED.format,
+             raw_source = NULL,
+             r2_key     = EXCLUDED.r2_key,
+             size_bytes = EXCLUDED.size_bytes,
+             created_at = EXCLUDED.created_at`,
+        )
+        .bind(
+          fileId,
+          projectId,
+          sourceBlobFormat(cmd.fileType),
+          artifactObject.r2_key,
+          artifactObject.size_bytes === null ? null : Number(artifactObject.size_bytes),
+          clientTs,
+        )
+        .run()
+    }
+
     await db
       .prepare(
         `INSERT INTO artifact_bindings (

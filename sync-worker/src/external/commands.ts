@@ -29,11 +29,32 @@ import {
   validateSetBriefCommand,
   type SetBriefCommand,
 } from './commands-set-brief'
+import {
+  MEMORY_COMMAND_KINDS,
+  isMemoryCommand,
+  memoryCommandFloor,
+  validateMemoryCommand,
+  type MemoryCommand,
+} from './commands-memory'
+
+/** True for the four AQU-1228 Living Memory command kinds. Narrows a raw
+ *  `kind` string BEFORE validation, unlike `isMemoryCommand` which narrows an
+ *  already-typed command. */
+function isMemoryCommandKind(kind: string): boolean {
+  return (MEMORY_COMMAND_KINDS as readonly string[]).includes(kind)
+}
 
 export type { PlanImportCell, PlanImportManifest, PlanImportVariant } from './import-manifest'
 export type { PatchSettingsCommand, PatchSettingsOp } from './commands-patch-settings'
 export type { EmitEventsCommand, EmitEventInput } from './commands-emit-events'
 export type { SetBriefCommand } from './commands-set-brief'
+export type {
+  AddExampleCommand,
+  AddDecisionCommand,
+  RetireExampleCommand,
+  AddNoteCommand,
+  MemoryCommand,
+} from './commands-memory'
 export { cellKey, laneCellKey } from './cell-keys'
 
 /** Set (or update) a single cell's translation. Compiles to target.cell.commit. */
@@ -108,6 +129,7 @@ export interface LinkMediaCommand {
 }
 
 export type Command =
+  | MemoryCommand
   | SetTranslationCommand
   | PlanImportCommand
   | CreateProjectCommand
@@ -452,6 +474,12 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
       if (cmd) commands.push(cmd)
       return
     }
+    // AQU-1228 Living Memory writes — four kinds sharing one validator.
+    if (typeof c.kind === 'string' && isMemoryCommandKind(c.kind)) {
+      const cmd = validateMemoryCommand(c, index, issues)
+      if (cmd) commands.push(cmd)
+      return
+    }
     if (c.kind === 'LinkMedia') {
       if (!isNonEmptyString(c.fileId)) {
         issues.push({ index, message: 'LinkMedia.fileId must be a non-empty string' })
@@ -522,6 +550,12 @@ export function requiredRoleForCommand(c: Command): number {
   if (c.kind === 'LinkMedia') {
     // Compiles to cell.audio.attach + cell.audio.select (both CONTRIBUTOR).
     return Math.max(REQUIRED_ROLE['cell.audio.attach'], REQUIRED_ROLE['cell.audio.select'])
+  }
+  // AQU-1228 memory writes compile to no events at all — their floor mirrors
+  // auth-worker's agent-memory route (propose = CONTRIBUTOR, retire = the
+  // review-tier PROJECT_LEAD). Their own prepare/commit path re-checks it.
+  if (isMemoryCommand(c)) {
+    return memoryCommandFloor(c)
   }
   return REQUIRED_ROLE['target.cell.commit']
 }

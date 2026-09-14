@@ -220,6 +220,10 @@ const MEMORY_COLS = `id, project_id, path, content, status, human_edited,
 // ──────────────────────────────────────────────────────────────────────────
 
 export interface CreateProposalInput {
+  /** Pre-minted row id. Callers that must survive a crash-and-retry (the
+   *  changeset engine pins it at prepare) pass it so the retry can find its own
+   *  row instead of inserting a duplicate proposal. Omit to mint one. */
+  id?: string
   projectId: string
   path: string
   content: string
@@ -245,7 +249,7 @@ export async function createProposal(
   const contentErr = validateMemoryContent(input.content)
   if (contentErr) return { status: "validation_failed", message: contentErr.message }
 
-  const id = crypto.randomUUID()
+  const id = input.id ?? crypto.randomUUID()
   const provenanceJson =
     input.provenance != null ? JSON.stringify(input.provenance) : null
   const row = await db
@@ -299,6 +303,73 @@ export async function getMemory(db: AquillaDb, id: string): Promise<AgentMemory 
     .bind(id)
     .first<MemoryRow>()
   return row ? rowToMemory(row) : null
+}
+
+/** Read the memory currently APPROVED at (project, path), if any. The partial
+ *  UNIQUE index guarantees at most one. */
+export async function getApprovedMemoryByPath(
+  db: AquillaDb,
+  projectId: string,
+  path: string,
+): Promise<AgentMemory | null> {
+  const row = await db
+    .prepare(
+      `SELECT ${MEMORY_COLS} FROM agent_memories
+        WHERE project_id = ? AND path = ? AND status = 'approved'
+        LIMIT 1`,
+    )
+    .bind(projectId, path)
+    .first<MemoryRow>()
+  return row ? rowToMemory(row) : null
+}
+
+export interface RetireMemoryInput {
+  projectId: string
+  path: string
+  reviewedBy?: string | null
+  /**
+   * Retiring a `human_edited=true` row destroys human-owned memory, so the
+   * caller must say so explicitly. The agent surfaces NEVER set this — they
+   * refuse instead (adversarial-panel B1/B2, same doctrine as the approve-time
+   * supersede guard).
+   */
+  retireHumanEdited?: boolean
+}
+
+export type RetireMemoryResult =
+  | { status: "ok"; memory: AgentMemory }
+  | { status: "not_found" }
+  | { status: "human_edited"; existing: { id: string; path: string } }
+
+/**
+ * Retire the approved memory at (project, path) → `archived`. Retirement is a
+ * retrieval change, not an erasure: the row keeps its content and history, and
+ * `buildMemoryContext` (approved-only) simply stops selecting it, so the next
+ * copilot prompt no longer carries it. Rejecting a still-`proposed` row is a
+ * different act — that is `reviewMemory('reject')`.
+ */
+export async function retireMemory(
+  db: AquillaDb,
+  input: RetireMemoryInput,
+): Promise<RetireMemoryResult> {
+  const current = await getApprovedMemoryByPath(db, input.projectId, input.path)
+  if (!current) return { status: "not_found" }
+  if (current.humanEdited && input.retireHumanEdited !== true) {
+    return { status: "human_edited", existing: { id: current.id, path: current.path } }
+  }
+  const row = await db
+    .prepare(
+      `UPDATE agent_memories
+          SET status = 'archived', reviewed_by = ?, updated_at = now()
+        WHERE id = ? AND status = 'approved'
+        RETURNING ${MEMORY_COLS}`,
+    )
+    .bind(input.reviewedBy ?? null, current.id)
+    .first<MemoryRow>()
+  // A 0-row update means a concurrent writer already moved this row off
+  // 'approved' — the end state the caller wanted, reached by someone else.
+  if (!row) return { status: "not_found" }
+  return { status: "ok", memory: rowToMemory(row) }
 }
 
 export interface ReviewMemoryInput {

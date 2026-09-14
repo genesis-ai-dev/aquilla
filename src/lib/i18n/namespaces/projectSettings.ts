@@ -666,6 +666,12 @@ export const projectSettings = defineNamespace({
     "projectSettings.monday.viewBoardLink": "View board on Monday",
     "projectSettings.monday.connectButton": "Connect Monday.com",
     "projectSettings.monday.applyAndPushButton": "Apply and push",
+
+    // ── Terminology source-term matching (AQU-1271) ──
+    "projectSettings.termMatching.preset.hebrew": "Hebrew",
+    "projectSettings.termMatching.preset.arabic": "Arabic",
+    "projectSettings.termMatching.preset.swahili": "Swahili",
+    "projectSettings.termMatching.preset.turkish": "Turkish",
   },
   context: {
     _context: {
@@ -1200,6 +1206,18 @@ export const projectSettings = defineNamespace({
         placeholders: {
           username: "The row's member username (data, not translated).",
         },
+      },
+      "projectSettings.termMatching.preset.hebrew": {
+        description: "Name of a language whose affix preset can be loaded into the terminology matching settings.",
+      },
+      "projectSettings.termMatching.preset.arabic": {
+        description: "Name of a language whose affix preset can be loaded into the terminology matching settings.",
+      },
+      "projectSettings.termMatching.preset.swahili": {
+        description: "Name of a language whose affix preset can be loaded into the terminology matching settings.",
+      },
+      "projectSettings.termMatching.preset.turkish": {
+        description: "Name of a language whose affix preset can be loaded into the terminology matching settings.",
       },
     },
   },

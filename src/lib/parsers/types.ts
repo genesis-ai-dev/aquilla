@@ -429,6 +429,8 @@ export interface ProjectRecord {
    * by default (still reachable via the "show archived" reveal / deep links).
    */
   archivedLanes?: string[]
+  /** AQU-1271: overlaid from ProjectWideSettings.termMatching by useProject. */
+  termMatching?: import("@/lib/terminology/types").TermMatchingSettings
   createdAt: string
   files: FileReference[]
   members: ProjectMember[]

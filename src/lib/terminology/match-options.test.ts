@@ -1,0 +1,53 @@
+import { describe, it, expect } from "vitest"
+import { hasCombiningMarks, resolveMatchOptions } from "./match-options"
+
+describe("resolveMatchOptions", () => {
+  // WHY: the whole point of script-derived defaults is that a user who selects
+  // pointed Hebrew gets mark-tolerant matching without finding a checkbox.
+  it("folds marks by default when the term carries combining marks", () => {
+    expect(resolveMatchOptions({ sourceTerm: "הָאָ֗רֶץ" }).foldMarks).toBe(true)
+    expect(resolveMatchOptions({ sourceTerm: "grace" }).foldMarks).toBe(false)
+  })
+
+  // WHY: Latin diacritics (é, ñ) are letters that matter; folding must not
+  // silently turn on for them. NFD splits é into e + mark, so we check the
+  // NFC-composed form first and only look at marks that survive composition.
+  it("does not treat precomposed Latin diacritics as combining marks", () => {
+    expect(hasCombiningMarks("café")).toBe(false)
+    expect(hasCombiningMarks("Español")).toBe(false)
+    expect(hasCombiningMarks("בְּרֵאשִׁית")).toBe(true)
+  })
+
+  // WHY: an explicit per-concept choice must beat every default.
+  it("explicit concept options win over defaults", () => {
+    expect(resolveMatchOptions({ sourceTerm: "הָאָ֗רֶץ", match: { foldMarks: false } }).foldMarks).toBe(false)
+    expect(resolveMatchOptions({ sourceTerm: "grace", match: { foldMarks: true } }).foldMarks).toBe(true)
+  })
+
+  // WHY: the project-level default is the admin's override for a whole
+  // termbase; it sits between the script default and the per-concept choice.
+  it("project foldMarksDefault beats the script default but not the concept", () => {
+    const project = { prefixes: [], suffixes: [], foldMarksDefault: true }
+    expect(resolveMatchOptions({ sourceTerm: "grace" }, project).foldMarks).toBe(true)
+    expect(resolveMatchOptions({ sourceTerm: "grace", match: { foldMarks: false } }, project).foldMarks).toBe(false)
+  })
+
+  // WHY: affixes default on only when there is an inventory to apply; with an
+  // empty inventory the flag is meaningless and must resolve false so the
+  // regex builder never emits an empty alternation.
+  it("affixes default to whether the project has an inventory", () => {
+    expect(resolveMatchOptions({ sourceTerm: "x" }).affixes).toBe(false)
+    expect(resolveMatchOptions({ sourceTerm: "x" }, { prefixes: ["ו"], suffixes: [] }).affixes).toBe(true)
+    expect(resolveMatchOptions({ sourceTerm: "x", match: { affixes: false } }, { prefixes: ["ו"], suffixes: [] }).affixes).toBe(false)
+  })
+
+  // WHY: consumers iterate these; they must never be undefined.
+  it("always returns arrays and a numeric maxAffixes", () => {
+    const r = resolveMatchOptions({ sourceTerm: "x" })
+    expect(r.forms).toEqual([])
+    expect(r.excludedForms).toEqual([])
+    expect(r.prefixes).toEqual([])
+    expect(r.suffixes).toEqual([])
+    expect(r.maxAffixes).toBe(2)
+  })
+})

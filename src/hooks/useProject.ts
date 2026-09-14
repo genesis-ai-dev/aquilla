@@ -57,6 +57,7 @@ function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): 
   assign("rulePenalties", settings.rulePenalties)
   assign("algorithmicChecks", settings.algorithmicChecks)
   assign("terminology", settings.terminology)
+  assign("termMatching", settings.termMatching)
   assign("livingMemoryEntries", settings.livingMemoryEntries)
   assign("translationBrief", settings.translationBrief)
   assign("validationCount", settings.validationCount)

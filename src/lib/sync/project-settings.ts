@@ -147,6 +147,11 @@ export interface ProjectWideSettings {
    */
   archivedLanes?: string[]
   /**
+   * AQU-1271: project affix inventory for terminology source-term matching.
+   * Replacing this key replaces the whole object.
+   */
+  termMatching?: import("@/lib/terminology/types").TermMatchingSettings
+  /**
    * AQU-634: per-project opt-out for USFM front matter. When true, a USFM import
    * (primary upload, Paratext project, DCS/Door43 resource, and target-language
    * matching) EXCLUDES book-name/running-header/TOC, main title, and the whole

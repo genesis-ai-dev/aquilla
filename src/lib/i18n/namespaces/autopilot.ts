@@ -593,6 +593,13 @@ export const autopilot = defineNamespace({
     "autopilot.readiness.languages.set": "Translating {sourceLanguage} → {targetLanguage}.",
     "autopilot.readiness.languages.unset":
       "Source or target language isn’t set, so Autopilot has to infer it from your existing translations.",
+    "autopilot.startGate.title": "Autopilot needs a little more to go on",
+    "autopilot.startGate.languages":
+      "Set the project’s source and target languages in project settings.",
+    "autopilot.startGate.brief":
+      "Answer at least one translation-brief question so Autopilot knows what this translation is for.",
+    "autopilot.startGate.settingsLink": "Open project settings",
+    "autopilot.startGate.briefLink": "Open the translation brief",
   },
   context: {
     _context: {

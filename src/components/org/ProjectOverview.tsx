@@ -26,6 +26,7 @@ import { markProjectOpened } from "@/lib/frontier/opened-shared-store"
 import { useProjectLifecycle } from "@/hooks/useProjectLifecycle"
 import { InactiveProjectBanner } from "@/components/InactiveProjectBanner"
 import { downloadProjectBundle } from "@/lib/sync/export-bundle"
+import { downloadImportedOriginal, downloadImportedOriginalsZip } from "@/lib/file-original-download"
 import { AssignWork } from "./AssignWork"
 import { MemberActivityPanel } from "./MemberActivityPanel"
 import { ProjectAutopilotPanel } from "./ProjectAutopilotPanel"
@@ -240,6 +241,11 @@ function StatTile({ label, pct, colorClass, tooltip }: {
 
 const LANE_TAB_ALL = "__all__"
 const LANE_TAB_DEFAULT = "__default__"
+/**
+ * AQU-656: rows the imported-originals card shows before "Show more" /
+ * "Show all" kick in. Also the batch size each "Show more" reveals.
+ */
+const ORIGINALS_PAGE_SIZE = 5
 
 function laneTagToTab(tag: string | null): string {
   if (tag === null) return LANE_TAB_ALL
@@ -336,6 +342,19 @@ export function ProjectOverview() {
     () => new Map(files.map((f) => [f.fileId, f.name])),
     [files],
   )
+  // AQU-656: originals live on `file_source_blobs`, not the plan. The files
+  // card this used to hang off was replaced by PlanBoard (AQU-1092), so the
+  // PM download gallery is this compact list — only files that have a blob.
+  const originalFiles = useMemo(
+    () => files.filter((f) => f.hasOriginalSource),
+    [files],
+  )
+  // The originals list starts capped at ORIGINALS_PAGE_SIZE rows; "Show more"
+  // grows it one page at a time, "Show all" expands it outright, and "Show
+  // fewer" collapses it back to the first page.
+  const [originalsShown, setOriginalsShown] = useState(ORIGINALS_PAGE_SIZE)
+  const visibleOriginals = originalFiles.slice(0, originalsShown)
+  const hiddenOriginalsCount = originalFiles.length - visibleOriginals.length
   const [deadlineDialogOpen, setDeadlineDialogOpen] = useState(false)
   const [deadlineDate, setDeadlineDate] = useState<Date | undefined>(undefined)
   // AQU-507: PM assignment dialog. `pmSelection` holds the picker value (a
@@ -1419,6 +1438,121 @@ export function ProjectOverview() {
                   ) : null
                 }
               />
+
+              {/* AQU-656: original imported blobs. Hidden when the org export
+                  floor forbids it, and when no file has a stored original —
+                  Codex-migrated / pre-sidecar files are AQU-991, not a
+                  storage-audit empty state here. */}
+              {orgSettings.canExport && originalFiles.length > 0 && jwt && (
+                <div className="rounded-lg border bg-card p-5" data-testid="imported-originals">
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <h2 className="text-xs font-semibold text-muted-foreground">
+                      {t("org.projectOverview.importedOriginalsHeading")}
+                    </h2>
+                    <AppTooltip content={t("org.projectOverview.downloadOriginalsTooltip")}>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        data-testid="download-originals-zip"
+                        onClick={() => {
+                          const fileId = project?.files[0]?.id ?? originalFiles[0]?.fileId
+                          if (!fileId) return
+                          void downloadImportedOriginalsZip({
+                            projectId: id,
+                            projectName: project?.name ?? "project",
+                            jwt,
+                            fileId,
+                          })
+                        }}
+                      >
+                        {t("org.projectOverview.downloadOriginals")}
+                      </Button>
+                    </AppTooltip>
+                  </div>
+                  <ul
+                    id="imported-originals-list"
+                    className="space-y-1"
+                    aria-label={t("org.projectOverview.importedOriginalsListAria")}
+                  >
+                    {visibleOriginals.map((f) => (
+                      <li key={f.fileId} className="flex items-center gap-3 text-sm">
+                        <span className="min-w-0 flex-1 font-medium">
+                          <ExpandableName name={f.name} />
+                        </span>
+                        <AppTooltip content={t("fileDetails.downloadOriginal")}>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            className="shrink-0"
+                            aria-label={t("org.projectOverview.downloadOriginalAria", { fileName: f.name })}
+                            data-testid="download-original-file"
+                            onClick={() => {
+                              void downloadImportedOriginal({
+                                projectId: id,
+                                file: { id: f.fileId, name: f.name, type: f.fileType },
+                                getToken: async (fileId) => {
+                                  const tok = await fetchSyncToken(jwt, id, fileId, {
+                                    projectName: project?.name,
+                                  })
+                                  return tok.token
+                                },
+                              })
+                            }}
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                          </Button>
+                        </AppTooltip>
+                      </li>
+                    ))}
+                  </ul>
+                  {originalFiles.length > ORIGINALS_PAGE_SIZE && (
+                    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+                      {/* "Show more" only earns its place while a full batch is
+                          still hidden — once fewer than a page remains it would
+                          do exactly what "Show all" does. */}
+                      {hiddenOriginalsCount > ORIGINALS_PAGE_SIZE && (
+                        <button
+                          type="button"
+                          className="text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                          aria-controls="imported-originals-list"
+                          data-testid="imported-originals-show-more"
+                          onClick={() => setOriginalsShown((n) => n + ORIGINALS_PAGE_SIZE)}
+                        >
+                          {t("org.projectOverview.importedOriginalsShowMore", {
+                            count: ORIGINALS_PAGE_SIZE,
+                          })}
+                        </button>
+                      )}
+                      {hiddenOriginalsCount > 0 ? (
+                        <button
+                          type="button"
+                          className="text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                          aria-controls="imported-originals-list"
+                          aria-expanded={false}
+                          data-testid="imported-originals-show-all"
+                          onClick={() => setOriginalsShown(originalFiles.length)}
+                        >
+                          {t("org.projectOverview.importedOriginalsShowAll", {
+                            count: originalFiles.length,
+                          })}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                          aria-controls="imported-originals-list"
+                          aria-expanded={true}
+                          data-testid="imported-originals-show-fewer"
+                          onClick={() => setOriginalsShown(ORIGINALS_PAGE_SIZE)}
+                        >
+                          {t("org.projectOverview.showFewer")}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* ── Team / Assignments card ── */}
               {/* AQU-486: per-assignee progress is gated by the AQU-485

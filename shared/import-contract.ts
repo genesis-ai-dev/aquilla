@@ -99,6 +99,67 @@ export function sourceArtifactDescriptor(format: string): {
       }
 }
 
+const HAS_EXTENSION = /\.[A-Za-z0-9]{1,8}$/
+const GENERATED_ID_STEM =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** True when the save stem is a file/blob UUID (with or without an extension). */
+export function isGeneratedDownloadStem(fileName: string): boolean {
+  const stem = fileName.trim().replace(/\.[A-Za-z0-9]{1,8}$/, "")
+  return stem.length > 0 && GENERATED_ID_STEM.test(stem)
+}
+
+/**
+ * Browser-save / zip-entry name for an original import blob (AQU-656).
+ * Uses the current file name; appends the artifact extension only when the
+ * name has none. `.sfm` counts as present for USFM.
+ */
+export function originalDownloadName(fileName: string, format: string): string {
+  const ext = sourceArtifactDescriptor(format).extension
+  const trimmed = fileName.trim() || `file.${ext}`
+  if (format === "usfm" && /\.(sfm|usfm)$/i.test(trimmed)) return trimmed
+  if (HAS_EXTENSION.test(trimmed)) return trimmed
+  return `${trimmed}.${ext}`
+}
+
+/**
+ * Same as originalDownloadName, but never emits a file-id UUID. Missing or
+ * generated names fall back to `original.{ext}` (or `originalName` when that
+ * is a real display name).
+ */
+export function humanOriginalDownloadName(
+  currentName: string | null | undefined,
+  format: string,
+  originalName?: string | null,
+): string {
+  for (const candidate of [currentName, originalName]) {
+    const trimmed = candidate?.trim()
+    if (trimmed && !isGeneratedDownloadStem(trimmed)) {
+      return originalDownloadName(trimmed, format)
+    }
+  }
+  return originalDownloadName("original", format)
+}
+
+/** Deduplicate zip entry names: `Matthew.docx`, `Matthew (2).docx`, … */
+export function uniqueZipEntryName(name: string, used: Set<string>): string {
+  if (!used.has(name)) {
+    used.add(name)
+    return name
+  }
+  const dot = name.lastIndexOf(".")
+  const stem = dot > 0 ? name.slice(0, dot) : name
+  const suffix = dot > 0 ? name.slice(dot) : ""
+  let n = 2
+  let next = `${stem} (${n})${suffix}`
+  while (used.has(next)) {
+    n += 1
+    next = `${stem} (${n})${suffix}`
+  }
+  used.add(next)
+  return next
+}
+
 export const IMPORT_UNIT_KINDS = [
   "verse",
   "heading",

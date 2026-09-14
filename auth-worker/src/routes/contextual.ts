@@ -81,7 +81,7 @@ import {
 } from "../../../db/shared/contextual-runs"
 import { getSceneBrief, listSceneBriefsByRun } from "../../../db/shared/scene-briefs"
 import { isRegisteredTargetLane, loadProjectContext } from "../lib/contextual/project-context"
-import { computeContextReadiness, type ContextReadiness } from "../lib/contextual/readiness"
+import { computeContextReadiness, computeStartBlockers, type ContextReadiness } from "../lib/contextual/readiness"
 import {
   runOneTick,
   makeLlmCall,
@@ -569,6 +569,24 @@ contextual.post(
         "validation_failed",
         "That target-language lane is not registered on this project.",
         400,
+      )
+      return c.json(err, status)
+    }
+
+    // Minimum steering context (AQU-827). Checked before the budget/credit
+    // guards because it is a precondition, not a spend decision: a project
+    // missing its languages or any brief cannot be steered, and the run would
+    // bill for fluent output nobody asked for. Covers BOTH scopes — the
+    // file-scoped pill and the project-wide start land on this route.
+    const startBlockers = computeStartBlockers(
+      await loadProjectContext(c.env.AQUILLA_PG, projectId),
+    )
+    if (startBlockers.length > 0) {
+      const { body: err, status } = errorJson(
+        "context_required",
+        "Autopilot needs the project's source and target languages and a translation brief before it can start.",
+        400,
+        { missing: startBlockers },
       )
       return c.json(err, status)
     }

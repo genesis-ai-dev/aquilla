@@ -24,6 +24,7 @@ not a micro-spec farm.
 | Orgs | Account switcher sessions | `e2e/specs/orgs/account-switcher.smoke.spec.ts` |
 | Orgs | Preferences persist across reload | `e2e/specs/orgs/preferences-persist-reload.smoke.spec.ts` |
 | Orgs | Billing & usage shows the Field Plan CTA and agent-credit meter | `e2e/specs/orgs/org-settings-billing.smoke.spec.ts` |
+| Orgs | Owner exports selected projects as one org ZIP | `e2e/specs/orgs/org-egress.smoke.spec.ts` |
 | Auth | First-login / account-setup status (sentinel) | `e2e/specs/auth/login-account-setup-status.smoke.spec.ts` |
 | Editor | Import markdown, edit cell, persists across reload | `e2e/specs/editor/import-and-edit.smoke.spec.ts` |
 | Editor | Import EPUB package, preserve spine order, commit source bytes | `e2e/specs/editor/import-epub.smoke.spec.ts` |
@@ -32,7 +33,7 @@ not a micro-spec farm.
 | Editor | Re-import updates source while preserving target | `e2e/specs/editor/reimport-preserves-target.smoke.spec.ts` |
 | Editor | eBible import persists across reload | `e2e/specs/editor/import-ebible-persists-reload.smoke.spec.ts` |
 | Editor | Comment writes through events | `e2e/specs/editor/comments.smoke.spec.ts` |
-| Editor | Export downloads | `e2e/specs/editor/export.smoke.spec.ts` |
+| Editor | Export downloads (own-format, original blob vs injected USFM) | `e2e/specs/editor/export.smoke.spec.ts` |
 | Editor | Workspace actions dropdown (E2E harness sentinel) | `e2e/specs/editor/workspace-actions-dropdown.smoke.spec.ts` |
 | Rules | Enable built-in rule, see violation in editor | `e2e/specs/rules/violation.smoke.spec.ts` |
 | Rules | Custom rule create / edit / toggle (surface session) | `e2e/specs/rules/rules-crud.smoke.spec.ts` |

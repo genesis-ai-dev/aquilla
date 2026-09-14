@@ -84,6 +84,34 @@ export interface OrgWideSettings {
    */
   termbaseEditMinRole?: number
   /**
+   * AQU-1002: Minimum role level allowed to OPEN a comment thread or post a
+   * reply. Default (when absent) = COMMENTER (200), the static
+   * `comment.create` floor the app has always enforced.
+   *
+   * Raising it lets an org keep discussion to reviewers and above; lowering it
+   * below COMMENTER has no practical effect, since VIEWER is the only rung
+   * underneath and viewers have no write path at all.
+   *
+   * Same OWNER-only write gate as exportMinRole / termbaseEditMinRole.
+   */
+  commentCreateMinRole?: number
+  /**
+   * AQU-1002: Minimum role level allowed to resolve or reopen a thread that
+   * SOMEBODY ELSE opened. Default (when absent) = CONTRIBUTOR (400), the
+   * foreign-resolve floor AQU-999 hardened to.
+   *
+   * This is deliberately the *foreign* floor, not a flat one: a thread's own
+   * author can always resolve their own thread, whatever the org sets. The
+   * policy orgs disagreed about (and the reason this setting exists) is
+   * authority over other people's threads — some partners want contributors
+   * settling the threads on files they translate, others want that reserved
+   * for maintainers.
+   *
+   * Enforced server-side in sync-worker on both write paths (the /events
+   * perimeter and the external Agent API emit path).
+   */
+  commentResolveMinRole?: number
+  /**
    * AQU-433: Org-scoped provider API keys. Set once by an org owner/maintainer;
    * used as the baseline for all members and projects in the org.
    * Precedence: project key > user (localStorage) key > org key.

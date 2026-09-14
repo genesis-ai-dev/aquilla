@@ -46,7 +46,7 @@ import {
 } from "../../../../db/shared/scene-briefs"
 import { getFileSegmentation } from "../../../../db/shared/file-segmentation"
 import { selectCellPairs, type CellPair } from "../agent/tools/select-cells"
-import { type LintRule } from "../agent/lint"
+import { rulesForLane, type LintRule } from "../agent/lint"
 import { loadProjectContext, type ProjectContext } from "./project-context"
 import { openRouterExtras } from "../llm-vendor"
 import { deriveSpanSeeds, seedsFromBoundaries } from "./segment"
@@ -699,29 +699,6 @@ export async function resolveSpanSeeds(
   return deriveAutoSeeds(db, projectId, fileId, pairs)
 }
 
-/**
- * AQU-1087: pin a newly created run to an explicit cell set (the open chapter)
- * BEFORE the tick loop starts, so the first wave cannot re-segment the file.
- */
-export async function pinContextualRunToCellIds(
-  db: AquillaDb,
-  run: ContextualRun,
-  cellIds: readonly string[],
-): Promise<ContextualRun | null> {
-  const allowed = new Set(cellIds)
-  const pairs = await selectCellPairs(db, run.projectId, {
-    fileId: run.fileId,
-    targetLang: run.targetLang,
-  })
-  const scoped = pairs.filter((pair) => allowed.has(pair.cellId))
-  const seeds = orderSeedsFromAnchor(
-    await resolveSpanSeeds(db, run.projectId, run.fileId, scoped),
-    run.anchorCellId,
-    scoped,
-  )
-  return setSpanCursor(db, run.id, { seeds, nextIndex: 0 })
-}
-
 function validatedExamples(pairs: CellPair[]): ExamplePair[] {
   return pairs
     .filter((p) => p.validated && p.target.trim())
@@ -1215,7 +1192,8 @@ export async function runOneTick(deps: TickDeps): Promise<TickResult> {
   const layerAbove: LayerAboveBlock[] = ctx.projectBriefL1
     ? [{ ref: "project-brief", text: ctx.projectBriefL1 }]
     : []
-  const rules: LintRule[] = ctx.authoredRules
+  // AQU-609: lane-scoped rules only constrain their own lane's drafts.
+  const rules: LintRule[] = rulesForLane(ctx.authoredRules, run.targetLang)
   const shared: RunContext = {
     ctx,
     rules,

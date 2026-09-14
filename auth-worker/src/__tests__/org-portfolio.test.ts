@@ -212,12 +212,14 @@ describe("POST /api/v2/orgs/portfolio", () => {
     }))
     const fakeEnv = { AQUILLA_PG: { prepare } } as unknown as Env
 
-    await getOrgPortfolios(fakeEnv, [2, 1, 2], { userId: 99, isAdmin: false })
+    await getOrgPortfolios(fakeEnv, [2, 1, 2], { userId: 99, isAdmin: false }, Date.parse("2026-09-02T09:00:00Z"))
 
-    // AQU-745: the aggregate carries the org binds (both IN clauses) plus the
+    // AQU-745: the aggregate carries the org binds for each IN clause plus the
     // per-caller visibility binds appended by PORTFOLIO_VISIBILITY_PREDICATE:
     // <isAdmin 0/1>, then userId ×4.
-    expect(aggregateOrgBinds).toEqual([[2, 1, 2, 1, 0, 99, 99, 99, 99]])
+    // AQU-1097 inserted a third IN clause (the plan-unit counts) preceded by
+    // the Anywhere-on-Earth cutoff date those counts compare target dates to.
+    expect(aggregateOrgBinds).toEqual([[2, 1, "2026-09-01", 2, 1, 2, 1, 0, 99, 99, 99, 99]])
     const settingsQuery = preparedQueries.find((query) => query.includes("FROM project_settings ps"))
     expect(settingsQuery).toContain("ps.validation_count")
     expect(settingsQuery).toContain("ps.target_lanes")
@@ -249,11 +251,120 @@ describe("POST /api/v2/orgs/portfolio", () => {
     expect(res.status).toBe(200)
     const body = (await res.json()) as {
       portfolios: Array<{ orgId: number; projects: Array<{ id: string; name: string }> }>
+      nextCursor: string | null
     }
     expect(body.portfolios).toEqual([
       { orgId: 2, projects: [expect.objectContaining({ id: "pb", name: "Luke" })] },
       { orgId: 1, projects: [expect.objectContaining({ id: "pa", name: "John" })] },
     ])
+    expect(body.nextCursor).toBeNull()
+  })
+
+  it("pages and searches with limit/cursor/q instead of dumping every project", async () => {
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)").run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'John', 1, 1), ('pb', 'Mark', 1, 1), ('pc', 'Acts', 1, 1)",
+    ).run()
+
+    const first = await app.request("/api/v2/orgs/1/portfolio?limit=1", { headers: authHeader(await jwtFor("wendi")) }, env)
+    expect(first.status).toBe(200)
+    const firstBody = (await first.json()) as {
+      projects: Array<{ id: string; name: string }>
+      nextCursor: string | null
+    }
+    expect(firstBody.projects).toEqual([expect.objectContaining({ id: "pc", name: "Acts" })])
+    expect(firstBody.nextCursor).toBeTruthy()
+
+    const second = await app.request(
+      `/api/v2/orgs/1/portfolio?limit=1&cursor=${encodeURIComponent(firstBody.nextCursor!)}`,
+      { headers: authHeader(await jwtFor("wendi")) },
+      env,
+    )
+    const secondBody = (await second.json()) as {
+      projects: Array<{ id: string; name: string }>
+      nextCursor: string | null
+    }
+    expect(secondBody.projects).toEqual([expect.objectContaining({ id: "pa", name: "John" })])
+    expect(secondBody.nextCursor).toBeTruthy()
+
+    const search = await app.request("/api/v2/orgs/1/portfolio?q=mar", { headers: authHeader(await jwtFor("wendi")) }, env)
+    const searchBody = (await search.json()) as { projects: Array<{ id: string; name: string }> }
+    expect(searchBody.projects).toEqual([expect.objectContaining({ id: "pb", name: "Mark" })])
+
+    const batched = await app.request(
+      "/api/v2/orgs/portfolio",
+      {
+        method: "POST",
+        headers: { ...authHeader(await jwtFor("wendi")), "Content-Type": "application/json" },
+        body: JSON.stringify({ orgIds: [1], limit: 1 }),
+      },
+      env,
+    )
+    const batchedBody = (await batched.json()) as {
+      portfolios: Array<{ orgId: number; projects: Array<{ id: string; name: string }> }>
+      nextCursor: string | null
+    }
+    expect(batchedBody.portfolios).toEqual([
+      { orgId: 1, projects: [expect.objectContaining({ id: "pc", name: "Acts" })] },
+    ])
+    expect(batchedBody.nextCursor).toBeTruthy()
+  })
+
+  it("accepts more than 100 membership orgIds so all-orgs dashboards do not 400 (AQU-756)", async () => {
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO organizations (id, name, owner_user_id)
+       SELECT g, 'Org ' || g, 1 FROM generate_series(1, 101) AS g`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO org_members (org_id, user_id, role_level, granted_by)
+       SELECT g, 1, 700, 1 FROM generate_series(1, 101) AS g`,
+    ).run()
+    const orgIds = Array.from({ length: 101 }, (_, i) => i + 1)
+    const res = await app.request(
+      "/api/v2/orgs/portfolio",
+      {
+        method: "POST",
+        headers: { ...authHeader(await jwtFor("wendi")), "Content-Type": "application/json" },
+        body: JSON.stringify({ orgIds }),
+      },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { portfolios: Array<{ orgId: number }> }
+    expect(body.portfolios).toHaveLength(101)
+  })
+
+  it("omitted orgIds rolls up every membership (AQU-756)", async () => {
+    await seedUser(1, "wendi")
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1), (2, 'Waha', 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1), (2, 1, 700, 1)",
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'John', 1, 1), ('pb', 'Luke', 2, 1)",
+    ).run()
+
+    const res = await app.request(
+      "/api/v2/orgs/portfolio",
+      {
+        method: "POST",
+        headers: { ...authHeader(await jwtFor("wendi")), "Content-Type": "application/json" },
+        body: JSON.stringify({ limit: 40 }),
+      },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as {
+      portfolios: Array<{ orgId: number; projects: Array<{ id: string }> }>
+    }
+    const byOrg = Object.fromEntries(body.portfolios.map((p) => [p.orgId, p.projects.map((r) => r.id)]))
+    expect(byOrg[1]).toEqual(["pa"])
+    expect(byOrg[2]).toEqual(["pb"])
   })
 })
 
@@ -354,5 +465,83 @@ describe("AQU-745 — portfolio project-name visibility floor", () => {
       "INSERT INTO group_project_grants (group_id, project_id, role_level, granted_by) VALUES (?, 'pb', 400, 1)",
     ).bind(grp!.id).run()
     expect(await portfolioNames("teamie")).toEqual(["Bambara"])
+  })
+})
+
+// AQU-1097: planning-unit counts on the portfolio, so the org projects table
+// can answer "which units are done" without opening every project.
+describe("plan unit rollup", () => {
+  const sql = (q: string) => env.AQUILLA_PG.prepare(q).run()
+
+  async function seedOrg() {
+    await seedUser(1, "wendi")
+    await sql("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'CAS', 1)")
+    await sql("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)")
+    await sql("INSERT INTO projects (id, name, org_id, created_by) VALUES ('pa', 'Tok Pisin', 1, 1)")
+    await sql("INSERT INTO events (id, schema_version, project_id, kind, author, payload, client_ts, server_ts, server_seq) VALUES ('e1', 1, 'pa', 'file.create', 'wendi', '{}', 1, 1, 1)")
+  }
+
+  const progress = (fileId: string, scope: string, key: string) =>
+    sql(`INSERT INTO file_section_progress (project_id, file_id, scope, section_key, target_lang, total_count, filled_count, validator_histogram, revision, updated_at)
+         VALUES ('pa', '${fileId}', '${scope}', '${key}', '', 10, 0, '{}', 1, 1)`)
+
+  async function portfolio(now?: number) {
+    const rows = await getOrgPortfolios(env as unknown as Env, [1], { userId: 1, isAdmin: false }, now)
+    return rows.find((r) => r.id === "pa")!
+  }
+
+  it("counts one unit per book for a Scripture file, and no file-grain unit", async () => {
+    await seedOrg()
+    await sql("INSERT INTO files (id, project_id, name, event_id, cell_count) VALUES ('f1', 'pa', 'Bible', 'e1', 40)")
+    await progress("f1", "file", "")
+    await progress("f1", "book", "GEN")
+    await progress("f1", "book", "EXO")
+    expect(await portfolio()).toMatchObject({ unitsTotal: 2, unitsDone: 0, unitsOverdue: 0 })
+  })
+
+  it("counts a non-Scripture file as one unit", async () => {
+    await seedOrg()
+    await sql("INSERT INTO files (id, project_id, name, event_id, cell_count) VALUES ('f1', 'pa', 'Episode 1', 'e1', 12)")
+    await progress("f1", "file", "")
+    expect(await portfolio()).toMatchObject({ unitsTotal: 1 })
+  })
+
+  it("excludes tombstoned files and audio-cue siblings from the total", async () => {
+    await seedOrg()
+    await sql("INSERT INTO files (id, project_id, name, event_id, cell_count) VALUES ('live', 'pa', 'Live', 'e1', 5)")
+    await sql("INSERT INTO files (id, project_id, name, event_id, cell_count, deleted_at) VALUES ('gone', 'pa', 'Gone', 'e1', 5, 123)")
+    await sql("INSERT INTO files (id, project_id, name, event_id, cell_count, role) VALUES ('cue', 'pa', 'Cues', 'e1', 5, 'audio-cues')")
+    expect(await portfolio()).toMatchObject({ unitsTotal: 1 })
+  })
+
+  it("counts a unit as done from its explicit mark", async () => {
+    await seedOrg()
+    await sql("INSERT INTO files (id, project_id, name, event_id, cell_count) VALUES ('f1', 'pa', 'Mark', 'e1', 10)")
+    await sql("INSERT INTO plan_units (project_id, file_id, section_key, done_at, done_by, updated_at) VALUES ('pa', 'f1', '', 999, 'randall', 999)")
+    expect(await portfolio()).toMatchObject({ unitsTotal: 1, unitsDone: 1 })
+  })
+
+  it("is not overdue on the target day anywhere on Earth, and is the day after", async () => {
+    // Same Anywhere-on-Earth rule the project deadline uses: a unit due on a
+    // date is late only once that date has ended in UTC-12.
+    await seedOrg()
+    await sql("INSERT INTO files (id, project_id, name, event_id, cell_count) VALUES ('f1', 'pa', 'Mark', 'e1', 10)")
+    await sql("INSERT INTO plan_units (project_id, file_id, section_key, target_date, updated_at) VALUES ('pa', 'f1', '', '2026-09-02', 1)")
+    const during = Date.parse("2026-09-02T23:00:00Z") // still the 2nd in UTC-12
+    const after = Date.parse("2026-09-04T00:00:00Z")
+    expect((await portfolio(during)).unitsOverdue).toBe(0)
+    expect((await portfolio(after)).unitsOverdue).toBe(1)
+  })
+
+  it("never counts a done unit as overdue, however old its target", async () => {
+    await seedOrg()
+    await sql("INSERT INTO files (id, project_id, name, event_id, cell_count) VALUES ('f1', 'pa', 'Mark', 'e1', 10)")
+    await sql("INSERT INTO plan_units (project_id, file_id, section_key, target_date, done_at, done_by, updated_at) VALUES ('pa', 'f1', '', '2020-01-01', 5, 'randall', 5)")
+    expect(await portfolio()).toMatchObject({ unitsDone: 1, unitsOverdue: 0 })
+  })
+
+  it("reports zeroes for a project with no files", async () => {
+    await seedOrg()
+    expect(await portfolio()).toMatchObject({ unitsTotal: 0, unitsDone: 0, unitsOverdue: 0 })
   })
 })

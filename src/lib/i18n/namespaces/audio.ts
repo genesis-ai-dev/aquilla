@@ -1,4 +1,4 @@
-import { defineNamespace } from "./types"
+import { defineNamespace, plural } from "./types"
 
 export const audio = defineNamespace({
   keys: {
@@ -135,7 +135,19 @@ export const audio = defineNamespace({
     "audio.recordingModal.generateTtsButton": "Generate TTS",
     "audio.recordingModal.ttsTooltip": "Generate this line's voice with the project's engine",
     "audio.recordingModal.ttsNeedsTranslation": "Translate this line first to generate voice",
+    "audio.recordingModal.ttsNoLinkedLine": "No subtitle is linked to this heard line, so there are no words to speak. Pair it with a subtitle first.",
     "audio.recordingModal.ttsDoneTooltip": "Voice generated — it plays on the Target track",
+    // AQU-646: leaving the recorder with a take that was never attached.
+    "audio.recordingModal.unsavedTakeTitle": "Keep this take?",
+    "audio.recordingModal.unsavedTakeBody":
+      "You recorded a take and haven't saved it yet. Leaving this line without saving throws it away.",
+    "audio.recordingModal.discardTake": "Throw it away",
+    "audio.recordingModal.saveTake": "Save take",
+    // AQU-646 stage 4c: what the button says when generation failed, while it
+    // is downloading a local voice model, and while it is synthesizing.
+    "audio.recordingModal.ttsFailedButton": "TTS failed",
+    "audio.recordingModal.ttsFailedTooltip": "Generation failed: {error}",
+    "audio.recordingModal.ttsDownloadingPct": "Downloading {percent}%",
     "audio.recordingModal.cancelCountdown": "Cancel countdown",
 
     // AudioRecordingModal, AQU-646 rebuild — the film panel beside the
@@ -156,7 +168,29 @@ export const audio = defineNamespace({
     "audio.recordingModal.lineCounterWindow": "{index} / {total} · window {seconds}s",
     "audio.recordingModal.lineCounterVeryShort":
       "{index} / {total} · window {seconds}s · very short",
+    "audio.tts.voicedSeveral": plural({
+      one: "Voiced {count} heard line",
+      other: "Voiced {count} heard lines",
+    }),
+    "audio.tts.voicedSeveralDetail":
+      "This subtitle is performed by several heard lines, so each one was given the whole subtitle. Trim them to fit.",
+    "audio.tts.mixedCharacters": plural({
+      one: "{count} heard line had more than one character",
+      other: "{count} heard lines had more than one character",
+    }),
+    "audio.tts.mixedCharactersDetail":
+      "Each was voiced as the character on its first line. Check them if the wrong voice would matter.",
+    "audio.tts.siblingFailed": plural({
+      one: "{count} heard line could not be voiced",
+      other: "{count} heard lines could not be voiced",
+    }),
+    "audio.tts.siblingFailedDetail":
+      "The clip you played was saved. Delete it and press the button again to retry the rest.",
     "audio.recordingModal.cueReferenceLabel": "This cue:",
+    "audio.recordingModal.ttsSharedNotice": plural({
+      one: "{count} heard line performs this subtitle. A generated voice speaks the whole subtitle onto this one, and leaves the others silent.",
+      other: "{count} heard lines perform this subtitle. A generated voice speaks the whole subtitle onto this one, and leaves the others silent.",
+    }),
     "audio.recordingModal.maxDuration": "max {minutes}m",
     "audio.recordingModal.overrunNotice": "Past the window — this will overrun the cue.",
     "audio.recordingModal.nearLimitNotice":
@@ -342,6 +376,7 @@ export const audio = defineNamespace({
     "audio.aiError.gitProjectUnsupportedTitle": "Not yet supported on git projects",
     "audio.aiError.nothingToReadTitle": "Nothing to read aloud",
     "audio.aiError.translationNotConfiguredTitle": "Translation not configured",
+    "audio.aiError.ttsNotConfiguredTitle": "Voice generation isn't set up",
     "audio.aiError.translationFailedTitle": "Translation failed",
     "audio.aiError.networkTitle": "Network error",
     "audio.aiError.modelLoadFailedTitle": "Couldn't load model",
@@ -1023,11 +1058,132 @@ export const audio = defineNamespace({
           "engine' means the text-to-speech service configured for this project, so " +
           "the user knows no choice is being asked of them here.",
       },
+      "audio.tts.voicedSeveral": {
+        description:
+          "Toast title after one press of a line's voice button generated more " +
+          "than one clip, which happens when the subtitle is performed by " +
+          "several heard lines (about 8% of lines). Only one clip can be played " +
+          "back, so without this the rest are invisible work. The count is how " +
+          "many were actually written, not how many were attempted.",
+        placeholders: { count: "How many clips were generated. Always 2 or more." },
+      },
+      "audio.tts.voicedSeveralDetail": {
+        description:
+          "Toast body for the above: why there is more than one clip, and what " +
+          "to do about it — each clip says the whole subtitle rather than just " +
+          "its own line's share, so they need trimming.",
+      },
+      "audio.tts.mixedCharacters": {
+        description:
+          "Toast title after a bulk voice generation, when a heard line was " +
+          "performed by subtitle lines with DIFFERENT characters assigned. " +
+          "Measured on the client's own episode: 96 heard lines cover two or " +
+          "more subtitles, of which 5 disagree about the character. The run " +
+          "generates in the first line's character (Sam's ruling) and reports " +
+          "the rest here rather than silently choosing.",
+        placeholders: { count: "How many heard lines had disagreeing characters." },
+      },
+      "audio.tts.mixedCharactersDetail": {
+        description:
+          "Toast body for the above: which character was used, and that it is " +
+          "worth a look rather than an error.",
+      },
+      "audio.tts.siblingFailed": {
+        description:
+          "Error toast after one press of a line's voice button, when the " +
+          "subtitle is performed by several heard lines and some of the extra " +
+          "clips failed to generate. The primary clip succeeded (the user just " +
+          "heard it), so without this the failure is invisible and those lines " +
+          "stay silent in the dub.",
+        placeholders: { count: "How many heard lines failed." },
+      },
+      "audio.tts.siblingFailedDetail": {
+        description:
+          "Toast body for the above: reassures that the clip they heard is " +
+          "safe, and names the only recovery path — the button becomes a replay " +
+          "button once the first clip lands, so retrying means removing it.",
+      },
+      "audio.recordingModal.ttsSharedNotice": {
+        description:
+          "Notice in the recorder, shown AFTER a voice has been generated, and " +
+          "only when the subtitle being performed is split across several " +
+          "heard lines (about 8% of lines). It explains what the generation " +
+          "just did: the synthesized clip says the whole subtitle rather than " +
+          "only this line's share, and the other heard lines performing the " +
+          "same subtitle got no audio from it — so it reads as a to-do, naming " +
+          "what is still silent. Always at least 2, so the plural is safe.",
+        placeholders: { count: "How many heard lines perform this subtitle. Always 2 or more." },
+      },
+      "audio.recordingModal.ttsNoLinkedLine": {
+        description:
+          "Tooltip on the recorder's disabled Generate-voice button when this " +
+          "heard line is not paired with any subtitle, so there are no words " +
+          "to speak. Distinct from the untranslated case, which is a different " +
+          "problem with a different fix.",
+      },
       "audio.recordingModal.ttsNeedsTranslation": {
         description:
           "Tooltip for the synthesize button while it is disabled because the line " +
           "has no translated text yet — there is nothing for a voice to read. " +
           "Phrased as the action that unblocks it.",
+      },
+      "audio.recordingModal.unsavedTakeTitle": {
+        description:
+          "Heading of the confirmation shown when someone tries to leave the " +
+          "recorder while a take they just recorded has not been saved. Asked " +
+          "as a question because both answers are reasonable.",
+      },
+      "audio.recordingModal.unsavedTakeBody": {
+        description:
+          "Body of that confirmation. States plainly that the recording is not " +
+          "stored yet and what leaving would cost, because nothing on screen " +
+          "otherwise distinguishes a saved take from an unsaved one. Says " +
+          "LEAVING THIS LINE rather than closing: the same confirmation now " +
+          "also covers the previous/next arrows, which step to another line " +
+          "without closing the recorder (2026-08-27).",
+      },
+      "audio.recordingModal.discardTake": {
+        description:
+          "The button that leaves the recorder WITHOUT keeping the take. " +
+          "Worded concretely rather than as 'Discard' so it cannot be misread " +
+          "as merely dismissing the question.",
+      },
+      "audio.recordingModal.saveTake": {
+        description:
+          "The button that keeps the take, on that same confirmation. Matches " +
+          "the recorder's own Save control, which is what it triggers.",
+      },
+      "audio.recordingModal.ttsFailedButton": {
+        description:
+          "Visible label of the recorder's voice button after generation " +
+          "failed. Two words on purpose: the button is about half the panel " +
+          "wide, and the actual reason is written out in full on the line " +
+          "beneath it, so this only has to say THAT it failed. 'TTS' is the " +
+          "industry abbreviation for text-to-speech; keep it if it is " +
+          "recognised in the target language, otherwise use the local short " +
+          "form.",
+        maxLength: 16,
+      },
+      "audio.recordingModal.ttsFailedTooltip": {
+        description:
+          "Hover text on that failed button, carrying the verbatim technical " +
+          "error. The user-facing explanation is the line beneath the button, " +
+          "not this — this exists so the raw text can be read and passed on to " +
+          "support without it being the first thing anyone sees.",
+        placeholders: {
+          error:
+            "The underlying error message, usually untranslated technical text " +
+            "from the browser or the voice server.",
+        },
+      },
+      "audio.recordingModal.ttsDownloadingPct": {
+        description:
+          "Label on the recorder's voice button while a local voice model is " +
+          "downloading, so a wait of tens of seconds does not read as a hang. " +
+          "Only local engines (Kokoro, MMS) report progress. Keep it short — " +
+          "the button is about half the panel wide.",
+        placeholders: { percent: "Whole-number download progress, 0 to 100, without the % sign." },
+        maxLength: 18,
       },
       "audio.recordingModal.ttsDoneTooltip": {
         description:
@@ -1650,6 +1806,14 @@ export const audio = defineNamespace({
         description:
           "Popover heading when generating voice for an untranslated cell needs " +
           "on-the-fly translation, but the project has no completion provider set up.",
+      },
+      "audio.aiError.ttsNotConfiguredTitle": {
+        description:
+          "Popover heading when the voice service itself was never configured, " +
+          "so generating audio cannot work at all until someone sets it up. " +
+          "Distinct from a server being temporarily down: retrying will never " +
+          "help, which is why it is worded as a state ('isn't set up') rather " +
+          "than as a failure that just happened.",
       },
       "audio.aiError.translationFailedTitle": {
         description:

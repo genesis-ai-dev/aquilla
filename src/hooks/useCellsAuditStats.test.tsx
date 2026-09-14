@@ -3,7 +3,9 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { renderHook, waitFor, act } from "@testing-library/react"
-import { useCellsAuditStats } from "./useCellsAuditStats"
+import { useCellsAuditStats, deriveCommittedCellStats, type CellAuditStats } from "./useCellsAuditStats"
+import type { CellRow } from "@/lib/sync/cells-read-types"
+import { contentHash } from "@/lib/dcs/content-hash"
 
 vi.mock("@/lib/sync/sync-worker-url", () => ({
   syncWorkerHttpOrigin: () => "https://sync.example.com",
@@ -242,5 +244,73 @@ describe("useCellsAuditStats (Phase 2b)", () => {
       })
       expect(result.current.byCellId.get("cell-1")?.editCount).toBe(3)
     })
+  })
+})
+
+// Derived stats from the POST /events response rows — replaces the
+// per-commit GET /cells/audit-stats?cellId=. Must read the rows the way the
+// server route does, or the validation pill / stale-parent logic drifts.
+describe("deriveCommittedCellStats", () => {
+  const base: Omit<CellRow, "side" | "eventId" | "value"> = {
+    cellId: "cell-1", valueHtml: null, type: null, canonicalRef: null, anchorCellId: null,
+    sourceEventId: null, lastEditor: "alice", lastEditAt: 1234, validated: false, wordCount: 1,
+  }
+  const source: CellRow = { ...base, side: "source", eventId: "S0", value: "src" }
+  const prev: CellAuditStats = {
+    cellId: "cell-1", editCount: 3, contentHash: "old", lastEditAt: 1, lastEditEventId: "E0",
+    activeValidators: ["bob"], waivers: [{ ruleId: "r1", waivedAt: "2026-01-01T00:00:00.000Z" }],
+  }
+
+  it("follows the active lane's target row: new head, validators reset, waivers kept, server hash", () => {
+    const rows: CellRow[] = [
+      source,
+      { ...base, side: "target", eventId: "E1", value: "hola", targetLang: "" },
+      { ...base, side: "target", eventId: "E9", value: "bonjour", targetLang: "fr" },
+    ]
+    expect(deriveCommittedCellStats("cell-1", rows, "", prev)).toEqual({
+      cellId: "cell-1",
+      editCount: 3,
+      contentHash: contentHash("hola"),
+      lastEditAt: 1234,
+      lastEditEventId: "E1",
+      activeValidators: [],
+      waivers: prev.waivers,
+    })
+    expect(deriveCommittedCellStats("cell-1", rows, "fr", prev)?.lastEditEventId).toBe("E9")
+  })
+
+  it("keeps validators when the head did not move (a re-applied echo of the same event)", () => {
+    const rows: CellRow[] = [source, { ...base, side: "target", eventId: "E0", value: "x" }]
+    expect(deriveCommittedCellStats("cell-1", rows, "", prev)?.activeValidators).toEqual(["bob"])
+  })
+
+  it("falls back to the source row for a source-only cell and returns null with no rows", () => {
+    expect(deriveCommittedCellStats("cell-1", [source], "", undefined)).toMatchObject({
+      lastEditEventId: "S0", editCount: 0, activeValidators: [], waivers: [],
+    })
+    expect(deriveCommittedCellStats("cell-1", [], "", undefined)).toBeNull()
+  })
+
+  it("applyCommittedCellStats merges into the hook's map without a fetch", async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce(
+      new Response(JSON.stringify({ cells: STATS_RESPONSE }), { status: 200 }),
+    ) as unknown as typeof fetch
+    const { result } = renderHook(() =>
+      useCellsAuditStats({ enabled: true, fileId: "file-abc", getTokenForFile: TOKEN_FN }),
+    )
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+    const calls = (global.fetch as unknown as { mock: { calls: unknown[] } }).mock.calls.length
+    let merged = false
+    act(() => {
+      merged = result.current.applyCommittedCellStats("cell-1", [
+        { ...base, side: "target", eventId: "ev-2", value: "new" },
+      ])
+    })
+    expect(merged).toBe(true)
+    expect(result.current.byCellId.get("cell-1")).toMatchObject({
+      lastEditEventId: "ev-2", activeValidators: [], editCount: 3,
+    })
+    expect(result.current.byCellId.get("cell-2")?.editCount).toBe(7)
+    expect((global.fetch as unknown as { mock: { calls: unknown[] } }).mock.calls.length).toBe(calls)
   })
 })

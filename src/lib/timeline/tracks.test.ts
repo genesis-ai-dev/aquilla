@@ -40,14 +40,14 @@ const shape = (tracks: ReturnType<typeof mergeTrackOverrides>) =>
 
 /** The rows a media file (and a caller with no context at all) derives: the
  *  three the editor has drawn since it shipped, ids renamed in stage 2 but
- *  every visible LABEL identical — "Subtitles" and not "Source subtitles",
+ *  every visible LABEL identical — one name per kind, source and target text
  *  because a name is per-track data and that row has always read that way.
  *
- *  Source audio's number went 1 → 2 in stage 3, when Target subtitles took seat
+ *  alike. Source audio's number went 1 → 2 in stage 3, when Target text took seat
  *  1. Nothing here derives seat 1, so the gap is unobservable: same rows, same
  *  labels, same sequence. That is the guarantee the renumber hangs on. */
 const DEFAULT_SHAPE = [
-  ["source-subtitles", "source-subtitles", "Subtitles", 0, null],
+  ["source-subtitles", "source-subtitles", "Source text", 0, null],
   ["source-audio", "source-audio", "Source audio", 2, null],
   ["target-audio", "target-audio", "Target audio", 3, null],
 ]
@@ -126,10 +126,10 @@ describe("deriveDefaultTracks — the derivation context", () => {
     // Spelled out rather than reusing DEFAULT_SHAPE, because this is the pin
     // with the highest blast radius in stage 3 and it should read as a literal:
     // every dubbing project that exists draws these three rows, in this
-    // sequence, under these labels, before and after Target subtitles took
+    // sequence, under these labels, before and after Target text took
     // seat 1.
     expect(shape(deriveDefaultTracks(MEDIA))).toEqual([
-      ["source-subtitles", "source-subtitles", "Subtitles", 0, null],
+      ["source-subtitles", "source-subtitles", "Source text", 0, null],
       ["source-audio", "source-audio", "Source audio", 2, null],
       ["target-audio", "target-audio", "Target audio", 3, null],
     ])
@@ -137,16 +137,16 @@ describe("deriveDefaultTracks — the derivation context", () => {
 
   it("gives a subtitle import no Source-audio row until an audio VTT is imported", () => {
     expect(shape(deriveDefaultTracks(SUBTITLE_IMPORT))).toEqual([
-      ["source-subtitles", "source-subtitles", "Source subtitles", 0, null],
-      ["target-subtitles", "target-subtitles", "Target subtitles", 1, null],
+      ["source-subtitles", "source-subtitles", "Source text", 0, null],
+      ["target-subtitles", "target-subtitles", "Target text", 1, null],
       ["target-audio", "target-audio", "Target audio", 3, null],
     ])
   })
 
   it("draws it once there are cues for it to hold", () => {
     expect(shape(deriveDefaultTracks({ ...SUBTITLE_IMPORT, hasAudioCues: true }))).toEqual([
-      ["source-subtitles", "source-subtitles", "Source subtitles", 0, null],
-      ["target-subtitles", "target-subtitles", "Target subtitles", 1, null],
+      ["source-subtitles", "source-subtitles", "Source text", 0, null],
+      ["target-subtitles", "target-subtitles", "Target text", 1, null],
       ["source-audio", "source-audio", "Source audio", 2, null],
       ["target-audio", "target-audio", "Target audio", 3, null],
     ])
@@ -155,7 +155,7 @@ describe("deriveDefaultTracks — the derivation context", () => {
   it("keeps every other row's order identical across that row appearing", () => {
     // Orders are per-KIND and never the array index, so a persisted reorder
     // survives an audio-VTT import: `order: 0.5` has to go on meaning "between
-    // Source subtitles and Target subtitles" whether or not Source audio is
+    // Source text and Target text" whether or not Source audio is
     // drawn. An index-based order would slide every row below the new one.
     const before = deriveDefaultTracks(SUBTITLE_IMPORT)
     const after = new Map(
@@ -223,9 +223,9 @@ describe("mergeTrackOverrides — patching a default", () => {
   })
 
   it("ignores a blank or whitespace-only name rather than drawing an empty label", () => {
-    expect(merge({ "source-subtitles": { name: "" } })[0].name).toBe("Subtitles")
-    expect(merge({ "source-subtitles": { name: "   " } })[0].name).toBe("Subtitles")
-    expect(merge({ "source-subtitles": { name: "\n\t" } })[0].name).toBe("Subtitles")
+    expect(merge({ "source-subtitles": { name: "" } })[0].name).toBe("Source text")
+    expect(merge({ "source-subtitles": { name: "   " } })[0].name).toBe("Source text")
+    expect(merge({ "source-subtitles": { name: "\n\t" } })[0].name).toBe("Source text")
   })
 
   it("applies a name verbatim — what is shown has to be what is stored", () => {
@@ -269,7 +269,7 @@ describe("mergeTrackOverrides — user-added tracks", () => {
   it("keeps an explicit name, order and groupId", () => {
     const tracks = merge({ "trk-a": { kind: "target-audio", name: "Spanish", order: 1.5, groupId: "es" } })
     expect(shape(tracks)).toEqual([
-      ["source-subtitles", "source-subtitles", "Subtitles", 0, null],
+      ["source-subtitles", "source-subtitles", "Source text", 0, null],
       ["trk-a", "target-audio", "Spanish", 1.5, "es"],
       ["source-audio", "source-audio", "Source audio", 2, null],
       ["target-audio", "target-audio", "Target audio", 3, null],
@@ -311,6 +311,59 @@ describe("mergeTrackOverrides — user-added tracks", () => {
       { "source-subtitles": { kind: "source-subtitles", name: "Impostor" } },
     )
     expect(shape(tracks)).toEqual([["source-audio", "source-audio", "Source audio", 0, null]])
+  })
+})
+
+describe("mergeTrackOverrides — the kinds a user makes (stage 2)", () => {
+  it("builds a folder", () => {
+    const tracks = merge({ grp: { kind: "folder", name: "Dubs", order: 1.5 } })
+    expect(shape(tracks)[1]).toEqual(["grp", "folder", "Dubs", 1.5, null])
+  })
+
+  it("builds an added audio track with its alignment and colour", () => {
+    const tracks = merge({
+      "trk-a": { kind: "audio", name: "Spanish VO", order: 4, sourceTrackId: "source-subtitles", color: "teal" },
+    })
+    expect(tracks[3]).toMatchObject({
+      id: "trk-a",
+      kind: "audio",
+      sourceTrackId: "source-subtitles",
+      color: "teal",
+    })
+  })
+
+  // The set split, from the client side. DEFAULT_TRACK_IDS used to be an alias
+  // of the kind list; re-aliasing it would reserve "folder" as a track id and
+  // this entry would be silently dropped instead of drawn.
+  it('treats "folder" as an ordinary track id, not a reserved one', () => {
+    const tracks = merge({ folder: { kind: "audio", name: "Oddly named" } })
+    expect(tracks.map((t) => t.id)).toContain("folder")
+  })
+
+  it("drops a self-reference rather than the track — it just aligns to nothing", () => {
+    const tracks = merge({ "trk-a": { kind: "audio", sourceTrackId: "trk-a" } })
+    expect(tracks[3]).toMatchObject({ id: "trk-a", sourceTrackId: null })
+  })
+
+  it("honours a colour on a DEFAULT track — the dub row is the first anyone recolours", () => {
+    const tracks = merge({ "target-audio": { color: "fuchsia" } })
+    expect(tracks[2]).toMatchObject({ id: "target-audio", color: "fuchsia" })
+  })
+
+  it("ignores kind and sourceTrackId on a default, whose identity and alignment are derived", () => {
+    const tracks = merge({ "target-audio": { kind: "audio", sourceTrackId: "source-audio", name: "Dub" } })
+    expect(tracks[2]).toMatchObject({ id: "target-audio", kind: "target-audio", name: "Dub" })
+    // Absent, not null: a derived row never carried the field in the first
+    // place, and the merge must not invent one to say "no".
+    expect(tracks[2].sourceTrackId).toBeUndefined()
+  })
+
+  // The palette is this build's rendering, not the contract — see
+  // PersistedTrackPatch.color. An id from a newer client has to survive the
+  // merge intact so the renderer is the one that decides to fall back.
+  it("carries a palette id this build has never heard of straight through", () => {
+    const tracks = merge({ "trk-a": { kind: "audio", color: "ultramarine-2" } })
+    expect(tracks[3]).toMatchObject({ color: "ultramarine-2" })
   })
 })
 
@@ -438,7 +491,7 @@ describe("deriveTracksForFile", () => {
       SUBTITLE_IMPORT,
     )
     expect(shape(tracks)).toEqual([
-      ["source-subtitles", "source-subtitles", "Source subtitles", 0, null],
+      ["source-subtitles", "source-subtitles", "Source text", 0, null],
       ["target-subtitles", "target-subtitles", "Armenian", 1, null],
       ["target-audio", "target-audio", "Target audio", 3, null],
     ])

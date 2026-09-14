@@ -9,6 +9,7 @@ import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import path from "node:path"
 import { PostgresDb, type PgExecutor } from "../../../../db/shim/postgres"
+import { resetChainCacheForTests } from "../../events/cells-read-route"
 
 const SCHEMA = readFileSync(
   path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../db/postgres/schema.sql"),
@@ -112,6 +113,11 @@ async function seedRows(pg: PGlite, table: string, rows: ReadonlyArray<object>) 
 }
 
 export async function makeTestDb(seed: Seed = {}): Promise<TestDb> {
+  // A fresh test database is a fresh "isolate": the cells chain cache is
+  // module-level and keyed on projectId + ETag, and every spec reuses the
+  // same ids/seqs across independent databases, so clear it here or a
+  // previous test's ordering leaks into this one.
+  resetChainCacheForTests()
   const pg = new PGlite()
   await pg.exec(SCHEMA)
   for (const [table, rows] of Object.entries(seed)) {
@@ -135,6 +141,7 @@ export async function makeTestDb(seed: Seed = {}): Promise<TestDb> {
       return out
     },
     reset: async () => {
+      resetChainCacheForTests() // same reason as in makeTestDb above
       await pg.exec(`DO $$ DECLARE r RECORD; BEGIN
         FOR r IN SELECT tablename FROM pg_tables WHERE schemaname='public' LOOP
           EXECUTE 'TRUNCATE TABLE ' || quote_ident(r.tablename) || ' RESTART IDENTITY CASCADE';

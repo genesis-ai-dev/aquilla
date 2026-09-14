@@ -36,6 +36,7 @@ export type ErrorCategory =
   | "consent-denied"
   | "no-source-text"
   | "translation-not-configured"
+  | "tts-not-configured"
   | "translation-failed"
   | "git-project-unsupported"
   | "sign-in-required"
@@ -52,11 +53,21 @@ export type ErrorCategory =
   | "unknown"
 
 /** Pull an HTTP status out of the messages we format locally, e.g.
- *  `Completion failed: 413 {"error":…}` or `Failed to fetch models: 500 …`.
+ *  `Completion failed: 413 {"error":…}` or `voice/tts failed (503): …`.
  *  Deliberately anchored to a "failed/error/status/http" lead-in so a bare
- *  three-digit number inside a provider payload isn't mistaken for a status. */
+ *  three-digit number inside a provider payload isn't mistaken for a status.
+ *
+ *  THE OPTIONAL PARENTHESIS IS NOT COSMETIC. Every audio error this app
+ *  formats writes the status in brackets — `voice/tts failed (503)`,
+ *  `audio upload failed (500)`, `voice convert failed (502)`, `Gemini TTS
+ *  failed (500)` — and without the `\(?` none of them parsed. Only the
+ *  completions path's bare `failed: 413` did. So the `rate-limited`,
+ *  `provider-unavailable` and `provider-rejected` branches below had never
+ *  once fired for an audio failure: every one of them fell through to
+ *  `unknown`, which is why a voice failure read as a raw server fragment
+ *  however carefully those branches were worded. */
 function extractStatus(lowered: string): number | null {
-  const match = lowered.match(/(?:failed|error|status|http)[:\s]+(\d{3})\b/)
+  const match = lowered.match(/(?:failed|error|status|http)[:\s]+\(?(\d{3})\b/)
   return match ? Number(match[1]) : null
 }
 
@@ -79,6 +90,13 @@ export function categorizeAiError(rawMessage: string): ActionableError {
   if (
     m.includes("daily ai limit") ||
     m.includes("daily_budget_exceeded") ||
+    // The TTS budget's own code, which reaches us as a raw JSON body:
+    // `voice/tts failed (429): {"error":"tts_daily_limit_exceeded"}`. Without
+    // this it matched nothing here, and `looksLikeMachineDump` saw the braces
+    // and swapped the whole thing for "the AI request didn't finish" — the
+    // one failure where the user CAN do something (wait, or switch provider)
+    // wearing the one message that says nothing at all.
+    m.includes("daily_limit_exceeded") ||
     m.includes("resets at midnight") ||
     m.includes("global_budget_exceeded") ||
     m.includes("platform ai capacity")
@@ -207,6 +225,32 @@ export function categorizeAiError(rawMessage: string): ActionableError {
       category: "translation-not-configured",
       title: t("audio.aiError.translationNotConfiguredTitle"),
       body: "Set up a completion provider for this project before generating voice on untranslated cells.",
+      raw,
+    }
+  }
+  // NOT SET UP IS NOT A TEMPORARY OUTAGE, and the ordering here is the whole
+  // point: the server answers 503 for this, so with `extractStatus` finally
+  // parsing brackets the branch below would call it `provider-unavailable` and
+  // say "this is usually temporary — try again in a moment." It is not
+  // temporary and retrying will never fix it. Since OmniVoice is the DEFAULT
+  // engine, that would be the wrong advice on the single most likely voice
+  // failure in the app.
+  //
+  // Matched on the specific server strings rather than a bare "not
+  // configured": this module also categorizes drafting and agent failures,
+  // and telling someone their *translation* provider is a voice problem would
+  // be its own small lie.
+  if (
+    m.includes("tts not configured") ||
+    m.includes("voice conversion not configured") ||
+    m.includes("voice generation not configured")
+  ) {
+    return {
+      category: "tts-not-configured",
+      title: t("audio.aiError.ttsNotConfiguredTitle"),
+      // Worded to follow its own title rather than repeat it — the recorder
+      // renders the two as one sentence.
+      body: "Switch this project to a local voice (Kokoro or MMS), which runs in the browser, or ask an administrator to configure the server voice service.",
       raw,
     }
   }

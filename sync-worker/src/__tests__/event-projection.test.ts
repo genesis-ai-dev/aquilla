@@ -903,6 +903,12 @@ describe('isChainMutatingKind', () => {
     'comment.edit': false,
     'comment.delete': false,
     'comment.resolve': false,
+    // Terminology concepts are project-scoped and touch no cell chain.
+    'term.create': false,
+    'term.update': false,
+    'term.delete': false,
+    'term.approve': false,
+    'term.reject': false,
     'cell.backtranslation.set': false,
     'assignment.create': false,
     'assignment.reassign': false,
@@ -912,6 +918,7 @@ describe('isChainMutatingKind', () => {
     'cell.retime': false,
     'cell.audio.rename': false,
     'cell.audio.trim': false,
+    'cell.audio.place': false,
     // A link says which subtitle a heard line performs; it never moves the
     // cell's own text chain.
     'cell.link.set': false,
@@ -919,6 +926,7 @@ describe('isChainMutatingKind', () => {
     'cell.lane.retime': false,
     'file.video.set': false,
     'file.timing.set': false,
+    'file.corpus.set': false,
     'file.track.set': false,
     // AQU-476: mirror events replicate an ordering the upstream already
     // arbitrated — see CHAIN_MUTATING_KINDS's doc comment.

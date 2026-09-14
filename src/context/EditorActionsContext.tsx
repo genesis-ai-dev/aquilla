@@ -21,6 +21,8 @@ export interface EditorActionsContextValue {
   onInfractionClick?: (ruleId: string) => void
   onOpenComments?: (cellId: string) => void
   onOpenHistory?: (cellId: string) => void
+  /** Opens the matching concept in the Terminology page. */
+  onOpenTerminologyConcept?: (conceptId: string) => void
   onAiSetupNeeded?: () => void
   onOpenRecording?: (cellId: string) => void
   /**
@@ -69,6 +71,36 @@ export interface EditorActionsContextValue {
    * identity-stable in the workspace.
    */
   onTakeSaved?: (cellId: string) => void
+  /**
+   * AQU-646 stage 3f: where this row's audio actually belongs.
+   *
+   * On a file with an audio-cue sibling a take hangs off the HEARD LINE that
+   * performs the subtitle, in the cue sibling — never on the subtitle cell. The
+   * mic already knew this (`onOpenRecording` redirects); the TTS button in the
+   * same row did not, so a generated voice landed on the subtitle cell where
+   * the timeline cannot draw it.
+   *
+   * Returns the cell itself in every arrangement without cues, and null when a
+   * cue sibling exists but nothing is linked — there is genuinely nowhere to
+   * put audio for that line, and writing it to the subtitle would hide it.
+   * Context rather than a row prop: rows only forward it, and the workspace
+   * keeps it identity-stable.
+   *
+   * CELLS, NOT IDS, AND THAT IS LOAD-BEARING. The row's voice button is a
+   * REPLAY button as much as a generate one — it looks for an already-generated
+   * clip before synthesizing anything. That lookup reads
+   * `selectedGeneratedVoiceAudioId` and `attachments`, which live on the cue,
+   * so handing back bare ids would leave it looking at the subtitle, finding
+   * nothing, and re-synthesizing on every single press.
+   *
+   * ALL of them, in film order: one subtitle can be performed by several heard
+   * lines and Sam's ruling (2026-08-25) is that each gets the whole line, so
+   * nothing is left silent. Callers that can only write one — the microphone —
+   * take the first.
+   */
+  audioHomeFor?: (
+    cell: import("@/hooks/useCells").CellData,
+  ) => readonly import("@/hooks/useCells").CellData[] | null
 }
 
 const EditorActionsContext = createContext<EditorActionsContextValue>({})

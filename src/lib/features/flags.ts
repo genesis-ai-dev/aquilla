@@ -23,13 +23,23 @@ export const FLAGS: Record<string, FeatureFlagDefinition> = {
   contextualTranslation: {
     labelKey: "autopilot.settings.controlsLabel",
     descriptionKey: "autopilot.settings.controlsDescription",
-    // Default ON: this flag gates DISCOVERY, not spend. It decides whether the
-    // play button is visible; a run only starts, and only costs anything, when
-    // someone deliberately clicks it. Defaulting it off meant the feature could
-    // only be found by someone who already knew it existed and went looking in
-    // project settings for it — which is not a discovery path, it's a hiding
-    // place. Flip this single line to hide it again.
-    default: true,
+    // AQU-1103 — DEFAULT OFF, for everyone. Autopilot was always intended to be
+    // opt-in, and shipping it default-on put its surfaces in front of every
+    // project in production: the overview panel reporting "Needs attention" on
+    // work nobody asked it to do. Discoverability was the argument for ON (the
+    // flag gates whether the play button is visible, and a run costs nothing
+    // until someone clicks it) — but an unrequested status claim on a PM's
+    // overview is not discovery, and an experiment that turns itself on for
+    // people who never opted in is the wrong default whatever it costs.
+    //
+    // This is the ONLY thing that enables Autopilot for a project that has
+    // never stored a value: flags are device-local (see the module header) and
+    // nothing server-side auto-enables a project — the auth-worker cron only
+    // resumes runs that a person already started. So flipping this line turns
+    // the surfaces off everywhere except where someone explicitly switched
+    // them on in Project settings → Experimental, whose stored `true` still
+    // wins (isFlagEnabled prefers the stored value over the default).
+    default: false,
   },
 }
 

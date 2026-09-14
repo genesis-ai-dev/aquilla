@@ -45,8 +45,11 @@ import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { portfolioAttentionReasons, type ProjectAttentionReason } from "@/lib/project-status"
 import { DateTooltip } from "@/components/ui/date-tooltip"
+import { SignedOutWorkspace } from "./SignedOutWorkspace"
 
-const PROJECT_PREVIEW_LIMIT = 10
+/** Bounded pane height so LegendList can virtualize instead of growing with content. */
+const PROJECTS_PANEL_MAX_H =
+  "h-[clamp(14rem,calc(100dvh-22rem),28rem)]"
 
 type OverviewProjectRow = {
   project: PortfolioProjectRow
@@ -95,10 +98,9 @@ function OverviewLoadingTemplate() {
 }
 
 /**
- * Single-org Overview: admin-style operator home — rollup tiles, recently
- * updated projects, plus team workload / usage / credits. The first ten
- * projects are directly reachable here; the full directory also lives on
- * `/orgs/:id/projects`.
+ * Single-org Overview: admin-style operator home — rollup tiles, a
+ * continuous recently-updated project list, plus team workload / usage /
+ * credits. The full searchable directory also lives on `/orgs/:id/projects`.
  */
 export function OrgOverview() {
   const { t } = useI18n()
@@ -114,7 +116,6 @@ export function OrgOverview() {
   const memberProgressViewerRole = activeOrg?.role?.level ?? null
 
   const [pendingInvites, setPendingInvites] = useState<MyPendingInvite[]>([])
-  const [expandedProjectsOrgId, setExpandedProjectsOrgId] = useState<number | null>(null)
 
   useEffect(() => {
     if (!jwt) {
@@ -153,12 +154,6 @@ export function OrgOverview() {
         ),
     [portfolio.projects, portfolio.now],
   )
-  const projectsExpanded = expandedProjectsOrgId === activeOrgId
-  const hiddenProjectCount = Math.max(0, projectRows.length - PROJECT_PREVIEW_LIMIT)
-  const visibleProjectRows = projectsExpanded
-    ? projectRows
-    : projectRows.slice(0, PROJECT_PREVIEW_LIMIT)
-
   const projectColumns = useMemo<ColumnDef<OverviewProjectRow>[]>(
     () => [
       {
@@ -205,24 +200,8 @@ export function OrgOverview() {
 
   if (!sessionLoading && !jwt) {
     return (
-      <AppShell
-        sidebar={<OrgSidebar />}
+      <SignedOutWorkspace
         header={<OrgBreadcrumb section="Overview" isProjectsLanding />}
-        statusBar={null}
-        main={
-          <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
-            <p className="text-lg font-medium">{t("org.orgHome.signedOut.heading")}</p>
-            <p className="max-w-xs text-sm text-muted-foreground">
-              {t("org.orgHome.signedOut.description")}
-            </p>
-            <Link
-              to={`/login?next=${encodeURIComponent("/")}`}
-              className={cn(buttonVariants())}
-            >
-              {t("auth.login.submitDefault")}
-            </Link>
-          </div>
-        }
       />
     )
   }
@@ -320,35 +299,31 @@ export function OrgOverview() {
               <Section
                 title={t("nav.projects")}
                 description={t("org.overview.projectsDescription")}
-                headerClassName={ADMIN_TABLE_SECTION_HEADER}
-                contentClassName={ADMIN_TABLE_SECTION_CONTENT}
+                className={cn("flex min-w-0 flex-col overflow-hidden", PROJECTS_PANEL_MAX_H)}
+                headerClassName={cn(ADMIN_TABLE_SECTION_HEADER, "shrink-0")}
+                contentClassName={cn(
+                  ADMIN_TABLE_SECTION_CONTENT,
+                  "flex min-h-0 min-w-0 flex-1 flex-col",
+                )}
               >
-                <div id="org-overview-projects-table">
+                <div
+                  id="org-overview-projects-table"
+                  className="flex min-h-0 min-w-0 flex-1 flex-col"
+                >
                   <DataTable
                     columns={projectColumns}
-                    data={visibleProjectRows}
+                    data={projectRows}
                     getRowId={(r) => r.project.id}
                     onRowClick={(r) => navigate(`/projects/${r.project.id}`)}
                     testId="org-overview-projects-table"
-                    className={ADMIN_TABLE_CLASS}
+                    className={cn(
+                      ADMIN_TABLE_CLASS,
+                      // Keep the -mx-2 bleed inside the card so the
+                      // fillHeight scrollbar is not clipped at the edge.
+                      "mx-0",
+                    )}
                     dense
-                    footer={
-                      hiddenProjectCount > 0 ? (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setExpandedProjectsOrgId(projectsExpanded ? null : activeOrgId)
-                          }
-                          aria-expanded={projectsExpanded}
-                          aria-controls="org-overview-projects-table"
-                          className="w-full text-start text-sm text-muted-foreground"
-                        >
-                          {projectsExpanded
-                            ? t("org.projectOverview.showFewer")
-                            : t("org.overview.showMoreProjects", { count: hiddenProjectCount })}
-                        </button>
-                      ) : null
-                    }
+                    fillHeight
                     emptyState={
                       <EmptyState
                         variant="inline"

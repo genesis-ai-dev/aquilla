@@ -3,11 +3,11 @@
  *
  * Standalone presentational component. Renders TWO visually distinct groups:
  *
- *   1. "Managed (your decisions)" — deterministic Concept renderings. These are
+ *   1. "Approved translations" — deterministic Concept renderings. These are
  *      facts the user (or org) decided. Solid, no probabilistic chrome.
- *   2. "AI-assumed (predicted)"   — probabilistic predictions from the χ² + EM
- *      cross-check (lib/terminology/equivalents.ts). Each row carries a
- *      confidence band, expandable few-shot examples (the evidence it drew
+ *   2. "Suggested translations" — probabilistic predictions from the internal
+ *      alignment cross-check. Each row carries a plain-language confidence
+ *      percentage, expandable nearby examples (the evidence it drew
  *      from), and a "Promote to managed rendering" action — promotion is the
  *      explicit user act that crosses the deterministic line (spec Slice 3,
  *      pre-mortem P6).
@@ -27,7 +27,13 @@
  */
 
 import { useState } from "react"
-import { ChevronRight, ChevronDown, ShieldCheck, Sparkles, ArrowUp } from "lucide-react"
+import {
+  ChevronRight,
+  ChevronDown,
+  ChevronUp,
+  ShieldCheck,
+  Sparkles,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
@@ -35,10 +41,9 @@ import type { TermRendering } from "@/lib/terminology/types"
 import { renderingStatusLabelKey } from "@/lib/terminology/types"
 import type {
   PredictedEquivalent,
-  EquivalentConfidence,
 } from "@/lib/terminology/equivalents"
-import { useT } from "@/lib/i18n/I18nProvider"
-import type { TFunction } from "@/lib/i18n/I18nProvider"
+import { useI18n, useT } from "@/lib/i18n/I18nProvider"
+import { formatPercent } from "@/lib/i18n/format"
 
 // ─── Managed rendering chip (mirrors TerminologyTermDetail.RenderingChip) ─────
 
@@ -61,33 +66,15 @@ function ManagedChip({ rendering }: { rendering: TermRendering }) {
   )
 }
 
-// ─── Confidence band chip ─────────────────────────────────────────────────────
+// ─── User-facing confidence ───────────────────────────────────────────────────
 
-function confidenceLabelKey(confidence: EquivalentConfidence): Parameters<TFunction>[0] {
-  switch (confidence) {
-    case "HIGH":
-      return "terminology.equivalents.confidenceHigh"
-    case "AMBER":
-      return "terminology.equivalents.confidenceAmber"
-    case "LOW":
-      return "terminology.equivalents.confidenceLow"
-  }
-}
-
-function ConfidenceChip({ confidence }: { confidence: EquivalentConfidence }) {
-  const t = useT()
+function ConfidenceLabel({ score }: { score: number }) {
+  const { locale, t } = useI18n()
   return (
-    <span
-      className={cn(
-        "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold",
-        confidence === "HIGH" &&
-          "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400",
-        confidence === "AMBER" &&
-          "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400",
-        confidence === "LOW" && "bg-muted text-muted-foreground",
-      )}
-    >
-      {t(confidenceLabelKey(confidence))}
+    <span className="text-[11px] tabular-nums text-muted-foreground">
+      {t("terminology.equivalents.confidence", {
+        confidence: formatPercent(score, locale),
+      })}
     </span>
   )
 }
@@ -106,16 +93,10 @@ function PredictedRow({
   const t = useT()
   const [open, setOpen] = useState(false)
   const hasExamples = prediction.examples.length > 0
-  const sourceLabel =
-    prediction.source === "both"
-      ? t("terminology.equivalents.sourceBoth")
-      : prediction.source === "em"
-        ? t("terminology.equivalents.sourceEm")
-        : t("terminology.equivalents.sourceChi2")
 
   return (
-    <li className="flex flex-col gap-1.5 border-b py-2 last:border-0">
-      <div className="flex items-center gap-2">
+    <li className="flex flex-col gap-1 border-b py-1.5 last:border-0">
+      <div className="flex min-w-0 items-center gap-1.5">
         <button
           type="button"
           className={cn(
@@ -135,28 +116,19 @@ function PredictedRow({
           ) : (
             <span className="w-3" />
           )}
-          <span className="text-sm font-medium">{prediction.target}</span>
+          <span className="text-xs font-medium">{prediction.target}</span>
         </button>
 
-        <ConfidenceChip confidence={prediction.confidence} />
-
-        <span className="text-[10px] text-muted-foreground">{sourceLabel}</span>
-
-        {/* Numeric evidence — kept subtle, signals "this is a guess". */}
-        <span className="ms-auto flex items-center gap-2 font-mono text-[10px] text-muted-foreground">
-          {prediction.chi2 !== undefined && <span>χ²={prediction.chi2.toFixed(1)}</span>}
-          {prediction.emProb !== undefined && <span>p={prediction.emProb.toFixed(2)}</span>}
-        </span>
+        <ConfidenceLabel score={prediction.confidenceScore} />
 
         {canPromote && onPromote && (
           <AppTooltip content={t("terminology.equivalents.promoteTooltip")}>
             <Button
               variant="ghost"
-              size="sm"
-              className="h-6 gap-1 px-1.5 text-[10px]"
+              size="xs"
+              className="ms-auto h-6 px-1.5 text-[10px]"
               onClick={() => onPromote(prediction.target)}
             >
-              <ArrowUp className="h-3 w-3" />
               {t("terminology.equivalents.promoteButton")}
             </Button>
           </AppTooltip>
@@ -195,6 +167,8 @@ export interface EquivalentsPanelProps {
   className?: string
 }
 
+const COLLAPSED_SUGGESTION_COUNT = 3
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export function EquivalentsPanel({
@@ -206,18 +180,24 @@ export function EquivalentsPanel({
   className,
 }: EquivalentsPanelProps) {
   const t = useT()
+  const [showAllSuggestions, setShowAllSuggestions] = useState(false)
+  const sortedPredictions = [...predicted].sort(
+    (a, b) => b.confidenceScore - a.confidenceScore,
+  )
+  const visiblePredictions = showAllSuggestions
+    ? sortedPredictions
+    : sortedPredictions.slice(0, COLLAPSED_SUGGESTION_COUNT)
+  const hasHiddenSuggestions = predicted.length > COLLAPSED_SUGGESTION_COUNT
+
   return (
     <div className={cn("flex flex-col gap-4 text-sm", className)}>
-      {/* ── Managed (deterministic decisions) ── */}
+      {/* ── Approved translations ── */}
       <section className="rounded-lg border bg-card p-3">
         <header className="mb-2 flex items-center gap-1.5">
           <ShieldCheck className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
           <h3 className="text-xs font-semibold text-foreground">
-            {t("terminology.common.managed")}
+            {t("terminology.equivalents.approvedHeading")}
           </h3>
-          <span className="text-[10px] text-muted-foreground">
-            {t("terminology.equivalents.managedSubtitle")}
-          </span>
         </header>
         {managed.length === 0 ? (
           <p className="text-xs text-muted-foreground italic">
@@ -232,15 +212,15 @@ export function EquivalentsPanel({
         )}
       </section>
 
-      {/* ── AI-assumed (probabilistic predictions) ── */}
-      <section className="rounded-lg border border-dashed border-amber-300/60 bg-amber-50/30 p-3 dark:border-amber-800/40 dark:bg-amber-950/10">
+      {/* ── Suggested translations ── */}
+      <section className="rounded-lg border bg-muted/20 p-3">
         <header className="mb-2 flex items-center gap-1.5">
-          <Sparkles className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
+          <Sparkles className="h-3.5 w-3.5 text-muted-foreground" />
           <h3 className="text-xs font-semibold text-foreground">
-            {t("terminology.equivalents.aiAssumedHeading")}
+            {t("terminology.equivalents.suggestedHeading")}
           </h3>
           <span className="text-[10px] text-muted-foreground">
-            {t("terminology.equivalents.aiAssumedSubtitle")}
+            {t("terminology.equivalents.suggestedSubtitle")}
           </span>
         </header>
         {predicted.length === 0 ? (
@@ -248,16 +228,36 @@ export function EquivalentsPanel({
             {t("terminology.equivalents.noPredicted")}
           </p>
         ) : (
-          <ul>
-            {predicted.map((p) => (
-              <PredictedRow
-                key={p.target}
-                prediction={p}
-                canPromote={canPromote}
-                onPromote={onPromote}
-              />
-            ))}
-          </ul>
+          <>
+            <ul>
+              {visiblePredictions.map((p) => (
+                <PredictedRow
+                  key={p.target}
+                  prediction={p}
+                  canPromote={canPromote}
+                  onPromote={onPromote}
+                />
+              ))}
+            </ul>
+            {hasHiddenSuggestions && (
+              <div className="mt-1 flex justify-center border-t pt-1">
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  className="h-6 px-1.5 text-[10px] text-muted-foreground"
+                  aria-expanded={showAllSuggestions}
+                  onClick={() => setShowAllSuggestions((showAll) => !showAll)}
+                >
+                  {showAllSuggestions ? t("common.showLess") : t("common.showMore")}
+                  {showAllSuggestions ? (
+                    <ChevronUp data-icon="inline-end" />
+                  ) : (
+                    <ChevronDown data-icon="inline-end" />
+                  )}
+                </Button>
+              </div>
+            )}
+          </>
         )}
       </section>
     </div>

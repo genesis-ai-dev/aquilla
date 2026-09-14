@@ -14,7 +14,13 @@
 
 import { describe, it, expect, vi, afterEach } from "vitest"
 import { renderHook, waitFor, act } from "@testing-library/react"
-import { useOrgSettings, canEditRosterProgressFloor, canEditTermbaseFloor, canEditEgressFloor } from "./useOrgSettings"
+import {
+  useOrgSettings,
+  canEditRosterProgressFloor,
+  canEditTermbaseFloor,
+  canEditEgressFloor,
+  canEditCommentFloors,
+} from "./useOrgSettings"
 import * as restClient from "@/lib/sync/org-settings"
 import type { OrgSettingsResponse, OrgPatchResult } from "@/lib/sync/org-settings"
 import type { TranslationRule } from "@/lib/parsers/types"
@@ -527,5 +533,219 @@ describe("canEditEgressFloor — owner-only write gate (AQU-907)", () => {
   it("denies when the caller's role is unknown (null/undefined)", () => {
     expect(canEditEgressFloor(null)).toBe(false)
     expect(canEditEgressFloor(undefined)).toBe(false)
+  })
+})
+
+// AQU-1002: the two comment floors. Defaults reproduce post-AQU-999 behaviour
+// exactly — COMMENTER (200) to open a thread, CONTRIBUTOR (400) to resolve one
+// somebody else opened — so an org that never sets them sees no change.
+describe("useOrgSettings — comment floors (AQU-1002)", () => {
+  function makeCommentResponse(settings: Record<string, unknown>): OrgSettingsResponse {
+    return {
+      orgId: 1,
+      settings,
+      version: 1,
+      updatedAt: "2026-01-01T00:00:00Z",
+      updatedBy: 1,
+    }
+  }
+
+  it("defaults to commenter (200) / contributor (400) when the org has set neither", async () => {
+    mockFetchResponse = makeCommentResponse({})
+    const { result } = renderHook(() => useOrgSettings(1, 700))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    expect(result.current.commentCreateMinRole).toBe(200)
+    expect(result.current.commentResolveMinRole).toBe(400)
+  })
+
+  it("reads explicitly configured floors", async () => {
+    mockFetchResponse = makeCommentResponse({
+      commentCreateMinRole: 400,
+      commentResolveMinRole: 600,
+    })
+    const { result } = renderHook(() => useOrgSettings(1, 700))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    expect(result.current.commentCreateMinRole).toBe(400)
+    expect(result.current.commentResolveMinRole).toBe(600)
+  })
+
+  it("keeps the floors independent — setting one leaves the other at its default", async () => {
+    mockFetchResponse = makeCommentResponse({ commentResolveMinRole: 200 })
+    const { result } = renderHook(() => useOrgSettings(1, 700))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    expect(result.current.commentCreateMinRole).toBe(200)
+    expect(result.current.commentResolveMinRole).toBe(200)
+  })
+
+  it("falls back to the defaults for out-of-ladder values", async () => {
+    mockFetchResponse = makeCommentResponse({
+      commentCreateMinRole: 9999,
+      commentResolveMinRole: -1,
+    })
+    const { result } = renderHook(() => useOrgSettings(1, 700))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    expect(result.current.commentCreateMinRole).toBe(200)
+    expect(result.current.commentResolveMinRole).toBe(400)
+  })
+})
+
+describe("canEditCommentFloors — owner-only write gate (AQU-1002)", () => {
+  it("denies a maintainer (600) — who settles other people's threads is org policy", () => {
+    expect(canEditCommentFloors(600)).toBe(false)
+  })
+
+  it("permits an owner (700)", () => {
+    expect(canEditCommentFloors(700)).toBe(true)
+  })
+
+  it("denies when the caller's role is unknown (null/undefined)", () => {
+    expect(canEditCommentFloors(null)).toBe(false)
+    expect(canEditCommentFloors(undefined)).toBe(false)
+  })
+})
+
+// ─── Cross-instance sync ─────────────────────────────────────────────────────
+// WHY: ProjectWorkspace (rule evaluation → editor underlines) and the Living
+// Memory rules section each mount their own useOrgSettings for the same org.
+// Before the sync, a rule promoted on the rules page only updated THAT hook;
+// the editor's copy stayed stale until a full reload, so org rules looked
+// "not applied" while project rules (shared parent state) applied at once.
+describe("useOrgSettings — cross-instance sync of confirmed writes", () => {
+  function orgResponse(orgId: number, ruleIds: string[], version: number): OrgSettingsResponse {
+    const rules: TranslationRule[] = ruleIds.map((id) => ({
+      id,
+      name: id,
+      description: "",
+      severity: "minor",
+      source: "user",
+      scope: "org",
+      check: { type: "target-forbids", targetPattern: "x" },
+      enabled: true,
+      createdAt: "2026-01-01T00:00:00Z",
+    }))
+    return { orgId, settings: { rules }, version, updatedAt: "2026-01-01T00:00:00Z", updatedBy: 1 }
+  }
+
+  /** Two hooks for org 1 (writer + sibling) plus a render counter on the sibling. */
+  async function mountPair() {
+    mockFetchResponse = orgResponse(1, ["r1"], 3)
+    const writer = renderHook(() => useOrgSettings(1, 700))
+    let siblingRenders = 0
+    const sibling = renderHook(() => {
+      siblingRenders++
+      return useOrgSettings(1, 700)
+    })
+    await waitFor(() => expect(writer.result.current.hasFetched).toBe(true))
+    await waitFor(() => expect(sibling.result.current.hasFetched).toBe(true))
+    return { writer, sibling, renders: () => siblingRenders }
+  }
+
+  it("a confirmed patch in one instance reaches a sibling of the same org: no refetch, one render", async () => {
+    const { writer, sibling, renders } = await mountPair()
+    expect(sibling.result.current.orgRules.map((r) => r.id)).toEqual(["r1"])
+    const rendersBefore = renders()
+
+    const confirmed = orgResponse(1, ["r1", "promoted"], 4)
+    vi.mocked(restClient.patchOrgSettings).mockResolvedValueOnce({ kind: "ok", value: confirmed })
+    await act(async () => {
+      await writer.result.current.patch({ rules: confirmed.settings.rules })
+    })
+
+    // The sibling now evaluates against the promoted rule …
+    expect(sibling.result.current.orgRules.map((r) => r.id)).toEqual(["r1", "promoted"])
+    expect(sibling.result.current.version).toBe(4)
+    // … without any network of its own: two initial loads + patch()'s own
+    // pre-write re-read of truth, nothing else.
+    expect(vi.mocked(restClient.fetchOrgSettings)).toHaveBeenCalledTimes(3)
+    // … and at the cost of exactly one extra render (setServer; hasFetched was
+    // already true so that setter bails out).
+    expect(renders()).toBe(rendersBefore + 1)
+
+    writer.unmount()
+    sibling.unmount()
+  })
+
+  it("a conflict outcome fans out the server's latest too", async () => {
+    const { writer, sibling } = await mountPair()
+
+    const latest = orgResponse(1, ["r1", "someone-elses"], 9)
+    vi.mocked(restClient.patchOrgSettings).mockResolvedValueOnce({ kind: "conflict", latest })
+    await act(async () => {
+      await writer.result.current.patch({ rules: [] })
+    })
+
+    expect(sibling.result.current.orgRules.map((r) => r.id)).toEqual(["r1", "someone-elses"])
+    expect(sibling.result.current.version).toBe(9)
+
+    writer.unmount()
+    sibling.unmount()
+  })
+
+  it("drops responses that are not newer, and never crosses orgs", async () => {
+    const { writer, sibling, renders } = await mountPair()
+    let otherOrgRenders = 0
+    mockFetchResponse = orgResponse(2, ["other"], 1)
+    const otherOrg = renderHook(() => {
+      otherOrgRenders++
+      return useOrgSettings(2, 700)
+    })
+    await waitFor(() => expect(otherOrg.result.current.hasFetched).toBe(true))
+    const siblingSettingsBefore = sibling.result.current.settings
+    const siblingRendersBefore = renders()
+    const otherOrgRendersBefore = otherOrgRenders
+
+    // Same version as the sibling already holds → nothing to adopt.
+    mockFetchResponse = orgResponse(1, ["r1"], 3)
+    vi.mocked(restClient.patchOrgSettings).mockResolvedValueOnce({ kind: "ok", value: orgResponse(1, ["r1"], 3) })
+    await act(async () => {
+      await writer.result.current.patch({ rules: [] })
+    })
+
+    expect(sibling.result.current.settings).toBe(siblingSettingsBefore)
+    expect(renders()).toBe(siblingRendersBefore)
+    expect(otherOrg.result.current.orgRules.map((r) => r.id)).toEqual(["other"])
+    expect(otherOrgRenders).toBe(otherOrgRendersBefore)
+
+    // A genuinely newer write for org 1 still leaves org 2 alone.
+    vi.mocked(restClient.patchOrgSettings).mockResolvedValueOnce({ kind: "ok", value: orgResponse(1, ["r1", "r2"], 4) })
+    await act(async () => {
+      await writer.result.current.patch({ rules: [] })
+    })
+    expect(sibling.result.current.version).toBe(4)
+    expect(otherOrg.result.current.version).toBe(1)
+    expect(otherOrgRenders).toBe(otherOrgRendersBefore)
+
+    writer.unmount()
+    sibling.unmount()
+    otherOrg.unmount()
+  })
+
+  it("an unmounted sibling is unsubscribed: no delivery, no error", async () => {
+    const { writer, sibling } = await mountPair()
+    sibling.unmount()
+
+    vi.mocked(restClient.patchOrgSettings).mockResolvedValueOnce({ kind: "ok", value: orgResponse(1, ["r1", "late"], 4) })
+    let outcome: Awaited<ReturnType<typeof writer.result.current.patch>> | undefined
+    await act(async () => {
+      outcome = await writer.result.current.patch({ rules: [] })
+    })
+    expect(outcome?.kind).toBe("ok")
+    expect(writer.result.current.version).toBe(4)
+
+    writer.unmount()
+  })
+})
+
+describe("orgRules identity (AQU-1104)", () => {
+  it("keeps the same empty orgRules array across re-renders when the org has no rules", async () => {
+    mockFetchResponse = makeResponse()
+    const { result, rerender } = renderHook(() => useOrgSettings(1, 700))
+    const beforeFetch = result.current.orgRules
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    const afterFetch = result.current.orgRules
+    rerender()
+    expect(result.current.orgRules).toBe(afterFetch)
+    expect(afterFetch).toBe(beforeFetch)
+    expect(afterFetch).toEqual([])
   })
 })

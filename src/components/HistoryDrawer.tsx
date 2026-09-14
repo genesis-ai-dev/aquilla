@@ -290,6 +290,15 @@ function GroupItem({
     ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400"
     : "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400"
   const hasSubEntries = group.entries.length > 1
+  // AQU-1159: any non-current entry can be restored, not only bumped ones.
+  // Restoring emits a new commit chained on the current head (see onPromote).
+  // Unsynced local entries are skipped: their value is not yet on the server,
+  // so a commit "restoring" it would be meaningless.
+  const canRestore =
+    !!onPromote &&
+    !isCurrent &&
+    terminal.syncState !== "pending" &&
+    terminal.syncState !== "failed"
 
   return (
     <li
@@ -371,17 +380,24 @@ function GroupItem({
           {t("editor.history.examples", { count: terminal.examples.length })}
         </div>
       )}
-      {isStale && onPromote && !pendingPromote && (
+      {canRestore && !pendingPromote && (
         <button
           onClick={() => setPendingPromote(true)}
-          className="mt-2 text-[11px] font-medium text-amber-700 hover:text-amber-900 dark:text-amber-300 dark:hover:text-amber-100 underline underline-offset-2"
+          className={cn(
+            "mt-2 text-[11px] font-medium underline underline-offset-2",
+            isStale
+              ? "text-amber-700 hover:text-amber-900 dark:text-amber-300 dark:hover:text-amber-100"
+              : "text-primary hover:text-primary/80",
+          )}
         >
-          {t("editor.history.promote")}
+          {isStale ? t("editor.history.promote") : t("editor.history.restore")}
         </button>
       )}
-      {isStale && onPromote && pendingPromote && (
+      {canRestore && pendingPromote && (
         <div className="mt-2 flex items-center gap-2 text-[11px]">
-          <span className="text-muted-foreground">{t("editor.history.promoteConfirm")}</span>
+          <span className="text-muted-foreground">
+            {isStale ? t("editor.history.promoteConfirm") : t("editor.history.restoreConfirm")}
+          </span>
           <button
             onClick={() => { onPromote(terminal); setPendingPromote(false) }}
             className="font-medium text-primary hover:text-primary/80"

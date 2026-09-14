@@ -22,10 +22,11 @@ import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { OrgCreateDialog } from "./OrgCreateDialog"
 import { LaneChips } from "./LaneChips"
 import { ProjectMetricHeader } from "./ProjectMetricHeader"
-import { displayLanes } from "./project-lanes"
+import { displayLanes, resolveDefaultLaneLabel } from "./project-lanes"
 import { ProjectStatusFilter } from "./ProjectStatusFilter"
 import { OrgProjectsDataTable } from "./OrgProjectsDataTable"
 import type { StatusFilter } from "@/hooks/useOrgPortfolio"
+import { useProjectDirectory } from "@/hooks/useProjectDirectory"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   partitionSharedProjects,
@@ -47,9 +48,11 @@ import { cn } from "@/lib/utils"
 import { Search, Building2, Sparkles, CircleCheck, Mic, AlertTriangle } from "lucide-react"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
+import { SignedOutWorkspace } from "./SignedOutWorkspace"
 
+/** Bounded pane height so LegendList can virtualize instead of growing with content. */
 const PANEL_MAX_H =
-  "max-h-[clamp(14rem,calc(100dvh-22rem),28rem)]"
+  "h-[clamp(14rem,calc(100dvh-22rem),28rem)]"
 
 function DashboardRowTemplate() {
   return (
@@ -484,7 +487,7 @@ export function ProjectTable({
                   <LaneChips
                     projectId={p.id}
                     lanes={displayLanes(p)}
-                    defaultLaneLabel={defaultLaneLabelByProjectId?.get(p.id) ?? ""}
+                    defaultLaneLabel={resolveDefaultLaneLabel(p, defaultLaneLabelByProjectId?.get(p.id))}
                     maxVisible={2}
                     className="w-full"
                   />
@@ -562,7 +565,20 @@ export function OrgHome() {
   const [orgCreateOpen, setOrgCreateOpen] = useState(false)
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
   const [originFilter, setOriginFilter] = useState<"all" | "member" | "shared">("all")
+  const [projectQuery, setProjectQuery] = useState("")
   const projectLens = readProjectLens()
+  const directoryOrgIds = useMemo(() => orgs.map((org) => org.id), [orgs])
+  const orgById = useMemo(() => new Map(orgs.map((org) => [org.id, org])), [orgs])
+  const pmByProjectId = useMemo(
+    () => new Map(accessibleProjects.map((project) => [project.id, project.pm ?? null])),
+    [accessibleProjects],
+  )
+  const directory = useProjectDirectory({
+    jwt,
+    enabled: Boolean(jwt) && !orgLoading && directoryOrgIds.length > 0,
+    query: projectQuery,
+    orgIds: directoryOrgIds,
+  })
 
   useEffect(() => {
     if (!jwt) {
@@ -626,24 +642,8 @@ export function OrgHome() {
   // Never show zero-stat fake-empty cards for unauthenticated visitors.
   if (!sessionLoading && !jwt) {
     return (
-      <AppShell
-        sidebar={<OrgSidebar />}
+      <SignedOutWorkspace
         header={<OrgBreadcrumb section="Overview" isProjectsLanding />}
-        statusBar={null}
-        main={
-          <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
-            <p className="text-lg font-medium">{t("org.orgHome.signedOut.heading")}</p>
-            <p className="text-sm text-muted-foreground max-w-xs">
-              {t("org.orgHome.signedOut.description")}
-            </p>
-            <Link
-              to={`/login?next=${encodeURIComponent("/")}`}
-              className={cn(buttonVariants())}
-            >
-              {t("auth.login.submitDefault")}
-            </Link>
-          </div>
-        }
       />
     )
   }
@@ -759,11 +759,13 @@ export function OrgHome() {
   const attentionCount = projects.filter((p) => portfolioAttentionReasons(p, now).length > 0).length
 
   // AQU-507: the portfolio feed (which backs these rows) has no PM dimension;
-  // merge it in from the accessible-projects feed when available — here we rely
-  // only on portfolio rows (all-orgs table).
-  const projectsWithPm: PortfolioProjectRow[] = projects.map((project) => ({
+  // merge it in from the accessible-projects feed when available.
+  const projectsWithPm: PortfolioProjectRow[] = directory.projects.map((project) => ({
     ...project,
+    orgId: project.orgId,
+    orgName: (project.orgId != null ? orgById.get(project.orgId)?.name : null) ?? "Workspace",
     origin: "member" as const,
+    pm: pmByProjectId.has(project.id) ? pmByProjectId.get(project.id) ?? null : project.pm,
   }))
   const username = session?.username ?? null
   const sharedWithMe = partitionSharedProjects(
@@ -773,6 +775,7 @@ export function OrgHome() {
     "all-orgs",
   ).sharedWithMe
   const memberIds = new Set(projectsWithPm.map((p) => p.id))
+  const queryNorm = projectQuery.trim().toLowerCase()
   const sharedRows: PortfolioProjectRow[] = sharedWithMe
     .filter((p) => !memberIds.has(p.id))
     .map((p) => ({
@@ -781,14 +784,22 @@ export function OrgHome() {
         ? isProjectNew(p.grantedAt, readProjectOpenedAt(username, p.id))
         : false,
     }))
+    .filter((row) =>
+      queryNorm === ""
+        ? true
+        : `${row.name} ${row.orgName ?? ""} ${row.pm?.username ?? ""}`.toLowerCase().includes(queryNorm),
+    )
   const tableProjects: PortfolioProjectRow[] = [...projectsWithPm, ...sharedRows]
   const hasNewSharedProjects = sharedRows.some((p) => p.isNew)
   // Hide org-rollup chrome when there is nothing to roll up — a project-only
   // invitee still gets the same projects table, just without fake 0/0/0 stats.
   const showOrgRollup = orgs.length > 0
   // AQU-538 §3.2: the '' (default) lane chip is labeled with the project's
-  // target language — portfolio alone doesn't join file languages; empty map
-  // falls back to generic "Default" labels.
+  // target language. This all-orgs view has no per-file language hints to join,
+  // so the map stays empty — AQU-606: `resolveDefaultLaneLabel` reads the
+  // project-level `targetLanguage` off the row itself, so the chip still shows
+  // the real language and only a genuinely untargeted project falls back to the
+  // neutral placeholder.
   const defaultLaneLabelByProjectId = new Map<string, string>()
 
   const orgSummaries: OrgPortfolioSummary[] = orgs
@@ -948,6 +959,14 @@ export function OrgHome() {
                         testId="project-table"
                         defaultLaneLabelByProjectId={defaultLaneLabelByProjectId}
                         initialLens={statusFilter === "attention" ? "attention" : projectLens}
+                        searchValue={projectQuery}
+                        onSearchChange={setProjectQuery}
+                        searching={directory.searching}
+                        hasMore={originFilter !== "shared" && directory.hasMore}
+                        onLoadMore={directory.loadMore}
+                        loadingMore={directory.loadingMore}
+                        loading={directory.loading && directory.projects.length === 0}
+                        loadingLabel={t("org.projectsList.loadingLabel")}
                         toolbarLeading={
                           <div className="flex flex-wrap items-center gap-2">
                             {sharedRows.length > 0 && (
@@ -1024,7 +1043,7 @@ export function OrgHome() {
                 >
                   <div
                     data-testid="organizations-scroll"
-                    className="min-h-0 min-w-0 overflow-x-auto overflow-y-auto overscroll-contain"
+                    className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
                   >
                     {orgSummaries.length === 0 ? (
                       <EmptyState
@@ -1054,6 +1073,7 @@ export function OrgHome() {
                           "mx-0",
                         )}
                         dense
+                        fillHeight
                         emptyState={
                           <EmptyState
                             variant="inline"

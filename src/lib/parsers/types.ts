@@ -13,10 +13,28 @@ import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { PersistedTrackOverrides } from "@/lib/timeline/tracks"
 import type { CameraState } from "@/lib/sync/cells-read-types"
 
-export type FileType = "md" | "docx" | "pptx" | "idml" | "xlsx" | "txt" | "html" | "epub" | "json" | "po" | "properties" | "vtt" | "srt" | "sbv" | "usfm" | "ebible" | "helloao" | "xliff" | "tmx" | "csv" | "tsv" | "audio" | "video" | "obs" | "sdbh" | "custom"
+/**
+ * AQU-997: `"codex"` and `"source"` were reaching the client from the wire long
+ * before they were admitted here — `files.fileType` is the server's
+ * `kind ?? role`, so a migrated Codex notebook arrives as `"codex"` and a row
+ * with no `kind` falls back to its `role`, `"source"`. `cloud-projects.ts`
+ * widens both in with `f.type as FileType`, which is exactly why the gap went
+ * unnoticed: nothing type-errored, the values simply failed every predicate
+ * that tests membership of a literal set.
+ */
+export type FileType = "md" | "docx" | "pptx" | "idml" | "xlsx" | "txt" | "html" | "epub" | "json" | "po" | "properties" | "vtt" | "srt" | "sbv" | "usfm" | "ebible" | "helloao" | "xliff" | "tmx" | "csv" | "tsv" | "audio" | "video" | "obs" | "sdbh" | "codex" | "source" | "custom"
 
-/** File types whose parsers produce scripture-style sections (globalReferences populated, section labels meaningful). */
-export const SCRIPTURE_FILE_TYPES: ReadonlySet<FileType> = new Set(["usfm", "ebible", "helloao"])
+/** File types whose parsers produce scripture-style sections (globalReferences
+ *  populated, section labels meaningful).
+ *
+ *  AQU-997: `"codex"` — Aquilla's native Scripture notebook format, what every
+ *  book of a migrated Codex project is stored as — belongs here for the same
+ *  reason `"usfm"` does: its cells are verses, addressed canonically. Its
+ *  absence is what hid the Parallel Bibles panel (and its collapsed edge tab,
+ *  and file-tree expandability) for a project whose books are all codex files.
+ *  `"source"` is deliberately NOT here: it is the generic `role` fallback for
+ *  a row carrying no `kind`, not a Scripture format. */
+export const SCRIPTURE_FILE_TYPES: ReadonlySet<FileType> = new Set(["usfm", "ebible", "helloao", "codex"])
 export function fileTypeHasSections(type: FileType): boolean {
   return SCRIPTURE_FILE_TYPES.has(type)
 }
@@ -80,7 +98,11 @@ export interface TranslationRule {
   description: string
   severity: "major" | "minor"
   source: "algorithmic" | "llm" | "user"
-  scope: "project" | "org"
+  scope: "project" | "org" | "lane"
+  /** For lane-scoped rules (AQU-609): the target-language lane this rule
+   *  applies to. `''` is the project-default lane (matching the cells/lanes
+   *  convention from AQU-538). Only meaningful when `scope === "lane"`. */
+  lane?: string
   check: RuleCheck
   enabled: boolean
   createdAt: string
@@ -91,8 +113,8 @@ export interface TranslationRule {
 }
 
 export type RuleCheck =
-  | { type: "source-requires-target"; sourcePattern: string; targetPattern: string }
-  | { type: "target-forbids"; targetPattern: string }
+  | { type: "source-requires-target"; sourcePattern: string; targetPattern: string; caseSensitive?: boolean }
+  | { type: "target-forbids"; targetPattern: string; caseSensitive?: boolean }
   | { type: "source-target-match"; pattern: string }
   | { type: "builtin"; checkId: BuiltinCheckId }
 
@@ -157,6 +179,8 @@ export interface RuleInfraction {
    * joined) and `count` (how many) — both are RAW content lifted from the
    * cell (via `InfractionSpan.matchedText`) and must never be routed through
    * `t()`, only interpolated as a variable.
+   * `source-requires-target`: `sourceCount` and `targetCount` (instance
+   * counts as decimal strings).
    */
   reasonParams?: Record<string, string>
   /** Triggering text spans. Empty when the violation has no identifiable
@@ -379,6 +403,18 @@ export interface ProjectRecord {
    * every terminology write, so this is an affordance value, not authority.
    */
   termbaseEditMinRole?: number | null
+  /**
+   * AQU-1002: the org's effective comment floors — the minimum role to open a
+   * thread (`commentCreateMinRole`) and to resolve/reopen a thread somebody
+   * else opened (`commentResolveMinRole`). Sent by the single-project endpoint
+   * so the comments drawer and Comments page can gate their controls honestly
+   * without an org-settings fetch of their own. Absent (older server /
+   * local-only project) ⇒ the defaults in `src/lib/sync/role-policy.ts`.
+   * sync-worker re-resolves both on every comment write, so these are
+   * affordance values, not authority.
+   */
+  commentCreateMinRole?: number | null
+  commentResolveMinRole?: number | null
   sourceLanguage: string
   targetLanguage: string
   /**
@@ -419,6 +455,13 @@ export interface ProjectRecord {
    *  turned on in project settings — see ProjectWideSettings.allowLineCreation.
    *  Deleting an empty added line is not gated on it. */
   allowLineCreation?: boolean
+  /** AQU-646 stage 2: may this project's timelines be restructured — tracks
+   *  added, deleted, foldered, recoloured? Off unless turned on; a SECOND gate
+   *  on top of the maintainer floor, so with it off the write is refused even
+   *  to an owner. Rename and drag-to-reorder are NOT gated on it. See
+   *  ProjectWideSettings.allowTrackEditing for why it diverges from its
+   *  sibling above on stranding. */
+  allowTrackEditing?: boolean
   /**
    * AQU-701: set when the user explicitly skips the voice & transcription setup
    * step ("we don't use voice or transcription"). Marks that step complete in
@@ -573,29 +616,7 @@ export interface ProjectRecord {
    *  front matter (per-project opt-out). Synced via ProjectWideSettings; absent/
    *  false imports front matter as translatable cells. */
   importExcludeFrontMatter?: boolean
-  /**
-   * AQU-1087: chapter-paged editor. Absent/false = current full-book scroll.
-   * When true, the editor shows one chapter at a time. Overlaid from
-   * ProjectWideSettings by useProject's overlaySettings.
-   */
-  chapterPagingEnabled?: boolean
-  /**
-   * AQU-1087: what counts as "this chapter is done" when paging is on.
-   * Absent → allTranslated. Ignored when chapterPagingEnabled is off.
-   */
-  chapterCompletionTrigger?: ChapterCompletionTrigger
-  /**
-   * AQU-1087: what the editor does when the completion trigger fires.
-   * Absent → prompt. Ignored when paging is off or the trigger is manual.
-   */
-  chapterCompletionAction?: ChapterCompletionAction
 }
-
-/** AQU-1087: how a chapter-paged editor decides the current chapter is done. */
-export type ChapterCompletionTrigger = "allTranslated" | "allValidated" | "manual"
-
-/** AQU-1087: what the editor does when the chapter-completion trigger fires. */
-export type ChapterCompletionAction = "prompt" | "autoAdvance" | "stay"
 
 /** A single authored guidance entry in the Living Memory page. */
 export interface LivingMemoryEntry {
@@ -673,6 +694,12 @@ export interface FileReference {
    * applicable and which belong to a build newer than this one.
    */
   trackOverrides?: PersistedTrackOverrides | null
+  /**
+   * AQU-656: true when this file has an original import blob. Set on
+   * document imports that uploaded source bytes; absent/false otherwise
+   * (audio/video, Codex-migrated, pre-sidecar).
+   */
+  hasOriginalSource?: boolean
   /**
    * The files-table `role` column. `"source"` for every ordinary import — the
    * value that matters is `"audio-cues"` (see `AUDIO_CUES_ROLE`), which marks a

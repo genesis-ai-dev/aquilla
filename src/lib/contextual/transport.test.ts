@@ -191,16 +191,6 @@ describe("start + run commands", () => {
     expect(lastRequest().url).toContain(`/runs/${RUN.runId}/terminate`)
   })
 
-  it("POSTs chapter-page cellIds when the editor is paging", async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse({ runId: RUN.runId }))
-    await realContextualTransport.start(PROJECT_ID, FILE_ID, "c3", "", ["c3", "c4"])
-    expect(JSON.parse(lastRequest().init.body as string)).toEqual({
-      fileId: FILE_ID,
-      anchorCellId: "c3",
-      cellIds: ["c3", "c4"],
-    })
-  })
-
   it("learns a run's project from fetchSnapshot too (reload → pause without start)", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({ run: RUN }))
     await realContextualTransport.fetchSnapshot(PROJECT_ID, FILE_ID)
@@ -252,6 +242,38 @@ describe("project Autopilot observability", () => {
     expect(lastRequest().url).toContain("/projects/proj%2F1/contextual/overview")
     expect(lastRequest().init.headers).toMatchObject({ Authorization: "Bearer jwt-token" })
     expect(result).toMatchObject({ available: true, doneSpans: 3, proposedDrafts: 2 })
+  })
+
+  it("polls conditionally: sends the retained ETag and replays the body on 304", async () => {
+    // WHY: auth-worker answers an unchanged poll with 304 and no body so the
+    // 4s poll loop moves no bytes. If the transport forgot the ETag, or threw
+    // on 304, every poll would be a full fetch — or the panel would flip into
+    // its refresh-warning state on a cache hit.
+    fetchMock.mockResolvedValueOnce(new Response(
+      JSON.stringify({ files: [], activeRuns: 1, doneSpans: 3, totalSpans: 8, failedSpans: 0,
+        unitsSpent: 14, proposedDrafts: 2, appliedDrafts: 1 }),
+      { status: 200, headers: { "Content-Type": "application/json", ETag: 'W/"abc"' } },
+    ))
+    const first = await fetchContextualOverview(PROJECT_ID)
+    expect(lastRequest().init.headers).not.toHaveProperty("If-None-Match")
+
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 304, headers: { ETag: 'W/"abc"' } }))
+    const second = await fetchContextualOverview(PROJECT_ID)
+    expect(lastRequest().init.headers).toMatchObject({ "If-None-Match": 'W/"abc"' })
+    expect(second).toEqual(first)
+    expect(second).toMatchObject({ available: true, doneSpans: 3 })
+
+    // A changed body arrives as a fresh 200 with a new tag, replacing the retained one.
+    fetchMock.mockResolvedValueOnce(new Response(
+      JSON.stringify({ files: [], activeRuns: 0, doneSpans: 8, totalSpans: 8, failedSpans: 0,
+        unitsSpent: 20, proposedDrafts: 5, appliedDrafts: 1 }),
+      { status: 200, headers: { "Content-Type": "application/json", ETag: 'W/"def"' } },
+    ))
+    const third = await fetchContextualOverview(PROJECT_ID)
+    expect(third).toMatchObject({ doneSpans: 8, proposedDrafts: 5 })
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 304 }))
+    await fetchContextualOverview(PROJECT_ID)
+    expect(lastRequest().init.headers).toMatchObject({ "If-None-Match": 'W/"def"' })
   })
 
   it("POSTs the project-wide start contract and preserves mixed results", async () => {

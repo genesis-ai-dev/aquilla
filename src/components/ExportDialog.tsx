@@ -51,6 +51,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Input } from "@/components/ui/input"
 import { downloadBlob } from "@/lib/export/export-service"
 import { collectInlineStyleWarnings, type ExportFidelityWarning } from "@/lib/export/fidelity"
+import { chapterFilenameSuffix, filterCellsByChapter, listChapterLabels } from "@/lib/export/chapter-scope"
 import { downloadSourceFile, downloadProjectZip, fetchSourceSidecar } from "@/lib/sync/source-export"
 import { exportPlainTextStructured } from "@/lib/export/exporters/plaintext"
 import { exportMarkdownStructured } from "@/lib/export/exporters/markdown"
@@ -77,6 +78,8 @@ import {
   type SubtitleTarget,
 } from "@/lib/export/export-dialog-memory"
 import type { CellData } from "@/hooks/useCells"
+import { isDefaultTrackSlot } from "@/lib/timeline/track-slots"
+import type { TimelineTrack } from "@/lib/timeline/tracks"
 import { isSubtitleImportFile } from "@/lib/parsers/types"
 import type { CharacterResolution, ProjectTtsSettings } from "@/lib/parsers/types"
 import posthog from "@/lib/posthog"
@@ -295,6 +298,15 @@ interface ExportDialogProps {
   /** Name the character for a cell the way the timeline and recorder do — via
    *  the links, so it works whichever character sheet was imported. */
   resolveCharacterName?: (cell: CellData) => string | null
+  /**
+   * AQU-646 stage 4: the file's timeline tracks.
+   *
+   * Two jobs. The per-line export enumerates them to write a folder each; and
+   * their mere EXISTENCE decides whether the by-character option carries its
+   * "these are not included" notice — Sam's rule is about tracks having been
+   * added, not about whether anybody has recorded onto them yet.
+   */
+  timelineTracks?: readonly TimelineTrack[]
   projectId: string
   projectName: string
   /** The active file's id, used for USFM file-scope export. */
@@ -368,6 +380,7 @@ export function ExportDialog({
   cells,
   audioCells,
   resolveCharacterName,
+  timelineTracks,
   projectId,
   projectName,
   activeFileId,
@@ -529,7 +542,17 @@ export function ExportDialog({
     const hasTake = (list: CellData[] | undefined) =>
       list?.some((c) => {
         const id = c.selectedAudioId ?? c.selectedGeneratedVoiceAudioId
-        return id != null && Boolean(c.attachments?.[id]?.url)
+        if (id != null && Boolean(c.attachments?.[id]?.url)) return true
+        // AQU-646 stage 4: AN ADDED TRACK'S TAKE COUNTS AS AUDIO.
+        //
+        // Reading only the default row's two slots meant a file whose
+        // recordings live entirely on an added track looked take-less, so the
+        // audio card offered nothing at all — and "per-line carries the new
+        // tracks" would have been a promise you could not reach.
+        return Object.entries(c.selectedBySlot ?? {}).some(
+          ([slot, audioId]) =>
+            !isDefaultTrackSlot(slot) && Boolean(c.attachments?.[audioId]?.url),
+        )
       }) === true
     if (hasTake(audioCells)) return audioCells!
     if (hasTake(cells)) return cells
@@ -568,6 +591,77 @@ export function ExportDialog({
     () => audioPreview.reduce((n, c) => n + c.clipCount, 0),
     [audioPreview],
   )
+  /**
+   * AQU-646 stage 4: takes living on ADDED tracks, which the preview above
+   * cannot see.
+   *
+   * `previewAudioByCharacter` describes the by-character deliverable, and that
+   * deliverable is deliberately default-track-only (Sam, 2026-08-26) — so the
+   * preview stays exactly as it is. But the export BUTTON is shared by both
+   * shapes, and gating it on the preview alone would leave it dead on a file
+   * whose only recordings are on an added track, with a per-line export sitting
+   * right there that would have written them.
+   */
+  const addedTrackTakes = useMemo(
+    () =>
+      audioSourceCells.reduce(
+        (n, c) =>
+          n +
+          Object.entries(c.selectedBySlot ?? {}).filter(
+            ([slot, audioId]) =>
+              !isDefaultTrackSlot(slot) && Boolean(c.attachments?.[audioId]?.url),
+          ).length,
+        0,
+      ),
+    [audioSourceCells],
+  )
+  /**
+   * Does this file carry tracks beyond the four derived ones?
+   *
+   * FOLDERS DO NOT COUNT, and that is Sam's own rule read back: "folders are
+   * not tracks". A folder holds no takes, so warning that one will not be
+   * exported would be noise about a thing that could never have been.
+   */
+  const hasAddedAudioTracks = useMemo(
+    () => (timelineTracks ?? []).some((t) => t.kind === "audio"),
+    [timelineTracks],
+  )
+
+  /**
+   * OPEN ON A MODE THAT CAN ACTUALLY PRODUCE SOMETHING. (Sam, 2026-08-27)
+   *
+   * "By character" reads the default Target audio row only, deliberately — so
+   * on a file whose takes all live on ADDED tracks it finds nothing, while the
+   * Export button beside it is enabled (its gate is an OR across both counters,
+   * blind to the mode) and refuses AFTER the press with "No recordings found in
+   * this file". Untrue of a file that plainly has recordings, and the preview
+   * beside it agreed with the lie.
+   *
+   * The same discipline `export-dialog-memory.ts` states for itself — validate
+   * on read against the live thing, not against what was stored — applied to
+   * the one field it cannot validate on its own, because only this component
+   * knows what the file holds.
+   *
+   * A FALLBACK, NOT AN OVERRIDE. It waits until the counts mean something
+   * (they are both zero while the cells are still arriving), fires at most once
+   * per opening, and never touches a mode that works — so switching back to by
+   * character afterwards stands.
+   *
+   * Its own effect rather than a line in the restore above, because a
+   * dependency array is evaluated at RENDER: naming these counts up there,
+   * where they are not yet declared, is a temporal-dead-zone crash.
+   */
+  const steeredModeRef = useRef(false)
+  useEffect(() => {
+    if (!open) {
+      steeredModeRef.current = false
+      return
+    }
+    if (steeredModeRef.current) return
+    if (recordedLines === 0 && addedTrackTakes === 0) return
+    steeredModeRef.current = true
+    if (recordedLines === 0 && addedTrackTakes > 0) setAudioMode("audio-by-line")
+  }, [open, recordedLines, addedTrackTakes])
 
   /** Which of the two audio deliverables the Audio card will produce. They are
    *  two forms of one thing — a mix track and a review folder — so they share a
@@ -655,6 +749,20 @@ export function ExportDialog({
   // inside either file.
   const isProjectOnlyFormat = format === "sdbh-xml" || format === "project-report"
   const effectiveScope: ExportScope = isProjectOnlyFormat ? "project" : isFileOnlyFormat ? "file" : scope
+
+  /**
+   * AQU-465: the formats a chapter can be sliced out of.
+   *
+   * Exactly the formats built from the in-memory cell array (the `filteredCells`
+   * branch of handleExport). The round-trip formats are deliberately absent:
+   * USFM/DOCX/PPTX/IDML reinject translations into the ORIGINAL document —
+   * USFM server-side — so there is no cell array to filter, and handing back a
+   * one-chapter .docx would mean rebuilding the document rather than exporting
+   * it. Those stay whole-file.
+   */
+  const chapterScopeFormats = ["txt", "md", "tsv", "csv", "xlf", "tmx", "vtt", "srt", "plain-text-dump", "metadata-csv"] as const
+  const supportsChapterScope = (fmt: ExportFormat): boolean =>
+    (chapterScopeFormats as readonly string[]).includes(fmt)
 
   // SDBH XML export needs the original MARBLE edition as the skeleton.
   const [sdbhSkeleton, setSdbhSkeleton] = useState<File | null>(null)
@@ -748,6 +856,16 @@ export function ExportDialog({
     return Array.from(names).sort()
   }, [cells])
 
+  // Same Base UI label rule as `chapterItems` below: without `items` the
+  // "All voices" option ("") renders an empty trigger.
+  const voiceItems = useMemo(
+    () => [
+      { value: "", label: t("importExport.dialog.allVoices") },
+      ...distinctVoices.map((v) => ({ value: v, label: v })),
+    ],
+    [distinctVoices, t],
+  )
+
   // Reset voice filter when dialog closes or cells change.
   useEffect(() => {
     if (!open) setVoiceFilter("")
@@ -761,6 +879,45 @@ export function ExportDialog({
     if (!voiceFilter) return cs
     return cs.filter((c) => getCellVoice(c) === voiceFilter)
   }
+
+  // AQU-465: Chapter scope — the middle ground between "current file" and
+  // "whole project". "" = every chapter, the same "no filter" contract the
+  // voice filter uses.
+  const [chapterFilter, setChapterFilter] = useState<string>("")
+
+  const chapterLabels = useMemo(() => listChapterLabels(cells), [cells])
+
+  // Base UI resolves the trigger's label from the root's `items`, not from
+  // the mounted <SelectItem>s, and falls back to the raw value string when
+  // there are none. "GEN 2" is its own label so it looked fine; "" — the
+  // "All chapters" option — rendered an empty trigger.
+  const chapterItems = useMemo(
+    () => [
+      { value: "", label: t("importExport.dialog.allChapters") },
+      ...chapterLabels.map((c) => ({ value: c, label: c })),
+    ],
+    [chapterLabels, t],
+  )
+
+  /** Only offered where it means something: a file with more than one chapter,
+   *  exporting itself (not the project) through a cell-array format. */
+  const canScopeToChapter =
+    effectiveScope === "file" && supportsChapterScope(format) && chapterLabels.length > 1
+  const activeChapter = canScopeToChapter ? chapterFilter : ""
+
+  // Drop the chapter on close, on a file switch, and whenever the remembered
+  // label is not in the current file. WITHOUT THE LAST CLAUSE a "GEN 3" left
+  // over from the previous file would filter every cell away and export an
+  // empty document — the same trap the format-reset effect above guards.
+  useEffect(() => {
+    if (!open) setChapterFilter("")
+  }, [open])
+  useEffect(() => {
+    setChapterFilter("")
+  }, [activeFileId])
+  useEffect(() => {
+    if (chapterFilter && !chapterLabels.includes(chapterFilter)) setChapterFilter("")
+  }, [chapterFilter, chapterLabels])
 
   // Load cells for all project files when project scope is selected and the
   // format is a client-side one. Disabled until the user actually picks
@@ -1052,6 +1209,10 @@ export function ExportDialog({
         const result = await exportAudioPerLine({
           cells: audioSourceCells,
           resolveName: resolveCharacterName,
+          // AQU-646 stage 4: per line is the deliverable that carries every
+          // track (Sam, 2026-08-26). Absent, or with only the derived rows, it
+          // writes the flat classic zip exactly as before.
+          tracks: timelineTracks,
           settings: ttsSettings,
           projectId,
           langCode: targetLanguage || "und",
@@ -1079,6 +1240,16 @@ export function ExportDialog({
         if (result.untimed > 0) {
           lineNotes.push(
             `${result.untimed} ${result.untimed === 1 ? "has" : "have"} no timing, so ${result.untimed === 1 ? "it carries" : "they carry"} no timestamp`,
+          )
+        }
+        // 2026-08-27: a trim is applied on the way out, so the file holds what
+        // the line sounds like. That is a byte-range cut on a PCM WAV and
+        // needs no decoder — but a webm or mp3 take cannot be cut that way, so
+        // it goes out whole. Said out loud, because a file longer than its
+        // line is not something anyone notices until the mix.
+        if (result.untrimmed > 0) {
+          lineNotes.push(
+            `${result.untrimmed} ${result.untrimmed === 1 ? "is" : "are"} not a WAV, so ${result.untrimmed === 1 ? "its trim" : "their trims"} could not be applied`,
           )
         }
         setStatus({
@@ -1239,13 +1410,24 @@ export function ExportDialog({
         // the AUDIO character sheet was imported — so filtering here would
         // silently hand back an empty file on every project that imported only
         // the subtitle sheet.
-        const filteredCells = opts?.audioCues ? (audioCells ?? []) : applyVoiceFilter(cells)
+        //
+        // AQU-465: the chapter narrows the same array, after the voice. It is
+        // NOT applied to the cues (they are the sibling's rows, filtered above
+        // for the same reason the voice filter skips them) and not to the
+        // primary "Download <file>" action — that one means "give me my file
+        // back", whole, whatever chapter the fold happens to be showing.
+        const chapter = overrideFormat || opts?.audioCues ? "" : activeChapter
+        const filteredCells = opts?.audioCues
+          ? (audioCells ?? [])
+          : [...filterCellsByChapter(applyVoiceFilter(cells), chapter)]
         let blob: Blob
         // `_audio` rather than the sibling's own name (`<file> · audio cues`),
         // which carries a space and a middle dot and would need sanitising
         // into something unrecognisable anyway. This matches the audio zips'
         // suffixes, so all four of this file's audio deliverables sort together.
-        const baseName = buildExportStem(false) + (opts?.audioCues ? "_audio" : "")
+        const baseName = buildExportStem(false)
+          + chapterFilenameSuffix(chapter)
+          + (opts?.audioCues ? "_audio" : "")
         const ext = fmtOption.ext
         switch (fmt) {
           case "txt":
@@ -1450,9 +1632,16 @@ export function ExportDialog({
                     </span>
                   </div>
                 ))}
+                {/* This preview describes the BY-CHARACTER deliverable, which
+                    reads the default row only — so on a file whose takes live
+                    on added tracks "nothing is recorded" is false, and sat one
+                    line away from a button that had just refused for the same
+                    reason (2026-08-27). Say what is actually true. */}
                 {recorded.length === 0 && (
                   <p className="text-muted-foreground">
-                    {t("importExport.dialog.nothingRecordedYet")}
+                    {addedTrackTakes > 0
+                      ? t("importExport.dialog.nothingOnMainTrack", { count: addedTrackTakes })
+                      : t("importExport.dialog.nothingRecordedYet")}
                   </p>
                 )}
                 {/* The rest, folded away — still countable at a glance, still
@@ -1617,6 +1806,22 @@ export function ExportDialog({
                     <span className="flex flex-col gap-0.5 min-w-0">
                       <span className="text-sm font-medium leading-tight">{mode.label}</span>
                       <span className="text-xs text-muted-foreground leading-relaxed">{mode.hint}</span>
+                      {/* AQU-646 stage 4: by character is the DEFAULT TRACK's
+                          deliverable, deliberately (Sam, 2026-08-26) — a
+                          character's lines merged across several tracks is not
+                          a mix stem anyone asked for. So where a file has added
+                          tracks, this says what it is leaving behind and where
+                          to find it, and does not gate anything: a small,
+                          subtle notice were Sam's words, and by character is
+                          still the right export for most of these files. */}
+                      {mode.id === "audio-by-character" && hasAddedAudioTracks && (
+                        <span
+                          data-testid="export-audio-added-tracks-note"
+                          className="mt-0.5 text-xs leading-relaxed text-amber-700 dark:text-amber-400"
+                        >
+                          {t("importExport.dialog.audioAddedTracksNote")}
+                        </span>
+                      )}
                     </span>
                   </label>
                 ))}
@@ -1629,7 +1834,7 @@ export function ExportDialog({
                 onClick={() => handleExport(audioMode)}
                 // Nothing recorded means nothing to write. Better to say so on a
                 // dead button than to hand someone a refusal after they press it.
-                disabled={!activeFileId || isBusy || recordedLines === 0}
+                disabled={!activeFileId || isBusy || (recordedLines === 0 && addedTrackTakes === 0)}
                 aria-busy={isBusy}
               >
                 {isBusy ? <Spinner aria-hidden="true" /> : <Download className="h-4 w-4" aria-hidden="true" />}
@@ -1901,6 +2106,45 @@ export function ExportDialog({
           )}
         </fieldset>
 
+        {/* AQU-465: Chapter scope — only shown when the file has chapters to
+            choose between and the format can be sliced by one */}
+        {canScopeToChapter && (
+          <fieldset className="flex flex-col gap-1.5">
+            <legend className="text-xs font-medium text-muted-foreground mb-1.5">
+              {t("editor.milestone.vocab.chapterPlural")}
+            </legend>
+            <Select
+              value={chapterFilter}
+              onValueChange={(v) => setChapterFilter(v ?? "")}
+              items={chapterItems}
+            >
+              <SelectTrigger
+                size="sm"
+                className="w-full"
+                aria-label={t("importExport.dialog.chapterFilterAriaLabel")}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="">{t("importExport.dialog.allChapters")}</SelectItem>
+                  {chapterLabels.map((c) => (
+                    <SelectItem key={c} value={c}>{c}</SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+            {chapterFilter && (
+              <p className="text-[10px] text-muted-foreground">
+                <RichMessage
+                  k="importExport.dialog.chapterFilterHint"
+                  values={{ chapter: <strong>{chapterFilter}</strong> }}
+                />
+              </p>
+            )}
+          </fieldset>
+        )}
+
         {/* AQU-439: Voice filter — only shown when cells have cast assignments */}
         {distinctVoices.length > 0 && (
           <fieldset className="flex flex-col gap-1.5">
@@ -1910,6 +2154,7 @@ export function ExportDialog({
             <Select
               value={voiceFilter}
               onValueChange={(v) => setVoiceFilter(v ?? "")}
+              items={voiceItems}
             >
               <SelectTrigger
                 size="sm"

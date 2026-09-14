@@ -82,6 +82,20 @@ afterEach(async () => {
   vi.stubGlobal("fetch", realFetch)
 })
 
+/** A project with the steering context the start gate requires. */
+const READY_SETTINGS = {
+  sourceLanguage: "en",
+  targetLanguage: "sw",
+  translationBrief: { parameters: { purpose: "Community reading" } },
+}
+
+/** Replace the seeded project's settings, keeping the start-gate minimum. */
+async function setSettings(extra: Record<string, unknown>): Promise<void> {
+  await env.AQUILLA_PG.prepare("UPDATE project_settings SET settings = ? WHERE project_id = ?")
+    .bind(JSON.stringify({ ...READY_SETTINGS, ...extra }), PROJECT)
+    .run()
+}
+
 async function seedWorld(): Promise<{ lead: string; contrib: string; viewer: string }> {
   await seedUser(1, "lead")
   await seedUser(2, "contrib")
@@ -100,6 +114,15 @@ async function seedWorld(): Promise<{ lead: string; contrib: string; viewer: str
       .bind(PROJECT, userId, role)
       .run()
   }
+  // Minimum steering context — the start gate (AQU-827) refuses a run without
+  // both languages and at least one answered brief question, so the seeded
+  // world has to be a project someone has actually set up.
+  await env.AQUILLA_PG.prepare(
+    `INSERT INTO project_settings (project_id, settings, version, updated_by)
+     VALUES (?, ?, 1, 1)`,
+  )
+    .bind(PROJECT, JSON.stringify(READY_SETTINGS))
+    .run()
   // A tiny file so the kicked loop has real work: one chapter, two cells.
   for (const [cellId, ref, text] of [
     ["c1", "MRK 1:1", "In the beginning"],
@@ -191,6 +214,50 @@ describe("POST /contextual/runs", () => {
     expect(activityBody.events.map((event) => event.kind)).toContain("run_created")
   })
 
+  // AQU-827. The gate is server-side because the client's disabled button is a
+  // courtesy, not a guarantee — the pill, the panel, and any API caller all
+  // arrive on this one route. It must refuse BEFORE the run row exists and
+  // before a single model call is billed.
+  it("refuses to start without the project's languages and any brief, naming what is missing", async () => {
+    const { contrib } = await seedWorld()
+    await setSettings({ sourceLanguage: "", targetLanguage: "", translationBrief: {} })
+
+    const blocked = await req("POST", "/runs", contrib, { fileId: FILE })
+    expect(blocked.status).toBe(400)
+    const body = (await blocked.json()) as {
+      error: { code: string; details: { missing: string[] } }
+    }
+    expect(body.error.code).toBe("context_required")
+    expect(body.error.details.missing).toEqual(["languages", "brief"])
+    // Nothing was started and no model was called — the point of gating early.
+    expect(modelCallCount).toBe(0)
+    expect(syncFrames).toEqual([])
+    expect(await listDrafts(env.AQUILLA_PG, PROJECT, FILE, "proposed")).toEqual([])
+
+    // The project-wide start is the same route and is gated identically.
+    const blockedProject = await req("POST", "/runs", contrib, { scope: "project" })
+    expect(blockedProject.status).toBe(400)
+    expect(((await blockedProject.json()) as { error: { code: string } }).error.code)
+      .toBe("context_required")
+
+    // Supplying the missing context unblocks it without any other change.
+    await setSettings({})
+    const started = await req("POST", "/runs", contrib, { fileId: FILE })
+    expect(started.status).toBe(201)
+    if (_test.lastLoop) await _test.lastLoop
+    _test.lastLoop = null
+  })
+
+  it("blocks on the brief alone once the languages are set", async () => {
+    const { contrib } = await seedWorld()
+    await setSettings({ translationBrief: { parameters: { purpose: "   " } } })
+
+    const blocked = await req("POST", "/runs", contrib, { fileId: FILE })
+    expect(blocked.status).toBe(400)
+    const body = (await blocked.json()) as { error: { details: { missing: string[] } } }
+    expect(body.error.details.missing).toEqual(["brief"])
+  })
+
   it("refuses a second active run with 409 + the existing runId", async () => {
     const { contrib } = await seedWorld()
     const runId = await startRun(contrib)
@@ -202,28 +269,6 @@ describe("POST /contextual/runs", () => {
     expect(body.error.details.runId).toBe(runId)
   })
 
-  it("cellIds pins the run to those cells instead of the whole file", async () => {
-    const { contrib } = await seedWorld()
-    for (const [cellId, ref, text] of [
-      ["c3", "MRK 2:1", "and the word was"],
-      ["c4", "MRK 2:2", "with God"],
-    ] as const) {
-      await env.AQUILLA_PG.prepare(
-        `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at)
-         VALUES (?, ?, ?, 'source', ?, ?, ?, 0)`,
-      ).bind(PROJECT, FILE, cellId, text, ref, `ev-${cellId}`).run()
-    }
-    const r = await req("POST", "/runs", contrib, { fileId: FILE, cellIds: ["c3", "c4"] })
-    expect(r.status).toBe(201)
-    const { runId } = (await r.json()) as { runId: string }
-    if (_test.lastLoop) await _test.lastLoop
-    _test.lastLoop = null
-    const run = await getRun(env.AQUILLA_PG, runId)
-    expect(run?.status).toBe("parked")
-    const drafts = await listDrafts(env.AQUILLA_PG, PROJECT, FILE, "proposed")
-    expect(drafts.map((d) => d.cellId).sort()).toEqual(["c3", "c4"])
-  })
-
   it("rejects an unregistered multilingual lane and starts a registered one", async () => {
     const { contrib } = await seedWorld()
     const unregistered = await req("POST", "/runs", contrib, { fileId: FILE, targetLang: "fr" })
@@ -233,10 +278,7 @@ describe("POST /contextual/runs", () => {
     expect(body.error.message).toMatch(/not registered/i)
     expect(syncFrames).toEqual([])
 
-    await env.AQUILLA_PG.prepare(
-      `INSERT INTO project_settings (project_id, settings, version, updated_by)
-       VALUES (?, ?, 1, 1)`,
-    ).bind(PROJECT, JSON.stringify({ targetLanes: ["fr", "es"] })).run()
+    await setSettings({ targetLanes: ["fr", "es"] })
 
     const started = await req("POST", "/runs", contrib, { fileId: FILE, targetLang: "fr" })
     expect(started.status).toBe(201)

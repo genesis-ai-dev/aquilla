@@ -80,14 +80,22 @@ const project: ProjectRecord = {
  * Pass `timecode: true` to attach cue timings so `context` becomes a VTT range
  * (the timeline-ordered / subtitle case).
  */
-function makeRows(id: string, { timecode = false }: { timecode?: boolean } = {}): CellRow[] {
+function makeRows(
+  id: string,
+  { timecode = false, castName }: { timecode?: boolean; castName?: string } = {},
+): CellRow[] {
   const timing = timecode ? { startMs: 0, endMs: 3970 } : {}
+  // The character sheet writes `cast_name` onto the SOURCE row (see the
+  // `cast.assign` projection in sync-worker), and buildCellData prefers the
+  // source row's metadata — so this is the shape a real imported row has.
+  const meta = castName === undefined ? {} : { metadata: { cast_name: castName } }
   return [
     {
       cellId: id, side: "source", value: "hello", valueHtml: null, type: "text",
       canonicalRef: "GEN 1:1", anchorCellId: null, eventId: `${id}-source`,
       sourceEventId: null, lastEditor: null, lastEditAt: 1, validated: false, wordCount: 1,
       ...timing,
+      ...meta,
     },
     {
       cellId: id, side: "target", value: "bonjour", valueHtml: null, type: "text",
@@ -98,16 +106,60 @@ function makeRows(id: string, { timecode = false }: { timecode?: boolean } = {})
   ]
 }
 
-function renderTable({ lineNumbers = false, timecode = false }: { lineNumbers?: boolean; timecode?: boolean } = {}) {
+/** AQU-646: the corner label reads the ASSIGNED VOICE's name, through the
+ *  project's cast assignments — not the character sheet's `cast_name`, which is
+ *  a separate store. Sam's call was that the two cell corners agree with each
+ *  other. */
+const projectWithCast: ProjectRecord = {
+  ...project,
+  ttsSettings: {
+    castAssignments: { "cell-1": "voice-ravi" },
+    voices: [{ id: "voice-ravi", name: "Ravi" }],
+  },
+} as unknown as ProjectRecord
+
+/** AQU-1018: the same cast, but nothing assigned to `cell-1` yet — the state a
+ *  subtitle file is in the moment it lands, before any voice has been minted. */
+const projectCastUnassigned: ProjectRecord = {
+  ...project,
+  ttsSettings: { castAssignments: {}, voices: [{ id: "voice-ravi", name: "Ravi" }] },
+} as unknown as ProjectRecord
+
+/** AQU-1018: an assignment left pointing at a voice someone has since deleted.
+ *  `findVoice` returns nothing, so the assigned-voice rung yields no name. */
+const projectCastDeletedVoice: ProjectRecord = {
+  ...project,
+  ttsSettings: { castAssignments: { "cell-1": "voice-gone" }, voices: [] },
+} as unknown as ProjectRecord
+
+function renderTable({
+  lineNumbers = false,
+  timecode = false,
+  cellLabels = false,
+  castName,
+  projectOverride,
+}: {
+  lineNumbers?: boolean
+  timecode?: boolean
+  cellLabels?: boolean
+  castName?: string
+  projectOverride?: ProjectRecord
+} = {}) {
   const store = new CellStore()
   store.setRuntime({ projectId: project.id, fileId: "file-1", username: "tester", requiredValidations: 1, auditStats: new Map() })
-  store.replaceRows(makeRows("cell-1", { timecode }), { full: true, maxServerSeq: 1 })
+  store.replaceRows(makeRows("cell-1", { timecode, castName }), { full: true, maxServerSeq: 1 })
   const qc = new QueryClient()
   return render(
     <QueryClientProvider client={qc}>
       <EditorActionsProvider value={{}}>
         <EditorTable
-          project={project}
+          // ALWAYS the cast-bearing project, so `cellLabelsEnabled` below is
+          // the ONLY variable (2026-08-28). This used to swing with the gate
+          // flag, which meant the gate-off test rendered a project with no
+          // `ttsSettings` at all — so the label was absent because there was no
+          // cast to show, not because the gate withheld it. Delete the gate
+          // entirely and that test still passed.
+          project={projectOverride ?? projectWithCast}
           cellStore={store}
           username="tester"
           isCompletionConfigured={false}
@@ -120,7 +172,7 @@ function renderTable({ lineNumbers = false, timecode = false }: { lineNumbers?: 
           onCompleteBatch={() => {}}
           healthMap={new Map()}
           lineNumbersEnabled={lineNumbers}
-          cellLabelsEnabled={false}
+          cellLabelsEnabled={cellLabels}
           sourceTextDirection="ltr"
           targetTextDirection="ltr"
         />
@@ -175,19 +227,39 @@ describe("EditorTable — source/target first-line alignment", () => {
   // read flush-left above the source text, while other context (empty, scripture
   // verse refs) stays centered. Detection reuses parseTimestampRange, so only a
   // real cue range flips the alignment — no false positive from a verse ref.
-  it("left-aligns the context line when it holds a timecode range", async () => {
+  // AQU-646 stage 6G (2026-08-27, the client's ask via Sam): the timecode moved
+  // OUT of the top lane and down to the foot of the cell, so the character
+  // label has the corner to itself. It keeps its flush-left reading and its own
+  // `data-context-kind`; what changed is which line it lives on.
+  it("reads the timecode flush-left at the FOOT of the cell", async () => {
     renderTable({ timecode: true })
     await screen.findByText("hello")
 
+    const timingLine = screen.getByTestId("source-timing-line")
+    expect(timingLine.textContent).toBe("00:00:00.000 --> 00:00:03.970")
+    expect(timingLine.getAttribute("data-context-kind")).toBe("timecode")
+    expect(timingLine.className).toContain("justify-start")
+    expect(timingLine.className).toContain("text-left")
+    expect(timingLine.className).not.toContain("justify-center")
+
+    // …and the lane at the top no longer carries it at all.
     const contextLine = screen.getByTestId("source-context-line")
-    expect(contextLine.textContent).toBe("00:00:00.000 --> 00:00:03.970")
-    expect(contextLine.getAttribute("data-context-kind")).toBe("timecode")
-    expect(contextLine.className).toContain("justify-start")
-    expect(contextLine.className).toContain("text-left")
-    expect(contextLine.className).not.toContain("justify-center")
-    // Height strip is unchanged — baseline alignment still holds.
+    expect(contextLine.textContent).toBe("")
+    expect(contextLine.getAttribute("data-context-kind")).toBeNull()
+    // The 20px strip is still reserved — it is what holds the source and target
+    // columns' first lines on one baseline, whether or not it has anything in
+    // it. That is exactly why the timing could move and the lane could not.
     expect(contextLine.className).toContain("h-4")
     expect(contextLine.className).toContain("mb-1")
+  })
+
+  // The foot line is NOT reserved when empty, and that asymmetry is deliberate:
+  // nothing below the source text mirrors anything in the target column, so an
+  // always-on strip would be wasted height on every scripture row in the app.
+  it("draws no foot line at all when the context is not a timecode", async () => {
+    renderTable()
+    await screen.findByText("hello")
+    expect(screen.queryByTestId("source-timing-line")).toBeNull()
   })
 
   it("keeps non-timecode context (empty / verse ref) centered", async () => {
@@ -210,5 +282,166 @@ describe("EditorTable — source/target first-line alignment", () => {
     const numberBox = screen.getByLabelText("Line 1")
     expect(numberBox.style.height).toBe("calc(14px * 1.6)")
     expect(numberBox.className).not.toContain("h-6")
+  })
+})
+
+// ── AQU-646 ─────────────────────────────────────────────────────────────────
+//
+// Sam, 2026-08-26: "you know how in the top left corner of target cells there's
+// the character name… let's put that character label also in the top left of
+// source cells where currently there's the time range — we'll just scoot the
+// time range over."
+describe("EditorTable — the character label on source cells", () => {
+  it("gives the label the top-left corner, with the timing below", async () => {
+    renderTable({ timecode: true, cellLabels: true })
+    await screen.findByText("hello")
+    const line = screen.getByTestId("source-context-line")
+    const label = screen.getByTestId("source-cell-label")
+    expect(label).toHaveTextContent("Ravi")
+    // The corner is the label's alone now — stage 6G moved the timing out.
+    expect(line.textContent).toBe("Ravi")
+    expect(line.firstElementChild).toBe(label)
+    // …and it went to the foot, not away.
+    expect(screen.getByTestId("source-timing-line").textContent)
+      .toBe("00:00:00.000 --> 00:00:03.970")
+  })
+
+  // The two lines are the cell's first and last, which is the whole of what
+  // "top-left" and "bottom-left" mean here.
+  it("puts the label above the source text and the timing below it", async () => {
+    renderTable({ timecode: true, cellLabels: true })
+    await screen.findByText("hello")
+    const line = screen.getByTestId("source-context-line")
+    const timing = screen.getByTestId("source-timing-line")
+    const cellEl = line.parentElement!
+    // Both lines belong to the SAME cell, and the timing is its last element —
+    // the floating edit pencil sits before the lane, so "first child" is not
+    // the thing to assert; "last child" is exactly the bottom of the cell.
+    expect(timing.parentElement).toBe(cellEl)
+    expect(cellEl.lastElementChild).toBe(timing)
+    expect(timing.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy()
+    // The source text itself sits between them.
+    expect(line.compareDocumentPosition(screen.getByText("hello")) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy()
+  })
+
+  // The 20px lane is what holds source and target text on one baseline, and a
+  // name added to it must not change that.
+  it("does not grow the lane that keeps the two columns aligned", async () => {
+    renderTable({ timecode: true, cellLabels: true })
+    await screen.findByText("hello")
+    const line = screen.getByTestId("source-context-line")
+    for (const cls of ["h-4", "mb-1"]) expect(line.className).toContain(cls)
+    // A long name truncates rather than pushing anything out of the row.
+    expect(screen.getByTestId("source-cell-label").className).toContain("truncate")
+  })
+
+  // Centring is for a bare verse reference. Once the corner holds a name, the
+  // lane reads left-to-right like the label it now is.
+  it("left-aligns the lane for a labelled cell even with no timecode", async () => {
+    renderTable({ timecode: false, cellLabels: true })
+    await screen.findByText("hello")
+    const line = screen.getByTestId("source-context-line")
+    expect(line.className).toContain("justify-start")
+    expect(line.className).not.toContain("justify-center")
+  })
+
+  it("is absent when cell labels are switched off", async () => {
+    renderTable({ timecode: true })
+    await screen.findByText("hello")
+    expect(screen.queryByTestId("source-cell-label")).toBeNull()
+  })
+})
+
+// ── AQU-1018 ────────────────────────────────────────────────────────────────
+//
+// Come and See (Anna), 2026-08-26: on a freshly imported subtitle file "there
+// are no target files yet, so the translator has nothing to orient against."
+//
+// AQU-646 stage 6G had already given the source cell the layout she asked for —
+// character label in the top-left corner, the line, the timing underneath. What
+// it did NOT do was make the label resolve at import time: `labelText` climbed
+// from the ASSIGNED VOICE's name only, and a voice is minted by a `saveTts` that
+// lands after the `cast.assign` events (and not at all if that call fails, a
+// degraded-success window ProjectWorkspace documents). So the corner the layout
+// work reserved sat empty on exactly the file it was reserved for, while the
+// cast gutter three columns to its left drew the very same character's name off
+// `metadata.cast_name`.
+describe("EditorTable — the character on a row whose voice has not resolved", () => {
+  it("names the speaker from the cell's own cast_name when nothing is assigned yet", async () => {
+    renderTable({
+      timecode: true,
+      cellLabels: true,
+      castName: "little Mary Magdalene",
+      projectOverride: projectCastUnassigned,
+    })
+    await screen.findByText("hello")
+    expect(screen.getByTestId("source-cell-label")).toHaveTextContent("little Mary Magdalene")
+  })
+
+  // The invariant AQU-646 actually chose: the two corners agree with EACH OTHER.
+  // Adding a rung beneath the assigned voice must not split them.
+  it("shows the same name in the target corner", async () => {
+    renderTable({
+      timecode: true,
+      cellLabels: true,
+      castName: "little Mary Magdalene",
+      projectOverride: projectCastUnassigned,
+    })
+    await screen.findByText("hello")
+    expect(screen.getByTestId("target-header-lane")).toHaveTextContent("little Mary Magdalene")
+  })
+
+  // Anna's whole ask was orientation on a file with no targets: the name says
+  // WHO speaks, the timing says WHEN, and the line sits between them.
+  it("still carries the timing at the foot, so the row reads name / line / time", async () => {
+    renderTable({
+      timecode: true,
+      cellLabels: true,
+      castName: "little Mary Magdalene",
+      projectOverride: projectCastUnassigned,
+    })
+    await screen.findByText("hello")
+    const label = screen.getByTestId("source-cell-label")
+    const timing = screen.getByTestId("source-timing-line")
+    expect(timing.textContent).toBe("00:00:00.000 --> 00:00:03.970")
+    expect(label.compareDocumentPosition(timing) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  // An assignment pointing at a deleted voice used to strand the label at null
+  // even though the sheet's name was still on the cell. The cast gutter already
+  // survives this case (it renders the faded fallback circle WITH the name);
+  // the corner now does too.
+  it("falls back when the assignment points at a voice that no longer exists", async () => {
+    renderTable({
+      timecode: true,
+      cellLabels: true,
+      castName: "little Mary Magdalene",
+      projectOverride: projectCastDeletedVoice,
+    })
+    await screen.findByText("hello")
+    expect(screen.getByTestId("source-cell-label")).toHaveTextContent("little Mary Magdalene")
+  })
+
+  // The rung is BENEATH the assigned voice, not in front of it. Once a voice is
+  // assigned the corner keeps saying what it said before AQU-1018 — which is
+  // what stops this from quietly becoming the `cast_name` surface Sam ruled out.
+  it("still prefers the assigned voice's name over cast_name", async () => {
+    renderTable({ timecode: true, cellLabels: true, castName: "little Mary Magdalene" })
+    await screen.findByText("hello")
+    expect(screen.getByTestId("source-cell-label")).toHaveTextContent("Ravi")
+    expect(screen.getByTestId("source-cell-label")).not.toHaveTextContent("little Mary Magdalene")
+  })
+
+  // The preference is still the one gate over both corners.
+  it("stays hidden when cell labels are switched off", async () => {
+    renderTable({
+      timecode: true,
+      castName: "little Mary Magdalene",
+      projectOverride: projectCastUnassigned,
+    })
+    await screen.findByText("hello")
+    expect(screen.queryByTestId("source-cell-label")).toBeNull()
+    expect(screen.getByTestId("target-header-lane")).not.toHaveTextContent("little Mary Magdalene")
   })
 })

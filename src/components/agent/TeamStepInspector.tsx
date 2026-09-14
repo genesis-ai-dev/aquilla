@@ -7,7 +7,7 @@
  */
 
 import { ChevronRight, X } from "lucide-react"
-import { useState, type ReactNode } from "react"
+import { useId, useState, type ReactNode } from "react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { cn } from "@/lib/utils"
@@ -35,6 +35,7 @@ function InspectorSection({ title, children }: { title: string; children: ReactN
 }
 
 export interface TeamStepInspectorProps {
+  id: string
   message: TeamFeedMessage
   /** Plain-language sentence for the step (rendered by the thread's own
    *  formatter so the two panes never disagree). */
@@ -42,8 +43,9 @@ export interface TeamStepInspectorProps {
   onClose: () => void
 }
 
-export function TeamStepInspector({ message, sentence, onClose }: TeamStepInspectorProps) {
+export function TeamStepInspector({ id, message, sentence, onClose }: TeamStepInspectorProps) {
   const { locale, t } = useI18n()
+  const titleId = useId()
   const persona = AGENT_PERSONAS[message.persona]
   const time = message.at
     ? new Date(message.at).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" })
@@ -52,14 +54,16 @@ export function TeamStepInspector({ message, sentence, onClose }: TeamStepInspec
   const reasons = message.body.kind === "outcome" ? message.body.reasons : []
   const detailEntries = Object.entries(message.raw.details)
   return (
-    <div
+    <aside
+      id={id}
+      aria-labelledby={titleId}
       className="flex w-72 shrink-0 flex-col border-s border-border/60"
       data-testid="team-step-inspector"
     >
       <div className="flex shrink-0 items-center gap-1.5 border-b border-border/60 px-2 py-1.5">
-        <span className="min-w-0 flex-1 truncate text-xs font-medium">
+        <h3 id={titleId} className="min-w-0 flex-1 truncate text-xs font-medium">
           {t("agent.team.inspector.title")}
-        </span>
+        </h3>
         <Button
           type="button"
           variant="ghost"
@@ -125,6 +129,6 @@ export function TeamStepInspector({ message, sentence, onClose }: TeamStepInspec
           </InspectorSection>
         </div>
       </ScrollArea>
-    </div>
+    </aside>
   )
 }

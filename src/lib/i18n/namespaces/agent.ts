@@ -208,6 +208,10 @@ export const agent = defineNamespace({
     "agent.team.inspector.reasons": "Why",
     "agent.team.inspector.details": "Details",
     "agent.team.inspector.noDetails": "This step recorded no further detail.",
+    "agent.team.step.viewDetails": "View details",
+    "agent.team.step.hideDetails": "Hide details",
+    "agent.team.step.viewDetailsAriaLabel": "View details: {step}",
+    "agent.team.step.hideDetailsAriaLabel": "Hide details: {step}",
     "agent.team.spanFallback": "this passage",
     "agent.team.msg.started": "Starting on {span}.",
     "agent.team.msg.reading": "Reading the situation around {span}.",
@@ -1025,6 +1029,20 @@ export const agent = defineNamespace({
         placeholders: {
           title: "The file's display name, its passage label, or the translated 'Autopilot run' fallback — not translated.",
         },
+      },
+      "agent.team.step.viewDetails": {
+        description: "Tooltip for the explicit per-message control that opens the step inspector.",
+      },
+      "agent.team.step.hideDetails": {
+        description: "Tooltip for the selected message's control that closes its step inspector.",
+      },
+      "agent.team.step.viewDetailsAriaLabel": {
+        description: "Accessible name identifying which message the details control opens.",
+        placeholders: { step: "The already-localized plain-language step sentence, not raw event data." },
+      },
+      "agent.team.step.hideDetailsAriaLabel": {
+        description: "Accessible name for closing details from the selected message's control.",
+        placeholders: { step: "The already-localized plain-language step sentence." },
       },
       "agent.team.openQuestionAriaLabel": {
         description:

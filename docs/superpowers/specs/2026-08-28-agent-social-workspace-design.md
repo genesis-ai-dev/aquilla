@@ -189,6 +189,25 @@ the redundant navigation action is omitted; answers stay in DecisionCard.
 Project-wide question counts are not attributed to an individual run.
 These are navigation affordances only: no new approval controls or writes.
 
+## Explicit step inspection (2026-09-14)
+
+Message text uses the app's `select-text` opt-in so the global chrome selection
+lock does not apply; the adjacent details control stays non-selectable. Text
+is not an inspector trigger. Each
+inspectable message has a separate **View details** control with an accessible
+name identifying its step. Controls appear on row hover or keyboard focus for
+fine, hover-capable pointers and stay visible on touch devices; the selected
+control remains visible. Expanding routine activity exposes the same controls.
+Review links remain independent native links, including keyboard activation.
+
+The inspector is a named complementary region associated with its expanded
+trigger. Closing it with its close button, the selected step's **Hide details**
+control, or an unhandled Escape leaves the conversation selected and returns
+focus to that trigger. If its activity group was collapsed and the trigger is
+gone, focus returns to the conversation region instead. A subsequent unhandled
+Escape retains the existing return-to-Team-chat behavior. Consumed Escape
+events and composition cancellation do not dismiss or navigate the workspace.
+
 ## Testing
 
 Vitest: personas mapping totality (every region/tool kind attributes — the social
@@ -211,3 +230,6 @@ visibility.
 Attention-header RTL covers zero/missing/updated pending counts, default and
 non-default review lanes, project-question scope and capped pages, and the
 existing question-card navigation/answer surface.
+Inspector interaction RTL covers passive text, explicit controls, trigger/panel
+association, focus return and its collapsed-group fallback, Escape priority,
+and keyboard activation of the independent review link.

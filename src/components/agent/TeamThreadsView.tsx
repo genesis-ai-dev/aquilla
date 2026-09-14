@@ -3,7 +3,7 @@
  *
  * v2.2, the three-column layout (2026-08-28): the conversations LIST lives in
  * the left dock's Agent tab (AgentDockPanel) — this surface is the ACTIVE
- * conversation plus, when a step is clicked, the optional step-inspector
+ * conversation plus, when step details are requested, the optional step-inspector
  * third column. Selection is URL-driven (CONVERSATION_PARAM) so the dock and
  * this pane share one source of truth: absent = Team chat (the orchestrator),
  * `run:<id>` = that autopilot run's conversation, `questions` = the one
@@ -19,7 +19,7 @@
  * aware); only the open run's activity is fetched here.
  */
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react"
 import { useSearchParams } from "react-router-dom"
 import { AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -149,8 +149,19 @@ export function TeamThreadsView({
   const [activityLoading, setActivityLoading] = useState(false)
   // Step inspector (the optional third column) — per selected conversation.
   const [inspectedId, setInspectedId] = useState<string | null>(null)
+  const inspectorId = useId()
+  const inspectorTriggerRef = useRef<HTMLButtonElement | null>(null)
+  const conversationRef = useRef<HTMLDivElement | null>(null)
+  const closeInspector = useCallback(() => {
+    setInspectedId(null)
+    const trigger = inspectorTriggerRef.current
+    inspectorTriggerRef.current = null
+    if (trigger?.isConnected) trigger.focus({ preventScroll: true })
+    else conversationRef.current?.focus({ preventScroll: true })
+  }, [])
   useEffect(() => {
     setInspectedId(null)
+    inspectorTriggerRef.current = null
   }, [selectedId])
 
   const openDecisions = useMemo(() => decisions?.decisions ?? [], [decisions])
@@ -205,15 +216,21 @@ export function TeamThreadsView({
     }
   }, [projectId, openRun])
 
-  // Esc returns to Team chat — the keyboard way home.
+  // Dismiss details first; a later unhandled Escape returns to Team chat.
   useEffect(() => {
     if (selectedId === TEAM_CHAT_CONVERSATION) return
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setSelected(TEAM_CHAT_CONVERSATION)
+      if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return
+      if (inspectedId) {
+        event.preventDefault()
+        closeInspector()
+      } else {
+        setSelected(TEAM_CHAT_CONVERSATION)
+      }
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [selectedId, setSelected])
+  }, [selectedId, setSelected, inspectedId, closeInspector])
 
   const feed = useMemo(() => (activity ? buildRunFeed(activity) : []), [activity])
   const inspectedMessage = useMemo<TeamFeedMessage | null>(
@@ -365,9 +382,15 @@ export function TeamThreadsView({
         feed={feed}
         feedLoading={activityLoading}
         inspectedId={inspectedId}
-        onInspect={(message) =>
-          setInspectedId((current) => (current === message.id ? null : message.id))
-        }
+        inspectorId={inspectorId}
+        onInspect={(message, trigger) => {
+          if (inspectedId === message.id) {
+            closeInspector()
+            return
+          }
+          inspectorTriggerRef.current = trigger
+          setInspectedId(message.id)
+        }}
       />
     )
   } else {
@@ -394,7 +417,13 @@ export function TeamThreadsView({
         projectId={projectId}
       />
       <div className="flex min-h-0 flex-1">
-        <div className="flex min-w-0 flex-1 flex-col">
+        <div
+          ref={conversationRef}
+          role="region"
+          aria-label={conversationTitle}
+          tabIndex={-1}
+          className="flex min-w-0 flex-1 flex-col outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        >
           {conversation}
           {showComposer && (
             <TeamChannelComposer
@@ -408,9 +437,10 @@ export function TeamThreadsView({
         </div>
         {inspectedMessage && (
           <TeamStepInspector
+            id={inspectorId}
             message={inspectedMessage}
             sentence={feedMessageText(inspectedMessage, t)}
-            onClose={() => setInspectedId(null)}
+            onClose={closeInspector}
           />
         )}
       </div>

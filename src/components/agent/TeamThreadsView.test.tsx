@@ -10,8 +10,8 @@
  *  - Team chat is time-ordered: Coordinator dispatches (with a quiet "view
  *    updates" affordance), questions addressed to the human, the live
  *    session underneath; Escape is the keyboard way home;
- *  - clicking a step opens the inspector third column with the receipts
- *    (raw event kind/details) behind collapsed sections;
+ *  - explicit step controls open the inspector with original receipts;
+ *    Close/Escape restore focus without leaving the conversation;
  *  - the one composer says where it sends: Team chat → the shared session;
  *    a live run → steering; a FINISHED run with CONTRIBUTOR+ → re-opens the
  *    work (fresh run seeded with the message); finished without the role →
@@ -22,7 +22,8 @@
  */
 
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest"
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { MemoryRouter } from "react-router-dom"
 import { ROLE } from "@/lib/frontier/roles"
 import type {
@@ -291,23 +292,68 @@ describe("TeamThreadsView — the active conversation surface", () => {
     view.unmount()
   })
 
-  it("clicking a step opens the inspector with the receipts behind collapsed sections", async () => {
+  it("opens details only from the explicit action and returns focus on close", async () => {
     fetchContextualRuns.mockResolvedValue(runsPage([runRecord()]))
     fetchContextualDecisions.mockResolvedValue(decisionsPage())
     fetchContextualRunActivity.mockResolvedValue(activity([stagedEvent]))
     const view = renderView({ initialEntry: "/project/p1/agent?conversation=run%3Arun-1" })
 
     fireEvent.click(await screen.findByText("Put 3 drafts out for your review."))
+    expect(screen.queryByTestId("team-step-inspector")).not.toBeInTheDocument()
+    const trigger = screen.getByRole("button", { name: "View details: Put 3 drafts out for your review." })
+    act(() => trigger.focus())
+    fireEvent.click(trigger)
     const inspector = await screen.findByTestId("team-step-inspector")
+    expect(screen.getByRole("complementary", { name: "Step detail" })).toBe(inspector)
+    expect(trigger).toHaveAttribute("aria-expanded", "true")
+    expect(trigger).toHaveAttribute("aria-controls", inspector.id)
     // The receipts are collapsed by default…
     expect(within(inspector).queryByText("drafts_staged")).not.toBeInTheDocument()
     // …and one click away.
     fireEvent.click(within(inspector).getByRole("button", { name: "Details" }))
     expect(within(inspector).getByText("drafts_staged")).toBeInTheDocument()
     expect(within(inspector).getByText("count")).toBeInTheDocument()
-    // Close restores the two-column view.
-    fireEvent.click(within(inspector).getByRole("button", { name: "Close step detail" }))
+    // Focus must return from inside the inspector, not merely remain on its trigger.
+    const close = within(inspector).getByRole("button", { name: "Close step detail" })
+    act(() => close.focus())
+    fireEvent.click(close)
     expect(screen.queryByTestId("team-step-inspector")).not.toBeInTheDocument()
+    expect(trigger).toHaveFocus()
+    expect(trigger).toHaveAttribute("aria-expanded", "false")
+    expect(screen.getByRole("heading", { name: "Mark", level: 2 })).toBeInTheDocument()
+    fireEvent.click(trigger)
+    expect(await screen.findByTestId("team-step-inspector")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Hide details: Put 3 drafts out for your review." }))
+    expect(screen.queryByTestId("team-step-inspector")).not.toBeInTheDocument()
+    expect(trigger).toHaveFocus()
+    view.unmount()
+  })
+
+  it("handles Escape inside the inspector before navigating away, and respects consumed keys", async () => {
+    const user = userEvent.setup()
+    fetchContextualRuns.mockResolvedValue(runsPage([runRecord()]))
+    fetchContextualDecisions.mockResolvedValue(decisionsPage())
+    fetchContextualRunActivity.mockResolvedValue(activity([stagedEvent]))
+    const view = renderView({ initialEntry: "/project/p1/agent?conversation=run%3Arun-1" })
+    const trigger = await screen.findByRole("button", { name: "View details: Put 3 drafts out for your review." })
+    act(() => trigger.focus())
+    await user.keyboard("{Enter}")
+    const inspector = await screen.findByTestId("team-step-inspector")
+
+    const consumedEscape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })
+    consumedEscape.preventDefault()
+    fireEvent(trigger, consumedEscape)
+    expect(inspector).toBeInTheDocument()
+    fireEvent.keyDown(trigger, { key: "Escape", isComposing: true })
+    expect(inspector).toBeInTheDocument()
+
+    act(() => within(inspector).getByRole("button", { name: "Details" }).focus())
+    await user.keyboard("{Escape}")
+    expect(screen.queryByTestId("team-step-inspector")).not.toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Mark", level: 2 })).toBeInTheDocument()
+    expect(trigger).toHaveFocus()
+    await user.keyboard("{Escape}")
+    expect(await screen.findByTestId("team-channel")).toBeInTheDocument()
     view.unmount()
   })
 
@@ -342,14 +388,18 @@ describe("TeamThreadsView — the active conversation surface", () => {
     expect(toggle).toHaveAttribute("aria-expanded", "true")
     const steps = within(thread).getAllByText(/Reading the situation/)
     expect(steps).toHaveLength(2)
-    fireEvent.click(steps[0])
+    const inspectTrigger = within(thread).getByRole("button", { name: /^View details: Reading the situation around MRK 4:1/ })
+    fireEvent.click(inspectTrigger)
     const inspector = await screen.findByTestId("team-step-inspector")
     fireEvent.click(within(inspector).getByRole("button", { name: "Details" }))
     expect(within(inspector).getByText("phase")).toBeVisible()
     expect(within(inspector).getByText("read-first")).toBeVisible()
-    fireEvent.click(within(inspector).getByRole("button", { name: "Close step detail" }))
     fireEvent.click(within(thread).getByRole("button", { name: "Hide 2 activity updates" }))
     expect(within(thread).queryByText(/Reading the situation/)).not.toBeInTheDocument()
+    expect(inspectTrigger).not.toBeInTheDocument()
+    fireEvent.click(within(inspector).getByRole("button", { name: "Close step detail" }))
+    expect(screen.queryByTestId("team-step-inspector")).not.toBeInTheDocument()
+    expect(screen.getByRole("region", { name: "Mark" })).toHaveFocus()
     expect(within(thread).getByRole("link", { name: "Review drafts" })).toBeVisible()
     view.unmount()
   })

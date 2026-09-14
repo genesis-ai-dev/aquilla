@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { MemoryRouter } from "react-router-dom"
+import { MemoryRouter, useLocation } from "react-router-dom"
 import { buildRunFeed } from "@/lib/agent/social-feed"
 import type { ContextualActivityEvent, ContextualRunRecord } from "@/lib/contextual/transport"
 import { TeamThreadDetail } from "./TeamThreadDetail"
@@ -48,7 +48,12 @@ const second: ContextualActivityEvent = {
   createdAt: "2026-08-28T12:00:02Z",
 }
 
-function detail(events: ContextualActivityEvent[], inspectedId?: string) {
+function LocationProbe() {
+  const location = useLocation()
+  return <output data-testid="location">{location.pathname}{location.search}</output>
+}
+
+function detail(events: ContextualActivityEvent[], inspectedId?: string, onInspect = vi.fn()) {
   return (
     <MemoryRouter>
       <TeamThreadDetail
@@ -57,8 +62,10 @@ function detail(events: ContextualActivityEvent[], inspectedId?: string) {
         feed={buildRunFeed({ events, sceneBriefs: [] })}
         feedLoading={false}
         inspectedId={inspectedId}
-        onInspect={vi.fn()}
+        inspectorId="step-inspector"
+        onInspect={onInspect}
       />
+      <LocationProbe />
     </MemoryRouter>
   )
 }
@@ -71,6 +78,37 @@ beforeAll(() => {
 })
 
 describe("TeamThreadDetail activity groups", () => {
+  it("keeps message text passive and sends the original message plus trigger through the details action", async () => {
+    const user = userEvent.setup()
+    const onInspect = vi.fn()
+    render(detail([first], undefined, onInspect))
+    const text = screen.getByText(/Reading the situation/)
+    fireEvent.click(text)
+    expect(onInspect).not.toHaveBeenCalled()
+    expect(text.closest("[data-feed-kind]")).not.toHaveAttribute("role")
+    expect(text.closest("[data-feed-kind]")).not.toHaveAttribute("tabindex")
+    // App chrome disables selection globally; message content must opt back in.
+    expect(text.parentElement).toHaveClass("select-text")
+
+    const trigger = screen.getByRole("button", { name: /^View details: Reading/ })
+    expect(trigger.closest(".select-text")).toBeNull()
+    await user.click(trigger)
+    expect(onInspect).toHaveBeenCalledWith(
+      expect.objectContaining({ id: first.id, raw: { kind: "phase", details: first.details } }),
+      trigger,
+    )
+  })
+
+  it("lets keyboard activation of Review drafts navigate without opening the inspector", async () => {
+    const user = userEvent.setup()
+    const onInspect = vi.fn()
+    render(detail([{ ...first, kind: "drafts_staged", details: { count: 3 } }], undefined, onInspect))
+    screen.getByRole("link", { name: "Review drafts" }).focus()
+    await user.keyboard("{Enter}")
+    expect(screen.getByTestId("location")).toHaveTextContent("/project/p1/editor/file/file-1?lane=")
+    expect(onInspect).not.toHaveBeenCalled()
+  })
+
   it("keeps a single routine update visible without adding an expander", () => {
     render(detail([first]))
     expect(screen.getByRole("group", { name: "Drafter" })).toHaveTextContent("Drafter")
@@ -119,6 +157,8 @@ describe("TeamThreadDetail activity groups", () => {
     view.rerender(detail([first, second], first.id))
 
     expect(screen.getByRole("button", { name: "Hide 2 activity updates" })).toHaveAttribute("aria-expanded", "true")
-    expect(screen.getByRole("button", { name: /Reading the situation around MRK 4:1/ })).toHaveAttribute("aria-pressed", "true")
+    const trigger = screen.getByRole("button", { name: /^Hide details: Reading the situation around MRK 4:1/ })
+    expect(trigger).toHaveAttribute("aria-expanded", "true")
+    expect(trigger).toHaveAttribute("aria-controls", "step-inspector")
   })
 })

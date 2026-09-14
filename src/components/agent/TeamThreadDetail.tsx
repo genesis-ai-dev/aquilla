@@ -1,19 +1,20 @@
 /**
  * TeamThreadDetail.tsx — one autopilot run's conversation in the Team tab
  * (v2.2 three-column layout): the subagent's play-by-play as a
- * persona-attributed, plain-language feed (social-feed.ts). Clicking a step
- * opens it in the step inspector — the optional third column — so the thread
- * itself stays calm. Adjacent updates share a teammate byline; repeated
+ * persona-attributed, plain-language feed (social-feed.ts). Each step's
+ * explicit details control opens the optional inspector; message text stays
+ * readable and selectable. Adjacent updates share a teammate byline; repeated
  * routine phases sit behind a disclosure without hiding notes or outcomes.
  */
 
 import { useId, useState } from "react"
-import { ChevronRight } from "lucide-react"
+import { ChevronRight, Info } from "lucide-react"
 import { Link } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Skeleton } from "@/components/ui/skeleton"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { draftReviewHref } from "@/components/project-workspace-lane-deeplink"
@@ -27,45 +28,34 @@ export function FeedMessageRow({
   message,
   reviewHref,
   inspected,
+  inspectorId,
   onInspect,
 }: {
   message: TeamFeedMessage
   reviewHref: string | null
   inspected?: boolean
-  onInspect?: () => void
+  inspectorId?: string
+  onInspect?: (trigger: HTMLButtonElement) => void
 }) {
   const t = useT()
+  const sentence = feedMessageText(message, t)
   const excerpt = message.body.kind === "sceneReady" ? message.body.excerpt : null
   const reviewLinkHref = message.body.kind === "draftsStaged" ? reviewHref : null
   return (
     <div
       className={cn(
-        "flex items-start gap-2 rounded-md px-1.5 py-1 transition-colors",
-        onInspect && "cursor-pointer outline-none hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring",
+        "group/step flex items-start gap-2 rounded-md px-1.5 py-1 transition-colors",
+        onInspect && "hover:bg-accent/40",
         inspected && "bg-accent",
       )}
       data-feed-kind={message.body.kind}
-      role={onInspect ? "button" : undefined}
-      tabIndex={onInspect ? 0 : undefined}
-      aria-pressed={onInspect ? inspected : undefined}
-      onClick={onInspect}
-      onKeyDown={
-        onInspect
-          ? (event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault()
-                onInspect()
-              }
-            }
-          : undefined
-      }
     >
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5 select-text">
         <p className={cn(
           "leading-relaxed",
           message.body.kind === "phase" ? "text-xs text-muted-foreground" : "text-sm",
         )}>
-          {feedMessageText(message, t)}
+          {sentence}
         </p>
         {excerpt && (
           <blockquote className="mt-0.5 border-s-2 border-border ps-2 text-xs leading-relaxed text-muted-foreground">
@@ -75,13 +65,38 @@ export function FeedMessageRow({
         {reviewLinkHref && (
           <Link
             to={reviewLinkHref}
-            onClick={(event) => event.stopPropagation()}
             className="mt-0.5 w-fit text-xs font-medium underline underline-offset-2 hover:text-foreground"
           >
             {t("agent.team.reviewDrafts")}
           </Link>
         )}
       </div>
+      {onInspect && (
+        <AppTooltip
+          content={t(inspected ? "agent.team.step.hideDetails" : "agent.team.step.viewDetails")}
+          disabled={inspected}
+          delay={150}
+        >
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            className={cn(
+              "shrink-0",
+              !inspected && "[@media(hover:hover)_and_(pointer:fine)]:opacity-0 [@media(hover:hover)_and_(pointer:fine)]:group-hover/step:opacity-100 [@media(hover:hover)_and_(pointer:fine)]:group-focus-within/step:opacity-100",
+            )}
+            aria-label={t(
+              inspected ? "agent.team.step.hideDetailsAriaLabel" : "agent.team.step.viewDetailsAriaLabel",
+              { step: sentence },
+            )}
+            aria-expanded={Boolean(inspected)}
+            aria-controls={inspected ? inspectorId : undefined}
+            onClick={(event) => onInspect(event.currentTarget)}
+          >
+            <Info aria-hidden data-icon="inline-start" />
+          </Button>
+        </AppTooltip>
+      )}
     </div>
   )
 }
@@ -90,12 +105,14 @@ function RoutineUpdates({
   messages,
   reviewHref,
   inspectedId,
+  inspectorId,
   onInspect,
 }: {
   messages: TeamFeedMessage[]
   reviewHref: string | null
   inspectedId?: string | null
-  onInspect?: (message: TeamFeedMessage) => void
+  inspectorId?: string
+  onInspect?: (message: TeamFeedMessage, trigger: HTMLButtonElement) => void
 }) {
   const t = useT()
   const contentId = useId()
@@ -109,7 +126,8 @@ function RoutineUpdates({
       message={message}
       reviewHref={reviewHref}
       inspected={inspectedId === message.id}
-      onInspect={onInspect ? () => onInspect(message) : undefined}
+      inspectorId={inspectorId}
+      onInspect={onInspect ? (trigger) => onInspect(message, trigger) : undefined}
     />
   ))
   if (messages.length < 2) return <>{rows}</>
@@ -147,7 +165,8 @@ export interface TeamThreadDetailProps {
   feedLoading: boolean
   /** Step-inspector wiring (the optional third column). */
   inspectedId?: string | null
-  onInspect?: (message: TeamFeedMessage) => void
+  inspectorId?: string
+  onInspect?: (message: TeamFeedMessage, trigger: HTMLButtonElement) => void
 }
 
 export function TeamThreadDetail({
@@ -156,6 +175,7 @@ export function TeamThreadDetail({
   feed,
   feedLoading,
   inspectedId,
+  inspectorId,
   onInspect,
 }: TeamThreadDetailProps) {
   const { locale, t } = useI18n()
@@ -200,6 +220,7 @@ export function TeamThreadDetail({
                     messages={part.messages}
                     reviewHref={reviewHref}
                     inspectedId={inspectedId}
+                    inspectorId={inspectorId}
                     onInspect={onInspect}
                   />
                 ) : (
@@ -208,7 +229,8 @@ export function TeamThreadDetail({
                     message={part.message}
                     reviewHref={reviewHref}
                     inspected={inspectedId === part.message.id}
-                    onInspect={onInspect ? () => onInspect(part.message) : undefined}
+                    inspectorId={inspectorId}
+                    onInspect={onInspect ? (trigger) => onInspect(part.message, trigger) : undefined}
                   />
                 ))}
               </div>

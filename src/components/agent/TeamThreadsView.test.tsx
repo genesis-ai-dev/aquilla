@@ -280,6 +280,10 @@ describe("TeamThreadsView — the active conversation surface", () => {
     expect(screen.getByTestId("team-composer-scope")).toHaveTextContent("Drafter · MRK 4:1–4:8")
     const header = screen.getByTestId("team-conversation-header")
     expect(within(header).getByRole("heading", { name: "Mark", level: 2 })).toBeInTheDocument()
+    expect(within(header).getByRole("status")).toHaveTextContent("3 drafts ready for your review")
+    expect(within(header).getByRole("link", { name: "Review drafts" })).toHaveAttribute(
+      "href", "/project/p1/editor/file/file-1?lane=",
+    )
     expect(within(header).getByTestId("team-roster-live-drafter")).toBeInTheDocument()
     for (const name of ["Drafter", "Reviewer", "Coordinator"]) {
       expect(within(header).getByRole("button", { name: `About ${name}` })).toBeInTheDocument()
@@ -460,20 +464,39 @@ describe("TeamThreadsView — the active conversation surface", () => {
   it("consolidates open questions into one conversation, with no second message box", async () => {
     fetchContextualRuns.mockResolvedValue(runsPage([]))
     fetchContextualDecisions.mockResolvedValue(
-      decisionsPage({ openCount: 1, decisions: [openQuestion] }),
+      decisionsPage({ openCount: 7, decisions: [openQuestion] }),
     )
-    const view = renderView()
+    const view = renderView({ initialEntry: "/project/p1/agent?conversation=team-chat&lane=fr" })
+    const teamHeader = await screen.findByTestId("team-conversation-header")
+    const questionsLink = within(teamHeader).getByRole("link", { name: "View questions" })
+    expect(questionsLink).toHaveAttribute("href", "/project/p1/agent?conversation=questions&lane=fr")
+    fireEvent.click(questionsLink)
+    expect(await screen.findByTestId("team-questions")).toBeInTheDocument()
+    fireEvent.keyDown(window, { key: "Escape" })
 
-    // Reachable from the inline Answer affordance in Team chat…
+    // The existing inline Answer affordance still reaches the same conversation.
     fireEvent.click(await screen.findByRole("button", { name: "Open this question" }))
 
     expect(await screen.findByTestId("team-questions")).toBeInTheDocument()
     const header = screen.getByTestId("team-conversation-header")
     expect(within(header).getByRole("heading", { name: "Needs your expertise", level: 2 })).toBeInTheDocument()
+    expect(within(header).getByRole("status")).toHaveTextContent("7 questions need your expertise")
+    expect(within(header).queryByRole("link", { name: "View questions" })).not.toBeInTheDocument()
     expect(within(header).getByTestId("team-roster")).toBeInTheDocument()
     expect(screen.getByTestId("contextual-decision-card")).toBeInTheDocument()
     // DecisionCard owns its own Answer input — the channel composer stands down.
     expect(screen.queryByLabelText("Ask the agent")).not.toBeInTheDocument()
+    view.unmount()
+  })
+
+  it("does not show the empty-team intro when open questions are outside the visible page", async () => {
+    fetchContextualRuns.mockResolvedValue(runsPage([]))
+    fetchContextualDecisions.mockResolvedValue(decisionsPage({ openCount: 4 }))
+    const view = renderView()
+    const header = await screen.findByTestId("team-conversation-header")
+    expect(within(header).getByRole("status")).toHaveTextContent("4 questions need your expertise")
+    expect(within(header).getByRole("link", { name: "View questions" })).toBeInTheDocument()
+    expect(screen.queryByText("The team posts its work here")).not.toBeInTheDocument()
     view.unmount()
   })
 

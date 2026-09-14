@@ -56,9 +56,10 @@ import { humanPassageLabel } from "../../../shared/span-label"
 import { AgentCardTrigger } from "./AgentCard"
 import { TeamChannel } from "./TeamChannel"
 import { TeamChannelComposer } from "./TeamChannelComposer"
+import { TeamConversationHeader } from "./TeamConversationHeader"
 import { TeamStepInspector } from "./TeamStepInspector"
 import { TeamThreadDetail } from "./TeamThreadDetail"
-import { isRunWorking, runStatusKey } from "./team-run-status"
+import { isRunWorking } from "./team-run-status"
 
 const POLL_MS = 4_000
 
@@ -76,50 +77,6 @@ export interface TeamThreadsViewProps {
   author?: string
   /** Project role level — gates re-opening finished runs by messaging. */
   roleLevel?: number | null
-}
-
-function TeamConversationHeader({
-  title,
-  status,
-  activePersonas,
-  projectId,
-  t,
-}: {
-  title: string
-  status?: string
-  activePersonas: ReadonlySet<string>
-  projectId: string
-  t: TFunction
-}) {
-  return (
-    <header
-      className="flex shrink-0 items-center gap-3 border-b border-border/60 px-4 py-3"
-      data-testid="team-conversation-header"
-    >
-      <div className="flex min-w-0 flex-1 items-baseline gap-2">
-        <h2 className="min-w-0 truncate text-base font-semibold" title={title}>{title}</h2>
-        {status && <span className="shrink-0 text-xs text-muted-foreground">{status}</span>}
-      </div>
-      <ul
-        className="flex shrink-0 items-center gap-2"
-        aria-label={t("agent.team.rosterTitle")}
-        data-testid="team-roster"
-      >
-        {AGENT_PERSONA_IDS.map((id) => (
-          <li key={id} className="flex items-center gap-1">
-            <AgentCardTrigger personaId={id} projectId={projectId} size="md" />
-            {activePersonas.has(id) && (
-              <span
-                data-testid={`team-roster-live-${id}`}
-                aria-label={t("autopilot.status.working")}
-                className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse motion-reduce:animate-none"
-              />
-            )}
-          </li>
-        ))}
-      </ul>
-    </header>
-  )
 }
 
 function TeamEmptyState({ projectId, t }: { projectId: string; t: TFunction }) {
@@ -316,7 +273,7 @@ export function TeamThreadsView({
     : null
 
   const loading = runs === null && !loadFailed
-  const isEmpty = channelItems.length === 0 && state.runs.length === 0
+  const isEmpty = channelItems.length === 0 && state.runs.length === 0 && openCount === 0
   // The questions conversation hides the composer: DecisionCard owns its own
   // Answer input, and a second box would be two ways to say one thing.
   const showComposer = selectedId !== QUESTIONS_CONVERSATION
@@ -350,7 +307,6 @@ export function TeamThreadsView({
           title={t("agent.team.teamChat")}
           activePersonas={activePersonas}
           projectId={projectId}
-          t={t}
         />
         <TeamEmptyState projectId={projectId} t={t} />
         {showComposer && (
@@ -374,6 +330,11 @@ export function TeamThreadsView({
         : openRun
           ? runTitle(openRun)
           : ""
+  const questionsParams = new URLSearchParams(searchParams)
+  questionsParams.set(CONVERSATION_PARAM, QUESTIONS_CONVERSATION)
+  const questionsHref = selectedId === TEAM_CHAT_CONVERSATION
+    ? `?${questionsParams.toString()}`
+    : undefined
 
   let conversation: ReactNode
   if (selectedId === QUESTIONS_CONVERSATION) {
@@ -426,10 +387,11 @@ export function TeamThreadsView({
     <div className="flex min-h-0 flex-1 flex-col">
       <TeamConversationHeader
         title={conversationTitle}
-        status={openRun ? t(runStatusKey(openRun)) : undefined}
+        run={openRun}
+        openQuestionCount={openCount}
+        questionsHref={questionsHref}
         activePersonas={activePersonas}
         projectId={projectId}
-        t={t}
       />
       <div className="flex min-h-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col">

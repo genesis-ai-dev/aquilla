@@ -172,6 +172,23 @@ when an arriving phase turns a single update into a collapsible group. This is
 presentation only: no new summaries, claims of approval, or backend writes.
 The main Team chat and the document-workspace Chat tab are unchanged.
 
+## Human-attention header (2026-09-14)
+
+A task with pending proposals shows its current pending-review count and a
+primary **Review drafts** link beneath the conversation title. The run's
+technical status (including Idle) remains secondary metadata. The count is the
+server's run-scoped `proposedDrafts`, not a sum of historical staging messages;
+zero or unavailable counts do not imply pending work or a completed review.
+The link uses the existing file-review destination and preserves the run's
+target-language lane, including an explicitly empty default lane.
+
+Team chat promotes the full project `openCount` with a **View questions** link
+to the existing questions conversation. The count includes questions beyond
+the visible page cap. In that conversation, the count remains visible but
+the redundant navigation action is omitted; answers stay in DecisionCard.
+Project-wide question counts are not attributed to an individual run.
+These are navigation affordances only: no new approval controls or writes.
+
 ## Testing
 
 Vitest: personas mapping totality (every region/tool kind attributes — the social
@@ -191,3 +208,6 @@ and the real thread UI, plus TeamThreadsView RTL for disclosure-to-inspector
 behavior and visible notes, failures, and review links. TeamThreadDetail RTL
 covers singleton activity, refresh/append stability, and inspected-step
 visibility.
+Attention-header RTL covers zero/missing/updated pending counts, default and
+non-default review lanes, project-question scope and capped pages, and the
+existing question-card navigation/answer surface.

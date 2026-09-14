@@ -110,6 +110,8 @@ UI chrome that used to be one smoke file per click is covered under
   covered in RTL (`TeamThreadsView.test.tsx`, `AgentWorkbench.test.tsx`)
 - Agent task message grouping, routine-activity disclosure, and original-step
   inspection: covered in RTL (`TeamThreadDetail.test.tsx`, `TeamThreadsView.test.tsx`)
+- Agent pending-review/question header and links to existing review lanes:
+  covered in RTL (`TeamConversationHeader.test.tsx`, `TeamThreadsView.test.tsx`)
 - View settings, tab strip, selection bar, outbox inspector, term-lookup popover,
   video attachment dialog, cell-expansion Escape close, setup-checklist expand/skip
   (except survives-refresh, which stays smoke)

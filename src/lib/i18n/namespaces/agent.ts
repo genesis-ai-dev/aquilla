@@ -192,6 +192,11 @@ export const agent = defineNamespace({
       one: "{count} draft ready for your review",
       other: "{count} drafts ready for your review",
     }),
+    "agent.team.questionsWaiting": plural({
+      one: "{count} question needs your expertise",
+      other: "{count} questions need your expertise",
+    }),
+    "agent.team.viewQuestions": "View questions",
     // v2.2 three-column layout: dock threads list + step inspector + re-open.
     // (The v2.1 focus toggle went away — collapsing the dock plays that role.)
     "agent.team.newConversation": "New conversation",
@@ -909,9 +914,16 @@ export const agent = defineNamespace({
       },
       "agent.team.draftsReady": {
         description:
-          "One-line preview on a run's row in the conversations list when staged " +
-          "drafts await the human — the row's badge shows the same count.",
+          "Pending-review count in a task conversation header and its sidebar " +
+          "preview. Counts only proposals still awaiting review, not historical staging events.",
         placeholders: { count: "How many staged drafts await review." },
+      },
+      "agent.team.questionsWaiting": {
+        description: "Project-wide attention prompt in Team chat and the questions conversation.",
+        placeholders: { count: "Full number of open questions, including any beyond the visible page cap." },
+      },
+      "agent.team.viewQuestions": {
+        description: "Open the existing questions conversation; answers remain in the individual question cards.",
       },
       "agent.team.showActivityUpdates": {
         description: "Expand adjacent routine reading, drafting, or checking updates in a task conversation.",

@@ -242,6 +242,14 @@ export const agent = defineNamespace({
     "agent.team.composer.scope": "{persona} · {scope}",
     "agent.team.composer.sendFailed": "Couldn't send that message. Try again.",
 
+    // ── Shared chat management (AgentChatOptions) ───────────────────────
+    "agent.chatOptions.label": "Chat options",
+    "agent.chatOptions.resetItem": "Reset chat…",
+    "agent.chatOptions.resetTitle": "Reset chat?",
+    "agent.chatOptions.resetDescription":
+      "Clears the messages, chat proposals, and Undo controls shared by {teamChat} and {chat} in this browser. Stops any current chat response and clears queued messages. Project task activity, files, and applied translations are unchanged.",
+    "agent.chatOptions.resetConfirm": "Reset chat",
+
     // ── Full-screen workbench (AgentWorkbench) ──────────────────────────
     "agent.workbench.newSessionAriaLabel": "New session",
     "agent.workbench.minimizeTooltip": "Minimize to sidebar",
@@ -1043,6 +1051,25 @@ export const agent = defineNamespace({
       "agent.team.step.hideDetailsAriaLabel": {
         description: "Accessible name for closing details from the selected message's control.",
         placeholders: { step: "The already-localized plain-language step sentence." },
+      },
+      "agent.chatOptions.label": {
+        description: "Accessible name for the workbench's overflow menu of occasional chat-management actions.",
+      },
+      "agent.chatOptions.resetItem": {
+        description: "Menu action that opens confirmation before resetting the shared chat session; it does not create a separate conversation in the task list.",
+      },
+      "agent.chatOptions.resetTitle": {
+        description: "Confirmation title for discarding the current browser's shared chat session.",
+      },
+      "agent.chatOptions.resetDescription": {
+        description: "Explains the actual reset scope: browser-local chat and review state are cleared, chat streaming/queue stop, and project activity and applied translations are preserved.",
+        placeholders: {
+          teamChat: "The already-localized name of the pinned Team chat conversation.",
+          chat: "The already-localized name of the Chat tab.",
+        },
+      },
+      "agent.chatOptions.resetConfirm": {
+        description: "Destructive confirmation button; the existing reset runs only after this is activated.",
       },
       "agent.team.openQuestionAriaLabel": {
         description:

@@ -208,6 +208,25 @@ gone, focus returns to the conversation region instead. A subsequent unhandled
 Escape retains the existing return-to-Team-chat behavior. Consumed Escape
 events and composition cancellation do not dismiss or navigate the workspace.
 
+## Chat controls cleanup (2026-09-14)
+
+The dock's pinned Team chat row is the single entry to that conversation; the
+misleading New conversation shortcut is removed because it only navigated to
+the same chat. The workbench's always-visible New session button is replaced
+by **Chat options → Reset chat…**. Tabs and the prominent Send, Stop, review,
+and question actions keep their existing behavior.
+
+Reset always opens an explicit confirmation explaining the actual scope:
+messages, in-chat proposals, and Undo controls shared by Team chat and Chat
+are cleared in this browser; the current chat response and queued messages
+stop. Project task activity, files, and applied translations are not reset.
+Cancel receives initial focus, cancellation does not call reset, and closing
+the dialog returns focus to Chat options. Reset is unavailable during a
+workbench apply/undo operation. Changing the project or account dismisses the
+confirmation rather than retargeting it to another chat. Confirming calls the
+existing session-store reset without navigating, creating a task, or emitting
+document events.
+
 ## Testing
 
 Vitest: personas mapping totality (every region/tool kind attributes — the social
@@ -233,3 +252,8 @@ existing question-card navigation/answer surface.
 Inspector interaction RTL covers passive text, explicit controls, trigger/panel
 association, focus return and its collapsed-group fallback, Escape priority,
 and keyboard activation of the independent review link.
+Chat-options RTL covers confirmation/cancellation, focus, busy-state gating,
+and the real session-store reset. The workbench integration test preserves
+already-applied outbox records and verifies reset emits no undo/delete writes.
+Existing session-store tests cover stopping queued work and persistence of the
+fresh session.

@@ -160,12 +160,15 @@ describe("AgentDockPanel", () => {
     expect(currentPath).toBe("/project/p1/agent?conversation=team-chat")
   })
 
-  it("the new-conversation control heads to a fresh Team chat", async () => {
+  it("uses the pinned Team chat row instead of a misleading duplicate new-conversation control", async () => {
     fetchContextualRuns.mockResolvedValue(runsPage([]))
     fetchContextualDecisions.mockResolvedValue(decisionsPage())
     renderPanel()
 
-    fireEvent.click(await screen.findByRole("button", { name: "New conversation" }))
+    const list = await screen.findByTestId("team-conversation-list")
+    expect(screen.queryByRole("button", { name: "New conversation" })).not.toBeInTheDocument()
+    expect(within(list).getAllByRole("button")).toHaveLength(1)
+    fireEvent.click(within(list).getByText("Team chat"))
     expect(currentPath).toBe("/project/p1/agent?conversation=team-chat")
   })
 })

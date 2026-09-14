@@ -12,7 +12,7 @@
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "react-router-dom"
-import { Bot, Minimize2, RotateCcw, Square } from "lucide-react"
+import { Bot, Minimize2, Square } from "lucide-react"
 import type { Layout } from "react-resizable-panels"
 import { Button } from "@/components/ui/button"
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable"
@@ -40,6 +40,7 @@ import { translateRuleName } from "@/lib/lqa/builtin-resolver"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { CONVERSATION_PARAM } from "@/lib/agent/team-channel"
 import { AgentDockView, type AgentDockViewProps } from "./AgentDockView"
+import { AgentChatOptions } from "./AgentChatOptions"
 import { AgentContextPane, type AgentWorkbenchCell } from "./AgentContextPane"
 import { TeamThreadsView } from "./TeamThreadsView"
 import { CreditsDial, type CreditsDialProps } from "./CreditsDial"
@@ -115,6 +116,7 @@ export function AgentWorkbench({ agent, credits, fileNames, onClose, onJumpToCel
   const [searchParams] = useSearchParams()
   const conversationParam = searchParams.get(CONVERSATION_PARAM)
   const [tab, setTab] = useState<WorkbenchTab>(() => (conversationParam ? "team" : "sessions"))
+  const showWorkbenchIdentity = tab !== "team"
   useEffect(() => {
     if (conversationParam) setTab("team")
   }, [conversationParam])
@@ -385,7 +387,7 @@ export function AgentWorkbench({ agent, credits, fileNames, onClose, onJumpToCel
       >
         {/* One compact workbench header: identity, navigation, and actions. */}
         <div className="flex shrink-0 items-center gap-2 border-b px-3 py-1.5">
-          {tab !== "team" && (
+          {showWorkbenchIdentity && (
             <>
               <Bot className="h-4 w-4 shrink-0 text-muted-foreground" />
               <span className="shrink-0 text-sm font-medium">{t("agentWorkspace.agent")}</span>
@@ -427,18 +429,11 @@ export function AgentWorkbench({ agent, credits, fileNames, onClose, onJumpToCel
                 {t("common.stop")}
               </Button>
             )}
-            <AppTooltip content={t("agentWorkspace.newSessionHelp")}>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-6 text-[11px] text-muted-foreground"
-                onClick={reset}
-              >
-                <RotateCcw data-icon="inline-start" />
-                {t("agentWorkspace.newSession")}
-              </Button>
-            </AppTooltip>
+            <AgentChatOptions
+              key={JSON.stringify([agent.projectId, agent.author])}
+              onReset={reset}
+              disabled={applying}
+            />
             <AppTooltip content={t("agentWorkspace.collapseHelp")}>
               <Button
                 type="button"

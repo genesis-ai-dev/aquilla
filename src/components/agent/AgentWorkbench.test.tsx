@@ -9,7 +9,7 @@
  * text after accept (and the restored text after undo).
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import type { AgentFrame } from "@/lib/agent/protocol"
 
@@ -82,6 +82,7 @@ vi.mock("@/lib/agent/memory-api", async () => {
 })
 
 import { agentSessionStore } from "@/lib/agent/session-store"
+import { getOutboxRecords, outboxRecordCountAllOwners } from "@/lib/sync/outbox"
 import { AgentWorkbench, type AgentWorkbenchProps } from "./AgentWorkbench"
 
 const PROJECT = `wb-test-${Math.random().toString(36).slice(2)}`
@@ -236,6 +237,13 @@ async function primeSessionWithDraftRun(): Promise<void> {
   await waitFor(() => expect(agentSessionStore(PROJECT, "alice").getState().isStreaming).toBe(false))
 }
 
+beforeAll(() => {
+  Object.defineProperty(Element.prototype, "getAnimations", {
+    configurable: true,
+    value: () => [],
+  })
+})
+
 beforeEach(() => {
   agentSessionStore(PROJECT, "alice").reset()
 })
@@ -354,6 +362,65 @@ describe("AgentWorkbench three-pane layout", () => {
 })
 
 describe("AgentWorkbench review loop", () => {
+  it("confirms chat reset without undoing or deleting already-applied events", async () => {
+    await primeSessionWithDraftRun()
+    const props = workbenchProps()
+    const onApplied = vi.fn<NonNullable<AgentWorkbenchProps["agent"]["onApplied"]>>()
+    props.agent.onApplied = onApplied
+    render(<AgentWorkbench {...props} />)
+    fireEvent.click(screen.getByRole("button", { name: /Accept remaining/ }))
+    await waitFor(() => expect(onApplied).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(screen.getAllByText("✓ accepted")).toHaveLength(2))
+
+    const store = agentSessionStore(PROJECT, "alice")
+    const before = store.getState()
+    const appliedIds = onApplied.mock.calls[0][0]
+    const appliedRecords = await getOutboxRecords(appliedIds)
+    expect(appliedRecords).toHaveLength(2)
+    const eventCount = await outboxRecordCountAllOwners()
+    expect(before.decided.size).toBe(2)
+
+    fireEvent.click(screen.getByRole("button", { name: "Chat options" }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Reset chat…" }))
+    let dialog = await screen.findByRole("alertdialog", { name: "Reset chat?" })
+    expect(store.getState().sessionId).toBe(before.sessionId)
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
+    expect(store.getState().runs).toEqual(before.runs)
+    expect(store.getState().decided).toEqual(before.decided)
+
+    fireEvent.click(screen.getByRole("button", { name: "Chat options" }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Reset chat…" }))
+    dialog = await screen.findByRole("alertdialog", { name: "Reset chat?" })
+    fireEvent.click(within(dialog).getByRole("button", { name: "Reset chat" }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole("button", { name: "Chat options" })).toHaveFocus())
+    expect(store.getState().sessionId).not.toBe(before.sessionId)
+    expect(store.getState().runs).toEqual([])
+    expect(store.getState().decided.size).toBe(0)
+    expect(await getOutboxRecords(appliedIds)).toEqual(appliedRecords)
+    expect(await outboxRecordCountAllOwners()).toBe(eventCount)
+    expect(screen.getByRole("tab", { name: "Chat" })).toHaveAttribute("aria-selected", "true")
+  })
+
+  it.each(["project", "account"])("dismisses reset confirmation when its %s changes", async (scope) => {
+    await primeSessionWithDraftRun()
+    const props = workbenchProps()
+    const view = render(<AgentWorkbench {...props} />)
+    const before = agentSessionStore(PROJECT, "alice").getState()
+    fireEvent.click(screen.getByRole("button", { name: "Chat options" }))
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Reset chat…" }))
+    expect(await screen.findByRole("alertdialog", { name: "Reset chat?" })).toBeInTheDocument()
+
+    const next = workbenchProps()
+    if (scope === "project") next.agent.projectId = `${PROJECT}-other`
+    else next.agent.author = "bob"
+    view.rerender(<AgentWorkbench {...next} />)
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
+    expect(agentSessionStore(PROJECT, "alice").getState().sessionId).toBe(before.sessionId)
+    expect(agentSessionStore(PROJECT, "alice").getState().runs).toEqual(before.runs)
+  })
+
   it("accept-all keeps the committed text visible in the grid (regression: rows went blank)", async () => {
     await primeSessionWithDraftRun()
     render(<AgentWorkbench {...workbenchProps()} />)
@@ -397,7 +464,8 @@ describe("AgentWorkbench Chat | Project knowledge tab slot (AQU-AGENT §5)", () 
     expect(within(toolbar).queryByText("Agent", { exact: true })).not.toBeInTheDocument()
     expect(within(toolbar).getByRole("tab", { name: "Chat" })).toBeInTheDocument()
     expect(within(toolbar).getByRole("tab", { name: "Project knowledge" })).toBeInTheDocument()
-    expect(within(toolbar).getByRole("button", { name: /New session/ })).toBeInTheDocument()
+    expect(within(toolbar).getByRole("button", { name: "Chat options" })).toBeInTheDocument()
+    expect(within(toolbar).queryByRole("button", { name: /New session/ })).not.toBeInTheDocument()
     expect(within(toolbar).getByRole("button", { name: /Collapse Agent pane/ })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("tab", { name: "Chat" }))
@@ -417,7 +485,7 @@ describe("AgentWorkbench Chat | Project knowledge tab slot (AQU-AGENT §5)", () 
     const header = chatTab.closest("[role=tablist]")?.parentElement
     expect(header).not.toBeNull()
     expect(within(header!).getByText("Agent")).toBeInTheDocument()
-    expect(within(header!).getByRole("button", { name: /New session/ })).toBeInTheDocument()
+    expect(within(header!).getByRole("button", { name: "Chat options" })).toBeInTheDocument()
     expect(within(header!).getByRole("button", { name: /Collapse Agent pane/ })).toBeInTheDocument()
 
     fireEvent.click(memoryTab)

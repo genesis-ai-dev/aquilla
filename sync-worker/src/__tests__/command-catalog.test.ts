@@ -57,7 +57,7 @@ describe('command catalog — invariants', () => {
       PlanImport: { kind: 'PlanImport', fileName: 'n', fileType: 'txt', cells: [{ content: 'x' }] },
       CreateProject: { kind: 'CreateProject', name: 'P' },
       UpdateProjectSettings: { kind: 'UpdateProjectSettings', projectId: 'p', settings: {}, ifMatchVersion: 0 },
-      PatchSettings: { kind: 'PatchSettings', projectId: 'p', ops: [{ key: 'brief', value: 1 }], ifMatchVersion: 0 },
+      PatchSettings: { kind: 'PatchSettings', projectId: 'p', ops: [{ key: 'systemPrompt', value: 'x' }], ifMatchVersion: 0 },
       EmitEvents: { kind: 'EmitEvents', events: [{ kind: 'comment.create', payload: { body: 'hi' } }] },
       AddExample: { kind: 'AddExample', slug: 'lord-as-hospod', source: 'the LORD', target: 'Господь' },
       AddDecision: { kind: 'AddDecision', slug: 'divine-name', decision: 'Render Lord as Господь.' },

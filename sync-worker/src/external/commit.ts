@@ -23,6 +23,7 @@ import {
   type UpdateProjectSettingsCommand,
 } from './commands'
 import { changedPolicyKeys, commitPatchSettings } from './commands-patch-settings'
+import { commitMemoryCommand, isMemoryCommand } from './commands-memory'
 import { commitEmitEvents } from './emit-events-engine'
 import {
   buildProvenance,
@@ -211,6 +212,13 @@ export async function commitChangesetCore(
   )
   if (patchSettingsCmd) {
     return commitPatchSettings(db, cred, cs, patchSettingsCmd, channel)
+  }
+
+  // AQU-1228 Living Memory writes: receipt-only, with their own floors and the
+  // human-edited guard — the module re-runs the full guard sequence.
+  const memoryCmd = cs.commands.find(isMemoryCommand)
+  if (memoryCmd) {
+    return commitMemoryCommand(db, cred, cs, memoryCmd, channel)
   }
 
   // ── Live role/membership precheck (§2) ────────────────────────────────────

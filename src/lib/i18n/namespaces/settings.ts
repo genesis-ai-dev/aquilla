@@ -100,6 +100,35 @@ export const settings = defineNamespace({
     "settings.termbase.optionProjectLead": "Project lead (500) — default",
     "settings.termbase.optionMaintainer": "Maintainer (600) — most restrictive",
 
+    // ── CommentPermissionsSection (org settings → security) ──
+    "settings.commentPermissions.groupLabel": "Comments",
+    "settings.commentPermissions.groupDescription":
+      "Who can take part in comment threads on this org's projects. Only org " +
+      "owners can change these.",
+    "settings.commentPermissions.createLabel": "Who can comment",
+    "settings.commentPermissions.createDescription":
+      "Minimum role required to open a comment thread or post a reply. Below " +
+      "this role, threads are read-only.",
+    "settings.commentPermissions.resolveLabel": "Who can resolve others' threads",
+    "settings.commentPermissions.resolveDescription":
+      "Minimum role required to resolve or reopen a thread someone else " +
+      "opened. Whoever opened a thread can always resolve their own, whatever " +
+      "this is set to.",
+    // Open-dropdown option text for both comment floors; see the
+    // roster/progress options above for why the level number is baked in.
+    "settings.commentPermissions.createOptionCommenter": "Commenter (200) — default",
+    "settings.commentPermissions.createOptionReviewer": "Reviewer (300) — reviewers and above",
+    "settings.commentPermissions.createOptionContributor":
+      "Contributor (400) — translators and above",
+    "settings.commentPermissions.createOptionProjectLead": "Project lead (500) — leads and above",
+    "settings.commentPermissions.createOptionMaintainer": "Maintainer (600) — most restrictive",
+    "settings.commentPermissions.resolveOptionCommenter":
+      "Commenter (200) — anyone who can comment",
+    "settings.commentPermissions.resolveOptionReviewer": "Reviewer (300) — reviewers and above",
+    "settings.commentPermissions.resolveOptionContributor": "Contributor (400) — default",
+    "settings.commentPermissions.resolveOptionProjectLead": "Project lead (500) — leads and above",
+    "settings.commentPermissions.resolveOptionMaintainer": "Maintainer (600) — most restrictive",
+
     // ── UsageSection (Preferences → Usage) ──
     "settings.usage.historyLabel": "7-day audio history",
     "settings.usage.historyChartAriaLabel": "7-day audio history bar chart",

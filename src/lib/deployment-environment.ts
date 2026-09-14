@@ -39,16 +39,26 @@ export type DeploymentEnvironment =
   | "local"
   | "unknown"
 
-/** Live API hosts from the environment matrix in docs/DEPLOYMENT-ENVIRONMENTS.md. */
-const PRODUCTION_API_HOSTS = new Set(["api.aquilla.app"])
-const DEVELOPMENT_API_HOSTS = new Set(["api.dev.aquilla.app"])
+/** The one production API host from the matrix in docs/DEPLOYMENT-ENVIRONMENTS.md. */
+const PRODUCTION_API_HOST = "api.aquilla.app"
+
+/*
+ * Non-production live environments are the environment-scoped hosts under the
+ * same apex — `api.<env>.aquilla.app` (today only `dev`). They are matched by
+ * shape, deliberately NOT listed by name: this module is compiled into every
+ * bundle, and `scripts/verify-live-environment.mjs` refuses to promote a
+ * production bundle that contains a non-production host literal. Spelling the
+ * dev host out here is exactly what blocked the 2026-09-11 production deploy
+ * (AQU-1258). Keep it a pattern.
+ */
+const ENVIRONMENT_API_HOST_PATTERN = /^api\.[a-z0-9-]+\.aquilla\.app$/
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]"])
 
 /**
  * Reduce an API base to a bare hostname. Accepts every shape the build-time
  * vars come in as: a full URL (`https://api.aquilla.app/identity`), a
- * host-with-path (`api.dev.aquilla.app/sync`), or a host:port
+ * host-with-path (`api.aquilla.app/sync`), or a host:port
  * (`127.0.0.1:8787`).
  */
 export function apiHostname(value: string): string {
@@ -68,8 +78,8 @@ export function apiHostname(value: string): string {
 export function classifyApiHost(value: string): DeploymentEnvironment {
   const host = apiHostname(value)
   if (!host) return "unknown"
-  if (PRODUCTION_API_HOSTS.has(host)) return "production"
-  if (DEVELOPMENT_API_HOSTS.has(host)) return "development"
+  if (host === PRODUCTION_API_HOST) return "production"
+  if (ENVIRONMENT_API_HOST_PATTERN.test(host)) return "development"
   if (
     LOCAL_HOSTS.has(host) ||
     host.endsWith(".localhost") ||

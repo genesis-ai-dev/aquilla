@@ -2,23 +2,49 @@
 
 Updated: 2026-09-14. AQU-837. Implementation preparation, not an enabled meter.
 
-## Decision required
+## Approved accounting basis
 
-The approved Free/Pro/Max/Team values specify allowance counts but not the
-conversion from performed work into those counts. Two incompatible accounting
-systems currently exist:
+Ryder selects provider cost with a multiplier on 2026-09-14 and confirms the
+agent uses the same multiplier as other work. Higher token consumption naturally
+uses more of the shared allowance; there is no additional agent surcharge.
 
-- `auth-worker/src/lib/credits.ts` stores raw provider cents in daily aggregates.
-  `creditsFor` applies a configurable multiplier (default 4×; agent 5×).
-  `sync-worker/src/credits.ts` mirrors this for speech synthesis.
-- `auth-worker/src/lib/billing/words.ts` records input words in daily aggregates;
-  legacy billing defaults to 100 words per credit.
+The new weekly model preserves the existing base conversion: one internal unit
+is one marked-up cent, with a uniform 4× multiplier. `2026-09-cost-v1` snapshots
+that rate. Store raw provider cost separately, and use integer millionths of an
+internal unit so small calls do not each round up to a whole unit. Existing
+legacy credit/word accounting remains separate during rollout.
 
-These do not give the same capacity. Do not silently select one, reinterpret
-approved allowance counts, or treat missing provider cost as free work.
-Ryder has been asked which unit the weekly allowance uses. If cost-based, confirm
-its conversion/rate version before enabling customer enforcement. Percentage-only
-presentation does not remove the need for an explicit internal unit.
+The approved allowance counts stay unchanged. Consequently Pro's 50 units allow
+12.5 raw provider cents per week at 4×. This is an explicit implementation of the
+existing unit convention, not a claim that the capacity is commercially validated.
+Validate realistic workloads before enabling enforcement; changing the unit or
+capacity requires a new explicit policy/version, not hidden repricing.
+
+Missing provider cost is unresolved, not zero or an invented flat charge.
+Percentage-only presentation does not remove the need for an explicit unit.
+
+## Implemented foundation
+
+- `db/shared/billing-cost.ts` defines the common conversion and strict provider
+  cost parser. Agent, chat, and speech use the same multiplier.
+- Migration `0097_workspace_usage_requests.sql` adds exact-period reservations,
+  raw settled cost, rate snapshots, and terminal-state constraints. It is prepared,
+  not deployed. Freshly fetched main `c1aad5636` ends at migration 0089;
+  0097 does not collide there. Recheck pending branches at release integration.
+- `workspace-usage.ts` reads the verified workspace entitlement inside the same
+  organization lock used by billing changes. It reserves against settled plus
+  outstanding usage, deduplicates request IDs, and settles actual cost atomically.
+- A reservation replay never authorizes another provider call. Known unused work
+  can release its reservation; unknown completion cannot expire into free usage.
+  Settled overruns remain recorded and prevent further admission.
+- Paid access failure selects the Free cap against the same period's consumption.
+  Exact weekly boundaries leave old usage intact. Explicit Free workspace periods
+  start at workspace creation; unknown/legacy/covered workspaces require their
+  separate access contract instead of automatic reclassification.
+- This foundation is internal and has no production route callers yet. It does
+  not authorize users itself: funded endpoints must validate project access first,
+  calculate a trusted maximum cost, reserve before the call, and settle afterward.
+  Billing usage remains unavailable until all active producers are connected.
 
 ## Producer and consumer map
 
@@ -44,10 +70,10 @@ admission. A daily row cannot divide usage at a midday weekly boundary.
 
 ## Implementation order
 
-1. Reconcile migration numbering with current main before adding a usage store.
-2. Define a versioned internal unit and provider settlement contract. Preserve
+1. Recheck migration numbering against release integration branches; the fresh main reference has no collision with 0097.
+2. Use the approved versioned cost unit and finish provider-specific settlement contracts. Preserve
    raw measurements separately so pricing changes do not rewrite consumption.
-3. Add a durable request/reservation ledger and exact anchored-period totals.
+3. Connect the durable request/reservation ledger and exact anchored-period totals.
    Serialize admission per workspace; include outstanding reservations when
    checking capacity. Make retries idempotent and release only proven unused
    reservations. Unknown completion stays reconcilable instead of free.
@@ -79,5 +105,20 @@ admission. A daily row cannot divide usage at a midday weekly boundary.
   keep UI-only copy/control tests in RTL. Add the usage module/migration to
   `scripts/lib/e2e-impact.ts` when implementation lands.
 
-No runtime code changes in this map. It does not mark metering, capabilities, or
-launch enforcement complete.
+Foundation verification: 16 tests pass against real Postgres, composing signed
+Checkout activation → entitlement → reservation → provider cost parser → settlement.
+Coverage includes concurrency, replay, migration replay, equal multipliers, unknown
+cost, overrun, rollback, Free fallback, scope mismatch, and exact reset boundaries.
+Endpoint integration, capabilities, and launch enforcement remain incomplete.
+
+## Local verification commands
+
+- `pnpm --dir auth-worker exec vitest run --config vitest.webhook-postgres.config.ts src/__tests__/billing-workspace-usage.test.ts` — 16 pass.
+- `npx vitest run scripts/e2e-impact.test.ts scripts/e2e-determinism.test.ts --maxWorkers=2` — 24 pass.
+- `E2E_SHARD=3/3 npx tsx scripts/e2e-up.ts -- e2e/specs/orgs/org-settings-billing.smoke.spec.ts --shard=1/1` — three pass; no slow-request logs.
+- `pnpm --dir auth-worker exec tsc --noEmit`, `npm run build`, and `git diff --check` — pass.
+
+The existing browser journey checks that the new schema preserves billing access;
+it does not claim to verify provider admission, which has no route callers yet.
+The new regression suite verifies the changed ledger contract against real
+Postgres. No UI behavior changes, so no new UI test or browser journey is added.

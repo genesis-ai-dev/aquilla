@@ -45,8 +45,16 @@ Production payments and deployed configuration remain unchanged.
   Preserving the usage anchor does not establish that usage is measured/enforced.
 - [x] Map existing AI producers and accounting gaps in
   [weekly usage implementation](weekly-usage-implementation.md).
-- [ ] Resolve the cost-based versus word-based accounting unit before applying
-  the approved weekly counts. The existing ledgers disagree; user input pending.
+- [x] Resolve the accounting basis: provider cost with the same multiplier for
+  agent and other tools. Version `2026-09-cost-v1` uses 4× and internal marked-up
+  cents; approved allowance counts stay unchanged. Validate workload capacity
+  before enforcement: Pro currently maps to 12.5 raw provider cents/week.
+- [x] Implement the durable cost reservation/settlement foundation with exact
+  weekly periods, rate snapshots, idempotency, and atomic admission. Sixteen
+  real-Postgres tests pass. See the usage implementation map for boundaries.
+- [ ] Connect every funded endpoint to admission/settlement, verify streamed and
+  background work, and expose measured percentage usage. The foundation has no
+  production callers yet; it does not establish end-to-end enforcement.
 - [ ] Resolve migration numbering against current main, then run release gates.
 - [ ] Provision and validate the production catalog, portal settings, endpoint
   signing secret, tax configuration, and controlled live rollout separately.

@@ -37,6 +37,21 @@ there are about 52 weekly allocations per year, not 48. Monthly/4 sets weekly
 capacity rather than a strict calendar-month cap. No five-hour throttle is enabled;
 keep any future short-window throttle separate from the weekly entitlement.
 
+## Internal provider-cost accounting
+
+Ryder approves provider cost with one uniform multiplier across tools. Agent work
+uses more allowance when it consumes more tokens; it receives no extra surcharge.
+The initial version `2026-09-cost-v1` uses the existing base conversion: one
+internal unit is one marked-up cent, at 4× raw provider cost. Preserve the approved
+weekly counts. Pro's 50 units therefore cover 12.5 raw provider cents per week;
+validate realistic workload capacity before enabling paid enforcement.
+
+Record raw cost and its rate version together. Do not retroactively reprice
+consumed usage when configuration changes. Keep fractional usage internally,
+reserve capacity before calls, and reconcile actual provider cost afterward.
+Missing cost remains unresolved; it must not silently become free work. The
+legacy word ledger is not the new weekly allowance authority.
+
 ## Customer-facing usage presentation
 
 Approved direction: hide credits across the app and marketing site. Retain the
@@ -142,7 +157,7 @@ Keep Enterprise’s custom quote and rollout action. Preserve the existing cover
 2. Confirm guest-reviewer actions and whether the Team collaborator limit includes its owner.
 3. Specify Team versus Enterprise onboarding and support commitments.
 4. Verify the approved native lifecycle policies across remaining real sandbox cases and finalize existing-customer migration.
-5. Resolve the internal accounting-unit mismatch (cost-based versus word-based ledgers), then verify metering and feature permissions across all producers and consumers.
+5. Verify provider-cost metering and feature permissions across all producers and consumers, and validate realistic workload capacity before enabling enforcement.
 
 Implement and test the complete pricing path: Stripe catalog → billing API → in-app/marketing display → checkout → webhook → workspace allowance and permissions. Include weekly resets independent of billing renewals, recurring quantities, personal/team isolation, and usage-preserving plan changes.
 

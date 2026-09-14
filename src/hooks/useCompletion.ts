@@ -109,12 +109,25 @@ export const FALLBACK_COMPLETION_SETTINGS: CompletionSettings = {
   fewShotExampleFormat: "source-and-target",
 }
 
-type CommitCompletedCell = (
+export type CommitCompletedCell = (
   cell: CellData,
   text: string,
   author: string,
   provenance: AiDraftProvenance,
 ) => Promise<void>
+
+export interface CompletedCellDraft {
+  cell: CellData
+  text: string
+  author: string
+  provenance: AiDraftProvenance
+}
+
+export type CommitCompletedCellsResult = PromiseSettledResult<void>[]
+
+export type CommitCompletedCells = (
+  drafts: CompletedCellDraft[],
+) => Promise<CommitCompletedCellsResult>
 
 const PROMPT_VERSION = "translation-draft-v2"
 
@@ -197,6 +210,8 @@ export function useCompletion(
   draftContext: DraftContextSettings = DEFAULT_DRAFT_CONTEXT,
   /** Active target lane tag (`activeLane`). Default `""`. */
   lane = "",
+  /** AQU-1145: persist one mapped model-response chunk as one local batch. */
+  commitCompletedCells?: CommitCompletedCells,
 ) {
   const [completing, setCompleting] = useState<Map<string, string>>(new Map())
   const [examples, setExamples] = useState<Map<string, ScoredPair[]>>(new Map())
@@ -706,6 +721,7 @@ export function useCompletion(
           break
         }
 
+        const preparedDrafts: CompletedCellDraft[] = []
         for (let i = 0; i < chunk.length; i++) {
           const cell = chunk[i]
           const text = filledText.get(i + 1)
@@ -713,63 +729,103 @@ export function useCompletion(
           // like a missing tag — send it to the per-cell fallback instead of
           // committing an empty draft.
           if (text !== undefined && text.trim()) {
-            if (commitCompletedCell) {
-              try {
-                const completed = await normalizeProtectedCompletionWithRepair(
-                  cell,
-                  text,
-                  async (messages) => complete({
-                    settings: effectiveSettings,
-                    session,
-                    messages: [...messages],
-                    stream: false,
-                    signal: getBatchCompletionSignal(runId),
-                  }),
-                )
-                await commitCompletedCell(
-                  cell,
-                  completed.valueHtml ?? completed.value,
-                  llmAuthor,
-                  draftProvenance(
-                    "batch",
-                    uniqueExampleIds(batchApprovedExamples.map((example) => example.cellId)),
-                    batchApprovedExamples.length,
-                  ),
-                )
-              } catch (err) {
-                // AQU-670: this cell's draft failed to queue. commitCompletedCell
-                // has already reverted its optimistic patch, so the drafted text
-                // won't linger; mark the cell errored (not done) and continue the
-                // run so one failed enqueue doesn't abandon the rest of the batch.
-                if (err instanceof DOMException && err.name === "AbortError") throw err
-                posthog.captureException(err instanceof Error ? err : new Error(String(err)))
-                setPreviews((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
-                setCompleting((p) => new Map(p).set(lk(cell.id), "error"))
-                setErrors((p) => new Map(p).set(lk(cell.id), err instanceof Error ? err.message : "Failed"))
-                incrementBatchCompletionFailed(runId, 1)
-                continue
-              }
-            }
-            // AQU-235 fix: after await, re-check — another Start could have
-            // superseded us during the commit. If so, do not increment or clear.
-            if (isBatchCompletionCancelled(runId)) {
+            try {
+              const completed = await normalizeProtectedCompletionWithRepair(
+                cell,
+                text,
+                async (messages) => complete({
+                  settings: effectiveSettings,
+                  session,
+                  messages: [...messages],
+                  stream: false,
+                  signal: getBatchCompletionSignal(runId),
+                }),
+              )
+              preparedDrafts.push({
+                cell,
+                text: completed.valueHtml ?? completed.value,
+                author: llmAuthor,
+                provenance: draftProvenance(
+                  "batch",
+                  uniqueExampleIds(batchApprovedExamples.map((example) => example.cellId)),
+                  batchApprovedExamples.length,
+                ),
+              })
+            } catch (err) {
+              if (err instanceof DOMException && err.name === "AbortError") throw err
+              posthog.captureException(err instanceof Error ? err : new Error(String(err)))
               setPreviews((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
-              setCompleting((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
-              // Clear remaining cells in this chunk then bail from the outer loop.
-              for (let j = i + 1; j < chunk.length; j++) {
-                const c = chunk[j]
-                setPreviews((p) => { const m = new Map(p); m.delete(lk(c.id)); return m })
-                setCompleting((p) => { const m = new Map(p); m.delete(lk(c.id)); return m })
-              }
-              break
+              setCompleting((p) => new Map(p).set(lk(cell.id), "error"))
+              setErrors((p) => new Map(p).set(lk(cell.id), err instanceof Error ? err.message : "Failed"))
+              incrementBatchCompletionFailed(runId, 1)
             }
-            // AQU-211: clear state once committed — no inline review step.
-            setPreviews((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
-            setCompleting((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
-            incrementBatchCompletionDone(runId)
           } else {
             fallbackQueue.push(cell)
           }
+        }
+
+        // AQU-1145: a model response is already a bounded, coherent package.
+        // Hand that package to the workspace once so it can apply one store
+        // mutation, one outbox transaction, and one refresh. The scalar path
+        // remains the compatibility fallback for callers that have not wired
+        // the batch persistence callback yet.
+        let commitResults: CommitCompletedCellsResult = []
+        if (preparedDrafts.length > 0) {
+          if (commitCompletedCells) {
+            try {
+              commitResults = await commitCompletedCells(preparedDrafts)
+            } catch (err) {
+              if (err instanceof DOMException && err.name === "AbortError") throw err
+              commitResults = preparedDrafts.map(() => ({ status: "rejected", reason: err }))
+            }
+          } else {
+            // Preserve the scalar callback's established ordering and
+            // cancellation boundary until its caller wires the batch seam.
+            for (const draft of preparedDrafts) {
+              try {
+                await commitCompletedCell?.(
+                  draft.cell,
+                  draft.text,
+                  draft.author,
+                  draft.provenance,
+                )
+                commitResults.push({ status: "fulfilled", value: undefined })
+              } catch (err) {
+                if (err instanceof DOMException && err.name === "AbortError") throw err
+                commitResults.push({ status: "rejected", reason: err })
+              }
+              if (isBatchCompletionCancelled(runId)) break
+            }
+          }
+        }
+
+        // AQU-235: a superseding run owns the progress store. Persistence may
+        // already have completed, but this stale run must not update counters.
+        if (isBatchCompletionCancelled(runId)) {
+          for (const draft of preparedDrafts) {
+            setPreviews((p) => { const m = new Map(p); m.delete(lk(draft.cell.id)); return m })
+            setCompleting((p) => { const m = new Map(p); m.delete(lk(draft.cell.id)); return m })
+          }
+          break
+        }
+
+        for (let i = 0; i < preparedDrafts.length; i++) {
+          const cell = preparedDrafts[i].cell
+          const outcome = commitResults[i] ?? {
+            status: "rejected" as const,
+            reason: new Error("Batch commit returned no result for this cell"),
+          }
+          setPreviews((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
+          if (outcome.status === "fulfilled") {
+            setCompleting((p) => { const m = new Map(p); m.delete(lk(cell.id)); return m })
+            incrementBatchCompletionDone(runId)
+            continue
+          }
+          const err = outcome.reason
+          posthog.captureException(err instanceof Error ? err : new Error(String(err)))
+          setCompleting((p) => new Map(p).set(lk(cell.id), "error"))
+          setErrors((p) => new Map(p).set(lk(cell.id), err instanceof Error ? err.message : "Failed"))
+          incrementBatchCompletionFailed(runId, 1)
         }
 
         // If we broke out of the inner loop due to supersession, stop chunks.
@@ -816,7 +872,7 @@ export function useCompletion(
       clearBatchCompletionProgress(runId)
       memMark(`completeBatch.end(${cells.length}c)`)
     }
-  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, completeSingle, commitCompletedCell, rules, getAllCells, briefSummary, draftContext, draftProvenance, lk])
+  }, [effectiveSettings, isConfigured, isAvailable, sourceLanguage, targetLanguage, searchPassages, session, provider, modelName, completeSingle, commitCompletedCell, commitCompletedCells, rules, getAllCells, briefSummary, draftContext, draftProvenance, lk])
 
   // completeParagraph: draft a whole paragraph group as ONE model call, fan results
   // out to per-cell commits via the existing commitCompletedCell path (D3, D11).

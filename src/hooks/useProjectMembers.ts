@@ -52,12 +52,15 @@ export function useProjectMembers(projectId: string | null): UseProjectMembers {
     return () => { aliveRef.current = false; };
   }, []);
 
-  const refresh = useCallback(async () => {
+  // The mount read may share useSetupChecklist's in-flight/cached roster
+  // (members.ts coalescer); an explicit `refresh()` always re-reads the server
+  // because callers use it right after a membership write.
+  const load = useCallback(async (fresh: boolean) => {
     if (!jwt || !projectId) return;
     setLoading(true);
     setError(null);
     try {
-      const result = await fetchProjectRoster(jwt, projectId);
+      const result = await fetchProjectRoster(jwt, projectId, { fresh });
       if (!aliveRef.current) return;
       if (result.kind === "ok") {
         setMembers(result.members);
@@ -78,8 +81,9 @@ export function useProjectMembers(projectId: string | null): UseProjectMembers {
       if (aliveRef.current) setLoading(false);
     }
   }, [jwt, projectId]);
+  const refresh = useCallback(() => load(true), [load]);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => { void load(false); }, [load]);
 
   const add = useCallback(async (username: string, role: number) => {
     if (!jwt || !projectId) return null;

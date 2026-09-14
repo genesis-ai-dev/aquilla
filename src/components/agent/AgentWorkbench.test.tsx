@@ -333,6 +333,22 @@ describe("AgentWorkbench three-pane layout", () => {
     expect(onVisibleCellIdsChange).not.toHaveBeenCalledWith([])
   })
 
+  it("reports the focused agent context cell for presence", () => {
+    const props = workbenchProps()
+    props.workspace!.onViewCell = vi.fn()
+    render(<AgentWorkbench {...props} />)
+
+    const targetPane = screen.getByLabelText("Target pane")
+    const targetCell = targetPane.querySelector('article[data-cell-id="c1"]')
+    expect(targetCell).not.toBeNull()
+
+    fireEvent.focusIn(targetCell as HTMLElement)
+    expect(props.workspace?.onViewCell).toHaveBeenCalledWith("c1")
+
+    fireEvent.focusOut(targetCell as HTMLElement, { relatedTarget: document.body })
+    expect(props.workspace?.onViewCell).toHaveBeenLastCalledWith(null)
+  })
+
   it("uses the editor's real validation control in agent mode", () => {
     const props = workbenchProps()
     render(<AgentWorkbench {...props} />)

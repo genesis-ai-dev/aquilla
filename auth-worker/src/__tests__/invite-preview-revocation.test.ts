@@ -25,6 +25,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import app from "../index"
 import { authHeader } from "./helpers/db"
+import { clearSessionCache } from "../lib/session-cache"
 
 const ROUTES_DIR = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -95,6 +96,12 @@ async function logout(token: string): Promise<void> {
 /** Stamps a password reset strictly after the token's `iat`, the way
  *  POST /auth/password-reset/reset does. */
 async function resetPasswordAfterIssue(username: string): Promise<void> {
+  // This reset is written straight to the DB, i.e. from outside this isolate.
+  // The session cache (lib/session-cache.ts) would otherwise keep serving the
+  // pre-reset row for up to SESSION_CACHE_TTL_MS — the documented window.
+  // Clearing models that TTL having elapsed; the in-isolate eviction on the
+  // reset route is covered in session-cache.test.ts.
+  clearSessionCache()
   await env.AQUILLA_PG.prepare("UPDATE users SET password_changed_at = ? WHERE username = ?")
     .bind(new Date(Date.now() + 60_000).toISOString(), username)
     .run()

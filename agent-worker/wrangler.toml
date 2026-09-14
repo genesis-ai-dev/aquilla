@@ -30,6 +30,12 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 [observability]
 enabled = true
 
+# PostHog *project* token (public — same one shipped in the SPA bundle).
+# Enables slow-request / 4xx / 5xx log shipping to PostHog Logs
+# (src/posthog-logs.ts). Mirrors auth-worker and sync-worker.
+[vars]
+POSTHOG_KEY = "phc_oTksJRNEdLEaLD4wmdd2XcR4xaR4n52eA5VGDytW55Ln"
+
 # The container-backed Durable Object. `image = "./Dockerfile"` builds the
 # sandbox image; `instance_type` sizes each container (contract §6).
 [[containers]]
@@ -64,6 +70,9 @@ account_id = "6a80496d1e59948a9cbaa3c643ba81d7"
 [env.development.observability]
 enabled = true
 
+[env.development.vars]
+POSTHOG_KEY = "phc_oTksJRNEdLEaLD4wmdd2XcR4xaR4n52eA5VGDytW55Ln"
+
 [[env.development.containers]]
 class_name = "Sandbox"
 image = "./Dockerfile"
@@ -90,6 +99,9 @@ command = "bash ../scripts/verify-deploy-branch.sh main"
 
 [env.production.observability]
 enabled = true
+
+[env.production.vars]
+POSTHOG_KEY = "phc_oTksJRNEdLEaLD4wmdd2XcR4xaR4n52eA5VGDytW55Ln"
 
 [[env.production.containers]]
 class_name = "Sandbox"

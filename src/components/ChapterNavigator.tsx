@@ -418,12 +418,19 @@ export function MilestoneNavigator({
   activeSubsectionKey,
   onSelect,
   compact = false,
+  pageByMilestone = false,
 }: {
   items: MilestoneNavigationItem[]
   activeKey: string
   activeSubsectionKey?: string
   onSelect: (key: string, subsectionKey?: string) => void
   compact?: boolean
+  /**
+   * Split-into-milestones view: prev/next turn a whole division at a time, and
+   * the trigger names that division rather than a 50-cell jump range inside it.
+   * The picker still lists those ranges so a long section stays searchable.
+   */
+  pageByMilestone?: boolean
 }) {
   const t = useT()
   const [open, setOpen] = useState(false)
@@ -436,22 +443,26 @@ export function MilestoneNavigator({
   const matchedActiveIndex = items.findIndex((item) => item.key === activeKey)
   const activeIndex = matchedActiveIndex >= 0 ? matchedActiveIndex : 0
   const active = items[activeIndex]
-  const activeSubsection = active?.subsections?.find(
-    (subsection) => subsection.key === activeSubsectionKey,
-  ) ?? active?.subsections?.[0]
+  const activeSubsection = pageByMilestone
+    ? undefined
+    : active?.subsections?.find(
+      (subsection) => subsection.key === activeSubsectionKey,
+    ) ?? active?.subsections?.[0]
 
-  // Prev/Next walk every reachable destination, so a milestone split into cell
-  // ranges steps range-by-range instead of jumping past them.
+  // Continuous view walks every reachable destination, so a long IDML division
+  // steps range-by-range. Split view pages the whole division at once.
   const destinations = useMemo<{ milestoneKey: string; subsectionKey?: string }[]>(
-    () => items.flatMap((item) => (
-      item.subsections?.length
-        ? item.subsections.map((subsection) => ({
-            milestoneKey: item.key,
-            subsectionKey: subsection.key,
-          }))
-        : [{ milestoneKey: item.key }]
-    )),
-    [items],
+    () => pageByMilestone
+      ? items.map((item) => ({ milestoneKey: item.key }))
+      : items.flatMap((item) => (
+        item.subsections?.length
+          ? item.subsections.map((subsection) => ({
+              milestoneKey: item.key,
+              subsectionKey: subsection.key,
+            }))
+          : [{ milestoneKey: item.key }]
+      )),
+    [items, pageByMilestone],
   )
   const activeDestinationIndex = destinations.findIndex((destination) => (
     destination.milestoneKey === active?.key

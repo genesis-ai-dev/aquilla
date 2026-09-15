@@ -93,6 +93,7 @@ describe("Biblica study-notes import", () => {
       kind: "idml",
       parserVersion: `${BIBLICA_NOTES_PROFILE_ID}@1`,
       bookCode: "GEN",
+      corpusMarker: "Biblica Study Notes",
     })
 
     const cells = bodies.flatMap((body) => body.cells ?? [])

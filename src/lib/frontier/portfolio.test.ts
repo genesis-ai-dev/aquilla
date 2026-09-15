@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { getPortfolio, validatedPct, attentionRank, audioPct, audioValidatedPct, recordedMinutes, deadlineStatus, languagePairLabel, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "./portfolio"
+import { getPortfolio, getPortfolioPage, getPortfolios, getPortfoliosPage, PORTFOLIO_ORG_IDS_MAX, validatedPct, attentionRank, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, languagePairLabel, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "./portfolio"
 
 const ORIG = global.fetch
 
@@ -31,6 +31,72 @@ describe("getPortfolio", () => {
     expect(err).toBeInstanceOf(Error)
     expect((err as Error).message).not.toMatch(/HTTP\s*403/)
     expect((err as Error).name).toBe("UserError")
+  })
+})
+
+describe("getPortfolioPage / getPortfoliosPage", () => {
+  it("GETs …/portfolio with limit, q, and cursor", async () => {
+    let calledUrl = ""
+    global.fetch = vi.fn(async (input: unknown) => {
+      calledUrl = typeof input === "string" ? input : (input as Request).url
+      return new Response(
+        JSON.stringify({ projects: [project({ id: "p1", name: "Mark" })], nextCursor: "p1:Mark" }),
+        { status: 200 },
+      )
+    }) as unknown as typeof fetch
+
+    const page = await getPortfolioPage("jwt", 1, { q: "mar", limit: 40, cursor: "a:Acts" })
+    expect(calledUrl).toContain("/api/v2/orgs/1/portfolio?")
+    expect(calledUrl).toContain("q=mar")
+    expect(calledUrl).toContain("limit=40")
+    expect(calledUrl).toContain("cursor=a%3AActs")
+    expect(page).toEqual({
+      projects: [project({ id: "p1", name: "Mark" })],
+      nextCursor: "p1:Mark",
+    })
+  })
+
+  it("POSTs …/orgs/portfolio with orgIds, limit, q, and cursor and flattens rows", async () => {
+    let calledUrl = ""
+    let calledBody: unknown
+    global.fetch = vi.fn(async (input: unknown, init?: RequestInit) => {
+      calledUrl = typeof input === "string" ? input : (input as Request).url
+      calledBody = JSON.parse(String(init?.body))
+      return new Response(
+        JSON.stringify({
+          portfolios: [{ orgId: 1, projects: [project({ id: "p1", name: "Mark" })] }],
+          nextCursor: "p1:Mark",
+        }),
+        { status: 200 },
+      )
+    }) as unknown as typeof fetch
+
+    const page = await getPortfoliosPage("jwt", [1, 1], { q: "mar", limit: 40, cursor: "a:Acts" })
+    expect(calledUrl).toMatch(/\/api\/v2\/orgs\/portfolio$/)
+    expect(calledBody).toEqual({
+      orgIds: [1],
+      q: "mar",
+      limit: 40,
+      cursor: "a:Acts",
+    })
+    expect(page).toEqual({
+      projects: [{ ...project({ id: "p1", name: "Mark" }), orgId: 1 }],
+      nextCursor: "p1:Mark",
+    })
+  })
+
+  it("omits orgIds when the membership list exceeds the batch cap (AQU-756)", async () => {
+    let calledBody: unknown
+    global.fetch = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      calledBody = JSON.parse(String(init?.body))
+      return new Response(JSON.stringify({ portfolios: [], nextCursor: null }), { status: 200 })
+    }) as unknown as typeof fetch
+
+    const orgIds = Array.from({ length: PORTFOLIO_ORG_IDS_MAX + 1 }, (_, i) => i + 1)
+    await getPortfoliosPage("jwt", orgIds, { limit: 40 })
+    expect(calledBody).toEqual({ limit: 40 })
+    await getPortfolios("jwt", orgIds)
+    expect(calledBody).toEqual({})
   })
 })
 
@@ -76,13 +142,38 @@ describe("audioPct", () => {
   })
 })
 
-describe("audioValidatedPct (AQU-508)", () => {
-  it("is validated audio over covered audio, not over total cells", () => {
-    expect(audioValidatedPct(project({ totalCells: 200, audioCells: 50, validatedAudioCells: 20 }))).toBe(0.4)
+describe("audioValidatedPct (AQU-508 / AQU-1093)", () => {
+  it("is validated audio over EVERY cell, so it agrees with the plan board", () => {
+    // AQU-1093: the plan board's per-unit bars and CSV divide audio validated
+    // by every cell in the unit. This tile used to divide by audioCells, which
+    // made one project report two different percentages on one page.
+    expect(audioValidatedPct(project({ totalCells: 200, audioCells: 50, validatedAudioCells: 20 }))).toBe(0.1)
   })
 
-  it("returns 0 when no cells have audio (avoids divide-by-zero)", () => {
+  it("returns 0 for a project with no cells (avoids divide-by-zero)", () => {
+    expect(audioValidatedPct(project({ totalCells: 0, audioCells: 0, validatedAudioCells: 0 }))).toBe(0)
+  })
+
+  it("returns 0 when nothing is recorded, rather than dividing by a stale count", () => {
     expect(audioValidatedPct(project({ totalCells: 100, audioCells: 0, validatedAudioCells: 0 }))).toBe(0)
+  })
+
+  it("clamps at 1 when audio outlives the files it was counted against", () => {
+    // The two counts come from different tables with no join: audio on a
+    // tombstoned file lands in the numerator and not the denominator. StatTile
+    // has no ceiling of its own, so without this the tile renders "140%".
+    expect(audioValidatedPct(project({ totalCells: 10, audioCells: 14, validatedAudioCells: 14 }))).toBe(1)
+    expect(audioPct(project({ totalCells: 10, audioCells: 14 }))).toBe(1)
+  })
+})
+
+describe("audioValidatedOfRecordedPct", () => {
+  it("keeps the reviewer's ratio the tile no longer shows", () => {
+    expect(audioValidatedOfRecordedPct(project({ totalCells: 200, audioCells: 50, validatedAudioCells: 20 }))).toBe(0.4)
+  })
+
+  it("returns 0 when nothing has been recorded", () => {
+    expect(audioValidatedOfRecordedPct(project({ totalCells: 100, audioCells: 0, validatedAudioCells: 0 }))).toBe(0)
   })
 })
 

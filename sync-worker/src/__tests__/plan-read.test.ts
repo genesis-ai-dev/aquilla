@@ -1,0 +1,273 @@
+// AQU-1092…1098: GET /api/v1/projects/:projectId/plan
+//
+// The board's whole data contract: which rows are units at all, what progress
+// each carries for the lane being viewed, and what the manager has planned.
+import { describe, it, expect } from "vitest"
+import { handlePlanRequest, type PlanResponse } from "../events/plan-route"
+import { makeTestDb } from "./helpers/pg-test-db"
+import { makeTestToken } from "./helpers/auth"
+import type { AquillaDb } from "../../../db/shim/postgres"
+
+const SECRET = "plan-read-secret"
+const P = "proj-a"
+const TS = 1_700_000_000_000
+
+function envWith(db: AquillaDb) {
+  return { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }
+}
+
+function file(id: string, over: Record<string, unknown> = {}) {
+  return {
+    id, project_id: P, name: id, file_type: "codex",
+    event_id: `ev-${id}`, cell_count: 0, approved_count: 0, word_count: 0,
+    ...over,
+  }
+}
+
+function progress(fileId: string, scope: string, key: string, over: Record<string, unknown> = {}) {
+  return {
+    project_id: P, file_id: fileId, scope, section_key: key, target_lang: "",
+    total_count: 0, filled_count: 0, validator_histogram: "{}",
+    audio_count: 0, audio_validated_count: 0, last_edit_at: null,
+    revision: 5, updated_at: TS,
+    ...over,
+  }
+}
+
+async function get(db: AquillaDb, opts: { lane?: string; role?: number; headers?: Record<string, string> } = {}) {
+  const token = await makeTestToken(SECRET, { projectId: P, role: opts.role ?? 400 })
+  const url = `https://sync.test/api/v1/projects/${P}/plan${opts.lane ? `?lane=${opts.lane}` : ""}`
+  const res = await handlePlanRequest(
+    new Request(url, { headers: { Authorization: `Bearer ${token}`, ...(opts.headers ?? {}) } }),
+    envWith(db),
+  )
+  return res!
+}
+
+describe("GET .../plan — which rows are units", () => {
+  it("gives a Scripture file one unit per book and no file-grain unit", async () => {
+    // The file dissolves into its books. Showing the file as a sibling row
+    // would double-count it in every summary.
+    const { db } = await makeTestDb({
+      files: [file("bible", { name: "Whole Bible" })],
+      file_section_progress: [
+        progress("bible", "file", "", { total_count: 40 }),
+        progress("bible", "book", "GEN", { total_count: 25 }),
+        progress("bible", "book", "EXO", { total_count: 15 }),
+      ],
+    })
+    const body = (await (await get(db)).json()) as PlanResponse
+    expect(body.units.map((u) => u.sectionKey)).toEqual(["GEN", "EXO"])
+    expect(body.units.every((u) => u.fileId === "bible")).toBe(true)
+  })
+
+  it("gives a non-Scripture file exactly one file-grain unit", async () => {
+    const { db } = await makeTestDb({
+      files: [file("ep1", { name: "Episode 1" })],
+      file_section_progress: [progress("ep1", "file", "", { total_count: 12, filled_count: 6 })],
+    })
+    const body = (await (await get(db)).json()) as PlanResponse
+    expect(body.units).toHaveLength(1)
+    expect(body.units[0]).toMatchObject({ fileId: "ep1", sectionKey: "", totalCount: 12, filledCount: 6 })
+  })
+
+  it("excludes tombstoned files and audio-cue siblings", async () => {
+    // The cue sibling is a hidden companion the audio workflow creates; nobody
+    // plans it, and it never appears in a file list either.
+    const { db } = await makeTestDb({
+      files: [
+        file("live"),
+        file("gone", { deleted_at: TS }),
+        file("cues", { role: "audio-cues" }),
+      ],
+      file_section_progress: [
+        progress("live", "file", ""),
+        progress("gone", "file", ""),
+        progress("cues", "file", ""),
+      ],
+    })
+    const body = (await (await get(db)).json()) as PlanResponse
+    expect(body.units.map((u) => u.fileId)).toEqual(["live"])
+  })
+
+  it("orders books canonically and unknown units after them", async () => {
+    const { db } = await makeTestDb({
+      files: [file("bible"), file("zz-notes", { name: "Appendix" })],
+      file_section_progress: [
+        progress("bible", "book", "EXO"),
+        progress("bible", "book", "GEN"),
+        progress("zz-notes", "file", ""),
+      ],
+    })
+    const body = (await (await get(db)).json()) as PlanResponse
+    expect(body.units.map((u) => u.sectionKey || u.fileName)).toEqual(["GEN", "EXO", "Appendix"])
+  })
+
+  it("orders one-book files by their book_code, not their name", async () => {
+    const { db } = await makeTestDb({
+      files: [file("f-exo", { name: "Exodus", book_code: "EXO" }), file("f-gen", { name: "Genesis", book_code: "GEN" })],
+      file_section_progress: [progress("f-exo", "file", ""), progress("f-gen", "file", "")],
+    })
+    const body = (await (await get(db)).json()) as PlanResponse
+    expect(body.units.map((u) => u.fileName)).toEqual(["Genesis", "Exodus"])
+  })
+})
+
+describe("GET .../plan — lane behaviour", () => {
+  it("reads the requested lane's progress", async () => {
+    const { db } = await makeTestDb({
+      files: [file("f1")],
+      file_section_progress: [
+        progress("f1", "file", "", { total_count: 10, filled_count: 0 }),
+        progress("f1", "file", "", { target_lang: "es", total_count: 10, filled_count: 7 }),
+      ],
+    })
+    const body = (await (await get(db, { lane: "es" })).json()) as PlanResponse
+    expect(body.lane).toBe("es")
+    expect(body.units[0].filledCount).toBe(7)
+  })
+
+  it("reports zero progress for a lane nobody has started, not another lane's", async () => {
+    // Borrowing the default lane's filled count would claim French work that
+    // does not exist. The denominator is shared; the progress is not.
+    const { db } = await makeTestDb({
+      files: [file("f1")],
+      file_section_progress: [
+        progress("f1", "file", "", { total_count: 10, filled_count: 9, audio_count: 4, last_edit_at: 999 }),
+      ],
+    })
+    const body = (await (await get(db, { lane: "fr" })).json()) as PlanResponse
+    expect(body.units[0]).toMatchObject({
+      totalCount: 10,   // lane-independent — falls back
+      filledCount: 0,   // lane-specific — does not
+      audioCount: 4,    // lane-independent — audio hangs off the cell
+      lastEditAt: 999,
+    })
+  })
+
+  it("falls back to the file's cell_count when no projection row exists yet", async () => {
+    // Mid-backfill, or a file imported before the projection existed.
+    const { db } = await makeTestDb({ files: [file("f1", { cell_count: 33 })] })
+    const body = (await (await get(db)).json()) as PlanResponse
+    expect(body.units[0]).toMatchObject({ totalCount: 33, filledCount: 0 })
+  })
+})
+
+describe("GET .../plan — validation and plan data", () => {
+  it("counts validated against the project's validation threshold", async () => {
+    const { db } = await makeTestDb({
+      files: [file("f1")],
+      project_settings: [{ project_id: P, settings: JSON.stringify({ validationCount: 2 }), version: 1, updated_at: TS }],
+      file_section_progress: [
+        // Three cells endorsed once, two endorsed twice.
+        progress("f1", "file", "", { total_count: 5, filled_count: 5, validator_histogram: JSON.stringify({ "1": 3, "2": 2 }) }),
+      ],
+    })
+    const body = (await (await get(db)).json()) as PlanResponse
+    expect(body.validationCount).toBe(2)
+    expect(body.units[0].validatedCount).toBe(2) // only the two that reached 2
+  })
+
+  it("carries the target date and Done provenance", async () => {
+    const { db } = await makeTestDb({
+      files: [file("f1")],
+      file_section_progress: [progress("f1", "file", "")],
+      plan_units: [{
+        project_id: P, file_id: "f1", section_key: "",
+        target_date: "2026-11-01", done_at: TS, done_by: "randall",
+        updated_at: TS, updated_by: "randall",
+      }],
+    })
+    const body = (await (await get(db)).json()) as PlanResponse
+    expect(body.units[0]).toMatchObject({
+      targetDate: "2026-11-01", doneAt: TS, doneBy: "randall", updatedBy: "randall",
+    })
+  })
+
+  it("leaves plan fields null for an unplanned unit", async () => {
+    const { db } = await makeTestDb({
+      files: [file("f1")],
+      file_section_progress: [progress("f1", "file", "")],
+    })
+    const body = (await (await get(db)).json()) as PlanResponse
+    expect(body.units[0]).toMatchObject({ targetDate: null, doneAt: null, doneBy: null })
+  })
+})
+
+describe("GET .../plan — caching and auth", () => {
+  it("answers 304 when the caller already has the current plan", async () => {
+    const { db } = await makeTestDb({
+      files: [file("f1")],
+      file_section_progress: [progress("f1", "file", "")],
+    })
+    const first = await get(db)
+    const etag = first.headers.get("ETag")!
+    expect(etag).toBeTruthy()
+    const second = await get(db, { headers: { "If-None-Match": etag } })
+    expect(second.status).toBe(304)
+  })
+
+  it("changes the ETag when a plan is edited, though no event was written", async () => {
+    // Plan writes never advance the event sequence, so a revision-only ETag
+    // would serve a stale board forever after a date change.
+    const { db } = await makeTestDb({
+      files: [file("f1")],
+      file_section_progress: [progress("f1", "file", "")],
+    })
+    const before = (await get(db)).headers.get("ETag")
+    await db
+      .prepare(`INSERT INTO plan_units (project_id, file_id, section_key, target_date, updated_at)
+                VALUES (?, 'f1', '', '2026-11-01', ?)`)
+      .bind(P, TS + 1)
+      .run()
+    expect((await get(db)).headers.get("ETag")).not.toBe(before)
+  })
+
+  it("refuses a request with no token", async () => {
+    const { db } = await makeTestDb({ files: [file("f1")] })
+    const res = await handlePlanRequest(new Request(`https://sync.test/api/v1/projects/${P}/plan`), envWith(db))
+    expect(res!.status).toBe(401)
+  })
+
+  it("refuses a token minted for another project", async () => {
+    const { db } = await makeTestDb({ files: [file("f1")] })
+    const token = await makeTestToken(SECRET, { projectId: "other", role: 600 })
+    const res = await handlePlanRequest(
+      new Request(`https://sync.test/api/v1/projects/${P}/plan`, { headers: { Authorization: `Bearer ${token}` } }),
+      envWith(db),
+    )
+    expect(res!.status).toBe(403)
+  })
+
+  it("lets a viewer read the plan", async () => {
+    const { db } = await makeTestDb({ files: [file("f1")] })
+    expect((await get(db, { role: 100 })).status).toBe(200)
+  })
+})
+
+describe("the ETag samples every clock that can change the board", () => {
+  it("changes when a backfill fills in audio without any new event", async () => {
+    // A progress recompute advances neither the event sequence nor
+    // plan_units.updated_at, so an ETag built from those two alone stayed
+    // byte-identical while the numbers underneath it changed — and a client
+    // holding an audio-less board would 304 onto it forever.
+    const db = await makeTestDb({
+      files: [file("f1", { cell_count: 10 })],
+      file_section_progress: [progress("f1", "file", "", { total_count: 10, filled_count: 4 })],
+    }).then((r) => r.db)
+
+    const before = await get(db)
+    const tag = before.headers.get("ETag")!
+    expect((await get(db, { headers: { "If-None-Match": tag } })).status).toBe(304)
+
+    await db.prepare(
+      `UPDATE file_section_progress SET audio_count = 5, updated_at = updated_at + 1000
+        WHERE project_id = ? AND file_id = ?`,
+    ).bind(P, "f1").run()
+
+    const after = await get(db, { headers: { "If-None-Match": tag } })
+    expect(after.status).toBe(200)
+    expect(after.headers.get("ETag")).not.toBe(tag)
+    expect((await after.json() as PlanResponse).units[0].audioCount).toBe(5)
+  })
+})

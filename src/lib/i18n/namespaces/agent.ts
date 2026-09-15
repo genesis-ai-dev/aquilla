@@ -111,7 +111,10 @@ export const agent = defineNamespace({
     "agent.changeset.whatWillBeApplied": "What will be applied",
     "agent.changeset.noChangesSummarized": "No changes summarized.",
     "agent.changeset.settingsChanges": "Settings changes",
+    "agent.changeset.membershipChanges": "Membership changes",
+    "agent.changeset.memoryWrites": "Living Memory changes",
     "agent.changeset.changesHeading": "Changes ({count})",
+    "agent.changeset.testimonyHeading": "Validations to endorse ({count})",
     "agent.changeset.warnings": "Warnings",
     "agent.changeset.digestLabel": "Digest:",
     // ── AQU-926 live review card (LiveChangesetCard): the card itself
@@ -261,6 +264,7 @@ export const agent = defineNamespace({
     "agent.validation.testimonyNotice":
       "Validation is your testimony — confirm each line yourself. There is no confirm-all.",
     "agent.validation.confirmAriaLabel": "Validate {ref}",
+    "agent.validation.roleCannotValidate": "Your role can't validate in this project",
 
     // ── Composer slash commands (slash-commands.ts, shown in AgentEmptyState's
     //    shortcuts list). The /draft, /check, /find, /status TOKENS themselves
@@ -506,6 +510,13 @@ export const agent = defineNamespace({
           "the total change count in parentheses.",
         placeholders: { count: "Total number of changes in the changeset (may exceed how many are listed below it)." },
       },
+      "agent.changeset.testimonyHeading": {
+        description:
+          "Heading over the itemized list of staged cell validations on the approval " +
+          "page (AQU-1184). Each row names the cell and shows its current text, so the " +
+          "approver endorses specific translations rather than a bare count.",
+        placeholders: { count: "Number of validation/unvalidation entries listed below it." },
+      },
       "agent.changeset.receiptApplied": {
         description:
           "Execution receipt shown in the changeset review card after Approve & " +
@@ -743,6 +754,11 @@ export const agent = defineNamespace({
         placeholders: {
           ref: "The row's canonical reference, a truncated cell id, or the literal fallback word 'cell' when neither is known — not translated.",
         },
+      },
+      "agent.validation.roleCannotValidate": {
+        description:
+          "Tooltip on a disabled per-row Validate button in the validation queue " +
+          "when the signed-in user's project role is below the validation floor.",
       },
     },
   },

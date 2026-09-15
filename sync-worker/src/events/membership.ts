@@ -39,9 +39,11 @@ export type MembershipCheck = "ok" | "revoked"
  * Returns "revoked" iff the project row exists AND the user has no grant
  * path left. Fails OPEN in two cases, deliberately:
  *
- *   - Project row missing: the mint-time gate is the only authority (the
- *     sync-token route auto-registers the project row on first mint, so a
- *     real removal always has a row; test/dev fixtures may not).
+ *   - Project row missing: the mint-time gate is the only authority. AQU-299 /
+ *     SEC-9: the sync-token route now 403s an unknown projectId instead of
+ *     auto-registering it, so a live project always has a row by the time any
+ *     event reaches here and a real removal always has one; test/dev fixtures
+ *     may not.
  *   - Query error: enforcement degrades to the 15-minute token TTL rather
  *     than 500'ing every write during a partial outage (same philosophy as
  *     safeFirst in auth-worker's role resolver).

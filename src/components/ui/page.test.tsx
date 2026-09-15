@@ -60,6 +60,26 @@ describe("Page", () => {
       "scrollbar-gutter-stable",
     )
   })
+
+  it("lets fill pages pin the well so a fillHeight table can own remaining height", () => {
+    const { container } = render(
+      <Page fill>
+        <div>body</div>
+      </Page>,
+    )
+    expect(container.firstElementChild).toHaveClass(
+      "overflow-hidden",
+      "flex",
+      "min-h-0",
+    )
+    expect(container.firstElementChild).not.toHaveClass("overflow-y-auto")
+    expect(container.firstElementChild?.firstElementChild).toHaveClass(
+      "flex",
+      "min-h-0",
+      "flex-1",
+      "flex-col",
+    )
+  })
 })
 
 describe("PageHeader", () => {

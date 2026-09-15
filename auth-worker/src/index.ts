@@ -84,6 +84,7 @@ import parseDocumentRoutes from "./routes/parse-document"
 import termbaseSubscriptionRoutes from "./routes/termbase-subscriptions"
 import usageRoutes from "./routes/usage"
 import credentialsRoutes from "./routes/credentials"
+import agentConnectRoutes from "./routes/agent-connect"
 import changesetApprovalsRoutes from "./routes/changeset-approvals"
 import importClassifyRoutes from "./routes/import-classify"
 import importSandboxRoutes from "./routes/import-sandbox"
@@ -108,6 +109,7 @@ import {
 type HonoEnv = { Bindings: Env; Variables: Variables }
 
 import { makePostgres } from "../../db/shim/postgres"
+import { sendScheduledRetentionReport } from "./lib/retention-cron"
 import { shipLog, shipErrorResponse } from "./posthog-logs"
 
 const app = new Hono<HonoEnv>()
@@ -305,6 +307,7 @@ app.route("/api/v2/monday", mondayRoutes)
 // External API credentials (PATs) for the Agent API (AQU-533 §2). Mint/list/
 // revoke; live role is re-resolved on every downstream API call.
 app.route("/api/v2/credentials", credentialsRoutes)
+app.route("/api/v2/agent-connect", agentConnectRoutes)
 // One-time human approval assertion for ask-mode changesets (AQU-533 §3).
 // Browser-session-authenticated — distinct from the API-credential-gated
 // agent surface in sync-worker's /api/v1/external/projects/*/changesets.
@@ -418,7 +421,7 @@ app.fetch = (async (request: Request, env: Env, ctx: ExecutionContext): Promise<
 // The scheduled entrypoint doesn't pass through the fetch wrapper above, so it
 // builds its own request-scoped Postgres shim the same way.
 const scheduled = async (
-  _controller: ScheduledController,
+  controller: ScheduledController,
   env: Env,
   ctx: ExecutionContext,
 ): Promise<void> => {
@@ -445,6 +448,13 @@ const scheduled = async (
   // is configured). The close below must wait for them.
   let sweepDone: Promise<void> = Promise.resolve()
   try {
+    // The retention recap crons (weekly Monday / monthly 1st) share this
+    // handler; they do their one job and return without the 5-minute chores.
+    const recap = await sendScheduledRetentionReport(runEnv, controller.cron, new Date())
+    if (recap !== "not-a-recap-cron") {
+      console.log(`[retention cron] ${controller.cron}: ${recap}`)
+      return
+    }
     const flushed = await flushDirtyLinks(runEnv, 20)
     if (flushed > 0) console.log(`[monday cron] flushed ${flushed} dirty link(s)`)
     // revoked_tokens hygiene lives here now, off the request path (it used to

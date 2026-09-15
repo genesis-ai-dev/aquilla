@@ -58,7 +58,12 @@ export const autopilot = defineNamespace({
     // — Discovery setting ———————————————————————————————————————————
     "autopilot.settings.experimentalTitle": "Experimental",
     "autopilot.settings.experimentalDescription":
-      "Early features still in development. These switches stay on this device — they are not shared with collaborators.",
+      "Early features still in development. Autopilot is turned on for the whole project and everyone working on it; any other switch here stays on this device.",
+    "autopilot.settings.autopilotLabel": "Try Autopilot",
+    "autopilot.settings.autopilotDescription":
+      "Turns on Autopilot for this project, for everyone working on it. Until then, nothing about Autopilot appears anywhere. Turning it on does not start work: choose Run Autopilot when you are ready, and suggestions stay in review until you accept them.",
+    "autopilot.settings.autopilotRoleHint":
+      "Only a project lead, maintainer, or owner can try experimental features on this project.",
     "autopilot.settings.controlsLabel": "Show Autopilot controls",
     "autopilot.settings.controlsDescription":
       "Shows Autopilot controls on this device. Turning this on does not start work, and hiding the controls does not stop a run. Choose Run Autopilot when you are ready; suggestions stay in review until you accept them.",
@@ -593,6 +598,13 @@ export const autopilot = defineNamespace({
     "autopilot.readiness.languages.set": "Translating {sourceLanguage} → {targetLanguage}.",
     "autopilot.readiness.languages.unset":
       "Source or target language isn’t set, so Autopilot has to infer it from your existing translations.",
+    "autopilot.startGate.title": "Autopilot needs a little more to go on",
+    "autopilot.startGate.languages":
+      "Set the project’s source and target languages in project settings.",
+    "autopilot.startGate.brief":
+      "Answer at least one translation-brief question so Autopilot knows what this translation is for.",
+    "autopilot.startGate.settingsLink": "Open project settings",
+    "autopilot.startGate.briefLink": "Open the translation brief",
   },
   context: {
     _context: {
@@ -625,6 +637,21 @@ export const autopilot = defineNamespace({
       "autopilot.settings.controlsLabel": {
         description:
           "Device-local switch label that shows or hides Autopilot controls without starting or stopping server work.",
+        screenshot: "project-settings",
+      },
+      "autopilot.settings.autopilotLabel": {
+        description:
+          "Project-wide switch label that opts the whole project into the experimental Autopilot feature.",
+        screenshot: "project-settings",
+      },
+      "autopilot.settings.autopilotDescription": {
+        description:
+          "Safety explanation below the project-wide Autopilot opt-in switch: it reveals the feature for everyone on the project but starts no work.",
+        screenshot: "project-settings",
+      },
+      "autopilot.settings.autopilotRoleHint": {
+        description:
+          "Tooltip shown on the disabled Autopilot opt-in switch, naming the roles allowed to change it.",
         screenshot: "project-settings",
       },
       "autopilot.settings.controlsDescription": {

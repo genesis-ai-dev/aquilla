@@ -59,6 +59,9 @@ import { useSessionRefresh } from "@/hooks/useSessionRefresh"
 const ProjectWorkspace = lazy(() =>
   import("@/components/ProjectWorkspace").then((m) => ({ default: m.ProjectWorkspace })),
 )
+const OrgDataEgress = lazy(() =>
+  import("@/pages/OrgDataEgress").then((m) => ({ default: m.OrgDataEgress })),
+)
 const ProjectSettings = lazy(() =>
   import("@/components/ProjectSettings").then((m) => ({ default: m.ProjectSettings })),
 )
@@ -94,6 +97,9 @@ const OrgSettingsKnowledge = lazy(() =>
   import("@/pages/Settings").then((m) => ({ default: m.OrgSettingsKnowledge })),
 )
 // Monday OAuth landing — Monday's registered redirect URI is this SPA route.
+const ConnectAgent = lazy(() =>
+  import("@/pages/ConnectAgent").then((m) => ({ default: m.ConnectAgent })),
+)
 const MondayOAuthCallback = lazy(() =>
   import("@/pages/settings/MondayOAuthCallback").then((m) => ({ default: m.MondayOAuthCallback })),
 )
@@ -313,6 +319,7 @@ function AppRoutes() {
         <Route path="/" element={<AppEntry />} />
         {/* The workspace entry. `/` is marketing at the edge, so this is the
             URL that opens the app — marketing "Open app" CTAs point here. */}
+        <Route path="/connect-agent" element={<LazyRoute><ConnectAgent /></LazyRoute>} />
         <Route path="/app" element={<AppEntry />} />
         <Route path="/projects" element={<Navigate to={resumeOrgPath()} replace />} />
         <Route path="/projects/:id" element={<ProjectOverview />} />
@@ -350,6 +357,7 @@ function AppRoutes() {
           <Route path="assigned" element={<AssignedToMe />} />
           <Route path="archived" element={<ArchivedProjects />} />
           <Route path="archived/files" element={<ArchivedProjects />} />
+          <Route path="egress" element={<OrgLazyRoute><OrgDataEgress /></OrgLazyRoute>} />
           <Route path="teams" element={<OrgLazyRoute><TeamsList /></OrgLazyRoute>} />
           <Route path="teams/:groupId" element={<OrgLazyRoute><TeamDetail /></OrgLazyRoute>} />
           <Route path="teams/:groupId/settings" element={<OrgLazyRoute><TeamSettingsIndex /></OrgLazyRoute>} />

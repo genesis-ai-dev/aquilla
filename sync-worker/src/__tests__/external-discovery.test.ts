@@ -62,6 +62,10 @@ describe('discovery root', () => {
     expect(body.quickstart.length).toBeGreaterThan(0)
     expect(body.mcp.endpoint).toBe('/api/v1/external/mcp')
     expect(Object.keys(body.endpoints)).toContain('GET /api/v1/external/me')
+    expect(body.endpoints['GET /api/v1/external/me']).toContain('credentialId')
+    expect(body.endpoints['GET /api/v1/external/me']).not.toMatch(/userId, username/)
+    expect(body.privacy.note).toContain('AQU-1180')
+    expect(body.orgScopedReads.maxProjectsPerSearch).toBe(10)
     expect(body.errors.codes.confirmation_required).toBeDefined()
     // AQU-538: the map teaches the multi-target-language (lanes) workflow —
     // register targetLanes, write SetTranslation.laneId, read ?lane=.
@@ -193,8 +197,10 @@ describe('get_capabilities quickstart', () => {
     )
     const body = (await res!.json()) as any
     const payload = JSON.parse(body.result.content[0].text)
-    expect(payload.quickstart).toHaveLength(5)
+    expect(payload.quickstart).toHaveLength(6)
     expect(payload.quickstart[0]).toContain('get_identity_and_scope')
     expect(payload.quickstart[4]).toContain('confirm_changeset')
+    // The path ends where the work ends: pulling the deliverable back out (AQU-858).
+    expect(payload.quickstart[5]).toContain('export_file')
   })
 })

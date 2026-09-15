@@ -32,6 +32,7 @@ import {
   normalizeSettings,
   patchProjectSettingsShared,
 } from '../../../db/shared/projects'
+import { validateSettingsKeyValue } from '../../../db/shared/project-settings-keys'
 import { ROLE } from '../events/role-policy'
 
 /** One top-level settings key replace. `value` is any JSON value (null stores
@@ -83,6 +84,15 @@ function isNonEmptyString(v: unknown): v is string {
   return typeof v === 'string' && v.length > 0
 }
 
+/** Own-prototype-mutating keys. `merged[op.key] = op.value` in both
+ *  `patchProjectSettingsShared` (db/shared/projects.ts) and the supersede
+ *  comparison merge (external/supersede.ts) is a bracket assignment onto a
+ *  plain object literal — one of these as `op.key` reaches `Object.prototype`'s
+ *  `__proto__` accessor (or shadows `constructor`/`prototype`) before either
+ *  merge ever runs. Rejected once here, at the single point both call sites'
+ *  `PatchSettingsOp[]` is built from. */
+const DANGEROUS_SETTINGS_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
+
 /** Validate one raw PatchSettings command (shape only — floors and the version
  *  pin are prepare-time checks). Returns the typed command or pushes issues. */
 export function validatePatchSettingsCommand(
@@ -118,9 +128,25 @@ export function validatePatchSettingsCommand(
       issues.push({ index, message: `PatchSettings.ops[${opIndex}].key must be a non-empty string` })
       return null
     }
+    if (DANGEROUS_SETTINGS_KEYS.has(op.key)) {
+      issues.push({ index, message: `PatchSettings.ops[${opIndex}].key "${op.key}" is a reserved key and cannot be used` })
+      return null
+    }
     if (!('value' in op)) {
       issues.push({ index, message: `PatchSettings.ops[${opIndex}].value is required (null to store null)` })
       return null
+    }
+    // AQU-1224: a key the settings schema doesn't carry is a TYPO, not a new
+    // setting — reject it here so nothing reaches the human approval queue,
+    // and name the key so the caller can correct it (describe_command lists
+    // the legal ones). Policy keys skip the VALUE check so they always resolve
+    // to the permission_denied prepare emits for them, never a type complaint.
+    if (!POLICY_KEY_SET.has(op.key)) {
+      const problem = validateSettingsKeyValue(op.key, op.value)
+      if (problem) {
+        issues.push({ index, message: `PatchSettings.ops[${opIndex}]: ${problem}` })
+        return null
+      }
     }
     // A duplicate key is a caller bug (later would silently clobber earlier),
     // unlike SetTranslation's loop-generated cell batches — reject, don't warn.

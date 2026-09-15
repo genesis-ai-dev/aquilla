@@ -9,6 +9,7 @@ import {
   PresenceDraftThrottle,
   presenceSnapshot,
   PRESENCE_DRAFT_THROTTLE_MS,
+  resolveConnId,
   PROJECT_DO_DEFAULT_LEASE_MS,
   sweepExpiredLeases,
   unpackBroadcastBody,
@@ -21,6 +22,8 @@ import type { OutboxRawEvent } from "../project-do-types"
 
 const emptyLocks = (): Map<string, LockState> => new Map()
 const emptyPresence = (): Map<string, PresenceState> => new Map()
+/** Single-tab identity: connId == userId keeps the map keys readable. */
+const who = (name: string) => ({ connId: name, userId: name })
 
 describe("parseProjectDoClientMessage", () => {
   it("parses focus.claim with leaseMs", () => {
@@ -95,7 +98,7 @@ describe("applyFocusClaim", () => {
     const r = applyFocusClaim(
       emptyLocks(),
       emptyPresence(),
-      "alice",
+      who("alice"),
       { t: "focus.claim", cellId: "c", leaseMs: 30_000 },
       1000,
     )
@@ -113,7 +116,7 @@ describe("applyFocusClaim", () => {
     // Only the claimant's row goes out — never the whole roster.
     expect(r.emit.find((m) => m.t === "presence.diff")).toEqual({
       t: "presence.diff",
-      user: { userId: "alice", focusedCell: "c", ts: 1000 },
+      user: { connId: "alice", userId: "alice", focusedCell: "c", ts: 1000 },
     })
     expect(r.emit.some((m) => m.t === "presence")).toBe(false)
     expect(r.emitTo).toHaveLength(0)
@@ -126,7 +129,7 @@ describe("applyFocusClaim", () => {
     const r = applyFocusClaim(
       locks,
       emptyPresence(),
-      "alice",
+      who("alice"),
       { t: "focus.claim", cellId: "c" },
       2_000,
     )
@@ -148,7 +151,7 @@ describe("applyFocusClaim", () => {
     const r = applyFocusClaim(
       locks,
       emptyPresence(),
-      "alice",
+      who("alice"),
       { t: "focus.claim", cellId: "c" },
       5_000,
     )
@@ -160,7 +163,7 @@ describe("applyFocusClaim", () => {
     const r = applyFocusClaim(
       emptyLocks(),
       emptyPresence(),
-      "alice",
+      who("alice"),
       { t: "focus.claim", cellId: "c" },
       0,
     )
@@ -171,11 +174,11 @@ describe("applyFocusClaim", () => {
 describe("applyPresenceUpdate", () => {
   it("merges current file and target selection into an already-focused presence", () => {
     const presence = new Map<string, PresenceState>([
-      ["alice", { userId: "alice", focusedCell: "cell-1", ts: 1 }],
+      ["alice", { connId: "alice", userId: "alice", focusedCell: "cell-1", ts: 1 }],
     ])
     const r = applyPresenceUpdate(
       presence,
-      "alice",
+      who("alice"),
       {
         t: "presence.update",
         currentFileId: "file-1",
@@ -184,6 +187,7 @@ describe("applyPresenceUpdate", () => {
       1_000,
     )
     expect(r.presence.get("alice")).toEqual({
+      connId: "alice",
       userId: "alice",
       currentFileId: "file-1",
       focusedCell: "cell-1",
@@ -194,6 +198,7 @@ describe("applyPresenceUpdate", () => {
     expect(r.emit[0]).toEqual({
       t: "presence.diff",
       user: {
+        connId: "alice",
         userId: "alice",
         currentFileId: "file-1",
         focusedCell: "cell-1",
@@ -208,12 +213,12 @@ describe("applyPresenceUpdate", () => {
   // split off into its own (rate-limited) frame.
   it("emits one draft-free presence.diff plus one presence.draft when draftText is set", () => {
     const presence = new Map<string, PresenceState>([
-      ["alice", { userId: "alice", focusedCell: "cell-1", ts: 1 }],
-      ["bob", { userId: "bob", focusedCell: "cell-9", ts: 1 }],
+      ["alice", { connId: "alice", userId: "alice", focusedCell: "cell-1", ts: 1 }],
+      ["bob", { connId: "bob", userId: "bob", focusedCell: "cell-9", ts: 1 }],
     ])
     const r = applyPresenceUpdate(
       presence,
-      "alice",
+      who("alice"),
       {
         t: "presence.update",
         selection: { side: "target", anchor: 3, head: 3, draftText: "In the beginning" },
@@ -227,6 +232,7 @@ describe("applyPresenceUpdate", () => {
       {
         t: "presence.diff",
         user: {
+          connId: "alice",
           userId: "alice",
           focusedCell: "cell-1",
           selection: { side: "target", anchor: 3, head: 3 },
@@ -236,6 +242,7 @@ describe("applyPresenceUpdate", () => {
       {
         t: "presence.draft",
         userId: "alice",
+        connId: "alice",
         cellId: "cell-1",
         draftText: "In the beginning",
         ts: 2_000,
@@ -246,6 +253,7 @@ describe("applyPresenceUpdate", () => {
   it("moving the caret without changing the draft emits presence.diff only", () => {
     const presence = new Map<string, PresenceState>([
       ["alice", {
+        connId: "alice",
         userId: "alice",
         focusedCell: "cell-1",
         selection: { side: "target", anchor: 3, head: 3, draftText: "same" },
@@ -254,7 +262,7 @@ describe("applyPresenceUpdate", () => {
     ])
     const r = applyPresenceUpdate(
       presence,
-      "alice",
+      who("alice"),
       { t: "presence.update", selection: { side: "target", anchor: 4, head: 4, draftText: "same" } },
       2_000,
     )
@@ -264,6 +272,7 @@ describe("applyPresenceUpdate", () => {
   it("emits nothing when the update changes nothing", () => {
     const presence = new Map<string, PresenceState>([
       ["alice", {
+        connId: "alice",
         userId: "alice",
         focusedCell: "cell-1",
         selection: { side: "target", anchor: 3, head: 3, draftText: "same" },
@@ -272,7 +281,7 @@ describe("applyPresenceUpdate", () => {
     ])
     const r = applyPresenceUpdate(
       presence,
-      "alice",
+      who("alice"),
       { t: "presence.update", selection: { side: "target", anchor: 3, head: 3, draftText: "same" } },
       2_000,
     )
@@ -284,6 +293,7 @@ describe("applyPresenceUpdate", () => {
     // fresh ts; fanning each out as presence.diff is pure bandwidth waste.
     const presence = new Map<string, PresenceState>([
       ["alice", {
+        connId: "alice",
         userId: "alice",
         currentFileId: "file-1",
         viewingCell: "cell-1",
@@ -292,7 +302,7 @@ describe("applyPresenceUpdate", () => {
     ])
     const r = applyPresenceUpdate(
       presence,
-      "alice",
+      who("alice"),
       { t: "presence.update", currentFileId: "file-1", viewingCell: "cell-1" },
       5_000,
     )
@@ -304,47 +314,49 @@ describe("applyPresenceUpdate", () => {
     // up on the row they are looking at — viewingCell is not lease-gated.
     const r1 = applyPresenceUpdate(
       emptyPresence(),
-      "viewer",
+      who("viewer"),
       { t: "presence.update", currentFileId: "file-1", viewingCell: "cell-7" },
       1_000,
     )
     expect(r1.presence.get("viewer")).toEqual({
+      connId: "viewer",
       userId: "viewer",
       currentFileId: "file-1",
       viewingCell: "cell-7",
       ts: 1_000,
     })
     expect(r1.emit).toEqual([
-      { t: "presence.diff", user: { userId: "viewer", currentFileId: "file-1", viewingCell: "cell-7", ts: 1_000 } },
+      { t: "presence.diff", user: { connId: "viewer", userId: "viewer", currentFileId: "file-1", viewingCell: "cell-7", ts: 1_000 } },
     ])
-    const r2 = applyPresenceUpdate(r1.presence, "viewer", { t: "presence.update", viewingCell: null }, 2_000)
-    expect(r2.presence.get("viewer")).toEqual({ userId: "viewer", currentFileId: "file-1", ts: 2_000 })
+    const r2 = applyPresenceUpdate(r1.presence, who("viewer"), { t: "presence.update", viewingCell: null }, 2_000)
+    expect(r2.presence.get("viewer")).toEqual({ connId: "viewer", userId: "viewer", currentFileId: "file-1", ts: 2_000 })
     expect(r2.emit.map((m) => m.t)).toEqual(["presence.diff"])
   })
 
   it("keeps viewingCell when the lease is released or swept", () => {
     const claimed = applyFocusClaim(
       emptyLocks(),
-      new Map<string, PresenceState>([["alice", { userId: "alice", viewingCell: "cell-1", ts: 1 }]]),
-      "alice",
+      new Map<string, PresenceState>([["alice", { connId: "alice", userId: "alice", viewingCell: "cell-1", ts: 1 }]]),
+      who("alice"),
       { t: "focus.claim", cellId: "cell-1", leaseMs: 1_000 },
       1_000,
     )
     expect(claimed.presence.get("alice")).toMatchObject({ focusedCell: "cell-1", viewingCell: "cell-1" })
-    const released = applyFocusRelease(claimed.locks, claimed.presence, "alice", { t: "focus.release", cellId: "cell-1" }, 2_000)
-    expect(released.presence.get("alice")).toEqual({ userId: "alice", viewingCell: "cell-1", ts: 2_000 })
+    const released = applyFocusRelease(claimed.locks, claimed.presence, who("alice"), { t: "focus.release", cellId: "cell-1" }, 2_000)
+    expect(released.presence.get("alice")).toEqual({ connId: "alice", userId: "alice", viewingCell: "cell-1", ts: 2_000 })
     const swept = sweepExpiredLeases(claimed.locks, claimed.presence, 10_000)
-    expect(swept.presence.get("alice")).toEqual({ userId: "alice", viewingCell: "cell-1", ts: 10_000 })
+    expect(swept.presence.get("alice")).toEqual({ connId: "alice", userId: "alice", viewingCell: "cell-1", ts: 10_000 })
   })
 
   it("does not grant focus from presence.update alone", () => {
     const r = applyPresenceUpdate(
       emptyPresence(),
-      "alice",
+      who("alice"),
       { t: "presence.update", currentFileId: "file-1", focusedCell: "cell-1" },
       1_000,
     )
     expect(r.presence.get("alice")).toEqual({
+      connId: "alice",
       userId: "alice",
       currentFileId: "file-1",
       ts: 1_000,
@@ -354,6 +366,7 @@ describe("applyPresenceUpdate", () => {
   it("clears focus and selection while preserving current file", () => {
     const presence = new Map<string, PresenceState>([
       ["alice", {
+        connId: "alice",
         userId: "alice",
         currentFileId: "file-1",
         focusedCell: "cell-1",
@@ -363,11 +376,12 @@ describe("applyPresenceUpdate", () => {
     ])
     const r = applyPresenceUpdate(
       presence,
-      "alice",
+      who("alice"),
       { t: "presence.update", focusedCell: null, selection: null },
       2_000,
     )
     expect(r.presence.get("alice")).toEqual({
+      connId: "alice",
       userId: "alice",
       currentFileId: "file-1",
       ts: 2_000,
@@ -379,23 +393,25 @@ describe("presenceSnapshot", () => {
   it("returns the full roster with every draftText stripped (connect snapshot)", () => {
     const presence = new Map<string, PresenceState>([
       ["alice", {
+        connId: "alice",
         userId: "alice",
         focusedCell: "cell-1",
         selection: { side: "target", anchor: 0, head: 2, draftText: "x".repeat(10_000) },
         ts: 1,
       }],
-      ["bob", { userId: "bob", currentFileId: "file-1", ts: 2 }],
+      ["bob", { connId: "bob", userId: "bob", currentFileId: "file-1", ts: 2 }],
     ])
     expect(presenceSnapshot(presence)).toEqual({
       t: "presence",
       users: [
         {
+          connId: "alice",
           userId: "alice",
           focusedCell: "cell-1",
           selection: { side: "target", anchor: 0, head: 2 },
           ts: 1,
         },
-        { userId: "bob", currentFileId: "file-1", ts: 2 },
+        { connId: "bob", userId: "bob", currentFileId: "file-1", ts: 2 },
       ],
     })
   })
@@ -408,6 +424,7 @@ describe("PresenceDraftThrottle", () => {
   const draft = (userId: string, draftText: string, ts: number): ServerPresenceDraft => ({
     t: "presence.draft",
     userId,
+    connId: userId,
     cellId: "cell-1",
     draftText,
     ts,
@@ -455,14 +472,14 @@ describe("applyFocusRenew", () => {
     const locks = new Map<string, LockState>([
       ["c", { cellId: "c", userId: "alice", expiresAt: 1_000 }],
     ])
-    const r = applyFocusRenew(locks, emptyPresence(), "alice", { t: "focus.renew", cellId: "c" }, 5_000)
+    const r = applyFocusRenew(locks, emptyPresence(), who("alice"), { t: "focus.renew", cellId: "c" }, 5_000)
     expect(r.locks.get("c")?.expiresAt).toBe(5_000 + PROJECT_DO_DEFAULT_LEASE_MS)
   })
   it("is a no-op when called by a non-holder", () => {
     const locks = new Map<string, LockState>([
       ["c", { cellId: "c", userId: "alice", expiresAt: 1_000 }],
     ])
-    const r = applyFocusRenew(locks, emptyPresence(), "bob", { t: "focus.renew", cellId: "c" }, 5_000)
+    const r = applyFocusRenew(locks, emptyPresence(), who("bob"), { t: "focus.renew", cellId: "c" }, 5_000)
     expect(r.locks.get("c")?.expiresAt).toBe(1_000)
   })
 })
@@ -473,22 +490,22 @@ describe("applyFocusRelease", () => {
       ["c", { cellId: "c", userId: "alice", expiresAt: 5_000 }],
     ])
     const presence = new Map<string, PresenceState>([
-      ["alice", { userId: "alice", focusedCell: "c", ts: 1 }],
+      ["alice", { connId: "alice", userId: "alice", focusedCell: "c", ts: 1 }],
     ])
-    const r = applyFocusRelease(locks, presence, "alice", { t: "focus.release", cellId: "c" }, 6_000)
+    const r = applyFocusRelease(locks, presence, who("alice"), { t: "focus.release", cellId: "c" }, 6_000)
     expect(r.locks.has("c")).toBe(false)
     expect(r.presence.get("alice")?.focusedCell).toBeUndefined()
     expect(r.emit.map((m) => m.t)).toEqual(["lock.released", "presence.diff"])
     expect(r.emit[1]).toEqual({
       t: "presence.diff",
-      user: { userId: "alice", ts: 6_000 },
+      user: { connId: "alice", userId: "alice", ts: 6_000 },
     })
   })
   it("no-ops when caller is not the holder", () => {
     const locks = new Map<string, LockState>([
       ["c", { cellId: "c", userId: "alice", expiresAt: 5_000 }],
     ])
-    const r = applyFocusRelease(locks, emptyPresence(), "bob", { t: "focus.release", cellId: "c" }, 6_000)
+    const r = applyFocusRelease(locks, emptyPresence(), who("bob"), { t: "focus.release", cellId: "c" }, 6_000)
     expect(r.locks.has("c")).toBe(true)
     expect(r.emit).toHaveLength(0)
   })
@@ -502,11 +519,11 @@ describe("applyDisconnect", () => {
       ["c", { cellId: "c", userId: "bob", expiresAt: 5_000 }],
     ])
     const presence = new Map<string, PresenceState>([
-      ["alice", { userId: "alice", ts: 1 }],
-      ["bob", { userId: "bob", ts: 1 }],
+      ["alice", { connId: "alice", userId: "alice", ts: 1 }],
+      ["bob", { connId: "bob", userId: "bob", ts: 1 }],
     ])
     // remainingConnectionsForUser=0 (default) — last connection, release everything
-    const r = applyDisconnect(locks, presence, "alice", 9_000)
+    const r = applyDisconnect(locks, presence, who("alice"), 9_000)
     expect(r.locks.has("a")).toBe(false)
     expect(r.locks.has("b")).toBe(false)
     expect(r.locks.has("c")).toBe(true)
@@ -515,28 +532,28 @@ describe("applyDisconnect", () => {
     const released = r.emit.filter((m) => m.t === "lock.released")
     expect(released).toHaveLength(2)
     // Peers drop the row from a one-user frame; bob's row is not re-sent.
-    expect(r.emit.at(-1)).toEqual({ t: "presence.left", userId: "alice" })
+    expect(r.emit.at(-1)).toEqual({ t: "presence.left", userId: "alice", connId: "alice" })
     expect(r.emit.some((m) => m.t === "presence")).toBe(false)
   })
 
-  // RACE-6: closing one tab must NOT release locks/presence when another tab
-  // for the same user is still connected.
-  it("multi-tab: closing tab B preserves tab A's locks and presence", () => {
+  // RACE-6: closing one tab must NOT release locks when another tab for the
+  // same user is still connected. Presence, however, is per connection: the
+  // closing tab's row goes away so peers stop seeing a ghost, while tab A's
+  // row (same userId, different connId) stays.
+  it("multi-tab: closing tab B preserves tab A's lock and presence row, drops only B's row", () => {
     const locks = new Map<string, LockState>([
       ["cell-1", { cellId: "cell-1", userId: "alice", expiresAt: 5_000 }],
     ])
     const presence = new Map<string, PresenceState>([
-      ["alice", { userId: "alice", focusedCell: "cell-1", ts: 1 }],
+      ["tab-a", { connId: "tab-a", userId: "alice", focusedCell: "cell-1", ts: 1 }],
+      ["tab-b", { connId: "tab-b", userId: "alice", viewingCell: "cell-2", ts: 1 }],
     ])
     // remainingConnectionsForUser=1 — tab A still connected
-    const r = applyDisconnect(locks, presence, "alice", 9_000, 1)
-    // Lock must survive
-    expect(r.locks.has("cell-1")).toBe(true)
+    const r = applyDisconnect(locks, presence, { connId: "tab-b", userId: "alice" }, 9_000, 1)
     expect(r.locks.get("cell-1")?.userId).toBe("alice")
-    // Presence must survive
-    expect(r.presence.has("alice")).toBe(true)
-    // No broadcasts
-    expect(r.emit).toHaveLength(0)
+    expect(r.presence.get("tab-a")?.focusedCell).toBe("cell-1")
+    expect(r.presence.has("tab-b")).toBe(false)
+    expect(r.emit).toEqual([{ t: "presence.left", userId: "alice", connId: "tab-b" }])
   })
 
   it("multi-tab: closing the last tab releases all locks and presence", () => {
@@ -545,10 +562,10 @@ describe("applyDisconnect", () => {
       ["cell-2", { cellId: "cell-2", userId: "alice", expiresAt: 5_000 }],
     ])
     const presence = new Map<string, PresenceState>([
-      ["alice", { userId: "alice", focusedCell: "cell-1", ts: 1 }],
+      ["alice", { connId: "alice", userId: "alice", focusedCell: "cell-1", ts: 1 }],
     ])
     // remainingConnectionsForUser=0 — this was the last tab
-    const r = applyDisconnect(locks, presence, "alice", 9_000, 0)
+    const r = applyDisconnect(locks, presence, who("alice"), 9_000, 0)
     expect(r.locks.has("cell-1")).toBe(false)
     expect(r.locks.has("cell-2")).toBe(false)
     expect(r.presence.has("alice")).toBe(false)
@@ -559,11 +576,13 @@ describe("applyDisconnect", () => {
   it("multi-tab: claim from tab A survives tab B closing", () => {
     // Simulate: alice claims cell from tab A, then tab B disconnects.
     const now = 1_000
+    const tabA = { connId: "tab-a", userId: "alice" }
+    const tabB = { connId: "tab-b", userId: "alice" }
     // 1. Tab A claims cell
     const claimResult = applyFocusClaim(
       emptyLocks(),
-      emptyPresence(),
-      "alice",
+      new Map<string, PresenceState>([["tab-b", { ...tabB, ts: 1 }]]),
+      tabA,
       { t: "focus.claim", cellId: "cell-x" },
       now,
     )
@@ -573,24 +592,88 @@ describe("applyDisconnect", () => {
     const disconnectResult = applyDisconnect(
       claimResult.locks,
       claimResult.presence,
-      "alice",
+      tabB,
       now + 500,
       1,
     )
     // Lock survives
     expect(disconnectResult.locks.get("cell-x")?.userId).toBe("alice")
-    expect(disconnectResult.presence.has("alice")).toBe(true)
+    expect(disconnectResult.presence.get("tab-a")?.focusedCell).toBe("cell-x")
+    expect(disconnectResult.presence.has("tab-b")).toBe(false)
 
     // 3. Tab A finally closes (remaining=0)
     const finalDisconnect = applyDisconnect(
       disconnectResult.locks,
       disconnectResult.presence,
-      "alice",
+      tabA,
       now + 1_000,
       0,
     )
     expect(finalDisconnect.locks.has("cell-x")).toBe(false)
-    expect(finalDisconnect.presence.has("alice")).toBe(false)
+    expect(finalDisconnect.presence.size).toBe(0)
+  })
+})
+
+// Presence is keyed per CONNECTION so two tabs — or two people sharing one
+// test account — never overwrite each other's row and each sees the other.
+describe("per-connection presence for one user", () => {
+  const tabA = { connId: "tab-a", userId: "alice" }
+  const tabB = { connId: "tab-b", userId: "alice" }
+
+  it("two connections of one user are two roster rows in the snapshot", () => {
+    const r1 = applyPresenceUpdate(emptyPresence(), tabA, { t: "presence.update", viewingCell: "cell-1" }, 1)
+    const r2 = applyPresenceUpdate(r1.presence, tabB, { t: "presence.update", viewingCell: "cell-2" }, 2)
+    expect(r1.presence.get("tab-a")?.viewingCell).toBe("cell-1")
+    expect(presenceSnapshot(r2.presence).users).toEqual([
+      { connId: "tab-a", userId: "alice", viewingCell: "cell-1", ts: 1 },
+      { connId: "tab-b", userId: "alice", viewingCell: "cell-2", ts: 2 },
+    ])
+    // The diff for tab B never touches tab A's row.
+    expect(r2.emit).toEqual([
+      { t: "presence.diff", user: { connId: "tab-b", userId: "alice", viewingCell: "cell-2", ts: 2 } },
+    ])
+  })
+
+  it("focus.claim from a second tab of the same user is granted (locks stay per user)", () => {
+    const a = applyFocusClaim(emptyLocks(), emptyPresence(), tabA, { t: "focus.claim", cellId: "c" }, 1)
+    const b = applyFocusClaim(a.locks, a.presence, tabB, { t: "focus.claim", cellId: "c" }, 2)
+    expect(b.emitTo).toHaveLength(0)
+    expect(b.locks.get("c")?.userId).toBe("alice")
+    expect(b.presence.get("tab-a")?.focusedCell).toBe("c")
+    expect(b.presence.get("tab-b")?.focusedCell).toBe("c")
+  })
+
+  it("focus.release from tab B clears only tab B's row; tab A keeps focusedCell for its re-claim", () => {
+    const a = applyFocusClaim(emptyLocks(), emptyPresence(), tabA, { t: "focus.claim", cellId: "c" }, 1)
+    const b = applyFocusClaim(a.locks, a.presence, tabB, { t: "focus.claim", cellId: "c" }, 2)
+    const r = applyFocusRelease(b.locks, b.presence, tabB, { t: "focus.release", cellId: "c" }, 3)
+    expect(r.locks.has("c")).toBe(false)
+    expect(r.presence.get("tab-a")?.focusedCell).toBe("c")
+    expect(r.presence.get("tab-b")?.focusedCell).toBeUndefined()
+    expect(r.emit).toEqual([
+      { t: "lock.released", cellId: "c", by: { userId: "alice", ts: 3 } },
+      { t: "presence.diff", user: { connId: "tab-b", userId: "alice", ts: 3 } },
+    ])
+  })
+
+  it("lease sweep clears focusedCell on every connection of the lock's user", () => {
+    const a = applyFocusClaim(emptyLocks(), emptyPresence(), tabA, { t: "focus.claim", cellId: "c", leaseMs: 100 }, 1)
+    const b = applyFocusClaim(a.locks, a.presence, tabB, { t: "focus.claim", cellId: "c", leaseMs: 100 }, 2)
+    const r = sweepExpiredLeases(b.locks, b.presence, 1_000)
+    expect(r.presence.get("tab-a")?.focusedCell).toBeUndefined()
+    expect(r.presence.get("tab-b")?.focusedCell).toBeUndefined()
+    expect(r.emit.filter((m) => m.t === "presence.diff")).toHaveLength(2)
+  })
+
+  it("presence.draft carries connId and is throttled per connection", () => {
+    const sent: ServerPresenceDraft[] = []
+    const throttle = new PresenceDraftThrottle((f) => sent.push(f))
+    const a = applyFocusClaim(emptyLocks(), emptyPresence(), tabA, { t: "focus.claim", cellId: "c" }, 1)
+    const b = applyFocusClaim(a.locks, a.presence, tabB, { t: "focus.claim", cellId: "c" }, 2)
+    const ua = applyPresenceUpdate(b.presence, tabA, { t: "presence.update", selection: { side: "target", anchor: 0, head: 0, draftText: "a" } }, 3)
+    const ub = applyPresenceUpdate(ua.presence, tabB, { t: "presence.update", selection: { side: "target", anchor: 0, head: 0, draftText: "b" } }, 4)
+    for (const m of [...ua.emit, ...ub.emit]) if (m.t === "presence.draft") throttle.push(m)
+    expect(sent.map((f) => [f.connId, f.draftText])).toEqual([["tab-a", "a"], ["tab-b", "b"]])
   })
 })
 
@@ -602,26 +685,29 @@ describe("sweepExpiredLeases", () => {
       ["c", { cellId: "c", userId: "carol", expiresAt: 9_999 }],
     ])
     const presence = new Map<string, PresenceState>([
-      ["alice", { userId: "alice", focusedCell: "a", currentFileId: "file-1", ts: 1 }],
+      ["alice", { connId: "alice", userId: "alice", focusedCell: "a", currentFileId: "file-1", ts: 1 }],
       ["bob", {
+        connId: "bob",
         userId: "bob",
         focusedCell: "b",
         currentFileId: "file-1",
         selection: { side: "target", anchor: 0, head: 2 },
         ts: 1,
       }],
-      ["carol", { userId: "carol", focusedCell: "c", currentFileId: "file-2", ts: 1 }],
+      ["carol", { connId: "carol", userId: "carol", focusedCell: "c", currentFileId: "file-2", ts: 1 }],
     ])
     const r = sweepExpiredLeases(locks, presence, 5_000)
     expect(r.locks.has("a")).toBe(false)
     expect(r.locks.has("b")).toBe(false)
     expect(r.locks.has("c")).toBe(true)
     expect(r.presence.get("alice")).toEqual({
+      connId: "alice",
       userId: "alice",
       currentFileId: "file-1",
       ts: 5_000,
     })
     expect(r.presence.get("bob")).toEqual({
+      connId: "bob",
       userId: "bob",
       currentFileId: "file-1",
       ts: 5_000,
@@ -637,7 +723,7 @@ describe("sweepExpiredLeases", () => {
     ])
     expect(r.emit[3]).toEqual({
       t: "presence.diff",
-      user: { userId: "bob", currentFileId: "file-1", ts: 5_000 },
+      user: { connId: "bob", userId: "bob", currentFileId: "file-1", ts: 5_000 },
     })
   })
 })
@@ -731,5 +817,19 @@ describe("unpackBroadcastBody — additive event.applied fields", () => {
   it("passes serverSeq and rows through untouched inside a broadcast.batch envelope", () => {
     const body = { t: "broadcast.batch", messages: [enriched("e1"), enriched("e2")] }
     expect(unpackBroadcastBody(body)).toEqual([enriched("e1"), enriched("e2")])
+  })
+})
+
+describe("resolveConnId", () => {
+  const live = new Map<string, { connId: string }>([["ws1", { connId: "client-conn-0001" }]])
+  it("accepts a well-formed client connId that no live socket holds", () => {
+    expect(resolveConnId("client-conn-0002", live)).toBe("client-conn-0002")
+  })
+  it("mints a server id for old clients that send none, and for malformed or colliding ids", () => {
+    const uuid = /^[0-9a-f-]{36}$/
+    expect(resolveConnId(null, live)).toMatch(uuid)
+    expect(resolveConnId("bad id!", live)).toMatch(uuid)
+    expect(resolveConnId("short", live)).toMatch(uuid)
+    expect(resolveConnId("client-conn-0001", live)).toMatch(uuid)
   })
 })

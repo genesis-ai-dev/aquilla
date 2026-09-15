@@ -154,7 +154,7 @@ export async function validateApiCredential(
     mode: row.mode,
     orgId: row.org_id,
     projectId: row.project_id,
-    // Only an explicit true opts in — a NULL (pre-0085 row) stays scrubbed.
+    // Only an explicit true opts in — a NULL (pre-0091 row) stays scrubbed.
     pii: row.pii === true,
   }
 }

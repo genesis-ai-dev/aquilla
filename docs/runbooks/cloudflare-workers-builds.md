@@ -23,8 +23,9 @@ bindings, or promote traffic in either environment.
 
 The route-free Workers Builds helpers fail closed unless Cloudflare provides
 `WORKERS_CI`, `WORKERS_CI_BRANCH`, and `WORKERS_CI_COMMIT_SHA`. The preview
-uploader always names `aquilla-web-preview`, always builds the SPA against
-development APIs, and never invokes a traffic promotion or trigger deployment.
+deployer uses only `aquilla-web-preview`, `aquilla-auth-preview`, and
+`aquilla-sync-preview`. The three named previews share development storage and
+never promote a production/development version or deploy live routes.
 
 The identity and sync build wrappers install their package-local lockfiles only
 after Cloudflare has installed the root lockfile. This two-level install is
@@ -39,7 +40,7 @@ application and must not be given a placeholder build command.
 | Connection | Branch | Binding profile | Operation | Changes live traffic |
 | --- | --- | --- | --- | --- |
 | All live Workers | Any | N/A | no automatic build; Git disconnected | No |
-| `aquilla-web-preview` | Any repository branch | development API hosts | lint, tests, build, route-free preview upload | No |
+| `aquilla-web-preview` | Any repository branch | branch auth/sync previews, development storage | TypeScript/Vite build, three named previews | No |
 
 Both environments and their routes remain controlled by the explicit operator
 commands below.
@@ -93,7 +94,7 @@ Playwright smoke on a dedicated Hetzner box is also separate — see
 [hetzner-ci.md](hetzner-ci.md). It is `workflow_dispatch`-only until a
 self-hosted runner is Idle.
 
-## Pull-request validation
+## Pull-request previews
 
 Connect only `aquilla-web-preview` to `genesis-ai-dev/aquilla`. Configure:
 
@@ -102,17 +103,65 @@ Connect only `aquilla-web-preview` to `genesis-ai-dev/aquilla`. Configure:
 - root directory: `/`
 - non-production branch builds: enabled
 
-The build runs root lint/unit/IDML/schema/build gates, both identity and sync
-typecheck/test suites, and the agent-worker typecheck/tests. Independent lanes
-run concurrently in three bounded-memory phases so the complete gate fits both
-Cloudflare's build-duration and memory limits; any failed phase prevents later
-phases and fails the whole build. The long root and sync Vitest suites run in
-separate phases so they cannot starve each other's asynchronous tests. The IDML
-browser-conformance lane uses its pinned, serverless Chromium binary without
-requiring root access. The deploy step uploads only a route-free
-`aquilla-web-preview` version. Slash-named branches are normalized and hashed
-into stable lowercase aliases. No preview command can name `aquilla-web`,
-`aquilla-web-development`, either identity Worker, or either sync Worker.
+The build installs auth/sync dependencies and runs `tsc -b`. The deploy command
+runs `scripts/cloudflare-stack-preview.mjs` using the root Wrangler version:
+
+1. Create/update auth and sync previews with the same branch-derived name.
+2. Read their actual URLs from Wrangler's structured output.
+3. Run Vite once with those URLs, then upload the web preview.
+4. Update backend callback URLs to the matching web/auth/sync previews.
+
+The first uploads use a non-resolving callback origin until all URLs are known.
+An interrupted deployment can leave an incomplete preview; rerun the same branch
+build to finish it. The job reports success only after all five uploads finish.
+The preview's stable URL stays the same across commits on that branch.
+
+No lint, secret scan, unit/worker suites, IDML gate, or browser tests run inside
+Cloudflare. QA tests the published app. A green check confirms compilation and
+uploads, not a tested user journey. No GitHub Action is required.
+
+### One-time preview setup
+
+Provision `aquilla-auth-preview` and `aquilla-sync-preview` in the same account.
+Keep them disconnected from Git: the web Worker's existing repo integration
+coordinates the complete stack. Allow its build token to deploy all three
+preview parents. Never grant it access to live Worker routes for this purpose.
+
+Configure runtime secrets in **Previews Base**, not Production, for each parent:
+
+- auth: `SECRET_KEY`, `SYNC_SECRET_KEY`, `ADMIN_SECRET`.
+- sync: the same `SYNC_SECRET_KEY` and `ADMIN_SECRET`.
+- auth: `OPENROUTER_API_KEY` if QA needs chat/agent features.
+
+Use preview-specific signing/admin keys. The deployment script never reads
+local `.dev.vars` or copies production secrets. Enable Preview Deployments URLs
+for all three parents. The script fails if Wrangler returns no preview URL.
+
+Generated `previews` configs bind both backends to development Hyperdrive
+`53581197ff7a4202a5ed0ef08537d4a6` and `aquilla-snapshots-dev`. This isolates code
+and Durable Objects, **not database rows or blobs**. QA should use a separate
+project per preview; development and preview sessions of the same project do
+not share a Durable Object broadcast namespace. Schema-changing PRs need a
+separate database branch. Automatic migrations, legacy identity migration,
+cron jobs, outbound email, and local authentication bypasses are not enabled.
+Password login uses existing development accounts. Email/invite delivery,
+external integrations, and optional agent infrastructure need separate preview
+configuration before QA can rely on those journeys.
+
+Before push, `.husky/pre-push` runs `pnpm scan:secrets`, then
+`pnpm test:e2e:affected`. The existing selector uses the commits being pushed
+and domain sentinels; it does not run the full smoke suite. Git's pushed refs
+are preserved for selection, while inherited repository variables are cleared
+so test fixtures can safely create their own Git repositories.
+
+Pushes do not run the full root/worker suites, lint, or IDML/schema validation.
+Run directly affected unit/worker tests during implementation. The manual CI
+workflow retains broader validation when explicitly requested.
+
+Hooks apply only to pushes that execute them: `--no-verify`, `HUSKY=0`, and
+API-created commits bypass local validation. Cloudflare still builds these
+commits without running tests. QA owns functional review of each preview.
+The full smoke suite remains the explicit merge/deploy/release gate.
 
 GitHub's removed Actions contexts (`lint`, `typecheck`, `unit`, and `build`)
 must not remain required. After the first successful Workers Build establishes
@@ -183,3 +232,57 @@ as part of this recovery.
 Never refresh the development Neon branch or development R2 buckets while an
 environment-crossing incident is under recovery. First compare event IDs and blob
 keys against production and reconcile any development-only records.
+
+## Automatic QA links on pull requests
+
+After all three branch previews deploy, `scripts/cloudflare-preview-comment.mjs`
+creates or updates one **QA preview** comment on matching open PRs. It includes
+the actual frontend URL, deployed commit, and GitHub build-check/logs link.
+Cloudflare performs this API call directly; no GitHub Action runs.
+
+The comment is posted by the org's **Aquilla QA** GitHub App (`aquilla-qa-bot`),
+the same App Grokbot uses, so it shows as `aquilla-qa-bot[bot]` and never under a
+person's name. The App needs **Pull requests: Read and write** on `aquilla`; it
+already holds that. No permission change is needed for this feature.
+
+Configure three encrypted **build** variables on `aquilla-web-preview`
+(Settings → Build → Variables and secrets):
+
+- `PREVIEW_GITHUB_APP_ID`: the App ID from the App's settings page.
+- `PREVIEW_GITHUB_APP_INSTALLATION_ID`: the App's installation id on the
+  `genesis-ai-dev` org (Organization settings → GitHub Apps → Aquilla QA →
+  Configure; the number at the end of that page's URL).
+- `PREVIEW_GITHUB_APP_PRIVATE_KEY`: a private key generated for this build under
+  the App's settings (Private keys → Generate a private key), stored as one
+  base64 line: `base64 -w0 <file>.pem`. Cloudflare's variable form does not keep
+  the line breaks a PEM needs; a raw PEM is accepted when it survives intact.
+
+The short names `APP_ID`, `INSTALLATION_ID` and `PRIVATE_KEY` are accepted as
+aliases (the first setup used them). Prefer the prefixed names: a bare
+`PRIVATE_KEY` in a build environment does not say which key it is.
+
+Give the build its own key rather than reusing another holder's. An App can hold
+several private keys, each revocable on its own, so a leak in one place never
+forces a rotation in the other. Do not put any of these in Worker runtime
+secrets, `VITE_*` variables, or Git. Restrict builds carrying this credential to
+trusted repository branches: anyone who can push a branch can read a build secret.
+
+At run time the script signs a five-minute JWT with the key, exchanges it for a
+one-hour installation token limited to `pull_requests: write` (narrower than the
+App's full grant), and uses that token for every GitHub call.
+
+The script edits only comments GitHub stamps with this App's id and its own marker.
+It rechecks the current PR head before writing, skips closed/fork/stale PRs,
+and bounds GitHub requests with one 30-second deadline. Missing credentials or
+notification failures produce a warning but do not fail the deployment.
+
+Only successful deployments publish comments. A later failed build leaves the
+last successful commit visible; the comment does not claim it tests newer commits.
+If a PR opens after its branch build finishes, retry that Cloudflare build to
+publish the comment. This build-driven approach has no PR-open webhook. After
+adding or rotating the key, retry a build for an open PR and check its comment.
+
+Validation: `node --test scripts/cloudflare-preview-comment.test.mjs` covers
+the JWT signature, the installation-token exchange, GitHub comment
+creation/update, commit checks, missing credentials, and failures.
+The stack preview contract test verifies notification follows all five uploads.

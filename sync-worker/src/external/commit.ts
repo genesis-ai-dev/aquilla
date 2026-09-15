@@ -12,6 +12,7 @@
 import { errorResponse, toErrorResponse } from './errors'
 import {
   cellKey,
+  isStructureCommandKind,
   laneCellKey,
   requiredRoleForCommand,
   type CreateProjectCommand,
@@ -19,11 +20,18 @@ import {
   type LinkMediaCommand,
   type PatchSettingsCommand,
   type PlanImportCommand,
+  type SetBriefCommand,
   type SetTranslationCommand,
+  type StructureCommand,
   type UpdateProjectSettingsCommand,
 } from './commands'
 import { changedPolicyKeys, commitPatchSettings } from './commands-patch-settings'
+import { commitSetBrief } from './commands-set-brief'
+import { isOrgMemberCommand, type OrgMemberCommand } from './commands-org-members'
+import { commitOrgMember } from './org-members-engine'
+import { commitMemoryCommand, isMemoryCommand } from './commands-memory'
 import { commitEmitEvents } from './emit-events-engine'
+import { commitStructure } from './structure-engine'
 import {
   buildProvenance,
   receiptOnlyGates,
@@ -37,6 +45,7 @@ import { isPlanSatisfied } from './supersede'
 import { resolveSupersedeState } from './supersede-state'
 import { compilePlanImport } from './import-manifest'
 import { loadChangeset } from './store'
+import { SOURCE_ARTIFACT_FORMATS } from '../../../shared/import-contract'
 import { assertCredentialScope, mintInternalSyncToken } from './token-bridge'
 import { uuidv7 } from './uuid'
 import { audioObjectKey } from '../audio'
@@ -211,6 +220,25 @@ export async function commitChangesetCore(
   if (patchSettingsCmd) {
     return commitPatchSettings(db, cred, cs, patchSettingsCmd, channel)
   }
+  // AQU-1227 SetBrief: receipt-only — merges its patch into the live brief and
+  // writes it back as the translationBrief settings key.
+  const setBriefCmd = cs.commands.find((c): c is SetBriefCommand => c.kind === 'SetBrief')
+  if (setBriefCmd) {
+    return commitSetBrief(db, cred, cs, setBriefCmd, channel)
+  }
+  // AQU-1235 org membership: receipt-only with an ORG-level gate, so like
+  // CreateProject it must run before the project-role precheck below.
+  const orgMemberCmd = cs.commands.find((c): c is OrgMemberCommand => isOrgMemberCommand(c))
+  if (orgMemberCmd) {
+    return commitOrgMember(db, cred, cs, orgMemberCmd, channel)
+  }
+
+  // AQU-1228 Living Memory writes: receipt-only, with their own floors and the
+  // human-edited guard — the module re-runs the full guard sequence.
+  const memoryCmd = cs.commands.find(isMemoryCommand)
+  if (memoryCmd) {
+    return commitMemoryCommand(db, cred, cs, memoryCmd, channel)
+  }
 
   // ── Live role/membership precheck (§2) ────────────────────────────────────
   // Resolve the caller's CURRENT role and require the floor of the command kinds
@@ -347,6 +375,20 @@ export async function commitChangesetCore(
       .prepare(`UPDATE changesets SET confirmation_id = ? WHERE id = ? AND status = 'committing'`)
       .bind(confirmationId, id)
       .run()
+  }
+
+  // ── Cell-structure commands take their own compile/commit path (AQU-1234) ─
+  // The shared gates above handled expiry, the ask confirmation, and the flip;
+  // the engine re-checks its OWN pins (the chain heads it will use as parent
+  // ids) rather than the shared precondition list — see structure-engine.ts.
+  const structure = cs.commands.find(
+    (c): c is StructureCommand => isStructureCommandKind(c.kind),
+  )
+  if (structure) {
+    return commitStructure(
+      request, env, db, cred, cs, structure, confirmationId, channel,
+      cs.status === 'staged', ctx,
+    )
   }
 
   // ── PlanImport takes its own compile/commit path ──────────────────────────
@@ -504,6 +546,17 @@ export async function commitChangesetCore(
  *  chunk and artifact binding succeeds; an interrupted apply is retryable and
  *  never exposes a silently truncated file. */
 const PLAN_IMPORT_CHUNK = 100
+
+/**
+ * AQU-1120: the `file_source_blobs.format` the export route switches on, derived
+ * from the caller's declared `fileType`. A format the shared registry doesn't
+ * know maps to `custom-original`, which the export route serves as verbatim
+ * bytes — an honest round trip is better than claiming a serializer we lack.
+ */
+function sourceBlobFormat(fileType: string): string {
+  const normalized = fileType.trim().toLowerCase().replace(/^\./, '')
+  return normalized in SOURCE_ARTIFACT_FORMATS ? normalized : 'custom-original'
+}
 
 /**
  * Compile a PlanImport into one file.create + N genesis source.cell.create
@@ -700,6 +753,42 @@ async function commitPlanImport(
       .prepare(`UPDATE artifacts SET file_id = ? WHERE id::text = ? AND project_id = ?`)
       .bind(fileId, cmd.artifactId, projectId)
       .run()
+
+    // AQU-1120: browser import writes the `file_source_blobs` side-car (see
+    // events/source-artifact-persistence.ts) alongside the artifact rows; the
+    // Agent API used to write the artifact + binding only. The export route
+    // resolves original bytes through the side-car, so an agent-imported file
+    // 404'd on export ("no source blob recorded for this file"). Point the
+    // side-car at the artifact's existing R2 object — no byte copy, and the
+    // export route already resolves an r2_key-only row for every format.
+    const artifactObject = await db
+      .prepare(`SELECT r2_key, size_bytes FROM artifacts WHERE id::text = ? AND project_id = ?`)
+      .bind(cmd.artifactId, projectId)
+      .first<{ r2_key: string | null; size_bytes: number | string | null }>()
+    if (artifactObject?.r2_key) {
+      await db
+        .prepare(
+          `INSERT INTO file_source_blobs (file_id, project_id, format, raw_source, r2_key, size_bytes, created_at)
+           VALUES (?, ?, ?, NULL, ?, ?, ?)
+           ON CONFLICT (file_id) DO UPDATE SET
+             project_id = EXCLUDED.project_id,
+             format     = EXCLUDED.format,
+             raw_source = NULL,
+             r2_key     = EXCLUDED.r2_key,
+             size_bytes = EXCLUDED.size_bytes,
+             created_at = EXCLUDED.created_at`,
+        )
+        .bind(
+          fileId,
+          projectId,
+          sourceBlobFormat(cmd.fileType),
+          artifactObject.r2_key,
+          artifactObject.size_bytes === null ? null : Number(artifactObject.size_bytes),
+          clientTs,
+        )
+        .run()
+    }
+
     await db
       .prepare(
         `INSERT INTO artifact_bindings (
@@ -861,6 +950,17 @@ async function commitCreateProject(
     orgId,
     createdBy: cred.userId,
     writeCreatorMembership: true,
+    // AQU-1223: the language pair rides the create instead of being dropped.
+    // Sent only when the command carried one, so a bare name+orgId create still
+    // writes no settings row at all.
+    ...(cmd.sourceLanguage !== undefined || cmd.targetLanguage !== undefined
+      ? {
+          settingsSeed: {
+            ...(cmd.sourceLanguage !== undefined ? { sourceLanguage: cmd.sourceLanguage } : {}),
+            ...(cmd.targetLanguage !== undefined ? { targetLanguage: cmd.targetLanguage } : {}),
+          },
+        }
+      : {}),
   })
 
   if (!inserted) {

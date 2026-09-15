@@ -81,7 +81,7 @@
   },
   "src/components/ProjectCreateDialog.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 10
+      "count": 6
     }
   },
   "src/components/ProjectSettings/LocalModelsSection.tsx": {
@@ -236,7 +236,7 @@
   },
   "src/components/org/TeamsList.tsx": {
     "i18n/no-unkeyed-string": {
-      "count": 7
+      "count": 6
     }
   },
   "src/components/settings/OrgProviderSection.tsx": {

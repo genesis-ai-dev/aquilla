@@ -255,6 +255,165 @@ describe('CreateProject — happy path (org-scoped maintainer)', () => {
   })
 })
 
+// AQU-1223. The bug these guard: CreateProject used to pick `name`/`orgId`/
+// `projectId` off the body and DROP everything else without a word — a caller
+// that sent languages got a 200 and a blank project, and had no way to find out.
+// Both halves matter: the language pair must actually land, and anything the
+// command does not implement must come back named.
+describe('CreateProject — accepted fields (AQU-1223)', () => {
+  /** Stage + human-approve + commit a CreateProject, returning the commit result. */
+  async function createProject(
+    env: ReturnType<typeof makeEnv>,
+    projectId: string,
+    token: string,
+    credentialId: string,
+    command: Record<string, unknown>,
+  ) {
+    const { body: prep } = await prepare(env, projectId, token, [command])
+    await seedConfirmation(tdb, prep.changeset.id, prep.digest, 1, credentialId)
+    return { prep, ...(await commit(env, projectId, token, prep.changeset.id)) }
+  }
+
+  async function settingsRow(projectId: string) {
+    const rows = await tdb.rows<{ project_id: string; settings: string; version: number }>('project_settings')
+    return rows.find((r) => r.project_id === projectId)
+  }
+
+  it('seeds sourceLanguage + targetLanguage into the settings blob at version 1', async () => {
+    const env = makeEnv(tdb.db)
+    await seedOrgMember(tdb, 1, 600)
+    const credentialId = '00000000-0000-0000-0000-0000000000c1'
+    const token = await credToken(tdb, {
+      credentialId, userId: 1, username: 'alice', orgId: String(ORG_ID), projectId: null,
+    })
+
+    const { res, body } = await createProject(env, 'with-langs', token, credentialId, {
+      kind: 'CreateProject', name: 'With Langs', orgId: ORG_ID,
+      sourceLanguage: 'en', targetLanguage: 'es',
+    })
+    expect(res.status).toBe(200)
+    expect(body.receipt.command).toBe('CreateProject')
+
+    const settings = await settingsRow('with-langs')
+    expect(settings).toBeDefined()
+    expect(JSON.parse(settings!.settings)).toMatchObject({ sourceLanguage: 'en', targetLanguage: 'es' })
+    // Version 1 is what the UI's create-then-patch(version 0) also produces, so
+    // a client that reads the version back and patches on top behaves the same
+    // whichever path created the project.
+    expect(settings!.version).toBe(1)
+  })
+
+  it("accepts targetLanguage: '' for the source-only shape", async () => {
+    const env = makeEnv(tdb.db)
+    await seedOrgMember(tdb, 1, 600)
+    const credentialId = '00000000-0000-0000-0000-0000000000c2'
+    const token = await credToken(tdb, {
+      credentialId, userId: 1, username: 'alice', orgId: String(ORG_ID), projectId: null,
+    })
+
+    const { res } = await createProject(env, 'source-only', token, credentialId, {
+      kind: 'CreateProject', name: 'Source Only', orgId: ORG_ID,
+      sourceLanguage: 'grc', targetLanguage: '',
+    })
+    expect(res.status).toBe(200)
+    const settings = await settingsRow('source-only')
+    expect(JSON.parse(settings!.settings)).toMatchObject({ sourceLanguage: 'grc', targetLanguage: '' })
+  })
+
+  it('the approval summary names the language pair being seeded', async () => {
+    const env = makeEnv(tdb.db)
+    await seedOrgMember(tdb, 1, 600)
+    const token = await credToken(tdb, {
+      credentialId: '00000000-0000-0000-0000-0000000000c3', userId: 1, username: 'alice',
+      orgId: String(ORG_ID), projectId: null,
+    })
+    const { body: prep } = await prepare(env, 'summarised', token, [
+      { kind: 'CreateProject', name: 'Summarised', orgId: ORG_ID, sourceLanguage: 'en', targetLanguage: 'fr' },
+    ])
+    expect(prep.summary.newProjectLanguages).toBe('en → fr')
+  })
+
+  it('a bare name + orgId create still works and writes NO settings row', async () => {
+    const env = makeEnv(tdb.db)
+    await seedOrgMember(tdb, 1, 600)
+    const credentialId = '00000000-0000-0000-0000-0000000000c4'
+    const token = await credToken(tdb, {
+      credentialId, userId: 1, username: 'alice', orgId: String(ORG_ID), projectId: null,
+    })
+
+    const { res, prep } = await createProject(env, 'bare', token, credentialId, {
+      kind: 'CreateProject', name: 'Bare', orgId: ORG_ID,
+    })
+    expect(res.status).toBe(200)
+    // No language pair sent ⇒ nothing to summarize and no row: the lazy
+    // first-settings-write path is untouched for every pre-existing caller.
+    expect(prep.summary.newProjectLanguages).toBeUndefined()
+    expect(await settingsRow('bare')).toBeUndefined()
+
+    const created = (await tdb.rows<{ id: string; name: string }>('projects')).find((p) => p.id === 'bare')
+    expect(created?.name).toBe('Bare')
+  })
+
+  it.each([
+    ['description', { description: 'a blurb' }],
+    ['members', { members: [{ userId: 2, role: 'contributor' }] }],
+    ['settings', { settings: { validationCount: 3 } }],
+    ['targetLangauge', { targetLangauge: 'es' }], // the typo case
+  ])('rejects an unrecognized field (%s) by name instead of dropping it', async (field, extra) => {
+    const env = makeEnv(tdb.db)
+    await seedOrgMember(tdb, 1, 600)
+    const token = await credToken(tdb, {
+      credentialId: `00000000-0000-0000-0000-0000000000d${field.length % 10}`, userId: 1,
+      username: 'alice', orgId: String(ORG_ID), projectId: null,
+    })
+
+    const { res, body } = await prepare(env, 'rejected', token, [
+      { kind: 'CreateProject', name: 'Rejected', orgId: ORG_ID, ...extra },
+    ])
+    expect(res.status).toBe(400)
+    expect(body.error.code).toBe('validation_failed')
+    // Named, not merely counted — the whole point is the caller learns WHICH
+    // field never landed.
+    expect(JSON.stringify(body.error)).toContain(field)
+    // And nothing was created behind the rejection.
+    expect((await tdb.rows<{ id: string }>('projects')).filter((p) => p.id === 'rejected')).toHaveLength(0)
+  })
+
+  it('names EVERY unrecognized field at once, not just the first', async () => {
+    const env = makeEnv(tdb.db)
+    await seedOrgMember(tdb, 1, 600)
+    const token = await credToken(tdb, {
+      credentialId: '00000000-0000-0000-0000-0000000000d9', userId: 1, username: 'alice',
+      orgId: String(ORG_ID), projectId: null,
+    })
+    const { res, body } = await prepare(env, 'multi-bad', token, [
+      {
+        kind: 'CreateProject', name: 'Multi', orgId: ORG_ID,
+        description: 'x', members: [], sourceLangauge: 'en',
+      },
+    ])
+    expect(res.status).toBe(400)
+    const serialized = JSON.stringify(body.error)
+    for (const field of ['description', 'members', 'sourceLangauge']) {
+      expect(serialized).toContain(field)
+    }
+  })
+
+  it('rejects a non-string language rather than coercing it', async () => {
+    const env = makeEnv(tdb.db)
+    await seedOrgMember(tdb, 1, 600)
+    const token = await credToken(tdb, {
+      credentialId: '00000000-0000-0000-0000-0000000000da', userId: 1, username: 'alice',
+      orgId: String(ORG_ID), projectId: null,
+    })
+    const { res, body } = await prepare(env, 'bad-lang', token, [
+      { kind: 'CreateProject', name: 'Bad Lang', orgId: ORG_ID, sourceLanguage: 42 },
+    ])
+    expect(res.status).toBe(400)
+    expect(body.error.code).toBe('validation_failed')
+  })
+})
+
 describe('CreateProject — scope + role gates', () => {
   it('a project-scoped credential → scope_denied at prepare', async () => {
     const env = makeEnv(tdb.db)

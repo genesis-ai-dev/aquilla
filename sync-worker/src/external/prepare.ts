@@ -725,6 +725,14 @@ async function prepareCreateProject(
     projectName: cmd.name,
     newProjectId: definitiveProjectId,
     targetOrg: orgId == null ? 'personal' : String(orgId),
+    // AQU-1223: the seeded language pair is part of what the approver is
+    // authorizing, so it belongs in the effect summary rather than only in the
+    // raw command body.
+    ...(cmd.sourceLanguage !== undefined || cmd.targetLanguage !== undefined
+      ? {
+          newProjectLanguages: `${cmd.sourceLanguage || 'none'} → ${cmd.targetLanguage || 'none'}`,
+        }
+      : {}),
     warnings: [],
   }
   return stageReceiptOnlyChangeset(db, cred, urlProjectId, id, 'ask', cmd, plannedIds, summary, env)

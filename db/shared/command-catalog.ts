@@ -93,8 +93,13 @@ Gotchas:
     tier: 'structural',
     agentReachable: true,
     paramsDoc: `### CreateProject
-Params: \`{ name, projectId?, orgId? }\` — sole command; forced ask-mode regardless of credential mode.
+Params: \`{ name, projectId?, orgId?, sourceLanguage?, targetLanguage? }\` — sole command; forced ask-mode regardless of credential mode.
 Requires org MAINTAINER (600) on the target org; project-scoped credentials can never create projects.
+The field set is CLOSED: any other key is \`validation_failed\` naming it. Nothing is silently ignored.
+- \`sourceLanguage\` / \`targetLanguage\` seed the settings blob at creation (landing at settings version 1, exactly as the UI's create-then-patch does). Send \`targetLanguage: ""\` for a source-only project.
+- Every OTHER settings key goes through \`PatchSettings\` after the create — it owns the version guard and the per-key role floors a create cannot honor.
+- Membership is not set here: use the \`InviteMember\` / \`SetRole\` family. A \`members\` field is rejected, not swallowed.
+- There is no project \`description\` field in the product; sending one is rejected.
 Gotcha: when \`projectId\` is omitted the changeset URL's project id becomes the definitive id, pinned at prepare (crash-retry re-applies the same id).`,
   },
   {

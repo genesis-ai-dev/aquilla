@@ -7,6 +7,10 @@ const CORE_SENTINELS = [
 
 const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
   {
+    source: /^(?:auth-worker\/.*agent-connect|src\/.*(?:ConnectAgent|agent-connect|ApiTokensSection)|db\/.*agent_authorizations)/i,
+    sentinels: ["e2e/specs/agent/agent-connection.smoke.spec.ts"],
+  },
+  {
     source: /^(?:auth-worker\/|src\/(?:pages|components|lib|hooks|context)\/.*(?:auth|account|login|signup|password|session|credential|outbox))/i,
     sentinels: [
       "e2e/specs/auth/login-account-setup-status.smoke.spec.ts",

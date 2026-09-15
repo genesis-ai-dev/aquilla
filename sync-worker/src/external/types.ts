@@ -86,6 +86,11 @@ export interface ChangesetSummary {
   orgMemberNewRole?: string
   /** AQU-1235: the org role the member holds TODAY ('not a member' for an add). */
   orgMemberCurrentRole?: string
+  /** CreateProject: the language pair being seeded into settings, when the
+   *  command carried one (AQU-1223) — rendered on /approve/:id so a human sees
+   *  the configuration they are authorizing, not just the name. `''` (the
+   *  source-only shape) is shown as 'none'. */
+  newProjectLanguages?: string
   /** Receipt-only UpdateProjectSettings: the changeset's project id. */
   projectId?: string
   /** UpdateProjectSettings: the pinned settings version this write guards on. */

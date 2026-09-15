@@ -222,6 +222,23 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
         'prepare_translations\'s `commands` argument. Multiple LinkMedia commands may share ' +
         'one changeset; LinkMedia cannot mix with any other command kind.',
     },
+    structure: {
+      mcpStagingTool: 'prepare_translations',
+      commitTool: 'confirm_changeset',
+      commandKinds: ['InsertCell', 'DeleteCell', 'SplitCell'],
+      note:
+        'Cell-structure commands change a file\'s SHAPE — add a row, remove one, or cut a ' +
+        'long source sentence in two — using the same cell-lifecycle events the workspace ' +
+        'emits, so the event log is indistinguishable from a human edit. Stage via ' +
+        'prepare_translations\'s `commands` argument; each must be the SOLE command in its ' +
+        'changeset and requires PROJECT_LEAD. All three are REFUSED on a file imported with ' +
+        'preserved export slots (IDML/OOXML locators), because those exporters address ' +
+        'cells by locator and a structural change would break the round trip. DeleteCell is ' +
+        'refused while the cell still owns validators, waivers, comments, back-translations, ' +
+        'audio takes, links or assignment rows. SplitCell requires an explicit `targets` ' +
+        '("blank" or "divide"); both halves come out unvalidated either way. MergeCells is ' +
+        'NOT available — see docs/AGENT-API.md for why it is deferred.',
+    },
     multiLanguage: {
       note:
         'A project can hold MULTIPLE target languages at once via target-language lanes. A ' +

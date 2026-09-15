@@ -86,6 +86,7 @@ describe("Reach 4 Life import", () => {
       fileType: "idml",
       kind: "idml",
       parserVersion: `${REACH4LIFE_PROFILE_ID}@1`,
+      corpusMarker: "Reach 4 Life",
     })
     // Two books are introduced here, so no single book identifies the file.
     expect(bodies.find((body) => body.file)?.file?.bookCode).toBeUndefined()
@@ -266,7 +267,7 @@ describe("Reach 4 Life import", () => {
     // A Reach 4 Life package has no `intro:*` paragraphs, which is the failure
     // the toggle exists to resolve — so the message has to point at the toggle.
     await expect(importBiblicaStudyNotes(await reach4LifeFile(), ctx))
-      .rejects.toThrow(/Treasure Hunt Bible or a Reach 4 Life file/)
+      .rejects.toThrow(/Treasure Hunt Bible, a Reach 4 Life or an EBL file/)
     expect(fetchMock).not.toHaveBeenCalled()
   })
 

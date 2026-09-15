@@ -150,7 +150,7 @@ function placeContentUnits(units: readonly IdmlTranslationUnit[]): {
       if (bookCode) {
         currentBook = bookCode
         for (let index = placed.length - 1; index >= 0; index -= 1) {
-          const earlier = placed[index]!
+          const earlier = placed[index]
           if (!isReach4LifeBookStraplineStyle(earlier.unit.paragraphStyleId ?? "")) break
           earlier.bookCode = bookCode
         }

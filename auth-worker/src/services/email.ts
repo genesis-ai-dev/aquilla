@@ -527,3 +527,26 @@ export async function sendPasswordResetEmail(
     throw new Error(`Failed to send email: ${message}`)
   }
 }
+
+/**
+ * Send the retention recap (weekly/monthly cron, or on demand from the admin
+ * console) to platform operators. Best-effort like the other senders: false
+ * when EMAIL is unbound or the provider rejects it.
+ */
+export async function sendRetentionReportEmail(
+  env: Env,
+  to: string[],
+  report: { subject: string; text: string; html: string },
+): Promise<boolean> {
+  if (!env.EMAIL || to.length === 0) return false
+  const from = env.EMAIL_FROM || "noreply@support.aquilla.app"
+  const replyTo = env.EMAIL_REPLY_TO || DEFAULT_REPLY_TO
+  try {
+    await env.EMAIL.send({ from, replyTo, to, subject: report.subject, html: report.html, text: report.text })
+    return true
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.warn("[retention-report] email failed:", message)
+    return false
+  }
+}

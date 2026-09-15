@@ -91,6 +91,40 @@ describe("file.video.set projection", () => {
   })
 })
 
+describe("file.corpus.set projection (sidebar folder)", () => {
+  it("is contributor-gated and non-chain-mutating", async () => {
+    const { REQUIRED_ROLE } = await import("../events/role-policy")
+    const { isChainMutatingKind } = await import("../events/event-projection")
+    expect(REQUIRED_ROLE["file.corpus.set"]).toBe(400)
+    expect(isChainMutatingKind("file.corpus.set")).toBe(false)
+  })
+
+  it("merges corpusMarker into files.meta and advances event_id", () => {
+    const { db, recorded } = makeRecordingDb()
+    const touches = buildEventProjectionStmts(
+      db,
+      makeEvent("file.corpus.set", { corpusMarker: "Treasure Hunt Bible" }, { cellId: null }),
+      [],
+    )
+    expect(touches).toEqual(["files"])
+    expect(recorded).toHaveLength(1)
+    expect(recorded[0].sql).toContain("UPDATE files")
+    expect(recorded[0].sql).toContain("jsonb_build_object('corpusMarker'")
+    expect(recorded[0].args).toEqual(["Treasure Hunt Bible", "evt-1", "f1", "p1"])
+  })
+
+  it("removes the corpusMarker key when null — the file lands in Ungrouped", () => {
+    const { db, recorded } = makeRecordingDb()
+    buildEventProjectionStmts(
+      db,
+      makeEvent("file.corpus.set", { corpusMarker: null }, { cellId: null }),
+      [],
+    )
+    expect(recorded[0].sql).toContain("- 'corpusMarker'")
+    expect(recorded[0].args).toEqual(["evt-1", "f1", "p1"])
+  })
+})
+
 describe("file.timing.set projection (pre-merge round: file-level timing mode)", () => {
   it("is maintainer-gated and non-chain-mutating", async () => {
     const { REQUIRED_ROLE } = await import("../events/role-policy")

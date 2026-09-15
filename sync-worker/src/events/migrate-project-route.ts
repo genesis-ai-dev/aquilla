@@ -87,7 +87,8 @@ export async function handleMigrateProjectRequest(
   try {
     await db.batch(stmts)
   } catch (err) {
-    return Response.json({ error: `project upsert failed: ${String(err)}` }, { status: 500 })
+    console.error("[migrate-project] upsert failed:", err)
+    return Response.json({ error: "project upsert failed" }, { status: 500 })
   }
   return Response.json({ ok: true })
 }

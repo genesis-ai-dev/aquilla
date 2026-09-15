@@ -93,6 +93,18 @@ describe("E2E determinism guardrails", () => {
   })
 })
 
+describe("workspace import readiness", () => {
+  it("does not treat immediate visibility probes as timed waits", () => {
+    const source = readFileSync(
+      path.join(REPO_ROOT, "e2e/helpers/page-objects/Workspace.ts"),
+      "utf8",
+    )
+    // Playwright ignores isVisible's timeout. A cold lazy-loaded import
+    // dialog must use a web-first assertion, not an immediate snapshot.
+    expect(source).not.toMatch(/\.isVisible\(\s*\{\s*timeout:/)
+  })
+})
+
 describe("E2E auth-state isolation", () => {
   it("namespaces sidecars by identity-worker origin", () => {
     const root = path.join(os.tmpdir(), "aquilla-auth-state-paths")

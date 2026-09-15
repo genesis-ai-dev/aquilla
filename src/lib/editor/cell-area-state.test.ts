@@ -6,7 +6,7 @@ describe("deriveCellAreaState", () => {
   const open = {
     activeFileId: "file-1" as string | null,
     cellCount: 1,
-    syncStatus: "live" as "live" | "connecting" | "offline" | "idle" | "disabled",
+    syncStatus: "live" as "live" | "connecting" | "reconnecting" | "offline" | "idle" | "disabled",
     cellsLoading: false,
     cellsError: false,
   }
@@ -19,9 +19,12 @@ describe("deriveCellAreaState", () => {
     // User just opened a file fresh — WS is negotiating, no cells yet.
     // Showing 'ready-empty' here would flash 'No cells' and then flip to populated,
     // which is worse than keeping a skeleton visible.
-    expect(
-      deriveCellAreaState({ ...open, cellCount: 0, syncStatus: "connecting" }).kind
-    ).toBe("syncing-empty")
+    for (const syncStatus of ["connecting", "reconnecting"] as const) {
+      expect(
+        deriveCellAreaState({ ...open, cellCount: 0, syncStatus }).kind,
+        `expected syncing-empty for ${syncStatus}`
+      ).toBe("syncing-empty")
+    }
   })
 
   it("returns syncing-empty when the cells fetch is still in flight even after the WS is live", () => {
@@ -61,7 +64,7 @@ describe("deriveCellAreaState", () => {
   })
 
   it("returns ready as soon as any cell is present, regardless of sync state", () => {
-    for (const syncStatus of ["connecting", "live", "offline", "idle", "disabled"] as const) {
+    for (const syncStatus of ["connecting", "reconnecting", "live", "offline", "idle", "disabled"] as const) {
       expect(
         deriveCellAreaState({ ...open, cellCount: 1, syncStatus }).kind,
         `expected ready for ${syncStatus}`

@@ -25,6 +25,11 @@ import type { CellRow } from "@/lib/sync/cells-read-types"
 
 // happy-dom has no real layout engine, so LegendList may decide no rows are
 // visible. Replace it with a trivial "render every row" stand-in.
+// The ribbon is behind the health kill switch (lib/health/kill-switch.ts,
+// off by default while client memory spikes are investigated). These tests
+// cover the ribbon itself, so force the switch on.
+vi.mock("@/lib/health/kill-switch", () => ({ useHealthCalculationsEnabled: () => true }))
+
 vi.mock("@legendapp/list/react", async () => {
   const React = await import("react")
   return {

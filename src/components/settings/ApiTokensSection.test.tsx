@@ -72,6 +72,7 @@ const ASK_CREDENTIAL: ApiCredential = {
   expiresAt: null,
   lastUsedAt: null,
   revokedAt: null,
+  pii: false,
 }
 
 const REVOKED_CREDENTIAL: ApiCredential = {
@@ -85,6 +86,7 @@ const REVOKED_CREDENTIAL: ApiCredential = {
   expiresAt: null,
   lastUsedAt: null,
   revokedAt: "2026-06-15T00:00:00.000Z",
+  pii: false,
 }
 
 // Base UI Select renders a combobox trigger; options live in a portaled
@@ -124,6 +126,18 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks())
 
 describe("ApiTokensSection", () => {
+  it("copies connection instructions without minting or disclosing a token", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } })
+    render(<ApiTokensSection />)
+    fireEvent.click(screen.getByRole("button", { name: "Copy connection instructions" }))
+    await waitFor(() => expect(writeText).toHaveBeenCalledOnce())
+    const prompt = writeText.mock.calls[0][0] as string
+    expect(prompt).toContain("/api/v2/agent-connect")
+    expect(prompt).not.toContain("aqk_")
+    expect(mockMintCredential).not.toHaveBeenCalled()
+  })
+
   it("renders the credential list from the mocked client (prefix, mode, resolved scope, revoked state)", async () => {
     render(<ApiTokensSection />)
 
@@ -173,6 +187,7 @@ describe("ApiTokensSection", () => {
         expiresAt: null,
         lastUsedAt: null,
         revokedAt: null,
+        pii: false,
       },
     }
     mockMintCredential.mockResolvedValue(mintResult)
@@ -241,7 +256,7 @@ describe("ApiTokensSection", () => {
       credential: {
         id: "cred-x", name: "Dupe bot", mode: "ask", orgId: null, projectId: null,
         tokenPrefix: "aqk_once", createdAt: "2026-07-17T00:00:00.000Z",
-        expiresAt: null, lastUsedAt: null, revokedAt: null,
+        expiresAt: null, lastUsedAt: null, revokedAt: null, pii: false,
       },
     })
     await screen.findByText("aqk_once")
@@ -286,7 +301,7 @@ describe("ApiTokensSection", () => {
           id: "cred-3", name: "Deploy bot", mode: "act", orgId: null,
           projectId: "proj-maint", tokenPrefix: "aqk_fresh",
           createdAt: "2026-07-17T00:00:00.000Z", expiresAt: null,
-          lastUsedAt: null, revokedAt: null,
+          lastUsedAt: null, revokedAt: null, pii: false,
         },
       })
 

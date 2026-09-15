@@ -109,11 +109,21 @@ export interface TimelineCardProps {
   /** SUB-53: where this card sits, resolved by the lane's layout. Absent falls
    *  back to the pre-SUB-53 computation (the dubbing answer). */
   span?: { start: number; end: number }
-  /** AQU-646 round 8: hard walls this card may not cross — the neighbouring
-   *  cues' edges. Absent = unbounded, which is every lane but the VTT-plus-
-   *  footage Subtitles track. Subtitle timing IS the cell's timing, so unlike a
-   *  dub take it does not get to be approximate: no crossing, no overlapping. */
-  bounds?: { minStartSec: number; maxEndSec: number }
+  /**
+   * AQU-646 round 8: hard walls this card may not cross. Absent = unbounded,
+   * which is every lane but the VTT-plus-footage Subtitles track.
+   *
+   * AQU-1068 item 5 (Sam, 2026-09-09) narrowed what these mean. They used to be
+   * the neighbouring cues' near EDGES — no crossing and no overlapping, on the
+   * reasoning that cues are a transcript. Overlap is now allowed in full: two
+   * speakers talking over each other is a real thing a subtitle says, and the
+   * timed exporters already sort by start time. What is left is the one limit
+   * that keeps the clock order and the anchor chain agreeing — a card's START
+   * stays between its neighbours' STARTS. Hence `maxStartSec`, which bounds
+   * where a card may BEGIN; `maxEndSec` bounds where it may END and the
+   * subtitle lanes now pass Infinity for it.
+   */
+  bounds?: { minStartSec: number; maxEndSec: number; maxStartSec?: number }
   /** AQU-928: `mods` is undefined for a plain click (which also seeks) and set
    *  when a modifier made this a selection-building gesture. */
   onSelect(cellId: string, mods?: SelectMods): void
@@ -181,14 +191,23 @@ export function TimelineCard({
     // AND a wall, so a candidate that would land the card past a wall has to
     // lose to the wall. Clamping first would let the snap step step back over it.
     if (bounds) {
-      const { minStartSec: lo, maxEndSec: hi } = bounds
+      const { minStartSec: lo, maxEndSec: hi, maxStartSec } = bounds
+      // The furthest this card may BEGIN. Two sources: an explicit
+      // `maxStartSec` (the next cue's start — AQU-1068's order rule), and the
+      // end wall minus the card's own length, which is what an end-bounded
+      // lane implies. The tighter wins, so a lane passing only one is
+      // unaffected by the other.
+      const startCeiling = (len: number) =>
+        Math.max(lo, Math.min(maxStartSec ?? Number.POSITIVE_INFINITY, hi - len))
       if (mode === "move") {
         // Slide, never squeeze: a move keeps its length and stops at the wall.
         const len = ne - ns
-        ns = Math.min(Math.max(ns, lo), Math.max(lo, hi - len))
+        ns = Math.min(Math.max(ns, lo), startCeiling(len))
         ne = ns + len
       } else if (mode === "resize-l") {
-        ns = Math.min(Math.max(ns, lo), ne - MIN_DUR_SEC)
+        // The left edge cannot pass the start wall, and cannot swallow the
+        // card either.
+        ns = Math.min(Math.max(ns, lo), Math.min(maxStartSec ?? Number.POSITIVE_INFINITY, ne - MIN_DUR_SEC))
       } else {
         ne = Math.max(Math.min(ne, hi), ns + MIN_DUR_SEC)
       }

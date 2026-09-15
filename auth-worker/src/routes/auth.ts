@@ -38,6 +38,7 @@ import {
   RESET_REQUEST_MAX_PER_IDENTIFIER,
 } from "../utils/rate-limit"
 import { revokeToken } from "../utils/token-revocation"
+import { evictUserSessions } from "../lib/session-cache"
 import {
   LegacyUserMigrationError,
   migrateLegacyUserCandidate,
@@ -271,10 +272,11 @@ auth.post("/register", zValidator("json", registerSchema), async (c) => {
         // digest, same as the reset token. This one is lower-value (it marks
         // an address verified, it doesn't take over the account) but it lived
         // in plaintext next to the reset token for the same reason, and the
-        // fix is identical.
+        // fix is identical. (2026-09-07, OPS-31: the plaintext `token` column
+        // is gone — migration 0081 — so there is no longer a NULL to write.)
         await c.env.AQUILLA_PG.prepare(
-          `INSERT INTO email_verification_tokens (user_id, token, token_hash, expires_at)
-           VALUES (?, NULL, ?, ?)`,
+          `INSERT INTO email_verification_tokens (user_id, token_hash, expires_at)
+           VALUES (?, ?, ?)`,
         )
           .bind(created.id, await sha256Hex(verifyToken), expiresAt)
           .run()
@@ -726,6 +728,7 @@ auth.patch("/me", authMiddleware, zValidator("json", patchMeSchema), async (c) =
     )
       .bind(preferencesJson, user.id)
       .run()
+    evictUserSessions(user.id)
   }
 
   // Re-fetch to return the canonical record.
@@ -759,15 +762,15 @@ const verifyEmailSchema = z.object({ token: z.string().min(8) })
 // (deleted on success), so a second click returns 404 ("already used").
 auth.post("/verify-email", zValidator("json", verifyEmailSchema), async (c) => {
   const { token } = c.req.valid("json")
-  // Hash-first lookup with the same pre-0080 plaintext fallback the reset
-  // flow uses; these rows have a 7-day TTL, so the fallback stays live a week
-  // after deploy rather than a day.
+  // [Pen test] Auth & session mgmt (2026-09-07, OPS-31): digest-only lookup.
+  // The pre-0080 plaintext fallback arm was removed once the 7-day rollover
+  // window had elapsed; migration 0081 then dropped the column it read.
   const tokenHash = await sha256Hex(token)
   const row = await c.env.AQUILLA_PG.prepare(
     `SELECT user_id, expires_at FROM email_verification_tokens
-     WHERE token_hash = ? OR (token_hash IS NULL AND token = ?)`,
+     WHERE token_hash = ?`,
   )
-    .bind(tokenHash, token)
+    .bind(tokenHash)
     .first<{ user_id: number; expires_at: string }>()
   if (!row) {
     return c.json({ error: "Invalid or already-used verification link" }, 404)
@@ -775,9 +778,9 @@ auth.post("/verify-email", zValidator("json", verifyEmailSchema), async (c) => {
   if (new Date(row.expires_at) < new Date()) {
     await c.env.AQUILLA_PG.prepare(
       `DELETE FROM email_verification_tokens
-       WHERE token_hash = ? OR (token_hash IS NULL AND token = ?)`,
+       WHERE token_hash = ?`,
     )
-      .bind(tokenHash, token)
+      .bind(tokenHash)
       .run()
     return c.json({ error: "Verification link expired" }, 410)
   }
@@ -916,8 +919,8 @@ auth.post(
       const tokenHash = await sha256Hex(token)
       const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000)
       await c.env.AQUILLA_PG.prepare(
-        `INSERT INTO password_reset_tokens (user_id, token, token_hash, expires_at)
-         VALUES (?, NULL, ?, ?)
+        `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
+         VALUES (?, ?, ?)
          ON CONFLICT (token_hash) DO UPDATE SET user_id = excluded.user_id, expires_at = excluded.expires_at`,
       )
         .bind(user.id, tokenHash, expiresAt.toISOString())
@@ -986,16 +989,15 @@ auth.post(
       }
 
       // [Pen test] Auth & session mgmt (2026-08-24): match on the SHA-256
-      // digest, never on stored plaintext. The `token_hash IS NULL` arm is
-      // the rollover path for rows minted before this change; those rows
-      // expire within 24 hours of deploy, after which it can be dropped (see
-      // migration 0080).
+      // digest, never on stored plaintext. The pre-0080 `token_hash IS NULL`
+      // rollover arm was dropped on 2026-09-07 (OPS-31) once the 24-hour
+      // window had long elapsed; migration 0081 dropped the column it read.
       const resetToken = await c.env.AQUILLA_PG.prepare(
         `SELECT expires_at FROM password_reset_tokens
          WHERE user_id = ?
-           AND (token_hash = ? OR (token_hash IS NULL AND token = ?))`,
+           AND token_hash = ?`,
       )
-        .bind(user.id, await sha256Hex(token), token)
+        .bind(user.id, await sha256Hex(token))
         .first<ResetTokenRow>()
       if (!resetToken) {
         await recordAuthEvent(c.env.AQUILLA_PG, "password_reset_attempt", identifier, false)
@@ -1055,16 +1057,15 @@ auth.post(
       }
 
       // [Pen test] Auth & session mgmt (2026-08-24): match on the SHA-256
-      // digest, never on stored plaintext. The `token_hash IS NULL` arm is
-      // the rollover path for rows minted before this change; those rows
-      // expire within 24 hours of deploy, after which it can be dropped (see
-      // migration 0080).
+      // digest, never on stored plaintext. The pre-0080 `token_hash IS NULL`
+      // rollover arm was dropped on 2026-09-07 (OPS-31) once the 24-hour
+      // window had long elapsed; migration 0081 dropped the column it read.
       const resetToken = await c.env.AQUILLA_PG.prepare(
         `SELECT expires_at FROM password_reset_tokens
          WHERE user_id = ?
-           AND (token_hash = ? OR (token_hash IS NULL AND token = ?))`,
+           AND token_hash = ?`,
       )
-        .bind(user.id, await sha256Hex(token), token)
+        .bind(user.id, await sha256Hex(token))
         .first<ResetTokenRow>()
       if (!resetToken) {
         await recordAuthEvent(c.env.AQUILLA_PG, "password_reset_attempt", identifier, false)
@@ -1093,6 +1094,8 @@ auth.post(
       )
         .bind(passwordHash, user.id)
         .run()
+      // Same-isolate eviction so the password_changed_at cutoff bites at once.
+      evictUserSessions(user.id)
       await c.env.AQUILLA_PG.prepare(
         "DELETE FROM password_reset_tokens WHERE user_id = ?",
       )

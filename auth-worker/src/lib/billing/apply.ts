@@ -2,11 +2,18 @@
 // Idempotent on stripe_event_id. Period rollover zeroes addon_packs.
 
 import type { BillingPlan, BillingStatus } from "./plans"
-import { emptyBillingRow, readOrgBilling, type OrgBillingRow } from "./words"
+import { emptyBillingRow, type OrgBillingRow } from "./words"
 
-function isMissingTableError(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : String(err)
-  return msg.includes("does not exist") || msg.includes("undefined_table")
+// Mutation paths must never turn a database failure into an empty billing row.
+async function readOrgBilling(db: AquillaDb, orgId: number): Promise<OrgBillingRow> {
+  const row = await db.prepare(`SELECT org_id, stripe_customer_id,
+    stripe_subscription_id, plan, status, current_period_start::text,
+    current_period_end::text, addon_packs, complimentary_words, hard_cap_words
+    FROM org_billing WHERE org_id = ?`).bind(orgId).first<OrgBillingRow>()
+  if (!row) return emptyBillingRow(orgId)
+  return { ...row, addon_packs: Number(row.addon_packs) || 0,
+    complimentary_words: Number(row.complimentary_words) || 0,
+    hard_cap_words: row.hard_cap_words == null ? null : Number(row.hard_cap_words) }
 }
 
 function asStatus(raw: string | undefined): BillingStatus {
@@ -36,35 +43,36 @@ function periodUnix(obj: Record<string, unknown>, key: "current_period_start" | 
   return items?.data?.[0]?.[key]
 }
 
-export async function rememberBillingEvent(
+/** Receipt and effects commit together. A failed attempt leaves neither behind.
+ * All effects must use tx; external Stripe reads belong before this transaction.
+ * The organization lock also serializes distinct legacy add-on purchases when
+ * org_billing does not exist yet. The unique event index deduplicates globally.
+ */
+export async function applyBillingEvent(
   db: AquillaDb,
-  orgId: number | null,
-  stripeEventId: string | null,
+  orgId: number,
+  stripeEventId: string,
   kind: string,
   payload: unknown,
+  apply: (tx: AquillaDb) => Promise<void>,
 ): Promise<boolean> {
-  if (!stripeEventId) return true
-  try {
-    const existing = await db
-      .prepare(`SELECT id FROM org_billing_events WHERE stripe_event_id = ?`)
-      .bind(stripeEventId)
+  if (!stripeEventId) throw new Error("Stripe event ID is required")
+  if (!db.transaction) throw new Error("Billing requires Postgres transactions")
+  return db.transaction(async (tx) => {
+    const org = await tx.prepare(
+      "SELECT id FROM organizations WHERE id = ? FOR UPDATE",
+    ).bind(orgId).first()
+    if (!org) throw new Error("Billing organization does not exist")
+    const receipt = await tx.prepare(
+      `INSERT INTO org_billing_events (org_id, stripe_event_id, kind, payload_json)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT (stripe_event_id) DO NOTHING RETURNING id`,
+    ).bind(orgId, stripeEventId, kind, JSON.stringify(payload).slice(0, 8000))
       .first<{ id: number }>()
-    if (existing) return false
-    await db
-      .prepare(
-        `INSERT INTO org_billing_events (org_id, stripe_event_id, kind, payload_json)
-         VALUES (?, ?, ?, ?)`,
-      )
-      .bind(orgId, stripeEventId, kind, JSON.stringify(payload).slice(0, 8000))
-      .run()
+    if (!receipt) return false
+    await apply(tx)
     return true
-  } catch (err) {
-    if (isMissingTableError(err)) return true
-    const msg = err instanceof Error ? err.message : String(err)
-    if (msg.includes("duplicate") || msg.includes("unique")) return false
-    console.error("[billing] rememberBillingEvent error:", err)
-    return true
-  }
+  })
 }
 
 export async function upsertOrgBilling(
@@ -106,76 +114,38 @@ export async function upsertOrgBilling(
     next.complimentary_words = 0
   }
 
-  try {
-    await db
-      .prepare(
-        `INSERT INTO org_billing (
-           org_id, stripe_customer_id, stripe_subscription_id, plan, status,
-           current_period_start, current_period_end, addon_packs, complimentary_words,
-           hard_cap_words, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now())
-         ON CONFLICT (org_id) DO UPDATE SET
-           stripe_customer_id     = EXCLUDED.stripe_customer_id,
-           stripe_subscription_id = EXCLUDED.stripe_subscription_id,
-           plan                   = EXCLUDED.plan,
-           status                 = EXCLUDED.status,
-           current_period_start   = EXCLUDED.current_period_start,
-           current_period_end     = EXCLUDED.current_period_end,
-           addon_packs            = EXCLUDED.addon_packs,
-           complimentary_words    = EXCLUDED.complimentary_words,
-           hard_cap_words         = EXCLUDED.hard_cap_words,
-           updated_at             = now()`,
-      )
-      .bind(
-        next.org_id,
-        next.stripe_customer_id,
-        next.stripe_subscription_id,
-        next.plan,
-        next.status,
-        next.current_period_start,
-        next.current_period_end,
-        next.addon_packs,
-        next.complimentary_words,
-        next.hard_cap_words,
-      )
-      .run()
-  } catch (err) {
-    if (isMissingTableError(err)) return
-    const msg = err instanceof Error ? err.message : String(err)
-    if (msg.includes("complimentary_words") || msg.includes("undefined_column")) {
-      await db
-        .prepare(
-          `INSERT INTO org_billing (
-             org_id, stripe_customer_id, stripe_subscription_id, plan, status,
-             current_period_start, current_period_end, addon_packs, hard_cap_words, updated_at
-           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, now())
-           ON CONFLICT (org_id) DO UPDATE SET
-             stripe_customer_id     = EXCLUDED.stripe_customer_id,
-             stripe_subscription_id = EXCLUDED.stripe_subscription_id,
-             plan                   = EXCLUDED.plan,
-             status                 = EXCLUDED.status,
-             current_period_start   = EXCLUDED.current_period_start,
-             current_period_end     = EXCLUDED.current_period_end,
-             addon_packs            = EXCLUDED.addon_packs,
-             hard_cap_words         = EXCLUDED.hard_cap_words,
-             updated_at             = now()`,
-        )
-        .bind(
-          next.org_id,
-          next.stripe_customer_id,
-          next.stripe_subscription_id,
-          next.plan,
-          next.status,
-          next.current_period_start,
-          next.current_period_end,
-          next.addon_packs,
-          next.hard_cap_words,
-        )
-        .run()
-      return
-    }
-    throw err
-  }
+  await db
+    .prepare(
+      `INSERT INTO org_billing (
+         org_id, stripe_customer_id, stripe_subscription_id, plan, status,
+         current_period_start, current_period_end, addon_packs, complimentary_words,
+         hard_cap_words, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now())
+       ON CONFLICT (org_id) DO UPDATE SET
+         stripe_customer_id     = EXCLUDED.stripe_customer_id,
+         stripe_subscription_id = EXCLUDED.stripe_subscription_id,
+         plan                   = EXCLUDED.plan,
+         status                 = EXCLUDED.status,
+         current_period_start   = EXCLUDED.current_period_start,
+         current_period_end     = EXCLUDED.current_period_end,
+         addon_packs            = EXCLUDED.addon_packs,
+         complimentary_words    = EXCLUDED.complimentary_words,
+         hard_cap_words         = EXCLUDED.hard_cap_words,
+         updated_at             = now()`,
+    )
+    .bind(
+      next.org_id,
+      next.stripe_customer_id,
+      next.stripe_subscription_id,
+      next.plan,
+      next.status,
+      next.current_period_start,
+      next.current_period_end,
+      next.addon_packs,
+      next.complimentary_words,
+      next.hard_cap_words,
+    )
+    .run()
 }
 
 export async function applySubscriptionSnapshot(
@@ -240,5 +210,3 @@ export function orgIdFromMetadata(meta: unknown): number | null {
   const n = typeof raw === "number" ? raw : Number(raw)
   return Number.isFinite(n) && n > 0 ? n : null
 }
-
-export { emptyBillingRow }

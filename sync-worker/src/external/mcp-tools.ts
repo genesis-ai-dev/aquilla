@@ -38,8 +38,11 @@ export const MCP_TOOLS: McpToolDef[] = [
       'expiry, PlanImport max cells, artifact max bytes, max commands per changeset), the ' +
       'full list of stable machine-actionable error codes, and an explanation of the ' +
       'ask-mode approval flow (prepare -> approvalUrl -> a human approves in a browser -> ' +
-      'confirm_changeset). This is the recommended first call: it tells an agent its ' +
-      'ceiling so it does not attempt commits it cannot make. Takes no arguments.',
+      'confirm_changeset). The returned uiOnly field lists what this API deliberately does ' +
+      'NOT expose and never will (credential minting, project deletion, billing, approving ' +
+      'your own changeset) — read it instead of probing for those endpoints. This is the ' +
+      'recommended first call: it tells an agent its ceiling so it does not attempt commits ' +
+      'it cannot make. Takes no arguments.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
   {

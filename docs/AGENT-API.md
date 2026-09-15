@@ -370,6 +370,37 @@ CRUD surface with MCP bolted on.
 `get_capabilities` + `get_identity_and_scope` are what make the cold-start test (§6)
 passable: an agent must be able to learn what it may do before trying to do it.
 
+### Intentionally UI-only — the `uiOnly` map section (AQU-1178)
+
+Knowing what the API *won't* do is part of learning what it will. Some capabilities are
+browser-only **by design**, not by backlog: they are the steps whose whole value is that a
+human account holder performs them. Left undocumented they read as gaps, so agents kept
+probing for endpoints that will never exist and burning turns on `not_found`.
+
+The list is published as a `uiOnly` section in both adapters — REST `GET /api/v1/external`
+and MCP `get_capabilities` — and quoted back in the misses:
+
+| `uiOnly` id | Not exposed | Why it is a human's job | Where the human does it |
+| --- | --- | --- | --- |
+| `credential-minting` | Minting, rotating, or revoking `aqk_` credentials | A token that can mint tokens makes revocation meaningless and lets an agent outlive its own grant | Preferences → Account → "API tokens" (identity host, browser session) |
+| `project-deletion` | Deleting/archiving a project; bulk-deleting its files or members | Irreversible for everyone on the project, and there is no changeset to review | Project Settings → Danger zone |
+| `billing` | Plans, credits, payment methods, invoices, entitlements | Money movement is bound to the account holder and the payment provider's own authenticated flow | Org Settings → Billing |
+| `changeset-approval` | Approving your own staged changeset in ask mode | The gate only means something if a person other than the caller performs it — an API that could approve would be act mode wearing a costume | The `approvalUrl` from prepare, in a browser |
+
+Behaviour these rows buy:
+
+- An unmatched `/api/v1/external/**` path that looks like one of these probes returns its
+  `not_found` with the exclusion's reason, the human path, and `details.uiOnly: "<id>"`
+  instead of the generic "check the API map" hint. Unknown MCP tool names
+  (`mint_credential`, `delete_project`, …) get the same treatment on their JSON-RPC error.
+- **One source, no drift.** The rows above, the two published `uiOnly` sections, and the
+  404/unknown-tool hints all come from `UI_ONLY_SURFACES` in
+  [`sync-worker/src/external/ui-only.ts`](../sync-worker/src/external/ui-only.ts); a test
+  asserts this table lists exactly those ids. Add a row there — never a second list.
+
+A capability that is merely *unbuilt* does not belong in `uiOnly`: the section promises
+"never", not "not yet". Deferred work lives in §8 instead.
+
 ### Operational contract
 
 - **Idempotency keys on all mutations** (UUIDv7, consistent with the outbox design)

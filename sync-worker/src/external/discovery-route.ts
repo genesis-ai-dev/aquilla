@@ -13,6 +13,8 @@
 // instead of burning tokens guessing. It exposes no data (static text only),
 // so it is deliberately unauthenticated.
 
+import { matchUiOnly, uiOnlyHint, uiOnlySection } from './ui-only'
+
 const EXTERNAL_ROOT = '/api/v1/external'
 
 /** Where the map points callers for prose docs.
@@ -93,6 +95,10 @@ function apiMap(): Record<string, unknown> {
       'POST /api/v1/external/projects/:projectId/changesets/:id/discard': 'Discard a staged changeset.',
       'POST /api/v1/external/mcp': 'MCP server (JSON-RPC 2.0, streamable HTTP, same bearer token). Tools mirror the REST surface — see "mcp" below.',
     },
+    // AQU-1178: what is deliberately NOT here, so an agent stops guessing at
+    // endpoints that will never exist. Same list the MCP get_capabilities tool
+    // publishes and the 404 hints quote (sync-worker/src/external/ui-only.ts).
+    uiOnly: uiOnlySection(),
     orgScopedReads: {
       note:
         'Credentials are scoped org-or-project. An ORG-scoped token can work a partner’s whole workspace from one credential: list its orgs, enumerate each org’s projects, and search several projects in one call. Scope only ever narrows — a PROJECT-scoped token sees exactly its one project (and that project’s org) from these routes, and naming anything outside the scope returns scope_denied rather than an empty list, so "not yours" never looks like "empty".',
@@ -238,13 +244,22 @@ function docsMarkdown(): string {
 /** JSON body for unmatched /api/v1/external/* paths — same error envelope as
  *  every other external error, plus enough of a hint to self-correct. */
 function externalNotFound(pathname: string): Response {
+  // AQU-1178: a probe at a deliberately browser-only surface is not a typo —
+  // saying "no such route" invites another guess, so name the exclusion, the
+  // reason, and where a human does it instead.
+  const uiOnly = matchUiOnly(pathname)
+  const hint = uiOnly
+    ? uiOnlyHint(uiOnly, EXTERNAL_ROOT)
+    : `GET ${EXTERNAL_ROOT} returns the full API map (endpoints, auth, quickstart, and a uiOnly list of intentional exclusions). Common fixes: project routes live under ${EXTERNAL_ROOT}/projects/:projectId/..., and in production this worker is mounted at https://api.aquilla.app/sync — the /sync prefix is part of the URL.`
+
   return Response.json(
     {
       error: {
         code: 'not_found',
         message: `no external API route matches ${pathname}`,
         details: {
-          hint: `GET ${EXTERNAL_ROOT} returns the full API map (endpoints, auth, quickstart). Common fixes: project routes live under ${EXTERNAL_ROOT}/projects/:projectId/..., and in production this worker is mounted at https://api.aquilla.app/sync — the /sync prefix is part of the URL.`,
+          hint,
+          ...(uiOnly ? { uiOnly: uiOnly.id } : {}),
           docs: DOCS_URL,
         },
       },

@@ -24,10 +24,31 @@ import {
   validateEmitEventsCommand,
   type EmitEventsCommand,
 } from './commands-emit-events'
+import {
+  MEMORY_COMMAND_KINDS,
+  isMemoryCommand,
+  memoryCommandFloor,
+  validateMemoryCommand,
+  type MemoryCommand,
+} from './commands-memory'
+
+/** True for the four AQU-1228 Living Memory command kinds. Narrows a raw
+ *  `kind` string BEFORE validation, unlike `isMemoryCommand` which narrows an
+ *  already-typed command. */
+function isMemoryCommandKind(kind: string): boolean {
+  return (MEMORY_COMMAND_KINDS as readonly string[]).includes(kind)
+}
 
 export type { PlanImportCell, PlanImportManifest, PlanImportVariant } from './import-manifest'
 export type { PatchSettingsCommand, PatchSettingsOp } from './commands-patch-settings'
 export type { EmitEventsCommand, EmitEventInput } from './commands-emit-events'
+export type {
+  AddExampleCommand,
+  AddDecisionCommand,
+  RetireExampleCommand,
+  AddNoteCommand,
+  MemoryCommand,
+} from './commands-memory'
 export { cellKey, laneCellKey } from './cell-keys'
 
 /** Set (or update) a single cell's translation. Compiles to target.cell.commit. */
@@ -67,7 +88,13 @@ export interface PlanImportCommand {
  *  re-applies the SAME id). `orgId` names the target org (null/omitted = a
  *  personal, org-less project). Scope: unscoped or org-scoped credentials only —
  *  a project-scoped credential can never CreateProject, so (act tokens being
- *  required project-scoped at mint) CreateProject is ask-mode-only by design. */
+ *  required project-scoped at mint) CreateProject is ask-mode-only by design.
+ *
+ *  AQU-1223: the accepted field set is CLOSED — anything not listed here is
+ *  rejected by name at validation (see CREATE_PROJECT_FIELDS). It used to be
+ *  silently dropped, which is the worse failure: a caller that sends
+ *  `description` or a typo'd `targetLangauge` got a 200 and a blank project,
+ *  with nothing anywhere signalling that its configuration never landed. */
 export interface CreateProjectCommand {
   kind: 'CreateProject'
   /** Client-chosen project id; when omitted the changeset URL project id is used. */
@@ -75,7 +102,26 @@ export interface CreateProjectCommand {
   name: string
   /** Target org id (numeric, or its string form). Omit for a personal project. */
   orgId?: string | number
+  /** Seed `settings.sourceLanguage` at creation — the same key the UI's create
+   *  flow patches immediately after createCloudProject. Omit to leave unset. */
+  sourceLanguage?: string
+  /** Seed `settings.targetLanguage` at creation. Omit (or '') for a
+   *  source-only project, mirroring the UI's source-only shape. */
+  targetLanguage?: string
 }
+
+/** The complete accepted key set for a CreateProject command body (AQU-1223).
+ *  Every other key is a `validation_failed` naming that key — never a silent
+ *  drop. Settings beyond the language pair go through PatchSettings, which owns
+ *  the version guard and the per-key role floors that a create cannot honor. */
+export const CREATE_PROJECT_FIELDS: readonly string[] = [
+  'kind',
+  'projectId',
+  'name',
+  'orgId',
+  'sourceLanguage',
+  'targetLanguage',
+]
 
 /** Update a project's settings blob with optimistic-concurrency control (spec
  *  §2, receipt-only — D8). Applies via db/shared/projects.ts's version-guarded
@@ -102,6 +148,7 @@ export interface LinkMediaCommand {
 }
 
 export type Command =
+  | MemoryCommand
   | SetTranslationCommand
   | PlanImportCommand
   | CreateProjectCommand
@@ -381,6 +428,22 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
       return
     }
     if (c.kind === 'CreateProject') {
+      // Unknown-field rejection FIRST (AQU-1223): report every unrecognized key
+      // at once rather than one per round-trip, and before the shape checks so a
+      // typo'd field never rides along with an otherwise-valid body.
+      const unknown = Object.keys(c).filter((k) => !CREATE_PROJECT_FIELDS.includes(k))
+      if (unknown.length > 0) {
+        issues.push({
+          index,
+          message:
+            `CreateProject does not accept ${unknown.map((k) => `\`${k}\``).join(', ')} — ` +
+            `accepted fields are ${CREATE_PROJECT_FIELDS.filter((k) => k !== 'kind')
+              .map((k) => `\`${k}\``)
+              .join(', ')}. Project settings beyond the language pair are written with ` +
+            `PatchSettings; membership is InviteMember/SetRole.`,
+        })
+        return
+      }
       if (!isNonEmptyString(c.name)) {
         issues.push({ index, message: 'CreateProject.name must be a non-empty string' })
         return
@@ -397,11 +460,23 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
         issues.push({ index, message: 'CreateProject.orgId must be a string or number when present' })
         return
       }
+      // '' is meaningful for targetLanguage (the UI's source-only shape writes
+      // exactly that), so these are string-checked, not non-empty-checked.
+      if (c.sourceLanguage !== undefined && typeof c.sourceLanguage !== 'string') {
+        issues.push({ index, message: 'CreateProject.sourceLanguage must be a string when present' })
+        return
+      }
+      if (c.targetLanguage !== undefined && typeof c.targetLanguage !== 'string') {
+        issues.push({ index, message: 'CreateProject.targetLanguage must be a string when present' })
+        return
+      }
       commands.push({
         kind: 'CreateProject',
         ...(c.projectId !== undefined ? { projectId: c.projectId as string } : {}),
         name: c.name,
         ...(c.orgId !== undefined ? { orgId: c.orgId as string | number } : {}),
+        ...(c.sourceLanguage !== undefined ? { sourceLanguage: c.sourceLanguage } : {}),
+        ...(c.targetLanguage !== undefined ? { targetLanguage: c.targetLanguage } : {}),
       })
       return
     }
@@ -437,6 +512,12 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
     }
     if (c.kind === 'EmitEvents') {
       const cmd = validateEmitEventsCommand(c, index, issues)
+      if (cmd) commands.push(cmd)
+      return
+    }
+    // AQU-1228 Living Memory writes — four kinds sharing one validator.
+    if (typeof c.kind === 'string' && isMemoryCommandKind(c.kind)) {
+      const cmd = validateMemoryCommand(c, index, issues)
       if (cmd) commands.push(cmd)
       return
     }
@@ -505,6 +586,12 @@ export function requiredRoleForCommand(c: Command): number {
   if (c.kind === 'LinkMedia') {
     // Compiles to cell.audio.attach + cell.audio.select (both CONTRIBUTOR).
     return Math.max(REQUIRED_ROLE['cell.audio.attach'], REQUIRED_ROLE['cell.audio.select'])
+  }
+  // AQU-1228 memory writes compile to no events at all — their floor mirrors
+  // auth-worker's agent-memory route (propose = CONTRIBUTOR, retire = the
+  // review-tier PROJECT_LEAD). Their own prepare/commit path re-checks it.
+  if (isMemoryCommand(c)) {
+    return memoryCommandFloor(c)
   }
   return REQUIRED_ROLE['target.cell.commit']
 }

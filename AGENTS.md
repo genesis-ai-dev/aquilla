@@ -85,14 +85,27 @@ For the E2E suite, prefer the existing `/__test__/reset` + alice/bob/carol helpe
 
 ## Slow-request logs — treat them as failures
 
-Both workers log any request that takes **≥ 5s**, even when it succeeds — as a
-`[slow-request]` console line locally and a `slow: <METHOD> <path>` warn in
-PostHog Logs in production (AQU-1005: only-error logging hid DB saturation for
-90 minutes because the SPA aborts at 15s and an aborted request produces no
-server-side error). **Dev flow rule:** a `[slow-request]` line in `pnpm dev` /
-e2e worker output is a defect to investigate before shipping, not noise — find
-the query behind it (Neon `pg_stat_statements` or an `EXPLAIN ANALYZE`) rather
-than raising the threshold.
+`auth-worker`, `sync-worker` and `agent-worker` each log any request that takes
+**≥ 5s**, even when it succeeds — as a `[slow-request]` console line locally and
+a `slow: <METHOD> <path>` warn in PostHog Logs in production (AQU-1005:
+only-error logging hid DB saturation for 90 minutes because the SPA aborts at
+15s and an aborted request produces no server-side error). **Dev flow rule:** a
+`[slow-request]` line in `pnpm dev` / e2e worker output is a defect to
+investigate before shipping, not noise — find the query behind it (Neon
+`pg_stat_statements` or an `EXPLAIN ANALYZE`) rather than raising the threshold.
+
+**The one exception is `agent-worker`'s `POST /sessions/:id/exec`** (AQU-1021): a
+multi-second run there is the contract, not a defect — callers get a 60s default
+budget and may request up to `MAX_TIMEOUT_MS` (300s). Holding it to the 5s bar
+would warn on every normal agent run and train devs to ignore the line, which is
+the signal AQU-1005 exists to protect. So `/exec` warns only when it outlives
+that 300s hard ceiling, which means the timeout race in `exec.ts` failed to fire.
+Every other agent-worker route — including `/health` and bearer-auth rejections
+— is on the shared 5s bar.
+
+Slow requests already **route into PostHog** (OTLP log records, severity `warn`,
+carrying `http.path` / `http.status` / `http.duration_ms`), so alerting is a
+PostHog-side saved-query/alert on `slow:` records rather than more worker code.
 
 ## Issue workflow (Linear — Aquilla team)
 

@@ -22,7 +22,7 @@ import {
   catalogIndexLines,
   describeCommand,
 } from '../../../db/shared/command-catalog'
-import { validateCommands } from '../external/commands'
+import { validateCommands, CREATE_PROJECT_FIELDS } from '../external/commands'
 import { POLICY_SETTINGS_KEYS } from '../external/commands-patch-settings'
 import { ALLOWED_EMIT_KINDS, TESTIMONY_EMIT_KINDS } from '../external/commands-emit-events'
 import { ROLE } from '../events/role-policy'
@@ -57,8 +57,12 @@ describe('command catalog — invariants', () => {
       PlanImport: { kind: 'PlanImport', fileName: 'n', fileType: 'txt', cells: [{ content: 'x' }] },
       CreateProject: { kind: 'CreateProject', name: 'P' },
       UpdateProjectSettings: { kind: 'UpdateProjectSettings', projectId: 'p', settings: {}, ifMatchVersion: 0 },
-      PatchSettings: { kind: 'PatchSettings', projectId: 'p', ops: [{ key: 'brief', value: 1 }], ifMatchVersion: 0 },
+      PatchSettings: { kind: 'PatchSettings', projectId: 'p', ops: [{ key: 'systemPrompt', value: 'x' }], ifMatchVersion: 0 },
       EmitEvents: { kind: 'EmitEvents', events: [{ kind: 'comment.create', payload: { body: 'hi' } }] },
+      AddExample: { kind: 'AddExample', slug: 'lord-as-hospod', source: 'the LORD', target: 'Господь' },
+      AddDecision: { kind: 'AddDecision', slug: 'divine-name', decision: 'Render Lord as Господь.' },
+      AddNote: { kind: 'AddNote', fileId: 'f', cellId: 'c', note: 'why this rendering' },
+      RetireExample: { kind: 'RetireExample', slug: 'lord-as-hospod' },
     }
     for (const entry of COMMAND_CATALOG) {
       const sample = minimal[entry.kind]
@@ -96,6 +100,19 @@ describe('command catalog — invariants', () => {
       expect(ALLOWED_EMIT_KINDS).toContain(kind)
     }
     expect(emitDoc).toContain('testimony')
+  })
+
+  it("documents every field CreateProject actually accepts (AQU-1223)", () => {
+    // describe_command is how an agent learns the shape before it stages. An
+    // accepted field missing from the doc is how the silent-drop bug got its
+    // reach: the caller had no way to know what would survive the create.
+    const createDoc = describeCommand('CreateProject')!.paramsDoc
+    for (const field of CREATE_PROJECT_FIELDS) {
+      if (field === 'kind') continue
+      expect(createDoc).toContain(field)
+    }
+    // …and that the closed set is stated, so the reader knows a typo fails loudly.
+    expect(createDoc).toContain('validation_failed')
   })
 })
 

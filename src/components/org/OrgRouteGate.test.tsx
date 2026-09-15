@@ -34,6 +34,11 @@ vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => sessionState,
 }))
 
+const platformAdmin = vi.hoisted(() => ({ isAdmin: false, loading: false }))
+vi.mock("@/hooks/usePlatformAdmin", () => ({
+  usePlatformAdmin: () => platformAdmin,
+}))
+
 vi.mock("@/components/AccountSwitcher", () => ({
   AccountSwitcher: () => <div data-testid="account-switcher" />,
 }))
@@ -73,6 +78,8 @@ beforeEach(() => {
   orgContext.error = null
   sessionState.session = { jwt: "jwt", username: "alice", createdAt: "x" }
   sessionState.loading = false
+  platformAdmin.isAdmin = false
+  platformAdmin.loading = false
 })
 
 describe("OrgRouteGate (AQU-790 guest orgs)", () => {
@@ -193,5 +200,21 @@ describe("OrgRouteGate (AQU-1046 signed-out)", () => {
 
     expect(screen.getByText("Organization not found")).toBeInTheDocument()
     expect(screen.queryByText("Sign in to see your workspace")).not.toBeInTheDocument()
+  })
+})
+
+describe("OrgRouteGate (platform-admin catalog orgs)", () => {
+  it("waits while the platform-admin probe is in flight instead of flashing not-found", () => {
+    platformAdmin.loading = true
+    renderGate("/orgs/999")
+    expect(screen.queryByText(/not found/i)).not.toBeInTheDocument()
+    expect(screen.getByRole("status", { name: "Loading organization" })).toBeInTheDocument()
+  })
+
+  it("admits an org that is not a membership when the caller is a platform admin", () => {
+    platformAdmin.isAdmin = true
+    renderGate("/orgs/999")
+    expect(screen.getByText("ORG INDEX")).toBeInTheDocument()
+    expect(screen.queryByText(/not found/i)).not.toBeInTheDocument()
   })
 })

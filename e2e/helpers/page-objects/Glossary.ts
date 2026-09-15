@@ -35,9 +35,9 @@ export class Glossary {
     if (rendering) {
       await dialog.getByRole("textbox", { name: "Rendering", exact: true }).fill(rendering)
     }
-    const saved = this.waitForSettingsPatch()
+    const saved = this.waitForTermEventFlush()
     await dialog.getByRole("button", { name: "Add term" }).click()
-    await this.expectSettingsPatchOk(saved)
+    await this.expectTermEventFlushOk(saved)
     await expect(dialog).not.toBeVisible({ timeout: 5_000 })
     const row = this.row(sourceTerm)
     await expect(row).toBeVisible({ timeout: 8_000 })
@@ -47,21 +47,23 @@ export class Glossary {
   async setRenderingStatus(sourceTerm: string, status: string): Promise<void> {
     const row = await this.expandTerm(sourceTerm)
     const statusSelect = row.getByRole("combobox", { name: "Rendering 1 status" })
-    const saved = this.waitForSettingsPatch()
+    const saved = this.waitForTermEventFlush()
     await pickSelectOption(this.page, statusSelect, status)
-    await this.expectSettingsPatchOk(saved)
+    await this.expectTermEventFlushOk(saved)
   }
 
-  private waitForSettingsPatch() {
+  // AQU-1006: glossary writes are term.* events through the outbox, flushed
+  // as POST /events to the sync-worker — the settings blob is never PATCHed.
+  private waitForTermEventFlush() {
     return this.page.waitForResponse((response) =>
-      response.request().method() === "PATCH"
-      && /\/api\/v2\/projects\/[^/]+\/settings(?:\?|$)/.test(response.url()),
+      response.request().method() === "POST"
+      && /\/events(?:\?|$)/.test(response.url()),
     )
   }
 
-  private async expectSettingsPatchOk(responsePromise: ReturnType<Page["waitForResponse"]>) {
+  private async expectTermEventFlushOk(responsePromise: ReturnType<Page["waitForResponse"]>) {
     const response = await responsePromise
-    expect(response.ok(), `settings PATCH failed: HTTP ${response.status()}`).toBe(true)
+    expect(response.ok(), `term event flush failed: HTTP ${response.status()}`).toBe(true)
   }
 
   async expandTerm(sourceTerm: string): Promise<Locator> {

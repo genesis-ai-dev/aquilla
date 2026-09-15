@@ -305,6 +305,26 @@ async function searchProject(
   return runRead(env, token, `${encodeURIComponent(projectId)}/search?${params.toString()}`)
 }
 
+// AQU-1232: translation-memory retrieval. Same delegation shape as
+// search_project — the REST route owns the ranking, this is argument marshalling.
+async function findSimilarCells(
+  env: ExternalEnv,
+  token: string,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const projectId = str(args, 'projectId')
+  if (!projectId) return fail('validation_failed', 'projectId is required')
+  const cellId = str(args, 'cellId')
+  const text = str(args, 'text')
+  if (!cellId && !text) return fail('validation_failed', 'one of cellId or text is required')
+  if (cellId && text) return fail('validation_failed', 'pass either cellId or text, not both')
+  const params = new URLSearchParams()
+  if (cellId) params.set('cellId', cellId)
+  if (text) params.set('text', text)
+  if (typeof args.limit === 'number') params.set('limit', String(args.limit))
+  return runRead(env, token, `${encodeURIComponent(projectId)}/similar?${params.toString()}`)
+}
+
 async function readContent(
   env: ExternalEnv,
   token: string,
@@ -644,6 +664,8 @@ export async function callTool(
     }
     case 'search_project':
       return searchProject(env, token, args)
+    case 'find_similar_cells':
+      return findSimilarCells(env, token, args)
     case 'read_content':
       return readContent(env, token, args)
     case 'read_history':

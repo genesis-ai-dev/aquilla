@@ -3,6 +3,17 @@ import { defineNamespace, plural } from "./types"
 export const agentWorkspace = defineNamespace({
   keys: {
     "agentWorkspace.agent": "Agent",
+    "agentWorkspace.conversations": "Conversations",
+    "agentWorkspace.conversation": "Conversation",
+    "agentWorkspace.document": "Document",
+    "agentWorkspace.backToConversation": "Back to conversation",
+    "agentWorkspace.reviewPending": plural({ one: "Review {count} draft", other: "Review {count} drafts" }, "count"),
+    "agentWorkspace.needsReview": "Needs review",
+    "agentWorkspace.agentState": "Agent: {state}",
+    "agentWorkspace.guideDetails": "About the team & shortcuts",
+    "agentWorkspace.startConversation": "What would you like to work on?",
+    "agentWorkspace.draftSuggestion": "Draft untranslated passages",
+    "agentWorkspace.checkSuggestion": "Check translation consistency",
     "agentWorkspace.working": "working…",
     "agentWorkspace.queued": plural({ one: "{count} queued", other: "{count} queued" }, "count"),
     "agentWorkspace.sections": "Agent workbench sections",
@@ -53,6 +64,8 @@ export const agentWorkspace = defineNamespace({
       description: "Labels, status copy, accessible names, and explanatory text in the three-pane agent translation workspace and its health indicators.",
     },
     keys: {
+      "agentWorkspace.reviewPending": { description: "Primary action opening pending proposals without applying them.", placeholders: { count: "Number of pending drafts." } },
+      "agentWorkspace.agentState": { description: "Secondary machine status, separate from pending human work.", placeholders: { state: "Localized current agent execution state." } },
       "agentWorkspace.backToEditor": {
         description: "Navigate back to the editor without closing the Agent tab, stopping work, or resetting chat.",
       },

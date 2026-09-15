@@ -105,7 +105,7 @@ describe("TeamThreadDetail activity groups", () => {
     render(detail([{ ...first, kind: "drafts_staged", details: { count: 3 } }], undefined, onInspect))
     screen.getByRole("link", { name: "Review drafts" }).focus()
     await user.keyboard("{Enter}")
-    expect(screen.getByTestId("location")).toHaveTextContent("/project/p1/editor/file/file-1?lane=")
+    expect(screen.getByTestId("location")).toHaveTextContent("/project/p1/agent?conversation=run%3Arun-1&view=review")
     expect(onInspect).not.toHaveBeenCalled()
   })
 

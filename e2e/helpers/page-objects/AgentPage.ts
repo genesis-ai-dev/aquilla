@@ -27,10 +27,10 @@ export class AgentPage {
 
   // ── Entry ──────────────────────────────────────────────────────────────
 
-  /** Open the agent CHAT from the sidebar rail (v2.2 three-column layout):
+  /** Open the unified conversation from the sidebar rail:
    *  the rail's Agent tab opens the dock THREADS LIST — no composer lives in
    *  the dock any more — so this continues into the agent surface, where the
-   *  workbench chat (and its composer) is the default tab. */
+   *  conversation (and its composer) is the default view. */
   async openAgentTab(): Promise<void> {
     await this.page
       .getByRole("complementary")
@@ -66,7 +66,7 @@ export class AgentPage {
   }
 
   async closeFullScreenWorkbench(): Promise<void> {
-    await this.page.getByRole("button", { name: "Close workbench" }).click()
+    await this.page.getByRole("button", { name: "Close Agent", exact: true }).click()
   }
 
   // ── Session + attachment ──────────────────────────────────────────────
@@ -154,11 +154,9 @@ export class AgentPage {
     return proposal
   }
 
-  /** Switch the workbench's tab slot to "memory" — contracts §5: AgentWorkbench
-   * adds a `sessions | memory` tab slot, memory tab lazy-imports
-   * W1E's `AgentMemoryTab`. */
+  /** Open the separately addressable knowledge view. */
   async openMemoryTab(): Promise<void> {
-    await this.page.getByRole("tab", { name: "Memory" }).click()
+    await this.page.getByRole("tab", { name: "Project knowledge", exact: true }).click()
   }
 
   /** Approve a proposed-memory row by its path (e.g. "observations/foo.md"). */

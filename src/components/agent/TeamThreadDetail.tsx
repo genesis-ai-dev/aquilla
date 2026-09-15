@@ -17,7 +17,8 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
-import { draftReviewHref } from "@/components/project-workspace-lane-deeplink"
+import { agentConversationHref } from "@/lib/agent/workspace-location"
+import { runThreadId } from "@/lib/agent/team-channel"
 import { AGENT_PERSONAS } from "@/lib/agent/personas"
 import { groupRunFeed, type TeamFeedMessage } from "@/lib/agent/social-feed"
 import { feedMessageText } from "@/lib/agent/team-channel"
@@ -179,7 +180,7 @@ export function TeamThreadDetail({
   onInspect,
 }: TeamThreadDetailProps) {
   const { locale, t } = useI18n()
-  const reviewHref = draftReviewHref(projectId, run.fileId, null, run.targetLang ?? "")
+  const reviewHref = agentConversationHref(projectId, runThreadId(run.runId), "review")
   const groups = groupRunFeed(feed)
   return (
     <ScrollArea className="min-h-0 flex-1" data-testid="team-thread-detail">

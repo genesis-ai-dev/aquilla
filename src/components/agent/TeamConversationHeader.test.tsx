@@ -41,17 +41,17 @@ function header(props: Partial<TeamConversationHeaderProps> = {}) {
 }
 
 describe("TeamConversationHeader attention", () => {
-  it.each(["", "fr-CA"])("links pending drafts to their existing review lane (%s)", (targetLang) => {
+  it.each(["", "fr-CA"])("opens the task's focused review without changing editor mode (%s)", (targetLang) => {
     render(header({ run: runRecord({ targetLang }) }))
     const title = screen.getByRole("heading", { name: "Mark" })
     expect(title).toBeInTheDocument()
     expect(screen.getByRole("status")).toHaveTextContent("3 drafts ready for your review")
     expect(screen.getByRole("status")).toHaveAttribute("aria-atomic", "true")
-    expect(screen.getByRole("link", { name: "Review drafts" })).toHaveAttribute(
-      "href", `/project/p1/editor/file/file-1?lane=${encodeURIComponent(targetLang)}`,
+    expect(screen.getByRole("link", { name: "Review 3 drafts" })).toHaveAttribute(
+      "href", "/project/p1/agent?conversation=run%3Arun-1&view=review",
     )
-    expect(screen.getByRole("link", { name: "Review drafts" })).toHaveClass("bg-primary")
-    expect(screen.getByText("Idle")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Review 3 drafts" })).toHaveClass("bg-primary")
+    expect(screen.getByText("Needs review")).toHaveAttribute("title", "Agent: Idle")
   })
 
   it.each([0, undefined])("does not invent pending work for a zero or missing count (%s)", (proposedDrafts) => {

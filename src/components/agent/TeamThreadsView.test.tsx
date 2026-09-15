@@ -282,8 +282,8 @@ describe("TeamThreadsView — the active conversation surface", () => {
     const header = screen.getByTestId("team-conversation-header")
     expect(within(header).getByRole("heading", { name: "Mark", level: 2 })).toBeInTheDocument()
     expect(within(header).getByRole("status")).toHaveTextContent("3 drafts ready for your review")
-    expect(within(header).getByRole("link", { name: "Review drafts" })).toHaveAttribute(
-      "href", "/project/p1/editor/file/file-1?lane=",
+    expect(within(header).getByRole("link", { name: "Review 3 drafts" })).toHaveAttribute(
+      "href", "/project/p1/agent?conversation=run%3Arun-1&view=review",
     )
     expect(within(header).getByTestId("team-roster-live-drafter")).toBeInTheDocument()
     for (const name of ["Drafter", "Reviewer", "Coordinator"]) {

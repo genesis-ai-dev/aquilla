@@ -106,12 +106,22 @@ Expensive format/agent/access journeys live as `*.spec.ts` and run on
 UI chrome that used to be one smoke file per click is covered under
 `src/**/*.test.tsx`. Do **not** re-add Playwright for these:
 
+- Unified Agent conversation/document/knowledge navigation and same-task
+  re-selection: covered in RTL (`AgentWorkbench.test.tsx`, `workspace-location.test.ts`).
+  The former competing Team/Chat tabs and mandatory three-pane layout are retired.
+- Unsent Agent messages, context chips, and attachment ownership across views,
+  conversations, and accounts: covered in composer draft-store and composer RTL.
+- Focused task-draft review stays on the Agent route, preserves the task language
+  lane and editor Audio/Text preference, and uses the existing contextual approval
+  transport. Navigation and approval wiring are covered in `AgentDraftReview.test.tsx`.
+- Optional paired document context uses the existing cell renderer/commit callbacks
+  in one aligned scrolling surface: covered in `AgentDocumentContext.test.tsx`.
 - Agent Team header, roster/card access, and toolbar identity across tabs:
   covered in RTL (`TeamThreadsView.test.tsx`, `AgentWorkbench.test.tsx`)
 - Agent task message grouping, routine-activity disclosure, explicit step
   inspection, Escape priority, and focus return: covered in RTL
   (`TeamThreadDetail.test.tsx`, `TeamThreadsView.test.tsx`)
-- Agent pending-review/question header and links to existing review lanes:
+- Agent pending-review/question header and links to focused task review:
   covered in RTL (`TeamConversationHeader.test.tsx`, `TeamThreadsView.test.tsx`)
 - Agent chat options, confirmed reset, preserved applied events, and pinned
   Team chat navigation: covered in RTL (`AgentChatOptions.test.tsx`,

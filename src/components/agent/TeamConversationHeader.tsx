@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom"
 import { buttonVariants } from "@/components/ui/button"
-import { draftReviewHref } from "@/components/project-workspace-lane-deeplink"
+import { agentConversationHref } from "@/lib/agent/workspace-location"
+import { runThreadId } from "@/lib/agent/team-channel"
 import { AGENT_PERSONA_IDS } from "@/lib/agent/personas"
 import type { ContextualRunRecord } from "@/lib/contextual/transport"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -36,7 +37,7 @@ export function TeamConversationHeader({
       ? t("agent.team.questionsWaiting", { count: pendingQuestions })
       : null
   const actionHref = run && pendingDrafts > 0
-    ? draftReviewHref(projectId, run.fileId, null, run.targetLang ?? "")
+    ? agentConversationHref(projectId, runThreadId(run.runId), "review")
     : pendingQuestions > 0
       ? questionsHref
       : undefined
@@ -50,7 +51,9 @@ export function TeamConversationHeader({
         <div className="flex min-w-0 flex-1 items-baseline gap-2">
           <h2 className="min-w-0 truncate text-base font-semibold" title={title}>{title}</h2>
           {run && (
-            <span className="shrink-0 text-xs text-muted-foreground">{t(runStatusKey(run))}</span>
+            <span className="shrink-0 text-xs text-muted-foreground" title={t("agentWorkspace.agentState", { state: t(runStatusKey(run)) })}>
+              {pendingDrafts > 0 ? t("agentWorkspace.needsReview") : t(runStatusKey(run))}
+            </span>
           )}
         </div>
         <ul
@@ -79,7 +82,7 @@ export function TeamConversationHeader({
           </p>
           {actionHref && (
             <Link to={actionHref} replace={!run} className={buttonVariants({ size: "sm" })}>
-              {t(run ? "agent.team.reviewDrafts" : "agent.team.viewQuestions")}
+              {run ? t("agentWorkspace.reviewPending", { count: pendingDrafts }) : t("agent.team.viewQuestions")}
             </Link>
           )}
         </div>

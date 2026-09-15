@@ -39,6 +39,8 @@ export interface TeamChannelProps {
   heldQuestions: number
   /** Runs of the shared conversational session, oldest first. */
   conversationRuns: readonly AgentRunUi[]
+  /** The full chat owns the scroller when these dispatches are its prelude. */
+  embedded?: boolean
 }
 
 function ChannelMessage({ children }: { children: ReactNode }) {
@@ -57,11 +59,11 @@ export function TeamChannel({
   onOpenQuestions,
   heldQuestions,
   conversationRuns,
+  embedded = false,
 }: TeamChannelProps) {
   const { locale, t } = useI18n()
   const coordinatorName = t(AGENT_PERSONAS.coordinator.nameKey)
-  return (
-    <ScrollArea className="min-h-0 flex-1">
+  const content = (
       <div
         className="mx-auto flex w-full max-w-2xl flex-col gap-2 p-3"
         data-testid="team-channel"
@@ -139,6 +141,6 @@ export function TeamChannel({
           </div>
         ))}
       </div>
-    </ScrollArea>
   )
+  return embedded ? content : <ScrollArea className="min-h-0 flex-1">{content}</ScrollArea>
 }

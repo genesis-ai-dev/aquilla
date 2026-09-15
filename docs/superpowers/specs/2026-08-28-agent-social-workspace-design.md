@@ -172,6 +172,37 @@ when an arriving phase turns a single update into a collapsible group. This is
 presentation only: no new summaries, claims of approval, or backend writes.
 The main Team chat and the document-workspace Chat tab are unchanged.
 
+## Unified conversation and review workspace (2026-09-15)
+
+This supersedes the earlier competing Team/Chat tabs and mandatory
+Source/Agent/Target columns. The default is one **Conversation** view. The
+sidebar owns selection; selecting any conversation, including the already
+selected one, returns to that conversation. The URL owns both conversation
+and view so reloading, history navigation, and shared links agree with the UI.
+Main Team chat keeps the complete chat toolset, attachments, selection chips,
+proposal receipts, and compensating Undo; task conversations keep scoped steering.
+
+Unsent messages belong to the signed-in owner, project, and conversation.
+Switching views must not erase them, and selecting another conversation must
+never retarget the previous conversation's draft. Typed text, context chips,
+and attached artifacts retain their scope until handed off successfully.
+
+**Review drafts** stays inside the selected task and opens pending proposals
+with their source context, explicit human approval controls, previous/next
+navigation, and a return to the conversation. It does not change the preferred
+Audio/Text editor mode. Proposed content stays distinct from committed content;
+review uses the existing contextual decision/approval transport.
+
+**Document** is optional main-chat context: source and target are paired in
+shared-height rows within one scrolling surface. Existing target editing,
+validation, collaboration guards, and reference actions are retained.
+Knowledge is a separate view rather than a competing conversation.
+
+Onboarding offers two prefill-only suggestions, with the team description
+and shortcuts behind a disclosure. Existing work takes precedence over a
+first-run guide. Pending human work is the prominent status; machine activity
+remains secondary. Sidebar dates no longer compete with the task title.
+
 ## Human-attention header (2026-09-14)
 
 A task with pending proposals shows its current pending-review count and a

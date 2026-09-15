@@ -49,7 +49,7 @@ function ConversationRow({
         selected && "bg-accent",
       )}
     >
-      <span className="flex items-center gap-1.5">
+      <span className="flex items-center gap-1.5" title={row.title}>
         {row.live && <Spinner className="h-2.5 w-2.5 shrink-0 text-muted-foreground" />}
         <span className="min-w-0 flex-1 truncate text-xs font-medium text-foreground">
           {row.title}
@@ -57,12 +57,13 @@ function ConversationRow({
         {row.pinned && (
           <Pin aria-hidden className="h-3 w-3 shrink-0 rotate-45 text-muted-foreground" />
         )}
-        {row.at && (
-          <span className="shrink-0 text-[10px] text-muted-foreground">
-            {fmtShortCalendarDate(row.at, undefined, locale)}
-          </span>
-        )}
       </span>
+      {row.scope && <span className="truncate text-[11px] text-muted-foreground" title={row.scope}>{row.scope}</span>}
+      {row.at && (
+        <time dateTime={row.at} className="text-[10px] text-muted-foreground">
+          {fmtShortCalendarDate(row.at, undefined, locale)}
+        </time>
+      )}
       <span className="flex items-center gap-1.5">
         <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">
           {row.preview}

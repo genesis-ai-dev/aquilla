@@ -1,22 +1,25 @@
 /**
- * TeamChannelComposer.tsx — the one composer at the bottom of the Team tab.
+ * TeamChannelComposer.tsx — scoped steering composer for Team conversations.
  *
  * There is only ever ONE message box, and where it sends must be
- * unmistakable. In Team chat it addresses the orchestrator — the same shared
- * chat session the Chat tab drives (compose-send.ts). With a run conversation
+ * unmistakable. The channel callback addresses the shared orchestrator
+ * session (compose-send.ts). With a run conversation
  * open it steps in by an inline-start margin and wears a scope chip naming
  * the teammate and passage it is talking to; the message goes to that run as
  * a steering direction, never to the chat. A FINISHED run can be re-opened by
  * messaging (v2.2): the message starts a fresh run on the same file and rides
  * along as its first steering direction — role-gated by the caller. Only when
  * the viewer cannot start runs does the box close and say so.
+ * The caller supplies owner/project/conversation identity; failed handoffs
+ * keep the exact document and error in that scope.
  */
 
-import { useState } from "react"
+import { useEffect, useRef } from "react"
 import { ChatComposer } from "@/components/chat/ChatComposer"
 import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
-import type { ContextChip } from "@/lib/agent/context-chip"
+import { serializeWithChips, type ContextChip } from "@/lib/agent/context-chip"
+import { composerDraftKey, composerDraftStore, type ComposerDraftScope } from "@/lib/agent/composer-drafts"
 import { AGENT_PERSONAS, type AgentPersonaId } from "@/lib/agent/personas"
 import { sendContextualSteering, startFileContextualRun } from "@/lib/contextual/transport"
 import { PersonaAvatar } from "./PersonaAvatar"
@@ -41,6 +44,7 @@ export interface TeamComposerThread {
 }
 
 export interface TeamChannelComposerProps {
+  draftScope: ComposerDraftScope
   /** Null → Team chat (message the orchestrator). */
   thread: TeamComposerThread | null
   /** A session JWT exists — without one nothing can be sent. */
@@ -48,10 +52,15 @@ export interface TeamChannelComposerProps {
   /** The shared chat session is streaming (Team chat only). */
   isStreaming: boolean
   onStop: () => void
-  onSendToChannel: (text: string, chips: ContextChip[]) => void
+  onSendToChannel: (text: string, chips: ContextChip[]) => void | boolean | Promise<void | boolean>
 }
 
-export function TeamChannelComposer({
+export function TeamChannelComposer(props: TeamChannelComposerProps) {
+  return <ScopedTeamChannelComposer key={composerDraftKey(props.draftScope)} {...props} />
+}
+
+function ScopedTeamChannelComposer({
+  draftScope,
   thread,
   isConfigured,
   isStreaming,
@@ -59,11 +68,16 @@ export function TeamChannelComposer({
   onSendToChannel,
 }: TeamChannelComposerProps) {
   const t = useT()
-  const [sendFailed, setSendFailed] = useState(false)
-  const [reopening, setReopening] = useState(false)
+  const draftStore = composerDraftStore(draftScope)
+  const reopenedRunId = useRef<string | null>(null)
+  const mountedRef = useRef(true)
+  useEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
 
   const personaName = thread ? t(AGENT_PERSONAS[thread.personaId].nameKey) : null
-  const threadCanSend = Boolean(thread && (thread.steerable || thread.reopen)) && !reopening
+  const threadCanSend = Boolean(thread && (thread.steerable || thread.reopen))
   const canSend = thread ? isConfigured && threadCanSend : isConfigured
 
   const placeholder = !thread
@@ -74,32 +88,31 @@ export function TeamChannelComposer({
         ? t("agent.team.composer.reopenPlaceholder")
         : t("agent.team.composer.finishedPlaceholder")
 
-  const handleSend = ({ text, chips }: { text: string; chips: ContextChip[] }) => {
-    setSendFailed(false)
-    if (!thread) {
-      onSendToChannel(text, chips)
-      return
-    }
+  const handleSend = async ({ text, chips }: { text: string; chips: ContextChip[] }) => {
+    if (!thread) return onSendToChannel(text, chips)
     const trimmed = text.trim()
-    if (!trimmed) return
-    if (thread.steerable) {
-      // Steering wakes a parked run server-side; the client only reports failure.
-      void sendContextualSteering(thread.runId, trimmed).catch(() => setSendFailed(true))
-      return
+    if (!trimmed && chips.length === 0) return false
+    const { wire } = serializeWithChips(trimmed, chips)
+    try {
+      if (thread.steerable) {
+        await sendContextualSteering(thread.runId, wire)
+        return true
+      }
+      const reopen = thread.reopen
+      if (!reopen) return false
+      // If starting succeeded but steering failed, retry that direction on the
+      // already-created run rather than starting duplicate work.
+      if (!reopenedRunId.current) {
+        const { runId } = await startFileContextualRun(reopen.projectId, reopen.fileId, reopen.targetLang)
+        reopenedRunId.current = runId
+      }
+      await sendContextualSteering(reopenedRunId.current, wire)
+      if (mountedRef.current) reopen.onReopened(reopenedRunId.current)
+      return true
+    } catch {
+      draftStore.setSendError(t("agent.team.composer.sendFailed"))
+      return false
     }
-    const reopen = thread.reopen
-    if (!reopen) return
-    setReopening(true)
-    void startFileContextualRun(reopen.projectId, reopen.fileId, reopen.targetLang)
-      .then(async ({ runId }) => {
-        await sendContextualSteering(runId, trimmed).catch(() => {
-          // The run started; a lost direction is reported, not fatal.
-          setSendFailed(true)
-        })
-        reopen.onReopened(runId)
-      })
-      .catch(() => setSendFailed(true))
-      .finally(() => setReopening(false))
   }
 
   return (
@@ -119,12 +132,8 @@ export function TeamChannelComposer({
           </span>
         </div>
       )}
-      {sendFailed && (
-        <p role="alert" className="px-3 pt-1 text-[11px] text-destructive">
-          {t("agent.team.composer.sendFailed")}
-        </p>
-      )}
       <ChatComposer
+        draftScope={draftScope}
         isStreaming={thread ? false : isStreaming}
         isConfigured={canSend}
         onSend={handleSend}

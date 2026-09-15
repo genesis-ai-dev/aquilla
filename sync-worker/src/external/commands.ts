@@ -31,6 +31,17 @@ import {
   type DraftCellsCommand,
 } from './commands-draft-cells'
 import {
+  cellFieldsFloor,
+  isCellFieldCommand,
+  isCellFieldKind,
+  validateCellFieldCommand,
+  type CellFieldCommand,
+  type SetSourceCommand,
+  type SetTimingCommand,
+  type SetTrackOverrideCommand,
+  type SetTranscriptionCommand,
+} from './commands-cell-fields'
+import {
   MEMBERSHIP_FLOOR,
   isMembershipCommand,
   validateMembershipCommand,
@@ -82,6 +93,14 @@ export type { PatchSettingsCommand, PatchSettingsOp } from './commands-patch-set
 export type { EmitEventsCommand, EmitEventInput } from './commands-emit-events'
 export type { DraftCellsCommand } from './commands-draft-cells'
 export type {
+  CellFieldCommand,
+  SetSourceCommand,
+  SetTimingCommand,
+  SetTrackOverrideCommand,
+  SetTranscriptionCommand,
+  TrackPatch,
+} from './commands-cell-fields'
+export type {
   InviteMemberCommand,
   MembershipCommand,
   RemoveMemberCommand,
@@ -119,6 +138,7 @@ export type {
 } from './commands-structure'
 export { isStructureCommandKind } from './commands-structure'
 export { cellKey, laneCellKey } from './cell-keys'
+export { isCellFieldCommand } from './commands-cell-fields'
 
 /** Set (or update) a single cell's translation. Compiles to target.cell.commit. */
 export interface SetTranslationCommand {
@@ -251,6 +271,7 @@ export type Command =
   | PatchSettingsCommand
   | EmitEventsCommand
   | DraftCellsCommand
+  | CellFieldCommand
   | MembershipCommand
   | RenameFileCommand
   | ProjectLifecycleCommand
@@ -740,6 +761,13 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
       if (cmd) commands.push(cmd)
       return
     }
+    // AQU-1183 cell-field commands (SetSource / SetTranscription / SetTiming /
+    // SetTrackOverride) — one validator for the family.
+    if (isCellFieldKind(c.kind)) {
+      const cmd = validateCellFieldCommand(c, index, issues)
+      if (cmd) commands.push(cmd)
+      return
+    }
     if (isMembershipCommand(c as { kind: string })) {
       const cmd = validateMembershipCommand(c, index, issues)
       if (cmd) commands.push(cmd)
@@ -864,6 +892,14 @@ export function requiredRoleForCommand(c: Command): number {
   if (c.kind === 'DraftCells') {
     // Expands at prepare into SetTranslation → target.cell.commit.
     return draftCellsFloor()
+  }
+  // AQU-1183: the cell-field family. Each command's floor is the max
+  // REQUIRED_ROLE across the events it compiles to — PROJECT_LEAD for a source
+  // edit (a rung above SetTranslation, matching the UI's source-edit floor),
+  // MAINTAINER for a track override. The DYNAMIC bumps (timing lock,
+  // allowTrackEditing) are live-state checks in cell-fields-engine.ts.
+  if (isCellFieldCommand(c)) {
+    return cellFieldsFloor(c)
   }
   // AQU-1185 membership commands: MAINTAINER, flat. Like the other receipt-only
   // kinds they take their own prepare/commit path (which re-checks the grant and

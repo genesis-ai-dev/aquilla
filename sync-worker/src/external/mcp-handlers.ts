@@ -26,6 +26,8 @@ import { handleExternalQualityRequest } from './quality-routes'
 import { handleExternalChangesetsRequest } from './changesets-route'
 import { listProjectsForCredential } from './projects-list'
 import { loadProjectDetail } from './project-detail'
+import { listOrgsForCredential } from './orgs-list'
+import { MAX_SEARCH_PROJECTS } from './search-reads'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { COMMAND_CATALOG } from '../../../db/shared/command-catalog'
 import type { ApiCredentialContext } from '../../../db/shared/api-credentials'
@@ -92,7 +94,8 @@ function bearer(token: string): Record<string, string> {
  *  `channel: 'mcp'` into the provenance envelope (§2) instead of the REST default. */
 const MCP_CHANNEL_HEADER: Record<string, string> = { 'x-aquilla-channel': 'mcp' }
 
-const EXTERNAL_BASE = 'https://internal/api/v1/external/projects'
+const EXTERNAL_ROOT = 'https://internal/api/v1/external'
+const EXTERNAL_BASE = `${EXTERNAL_ROOT}/projects`
 
 // ── direct reads ─────────────────────────────────────────────────────────────
 
@@ -104,8 +107,8 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
     // the workflow from per-tool descriptions.
     quickstart: [
       '1. get_identity_and_scope — confirm who you are, your mode (ask|act), and your org/project scope.',
-      '2. list_projects — find a projectId.',
-      '3. read_content with just projectId to list files; add fileId to read cells. search_project for full-text search. list_memory for what the copilot has learned about the project (and read_cell_memory for what it is given on one cell).',
+      '2. list_projects — find a projectId. Managing a whole workspace? list_orgs first, then list_projects { orgId } per org.',
+      '3. read_content with just projectId to list files; add fileId to read cells. search_project for full-text search in one project, search_projects { projectIds: [...] } across several, find_similar_cells for translation-memory precedents. list_memory for what the copilot has learned about the project (and read_cell_memory for what it is given on one cell).',
       '4. prepare_translations — stage your writes as a changeset. Nothing is applied yet. Returns { changesetId, digest, summary, mode, approvalUrl? }.',
       '5. confirm_changeset with that changesetId + digest. act mode: applies immediately. ask mode: first show the approvalUrl to a human and wait for them to approve in their browser, then call confirm_changeset — until then it returns confirmation_required and applies nothing.',
       '6. export_file — when the work is done, pull the file back out in its delivered format (e.g. USFM for Paratext). See exporting below for the role floor and the fidelity fields to check before you hand the result to anyone.',
@@ -236,6 +239,23 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
         'Preconditions and drift (plan_stale) are lane-scoped: concurrent edits to the SAME ' +
         'cell in DIFFERENT lanes never invalidate each other\'s changesets.',
     },
+    // AQU-1236: org-scoped reads. PATs are scoped org-or-project, so a console
+    // managing a partner's whole workspace can work from one org-scoped token
+    // instead of one token per project.
+    orgScopedReads: {
+      tools: ['list_orgs', 'list_projects', 'search_projects'],
+      note:
+        'list_orgs returns the orgs this credential covers; list_projects takes an optional ' +
+        'orgId to enumerate one of them; search_projects searches an explicit list of up to ' +
+        `${MAX_SEARCH_PROJECTS} projects in one call, each result carrying its projectId. ` +
+        'Scope only ever narrows: an org-scoped credential is confined to that org, a ' +
+        'project-scoped one to its single project (and that project\'s org), and naming ' +
+        'anything outside it returns scope_denied rather than an empty result. ' +
+        'search_projects is strict — one unauthorized project in the list fails the whole ' +
+        'call, so a result set is never silently partial — and costs one search-rate-limit ' +
+        'unit per project searched.',
+      maxProjectsPerSearch: MAX_SEARCH_PROJECTS,
+    },
     limits: {
       changesetExpirySeconds: CHANGESET_TTL_MS / 1000,
       // Wave-1 validateCommands enforces no hard per-changeset command cap.
@@ -265,11 +285,33 @@ function getIdentityAndScope(cred: ApiCredentialContext): McpToolResult {
   })
 }
 
-async function listProjects(env: ExternalEnv, cred: ApiCredentialContext): Promise<McpToolResult> {
+async function listOrgs(env: ExternalEnv, cred: ApiCredentialContext): Promise<McpToolResult> {
   if (!env.AQUILLA_PG) return fail('job_failed', 'AQUILLA_PG not configured')
+  // Shared with REST GET /api/v1/external/orgs (orgs-list.ts) — AQU-1236.
+  const orgs = await listOrgsForCredential(env.AQUILLA_PG, cred)
+  return ok({ orgs })
+}
+
+async function listProjects(
+  env: ExternalEnv,
+  cred: ApiCredentialContext,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  if (!env.AQUILLA_PG) return fail('job_failed', 'AQUILLA_PG not configured')
+  // AQU-1236: an org id from the caller narrows the list, but only inside the
+  // credential's own scope — an org-scoped credential naming a different org
+  // gets scope_denied, matching the REST route rather than returning [].
+  const orgId = str(args, 'orgId')
+  if (orgId !== undefined && cred.orgId !== null && cred.orgId !== orgId) {
+    return fail('scope_denied', 'credential is not scoped to this org')
+  }
   // Shared with REST GET /api/v1/external/projects (projects-list.ts) so the
   // two adapters can never drift.
-  const projects = await listProjectsForCredential(env.AQUILLA_PG, cred)
+  const projects = await listProjectsForCredential(
+    env.AQUILLA_PG,
+    cred,
+    orgId !== undefined ? { orgId } : {},
+  )
   return ok({ projects })
 }
 
@@ -438,6 +480,42 @@ async function findSimilarCells(
   if (text) params.set('text', text)
   if (typeof args.limit === 'number') params.set('limit', String(args.limit))
   return runRead(env, token, `${encodeURIComponent(projectId)}/similar?${params.toString()}`)
+}
+
+/** Cross-project search (AQU-1236) — delegates to REST
+ *  GET /api/v1/external/search, which sits at the external ROOT rather than
+ *  under /projects, so it cannot use runRead's project-scoped base. */
+async function searchProjects(
+  env: ExternalEnv,
+  token: string,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const q = str(args, 'q')
+  if (!q) return fail('validation_failed', 'q is required')
+  if (!Array.isArray(args.projectIds)) {
+    return fail('validation_failed', 'projectIds must be an array of project ids')
+  }
+  const projectIds = args.projectIds.filter((p): p is string => typeof p === 'string' && p.length > 0)
+  if (projectIds.length === 0) {
+    return fail('validation_failed', 'projectIds must be a non-empty array of project ids')
+  }
+  if (projectIds.length > MAX_SEARCH_PROJECTS) {
+    return fail(
+      'validation_failed',
+      `too many projects: ${projectIds.length} requested, max ${MAX_SEARCH_PROJECTS} per call`,
+    )
+  }
+
+  const params = new URLSearchParams({ q, projectIds: projectIds.join(',') })
+  const side = str(args, 'side')
+  if (side) params.set('side', side)
+  if (typeof args.limit === 'number') params.set('limit', String(args.limit))
+
+  const req = new Request(`${EXTERNAL_ROOT}/search?${params.toString()}`, { headers: bearer(token) })
+  const res = await handleExternalReadRequest(req, env)
+  if (!res) return fail('not_found', 'read route did not match')
+  if (!res.ok) return delegatedError(res)
+  return ok(await res.json())
 }
 
 async function readContent(
@@ -902,8 +980,10 @@ export async function callTool(
       return getCapabilities(cred)
     case 'get_identity_and_scope':
       return getIdentityAndScope(cred)
+    case 'list_orgs':
+      return listOrgs(env, cred)
     case 'list_projects':
-      return listProjects(env, cred)
+      return listProjects(env, cred, args)
     case 'get_project': {
       const projectId = str(args, 'projectId')
       if (!projectId) return fail('validation_failed', 'projectId is required')
@@ -915,6 +995,8 @@ export async function callTool(
       return searchProject(env, token, args)
     case 'find_similar_cells':
       return findSimilarCells(env, token, args)
+    case 'search_projects':
+      return searchProjects(env, token, args)
     case 'read_content':
       return readContent(env, token, args)
     case 'read_history':

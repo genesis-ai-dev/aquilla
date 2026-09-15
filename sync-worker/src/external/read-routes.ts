@@ -1,23 +1,26 @@
 // External read surface (AGENT-API §4 read tier — AQU-533 W1-C).
 //
 //   GET /api/v1/external/me                                — identity bootstrap
-//   GET /api/v1/external/projects                          — list accessible projects
+//   GET /api/v1/external/orgs                              — list accessible orgs      (org-read-routes.ts)
+//   GET /api/v1/external/orgs/:orgId/projects              — that org's projects       (org-read-routes.ts)
+//   GET /api/v1/external/projects?orgId=                   — list accessible projects
 //   GET /api/v1/external/projects/:projectId                — one project + settings/version
-//   GET /api/v1/external/projects/:projectId/search?q=&side=&limit=&cursor=
+//   GET /api/v1/external/search?q=&projectIds=a,b          — cross-project search      (search-reads.ts)
+//   GET /api/v1/external/projects/:projectId/search?q=&side=&limit=&cursor=            (search-reads.ts)
 //   GET /api/v1/external/projects/:projectId/similar?cellId=|text=&limit=&cursor=
 //   GET /api/v1/external/projects/:projectId/files?limit=&cursor=
 //   GET /api/v1/external/projects/:projectId/files/:fileId/cells?since=&limit=&cursor=
 //   GET /api/v1/external/projects/:projectId/cells/:cellId/history?limit=&cursor=
 //   GET /api/v1/external/projects/:projectId/cells/:cellId/prompt-preview?targetLang=&fileId=
 //
-// /me and /projects are the REST cold-start pair (mirrors of the MCP
-// get_identity_and_scope / list_projects tools): they need only a valid
-// credential, no projectId — without them a REST caller had no way to
+// /me, /orgs and /projects are the REST cold-start set (mirrors of the MCP
+// get_identity_and_scope / list_orgs / list_projects tools): they need only a
+// valid credential, no projectId — without them a REST caller had no way to
 // discover a project id at all.
 //
 // Auth: `Authorization: Bearer aqk_...` — a credential minted via the
 // api_credentials table (db/shared/api-credentials.ts), NOT a sync-token JWT.
-// Every request:
+// The shared gate lives in read-auth.ts; every request:
 //   1. validates the credential (hashed lookup, revocation/expiry),
 //   2. checks it is scoped to this project (credential.projectId null-or-match)
 //      and this project's org (credential.orgId null-or-match projects.org_id),
@@ -25,8 +28,11 @@
 //      required) — never trusts a role baked into the credential itself.
 //
 // These are thin wrappers: no query/search/read logic is reimplemented here.
-//   - /search delegates to scoped-search.ts's queryScopedSearch, the single
-//     structural choke-point for project-scoped FTS (same as search-route.ts).
+//   - /search (both forms) lives in search-reads.ts and delegates to
+//     scoped-search.ts's queryScopedSearch, the single structural choke-point
+//     for project-scoped FTS (same as search-route.ts).
+//   - /orgs and /orgs/:orgId/projects live in org-read-routes.ts over the
+//     shared orgs-list.ts / projects-list.ts scope queries.
 //   - /similar lives in similar-route.ts (this file is at its size budget) and
 //     delegates to the same choke-point's querySimilarSourceCells. It is
 //     mounted from THIS router so the MCP tier, which delegates reads through
@@ -52,14 +58,12 @@
 // alongside `data` when present). Errors: `{ error: { code, message } }`
 // with codes from external/errors.ts.
 
-import { sign } from "hono/jwt"
-import type { SyncTokenClaims } from "../auth"
-import { makeVerifiedProjectId, queryScopedSearch } from "../events/scoped-search"
-import { handleFilesReadRequest } from "../events/files-read-route"
-import { handleCellsReadRequest } from "../events/cells-read-route"
 import { externalError } from "./errors"
 import { listProjectsForCredential } from "./projects-list"
-import { countRecentRateLimitEvents, recordRateLimitEvent } from "../../../db/shared/rate-limit"
+import { assertOrgInCredentialScope, handleExternalOrgReadRequest } from "./org-read-routes"
+import { handleExternalCrossProjectSearch, handleExternalSearch } from "./search-reads"
+import { handleFilesReadRequest } from "../events/files-read-route"
+import { handleCellsReadRequest } from "../events/cells-read-route"
 import { paginate, parsePageParams } from "./pagination"
 import { handleExternalSimilarRequest } from "./similar-route"
 import { handlePromptPreview } from "./prompt-preview"
@@ -68,7 +72,7 @@ import {
   authenticateAndScope,
   authenticateCredential,
   checkReadRateLimit,
-  type AuthedContext,
+  mintInternalToken,
   type ExternalReadsEnv,
 } from "./read-auth"
 
@@ -77,38 +81,12 @@ export type { ExternalReadsEnv } from "./read-auth"
 const ME_RE = /^\/api\/v1\/external\/me$/
 const PROJECTS_RE = /^\/api\/v1\/external\/projects$/
 const PROJECT_DETAIL_RE = /^\/api\/v1\/external\/projects\/([^/]+)$/
+const CROSS_SEARCH_RE = /^\/api\/v1\/external\/search$/
 const SEARCH_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/search$/
 const FILE_CELLS_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/files\/([^/]+)\/cells$/
 const FILES_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/files$/
 const CELL_HISTORY_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/cells\/([^/]+)\/history$/
 const PROMPT_PREVIEW_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/cells\/([^/]+)\/prompt-preview$/
-
-// ---------------------------------------------------------------------------
-// Shared auth + scope gate — see read-auth.ts (also used by similar-route.ts)
-// ---------------------------------------------------------------------------
-
-/** Mint a short-lived (30s) internal sync-token JWT so we can call the
- *  existing internal route handlers in-process without re-deriving their
- *  auth/ETag/anchor-chain logic. `fileId` is only meaningful to the doc-scoped
- *  verifier the DO uses; project-scoped read routes ignore it. */
-export async function mintInternalToken(
-  env: ExternalReadsEnv,
-  ctx: AuthedContext,
-  projectId: string,
-  fileId: string,
-): Promise<string> {
-  const now = Math.floor(Date.now() / 1000)
-  const claims: SyncTokenClaims = {
-    userId: Number(ctx.credential.userId),
-    projectId,
-    fileId,
-    role: ctx.role,
-    aud: "sync",
-    iat: now,
-    exp: now + 30,
-  }
-  return sign(claims as unknown as Record<string, unknown>, env.SYNC_SECRET_KEY as string, "HS256")
-}
 
 // ---------------------------------------------------------------------------
 // GET /api/v1/external/me — cold-start step 1: prove the token works, learn
@@ -134,7 +112,7 @@ async function handleExternalMe(request: Request, env: ExternalReadsEnv): Promis
         cred.mode === "ask"
           ? "ask mode: you can prepare changesets but a commit needs a human approval at the approvalUrl first (commit returns 428 confirmation_required until then)."
           : "act mode: commit applies a prepared changeset immediately.",
-      next: "GET /api/v1/external/projects to find a projectId, then GET /api/v1/external/projects/:projectId/files. GET /api/v1/external for the full API map.",
+      next: "GET /api/v1/external/projects to find a projectId, then GET /api/v1/external/projects/:projectId/files. Managing a whole workspace? GET /api/v1/external/orgs, then /api/v1/external/orgs/:orgId/projects, and search several at once with GET /api/v1/external/search?q=&projectIds=a,b. GET /api/v1/external for the full API map.",
     },
   })
 }
@@ -142,6 +120,8 @@ async function handleExternalMe(request: Request, env: ExternalReadsEnv): Promis
 // ---------------------------------------------------------------------------
 // GET /api/v1/external/projects — cold-start step 2: find a projectId.
 // (REST mirror of the MCP list_projects tool; same shared query.)
+// Optional ?orgId= narrows to one org (AQU-1236) — a filter on top of the
+// credential's own scope, never a widening of it.
 // ---------------------------------------------------------------------------
 
 async function handleExternalProjects(request: Request, env: ExternalReadsEnv): Promise<Response> {
@@ -150,7 +130,23 @@ async function handleExternalProjects(request: Request, env: ExternalReadsEnv): 
   if (!authed.ok) return authed.response
   const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.credential.credentialId)
   if (limited) return limited
-  const projects = await listProjectsForCredential(env.AQUILLA_PG, authed.credential)
+
+  const orgId = new URL(request.url).searchParams.get("orgId")
+  const cred = authed.credential
+  if (orgId !== null) {
+    // Same gate as /orgs/:orgId/projects, deliberately shared: the two spellings
+    // of "this org's projects" must answer an out-of-scope org identically
+    // (scope_denied), or one of them would quietly return [] and make "not
+    // yours" indistinguishable from "empty".
+    const denied = await assertOrgInCredentialScope(env.AQUILLA_PG, cred, orgId)
+    if (denied) return denied
+  }
+
+  const projects = await listProjectsForCredential(
+    env.AQUILLA_PG,
+    cred,
+    orgId !== null ? { orgId } : {},
+  )
   return Response.json({ data: projects, nextCursor: null })
 }
 
@@ -181,89 +177,6 @@ async function handleExternalProjectDetail(
   const detail = await loadProjectDetail(env.AQUILLA_PG as AquillaDb, projectId, authed.ctx.role)
   if (!detail) return externalError("not_found", "project not found", 404)
   return Response.json(detail)
-}
-
-// ---------------------------------------------------------------------------
-// GET /api/v1/external/projects/:projectId/search
-// ---------------------------------------------------------------------------
-
-// Search is the cheapest external call to spam (no write, no changeset) and
-// the most abuse-prone (FTS over the whole project on every request), so it's
-// the first external route throttled. Scoped per credential, not per IP — PAT
-// callers are already authenticated and IP-scoping a bot-run agent buys
-// nothing. Wide enough that a legitimate agent looping searches every few
-// seconds never trips it; tight enough to blunt a leaked-PAT query flood.
-const SEARCH_MAX_PER_CREDENTIAL = 300
-
-async function handleExternalSearch(
-  request: Request,
-  env: ExternalReadsEnv,
-  projectId: string,
-): Promise<Response> {
-  const authed = await authenticateAndScope(request, env, projectId)
-  if (!authed.ok) return authed.response
-
-  if (env.AQUILLA_PG) {
-    const identifier = `credential:${authed.ctx.credential.credentialId}`
-    const recent = await countRecentRateLimitEvents(env.AQUILLA_PG, "external_search", identifier)
-    if (recent >= SEARCH_MAX_PER_CREDENTIAL) {
-      return externalError("rate_limited", "search rate limit exceeded, slow down", 429)
-    }
-    await recordRateLimitEvent(env.AQUILLA_PG, "external_search", identifier)
-  }
-
-  const url = new URL(request.url)
-  const q = url.searchParams.get("q")
-  if (q === null || q.trim() === "") {
-    return externalError("validation_failed", "missing q", 400)
-  }
-
-  const qSide = url.searchParams.get("side")
-  let side: "source" | "target" | undefined
-  if (qSide !== null) {
-    if (qSide !== "source" && qSide !== "target") {
-      return externalError("validation_failed", "invalid side: must be source or target", 400)
-    }
-    side = qSide
-  }
-
-  const { limit, offset } = parsePageParams(url)
-
-  // makeVerifiedProjectId only accepts a SyncTokenClaims-shaped object — we
-  // already established project scope + role above, so this claims object is
-  // legitimate (not a bypass): it just satisfies the branded-type gate that
-  // queryScopedSearch requires, the same way search-route.ts's real JWT
-  // claims do.
-  const claims: SyncTokenClaims = {
-    userId: Number(authed.ctx.credential.userId),
-    projectId,
-    fileId: "",
-    role: authed.ctx.role,
-    aud: "sync",
-    iat: 0,
-    exp: 0,
-  }
-  const verifiedProjectId = makeVerifiedProjectId(claims)
-
-  // queryScopedSearch only supports limit (no offset) — over-fetch to
-  // offset+limit (capped at its own MAX_LIMIT=500) and paginate in memory.
-  // See pagination.ts's module doc for the offset-pagination caveat this implies.
-  const fetchLimit = Math.min(500, offset + limit)
-
-  try {
-    const results = await queryScopedSearch(env.AQUILLA_PG as AquillaDb, verifiedProjectId, q, {
-      side,
-      limit: fetchLimit,
-    })
-    return Response.json(paginate(results, offset, limit))
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    console.error("external search failed:", err)
-    if (/syntax error|fts5/i.test(message)) {
-      return externalError("validation_failed", "invalid search query", 400)
-    }
-    return externalError("validation_failed", "search failed", 400)
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -472,6 +385,11 @@ export async function handleExternalReadRequest(
 
   if (ME_RE.test(url.pathname)) return handleExternalMe(request, env)
   if (PROJECTS_RE.test(url.pathname)) return handleExternalProjects(request, env)
+  if (CROSS_SEARCH_RE.test(url.pathname)) return handleExternalCrossProjectSearch(request, env)
+
+  // /orgs and /orgs/:orgId/projects (AQU-1236).
+  const orgResponse = await handleExternalOrgReadRequest(request, env)
+  if (orgResponse) return orgResponse
 
   let match = url.pathname.match(SEARCH_RE)
   if (match) return handleExternalSearch(request, env, decodeURIComponent(match[1]))

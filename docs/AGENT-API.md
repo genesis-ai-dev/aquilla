@@ -195,6 +195,25 @@ outside the event log. v1 therefore:
 The doc promises universal *auditability* in v1, and universal *event* provenance only
 where events exist.
 
+**Org-scoped reads (AQU-1236).** Credentials have always been scoped org-**or**-project,
+but the read tier only ever exposed the single scoped project, so a console managing a
+partner's whole workspace had to mint and juggle one token per project. An org-scoped
+credential can now enumerate its orgs (`GET …/orgs`), list a given org's projects
+(`GET …/orgs/:orgId/projects`, or `GET …/projects?orgId=`), and search an explicit list
+of projects in one call (`GET …/search?q=&projectIds=a,b`). Three invariants hold:
+
+- **Scope narrows, never widens.** Every query runs through the credential's own scope.
+  A *project*-scoped credential sees exactly its one project and that project's org — it
+  cannot reach the org's siblings. Naming a resource outside the scope returns
+  `scope_denied`, not an empty list, so "not yours" never reads as "empty".
+- **Cross-project search is all-or-nothing.** Every listed project is gated before any of
+  them is searched; one unauthorized id fails the whole call. A partial result set would
+  otherwise be indistinguishable from a complete one, and diffing result sets would leak
+  which project ids exist. Fan-out is bounded (10 projects) and charges the search rate
+  limit once per project searched.
+- **No new PII.** These routes expose ids, names, and the *caller's own* role level.
+  Org member lists, emails, and owner identities stay on the in-app surfaces.
+
 ---
 
 ## 3. Commands, changesets, confirmation, and jobs
@@ -334,10 +353,11 @@ CRUD surface with MCP bolted on.
 | Outcome | Tools |
 | --- | --- |
 | Discovery | `get_capabilities`, `get_identity_and_scope` |
-| Projects | `list_projects`, `get_project`, `create_project`, `update_project` |
+| Orgs | `list_orgs` — **implemented** (AQU-1236): the orgs a credential covers, `{ id, name, role, role_source }`. REST: `GET …/orgs` and `GET …/orgs/:orgId/projects` |
+| Projects | `list_projects` (optional `orgId` filter — AQU-1236), `get_project`, `create_project`, `update_project` |
 | Artifacts | `create_artifact_upload`, `inspect_artifact` |
 | Ingestion | `preview_import`, `prepare_import` — **implemented**: both parse an already-uploaded source artifact server-side with the built-in DOM-free parsers (txt, md, json, po, properties, obs, vtt, srt, sbv, csv, tsv, usfm, docx; 5000-cell cap) — preview returns cells without staging, prepare stages a `PlanImport` changeset linking the artifact. Upload stays REST-only (`POST …/artifacts`, 25MB). REST equivalent: `POST …/artifacts/:artifactId/parse` (body `{ "stage": true }` to stage). `docx` is parsed by the SAME `extractDocxStrings` the in-app Import dialog runs (AQU-1237 moved it off `DOMParser`/JSZip onto the platform-only `xml-lite`/`zip-lite` readers), so an agent import and a browser import of one file yield identical cells. Still DOM-bound and not yet server-parseable: pptx, html, xliff, tmx, usx, idml. |
-| Reading | `search_project`, `read_content`, `read_history`, `find_similar_cells`, `get_prompt_preview`, `list_memory`, `read_cell_memory` |
+| Reading | `search_project`, `search_projects` (cross-project, explicit id list, max 10 — AQU-1236), `read_content`, `read_history`, `find_similar_cells`, `get_prompt_preview`, `list_memory`, `read_cell_memory` |
 | Quality | `read_quality`, `read_term_consistency` — **implemented (AQU-1231)**: per-file health (0-100) + coverage (total/filled/validated + percentages) and the project rollup; and the term-consistency drift list (per active concept: occurrences, consistent count/percent, which approved rendering was used in which cells, and the cells that used none). Both are PARITY reads — `read_quality` delegates to the internal `health-rollup` and `files/:fileId/progress` routes the in-app health ring and progress surfaces read, and `read_term_consistency` runs the SPA's own scan (`src/lib/check/term-consistency-scan.ts`, shared with the in-app "Check file" pass). Whatever counting rules the progress projection applies (e.g. AQU-1083's headings/paratextual exclusion) the API inherits by construction — there is no second denominator to keep in step. REST equivalents: `GET …/projects/:projectId/quality` and `GET …/projects/:projectId/terms/consistency` (both take optional `fileId`, `lane`; the latter also `onlyDrift=1`). |
 | Translation | `prepare_translations` |
 | Verification | `run_checks` — structured, actionable failures (e.g. `"term 'covenant' rendered 3 ways: [refs]"`), never a bare 400. The term-consistency half of this now exists as `read_term_consistency` (above); `run_checks` remains unimplemented for the RULE pass. |

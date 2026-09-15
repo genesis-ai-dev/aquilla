@@ -2,6 +2,51 @@
 
 Updated: 2026-09-14. Tickets: AQU-837 (billing readiness), AQU-1091 (pricing and app UI).
 
+## Chat cost-ledger integration — 2026-09-14
+
+- [x] Connect the authenticated chat handler to durable weekly admission and
+  actual-cost settlement for local scripted-provider rehearsal. No separate
+  shadow implementation bypasses the normal authentication or project roles.
+- [x] Reject missing, unknown, and unauthorized project ownership instead of
+  falling back to the legacy unowned pool when usage rehearsal is enabled.
+- [x] Reserve before calling the provider; return 429 on exhausted allowance and
+  409 on a repeated idempotency key without making another provider request.
+- [x] Settle non-streaming provider cost and bounded, backpressured SSE streams.
+  Preserve response bytes. Settle before forwarding `[DONE]`, since the real
+  client returns at that frame without waiting for transport EOF.
+- [x] Preserve reservations for unknown/malformed cost, truncated streams,
+  cancellation, and uncertain provider failures. Valid generated content survives
+  accounting failure. Missing cost never becomes a fabricated flat charge in the
+  new weekly ledger; the legacy parallel ledger remains separate.
+- [x] Keep real providers and deployed origins outside this rehearsal. The flag
+  `BILLING_CHAT_USAGE_REHEARSAL=true` requires `WRANGLER_LOCAL=1` and loopback
+  request/provider URLs. Its one-cent reservation is for scripted local tests,
+  not a validated upper bound or estimated bill for a real provider.
+- [ ] Validate server-owned real-provider cost bounds and model routing before
+  enabling actual funded-provider enforcement. Do not silently remove the gate.
+- [ ] Persist provider generation references and verify reconciliation of held
+  requests after interrupted delivery or persistence failure.
+- [ ] Connect agent, background/contextual work, imports, and speech to the same
+  ledger; complete capability checks and authoritative usage percentages.
+
+Test impact: new `billing-chat-usage.test.ts` composes signed Checkout activation
+with the actual authenticated chat route, provider-shaped JSON/SSE responses, and
+real Postgres reservations/settlement. It covers fragmented UTF-8/SSE, immediate
+client completion at `[DONE]`, cancellation, missing cost, exhausted allowance,
+unauthorized scope, duplicate execution, and unsafe rehearsal configuration.
+Thirteen route tests plus sixteen ledger tests pass (29 total). Existing chat
+allowlist/attribution tests pass (14). Provider transport is scripted, not live.
+
+Commands: `pnpm --dir auth-worker exec vitest run --config
+vitest.webhook-postgres.config.ts src/__tests__/billing-chat-usage.test.ts
+src/__tests__/billing-workspace-usage.test.ts`; `pnpm --dir auth-worker exec
+vitest run src/__tests__/chat-guard.test.ts --maxWorkers=2`.
+The billing browser sentinel preserves current app access; it does not claim
+end-to-end live-provider enforcement. Worker type checking, production build,
+impact/determinism checks (24 pass), and targeted billing smoke (three pass,
+no slow-request logs) pass. `pnpm scan:secrets` and `git diff --check` also pass.
+No deployment or live-provider call occurs.
+
 ## Native hosted billing implementation — 2026-09-14
 
 This checkpoint supersedes the limited portal configuration and custom paid-plan

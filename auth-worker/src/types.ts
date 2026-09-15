@@ -257,6 +257,7 @@ export interface Env {
   /** Recurring $500 / 4-week Field Plan price id (price_…). */
   BILLING_CHECKOUT_ENABLED?: string
   /** Local loopback + test-key only. Never enables production purchasing. */
+  BILLING_CHAT_USAGE_REHEARSAL?: string
   BILLING_WORKSPACE_CHECKOUT_REHEARSAL?: string
   /** Approved environment-specific catalog JSON. Amounts are fetched from Stripe. */
   STRIPE_PRICE_CATALOG?: string

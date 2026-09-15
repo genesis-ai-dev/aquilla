@@ -41,7 +41,8 @@ Percentage-only presentation does not remove the need for an explicit unit.
   Exact weekly boundaries leave old usage intact. Explicit Free workspace periods
   start at workspace creation; unknown/legacy/covered workspaces require their
   separate access contract instead of automatic reclassification.
-- This foundation is internal and has no production route callers yet. It does
+- The authenticated chat route now consumes this foundation in explicit local
+  scripted-provider rehearsal; other production callers remain unconnected. It does
   not authorize users itself: funded endpoints must validate project access first,
   calculate a trusted maximum cost, reserve before the call, and settle afterward.
   Billing usage remains unavailable until all active producers are connected.
@@ -109,7 +110,9 @@ Foundation verification: 16 tests pass against real Postgres, composing signed
 Checkout activation → entitlement → reservation → provider cost parser → settlement.
 Coverage includes concurrency, replay, migration replay, equal multipliers, unknown
 cost, overrun, rollback, Free fallback, scope mismatch, and exact reset boundaries.
-Endpoint integration, capabilities, and launch enforcement remain incomplete.
+Local chat endpoint integration passes thirteen additional real-Postgres route
+tests. Real-provider bounds, remaining endpoints, capabilities, and launch
+enforcement remain incomplete.
 
 ## Local verification commands
 
@@ -119,6 +122,6 @@ Endpoint integration, capabilities, and launch enforcement remain incomplete.
 - `pnpm --dir auth-worker exec tsc --noEmit`, `npm run build`, and `git diff --check` — pass.
 
 The existing browser journey checks that the new schema preserves billing access;
-it does not claim to verify provider admission, which has no route callers yet.
+it does not claim to verify provider admission, which is separately covered through the real chat handler against Postgres.
 The new regression suite verifies the changed ledger contract against real
 Postgres. No UI behavior changes, so no new UI test or browser journey is added.

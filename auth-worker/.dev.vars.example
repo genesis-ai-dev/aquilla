@@ -151,3 +151,8 @@ MONDAY_REDIRECT_URI="http://localhost:5173/oauth/callback"
 
 # R2 object key prefix override for agent artifacts (routes/agent-artifacts.ts).
 # R2_KEY_PREFIX=""
+
+# Local scripted-provider weekly usage verification only. Requires WRANGLER_LOCAL=1
+# and loopback request + OPENROUTER_BASE_URL. Never enable for live providers.
+# Reserves 1 raw cent per local test request; settles reported cost, never an estimate.
+# BILLING_CHAT_USAGE_REHEARSAL="false"

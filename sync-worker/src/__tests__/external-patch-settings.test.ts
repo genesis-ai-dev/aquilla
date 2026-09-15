@@ -197,14 +197,14 @@ describe('PatchSettings — per-key floors', () => {
     // Mixed batch takes the max floor — the non-language key still needs 600.
     const { res: mixedRes } = await prepare(env, lead.token, patchCmd([
       { key: 'targetLanguage', value: 'de' },
-      { key: 'brief', value: 'x' },
+      { key: 'translationBrief', value: { l1Summary: 'x' } },
     ]))
     expect(mixedRes.status).toBe(403)
 
     // Terminology keeps its own (unchanged) floor — a contributor stays denied.
     const contributor = await memberToken(tdb, 400)
     const { res: termRes } = await prepare(env, contributor.token, patchCmd([
-      { key: 'terminology', value: { concepts: [] } },
+      { key: 'terminology', value: [] },
     ]))
     expect(termRes.status).toBe(403)
   })
@@ -363,7 +363,7 @@ describe('PatchSettings — read-then-patch round trip', () => {
     const { res, body } = await prepare(
       env,
       maintainer.token,
-      patchCmd([{ key: 'brief', value: 'Translate plainly.' }], before.version),
+      patchCmd([{ key: 'translationBrief', value: { l1Summary: 'Translate plainly.' } }], before.version),
     )
     expect(res.status).toBe(200)
     const { res: commitRes } = await commit(env, maintainer.token, body.changeset.id)
@@ -380,7 +380,7 @@ describe('PatchSettings — read-then-patch round trip', () => {
       version: number
     }
 
-    expect(after.settings.brief).toBe('Translate plainly.')
+    expect(after.settings.translationBrief).toEqual({ l1Summary: 'Translate plainly.' })
     expect(after.version).toBe(before.version + 1)
     // Byte-identical for everything the ops did not name.
     for (const key of Object.keys(before.settings)) {
@@ -394,12 +394,12 @@ describe('PatchSettings — read-then-patch round trip', () => {
     const { res, body } = await prepare(
       env,
       maintainer.token,
-      patchCmd([{ key: 'brief', value: 'nope' }], 99),
+      patchCmd([{ key: 'translationBrief', value: { l1Summary: 'nope' } }], 99),
     )
     expect(res.status).toBe(409)
     expect(body.error.code).toBe('plan_stale')
     const rows = await tdb.rows<{ settings: string }>('project_settings')
-    expect(JSON.parse(rows[0].settings).brief).toBeUndefined()
+    expect(JSON.parse(rows[0].settings).translationBrief).toBeUndefined()
   })
 })
 

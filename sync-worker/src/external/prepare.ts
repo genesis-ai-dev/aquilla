@@ -9,10 +9,12 @@ import { errorResponse, toErrorResponse } from './errors'
 import { AUTH_HINT } from './discovery-route'
 import {
   validateCommands,
+  isStructureCommandKind,
   laneCellKey,
   requiredRoleForCommand,
   PLAN_IMPORT_MAX_CELLS,
   type Command,
+  type StructureCommand,
   type CreateProjectCommand,
   type EmitEventsCommand,
   type LinkMediaCommand,
@@ -28,6 +30,7 @@ import { changedPolicyKeys, preparePatchSettings, previewSettingValue } from './
 import { prepareSetBrief } from './commands-set-brief'
 import { isMemoryCommand, prepareMemoryCommand } from './commands-memory'
 import { prepareEmitEvents } from './emit-events-engine'
+import { prepareStructure } from './structure-engine'
 import { resolveCellStates, type CellPrecondition } from './preconditions'
 import { uuidv7 } from './uuid'
 import { stageAndRespond } from './stage'
@@ -231,6 +234,24 @@ export async function prepareChangesetCore(
       return errorResponse('validation_failed', 'EmitEvents must be the only command in a changeset')
     }
     return prepareEmitEvents(db, cred, projectId, id, autonomyMode, emitEvents, env, resolvedRole.level)
+  }
+
+  // Cell-structure commands (AQU-1234): sole command per changeset. A
+  // structural edit is one indivisible rewrite of a file's anchor chain — two
+  // of them in one plan could name each other's cells and would have to be
+  // ordered and re-pinned against a chain that the first one moved. One per
+  // changeset keeps the plan reviewable and the pins honest.
+  const structure = validated.commands.find(
+    (c): c is StructureCommand => isStructureCommandKind(c.kind),
+  )
+  if (structure) {
+    if (validated.commands.length !== 1) {
+      return errorResponse(
+        'validation_failed',
+        `${structure.kind} must be the only command in a changeset`,
+      )
+    }
+    return prepareStructure(db, cred, projectId, id, autonomyMode, structure, env)
   }
 
   // PlanImport is a whole-file operation, not a per-cell batch — it takes its

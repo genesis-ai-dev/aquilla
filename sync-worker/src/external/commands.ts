@@ -41,6 +41,12 @@ import {
   validateMemoryCommand,
   type MemoryCommand,
 } from './commands-memory'
+import {
+  isStructureCommandKind,
+  structureCommandFloor,
+  validateStructureCommand,
+  type StructureCommand,
+} from './commands-structure'
 
 /** True for the four AQU-1228 Living Memory command kinds. Narrows a raw
  *  `kind` string BEFORE validation, unlike `isMemoryCommand` which narrows an
@@ -66,6 +72,15 @@ export type {
   AddNoteCommand,
   MemoryCommand,
 } from './commands-memory'
+export type {
+  DeleteCellCommand,
+  InsertCellCommand,
+  SplitCellCommand,
+  SplitTargetHandling,
+  SplitTargetOffset,
+  StructureCommand,
+} from './commands-structure'
+export { isStructureCommandKind } from './commands-structure'
 export { cellKey, laneCellKey } from './cell-keys'
 
 /** Set (or update) a single cell's translation. Compiles to target.cell.commit. */
@@ -175,6 +190,7 @@ export type Command =
   | EmitEventsCommand
   | SetBriefCommand
   | OrgMemberCommand
+  | StructureCommand
 
 /** Hard cap on source cells per PlanImport changeset. Above this the plan is
  *  rejected with validation_failed — the manifest-in-R2 pattern for larger
@@ -611,6 +627,11 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
       if (cmd) commands.push(cmd)
       return
     }
+    if (isStructureCommandKind(c.kind)) {
+      const cmd = validateStructureCommand(c, index, issues)
+      if (cmd) commands.push(cmd)
+      return
+    }
     if (c.kind === 'LinkMedia') {
       if (!isNonEmptyString(c.fileId)) {
         issues.push({ index, message: 'LinkMedia.fileId must be a non-empty string' })
@@ -695,6 +716,13 @@ export function requiredRoleForCommand(c: Command): number {
   // review-tier PROJECT_LEAD). Their own prepare/commit path re-checks it.
   if (isMemoryCommand(c)) {
     return memoryCommandFloor(c)
+  }
+  // InsertCell / DeleteCell / SplitCell: PROJECT_LEAD, for the same reason
+  // EmitEvents floors source.cell.* there — this surface never runs the app's
+  // per-event `allowLineCreation` carve-out, so restructuring source rows stays
+  // a re-import-shaped act. See commands-structure.ts.
+  if (c.kind === 'InsertCell' || c.kind === 'DeleteCell' || c.kind === 'SplitCell') {
+    return structureCommandFloor()
   }
   return REQUIRED_ROLE['target.cell.commit']
 }

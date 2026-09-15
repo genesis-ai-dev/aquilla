@@ -135,7 +135,9 @@ export function RuleSuggestFromEditsDialog({
     }
   }
 
-  async function handleCommit(accepted: number[]) {
+  // AQU-198: `accepted` carries the drafts as edited in the review screen, so an
+  // inline rename there survives the commit.
+  async function handleCommit(accepted: RuleSuggestion[]) {
     setCommitting(true)
     try {
       // AQU-455: this loop calls onAdd (= useRules.addRule) once per accepted
@@ -147,8 +149,7 @@ export function RuleSuggestFromEditsDialog({
       // rule. SWARM-TODO(manual verify): Editor -> Rules -> "Suggest from
       // edits" -> accept >= 2 suggestions -> confirm -> all N rules appear in
       // the list and survive a reload.
-      for (const i of accepted) {
-        const s = suggestions[i]
+      for (const s of accepted) {
         await onAdd({
           name: s.name,
           description: s.description,

@@ -78,7 +78,25 @@ export interface ChangesetApprovalSummary {
    *  must be able to see who, what role, and which project without reading
    *  the command JSON. */
   membershipChanges?: string[]
+  /** AQU-1228 Living Memory writes: the entry path being written or retired
+   *  plus a one-line preview of its content — the approval page renders these
+   *  explicitly, because approving IS the memory review. */
+  memoryWrites?: { path: string; action: string; preview: string }[]
+  /** InsertCell/DeleteCell/SplitCell: the one structural effect line — which
+   *  command, the file, and how many rows move (AQU-1234). */
+  structure?: ChangesetSummaryStructure
   [key: string]: unknown
+}
+
+/** Server-computed effect line for a cell-structure changeset. */
+export interface ChangesetSummaryStructure {
+  command: 'InsertCell' | 'DeleteCell' | 'SplitCell'
+  fileId: string
+  cellsAdded: number
+  cellsRemoved: number
+  cellsReanchored: number
+  targetsRemoved: number
+  targetsRewritten: number
 }
 
 /** GET /api/v2/changesets/:id/approval response (auth-worker

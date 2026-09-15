@@ -11,10 +11,44 @@ export interface TeamDetail {
 }
 function authHeaders(jwt: string): HeadersInit { return { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` } }
 
+export const TEAM_DIRECTORY_PAGE_SIZE = 40
+export type TeamDirectoryVisibility = "all" | "internal" | "public"
+
+export interface TeamDirectoryPage {
+  groups: TeamSummary[]
+  nextCursor: string | null
+}
+
 export async function listTeams(jwt: string, orgId: number): Promise<TeamSummary[]> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/groups`, { headers: authHeaders(jwt) })
   if (!res.ok) throw new UserError(res.status, "", "team")
   return ((await res.json()) as { groups: TeamSummary[] }).groups
+}
+
+export async function listTeamsPage(
+  jwt: string,
+  orgId: number,
+  opts: {
+    q?: string
+    limit?: number
+    cursor?: string | null
+    visibility?: TeamDirectoryVisibility
+    signal?: AbortSignal
+  } = {},
+): Promise<TeamDirectoryPage> {
+  const params = new URLSearchParams()
+  const q = opts.q?.trim()
+  if (q) params.set("q", q)
+  params.set("limit", String(opts.limit ?? TEAM_DIRECTORY_PAGE_SIZE))
+  if (opts.cursor) params.set("cursor", opts.cursor)
+  if (opts.visibility) params.set("visibility", opts.visibility)
+  const res = await fetchWithTimeout(
+    `${FRONTIER_BASE}/api/v2/orgs/${orgId}/groups?${params}`,
+    { headers: authHeaders(jwt), signal: opts.signal },
+  )
+  if (!res.ok) throw new UserError(res.status, "", "team")
+  const body = (await res.json()) as { groups: TeamSummary[]; nextCursor?: string | null }
+  return { groups: body.groups ?? [], nextCursor: body.nextCursor ?? null }
 }
 export async function getTeam(jwt: string, orgId: number, groupId: number): Promise<TeamDetail> {
   const res = await fetchWithTimeout(`${FRONTIER_BASE}/api/v2/orgs/${orgId}/groups/${groupId}`, { headers: authHeaders(jwt) })

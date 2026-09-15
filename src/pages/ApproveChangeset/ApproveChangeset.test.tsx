@@ -109,6 +109,58 @@ describe("ApproveChangeset", () => {
     expect(screen.queryByText(/No changes summarized/i)).not.toBeInTheDocument()
   })
 
+  it("states an AddOrgMember change in plain language — who, which org, what role (AQU-1235)", async () => {
+    const data = {
+      ...APPROVAL_DATA,
+      summary: {
+        command: "AddOrgMember",
+        orgMemberUsername: "bob",
+        targetOrg: "Acme (id 10)",
+        orgMemberNewRole: "contributor",
+        orgMemberCurrentRole: "not a member",
+        warnings: [],
+      },
+    }
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(data), { status: 200 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    renderPage()
+
+    // The approver must be able to answer "who, where, what role" without
+    // reading the raw plan — a blind approval is the failure mode here.
+    expect(await screen.findByText("AddOrgMember")).toBeInTheDocument()
+    expect(screen.getByText("bob")).toBeInTheDocument()
+    expect(screen.getByText("Acme (id 10)")).toBeInTheDocument()
+    expect(screen.getByText("contributor")).toBeInTheDocument()
+    expect(screen.getByText(/org member new role/i)).toBeInTheDocument()
+    expect(screen.queryByText(/No changes summarized/i)).not.toBeInTheDocument()
+  })
+
+  it("names the org and its incoming owner for a CreateOrg changeset (AQU-1221)", async () => {
+    // The human approving a tenant creation must be told WHAT is created and WHO
+    // ends up owning it — an org name alone is not enough to authorize on.
+    const data = {
+      ...APPROVAL_DATA,
+      summary: {
+        command: "CreateOrg",
+        orgName: "Partner Co",
+        orgOwner: "alice",
+        warnings: [],
+      },
+    }
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(data), { status: 200 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    renderPage()
+
+    expect(await screen.findByText("CreateOrg")).toBeInTheDocument()
+    expect(screen.getByText(/org name/i)).toBeInTheDocument()
+    expect(screen.getByText("Partner Co")).toBeInTheDocument()
+    expect(screen.getByText(/org owner/i)).toBeInTheDocument()
+    expect(screen.getByText("alice")).toBeInTheDocument()
+    expect(screen.queryByText(/No changes summarized/i)).not.toBeInTheDocument()
+  })
+
   it("renders per-key settings previews for an UpdateProjectSettings changeset", async () => {
     const data = {
       ...APPROVAL_DATA,
@@ -155,6 +207,35 @@ describe("ApproveChangeset", () => {
     expect(await screen.findByText(/Membership changes/i)).toBeInTheDocument()
     expect(screen.getByText("Add ana to proj-1 as contributor (400)")).toBeInTheDocument()
     expect(screen.getByText("Remove pat from proj-1")).toBeInTheDocument()
+    expect(screen.queryByText(/No changes summarized/i)).not.toBeInTheDocument()
+  })
+
+  it("renders the entry path and content preview for a Living Memory changeset", async () => {
+    // AQU-1228: approving IS the memory review, so the human must see WHAT the
+    // entry says — "Command: AddDecision" alone is a blind approval.
+    const data = {
+      ...APPROVAL_DATA,
+      summary: {
+        command: "AddDecision",
+        projectId: "proj-1",
+        memoryWrites: [
+          {
+            path: "decisions/divine-name.md",
+            action: "add",
+            preview: "add decision: Render Lord as Господь, never Пан.",
+          },
+        ],
+        warnings: [],
+      },
+    }
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(data), { status: 200 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    renderPage()
+
+    expect(await screen.findByText(/Living Memory changes/i)).toBeInTheDocument()
+    expect(screen.getByText("decisions/divine-name.md")).toBeInTheDocument()
+    expect(screen.getByText(/never Пан/)).toBeInTheDocument()
     expect(screen.queryByText(/No changes summarized/i)).not.toBeInTheDocument()
   })
 

@@ -42,6 +42,33 @@ export function isTerminologyOnlyPatch(partial: ProjectWideSettings): boolean {
 }
 
 /**
+ * AQU-1246: the second key that does NOT sit behind
+ * {@link SETTINGS_EDIT_ROLE_FLOOR}. A patch that touches only
+ * `autopilotEnabled` — opting this project into (or out of) the experimental
+ * Autopilot surface — is admitted at project_lead(500)+.
+ *
+ * Deliberately a carve-out rather than a floor change: whether your own
+ * project may try an experiment is a lead's call, and admitting this one key
+ * hands a lead nothing else. Everything above it (languages, system prompt,
+ * validation rules, health) keeps the maintainer gate.
+ *
+ * Mirrors the server carve-out in auth-worker/src/routes/project-settings.ts,
+ * which re-derives the same "only this key changed" test against the stored
+ * row and remains authoritative. This client copy exists to stop a
+ * guaranteed-403 write and to keep the AQU-255 rule intact (never apply a
+ * below-floor patch locally).
+ */
+export const AUTOPILOT_EDIT_ROLE_FLOOR = ROLE.PROJECT_LEAD
+
+const AUTOPILOT_KEY = "autopilotEnabled"
+
+/** True when a patch changes the Autopilot opt-in and nothing else. */
+export function isAutopilotOnlyPatch(partial: ProjectWideSettings): boolean {
+  const keys = Object.keys(partial)
+  return keys.length > 0 && keys.every((key) => key === AUTOPILOT_KEY)
+}
+
+/**
  * AQU-979: the same-tab convergence channel for project-wide settings.
  *
  * Project settings are PATCHed through auth-worker's REST API, not the sync
@@ -144,8 +171,9 @@ export interface UseProjectSettings {
   refresh: () => Promise<ProjectSettingsResponse | null>
   /** Apply a partial settings update. Optimistic local update, server PATCH,
    *  conflict-snap on 409, returns outcome. Blocked when offline or below
-   *  MAINTAINER (600) — except a terminology-only patch, which is gated by the
-   *  org's `termbaseEditMinRole` floor (AQU-822). Server-forbidden writes are
+   *  MAINTAINER (600) — except a terminology-only patch, gated by the org's
+   *  `termbaseEditMinRole` floor (AQU-822), and an autopilotEnabled-only
+   *  patch, gated by PROJECT_LEAD (AQU-1246). Server-forbidden writes are
    *  surfaced as blocked and the optimistic overlay is rolled back — no silent
    *  local divergence. */
   patch: (partial: ProjectWideSettings) => Promise<PatchOutcome>
@@ -159,6 +187,22 @@ export interface UseProjectSettingsOptions {
    * Omitted ⇒ the PROJECT_LEAD default.
    */
   termbaseEditMinRole?: number | null
+  /**
+   * AQU-1274: role context stamped onto the `project settings hydrated`
+   * PostHog event. A hidden panel is indistinguishable from a broken one in
+   * telemetry unless the event says which role the viewer actually resolved
+   * to and which grant path produced it — diagnosing the Biblica ETT report
+   * took a screenshot hunt for exactly this reason. Optional: callers that
+   * don't have the role context omit it and the properties are absent.
+   */
+  roleTelemetry?: {
+    /** The viewer's `org_members` role level, or null if not an org member. */
+    orgRole: number | null
+    /** The resolved (max-wins) role level on this project. */
+    resolvedRole: number | null
+    /** Which grant path won: override | group | org | creator | platform. */
+    resolvedFrom: string | null
+  }
 }
 
 function settingsValueEqual(a: unknown, b: unknown): boolean {
@@ -293,6 +337,14 @@ export function useProjectSettings(
     isOnlineRef.current = isOnline
   }, [isOnline])
 
+  // AQU-1274: read through a ref so role context stamped on the hydration
+  // event never becomes a refresh() dependency — the role resolves on its own
+  // schedule and must not re-trigger the settings fetch (or re-fire the event).
+  const roleTelemetryRef = useRef(options?.roleTelemetry)
+  useEffect(() => {
+    roleTelemetryRef.current = options?.roleTelemetry
+  }, [options?.roleTelemetry])
+
   // React StrictMode invokes the initial hydration effect twice, and settings
   // can also be requested by more than one effect during a fast route change.
   // Keep one request per mounted consumer in flight and let every caller await
@@ -325,6 +377,14 @@ export function useProjectSettings(
           project_id: projectId,
           within_ms: Math.round(performance.now() - mountAtRef.current),
           has_server_row: got.version > 0,
+          // AQU-1274 — see UseProjectSettingsOptions.roleTelemetry.
+          ...(roleTelemetryRef.current
+            ? {
+                org_role: roleTelemetryRef.current.orgRole,
+                resolved_role: roleTelemetryRef.current.resolvedRole,
+                resolved_from: roleTelemetryRef.current.resolvedFrom,
+              }
+            : {}),
         })
       }
       if (got && got.version > 0) {
@@ -542,11 +602,12 @@ export function useProjectSettings(
     // 5. roleLevel >= that floor → optimistic local apply happens *after*
     //    this block, just before the serialized server write.
     //
-    // AQU-822: the required floor is SETTINGS_EDIT_ROLE_FLOOR (maintainer) for
-    // every patch EXCEPT a terminology-only one, which uses the org's
-    // configured termbaseEditMinRole. Deriving it per-patch (rather than
-    // loosening the hook-wide floor) keeps the AQU-255 guarantee intact for
-    // all the other keys.
+    // AQU-822 / AQU-1246: the required floor is SETTINGS_EDIT_ROLE_FLOOR
+    // (maintainer) for every patch EXCEPT two single-key carve-outs — a
+    // terminology-only one, which uses the org's configured
+    // termbaseEditMinRole, and an autopilotEnabled-only one, which sits at
+    // project_lead. Deriving it per-patch (rather than loosening the hook-wide
+    // floor) keeps the AQU-255 guarantee intact for all the other keys.
 
     if (!projectId || !jwt) return { kind: "error", message: t("workspace.projectSettingsHook.noSessionError") }
 
@@ -570,7 +631,9 @@ export function useProjectSettings(
 
     const requiredLevel = isTerminologyOnlyPatch(partial)
       ? resolveTermbaseEditFloor(termbaseEditMinRole)
-      : SETTINGS_EDIT_ROLE_FLOOR
+      : isAutopilotOnlyPatch(partial)
+        ? AUTOPILOT_EDIT_ROLE_FLOOR
+        : SETTINGS_EDIT_ROLE_FLOOR
     if (roleLevel < requiredLevel) {
       // Synced project below floor — do NOT apply locally; the server will
       // reject and we'd silently diverge (the original AQU-255 bug).

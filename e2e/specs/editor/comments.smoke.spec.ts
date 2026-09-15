@@ -14,12 +14,8 @@ test("alice posts a comment on a cell and it appears in the drawer", async ({ al
   const seeded = await seedProjectWithFile(await jwtFor("alice"), { name: `Comments ${Date.now()}` })
   const ws = await openSeededProject(alice, seeded)
 
-  const row = ws.cellRow(0)
-  await row.scrollIntoViewIfNeeded()
-  await row.hover()
-
-  const addCommentBtn = row.locator('button[aria-label="Add comment"]')
-  await expect(addCommentBtn).toBeVisible()
+  // AQU-200: comments live behind the rail's ⋯ overflow.
+  const addCommentBtn = await ws.openRowAction(ws.cellRow(0), "Add comment")
   await addCommentBtn.click()
 
   // CommentsDrawer should now be open. The drawer renders as a div with

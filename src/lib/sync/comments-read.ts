@@ -3,7 +3,7 @@
 // Pattern follows search-read.ts.
 
 import { syncWorkerHttpOrigin } from './sync-worker-url'
-import type { CommentRecord, CommentsResponse, FetchCommentsOptions } from './comments-read-types'
+import type { CommentCounts, CommentRecord, CommentsResponse, FetchCommentsOptions } from './comments-read-types'
 
 export class CommentsReadError extends Error {
   status: number
@@ -54,24 +54,61 @@ export async function fetchCommentsForCell(
 }
 
 /**
- * GET /api/v1/projects/:projectId/comments
+ * GET /api/v1/projects/:projectId/comments?fileId=&cellId=&limit=&cursor=
  *
- * Returns all comments across every scope in the project. Used by
- * CommentsPage for the project-wide comments view.
+ * One page of comments (worker default 200 rows) in createdAt ASC order plus
+ * the cursor for the next page. Feed `nextCursor` back as `cursor` until it
+ * comes back null.
  */
-export async function fetchCommentsForProject(
+export async function fetchCommentsPage(
   projectId: string,
   jwt: string,
   opts: FetchCommentsOptions = {},
-): Promise<CommentRecord[]> {
+): Promise<{ comments: CommentRecord[]; nextCursor: string | null }> {
   const params = new URLSearchParams()
   if (opts.fileId) params.set('fileId', opts.fileId)
   if (opts.cellId) params.set('cellId', opts.cellId)
+  if (opts.limit) params.set('limit', String(opts.limit))
+  if (opts.cursor) params.set('cursor', opts.cursor)
   const qs = params.toString()
   const url =
     `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}` +
     `/comments${qs ? `?${qs}` : ''}`
   const res = await fetch(url, { headers: authHeaders(jwt) })
   const body = await readJson<CommentsResponse>(res)
-  return body.comments
+  return { comments: body.comments, nextCursor: body.nextCursor ?? null }
+}
+
+/**
+ * Every comment matching the scope, following `nextCursor` to the end.
+ * `onPage` fires after each page lands with the rows so far, so a caller can
+ * render the first page before the rest arrives.
+ */
+export async function fetchCommentsForProject(
+  projectId: string,
+  jwt: string,
+  opts: FetchCommentsOptions = {},
+  onPage?: (soFar: CommentRecord[]) => void,
+): Promise<CommentRecord[]> {
+  const all: CommentRecord[] = []
+  let cursor: string | undefined = opts.cursor
+  do {
+    const page = await fetchCommentsPage(projectId, jwt, { ...opts, cursor })
+    all.push(...page.comments)
+    onPage?.(all)
+    cursor = page.nextCursor ?? undefined
+  } while (cursor)
+  return all
+}
+
+/**
+ * GET /api/v1/projects/:projectId/comments/counts
+ *
+ * Open-thread counts for badges — an indexed GROUP BY on the worker, no rows.
+ */
+export async function fetchCommentCounts(projectId: string, jwt: string): Promise<CommentCounts> {
+  const url =
+    `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}/comments/counts`
+  const res = await fetch(url, { headers: authHeaders(jwt) })
+  return readJson<CommentCounts>(res)
 }

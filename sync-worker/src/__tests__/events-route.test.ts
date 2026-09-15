@@ -10,7 +10,8 @@ vi.mock('partyserver', () => ({
   }),
 }))
 
-import { handleEventsWriteRequest } from '../events/route'
+import { handleEventsWriteRequest, EVENT_APPLIED_ROWS_MAX_CELLS } from '../events/route'
+import { handleCellsReadRequest } from '../events/cells-read-route'
 import { handleRebuildProjectionRequest } from '../events/rebuild'
 import { makeTestDb } from './helpers/pg-test-db'
 import { makeTestToken } from './helpers/auth'
@@ -164,8 +165,14 @@ describe('POST /events — authorization', () => {
     expect(tables.events[0].author).toBe('token-alice')
   })
 
-  it('rejects source.cell.* from a CONTRIBUTOR token with 403', async () => {
-    const token = await makeToken({ role: 400 })
+  it('rejects source.cell.* from a VIEWER token with 403', async () => {
+    // The static floor in role-policy.ts is COMMENTER (200), and since
+    // 2026-09-09 it is the ONLY server floor on this kind — the project's
+    // `cellEditingFloor` tier is enforced at the button instead. A viewer (100)
+    // is the rank this still refuses. (This test named a CONTRIBUTOR until the
+    // tier came out; a contributor is above the static floor and is now
+    // accepted, which the two tests below assert directly.)
+    const token = await makeToken({ role: 100 })
     const event = sourceCreate()
     const { db, snapshot } = await makeTestDb()
     const res = (await handleEventsWriteRequest(await makeRequest([event], token), makeEnv(db)))!
@@ -174,10 +181,30 @@ describe('POST /events — authorization', () => {
     expect(body.rejected[0].status).toBe(403)
   })
 
-  it('accepts source.cell.* from a PROJECT_LEAD token', async () => {
+  it('ACCEPTS source.cell.* from a PROJECT_LEAD token on a project that never opted in', async () => {
+    // AQU-1068, reversed on 2026-09-09. This used to assert a 403: the
+    // `cellEditingFloor` tier defaulted to "none" and refused every rank at
+    // this perimeter. The tier is now a product rule enforced at the button
+    // (see authorize.ts), because refusing here also refused audio-cue
+    // re-import, DCS upstream import and diarization — all of which emit this
+    // kind through the user's own outbox. What is left is the static floor.
     const token = await makeToken({ role: 500 })
     const event = sourceCreate()
     const { db, snapshot } = await makeTestDb()
+    const res = (await handleEventsWriteRequest(await makeRequest([event], token), makeEnv(db)))!
+    const body = await res.json() as any
+    expect(body.accepted).toHaveLength(1)
+    expect((await snapshot()).events[0].kind).toBe('source.cell.create')
+  })
+
+  it('accepts it with a tier set too — the tier changes nothing at this layer', async () => {
+    const token = await makeToken({ role: 500 })
+    const event = sourceCreate()
+    const { db, snapshot } = await makeTestDb({
+      project_settings: [
+        { project_id: 'proj-a', settings: JSON.stringify({ cellEditingFloor: 'maintainer' }) },
+      ],
+    })
     const res = (await handleEventsWriteRequest(await makeRequest([event], token), makeEnv(db)))!
     const body = await res.json() as any
     expect(body.accepted).toHaveLength(1)
@@ -242,6 +269,33 @@ describe('POST /events — one malformed event does not take its batch down', ()
     // batch that never reached Postgres.
     const events = (await snapshot()).events
     expect(events.map((e: any) => e.id)).toEqual(['evt-create-good'])
+  })
+})
+
+// ── DB-failure error responses never echo raw driver/DB error text ────────
+
+describe('POST /events — DB batch failure responses stay generic', () => {
+  it('reports a generic "DB batch failed" reason, never the raw driver error, when the write transaction throws', async () => {
+    const token = await makeToken({ role: 600 })
+    const { db } = await makeTestDb()
+    const failingDb = Object.create(db) as typeof db
+    const failBatch = async () => {
+      throw new Error('relation "cells" violates constraint fk_cells_project_id_9f21 on column project_id')
+    }
+    failingDb.batch = failBatch
+    failingDb.batchPipelined = failBatch
+
+    const res = (await handleEventsWriteRequest(
+      await makeRequest([targetCreate()], token),
+      makeEnv(failingDb),
+    ))!
+    expect(res.status).toBe(200)
+
+    const body = (await res.json()) as any
+    expect(body.rejected).toHaveLength(1)
+    expect(body.rejected[0].status).toBe(500)
+    expect(body.rejected[0].reason).toBe('DB batch failed')
+    expect(body.rejected[0].reason).not.toMatch(/relation|constraint|fk_cells/)
   })
 })
 
@@ -393,10 +447,21 @@ describe('POST /events — lane/side-qualified chain slots (route pre-check)', (
   const srcCreate = () =>
     sourceCreate({ id: 'evt-src', payload: { cellId: 'cell-1', value: 'source text' } })
 
+  // These tests are about chain-slot arbitration, not about who may restructure
+  // a file — but each seeds a `source.cell.create`, which AQU-1068 gates on the
+  // project having opted in. Opt them in so the gate stays out of the way of
+  // what they actually assert.
+  const makeChainDb = () =>
+    makeTestDb({
+      project_settings: [
+        { project_id: 'proj-a', settings: JSON.stringify({ cellEditingFloor: 'project_lead' }) },
+      ],
+    })
+
   it("two lanes' first commits share the source parent and BOTH project (separate requests)", async () => {
     const leadToken = await makeToken({ role: 500 })
     const token = await makeToken()
-    const { db, snapshot } = await makeTestDb()
+    const { db, snapshot } = await makeChainDb()
 
     await handleEventsWriteRequest(await makeRequest([srcCreate()], leadToken), makeEnv(db))
 
@@ -431,7 +496,7 @@ describe('POST /events — lane/side-qualified chain slots (route pre-check)', (
   it('a source correction after a target commit on the same parent still projects', async () => {
     const leadToken = await makeToken({ role: 500 })
     const token = await makeToken()
-    const { db, snapshot } = await makeTestDb()
+    const { db, snapshot } = await makeChainDb()
 
     await handleEventsWriteRequest(await makeRequest([srcCreate()], leadToken), makeEnv(db))
     await handleEventsWriteRequest(
@@ -476,7 +541,7 @@ describe('POST /events — lane/side-qualified chain slots (route pre-check)', (
     // lane head, and the next commit chains cleanly.
     const leadToken = await makeToken({ role: 500 })
     const token = await makeToken()
-    const { db, snapshot } = await makeTestDb()
+    const { db, snapshot } = await makeChainDb()
 
     await handleEventsWriteRequest(await makeRequest([srcCreate()], leadToken), makeEnv(db))
     await handleEventsWriteRequest(
@@ -560,7 +625,7 @@ describe('POST /events — lane/side-qualified chain slots (route pre-check)', (
   it('a same-lane sibling still loses its slot (AD-2 preserved per lane)', async () => {
     const leadToken = await makeToken({ role: 500 })
     const token = await makeToken()
-    const { db, snapshot } = await makeTestDb()
+    const { db, snapshot } = await makeChainDb()
 
     await handleEventsWriteRequest(await makeRequest([srcCreate()], leadToken), makeEnv(db))
     await handleEventsWriteRequest(
@@ -592,7 +657,22 @@ describe('POST /events — lane/side-qualified chain slots (route pre-check)', (
 describe('POST /events — AD-9 source_event_id pin', () => {
   it('target.cell.commit writes payload.sourceEventId into cells.source_event_id', async () => {
     const token = await makeToken()
-    const { db, snapshot } = await makeTestDb()
+    // The source row the pin names has to be there: a pinned commit whose
+    // source row is ABSENT is now refused outright (AQU-1068, below), so a
+    // free-floating pin no longer reaches the projection at all.
+    const { db, snapshot } = await makeTestDb({
+      cells: [
+        {
+          project_id: 'proj-a',
+          file_id: 'file-x',
+          cell_id: 'cell-1',
+          side: 'source',
+          target_lang: '',
+          value: 'source text',
+          event_id: 'src-pin-99',
+        },
+      ],
+    })
 
     await handleEventsWriteRequest(
       await makeRequest([targetCreate({ id: 'evt-create-001' })], token),
@@ -609,7 +689,7 @@ describe('POST /events — AD-9 source_event_id pin', () => {
     })
     await handleEventsWriteRequest(await makeRequest([commit], token), makeEnv(db))
 
-    const cell = (await snapshot()).cells[0]
+    const cell = (await snapshot()).cells.find((c) => c.side === 'target')!
     expect(cell.source_event_id).toBe('src-pin-99')
   })
 
@@ -626,6 +706,206 @@ describe('POST /events — AD-9 source_event_id pin', () => {
     )
     const cell = (await snapshot()).cells[0]
     expect(cell.source_event_id).toBeNull()
+  })
+})
+
+// ── AQU-1068: a pinned draft that lands after its cell is gone ─────────
+
+describe('POST /events — target.cell.commit whose source cell was removed', () => {
+  // Matthew, on 3G: he asked the AI to draft a cell, deleted a cell while that
+  // draft was still generating, and the draft POSTed after the delete landed.
+  // The projection's target commit upserts without checking for a source row,
+  // so the late draft re-created the cell as a target-only row — which the
+  // client appends to the END of the file (joinSourceAndTarget). His
+  // translation "jumped to the second last cell", unrecoverably.
+  //
+  // The cell is IMPORTED — seeded straight into `cells` the way the import
+  // route lands one, with no `source.cell.create` in the log. That is the cell
+  // AQU-1068 newly lets somebody remove, and the one a translator is drafting
+  // against. Removing it needs MAINTAINER rank — the one cell-structure rule
+  // authorize.ts still enforces — so the token below carries it. The tier in
+  // the seed is inert since 2026-09-09 and kept only to prove it changes
+  // nothing.
+  const SOURCE_HEAD = 'evt-src-imported'
+  const importedCell = () =>
+    makeTestDb({
+      project_settings: [
+        { project_id: 'proj-a', settings: JSON.stringify({ cellEditingFloor: 'maintainer' }) },
+      ],
+      cells: [
+        {
+          project_id: 'proj-a',
+          file_id: 'file-x',
+          cell_id: 'cell-1',
+          side: 'source',
+          target_lang: '',
+          value: 'source text',
+          event_id: SOURCE_HEAD,
+        },
+      ],
+    })
+
+  // The PARENTED shape, which is what the in-app remove actually sends
+  // (`handleRemoveLine` passes `parentId: plan.eventId`). A parent is what puts
+  // a chain gate on the projection, so this is the only shape that exercises
+  // the gated cascade — and until the review round that cascade was broken
+  // (its gate named a `cells` column inside DELETEs against other tables, which
+  // Postgres refuses outright), so a removal 500'd and every test here had to
+  // use the parent-less tombstone instead. Keep it parented: a refusal that is
+  // only ever proven against a shape no user can produce proves nothing.
+  const sourceDelete = (
+    overrides: Partial<RawEvent<'source.cell.delete'>> = {},
+  ): RawEvent<'source.cell.delete'> => ({
+    id: 'evt-src-delete',
+    schemaVersion: 1,
+    kind: 'source.cell.delete',
+    projectId: 'proj-a',
+    fileId: 'file-x',
+    cellId: 'cell-1',
+    parentId: SOURCE_HEAD,
+    author: 'alice',
+    payload: {},
+    clientTs: 4000,
+    ...overrides,
+  })
+
+  /** The draft that arrives too late. The pin is the source head the client
+   *  read off the row when it asked for the translation. */
+  const lateDraft = (overrides: Partial<RawEvent<'target.cell.commit'>> = {}) =>
+    targetCommit({
+      id: 'evt-late-draft',
+      parentId: SOURCE_HEAD,
+      payload: { value: 'AI translation', sourceEventId: SOURCE_HEAD },
+      ...overrides,
+    })
+
+  it('refuses the pinned draft with 409 when the delete landed in an EARLIER request', async () => {
+    const maintainer = await makeToken({ role: 600 })
+    const translator = await makeToken()
+    const { db, snapshot } = await importedCell()
+
+    await handleEventsWriteRequest(await makeRequest([sourceDelete()], maintainer), makeEnv(db))
+    expect((await snapshot()).cells).toHaveLength(0)
+
+    const res = (await handleEventsWriteRequest(
+      await makeRequest([lateDraft()], translator),
+      makeEnv(db),
+    ))!
+    const body = (await res.json()) as any
+    expect(body.accepted).toHaveLength(0)
+    expect(body.rejected).toHaveLength(1)
+    expect(body.rejected[0].id).toBe('evt-late-draft')
+    expect(body.rejected[0].status).toBe(409)
+    expect(body.rejected[0].reason).toMatch(/no source cell/)
+    // THE BUG: this used to be one orphaned target row, rendered at the tail
+    // of the file with nothing to undo it.
+    expect((await snapshot()).cells).toHaveLength(0)
+  })
+
+  it('refuses it too when the delete is EARLIER IN THE SAME BATCH', async () => {
+    // One flush can carry both: the head-tracking pass drops the source key
+    // from the request's prefetched heads as it walks the delete, so the
+    // commit behind it sees the same absence a separate request would.
+    const maintainer = await makeToken({ role: 600 })
+    const { db, snapshot } = await importedCell()
+
+    const res = (await handleEventsWriteRequest(
+      await makeRequest([sourceDelete(), lateDraft()], maintainer),
+      makeEnv(db),
+    ))!
+    const body = (await res.json()) as any
+    expect(body.accepted.map((a: any) => a.id)).toEqual(['evt-src-delete'])
+    expect(body.rejected).toHaveLength(1)
+    expect(body.rejected[0].id).toBe('evt-late-draft')
+    expect(body.rejected[0].status).toBe(409)
+    expect(body.rejected[0].reason).toMatch(/no source cell/)
+    expect((await snapshot()).cells).toHaveLength(0)
+  })
+
+  it('still accepts a commit with NO pin and no source row — target-only is a supported shape', async () => {
+    // The guard against widening the refusal. Same world as the test above —
+    // the source row is gone — and the ONLY difference is the missing
+    // `sourceEventId`. Target rows with no source beside them are a shape this
+    // codebase counts (progress-projection.ts) and serves (cells-read-route.ts),
+    // and a legitimate one carries no pin, so "no source row" alone must never
+    // be the predicate.
+    const maintainer = await makeToken({ role: 600 })
+    const translator = await makeToken()
+    const { db, snapshot } = await importedCell()
+
+    await handleEventsWriteRequest(await makeRequest([sourceDelete()], maintainer), makeEnv(db))
+
+    const res = (await handleEventsWriteRequest(
+      await makeRequest([lateDraft({ payload: { value: 'target-only draft' } })], translator),
+      makeEnv(db),
+    ))!
+    const body = (await res.json()) as any
+    expect(body.rejected).toHaveLength(0)
+    expect(body.accepted.map((a: any) => a.id)).toEqual(['evt-late-draft'])
+
+    const cells = (await snapshot()).cells
+    expect(cells).toHaveLength(1)
+    expect(cells[0].side).toBe('target')
+    expect(cells[0].value).toBe('target-only draft')
+  })
+
+  it('leaves an ordinary pinned commit on a live cell alone', async () => {
+    const translator = await makeToken()
+    const { db, snapshot } = await importedCell()
+
+    const res = (await handleEventsWriteRequest(
+      await makeRequest([lateDraft()], translator),
+      makeEnv(db),
+    ))!
+    const body = (await res.json()) as any
+    expect(body.rejected).toHaveLength(0)
+    expect(body.accepted.map((a: any) => a.id)).toEqual(['evt-late-draft'])
+    // The pin still matches the source head, so it is not stale either.
+    expect(body.staleSource).toHaveLength(0)
+
+    const cells = (await snapshot()).cells
+    expect(cells.map((c: any) => c.side).sort()).toEqual(['source', 'target'])
+    const target = cells.find((c: any) => c.side === 'target')!
+    expect(target.value).toBe('AI translation')
+    expect(target.source_event_id).toBe(SOURCE_HEAD)
+  })
+
+  // THE BOUNDARY THE REFUSAL SITS ON, and the one nothing pinned.
+  //
+  // The 409 above and this advisory flag read the SAME `cellHeads` entry, one
+  // line apart: absent means the source row is GONE (refuse), different means
+  // it has merely MOVED ON (accept, and flag so the client can offer
+  // "source changed — please re-confirm"). Nothing in the suite asserted the
+  // second half, so folding the two conditions together — an easy edit to
+  // make, since they now share a lookup — would have turned every advisory
+  // hint into a hard refusal with the whole suite still green. The client
+  // treats 409 as permanent and DROPS the event, so that mistake would delete
+  // the work of any translator who commits against a source line somebody
+  // edited a moment earlier.
+  it('a pin that is merely STALE is accepted and flagged, never refused', async () => {
+    const translator = await makeToken()
+    const { db, snapshot } = await importedCell()
+
+    // The source row advanced after the translator read it.
+    await db
+      .prepare("UPDATE cells SET event_id = 'evt-src-edited' WHERE side = 'source'")
+      .bind()
+      .run()
+
+    const res = (await handleEventsWriteRequest(
+      await makeRequest([lateDraft()], translator),
+      makeEnv(db),
+    ))!
+    const body = (await res.json()) as any
+    expect(body.rejected).toHaveLength(0)
+    expect(body.accepted.map((a: any) => a.id)).toEqual(['evt-late-draft'])
+    expect(body.staleSource).toEqual([
+      { id: 'evt-late-draft', currentSourceEventId: 'evt-src-edited' },
+    ])
+
+    // Accepted AND projected — the translator's work is not lost.
+    const target = (await snapshot()).cells.find((c: any) => c.side === 'target')!
+    expect(target.value).toBe('AI translation')
   })
 })
 
@@ -738,9 +1018,24 @@ describe('POST /events — PERF-2 batched pre-checks', () => {
     return events
   }
 
+  /** One source row per cell in the batch, whose `event_id` IS the pin the
+   *  commit carries. Without them every pinned commit is refused as a draft
+   *  for a removed cell (AQU-1068), and with a mismatched id every one comes
+   *  back flagged stale — neither of which is what this test is measuring. */
+  const sourceRowsFor = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      project_id: 'proj-a',
+      file_id: 'file-x',
+      cell_id: `cell-${i}`,
+      side: 'source',
+      target_lang: '',
+      value: `s${i}`,
+      event_id: `pin-${i}`,
+    }))
+
   async function statementsFor(n: number): Promise<number> {
     const token = await makeToken()
-    const { db } = await makeTestDb()
+    const { db } = await makeTestDb({ cells: sourceRowsFor(n) })
     // Settings row present so the validate path actually reads settings.
     await db
       .prepare(
@@ -877,5 +1172,264 @@ describe('POST /events — ProjectSync event.applied fan-out', () => {
     const applied = bodies.filter((b) => b.t === 'event.applied')
     expect(applied.length).toBe(1)
     expect('via' in applied[0]).toBe(false)
+  })
+})
+
+// ── event.applied carries serverSeq + projected rows ───────────────────
+
+describe('POST /events — event.applied carries serverSeq + the cell\'s projected rows', () => {
+  // The WHY: every event.applied used to cost the receiving client a
+  // GET …/cells?cellIds= round-trip before it could render the change. The
+  // server already knows the cell's post-commit projection, so it inlines the
+  // rows (byte-identical to the by-ids read — the client stores whichever it
+  // received without telling them apart) plus the event's server_seq.
+  function makeProjectSyncEnv(db: AquillaDb) {
+    const bodies: Array<Record<string, unknown>> = []
+    const stubFetch = vi.fn().mockImplementation(async (_url: unknown, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)))
+      return new Response(JSON.stringify({ ok: true }), { status: 200 })
+    })
+    const env = {
+      ...makeEnv(db),
+      ProjectSync: {
+        idFromName: vi.fn().mockReturnValue({ id: 'do-id' }),
+        get: vi.fn().mockReturnValue({ fetch: stubFetch }),
+      } as unknown as DurableObjectNamespace,
+    }
+    const applied = () =>
+      bodies.flatMap((b) =>
+        b.t === 'broadcast.batch' ? (b.messages as Array<Record<string, unknown>>) : [b],
+      ).filter((m) => m.t === 'event.applied')
+    return { env, bodies, applied }
+  }
+
+  async function readCellByIds(db: AquillaDb, cellId: string): Promise<unknown[]> {
+    const token = await makeTestToken(SECRET, { projectId: 'proj-a', fileId: 'file-x' })
+    const res = (await handleCellsReadRequest(
+      new Request(`https://w/api/v1/projects/proj-a/files/file-x/cells?cellIds=${cellId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      makeEnv(db) as { AQUILLA_PG: AquillaDb; SYNC_SECRET_KEY: string },
+    ))!
+    expect(res.status).toBe(200)
+    return ((await res.json()) as { cells: unknown[] }).cells
+  }
+
+  const bySideLane = (rows: unknown[]) =>
+    [...(rows as Array<{ side: string; targetLang: string }>)].sort((a, b) =>
+      `${a.side}|${a.targetLang}`.localeCompare(`${b.side}|${b.targetLang}`),
+    )
+
+  it('a committed target.cell.commit frame carries serverSeq and rows whose target row is the new head', async () => {
+    const token = await makeToken({ role: 500, username: 'alice' })
+    // AQU-1068: the seed's `source.cell.create` needs the project's opt-in —
+    // `cellEditingFloor` defaults to "none", which refuses a lead too.
+    const { db, snapshot } = await makeTestDb({
+      project_settings: [
+        { project_id: 'proj-a', settings: JSON.stringify({ cellEditingFloor: 'project_lead' }) },
+      ],
+    })
+    // Seed both sides so `rows` has to carry the source row too.
+    await handleEventsWriteRequest(
+      await makeRequest([sourceCreate(), targetCreate()], token),
+      makeEnv(db),
+    )
+    const { env, applied } = makeProjectSyncEnv(db)
+
+    const res = await handleEventsWriteRequest(await makeRequest([targetCommit()], token), env)
+    expect(res?.status).toBe(200)
+
+    const frames = applied()
+    expect(frames).toHaveLength(1)
+    const frame = frames[0]
+    expect(frame.id).toBe('evt-commit-001')
+
+    const stored = (await snapshot()).events.find((e) => e.id === 'evt-commit-001')!
+    expect(frame.serverSeq).toBe(Number(stored.server_seq))
+
+    const rows = frame.rows as Array<{ side: string; eventId: string; value: string }>
+    expect(rows.map((r) => r.side).sort()).toEqual(['source', 'target'])
+    const target = rows.find((r) => r.side === 'target')!
+    expect(target.eventId).toBe('evt-commit-001')
+    expect(target.value).toBe('updated')
+
+    // Byte-identical to what GET …/cells?cellIds=cell-1 returns for the same cell.
+    const viaRead = await readCellByIds(db, 'cell-1')
+    expect(JSON.stringify(bySideLane(rows))).toBe(JSON.stringify(bySideLane(viaRead)))
+  })
+
+  it('the POST response `applied[]` carries the same frame (serverSeq + rows) as the DO broadcast', async () => {
+    // The WHY: the author's own client used to follow its outbox flush with a
+    // GET …/cells?cellIds= + GET /cells/audit-stats to confirm the head. The
+    // response already knows the projection, so one POST is the whole cost.
+    const token = await makeToken({ role: 500, username: 'alice' })
+    const { db } = await makeTestDb()
+    await handleEventsWriteRequest(
+      await makeRequest([sourceCreate(), targetCreate()], token),
+      makeEnv(db),
+    )
+    const { env, applied } = makeProjectSyncEnv(db)
+
+    const res = await handleEventsWriteRequest(await makeRequest([targetCommit()], token), env)
+    expect(res?.status).toBe(200)
+    const body = (await res!.json()) as { accepted: Array<{ id: string }>; applied: Array<Record<string, unknown>> }
+    expect(body.accepted).toEqual([{ id: 'evt-commit-001' }])
+    expect(body.applied).toHaveLength(1)
+    // Byte-identical to what peers receive over the WS.
+    expect(JSON.stringify(body.applied[0])).toBe(JSON.stringify(applied()[0]))
+    expect(body.applied[0].t).toBe('event.applied')
+    expect(body.applied[0].by).toBe('alice')
+    expect(typeof body.applied[0].serverSeq).toBe('number')
+    const target = (body.applied[0].rows as Array<{ side: string; eventId: string }>).find((r) => r.side === 'target')!
+    expect(target.eventId).toBe('evt-commit-001')
+  })
+
+  it('`applied[]` is returned even when no ProjectSync DO is bound (HTTP-only deployments)', async () => {
+    const token = await makeToken({ role: 500, username: 'alice' })
+    const { db } = await makeTestDb()
+    await handleEventsWriteRequest(await makeRequest([sourceCreate(), targetCreate()], token), makeEnv(db))
+    const res = await handleEventsWriteRequest(await makeRequest([targetCommit()], token), makeEnv(db))
+    const body = (await res!.json()) as { applied: Array<{ id: string; rows?: unknown[] }> }
+    expect(body.applied.map((f) => f.id)).toEqual(['evt-commit-001'])
+    expect(Array.isArray(body.applied[0].rows)).toBe(true)
+  })
+
+  it('a cell.validate frame carries rows reflecting the flipped validated flag', async () => {
+    const token = await makeToken({ role: 400 })
+    const reviewerToken = await makeToken({ role: 300, username: 'reviewer-bob' })
+    const { db } = await makeTestDb()
+    await handleEventsWriteRequest(await makeRequest([targetCreate()], token), makeEnv(db))
+    const { env, applied } = makeProjectSyncEnv(db)
+
+    await handleEventsWriteRequest(
+      await makeRequest([validate({ payload: { editEventId: 'evt-create-001' } })], reviewerToken),
+      env,
+    )
+
+    const frames = applied()
+    expect(frames).toHaveLength(1)
+    expect(typeof frames[0].serverSeq).toBe('number')
+    const rows = frames[0].rows as Array<{ side: string; validated: boolean; eventId: string }>
+    expect(rows).toHaveLength(1)
+    expect(rows[0].validated).toBe(true)
+    // Validation does not advance the chain head.
+    expect(rows[0].eventId).toBe('evt-create-001')
+  })
+
+  it('a chain-slot loser still receives the cell\'s CURRENT rows (the winner\'s head)', async () => {
+    // Rows describe the projection, not the losing event — the client must
+    // converge on the head, and refetching would have returned the same.
+    const token = await makeToken({ role: 400 })
+    const { db } = await makeTestDb()
+    await handleEventsWriteRequest(await makeRequest([targetCreate()], token), makeEnv(db))
+    const { env, applied } = makeProjectSyncEnv(db)
+
+    await handleEventsWriteRequest(
+      await makeRequest(
+        [
+          targetCommit({ id: 'evt-winner', payload: { value: 'first' } }),
+          targetCommit({ id: 'evt-loser', payload: { value: 'second' } }),
+        ],
+        token,
+      ),
+      env,
+    )
+
+    const frames = applied()
+    expect(frames.map((f) => f.id)).toEqual(['evt-winner', 'evt-loser'])
+    const loserRows = frames[1].rows as Array<{ eventId: string; value: string }>
+    expect(loserRows).toHaveLength(1)
+    // route.ts docs: `*.cell.commit` projects last-write-wins.
+    const viaRead = (await readCellByIds(db, 'cell-1')) as Array<{ eventId: string; value: string }>
+    expect(loserRows[0].eventId).toBe(viaRead[0].eventId)
+    expect(loserRows[0].value).toBe(viaRead[0].value)
+  })
+
+  it('non-cell events keep the legacy frame shape and trigger no cells SELECT', async () => {
+    const token = await makeToken({ role: 600 })
+    const { db } = await makeTestDb()
+    const { env, applied } = makeProjectSyncEnv(db)
+    const prepareSpy = vi.spyOn(db, 'prepare')
+
+    const fileCreate = {
+      id: 'evt-file-001',
+      schemaVersion: 1,
+      kind: 'file.create',
+      projectId: 'proj-a',
+      fileId: 'file-x',
+      cellId: null,
+      parentId: null,
+      author: 'alice',
+      payload: { name: 'Genesis', fileType: 'codex' },
+      clientTs: 1000,
+    }
+    const res = await handleEventsWriteRequest(await makeRequest([fileCreate], token), env)
+    expect(res?.status).toBe(200)
+
+    const frames = applied()
+    expect(frames).toHaveLength(1)
+    expect('serverSeq' in frames[0]).toBe(false)
+    expect('rows' in frames[0]).toBe(false)
+    const rowsSelects = prepareSpy.mock.calls.filter(([sql]) =>
+      // Match ONLY the event.applied rows SELECT. Other batched pre-checks
+      // (prefetchCellHeads, AQU-1154) also read cells by the same tuple-IN
+      // shape; the trailing `, project_id, file_id` column pair is unique to
+      // the rows read.
+      String(sql).includes(', project_id, file_id FROM cells WHERE (project_id, file_id, cell_id) IN'),
+    )
+    expect(rowsSelects).toHaveLength(0)
+  })
+
+  it('fetches every touched cell\'s rows with ONE query per request', async () => {
+    const token = await makeToken({ role: 400 })
+    const { db } = await makeTestDb()
+    const { env, applied } = makeProjectSyncEnv(db)
+    const prepareSpy = vi.spyOn(db, 'prepare')
+
+    const events = ['c1', 'c2', 'c3'].map((c) =>
+      targetCreate({ id: `evt-${c}`, cellId: c, payload: { cellId: c, value: `v-${c}` } }),
+    )
+    await handleEventsWriteRequest(await makeRequest(events, token), env)
+
+    const rowsSelects = prepareSpy.mock.calls.filter(([sql]) =>
+      // Match ONLY the event.applied rows SELECT. Other batched pre-checks
+      // (prefetchCellHeads, AQU-1154) also read cells by the same tuple-IN
+      // shape; the trailing `, project_id, file_id` column pair is unique to
+      // the rows read.
+      String(sql).includes(', project_id, file_id FROM cells WHERE (project_id, file_id, cell_id) IN'),
+    )
+    expect(rowsSelects).toHaveLength(1)
+    const frames = applied()
+    expect(frames).toHaveLength(3)
+    for (const f of frames) {
+      const rows = f.rows as Array<{ cellId: string; value: string }>
+      expect(rows).toHaveLength(1)
+      expect(rows[0].cellId).toBe(f.cell)
+      expect(rows[0].value).toBe(`v-${f.cell}`)
+    }
+  })
+
+  it(`omits rows (but keeps serverSeq) when one request touches more than ${EVENT_APPLIED_ROWS_MAX_CELLS} cells`, async () => {
+    // Bounds the DO fan-out payload; clients fall back to the by-ids refetch.
+    const token = await makeToken({ role: 400 })
+    const { db } = await makeTestDb()
+    const { env, applied } = makeProjectSyncEnv(db)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const events = Array.from({ length: EVENT_APPLIED_ROWS_MAX_CELLS + 1 }, (_, i) =>
+      targetCreate({ id: `evt-bulk-${i}`, cellId: `bulk-${i}`, payload: { cellId: `bulk-${i}`, value: 'x' } }),
+    )
+    const res = await handleEventsWriteRequest(await makeRequest(events, token), env)
+    expect(res?.status).toBe(200)
+
+    const frames = applied()
+    expect(frames).toHaveLength(EVENT_APPLIED_ROWS_MAX_CELLS + 1)
+    for (const f of frames) {
+      expect(typeof f.serverSeq).toBe('number')
+      expect('rows' in f).toBe(false)
+    }
+    const capWarnings = warn.mock.calls.filter(([msg]) => String(msg).includes('event.applied rows omitted'))
+    expect(capWarnings).toHaveLength(1)
+    warn.mockRestore()
   })
 })

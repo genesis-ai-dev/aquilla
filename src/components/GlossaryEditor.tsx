@@ -4,8 +4,10 @@
  * One row per concept (source left, primary rendering right), grouped by
  * lifecycle: suggested (draft) at top as pending rows, active in the middle,
  * archived (deprecated) hidden behind a toggle. Add term opens a create dialog.
- * Persistence is patchSettings({ terminology }); all concept
- * mutations reuse the pure helpers in lib/terminology/store.
+ * Persistence is term.* events through the outbox (see
+ * lib/terminology/events-delta); all concept mutations reuse the pure helpers
+ * in lib/terminology/store and the delta against the last known termbase is
+ * what goes on the wire.
  *
  * The Concept[] model is unchanged, so blots / prompt-injection / violation
  * compilation (which read active concepts) need no changes.
@@ -29,6 +31,10 @@ import { useProject } from "@/hooks/useProject"
 import type { UseProjectSettings } from "@/hooks/useProjectSettings"
 import { useProjectCells } from "@/hooks/useProjectCells"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { useConcepts } from "@/hooks/useConcepts"
+
+/** Stable identity so the memo below holds when a workspace project has none. */
+const EMPTY_SERVER_CONCEPTS: Concept[] = []
 import type { Concept, TermRendering } from "@/lib/terminology/types"
 import {
   addConcept,
@@ -42,6 +48,7 @@ import {
   canEditTermbase,
 } from "@/lib/terminology/glossary-view"
 import { extractCandidates } from "@/lib/terminology/candidates"
+import { emitConceptDelta } from "@/lib/terminology/events-delta"
 import { importConceptsCsv, exportConceptsCsv } from "@/lib/terminology/csv"
 import { importConceptsTbx, exportConceptsTbx } from "@/lib/terminology/tbx"
 import { GlossaryRow } from "@/components/GlossaryRow"
@@ -96,7 +103,6 @@ export function GlossaryEditor({
   })
   const project = workspaceProject ?? ownedProject.project
   const loading = workspaceProject == null && ownedProject.loading
-  const patchSettings = workspacePatchSettings ?? ownedProject.patchSettings
   const { session: frontierSession } = useFrontierSession()
   const importInputRef = useRef<HTMLInputElement>(null)
 
@@ -135,7 +141,25 @@ export function GlossaryEditor({
     enabled: Boolean(project?.id && projectFiles.length > 0 && cellDataRequested),
   })
 
-  const serverConcepts = useMemo(() => project?.terminology ?? [], [project?.terminology])
+  // AQU-1006 follow-up: concepts come from the sync-worker projection, not the
+  // retired `project.terminology` settings key.
+  //
+  // Two paths, mirroring how this component already resolves `project`:
+  //   - WORKSPACE-OWNED (`workspaceProject` passed in): its `terminology` is
+  //     ALREADY projection-sourced — ProjectWorkspace folds `useConcepts` onto
+  //     the record it hands down (see `editorProject`). Reuse it and skip the
+  //     fetch, exactly as `ownedProject` is disabled on this path; fetching
+  //     again would be the "duplicate project resolve" this path exists to
+  //     avoid, and would flash an empty glossary before it landed.
+  //   - STANDALONE (routed directly): fetch for ourselves.
+  const fetched = useConcepts({
+    projectId: id ?? null,
+    getToken,
+    tokenReady: !!frontierSession?.jwt && workspaceProject == null,
+  })
+  const serverConcepts = workspaceProject
+    ? workspaceProject.terminology ?? EMPTY_SERVER_CONCEPTS
+    : fetched.concepts
   const conceptsRef = useRef<Concept[]>(serverConcepts)
   const pendingWritesRef = useRef(0)
   const [optimisticConcepts, setOptimisticConcepts] = useState<Concept[] | null>(null)
@@ -192,30 +216,31 @@ export function GlossaryEditor({
     [concepts, selectedConceptId],
   )
 
+  // AQU-1006: every mutation is a term.* event through the outbox — never a
+  // whole-array PATCH of the settings blob. Callers still hand us the full
+  // next array from the store helpers; only the delta goes on the wire.
+  const author = frontierSession?.username ?? ""
+  const projectId = project?.id ?? null
   const persist = useCallback(
     async (updated: { terminology?: Concept[] }) => {
+      if (!projectId) return
+      const prev = conceptsRef.current
       const next = updated.terminology ?? []
       conceptsRef.current = next
       setOptimisticConcepts(next)
       pendingWritesRef.current += 1
-      const outcome = await patchSettings({ terminology: next })
-      pendingWritesRef.current -= 1
-      if (outcome.kind === "error" || outcome.kind === "conflict" || outcome.kind === "blocked") {
-        if (pendingWritesRef.current === 0) {
-          setOptimisticConcepts(null)
-        }
-        if (outcome.kind === "error") setError(outcome.message)
-        else if (outcome.kind === "conflict") setError(t("terminology.editor.errorConflict"))
-        else
-          setError(
-            outcome.reason === "offline"
-              ? t("terminology.editor.errorOffline")
-              : t("terminology.editor.errorBlocked"),
-          )
+      try {
+        await emitConceptDelta({ projectId, author, prev, next })
+        setError(null)
+      } catch (err) {
+        conceptsRef.current = prev
+        if (pendingWritesRef.current === 1) setOptimisticConcepts(null)
+        setError(err instanceof Error ? err.message : t("terminology.editor.errorBlocked"))
+      } finally {
+        pendingWritesRef.current -= 1
       }
-      return outcome
     },
-    [patchSettings, t],
+    [projectId, author, t],
   )
 
   // ── Row callbacks (all reuse store.ts helpers over the live project) ────────
@@ -322,8 +347,8 @@ export function GlossaryEditor({
     const corpus = cellFiles.flatMap((f) =>
       (f.cells ?? []).map((c: { original?: string }) => c.original ?? ""),
     )
-    const candidates = extractCandidates(corpus, { managed: project.terminology ?? [] })
-    const existing = new Set((project.terminology ?? []).map((c) => c.sourceTerm.trim().toLowerCase()))
+    const candidates = extractCandidates(corpus, { managed: serverConcepts })
+    const existing = new Set(serverConcepts.map((c) => c.sourceTerm.trim().toLowerCase()))
     let working = project
     for (const cand of candidates) {
       if (cand.isManaged || existing.has(cand.term.trim().toLowerCase())) continue
@@ -440,7 +465,7 @@ export function GlossaryEditor({
             <input
               ref={importInputRef}
               type="file"
-              accept=".csv,.tbx"
+              accept=".csv,.tsv,.tbx"
               className="hidden"
               onChange={(e) => {
                 const f = e.target.files?.[0]

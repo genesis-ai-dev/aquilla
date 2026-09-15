@@ -42,7 +42,8 @@ export async function handleMigrateAudioRequest(
   try {
     await env.SNAPSHOTS.put(key, body, { httpMetadata: { contentType } })
   } catch (err) {
-    return Response.json({ error: `R2 put failed: ${String(err)}` }, { status: 500 })
+    console.error("[migrate-audio] R2 put failed:", err)
+    return Response.json({ error: "R2 put failed" }, { status: 500 })
   }
   return Response.json({ ok: true, key, bytes: body.byteLength })
 }

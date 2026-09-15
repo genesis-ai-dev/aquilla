@@ -6,8 +6,11 @@
  */
 
 import type { ChangesetItem } from "./run-state"
-import type { ChangesetApproval } from "./changeset-api"
+import type { ChangesetApproval, ChangesetApprovalSummary } from "./changeset-api"
+import { ChangesetApiError } from "./changeset-api"
 import type { TFunction } from "@/lib/i18n/I18nProvider"
+import { t as standaloneT } from "@/lib/i18n/standalone"
+import { messageForStatus } from "@/lib/errors/user-error"
 import { KIND_TIER } from "@/components/agent/cards/registry"
 
 /** Server statuses after which a changeset can no longer be acted on.
@@ -82,6 +85,67 @@ export function changesetStatusBadgeClass(status: string): string {
   return status === "superseded"
     ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
     : ""
+}
+
+/**
+ * AQU-820: the returned string is rendered verbatim, so it is always ours and
+ * keyed — the server's `error.message` is untranslated and often a raw
+ * diagnostic. The status alone distinguishes the three cases worth naming;
+ * anything that isn't an HTTP failure (network drop, timeout) reads as a
+ * connectivity problem.
+ *
+ * Shared by every review surface (the /approve/:id page and the AQU-841
+ * approvals queue) so one changeset failure never reads two different ways.
+ */
+export function messageForChangesetError(err: unknown): string {
+  if (!(err instanceof ChangesetApiError)) {
+    return "Couldn't reach the server. Check your connection and try again."
+  }
+  if (err.status === 403) return standaloneT("error.changeset.notAuthorized")
+  if (err.status === 404) return standaloneT("error.changeset.notFound")
+  if (err.status === 409) return standaloneT("error.changeset.notApprovable")
+  return messageForStatus(err.status, "", "changeset").message
+}
+
+/** Turn `translationsAdded` / `translations_added` into "Translations added". */
+export function humanizeSummaryKey(key: string): string {
+  const spaced = key
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/_/g, " ")
+    .toLowerCase()
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1)
+}
+
+/** The scalar `key: value` facts of a summary — everything that isn't one of
+ *  the structured blocks a caller renders on its own (warnings, per-key
+ *  settings previews, the per-kind event breakdown). */
+export function summaryFactEntries(
+  summary: ChangesetApprovalSummary,
+): [string, string | number][] {
+  const { warnings: _w, settingsChanges: _s, events: _e, ...facts } = summary
+  return Object.entries(facts).filter(
+    (entry): entry is [string, string | number] =>
+      typeof entry[1] === "number" || typeof entry[1] === "string",
+  )
+}
+
+/**
+ * True when a staged changeset carries testimony-tier work.
+ *
+ * COMMAND-REGISTRY §5: testimony (validation, endorsement) needs a per-item
+ * human click and is "exempt from accept-all" — so a bulk-approve surface must
+ * be able to LEAVE these rows out rather than sweeping them up. The summary's
+ * own `testimony` marks are authoritative (§2); `KIND_TIER` is the fallback for
+ * summaries staged before the mark existed.
+ *
+ * A summary that itemizes no events answers `false`: bulk approval of an
+ * un-itemized plan is the existing /approve/:id behaviour, and inventing a
+ * testimony flag for it would block plans the gate never blocked.
+ */
+export function requiresPerItemConfirmation(summary: ChangesetApprovalSummary): boolean {
+  return (summary.events ?? []).some(
+    (ev) => ev.testimony === true || KIND_TIER[ev.kind] === "testimony",
+  )
 }
 
 /** One testimony line the reviewer must individually confirm. */

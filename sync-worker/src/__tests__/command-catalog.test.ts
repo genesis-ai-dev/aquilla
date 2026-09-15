@@ -58,6 +58,7 @@ describe('command catalog — invariants', () => {
       SetTranslation: { kind: 'SetTranslation', fileId: 'f', cellId: 'c', value: 'v' },
       LinkMedia: { kind: 'LinkMedia', fileId: 'f', cellId: 'c', artifactId: 'a' },
       PlanImport: { kind: 'PlanImport', fileName: 'n', fileType: 'txt', cells: [{ content: 'x' }] },
+      CreateOrg: { kind: 'CreateOrg', name: 'O' },
       CreateProject: { kind: 'CreateProject', name: 'P' },
       UpdateProjectSettings: { kind: 'UpdateProjectSettings', projectId: 'p', settings: {}, ifMatchVersion: 0 },
       PatchSettings: { kind: 'PatchSettings', projectId: 'p', ops: [{ key: 'systemPrompt', value: 'x' }], ifMatchVersion: 0 },
@@ -175,9 +176,10 @@ describe('get_capabilities — commands index (§6)', () => {
       expect(Object.keys(row).sort()).toEqual(['kind', 'minRoleLevel', 'tier', 'title'])
     }
     expect(payload.commands.note).toContain('describe_command')
-    // The legacy commandKinds field is untouched (frozen external behavior).
+    // The legacy commandKinds field is untouched (frozen external behavior),
+    // now including CreateOrg (AQU-1221).
     expect(payload.commandKinds).toEqual(
-      ['SetTranslation', 'PlanImport', 'CreateProject', 'UpdateProjectSettings', 'LinkMedia'],
+      ['SetTranslation', 'PlanImport', 'CreateOrg', 'CreateProject', 'UpdateProjectSettings', 'LinkMedia'],
     )
   })
 })

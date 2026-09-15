@@ -32,13 +32,16 @@ export function requiredFloorForChangeset(commands: readonly Command[]): number 
 }
 
 /** True when a plan keeps the creator rule instead of the project-role floor.
- *  Both cases are ORG-level authority re-checked in the commit handler, with no
- *  project role to resolve against: CreateProject's target project may not
- *  exist yet, and an org-membership plan (AQU-1235) does not concern the
- *  project it is merely filed under. A floor would deny everyone, the person
- *  who staged the plan included. */
+ *  All cases are ORG-level or scope-level authority re-checked in the commit
+ *  handler, with no project role to resolve against: CreateProject's and
+ *  CreateOrg's (AQU-1221) target tenant may not exist yet, and an
+ *  org-membership plan (AQU-1235) does not concern the project it is merely
+ *  filed under. A floor would deny everyone, the person who staged the plan
+ *  included. */
 function isCreatorScoped(commands: readonly Command[]): boolean {
-  return commands.some((c) => c.kind === 'CreateProject' || isOrgMemberCommand(c))
+  return commands.some(
+    (c) => c.kind === 'CreateProject' || c.kind === 'CreateOrg' || isOrgMemberCommand(c),
+  )
 }
 
 /**

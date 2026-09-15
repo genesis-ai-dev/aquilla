@@ -15,6 +15,7 @@ import {
   isStructureCommandKind,
   laneCellKey,
   requiredRoleForCommand,
+  type CreateOrgCommand,
   type CreateProjectCommand,
   type EmitEventsCommand,
   type LinkMediaCommand,
@@ -67,6 +68,7 @@ import {
   loadProjectSettings,
   updateProjectSettingsShared,
 } from '../../../db/shared/projects'
+import { createOrgShared, findRecentOrgByCreator } from '../../../db/shared/orgs'
 import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/shared/rate-limit'
 
 /** Provenance channel for a PAT commit request. MCP-originated commits arrive
@@ -205,6 +207,13 @@ export async function commitChangesetCore(
   )
   if (createProjectCmd) {
     return commitCreateProject(db, cred, cs, createProjectCmd, channel)
+  }
+  // CreateOrg (AQU-1221): receipt-only like CreateProject, and likewise gated
+  // on the credential's scope rather than any project role — the changeset's
+  // project id is a filing placeholder that never resolves to a row.
+  const createOrgCmd = cs.commands.find((c): c is CreateOrgCommand => c.kind === 'CreateOrg')
+  if (createOrgCmd) {
+    return commitCreateOrg(db, cred, cs, createOrgCmd, channel)
   }
   const updateSettingsCmd = cs.commands.find(
     (c): c is UpdateProjectSettingsCommand => c.kind === 'UpdateProjectSettings',
@@ -1001,6 +1010,67 @@ async function commitCreateProject(
     )
     .bind(JSON.stringify(receipt), confirmationId, cs.id)
     .run()
+
+  return Response.json({ receipt })
+}
+
+/**
+ * Commit a CreateOrg (AQU-1221, receipt-only). Re-checks the credential scope
+ * live, runs the shared gates (commit-gates.ts), then applies the row write via
+ * createOrgShared — which writes the `organizations` row and the creator's
+ * owner-level (700) `org_members` row in one atomic statement, and touches no
+ * billing/entitlement table (a new org is plan=none by absence).
+ *
+ * Crash-retry: `organizations.id` is a generated identity column, so the plan
+ * carries no pinned id to make the insert idempotent. Instead a retry (a
+ * changeset already in `committing`) first looks for the org THIS commit
+ * created before it died — same creator, same planned name, created within the
+ * changeset's own lifetime — and absorbs it rather than minting a second
+ * tenant. A first attempt never consults that lookup, so two deliberate
+ * same-name creations still produce two orgs.
+ */
+async function commitCreateOrg(
+  db: AquillaDb,
+  cred: ApiCredentialContext,
+  cs: StoredChangeset,
+  cmd: CreateOrgCommand,
+  channel: ProvenanceChannel,
+): Promise<Response> {
+  const wasStaged = cs.status === 'staged'
+
+  // Live scope re-check (D8 live-role pattern): a credential re-scoped between
+  // prepare and commit must not slip a tenant through on the stale check.
+  if (cred.projectId != null) {
+    return errorResponse('scope_denied', 'a project-scoped credential cannot create organizations')
+  }
+  if (cred.orgId != null) {
+    return errorResponse('scope_denied', 'an org-scoped credential cannot create organizations')
+  }
+
+  const gate = await receiptOnlyGates(db, cs)
+  if (gate instanceof Response) return gate
+  const confirmationId = gate.confirmationId
+
+  let orgId: number
+  const priorAttempt = wasStaged
+    ? null
+    : await findRecentOrgByCreator(db, cred.userId, cmd.name, cs.createdAt)
+  if (priorAttempt) {
+    orgId = priorAttempt.orgId
+  } else {
+    const created = await createOrgShared(db, { name: cmd.name, createdBy: cred.userId })
+    orgId = created.orgId
+  }
+
+  const receipt: ReceiptOnlyReceipt = {
+    credentialId: cred.credentialId,
+    channel,
+    changesetId: cs.id,
+    command: 'CreateOrg',
+    appliedAt: new Date().toISOString(),
+    orgId,
+  }
+  await writeCommittedReceipt(db, cs.id, receipt, confirmationId)
 
   return Response.json({ receipt })
 }

@@ -146,6 +146,23 @@ Also removes the user from that org's groups, exactly as the roster UI does, so 
 Gotcha: the last owner of an org (and the organization's own owner row) cannot be removed.`,
   },
   {
+    kind: 'CreateOrg',
+    title: 'Create organization',
+    oneLiner: 'Create an organization you will own (always requires human approval).',
+    minRoleLevel: MAINTAINER,
+    tier: 'structural',
+    agentReachable: true,
+    paramsDoc: `### CreateOrg
+Params: \`{ name }\` — sole command; forced ask-mode regardless of credential mode.
+Requires an UNSCOPED credential: an org-scoped or project-scoped credential is confined to the tenant it names and gets \`scope_denied\`.
+The credential's minting user becomes the org OWNER (role 700). There is no owner parameter — an agent can never point ownership elsewhere, and never becomes a member itself.
+Gotchas:
+- \`name\` is the ONLY field. Tier / billing / entitlement fields (\`plan\`, \`tier\`, \`addonPacks\`, …) are rejected with \`validation_failed\` naming the field; a new org always gets the default tier (no billing row = plan \`none\`).
+- Rate-limited to 5 staged creations per credential per 15 minutes → \`rate_limited\`.
+- The changeset is filed under the URL project id, which is a placeholder here: CreateOrg creates no project, and the receipt carries \`orgId\`, not \`projectId\`. Feed that \`orgId\` to a follow-up CreateProject to populate the new org.
+Example: \`{ "kind": "CreateOrg", "name": "Partner Co" }\``,
+  },
+  {
     kind: 'PatchSettings',
     title: 'Patch settings',
     oneLiner: 'Change specific project-settings keys (version-guarded).',

@@ -29,9 +29,9 @@ export const MCP_TOOLS: McpToolDef[] = [
     description:
       'Discover what this API and THIS credential can do before attempting anything. ' +
       'Returns the API version, the autonomy mode of the calling credential (ask|act), ' +
-      'the domain command kinds available (SetTranslation, PlanImport, CreateProject, ' +
-      'UpdateProjectSettings, LinkMedia, and the cell-structure commands InsertCell / ' +
-      'DeleteCell / SplitCell — PlanImport stages via preview_import/' +
+      'the domain command kinds available (SetTranslation, PlanImport, CreateOrg, ' +
+      'CreateProject, UpdateProjectSettings, LinkMedia, and the cell-structure commands ' +
+      'InsertCell / DeleteCell / SplitCell — PlanImport stages via preview_import/' +
       'prepare_import or REST, everything else stages/commits via ' +
       'prepare_translations/confirm_changeset — see the returned importing, ' +
       'projectLifecycle, linkMedia and structure fields for per-kind rules), the operational limits (changeset ' +
@@ -403,7 +403,7 @@ export const MCP_TOOLS: McpToolDef[] = [
       'Stage a batch of commands as an immutable changeset (execution plan) WITHOUT applying ' +
       'them — the generic propose step for every MCP-stageable command kind (Agent API v1.1). ' +
       'Pass `translations` for a SetTranslation batch (as before), and/or `commands` for ' +
-      'CreateProject, UpdateProjectSettings, or LinkMedia. Resolves preconditions from live ' +
+      'CreateOrg, CreateProject, UpdateProjectSettings, or LinkMedia. Resolves preconditions from live ' +
       'state and computes a server-side effect summary (nothing is silently dropped) before ' +
       'returning { changesetId, summary, digest, mode, approvalUrl? }. If mode is "ask" you ' +
       'CANNOT commit directly: first DESCRIBE the staged plan in the conversation — the ' +
@@ -415,6 +415,18 @@ export const MCP_TOOLS: McpToolDef[] = [
       'preview_import / prepare_import tools (or REST; see get_capabilities.importing).\n\n' +
       '`commands` shapes (each enforced server-side; a validation_failed error names the ' +
       'violated rule):\n' +
+      '  { kind: "CreateOrg", name } — receipt-only (a plain row write, not an event); ' +
+      'must be the SOLE command in the changeset, and `name` is the ONLY field it accepts. ' +
+      'Creates a NEW organization owned by this credential\'s minting user (role 700) — ' +
+      'there is no owner parameter, and the agent never becomes a member itself. Requires an ' +
+      'UNSCOPED credential: an org-scoped or project-scoped one gets scope_denied. Any ' +
+      'tier/billing/entitlement field (plan, tier, addonPacks, …) is rejected with ' +
+      'validation_failed naming the field — a new org always gets the default tier. Capped ' +
+      'at 5 staged creations per credential per 15 minutes (rate_limited). Prepare ALWAYS ' +
+      'stages it ask-mode, so it always needs human approval at the approvalUrl. This tool ' +
+      'call still needs a `projectId` argument, but for CreateOrg it is only the changeset\'s ' +
+      'filing id — no project is created, and the receipt carries `orgId` instead of ' +
+      '`projectId`. Feed that orgId to a follow-up CreateProject to populate the new org.\n' +
       '  { kind: "CreateProject", name, projectId?, orgId? } — receipt-only (a plain row ' +
       'write, not an event); must be the SOLE command in the changeset. `name` must be a ' +
       'REAL name derived from what you are importing (source folder or file name, the ' +
@@ -492,13 +504,26 @@ export const MCP_TOOLS: McpToolDef[] = [
         commands: {
           type: 'array',
           description:
-            'CreateProject / UpdateProjectSettings / LinkMedia / InsertCell / DeleteCell / ' +
-            'SplitCell commands to stage (Agent API v1.1) — see this tool\'s description for ' +
-            'per-kind shape, role gates, and sole-command rules. PlanImport is not accepted ' +
-            'here (REST-only).',
+            'CreateOrg / CreateProject / UpdateProjectSettings / LinkMedia / InsertCell / ' +
+            'DeleteCell / SplitCell commands to stage (Agent API v1.1) — see this tool\'s ' +
+            'description for per-kind shape, role gates, and sole-command rules. PlanImport ' +
+            'is not accepted here (REST-only).',
           items: {
             type: 'object',
             oneOf: [
+              {
+                type: 'object',
+                properties: {
+                  kind: { type: 'string', enum: ['CreateOrg'] },
+                  name: {
+                    type: 'string',
+                    description:
+                      'Organization name. The ONLY accepted field — tier/billing/entitlement fields are rejected.',
+                  },
+                },
+                required: ['kind', 'name'],
+                additionalProperties: false,
+              },
               {
                 type: 'object',
                 properties: {

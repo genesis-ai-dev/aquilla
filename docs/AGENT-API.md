@@ -577,6 +577,51 @@ The command layer is now the **shared write spine for both agent surfaces** (see
   `/api/v2/changesets/:id/approval|approve|reject` human gate; the SPA's live ChangesetCard
   commits after approval (per-item confirmation for testimony kinds).
 
+## Status addendum (2026-09-04, AQU-1182 — file + project lifecycle commands)
+
+Parity epic AQU-1181 items 17/21. All four commands are ask-mode-stageable through the same
+prepare → human approval → commit engine as everything above; none introduces a new event kind
+or a new mutation, and no delete of any kind is exposed.
+
+- **`RenameFile`** — `{ fileId, name }`, CONTRIBUTOR 400 (the UI's own floor for renaming a
+  file). Deliberately **sugar**: prepare desugars a RenameFile batch into the equivalent
+  `EmitEvents` `file.rename` batch and hands it to that engine, so there is one compile path,
+  one set of existence checks, and one prepare-time id ledger. The changeset you read back
+  therefore holds `file.rename` events, not a `RenameFile` entry. The named command exists
+  because `describe_command` and the role-filtered index are how an agent discovers what it may
+  do — "rename a file" is discoverable, "hand-build a `file.rename` payload" is not.
+- **`RenameProject`** — `{ projectId, name }`, MAINTAINER 600. **`ArchiveProject` /
+  `UnarchiveProject`** — `{ projectId }`, OWNER 700. Receipt-only row writes in the
+  `CreateProject` family (D8): each is the sole command in its changeset, mirrors auth-worker
+  `routes/projects.ts` (`PATCH /:projectId`, `POST|DELETE /:projectId/archive`) byte for byte,
+  and re-runs its guards live at commit. All three are **forced to ask-mode** at prepare
+  regardless of the credential's or request's mode (CreateProject's precedent): these reshape
+  or retire the whole project, so an act-mode credential running unattended is a hazard, not a
+  speed win. `RenameFile` deliberately does NOT force ask — it is a CONTRIBUTOR-floor label
+  edit, and forcing approval on it while `SetTranslation` (which writes actual translation
+  content at the same floor) stays act-capable would be incoherent.
+- **Archived-tolerant role resolution** — `resolveProjectRoleShared` denies every archived
+  project, which would make `UnarchiveProject` unreachable by construction. The lifecycle path
+  uses the new `resolveProjectRoleIncludingArchivedShared` instead — the shared-module twin of
+  the resolver auth-worker's own archive endpoints use. Ordinary read/write authority is
+  untouched.
+- **End-state checks** — archiving an already-archived project (or renaming to the name it
+  already has) is `validation_failed` at prepare, and `plan_stale` with
+  `details.status: "superseded"` at commit when a human got there first. A crash-retry
+  (`status = 'committing'`) skips that check and re-applies idempotently.
+- **Still not reachable, deliberately.** File *delete* stays out of the named-command surface
+  while soft-delete/trash semantics are in flux (AQU-272) — it remains available only through
+  the raw `EmitEvents` door. Project *delete* stays UI-only: archive is recoverable, delete is
+  not. `ReorderFile` and `SetFileAnchor` from the original issue are **not implemented**: there
+  is no file-ordering concept in the schema at all (`files` has no order column;
+  `files-read-route.ts` orders by `last_edit_at, name`) and `files.anchor_file_id` is written
+  only by `file.create`/import-reconcile, with no event kind that changes it afterwards and no
+  UI affordance whose floor could be mirrored. Both need new event semantics, which the issue
+  explicitly excluded — see the AQU-1182 thread.
+- **MCP** — the new kinds pass through `prepare_translations`' `commands` array like
+  `PatchSettings` and `EmitEvents` do, but (like those two) are not yet in that tool's
+  `oneOf` input schema. A strict MCP client will reject them client-side; REST is unaffected.
+
 ## Status addendum (2026-09-09, AQU-1222 — the read half of the settings surface)
 
 Live verification of AQU-1176 found its write half (`PatchSettings`) deployed but its

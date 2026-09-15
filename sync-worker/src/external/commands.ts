@@ -25,6 +25,16 @@ import {
   type EmitEventsCommand,
 } from './commands-emit-events'
 import {
+  renameFileFloor,
+  validateRenameFileCommand,
+  type RenameFileCommand,
+} from './commands-rename-file'
+import {
+  projectLifecycleFloor,
+  validateProjectLifecycleCommand,
+  type ProjectLifecycleCommand,
+} from './commands-project-lifecycle'
+import {
   SET_BRIEF_REQUIRED_ROLE,
   validateSetBriefCommand,
   type SetBriefCommand,
@@ -58,6 +68,13 @@ function isMemoryCommandKind(kind: string): boolean {
 export type { PlanImportCell, PlanImportManifest, PlanImportVariant } from './import-manifest'
 export type { PatchSettingsCommand, PatchSettingsOp } from './commands-patch-settings'
 export type { EmitEventsCommand, EmitEventInput } from './commands-emit-events'
+export type { RenameFileCommand } from './commands-rename-file'
+export type {
+  ArchiveProjectCommand,
+  ProjectLifecycleCommand,
+  RenameProjectCommand,
+  UnarchiveProjectCommand,
+} from './commands-project-lifecycle'
 export type { SetBriefCommand } from './commands-set-brief'
 export type {
   AddOrgMemberCommand,
@@ -206,6 +223,8 @@ export type Command =
   | LinkMediaCommand
   | PatchSettingsCommand
   | EmitEventsCommand
+  | RenameFileCommand
+  | ProjectLifecycleCommand
   | SetBriefCommand
   | OrgMemberCommand
   | StructureCommand
@@ -687,6 +706,20 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
       if (cmd) commands.push(cmd)
       return
     }
+    if (c.kind === 'RenameFile') {
+      const cmd = validateRenameFileCommand(c, index, issues)
+      if (cmd) commands.push(cmd)
+      return
+    }
+    if (
+      c.kind === 'RenameProject' ||
+      c.kind === 'ArchiveProject' ||
+      c.kind === 'UnarchiveProject'
+    ) {
+      const cmd = validateProjectLifecycleCommand(c, index, issues)
+      if (cmd) commands.push(cmd)
+      return
+    }
     if (c.kind === 'SetBrief') {
       const cmd = validateSetBriefCommand(c, index, issues)
       if (cmd) commands.push(cmd)
@@ -788,6 +821,22 @@ export function requiredRoleForCommand(c: Command): number {
   if (c.kind === 'LinkMedia') {
     // Compiles to cell.audio.attach + cell.audio.select (both CONTRIBUTOR).
     return Math.max(REQUIRED_ROLE['cell.audio.attach'], REQUIRED_ROLE['cell.audio.select'])
+  }
+  // AQU-1182 RenameFile: desugars to one file.rename event, so its floor IS
+  // file.rename's perimeter floor (the UI's own floor for renaming a file).
+  if (c.kind === 'RenameFile') {
+    return renameFileFloor()
+  }
+  // AQU-1182 project lifecycle: receipt-only row writes taking their own
+  // prepare/commit path, where the floor is re-resolved live. This static value
+  // is the honest index-filtering floor (rename MAINTAINER, archive/unarchive
+  // OWNER) and mirrors the UI floors for the same actions.
+  if (
+    c.kind === 'RenameProject' ||
+    c.kind === 'ArchiveProject' ||
+    c.kind === 'UnarchiveProject'
+  ) {
+    return projectLifecycleFloor(c)
   }
   // AQU-1235 org-membership commands: like CreateProject these take their own
   // prepare/commit path with an ORG-level gate (owner in the target org), so

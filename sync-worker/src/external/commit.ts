@@ -21,12 +21,14 @@ import {
   type LinkMediaCommand,
   type PatchSettingsCommand,
   type PlanImportCommand,
+  type ProjectLifecycleCommand,
   type SetBriefCommand,
   type SetTranslationCommand,
   type StructureCommand,
   type UpdateProjectSettingsCommand,
 } from './commands'
 import { changedPolicyKeys, commitPatchSettings } from './commands-patch-settings'
+import { commitProjectLifecycle, isProjectLifecycleCommand } from './commands-project-lifecycle'
 import { commitSetBrief } from './commands-set-brief'
 import { isOrgMemberCommand, type OrgMemberCommand } from './commands-org-members'
 import { commitOrgMember } from './org-members-engine'
@@ -228,6 +230,16 @@ export async function commitChangesetCore(
   )
   if (patchSettingsCmd) {
     return commitPatchSettings(db, cred, cs, patchSettingsCmd, channel)
+  }
+  // AQU-1182 project lifecycle: receipt-only like the above, with archived-
+  // tolerant role resolution (the generic precheck below denies every archived
+  // project, which would make UnarchiveProject uncommittable) and its own
+  // per-kind UI floor. Its module re-runs the full guard sequence.
+  const lifecycleCmd = cs.commands.find(
+    (c): c is ProjectLifecycleCommand => isProjectLifecycleCommand(c),
+  )
+  if (lifecycleCmd) {
+    return commitProjectLifecycle(db, env, cred, cs, lifecycleCmd, channel, ctx)
   }
   // AQU-1227 SetBrief: receipt-only — merges its patch into the live brief and
   // writes it back as the translationBrief settings key.

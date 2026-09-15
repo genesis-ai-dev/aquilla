@@ -94,6 +94,41 @@ AQU-1228 adds the Living Memory writes: **AddExample** / **AddDecision** / **Add
   `cell.audio.*` (use LinkMedia), reorders/retimes/mirrors, `file.timing.set`, `file.create`.
 - Summary gains `events: { kind, count, testimony }[]` alongside existing fields.
 
+### RenameFile — file label management (AQU-1182)
+
+- Params `{ fileId, name }`; batchable within a RenameFile-only changeset; floor CONTRIBUTOR
+  400 (`REQUIRED_ROLE['file.rename']` — the UI's own floor for the same action).
+- **Sugar over EmitEvents, by construction.** Prepare desugars the batch into the equivalent
+  `file.rename` `EmitEvents` command and delegates to that engine; nothing here compiles an
+  event of its own. Consequence to know: the stored plan (and the changeset a caller reads
+  back) holds `file.rename` events, not a `RenameFile` entry.
+- `name` is trimmed, 1–256 chars; whitespace-only is rejected. File delete is NOT given a named
+  command — soft-delete/trash semantics are in flux (AQU-272), so it stays behind the raw
+  `EmitEvents` door where the caller opts into current semantics explicitly.
+
+### Project lifecycle — RenameProject / ArchiveProject / UnarchiveProject (AQU-1182)
+
+- Receipt-only row writes in the `CreateProject` family (D8) — no events, receipt is a
+  provenance stamp. Each is the **sole command** in its changeset and its `projectId` must equal
+  the changeset's project.
+- Floors mirror auth-worker `routes/projects.ts` exactly: `RenameProject` MAINTAINER 600
+  (`PATCH /:projectId`), `ArchiveProject` / `UnarchiveProject` OWNER 700
+  (`POST` / `DELETE /:projectId/archive`). Re-resolved live at prepare AND commit.
+- **Forced ask-mode** at prepare for all three, regardless of credential/request mode
+  (CreateProject's precedent) — every agent-initiated project-lifecycle change passes through
+  `/approve/:id`. `RenameFile` is not forced: it is a CONTRIBUTOR-floor label edit and follows
+  the normal autonomy ladder like `SetTranslation`.
+- Role resolution uses `resolveProjectRoleIncludingArchivedShared`: the ordinary shared
+  resolver returns null for every archived project, which would make `UnarchiveProject`
+  unreachable. Same twin auth-worker's archive endpoints use; ordinary authority is untouched.
+- End-state check (deterministic, exact): already-archived / not-archived / already-named-that
+  is `validation_failed` at prepare and `plan_stale` + `details.status: "superseded"` at
+  commit. A crash-retry (`status = 'committing'`) skips it and re-applies idempotently; the
+  archive write keeps `AND archived_at IS NULL` so a retry cannot re-stamp a newer timestamp.
+- Archive/unarchive best-effort notify the `ProjectSync` DO (`archive-broadcast.ts`), matching
+  the UI path; a failed broadcast never fails an applied commit.
+- Project DELETE is never exposed on any agent surface: archive is recoverable, delete is not.
+
 ### Living Memory writes (AQU-1228) — AddExample / AddDecision / AddNote / RetireExample
 
 ```ts

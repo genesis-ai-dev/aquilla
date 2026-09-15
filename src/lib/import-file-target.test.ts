@@ -5,6 +5,7 @@ import {
   usfmToTargetRows,
   vttToTargetRows,
   type FileTargetCellRef,
+  type TargetRow,
 } from "./import-file-target"
 
 function cell(overrides: Partial<FileTargetCellRef> & { cellId: string }): FileTargetCellRef {
@@ -109,6 +110,143 @@ describe("matchTargetRowsByOrder", () => {
     )
     expect(result.matched).toHaveLength(3)
     expect(result.orphans).toEqual([{ ref: "Row 4", text: "overflow" }])
+  })
+})
+
+// AQU-1143 — cue files align by timecode overlap, not raw row order.
+describe("matchTargetRowsByOrder — cue timecode overlap", () => {
+  /** Cue N runs [N s, N s + 800 ms), the shape of a real subtitle grid. */
+  function cueCell(n: number, overrides: Partial<FileTargetCellRef> = {}): FileTargetCellRef {
+    return cell({
+      cellId: `c${n}`,
+      startMs: n * 1000,
+      endMs: n * 1000 + 800,
+      original: `source cue ${n}`,
+      ...overrides,
+    })
+  }
+  /** Incoming row carrying explicit cue timings. */
+  function cueRow(startMs: number, endMs: number, text: string): TargetRow {
+    return { ref: `cue ${startMs}`, startMs, endMs, text }
+  }
+
+  const cells = [cueCell(1), cueCell(2), cueCell(3), cueCell(4)]
+
+  it("survives a cue deleted mid-file — later cues keep their own cells", () => {
+    // Target is the source grid minus cue 2. Under raw order matching, "three"
+    // would land on cell c2 and "four" on c3 — every row after the deletion
+    // silently wrong.
+    const result = matchTargetRowsByOrder(
+      [
+        cueRow(1000, 1800, "one"),
+        cueRow(3000, 3800, "three"),
+        cueRow(4000, 4800, "four"),
+      ],
+      cells,
+    )
+    expect(result.alignedBy).toBe("overlap")
+    expect(result.matched.map((m) => [m.cellId, m.incomingText])).toEqual([
+      ["c1", "one"],
+      ["c3", "three"],
+      ["c4", "four"],
+    ])
+    // The deleted cue's slot shows up as an uncovered cell, not a bad commit.
+    expect(result.unmatchedSourceCount).toBe(1)
+    expect(result.orphans).toHaveLength(0)
+  })
+
+  it("an inserted extra cue becomes an orphan and displaces nothing", () => {
+    const result = matchTargetRowsByOrder(
+      [
+        cueRow(1000, 1800, "one"),
+        cueRow(1850, 1950, "inserted"),
+        cueRow(2000, 2800, "two"),
+        cueRow(3000, 3800, "three"),
+      ],
+      cells,
+    )
+    expect(result.matched.map((m) => [m.cellId, m.incomingText])).toEqual([
+      ["c1", "one"],
+      ["c2", "two"],
+      ["c3", "three"],
+    ])
+    expect(result.orphans.map((o) => o.text)).toEqual(["inserted"])
+  })
+
+  it("sub-second drift still matches the counterpart cue", () => {
+    const result = matchTargetRowsByOrder(
+      [cueRow(1300, 2100, "one"), cueRow(2300, 3100, "two")],
+      cells,
+    )
+    expect(result.matched.map((m) => [m.cellId, m.incomingText])).toEqual([
+      ["c1", "one"],
+      ["c2", "two"],
+    ])
+  })
+
+  it("a cue beyond tolerance of every cell is an orphan, never a wrong-cell commit", () => {
+    const result = matchTargetRowsByOrder([cueRow(60000, 60800, "way out")], cells)
+    expect(result.matched).toHaveLength(0)
+    expect(result.orphans).toEqual([{ ref: "cue 60000", text: "way out" }])
+    expect(result.unmatchedSourceCount).toBe(4)
+  })
+
+  it("recovers timings from a VTT cue timecode label when none are passed", () => {
+    // The VTT target import labels each row with its cue range; that label is
+    // enough to align by, so callers need not restate the timings.
+    const result = matchTargetRowsByOrder(
+      [
+        { ref: "00:00:03.000 --> 00:00:03.800", text: "three" },
+        { ref: "00:00:01.000 --> 00:00:01.800", text: "one" },
+      ],
+      cells,
+    )
+    expect(result.alignedBy).toBe("overlap")
+    expect(result.matched.map((m) => [m.cellId, m.incomingText])).toEqual([
+      ["c3", "three"],
+      ["c1", "one"],
+    ])
+    // Rows are listed in the incoming file's order, labelled by timecode.
+    expect(result.matched[0].ref).toBe("00:00:03.000 --> 00:00:03.800")
+  })
+
+  it("an empty incoming cue commits nothing and frees no cell for its neighbour", () => {
+    const result = matchTargetRowsByOrder(
+      [cueRow(1000, 1800, "one"), cueRow(2000, 2800, "   "), cueRow(3000, 3800, "three")],
+      cells,
+    )
+    expect(result.matched.map((m) => m.cellId)).toEqual(["c1", "c3"])
+    expect(result.unmatchedSourceCount).toBe(2)
+  })
+
+  it("falls back to raw order when the file's cells carry no timings", () => {
+    const untimed = [cell({ cellId: "u1" }), cell({ cellId: "u2" })]
+    const result = matchTargetRowsByOrder(
+      [cueRow(1000, 1800, "one"), cueRow(2000, 2800, "two")],
+      untimed,
+    )
+    expect(result.alignedBy).toBe("order")
+    expect(result.matched.map((m) => m.cellId)).toEqual(["u1", "u2"])
+  })
+
+  it("falls back to raw order when an incoming row carries no timing", () => {
+    const result = matchTargetRowsByOrder(
+      [cueRow(1000, 1800, "one"), { text: "no timing here" }],
+      cells,
+    )
+    expect(result.alignedBy).toBe("order")
+    expect(result.matched.map((m) => m.cellId)).toEqual(["c1", "c2"])
+  })
+
+  it("spreadsheet order matching is untouched — no timings on either side", () => {
+    const untimed = [cell({ cellId: "s1" }), cell({ cellId: "s2" }), cell({ cellId: "s3" })]
+    const result = matchTargetRowsByOrder(
+      [{ text: "one" }, { text: "" }, { text: "three" }],
+      untimed,
+    )
+    expect(result.alignedBy).toBe("order")
+    expect(result.matched.map((m) => m.cellId)).toEqual(["s1", "s3"])
+    expect(result.unmatchedSourceCount).toBe(1)
   })
 })
 

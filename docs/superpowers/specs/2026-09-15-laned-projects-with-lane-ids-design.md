@@ -59,7 +59,12 @@ Design notes, each load-bearing:
 - **`id`** — opaque and permanent. Appears in shareable links, so short/URL-friendly beats a raw
   UUID (cosmetic; decide once — open Q1).
 - **`name`** — editable label, **deliberately not unique** (see §0; a uniqueness rule would
-  re-create the collision crisis we just removed).
+  re-create the collision crisis we just removed). But non-unique names carry a real hazard:
+  assigning a translator to the *wrong* "Spanish" is easy when two lanes share a name. The
+  DB stays permissive; the **assignment/selection UIs must disambiguate** same-named lanes —
+  show `lang_code`, the owning project, and (on hover/secondary line) the short lane `id` — and
+  warn before an assignment lands on a duplicate-named lane. Uniqueness is a UX affordance, not a
+  constraint.
 - **`lang_code`** — the *machine's* idea of the language, split out from the human name. NULL is
   honest for a placeholder lane and is what language-aware features (TTS voice, spellcheck,
   language-aware AI, billing's distinct-language count) read. Renames never touch it.
@@ -208,11 +213,15 @@ name→`lane_id` switch is a trivial edit.
 
 1. **Lane ID format** — short opaque slug vs. UUID (they appear in links).
 2. **Export/publish gating** on placeholder-named lanes — block, warn, or allow?
-3. **First-class Codex provenance marker** on `projects` — add one, or keep the `legacy-import`
-   heuristic?
-4. **Name/`lang_code` UX** — keep "lane named by its language" in the UI for now (many users are
-   attached to it) while storing `lang_code` separately? Storage is additive and easy to defer;
-   this is purely a UX decision and can change later at low cost.
+3. **First-class Codex provenance marker** on `projects` — ~~add one, or keep the `legacy-import`
+   heuristic?~~ **DECIDED (2026-09-15):** defer the dedicated marker — it's a good idea but out of
+   scope for this already-large task. Rely on the `legacy-import` heuristic for now. **However, the
+   importer's lane-ID change (step 5) DOES land in this same PR.**
+4. **Name/`lang_code` UX** — ~~keep "lane named by its language" in the UI for now while storing
+   `lang_code` separately?~~ **DECIDED (2026-09-15):** adopt the split **now**. Lanes are
+   **auto-named by their language** at creation (so nothing changes for the many users attached to
+   language-named lanes), but `name` is stored separately from `lang_code` and can be **edited
+   later, independently of the language**, by whoever has the right permission (see Q6).
 5. **Drop vs. keep `target_lang`** on hot tables (§5) — decide post-cutover on perf grounds.
 6. **Who may name a placeholder lane** — any project lead, or narrower?
 7. **`chain_claims`** — v1's straddle test passed (Option A). Confirm the same holds when the key

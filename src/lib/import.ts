@@ -101,6 +101,7 @@ import type {
   SourceArtifactFormat,
 } from "../../shared/import-contract"
 import { parseUnknownFileInSandbox } from "./import/sandbox-parser"
+import { assertImportCellsWithinSizeLimit } from "./import/cell-size"
 
 export type EBibleImportPhase = "download" | "parse" | "save"
 export interface EBibleProgress {
@@ -1683,6 +1684,11 @@ export async function emitParsedFile(
   // need to mark the time-ordered case explicitly.
   const orderedBy: OrderedBy = orderedByForFileType(fileType)
 
+  // AQU-990: the bulk-import route rejects an oversized cell with a bare 413
+  // after the whole payload has been chunked and uploaded. Check the same
+  // ceiling here so an unsplittable section fails immediately, naming itself.
+  assertImportCellsWithinSizeLimit(result.name, cells, targets)
+
   const upload = existingFileId ? reconcileSourceImport : bulkUploadSource
   await upload({
     projectId: ctx.projectId,
@@ -1737,6 +1743,7 @@ export async function emitParsedFile(
       ...(result.corpusMarker ? { corpusMarker: result.corpusMarker } : {}),
       ...(result.originalName ? { originalName: result.originalName } : {}),
       ...(result.bookCode ? { bookCode: result.bookCode } : {}),
+      ...(result.rawBytes || result.rawSource ? { hasOriginalSource: true as const } : {}),
     },
     speakerPairs,
   }
@@ -2637,6 +2644,15 @@ export async function parseFile(
       throw new Error("SDBH lexicon editions import via importSdbh(), not importFile()")
     case "custom":
       throw new Error("Custom formats must be prepared by the AI-assisted recipe service")
+    case "codex":
+    case "source":
+      // AQU-997: server-side file KINDS, not upload formats. They only ever
+      // arrive already-parsed — a migrated Codex notebook's cells come in as
+      // events (lib/migrate/map.ts), and "source" is the role fallback for a
+      // row carrying no kind at all. `detectFileType` returns neither, so
+      // nothing routes an upload here; this is the same defensive guard the
+      // media arms below are.
+      throw new Error("codex/source are server-side file kinds, not import formats")
     case "audio":
     case "video":
       // Media files have no text parser; importFile() routes them to

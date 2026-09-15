@@ -61,22 +61,28 @@ schema, build, or deploy step; there is no default environment. Production jobs
 enter the GitHub `production` Environment, whose deployment-branch policy admits
 only `main`.
 
-Cloudflare Workers Builds owns automatic pull-request validation through the
+Cloudflare Workers Builds owns automatic compile-only pull-request previews through the
 dedicated `aquilla-web-preview` Worker. All six production/development Workers
 remain disconnected from Git. The preview Worker has no custom domain or live
-route, always targets development APIs, and never promotes a version or changes
+route. Its build deploys matching auth/sync previews and never promotes a live version or changes
 production/development traffic. `versification-tool` remains disconnected
 because it has no deployable Wrangler application.
 
 The consolidated `.github/workflows/ci.yml` is `workflow_dispatch`-only. Normal
 pull-request and push activity consumes no GitHub-hosted runner minutes. Cloudflare
 receives GitHub repository events, runs the repository-owned build commands, and
-reports its check results and preview links back to GitHub.
+reports compilation results and preview links back to GitHub. The local pre-push
+hook runs a secret scan and the existing commit-based affected E2E selection,
+not the full suites. QA tests the published preview; preview success does not
+certify automated test results.
 
-Every Workers Builds preview uses development API hosts, including builds of
-`main`. Preview versions remain route-free permanently; they are never promoted
-into a live Worker. Repository code converts slash-named branches into a stable,
-lowercase, hashed preview alias before passing it to Wrangler.
+Every Workers Builds preview uses its branch's auth and sync code with shared
+development Hyperdrive/R2 storage, including builds of `main`. The web Worker's
+single repository connection deploys all three using `wrangler preview`.
+Repository code converts slash-named branches into a stable, lowercase, hashed
+preview name. These previews never replace a live Worker. See the
+[Workers Builds runbook](runbooks/cloudflare-workers-builds.md#one-time-preview-setup)
+for required runtime secrets and limits of shared development data.
 
 The agent sandbox and not-yet-enabled resource proxy follow the same rule: their
 production profiles are main-only, their unnamed profiles have distinct local

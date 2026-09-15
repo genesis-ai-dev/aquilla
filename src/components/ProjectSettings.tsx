@@ -105,7 +105,8 @@ import { SettingsNav, type SettingsSection } from "./ProjectSettings/SettingsNav
 import { BackLink, NavList, NavRow } from "@/components/ui/nav-list"
 import { readValidationCount, readValidationCountAudio } from "@/lib/progress/read-validation-count"
 import { setUserApiKey, useUserApiKey } from "@/lib/store/user-api-keys"
-import type { ProjectWideSettings } from "@/lib/sync/project-settings"
+import type { CellEditingTier, ProjectWideSettings } from "@/lib/sync/project-settings"
+import { FLOOR_LABEL } from "@/pages/settings/constants"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { PERMISSION_DOCS_URL } from "@/components/PermissionDeniedAlert"
 import { resolveRoleName, ROLE } from "@/lib/frontier/roles"
@@ -135,6 +136,41 @@ import { PostEditMetricsSection } from "@/components/metrics/PostEditMetricsSect
  * =============================================================================
  */
 const SHOW_TERMBASE_SHARING_IN_SETTINGS = false
+
+/**
+ * AQU-1068: the cell-editing tiers, in the order they are offered.
+ *
+ * The reset default leads, matching every other floor control on this page;
+ * the rest climb the ladder, matching RosterProgressSection and
+ * TermbaseEditSection.
+ *
+ * The labels used to be DESCRIPTIVE — "Maintainers and project leads", "Anyone
+ * who can edit" — on the theory that they said who is admitted more plainly
+ * than a bare rank. Matthew's review overruled that (Sam approved, 2026-09-08):
+ * an admin who has just set someone's role on the Members panel should not have
+ * to work out which bespoke phrase covers that rank, so this is the standard
+ * ladder, spelled the standard way, and only "No one" — which is not a role —
+ * keeps a phrase of its own.
+ *
+ * `level` is what makes the two-tier labelling work, exactly as in
+ * RosterProgressSection: FLOOR_LABEL supplies the short word for the closed
+ * trigger and the message key the fuller row in the open list. "No one" has no
+ * level and therefore no FLOOR_LABEL entry, so it shows its row text in both.
+ */
+const CELL_EDITING_FLOOR_OPTIONS: readonly {
+  value: CellEditingTier
+  /** Ladder level this tier admits, or null for "none" — which is a refusal,
+   *  not a rank, and so has no place on the ladder. */
+  level: number | null
+  labelKey: MessageKey
+}[] = [
+  { value: "none", level: null, labelKey: "projectSettings.cellEditing.optionNone" },
+  { value: "commenter", level: ROLE.COMMENTER, labelKey: "projectSettings.cellEditing.optionCommenter" },
+  { value: "reviewer", level: ROLE.REVIEWER, labelKey: "projectSettings.cellEditing.optionReviewer" },
+  { value: "contributor", level: ROLE.CONTRIBUTOR, labelKey: "projectSettings.cellEditing.optionContributor" },
+  { value: "project_lead", level: ROLE.PROJECT_LEAD, labelKey: "projectSettings.cellEditing.optionProjectLead" },
+  { value: "maintainer", level: ROLE.MAINTAINER, labelKey: "projectSettings.cellEditing.optionMaintainer" },
+]
 
 // Well-known OpenAI-compatible providers. Exactly one of `label`/`labelKey` is
 // set per entry: `labelKey` for the two real English descriptions ("Local /
@@ -230,7 +266,7 @@ interface Baseline {
   validationNamedUsers: string[]
   allowSelfValidation: boolean
   /** AQU-646: may people add lines into the timeline's silences? */
-  allowLineCreation: boolean
+  cellEditingFloor: CellEditingTier
   /** AQU-646 stage 2: may this project's timelines be restructured? */
   allowTrackEditing: boolean
   timingLocked: boolean
@@ -280,7 +316,7 @@ function buildBaseline(project: ProjectRecord): Baseline {
     allowSelfValidation: project.allowSelfValidation ?? true,
     // Off unless a project has said otherwise: the affordance is speculative
     // and underdeveloped, so absent must read as off, not as unset.
-    allowLineCreation: project.allowLineCreation ?? false,
+    cellEditingFloor: project.cellEditingFloor ?? "none",
     // Off unless a project has said otherwise. Multi-track is capability for
     // clients who want it, and a project that never turns it on should not be
     // able to tell it was built.
@@ -341,9 +377,29 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const settingsHref = (section?: string) =>
     withSettingsReturn(projectSettingsPath(id!, section), fromEditor ? returnTo : null)
 
+  // Declared ahead of useProjectSettings so the hydration event can carry the
+  // viewer's org role (AQU-1274). No conditional return sits between these
+  // calls, so hook order is unchanged.
+  const activeOrg = useActiveOrgOptional()
+  const roleTelemetry = useMemo(
+    () => ({
+      orgRole: activeOrg?.activeOrg?.role?.level ?? null,
+      resolvedRole: project?.syncRole?.level ?? null,
+      resolvedFrom: project?.syncRole?.source ?? null,
+    }),
+    [
+      activeOrg?.activeOrg?.role?.level,
+      project?.syncRole?.level,
+      project?.syncRole?.source,
+    ],
+  )
+
   const {
     canEdit: canEditShared,
     reasonCannotEdit,
+    canEditLanguages,
+    reasonCannotEditLanguages,
+    languageEditFloor,
     patch: patchShared,
     version: sharedVersion,
     updatedAt: sharedUpdatedAt,
@@ -355,13 +411,18 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     // AQU-1083: what "Organization default" currently resolves to, from the
     // same response as the value it is the fallback for.
     orgCountStructuralCells,
-  } = useProjectSettings(id ?? null, project?.syncRole?.level ?? null)
+  } = useProjectSettings(id ?? null, project?.syncRole?.level ?? null, {
+    // AQU-1086: the org's language-edit floor rides on the project record, so
+    // the language fields below can be enabled for a project lead when the org
+    // opted in — without loosening the maintainer floor on anything else.
+    languageEditMinRole: project?.languageEditMinRole,
+    roleTelemetry,
+  })
 
   // Org context for the termbase-sharing section. The user's org; the section's
   // server calls re-validate org-membership / org-ownership, so a mismatch just
   // yields graceful empty/403 states.
   const { org } = useOrg()
-  const activeOrg = useActiveOrgOptional()
   const { session } = useFrontierSession()
   const isCloudProject = !!(project?.syncRole)
   // AQU-485: Members is a privacy-gated settings pane. Hide it entirely for
@@ -424,6 +485,32 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     : reasonCannotEdit === "role" ? roleLockHint
     : null
 
+  // AQU-1086: the language fields sit behind the org's configurable
+  // languageEditMinRole, so their lock hint must name the role the user
+  // actually needs (Project lead when the org lowered the floor, Maintainer by
+  // default) rather than a hardcoded Maintainer — the AQU-427 convention.
+  const languagePrivilegedRole = resolveRoleName(t, languageEditFloor, { plural: true })
+  const languageRoleLockHint = (
+    <PermissionLockHint
+      title={t("projectSettings.permission.onlyRoleCanModify", {
+        role: languagePrivilegedRole,
+      })}
+      onView={id ? () => setPrivilegedOpen(true) : undefined}
+      href={id ? undefined : PERMISSION_DOCS_URL}
+      linkLabel={
+        id
+          ? t("projectSettings.permission.viewPrivilegedMembers", {
+              role: languagePrivilegedRole,
+            })
+          : t("error.permissionDenied.learnMore")
+      }
+    />
+  )
+  const languageDisabledTooltip =
+    reasonCannotEditLanguages === "offline" ? t("projectSettings.permission.reconnectToEdit")
+    : reasonCannotEditLanguages === "role" ? languageRoleLockHint
+    : null
+
   // AQU-765: renaming a synced project now persists to the server rename
   // endpoint (maintainer+). Local (unsynced) projects keep their name editable
   // — their IDB record is the source of truth. For a cloud project below the
@@ -470,7 +557,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const [validationRoleFloor, setValidationRoleFloor] = useState<"reviewer" | "project_lead" | "maintainer">("reviewer")
   const [validationNamedUsers, setValidationNamedUsers] = useState<string[]>([])
   const [allowSelfValidation, setAllowSelfValidation] = useState(true)
-  const [allowLineCreation, setAllowLineCreation] = useState(false)
+  const [cellEditingFloor, setCellEditingFloor] = useState<CellEditingTier>("none")
   const [allowTrackEditing, setAllowTrackEditing] = useState(false)
   const [timingLocked, setTimingLocked] = useState(true)
   // AQU-186: harmonize_min_role — project_lead floor, configurable up to maintainer.
@@ -532,7 +619,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     setValidationRoleFloor(b.validationRoleFloor)
     setValidationNamedUsers(b.validationNamedUsers)
     setAllowSelfValidation(b.allowSelfValidation)
-    setAllowLineCreation(b.allowLineCreation)
+    setCellEditingFloor(b.cellEditingFloor)
     setAllowTrackEditing(b.allowTrackEditing)
     setTimingLocked(b.timingLocked)
     setHarmonizeMinRole(b.harmonize_min_role)
@@ -579,6 +666,41 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     setBibleResourcesEnabled((prev) => (prev === baseline.bibleResourcesEnabled ? project.bibleResourcesEnabled : prev))
   }, [project, baseline, sharedSettingsFetched])
 
+  // AQU-1115: the Source/Target Language fields rendered permanently EMPTY on a
+  // project that has both set. Same two-phase shape as the AQU-460 race above,
+  // but worse: this page passes `includeSettings: false` to `useProject` (it
+  // owns the editable settings hook below, and a second overlay request would
+  // be a duplicate GET), so `project` here is `minimalProjectRecord`, which
+  // hardcodes `sourceLanguage: ""` / `targetLanguage: ""` — the languages live
+  // ONLY in the shared settings blob and never reach `project` at all. The
+  // baseline seed therefore didn't just *race* the real values, it could never
+  // see them, so the fields stayed blank forever. (The Languages card below
+  // looked right because it reads `sharedSettingsBlob` directly — that
+  // discrepancy is exactly what the bug report describes.)
+  //
+  // Once this page's own settings GET has resolved, re-sync both fields from
+  // the blob. `hasFetched` fails closed (stays false on a failed GET), so a
+  // settings outage leaves the previous behavior rather than blanking anything.
+  const languagesResyncedRef = useRef(false)
+  useEffect(() => {
+    if (!baseline || !sharedSettingsFetched) return
+    if (languagesResyncedRef.current) return
+    languagesResyncedRef.current = true
+    // Absent stays absent — a project with a genuinely empty language must show
+    // an empty field, never an invented default. A free-text label that isn't
+    // in the language catalog rides through verbatim.
+    const nextSource = sharedSettingsBlob?.sourceLanguage ?? baseline.sourceLanguage
+    const nextTarget = sharedSettingsBlob?.targetLanguage ?? baseline.targetLanguage
+    if (nextSource === baseline.sourceLanguage && nextTarget === baseline.targetLanguage) return
+    setBaseline((prev) => (prev ? { ...prev, sourceLanguage: nextSource, targetLanguage: nextTarget } : prev))
+    // Only adopt the hydrated value where the user hasn't already typed over the
+    // (blank) seed — otherwise this would stomp an in-progress edit. Settling to
+    // the true server value must also not read as a user edit, which is why the
+    // baseline moves with it.
+    setSourceLanguage((prev) => (prev === baseline.sourceLanguage ? nextSource : prev))
+    setTargetLanguage((prev) => (prev === baseline.targetLanguage ? nextTarget : prev))
+  }, [baseline, sharedSettingsFetched, sharedSettingsBlob])
+
   const effectiveCompletionApiKey = apiKey.trim() || completionUserKey.trim()
 
   const loadModels = useCallback(async (opts: { force?: boolean } = {}) => {
@@ -594,7 +716,38 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       if (lastModelFetchKeyRef.current !== fetchKey) return
       setModels(list)
       setConnected(true)
+      const chosenModel = model || list[0] || ""
       if (list.length > 0 && !model) setModel(list[0])
+      // Connect (and the auto-probe after a key/endpoint pause) is the moment
+      // the user believes BYOK is ready. Persist immediately so the workspace
+      // sparkle gate sees Custom OpenRouter without a second "Save changes".
+      if (id && provider === "custom") {
+        const latest = (await getProject(id)) ?? project ?? undefined
+        if (latest) {
+          const nextCompletion = buildCompletionSettings(latest.completionSettings, {
+            provider: "custom",
+            endpoint: trimmedEndpoint,
+            ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+            model: chosenModel,
+          })
+          await updateProject({
+            ...latest,
+            completionSettings: nextCompletion,
+            aiProviderChosen: true,
+          })
+          setBaseline((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  provider: "custom",
+                  endpoint: trimmedEndpoint,
+                  apiKey,
+                  model: chosenModel,
+                }
+              : prev,
+          )
+        }
+      }
     } catch (err) {
       if (lastModelFetchKeyRef.current !== fetchKey) return
       setModels([])
@@ -603,7 +756,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     } finally {
       if (lastModelFetchKeyRef.current === fetchKey) setConnecting(false)
     }
-  }, [effectiveCompletionApiKey, endpoint, model])
+  }, [apiKey, effectiveCompletionApiKey, endpoint, id, model, project, provider])
 
   const isDirty = useMemo(() => {
     if (!baseline) return false
@@ -633,7 +786,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       validationRoleFloor !== baseline.validationRoleFloor ||
       JSON.stringify(validationNamedUsers) !== JSON.stringify(baseline.validationNamedUsers) ||
       allowSelfValidation !== baseline.allowSelfValidation ||
-      allowLineCreation !== baseline.allowLineCreation ||
+      cellEditingFloor !== baseline.cellEditingFloor ||
       allowTrackEditing !== baseline.allowTrackEditing ||
       timingLocked !== baseline.timingLocked ||
       harmonizeMinRole !== baseline.harmonize_min_role ||
@@ -650,7 +803,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     topK, contextSize, useOnlyValidatedExamples, fewShotExampleFormat, mainChatLanguage,
     completionBatchSize, validationBatchSize,
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
-    validationRoleFloor, validationNamedUsers, allowSelfValidation, allowLineCreation,
+    validationRoleFloor, validationNamedUsers, allowSelfValidation, cellEditingFloor,
     allowTrackEditing,
     timingLocked,
     harmonizeMinRole, bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey,
@@ -842,7 +995,13 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         const nextTtsSettings = geminiKeyChanged
           ? { ...latest.ttsSettings, apiKey: geminiApiKey || undefined }
           : latest.ttsSettings
-        await updateProject({ ...latest, ...localUpdates, completionSettings: nextCompletion, ttsSettings: nextTtsSettings })
+        await updateProject({
+          ...latest,
+          ...localUpdates,
+          completionSettings: nextCompletion,
+          ttsSettings: nextTtsSettings,
+          ...(Object.keys(completionUpdates).length > 0 ? { aiProviderChosen: true } : {}),
+        })
       }
 
       const sharedUpdates: ProjectWideSettings = {}
@@ -859,7 +1018,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         changedFieldLabels.push("named validators")
       }
       if (allowSelfValidation !== baseline.allowSelfValidation) { sharedUpdates.allowSelfValidation = allowSelfValidation; changedFieldLabels.push("self-validation") }
-      if (allowLineCreation !== baseline.allowLineCreation) { sharedUpdates.allowLineCreation = allowLineCreation; changedFieldLabels.push("adding timeline lines") }
+      if (cellEditingFloor !== baseline.cellEditingFloor) { sharedUpdates.cellEditingFloor = cellEditingFloor; changedFieldLabels.push("who can add and remove cells") }
       if (allowTrackEditing !== baseline.allowTrackEditing) { sharedUpdates.allowTrackEditing = allowTrackEditing; changedFieldLabels.push("timeline track editing") }
       if (timingLocked !== baseline.timingLocked) { sharedUpdates.timingLocked = timingLocked; changedFieldLabels.push("the timing lock") }
       if (harmonizeMinRole !== baseline.harmonize_min_role) { sharedUpdates.harmonize_min_role = harmonizeMinRole; changedFieldLabels.push("harmonize min role") }
@@ -932,7 +1091,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         validationRoleFloor,
         validationNamedUsers,
         allowSelfValidation,
-        allowLineCreation,
+        cellEditingFloor,
         allowTrackEditing,
         timingLocked,
         harmonize_min_role: harmonizeMinRole,
@@ -975,6 +1134,19 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     completionBatchSize, validationBatchSize,
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
     validationRoleFloor, validationNamedUsers, allowSelfValidation, harmonizeMinRole,
+    // AQU-1068. Its predecessor `allowLineCreation` was missing from this list
+    // too, and the bug is invisible until you try it: handleSave closes over a
+    // stale value, the diff below sees no change, `sharedUpdates` comes out
+    // empty and NO REQUEST IS SENT AT ALL. The button reacts, the header keeps
+    // saying "Unsaved changes", and nothing in the console complains. The unit
+    // test does not catch it either — an unrelated re-render refreshes the
+    // closure in happy-dom — so exhaustive-deps is the only guard, and it is a
+    // warning among hundreds. `timingLocked` had the same hole: the timing
+    // LOCK, the one safeguard AQU-646 added, could silently fail to save.
+    // `allowTrackEditing` arrived with PR #474 carrying the same hole, and the
+    // merge that brought it here is where it became visible — dev's own
+    // handleSave list never named it either.
+    cellEditingFloor, timingLocked, allowTrackEditing,
     bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey, patchShared, refresh, applyBaseline, project,
     precedingTargetCells, importExcludeFrontMatter, getJwt, isCloudProject, t,
   ])
@@ -1042,6 +1214,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     { id: "section-import", label: "Import", keywords: ["import", "usfm", "front matter", "book title", "book name", "introduction", "toc", "running header", "paratext", "door43"] },
     { id: "section-user", label: "User", keywords: ["username", "author"] },
     { id: "section-members", label: "Team members", keywords: ["members", "invite", "invite link", "link", "join", "share", "access", "role", "roster", "collaborator"], visible: canSeeMembers },
+    // AQU-1068: a permission, so it lives with the roles rather than in the
+    // Timeline card it grew out of — it governs ordinary text files now, not
+    // just the timeline's silences.
+    { id: "section-cell-editing", label: "Content structure", keywords: ["add cell", "remove cell", "insert", "delete", "structure", "verse", "line", "row", "restructure", "permission", "role"] },
     { id: "section-ai-instructions", label: "AI Instructions", keywords: ["ai", "llm", "instructions", "batch size", "completions batch", "validation batch", "batch validate", "top_k", "examples", "context window", "assistant language", "few shot"] },
     { id: "section-draft-context", label: "Draft Context", keywords: ["draft context", "preceding cells", "left context", "paragraph drafting", "context budget"] },
     { id: "section-advanced-llm", label: "Advanced LLM", keywords: ["provider", "endpoint", "api key", "model", "temperature", "max tokens", "health penalty", "frontier", "openai", "custom"] },
@@ -1102,10 +1278,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     {
       id: "general",
       label: "General",
-      description: "Name, languages, username, Bible resources",
+      description: "Name, languages, content structure, username, Bible resources",
       icon: SlidersHorizontal,
       hub: "Project",
-      sectionIds: ["section-project-info", "section-languages", "section-bible-resources", "section-import", "section-user"],
+      sectionIds: ["section-project-info", "section-languages", "section-cell-editing", "section-bible-resources", "section-import", "section-user"],
     },
     {
       id: "members",
@@ -1563,12 +1739,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               <SettingsRow
                 label={<label htmlFor="sl">{t("projectSettings.info.sourceLanguageLabel")}</label>}
                 control={
-                  <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip}>
+                  <DisabledFieldTooltip disabled={!canEditLanguages} tooltip={languageDisabledTooltip}>
                     <LanguageComboboxInput
                       id="sl"
                       value={sourceLanguage}
                       onValueChange={setSourceLanguage}
-                      disabled={!canEditShared}
+                      disabled={!canEditLanguages}
                       aria-label={t("projectSettings.info.sourceLanguageLabel")}
                       className="w-40 bg-background"
                     />
@@ -1578,12 +1754,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               <SettingsRow
                 label={<label htmlFor="tl">{t("projectSettings.info.targetLanguageLabel")}</label>}
                 control={
-                  <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip}>
+                  <DisabledFieldTooltip disabled={!canEditLanguages} tooltip={languageDisabledTooltip}>
                     <LanguageComboboxInput
                       id="tl"
                       value={targetLanguage}
                       onValueChange={setTargetLanguage}
-                      disabled={!canEditShared}
+                      disabled={!canEditLanguages}
                       aria-label={t("projectSettings.info.targetLanguageLabel")}
                       className="w-40 bg-background"
                     />
@@ -1600,10 +1776,56 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             defaultTargetLanguage={sharedSettingsBlob?.targetLanguage ?? project?.targetLanguage ?? ""}
             targetLanes={sharedSettingsBlob?.targetLanes ?? []}
             archivedLanes={sharedSettingsBlob?.archivedLanes ?? []}
-            canEdit={canEditShared}
-            disabledTooltip={sharedDisabledTooltip}
+            canEdit={canEditLanguages}
+            disabledTooltip={languageDisabledTooltip}
             patch={patchShared}
           />
+        )}
+
+        {searchGroupLabel("section-cell-editing")}
+        {sectionsToRender.some((s) => s.id === "section-cell-editing") && (
+          <div id="section-cell-editing">
+            {/* AQU-1068. One setting answers WHO; the file's own nature answers
+                WHERE — a text file takes a cell anywhere, a subtitle file only
+                in a gap — so nothing here mentions timings or media. */}
+            <SettingsGroup label={t("projectSettings.cellEditing.sectionTitle")}>
+              <SettingsRow
+                label={<label htmlFor="cell-editing-floor">{t("projectSettings.cellEditing.label")}</label>}
+                description={t("projectSettings.cellEditing.description")}
+                control={
+                  <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip ?? null}>
+                    <Select
+                      items={CELL_EDITING_FLOOR_OPTIONS.map((o) => ({
+                        value: o.value,
+                        label: (o.level != null ? FLOOR_LABEL[o.level] : undefined) ?? t(o.labelKey),
+                      }))}
+                      disabled={!canEditShared}
+                      value={cellEditingFloor}
+                      onValueChange={(value) =>
+                        setCellEditingFloor((value ?? cellEditingFloor) as typeof cellEditingFloor)
+                      }
+                    >
+                      <SelectTrigger
+                        id="cell-editing-floor"
+                        data-testid="settings-cell-editing-floor"
+                        aria-label={t("projectSettings.cellEditing.label")}
+                        className="w-64 bg-background"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectGroup>
+                          {CELL_EDITING_FLOOR_OPTIONS.map((o) => (
+                            <SelectItem key={o.value} value={o.value}>{t(o.labelKey)}</SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                  </DisabledFieldTooltip>
+                }
+              />
+            </SettingsGroup>
+          </div>
         )}
 
         {searchGroupLabel("section-bible-resources")}
@@ -2308,23 +2530,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                   </p>
                 </label>
               </div>
-              <div className="flex items-start gap-2">
-                <Checkbox
-                  id="allow-line-creation"
-                  data-testid="settings-allow-line-creation"
-                  checked={allowLineCreation}
-                  disabled={!canEditShared}
-                  onCheckedChange={(checked) => setAllowLineCreation(checked)}
-                />
-                <label htmlFor="allow-line-creation" className="text-sm">
-                  {t("projectSettings.timeline.addLinesLabel")}
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {t("projectSettings.timeline.addLinesHint")}
-                  </p>
-                </label>
-              </div>
-              {/* AQU-646 stage 2. LAST in the card, because it is the widest
-                  claim of the three: the two above constrain what may move on
+              {/* AQU-646 stage 2. LAST in the card, because it is the wider
+                  claim of the two: the lock above constrains what may move on
                   a timeline, this one decides whether the timeline's own rows
                   may be added to, grouped and recoloured at all. Off by
                   default, and enforced on the server as well — the UI
@@ -2438,7 +2645,20 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         )}
 
         {sectionsToRender.some((s) => s.id === "section-experimental") && id && (
-          <ExperimentalFlagsSection projectId={id} serverProject={project ?? undefined} />
+          <ExperimentalFlagsSection
+            projectId={id}
+            serverProject={project ?? undefined}
+            // AQU-1246: the Autopilot opt-in is a project-wide synced setting,
+            // not a device-local flag, so it reads from and writes through the
+            // shared settings blob. It saves immediately rather than joining
+            // the deferred Save bar — it is one switch with no dependent
+            // fields, and its role floor (project_lead) is lower than the bar's
+            // (maintainer), so folding it in would lock leads out of the one
+            // control they are allowed to touch.
+            autopilotEnabled={sharedSettingsBlob.autopilotEnabled}
+            roleLevel={project?.syncRole?.level ?? null}
+            onSetAutopilotEnabled={(enabled) => { void patchShared({ autopilotEnabled: enabled }) }}
+          />
         )}
           </div>
     </Page>

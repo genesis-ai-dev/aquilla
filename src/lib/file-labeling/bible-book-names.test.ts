@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { getBookName, isKnownBookCode, compareByCanonicalBookOrder } from "./bible-book-names"
+import { getBookName, isKnownBookCode, compareByCanonicalBookOrder, bookCodeFromFileName } from "./bible-book-names"
 
 describe("getBookName", () => {
   it("returns English name for OT book codes", () => {
@@ -55,5 +55,28 @@ describe("compareByCanonicalBookOrder (AQU-582)", () => {
   it("sorts unknown (non-book) names after all known books, alphabetically", () => {
     expect([...["Zeta Notes", "John", "Alpha Notes", "Mark"]].sort(compareByCanonicalBookOrder))
       .toEqual(["Mark", "John", "Alpha Notes", "Zeta Notes"])
+  })
+})
+
+describe("bookCodeFromFileName (AQU-1084)", () => {
+  it("reads a bare code, with or without an extension, in any case", () => {
+    expect(bookCodeFromFileName("1CH")).toBe("1CH")
+    expect(bookCodeFromFileName("gen.usfm")).toBe("GEN")
+    expect(bookCodeFromFileName("Mat")).toBe("MAT")
+  })
+
+  it("prefers the end of the stem so numbered prefixes work", () => {
+    expect(bookCodeFromFileName("40-MAT.usfm")).toBe("MAT")
+  })
+
+  it("falls back to the front of the stem for friendly names", () => {
+    expect(bookCodeFromFileName("Genesis")).toBe("GEN")
+    expect(bookCodeFromFileName("Revelation.usfm")).toBe("REV")
+  })
+
+  it("returns undefined when neither end of the stem is a known code", () => {
+    expect(bookCodeFromFileName("readme")).toBeUndefined()
+    expect(bookCodeFromFileName("World English Bible (eng-engwebp)")).toBeUndefined()
+    expect(bookCodeFromFileName("")).toBeUndefined()
   })
 })

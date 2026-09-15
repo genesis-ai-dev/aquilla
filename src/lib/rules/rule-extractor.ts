@@ -5,6 +5,20 @@
  * Pass 2 (stronger model): Convert each candidate into a structured TranslationRule draft.
  *
  * Mirrors the pattern from rule-suggester.ts.
+ *
+ * AQU-466: hardened for real organisation style guides. The path had only ever
+ * been exercised on short hand-written samples, where pass 1 comfortably fits
+ * one request. A real guide is tens of pages, and three things broke on it:
+ *   1. The whole document went to pass 1 in a single call under a 2048-token
+ *      output cap, so the candidate array came back cut off mid-array — and the
+ *      strict `JSON.parse` then yielded ZERO rules with no error at all. The
+ *      document is now chunked (`chunkDocument`) and a truncated array is
+ *      salvaged down to the candidates it did complete.
+ *   2. Long guides restate the same convention in several sections, so
+ *      chunking multiplies duplicates — candidates are now de-duplicated.
+ *   3. Pass 2 patterns were accepted as any string, so a regex the model got
+ *      wrong became a rule that silently never fires (rule-engine `compile()`
+ *      caches the failed compile as null). Patterns must now compile.
  */
 
 import { complete } from "@/lib/completion/completion-service"
@@ -30,6 +44,118 @@ export function checkInputSize(text: string): { ok: true } | { ok: false; messag
 }
 
 // ---------------------------------------------------------------------------
+// Document chunking (AQU-466)
+// ---------------------------------------------------------------------------
+
+/**
+ * Byte budget for one pass-1 request. A 200 KB guide is ~50k tokens, which
+ * neither fits a fast model's context nor can be summarised under the 2048
+ * output-token cap pass 1 runs with. ~24 KB (~6k tokens) leaves room for the
+ * prompt and for a candidate list long enough to cover the chunk.
+ */
+export const PASS1_CHUNK_BYTES = 24 * 1024
+
+const encoder = new TextEncoder()
+const byteLength = (s: string): number => encoder.encode(s).length
+
+/**
+ * Split a document into pass-1 sized chunks, cutting on line boundaries so a
+ * rule is not sliced in half. Style guides converted from PDF/DOCX sometimes
+ * arrive as one enormous line, so an oversize line is split on whitespace and,
+ * failing that, on code-point boundaries.
+ */
+export function chunkDocument(text: string, maxBytes: number = PASS1_CHUNK_BYTES): string[] {
+  const trimmed = text.trim()
+  if (!trimmed) return []
+  if (byteLength(trimmed) <= maxBytes) return [trimmed]
+
+  const chunks: string[] = []
+  let current = ""
+  let currentBytes = 0
+
+  for (const line of trimmed.split(/\r?\n/)) {
+    for (const piece of splitOversizeLine(line, maxBytes)) {
+      const pieceBytes = byteLength(piece) + 1 // + the newline we re-add
+      if (currentBytes > 0 && currentBytes + pieceBytes > maxBytes) {
+        if (current.trim()) chunks.push(current.trim())
+        current = ""
+        currentBytes = 0
+      }
+      current += piece + "\n"
+      currentBytes += pieceBytes
+    }
+  }
+  if (current.trim()) chunks.push(current.trim())
+  return chunks
+}
+
+function splitOversizeLine(line: string, maxBytes: number): string[] {
+  if (byteLength(line) <= maxBytes) return [line]
+
+  const pieces: string[] = []
+  let buf = ""
+  let bufBytes = 0
+
+  // Keep the separators so whitespace inside the line survives the round trip.
+  for (const word of line.split(/(\s+)/)) {
+    if (!word) continue
+    const wordBytes = byteLength(word)
+    if (wordBytes > maxBytes) {
+      // A single token larger than the budget (base64 blob, minified table).
+      if (buf) {
+        pieces.push(buf)
+        buf = ""
+        bufBytes = 0
+      }
+      pieces.push(...splitByCodePoint(word, maxBytes))
+      continue
+    }
+    if (bufBytes > 0 && bufBytes + wordBytes > maxBytes) {
+      pieces.push(buf)
+      buf = ""
+      bufBytes = 0
+    }
+    buf += word
+    bufBytes += wordBytes
+  }
+  if (buf) pieces.push(buf)
+  return pieces
+}
+
+function splitByCodePoint(text: string, maxBytes: number): string[] {
+  const pieces: string[] = []
+  let buf = ""
+  let bufBytes = 0
+  // Iterating a string yields code points, so surrogate pairs stay intact.
+  for (const ch of text) {
+    const chBytes = byteLength(ch)
+    if (bufBytes > 0 && bufBytes + chBytes > maxBytes) {
+      pieces.push(buf)
+      buf = ""
+      bufBytes = 0
+    }
+    buf += ch
+    bufBytes += chBytes
+  }
+  if (buf) pieces.push(buf)
+  return pieces
+}
+
+/**
+ * Normalised key for de-duplicating candidates. Long guides restate the same
+ * convention across sections (and each chunk is extracted independently), so
+ * without this a real guide yields the same rule five or six times — and each
+ * duplicate costs a pass-2 call.
+ */
+export function candidateKey(candidate: string): string {
+  return candidate
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[.,;:!?"'`]+$/g, "")
+    .trim()
+}
+
+// ---------------------------------------------------------------------------
 // Pass 1 — extract raw candidates
 // ---------------------------------------------------------------------------
 
@@ -48,50 +174,123 @@ Rules:
 - Output ONLY a valid JSON array of strings, no markdown, no code fences, no explanation
 - If nothing checkable is found, return []`
 
+/**
+ * Run pass 1 over the whole document, one request per chunk, merging and
+ * de-duplicating the candidates. `onChunk` reports (done, total) so the dialog
+ * can show progress through a long guide instead of appearing to hang.
+ */
 export async function extractCandidates(
   docText: string,
   settings: CompletionSettings,
   session: FrontierSession | null = null,
   onLlmCall?: UsageCallback,
+  onChunk?: (done: number, total: number) => void,
 ): Promise<string[]> {
-  const userMessage = `Extract all verifiable translation rules and conventions from this document:\n\n${docText}`
+  const chunks = chunkDocument(docText)
+  const seen = new Set<string>()
+  const candidates: string[] = []
 
-  const response = await complete({
-    settings: {
-      ...settings,
-      // Pass 1: fast model, short output
-      maxTokens: Math.min(settings.maxTokens, 2048),
-      temperature: 0.1,
-    },
-    session,
-    messages: [
-      { role: "system", content: PASS1_SYSTEM_PROMPT },
-      { role: "user", content: userMessage },
-    ],
-  })
+  for (let i = 0; i < chunks.length; i++) {
+    const userMessage = `Extract all verifiable translation rules and conventions from this document:\n\n${chunks[i]}`
 
-  onLlmCall?.({
-    kind: "rule-extract-pass1",
-    model: settings.model,
-    provider: settings.provider || "frontier",
-  })
+    const response = await complete({
+      settings: {
+        ...settings,
+        // Pass 1: fast model, short output
+        maxTokens: Math.min(settings.maxTokens, 2048),
+        temperature: 0.1,
+      },
+      session,
+      messages: [
+        { role: "system", content: PASS1_SYSTEM_PROMPT },
+        { role: "user", content: userMessage },
+      ],
+    })
 
-  return parseCandidates(response)
+    onLlmCall?.({
+      kind: "rule-extract-pass1",
+      model: settings.model,
+      provider: settings.provider || "frontier",
+    })
+
+    for (const candidate of parseCandidates(response)) {
+      const key = candidateKey(candidate)
+      if (!key || seen.has(key)) continue
+      seen.add(key)
+      candidates.push(candidate)
+    }
+
+    onChunk?.(i + 1, chunks.length)
+  }
+
+  return candidates
 }
 
 export function parseCandidates(raw: string): string[] {
   let cleaned = raw.trim()
   cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "")
   const start = cleaned.indexOf("[")
+  if (start === -1) return []
+
   const end = cleaned.lastIndexOf("]")
-  if (start === -1 || end === -1 || end < start) return []
-  try {
-    const parsed = JSON.parse(cleaned.slice(start, end + 1))
-    if (!Array.isArray(parsed)) return []
-    return parsed.filter((x): x is string => typeof x === "string" && x.trim().length > 0)
-  } catch {
-    return []
+  if (end > start) {
+    try {
+      const parsed: unknown = JSON.parse(cleaned.slice(start, end + 1))
+      if (Array.isArray(parsed)) {
+        return parsed
+          .filter((x): x is string => typeof x === "string" && x.trim().length > 0)
+          .map((x) => x.trim())
+      }
+    } catch {
+      // Malformed — fall through and salvage what completed.
+    }
   }
+
+  // AQU-466: pass 1 hitting its output cap on a long guide leaves the array
+  // unterminated. Strict parsing returned [] — a real style guide imported as
+  // zero rules, with no error to explain it. Salvage the complete entries.
+  return salvageStrings(cleaned.slice(start))
+}
+
+/**
+ * Pull every COMPLETE JSON string literal out of a truncated array, stopping at
+ * the first unterminated one (that entry was cut mid-word and would import a
+ * half-sentence rule).
+ */
+function salvageStrings(text: string): string[] {
+  const out: string[] = []
+  let i = 0
+
+  while (i < text.length) {
+    if (text[i] !== '"') {
+      i++
+      continue
+    }
+    let j = i + 1
+    let closed = false
+    while (j < text.length) {
+      if (text[j] === "\\") {
+        j += 2
+        continue
+      }
+      if (text[j] === '"') {
+        closed = true
+        break
+      }
+      j++
+    }
+    if (!closed) break // truncated mid-string — everything after is unusable
+
+    try {
+      const value: unknown = JSON.parse(text.slice(i, j + 1))
+      if (typeof value === "string" && value.trim()) out.push(value.trim())
+    } catch {
+      // Not a well-formed literal; skip it.
+    }
+    i = j + 1
+  }
+
+  return out
 }
 
 // ---------------------------------------------------------------------------
@@ -172,6 +371,22 @@ export function parseStructuredRule(raw: string): RuleSuggestion | null {
   }
 }
 
+/**
+ * AQU-466: a pattern is only usable if it actually compiles. The rule engine
+ * caches a failed compile as null and skips the rule, so an invalid regex from
+ * pass 2 used to import as a rule that looks enabled and never fires. An empty
+ * pattern is rejected too — as a `target-forbids` it flags every single cell.
+ */
+function isUsablePattern(p: unknown): p is string {
+  if (typeof p !== "string" || !p.trim()) return false
+  try {
+    new RegExp(p)
+    return true
+  } catch {
+    return false
+  }
+}
+
 function isValidRuleSuggestion(s: unknown): s is RuleSuggestion {
   if (!s || typeof s !== "object") return false
   const obj = s as Record<string, unknown>
@@ -180,10 +395,10 @@ function isValidRuleSuggestion(s: unknown): s is RuleSuggestion {
   if (obj.severity !== "major" && obj.severity !== "minor") return false
   const check = obj.check as Record<string, unknown> | undefined
   if (!check || typeof check !== "object") return false
-  if (check.type === "source-target-match") return typeof check.pattern === "string"
-  if (check.type === "target-forbids") return typeof check.targetPattern === "string"
+  if (check.type === "source-target-match") return isUsablePattern(check.pattern)
+  if (check.type === "target-forbids") return isUsablePattern(check.targetPattern)
   if (check.type === "source-requires-target") {
-    return typeof check.sourcePattern === "string" && typeof check.targetPattern === "string"
+    return isUsablePattern(check.sourcePattern) && isUsablePattern(check.targetPattern)
   }
   return false
 }
@@ -196,6 +411,9 @@ export interface ExtractionProgress {
   phase: "extracting" | "structuring"
   candidateCount: number
   structuredCount: number
+  /** AQU-466: pass-1 chunks for this document (absent until the first completes). */
+  chunkCount?: number
+  chunksDone?: number
 }
 
 export async function extractRulesFromDocument(
@@ -205,9 +423,23 @@ export async function extractRulesFromDocument(
   onProgress?: (p: ExtractionProgress) => void,
   onLlmCall?: UsageCallback,
 ): Promise<RuleSuggestion[]> {
-  // Pass 1
+  // Pass 1 — one request per chunk of the document.
   onProgress?.({ phase: "extracting", candidateCount: 0, structuredCount: 0 })
-  const candidates = await extractCandidates(docText, settings, session, onLlmCall)
+  const candidates = await extractCandidates(
+    docText,
+    settings,
+    session,
+    onLlmCall,
+    (chunksDone, chunkCount) => {
+      onProgress?.({
+        phase: "extracting",
+        candidateCount: 0,
+        structuredCount: 0,
+        chunkCount,
+        chunksDone,
+      })
+    },
+  )
   onProgress?.({ phase: "structuring", candidateCount: candidates.length, structuredCount: 0 })
 
   // Pass 2 — structure each candidate sequentially, updating progress

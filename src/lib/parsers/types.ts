@@ -13,10 +13,28 @@ import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { PersistedTrackOverrides } from "@/lib/timeline/tracks"
 import type { CameraState } from "@/lib/sync/cells-read-types"
 
-export type FileType = "md" | "docx" | "pptx" | "idml" | "xlsx" | "txt" | "html" | "epub" | "json" | "po" | "properties" | "vtt" | "srt" | "sbv" | "usfm" | "ebible" | "helloao" | "xliff" | "tmx" | "csv" | "tsv" | "audio" | "video" | "obs" | "sdbh" | "custom"
+/**
+ * AQU-997: `"codex"` and `"source"` were reaching the client from the wire long
+ * before they were admitted here — `files.fileType` is the server's
+ * `kind ?? role`, so a migrated Codex notebook arrives as `"codex"` and a row
+ * with no `kind` falls back to its `role`, `"source"`. `cloud-projects.ts`
+ * widens both in with `f.type as FileType`, which is exactly why the gap went
+ * unnoticed: nothing type-errored, the values simply failed every predicate
+ * that tests membership of a literal set.
+ */
+export type FileType = "md" | "docx" | "pptx" | "idml" | "xlsx" | "txt" | "html" | "epub" | "json" | "po" | "properties" | "vtt" | "srt" | "sbv" | "usfm" | "ebible" | "helloao" | "xliff" | "tmx" | "csv" | "tsv" | "audio" | "video" | "obs" | "sdbh" | "codex" | "source" | "custom"
 
-/** File types whose parsers produce scripture-style sections (globalReferences populated, section labels meaningful). */
-export const SCRIPTURE_FILE_TYPES: ReadonlySet<FileType> = new Set(["usfm", "ebible", "helloao"])
+/** File types whose parsers produce scripture-style sections (globalReferences
+ *  populated, section labels meaningful).
+ *
+ *  AQU-997: `"codex"` — Aquilla's native Scripture notebook format, what every
+ *  book of a migrated Codex project is stored as — belongs here for the same
+ *  reason `"usfm"` does: its cells are verses, addressed canonically. Its
+ *  absence is what hid the Parallel Bibles panel (and its collapsed edge tab,
+ *  and file-tree expandability) for a project whose books are all codex files.
+ *  `"source"` is deliberately NOT here: it is the generic `role` fallback for
+ *  a row carrying no `kind`, not a Scripture format. */
+export const SCRIPTURE_FILE_TYPES: ReadonlySet<FileType> = new Set(["usfm", "ebible", "helloao", "codex"])
 export function fileTypeHasSections(type: FileType): boolean {
   return SCRIPTURE_FILE_TYPES.has(type)
 }
@@ -388,6 +406,29 @@ export interface ProjectRecord {
   // AQU-1083's org default is NOT here. It lives on the project settings
   // response (`ProjectSettingsResponse.orgCountStructuralCells`), because that
   // is the one an open editor re-reads when someone else changes it.
+  /**
+   * AQU-1086: the org's effective `languageEditMinRole` — the minimum role
+   * allowed to change this project's source/target language and its extra
+   * target lanes. Sent by the single-project endpoint so the Project Settings
+   * language fields and the Languages card share one floor without a second
+   * org-settings fetch. Absent (older server / local-only project) ⇒ the
+   * MAINTAINER default in `src/lib/sync/role-policy.ts`. The server
+   * re-resolves it on every language write, so this is an affordance value,
+   * not authority.
+   */
+  languageEditMinRole?: number | null
+  /**
+   * AQU-1002: the org's effective comment floors — the minimum role to open a
+   * thread (`commentCreateMinRole`) and to resolve/reopen a thread somebody
+   * else opened (`commentResolveMinRole`). Sent by the single-project endpoint
+   * so the comments drawer and Comments page can gate their controls honestly
+   * without an org-settings fetch of their own. Absent (older server /
+   * local-only project) ⇒ the defaults in `src/lib/sync/role-policy.ts`.
+   * sync-worker re-resolves both on every comment write, so these are
+   * affordance values, not authority.
+   */
+  commentCreateMinRole?: number | null
+  commentResolveMinRole?: number | null
   sourceLanguage: string
   targetLanguage: string
   /**
@@ -424,16 +465,25 @@ export interface ProjectRecord {
   syncSettings?: ProjectSyncSettings
   suggestionsDismissedAt?: string  // ISO timestamp; suggestion banner is hidden after this is set.
   setupChecklistDismissed?: boolean
-  /** AQU-646: may people add lines into the timeline's silences? Off unless
-   *  turned on in project settings — see ProjectWideSettings.allowLineCreation.
-   *  Deleting an empty added line is not gated on it. */
-  allowLineCreation?: boolean
+  /** AQU-1068: who is OFFERED the add and remove actions here? Absent (and
+   *  "none") means nobody, whatever their rank. This is a product rule, read
+   *  by the editor's affordances rather than enforced at the sync perimeter —
+   *  see ProjectWideSettings.cellEditingFloor for the full rationale, and
+   *  `resolveCellEditingFloor` for the mapping.
+   *
+   *  Structurally the same union as `CellEditingTier` in
+   *  `@/lib/sync/project-settings`, spelled out rather than imported to keep
+   *  this module out of a type cycle with that one. Narrowing it below that
+   *  union does not merely drift — `useProject`'s `assign()` copies the synced
+   *  value straight into this field, so a rung missing here is a compile
+   *  error, which is what keeps the two honest. */
+  cellEditingFloor?: "none" | "commenter" | "reviewer" | "contributor" | "project_lead" | "maintainer"
   /** AQU-646 stage 2: may this project's timelines be restructured — tracks
    *  added, deleted, foldered, recoloured? Off unless turned on; a SECOND gate
    *  on top of the maintainer floor, so with it off the write is refused even
    *  to an owner. Rename and drag-to-reorder are NOT gated on it. See
-   *  ProjectWideSettings.allowTrackEditing for why it diverges from its
-   *  sibling above on stranding. */
+   *  ProjectWideSettings.allowTrackEditing for why switching it off is allowed
+   *  to strand tracks that are already there. */
   allowTrackEditing?: boolean
   /**
    * AQU-701: set when the user explicitly skips the voice & transcription setup
@@ -442,6 +492,12 @@ export interface ProjectRecord {
    * nagged as "not set up". Cleared when they opt back in from the step.
    */
   aiSetupSkipped?: boolean
+  /**
+   * Device-local: the user has picked how drafts run on this project
+   * (Frontier hosted, a project API key, or a personal override). The
+   * sparkle Set up AI dialog shows once until this is true.
+   */
+  aiProviderChosen?: boolean
   /** ISO timestamp set when the user dismisses the "your project is still using
    * default AI instructions" nudge, OR when they actually customize the system
    * prompt. Either way, we stop nagging. */
@@ -452,6 +508,15 @@ export interface ProjectRecord {
    * projects without this field fall back to registry defaults.
    */
   experimentalFlags?: Record<string, boolean>
+  /**
+   * AQU-1246: project-wide opt-in to the experimental Autopilot surface.
+   * Absent/false → no Autopilot UI renders anywhere for this project. Synced
+   * (see ProjectWideSettings.autopilotEnabled) rather than device-local, and
+   * writable only at project_lead(500)+ — server-enforced in auth-worker.
+   * Read through `isAutopilotVisible`, never directly, so the legacy
+   * device-local grandfather is honoured with it.
+   */
+  autopilotEnabled?: boolean
   /** AD-14 decay tunables. Absent → use DECAY_DEFAULTS. */
   decaySettings?: DecaySettings
   /** Required distinct validators for a text cell to count as "fully validated". Clamped [1, 15]. Default 1. Mirrors desktop manifest. */
@@ -678,6 +743,12 @@ export interface FileReference {
    * applicable and which belong to a build newer than this one.
    */
   trackOverrides?: PersistedTrackOverrides | null
+  /**
+   * AQU-656: true when this file has an original import blob. Set on
+   * document imports that uploaded source bytes; absent/false otherwise
+   * (audio/video, Codex-migrated, pre-sidecar).
+   */
+  hasOriginalSource?: boolean
   /**
    * The files-table `role` column. `"source"` for every ordinary import — the
    * value that matters is `"audio-cues"` (see `AUDIO_CUES_ROLE`), which marks a

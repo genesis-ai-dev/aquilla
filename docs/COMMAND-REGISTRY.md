@@ -129,12 +129,31 @@ change (`kind`, `userId`, `username`, `role`, `previousRole`) as the audit recor
   `comment.create`, `comment.edit`, `comment.delete`, `comment.resolve`,
   `cell.waive`, `cell.unwaive`, `cell.validate`†, `cell.unvalidate`†,
   `cell.backtranslation.set`, `target.cell.repin`, `file.rename`, `file.delete`, `file.restore`,
-  `assignment.create`, `assignment.reassign`, `assignment.unassign`.
+  `assignment.create`, `assignment.reassign`, `assignment.unassign`,
+  `term.create`, `term.update`, `term.delete`, `term.approve`, `term.reject`.
   († testimony: allowed to stage, but the summary marks them `testimony: true` so review UIs
   render per-item confirmation; they are excluded from any future bulk auto-apply.)
-- Explicitly NOT in v1: `target.cell.commit` (use SetTranslation), `source.cell.*`,
-  `cell.audio.*` (use LinkMedia), reorders/retimes/mirrors, `file.timing.set`, `file.create`.
-- Summary gains `events: { kind, count, testimony }[]` alongside existing fields.
+- **Terminology (AQU-1179).** Project-level: no `fileId`/`cellId` on the envelope (rejected if
+  supplied — the engine routes them under the project sentinel), concept id rides the payload.
+  The static floor is CONTRIBUTOR, but prepare mirrors `termbase-authority.ts`'s conditional
+  raise: every BINDING write — `term.create` with `status: 'active'`, and every update / delete /
+  approve / reject — is checked against the org's `termbaseEditMinRole` (default 500), so a plan
+  the caller could never commit is denied rather than staged. `status: 'draft'` on create is a
+  suggestion and stays at CONTRIBUTOR. `term.update` may not carry `status` (approve/reject are
+  their own kinds, so the audit trail keeps "edited" apart from "made binding"); a `term.create`
+  naming a live concept is rejected rather than upserted over it; a `term.approve` of a non-draft
+  is rejected rather than applied as a projection no-op.
+- Explicitly NOT allowlisted: `target.cell.commit` (use SetTranslation), `source.cell.*`,
+  `cell.audio.*` (use LinkMedia), reorders/retimes/mirrors, `file.timing.set`, `file.create`,
+  cell structure (split/merge/insert/delete), membership, and project lifecycle. Rules and Living
+  Memory have no event kinds at all — rules live in the settings blob (PatchSettings), memory
+  behind auth-worker's agent-memory API — so they cannot come through this door until they are
+  event-sourced.
+- Summary gains `events: { kind, count, testimony, label }[]` alongside existing fields. `label`
+  is a server-computed plain-language effect line ("Approve a glossary term — enforced for
+  everyone on the project"); the approval page renders it, falling back to `kind × count` for
+  changesets staged before it existed. Adding a kind to the allowlist means adding its phrasing
+  to `emitKindEffectLabel` — a reviewer approves the effect, not the event name.
 
 ### RenameFile — file label management (AQU-1182)
 

@@ -59,6 +59,12 @@ export interface EmitEventsSummaryEntry {
   kind: string
   count: number
   testimony: boolean
+  /** Plain-language effect line for the approval page (AQU-1179) — what the
+   *  change does to the project, in a sentence a non-developer can consent to.
+   *  Computed server-side (emitKindEffectLabel) so every reviewing surface says
+   *  the same thing; absent on changesets staged before AQU-1179, where the UI
+   *  falls back to `kind × count`. */
+  label?: string
 }
 
 /** One staged validation/unvalidation, named cell by cell (AQU-1184 guardrail
@@ -294,7 +300,7 @@ export interface PlannedEventIds {
    *  id plus any payload ids minted at prepare (comment.create's commentId /
    *  assignment.create's assignmentId when the caller omitted them), so a
    *  crash-retry re-posts IDENTICAL ids and payloads. */
-  emitEvents?: { eventId: string; commentId?: string; assignmentId?: string }[]
+  emitEvents?: { eventId: string; commentId?: string; assignmentId?: string; conceptId?: string }[]
   /** AQU-1183 cell-field commands: the compiled event id per normalized
    *  target, in the SAME order planCellFields emits them. Commit re-runs that
    *  pure normalizer over the stored commands, so the two line up

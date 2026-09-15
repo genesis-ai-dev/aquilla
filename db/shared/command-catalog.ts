@@ -274,25 +274,39 @@ Example: \`{ "kind": "SetTrackOverride", "fileId": "f1", "trackId": "target-audi
   {
     kind: 'EmitEvents',
     title: 'Emit events',
-    oneLiner: 'Stage any allowed project events: comments, waives, validations, files, assignments.',
+    oneLiner: 'Stage any allowed project events: comments, waives, validations, files, assignments, terms.',
     minRoleLevel: COMMENTER,
     tier: 'structural',
     agentReachable: true,
     paramsDoc: `### EmitEvents
 Params: \`{ events: [{ kind, fileId?, cellId?, laneId?, payload? }] }\` — sole command; max 200 events per changeset.
 The generalized escape hatch: stages role-allowed event kinds through the same precondition doctrine as SetTranslation. The changeset floor is the max floor across events (per-kind floors come from role-policy).
-Allowed kinds v1: comment.create/edit/delete/resolve · cell.waive/unwaive · cell.validate/unvalidate (testimony — reviewed per item, never bulk) · cell.backtranslation.set · target.cell.repin · file.rename/delete/restore · assignment.create/reassign/unassign.
-Not here: target text (use SetTranslation), source edits, audio (use LinkMedia), imports (use PlanImport), reorders/retimes.
+
+**The allowlist IS the permission surface.** A kind not on this list is rejected at prepare with \`validation_failed\` naming the kind — there is no bypass, and adding a kind is a deliberate human change to this file.
+
+Allowed kinds:
+- Comments (200+): \`comment.create\` \`{ body, parentCommentId?, createdForTranslated? }\` (scope from the envelope: cell / file / project) · \`comment.edit\` \`{ commentId, body }\` · \`comment.delete\` \`{ commentId }\` · \`comment.resolve\` \`{ commentId, resolved }\`.
+- Quality waivers (400+): \`cell.waive\` \`{ ruleId, reason? }\` · \`cell.unwaive\` \`{ ruleId }\` — need fileId + cellId.
+- Validation † (400+, testimony — reviewed per item, never bulk): \`cell.validate\` \`{}\` · \`cell.unvalidate\` \`{ targetUsername? }\` — need fileId + cellId; removing someone else's validation needs maintainer (600).
+- Back-translation (400+): \`cell.backtranslation.set\` \`{ btText, btHtml?, polished? }\` — needs fileId + cellId.
+- Staleness (400+): \`target.cell.repin\` \`{}\` — needs fileId + cellId.
+- File lifecycle (500+): \`file.rename\` \`{ name }\` · \`file.delete\` \`{}\` · \`file.restore\` \`{}\` — need fileId.
+- Assignments (500+): \`assignment.create\` \`{ scopeKind: 'books'|'chapters', scope: [{ fileId, chapter? }], scopeLabel, assigneeUserId, deadline?, note?, assignmentId? }\` · \`assignment.reassign\` \`{ assignmentId, assigneeUserId }\` · \`assignment.unassign\` \`{ assignmentId }\`.
+- Terminology (400+ to suggest; the org's termbase floor — default 500 — to bind): \`term.create\` \`{ sourceTerm, renderings: [{ rendering, status: 'preferred'|'admitted'|'forbidden' }], status: 'draft'|'active', notes?, caseSensitive?, conceptId? }\` · \`term.update\` \`{ conceptId, sourceTerm?, renderings?, notes?, caseSensitive? }\` · \`term.delete\` \`{ conceptId }\` · \`term.approve\` \`{ conceptId }\` · \`term.reject\` \`{ conceptId, mode: 'delete'|'deprecate' }\` — project-level, so omit fileId/cellId.
+
+Not here: target text (use SetTranslation), source edits, cell structure (split/merge/insert/delete), audio (use LinkMedia), imports (use PlanImport), reorders/retimes, membership, and project lifecycle. Rules and Living Memory are not event-sourced at all — rules go through PatchSettings, memory through the agent-memory API — so they cannot be emitted here.
 Gotchas:
 - Head pins (editEventId / targetEventId / sourceEventId / expectedTargetEventId) are SERVER-RESOLVED from the live projection at prepare — omit them; a supplied value is rejected. Commit re-checks the pins (plan_stale on drift).
-- Every referenced cell/comment/file/assignment must exist at prepare — one bad reference rejects the whole plan (no silent skips).
+- Every referenced cell/comment/file/assignment/concept must exist at prepare — one bad reference rejects the whole plan (no silent skips).
+- Terminology: \`status: 'active'\` on create, and every update/delete/approve/reject, are BINDING writes gated by the org's termbase floor; \`status: 'draft'\` is a suggestion any contributor may stage. \`term.create\` naming an existing concept is rejected (use \`term.update\`) — omit \`conceptId\` and the server mints one. Status is not patchable via \`term.update\`; approve/reject are their own kinds so the audit trail keeps them apart.
 - payload shapes match the app's event vocabulary — call describe_command or docs before hand-building unfamiliar payloads.
 
 Validation guardrails (\`cell.validate\` / \`cell.unvalidate\`; AQU-1184) — these are policy, not preferences, and no parameter turns any of them off:
 - **AI-drafted text cannot be validated through this API.** A \`cell.validate\` whose cell is still an unreviewed machine draft (\`ai_drafted\`) is rejected at prepare with \`validation_failed\` naming that cell, and it rejects the WHOLE plan. This mirrors the in-app rule that AI output is reviewed one cell at a time. To validate such a cell, a human edits or validates it in the app first (either clears the marker); an agent cannot clear it on its own behalf.
 - **Explicit cells only.** Every event names one \`(fileId, cellId)\`. There is no wildcard, glob, range, \`"*"\`, or "validate all" form — such a value is simply a cell id that does not exist, and prepare rejects the plan.
 - **Every staged validation is itemized for the approver.** The effect summary lists each cell id with the text as the server reads it, so approval endorses specific sentences, not a count. Validations are testimony tier: review UIs confirm them per item and never bulk-apply them.
-- **Project validation policy still governs the commit.** The compiled events go through the /events perimeter as the credential's own user, so the validation role floor, the validator allowlist, and \`allowSelfValidation\` apply exactly as they do in the app — a credential cannot validate what its owner could not.`,
+- **Project validation policy still governs the commit.** The compiled events go through the /events perimeter as the credential's own user, so the validation role floor, the validator allowlist, and \`allowSelfValidation\` apply exactly as they do in the app — a credential cannot validate what its owner could not.
+Example: \`{ "kind": "EmitEvents", "events": [{ "kind": "term.create", "payload": { "sourceTerm": "covenant", "renderings": [{ "rendering": "заповіт", "status": "preferred" }], "status": "draft" } }] }\``,
   },
   {
     kind: 'RenameFile',

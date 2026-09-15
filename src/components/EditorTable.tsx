@@ -590,7 +590,6 @@ export const REMOTE_DRAFT_HOLD_MS = 15_000
 export type { BacktranslationActionSource }
 
 export interface EditorTableHandle {
-  scrollToCellIndex: (index: number) => void
   /** AQU-646: scroll to a cell by id in DISPLAY space (lens-sorted — correct
    *  for time-ordered files, where store order ≠ display order), optionally
    *  flashing it. Returns false when the id is not currently displayable. */
@@ -1491,13 +1490,15 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     })
   }, [getListQueryRoot])
 
+  // AQU-1245: the index-based `scrollToCellIndex` entry is GONE. It indexed the
+  // rows the table is RENDERING, so with "Split into milestones" on — where
+  // that is only the current milestone's rows — every caller handing it an
+  // index counted over the whole file was wrong: out of range was silently
+  // dropped, in range landed on an unrelated row of the page already showing,
+  // and neither turned the page. AQU-1244 and AQU-1245 converted the last four
+  // callers to `scrollToCellId`; removing the entry is what stops a fifth from
+  // reintroducing the bug.
   useImperativeHandle(ref, () => ({
-    scrollToCellIndex(index: number) {
-      if (index >= 0 && index < displayCellIds.length) {
-        clearChapterNavigationSelection()
-        programmaticListScroll(index, { viewPosition: 0.5, animated: false })
-      }
-    },
     scrollToCellId(cellId, opts) {
       // AQU-646 round 3: id-based scroll in DISPLAY space. The older
       // index-based path resolved indexes via cellStore.findIndexByCellId —

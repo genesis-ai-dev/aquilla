@@ -52,7 +52,7 @@ export async function extractTreasureHuntStrings(
   const bookCodes: string[] = []
   const strings = selection.notes.map((note) => {
     if (note.bookCode && !bookCodes.includes(note.bookCode)) bookCodes.push(note.bookCode)
-    const value = idmlUnitToTranslatableString(note.unit)
+    const value = idmlUnitToTranslatableString(note.unit, result.styleCatalog)
     return {
       ...value,
       section: note.bookCode ? `${note.bookCode} ${note.chapterLabel}` : note.chapterLabel,

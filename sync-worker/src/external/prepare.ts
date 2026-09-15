@@ -9,20 +9,28 @@ import { errorResponse, toErrorResponse } from './errors'
 import { AUTH_HINT } from './discovery-route'
 import {
   validateCommands,
+  isStructureCommandKind,
   laneCellKey,
   requiredRoleForCommand,
   PLAN_IMPORT_MAX_CELLS,
   type Command,
+  type StructureCommand,
   type CreateProjectCommand,
   type EmitEventsCommand,
   type LinkMediaCommand,
   type PatchSettingsCommand,
   type PlanImportCommand,
+  type SetBriefCommand,
   type SetTranslationCommand,
   type UpdateProjectSettingsCommand,
 } from './commands'
+import { isOrgMemberCommand, type OrgMemberCommand } from './commands-org-members'
+import { prepareOrgMember } from './org-members-engine'
 import { changedPolicyKeys, preparePatchSettings, previewSettingValue } from './commands-patch-settings'
+import { prepareSetBrief } from './commands-set-brief'
+import { isMemoryCommand, prepareMemoryCommand } from './commands-memory'
 import { prepareEmitEvents } from './emit-events-engine'
+import { prepareStructure } from './structure-engine'
 import { resolveCellStates, type CellPrecondition } from './preconditions'
 import { uuidv7 } from './uuid'
 import { stageAndRespond } from './stage'
@@ -129,6 +137,20 @@ export async function prepareChangesetCore(
     return prepareCreateProject(db, cred, projectId, id, autonomyMode, createProject, env)
   }
 
+  // AQU-1235 org membership (receipt-only): also ORG-level authority, so it
+  // likewise skips the project-scope / project-role gates below — the target is
+  // an org roster, not this project. Sole command, forced ask-mode.
+  const orgMember = validated.commands.find((c): c is OrgMemberCommand => isOrgMemberCommand(c))
+  if (orgMember) {
+    if (validated.commands.length !== 1) {
+      return errorResponse(
+        'validation_failed',
+        `${orgMember.kind} must be the only command in a changeset`,
+      )
+    }
+    return prepareOrgMember(db, cred, projectId, id, orgMember, env)
+  }
+
   // Every remaining command operates on an EXISTING project — enforce the
   // credential's scope ceiling first.
   try {
@@ -162,6 +184,32 @@ export async function prepareChangesetCore(
     return preparePatchSettings(db, cred, projectId, id, autonomyMode, patchSettings, env)
   }
 
+  // SetBrief (AQU-1227): sole command — it writes the `translationBrief` key of
+  // the same versioned settings blob, so sharing a changeset with another
+  // settings write would double-bump the version. Its role floor and version
+  // pin live in its module, like the two above.
+  const setBrief = validated.commands.find((c): c is SetBriefCommand => c.kind === 'SetBrief')
+  if (setBrief) {
+    if (validated.commands.length !== 1) {
+      return errorResponse('validation_failed', 'SetBrief must be the only command in a changeset')
+    }
+    return prepareSetBrief(db, cred, projectId, id, autonomyMode, setBrief, env)
+  }
+
+  // AQU-1228 Living Memory writes: sole command; receipt-only like
+  // PatchSettings, with its own floors (propose vs. review tier) and the
+  // human-edited guard, so it also skips the generic role gate below.
+  const memoryCommand = validated.commands.find(isMemoryCommand)
+  if (memoryCommand) {
+    if (validated.commands.length !== 1) {
+      return errorResponse(
+        'validation_failed',
+        `${memoryCommand.kind} must be the only command in a changeset`,
+      )
+    }
+    return prepareMemoryCommand(db, cred, projectId, id, autonomyMode, memoryCommand, env)
+  }
+
   // Live role/membership gate (§2 — resolve the caller's CURRENT role on every
   // call, never a role baked into the credential). Scope alone (checked above)
   // does not imply membership: a non-member with a project-scoped credential
@@ -186,6 +234,24 @@ export async function prepareChangesetCore(
       return errorResponse('validation_failed', 'EmitEvents must be the only command in a changeset')
     }
     return prepareEmitEvents(db, cred, projectId, id, autonomyMode, emitEvents, env, resolvedRole.level)
+  }
+
+  // Cell-structure commands (AQU-1234): sole command per changeset. A
+  // structural edit is one indivisible rewrite of a file's anchor chain — two
+  // of them in one plan could name each other's cells and would have to be
+  // ordered and re-pinned against a chain that the first one moved. One per
+  // changeset keeps the plan reviewable and the pins honest.
+  const structure = validated.commands.find(
+    (c): c is StructureCommand => isStructureCommandKind(c.kind),
+  )
+  if (structure) {
+    if (validated.commands.length !== 1) {
+      return errorResponse(
+        'validation_failed',
+        `${structure.kind} must be the only command in a changeset`,
+      )
+    }
+    return prepareStructure(db, cred, projectId, id, autonomyMode, structure, env)
   }
 
   // PlanImport is a whole-file operation, not a per-cell batch — it takes its
@@ -694,6 +760,14 @@ async function prepareCreateProject(
     projectName: cmd.name,
     newProjectId: definitiveProjectId,
     targetOrg: orgId == null ? 'personal' : String(orgId),
+    // AQU-1223: the seeded language pair is part of what the approver is
+    // authorizing, so it belongs in the effect summary rather than only in the
+    // raw command body.
+    ...(cmd.sourceLanguage !== undefined || cmd.targetLanguage !== undefined
+      ? {
+          newProjectLanguages: `${cmd.sourceLanguage || 'none'} → ${cmd.targetLanguage || 'none'}`,
+        }
+      : {}),
     warnings: [],
   }
   return stageReceiptOnlyChangeset(db, cred, urlProjectId, id, 'ask', cmd, plannedIds, summary, env)

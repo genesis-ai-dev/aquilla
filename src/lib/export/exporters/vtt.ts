@@ -206,8 +206,8 @@ function splitCues(units: Unit[]): Unit[] {
     if (unit.startTime === unit.endTime && unit.payload !== "") out.push(unit)
   }
   for (let i = 0; i < sorted.length - 1; i += 1) {
-    const start = sorted[i]!
-    const end = sorted[i + 1]!
+    const start = sorted[i]
+    const end = sorted[i + 1]
     // Active across [start, end): strictly inside, so a cue that merely touches
     // this span at a boundary is not counted.
     const active = units.filter((u) => u.startTime < end && u.endTime > start)
@@ -240,7 +240,7 @@ function splitCues(units: Unit[]): Unit[] {
  * payload ends in `</v>`, not in an empty line.
  */
 function stacked(active: Unit[]): string {
-  if (active.length === 1) return active[0]!.payload
+  if (active.length === 1) return active[0].payload
   // A UNIT WITH NO TEXT AT ALL IS DROPPED FROM THE STACK, not joined as an
   // empty string. Trimming trailing newlines is not enough: a deliberately
   // blank user-added line has an EMPTY payload, and joining it puts a blank

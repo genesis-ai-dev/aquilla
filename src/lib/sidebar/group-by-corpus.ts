@@ -1,4 +1,5 @@
-import { compareByCanonicalBookOrder } from "@/lib/file-labeling/bible-book-names"
+import { compareByCanonicalBookOrder, bookCodeFromFileName } from "@/lib/file-labeling/bible-book-names"
+import { getTestament } from "@/lib/codex-editor/bible-books"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 
 export interface CorpusGroup<T = unknown> {
@@ -19,7 +20,36 @@ export interface CorpusGroup<T = unknown> {
    * for named groups (`group.labelKey ? t(group.labelKey) : group.label`).
    */
   labelKey?: MessageKey
+  /**
+   * Set ONLY when at least one member landed here through the AQU-1084
+   * fallback (no `corpusMarker`; testament derived from `bookCode` or, for
+   * migrated files, from the file name) rather than through its own marker. `renameCorpus` matches on `corpusMarker`, so
+   * renaming such a group would skip those members — callers hide the rename
+   * affordance when this is set.
+   */
+  derived?: true
   files: T[]
+}
+
+/** The subset of a file the grouping reads. `type` is a plain string rather
+ *  than `FileType` because migrated Codex projects arrive with `"codex"`,
+ *  which the union does not name (see `src/lib/migrate/map.ts`). */
+export interface GroupableFile {
+  name: string
+  corpusMarker?: string
+  bookCode?: string
+  type?: string
+  hasScriptureContent?: boolean
+}
+
+// File types whose members may be Scripture books even when the record
+// carries no `bookCode`: the native Scripture formats, plus `"codex"`, the
+// kind the legacy-project migrator stamps on every non-IDML file. A file of
+// any other type that happens to be named "ACT" is not a Bible book.
+const NAME_FALLBACK_TYPES: ReadonlySet<string> = new Set(["usfm", "ebible", "helloao", "codex"])
+
+function mayBeScripture(file: GroupableFile): boolean {
+  return file.hasScriptureContent === true || (file.type !== undefined && NAME_FALLBACK_TYPES.has(file.type))
 }
 
 function normalize(marker: string): string {
@@ -36,22 +66,52 @@ function corpusFileCompare(label: string, a: { name: string }, b: { name: string
   return a.name.localeCompare(b.name)
 }
 
-export function groupByCorpus<T extends { name: string; corpusMarker?: string }>(
+/**
+ * The marker a file groups under. `corpusMarker` always wins so custom
+ * groupings (seasons, series, …) are untouched. It is client-local state
+ * though, and often missing after a reload or on a fresh device (see
+ * `src/lib/file-labeling/detect.ts`), which used to drop every Bible book
+ * into "Ungrouped" exactly when a new user opened the project. When it is
+ * absent, the server-backed `bookCode` still tells us the testament (AQU-1084).
+ *
+ * Projects migrated from legacy Codex carry neither: the migrator never sets
+ * `bookCode` (`src/lib/migrate/map.ts`) and the rename banner that would set
+ * `corpusMarker` skips their `"codex"` type. Their files are named by bare
+ * book code ("1CH"), so as a last resort the code is read off the file name,
+ * with the same rule the rename detector uses, for scripture-capable files
+ * only (PR #504 review, 2026-09-07).
+ */
+function resolveMarker(file: GroupableFile): { marker: string; derived: boolean } | null {
+  const raw = file.corpusMarker?.trim()
+  if (raw) return { marker: raw, derived: false }
+  const code = file.bookCode || (mayBeScripture(file) ? bookCodeFromFileName(file.name) : undefined)
+  const testament = code ? getTestament(code) : undefined
+  if (testament) return { marker: testament, derived: true }
+  return null
+}
+
+export function groupByCorpus<T extends GroupableFile>(
   files: T[],
 ): CorpusGroup<T>[] {
-  const groupsByKey = new Map<string, { label: string; files: T[] }>()
+  const groupsByKey = new Map<string, CorpusGroup<T>>()
   const ungrouped: T[] = []
 
   for (const file of files) {
-    const raw = file.corpusMarker?.trim()
-    if (!raw) {
+    const resolved = resolveMarker(file)
+    if (!resolved) {
       ungrouped.push(file)
       continue
     }
-    const key = normalize(raw)
+    const key = normalize(resolved.marker)
     const existing = groupsByKey.get(key)
-    if (existing) existing.files.push(file)
-    else groupsByKey.set(key, { label: raw, files: [file] })
+    if (existing) {
+      existing.files.push(file)
+      if (resolved.derived) existing.derived = true
+    } else {
+      const group: CorpusGroup<T> = { label: resolved.marker, files: [file] }
+      if (resolved.derived) group.derived = true
+      groupsByKey.set(key, group)
+    }
   }
 
   for (const group of groupsByKey.values()) {

@@ -73,3 +73,34 @@ describe("healthRibbonColor", () => {
     expect(healthRibbonColor(50, 0.4)).toBe("rgb(245 158 11 / 0.4)")
   })
 })
+
+describe("preTranslationEvidence memoization (AQU-1104)", () => {
+  it("returns null without evidence and does not cache anything for an empty list", () => {
+    const empty: Array<{ matchedTokens: string[] }> = []
+    expect(preTranslationEvidence("In the beginning", empty)).toBeNull()
+    expect(preTranslationEvidence("something else", empty)).toBeNull()
+  })
+
+  it("reuses the result for the same examples array and source text", () => {
+    const examples = [{ matchedTokens: ["beginning"] }]
+    const first = preTranslationEvidence("In the beginning", examples)
+    const second = preTranslationEvidence("In the beginning", examples)
+    expect(first).not.toBeNull()
+    expect(second).toBe(first)
+  })
+
+  it("recomputes when the source text changes", () => {
+    const examples = [{ matchedTokens: ["beginning"] }]
+    const first = preTranslationEvidence("In the beginning", examples)
+    const second = preTranslationEvidence("In the beginning God created", examples)
+    expect(second).not.toBe(first)
+    expect(second?.score).toBeLessThan(first?.score ?? 0)
+  })
+
+  it("recomputes when the examples array is replaced", () => {
+    const first = preTranslationEvidence("In the beginning", [{ matchedTokens: ["beginning"] }])
+    const second = preTranslationEvidence("In the beginning", [{ matchedTokens: ["beginning", "in"] }])
+    expect(second).not.toBe(first)
+    expect(second?.score).toBeGreaterThan(first?.score ?? 0)
+  })
+})

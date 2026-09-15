@@ -215,6 +215,14 @@ export const nav = defineNamespace({
     "nav.version.copiedTooltip": "Copied to clipboard",
     "nav.version.copyTooltip": "Click to copy\n{buildInfo}",
 
+    // -- EnvironmentTag: non-production backend warning beside the build info --
+    "nav.environment.development": "Dev data",
+    "nav.environment.preview": "Preview data",
+    "nav.environment.local": "Local data",
+    "nav.environment.unknown": "Unknown backend",
+    "nav.environment.tooltip":
+      "Not production. This app is reading and writing {host}, so nothing you see here is production data.",
+
     // -- TabStrip: open-file tabs above the editor --
     "nav.tabStrip.openFiles": "Open files",
     "nav.tabStrip.closeTab": "Close {label}",
@@ -279,6 +287,7 @@ export const nav = defineNamespace({
     "nav.fileList.collapseGroup": "Collapse {group}",
     "nav.fileList.renameGroup": "Rename {group}",
     "nav.fileList.ungroupedLabel": "Ungrouped",
+    "nav.fileList.jumpToTestament": "Jump to Testament",
 
     // -- OutboxInspectorPopover --
     "nav.outbox.popoverAriaLabel": "Pending changes",
@@ -938,6 +947,42 @@ export const nav = defineNamespace({
         placeholders: { buildInfo: "Untranslated version/branch/SHA build string." },
       },
 
+      // -- EnvironmentTag (AQU-1022) --
+      "nav.environment.development": {
+        description:
+          "Warning chip beside the build info when the app is pointed at the shared " +
+          "development backend and its dev database, not production. Kept short so it " +
+          "reads at a glance in a screenshot.",
+        maxLength: 16,
+      },
+      "nav.environment.preview": {
+        description:
+          "Same warning chip for a route-free pull-request preview build. Short.",
+        maxLength: 16,
+      },
+      "nav.environment.local": {
+        description:
+          "Same warning chip when the app is talking to a developer's local stack. Short.",
+        maxLength: 16,
+      },
+      "nav.environment.unknown": {
+        description:
+          "Same warning chip when the backend host isn't one we recognize — treated as " +
+          "non-production on purpose. Short.",
+        maxLength: 16,
+      },
+      "nav.environment.tooltip": {
+        description:
+          "Tooltip and accessible name for the non-production warning chip, spelling " +
+          "out that the data on screen is not production data. {host} is the API " +
+          "hostname the build talks to.",
+        placeholders: {
+          host:
+            "Untranslated API hostname of the backend this build talks to " +
+            "(the dev environment's API host, a preview Worker, or a local port).",
+        },
+      },
+
       // -- TabStrip --
       "nav.tabStrip.openFiles": {
         description:
@@ -1177,6 +1222,13 @@ export const nav = defineNamespace({
           "identity string 'Ungrouped' the code branches on (is-this-the-synthetic-" +
           "bucket, rename eligibility, …) is NOT this key and stays English — only this " +
           "display copy is translated.",
+      },
+      "nav.fileList.jumpToTestament": {
+        description:
+          "Accessible name for the pair of buttons under the file filter that scroll " +
+          "the file list to the Old Testament or New Testament group (AQU-1084). " +
+          "The buttons themselves reuse importExport.helloao.presetOldTestament / " +
+          "presetNewTestament. 'Testament' is the Bible-division term of art.",
       },
 
       // -- OutboxInspectorPopover --

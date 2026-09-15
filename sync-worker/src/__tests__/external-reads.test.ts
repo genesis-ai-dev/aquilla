@@ -105,6 +105,96 @@ describe("external read surface", () => {
     expect(res).toBeNull()
   })
 
+  // AQU-1176: the settings read that makes PatchSettings' ifMatchVersion
+  // usable — without it an agent had to guess the version and blind-overwrite
+  // settings it had never seen.
+  describe("project settings", () => {
+    async function seedSettings(settings: Record<string, unknown>, version: number) {
+      await testDb.pg.query(
+        `INSERT INTO project_settings (project_id, settings, version, updated_by, updated_at)
+         VALUES ('proj-a', $1, $2, 1, '2026-01-01T00:00:00.000Z')`,
+        [JSON.stringify(settings), version],
+      )
+    }
+
+    it("returns the settings blob alongside its live version", async () => {
+      await seedSettings({ targetLanguage: "fr", targetLanes: ["fr", "es"] }, 7)
+      const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
+      const res = await handleExternalReadRequest(
+        req("/api/v1/external/projects/proj-a/settings", token),
+        env(testDb),
+      )
+      expect(res!.status).toBe(200)
+      const body = (await res!.json()) as {
+        projectId: string
+        settings: Record<string, unknown>
+        version: number
+        updatedAt: string | null
+      }
+      expect(body.projectId).toBe("proj-a")
+      expect(body.version).toBe(7)
+      expect(body.settings.targetLanguage).toBe("fr")
+      expect(body.settings.targetLanes).toEqual(["fr", "es"])
+      expect(body.updatedAt).not.toBeNull()
+    })
+
+    it("a project with no settings row reads as {} at version 0", async () => {
+      const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
+      const res = await handleExternalReadRequest(
+        req("/api/v1/external/projects/proj-a/settings", token),
+        env(testDb),
+      )
+      expect(res!.status).toBe(200)
+      const body = (await res!.json()) as { settings: Record<string, unknown>; version: number }
+      expect(body.settings).toEqual({})
+      expect(body.version).toBe(0)
+    })
+
+    it("does not echo the last writer's user id (agent-facing surface)", async () => {
+      await seedSettings({ targetLanguage: "fr" }, 3)
+      const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
+      const res = await handleExternalReadRequest(
+        req("/api/v1/external/projects/proj-a/settings", token),
+        env(testDb),
+      )
+      expect(Object.keys((await res!.json()) as object)).not.toContain("updatedBy")
+    })
+
+    it("a credential scoped to another project gets scope_denied", async () => {
+      await seedSettings({ targetLanguage: "fr" }, 1)
+      const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-b" })
+      const res = await handleExternalReadRequest(
+        req("/api/v1/external/projects/proj-a/settings", token),
+        env(testDb),
+      )
+      expect(res!.status).toBe(403)
+      expect(((await res!.json()) as { error: { code: string } }).error.code).toBe("scope_denied")
+    })
+
+    it("a non-member gets permission_denied", async () => {
+      await seedSettings({ targetLanguage: "fr" }, 1)
+      // user 3 has no project_members row on proj-a.
+      await testDb.pg.query(
+        `INSERT INTO users (id, username, email, password_hash) VALUES (3, 'stranger', 'stranger@x.com', 'h')`,
+      )
+      const token = await seedCredential(testDb, { id: CRED_1, userId: 3, projectId: "proj-a" })
+      const res = await handleExternalReadRequest(
+        req("/api/v1/external/projects/proj-a/settings", token),
+        env(testDb),
+      )
+      expect(res!.status).toBe(403)
+      expect(((await res!.json()) as { error: { code: string } }).error.code).toBe("permission_denied")
+    })
+
+    it("an unauthenticated read is rejected", async () => {
+      const res = await handleExternalReadRequest(
+        req("/api/v1/external/projects/proj-a/settings"),
+        env(testDb),
+      )
+      expect(res!.status).toBe(401)
+    })
+  })
+
   describe("search", () => {
     it("scoped member credential can search cells", async () => {
       const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
@@ -185,6 +275,45 @@ describe("external read surface", () => {
       const body = (await res!.json()) as { data: Array<{ cellId: string; side: string }>; nextCursor: string | null }
       expect(body.data).toHaveLength(2)
       expect(body.data.map((c) => c.side).sort()).toEqual(["source", "target"])
+    })
+
+    // AQU-1186: an agent must be able to tell a PENDING AI draft from a value a
+    // human committed, otherwise it re-drafts (or "confirms") the copilot's own
+    // untouched output. aiDrafted + aiDraft ride the same read as the value.
+    it("exposes aiDrafted + aiDraft provenance, distinct from the committed value", async () => {
+      const provenance = {
+        model: "anthropic/test-drafter",
+        provider: "platform",
+        promptVersion: "agent-draft-v3-staged-research",
+        exampleIds: [],
+        generatedAt: 1_700_000_000_000,
+        mode: "agent",
+        projectState: { sourceLanguage: "en", targetLanguage: "fr", approvedExampleCount: 0 },
+      }
+      await testDb.pg.query(
+        `UPDATE cells SET ai_drafted = 1, ai_draft = $1::jsonb
+          WHERE project_id = 'proj-a' AND file_id = 'file-x' AND cell_id = 'cell-1' AND side = 'target'`,
+        [JSON.stringify(provenance)],
+      )
+      const token = await seedCredential(testDb, { id: CRED_1, userId: 2, projectId: "proj-a" })
+      const res = await handleExternalReadRequest(
+        req("/api/v1/external/projects/proj-a/files/file-x/cells", token),
+        env(testDb),
+      )
+      expect(res!.status).toBe(200)
+      const body = (await res!.json()) as {
+        data: Array<{ side: string; value: string; aiDrafted?: boolean; aiDraft?: { model: string } | null }>
+      }
+      const target = body.data.find((c) => c.side === "target")!
+      expect(target.value).toBe("Au commencement")
+      expect(target.aiDrafted).toBe(true)
+      expect(target.aiDraft?.model).toBe("anthropic/test-drafter")
+
+      // A source cell (never AI-drafted) reports the same fields as absent/false,
+      // so the distinction is readable rather than inferred.
+      const source = body.data.find((c) => c.side === "source")!
+      expect(source.aiDrafted).toBe(false)
+      expect(source.aiDraft).toBeNull()
     })
   })
 

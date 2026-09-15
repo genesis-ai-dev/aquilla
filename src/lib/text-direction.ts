@@ -101,10 +101,21 @@ export function detectStrongTextDirection(value: string | undefined | null): Tex
 }
 
 export function summarizeTextDirections(values: Iterable<string | undefined | null>): TextDirectionSummary | null {
+  return summarizeDetectedDirections(detectEach(values))
+}
+
+function* detectEach(values: Iterable<string | undefined | null>): Iterable<TextDirection | null> {
+  for (const value of values) yield detectStrongTextDirection(value)
+}
+
+/**
+ * Same summary as `summarizeTextDirections`, over directions the caller has
+ * already detected (and can therefore cache per cell; AQU-1104).
+ */
+export function summarizeDetectedDirections(directions: Iterable<TextDirection | null>): TextDirectionSummary | null {
   let hasLtr = false
   let hasRtl = false
-  for (const value of values) {
-    const direction = detectStrongTextDirection(value)
+  for (const direction of directions) {
     if (direction === "ltr") hasLtr = true
     if (direction === "rtl") hasRtl = true
     if (hasLtr && hasRtl) return "mixed"

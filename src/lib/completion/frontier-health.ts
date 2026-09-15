@@ -47,12 +47,6 @@ export async function checkFrontierHealth(force = false): Promise<boolean> {
   return inflight
 }
 
-/** Test seam — reset cached result so tests start fresh. */
-export function __resetFrontierHealthForTests(): void {
-  snapshot = null
-  inflight = null
-}
-
 export interface FrontierHealthState {
   available: boolean
   checking: boolean

@@ -23,6 +23,7 @@ import { Link, Navigate, Outlet, useLocation, useParams } from "react-router-dom
 import { AlertTriangle } from "lucide-react"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
+import { usePlatformAdmin } from "@/hooks/usePlatformAdmin"
 import { orgKeyFromParam, ALL_ORGS_PARAM, orgHomePath, orgProjectsPath, parseOrgPath } from "@/lib/navigation/org-paths"
 import { AccountSwitcher } from "@/components/AccountSwitcher"
 import { Button } from "@/components/ui/button"
@@ -38,6 +39,7 @@ export function OrgRouteGate() {
   const orgKey = orgKeyFromParam(orgIdParam)
   const { orgs, guestOrgs, isLoading, accessibleProjectsLoading, error } = useActiveOrg()
   const { session, loading: sessionLoading } = useFrontierSession()
+  const { isAdmin: isPlatformAdmin, loading: platformAdminLoading } = usePlatformAdmin()
   const jwt = session?.jwt ?? null
   const location = useLocation()
 
@@ -67,8 +69,13 @@ export function OrgRouteGate() {
     // AQU-790: guest-org membership is derived from the app-wide project
     // directory. Until it loads we can't tell "not a guest org" from "directory
     // not fetched yet" — wait instead of flashing not-found on a guest reload.
-    if (accessibleProjectsLoading) {
+    // Platform admins can open any org; wait for that probe too so a catalog
+    // org is not classified as missing before we know the caller is an operator.
+    if (accessibleProjectsLoading || platformAdminLoading) {
       return <LoadingOverlay label={t("org.routeGate.loading")} data-testid="org-route-loading" />
+    }
+    if (isPlatformAdmin) {
+      return <Outlet />
     }
     return <OrgAccessProblem reason="missing" orgId={orgKey} />
   }

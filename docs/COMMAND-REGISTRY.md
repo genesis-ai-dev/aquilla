@@ -89,7 +89,12 @@ change (`kind`, `userId`, `username`, `role`, `previousRole`) as the audit recor
   `patchProjectSettingsShared` in `db/shared/projects.ts`). One op per key — a duplicate key is
   `validation_failed` (a settings op is authored intent, not a loop batch; last-wins would hide a bug).
 - Per-key floors: `terminology` → org `termbaseEditMinRole` (read `org_settings`, default 500);
-  everything else 600 (MAINTAINER).
+  `sourceLanguage` / `targetLanguage` / `targetLanes` / `archivedLanes` → org
+  `languageEditMinRole` (read `org_settings`, default 600 — AQU-1086); everything else 600
+  (MAINTAINER). A batch takes the MAX floor across its ops, so lowering one floor never widens
+  another key. Both org floors are resolved at prepare **and** re-resolved at commit; the
+  catalog's static floor advertises each key's *default*, so an org that lowers
+  `languageEditMinRole` makes the catalog conservative rather than permissive.
 - **POLICY_SETTINGS_KEYS** (exported const) always rejected with `permission_denied`:
   `agentMemoryAutonomy`, `validationRoleFloor`, `validationNamedUsers`, `validationCount`,
   `validationCountAudio`, `allowSelfValidation`, `harmonize_min_role`, `contributeToGlobalTm`.

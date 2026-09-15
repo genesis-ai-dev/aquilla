@@ -100,6 +100,20 @@ export const settings = defineNamespace({
     "settings.termbase.optionProjectLead": "Project lead (500) — default",
     "settings.termbase.optionMaintainer": "Maintainer (600) — most restrictive",
 
+    // ── LanguageEditSection (org settings → security) — AQU-1086 ──
+    "settings.languageEdit.label": "Who can change project languages",
+    "settings.languageEdit.description":
+      "Minimum role required to change a project's source and target language " +
+      "and to add or archive extra target languages. This setting covers " +
+      "languages only — every other project setting still requires Maintainer.",
+    // Open-dropdown option text for the language-edit floor select; see the
+    // roster/progress options above for why the level number is baked in.
+    "settings.languageEdit.optionProjectLead":
+      "Project lead (500) — project managers fix their own languages",
+    "settings.languageEdit.optionMaintainer": "Maintainer (600) — default",
+    "settings.languageEdit.ownerOnlyError":
+      "Only org owners can change the language permission policy.",
+
     // ── CommentPermissionsSection (org settings → security) ──
     "settings.commentPermissions.groupLabel": "Comments",
     "settings.commentPermissions.groupDescription":

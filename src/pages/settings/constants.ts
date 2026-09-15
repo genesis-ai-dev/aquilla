@@ -42,7 +42,7 @@ export const ORG_SETTINGS_SECTION_TITLES: Record<OrgSettingsSection, string> = {
 export const ORG_SETTINGS_SECTION_DESCRIPTIONS: Record<OrgSettingsSection, string> = {
   identity: "The organization's display name, shown across the workspace.",
   security:
-    "Who can see members and who can export, assign, and manage terms.",
+    "Who can see members and who can export, assign, manage terms, and change project languages.",
   billing:
     "Explore / Field / Enterprise agent credits for this organization.",
   providers:

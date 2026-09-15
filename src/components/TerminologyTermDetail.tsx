@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
-import type { Concept, TermRendering } from "@/lib/terminology/types"
+import type { Concept, TermMatchOptions, TermRendering } from "@/lib/terminology/types"
 import { renderingStatusLabelKey } from "@/lib/terminology/types"
 import type { TermMatchingSettings } from "@/lib/terminology/types"
 import type { CellData } from "@/hooks/useCells"
@@ -24,6 +24,7 @@ import { TranslatedEditor } from "@/components/TranslatedEditor"
 import type { TranslatedEditorCommit } from "@/components/TranslatedEditor"
 import { emitTargetCellCommit } from "@/lib/sync/events-emit"
 import { EquivalentsPanel } from "@/components/EquivalentsPanel"
+import { TermFormsSection } from "@/components/terminology/TermFormsSection"
 import { predictEquivalents } from "@/lib/terminology/equivalents"
 import { matchesConcept, matchesTerm } from "@/lib/terminology/match"
 import { useT } from "@/lib/i18n/I18nProvider"
@@ -329,6 +330,18 @@ export interface TerminologyTermDetailProps {
   onRenderingsChange?: (conceptId: string, renderings: TermRendering[]) => void | Promise<void>
   /** AQU-1271: project-level source-matching defaults, from `project.termMatching`. */
   termMatching?: TermMatchingSettings
+  /**
+   * AQU-1271: replace this concept's source-matching options.
+   *
+   * Like renderings, this is a WHOLE-object write: `term.update` replaces
+   * `match_options` wholesale, so the callback receives the full pruned
+   * `TermMatchOptions` (or `undefined` when the user has cleared everything).
+   */
+  onMatchChange?: (conceptId: string, match: TermMatchOptions | undefined) => void | Promise<void>
+  /** AQU-1271: case sensitivity lives on the concept, not inside `match`. */
+  onCaseSensitiveChange?: (conceptId: string, caseSensitive: boolean) => void | Promise<void>
+  /** Offered when the project has no prefix/suffix inventory yet. */
+  onSetUpAffixes?: () => void
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -348,6 +361,9 @@ export function TerminologyTermDetail({
   onJumpToCell,
   onRenderingsChange,
   termMatching,
+  onMatchChange,
+  onCaseSensitiveChange,
+  onSetUpAffixes,
 }: TerminologyTermDetailProps) {
   const t = useT()
   // Per-cell translated values — optimistic updates are already reflected via
@@ -540,6 +556,17 @@ export function TerminologyTermDetail({
           )}
         </div>
         )}
+
+        {/* AQU-1271: which source forms this term actually hits, and why. */}
+        <TermFormsSection
+          concept={concept}
+          cells={cells}
+          termMatching={termMatching}
+          canEdit={canManageTermbase && Boolean(onMatchChange)}
+          onMatchChange={onMatchChange}
+          onCaseSensitiveChange={onCaseSensitiveChange}
+          onSetUpAffixes={onSetUpAffixes}
+        />
       </div>
 
       {/* Managed renderings / predicted equivalents don't need the cell query. */}

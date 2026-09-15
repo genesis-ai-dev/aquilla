@@ -40,7 +40,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import type { Concept, TermRendering, RenderingStatus, TermMatchingSettings } from "@/lib/terminology/types"
+import type { Concept, TermRendering, RenderingStatus, TermMatchingSettings, TermMatchOptions } from "@/lib/terminology/types"
 import { renderingStatusLabelKey } from "@/lib/terminology/types"
 import { mergeConcepts } from "@/lib/terminology/store"
 import { useConcepts } from "@/hooks/useConcepts"
@@ -1174,6 +1174,41 @@ export function TerminologyPage() {
     [project, author, afterWrite],
   )
 
+  // AQU-1271: source-matching options from the term page. `match` replaces
+  // wholesale like renderings do, so the detail page hands back the FULL
+  // pruned object; `undefined` (nothing set) is written as `{}` to clear it.
+  const handleMatchChange = useCallback(
+    async (conceptId: string, match: TermMatchOptions | undefined) => {
+      if (!project) return
+      try {
+        await emitTermUpdate({ projectId: project.id, conceptId, match: match ?? {}, author })
+        await afterWrite()
+        setDrillDownConcept((prev) => (prev && prev.id === conceptId ? { ...prev, match } : prev))
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Could not update matching options")
+      }
+    },
+    [project, author, afterWrite],
+  )
+
+  // Case sensitivity is a concept column, not part of `match` — separate event
+  // field, same write path.
+  const handleCaseSensitiveChange = useCallback(
+    async (conceptId: string, caseSensitive: boolean) => {
+      if (!project) return
+      try {
+        await emitTermUpdate({ projectId: project.id, conceptId, caseSensitive, author })
+        await afterWrite()
+        setDrillDownConcept((prev) =>
+          prev && prev.id === conceptId ? { ...prev, caseSensitive } : prev,
+        )
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Could not update matching options")
+      }
+    },
+    [project, author, afterWrite],
+  )
+
   // ── Merge handler ─────────────────────────────────────────────────────────
 
   async function handleMerge(mergeIds: string[], survivorId: string) {
@@ -1257,6 +1292,9 @@ export function TerminologyPage() {
         onPromoteRendering={handlePromoteRendering}
         onRenderingsChange={handleRenderingsChange}
         termMatching={project?.termMatching}
+        onMatchChange={handleMatchChange}
+        onCaseSensitiveChange={handleCaseSensitiveChange}
+        onSetUpAffixes={() => navigate(`/project/${id}/settings?q=terminology`)}
       />
     )
   }

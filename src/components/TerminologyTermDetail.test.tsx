@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { TerminologyTermDetail } from "./TerminologyTermDetail"
 import type { Concept } from "@/lib/terminology/types"
 import type { CellData } from "@/hooks/useCells"
@@ -147,5 +148,60 @@ describe("TerminologyTermDetail — editable renderings", () => {
     // The renderings themselves are still shown (in the chip row, and again
     // in the EquivalentsPanel's managed list — hence getAllByText).
     expect(screen.getAllByText("favor").length).toBeGreaterThan(0)
+  })
+})
+
+// ── AQU-1271: source forms and matching options ─────────────────────────────
+//
+// A term's source side is not one string: "הָאָרֶץ" shows up prefixed, pointed
+// differently, or not at all. The term page is where a translator sees which
+// surface forms their term actually hit and prunes the wrong ones — so both
+// edits below must travel the same `term.update` path the renderings do.
+describe("TerminologyTermDetail — forms and matching", () => {
+  function makeConcept(over: Partial<Concept> = {}): Concept {
+    return { ...CONCEPT, ...over }
+  }
+
+  // WHY: excluding a form from the term page must persist through term.update
+  // with the FULL match object (the projection replaces it wholesale), and the
+  // occurrence count must drop immediately.
+  it("Forms section lists surface forms and excluding one emits the full match object", async () => {
+    const user = userEvent.setup()
+    const onMatchChange = vi.fn()
+    const concept = makeConcept({ sourceTerm: "הָאָ֗רֶץ", match: { foldMarks: true } })
+    const cells = [
+      cell({ id: "a", original: "וְהָאָ֗רֶץ הָיְתָה" }),
+      cell({ id: "b", original: "אֵת הָאָֽרֶץ׃" }),
+    ]
+    renderDetail({
+      concept,
+      cells,
+      termMatching: { prefixes: ["ו"], suffixes: [] },
+      canManageTermbase: true,
+      onMatchChange,
+    })
+    expect(screen.getByText("2")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: /Exclude וְהָאָ֗רֶץ/ }))
+    expect(onMatchChange).toHaveBeenCalledWith(concept.id, {
+      foldMarks: true,
+      excludedForms: ["וְהָאָ֗רֶץ"],
+    })
+  })
+
+  // WHY: manual variants are the escape hatch; adding one must go through the
+  // same term.update path.
+  it("Add form appends to match.forms", async () => {
+    const user = userEvent.setup()
+    const onMatchChange = vi.fn()
+    const concept = makeConcept({ sourceTerm: "אֶרֶץ" })
+    renderDetail({ concept, cells: [], canManageTermbase: true, onMatchChange })
+    await user.type(screen.getByPlaceholderText(/Another spelling/), "אָרֶץ{enter}")
+    expect(onMatchChange).toHaveBeenCalledWith(concept.id, { forms: ["אָרֶץ"] })
+  })
+
+  // WHY: read-only users must not be offered a write the server would refuse.
+  it("hides the form editors without termbase permission", () => {
+    renderDetail({ canManageTermbase: false, onMatchChange: vi.fn() })
+    expect(screen.queryByPlaceholderText(/Another spelling/)).not.toBeInTheDocument()
   })
 })

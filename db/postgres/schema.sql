@@ -753,6 +753,7 @@ CREATE TABLE concepts (
     notes          TEXT,
     status         TEXT NOT NULL DEFAULT 'draft',
     case_sensitive INTEGER NOT NULL DEFAULT 0,
+    match_options  JSONB,
     created_by     TEXT,
     created_at     BIGINT NOT NULL,
     updated_at     BIGINT NOT NULL,

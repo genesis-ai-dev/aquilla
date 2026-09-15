@@ -1623,8 +1623,8 @@ case 'cell.audio.attach': {
             // is an idempotent no-op rather than a duplicate concept.
             `INSERT INTO concepts (
               concept_id, project_id, source_term, renderings, notes,
-              status, case_sensitive, created_by, created_at, updated_at, deleted_at
-            ) VALUES (?, ?, ?, ?::text::jsonb, ?, ?, ?, ?, ?, ?, NULL)
+              status, case_sensitive, match_options, created_by, created_at, updated_at, deleted_at
+            ) VALUES (?, ?, ?, ?::text::jsonb, ?, ?, ?, ?::text::jsonb, ?, ?, ?, NULL)
             ON CONFLICT(concept_id) DO NOTHING`,
           )
           .bind(
@@ -1635,6 +1635,7 @@ case 'cell.audio.attach': {
             p.notes ?? null,
             p.status,
             p.caseSensitive ? 1 : 0,
+            p.match === undefined ? null : JSON.stringify(p.match),
             event.author,
             event.serverTs,
             event.serverTs,
@@ -1659,6 +1660,7 @@ case 'cell.audio.attach': {
                renderings     = COALESCE(?::text::jsonb, renderings),
                notes          = COALESCE(?, notes),
                case_sensitive = COALESCE(?, case_sensitive),
+               match_options  = COALESCE(?::text::jsonb, match_options),
                updated_at     = ?
              WHERE concept_id = ? AND project_id = ? AND deleted_at IS NULL`,
           )
@@ -1667,6 +1669,7 @@ case 'cell.audio.attach': {
             p.renderings === undefined ? null : JSON.stringify(p.renderings),
             p.notes ?? null,
             p.caseSensitive === undefined ? null : p.caseSensitive ? 1 : 0,
+            p.match === undefined ? null : JSON.stringify(p.match),
             event.serverTs,
             p.conceptId,
             event.projectId,

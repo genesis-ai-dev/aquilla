@@ -42,7 +42,27 @@ export interface CreateProjectInput {
    * this row rather than a live resolver, passes true.
    */
   writeCreatorMembership?: boolean
+  /**
+   * AQU-1223: seed `settings.sourceLanguage` / `settings.targetLanguage` at
+   * creation, atomically with the project row.
+   *
+   * This is the same end state the UI's create flow reaches by calling
+   * `patchProjectSettings(..., version 0)` immediately after the create — the
+   * seeded row lands at **version 1**, so a client that reads the version back
+   * and patches on top of it behaves identically either way. Omit both (the
+   * auth-worker route does) and no settings row is written at all, leaving the
+   * lazy first-write path in `updateProjectSettingsShared` exactly as it was.
+   *
+   * Only the language pair is seedable here. Every other settings key needs the
+   * version guard and per-key role floors that PatchSettings owns, which a
+   * create — writing before any project role exists to resolve — cannot honor.
+   */
+  settingsSeed?: { sourceLanguage?: string; targetLanguage?: string }
 }
+
+/** Version a seeded settings row lands at, matching the UI's create-then-patch
+ *  (`patchProjectSettings(..., 0)` → version 1). */
+const SEEDED_SETTINGS_VERSION = 1
 
 /**
  * Insert a project row (idempotent via `ON CONFLICT(id) DO NOTHING`) and,
@@ -65,22 +85,61 @@ export async function createProjectShared(
     )
     .bind(input.projectId, input.name, input.orgId, input.createdBy)
 
+  // The project insert stays FIRST in the batch — `inserted` is read off index 0.
+  const stmts = [projectStmt]
+
   if (input.writeCreatorMembership) {
     // Atomic with the project insert so a caller relying on the membership row
     // for its role never observes a project without its creator's grant.
-    const membershipStmt = db
-      .prepare(
-        `INSERT INTO project_members (project_id, user_id, role_level, granted_by)
-         VALUES (?, ?, 700, ?)
-         ON CONFLICT(project_id, user_id) DO NOTHING`,
-      )
-      .bind(input.projectId, input.createdBy, input.createdBy)
-    const [projectResult] = await db.batch([projectStmt, membershipStmt])
+    stmts.push(
+      db
+        .prepare(
+          `INSERT INTO project_members (project_id, user_id, role_level, granted_by)
+           VALUES (?, ?, 700, ?)
+           ON CONFLICT(project_id, user_id) DO NOTHING`,
+        )
+        .bind(input.projectId, input.createdBy, input.createdBy),
+    )
+  }
+
+  const seed = seededSettings(input.settingsSeed)
+  if (seed != null) {
+    // Same batch as the project insert: a create that reported the languages
+    // back to its caller must never leave a project without them (AQU-1223).
+    // DO NOTHING on conflict so an idempotent retry — or a settings row that
+    // somehow already exists for this id — never rolls a live blob backwards.
+    stmts.push(
+      db
+        .prepare(
+          `INSERT INTO project_settings (project_id, settings, version, updated_by)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(project_id) DO NOTHING`,
+        )
+        .bind(input.projectId, JSON.stringify(seed), SEEDED_SETTINGS_VERSION, input.createdBy),
+    )
+  }
+
+  if (stmts.length > 1) {
+    const [projectResult] = await db.batch(stmts)
     return { inserted: (projectResult.meta?.changes ?? 0) > 0 }
   }
 
   const result = await projectStmt.run()
   return { inserted: (result.meta?.changes ?? 0) > 0 }
+}
+
+/** Build the seeded settings blob, or null when there is nothing to seed.
+ *  Absent keys stay absent — a caller that sends neither language gets no
+ *  settings row at all, which is the pre-AQU-1223 behavior for every caller. */
+function seededSettings(
+  seed: CreateProjectInput["settingsSeed"],
+): Record<string, unknown> | null {
+  if (seed == null) return null
+  const settings: Record<string, unknown> = {}
+  if (seed.sourceLanguage !== undefined) settings.sourceLanguage = seed.sourceLanguage
+  if (seed.targetLanguage !== undefined) settings.targetLanguage = seed.targetLanguage
+  if (Object.keys(settings).length === 0) return null
+  return normalizeSettings(settings)
 }
 
 // ──────────────────────────────────────────────────────────────────────────

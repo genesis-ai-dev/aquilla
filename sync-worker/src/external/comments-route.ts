@@ -40,12 +40,8 @@ import { isAgentAuthoredLabel } from "../events/comment-authorship"
 import type { ApiCredentialContext } from "../../../db/shared/api-credentials"
 import { handleCommentsReadRequest, type CommentRowOut } from "../events/comments-read-route"
 import { externalError } from "./errors"
-import {
-  authenticateAndScope,
-  checkReadRateLimit,
-  mintInternalToken,
-  type ExternalReadsEnv,
-} from "./read-routes"
+import { mintInternalToken } from "./read-routes"
+import { authenticateAndScope, checkReadRateLimit, type ExternalReadsEnv } from "./read-auth"
 
 const COMMENTS_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/comments$/
 

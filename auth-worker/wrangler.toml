@@ -123,7 +123,9 @@ mode = "smart"
 # NOTE: like placement/observability, [triggers] is NOT inherited by env
 # blocks — keep the env-block copies below in sync.
 [triggers]
-crons = ["*/5 * * * *"]
+# Second/third entries: retention recap emails to ADMIN_EMAILS — weekly Monday
+# 14:00 UTC and monthly on the 1st (src/lib/retention-report.ts). Production only.
+crons = ["*/5 * * * *", "0 14 * * 1", "0 14 1 * *"]
 
 [vars]
 ALGORITHM = "HS256"
@@ -203,7 +205,9 @@ mode = "smart"
 
 # See top-level [triggers] — env blocks don't inherit crons either.
 [env.production.triggers]
-crons = ["*/5 * * * *"]
+# Second/third entries: retention recap emails to ADMIN_EMAILS — weekly Monday
+# 14:00 UTC and monthly on the 1st (src/lib/retention-report.ts). Production only.
+crons = ["*/5 * * * *", "0 14 * * 1", "0 14 1 * *"]
 
 # Like placement, observability is NOT inherited by env blocks — without this,
 # production has Workers Logs disabled and 4xx/5xx are invisible.
@@ -281,7 +285,9 @@ mode = "smart"
 
 # See top-level [triggers] — env blocks don't inherit crons either.
 [env.development.triggers]
-crons = ["*/5 * * * *"]
+# Second/third entries: retention recap emails to ADMIN_EMAILS — weekly Monday
+# 14:00 UTC and monthly on the 1st (src/lib/retention-report.ts). Production only.
+crons = ["*/5 * * * *", "0 14 * * 1", "0 14 1 * *"]
 
 # Dev runs on Neon (Postgres) to mirror prod. index.ts builds AQUILLA_PG
 # from the Postgres shim over Hyperdrive → the Neon `dev` branch.

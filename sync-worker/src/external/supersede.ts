@@ -17,6 +17,8 @@ import type { Command } from './commands'
 import { deepEqualJson } from './canonical'
 import type { EmitEventInput } from './commands-emit-events'
 import { normalizeSettings } from '../../../db/shared/projects'
+import { isBriefPatchSatisfied, readBriefFromSettings } from '../../../db/shared/brief'
+import { briefPatchOf } from './commands-set-brief'
 
 /** One live target cell, as the projection holds it. */
 export interface LiveTargetValue {
@@ -103,6 +105,17 @@ function satisfiesCommand(c: Command, live: SupersedeLiveState): Verdict {
       }
       return YES
     }
+    case 'SetBrief': {
+      if (!live.settings) return no('live settings were not resolved')
+      // Compare only the sections the patch NAMES: version/updatedAt always
+      // differ on a write, and unnamed sections are deliberately untouched.
+      const liveBrief = readBriefFromSettings(live.settings)
+      if (!liveBrief) return no('no live translation brief')
+      if (!isBriefPatchSatisfied(liveBrief, briefPatchOf(c))) {
+        return no('live brief sections differ from the planned text')
+      }
+      return YES
+    }
     case 'EmitEvents': {
       for (const [i, e] of c.events.entries()) {
         const verdict = satisfiesEvent(e, live)
@@ -117,12 +130,28 @@ function satisfiesCommand(c: Command, live: SupersedeLiveState): Verdict {
       return no('creation commands are never satisfied by inspection')
     case 'CreateProject':
       return no('creation commands are never satisfied by inspection')
+    case 'CreateOrg':
+      return no('creation commands are never satisfied by inspection')
     case 'LinkMedia':
       return no('creation commands are never satisfied by inspection')
     // The deprecated whole-blob replace carries no per-key intent to compare
     // (an absent key is a deletion), so it has no clean check. Use PatchSettings.
     case 'UpdateProjectSettings':
       return no('whole-blob settings replace has no clean per-key check')
+    // AQU-1182. RenameFile never reaches here: prepare desugars it into
+    // EmitEvents, so a stored plan holds file.rename events, which satisfiesEvent
+    // already answers (no clean end-state check). The project-lifecycle commands
+    // never reach here either — they are receipt-only and run their own
+    // end-state check against the live `projects` row (already archived / already
+    // named X), which this predicate has no live state for. Listed explicitly so
+    // the table stays a complete map of the command union rather than leaning on
+    // the default arm.
+    case 'RenameFile':
+      return no('file renames have no end-state this predicate can attribute to the plan')
+    case 'RenameProject':
+    case 'ArchiveProject':
+    case 'UnarchiveProject':
+      return no('project-lifecycle commands check their own end-state at commit')
     default:
       return no('unknown command kind')
   }

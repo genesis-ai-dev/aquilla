@@ -39,7 +39,7 @@ interface Env {
   AQUILLA_PG: AquillaDb
   SYNC_SECRET_KEY: string
   BASE_URL: string
-  EMAIL?: { send: (m: unknown) => Promise<void> }
+  EMAIL?: { send: (m: unknown) => Promise<{ messageId: string }> }
 }
 
 function makeEnv(db: AquillaDb, extra: Partial<Env> = {}): Env {
@@ -359,7 +359,14 @@ describe('AQU-1233 — agent comment reads', () => {
 describe('AQU-1233 — agent replies', () => {
   it('a reply lands in the right thread, authored by the minting user and marked via agent', async () => {
     const emailed: unknown[] = []
-    const env = makeEnv(tdb.db, { EMAIL: { send: async (m) => void emailed.push(m) } })
+    const env = makeEnv(tdb.db, {
+      EMAIL: {
+        send: async (m) => {
+          emailed.push(m)
+          return { messageId: 'test-message-id' }
+        },
+      },
+    })
     const agent = await memberToken(tdb, 400)
     await tdb.pg.query(`INSERT INTO users (id, username, email, password_hash) VALUES (901, 'reviewer', 'rev@x.com', 'h')`)
     await seedHumanComment(tdb, { commentId: 'c-root', author: 'reviewer', body: 'this rendering is wrong' })

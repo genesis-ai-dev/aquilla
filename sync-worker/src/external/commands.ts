@@ -8,6 +8,7 @@
 // dependency-free.
 
 import { REQUIRED_ROLE, ROLE } from '../events/role-policy'
+import type { AiDraftProvenance } from '../events/types'
 import {
   validatePlanImportManifest,
   type PlanImportCell,
@@ -24,6 +25,38 @@ import {
   validateEmitEventsCommand,
   type EmitEventsCommand,
 } from './commands-emit-events'
+import {
+  draftCellsFloor,
+  validateDraftCellsCommand,
+  type DraftCellsCommand,
+} from './commands-draft-cells'
+import {
+  cellFieldsFloor,
+  isCellFieldCommand,
+  isCellFieldKind,
+  validateCellFieldCommand,
+  type CellFieldCommand,
+  type SetSourceCommand,
+  type SetTimingCommand,
+  type SetTrackOverrideCommand,
+  type SetTranscriptionCommand,
+} from './commands-cell-fields'
+import {
+  MEMBERSHIP_FLOOR,
+  isMembershipCommand,
+  validateMembershipCommand,
+  type MembershipCommand,
+} from './commands-membership'
+import {
+  renameFileFloor,
+  validateRenameFileCommand,
+  type RenameFileCommand,
+} from './commands-rename-file'
+import {
+  projectLifecycleFloor,
+  validateProjectLifecycleCommand,
+  type ProjectLifecycleCommand,
+} from './commands-project-lifecycle'
 import {
   SET_BRIEF_REQUIRED_ROLE,
   validateSetBriefCommand,
@@ -58,6 +91,29 @@ function isMemoryCommandKind(kind: string): boolean {
 export type { PlanImportCell, PlanImportManifest, PlanImportVariant } from './import-manifest'
 export type { PatchSettingsCommand, PatchSettingsOp } from './commands-patch-settings'
 export type { EmitEventsCommand, EmitEventInput } from './commands-emit-events'
+export type { DraftCellsCommand } from './commands-draft-cells'
+export type {
+  CellFieldCommand,
+  SetSourceCommand,
+  SetTimingCommand,
+  SetTrackOverrideCommand,
+  SetTranscriptionCommand,
+  TrackPatch,
+} from './commands-cell-fields'
+export type {
+  InviteMemberCommand,
+  MembershipCommand,
+  RemoveMemberCommand,
+  SetRoleCommand,
+} from './commands-membership'
+export { isMembershipCommand } from './commands-membership'
+export type { RenameFileCommand } from './commands-rename-file'
+export type {
+  ArchiveProjectCommand,
+  ProjectLifecycleCommand,
+  RenameProjectCommand,
+  UnarchiveProjectCommand,
+} from './commands-project-lifecycle'
 export type { SetBriefCommand } from './commands-set-brief'
 export type {
   AddOrgMemberCommand,
@@ -82,6 +138,7 @@ export type {
 } from './commands-structure'
 export { isStructureCommandKind } from './commands-structure'
 export { cellKey, laneCellKey } from './cell-keys'
+export { isCellFieldCommand } from './commands-cell-fields'
 
 /** Set (or update) a single cell's translation. Compiles to target.cell.commit. */
 export interface SetTranslationCommand {
@@ -95,6 +152,13 @@ export interface SetTranslationCommand {
    *  lane. Prepare rejects an unregistered lane — register it with
    *  UpdateProjectSettings first. */
   laneId?: string
+  /** SERVER-MINTED (AQU-1186). Set only by the DraftCells prepare path when it
+   *  materializes the copilot's output into SetTranslation commands; it makes
+   *  the compiled commit carry `ai_suggestion` + `ai_draft`, so the cell lands
+   *  as `ai_drafted` and a human reviews it as AI work. `validateCommands`
+   *  rebuilds every command from known keys only, so a caller CANNOT set this
+   *  on a hand-written SetTranslation — provenance is never self-asserted. */
+  aiDraft?: AiDraftProvenance
 }
 
 /** Create a file and its source cells via the changeset pipeline (AQU-533 §5).
@@ -155,6 +219,23 @@ export const CREATE_PROJECT_FIELDS: readonly string[] = [
   'targetLanguage',
 ]
 
+/** Create an organization (AQU-1221, receipt-only like CreateProject). Applies
+ *  a plain row write via db/shared/orgs.ts, NOT events. The credential's
+ *  minting user becomes the org's OWNER — an agent never becomes a member
+ *  itself, and there is no parameter that could name a different owner. Scope:
+ *  UNSCOPED credentials only — an org-scoped credential is confined to its own
+ *  org and a project-scoped one to its own project, so neither may mint a new
+ *  tenant. Like CreateProject it is forced to ask-mode at prepare, so every
+ *  agent-initiated org creation passes a human approval.
+ *
+ *  `name` is the only parameter, by design: tier / billing / entitlement fields
+ *  are not settable through this surface (a new org has no org_billing row,
+ *  i.e. the default plan=none), and supplying one is validation_failed. */
+export interface CreateOrgCommand {
+  kind: 'CreateOrg'
+  name: string
+}
+
 /** Update a project's settings blob with optimistic-concurrency control (spec
  *  §2, receipt-only — D8). Applies via db/shared/projects.ts's version-guarded
  *  write; when the validation threshold changes the shared module runs the
@@ -184,10 +265,16 @@ export type Command =
   | SetTranslationCommand
   | PlanImportCommand
   | CreateProjectCommand
+  | CreateOrgCommand
   | UpdateProjectSettingsCommand
   | LinkMediaCommand
   | PatchSettingsCommand
   | EmitEventsCommand
+  | DraftCellsCommand
+  | CellFieldCommand
+  | MembershipCommand
+  | RenameFileCommand
+  | ProjectLifecycleCommand
   | SetBriefCommand
   | OrgMemberCommand
   | StructureCommand
@@ -196,6 +283,34 @@ export type Command =
  *  rejected with validation_failed — the manifest-in-R2 pattern for larger
  *  imports is a Wave-3 TRACE (see docs/swarm/AGENT-API-TRACES.md). */
 export const PLAN_IMPORT_MAX_CELLS = 5000
+
+/** Longest org name CreateOrg will stage (AQU-1221). The column is TEXT; this
+ *  is a sanity bound so an agent cannot park a document in the org switcher. */
+export const CREATE_ORG_MAX_NAME_LENGTH = 120
+
+/** Fields a CreateOrg command may carry. Anything else is validation_failed
+ *  naming the field — the guardrail that keeps tier / billing / entitlement
+ *  values (`plan`, `tier`, `addonPacks`, …) off the agent surface entirely,
+ *  rather than silently ignoring them. */
+const CREATE_ORG_ALLOWED_FIELDS = new Set(['kind', 'name'])
+
+/** Billing/entitlement field names an agent might plausibly try, called out by
+ *  name so the rejection explains WHY rather than just "unsupported field".
+ *  Every one of these is owned by the Stripe/billing surface (org_billing),
+ *  never by org creation. */
+const CREATE_ORG_BILLING_FIELDS = new Set([
+  'tier',
+  'plan',
+  'billing',
+  'entitlements',
+  'entitlement',
+  'status',
+  'stripeCustomerId',
+  'stripeSubscriptionId',
+  'addonPacks',
+  'complimentaryWords',
+  'hardCapWords',
+])
 
 export interface CommandValidationIssue {
   index: number
@@ -576,6 +691,36 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
       })
       return
     }
+    if (c.kind === 'CreateOrg') {
+      // Reject a billing/entitlement field BEFORE the shape check so the
+      // message names the offending field even when `name` is also missing.
+      const billingField = Object.keys(c).find((k) => CREATE_ORG_BILLING_FIELDS.has(k))
+      if (billingField !== undefined) {
+        issues.push({
+          index,
+          message: `CreateOrg cannot set billing/entitlement field "${billingField}" — a new org always gets the default tier`,
+        })
+        return
+      }
+      const unknownField = Object.keys(c).find((k) => !CREATE_ORG_ALLOWED_FIELDS.has(k))
+      if (unknownField !== undefined) {
+        issues.push({ index, message: `CreateOrg does not accept field "${unknownField}"` })
+        return
+      }
+      if (!isNonEmptyString(c.name) || c.name.trim().length === 0) {
+        issues.push({ index, message: 'CreateOrg.name must be a non-empty string' })
+        return
+      }
+      if (c.name.length > CREATE_ORG_MAX_NAME_LENGTH) {
+        issues.push({
+          index,
+          message: `CreateOrg.name must be at most ${CREATE_ORG_MAX_NAME_LENGTH} characters`,
+        })
+        return
+      }
+      commands.push({ kind: 'CreateOrg', name: c.name.trim() })
+      return
+    }
     if (c.kind === 'UpdateProjectSettings') {
       if (!isNonEmptyString(c.projectId)) {
         issues.push({ index, message: 'UpdateProjectSettings.projectId must be a non-empty string' })
@@ -608,6 +753,37 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
     }
     if (c.kind === 'EmitEvents') {
       const cmd = validateEmitEventsCommand(c, index, issues)
+      if (cmd) commands.push(cmd)
+      return
+    }
+    if (c.kind === 'DraftCells') {
+      const cmd = validateDraftCellsCommand(c, index, issues)
+      if (cmd) commands.push(cmd)
+      return
+    }
+    // AQU-1183 cell-field commands (SetSource / SetTranscription / SetTiming /
+    // SetTrackOverride) — one validator for the family.
+    if (isCellFieldKind(c.kind)) {
+      const cmd = validateCellFieldCommand(c, index, issues)
+      if (cmd) commands.push(cmd)
+      return
+    }
+    if (isMembershipCommand(c as { kind: string })) {
+      const cmd = validateMembershipCommand(c, index, issues)
+      if (cmd) commands.push(cmd)
+      return
+    }
+    if (c.kind === 'RenameFile') {
+      const cmd = validateRenameFileCommand(c, index, issues)
+      if (cmd) commands.push(cmd)
+      return
+    }
+    if (
+      c.kind === 'RenameProject' ||
+      c.kind === 'ArchiveProject' ||
+      c.kind === 'UnarchiveProject'
+    ) {
+      const cmd = validateProjectLifecycleCommand(c, index, issues)
       if (cmd) commands.push(cmd)
       return
     }
@@ -679,7 +855,17 @@ export function requiredRoleForCommand(c: Command): number {
   // (their role gate is org-level for CreateProject, project-MAINTAINER for
   // UpdateProjectSettings), so this generic per-command floor is never consulted
   // for them — but the union must be covered. MAINTAINER is the honest floor.
-  if (c.kind === 'CreateProject' || c.kind === 'UpdateProjectSettings') {
+  // CreateOrg (AQU-1221) likewise takes its own path: its gate is the
+  // credential's SCOPE (unscoped only), not any project role — there is no
+  // project, and no org either until it commits. MAINTAINER keeps it aligned
+  // with the other tenant-lifecycle command for index filtering; authority.ts
+  // and auth-worker's changeset-floor.ts carve it out of the floor rule the
+  // same way they carve out CreateProject.
+  if (
+    c.kind === 'CreateProject' ||
+    c.kind === 'CreateOrg' ||
+    c.kind === 'UpdateProjectSettings'
+  ) {
     return ROLE.MAINTAINER
   }
   // PatchSettings also takes its own path (dynamic per-key floors, incl. the
@@ -702,6 +888,40 @@ export function requiredRoleForCommand(c: Command): number {
   if (c.kind === 'LinkMedia') {
     // Compiles to cell.audio.attach + cell.audio.select (both CONTRIBUTOR).
     return Math.max(REQUIRED_ROLE['cell.audio.attach'], REQUIRED_ROLE['cell.audio.select'])
+  }
+  if (c.kind === 'DraftCells') {
+    // Expands at prepare into SetTranslation → target.cell.commit.
+    return draftCellsFloor()
+  }
+  // AQU-1183: the cell-field family. Each command's floor is the max
+  // REQUIRED_ROLE across the events it compiles to — PROJECT_LEAD for a source
+  // edit (a rung above SetTranslation, matching the UI's source-edit floor),
+  // MAINTAINER for a track override. The DYNAMIC bumps (timing lock,
+  // allowTrackEditing) are live-state checks in cell-fields-engine.ts.
+  if (isCellFieldCommand(c)) {
+    return cellFieldsFloor(c)
+  }
+  // AQU-1185 membership commands: MAINTAINER, flat. Like the other receipt-only
+  // kinds they take their own prepare/commit path (which re-checks the grant and
+  // target caps live); this is the honest index-filtering floor.
+  if (isMembershipCommand(c)) {
+    return MEMBERSHIP_FLOOR
+  }
+  // AQU-1182 RenameFile: desugars to one file.rename event, so its floor IS
+  // file.rename's perimeter floor (the UI's own floor for renaming a file).
+  if (c.kind === 'RenameFile') {
+    return renameFileFloor()
+  }
+  // AQU-1182 project lifecycle: receipt-only row writes taking their own
+  // prepare/commit path, where the floor is re-resolved live. This static value
+  // is the honest index-filtering floor (rename MAINTAINER, archive/unarchive
+  // OWNER) and mirrors the UI floors for the same actions.
+  if (
+    c.kind === 'RenameProject' ||
+    c.kind === 'ArchiveProject' ||
+    c.kind === 'UnarchiveProject'
+  ) {
+    return projectLifecycleFloor(c)
   }
   // AQU-1235 org-membership commands: like CreateProject these take their own
   // prepare/commit path with an ORG-level gate (owner in the target org), so

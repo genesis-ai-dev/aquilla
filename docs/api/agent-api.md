@@ -174,7 +174,7 @@ hand-rolled client), not just Claude products.
 | `read_content` | List a project's files, or read one file's cells (with `since`/`limit`/`cursor`). |
 | `read_history` | Append-only event history for one cell. |
 | `export_file` | Export one file in its delivered format — the original artifact with current translations substituted in (AQU-858, §4.2). Returns the text inline plus its fidelity fields; binary or >512KB results are refused with the REST URL to fetch instead. |
-| `prepare_translations` | Stage a changeset (see §3): a `SetTranslation` batch via `translations`, and/or `CreateProject` / `UpdateProjectSettings` / `LinkMedia` commands via `commands` (Agent API v1.1 — §4.1 below). |
+| `prepare_translations` | Stage a changeset (see §3): a `SetTranslation` batch via `translations`, and/or `CreateOrg` / `CreateProject` / `UpdateProjectSettings` / `LinkMedia` commands via `commands` (Agent API v1.1 + AQU-1221 — §4.1 below). |
 | `get_changeset` | Fetch a changeset's status/summary/digest/receipt/approvalUrl. |
 | `confirm_changeset` | Commit a prepared changeset (ask or act). |
 | `discard_changeset` | Discard a staged/stale/expired changeset. |
@@ -230,11 +230,39 @@ documented convention.
 Act-mode credentials skip steps 2–3 entirely: `confirm_changeset` / `POST .../commit` applies
 immediately.
 
-Polling: an agent may call `get_changeset` between steps 2 and 4 to observe `status` transition
-from `staged` to `committed` once a human has approved *and* the agent has re-called confirm —
-approval alone does not commit; the agent's own confirm call is still required. A changeset may
-also transiently read `committing` — the mid-apply state a commit sets before flipping to
-`committed` (§4.1 "commit idempotency" below); treat it the same as `staged` and poll again.
+**Waiting for the human (AQU-1177).** Between steps 2 and 4, prefer `wait_for_changeset` (MCP)
+or `GET .../changesets/:id/wait?timeoutMs=` (REST) over a `get_changeset` poll loop: the server
+holds the request until something actually happens, so the agent learns about an approval within
+about a second instead of on its next poll, and spends one rate-limit slot per call rather than
+one per poll. It returns when **either**
+
+- a human approval is recorded (`approved: true` — call confirm now; the confirmation's own
+  15-minute TTL is already running), **or**
+- the status leaves `staged` (a rejection shows as `discarded`; also `committed`, `expired`,
+  `stale`, `superseded`).
+
+`timeoutMs` defaults to 25 s and is capped at 60 s; `0` means "check now, don't block". A budget
+that runs out returns `timedOut: true` with the current changeset — a normal outcome, not an
+error: just call again.
+
+Note the arm that a naive poll gets wrong: **approval does not change the changeset's status.**
+The approve route mints a `changeset_confirmations` row and leaves the changeset `staged` until
+the agent commits it, so code watching only for `status !== 'staged'` will sleep straight through
+the event it is waiting for. `wait_for_changeset` checks both arms.
+
+Polling remains available: `get_changeset` observes the same `status`, which transitions to
+`committed` once a human has approved *and* the agent has re-called confirm — approval alone does
+not commit; the agent's own confirm call is still required. A changeset may also transiently read
+`committing` — the mid-apply state a commit sets before flipping to `committed` (§4.1 "commit
+idempotency" below); treat it the same as `staged` and poll again.
+
+**Finding your plans again.** `list_changesets` (MCP) or `GET .../changesets?status=&limit=&cursor=`
+(REST) lists the changesets **the calling credential staged**, newest first — what is still
+awaiting a human, what expired unattended, what already committed — so an agent that lost its
+`changesetId` (crash, new session, context trimmed) can pick the work back up instead of
+re-preparing it. Scoping is per credential, matching the per-item rule on `GET .../changesets/:id`:
+a PAT never sees a sibling agent's plans, and a PAT scoped to another project gets
+`403 scope_denied`.
 
 **`CreateProject` is ask-mode only, by construction.** `prepare` **forces every `CreateProject`
 changeset to ask-mode**, whatever the credential's or request's mode — an org-scoped `act`
@@ -276,7 +304,9 @@ CONTRIBUTOR=400, PROJECT_LEAD=500, MAINTAINER=600).
 | `GET /api/v1/external/projects/:projectId/artifacts/:artifactId/content` | `aqk_` | VIEWER | Raw bytes. |
 | `GET /api/v1/external/projects/:projectId/artifacts/:artifactId/inspect` | `aqk_` | VIEWER | Lightweight format sniff (first 64KB): `usfm`, `xliff`, `tmx`, `json`, `csv`, `tsv`, `plaintext`. Audio artifacts return size + content type only — no duration/waveform sniffing. |
 | `POST /api/v1/external/projects/:projectId/changesets` | `aqk_` | Per command kind — see §4.1 | Prepare (stage) a changeset. Body `{ commands: [...], id?, autonomyMode? }`. |
+| `GET /api/v1/external/projects/:projectId/changesets` | `aqk_` | VIEWER + credential scope | List the changesets this credential staged, newest first. Query `status`, `limit` (≤100), `cursor`. Returns `{ changesets, nextCursor }`. |
 | `GET /api/v1/external/projects/:projectId/changesets/:id` | `aqk_` | — (must be the staging credential) | Fetch status/summary/digest/receipt + `approvalUrl`. |
+| `GET /api/v1/external/projects/:projectId/changesets/:id/wait` | `aqk_` | — (must be the staging credential) | Long-poll until approved or no longer `staged`. Query `timeoutMs` (default 25 000, max 60 000, `0` = don't block). Returns `{ changeset, approved, timedOut, waitedMs }`. |
 | `POST /api/v1/external/projects/:projectId/changesets/:id/commit` | `aqk_` | — (must be the staging credential) | Commit (ask requires a consumed confirmation; act auto-confirms). Idempotent on `committed` **and safe to retry from `committing`** (§4.1). |
 | `POST /api/v1/external/projects/:projectId/changesets/:id/discard` | `aqk_` | — (must be the staging credential) | Discard a staged/stale/expired changeset. Cannot discard `committed` **or `committing`** (a mid-apply plan must not be stranded). |
 
@@ -284,7 +314,8 @@ CONTRIBUTOR=400, PROJECT_LEAD=500, MAINTAINER=600).
 
 Every command below shares the one `POST .../changesets` → `.../commit` pipeline. `SetTranslation`
 and `PlanImport` are unchanged from v1; `CreateProject`, `UpdateProjectSettings`, and `LinkMedia`
-are new in v1.1 (`sync-worker/src/external/{commands,prepare,commit}.ts`).
+are new in v1.1, and `CreateOrg` was added by AQU-1221
+(`sync-worker/src/external/{commands,prepare,commit}.ts`).
 
 - **`SetTranslation`** (`{ kind: "SetTranslation", fileId, cellId, value, valueHtml? }`) compiles
   to `target.cell.commit`, requires **CONTRIBUTOR** at commit time (routed through the same
@@ -315,6 +346,35 @@ are new in v1.1 (`sync-worker/src/external/{commands,prepare,commit}.ts`).
   needs no org-role check at all. If the chosen project id is claimed by another caller between
   prepare and commit, commit returns **`409 conflict`** (not `plan_stale` — this is a genuine
   race, distinguished from the credential's own crash-retry, which is idempotent success).
+- **`CreateOrg`** (`{ kind: "CreateOrg", name }`) — **receipt-only** (AQU-1221): applies a plain
+  row write via `db/shared/orgs.ts` (creates the `organizations` row plus an owner (700)
+  `org_members` row for the caller, in one atomic statement), not an event. Must be the **sole
+  command** in its changeset. This is the command that unblocks setting up a new partner
+  workspace end to end: previously the catalog had nothing org-level, so an agent stalled until a
+  human created the org shell by hand. Feed the receipt's `orgId` to a follow-up `CreateProject`
+  to populate the new org.
+  **`name` is the only accepted field.** Any other key is `400 validation_failed` naming it — in
+  particular tier / billing / entitlement fields (`plan`, `tier`, `addonPacks`,
+  `stripeCustomerId`, `complimentaryWords`, `hardCapWords`, …): a new org is always created on
+  the default tier (no `org_billing` row = plan `none`), and there is no path to plan or billing
+  state through this surface. There is likewise **no owner field** — ownership is resolved
+  server-side from the credential's minting user, so an agent can neither point ownership
+  elsewhere nor make itself a member.
+  **Scope gate:** the credential must be **unscoped**. An org-scoped credential (`403
+  scope_denied`) is confined to the org it names, and a project-scoped one to its project;
+  creating a new tenant is outside either scope by definition. Re-checked live at commit.
+  **Always ask-mode:** like `CreateProject`, prepare FORCES the changeset to ask-mode regardless
+  of the credential's or request's mode, so every agent-initiated org creation passes a human
+  approval at the `approvalUrl`. The approval page states the org name and its incoming owner in
+  plain language.
+  **Rate limit:** at most **5 staged org creations per credential per 15 minutes**; beyond that,
+  `429 rate_limited`. Much tighter than the generic per-route throttle — a runaway loop here
+  would litter a real person's org switcher and approval queue with junk tenants.
+  **Filing project id:** the `:projectId` in the URL is a placeholder only. No project is created,
+  and the receipt carries `orgId` instead of `projectId`. `organizations.id` is a generated
+  identity column, so unlike `CreateProject` no id is pinned at prepare; a crash-retry instead
+  absorbs the org it already created (same creator, same planned name, within the changeset's own
+  lifetime) rather than minting a second one.
 - **`UpdateProjectSettings`** (`{ kind: "UpdateProjectSettings", projectId, settings,
   ifMatchVersion }`) — **receipt-only**: applies a version-guarded write via the same shared
   module auth-worker's internal settings route uses (first-write insert vs `version + 1` update;
@@ -423,7 +483,7 @@ routes mirror the same shape and codes by convention.)
 | `validation_failed` | 400 | Malformed request, bad command shape, oversize/wrong-content-type artifact, expired changeset, wrong changeset status for the action, a `CreateProject`/`UpdateProjectSettings`/`LinkMedia` not staged as the sole (or only-LinkMedia) command in its changeset, etc. | Fix the request per `details`/`message`; do not retry unchanged. |
 | `conflict` | 409 | `CreateProject` only: the chosen project id was claimed by a different caller between `prepare` and `commit` — a genuine race, distinct from your own crash-retry (which is idempotent success, not a conflict). | Don't retry with the same id. Choose a different `projectId` (or omit it and let the next changeset's URL id pick a fresh one) and re-`prepare`. |
 | `job_failed` | 500 | Unexpected server-side failure (misconfiguration, unhandled exception, partial apply on `PlanImport`). | Safe to retry once; if it persists, treat as a bug — check `details.receipt` for a `PlanImport` partial-apply accounting. |
-| `rate_limited` | 429 | Too many requests from this credential in the trailing 15 minutes — enforced per credential on every external route (`db/shared/rate-limit.ts`, wired in across the 2026-07-30, 2026-08-20, and 2026-08-27 pen-test passes). | Back off and retry later; don't tighten a polling loop in response to a 429. |
+| `rate_limited` | 429 | Too many requests from this credential in the trailing 15 minutes — enforced per credential on every external route (`db/shared/rate-limit.ts`, wired in across the 2026-07-30, 2026-08-20, and 2026-08-27 pen-test passes). `CreateOrg` carries its own, much tighter cap: 5 staged org creations per credential per 15 minutes (AQU-1221). | Back off and retry later; don't tighten a polling loop in response to a 429. |
 | `not_found` | 404 | Resource (changeset, artifact, project, credential) doesn't exist or isn't visible to this credential. | Don't retry with the same id. |
 
 MCP tool errors use the identical code set inside the tool result (`isError: true`, JSON text
@@ -490,7 +550,10 @@ discarded plans" is **not yet implemented** — treat it as aspirational, not sh
 | --- | --- | --- |
 | Max artifact upload size | 25 MB | `MAX_ARTIFACT_BYTES`, `sync-worker/src/external/artifacts-route.ts` |
 | Max cells per `PlanImport` | 5,000 | `PLAN_IMPORT_MAX_CELLS`, `sync-worker/src/external/commands.ts` |
-| Changeset TTL (staged → auto-expires) | 1 hour | `CHANGESET_TTL_MS`, `sync-worker/src/external/prepare.ts` |
+| Changeset TTL, act mode (staged → auto-expires) | 1 hour | `CHANGESET_TTL_MS`, `sync-worker/src/external/stage.ts` |
+| Changeset TTL, ask mode (staged → auto-expires) | 24 hours — an ask-mode plan waits on a *human*, so the deadline is raised rather than the clock paused (AQU-1177); `expiresAt` always means exactly what it says | `CHANGESET_ASK_TTL_MS`, `sync-worker/src/external/stage.ts` |
+| `wait_for_changeset` long-poll budget | 25 s default, 60 s max | `WAIT_DEFAULT_TIMEOUT_MS` / `WAIT_MAX_TIMEOUT_MS`, `sync-worker/src/external/changeset-wait.ts` |
+| Changeset list page size | 25 default, 100 max | `EXTERNAL_LIST_DEFAULT_LIMIT` / `EXTERNAL_LIST_MAX_LIMIT`, `sync-worker/src/external/store.ts` |
 | Ask-mode confirmation TTL | 15 minutes | `CONFIRMATION_TTL_MS`, `auth-worker/src/routes/changeset-approvals.ts` |
 | Internal sync-token lifetime (implementation detail, not caller-facing) | 300 seconds | `INTERNAL_TOKEN_TTL_SECONDS`, `sync-worker/src/external/token-bridge.ts` |
 | Max commands per `SetTranslation` changeset | none enforced | `validateCommands` has no hard cap; `get_capabilities.limits.maxCommandsPerChangeset` reports `null` for this reason |

@@ -5,7 +5,7 @@
 // the plan with a digest, and inserts a staged changeset (idempotent on the
 // client-supplied UUIDv7 id). Nothing is applied here — ask/act commit does that.
 
-import { errorResponse, toErrorResponse } from './errors'
+import { ExternalError, errorResponse, toErrorResponse } from './errors'
 import { AUTH_HINT } from './discovery-route'
 import {
   validateCommands,
@@ -14,12 +14,16 @@ import {
   requiredRoleForCommand,
   PLAN_IMPORT_MAX_CELLS,
   type Command,
+  type CreateOrgCommand,
   type StructureCommand,
   type CreateProjectCommand,
+  type DraftCellsCommand,
   type EmitEventsCommand,
   type LinkMediaCommand,
   type PatchSettingsCommand,
   type PlanImportCommand,
+  type ProjectLifecycleCommand,
+  type RenameFileCommand,
   type SetBriefCommand,
   type SetTranslationCommand,
   type UpdateProjectSettingsCommand,
@@ -27,9 +31,20 @@ import {
 import { isOrgMemberCommand, type OrgMemberCommand } from './commands-org-members'
 import { prepareOrgMember } from './org-members-engine'
 import { changedPolicyKeys, preparePatchSettings, previewSettingValue } from './commands-patch-settings'
+import { assertWithinBatchCap, requestDrafts } from './commands-draft-cells'
+import { completionBatchSizeFromSettings } from '../../../db/shared/completion-batch'
+import {
+  isMembershipCommand,
+  prepareMembership,
+  type MembershipCommand,
+} from './commands-membership'
+import { isProjectLifecycleCommand, prepareProjectLifecycle } from './commands-project-lifecycle'
+import { renameFileToEmitEvents } from './commands-rename-file'
 import { prepareSetBrief } from './commands-set-brief'
 import { isMemoryCommand, prepareMemoryCommand } from './commands-memory'
 import { prepareEmitEvents } from './emit-events-engine'
+import { prepareCellFields } from './cell-fields-engine'
+import { isCellFieldCommand, CELL_FIELDS_MAX_COMMANDS, type CellFieldCommand } from './commands-cell-fields'
 import { prepareStructure } from './structure-engine'
 import { resolveCellStates, type CellPrecondition } from './preconditions'
 import { uuidv7 } from './uuid'
@@ -45,7 +60,7 @@ import { ROLE } from '../events/role-policy'
 // Staging primitives moved to stage.ts (AQU-926) so the new command modules
 // share them without an import cycle; re-exported here for existing importers
 // (mcp-handlers, changesets-route, tests).
-export { approvalUrlFor, CHANGESET_TTL_MS } from './stage'
+export { approvalUrlFor, CHANGESET_ASK_TTL_MS, CHANGESET_TTL_MS } from './stage'
 
 function bearer(request: Request): string | null {
   const h = request.headers.get('Authorization') ?? ''
@@ -58,6 +73,22 @@ function bearer(request: Request): string | null {
 // stage unbounded changesets. Wide enough that a real agent loop staging a
 // plan every few seconds never trips it.
 const PREPARE_MAX_PER_CREDENTIAL = 300
+
+/**
+ * CreateOrg throttle (AQU-1221): at most 5 org-creation changesets staged per
+ * credential per 15-minute window (the shared sliding window in
+ * db/shared/rate-limit.ts). Org creation is the one agent command that mints a
+ * whole new TENANT, so a runaway loop is not merely noisy — it litters the
+ * user's org switcher and the platform-admin views with junk tenants that a
+ * human then has to clean up. Deliberately far tighter than the generic
+ * PREPARE_MAX_PER_CREDENTIAL: a legitimate partner-onboarding agent creates one
+ * org and moves on, so five in a quarter-hour is already generous.
+ *
+ * Counted at PREPARE. Every CreateOrg is forced to ask-mode, so a human
+ * approval already gates each commit; throttling the staging step is what stops
+ * an agent from flooding that human's approval queue in the first place.
+ */
+export const CREATE_ORG_MAX_PER_CREDENTIAL = 5
 
 /** PAT-authenticated entrypoint (REST + the MCP adapter's synthetic request):
  *  resolves the credential, parses the body, and hands off to the shared core
@@ -151,6 +182,19 @@ export async function prepareChangesetCore(
     return prepareOrgMember(db, cred, projectId, id, orgMember, env)
   }
 
+  // CreateOrg (AQU-1221, receipt-only): sole command in its changeset. Like
+  // CreateProject it must skip assertCredentialScope — it creates a tenant, so
+  // neither the changeset's URL project nor any org exists to scope against.
+  const createOrg = validated.commands.find(
+    (c): c is CreateOrgCommand => c.kind === 'CreateOrg',
+  )
+  if (createOrg) {
+    if (validated.commands.length !== 1) {
+      return errorResponse('validation_failed', 'CreateOrg must be the only command in a changeset')
+    }
+    return prepareCreateOrg(db, cred, projectId, id, autonomyMode, createOrg, env)
+  }
+
   // Every remaining command operates on an EXISTING project — enforce the
   // credential's scope ceiling first.
   try {
@@ -182,6 +226,43 @@ export async function prepareChangesetCore(
       return errorResponse('validation_failed', 'PatchSettings must be the only command in a changeset')
     }
     return preparePatchSettings(db, cred, projectId, id, autonomyMode, patchSettings, env)
+  }
+
+  // AQU-1185 membership (InviteMember / SetRole / RemoveMember): receipt-only,
+  // its own module owns the MAINTAINER floor plus the grant and target caps, and
+  // it FORCES ask-mode — so like the settings commands it skips the generic role
+  // gate below. Membership kinds may batch with each other (one approval covers
+  // one roster change) but never with another kind: the human on /approve must
+  // be reading a membership decision, not a membership decision buried in an
+  // import.
+  const membership = validated.commands.filter((c): c is MembershipCommand =>
+    isMembershipCommand(c),
+  )
+  if (membership.length > 0) {
+    if (membership.length !== validated.commands.length) {
+      return errorResponse(
+        'validation_failed',
+        'membership commands cannot be mixed with other command kinds in one changeset',
+      )
+    }
+    return prepareMembership(db, cred, projectId, id, membership, env)
+  }
+
+  // Project lifecycle (AQU-1182): RenameProject / ArchiveProject /
+  // UnarchiveProject — receipt-only row writes, sole command per changeset. They
+  // MUST precede the generic role gate below: that gate resolves the role with
+  // resolveProjectRoleShared, which denies every archived project, so an
+  // UnarchiveProject would be permission_denied by construction. Their module
+  // resolves the archived-tolerant role instead (the same resolver auth-worker's
+  // own archive endpoints use) and enforces the per-kind UI floor itself.
+  const lifecycle = validated.commands.find(
+    (c): c is ProjectLifecycleCommand => isProjectLifecycleCommand(c),
+  )
+  if (lifecycle) {
+    if (validated.commands.length !== 1) {
+      return errorResponse('validation_failed', `${lifecycle.kind} must be the only command in a changeset`)
+    }
+    return prepareProjectLifecycle(db, cred, projectId, id, autonomyMode, lifecycle, env)
   }
 
   // SetBrief (AQU-1227): sole command — it writes the `translationBrief` key of
@@ -236,6 +317,76 @@ export async function prepareChangesetCore(
     return prepareEmitEvents(db, cred, projectId, id, autonomyMode, emitEvents, env, resolvedRole.level)
   }
 
+  // DraftCells (AQU-1186): a prepare-time expansion — run the project's copilot
+  // NOW, then fall through the ordinary SetTranslation path with the generated
+  // text. Sole command in its changeset (one command already batches many
+  // cells, and the cap is per-changeset).
+  const draftCells = validated.commands.find(
+    (c): c is DraftCellsCommand => c.kind === 'DraftCells',
+  )
+  let pending: Command[] = validated.commands
+  if (draftCells) {
+    if (validated.commands.length !== 1) {
+      return errorResponse('validation_failed', 'DraftCells must be the only command in a changeset')
+    }
+    try {
+      pending = await expandDraftCells(db, env, cred, projectId, draftCells)
+    } catch (err) {
+      return toErrorResponse(err)
+    }
+  }
+
+  // AQU-1183 cell-field family (SetSource / SetTranscription / SetTiming /
+  // SetTrackOverride): its own prepare path. These write EXISTING cell/file
+  // fields — two of them compile to the chain-mutating `source.cell.commit`,
+  // so the batch is normalized to one source event per cell (a mixed batch
+  // with SetTranslation would have two writers on one chain slot). The static
+  // max-floor gate just ran; the engine adds the live pins, existence checks
+  // and the two dynamic gates (timing lock, allowTrackEditing).
+  const cellFields: CellFieldCommand[] = validated.commands.filter(isCellFieldCommand)
+  if (cellFields.length > 0) {
+    if (cellFields.length !== validated.commands.length) {
+      return errorResponse(
+        'validation_failed',
+        'cell-field commands (SetSource, SetTranscription, SetTiming, SetTrackOverride) cannot be mixed with other command kinds in one changeset',
+      )
+    }
+    if (cellFields.length > CELL_FIELDS_MAX_COMMANDS) {
+      return errorResponse(
+        'validation_failed',
+        `too many cell-field commands in one changeset (max ${CELL_FIELDS_MAX_COMMANDS})`,
+      )
+    }
+    return prepareCellFields(db, cred, projectId, id, autonomyMode, cellFields, env, resolvedRole.level)
+  }
+
+  // RenameFile (AQU-1182): sugar over a single `file.rename` event. Desugar into
+  // the equivalent EmitEvents command and hand it to that engine — one compile
+  // path, one set of existence checks, one prepare-time id ledger. The role gate
+  // above already enforced file.rename's floor (requiredRoleForCommand returns
+  // it verbatim), so the plan an agent could not commit is refused here too.
+  const renameFiles = validated.commands.filter(
+    (c): c is RenameFileCommand => c.kind === 'RenameFile',
+  )
+  if (renameFiles.length > 0) {
+    if (renameFiles.length !== validated.commands.length) {
+      return errorResponse(
+        'validation_failed',
+        'RenameFile cannot be mixed with other command kinds in one changeset',
+      )
+    }
+    return prepareEmitEvents(
+      db,
+      cred,
+      projectId,
+      id,
+      autonomyMode,
+      renameFileToEmitEvents(renameFiles),
+      env,
+      resolvedRole.level,
+    )
+  }
+
   // Cell-structure commands (AQU-1234): sole command per changeset. A
   // structural edit is one indivisible rewrite of a file's anchor chain — two
   // of them in one plan could name each other's cells and would have to be
@@ -257,11 +408,11 @@ export async function prepareChangesetCore(
   // PlanImport is a whole-file operation, not a per-cell batch — it takes its
   // own prepare path (no cell preconditions; a duplicate-name precondition). A
   // PlanImport must be the sole command in its changeset.
-  const planImports = validated.commands.filter(
+  const planImports = pending.filter(
     (c): c is PlanImportCommand => c.kind === 'PlanImport',
   )
   if (planImports.length > 0) {
-    if (validated.commands.length !== 1) {
+    if (pending.length !== 1) {
       return errorResponse(
         'validation_failed',
         'PlanImport must be the only command in a changeset',
@@ -273,11 +424,11 @@ export async function prepareChangesetCore(
   // LinkMedia takes its own prepare path (per-cell audio attach, not a
   // per-cell translation batch). For v1 a LinkMedia changeset holds only
   // LinkMedia commands — mixing with SetTranslation is rejected.
-  const linkMedia = validated.commands.filter(
+  const linkMedia = pending.filter(
     (c): c is LinkMediaCommand => c.kind === 'LinkMedia',
   )
   if (linkMedia.length > 0) {
-    if (linkMedia.length !== validated.commands.length) {
+    if (linkMedia.length !== pending.length) {
       return errorResponse(
         'validation_failed',
         'LinkMedia cannot be mixed with other command kinds in one changeset',
@@ -286,8 +437,9 @@ export async function prepareChangesetCore(
     return prepareLinkMedia(db, cred, projectId, id, autonomyMode, linkMedia, env)
   }
 
-  // Past the PlanImport branch every remaining command is a SetTranslation.
-  const setCommands = validated.commands.filter(
+  // Past the PlanImport branch every remaining command is a SetTranslation —
+  // either the caller's own, or the ones DraftCells just materialized.
+  const setCommands = pending.filter(
     (c): c is SetTranslationCommand => c.kind === 'SetTranslation',
   )
 
@@ -388,6 +540,62 @@ export async function prepareChangesetCore(
     summary,
     plannedIds,
   })
+}
+
+/**
+ * Expand a DraftCells command into the SetTranslation commands the rest of the
+ * prepare path already knows how to stage (AQU-1186).
+ *
+ * Order matters and is the cost rail: the per-changeset cap is checked BEFORE
+ * any model call, so an over-cap request costs nothing and names the cap. Only
+ * then does the drafting bridge run; a credit-exhausted org throws out of here
+ * with a named error and never reaches stageAndRespond, which is what makes
+ * "exhaustion stages nothing" true rather than aspirational.
+ *
+ * The returned commands carry SERVER-MINTED `aiDraft` provenance so the commit
+ * lands as `ai_drafted` — a human reviews it as AI work, exactly as they would
+ * an in-app draft. No auto-commit: this only ever produces a staged plan.
+ */
+async function expandDraftCells(
+  db: AquillaDb,
+  env: ExternalEnv,
+  cred: ApiCredentialContext,
+  projectId: string,
+  cmd: DraftCellsCommand,
+): Promise<Command[]> {
+  const projectSettings = await loadProjectSettings(db, projectId)
+  assertWithinBatchCap(cmd, completionBatchSizeFromSettings(projectSettings.settings))
+
+  const { drafts } = await requestDrafts(env, {
+    projectId,
+    userId: cred.userId,
+    fileId: cmd.fileId,
+    cellIds: cmd.cellIds,
+    ...(cmd.instructions !== undefined ? { instructions: cmd.instructions } : {}),
+  })
+
+  // Only ever stage cells the caller actually asked for: the plan a human
+  // approves must match the plan the agent proposed, so a backend that widened
+  // the work list (or echoed a stale one) cannot smuggle extra writes in.
+  const requested = new Set(cmd.cellIds)
+  const scoped = drafts.filter((d) => requested.has(d.cellId))
+
+  if (scoped.length === 0) {
+    throw new ExternalError(
+      'job_failed',
+      'the copilot returned no usable drafts for these cells — nothing was staged; retry, or draft fewer cells',
+      { requested: cmd.cellIds.length },
+    )
+  }
+
+  return scoped.map((d) => ({
+    kind: 'SetTranslation' as const,
+    fileId: cmd.fileId,
+    cellId: d.cellId,
+    value: d.value,
+    ...(cmd.laneId ? { laneId: cmd.laneId } : {}),
+    ...(d.aiDraft !== undefined && d.aiDraft !== null ? { aiDraft: d.aiDraft } : {}),
+  }))
 }
 
 /**
@@ -771,6 +979,73 @@ async function prepareCreateProject(
     warnings: [],
   }
   return stageReceiptOnlyChangeset(db, cred, urlProjectId, id, 'ask', cmd, plannedIds, summary, env)
+}
+
+/** The credential's minting user, in plain language, for the approval summary.
+ *  Falls back to the numeric id when the row is unreadable — the approval page
+ *  must always name SOMEONE as the incoming owner. */
+async function resolveOwnerLabel(db: AquillaDb, userId: string): Promise<string> {
+  const row = await db
+    .prepare(`SELECT username FROM users WHERE id = ?`)
+    .bind(userId)
+    .first<{ username: string | null }>()
+  return row?.username ?? `user ${userId}`
+}
+
+/**
+ * Prepare a CreateOrg changeset (AQU-1221). Enforces the scope rule (UNSCOPED
+ * credentials only), the per-credential creation throttle, and forces ask-mode
+ * so a human always approves the new tenant.
+ *
+ * No id is pinned in the plan: `organizations.id` is a generated identity
+ * column, so unlike CreateProject there is no client-choosable id to fix at
+ * prepare. The crash-retry guarantee the prepare-time-ids doctrine buys is
+ * provided instead at commit, by findRecentOrgByCreator (see db/shared/orgs.ts).
+ */
+async function prepareCreateOrg(
+  db: AquillaDb,
+  cred: ApiCredentialContext,
+  urlProjectId: string,
+  id: string,
+  autonomyMode: 'ask' | 'act',
+  cmd: CreateOrgCommand,
+  env: ExternalEnv,
+): Promise<Response> {
+  // Scope: creating a NEW tenant is outside any narrower scope by definition —
+  // an org-scoped credential is confined to the org it names, a project-scoped
+  // one to its project. Only an unscoped credential may mint an org.
+  if (cred.projectId != null) {
+    return errorResponse('scope_denied', 'a project-scoped credential cannot create organizations')
+  }
+  if (cred.orgId != null) {
+    return errorResponse('scope_denied', 'an org-scoped credential cannot create organizations')
+  }
+
+  // Per-credential creation throttle (see CREATE_ORG_MAX_PER_CREDENTIAL).
+  const identifier = `credential:${cred.credentialId}`
+  const recent = await countRecentRateLimitEvents(db, 'external_create_org', identifier)
+  if (recent >= CREATE_ORG_MAX_PER_CREDENTIAL) {
+    return errorResponse(
+      'rate_limited',
+      `organization creation rate limit exceeded (max ${CREATE_ORG_MAX_PER_CREDENTIAL} per 15 minutes per credential), slow down`,
+    )
+  }
+  await recordRateLimitEvent(db, 'external_create_org', identifier)
+
+  // Ask-mode is FORCED, as for CreateProject: an agent must never mint a tenant
+  // unattended, whatever mode its credential holds. `autonomyMode` is ignored.
+  void autonomyMode
+
+  // Effect summary the /approve page renders: what is created, and who ends up
+  // owning it. The owner is resolved server-side from the credential — the
+  // command has no owner parameter, so an agent can never point it elsewhere.
+  const summary: ChangesetSummary = {
+    command: 'CreateOrg',
+    orgName: cmd.name,
+    orgOwner: await resolveOwnerLabel(db, String(cred.userId)),
+    warnings: [],
+  }
+  return stageReceiptOnlyChangeset(db, cred, urlProjectId, id, 'ask', cmd, {}, summary, env)
 }
 
 /**

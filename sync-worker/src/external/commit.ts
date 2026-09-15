@@ -15,22 +15,32 @@ import {
   isStructureCommandKind,
   laneCellKey,
   requiredRoleForCommand,
+  type CreateOrgCommand,
   type CreateProjectCommand,
   type EmitEventsCommand,
   type LinkMediaCommand,
   type PatchSettingsCommand,
   type PlanImportCommand,
+  type ProjectLifecycleCommand,
   type SetBriefCommand,
   type SetTranslationCommand,
   type StructureCommand,
   type UpdateProjectSettingsCommand,
 } from './commands'
 import { changedPolicyKeys, commitPatchSettings } from './commands-patch-settings'
+import {
+  commitMembership,
+  isMembershipCommand,
+  type MembershipCommand,
+} from './commands-membership'
+import { commitProjectLifecycle, isProjectLifecycleCommand } from './commands-project-lifecycle'
 import { commitSetBrief } from './commands-set-brief'
 import { isOrgMemberCommand, type OrgMemberCommand } from './commands-org-members'
 import { commitOrgMember } from './org-members-engine'
 import { commitMemoryCommand, isMemoryCommand } from './commands-memory'
 import { commitEmitEvents } from './emit-events-engine'
+import { commitCellFields } from './cell-fields-engine'
+import { isCellFieldCommand, type CellFieldCommand } from './commands-cell-fields'
 import { commitStructure } from './structure-engine'
 import {
   buildProvenance,
@@ -67,6 +77,7 @@ import {
   loadProjectSettings,
   updateProjectSettingsShared,
 } from '../../../db/shared/projects'
+import { createOrgShared, findRecentOrgByCreator } from '../../../db/shared/orgs'
 import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/shared/rate-limit'
 
 /** Provenance channel for a PAT commit request. MCP-originated commits arrive
@@ -206,6 +217,13 @@ export async function commitChangesetCore(
   if (createProjectCmd) {
     return commitCreateProject(db, cred, cs, createProjectCmd, channel)
   }
+  // CreateOrg (AQU-1221): receipt-only like CreateProject, and likewise gated
+  // on the credential's scope rather than any project role — the changeset's
+  // project id is a filing placeholder that never resolves to a row.
+  const createOrgCmd = cs.commands.find((c): c is CreateOrgCommand => c.kind === 'CreateOrg')
+  if (createOrgCmd) {
+    return commitCreateOrg(db, cred, cs, createOrgCmd, channel)
+  }
   const updateSettingsCmd = cs.commands.find(
     (c): c is UpdateProjectSettingsCommand => c.kind === 'UpdateProjectSettings',
   )
@@ -219,6 +237,25 @@ export async function commitChangesetCore(
   )
   if (patchSettingsCmd) {
     return commitPatchSettings(db, cred, cs, patchSettingsCmd, channel)
+  }
+  // AQU-1185 membership: receipt-only, all-or-nothing, and its module re-runs
+  // the MAINTAINER floor plus the grant/target caps against the LIVE role graph
+  // before it writes a single row.
+  const membershipCmds = cs.commands.filter((c): c is MembershipCommand =>
+    isMembershipCommand(c),
+  )
+  if (membershipCmds.length > 0) {
+    return commitMembership(db, env, cred, cs, membershipCmds, channel, ctx)
+  }
+  // AQU-1182 project lifecycle: receipt-only like the above, with archived-
+  // tolerant role resolution (the generic precheck below denies every archived
+  // project, which would make UnarchiveProject uncommittable) and its own
+  // per-kind UI floor. Its module re-runs the full guard sequence.
+  const lifecycleCmd = cs.commands.find(
+    (c): c is ProjectLifecycleCommand => isProjectLifecycleCommand(c),
+  )
+  if (lifecycleCmd) {
+    return commitProjectLifecycle(db, env, cred, cs, lifecycleCmd, channel, ctx)
   }
   // AQU-1227 SetBrief: receipt-only — merges its patch into the live brief and
   // writes it back as the translationBrief settings key.
@@ -421,6 +458,19 @@ export async function commitChangesetCore(
     )
   }
 
+  // ── AQU-1183 cell-field commands take their own compile/commit path ───────
+  // The shared gates above already re-checked expiry, the ask confirmation, and
+  // drift over the stored preconditions — which for this family pin the SOURCE
+  // chain head every source-side write chains on. The engine adds the existence
+  // re-checks and the compile.
+  const cellFields: CellFieldCommand[] = cs.commands.filter(isCellFieldCommand)
+  if (cellFields.length > 0) {
+    return commitCellFields(
+      request, env, db, cred, cs, cellFields, confirmationId, channel,
+      cs.status === 'staged', ctx,
+    )
+  }
+
   // ── Compile commands → target.cell.commit events, grouped by file ─────────
   // Past the PlanImport branch every remaining command is a SetTranslation.
   const commandByCell = new Map<string, SetTranslationCommand>()
@@ -458,6 +508,11 @@ export async function commitChangesetCore(
         // AQU-538: stamp the lane so the projection lands the commit on its
         // own (cell, target_lang) row and chain slot.
         ...(cmd.laneId ? { targetLang: cmd.laneId } : {}),
+        // AQU-1186: a DraftCells expansion carries the copilot's provenance,
+        // so the projection sets ai_drafted = 1 and the cell reads back as a
+        // pending AI draft — identical to an in-app draft. Only the server
+        // sets this (validateCommands drops a caller-supplied aiDraft).
+        ...(cmd.aiDraft ? { ai_suggestion: true as const, ai_draft: cmd.aiDraft } : {}),
         sourceEventId: pre.sourceEventId,
       },
       clientTs,
@@ -1001,6 +1056,67 @@ async function commitCreateProject(
     )
     .bind(JSON.stringify(receipt), confirmationId, cs.id)
     .run()
+
+  return Response.json({ receipt })
+}
+
+/**
+ * Commit a CreateOrg (AQU-1221, receipt-only). Re-checks the credential scope
+ * live, runs the shared gates (commit-gates.ts), then applies the row write via
+ * createOrgShared — which writes the `organizations` row and the creator's
+ * owner-level (700) `org_members` row in one atomic statement, and touches no
+ * billing/entitlement table (a new org is plan=none by absence).
+ *
+ * Crash-retry: `organizations.id` is a generated identity column, so the plan
+ * carries no pinned id to make the insert idempotent. Instead a retry (a
+ * changeset already in `committing`) first looks for the org THIS commit
+ * created before it died — same creator, same planned name, created within the
+ * changeset's own lifetime — and absorbs it rather than minting a second
+ * tenant. A first attempt never consults that lookup, so two deliberate
+ * same-name creations still produce two orgs.
+ */
+async function commitCreateOrg(
+  db: AquillaDb,
+  cred: ApiCredentialContext,
+  cs: StoredChangeset,
+  cmd: CreateOrgCommand,
+  channel: ProvenanceChannel,
+): Promise<Response> {
+  const wasStaged = cs.status === 'staged'
+
+  // Live scope re-check (D8 live-role pattern): a credential re-scoped between
+  // prepare and commit must not slip a tenant through on the stale check.
+  if (cred.projectId != null) {
+    return errorResponse('scope_denied', 'a project-scoped credential cannot create organizations')
+  }
+  if (cred.orgId != null) {
+    return errorResponse('scope_denied', 'an org-scoped credential cannot create organizations')
+  }
+
+  const gate = await receiptOnlyGates(db, cs)
+  if (gate instanceof Response) return gate
+  const confirmationId = gate.confirmationId
+
+  let orgId: number
+  const priorAttempt = wasStaged
+    ? null
+    : await findRecentOrgByCreator(db, cred.userId, cmd.name, cs.createdAt)
+  if (priorAttempt) {
+    orgId = priorAttempt.orgId
+  } else {
+    const created = await createOrgShared(db, { name: cmd.name, createdBy: cred.userId })
+    orgId = created.orgId
+  }
+
+  const receipt: ReceiptOnlyReceipt = {
+    credentialId: cred.credentialId,
+    channel,
+    changesetId: cs.id,
+    command: 'CreateOrg',
+    appliedAt: new Date().toISOString(),
+    orgId,
+  }
+  await writeCommittedReceipt(db, cs.id, receipt, confirmationId)
 
   return Response.json({ receipt })
 }

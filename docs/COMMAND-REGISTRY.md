@@ -34,9 +34,45 @@ export function describeCommand(kind: string): CommandCatalogEntry | null
 v1 entries: SetTranslation (prepared, 400) · LinkMedia (prepared, 400) · PlanImport (structural,
 500) · CreateProject (structural, 600-org) · UpdateProjectSettings (structural, 600 — oneLiner
 says "deprecated: prefer PatchSettings") · **PatchSettings** (structural, 500) ·
-**EmitEvents** (structural, 200 — floor is per inner event kind; testimony kinds flagged).
+**EmitEvents** (structural, 200 — floor is per inner event kind; testimony kinds flagged) ·
+**InviteMember / SetRole / RemoveMember** (governance, 600 — always ask-mode; see §2).
 AQU-1228 adds the Living Memory writes: **AddExample** / **AddDecision** / **AddNote**
 (structural, 400) and **RetireExample** (structural, 500).
+
+### Membership — InviteMember / SetRole / RemoveMember (AQU-1185)
+
+```ts
+{ kind: 'InviteMember', projectId: string, username: string, role: number }
+{ kind: 'SetRole',      projectId: string, username: string, role: number }
+{ kind: 'RemoveMember', projectId: string, username: string }
+```
+
+Receipt-only (a `project_members` row write, not events). Membership kinds batch with each
+other — max 25, one command per person — but never with another kind. Prepare **forces
+ask-mode** regardless of the credential's mode: every membership change a machine proposes
+passes a human at `/approve/:id`, which lists one plain-language line per change.
+
+Gates, enforced identically at prepare and at commit against the caller's **live** role:
+
+| Rule | Denial `details.code` |
+| --- | --- |
+| caller's effective project role ≥ MAINTAINER (600) | (`requiredRole: 600`) |
+| cannot grant a role above your own | `role_above_caller` |
+| cannot act on yourself (covers self-elevation) | `self_target` |
+| below OWNER, cannot touch anyone whose **effective** role ≥ yours | `target_outranks_caller` |
+| InviteMember on an existing direct member | `already_member` (409) |
+| SetRole / RemoveMember with no direct member row | `not_a_direct_member` (409) |
+
+The target cap reads the target's **effective** (max-wins) role, not the direct
+`project_members.role_level` the UI compares against — so a project OWNER who holds the
+project through the org or creator path, and therefore has no direct row, cannot be removed
+by a MAINTAINER's agent.
+
+Drift at commit is all-or-nothing: a plan whose end-state a human already applied is
+`superseded`, any other movement is `stale`, and nothing is written either way. Target user
+ids are pinned at prepare, so a username reassigned between prepare and commit is drift
+rather than a new target. The committed receipt carries the credential id plus every applied
+change (`kind`, `userId`, `username`, `role`, `previousRole`) as the audit record.
 
 ## 2. New commands (owner: sync-worker stream)
 
@@ -94,6 +130,41 @@ AQU-1228 adds the Living Memory writes: **AddExample** / **AddDecision** / **Add
 - Explicitly NOT in v1: `target.cell.commit` (use SetTranslation), `source.cell.*`,
   `cell.audio.*` (use LinkMedia), reorders/retimes/mirrors, `file.timing.set`, `file.create`.
 - Summary gains `events: { kind, count, testimony }[]` alongside existing fields.
+
+### RenameFile — file label management (AQU-1182)
+
+- Params `{ fileId, name }`; batchable within a RenameFile-only changeset; floor CONTRIBUTOR
+  400 (`REQUIRED_ROLE['file.rename']` — the UI's own floor for the same action).
+- **Sugar over EmitEvents, by construction.** Prepare desugars the batch into the equivalent
+  `file.rename` `EmitEvents` command and delegates to that engine; nothing here compiles an
+  event of its own. Consequence to know: the stored plan (and the changeset a caller reads
+  back) holds `file.rename` events, not a `RenameFile` entry.
+- `name` is trimmed, 1–256 chars; whitespace-only is rejected. File delete is NOT given a named
+  command — soft-delete/trash semantics are in flux (AQU-272), so it stays behind the raw
+  `EmitEvents` door where the caller opts into current semantics explicitly.
+
+### Project lifecycle — RenameProject / ArchiveProject / UnarchiveProject (AQU-1182)
+
+- Receipt-only row writes in the `CreateProject` family (D8) — no events, receipt is a
+  provenance stamp. Each is the **sole command** in its changeset and its `projectId` must equal
+  the changeset's project.
+- Floors mirror auth-worker `routes/projects.ts` exactly: `RenameProject` MAINTAINER 600
+  (`PATCH /:projectId`), `ArchiveProject` / `UnarchiveProject` OWNER 700
+  (`POST` / `DELETE /:projectId/archive`). Re-resolved live at prepare AND commit.
+- **Forced ask-mode** at prepare for all three, regardless of credential/request mode
+  (CreateProject's precedent) — every agent-initiated project-lifecycle change passes through
+  `/approve/:id`. `RenameFile` is not forced: it is a CONTRIBUTOR-floor label edit and follows
+  the normal autonomy ladder like `SetTranslation`.
+- Role resolution uses `resolveProjectRoleIncludingArchivedShared`: the ordinary shared
+  resolver returns null for every archived project, which would make `UnarchiveProject`
+  unreachable. Same twin auth-worker's archive endpoints use; ordinary authority is untouched.
+- End-state check (deterministic, exact): already-archived / not-archived / already-named-that
+  is `validation_failed` at prepare and `plan_stale` + `details.status: "superseded"` at
+  commit. A crash-retry (`status = 'committing'`) skips it and re-applies idempotently; the
+  archive write keeps `AND archived_at IS NULL` so a retry cannot re-stamp a newer timestamp.
+- Archive/unarchive best-effort notify the `ProjectSync` DO (`archive-broadcast.ts`), matching
+  the UI path; a failed broadcast never fails an applied commit.
+- Project DELETE is never exposed on any agent surface: archive is recoverable, delete is not.
 
 ### Living Memory writes (AQU-1228) — AddExample / AddDecision / AddNote / RetireExample
 

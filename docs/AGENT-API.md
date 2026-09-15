@@ -263,6 +263,8 @@ impossible rather than merely prohibited.
 
 Initial command set:
 
+- `CreateOrg` (create an organization owned by the credential's minting user — always
+  human-approved, unscoped credentials only, default tier, rate-limited)
 - `CreateProject`, `UpdateProjectSettings`
 - `PlanImport` (produces an import changeset from an artifact + recipe, §5)
 - `SetTranslation` (batch; compiled to `target.cell.commit` chained per AD-9 —
@@ -402,6 +404,37 @@ CRUD surface with MCP bolted on.
 
 `get_capabilities` + `get_identity_and_scope` are what make the cold-start test (§6)
 passable: an agent must be able to learn what it may do before trying to do it.
+
+### Intentionally UI-only — the `uiOnly` map section (AQU-1178)
+
+Knowing what the API *won't* do is part of learning what it will. Some capabilities are
+browser-only **by design**, not by backlog: they are the steps whose whole value is that a
+human account holder performs them. Left undocumented they read as gaps, so agents kept
+probing for endpoints that will never exist and burning turns on `not_found`.
+
+The list is published as a `uiOnly` section in both adapters — REST `GET /api/v1/external`
+and MCP `get_capabilities` — and quoted back in the misses:
+
+| `uiOnly` id | Not exposed | Why it is a human's job | Where the human does it |
+| --- | --- | --- | --- |
+| `credential-minting` | Minting, rotating, or revoking `aqk_` credentials | A token that can mint tokens makes revocation meaningless and lets an agent outlive its own grant | Preferences → Account → "API tokens" (identity host, browser session) |
+| `project-deletion` | Deleting/archiving a project; bulk-deleting its files or members | Irreversible for everyone on the project, and there is no changeset to review | Project Settings → Danger zone |
+| `billing` | Plans, credits, payment methods, invoices, entitlements | Money movement is bound to the account holder and the payment provider's own authenticated flow | Org Settings → Billing |
+| `changeset-approval` | Approving your own staged changeset in ask mode | The gate only means something if a person other than the caller performs it — an API that could approve would be act mode wearing a costume | The `approvalUrl` from prepare, in a browser |
+
+Behaviour these rows buy:
+
+- An unmatched `/api/v1/external/**` path that looks like one of these probes returns its
+  `not_found` with the exclusion's reason, the human path, and `details.uiOnly: "<id>"`
+  instead of the generic "check the API map" hint. Unknown MCP tool names
+  (`mint_credential`, `delete_project`, …) get the same treatment on their JSON-RPC error.
+- **One source, no drift.** The rows above, the two published `uiOnly` sections, and the
+  404/unknown-tool hints all come from `UI_ONLY_SURFACES` in
+  [`sync-worker/src/external/ui-only.ts`](../sync-worker/src/external/ui-only.ts); a test
+  asserts this table lists exactly those ids. Add a row there — never a second list.
+
+A capability that is merely *unbuilt* does not belong in `uiOnly`: the section promises
+"never", not "not yet". Deferred work lives in §8 instead.
 
 ### Operational contract
 
@@ -609,6 +642,113 @@ The command layer is now the **shared write spine for both agent surfaces** (see
   `credential_id = 'session'`, forced ask mode, `channel: "app"` provenance, and the existing
   `/api/v2/changesets/:id/approval|approve|reject` human gate; the SPA's live ChangesetCard
   commits after approval (per-item confirmation for testimony kinds).
+
+## Status addendum (2026-09-05, AQU-1186 — DraftCells)
+
+Parity epic AQU-1181 item 7: agents could only write text they wrote themselves, and had
+no way to tell a pending AI draft from a committed human value.
+
+- **New command — `DraftCells`** (`{ fileId, cellIds, laneId?, instructions? }`, sole
+  command, CONTRIBUTOR). Runs the **project's own copilot** over the named cells and stages
+  the result as one changeset. It is a *prepare-time expansion*: drafting happens once, at
+  prepare, and the generated text is materialized into ordinary `SetTranslation` commands
+  carrying server-minted `aiDraft` provenance — so the whole existing pipeline
+  (preconditions, digest, approval gate, provenance stamping, crash-retry id ledger)
+  applies unchanged, and the human approves text they can actually read. Committed cells
+  land `ai_drafted = 1`, identical to an in-app draft.
+- **Cost rails.** `cellIds` is explicit and non-empty — wildcards are rejected outright.
+  The per-changeset cap is the project's configured completion batch size
+  (`db/shared/completion-batch.ts`, mirroring AQU-586's `completionBatchSizeFor`: default
+  10, clamp 50); an over-cap request is rejected **naming the cap** and never reaches the
+  model. Spend meters through the existing credits system on the `agent` rail against the
+  project's org; an exhausted org returns `rate_limited` and **nothing is staged**.
+- **Where the model runs.** The drafting pipeline stays in auth-worker, which owns the
+  OpenRouter key, the model allowlist and the credit ledger. sync-worker calls
+  `POST /api/v1/ai/agent/internal/draft-cells` with the `SYNC_SECRET_KEY` shared secret
+  (the same server-to-server pattern as `monday/internal/push`). That endpoint returns
+  drafts and **never writes** — staging and the approval gate stay with the changeset
+  engine. `auth-worker/src/lib/agent/tools/draft.ts` now exposes `generateDrafts`
+  (generation only) with `executeDraft` layered on top, so the in-app agent tool and the
+  external command share one pipeline rather than two copies of the copilot.
+- **`aiDraft` in reads.** `aiDrafted` + `aiDraft` already ride the external cells read
+  (`GET .../files/:fileId/cells`, via `cells-read-route`'s serializer); they are now
+  pinned by a regression test so an agent can always distinguish a pending AI draft from
+  the committed value.
+- **Known divergence.** `completionBatchSize` is written by the SPA into the local project
+  record and is not yet synced into the server's `project_settings` blob, so the
+  server-side cap reads the default (10) until it is. The resolver accepts both
+  `completionSettings.completionBatchSize` and a top-level `completionBatchSize` so it
+  picks the value up the moment either lands.
+
+## Status addendum (2026-09-04, AQU-1176 — settings read + PatchSettings over MCP)
+
+The settings loop is now closed on the external surface: an agent can read what it is
+about to change instead of guessing the version and blind-overwriting a blob it has
+never seen.
+
+- **`GET /api/v1/external/projects/:projectId/settings`** — `{ projectId, settings,
+  version, updatedAt }` (`read-routes.ts`). Same credential/scope/role gate and
+  per-credential throttle as every other project read (VIEWER floor; wrong-project PAT
+  gets `scope_denied`). A project with no `project_settings` row reads as `{}` at
+  version 0 — patch against 0 to create it. `updated_by` is deliberately NOT echoed:
+  this is an agent-facing surface and that id names a human.
+- **`get_project_settings`** — the MCP mirror of that read, so an MCP-only agent can
+  obtain the `ifMatchVersion` its patch requires.
+- **`patch_settings`** — the dedicated MCP tool for the `PatchSettings` command. Pure
+  argument marshalling: per-key floors, the `POLICY_SETTINGS_KEYS` denial, the
+  sole-command rule, and the version guard stay server-side in
+  `commands-patch-settings.ts`, unchanged. `get_capabilities.projectSettings` documents
+  the shape, as does the API map's `settings` section.
+- `commandKinds` remains frozen at the v1.1 five under `commandKindsLegacy` (see the
+  AQU-926 addendum above); `commands.index` stays the authoritative vocabulary, and
+  `EmitEvents` is still REST-only for staging. (`describe_command` itself ships as an
+  MCP tool in the AQU-1222 addendum below, with an optional `kind` — omit it for the
+  index of every command.)
+
+## Status addendum (2026-09-04, AQU-1182 — file + project lifecycle commands)
+
+Parity epic AQU-1181 items 17/21. All four commands are ask-mode-stageable through the same
+prepare → human approval → commit engine as everything above; none introduces a new event kind
+or a new mutation, and no delete of any kind is exposed.
+
+- **`RenameFile`** — `{ fileId, name }`, CONTRIBUTOR 400 (the UI's own floor for renaming a
+  file). Deliberately **sugar**: prepare desugars a RenameFile batch into the equivalent
+  `EmitEvents` `file.rename` batch and hands it to that engine, so there is one compile path,
+  one set of existence checks, and one prepare-time id ledger. The changeset you read back
+  therefore holds `file.rename` events, not a `RenameFile` entry. The named command exists
+  because `describe_command` and the role-filtered index are how an agent discovers what it may
+  do — "rename a file" is discoverable, "hand-build a `file.rename` payload" is not.
+- **`RenameProject`** — `{ projectId, name }`, MAINTAINER 600. **`ArchiveProject` /
+  `UnarchiveProject`** — `{ projectId }`, OWNER 700. Receipt-only row writes in the
+  `CreateProject` family (D8): each is the sole command in its changeset, mirrors auth-worker
+  `routes/projects.ts` (`PATCH /:projectId`, `POST|DELETE /:projectId/archive`) byte for byte,
+  and re-runs its guards live at commit. All three are **forced to ask-mode** at prepare
+  regardless of the credential's or request's mode (CreateProject's precedent): these reshape
+  or retire the whole project, so an act-mode credential running unattended is a hazard, not a
+  speed win. `RenameFile` deliberately does NOT force ask — it is a CONTRIBUTOR-floor label
+  edit, and forcing approval on it while `SetTranslation` (which writes actual translation
+  content at the same floor) stays act-capable would be incoherent.
+- **Archived-tolerant role resolution** — `resolveProjectRoleShared` denies every archived
+  project, which would make `UnarchiveProject` unreachable by construction. The lifecycle path
+  uses the new `resolveProjectRoleIncludingArchivedShared` instead — the shared-module twin of
+  the resolver auth-worker's own archive endpoints use. Ordinary read/write authority is
+  untouched.
+- **End-state checks** — archiving an already-archived project (or renaming to the name it
+  already has) is `validation_failed` at prepare, and `plan_stale` with
+  `details.status: "superseded"` at commit when a human got there first. A crash-retry
+  (`status = 'committing'`) skips that check and re-applies idempotently.
+- **Still not reachable, deliberately.** File *delete* stays out of the named-command surface
+  while soft-delete/trash semantics are in flux (AQU-272) — it remains available only through
+  the raw `EmitEvents` door. Project *delete* stays UI-only: archive is recoverable, delete is
+  not. `ReorderFile` and `SetFileAnchor` from the original issue are **not implemented**: there
+  is no file-ordering concept in the schema at all (`files` has no order column;
+  `files-read-route.ts` orders by `last_edit_at, name`) and `files.anchor_file_id` is written
+  only by `file.create`/import-reconcile, with no event kind that changes it afterwards and no
+  UI affordance whose floor could be mirrored. Both need new event semantics, which the issue
+  explicitly excluded — see the AQU-1182 thread.
+- **MCP** — the new kinds pass through `prepare_translations`' `commands` array like
+  `PatchSettings` and `EmitEvents` do, but (like those two) are not yet in that tool's
+  `oneOf` input schema. A strict MCP client will reject them client-side; REST is unaffected.
 
 ## Status addendum (2026-09-09, AQU-1222 — the read half of the settings surface)
 

@@ -11,6 +11,7 @@
 //   GET /api/v1/external/projects/:projectId/files?limit=&cursor=
 //   GET /api/v1/external/projects/:projectId/files/:fileId/cells?since=&limit=&cursor=
 //   GET /api/v1/external/projects/:projectId/cells/:cellId/history?limit=&cursor=
+//   GET /api/v1/external/projects/:projectId/settings          — settings + live version
 //   GET /api/v1/external/projects/:projectId/cells/:cellId/prompt-preview?targetLang=&fileId=
 //
 // /me, /orgs and /projects are the REST cold-start set (mirrors of the MCP
@@ -64,6 +65,7 @@ import { assertOrgInCredentialScope, handleExternalOrgReadRequest } from "./org-
 import { handleExternalCrossProjectSearch, handleExternalSearch } from "./search-reads"
 import { handleFilesReadRequest } from "../events/files-read-route"
 import { handleCellsReadRequest } from "../events/cells-read-route"
+import { loadProjectSettings } from "../../../db/shared/projects"
 import { paginate, parsePageParams } from "./pagination"
 import { recordAgentRead, resolveAuthorshipPolicy, scrubAuthorField } from "./pii"
 import { handleExternalSimilarRequest } from "./similar-route"
@@ -88,6 +90,7 @@ const SEARCH_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/search$/
 const FILE_CELLS_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/files\/([^/]+)\/cells$/
 const FILES_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/files$/
 const CELL_HISTORY_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/cells\/([^/]+)\/history$/
+const SETTINGS_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/settings$/
 const PROMPT_PREVIEW_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/cells\/([^/]+)\/prompt-preview$/
 
 // ---------------------------------------------------------------------------
@@ -390,6 +393,38 @@ async function handleExternalCellHistory(
 }
 
 // ---------------------------------------------------------------------------
+// GET /api/v1/external/projects/:projectId/settings — the read that makes
+// PatchSettings' `ifMatchVersion` usable at all (AQU-1176). Without it an
+// agent had to guess the version and blind-overwrite settings it had never
+// seen. Same auth/scope/throttle contract as every other project read.
+// ---------------------------------------------------------------------------
+
+async function handleExternalProjectSettings(
+  request: Request,
+  env: ExternalReadsEnv,
+  projectId: string,
+): Promise<Response> {
+  const authed = await authenticateAndScope(request, env, projectId)
+  if (!authed.ok) return authed.response
+  if (env.AQUILLA_PG) {
+    const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.ctx.credential.credentialId)
+    if (limited) return limited
+  }
+
+  const current = await loadProjectSettings(env.AQUILLA_PG as AquillaDb, projectId)
+  // `updatedBy` (the last writer's user id) is deliberately NOT echoed: this
+  // is an agent-facing surface and the id identifies a human translator. The
+  // blob + version are all `ifMatchVersion` needs. A project with no settings
+  // row yet reads as `{}` at version 0 — patch against 0 to create it.
+  return Response.json({
+    projectId: current.projectId,
+    settings: current.settings,
+    version: current.version,
+    updatedAt: current.updatedAt,
+  })
+}
+
+// ---------------------------------------------------------------------------
 // GET /api/v1/external/projects/:projectId/cells/:cellId/prompt-preview
 // — AQU-1230. The assembled copilot prompt for one cell, plus the labeled
 // parts it was built from. Assembly lives in prompt-preview.ts; the perimeter
@@ -466,6 +501,9 @@ export async function handleExternalReadRequest(
   if (match) {
     return handleExternalCellHistory(request, env, decodeURIComponent(match[1]), decodeURIComponent(match[2]))
   }
+
+  match = url.pathname.match(SETTINGS_RE)
+  if (match) return handleExternalProjectSettings(request, env, decodeURIComponent(match[1]))
 
   // Last of the /projects/* family: its regex is the least specific, so every
   // deeper project route above must get first refusal.

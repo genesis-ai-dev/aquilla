@@ -58,10 +58,23 @@ describe('command catalog — invariants', () => {
       SetTranslation: { kind: 'SetTranslation', fileId: 'f', cellId: 'c', value: 'v' },
       LinkMedia: { kind: 'LinkMedia', fileId: 'f', cellId: 'c', artifactId: 'a' },
       PlanImport: { kind: 'PlanImport', fileName: 'n', fileType: 'txt', cells: [{ content: 'x' }] },
+      CreateOrg: { kind: 'CreateOrg', name: 'O' },
       CreateProject: { kind: 'CreateProject', name: 'P' },
       UpdateProjectSettings: { kind: 'UpdateProjectSettings', projectId: 'p', settings: {}, ifMatchVersion: 0 },
       PatchSettings: { kind: 'PatchSettings', projectId: 'p', ops: [{ key: 'systemPrompt', value: 'x' }], ifMatchVersion: 0 },
       EmitEvents: { kind: 'EmitEvents', events: [{ kind: 'comment.create', payload: { body: 'hi' } }] },
+      DraftCells: { kind: 'DraftCells', fileId: 'f', cellIds: ['c'] },
+      SetSource: { kind: 'SetSource', fileId: 'f', cellId: 'c', value: 'v' },
+      SetTranscription: { kind: 'SetTranscription', fileId: 'f', cellId: 'c', transcription: 't' },
+      SetTiming: { kind: 'SetTiming', fileId: 'f', cellId: 'c', startMs: 0, endMs: 1 },
+      SetTrackOverride: { kind: 'SetTrackOverride', fileId: 'f', trackId: 'target-audio', patch: { name: 'n' } },
+      InviteMember: { kind: 'InviteMember', projectId: 'p', username: 'ana', role: 400 },
+      SetRole: { kind: 'SetRole', projectId: 'p', username: 'ana', role: 400 },
+      RemoveMember: { kind: 'RemoveMember', projectId: 'p', username: 'ana' },
+      RenameFile: { kind: 'RenameFile', fileId: 'f', name: 'New label' },
+      RenameProject: { kind: 'RenameProject', projectId: 'p', name: 'New name' },
+      ArchiveProject: { kind: 'ArchiveProject', projectId: 'p' },
+      UnarchiveProject: { kind: 'UnarchiveProject', projectId: 'p' },
       SetBrief: { kind: 'SetBrief', projectId: 'p', parameters: { audience: 'Rural youth' }, ifMatchVersion: 0 },
       AddOrgMember: { kind: 'AddOrgMember', orgId: 1, username: 'u', role: 400 },
       SetOrgRole: { kind: 'SetOrgRole', orgId: 1, username: 'u', role: 400 },
@@ -175,9 +188,10 @@ describe('get_capabilities — commands index (§6)', () => {
       expect(Object.keys(row).sort()).toEqual(['kind', 'minRoleLevel', 'tier', 'title'])
     }
     expect(payload.commands.note).toContain('describe_command')
-    // The legacy commandKinds field is untouched (frozen external behavior).
+    // The legacy commandKinds field is untouched (frozen external behavior),
+    // now including CreateOrg (AQU-1221).
     expect(payload.commandKinds).toEqual(
-      ['SetTranslation', 'PlanImport', 'CreateProject', 'UpdateProjectSettings', 'LinkMedia'],
+      ['SetTranslation', 'PlanImport', 'CreateOrg', 'CreateProject', 'UpdateProjectSettings', 'LinkMedia'],
     )
   })
 })

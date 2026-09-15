@@ -340,6 +340,23 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const settingsHref = (section?: string) =>
     withSettingsReturn(projectSettingsPath(id!, section), fromEditor ? returnTo : null)
 
+  // Declared ahead of useProjectSettings so the hydration event can carry the
+  // viewer's org role (AQU-1274). No conditional return sits between these
+  // calls, so hook order is unchanged.
+  const activeOrg = useActiveOrgOptional()
+  const roleTelemetry = useMemo(
+    () => ({
+      orgRole: activeOrg?.activeOrg?.role?.level ?? null,
+      resolvedRole: project?.syncRole?.level ?? null,
+      resolvedFrom: project?.syncRole?.source ?? null,
+    }),
+    [
+      activeOrg?.activeOrg?.role?.level,
+      project?.syncRole?.level,
+      project?.syncRole?.source,
+    ],
+  )
+
   const {
     canEdit: canEditShared,
     reasonCannotEdit,
@@ -351,13 +368,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     dismissConflict,
     hasFetched: sharedSettingsFetched,
     settings: sharedSettingsBlob,
-  } = useProjectSettings(id ?? null, project?.syncRole?.level ?? null)
+  } = useProjectSettings(id ?? null, project?.syncRole?.level ?? null, { roleTelemetry })
 
   // Org context for the termbase-sharing section. The user's org; the section's
   // server calls re-validate org-membership / org-ownership, so a mismatch just
   // yields graceful empty/403 states.
   const { org } = useOrg()
-  const activeOrg = useActiveOrgOptional()
   const { session } = useFrontierSession()
   const isCloudProject = !!(project?.syncRole)
   // AQU-485: Members is a privacy-gated settings pane. Hide it entirely for

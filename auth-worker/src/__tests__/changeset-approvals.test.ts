@@ -920,7 +920,8 @@ describe("changeset approval authority (role floor, not creator identity)", () =
     const denied = (await stranger.json()) as { error: { code: string; message: string } }
     expect(denied.error.code).toBe("permission_denied")
     // AQU-1235 widened this carve-out from project-creation to every org-level
-    // plan (org-membership commands join it), so the message names that class.
+    // plan (org-membership commands and CreateOrg join it), so the message
+    // names that class.
     expect(denied.error.message).toMatch(/org-level plan/i)
   })
 
@@ -952,6 +953,39 @@ describe("changeset approval authority (role floor, not creator identity)", () =
     // mallory is an OWNER on proj-1 — irrelevant to an org-level plan.
     const stranger = await app.request(
       "/api/v2/changesets/cs-org/approval",
+      { method: "GET", headers: authHeader(await jwtFor("mallory")) },
+      env,
+    )
+    expect(stranger.status).toBe(403)
+    const denied = (await stranger.json()) as { error: { code: string; message: string } }
+    expect(denied.error.code).toBe("permission_denied")
+    expect(denied.error.message).toMatch(/org-level plan/i)
+  })
+
+  it("keeps the creator rule for an org-creation plan too (AQU-1221 — no project ever exists)", async () => {
+    // A CreateOrg changeset is filed under a placeholder project id that is
+    // never created at all, so the same carve-out applies: only its creator may
+    // view or act on it.
+    await seedUser(1, "alice")
+    await seedUser(9, "mallory")
+    const credId = await seedCredential(1)
+    await seedChangeset({
+      id: "cs-new-org",
+      projectId: "filing-placeholder",
+      createdByUserId: 1,
+      credentialId: credId,
+      commands: [{ kind: "CreateOrg", name: "Partner Co" }],
+    })
+
+    const creator = await app.request(
+      "/api/v2/changesets/cs-new-org/approval",
+      { method: "GET", headers: authHeader(await jwtFor("alice")) },
+      env,
+    )
+    expect(creator.status).toBe(200)
+
+    const stranger = await app.request(
+      "/api/v2/changesets/cs-new-org/approval",
       { method: "GET", headers: authHeader(await jwtFor("mallory")) },
       env,
     )

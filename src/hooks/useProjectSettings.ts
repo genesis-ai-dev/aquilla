@@ -187,6 +187,22 @@ export interface UseProjectSettingsOptions {
    * Omitted ⇒ the PROJECT_LEAD default.
    */
   termbaseEditMinRole?: number | null
+  /**
+   * AQU-1274: role context stamped onto the `project settings hydrated`
+   * PostHog event. A hidden panel is indistinguishable from a broken one in
+   * telemetry unless the event says which role the viewer actually resolved
+   * to and which grant path produced it — diagnosing the Biblica ETT report
+   * took a screenshot hunt for exactly this reason. Optional: callers that
+   * don't have the role context omit it and the properties are absent.
+   */
+  roleTelemetry?: {
+    /** The viewer's `org_members` role level, or null if not an org member. */
+    orgRole: number | null
+    /** The resolved (max-wins) role level on this project. */
+    resolvedRole: number | null
+    /** Which grant path won: override | group | org | creator | platform. */
+    resolvedFrom: string | null
+  }
 }
 
 function settingsValueEqual(a: unknown, b: unknown): boolean {
@@ -321,6 +337,14 @@ export function useProjectSettings(
     isOnlineRef.current = isOnline
   }, [isOnline])
 
+  // AQU-1274: read through a ref so role context stamped on the hydration
+  // event never becomes a refresh() dependency — the role resolves on its own
+  // schedule and must not re-trigger the settings fetch (or re-fire the event).
+  const roleTelemetryRef = useRef(options?.roleTelemetry)
+  useEffect(() => {
+    roleTelemetryRef.current = options?.roleTelemetry
+  }, [options?.roleTelemetry])
+
   // React StrictMode invokes the initial hydration effect twice, and settings
   // can also be requested by more than one effect during a fast route change.
   // Keep one request per mounted consumer in flight and let every caller await
@@ -353,6 +377,14 @@ export function useProjectSettings(
           project_id: projectId,
           within_ms: Math.round(performance.now() - mountAtRef.current),
           has_server_row: got.version > 0,
+          // AQU-1274 — see UseProjectSettingsOptions.roleTelemetry.
+          ...(roleTelemetryRef.current
+            ? {
+                org_role: roleTelemetryRef.current.orgRole,
+                resolved_role: roleTelemetryRef.current.resolvedRole,
+                resolved_from: roleTelemetryRef.current.resolvedFrom,
+              }
+            : {}),
         })
       }
       if (got && got.version > 0) {

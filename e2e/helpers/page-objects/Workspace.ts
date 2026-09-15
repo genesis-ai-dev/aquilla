@@ -902,6 +902,37 @@ export class Workspace {
     await this.page.getByRole("menuitem", { name: /^Export$/i }).click()
   }
 
+  /** AQU-656: download the exact imported blob (not translation-injected USFM). */
+  async clickDownloadOriginal(): Promise<void> {
+    await this.openFileOverflowMenu()
+    await this.page.getByRole("menuitem", { name: /^Download original$/i }).click()
+  }
+
+  /** Translation-injected USFM round-trip from the file options overflow. */
+  async clickExportSource(): Promise<void> {
+    await this.openFileOverflowMenu()
+    await this.page.getByRole("menuitem", { name: /Export source/i }).click()
+  }
+
+  /** First editor row whose source column contains `sourceSubstring`. */
+  async cellIndexWithSource(sourceSubstring: string): Promise<number> {
+    const rows = this.page.locator("[data-cell-id]")
+    await expect.poll(async () => {
+      const n = await rows.count()
+      for (let i = 0; i < n; i++) {
+        const text = await rows.nth(i).locator('[data-cell-type="source"]').innerText()
+        if (text.includes(sourceSubstring)) return i
+      }
+      return -1
+    }, { timeout: EDITOR_READY_TIMEOUT_MS }).not.toBe(-1)
+    const n = await rows.count()
+    for (let i = 0; i < n; i++) {
+      const text = await rows.nth(i).locator('[data-cell-type="source"]').innerText()
+      if (text.includes(sourceSubstring)) return i
+    }
+    throw new Error(`No cell whose source contains "${sourceSubstring}"`)
+  }
+
   /**
    * Expand the ExportDialog's "Export to another format" section (collapsed
    * by default when the file has a native round-trip download). No-op when

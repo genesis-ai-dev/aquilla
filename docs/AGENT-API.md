@@ -28,8 +28,11 @@ Status against the §6 release gates:
 | 10 | Cold-start test | **Not run** — no evidence of an executed cold-start session in this repo. Cold-start hardening landed 2026-07-21 after real-world agent feedback: unauthenticated discovery root (`GET /api/v1/external` — machine-readable API map), REST bootstrap pair (`GET /me`, `GET /projects`), JSON 404s with hints on unmatched external paths, teaching 401/405 messages, a `quickstart` in `get_capabilities`, and a hand-to-your-agent [`docs/api/QUICKSTART.md`](api/QUICKSTART.md). |
 
 Also not yet implemented, called out explicitly rather than left silent: `run_checks`, jobs
-(`get_job`), export (`prepare_export`/`get_export`), OAuth 2.1, and an MCP staging
-tool for `PlanImport` (REST-only). Full detail in `docs/api/agent-api.md` §8 and the running list
+(`get_job`), the job-shaped export pair (`prepare_export`/`get_export`), OAuth 2.1, and an MCP
+staging tool for `PlanImport` (REST-only). Single-file **round-trip export ships** (AQU-858) as
+one synchronous call instead of that pair — `export_file` (MCP) and
+`GET .../files/:fileId/export` (REST), gated at the org export floor; a whole-project bundle
+and target-format writers beyond the imported original are still open. Full detail in `docs/api/agent-api.md` §8 and the running list
 in `docs/swarm/AGENT-API-TRACES.md`. Rate limiting is now complete: `/search` (2026-07-30 pen
 test), changeset prepare/commit, and artifact upload (2026-08-20 pen test), plus `/me`,
 `/projects`, project/file/cell GETs, artifact meta/content/inspect, and changeset GET/discard
@@ -333,13 +336,14 @@ CRUD surface with MCP bolted on.
 | Discovery | `get_capabilities`, `get_identity_and_scope` |
 | Projects | `list_projects`, `get_project`, `create_project`, `update_project` |
 | Artifacts | `create_artifact_upload`, `inspect_artifact` |
-| Ingestion | `preview_import`, `prepare_import` — **implemented**: both parse an already-uploaded source artifact server-side with the built-in DOM-free parsers (txt, md, json, po, properties, obs, vtt, srt, sbv, csv, tsv, usfm; 5000-cell cap) — preview returns cells without staging, prepare stages a `PlanImport` changeset linking the artifact. Upload stays REST-only (`POST …/artifacts`, 25MB). REST equivalent: `POST …/artifacts/:artifactId/parse` (body `{ "stage": true }` to stage). DOM-bound formats (docx, pptx, html, xliff, tmx, usx, idml) are not yet server-parseable. |
-| Reading | `search_project`, `read_content`, `read_history` |
+| Ingestion | `preview_import`, `prepare_import` — **implemented**: both parse an already-uploaded source artifact server-side with the built-in DOM-free parsers (txt, md, json, po, properties, obs, vtt, srt, sbv, csv, tsv, usfm, docx; 5000-cell cap) — preview returns cells without staging, prepare stages a `PlanImport` changeset linking the artifact. Upload stays REST-only (`POST …/artifacts`, 25MB). REST equivalent: `POST …/artifacts/:artifactId/parse` (body `{ "stage": true }` to stage). `docx` is parsed by the SAME `extractDocxStrings` the in-app Import dialog runs (AQU-1237 moved it off `DOMParser`/JSZip onto the platform-only `xml-lite`/`zip-lite` readers), so an agent import and a browser import of one file yield identical cells. Still DOM-bound and not yet server-parseable: pptx, html, xliff, tmx, usx, idml. |
+| Reading | `search_project`, `read_content`, `read_history`, `find_similar_cells`, `get_prompt_preview`, `list_memory`, `read_cell_memory` |
+| Quality | `read_quality`, `read_term_consistency` — **implemented (AQU-1231)**: per-file health (0-100) + coverage (total/filled/validated + percentages) and the project rollup; and the term-consistency drift list (per active concept: occurrences, consistent count/percent, which approved rendering was used in which cells, and the cells that used none). Both are PARITY reads — `read_quality` delegates to the internal `health-rollup` and `files/:fileId/progress` routes the in-app health ring and progress surfaces read, and `read_term_consistency` runs the SPA's own scan (`src/lib/check/term-consistency-scan.ts`, shared with the in-app "Check file" pass). Whatever counting rules the progress projection applies (e.g. AQU-1083's headings/paratextual exclusion) the API inherits by construction — there is no second denominator to keep in step. REST equivalents: `GET …/projects/:projectId/quality` and `GET …/projects/:projectId/terms/consistency` (both take optional `fileId`, `lane`; the latter also `onlyDrift=1`). |
 | Translation | `prepare_translations` |
-| Verification | `run_checks` — structured, actionable failures (e.g. `"term 'covenant' rendered 3 ways: [refs]"`), never a bare 400 |
+| Verification | `run_checks` — structured, actionable failures (e.g. `"term 'covenant' rendered 3 ways: [refs]"`), never a bare 400. The term-consistency half of this now exists as `read_term_consistency` (above); `run_checks` remains unimplemented for the RULE pass. |
 | Changesets | `get_changeset`, `confirm_changeset`, `discard_changeset` |
 | Jobs | `get_job` |
-| Export | `prepare_export`, `get_export` |
+| Export | `prepare_export`, `get_export` — shipped instead as the synchronous `export_file` (AQU-858); the job-shaped pair is still open |
 
 `get_capabilities` + `get_identity_and_scope` are what make the cold-start test (§6)
 passable: an agent must be able to learn what it may do before trying to do it.
@@ -537,8 +541,80 @@ The command layer is now the **shared write spine for both agent surfaces** (see
   waives, validations (testimony-flagged), back-translation, repin, file rename/delete/restore,
   assignments incl. reassign; head pins are server-resolved, whole-plan rejection on any bad
   reference). `UpdateProjectSettings` is deprecated and now rejects policy-key changes.
+- **Living Memory writes (AQU-1228)** — `AddExample` / `AddDecision` / `AddNote` (CONTRIBUTOR)
+  and `RetireExample` (PROJECT_LEAD), each a sole-command receipt-only changeset writing the
+  `agent_memories` table (Living Memory is not event-sourced, so these do NOT ride
+  `EmitEvents`). The changeset's human confirmation stands in for the in-app Memory review,
+  but only when the APPROVING user's live role is PROJECT_LEAD+; otherwise the entry lands
+  `proposed` and the receipt's `memoryStatus` says so. Retirement archives (out of retrieval,
+  still auditable); human-edited entries are never overwritten or retired through this
+  surface. See `docs/COMMAND-REGISTRY.md` §2.
 - **Session principal** — the in-app agent stages changesets through the same engine via
   session sync-token routes (`/api/v1/changesets/:projectId[...]` on the sync host), with
   `credential_id = 'session'`, forced ask mode, `channel: "app"` provenance, and the existing
   `/api/v2/changesets/:id/approval|approve|reject` human gate; the SPA's live ChangesetCard
   commits after approval (per-item confirmation for testimony kinds).
+
+## Status addendum (2026-09-10, AQU-1230 — effective-prompt preview)
+
+Prompt tuning through the Agent API was write-only: `PatchSettings` can change
+`systemPrompt`, `completionSettings`, `translationBrief` and `rules`, and the terminology
+path can add concepts, but nothing showed what the copilot actually receives after
+injection. An agent had to change a setting, draft a cell, and infer.
+
+- **New read** — `GET /api/v1/external/projects/:projectId/cells/:cellId/prompt-preview`
+  (optional `targetLang=<lane>`, `fileId=<id>`), MCP tool `get_prompt_preview`. Returns
+  the assembled `messages` (system + user, exactly as sent) alongside `parts` — base
+  instructions after language substitution, the brief block, the compiled rules block,
+  `injectedTerms`, the retrieved `examples`, and the preceding approved-target discourse
+  window — plus `generation` (the project's provider/model/temperature/maxTokens/topK)
+  and `retrieval` (primitive, corpus size, upstream project). VIEWER floor, standard
+  external rate limit; it drafts nothing and spends no credits.
+- **Fidelity by construction, not by re-implementation.** The pure prompt builders moved
+  out of `src/lib/completion/completion-service.ts` (browser-bound: `import.meta.env`,
+  `window`, storage, i18n) into `src/lib/completion/prompt-build.ts`, and concept→rule
+  compilation into `src/lib/terminology/compile-core.ts`. Both are alias-free and
+  worker-importable — the same contract as `src/lib/parsers/parse-text-formats.ts` — so
+  the preview calls the builders the editor calls, over the same AD-13 branching-search
+  retrieval and the same compiled terminology rules. `completion-service.ts` re-exports
+  them, so no SPA call site changed.
+- **What a read cannot reproduce is named, not omitted.** `warnings` flags an empty
+  effective source (an untranscribed media section) and USFM footnote markers, whose
+  output contract the live call derives from the open editor buffer. Per-device provider
+  overrides (user Settings, `localStorage`) are invisible server-side, so `generation`
+  reports the project's configuration.
+
+## Status addendum (2026-09-10, AQU-1229 — Living Memory read model)
+
+Living Memory — the human-authored project brief plus the path-keyed entries the copilot
+learns from — is now **readable by an external agent**, at parity with the in-app Memory
+surface (AQU-932). Two GETs, `sync-worker/src/external/memory-read-routes.ts`, mirrored as
+the MCP tools `list_memory` / `read_cell_memory`:
+
+- `GET /api/v1/external/projects/:projectId/memory?status=&kind=&limit=&cursor=` — the brief
+  plus every entry with its full content, status, `humanEdited`, and `kind` (derived from the
+  path prefix: `examples/` → example, `decisions/` → decision, `notes/` → note,
+  `observations/` → observation). Same rows and same ordering (most-recently-updated first)
+  as the in-app page.
+- `GET /api/v1/external/projects/:projectId/files/:fileId/cells/:cellId/memory` — what
+  retrieval would inject for that cell's draft, produced by calling `buildMemoryContext`,
+  the copilot's own retrieval path.
+
+Three properties of this surface are contract, not implementation detail:
+
+- **`inRetrieval` / `retrieval.*` report reality, not intent.** Only *approved* entries reach
+  a prompt, and only the most-recently-updated `MEMORY_INDEX_RENDER_CAP` of them; the rest are
+  reachable but not injected. The cap now lives in `db/shared/agent-memory.ts` and is imported
+  by both the prompt assembly (`auth-worker/src/lib/agent/prompt-augment.ts`) and this read
+  model, so the number an agent is told cannot drift from the prompt it describes.
+- **Retrieval is project-scoped today.** There is no per-cell ranking or filtering — every
+  cell in a project gets the same brief and the same index. The per-cell route therefore
+  reports `retrieval.scope: "project"` rather than implying a narrowing that does not happen.
+  If per-cell retrieval lands later (AQU-1232's similarity search being the likely vehicle),
+  `scope` is how a caller detects it.
+- **Author identities are pseudonymous (AQU-1180 default).** `created_by`/`reviewed_by`/
+  `updated_by` hold usernames; agent-facing reads replace each with a keyed per-project
+  pseudonym (`author_<hex>`), and `provenance.credentialId` is dropped. Stable within a
+  project (so "one person made these decisions" survives), uncorrelatable across projects.
+  Keyed HMAC rather than a bare hash because usernames are low-entropy and the projectId is
+  already known to the caller.

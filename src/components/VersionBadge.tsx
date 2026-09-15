@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { useT } from "@/lib/i18n/I18nProvider"
+import { formatBuildInfo, formatBuildLabel, type BuildIdentity } from "@/lib/build-label"
 import {
   resolveBackendEnvironment,
   type DeploymentEnvironment,
@@ -15,15 +16,16 @@ import type { MessageKey } from "@/lib/i18n/messages/en"
 declare const __APP_VERSION__: string
 declare const __APP_BRANCH__: string
 declare const __APP_SHA__: string
+declare const __APP_BUILT_AT__: string
 
 const VERSION = __APP_VERSION__
 const BRANCH = __APP_BRANCH__
 const SHA = __APP_SHA__
+const BUILT_AT = __APP_BUILT_AT__
 
-// Show branch unless we're on the production line — there it's noise.
-const isProd = BRANCH === "main" || BRANCH === "production"
-const label = isProd ? `v${VERSION} · ${SHA}` : `v${VERSION} · ${BRANCH} · ${SHA}`
-const title = `${label}\nbuild: ${BRANCH}@${SHA}`
+const IDENTITY: BuildIdentity = { version: VERSION, branch: BRANCH, sha: SHA, builtAt: BUILT_AT }
+const label = formatBuildLabel(IDENTITY)
+const title = formatBuildInfo(IDENTITY)
 
 // Routes where AppShell / LeftDock already render <VersionTag/> in the left-rail
 // footer. The floating <VersionBadge/> must stand down there or it stacks on top

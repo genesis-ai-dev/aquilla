@@ -116,7 +116,7 @@ function makeScheduler(over: {
     config,
     db,
     sync: {} as SyncClient,
-    gitlab: { project: async () => GL_PROJECT } as unknown as GitLabClient,
+    gitlab: { project: async () => GL_PROJECT, headSha: async () => "abc" } as unknown as GitLabClient,
     creds: { gitlabUrl: "https://git", gitlabToken: "t", accessToken: "", source: "direct-token" } as GitLabCredentials,
     pacer: new Pacer({ eventsPerSec: 1e9, chunkStart: 500, chunkMin: 50, chunkMax: 2500 }),
     log: () => {},
@@ -186,6 +186,57 @@ describe("Scheduler.runOnce", () => {
     const { scheduler } = makeScheduler({ checkoutSha: "def" })
     await scheduler.runOnce({})
     expect(db.getJob(job.id)?.sha).toBe("def")
+  })
+})
+
+describe("Scheduler.runOnce with --only", () => {
+  const OTHER: ProjectRow = {
+    ...PROJECT, gitlab_id: 99, aquilla_id: "proj-99", name: "NinetyNine", namespace: "ns/ninety-nine",
+  }
+
+  beforeEach(() => {
+    db.upsertProject(OTHER)
+  })
+
+  /** Stubs `detectDeps()` so `opts.only`'s `registerProject` call resolves
+   *  without any real GitLab/sync network traffic — `probe`/`placement` are
+   *  injectable exactly for this. */
+  function stubDetectDeps(scheduler: Scheduler): void {
+    vi.spyOn(scheduler, "detectDeps").mockResolvedValue({
+      db, sync: scheduler.ctx.sync, gitlab: scheduler.ctx.gitlab, creds: scheduler.ctx.creds,
+      placement: { resolve: () => ({ orgId: 3, ownerUserId: 5, teamId: 4 }) },
+      log: () => {},
+      probe: async () => true,
+    })
+  }
+
+  it("drains only the named project's job and leaves the other untouched", async () => {
+    const job47 = db.enqueue(PROJECT.gitlab_id, "content", "abc")
+    const job99 = db.enqueue(OTHER.gitlab_id, "content", "abc")
+    const { scheduler, calls } = makeScheduler({ config: { home: root } })
+    stubDetectDeps(scheduler)
+    await scheduler.runOnce({ only: PROJECT.gitlab_id })
+    expect(db.getJob(job47.id)?.stage).toBe("done")
+    expect(db.getJob(job99.id)?.stage).toBe("detected")
+    expect(calls.checkouts).toBe(1)
+  })
+
+  it("processes every project's jobs when --only is not set", async () => {
+    const job47 = db.enqueue(PROJECT.gitlab_id, "content", "abc")
+    const job99 = db.enqueue(OTHER.gitlab_id, "content", "abc")
+    const { scheduler } = makeScheduler({ config: { home: root } })
+    await scheduler.runOnce({})
+    expect(db.getJob(job47.id)?.stage).toBe("done")
+    expect(db.getJob(job99.id)?.stage).toBe("done")
+  })
+
+  it("does not run the weekly reseed pass when --only is set", async () => {
+    db.enqueue(PROJECT.gitlab_id, "content", "abc")
+    const { scheduler } = makeScheduler({ config: { home: root } })
+    stubDetectDeps(scheduler)
+    await scheduler.runOnce({ only: PROJECT.gitlab_id })
+    // weeklyReseed is the only writer of this key; runOnce must never touch it.
+    expect(db.kvGet("last_full_reseed")).toBeUndefined()
   })
 })
 
@@ -381,22 +432,55 @@ describe("withLock", () => {
     expect(proc.exit).not.toHaveBeenCalled() // no signal-triggered hard exit path here; fn returned normally
   })
 
-  it("second signal during drain hard-exits immediately, release called at most once", async () => {
+  it("duplicate signal within the grace window is ignored — still draining, no exit", async () => {
+    // Regression for the systemd KillMode=control-group bug: pnpm/tsx forward
+    // their own SIGTERM to this process within ~ms of the daemon's own, so
+    // two SIGTERMs arriving close together must not trip the hard-exit path.
     const lock = fakeLock()
     const proc = fakeProc()
+    let t = 0
+    let resolveDrain: () => void = () => {}
+    const drainGate = new Promise<void>((resolve) => { resolveDrain = resolve })
+
+    const done = withLock(
+      loadConfig(ENV, { home: root }),
+      async () => { await drainGate },
+      { lock, proc, now: () => t, onSignal: () => {} },
+    )
+
+    await new Promise((r) => setTimeout(r, 0))
+    const sigterm = proc.handlers.get("SIGTERM")!
+    sigterm("SIGTERM") // first signal at t=0 -> starts draining
+    t = 10
+    sigterm("SIGTERM") // second signal 10ms later -> still within the grace window, ignored
+
+    await new Promise((r) => setTimeout(r, 5))
+    expect(proc.exit).not.toHaveBeenCalled()
+    expect(lock.release).not.toHaveBeenCalled()
+
+    resolveDrain()
+    await done
+    expect(lock.release).toHaveBeenCalledTimes(1)
+    expect(proc.exit).not.toHaveBeenCalled()
+  })
+
+  it("signal after the grace window hard-exits immediately, release called at most once", async () => {
+    const lock = fakeLock()
+    const proc = fakeProc()
+    let t = 0
     let resolveDrain: () => void = () => {}
     const drainGate = new Promise<void>((resolve) => { resolveDrain = resolve })
 
     void withLock(
       loadConfig(ENV, { home: root }),
       async () => { await drainGate },
-      { lock, proc, onSignal: () => {} },
+      { lock, proc, now: () => t, onSignal: () => {} },
     )
 
     await new Promise((r) => setTimeout(r, 0))
     const sigint = proc.handlers.get("SIGINT")!
-    sigint("SIGINT") // first signal -> starts draining, onSignal is a no-op so drainGate never resolves on its own
-    await new Promise((r) => setTimeout(r, 5))
+    sigint("SIGINT") // first signal at t=0 -> starts draining, onSignal is a no-op so drainGate never resolves on its own
+    t = 3_000 // well past the duplicate-signal grace window
     sigint("SIGINT") // second signal -> hard exit
 
     await new Promise((r) => setTimeout(r, 10))

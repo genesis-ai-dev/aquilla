@@ -19,10 +19,15 @@ import {
   type LinkMediaCommand,
   type PatchSettingsCommand,
   type PlanImportCommand,
+  type SetBriefCommand,
   type SetTranslationCommand,
   type UpdateProjectSettingsCommand,
 } from './commands'
 import { changedPolicyKeys, commitPatchSettings } from './commands-patch-settings'
+import { commitSetBrief } from './commands-set-brief'
+import { isOrgMemberCommand, type OrgMemberCommand } from './commands-org-members'
+import { commitOrgMember } from './org-members-engine'
+import { commitMemoryCommand, isMemoryCommand } from './commands-memory'
 import { commitEmitEvents } from './emit-events-engine'
 import {
   buildProvenance,
@@ -211,6 +216,25 @@ export async function commitChangesetCore(
   )
   if (patchSettingsCmd) {
     return commitPatchSettings(db, cred, cs, patchSettingsCmd, channel)
+  }
+  // AQU-1227 SetBrief: receipt-only — merges its patch into the live brief and
+  // writes it back as the translationBrief settings key.
+  const setBriefCmd = cs.commands.find((c): c is SetBriefCommand => c.kind === 'SetBrief')
+  if (setBriefCmd) {
+    return commitSetBrief(db, cred, cs, setBriefCmd, channel)
+  }
+  // AQU-1235 org membership: receipt-only with an ORG-level gate, so like
+  // CreateProject it must run before the project-role precheck below.
+  const orgMemberCmd = cs.commands.find((c): c is OrgMemberCommand => isOrgMemberCommand(c))
+  if (orgMemberCmd) {
+    return commitOrgMember(db, cred, cs, orgMemberCmd, channel)
+  }
+
+  // AQU-1228 Living Memory writes: receipt-only, with their own floors and the
+  // human-edited guard — the module re-runs the full guard sequence.
+  const memoryCmd = cs.commands.find(isMemoryCommand)
+  if (memoryCmd) {
+    return commitMemoryCommand(db, cred, cs, memoryCmd, channel)
   }
 
   // ── Live role/membership precheck (§2) ────────────────────────────────────
@@ -909,6 +933,17 @@ async function commitCreateProject(
     orgId,
     createdBy: cred.userId,
     writeCreatorMembership: true,
+    // AQU-1223: the language pair rides the create instead of being dropped.
+    // Sent only when the command carried one, so a bare name+orgId create still
+    // writes no settings row at all.
+    ...(cmd.sourceLanguage !== undefined || cmd.targetLanguage !== undefined
+      ? {
+          settingsSeed: {
+            ...(cmd.sourceLanguage !== undefined ? { sourceLanguage: cmd.sourceLanguage } : {}),
+            ...(cmd.targetLanguage !== undefined ? { targetLanguage: cmd.targetLanguage } : {}),
+          },
+        }
+      : {}),
   })
 
   if (!inserted) {

@@ -16,6 +16,8 @@
  *     cells whose target lacks ALL approved (preferred/admitted) renderings.
  *     Findings are grouped by concept so they read
  *     "Χριστός: 14 of 18 occurrences use 'Kristo', 4 use something else."
+ *     The scan itself lives in `term-consistency-scan.ts` (re-exported below)
+ *     so the Agent API's term-consistency read runs the same code — AQU-1231.
  *
  * Glosser drift is deferred (stretch goal in the spec): the bt-glosser builds
  * its alignment model from validated pairs at run time and a deterministic
@@ -26,56 +28,30 @@
 
 import type { TranslationRule, RuleInfraction } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
-import { effectiveSourceText } from "@/lib/cell-text"
 import { checkRulesForCell } from "@/lib/rules/rule-engine"
-import { buildTermRegex } from "@/lib/terminology/match"
+import { scanTermConsistency } from "@/lib/check/term-consistency-scan"
+import type { TermConsistencyFinding } from "@/lib/check/term-consistency-scan"
 import type { Concept } from "@/lib/terminology/types"
+
+// The term scan and its types live in the alias-free leaf module so
+// sync-worker can import them too (AQU-1231). Re-exported here because this
+// module has always been their public home for in-app callers.
+export { scanTermConsistency } from "@/lib/check/term-consistency-scan"
+export type {
+  CheckableCell,
+  CheckableConcept,
+  RenderingUsage,
+  TermConsistencyFinding,
+} from "@/lib/check/term-consistency-scan"
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-/** Minimal cell shape the scans need — keeps the scan testable without
- *  constructing full CellData fixtures. */
-export interface CheckableCell {
-  id: string
-  /** Human-facing reference ("MAT 1:1"); falls back to id in the UI. */
-  cellLabel?: string
-  original: string
-  translated: string
-  status: CellData["status"]
-  // SUB-28: media sections match against their transcript, not the filename.
-  medium?: import("@/lib/sync/cells-read-types").SegmentMedium | null
-  transcription?: string
-}
-
 /** One rule with every cell that breaks it (grouped for card rendering). */
 export interface RuleFindingGroup {
   rule: TranslationRule
   infractions: RuleInfraction[]
-}
-
-/** How many flagged-scope cells used one approved rendering. */
-export interface RenderingUsage {
-  rendering: string
-  /** Cells (by id) whose target contains this rendering. */
-  cellIds: string[]
-}
-
-/** Per-concept consistency result over the scoped cells. */
-export interface TermConsistencyFinding {
-  conceptId: string
-  sourceTerm: string
-  /** Approved renderings (preferred + admitted), for evidence display. */
-  approvedRenderings: string[]
-  /** Translated cells whose SOURCE matches the concept's source form. */
-  totalOccurrences: number
-  /** Occurrences whose target contains at least one approved rendering. */
-  consistentCount: number
-  /** Usage per approved rendering (a cell may count toward several). */
-  renderingUsage: RenderingUsage[]
-  /** Occurrences whose target contains NONE of the approved renderings. */
-  flaggedCells: { cellId: string; cellLabel?: string }[]
 }
 
 export interface CheckRunResult {
@@ -90,84 +66,6 @@ export interface CheckRunResult {
   termFindings: TermConsistencyFinding[]
   /** Total issue count: infraction rows + flagged term cells. */
   totalFindingCount: number
-}
-
-// ---------------------------------------------------------------------------
-// Term-consistency scan (pure, synchronous)
-// ---------------------------------------------------------------------------
-
-/**
- * Scan scoped cells for term consistency against active concepts.
- *
- * Only translated cells participate (an empty target is "not translated yet",
- * not a term inconsistency — mirrors the rule engine's empty short-circuit).
- * Concepts with no approved renderings produce no finding: there is nothing
- * the target could be checked against.
- *
- * Returns one finding per concept that has ≥1 occurrence, in concept order.
- * Callers typically render only findings with flaggedCells.length > 0 but the
- * fully-consistent ones are returned too so the UI can say "14 of 14".
- */
-export function scanTermConsistency(
-  cells: readonly CheckableCell[],
-  concepts: readonly Concept[],
-): TermConsistencyFinding[] {
-  const findings: TermConsistencyFinding[] = []
-
-  for (const concept of concepts) {
-    if (concept.status !== "active") continue
-    const sourceRe = buildTermRegex(concept.sourceTerm)
-    if (!sourceRe) continue
-
-    const approved = concept.renderings.filter(
-      (r) => r.status === "preferred" || r.status === "admitted",
-    )
-    if (approved.length === 0) continue
-
-    const approvedRes = approved
-      .map((r) => ({ rendering: r.rendering, re: buildTermRegex(r.rendering) }))
-      .filter((x): x is { rendering: string; re: RegExp } => x.re !== null)
-    if (approvedRes.length === 0) continue
-
-    let totalOccurrences = 0
-    let consistentCount = 0
-    const usage = new Map<string, string[]>()
-    const flaggedCells: TermConsistencyFinding["flaggedCells"] = []
-
-    for (const cell of cells) {
-      if (cell.status === "empty" || !cell.translated.trim()) continue
-      if (!sourceRe.test(effectiveSourceText(cell))) continue
-      totalOccurrences++
-
-      let matchedAny = false
-      for (const { rendering, re } of approvedRes) {
-        if (re.test(cell.translated)) {
-          matchedAny = true
-          const list = usage.get(rendering)
-          if (list) list.push(cell.id)
-          else usage.set(rendering, [cell.id])
-        }
-      }
-      if (matchedAny) consistentCount++
-      else flaggedCells.push({ cellId: cell.id, cellLabel: cell.cellLabel })
-    }
-
-    if (totalOccurrences === 0) continue
-    findings.push({
-      conceptId: concept.id,
-      sourceTerm: concept.sourceTerm,
-      approvedRenderings: approvedRes.map((x) => x.rendering),
-      totalOccurrences,
-      consistentCount,
-      renderingUsage: [...usage.entries()].map(([rendering, cellIds]) => ({
-        rendering,
-        cellIds,
-      })),
-      flaggedCells,
-    })
-  }
-
-  return findings
 }
 
 // ---------------------------------------------------------------------------

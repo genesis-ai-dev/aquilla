@@ -51,6 +51,11 @@ function renderTable(
     jwt?: string | null
     viewerUsername?: string | null
     layout?: "page" | "embedded"
+    searchValue?: string
+    onSearchChange?: (value: string) => void
+    searching?: boolean
+    hasMore?: boolean
+    onLoadMore?: () => void
   } = {},
 ) {
   const roleByProjectId = new Map<string, CloudProjectSummary["role"]>(
@@ -70,6 +75,11 @@ function renderTable(
         author="anna"
         viewerUsername={opts.viewerUsername ?? null}
         layout={opts.layout ?? "page"}
+        searchValue={opts.searchValue}
+        onSearchChange={opts.onSearchChange}
+        searching={opts.searching}
+        hasMore={opts.hasMore}
+        onLoadMore={opts.onLoadMore}
       />
     </MemoryRouter>,
   )
@@ -140,12 +150,17 @@ describe("OrgProjectsDataTable lane chips (AQU-538 §3.2)", () => {
     )
 
     const table = screen.getByTestId("project-table")
-    expect(table).toHaveClass("min-w-0", "w-full", "overflow-auto")
+    expect(table).toHaveClass("min-w-0", "w-full", "mx-0")
+    // No overflow-hidden on a virtualized fillHeight root: it clips the
+    // LegendList scrollbar track (the bounded Section contains the pane).
+    expect(table).not.toHaveClass("overflow-hidden")
     expect(table.className).not.toContain("overflow-x-hidden")
-    expect(table.className).toContain("[&_[data-slot=table-container]]:overflow-visible")
+    expect(screen.getByTestId("legend-list-mock")).toBeInTheDocument()
+    expect(table.querySelector(".overflow-x-auto")).toBeTruthy()
 
     const htmlTable = table.querySelector('[data-slot="table"]')
-    expect(htmlTable).not.toHaveClass("table-fixed")
+    expect(htmlTable).toHaveClass("w-full")
+    expect(htmlTable).not.toHaveClass("min-w-max")
 
     const nameCell = screen.getByTestId("project-table-name").closest("td")
     expect(nameCell).toHaveClass("min-w-[12rem]")
@@ -318,6 +333,45 @@ describe("OrgProjectsDataTable expandable lane sub-rows (AQU-538 §3.2)", () => 
   })
 })
 
+// AQU-1097: the plan rollup column — "which units are done" at org scale, so a
+// PM overseeing several language projects does not have to open each one.
+describe("units done column", () => {
+  it("shows how many units are done out of the total", () => {
+    renderTable([baseProject({ id: "p1", name: "Tok Pisin", unitsTotal: 66, unitsDone: 5 })])
+    expect(screen.getByTestId("project-table-units-value")).toHaveTextContent("5 of 66")
+  })
+
+  it("never names the unit, because it varies by project", () => {
+    // A unit is a book here, an episode in a dub, a document elsewhere. The
+    // column must read the same for all three.
+    renderTable([baseProject({ id: "p1", unitsTotal: 12, unitsDone: 3 })])
+    expect(screen.getByTestId("project-table-units-value").textContent).not.toMatch(/book/i)
+  })
+
+  it("shows a dash rather than '0 of 0' when there is nothing to plan", () => {
+    renderTable([baseProject({ id: "p1", unitsTotal: 0, unitsDone: 0 })])
+    expect(screen.getByTestId("project-table-units-value")).toHaveTextContent("—")
+    expect(screen.queryByTestId("project-table-units-overdue")).toBeNull()
+  })
+
+  it("shows a dash for a server that predates the plan board", () => {
+    // unitsTotal absent entirely — degrade quietly rather than claim 0 of 0.
+    renderTable([baseProject({ id: "p1" })])
+    expect(screen.getByTestId("project-table-units-value")).toHaveTextContent("—")
+  })
+
+  it("flags overdue units beside the count", () => {
+    renderTable([baseProject({ id: "p1", unitsTotal: 66, unitsDone: 5, unitsOverdue: 2 })])
+    expect(screen.getByTestId("project-table-units-overdue")).toHaveTextContent("2")
+    expect(screen.getByTestId("project-table-units-value")).toHaveAttribute("data-units-overdue", "true")
+  })
+
+  it("shows no flag when every unit is on time", () => {
+    renderTable([baseProject({ id: "p1", unitsTotal: 66, unitsDone: 5, unitsOverdue: 0 })])
+    expect(screen.queryByTestId("project-table-units-overdue")).toBeNull()
+  })
+})
+
 describe("PM column self marker (AQU-1027)", () => {
   const rows = () => [
     baseProject({ id: "gospels", name: "Gospels", pm: { id: 5, username: "anna" } }),
@@ -357,5 +411,42 @@ describe("PM column self marker (AQU-1027)", () => {
   it("is absent in embedded layout, which has no PM column at all", () => {
     renderTable(rows(), { viewerUsername: "anna", layout: "embedded" })
     expect(screen.queryAllByTestId("project-pm-you")).toHaveLength(0)
+  })
+})
+
+describe("OrgProjectsDataTable async directory", () => {
+  it("does not locally filter rows when search is controlled by the parent", () => {
+    const onSearchChange = vi.fn()
+    renderTable(
+      [baseProject({ id: "gospels", name: "Gospels" }), baseProject({ id: "ruth", name: "Ruth" })],
+      { searchValue: "zzz", onSearchChange },
+    )
+    expect(screen.getByText("Gospels")).toBeInTheDocument()
+    expect(screen.getByText("Ruth")).toBeInTheDocument()
+    fireEvent.change(screen.getByRole("textbox", { name: /Search projects/i }), {
+      target: { value: "gos" },
+    })
+    expect(onSearchChange).toHaveBeenCalledWith("gos")
+    expect(screen.getByText("Ruth")).toBeInTheDocument()
+  })
+
+  it("shows a spinner in the search field while the directory query is in flight", () => {
+    renderTable([baseProject({ id: "gospels", name: "Gospels" })], {
+      searchValue: "gos",
+      onSearchChange: vi.fn(),
+      searching: true,
+    })
+    const search = screen.getByRole("textbox", { name: /Search projects/i })
+    expect(search.closest("[data-slot='input-group']")).toHaveAttribute("aria-busy", "true")
+    expect(screen.getByRole("status", { name: /searching/i })).toBeInTheDocument()
+    expect(screen.getByText("Gospels")).toBeInTheDocument()
+  })
+
+  it("renders the load-more sentinel when another page remains", () => {
+    renderTable([baseProject({ id: "gospels", name: "Gospels" })], {
+      hasMore: true,
+      onLoadMore: vi.fn(),
+    })
+    expect(screen.getByTestId("project-directory-load-more")).toBeInTheDocument()
   })
 })

@@ -242,6 +242,29 @@ describe("MilestoneNavigator", () => {
     expect(onSelect).toHaveBeenCalledWith("story:u363", "story:u363:range:c102")
   })
 
+  it("pages a whole milestone at a time when split view is on", () => {
+    const onSelect = vi.fn()
+    render(
+      <MilestoneNavigator
+        items={stories}
+        activeKey="story:u44d21"
+        activeSubsectionKey="story:u44d21:range:c1"
+        onSelect={onSelect}
+        pageByMilestone
+      />,
+    )
+
+    // The trigger names the division, not a 50-cell slice inside it.
+    expect(screen.getByRole("combobox", { name: /Current story: Story u44d21\. Choose story/ }))
+      .toBeInTheDocument()
+    expect(screen.queryByRole("combobox", { name: /cells 1–1/ })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Next story" }))
+    expect(onSelect).toHaveBeenCalledWith("story:u363")
+    expect(onSelect).not.toHaveBeenCalledWith("story:u44d21", expect.anything())
+    expect(onSelect).not.toHaveBeenCalledWith("story:u363", expect.anything())
+  })
+
   it("expands a split milestone in place instead of navigating to it", () => {
     const onSelect = vi.fn()
     render(

@@ -66,6 +66,7 @@ export async function handleMigrateFinalizeRequest(
     }
     return Response.json({ ok: true, filesUpdated: res.meta?.changes ?? null, progressUpdated: files.length })
   } catch (err) {
-    return Response.json({ error: `finalize failed: ${String(err)}` }, { status: 500 })
+    console.error("[migrate-finalize] failed:", err)
+    return Response.json({ error: "finalize failed" }, { status: 500 })
   }
 }

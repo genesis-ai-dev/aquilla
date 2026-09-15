@@ -307,12 +307,20 @@ export class Workspace {
     ).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
   }
 
-  /** Hover the first cell until the action rail reveals, then click Translate with AI. */
-  async clickSparkleOnFirstCell(): Promise<void> {
+  /** First-cell sparkle: Translate with AI, or Set up AI before the chooser. */
+  private firstCellSparkle(): { row: Locator; sparkle: Locator } {
     const row = this.page.locator("[data-cell-id]").first()
     const sparkle = row
-      .locator("[data-tooltip*='Translate with AI'] button, button[aria-label*='Translate with AI']")
+      .locator(
+        "[data-tooltip*='Translate with AI'] button, [data-tooltip*='Set up AI'] button, " +
+          "button[aria-label*='Translate with AI'], button[aria-label*='Set up AI']",
+      )
       .first()
+    return { row, sparkle }
+  }
+
+  private async revealAndClickSparkle(): Promise<string> {
+    const { row, sparkle } = this.firstCellSparkle()
     await sparkle.scrollIntoViewIfNeeded()
     await row.hover()
     await expect(row.locator('[data-slot="cell-action-rail"]')).toHaveAttribute(
@@ -322,11 +330,59 @@ export class Workspace {
     )
     await expect(sparkle).toBeVisible()
     await expect(sparkle).toBeEnabled({ timeout: 15_000 })
+    const label = (await sparkle.getAttribute("aria-label")) ?? ""
     await row.hover()
     // The unrevealed rail wrapper intercepts Playwright's hit-test even after
     // data-revealed=true if idle-hide races the click. force skips that check;
     // the button is already asserted visible and enabled.
     await sparkle.click({ force: true })
+    return label
+  }
+
+  /** Open the per-project Set up AI chooser from the first cell's sparkle. */
+  async openAiSetupFromFirstCell(): Promise<Locator> {
+    await this.revealAndClickSparkle()
+    const dialog = this.page.getByRole("dialog", { name: /Set up AI/i })
+    await expect(dialog).toBeVisible({ timeout: 10_000 })
+    return dialog
+  }
+
+  async confirmAiSetup(): Promise<void> {
+    const dialog = this.page.getByRole("dialog", { name: /Set up AI/i })
+    await dialog.getByRole("button", { name: /^Continue$/i }).click()
+    await expect(dialog).toBeHidden()
+  }
+
+  /** Hover the first cell until the action rail reveals, then click sparkle.
+   *  If this project still needs the Set up AI chooser, Continue with the
+   *  default selection and click sparkle again to draft. */
+  async clickSparkleOnFirstCell(): Promise<void> {
+    const label = await this.revealAndClickSparkle()
+    if (!label.includes("Set up AI")) return
+    await this.confirmAiSetup()
+    await this.revealAndClickSparkle()
+  }
+
+  /**
+   * AQU-200: the rail keeps only the AI-generate group as direct buttons —
+   * comments, history, record, play, TTS and footnote live behind a single
+   * `⋯`. Reveal the row's rail, open that overflow, and return the named
+   * action. The popup is portalled to the body, so the returned locator is
+   * page-scoped, NOT row-scoped: only one row's overflow is ever open.
+   */
+  async openRowAction(row: Locator, ariaLabel: string): Promise<Locator> {
+    await row.scrollIntoViewIfNeeded()
+    await row.hover()
+    const rail = row.locator('[data-slot="cell-action-rail"]')
+    await expect(rail).toHaveAttribute("data-revealed", "true", { timeout: 5_000 })
+    const overflow = rail.locator('[data-slot="cell-action-rail-overflow"]')
+    await expect(overflow).toBeVisible({ timeout: 5_000 })
+    // force for the same reason as the sparkle above: the unrevealed rail
+    // wrapper can still intercept the hit-test if idle-hide races the click.
+    await overflow.click({ force: true })
+    const action = this.page.locator(`button[aria-label="${ariaLabel}"]`).first()
+    await expect(action).toBeVisible({ timeout: 5_000 })
+    return action
   }
 
   async waitForEditor(expectedCellId?: string): Promise<void> {

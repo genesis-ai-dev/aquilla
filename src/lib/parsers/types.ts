@@ -404,6 +404,17 @@ export interface ProjectRecord {
    */
   termbaseEditMinRole?: number | null
   /**
+   * AQU-1086: the org's effective `languageEditMinRole` — the minimum role
+   * allowed to change this project's source/target language and its extra
+   * target lanes. Sent by the single-project endpoint so the Project Settings
+   * language fields and the Languages card share one floor without a second
+   * org-settings fetch. Absent (older server / local-only project) ⇒ the
+   * MAINTAINER default in `src/lib/sync/role-policy.ts`. The server
+   * re-resolves it on every language write, so this is an affordance value,
+   * not authority.
+   */
+  languageEditMinRole?: number | null
+  /**
    * AQU-1002: the org's effective comment floors — the minimum role to open a
    * thread (`commentCreateMinRole`) and to resolve/reopen a thread somebody
    * else opened (`commentResolveMinRole`). Sent by the single-project endpoint
@@ -451,16 +462,25 @@ export interface ProjectRecord {
   syncSettings?: ProjectSyncSettings
   suggestionsDismissedAt?: string  // ISO timestamp; suggestion banner is hidden after this is set.
   setupChecklistDismissed?: boolean
-  /** AQU-646: may people add lines into the timeline's silences? Off unless
-   *  turned on in project settings — see ProjectWideSettings.allowLineCreation.
-   *  Deleting an empty added line is not gated on it. */
-  allowLineCreation?: boolean
+  /** AQU-1068: who is OFFERED the add and remove actions here? Absent (and
+   *  "none") means nobody, whatever their rank. This is a product rule, read
+   *  by the editor's affordances rather than enforced at the sync perimeter —
+   *  see ProjectWideSettings.cellEditingFloor for the full rationale, and
+   *  `resolveCellEditingFloor` for the mapping.
+   *
+   *  Structurally the same union as `CellEditingTier` in
+   *  `@/lib/sync/project-settings`, spelled out rather than imported to keep
+   *  this module out of a type cycle with that one. Narrowing it below that
+   *  union does not merely drift — `useProject`'s `assign()` copies the synced
+   *  value straight into this field, so a rung missing here is a compile
+   *  error, which is what keeps the two honest. */
+  cellEditingFloor?: "none" | "commenter" | "reviewer" | "contributor" | "project_lead" | "maintainer"
   /** AQU-646 stage 2: may this project's timelines be restructured — tracks
    *  added, deleted, foldered, recoloured? Off unless turned on; a SECOND gate
    *  on top of the maintainer floor, so with it off the write is refused even
    *  to an owner. Rename and drag-to-reorder are NOT gated on it. See
-   *  ProjectWideSettings.allowTrackEditing for why it diverges from its
-   *  sibling above on stranding. */
+   *  ProjectWideSettings.allowTrackEditing for why switching it off is allowed
+   *  to strand tracks that are already there. */
   allowTrackEditing?: boolean
   /**
    * AQU-701: set when the user explicitly skips the voice & transcription setup
@@ -469,6 +489,12 @@ export interface ProjectRecord {
    * nagged as "not set up". Cleared when they opt back in from the step.
    */
   aiSetupSkipped?: boolean
+  /**
+   * Device-local: the user has picked how drafts run on this project
+   * (Frontier hosted, a project API key, or a personal override). The
+   * sparkle Set up AI dialog shows once until this is true.
+   */
+  aiProviderChosen?: boolean
   /** ISO timestamp set when the user dismisses the "your project is still using
    * default AI instructions" nudge, OR when they actually customize the system
    * prompt. Either way, we stop nagging. */
@@ -479,6 +505,15 @@ export interface ProjectRecord {
    * projects without this field fall back to registry defaults.
    */
   experimentalFlags?: Record<string, boolean>
+  /**
+   * AQU-1246: project-wide opt-in to the experimental Autopilot surface.
+   * Absent/false → no Autopilot UI renders anywhere for this project. Synced
+   * (see ProjectWideSettings.autopilotEnabled) rather than device-local, and
+   * writable only at project_lead(500)+ — server-enforced in auth-worker.
+   * Read through `isAutopilotVisible`, never directly, so the legacy
+   * device-local grandfather is honoured with it.
+   */
+  autopilotEnabled?: boolean
   /** AD-14 decay tunables. Absent → use DECAY_DEFAULTS. */
   decaySettings?: DecaySettings
   /** Required distinct validators for a text cell to count as "fully validated". Clamped [1, 15]. Default 1. Mirrors desktop manifest. */

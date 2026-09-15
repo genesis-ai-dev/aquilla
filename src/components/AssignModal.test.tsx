@@ -92,6 +92,17 @@ describe("self-assign carve-out (AQU-496)", () => {
     expect(screen.getByText("Assign work")).toBeTruthy()
   })
 
+  it("renders a full assignee picker below Project lead when the org lowers the floor", () => {
+    render(
+      <AssignModal
+        {...BASE_PROPS}
+        roleLevel={ROLE.REVIEWER}
+        assignmentMinRole={ROLE.REVIEWER}
+      />,
+    )
+    expect(screen.getByRole("combobox", { name: /assign to/i })).not.toBeDisabled()
+  })
+
   it("locks the assignee picker to the caller and disables it", () => {
     render(<AssignModal {...SELF_ASSIGN_PROPS} />)
     const trigger = screen.getByRole("combobox", { name: /assign to/i })

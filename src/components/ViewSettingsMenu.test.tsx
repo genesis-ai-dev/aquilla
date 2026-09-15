@@ -17,6 +17,8 @@ function renderViewSettings(overrides: Partial<ComponentProps<typeof ViewSetting
     onCellLabelsChange: vi.fn(),
     onSourceFontSizeChange: vi.fn(),
     onTargetFontSizeChange: vi.fn(),
+    onSourceFontSizeReset: vi.fn(),
+    onTargetFontSizeReset: vi.fn(),
     onTnSidebarChange: vi.fn(),
     onTargetKeyTermHighlightModeChange: vi.fn(),
   }
@@ -109,6 +111,46 @@ describe("ViewSettingsMenu popover", () => {
     fireEvent.click(within(sourceTabs).getByRole("tab", { name: "RTL" }))
 
     expect(handlers.onSourceDirectionModeChange).toHaveBeenCalledWith("rtl")
+  })
+
+  it("steps font size from the scaled Large default (AQU-1170)", () => {
+    const handlers = renderViewSettings({ sourceFontSize: 16, targetFontSize: 16 })
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    expect(screen.getAllByText("16px")).toHaveLength(2)
+
+    fireEvent.click(screen.getByRole("button", { name: "Increase target font size" }))
+    expect(handlers.onTargetFontSizeChange).toHaveBeenCalledWith(17)
+
+    fireEvent.click(screen.getByRole("button", { name: "Decrease source font size" }))
+    expect(handlers.onSourceFontSizeChange).toHaveBeenCalledWith(15)
+    expect(screen.queryByRole("button", { name: "Use app font size for target" })).toBeNull()
+  })
+
+  it("steps font size from the Small scaled default (AQU-1170)", () => {
+    const handlers = renderViewSettings({ sourceFontSize: 12, targetFontSize: 12 })
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    fireEvent.click(screen.getByRole("button", { name: "Increase target font size" }))
+    expect(handlers.onTargetFontSizeChange).toHaveBeenCalledWith(13)
+  })
+
+  it("steps Extra Large scaled default and resets a pinned column to the app size", () => {
+    const handlers = renderViewSettings({
+      sourceFontSize: 18,
+      targetFontSize: 19,
+      targetFontSizeExplicit: true,
+    })
+
+    fireEvent.click(screen.getByRole("button", { name: "Editor settings" }))
+    expect(screen.getByText("18px")).toBeTruthy()
+    expect(screen.getByText("19px")).toBeTruthy()
+
+    fireEvent.click(screen.getByRole("button", { name: "Increase source font size" }))
+    expect(handlers.onSourceFontSizeChange).toHaveBeenCalledWith(19)
+
+    fireEvent.click(screen.getByRole("button", { name: "Use app font size for target" }))
+    expect(handlers.onTargetFontSizeReset).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole("button", { name: "Use app font size for source" })).toBeNull()
   })
 })
 

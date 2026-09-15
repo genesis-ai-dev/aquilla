@@ -7,7 +7,8 @@
  * Props:
  *   drafts    — structured rule suggestions to review
  *   evidence  — optional per-draft reason/evidence string (index-aligned)
- *   onCommit  — called with accepted draft indices; consumer calls addRule
+ *   onCommit  — called with the accepted drafts, carrying any inline edits the
+ *               user made here; consumer calls addRule
  *   onBack    — called when user clicks "Back"
  */
 
@@ -22,7 +23,11 @@ export interface RuleImportReviewProps {
   drafts: RuleSuggestion[]
   /** Optional per-draft evidence/reason string (same index as drafts). */
   evidence?: string[]
-  onCommit: (accepted: number[]) => void | Promise<void>
+  /**
+   * AQU-198: receives the accepted drafts *as edited here*, not bare indices —
+   * the inline name edit below is only real if it survives the commit.
+   */
+  onCommit: (accepted: RuleSuggestion[]) => void | Promise<void>
   onBack: () => void
   committing?: boolean
 }
@@ -51,8 +56,20 @@ export function RuleImportReview({
     })
   }
 
+  /**
+   * Apply the inline name edits to the accepted drafts. A name blanked out
+   * entirely falls back to the draft's own name — an unnamed rule is worse than
+   * an un-renamed one.
+   */
   function handleCommit() {
-    onCommit([...accepted])
+    const edited = drafts
+      .map((draft, i) => ({ draft, i }))
+      .filter(({ i }) => accepted.has(i))
+      .map(({ draft, i }) => {
+        const override = nameOverrides[i]?.trim()
+        return override ? { ...draft, name: override } : draft
+      })
+    onCommit(edited)
   }
 
   return (

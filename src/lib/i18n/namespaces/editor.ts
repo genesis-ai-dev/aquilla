@@ -117,6 +117,9 @@ export const editor = defineNamespace({
       other: "{count} cells with stale source",
     }),
 
+    // — Per-cell action rail ————————————————————————————————————————
+    "editor.rail.moreActions": "More actions",
+
     // — Per-cell audio: record / upload / playback ——————————————————
     "editor.audio.record": "Record audio",
     "editor.audio.recordingDisabled": "Recording disabled",
@@ -377,6 +380,7 @@ export const editor = defineNamespace({
     "editor.view.directionOf": "{side} direction",
     "editor.view.decreaseFontSize": "Decrease {side} font size",
     "editor.view.increaseFontSize": "Increase {side} font size",
+    "editor.view.useAppFontSize": "Use app font size for {side}",
     "editor.view.directionMismatch":
       "{side} is forced {forced}, but content looks {detected}",
     "editor.view.dismissDirectionWarning": "Dismiss direction warning",
@@ -390,6 +394,10 @@ export const editor = defineNamespace({
     "editor.bibles.hide": "Hide parallel bibles",
     "editor.bibles.edgeTab": "Bibles",
     "editor.bibles.title": "Parallel Bibles",
+    "editor.bibles.noReferences": "No Bible references",
+    "editor.bibles.noReferencesDescription":
+      "The current cells have no Bible references with chapter and verse numbers. " +
+      "Parallel Bibles needs these references to show matching text.",
     "editor.bibles.scrollHint":
       "Scroll the editor to a verse to see it in other bible versions.",
     "editor.bibles.noVersions":
@@ -858,6 +866,61 @@ export const editor = defineNamespace({
 
     // — Row hover controls + assurance panel (editing table) ——————
     "editor.row.removeLine": "Remove this line",
+    // AQU-1068 round 3: WHY a row cannot take an action. A closed set with
+    // one sentence shape — the same string serves the disabled button's tooltip
+    // and the disabled menu item's second line, so the two surfaces cannot
+    // drift. Shown instead of hiding the control, because an absent button
+    // cannot distinguish "not applicable here" from "this feature is broken".
+    //
+    // The media cause carries TWO strings because the question differs by
+    // action: hovering a dead INSERT asks about a new cell, not about the row
+    // it happens to sit beside, so describing the row there answered the
+    // wrong question (round 4, Sam).
+    "editor.row.noRoomReason": "There\u2019s no room here to fit a line.",
+    "editor.row.mediaInsertReason": "Cells can\u2019t be added to imported audio.",
+    "editor.row.mediaRemoveReason":
+      "This row is a piece of the original recording, so it can\u2019t be removed.",
+    "editor.row.idmlReason":
+      "IDML files keep their original layout, so cells can\u2019t be added or removed.",
+    "editor.row.maintainerOnlyReason": "Only a maintainer can remove an imported line.",
+    // AQU-1068: the removal confirmation. The body is ASSEMBLED from the
+    // fragments below — a resolved-and-concatenated list, the house idiom (see
+    // nav.workspaceActions.moreAfterThis) rather than a nested placeholder,
+    // because which clauses appear depends on what the cell actually carries.
+    "editor.removeCell.title": "Remove this cell?",
+    "editor.removeCell.confirmLabel": "Remove it",
+    "editor.removeCell.lead": "This removes the cell and everything on it:",
+    "editor.removeCell.leadNothing":
+      "This removes the cell. There is nothing else attached to it.",
+    "editor.removeCell.translations": plural({
+      one: "its translation in {count} language",
+      other: "its translations in {count} languages",
+    }),
+    "editor.removeCell.takes": plural({
+      one: "{count} recording",
+      other: "{count} recordings",
+    }),
+    "editor.removeCell.comments": plural({
+      one: "{count} comment",
+      other: "{count} comments",
+    }),
+    "editor.removeCell.validations": plural({
+      one: "{count} validation",
+      other: "{count} validations",
+    }),
+    "editor.removeCell.sharedTakeWarning":
+      "One of those recordings also performs other lines.",
+    "editor.removeCell.milestoneWarning":
+      "This cell carries the \u201c{label}\u201d heading, which will disappear from chapter navigation.",
+    "editor.removeCell.permanent": "This cannot be undone.",
+    // AQU-1068: an insert/removal applies instantly and is corrected if the
+    // server refuses it — the row comes back (or goes away again) on its own,
+    // so the copy explains the reversal rather than asking for an action.
+    "editor.addCell.failedToast": "That cell couldn\u2019t be added, so it has been removed again.",
+    "editor.removeCell.failedToast": "That cell couldn\u2019t be removed, so it has been put back.",
+    "editor.addCell.forbiddenToast": "You don\u2019t have permission to add cells here, so it has been removed again.",
+    "editor.removeCell.forbiddenToast": "You don\u2019t have permission to remove cells here, so it has been put back.",
+    "editor.removeCell.notYetSavedToast": "That cell is still being saved \u2014 try removing it again in a moment.",
     "editor.row.addLine": "Add a line",
     "editor.row.insertAbove": "Insert above",
     "editor.row.insertBelow": "Insert below",
@@ -1248,6 +1311,25 @@ export const editor = defineNamespace({
       "was closed.",
 
     // — Source column ——————————————————————————————————————————————
+    // AQU-1068 item 5: the source cell's one menu, which replaced the pencil
+    // and the hover corner. `editor.source.editText` and the row's insert /
+    // remove / reason strings are reused verbatim as its entries.
+    "editor.cellMenu.trigger": "Cell actions",
+    "editor.cellMenu.editTimestamps": "Edit timestamps",
+    "editor.cellMenu.timingLocked": "Timing is locked for this project.",
+    "editor.cellMenu.unlockInSettings": "Unlock timing in project settings",
+    "editor.cellMenu.startLabel": "Start time",
+    "editor.cellMenu.endLabel": "End time",
+    "editor.cellMenu.betweenHint": "Lines either side start {from} and {to}",
+    "editor.cellMenu.afterHint": "The line before starts {from}",
+    "editor.cellMenu.beforeHint": "The line after starts {to}",
+    "editor.cellMenu.badTime": "Type a time like 1:02.5",
+    "editor.cellMenu.invertedTimes": "The end has to come after the start.",
+    "editor.cellMenu.startsBeforePrevious":
+      "This would put the line before the one above it. Its start has to stay after {from}.",
+    "editor.cellMenu.startsAfterNext":
+      "This would put the line after the one below it. Its start has to stay before {to}.",
+    "editor.cellMenu.saveTimestamps": "Save",
     "editor.source.textAria": "Source text",
     "editor.source.editText": "Edit source text",
     "editor.source.doneEditing": "Done editing source",
@@ -1763,6 +1845,57 @@ export const editor = defineNamespace({
           "translate the meaning ('what is hurting the score most'), not the image.",
         maxLength: 24,
       },
+      "editor.removeCell.translations": {
+        description:
+          "One clause in the list of what removing a cell destroys, in the removal " +
+          "confirmation dialog. Counts the target-language lanes that hold a translation " +
+          "of the cell. Reads as an item in a sentence, e.g. \u201cits translations in 3 " +
+          "languages\u201d, so it starts lower-case and carries no full stop.",
+        placeholders: {
+          count:
+            "The number of target languages; it also selects which plural form is used.",
+        },
+      },
+      "editor.removeCell.takes": {
+        description:
+          "One clause in the list of what removing a cell destroys, in the removal " +
+          "confirmation dialog. Counts the voice recordings made against that cell. " +
+          "Reads as an item in a sentence, so no leading capital and no full stop.",
+        placeholders: {
+          count:
+            "The number of recordings; it also selects which plural form is used.",
+        },
+      },
+      "editor.removeCell.comments": {
+        description:
+          "One clause in the list of what removing a cell destroys, in the removal " +
+          "confirmation dialog. Counts every comment on the cell, replies and already- " +
+          "resolved ones included. Reads as an item in a sentence, so no leading capital " +
+          "and no full stop.",
+        placeholders: {
+          count: "The number of comments; it also selects which plural form is used.",
+        },
+      },
+      "editor.removeCell.validations": {
+        description:
+          "One clause in the list of what removing a cell destroys, in the removal " +
+          "confirmation dialog. Counts the reviewers whose approval currently stands on " +
+          "the cell. Reads as an item in a sentence, so no leading capital and no full stop.",
+        placeholders: {
+          count: "The number of validations; it also selects which plural form is used.",
+        },
+      },
+      "editor.removeCell.milestoneWarning": {
+        description:
+          "Extra warning in the removal confirmation dialog, shown only when the cell " +
+          "being removed is the one carrying a chapter or section heading. Removing it " +
+          "takes that heading out of the chapter navigator.",
+        placeholders: {
+          label:
+            "The heading as it appears in the file, e.g. a chapter number or a section " +
+            "title. Content from the user's own document \u2014 never translate it.",
+        },
+      },
       "editor.health.staleSource": {
         description:
           "Amber warning row in the health popover counting cells whose pinned source text " +
@@ -1772,6 +1905,15 @@ export const editor = defineNamespace({
           count:
             "The number the sentence counts; it also selects which plural form is used.",
         },
+      },
+      "editor.rail.moreActions": {
+        description:
+          "Tooltip and screen-reader name of the '…' overflow button in a cell's " +
+          "action rail (AQU-200). Opens a small menu holding the row's " +
+          "lower-frequency actions — record, upload audio, play, text-to-speech, " +
+          "footnote, comments, history — which no longer each get their own " +
+          "button. A noun phrase naming what is inside, not an imperative.",
+        maxLength: 20,
       },
       "editor.audio.record": {
         description:
@@ -2859,6 +3001,17 @@ export const editor = defineNamespace({
             "editor.column.target.",
         },
       },
+      "editor.view.useAppFontSize": {
+        description:
+          "Tooltip and screen-reader name of the button that drops a column's " +
+          "custom size so it follows the app-wide font size again. Shown only " +
+          "after A+ or A− has pinned that column. Imperative.",
+        placeholders: {
+          side:
+            "Which column, lower-cased by the app from editor.column.source / " +
+            "editor.column.target.",
+        },
+      },
       "editor.view.directionMismatch": {
         description:
           "Warning toast when a column's direction has been forced by hand but " +
@@ -2930,6 +3083,14 @@ export const editor = defineNamespace({
           "Heading of the open parallel-bibles sidebar. 'Parallel' means shown " +
           "side by side with the user's own translation for comparison.",
         maxLength: 22,
+      },
+      "editor.bibles.noReferences": {
+        description: "Empty-state title when no usable Bible reference is available.",
+      },
+      "editor.bibles.noReferencesDescription": {
+        description:
+          "Explains why parallel text is unavailable for the current cells. " +
+          "Do not imply that the entire file lacks references or suggest scrolling fixes it.",
       },
       "editor.bibles.scrollHint": {
         description:
@@ -4565,6 +4726,113 @@ export const editor = defineNamespace({
         description:
           "Screen-reader name of the read-only source column of one row — the text " +
           "being translated from.",
+      },
+      "editor.cellMenu.trigger": {
+        description:
+          "Screen-reader name of the three-dot button at the top-right of a source " +
+          "cell. It opens the one menu holding every action on that cell: edit its " +
+          "source text, edit its timestamps, insert a cell above or below, remove it.",
+        maxLength: 20,
+      },
+      "editor.cellMenu.editTimestamps": {
+        description:
+          "Menu entry that opens a small form for typing this line's start and end " +
+          "times. Only on files that run on a clock (subtitles, cue sheets). " +
+          "Imperative.",
+        maxLength: 24,
+      },
+      "editor.cellMenu.timingLocked": {
+        description:
+          "Why the timestamps entry is unavailable: a project-wide setting locks " +
+          "imported timings against accidental changes. A full sentence — it is " +
+          "shown as a second line inside the menu entry, and in the form itself.",
+      },
+      "editor.cellMenu.unlockInSettings": {
+        description:
+          "Button shown to a maintainer when timing is locked. It does NOT unlock " +
+          "anything — it takes them to the project settings page where the switch " +
+          "lives, because the lock covers the whole project and they should see " +
+          "that before changing it. Imperative.",
+        maxLength: 40,
+      },
+      "editor.cellMenu.startLabel": {
+        description:
+          "Label of the field holding when this line starts. Not bare \"Start\": " +
+          "beside a second field it would read as a verb, and it collides with " +
+          "the recorder's Start button.",
+        maxLength: 14,
+      },
+      "editor.cellMenu.endLabel": {
+        description:
+          "Label of the field holding when this line ends. Pairs with the start " +
+          "field beside it, so the two must read as a matched pair.",
+        maxLength: 14,
+      },
+      "editor.cellMenu.betweenHint": {
+        description:
+          "Hint under the timestamp fields giving the START times of the lines " +
+          "either side. Those two are the only limit: this line may overlap its " +
+          "neighbours as much as it likes, but its start must stay between " +
+          "theirs, or the file's order changes. {from} and {to} are timecodes " +
+          "like 1:02.500.",
+        placeholders: {
+          from: "The end of the line BEFORE this one, as a timecode like 1:02.500.",
+          to: "The start of the line AFTER this one, as a timecode like 1:04.000.",
+        },
+      },
+      "editor.cellMenu.afterHint": {
+        description:
+          "The same hint when this is the LAST line, so only the line before " +
+          "bounds it. {from} is a timecode.",
+        placeholders: {
+          from: "The end of the line BEFORE this one, as a timecode like 1:02.500.",
+        },
+      },
+      "editor.cellMenu.beforeHint": {
+        description:
+          "The same hint when this is the FIRST line, so only the line after " +
+          "bounds it. {to} is a timecode.",
+        placeholders: {
+          to: "The start of the line AFTER this one, as a timecode like 1:04.000.",
+        },
+      },
+      "editor.cellMenu.badTime": {
+        description:
+          "Error under a timestamp field that cannot be read as a time. The example " +
+          "is deliberately the short form people actually type; the field accepts " +
+          "longer ones too. Keep the example a plain digits-and-punctuation " +
+          "timecode in every language.",
+      },
+      "editor.cellMenu.startsBeforePrevious": {
+        description:
+          "Error when the start typed would move this line ABOVE the one before " +
+          "it, changing the order of the file. Overlapping that line is fine; " +
+          "starting earlier than it is not. {from} is the previous line's start, " +
+          "a timecode. Nothing is saved.",
+        placeholders: {
+          from: "The START of the line before this one, as a timecode like 1:02.500.",
+        },
+      },
+      "editor.cellMenu.startsAfterNext": {
+        description:
+          "The mirror of the entry above: the start typed would move this line " +
+          "BELOW the one after it. {to} is the next line's start, a timecode. " +
+          "Nothing is saved.",
+        placeholders: {
+          to: "The START of the line after this one, as a timecode like 1:04.000.",
+        },
+      },
+      "editor.cellMenu.invertedTimes": {
+        description:
+          "Error under the timestamp fields when the end is at or before the " +
+          "start, which is the one span that cannot mean anything. Nothing is " +
+          "saved and what was typed is kept, so the person can see and fix it — " +
+          "silently swapping the two fields would be the worse surprise.",
+      },
+      "editor.cellMenu.saveTimestamps": {
+        description:
+          "Button that commits the typed start and end times. Imperative, one word.",
+        maxLength: 12,
       },
       "editor.source.editText": {
         description:

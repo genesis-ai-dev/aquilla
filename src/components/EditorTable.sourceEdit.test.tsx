@@ -22,6 +22,32 @@ import type { ProjectRecord } from "@/lib/parsers/types"
 import { ROLE } from "@/lib/frontier/roles"
 import type { DcsCursor } from "@/lib/dcs/types"
 
+/**
+ * AQU-1068 item 5: the pencil became an entry in the source cell's ONE menu
+ * (Ryder's note, relayed 2026-09-05). Reaching it is two clicks now — open the
+ * menu, then pick the entry — so these helpers say that once instead of at
+ * every call site. What each test asserts about the affordance is unchanged.
+ */
+const openCellMenu = async () => {
+  const trigger = (await screen.findAllByRole("button", { name: "Cell actions" }))[0]
+  fireEvent.click(trigger)
+  return screen.findByTestId("cell-menu-edit-source")
+}
+/**
+ * The entry AFTER opening the menu, or null when it is not offered at all.
+ *
+ * It has to open the menu: a `queryByTestId` on a shut menu is null whatever
+ * the permission, which would pass every "not offered" assertion for the wrong
+ * reason. When the menu itself does not render there is nothing to open, and
+ * that is also "not offered".
+ */
+const sourceEntry = async () => {
+  const triggers = screen.queryAllByRole("button", { name: "Cell actions" })
+  if (triggers.length === 0) return null
+  fireEvent.click(triggers[0])
+  return screen.queryByTestId("cell-menu-edit-source")
+}
+
 // DCS lockdown state (AQU-615). The real hook goes through useProjectSettings
 // → network; in tests there is no session, so `loading` would stay true forever
 // and default-lock every project. Mock the cursor hook with a mutable bag: the
@@ -207,30 +233,30 @@ describe("EditorTable — source-edit affordance", () => {
   it("shows the Edit source affordance for a project_lead on a self-contained project", async () => {
     renderTable(withRole(ROLE.PROJECT_LEAD))
     await screen.findByText("bonjour")
-    expect(screen.getByRole("button", { name: "Edit source text" })).toBeInTheDocument()
+    expect(await openCellMenu()).toBeInTheDocument()
   })
 
   it("hides the affordance for a contributor (below the 500 floor)", async () => {
     renderTable(withRole(ROLE.CONTRIBUTOR))
     await screen.findByText("bonjour")
-    expect(screen.queryByRole("button", { name: "Edit source text" })).not.toBeInTheDocument()
+    expect(await sourceEntry()).not.toBeInTheDocument()
   })
 
   it("hides the affordance on a live-linked downstream (mirrored source is locked)", async () => {
     renderTable(withRole(ROLE.PROJECT_LEAD, { sourceProjectId: "up", sourceLinkMode: "live" }))
     await screen.findByText("bonjour")
-    expect(screen.queryByRole("button", { name: "Edit source text" })).not.toBeInTheDocument()
+    expect(await sourceEntry()).not.toBeInTheDocument()
   })
 
   it("shows the affordance on a clone-linked project (clone is independent)", async () => {
     renderTable(withRole(ROLE.PROJECT_LEAD, { sourceProjectId: "up", sourceLinkMode: "clone" }))
     await screen.findByText("bonjour")
-    expect(screen.getByRole("button", { name: "Edit source text" })).toBeInTheDocument()
+    expect(await openCellMenu()).toBeInTheDocument()
   })
 
   it("clicking the affordance mounts an editable source editor", async () => {
     renderTable(withRole(ROLE.PROJECT_LEAD))
-    const pencil = await screen.findByRole("button", { name: "Edit source text" })
+    const pencil = await openCellMenu()
     fireEvent.click(pencil)
     // The inline source editor is a TranslatedEditor with the source aria-label.
     const editor = await screen.findByRole("textbox", { name: "Edit source text" })
@@ -303,7 +329,7 @@ describe("EditorTable — media source edits are transcript corrections (AQU-646
 
   it("the editor opens on the transcript — never the filename", async () => {
     renderMedia()
-    fireEvent.click(await screen.findByRole("button", { name: "Edit source text" }))
+    fireEvent.click(await openCellMenu())
     const editor = await screen.findByRole("textbox", { name: "Edit source text" })
     await waitFor(() => expect(editor.textContent).toContain("let the peace of Christ rule"))
     expect(editor.textContent).not.toContain("episode-12.mp3")
@@ -313,7 +339,7 @@ describe("EditorTable — media source edits are transcript corrections (AQU-646
     // The filename placeholder is display-only. Putting it in the editor would
     // invite exactly the overwrite this guards against.
     renderMedia({ transcription: null })
-    fireEvent.click(await screen.findByRole("button", { name: "Edit source text" }))
+    fireEvent.click(await openCellMenu())
     const editor = await screen.findByRole("textbox", { name: "Edit source text" })
     await waitFor(() => expect(editor.textContent ?? "").not.toContain("episode-12.mp3"))
   })
@@ -324,17 +350,22 @@ describe("EditorTable — DCS source lockdown (AQU-615)", () => {
     dcsState = { cursor: null, loading: true }
     renderTable(withRole(ROLE.PROJECT_LEAD))
     await screen.findByText("bonjour")
-    expect(screen.queryByRole("button", { name: "Edit source text" })).not.toBeInTheDocument()
+    // Default-locked while the answer is still in flight, so the entry is
+    // present and refused rather than offered and doomed.
+    expect(await sourceEntry()).toHaveAttribute("data-disabled")
   })
 
-  it("replaces the pencil with an explained lock hint on a DCS-pinned project", async () => {
+  it("keeps the entry, disabled and explained, on a DCS-pinned project", async () => {
     dcsState = { cursor: DCS_CURSOR, loading: false }
     renderTable(withRole(ROLE.PROJECT_LEAD))
     await screen.findByText("bonjour")
-    // No pencil — but the affordance does not just vanish: a lock hint carrying
-    // sourceReadOnlyReason stands in its place.
-    expect(screen.queryByRole("button", { name: "Edit source text" })).not.toBeInTheDocument()
-    expect(screen.getByLabelText("Source is locked")).toBeInTheDocument()
+    // The affordance does not just vanish. It used to become a padlock beside
+    // the pencil (AQU-615); since AQU-1068 item 5 it is the same idea as the
+    // entry's own reason — one place to look, and it says why.
+    const item = await sourceEntry()
+    expect(item).toBeInTheDocument()
+    expect(item).toHaveAttribute("data-disabled")
+    expect(screen.getByTestId("cell-menu-edit-source-reason")).toHaveTextContent(/./)
   })
 
   it("force-closes an OPEN source editor when canEditSource flips false mid-edit, and says why", async () => {
@@ -344,7 +375,7 @@ describe("EditorTable — DCS source lockdown (AQU-615)", () => {
     // dropped every commit — the user typed into a void.
     const project = withRole(ROLE.PROJECT_LEAD)
     const view = renderTable(project)
-    const pencil = await screen.findByRole("button", { name: "Edit source text" })
+    const pencil = await openCellMenu()
     fireEvent.click(pencil)
     await screen.findByRole("textbox", { name: "Edit source text" })
 

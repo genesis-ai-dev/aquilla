@@ -2,7 +2,7 @@
 // hit auth-worker on every mount; a 404 surfaces as `not-found`.
 
 import { describe, it, expect, vi, afterEach } from "vitest"
-import { renderHook, waitFor } from "@testing-library/react"
+import { act, renderHook, waitFor } from "@testing-library/react"
 import { useProject } from "./useProject"
 import { getProject } from "@/lib/store/project-index"
 
@@ -27,9 +27,17 @@ vi.mock("@/hooks/useProjectSettings", () => ({
   useProjectSettings: () => ({ settings: {}, version: 0 }),
 }))
 
+const projectRecordListeners: Array<(projectId: string) => void> = []
+
 vi.mock("@/lib/store/project-index", () => ({
   getProject: vi.fn(async () => undefined),
-  subscribeProjectRecords: vi.fn(() => () => {}),
+  subscribeProjectRecords: vi.fn((listener: (projectId: string) => void) => {
+    projectRecordListeners.push(listener)
+    return () => {
+      const i = projectRecordListeners.indexOf(listener)
+      if (i >= 0) projectRecordListeners.splice(i, 1)
+    }
+  }),
 }))
 
 const originalFetch = global.fetch
@@ -37,6 +45,7 @@ const mockedGetProject = vi.mocked(getProject)
 
 afterEach(() => {
   global.fetch = originalFetch
+  projectRecordListeners.length = 0
   vi.restoreAllMocks()
 })
 
@@ -148,6 +157,7 @@ describe("useProject — thin-client fetch (Phase 2c-β)", () => {
       createdAt: "2026-06-14T00:00:00Z",
       files: [],
       members: [],
+      aiProviderChosen: true,
       completionSettings: {
         provider: "custom",
         endpoint: "https://openrouter.ai/api/v1",
@@ -166,6 +176,66 @@ describe("useProject — thin-client fetch (Phase 2c-β)", () => {
       endpoint: "https://openrouter.ai/api/v1",
       model: "google/gemma-4-31b-it:free",
     })
+    expect(result.current.project?.aiProviderChosen).toBe(true)
+  })
+
+  it("re-overlays device-local completion settings when another route saves them", async () => {
+    global.fetch = vi.fn<typeof fetch>(async (input) => {
+      const url = typeof input === "string" ? input : (input as Request).url
+      if (url === `${API}/api/v2/projects/p-1`) {
+        return new Response(
+          JSON.stringify({
+            id: "p-1",
+            name: "Alpha",
+            gitlabProjectId: null,
+            archivedAt: null,
+            archivedBy: null,
+            role: { level: 700, name: "owner", source: "creator" },
+            files: [],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        )
+      }
+      throw new Error(`unexpected fetch: ${url}`)
+    }) as unknown as typeof fetch
+    mockedGetProject.mockResolvedValue(undefined)
+
+    const { result } = renderHook(() => useProject("p-1"))
+    await waitFor(() => expect(result.current.status).toBe("ready"))
+    expect(result.current.project?.completionSettings).toBeUndefined()
+
+    mockedGetProject.mockResolvedValue({
+      id: "p-1",
+      name: "Alpha",
+      sourceLanguage: "",
+      targetLanguage: "",
+      createdAt: "2026-06-14T00:00:00Z",
+      files: [],
+      members: [],
+      aiProviderChosen: true,
+      completionSettings: {
+        provider: "custom",
+        endpoint: "https://openrouter.ai/api/v1",
+        apiKey: "sk-or-user",
+        model: "",
+        maxTokens: 512,
+        temperature: 0.3,
+        systemPrompt: "",
+        llmHealthPenalty: 0.1,
+      },
+    })
+    act(() => {
+      for (const listener of projectRecordListeners) listener("p-1")
+    })
+
+    await waitFor(() => {
+      expect(result.current.project?.completionSettings).toMatchObject({
+        provider: "custom",
+        endpoint: "https://openrouter.ai/api/v1",
+        apiKey: "sk-or-user",
+      })
+    })
+    expect(result.current.project?.aiProviderChosen).toBe(true)
   })
 
   it("overlays a device-local Autopilot opt-out even without completion settings", async () => {

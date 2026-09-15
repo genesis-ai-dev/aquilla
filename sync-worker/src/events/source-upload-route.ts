@@ -185,7 +185,8 @@ async function handleSourceBindingRequest(
          updated_at = now()`,
     ).bind(crypto.randomUUID(), projectId, artifactId, fileId, bindingRole, targetLang, memberPath, profileId, profileVersion, fidelity).run()
   } catch (error) {
-    return withCors(Response.json({ error: `Artifact binding failed: ${String(error)}` }, { status: 500 }), request)
+    console.error("[source-upload] artifact binding failed:", error)
+    return withCors(Response.json({ error: "Artifact binding failed" }, { status: 500 }), request)
   }
   return withCors(Response.json({ ok: true, artifactId, fileId }), request)
 }
@@ -389,8 +390,9 @@ export async function handleSourceUploadRequest(
       },
     )
   } catch (error) {
+    console.error("[source-upload] storage upload failed:", error)
     return withCors(
-      new Response(`source storage upload failed: ${error instanceof Error ? error.message : String(error)}`, { status: 502 }),
+      new Response("source storage upload failed", { status: 502 }),
       request,
     )
   }

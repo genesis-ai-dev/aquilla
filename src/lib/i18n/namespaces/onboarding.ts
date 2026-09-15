@@ -17,6 +17,31 @@ import { defineNamespace, plural } from "./types"
  */
 export const onboarding = defineNamespace({
   keys: {
+    "onboarding.connect.title": "Connect your agent",
+    "onboarding.connect.description": "Approve access to one Aquilla project. Your agent receives its credential directly.",
+    "onboarding.connect.approved": "Access approved. Return to your agent to finish connecting. You can revoke access at any time.",
+    "onboarding.connect.denied": "Access denied. Your agent receives no credential.",
+    "onboarding.connect.manage": "Manage agent access",
+    "onboarding.connect.account": "Signed in as {username}",
+    "onboarding.connect.code": "Connection code",
+    "onboarding.connect.review": "Review request",
+    "onboarding.connect.agent": "Agent name: {name}",
+    "onboarding.connect.unverified": "This name is supplied by the agent and is not verified. Only approve a request you just started.",
+    "onboarding.connect.ask": "Read project data and stage changes. Applying changes requires your separate approval.",
+    "onboarding.connect.act": "Read project data and apply changes immediately, without further approval.",
+    "onboarding.connect.expiry": "Access expires after 30 days. You can revoke it from API tokens at any time.",
+    "onboarding.connect.project": "Project",
+    "onboarding.connect.choose": "Choose a project",
+    "onboarding.connect.noProjects": "You do not have the required access to an available project.",
+    "onboarding.connect.confirm": "I started this request and the code {code} matches the code shown by my agent.",
+    "onboarding.connect.approve": "Authorize agent",
+    "onboarding.connect.deny": "Deny access",
+    "onboarding.connect.error": "Unable to complete this request. It may have expired, already been used, or your access may have changed. Check your connection and try again.",
+    "onboarding.connect.setup": "Connect an AI agent",
+    "onboarding.connect.setupBody": "Copy these instructions to your agent. Approve its request in Aquilla without sharing a token or setting an environment variable.",
+    "onboarding.connect.copy": "Copy connection instructions",
+    "onboarding.connect.copyError": "Could not copy. Select and copy the instructions below.",
+
     // — Shared small words reused across this namespace's own surfaces ———————
     "onboarding.common.continue": "Continue",
     "onboarding.common.skipForNow": "Skip for now",
@@ -361,7 +386,7 @@ export const onboarding = defineNamespace({
       "Follow your system appearance or choose a theme for this device.",
     "onboarding.preferences.fontSize.groupLabel": "App font size",
     "onboarding.preferences.fontSize.rowDescription":
-      "The overall size of menus, sidebars, and settings. Editor cell text is set separately in a file's View settings.",
+      "The overall size of menus, sidebars, settings, and editor cell text. A file's View settings can override the cell size; reset there to follow this size again.",
     "onboarding.preferences.fontSize.small": "Small",
     "onboarding.preferences.fontSize.default": "Default",
     "onboarding.preferences.fontSize.large": "Large",

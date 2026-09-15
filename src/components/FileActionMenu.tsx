@@ -17,6 +17,8 @@ interface FileActionMenuProps {
   /** Optional. Present only for file types we can export back to source
    *  format with round-trip fidelity (USFM today). */
   onExportSource?: () => void
+  /** AQU-656: mint a token on click, then download the imported bytes. */
+  onDownloadOriginal?: () => void
   /** Opens Assign work scoped to this file. Hidden when the caller
    *  cannot open the assign UI. */
   onAssignWork?: () => void
@@ -33,7 +35,7 @@ interface FileActionMenuProps {
  * once per way of opening it (row right-click, ⋯ button).
  */
 export function FileActionMenu({
-  onShowDetails, onRename, onMove, onExport, onExportSource, onAssignWork,
+  onShowDetails, onRename, onMove, onExport, onExportSource, onDownloadOriginal, onAssignWork,
   onSegmentation, onDelete,
 }: FileActionMenuProps) {
   const t = useT()
@@ -69,6 +71,11 @@ export function FileActionMenu({
         {onExportSource && (
           <MenuItem onClick={onExportSource}>
             <Download /> {t("fileDetails.exportSource")}
+          </MenuItem>
+        )}
+        {onDownloadOriginal && (
+          <MenuItem onClick={onDownloadOriginal}>
+            <Download /> {t("fileDetails.downloadOriginal")}
           </MenuItem>
         )}
       </MenuGroup>

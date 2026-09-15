@@ -7,6 +7,10 @@ const CORE_SENTINELS = [
 
 const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
   {
+    source: /^(?:auth-worker\/.*agent-connect|src\/.*(?:ConnectAgent|agent-connect|ApiTokensSection)|db\/.*agent_authorizations)/i,
+    sentinels: ["e2e/specs/agent/agent-connection.smoke.spec.ts"],
+  },
+  {
     source: /^(?:auth-worker\/|src\/(?:pages|components|lib|hooks|context)\/.*(?:auth|account|login|signup|password|session|credential|outbox))/i,
     sentinels: [
       "e2e/specs/auth/login-account-setup-status.smoke.spec.ts",
@@ -21,7 +25,7 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
   {
     // AQU-1169: app-wide font size is device-scoped like theme; the persist-reload
     // journey is the cross-layer contract (boot script + Preferences control).
-    source: /^(?:src\/(?:pages\/Preferences|branding\/FontSize)|index\.html$)/,
+    source: /^(?:src\/(?:pages\/Preferences|branding\/FontSize|lib\/store\/file-view-prefs)|index\.html$)/,
     sentinels: ["e2e/specs/orgs/preferences-persist-reload.smoke.spec.ts"],
   },
   {
@@ -69,6 +73,10 @@ const DOMAIN_RULES: Array<{ source: RegExp; sentinels: string[] }> = [
     // rather than falling through to the generic shared-runtime one.
     source: /^(?:src\/(?:components|lib)\/(?:editor|cell|workspace-actions|import|export|parsers|biblica|audio|voice|video|search|sidebar|timeline|storage)|packages\/idml)/i,
     sentinels: ["e2e/specs/editor/import-and-edit.smoke.spec.ts"],
+  },
+  {
+    source: /(?:original-download|originals-bundle|file-original-download|useOriginalSourceFlags|original-source)/i,
+    sentinels: ["e2e/specs/editor/export.smoke.spec.ts"],
   },
 ]
 

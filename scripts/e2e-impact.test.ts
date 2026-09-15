@@ -82,6 +82,7 @@ describe("changed-file E2E impact selection", () => {
     for (const file of [
       "src/branding/FontSize.tsx",
       "src/pages/Preferences.tsx",
+      "src/lib/store/file-view-prefs.ts",
       "index.html",
     ]) {
       expect(selectAffectedE2E([file], specs).specs, file).toContain(
@@ -106,6 +107,17 @@ describe("changed-file E2E impact selection", () => {
       "e2e/specs/editor/workspace-actions-dropdown.smoke.spec.ts",
       "e2e/specs/projects/route-health.smoke.spec.ts",
     ])
+  })
+
+  it("maps original-source download to the export journey", () => {
+    const available = [...specs, "e2e/specs/editor/export.smoke.spec.ts"]
+    expect(selectAffectedE2E(["src/lib/sync/original-download.ts"], available).specs).toContain(
+      "e2e/specs/editor/export.smoke.spec.ts",
+    )
+    expect(selectAffectedE2E(
+      ["sync-worker/src/events/original-download-route.ts"],
+      available,
+    ).specs).toContain("e2e/specs/editor/export.smoke.spec.ts")
   })
 
   it("does not boot a browser for docs and unit-test-only changes", () => {

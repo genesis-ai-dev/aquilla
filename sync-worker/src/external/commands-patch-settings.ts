@@ -32,6 +32,7 @@ import {
   normalizeSettings,
   patchProjectSettingsShared,
 } from '../../../db/shared/projects'
+import { validateSettingsKeyValue } from '../../../db/shared/project-settings-keys'
 import { ROLE } from '../events/role-policy'
 
 /** One top-level settings key replace. `value` is any JSON value (null stores
@@ -117,6 +118,18 @@ export function validatePatchSettingsCommand(
     if (!('value' in op)) {
       issues.push({ index, message: `PatchSettings.ops[${opIndex}].value is required (null to store null)` })
       return null
+    }
+    // AQU-1224: a key the settings schema doesn't carry is a TYPO, not a new
+    // setting — reject it here so nothing reaches the human approval queue,
+    // and name the key so the caller can correct it (describe_command lists
+    // the legal ones). Policy keys skip the VALUE check so they always resolve
+    // to the permission_denied prepare emits for them, never a type complaint.
+    if (!POLICY_KEY_SET.has(op.key)) {
+      const problem = validateSettingsKeyValue(op.key, op.value)
+      if (problem) {
+        issues.push({ index, message: `PatchSettings.ops[${opIndex}]: ${problem}` })
+        return null
+      }
     }
     // A duplicate key is a caller bug (later would silently clobber earlier),
     // unlike SetTranslation's loop-generated cell batches — reject, don't warn.

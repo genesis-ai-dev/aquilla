@@ -52,6 +52,12 @@ export interface Env {
   ALGORITHM: string
   ACCESS_TOKEN_EXPIRE_MINUTES: string
 
+  /** [Pen test] Auth & session mgmt (2026-09-14): absolute cap, in days, on a
+   *  session's total age (from `sst`/original login), independent of how many
+   *  times it's been refreshed past its half-life. Defaults to 90 — see
+   *  middleware/auth.ts's `resolveSession`. */
+  MAX_SESSION_AGE_DAYS?: string
+
   // Sync-token signing, and — until ADMIN_SECRET is provisioned on both
   // workers — admin auth to aquilla-sync-worker. Shared between identity and
   // the sync worker.

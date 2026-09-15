@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url"
 import process from "node:process"
 
 type Target = "production" | "dev"
-type Command = "status" | "apply" | "baseline" | "backfill-progress" | "backfill-activity"
+type Command = "status" | "apply" | "baseline" | "backfill-progress" | "backfill-activity" | "backfill-lanes"
 type PgKey = "HOST" | "DB" | "ROLE" | "PASSWORD"
 
 const DEFAULT_PROJECT_ID = "sweet-paper-88472094"
@@ -34,7 +34,7 @@ const DEFAULTS: Partial<Record<PgKey, string>> = {
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 
 function usage(): never {
-  console.error("usage: tsx scripts/neon-target.ts <production|dev> <status|apply|baseline|backfill-progress|backfill-activity>")
+  console.error("usage: tsx scripts/neon-target.ts <production|dev> <status|apply|baseline|backfill-progress|backfill-activity|backfill-lanes>")
   process.exit(1)
 }
 
@@ -46,7 +46,7 @@ function parseTarget(value: string | undefined): Target {
 }
 
 function parseCommand(value: string | undefined): Command {
-  if (value === "status" || value === "apply" || value === "baseline" || value === "backfill-progress" || value === "backfill-activity") return value
+  if (value === "status" || value === "apply" || value === "baseline" || value === "backfill-progress" || value === "backfill-activity" || value === "backfill-lanes") return value
   usage()
 }
 
@@ -228,8 +228,12 @@ async function main() {
     ? "scripts/neon-backfill-progress.ts"
     : command === "backfill-activity"
       ? "scripts/neon-backfill-activity.ts"
-      : "scripts/neon-migrate.ts"
-  const args = command.startsWith("backfill-") ? [script] : [script, command]
+      : command === "backfill-lanes"
+        ? "scripts/neon-backfill-lanes.ts"
+        : "scripts/neon-migrate.ts"
+  // Forward any extra flags (e.g. --apply, --project, --limit) to backfill scripts.
+  const passthrough = process.argv.slice(4)
+  const args = command.startsWith("backfill-") ? [script, ...passthrough] : [script, command]
   process.exit(await run("tsx", args, env))
 }
 

@@ -54,6 +54,16 @@ describe("FileActionMenu — export and assign work", () => {
     expect(screen.queryByRole("menuitem", { name: /assign work/i })).toBeNull()
   })
 
+  it("shows Download original when onDownloadOriginal is provided", () => {
+    renderMenu({ onDownloadOriginal: vi.fn() })
+    expect(screen.getByRole("menuitem", { name: /download original/i })).toBeTruthy()
+  })
+
+  it("hides Download original when onDownloadOriginal is omitted", () => {
+    renderMenu()
+    expect(screen.queryByRole("menuitem", { name: /download original/i })).toBeNull()
+  })
+
   it("shows Assign work above Export when both callbacks are provided", () => {
     renderMenu({ onExport: vi.fn(), onAssignWork: vi.fn() })
     const assign = screen.getByRole("menuitem", { name: /assign work/i })

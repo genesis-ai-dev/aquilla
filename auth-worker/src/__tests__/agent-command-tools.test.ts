@@ -116,6 +116,49 @@ describe("propose_command — static pre-validation (no HTTP)", () => {
     expect(out).toContain("SYNC_WORKER_URL")
   })
 
+  // AQU-1179: the staged-changeset line is what the person reads before
+  // applying the plan, so it must carry the server's plain-language effect
+  // label rather than the raw event kind. Older summaries have no label and
+  // keep the `count kind` rendering.
+  it("renders an EmitEvents summary from its plain-language labels", async () => {
+    await seedUser(1, "alice")
+    await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, created_by) VALUES ('p1', 'P', 1)").run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO project_members (project_id, user_id, role_level) VALUES ('p1', 1, 500)",
+    ).run()
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          changeset: {
+            id: "cs-1",
+            status: "staged",
+            digest: "sha256:abc",
+            summary: {
+              events: [
+                { kind: "term.create", count: 2, testimony: false, label: "Add 2 glossary terms" },
+                { kind: "cell.validate", count: 1, testimony: true, label: "Mark a translation as validated" },
+                { kind: "comment.create", count: 4 },
+              ],
+              warnings: [],
+            },
+          },
+        }),
+        { status: 200 },
+      ),
+    )
+    const ctx = ctxFor(500)
+    const out = await proposeCommandTool(
+      { commands: [{ kind: "EmitEvents", events: [{ kind: "term.create" }] }] },
+      ctx,
+    )
+    expect(out).toContain("Add 2 glossary terms")
+    // Testimony marking survives the switch to labels.
+    expect(out).toContain("Mark a translation as validated (testimony)")
+    // No label on the third entry → the old rendering, not a blank.
+    expect(out).toContain("4 comment.create")
+    expect(out).not.toContain("2 term.create")
+  })
+
   it("maps a mint denial to a readable authorize error (user without access)", async () => {
     // Real DB path: the project exists but alice has no grant → mint no_access.
     await seedUser(1, "alice")

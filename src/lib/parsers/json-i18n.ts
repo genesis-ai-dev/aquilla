@@ -1,4 +1,5 @@
 import { v4 as uuid } from "uuid"
+import { sanitizeThrownDetail } from "./parse-error-detail"
 import type { TranslatableString } from "./core-types"
 import type { ExportCellFields } from "./core-types"
 
@@ -76,8 +77,10 @@ function parseJson(content: string, label: string): unknown {
   try {
     return JSON.parse(content)
   } catch (err) {
-    const detail = err instanceof Error ? err.message : String(err)
-    throw new Error(`Invalid JSON in ${label}: ${detail}`)
+    // OPS-30: V8 quotes a slice of the document in its parse message, and this
+    // message is exported as IMPORT_FAILED.error_message — strip the content,
+    // keep the token/position detail.
+    throw new Error(`Invalid JSON in ${label}: ${sanitizeThrownDetail(err)}`)
   }
 }
 

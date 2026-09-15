@@ -132,9 +132,8 @@ sourceLinking.post(
         .bind(sourceProjectId, mode, consumes, gate, projectId)
         .run()
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
       console.error("link-source UPDATE failed:", err)
-      return c.json({ error: `link failed: ${message}` }, 500)
+      return c.json({ error: "link failed" }, 500)
     }
 
     // Emit the durable event. 1A's projector consumes this kind.
@@ -231,9 +230,8 @@ sourceLinking.post("/:projectId/detach-source", authMiddleware, async (c) => {
       .bind(projectId)
       .run()
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
     console.error("detach-source UPDATE failed:", err)
-    return c.json({ error: `detach failed: ${message}` }, 500)
+    return c.json({ error: "detach failed" }, 500)
   }
 
   // 1) Durable link-source event with null payload.
@@ -311,9 +309,8 @@ sourceLinking.delete("/:projectId", authMiddleware, async (c) => {
       .bind(projectId)
       .run()
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
     console.error("project DELETE failed:", err)
-    return c.json({ error: `delete failed: ${message}` }, 500)
+    return c.json({ error: "delete failed" }, 500)
   }
 
   return c.json({ ok: true, projectId })

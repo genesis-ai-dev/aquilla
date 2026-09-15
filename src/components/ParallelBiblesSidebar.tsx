@@ -21,6 +21,7 @@ import {
 import { cn } from "@/lib/utils"
 import { BookMarked, Plus, Search, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { EmptyState } from "@/components/ui/empty"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { Spinner } from "@/components/ui/spinner"
 import { RightSidebarPanel } from "./RightSidebarPanel"
@@ -288,9 +289,12 @@ export function ParallelBiblesSidebar({ trackedRef, open, onToggle, className }:
       {/* Body */}
       <div className="flex-1 overflow-y-auto">
         {!tracked ? (
-          <p className="p-4 text-xs text-muted-foreground">
-            {t("editor.bibles.scrollHint")}
-          </p>
+          <EmptyState
+            variant="inline"
+            icon={BookMarked}
+            title={t("editor.bibles.noReferences")}
+            description={t("editor.bibles.noReferencesDescription")}
+          />
         ) : pinned.length === 0 && !pickerOpen ? (
           <p className="p-4 text-xs text-muted-foreground">
             {t("editor.bibles.noVersions")}

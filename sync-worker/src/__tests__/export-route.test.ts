@@ -62,34 +62,34 @@ function makeStubDb(
   } = {},
 ): ExportRouteEnv["AQUILLA_PG"] {
   const { orgSettings, blob = null, cells = [], cellBinds } = options
-  // Call counter per `prepare` invocation to route to the right row.
-  const calls: unknown[] = []
 
-  // Query sequence in handleExportSourceRequest:
-  //   1. resolveExportFloor → projects (org_id)
-  //   2. resolveExportFloor → org_settings (settings)
-  //   3. file_source_blobs (blob)
-  //   4. files (name) — only if blob found
-  //   5. cells JOIN (all rows)
-  const responses: unknown[] = [
-    { org_id: 1 },                                                // 1. project row
-    orgSettings != null ? { settings: orgSettings } : null,       // 2. org_settings row
-    blob,                                                          // 3. blob row
-    { name: "test.sfm" },                                         // 4. file meta
-  ]
-  let idx = 0
-
+  // ROUTES ON SQL TEXT, NOT ON CALL ORDER.
+  //
+  // This stub used to hand back `responses[idx++]`, with a comment naming the
+  // translations JOIN as "the 5th prepare call". That made every test in this
+  // file depend on the exact number of queries the route runs, so AQU-1068's
+  // additions-and-removals lookups broke all of them at once while changing
+  // nothing they were testing. Matching on the SQL is both more honest about
+  // what each response IS and immune to a new query being added.
   return {
     prepare: (sql: string) => {
-      const row = responses[idx++] ?? null
-      calls.push(row)
+      const row =
+        sql.includes("FROM projects") ? { org_id: 1 }
+        : sql.includes("FROM org_settings") ? (orgSettings != null ? { settings: orgSettings } : null)
+        : sql.includes("FROM file_source_blobs") ? blob
+        : sql.includes("FROM files") ? { name: "test.sfm" }
+        : null
+      // The translations JOIN is the only query whose ROWS these tests seed.
+      // Everything else AQU-1068 added — added cells, their anchors, the
+      // removed-cell lookups — correctly finds nothing here, which is the
+      // shape of a file nobody restructured.
+      const isTranslationsJoin = sql.includes("FROM cells t")
       return {
         bind: (...args: unknown[]) => {
-          if (sql.includes("FROM cells t")) cellBinds?.push(args)
+          if (isTranslationsJoin) cellBinds?.push(args)
           return {
-          first: async () => row,
-          // 5th call is the cells JOIN — return the seeded rows
-          all: async () => ({ results: cells }),
+            first: async () => row,
+            all: async () => ({ results: isTranslationsJoin ? cells : [] }),
           }
         },
       }
@@ -274,6 +274,57 @@ describe("X-Usfm-Lossy-Verse-Count header (AQU-276)", () => {
     const res = await handleExportSourceRequest(exportReq(await makeToken(600)), env)
     expect(res?.status).toBe(200)
     expect(res?.headers.get("X-Usfm-Lossy-Verse-Count")).toBe("0")
+  })
+})
+
+describe("?mode=raw — byte-exact original USFM upload", () => {
+  const rawReq = (token: string): Request =>
+    new Request("https://w/api/v1/projects/p1/files/f1/source?mode=raw", {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+
+  it("returns raw_source verbatim with X-Export-Mode: raw-original — translations are NOT injected", async () => {
+    const env: ExportRouteEnv = {
+      SYNC_SECRET_KEY: SECRET,
+      AQUILLA_PG: makeStubDb({
+        blob: { format: "usfm", raw_source: PLAIN_USFM },
+        // Translated cells exist — raw mode must ignore them entirely.
+        cells: [{ canonical_ref: "GEN 1:1", value: "Au commencement." }],
+      }),
+      SNAPSHOTS: makeStubBucket(),
+    }
+    const res = await handleExportSourceRequest(rawReq(await makeToken(600)), env)
+    expect(res?.status).toBe(200)
+    expect(await res?.text()).toBe(PLAIN_USFM)
+    expect(res?.headers.get("X-Export-Mode")).toBe("raw-original")
+    // Raw mode never runs the serializer, so the lossy count doesn't apply.
+    expect(res?.headers.get("X-Usfm-Lossy-Verse-Count")).toBeNull()
+  })
+
+  it("resolves R2-stored originals byte-exactly when raw_source moved to R2", async () => {
+    const bucket = makeStubBucket()
+    await bucket.put("sources/p1/f1", new TextEncoder().encode(PLAIN_USFM))
+    const env: ExportRouteEnv = {
+      SYNC_SECRET_KEY: SECRET,
+      AQUILLA_PG: makeStubDb({
+        blob: { format: "usfm", raw_source: null, r2_key: "sources/p1/f1" },
+      }),
+      SNAPSHOTS: bucket,
+    }
+    const res = await handleExportSourceRequest(rawReq(await makeToken(600)), env)
+    expect(res?.status).toBe(200)
+    expect(await res?.text()).toBe(PLAIN_USFM)
+    expect(res?.headers.get("X-Export-Mode")).toBe("raw-original")
+  })
+
+  it("keeps the export role floor: a viewer (100) is still 403'd in raw mode", async () => {
+    const env: ExportRouteEnv = {
+      SYNC_SECRET_KEY: SECRET,
+      AQUILLA_PG: makeStubDb({ blob: { format: "usfm", raw_source: PLAIN_USFM } }),
+      SNAPSHOTS: makeStubBucket(),
+    }
+    const res = await handleExportSourceRequest(rawReq(await makeToken(100)), env)
+    expect(res?.status).toBe(403)
   })
 })
 

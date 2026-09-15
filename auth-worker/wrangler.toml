@@ -123,7 +123,9 @@ mode = "smart"
 # NOTE: like placement/observability, [triggers] is NOT inherited by env
 # blocks — keep the env-block copies below in sync.
 [triggers]
-crons = ["*/5 * * * *"]
+# Second/third entries: retention recap emails to ADMIN_EMAILS — weekly Monday
+# 14:00 UTC and monthly on the 1st (src/lib/retention-report.ts). Production only.
+crons = ["*/5 * * * *", "0 14 * * 1", "0 14 1 * *"]
 
 [vars]
 ALGORITHM = "HS256"
@@ -203,7 +205,9 @@ mode = "smart"
 
 # See top-level [triggers] — env blocks don't inherit crons either.
 [env.production.triggers]
-crons = ["*/5 * * * *"]
+# Second/third entries: retention recap emails to ADMIN_EMAILS — weekly Monday
+# 14:00 UTC and monthly on the 1st (src/lib/retention-report.ts). Production only.
+crons = ["*/5 * * * *", "0 14 * * 1", "0 14 1 * *"]
 
 # Like placement, observability is NOT inherited by env blocks — without this,
 # production has Workers Logs disabled and 4xx/5xx are invisible.
@@ -253,9 +257,9 @@ ADMIN_REQUIRE_ELEVATION = "true"
 # Enables 4xx/5xx log shipping to PostHog Logs (src/posthog-logs.ts).
 POSTHOG_KEY = "phc_oTksJRNEdLEaLD4wmdd2XcR4xaR4n52eA5VGDytW55Ln"
 # Monday.com integration (see top-level [vars] note).
-MONDAY_CLIENT_ID = ""
-MONDAY_APP_ID = ""
-MONDAY_APP_SLUG = ""
+MONDAY_CLIENT_ID = "552d390bfdeba3893d071979380eff09"
+MONDAY_APP_ID = "11760401"
+MONDAY_APP_SLUG = "frontierrnd-company_aquilla-v1"
 MONDAY_REDIRECT_URI = "https://aquilla.app/oauth/callback"
 # Stripe Field Plan: set STRIPE_PRICE_FIELD / STRIPE_PRICE_ADDON here after
 # live (or test) prices are provisioned. Checkout 503s until they exist.
@@ -281,7 +285,9 @@ mode = "smart"
 
 # See top-level [triggers] — env blocks don't inherit crons either.
 [env.development.triggers]
-crons = ["*/5 * * * *"]
+# Second/third entries: retention recap emails to ADMIN_EMAILS — weekly Monday
+# 14:00 UTC and monthly on the 1st (src/lib/retention-report.ts). Production only.
+crons = ["*/5 * * * *", "0 14 * * 1", "0 14 1 * *"]
 
 # Dev runs on Neon (Postgres) to mirror prod. index.ts builds AQUILLA_PG
 # from the Postgres shim over Hyperdrive → the Neon `dev` branch.
@@ -336,10 +342,10 @@ GITLAB_URL = "https://git.genesisrnd.com"
 ADMIN_EMAILS = "ryderwishart@gmail.com,danieljlosey@gmail.com,the.disciplexiii@gmail.com,joel@frontierrnd.com,jade@frontierrnd.com,sampetetc@gmail.com"
 ADMIN_REQUIRE_ELEVATION = "true"
 # Monday.com integration (see top-level [vars] note).
-MONDAY_CLIENT_ID = ""
-MONDAY_APP_ID = ""
-MONDAY_APP_SLUG = ""
-MONDAY_REDIRECT_URI = "https://aquilla.app/oauth/callback"
+MONDAY_CLIENT_ID = "552d390bfdeba3893d071979380eff09"
+MONDAY_APP_ID = "11760401"
+MONDAY_APP_SLUG = "frontierrnd-company_aquilla-v1"
+MONDAY_REDIRECT_URI = "https://dev.aquilla.app/oauth/callback"
 # Stripe Field Plan: same as production — leave unset until prices + secrets
 # are provisioned on this Worker. Local/e2e use the top-level test catalog.
 

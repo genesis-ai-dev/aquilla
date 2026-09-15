@@ -69,6 +69,51 @@ describe("scripture references", () => {
     })).toBe("31")
   })
 
+  // AQU-1068 review round. Matthew, via Ryder: adding a cell must not renumber
+  // the existing ones. This is the DISPLAY half of that answer (the store half
+  // lives in useActiveCellStore.insertPlan.test.ts): a number is read off the
+  // cell's own reference or its import manifest, never off its position, so a
+  // row inserted anywhere leaves every label around it untouched.
+  it("keeps every imported label unchanged when a cell is inserted among them", () => {
+    const label = (row: { canonicalRef: string | null; displayLabel?: string | null }, rowIndex: number) =>
+      cellNumberLabel({
+        lineNumbersEnabled: true,
+        cellType: "verse",
+        scriptureNumbering: true,
+        rowIndex,
+        ...row,
+      })
+
+    const before = [
+      { canonicalRef: "GEN 1:1" },
+      { canonicalRef: "GEN 1:2" },
+      { canonicalRef: "GEN 1:3" },
+    ]
+    // The same file with a hand-added cell dropped in the middle. It carries
+    // no reference and no import manifest, which is exactly why it takes no
+    // number and steals none.
+    const after = [
+      { canonicalRef: "GEN 1:1" },
+      { canonicalRef: "GEN 1:2" },
+      { canonicalRef: null },
+      { canonicalRef: "GEN 1:3" },
+    ]
+
+    expect(before.map(label)).toEqual(["1", "2", "3"])
+    expect(after.map(label)).toEqual(["1", "2", null, "3"])
+  })
+
+  it("keeps a manifest displayLabel unchanged when a cell is inserted above it", () => {
+    // A DOCX/USFM import owns its own presentation identity, so its label is
+    // position-independent by construction — the row index moves, the label
+    // does not.
+    const cell = { canonicalRef: null, displayLabel: "12" }
+    expect(cellNumberLabel({ lineNumbersEnabled: true, cellType: "text", scriptureNumbering: false, rowIndex: 11, ...cell }))
+      .toBe("12")
+    expect(cellNumberLabel({ lineNumbersEnabled: true, cellType: "text", scriptureNumbering: false, rowIndex: 12, ...cell }))
+      .toBe("12")
+  })
+
   it("retains ordinal labels for ordinary non-scripture cells", () => {
     expect(cellNumberLabel({
       lineNumbersEnabled: true,

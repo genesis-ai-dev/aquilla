@@ -114,9 +114,11 @@ export function LanguagesSection({
   // not an error unless it is already in targetLanes.
   const excludeFromSuggestions = [defaultTargetLanguage, ...targetLanes]
 
-  async function handleAdd() {
+  // `candidate` lets the Enter-on-a-suggestion path (AQU-1116) add the match
+  // straight away — `setNewLane` has not landed in state yet at that point.
+  async function handleAdd(candidate: string = newLane) {
     if (!canEdit) return
-    const trimmed = normalizeLane(newLane)
+    const trimmed = normalizeLane(candidate)
     // Dedupe against every registered lane (active + archived) so a tag can't
     // be re-added while an archived copy still holds its cell data.
     const validationError = validateNewLane(trimmed, targetLanes, t)
@@ -305,6 +307,14 @@ export function LanguagesSection({
                 onValueChange={(next) => {
                   setNewLane(next)
                   setAddError(null)
+                }}
+                // AQU-1116: Enter on the highlighted match adds that lane, the
+                // same as Enter on free text adds what was typed. Clicking a
+                // row still only fills the field.
+                onEnterSelect={(name) => {
+                  setNewLane(name)
+                  setAddError(null)
+                  void handleAdd(name)
                 }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {

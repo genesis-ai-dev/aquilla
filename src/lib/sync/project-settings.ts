@@ -76,6 +76,30 @@ export interface ProjectWideSettings {
    */
   allowTrackEditing?: boolean
   /**
+   * AQU-1246: does this project get the experimental Autopilot surface at all?
+   *
+   * OFF unless an owner or lead explicitly turns it on, and OFF means the
+   * surfaces are ABSENT — no pill, no overview panel, no settings entry —
+   * rather than present-and-disabled. Autopilot is an experiment; before this
+   * key the only gate was a device-local switch every member could flip in one
+   * click, so the feature was effectively on-by-one-click for every project in
+   * production (Joel, 2026-09-10).
+   *
+   * This is the ONE key below the maintainer settings floor: a patch that
+   * changes only this is admitted at project_lead(500)+, mirroring the
+   * `terminology` carve-out. That is deliberate — deciding whether your own
+   * project may try an experiment is a lead's call, and it hands them nothing
+   * else (AI config, languages, health thresholds all stay maintainer-gated).
+   * The server re-derives the same "only this key changed" test and is
+   * authoritative (auth-worker/src/routes/project-settings.ts).
+   *
+   * Turning it back OFF hides the surfaces but does not stop a run — the
+   * auth-worker cron owns run lifecycle, and stopping work is what Stop is
+   * for. Projects already using Autopilot via the legacy device-local flag
+   * keep it; see `isAutopilotVisible` in src/lib/features/flags.ts.
+   */
+  autopilotEnabled?: boolean
+  /**
    * AQU-186: minimum role level required to trigger a harmonization sweep on
    * this project. Default (absent) = project_lead (500). Configurable up to
    * maintainer (600); lowering below project_lead is not allowed (hard floor).

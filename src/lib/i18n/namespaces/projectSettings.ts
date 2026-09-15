@@ -417,6 +417,7 @@ export const projectSettings = defineNamespace({
       other: "Connected — {count} models",
     }),
     "projectSettings.advancedLlm.endpointRequiredError": "Endpoint URL is required",
+    "projectSettings.advancedLlm.apiKeyRequiredError": "API key is required for this endpoint",
     "projectSettings.advancedLlm.connectionFailedError": "Connection failed",
     "projectSettings.loadingLabel": "Loading project settings",
     "projectSettings.advancedLlm.apiKeyLabelRequired": "API key *",
@@ -648,6 +649,9 @@ export const projectSettings = defineNamespace({
     "projectSettings.monday.structureStaleWarning": "Board structure changed — review the mapping below.",
     "projectSettings.monday.linkedBoardPrefix": "Linked board:",
     "projectSettings.monday.oneItemPerLabel": "One item per {granularity}.",
+    "projectSettings.monday.lastPushOk": "Last push {date} — ok.",
+    "projectSettings.monday.lastPushFailed": "Last push {date} — failed.",
+    "projectSettings.monday.notPushedYet": "Not pushed yet.",
     "projectSettings.monday.syncToggleLabel": "Sync",
     "projectSettings.monday.syncNowButton": "Sync now",
     "projectSettings.monday.removeBoardLinkAriaLabel": "Remove board link",
@@ -1241,6 +1245,27 @@ export const projectSettings = defineNamespace({
         placeholders: {
           granularity: "The literal, untranslated word 'file' or 'project' (data) — matches the value stored on the link's itemGranularity setting, not a separately translated enum.",
         },
+      },
+      "projectSettings.monday.lastPushOk": {
+        description:
+          "Status sentence under the linked-board row after a successful Monday.com " +
+          "progress push; {date} is a hover-dated relative timestamp.",
+        placeholders: {
+          date: "A DateTooltip element rendering the last push time (data, not translated).",
+        },
+      },
+      "projectSettings.monday.lastPushFailed": {
+        description:
+          "Status sentence under the linked-board row after the last Monday.com " +
+          "progress push failed; a red error line follows it.",
+        placeholders: {
+          date: "A DateTooltip element rendering the last push time (data, not translated).",
+        },
+      },
+      "projectSettings.monday.notPushedYet": {
+        description:
+          "Status sentence under the linked-board row when no Monday.com progress " +
+          "push has happened yet for this project.",
       },
       "projectSettings.monday.boardSelectAriaLabel": {
         description:

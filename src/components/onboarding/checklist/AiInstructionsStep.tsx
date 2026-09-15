@@ -19,7 +19,7 @@ export function AiInstructionsStep({ project, onUpdated }: AiInstructionsStepPro
   const [prompt, setPrompt] = useState(saved || DEFAULT_SYSTEM_PROMPT)
   const [busy, setBusy] = useState(false)
 
-  const saveSettings = useSaveCompletionSettings(project.id, onUpdated)
+  const saveSettings = useSaveCompletionSettings(project, onUpdated)
 
   async function handleSave() {
     setBusy(true)

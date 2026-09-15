@@ -27,6 +27,7 @@ import { Preferences, PreferencesDialog } from "@/pages/Preferences"
 import { SyncingProvider, useSyncing } from "@/context/SyncingContext"
 import { OrgProvider } from "@/context/OrgContext"
 import { OutboxProvider } from "@/context/OutboxContext"
+import { OfflineStoreProvider } from "@/context/OfflineStoreContext"
 import { NavHistoryProvider } from "@/context/NavHistoryContext"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { LoadingOverlay } from "@/components/ui/loading-overlay"
@@ -264,36 +265,38 @@ export default function App() {
     // Single app-wide tooltip delay group: once one tooltip opens, adjacent
     // ones open instantly (Base UI grouping). `delay` only exists on the
     // Provider, so this is the one knob for hover timing across the app.
-    <TooltipProvider delay={600}>
-      <SyncingProvider>
-        <PrivateModeBanner />
-        {/* AQU-293: session-expiry banner — must be inside Router (uses useLocation) */}
-        <SessionExpiredBanner />
-        {/* AQU-885: a stored JWT that's already expired at boot goes straight to
-            re-auth instead of rendering a shell that silently empties out. */}
-        <ExpiredSessionGate />
-        <SyncFreezeOverlay />
-        <OrgProvider>
-          <OutboxProvider>
-            {/* AQU-243: ProductTourProvider mounts once here; the tour portal
-                renders into document.body so it is route-agnostic. The context
-                value (openTour) is consumed by OrgSidebar's "Take the tour" button. */}
-            <ProductTourProvider>
-              <NavHistoryProvider>
-                <AppRoutes />
-              </NavHistoryProvider>
-            </ProductTourProvider>
-          </OutboxProvider>
-        </OrgProvider>
-        <AiModelConsentDialog />
-        <AiModelDownloadChip />
-        <AudioBulkProgressBanner />
-        <GlobalAudioShortcuts />
-        <VersionBadge />
-        <UpdateBanner />
-        <Toaster />
-      </SyncingProvider>
-    </TooltipProvider>
+    <OfflineStoreProvider>
+      <TooltipProvider delay={600}>
+        <SyncingProvider>
+          <PrivateModeBanner />
+          {/* AQU-293: session-expiry banner — must be inside Router (uses useLocation) */}
+          <SessionExpiredBanner />
+          {/* AQU-885: a stored JWT that's already expired at boot goes straight to
+              re-auth instead of rendering a shell that silently empties out. */}
+          <ExpiredSessionGate />
+          <SyncFreezeOverlay />
+          <OrgProvider>
+            <OutboxProvider>
+              {/* AQU-243: ProductTourProvider mounts once here; the tour portal
+                  renders into document.body so it is route-agnostic. The context
+                  value (openTour) is consumed by OrgSidebar's "Take the tour" button. */}
+              <ProductTourProvider>
+                <NavHistoryProvider>
+                  <AppRoutes />
+                </NavHistoryProvider>
+              </ProductTourProvider>
+            </OutboxProvider>
+          </OrgProvider>
+          <AiModelConsentDialog />
+          <AiModelDownloadChip />
+          <AudioBulkProgressBanner />
+          <GlobalAudioShortcuts />
+          <VersionBadge />
+          <UpdateBanner />
+          <Toaster />
+        </SyncingProvider>
+      </TooltipProvider>
+    </OfflineStoreProvider>
   )
 }
 

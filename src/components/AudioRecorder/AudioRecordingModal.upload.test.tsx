@@ -8,7 +8,7 @@
 // can waste someone's time: a doomed upload while offline, and a file that was
 // never going to play, sent to R2 anyway.
 
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
@@ -80,6 +80,7 @@ vi.mock("@/lib/audio/transcribe", () => ({ transcribeCell: vi.fn(async () => {})
 vi.mock("@/lib/audio/audio-coordinator", () => ({ pushAudioShortcutOverride: () => () => {} }))
 
 import { AudioRecordingModal } from "./AudioRecordingModal"
+import { resetRecordingAutoAdvanceCacheForTests } from "@/lib/store/recording-auto-advance-pref"
 
 const project = { id: "p1", name: "P", ttsSettings: {} } as unknown as ProjectRecord
 const cell = {
@@ -246,5 +247,115 @@ describe("AudioRecordingModal — upload a file", () => {
     expect(await screen.findByTestId("rec-error-message")).toHaveTextContent(/doesn't look like an audio file/)
     expect(uploadSpy).not.toHaveBeenCalled()
     expect(emitAttach).not.toHaveBeenCalled()
+  })
+})
+
+// ── AQU-1216: an upload is not a performance ────────────────────────────────
+//
+// Stage 5 gave the upload path the recorded path's auto-advance so that
+// "keeping a take means the same thing either way". In the operator's hands
+// that reads as a bug rather than a symmetry: there is no moment of finishing
+// to move on FROM, so the modal jumped to the next line half a second after the
+// file landed, and — in the film layout, where the takes list is a collapsed
+// disclosure — nothing on screen ever showed the take. "I uploaded
+// successfully, but it only showed up in the Takes dropdown."
+//
+// Two halves, and they fail independently: STAY (the advance is not scheduled)
+// and SHOW (the list opens itself). The recorded path keeps its advance — that
+// half is pinned in AudioRecordingModal.tts.test.tsx's SUB-50 block, which is
+// the test that notices if this fix is over-applied.
+
+const twoCells = [
+  cell,
+  { ...(cell as unknown as Record<string, unknown>), id: "c2", original: "next", translated: "suivant" },
+] as unknown as CellData[]
+
+/** One take already on the cell, so the takes list has something to list. */
+const ONE_TAKE = new Map<string, unknown>([["c1", {
+  selectedAudioId: null,
+  attachments: {
+    "audio-c1-1000.webm": {
+      audioId: "audio-c1-1000.webm",
+      url: "frontier-audio://audio-c1-1000.webm",
+      slot: "recording", label: "Take 1", mimeType: "audio/webm",
+      voiceId: null, referenceAudioId: null, durationMs: 1000,
+      trimStartMs: null, trimEndMs: null,
+    },
+  },
+}]])
+
+/** The film layout — the one where the takes list starts collapsed. */
+const filmProject = {
+  id: "p1", name: "P", ttsSettings: {},
+  files: [{ id: "f1", name: "ep.vtt", coreMediaUrl: "https://cdn.example.com/ep.mp4" }],
+} as unknown as ProjectRecord
+
+describe("AudioRecordingModal — an upload stays on the line (AQU-1216)", () => {
+  const onActiveCellChange = vi.fn((..._args: unknown[]) => {})
+
+  beforeEach(() => {
+    onlineState.value = true
+    recorderState.value = { kind: "idle" }
+    attachmentsState.byCellId = new Map()
+    emitAttach.mockClear()
+    uploadSpy.mockClear()
+    onActiveCellChange.mockClear()
+    localStorage.removeItem("aq.recording-auto-advance.v1")
+    resetRecordingAutoAdvanceCacheForTests()
+  })
+  afterEach(() => {
+    localStorage.removeItem("aq.recording-auto-advance.v1")
+    resetRecordingAutoAdvanceCacheForTests()
+  })
+
+  function renderTwo(project: ProjectRecord) {
+    return render(
+      <AudioRecordingModal
+        open
+        project={project}
+        cells={twoCells}
+        activeCellId="c1"
+        username="sam"
+        onActiveCellChange={onActiveCellChange}
+        onClose={() => {}}
+      />,
+    )
+  }
+
+  it("with auto-advance ON, uploading does NOT jump to the next line", async () => {
+    renderTwo(project)
+    // Auto-advance really is on — otherwise this passes for the wrong reason,
+    // and the default is the whole point (it is what the operator hit).
+    fireEvent.click(screen.getByTestId("rec-settings"))
+    expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-pressed", "true")
+
+    pick(new File(["bytes"], "line.wav", { type: "audio/wav" }))
+    await waitFor(() => expect(emitAttach).toHaveBeenCalled()) // the attach DID happen
+    expect(await screen.findByTestId("rec-saved-note")).toHaveTextContent("Take 1 added")
+
+    // Well past the 450ms advance window the recorded path schedules.
+    await new Promise((r) => setTimeout(r, 700))
+    expect(onActiveCellChange).not.toHaveBeenCalled()
+    // …and the note is still here on THIS line, which is the operator-visible
+    // half of "you did not lose your place".
+    expect(screen.getByTestId("rec-saved-note")).toHaveTextContent("Take 1 added")
+  })
+
+  it("opens the collapsed takes list so the new take is reachable without a hunt", async () => {
+    attachmentsState.byCellId = ONE_TAKE
+    renderTwo(filmProject)
+    // The film layout, and the list starts shut — the state the take used to
+    // disappear into.
+    expect(screen.getByTestId("rec-video")).toBeInTheDocument()
+    expect(screen.getByTestId("rec-takes-toggle")).toHaveAttribute("aria-expanded", "false")
+
+    pick(new File(["bytes"], "line.wav", { type: "audio/wav" }))
+
+    await waitFor(() =>
+      expect(screen.getByTestId("rec-takes-toggle")).toHaveAttribute("aria-expanded", "true"),
+    )
+    // Not just the flag: the rows are actually rendered, each with the audition
+    // control that makes the take listenable on the spot.
+    expect(screen.getByTestId("take-row-audio-c1-1000.webm")).toBeInTheDocument()
   })
 })

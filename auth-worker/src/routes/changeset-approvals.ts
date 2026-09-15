@@ -28,7 +28,7 @@ import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
-import { planCreatesProject, requiredRoleForChangeset } from "../lib/changeset-floor"
+import { planIsCreatorScoped, requiredRoleForChangeset } from "../lib/changeset-floor"
 import { resolveProjectRole } from "../services/project-permissions"
 import { ROLE, type AuthUser, type Env } from "../types"
 import { buildChangeDetails } from "../lib/changeset-approval-changes"
@@ -120,14 +120,17 @@ async function authorityDenied(
   cs: ChangesetRow,
   verb: string,
 ): Promise<ReturnType<typeof errorJson> | null> {
-  // A project-creation plan keeps the creator rule: the project it names does
-  // not exist until commit, so no project role resolves against it and a floor
-  // would deny everyone. Its real gate is the org-role check at prepare/commit.
-  if (planCreatesProject(cs.commands)) {
+  // Org-level plans keep the creator rule: a tenant-creation plan (CreateProject
+  // / CreateOrg) names a project/org that does not exist until commit — for
+  // CreateOrg it never exists at all — and an org-membership plan (AQU-1235)
+  // does not concern the project it is filed under. Either way no project role
+  // resolves against the plan and a floor would deny everyone. Their real gate
+  // is the org-role / credential-scope check at prepare/commit.
+  if (planIsCreatorScoped(cs.commands)) {
     if (cs.created_by_user_id === String(user.id)) return null
     return errorJson(
       "permission_denied",
-      `only the creator of a project-creation plan may ${verb} it`,
+      `only the creator of an org-level plan may ${verb} it`,
     )
   }
   const required = await requiredRoleForChangeset(env, cs.project_id, cs.commands)

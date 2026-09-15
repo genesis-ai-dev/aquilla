@@ -980,7 +980,8 @@ export async function handleImportReconcileRequest(
     if (String(error).includes('re-import-cell-claim-conflict')) {
       return withCors(new Response('file changed during re-import; review and try again', { status: 409 }), request)
     }
-    return withCors(Response.json({ error: `Re-import failed: ${String(error)}` }, { status: 500 }), request)
+    console.error("[import-reconcile] re-import failed:", error)
+    return withCors(Response.json({ error: "Re-import failed" }, { status: 500 }), request)
   }
   const winners = await readClaimWinners(db, [fileClaim])
   if (winners.get(slotKey(fileClaim)) !== fileEvent.id) {

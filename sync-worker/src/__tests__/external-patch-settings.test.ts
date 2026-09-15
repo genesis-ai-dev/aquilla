@@ -15,6 +15,7 @@ vi.mock('partyserver', () => ({
 }))
 
 import { handleExternalChangesetsRequest } from '../external/changesets-route'
+import { handleExternalReadRequest } from '../external/read-routes'
 import { POLICY_SETTINGS_KEYS } from '../external/commands-patch-settings'
 import { mintApiToken } from '../../../db/shared/api-credentials'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
@@ -129,13 +130,13 @@ describe('PatchSettings — per-key floors', () => {
     const env = makeEnv(tdb.db)
     const contributor = await memberToken(tdb, 400)
     const { res: deniedRes } = await prepare(env, contributor.token, patchCmd([
-      { key: 'terminology', value: { concepts: [{ term: 'grace' }] } },
+      { key: 'terminology', value: [{ id: 'c1', sourceTerm: 'grace' }] },
     ]))
     expect(deniedRes.status).toBe(403)
 
     const lead = await memberToken(tdb, 500)
     const { res, body } = await prepare(env, lead.token, patchCmd([
-      { key: 'terminology', value: { concepts: [{ term: 'grace' }] } },
+      { key: 'terminology', value: [{ id: 'c1', sourceTerm: 'grace' }] },
     ]))
     expect(res.status).toBe(200)
     const { res: commitRes } = await commit(env, lead.token, body.changeset.id)
@@ -150,7 +151,7 @@ describe('PatchSettings — per-key floors', () => {
     )
     const contributor = await memberToken(tdb, 400)
     const { res, body } = await prepare(env, contributor.token, patchCmd([
-      { key: 'terminology', value: { concepts: [] } },
+      { key: 'terminology', value: [] },
     ]))
     expect(res.status).toBe(200)
     const { res: commitRes } = await commit(env, contributor.token, body.changeset.id)
@@ -212,10 +213,79 @@ describe('PatchSettings — per-key floors', () => {
     const env = makeEnv(tdb.db)
     const lead = await memberToken(tdb, 500)
     const { res } = await prepare(env, lead.token, patchCmd([
-      { key: 'terminology', value: {} },
-      { key: 'brief', value: 'x' },
+      { key: 'terminology', value: [] },
+      { key: 'systemPrompt', value: 'x' },
     ]))
     expect(res.status).toBe(403)
+  })
+})
+
+describe('PatchSettings — settings-key validation (AQU-1224)', () => {
+  it('an unknown key is rejected at prepare with validation_failed naming it — nothing reaches the approval queue', async () => {
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+    const { res, body } = await prepare(env, maintainer.token, patchCmd([{ key: 'bogusKey', value: 1 }]))
+    expect(res.status).toBe(400)
+    expect(body.error.code).toBe('validation_failed')
+    expect(JSON.stringify(body.error.details)).toContain('bogusKey')
+    expect(await tdb.rows('changesets')).toHaveLength(0)
+  })
+
+  it('a near-miss typo of a real key is rejected too (no silent write of the typo)', async () => {
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+    const { res, body } = await prepare(env, maintainer.token, patchCmd([{ key: 'targetLanguages', value: 'fr' }]))
+    expect(res.status).toBe(400)
+    expect(body.error.code).toBe('validation_failed')
+    expect(await tdb.rows('changesets')).toHaveLength(0)
+  })
+
+  it('a wrong value type for a valid key is rejected, naming the expected type', async () => {
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+    const { res, body } = await prepare(env, maintainer.token, patchCmd([{ key: 'targetLanes', value: 'es' }]))
+    expect(res.status).toBe(400)
+    expect(body.error.code).toBe('validation_failed')
+    expect(JSON.stringify(body.error.details)).toContain('string[]')
+    expect(await tdb.rows('changesets')).toHaveLength(0)
+  })
+
+  it('an enum key rejects a value outside its set', async () => {
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+    const { res, body } = await prepare(env, maintainer.token, patchCmd([
+      { key: 'audioTimingMode', value: 'sideways' },
+    ]))
+    expect(res.status).toBe(400)
+    expect(body.error.code).toBe('validation_failed')
+    expect(await tdb.rows('changesets')).toHaveLength(0)
+  })
+
+  it('null still clears a valid key (the only way JSON can express a delete)', async () => {
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+    const { res, body } = await prepare(env, maintainer.token, patchCmd([{ key: 'systemPrompt', value: null }]))
+    expect(res.status).toBe(200)
+    const { res: commitRes } = await commit(env, maintainer.token, body.changeset.id)
+    expect(commitRes.status).toBe(200)
+    const rows = await tdb.rows<{ settings: string }>('project_settings')
+    expect(JSON.parse(rows[0].settings).systemPrompt).toBeNull()
+  })
+
+  it('negative control: a valid single-key patch still stages, commits, and leaves other keys alone', async () => {
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+    const { res, body } = await prepare(env, maintainer.token, patchCmd([
+      { key: 'systemPrompt', value: 'translate plainly' },
+    ]))
+    expect(res.status).toBe(200)
+    const { res: commitRes } = await commit(env, maintainer.token, body.changeset.id)
+    expect(commitRes.status).toBe(200)
+    const rows = await tdb.rows<{ settings: string }>('project_settings')
+    const stored = JSON.parse(rows[0].settings)
+    expect(stored.systemPrompt).toBe('translate plainly')
+    expect(stored.targetLanguage).toBe('fr')
+    expect(stored.validationCount).toBe(3)
   })
 })
 
@@ -270,11 +340,74 @@ describe('UpdateProjectSettings — policy guard re-check at commit (AQU-926)', 
   })
 })
 
+// AQU-1176: GET .../settings is the read that makes ifMatchVersion usable —
+// this is the whole loop an agent actually runs (read the live version, patch
+// ONE key with it, commit) asserted end to end.
+describe('PatchSettings — read-then-patch round trip', () => {
+  it('patching one key with the version from GET /settings leaves every other key byte-identical', async () => {
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+
+    const readRes = (await handleExternalReadRequest(
+      new Request(`https://w/api/v1/external/projects/${PROJECT}/settings`, {
+        headers: { Authorization: `Bearer ${maintainer.token}` },
+      }),
+      env,
+    ))!
+    expect(readRes.status).toBe(200)
+    const before = (await readRes.json()) as {
+      settings: Record<string, unknown>
+      version: number
+    }
+
+    const { res, body } = await prepare(
+      env,
+      maintainer.token,
+      patchCmd([{ key: 'brief', value: 'Translate plainly.' }], before.version),
+    )
+    expect(res.status).toBe(200)
+    const { res: commitRes } = await commit(env, maintainer.token, body.changeset.id)
+    expect(commitRes.status).toBe(200)
+
+    const afterRes = (await handleExternalReadRequest(
+      new Request(`https://w/api/v1/external/projects/${PROJECT}/settings`, {
+        headers: { Authorization: `Bearer ${maintainer.token}` },
+      }),
+      env,
+    ))!
+    const after = (await afterRes.json()) as {
+      settings: Record<string, unknown>
+      version: number
+    }
+
+    expect(after.settings.brief).toBe('Translate plainly.')
+    expect(after.version).toBe(before.version + 1)
+    // Byte-identical for everything the ops did not name.
+    for (const key of Object.keys(before.settings)) {
+      expect(JSON.stringify(after.settings[key]), key).toBe(JSON.stringify(before.settings[key]))
+    }
+  })
+
+  it('a stale ifMatchVersion (guessed instead of read) is rejected, not applied', async () => {
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+    const { res, body } = await prepare(
+      env,
+      maintainer.token,
+      patchCmd([{ key: 'brief', value: 'nope' }], 99),
+    )
+    expect(res.status).toBe(409)
+    expect(body.error.code).toBe('plan_stale')
+    const rows = await tdb.rows<{ settings: string }>('project_settings')
+    expect(JSON.parse(rows[0].settings).brief).toBeUndefined()
+  })
+})
+
 describe('PatchSettings — version guard', () => {
   it('version drift at prepare → plan_stale, nothing staged', async () => {
     const env = makeEnv(tdb.db)
     const maintainer = await memberToken(tdb, 600)
-    const { res, body } = await prepare(env, maintainer.token, patchCmd([{ key: 'brief', value: 'b' }], 5))
+    const { res, body } = await prepare(env, maintainer.token, patchCmd([{ key: 'systemPrompt', value: 'b' }], 5))
     expect(res.status).toBe(409)
     expect(body.error.code).toBe('plan_stale')
     expect(await tdb.rows('changesets')).toHaveLength(0)
@@ -283,7 +416,7 @@ describe('PatchSettings — version guard', () => {
   it('drift between prepare and commit → plan_stale + status stale', async () => {
     const env = makeEnv(tdb.db)
     const maintainer = await memberToken(tdb, 600)
-    const { body: prep } = await prepare(env, maintainer.token, patchCmd([{ key: 'brief', value: 'b' }]))
+    const { body: prep } = await prepare(env, maintainer.token, patchCmd([{ key: 'systemPrompt', value: 'b' }]))
 
     await tdb.db
       .prepare(`UPDATE project_settings SET version = 2 WHERE project_id = ?`)
@@ -301,7 +434,7 @@ describe('PatchSettings — version guard', () => {
     const env = makeEnv(tdb.db)
     const maintainer = await memberToken(tdb, 600)
     const { res, body } = await prepare(env, maintainer.token, [
-      ...patchCmd([{ key: 'brief', value: 'b' }]),
+      ...patchCmd([{ key: 'systemPrompt', value: 'b' }]),
       { kind: 'SetTranslation', fileId: 'f', cellId: 'c', value: 'v' },
     ])
     expect(res.status).toBe(400)
@@ -312,8 +445,8 @@ describe('PatchSettings — version guard', () => {
     const env = makeEnv(tdb.db)
     const maintainer = await memberToken(tdb, 600)
     const { res, body } = await prepare(env, maintainer.token, patchCmd([
-      { key: 'brief', value: 'a' },
-      { key: 'brief', value: 'b' },
+      { key: 'systemPrompt', value: 'a' },
+      { key: 'systemPrompt', value: 'b' },
     ]))
     expect(res.status).toBe(400)
     expect(body.error.code).toBe('validation_failed')

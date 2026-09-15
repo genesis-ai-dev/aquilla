@@ -49,6 +49,16 @@ import type { PlanStatus } from "@/hooks/useProjectPlan"
 import { PLAN_TONE } from "./plan-tone"
 import { PlanRow } from "./PlanRow"
 
+/**
+ * AQU-1255: how many unit rows the card draws before it stops and offers
+ * "Show all". A full-Bible project renders 60–100+ rows, each with two
+ * progress bars, which buries everything below the plan and forces a manager
+ * who only wants the headline numbers to scroll past the whole thing. Five
+ * keeps the glance value — what is overdue, what is in flight — and leaves
+ * the card roughly one screen tall with its header and controls.
+ */
+const PLAN_ROW_CAP = 5
+
 const GROUP_HINT_KEY: Record<PlanUnitStatus, string> = {
   overdue: "org.projectOverview.plan.groupHintOverdue",
   soon: "org.projectOverview.plan.groupHintSoon",
@@ -132,6 +142,11 @@ export function PlanBoard({
   // data is missing.
   const [query, setQuery] = useState("")
   const [needsDateOnly, setNeedsDateOnly] = useState(false)
+  // AQU-1255. Ephemeral for the same reason the filter is: nothing about how
+  // much of the list you opened last week should decide what a reload draws.
+  // But once pressed it holds across filtering and re-arranging — re-hiding
+  // the rows because the reader typed a letter would be a trap.
+  const [showAll, setShowAll] = useState(false)
   // Arrangement is a working style, so it persists globally; folds belong to
   // the project whose groups they hide. See `plan-view.ts`.
   const [view, setView] = useState<PlanViewMode>(() => loadPlanView())
@@ -173,14 +188,49 @@ export function PlanBoard({
   const showAudio = useMemo(() => planHasAudio(units), [units])
 
   /**
-   * The rows the arrows walk: exactly what is on screen, in the order it is
-   * drawn. Anything filtered out or folded away is skipped, because stepping
-   * onto a row nobody can see would move the inspector for no visible reason.
+   * Every row the current narrowing and arrangement would draw, in drawn
+   * order — before the AQU-1255 cap. Anything filtered out or folded away is
+   * already gone, so a folded group consumes none of the cap.
    */
-  const ordered = useMemo(() => {
+  const eligible = useMemo(() => {
     if (view === "order") return visible
     return groups.flatMap((g) => (collapsed.has(g.status) ? [] : g.units))
   }, [view, visible, groups, collapsed])
+
+  // The cap only exists once there is something to hide behind it: a list of
+  // five or fewer draws in full and offers no button at all.
+  const capped = !showAll && eligible.length > PLAN_ROW_CAP
+
+  /**
+   * The rows the arrows walk: exactly what is on screen, in the order it is
+   * drawn. Stepping onto a row nobody can see would move the inspector for no
+   * visible reason — so a truncated list stops at the fifth row, and Show all
+   * hands the arrows the whole plan.
+   */
+  const ordered = useMemo(
+    () => (capped ? eligible.slice(0, PLAN_ROW_CAP) : eligible),
+    [capped, eligible],
+  )
+
+  /**
+   * Per-group slices for the By status arrangement: the cap is spent across
+   * groups in display order, so a later group can show its header and its
+   * (full, honest) count with no rows beneath it until Show all.
+   */
+  const groupRows = useMemo(() => {
+    const rows: PlanUnit[][] = []
+    let budget = capped ? PLAN_ROW_CAP : Number.POSITIVE_INFINITY
+    for (const group of groups) {
+      if (collapsed.has(group.status)) {
+        rows.push([])
+        continue
+      }
+      const take = group.units.slice(0, budget)
+      budget -= take.length
+      rows.push(take)
+    }
+    return rows
+  }, [groups, collapsed, capped])
 
   useEffect(() => {
     if (orderRef) orderRef.current = ordered
@@ -416,10 +466,10 @@ export function PlanBoard({
             // The server already sorts by canonical ordinal then name, so the
             // "in order" arrangement is the payload untouched — no client sort.
             <ul className="divide-y" data-testid="plan-order-list">
-              {visible.map(renderRow)}
+              {ordered.map(renderRow)}
             </ul>
           ) : (
-            groups.map((group) => {
+            groups.map((group, i) => {
               const tone = PLAN_TONE[group.status]
               const folded = collapsed.has(group.status)
               return (
@@ -455,10 +505,35 @@ export function PlanBoard({
                       </span>
                     </button>
                   </h3>
-                  {!folded && <ul className="divide-y">{group.units.map(renderRow)}</ul>}
+                  {/* The header and its count render even when the cap left
+                      this group no rows — a heading with "12" and nothing
+                      under it reads as "there is more here", which is what
+                      the Show all button is for. */}
+                  {!folded && groupRows[i].length > 0 && (
+                    <ul className="divide-y">{groupRows[i].map(renderRow)}</ul>
+                  )}
                 </section>
               )
             })
+          )}
+          {/* AQU-1255. A real button, so Tab reaches it and Enter/Space work,
+              and its label carries the count — "Show all" alone tells a
+              screen-reader user nothing about what they are opening. */}
+          {eligible.length > PLAN_ROW_CAP && (
+            <div className="border-t px-[17px] py-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                data-testid="plan-show-all"
+                aria-expanded={!capped}
+                onClick={() => setShowAll((v) => !v)}
+              >
+                {capped
+                  ? t("org.projectOverview.plan.showAll", { count: eligible.length })
+                  : t("org.projectOverview.plan.showFewer")}
+              </Button>
+            </div>
           )}
           {filtering && (
             <p className="border-t bg-muted px-[17px] py-2 text-[11.5px] text-muted-foreground"

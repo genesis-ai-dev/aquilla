@@ -26,7 +26,8 @@ export function sliceCompletionLaneMap<T>(store: Map<string, T>, lane: string): 
 import type { CompletionSettings } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { ScoredPair } from "@/lib/search/dual-index"
-import { getUserProviderOverride } from "@/lib/store/user-provider-override"
+import { useUserProviderOverride } from "@/lib/store/user-provider-override"
+import { useUserApiKey } from "@/lib/store/user-api-keys"
 
 /**
  * Few-shot retrieval for the AI copilot. As of AD-13 (branching search) the
@@ -43,7 +44,7 @@ type SearchFn = (
   excludeId?: string,
 ) => Promise<ScoredPair[]>
 import type { CellData } from "./useCells"
-import { buildPrompt, buildBatchPrompt, buildParagraphPrompt, complete, resolveProvider, DEFAULT_APPROVED_EXAMPLE_COUNT, DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT, collectValidatedPairs, normalizeCompletionMaxTokens, selectApprovedExamples, type ValidatedPair } from "@/lib/completion/completion-service"
+import { buildPrompt, buildBatchPrompt, buildParagraphPrompt, complete, resolveProvider, resolveEffectiveCompletionSettings, isCompletionConfigured, DEFAULT_APPROVED_EXAMPLE_COUNT, DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT, collectValidatedPairs, normalizeCompletionMaxTokens, selectApprovedExamples, type ValidatedPair } from "@/lib/completion/completion-service"
 import { buildFootnoteInstruction, prepareFootnotesForPrompt } from "@/lib/footnotes/completion"
 import { reintegrateFootnotes } from "@/lib/footnotes/reintegrate"
 import { paragraphGroupForCell } from "@/lib/parsers/paragraphs"
@@ -229,25 +230,29 @@ export function useCompletion(
     const base = settings ?? FALLBACK_COMPLETION_SETTINGS
     return { ...base, maxTokens: normalizeCompletionMaxTokens(base.maxTokens) }
   }, [settings])
-  // A per-device override (user Settings) always beats the project settings.
-  // Mirror the same precedence that complete() applies so isConfigured is
-  // consistent with what the request will actually use.
-  const deviceOverride = getUserProviderOverride()
-  const resolvedSettings: CompletionSettings = deviceOverride
-    ? { ...effectiveSettings, provider: "custom", endpoint: deviceOverride.endpoint, model: deviceOverride.model || effectiveSettings.model, apiKey: deviceOverride.apiKey }
-    : effectiveSettings
+  // Project custom provider beats the device-wide personal override.
+  // Mirror complete() so isConfigured matches the request that will fire.
+  const deviceOverride = useUserProviderOverride()
+  // Subscribe so a device-local completion key (Project Settings "save across
+  // my projects") re-evaluates the sparkle gate without a remount.
+  useUserApiKey("completion")
+  const resolvedSettings: CompletionSettings = resolveEffectiveCompletionSettings(
+    effectiveSettings,
+    deviceOverride,
+  )
   const provider = resolveProvider(resolvedSettings)
   const modelName = resolvedSettings.model || "frontier-default"
   const { available: frontierAvailable } = useFrontierHealth()
 
   // "Configured" = the user has done the setup. Frontier: signed in.
-  // Custom: endpoint + model. Service reachability (`isAvailable` below) is
-  // a separate, runtime concern — folding it in here causes the AI setup
-  // dialog to re-prompt every time the health probe fails, even though the
-  // user already configured a provider.
-  const isConfigured = provider === "frontier"
-    ? Boolean(session?.jwt)
-    : Boolean(resolvedSettings.endpoint && resolvedSettings.model)
+  // Custom / personal override: endpoint (+ key when the host requires one).
+  // A missing model must not reopen Set up AI — connecting OpenRouter lists
+  // models; the sparkle should run with the saved key.
+  const isConfigured = isCompletionConfigured(
+    effectiveSettings,
+    session?.jwt,
+    deviceOverride,
+  )
 
   // "Available" = service is reachable right now. Used to disable Generate
   // with a clear "service unavailable" message — never to gate setup.

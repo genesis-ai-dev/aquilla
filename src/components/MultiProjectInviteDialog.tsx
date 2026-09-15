@@ -123,7 +123,7 @@ export function MultiProjectInviteDialog({
         const jwt = session.jwt
         const results = await Promise.all(
           selectedIds.map((projectId) =>
-            createServerInvite(jwt, projectId, selections[projectId]!, undefined, email)
+            createServerInvite(jwt, projectId, selections[projectId], undefined, email)
           )
         )
         const errors: Record<string, string> = {}

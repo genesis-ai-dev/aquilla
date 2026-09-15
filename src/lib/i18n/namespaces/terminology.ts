@@ -367,6 +367,30 @@ export const terminology = defineNamespace({
     "terminology.addConcept.viewEntry": "View entry",
     "terminology.addConcept.saveFailed": "Couldn't save this term.",
 
+    // ── MatchOptionsFields.tsx / DiscoveredFormsChips.tsx (shared matching-
+    // options UI, reused by AddConceptDialog and the term detail page) ─────
+    "terminology.match.wildcardHint": "Use * for endings that change, e.g. grac*",
+    "terminology.match.previewCount": plural({
+      one: "Matches {count} place in this file",
+      other: "Matches {count} places in this file",
+    }),
+    "terminology.match.previewCountProject": plural({
+      one: "Matches {count} place in this project",
+      other: "Matches {count} places in this project",
+    }),
+    "terminology.match.formsLabel": "Forms",
+    "terminology.match.formsEmpty": "No matches yet",
+    "terminology.match.moreForms": "+{count} more",
+    "terminology.match.excludeForm": "Exclude {form}",
+    "terminology.match.includeForm": "Include {form}",
+    "terminology.match.optionsLabel": "Matching options",
+    "terminology.match.foldMarks": "Ignore vowel marks and accents",
+    "terminology.match.affixes": "Allow prefixes and suffixes",
+    "terminology.match.caseSensitive": "Match case exactly",
+    "terminology.match.setUpAffixes": "Set up prefixes and suffixes for this project",
+    "terminology.match.addFormLabel": "Add form",
+    "terminology.match.addFormPlaceholder": "Another spelling of this term…",
+
     // ── RenameSuggestionsDialog.tsx (bulk file/corpus rename suggestions) ───
     "terminology.renameSuggestions.title": "Review suggested names",
     "terminology.renameSuggestions.corpusChange": "Corpus: {current} → {suggested}",
@@ -827,6 +851,88 @@ export const terminology = defineNamespace({
           "Success toast after a source-selection add saves. {term} is the source " +
           "headword the user just added, verbatim.",
         placeholders: { term: "The source headword just saved, verbatim (not translated)." },
+      },
+      "terminology.match.wildcardHint": {
+        description:
+          "Hint text under a term/form input explaining wildcard syntax: '*' matches " +
+          "changing endings, e.g. 'grac*' for grace/graces/graced.",
+      },
+      "terminology.match.previewCount": {
+        description:
+          "Live match-preview stat while editing a concept's matching options, scoped " +
+          "to the currently open file; {count} is the number of matching places found.",
+        placeholders: { count: "The number of matches found in the current file." },
+      },
+      "terminology.match.previewCountProject": {
+        description:
+          "Live match-preview stat while editing a concept's matching options, scoped " +
+          "to the whole project; {count} is the number of matching places found.",
+        placeholders: { count: "The number of matches found across the project." },
+      },
+      "terminology.match.formsLabel": {
+        description:
+          "Label above the list of discovered/added surface forms for a concept's " +
+          "source term (e.g. alternate spellings the matcher hit).",
+      },
+      "terminology.match.formsEmpty": {
+        description:
+          "Empty state shown in place of the discovered-forms chip list when the " +
+          "matcher has not found any occurrences yet.",
+      },
+      "terminology.match.moreForms": {
+        description:
+          "Button label that reveals the remaining discovered forms beyond the chip " +
+          "list's initial display limit; {count} is how many more there are.",
+        placeholders: { count: "The number of additional forms not yet shown." },
+      },
+      "terminology.match.excludeForm": {
+        description:
+          "Accessible name for a discovered-form chip's toggle button when the form " +
+          "is currently included, offering to exclude it from matching. {form} is " +
+          "the surface form itself, verbatim (not translated).",
+        placeholders: { form: "The surface form, verbatim (not translated)." },
+      },
+      "terminology.match.includeForm": {
+        description:
+          "Accessible name for a discovered-form chip's toggle button when the form " +
+          "is currently excluded, offering to include it back into matching. {form} " +
+          "is the surface form itself, verbatim (not translated).",
+        placeholders: { form: "The surface form, verbatim (not translated)." },
+      },
+      "terminology.match.optionsLabel": {
+        description:
+          "Section heading above the group of matching-option checkboxes (fold " +
+          "marks, affixes, case sensitivity) for a concept's source term.",
+      },
+      "terminology.match.foldMarks": {
+        description:
+          "Checkbox label: when on, matching ignores combining marks such as vowel " +
+          "points and accents on both the source term and the text being matched.",
+      },
+      "terminology.match.affixes": {
+        description:
+          "Checkbox label: when on, matching allows the project's configured " +
+          "prefixes/suffixes to appear around the source term.",
+      },
+      "terminology.match.caseSensitive": {
+        description:
+          "Checkbox label: when on, matching requires the exact letter case of the " +
+          "source term instead of matching case-insensitively.",
+      },
+      "terminology.match.setUpAffixes": {
+        description:
+          "Link/button shown instead of the affixes checkbox when the project has no " +
+          "prefix/suffix inventory configured yet; opens the setup for it.",
+      },
+      "terminology.match.addFormLabel": {
+        description:
+          "Label for the control that lets a user manually add another spelling as " +
+          "an alternate form of a concept's source term.",
+      },
+      "terminology.match.addFormPlaceholder": {
+        description:
+          "Placeholder text in the empty input for manually adding another spelling " +
+          "of a concept's source term.",
       },
       "terminology.termDetail.goToCellAria": {
         description:

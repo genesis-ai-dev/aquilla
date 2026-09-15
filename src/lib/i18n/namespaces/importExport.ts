@@ -151,9 +151,25 @@ export const importExport = defineNamespace({
       "bullet advice — always arrive as one cell per line. Optionally, longer " +
       "paragraphs can also be split into one cell per sentence; export puts each one " +
       "back together as InDesign set it.",
+    "importExport.biblica.descriptionEbl":
+      "Upload the InDesign (.idml) package for an Equipping Biblical Leaders " +
+      "facilitator or participant guide. Every text-bearing paragraph is imported — " +
+      "the guide is written material throughout rather than a Bible with notes around " +
+      "it — and each cell keeps its InDesign formatting locked. The guide's own " +
+      "headings become the file's sections, so the navigator moves a topic or a lesson " +
+      "at a time. Lists that InDesign holds in a single paragraph — objectives, " +
+      "materials, contents entries — always arrive as one cell per line. Optionally, " +
+      "longer paragraphs can also be split into one cell per sentence; export puts " +
+      "each one back together as InDesign set it.",
     "importExport.biblica.chooseFile": "Choose study Bible IDML file",
     "importExport.biblica.chooseFileTreasureHunt": "Choose Treasure Hunt IDML file",
     "importExport.biblica.chooseFileReach4Life": "Choose Reach 4 Life IDML file",
+    "importExport.biblica.chooseFileEbl": "Choose EBL IDML file",
+    "importExport.biblica.editionQuestion": "Which Biblica title is this?",
+    "importExport.biblica.editionQuestionHint":
+      "Each title uses its own InDesign template, and nothing in the package says " +
+      "which one it is. Tick at most one. Leave all three unticked to read the " +
+      "package as Biblica Study Bible notes.",
     "importExport.biblica.treasureHuntLabel": "This is a Treasure Hunt Bible file",
     "importExport.biblica.treasureHuntHint":
       "The Treasure Hunt Bible uses a different InDesign template. Tick this to " +
@@ -164,6 +180,11 @@ export const importExport = defineNamespace({
       "Reach 4 Life uses a third InDesign template. Tick this to import its " +
       "lessons, journeys, hot topics, book introductions and front matter instead " +
       "of looking for study notes.",
+    "importExport.biblica.eblLabel": "This is an EBL file",
+    "importExport.biblica.eblHint":
+      "Equipping Biblical Leaders guides use a fourth InDesign template. Tick this " +
+      "to import the whole guide, split into sections by its own topic and lesson " +
+      "headings, instead of looking for study notes.",
     "importExport.biblica.splitSentencesLabel": "Split long notes into one cell per sentence",
     "importExport.biblica.splitSentencesHint":
       "Leave unchecked to import each note line as one larger cell. Lists still split per line either way.",
@@ -505,6 +526,30 @@ export const importExport = defineNamespace({
     "importExport.dialog.downloadFile": "Download {fileName}",
     "importExport.dialog.nativeFormatHint": "{label} — your file in its original format, with current translations.",
     "importExport.dialog.someFormattingMayNotCarryOver": "Some inline formatting may not carry over.",
+    // AQU-1068 (rewritten 2026-09-09): shown beside a native round-trip format
+    // when this file has cells somebody added or removed in the app. These
+    // exports put translations back into the client's OWN file, so what happens
+    // to that content differs per format and is worth saying plainly rather
+    // than warning about.
+    //
+    // Its predecessor said added cells could never be included. That is no
+    // longer true for USFM, Word or PowerPoint, and it was never true for the
+    // rendered formats it also reached (csv, tsv, xliff, tmx, md, txt all carry
+    // added lines fine — see exporters/added-lines.test.ts).
+    "importExport.dialog.structuralNoteUsfm":
+      "Content added here is written into the verse it follows, with no new verse number. " +
+      "Content removed here is left out.",
+    "importExport.dialog.structuralNoteDocx":
+      "Content added here becomes a new paragraph after the one it follows. " +
+      "Content removed here is left out.",
+    "importExport.dialog.structuralNotePptx":
+      "Content added here becomes a new paragraph after the one it follows, and a slide may " +
+      "overflow. Content removed here is left out.",
+    "importExport.dialog.structuralNoteUnplaceable":
+      "Cells can\u2019t be added or removed on this kind of file, so this export matches the original.",
+    "importExport.dialog.structuralNoteLegacy":
+      "This file was imported before we recorded where each paragraph came from, so content " +
+      "added or removed here can\u2019t be placed in it.",
     "importExport.dialog.formatOptionAriaLabel": "{label} ({ext})",
     "importExport.dialog.lossyBadge": "lossy",
     "importExport.dialog.permissionRequiredAriaLabel": "Export permission required",
@@ -535,6 +580,9 @@ export const importExport = defineNamespace({
     "importExport.dialog.voiceFilterAriaLabel": "Filter export by voice",
     "importExport.dialog.allVoices": "All voices",
     "importExport.dialog.voiceFilterHint": "Export will include only cells assigned to {voice}, across all camera angles.",
+    "importExport.dialog.chapterFilterAriaLabel": "Filter export by chapter",
+    "importExport.dialog.allChapters": "All chapters",
+    "importExport.dialog.chapterFilterHint": "Export will include only the cells in {chapter}.",
     "importExport.dialog.filenameLegend": "Filename",
     "importExport.dialog.filenameAriaLabel": "Export filename (without extension)",
     "importExport.dialog.projectScopeUsesProjectName": "Project-scope exports use the project name.",
@@ -656,6 +704,8 @@ export const importExport = defineNamespace({
     "importExport.status.downloadedFilesCount": plural({ one: "Downloaded {count} file", other: "Downloaded {count} files" }),
     "importExport.status.downloadedFile": "Downloaded {fileName}",
     "importExport.status.exportFailed": "Export failed.",
+    "importExport.errors.originalMissing":
+      "Original isn't in storage. Re-import to restore it.",
 
     // — Thrown-error triage: src/lib/import.ts (AQU-832 wave 3 error sweep) —
     // These are messages parser/upload helpers throw that reach the user
@@ -726,6 +776,21 @@ export const importExport = defineNamespace({
     "importExport.errors.sourceUploadFailed": "Source upload failed",
     "importExport.errors.artifactBindingNetworkFailed": "Artifact binding failed: {detail}",
     "importExport.errors.artifactBindingFailed": "Artifact binding failed",
+
+    // — Thrown-error triage: src/lib/import/cell-size.ts (AQU-990) —
+    "importExport.errors.oversizedCells": plural({
+      one:
+        "Import failed: {count} cell in {fileName} is larger than the {maxSize} per-cell " +
+        "limit ({cells}). Split that section in the source document and import again.",
+      other:
+        "Import failed: {count} cells in {fileName} are larger than the {maxSize} per-cell " +
+        "limit ({cells}). Split those sections in the source document and import again.",
+    }),
+    "importExport.errors.oversizedCellSource": "{label} — source text, {size}",
+    "importExport.errors.oversizedCellTarget": "{label} — translation, {size}",
+    // No inflected noun to agree with the count, so a single form is correct
+    // here rather than a plural() whose English forms would be identical.
+    "importExport.errors.oversizedCellsMore": "and {count} more",
 
     // — Door43 (DCS) sync badge, catalog browser and upstream panel —
     // (importExport.linked.* below is the linked-project upstream-changes
@@ -1050,6 +1115,18 @@ export const importExport = defineNamespace({
         description:
           "Visible label AND the checkbox's own accessible name (identical text, reused directly) for switching the Biblica importer to the Reach 4 Life InDesign template. 'Reach 4 Life' is a product title — keep it recognizable.",
       },
+      "importExport.biblica.eblLabel": {
+        description:
+          "Visible label AND the checkbox's own accessible name (identical text, reused directly) for switching the Biblica importer to the Equipping Biblical Leaders InDesign template. 'EBL' is the programme's own abbreviation of 'Equipping Biblical Leaders' and is how Biblica names these files — keep the abbreviation rather than expanding or translating it. Note the article agrees with the abbreviation, not the expansion.",
+      },
+      "importExport.biblica.editionQuestion": {
+        description:
+          "Caption above the three mutually exclusive Biblica title checkboxes (Treasure Hunt Bible, Reach 4 Life, EBL). It also names the group for screen readers, so it must read as a question about the file being imported, not as a command.",
+      },
+      "importExport.biblica.editionQuestionHint": {
+        description:
+          "Hint under that caption. Explains why the person importing has to answer — the package does not identify its own title — that at most one box applies, and that leaving all three clear reads the file as a Biblica Study Bible notes package (the importer's default).",
+      },
       "importExport.biblica.readingPackageWithProgress": {
         description: "Parse-phase progress line on the Biblica panel while unpacking the IDML package, once a file count is known.",
         placeholders: {
@@ -1276,6 +1353,37 @@ export const importExport = defineNamespace({
         description: "Label of the primary download button on the Export dialog, naming the exact file it will produce.",
         placeholders: { fileName: "Filename (with extension) the download will produce — not translated." },
       },
+      "importExport.dialog.structuralNoteUsfm": {
+        description:
+          "Appended to the USFM format's hint in the Export dialog, when this file has cells " +
+          "somebody added or removed in the app. Says exactly what the export does with them. " +
+          "'The verse it follows' matters: an added cell gets no verse number of its own, so " +
+          "the client's numbering never changes.",
+      },
+      "importExport.dialog.structuralNoteDocx": {
+        description:
+          "The same note for a Word export: an added cell becomes its own paragraph after the " +
+          "one it follows, and a removed cell's paragraph is dropped from the document.",
+      },
+      "importExport.dialog.structuralNotePptx": {
+        description:
+          "The same note for a PowerPoint export, plus the caveat that a text box has a fixed " +
+          "size and does not reflow, so added content can push past the edge of a slide and " +
+          "need the box resizing by hand.",
+      },
+      "importExport.dialog.structuralNoteUnplaceable": {
+        description:
+          "Shown for a format where cells cannot be added or removed at all — InDesign today, " +
+          "whose layout is addressed by position so new or missing paragraphs cannot be " +
+          "expressed. Reassures the reader that the export matches their original.",
+      },
+      "importExport.dialog.structuralNoteLegacy": {
+        description:
+          "Shown for a Word or PowerPoint file imported before we recorded a locator for each " +
+          "paragraph. Those files are matched to the document by POSITION, where inserting or " +
+          "dropping a paragraph would shift every later one onto the wrong text, so added and " +
+          "removed content cannot be carried at all.",
+      },
       "importExport.dialog.nativeFormatHint": {
         description: "Caption below the primary download button, naming the file's own format.",
         placeholders: { label: "The native format's own translated label (e.g. 'USFM')." },
@@ -1310,6 +1418,13 @@ export const importExport = defineNamespace({
       "importExport.dialog.voiceFilterHint": {
         description: "Hint below the voice filter once a specific voice is chosen. {voice} is bold-styled, rendered by RichMessage.",
         placeholders: { voice: "Bold-styled name of the selected cast voice." },
+      },
+      "importExport.dialog.chapterFilterAriaLabel": {
+        description: "Accessible name for the chapter-scope select on the Export dialog.",
+      },
+      "importExport.dialog.chapterFilterHint": {
+        description: "Hint below the chapter scope once a single chapter is chosen. {chapter} is bold-styled, rendered by RichMessage.",
+        placeholders: { chapter: "Bold-styled label of the selected chapter, e.g. 'GEN 1'." },
       },
       "importExport.dialog.filenameAriaLabel": {
         description: "Accessible name for the export filename input.",
@@ -1475,6 +1590,10 @@ export const importExport = defineNamespace({
         description: "Success-status message after a single-file client-side export (txt/md/tsv/csv/xlf/tmx/vtt/srt/plain-text-dump/metadata-csv).",
         placeholders: { fileName: "Name of the downloaded file — not translated." },
       },
+      "importExport.errors.originalMissing": {
+        description:
+          "Toast when Download original fails because the stored blob pointer exists but the bytes are gone from storage. Tells the user to re-import.",
+      },
       "importExport.errors.ebibleEmptyCorpus": {
         description: "Thrown when a chosen eBible translation's corpus file downloads but contains no text (often copyright-restricted).",
         placeholders: { title: "Title of the eBible translation the user chose — not translated." },
@@ -1531,6 +1650,49 @@ export const importExport = defineNamespace({
       "importExport.errors.sourceUploadTooLarge": {
         description: "Thrown when a source artifact upload exceeds the server-side size ceiling.",
         placeholders: { maxSize: "The size limit, already formatted (e.g. '95.0 MB') — not translated." },
+      },
+      "importExport.errors.oversizedCells": {
+        description:
+          "Thrown before any upload when one or more parsed cells exceed the server's " +
+          "per-cell text ceiling, so the user learns which sections are too big instead " +
+          "of waiting out a full upload that ends in a raw HTTP 413. The closing " +
+          "sentence is the remedy: break the oversized section up in the original " +
+          "document and re-import.",
+        placeholders: {
+          count: "Number of oversized cells found.",
+          fileName: "Name of the file being imported — not translated.",
+          maxSize: "The per-cell limit, already formatted (e.g. '256 KB') — not translated.",
+          cells:
+            "Pre-joined list of the offending cells, each already rendered by " +
+            "oversizedCellSource / oversizedCellTarget — not translated.",
+        },
+      },
+      "importExport.errors.oversizedCellSource": {
+        description:
+          "One entry in the oversized-cell list, for a cell whose SOURCE text is too " +
+          "big. Reads as a label followed by which side is at fault and how large it " +
+          "is; a fragment inside a sentence, so it takes no closing full stop.",
+        placeholders: {
+          label: "Canonical Scripture reference, or '#12' for the cell's position — not translated.",
+          size: "The cell's size, already formatted (e.g. '412 KB') — not translated.",
+        },
+      },
+      "importExport.errors.oversizedCellTarget": {
+        description:
+          "One entry in the oversized-cell list, for a cell whose pre-filled TRANSLATION " +
+          "is too big (paired imports carry both sides). Same shape as the source " +
+          "variant; a fragment inside a sentence, so it takes no closing full stop.",
+        placeholders: {
+          label: "Canonical Scripture reference, or '#12' for the cell's position — not translated.",
+          size: "The cell's size, already formatted (e.g. '412 KB') — not translated.",
+        },
+      },
+      "importExport.errors.oversizedCellsMore": {
+        description:
+          "Final entry in the oversized-cell list when more cells are oversized than the " +
+          "message names individually. A fragment appended after the listed ones, so it " +
+          "takes no closing full stop.",
+        placeholders: { count: "How many oversized cells are not listed individually." },
       },
       "importExport.errors.sourceUploadNetworkFailed": {
         description:

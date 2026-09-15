@@ -54,6 +54,7 @@ interface ReconcileFileMeta {
   targetTextDirection?: 'ltr' | 'rtl'
   orderedBy?: string
   importManifest?: Record<string, unknown>
+  corpusMarker?: string
 }
 
 export interface ReconcileImportCell {
@@ -630,6 +631,7 @@ function mergeFileMeta(existing: unknown, incoming: ReconcileFileMeta): Record<s
   if (incoming.importManifest) meta.aquillaImport = incoming.importManifest
   if (incoming.importFormat) meta.importFormat = incoming.importFormat
   if (incoming.parserVersion) meta.parserVersion = incoming.parserVersion
+  if (incoming.corpusMarker) meta.corpusMarker = incoming.corpusMarker
   return meta
 }
 
@@ -789,6 +791,7 @@ export async function handleImportReconcileRequest(
       ? mergedMeta.targetTextDirection : undefined,
     orderedBy: typeof mergedMeta.orderedBy === 'string' ? mergedMeta.orderedBy : undefined,
     importManifest: objectRecord(mergedMeta.aquillaImport),
+    corpusMarker: typeof mergedMeta.corpusMarker === 'string' ? mergedMeta.corpusMarker : undefined,
     projectionMeta: mergedMeta,
   }
   const fileEvent: PersistedEvent<'file.create'> = {
@@ -977,7 +980,8 @@ export async function handleImportReconcileRequest(
     if (String(error).includes('re-import-cell-claim-conflict')) {
       return withCors(new Response('file changed during re-import; review and try again', { status: 409 }), request)
     }
-    return withCors(Response.json({ error: `Re-import failed: ${String(error)}` }, { status: 500 }), request)
+    console.error("[import-reconcile] re-import failed:", error)
+    return withCors(Response.json({ error: "Re-import failed" }, { status: 500 }), request)
   }
   const winners = await readClaimWinners(db, [fileClaim])
   if (winners.get(slotKey(fileClaim)) !== fileEvent.id) {

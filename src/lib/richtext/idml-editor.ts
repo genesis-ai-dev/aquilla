@@ -7,8 +7,14 @@ import {
   type IdmlDiagnostic,
   type IdmlFormatMetadataV2,
   type IdmlProtectedTokenKind,
+  type IdmlStyleCatalog,
 } from "@aquilla/idml-roundtrip"
+import {
+  idmlParagraphStyleFromMetadata,
+  idmlStyleCatalogFromMetadata,
+} from "@/lib/idml/style-catalog"
 import { sanitizeIdmlEditorHtml } from "@/lib/richtext/editor-content"
+import { decorateIdmlStyleElement } from "@/lib/richtext/idml-style-display"
 import { t } from "@/lib/i18n/standalone"
 
 export const IDML_PARAGRAPH_NODE_NAME = "idmlParagraph"
@@ -27,6 +33,8 @@ const IDML_TOKEN_KINDS = new Set<IdmlProtectedTokenKind>([
 export interface IdmlEditorContext {
   sourceHtml: string
   metadata: IdmlFormatMetadataV2
+  styleCatalog?: IdmlStyleCatalog
+  paragraphStyleId?: string
 }
 
 export type IdmlEditorConfiguration =
@@ -41,6 +49,19 @@ export interface PreparedIdmlEditorContent {
 interface IdmlGuardOptions {
   context: IdmlEditorContext
   onRejected: (diagnostic: IdmlDiagnostic) => void
+}
+
+/** Style context the guard extension exposes so node views can render emphasis. */
+export interface IdmlGuardStorage {
+  styleCatalog?: IdmlStyleCatalog
+  paragraphStyleId?: string
+}
+
+declare module "@tiptap/core" {
+  interface Storage {
+    /** Present only when `createIdmlGuardExtension` is part of the editor. */
+    idmlTransactionGuard?: IdmlGuardStorage
+  }
 }
 
 /**
@@ -288,6 +309,105 @@ function lineBoundaries(text: string): number[] {
 export type IdmlDeleteDirection = "backward" | "forward"
 export type IdmlDeleteGranularity = "character" | "word" | "line"
 
+interface IdmlParagraphChild {
+  node: ProseMirrorNode
+  /** First text position inside the child (meaningful for slots). */
+  contentStart: number
+}
+
+/** The paragraph's inline children — slots and protected tokens — in order. */
+function idmlParagraphChildren(doc: ProseMirrorNode): IdmlParagraphChild[] {
+  if (doc.childCount !== 1) return []
+  const paragraph = doc.child(0)
+  if (paragraph.type.name !== IDML_PARAGRAPH_NODE_NAME) return []
+  const children: IdmlParagraphChild[] = []
+  let position = 1
+  for (let index = 0; index < paragraph.childCount; index += 1) {
+    const node = paragraph.child(index)
+    children.push({ node, contentStart: position + 1 })
+    position += node.nodeSize
+  }
+  return children
+}
+
+/** The range one keypress removes inside a single slot, or null at its edge. */
+function slotDeletionRange(
+  slotStart: number,
+  text: string,
+  offset: number,
+  direction: IdmlDeleteDirection,
+  granularity: IdmlDeleteGranularity,
+): IdmlRange | null {
+  const position = slotStart + offset
+  if (granularity === "word") {
+    const boundary = wordDeletionBoundary(text, offset, direction)
+    if (boundary === null) return null
+    return direction === "backward"
+      ? { from: slotStart + boundary, to: position }
+      : { from: position, to: slotStart + boundary }
+  }
+  const boundaries = granularity === "line"
+    ? lineBoundaries(text)
+    : segmentBoundaries(text, "grapheme")
+  if (direction === "backward") {
+    const previous = boundaries.filter((boundary) => boundary < offset).pop()
+    if (previous === undefined) return null
+    return { from: slotStart + previous, to: position }
+  }
+  const next = boundaries.find((boundary) => boundary > offset)
+  if (next === undefined) return null
+  return { from: position, to: slotStart + next }
+}
+
+/**
+ * AQU-1174: the character on the far side of a slot boundary.
+ *
+ * A style run one character long — the "source serif" apostrophe glue Biblica's
+ * English InDesign templates set inside possessives — renders as its own
+ * one-character span. Clicking just after it puts the caret at the *start* of
+ * the following slot, where the deletion above finds nothing before the caret
+ * and Backspace did nothing at all: the character looked locked. Deletion
+ * therefore steps into the adjacent editable slot, exactly as the caret would
+ * cross a style boundary in any other editor.
+ *
+ * Emptying a slot is legal (that is how an untranslated slot already looks), so
+ * this never touches the protected anchor sequence. Empty slots on the way are
+ * transparent, and the walk stops at a protected token — those are structure,
+ * not text, and are never deletable.
+ */
+function adjacentSlotDeletionRange(
+  doc: ProseMirrorNode,
+  slotStart: number,
+  direction: IdmlDeleteDirection,
+  granularity: IdmlDeleteGranularity,
+): IdmlRange | null {
+  const children = idmlParagraphChildren(doc)
+  const origin = children.findIndex((child) => (
+    child.node.type.name === IDML_SLOT_NODE_NAME && child.contentStart === slotStart
+  ))
+  if (origin < 0) return null
+  const step = direction === "backward" ? -1 : 1
+  for (let index = origin + step; index >= 0 && index < children.length; index += step) {
+    const child = children[index]
+    if (
+      !child
+      || child.node.type.name !== IDML_SLOT_NODE_NAME
+      || child.node.attrs.editable !== true
+    ) return null
+    const text = slotPlainText(child.node)
+    if (text.length === 0) continue
+    const range = slotDeletionRange(
+      child.contentStart,
+      text,
+      direction === "backward" ? text.length : 0,
+      direction,
+      granularity,
+    )
+    if (range) return range
+  }
+  return null
+}
+
 /**
  * AQU-740: the range a Backspace/Delete press should remove, expressed in
  * ProseMirror positions and confined to one editable slot.
@@ -312,26 +432,14 @@ export function idmlDeletionRange(
   const position = selection.from
   const slot = editableSlotAt(doc, position)
   if (!slot) return null
-  const text = slotPlainText(slot.node)
-  const offset = position - slot.start
-  if (granularity === "word") {
-    const boundary = wordDeletionBoundary(text, offset, direction)
-    if (boundary === null) return null
-    return direction === "backward"
-      ? { from: slot.start + boundary, to: position }
-      : { from: position, to: slot.start + boundary }
-  }
-  const boundaries = granularity === "line"
-    ? lineBoundaries(text)
-    : segmentBoundaries(text, "grapheme")
-  if (direction === "backward") {
-    const previous = boundaries.filter((boundary) => boundary < offset).pop()
-    if (previous === undefined) return null
-    return { from: slot.start + previous, to: position }
-  }
-  const next = boundaries.find((boundary) => boundary > offset)
-  if (next === undefined) return null
-  return { from: position, to: slot.start + next }
+  const within = slotDeletionRange(
+    slot.start,
+    slotPlainText(slot.node),
+    position - slot.start,
+    direction,
+    granularity,
+  )
+  return within ?? adjacentSlotDeletionRange(doc, slot.start, direction, granularity)
 }
 
 export function isEditableIdmlSelection(selection: {
@@ -420,7 +528,17 @@ export function resolveIdmlEditorConfiguration(
   if (!proof.valid) {
     return { kind: "error", error: diagnosticMessage(proof.diagnostics[0]) }
   }
-  return { kind: "ready", context: { sourceHtml, metadata } }
+  const styleCatalog = idmlStyleCatalogFromMetadata(cellMetadata)
+  const paragraphStyleId = idmlParagraphStyleFromMetadata(cellMetadata)
+  return {
+    kind: "ready",
+    context: {
+      sourceHtml,
+      metadata,
+      ...(styleCatalog ? { styleCatalog } : {}),
+      ...(paragraphStyleId ? { paragraphStyleId } : {}),
+    },
+  }
 }
 
 function emptyEditableSlots(sourceHtml: string, metadata: IdmlFormatMetadataV2): string {
@@ -504,18 +622,6 @@ function integerAttribute(element: HTMLElement, name: string): number | false {
 function exactAttributes(element: HTMLElement, expected: ReadonlySet<string>): boolean {
   return [...element.attributes].every((attribute) => expected.has(attribute.name))
     && [...expected].every((name) => element.hasAttribute(name))
-}
-
-function decorateIdmlStyleBoundary(element: HTMLElement, characterStyle: string): void {
-  element.className = "idml-style-boundary"
-  const normalized = characterStyle.toLowerCase()
-  element.style.fontWeight = /(?:bold|black|heavy)/.test(normalized) ? "700" : ""
-  element.style.fontStyle = /(?:italic|oblique)/.test(normalized) ? "italic" : ""
-  const decorations = [
-    /underline/.test(normalized) ? "underline" : "",
-    /(?:strike|strikethrough)/.test(normalized) ? "line-through" : "",
-  ].filter(Boolean)
-  element.style.textDecoration = decorations.join(" ")
 }
 
 const IdmlParagraph = TiptapNode.create({
@@ -604,7 +710,7 @@ const IdmlSlot = TiptapNode.create({
   },
 
   addNodeView() {
-    return ({ node }) => {
+    return ({ node, editor }) => {
       const dom = document.createElement("span")
       const render = (currentNode: ProseMirrorNode) => {
         const slot = currentNode.attrs.slot
@@ -614,7 +720,12 @@ const IdmlSlot = TiptapNode.create({
         dom.setAttribute("data-idml-protected", "slot")
         if (currentNode.attrs.editable === false) dom.setAttribute("contenteditable", "false")
         else dom.removeAttribute("contenteditable")
-        decorateIdmlStyleBoundary(dom, characterStyle)
+        decorateIdmlStyleElement(
+          dom,
+          characterStyle,
+          editor.storage.idmlTransactionGuard?.styleCatalog,
+          editor.storage.idmlTransactionGuard?.paragraphStyleId,
+        )
       }
       render(node)
       return {
@@ -872,6 +983,12 @@ export function createIdmlGuardExtension({ context, onRejected }: IdmlGuardOptio
   return Extension.create({
     name: "idmlTransactionGuard",
     priority: 10_000,
+    addStorage(): IdmlGuardStorage {
+      return {
+        styleCatalog: context.styleCatalog,
+        paragraphStyleId: context.paragraphStyleId,
+      }
+    },
     addProseMirrorPlugins() {
       return [new Plugin({
         filterTransaction(transaction) {

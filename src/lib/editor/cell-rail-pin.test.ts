@@ -15,6 +15,7 @@ const base: RailPinInputs = {
   railHasFocus: false,
   showMicDeniedHelp: false,
   showGenerateConfirm: false,
+  overflowOpen: false,
   hasFocusWithin: false,
   remoteChangedWhileFocused: false,
 }
@@ -38,12 +39,21 @@ describe("computeRailPinned", () => {
     ).toBe(false)
   })
 
+  // AQU-200: the `⋯` overflow popup portals OUT of the rail, so the rail's
+  // own focus-capture never sees the focus that moved into it. Without an
+  // explicit pin the rail idle-collapses while its menu is still open, taking
+  // every action inside the menu with it.
+  it("AQU-200: pins while the rail's overflow menu is open, with no other signal", () => {
+    expect(computeRailPinned({ ...base, overflowOpen: true })).toBe(true)
+  })
+
   it("still pins in-flight interactions even during the conflict banner", () => {
     for (const key of [
       "expanded",
       "railHasFocus",
       "showMicDeniedHelp",
       "showGenerateConfirm",
+      "overflowOpen",
     ] as const) {
       expect(
         computeRailPinned({

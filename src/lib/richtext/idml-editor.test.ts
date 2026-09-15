@@ -68,6 +68,39 @@ const SINGLE_SLOT_CONFIGURATION = {
   },
 } satisfies IdmlEditorConfiguration
 
+// AQU-1174: Biblica's English InDesign templates set the apostrophe inside a
+// possessive as its own "source serif" character run, so "Israelʼs covenant
+// history" imports as three slots with a one-character run in the middle.
+const STYLE_GLUE = "CharacterStyle/source%20serif"
+const GLUE_SOURCE =
+  `<p data-idml-version="2">`
+  + `<span data-idml-slot="0" data-idml-character-style="${STYLE_BODY}" data-idml-protected="slot">Israel</span>`
+  + `<span data-idml-slot="1" data-idml-character-style="${STYLE_GLUE}" data-idml-protected="slot">ʼ</span>`
+  + `<span data-idml-slot="2" data-idml-character-style="${STYLE_BODY}" data-idml-protected="slot">s covenant history</span>`
+  + `</p>`
+
+const GLUE_METADATA: IdmlFormatMetadataV2 = {
+  version: 2,
+  slotCount: 3,
+  editableSlotIndexes: [0, 1, 2],
+  protectedTokenCount: 0,
+  anchorSequenceHash: createHash("sha256").update([
+    `slot:0:editable:${STYLE_BODY}`,
+    `slot:1:editable:${STYLE_GLUE}`,
+    `slot:2:editable:${STYLE_BODY}`,
+  ].join("\u0000")).digest("hex"),
+}
+
+const GLUE_CONTEXT = { sourceHtml: GLUE_SOURCE, metadata: GLUE_METADATA }
+
+/** The same cell after an AI draft copied the English glue into slot 1. */
+const GLUE_TARGET =
+  `<p data-idml-version="2">`
+  + `<span data-idml-slot="0" data-idml-character-style="${STYLE_BODY}" data-idml-protected="slot">इस्राएल</span>`
+  + `<span data-idml-slot="1" data-idml-character-style="${STYLE_GLUE}" data-idml-protected="slot">ʼ</span>`
+  + `<span data-idml-slot="2" data-idml-character-style="${STYLE_BODY}" data-idml-protected="slot">चा इतिहास</span>`
+  + `</p>`
+
 const editors: Editor[] = []
 afterEach(() => {
   for (const editor of editors.splice(0)) editor.destroy()
@@ -149,6 +182,36 @@ describe("IDML editor sanitation and configuration", () => {
 
     const legacyPlainOnly = prepareIdmlEditorContent(CONFIGURATION, undefined, "translated")
     expect(legacyPlainOnly.error).toMatch(/plain text but no formatting anchors/i)
+  })
+
+  it("carries a display-only Bold/Italic catalog from cell metadata", () => {
+    const configuration = resolveIdmlEditorConfiguration(
+      {
+        idml: METADATA,
+        idmlStyleDisplay: { "CharacterStyle/Emphasis": { bold: false, italic: true } },
+      },
+      SOURCE_HTML,
+    )
+    expect(configuration).toMatchObject({
+      kind: "ready",
+      context: {
+        styleCatalog: { "CharacterStyle/Emphasis": { bold: false, italic: true } },
+      },
+    })
+  })
+
+  it("carries the paragraph style used for Treasure Hunt heading display", () => {
+    const configuration = resolveIdmlEditorConfiguration(
+      {
+        idml: METADATA,
+        biblica: { paragraphStyle: "ParagraphStyle/!meta_hunt_head" },
+      },
+      SOURCE_HTML,
+    )
+    expect(configuration).toMatchObject({
+      kind: "ready",
+      context: { paragraphStyleId: "ParagraphStyle/!meta_hunt_head" },
+    })
   })
 
   it("fails closed for unsupported metadata instead of selecting the generic editor", () => {
@@ -348,6 +411,41 @@ describe("IDML deletion ranges", () => {
     editor.commands.setTextSelection(slotStart + "alpha".length)
     expect(idmlDeletionRange(editor.state.doc, editor.state.selection, "forward", "word"))
       .toEqual({ from: slotStart + "alpha".length, to: slotEnd })
+  })
+
+  // AQU-1174: a one-character style run — Biblica's "source serif" apostrophe
+  // glue — is its own slot. Clicking just after it lands the caret at the START
+  // of the next slot, where deletion used to find nothing and Backspace did
+  // nothing at all, so the character read as locked.
+  it("deletes a one-character style run from the caret in the neighbouring slot", () => {
+    const editor = createEditor(vi.fn(), GLUE_TARGET, GLUE_CONTEXT)
+    const contentStart = (ordinal: number) =>
+      nodePosition(editor, IDML_SLOT_NODE_NAME, ordinal) + 1
+    const glueStart = contentStart(1)
+    const glueEnd = glueStart + editor.state.doc.nodeAt(glueStart - 1)!.content.size
+    const nextStart = contentStart(2)
+
+    editor.commands.setTextSelection(nextStart)
+    const backward = idmlDeletionRange(
+      editor.state.doc,
+      editor.state.selection,
+      "backward",
+      "character",
+    )
+    expect(backward).toEqual({ from: glueStart, to: glueEnd })
+
+    // Delete from the end of the word before it reaches the glue the same way.
+    const previousEnd = contentStart(0) + editor.state.doc.nodeAt(contentStart(0) - 1)!.content.size
+    editor.commands.setTextSelection(previousEnd)
+    expect(idmlDeletionRange(editor.state.doc, editor.state.selection, "forward", "character"))
+      .toEqual({ from: glueStart, to: glueEnd })
+
+    // Applying it empties the slot and keeps the protected anchor sequence, so
+    // the guard accepts the transaction instead of raising the structure error.
+    editor.view.dispatch(editor.state.tr.delete(backward!.from, backward!.to))
+    const html = serializeIdmlEditorDocument(editor.state.doc)
+    expect(html).not.toContain("ʼ")
+    expect(validateIdmlTranslation(GLUE_SOURCE, html!, GLUE_METADATA).valid).toBe(true)
   })
 
   it("steps over a whole grapheme rather than half a surrogate pair", () => {

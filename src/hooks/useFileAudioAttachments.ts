@@ -29,7 +29,13 @@ import {
 } from "@/lib/audio/audio-attachments-bus"
 import { getOutboxRecords, subscribeToOutbox } from "@/lib/sync/outbox"
 import { fetchFileAudioAttachments } from "@/lib/sync/cell-audio-read"
-import { slotSelections, type AudioAttachmentOut, type CellAudioEntry } from "@/lib/sync/cell-audio-read-types"
+import {
+  slotSelections,
+  type AudioAttachmentOut,
+  type CellAudioEntry,
+  type FileAudioAttachmentsResponse,
+} from "@/lib/sync/cell-audio-read-types"
+import { createRequestCoalescer } from "@/lib/request-coalescer"
 import { GENERATED_VOICE_SLOT, RECORDING_SLOT } from "@/lib/timeline/track-slots"
 import type { CellData } from "@/hooks/useCells"
 import type { CodexCellAttachment, WordTiming } from "@/lib/codex-editor/types"
@@ -225,6 +231,13 @@ export interface UseFileAudioAttachmentsResult {
 
 const EMPTY: Map<string, CellAudioEntry> = new Map()
 
+// Shared across every mounted instance (ProjectWorkspace mounts this hook
+// three times for the same file). Callers that arrive within the join window
+// share the in-flight request; a later poke waits for it and runs ONE fresh
+// follow-up so it is never answered with pre-write data. No TTL — every
+// settled fetch is a real read.
+const attachmentsCoalescer = createRequestCoalescer<FileAudioAttachmentsResponse | null>({ joinWindowMs: 250 })
+
 export function useFileAudioAttachments(
   projectId: string | null,
   fileId: string | null,
@@ -269,11 +282,6 @@ export function useFileAudioAttachments(
     const gen = ++generationRef.current
     setIsLoading(true)
     try {
-      const token = await getToken(projectId, fileId)
-      if (!token) {
-        if (gen === generationRef.current) setByCellId(EMPTY)
-        return
-      }
       const registry = getOptimisticShadows(fileId)
       const queuedIds: string[] = []
       for (const list of registry.values()) {
@@ -281,11 +289,21 @@ export function useFileAudioAttachments(
       }
       // One batched IDB read per fetch, alongside the network read — the ids
       // are just this file's live overlays, so it stays a handful of gets.
+      // The network read (token mint + GET) is shared across the hook's
+      // instances via the module-level coalescer, so the three mounts
+      // ProjectWorkspace keeps for one file cost one request each time.
       const [res, outboxRecords] = await Promise.all([
-        fetchFileAudioAttachments(projectId, fileId, token),
+        attachmentsCoalescer.run(`${projectId}/${fileId}`, async () => {
+          const token = await getToken(projectId, fileId)
+          return token ? fetchFileAudioAttachments(projectId, fileId, token) : null
+        }),
         getOutboxRecords(queuedIds),
       ])
       if (gen !== generationRef.current) return // a newer fetch superseded us
+      if (!res) {
+        setByCellId(EMPTY)
+        return
+      }
       const map = new Map(Object.entries(res.cells))
       const now = Date.now()
       const outboxStatus = new Map(outboxRecords.map((r) => [r.id, r.status]))

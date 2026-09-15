@@ -23,6 +23,7 @@ import { RuleImportReview } from "./RuleImportReview"
 import {
   checkInputSize,
   extractRulesFromDocument,
+  MAX_INPUT_BYTES,
   type ExtractionProgress,
 } from "@/lib/rules/rule-extractor"
 import { addLlmCall } from "@/lib/usage/record-usage"
@@ -44,7 +45,10 @@ const ACCEPTED_BINARY_MIME = [
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 ]
 
-const MAX_TEXT_BYTES = 200 * 1024 // 200 KB (existing limit for text)
+// The drop-zone cap and the extractor's own cap are the same limit seen from
+// two sides (file bytes vs. UTF-8 text bytes). Derive it from the extractor so
+// the two can't drift and let an over-cap document through to an LLM call.
+const MAX_TEXT_BYTES = MAX_INPUT_BYTES
 
 const FALLBACK_SETTINGS: CompletionSettings = {
   provider: "frontier",
@@ -207,12 +211,12 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
     if (file) handleFileAccepted(file)
   }
 
-  async function handleCommit(acceptedIndices: number[]) {
+  // AQU-198: the review screen hands back the accepted drafts *as edited*, so a
+  // name the user retyped there is the one that gets saved.
+  async function handleCommit(acceptedDrafts: RuleSuggestion[]) {
     setCommitting(true)
     try {
-      for (const i of acceptedIndices) {
-        const draft = drafts[i]
-        if (!draft) continue
+      for (const draft of acceptedDrafts) {
         await onAdd({
           name: draft.name,
           description: draft.description,

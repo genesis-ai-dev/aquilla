@@ -1,9 +1,19 @@
-import JSZip from "jszip"
 import { v4 as uuid } from "uuid"
-import type { TranslatableString } from "./types"
+// Types come from core-types (not types.ts): types.ts pulls `@/`-aliased SPA
+// modules, and this parser is now imported by the sync-worker too (AQU-1237).
+import type { TranslatableString } from "./core-types"
 import { splitIntoSegments } from "./text-splitter"
-import { assertSafeArchiveInputSize, assertSafeZipArchive } from "./zip-safety"
-import { createUsfmFootnoteMarker } from "@/lib/footnotes/insert"
+import { assertSafeArchiveInputSize, assertSafeZipLiteArchive } from "./zip-safety"
+import { readZipLite, readZipLiteEntryText, type ZipLiteArchive } from "./zip-lite"
+import {
+  elementsByTagName,
+  firstElementByTagName,
+  getAttribute,
+  parseXmlLite,
+  textContent,
+  type XmlElement,
+} from "./xml-lite"
+import { createUsfmFootnoteMarker } from "../footnotes/insert"
 
 // AQU-662: DOCX footnotes (word/footnotes.xml) are followed from their
 // w:footnoteReference anchors in word/document.xml and inlined into the cell
@@ -11,6 +21,14 @@ import { createUsfmFootnoteMarker } from "@/lib/footnotes/insert"
 // the whole existing footnote pipeline — inline decoration, hover, editing,
 // export round-trip, and completion footnote-awareness — works for DOCX with no
 // new display code. See src/lib/footnotes/extract.ts.
+//
+// AQU-1237: this parser used to depend on the Window-only `DOMParser` and on
+// JSZip, which is what kept DOCX out of the Agent API's server-side import path
+// (sync-worker/src/external/import-parse.ts). It now reads its archive through
+// `zip-lite` and its XML through `xml-lite` — both platform-only — so the
+// browser, the parse Web Worker, and the Cloudflare Worker run this SAME
+// function. Format parity between an in-app import and an agent import is
+// therefore structural, not a thing two implementations have to agree on.
 
 /** Matches a full USFM footnote span so the segment splitter can be prevented
  *  from breaking one across cells. Mirrors USFM_FOOTNOTE_RE in footnotes/extract.ts. */
@@ -20,23 +38,50 @@ const FOOTNOTE_SPAN_RE = /\\f\s+[^\s\\]+[\s\S]*?\\f\*/g
 // document text and carry no whitespace/punctuation, so a masked footnote span
 // stays glued to its anchor word, is never itself split apart by the segment
 // splitter, and cannot collide with real digits already in the paragraph.
-const MASK_OPEN = "\uE000"
-const MASK_CLOSE = "\uE001"
-const MASK_RE = /\uE000(\d+)\uE001/g
+const MASK_OPEN = ""
+const MASK_CLOSE = ""
+const MASK_RE = /(\d+)/g
+
+const DOCUMENT_PART = "word/document.xml"
+const FOOTNOTES_PART = "word/footnotes.xml"
+
+/** The XML parts a DOCX import reads, already inflated and decoded. Splitting
+ *  this out lets a caller that already holds the archive (or the raw parts)
+ *  reuse the exact cell-building logic without a second unzip. */
+export interface DocxParts {
+  documentXml: string
+  footnotesXml?: string
+}
 
 export async function extractDocxStrings(buffer: ArrayBuffer): Promise<TranslatableString[]> {
   assertSafeArchiveInputSize(buffer.byteLength, "DOCX file")
-  const zip = await JSZip.loadAsync(buffer)
-  assertSafeZipArchive(zip, "DOCX file")
-  const documentEntry = zip.file("word/document.xml")
-  if (!documentEntry) throw new Error("DOCX file does not contain word/document.xml")
-  const xmlStr = await documentEntry.async("string")
-  const doc = new DOMParser().parseFromString(xmlStr, "application/xml")
+  let archive: ZipLiteArchive
+  try {
+    archive = readZipLite(buffer)
+  } catch (err) {
+    throw new Error(`DOCX file appears to be corrupt (could not unzip): ${(err as Error).message}`, {
+      cause: err,
+    })
+  }
+  assertSafeZipLiteArchive(archive, "DOCX file")
 
-  const footnotes = await loadFootnotes(zip)
+  const documentXml = await readZipLiteEntryText(archive, DOCUMENT_PART)
+  if (documentXml === null) throw new Error("DOCX file does not contain word/document.xml")
+  const footnotesXml = await readZipLiteEntryText(archive, FOOTNOTES_PART)
+
+  return docxPartsToStrings({
+    documentXml,
+    ...(footnotesXml !== null ? { footnotesXml } : {}),
+  })
+}
+
+/** Turn the DOCX XML parts into translatable cells. Pure (no zip, no DOM). */
+export function docxPartsToStrings(parts: DocxParts): TranslatableString[] {
+  const doc = parseXmlLite(parts.documentXml)
+  const footnotes = parts.footnotesXml === undefined ? new Map<string, string>() : loadFootnotes(parts.footnotesXml)
 
   const results: TranslatableString[] = []
-  const paragraphs = doc.getElementsByTagName("w:p")
+  const paragraphs = elementsByTagName(doc, "w:p")
 
   for (let i = 0; i < paragraphs.length; i++) {
     const p = paragraphs[i]
@@ -50,7 +95,7 @@ export async function extractDocxStrings(buffer: ArrayBuffer): Promise<Translata
       : ("text" as const)
     const segments = splitFootnoteAware(plain)
     const sourceLocation = {
-      file: "word/document.xml",
+      file: DOCUMENT_PART,
       blockPath: `w:p[${i + 1}]`,
     }
 
@@ -103,25 +148,21 @@ function splitFootnoteAware(plain: string): { text: string; group: string }[] {
  * special separator / continuationSeparator footnotes (ids -1, 0) carry no
  * user content and are skipped.
  */
-async function loadFootnotes(zip: JSZip): Promise<Map<string, string>> {
+function loadFootnotes(footnotesXml: string): Map<string, string> {
   const map = new Map<string, string>()
-  const entry = zip.file("word/footnotes.xml")
-  if (!entry) return map
-
-  const xmlStr = await entry.async("string")
-  const doc = new DOMParser().parseFromString(xmlStr, "application/xml")
-  const notes = doc.getElementsByTagName("w:footnote")
+  const doc = parseXmlLite(footnotesXml)
+  const notes = elementsByTagName(doc, "w:footnote")
 
   for (let i = 0; i < notes.length; i++) {
     const note = notes[i]
-    const id = note.getAttribute("w:id")
+    const id = getAttribute(note, "w:id")
     if (id === null) continue
-    const noteType = note.getAttribute("w:type")
+    const noteType = getAttribute(note, "w:type")
     if (noteType === "separator" || noteType === "continuationSeparator") continue
 
-    const textEls = note.getElementsByTagName("w:t")
+    const textEls = elementsByTagName(note, "w:t")
     let text = ""
-    for (let j = 0; j < textEls.length; j++) text += textEls[j].textContent || ""
+    for (let j = 0; j < textEls.length; j++) text += textContent(textEls[j])
     text = text.trim()
     if (text) map.set(id, text)
   }
@@ -130,10 +171,10 @@ async function loadFootnotes(zip: JSZip): Promise<Map<string, string>> {
 }
 
 function extractRuns(
-  p: Element,
+  p: XmlElement,
   footnotes: Map<string, string>,
 ): { plain: string; html: string; hasFormatting: boolean; hasFootnote: boolean } {
-  const runs = p.getElementsByTagName("w:r")
+  const runs = elementsByTagName(p, "w:r")
   let plain = ""
   let html = ""
   let hasFormatting = false
@@ -144,9 +185,9 @@ function extractRuns(
 
     // A footnote-reference run carries no w:t; it anchors a note from
     // word/footnotes.xml. Inline the note as a USFM marker at this position.
-    const ref = run.getElementsByTagName("w:footnoteReference")[0]
+    const ref = firstElementByTagName(run, "w:footnoteReference")
     if (ref) {
-      const id = ref.getAttribute("w:id")
+      const id = getAttribute(ref, "w:id")
       const noteText = id !== null ? footnotes.get(id) : undefined
       if (noteText) {
         const marker = createUsfmFootnoteMarker({ caller: "+", text: noteText })
@@ -157,19 +198,19 @@ function extractRuns(
       continue
     }
 
-    const textEls = run.getElementsByTagName("w:t")
+    const textEls = elementsByTagName(run, "w:t")
     let text = ""
     for (let j = 0; j < textEls.length; j++) {
-      text += textEls[j].textContent || ""
+      text += textContent(textEls[j])
     }
 
     if (!text) continue
 
-    const rPr = run.getElementsByTagName("w:rPr")[0]
-    const bold = rPr?.getElementsByTagName("w:b").length > 0
-    const italic = rPr?.getElementsByTagName("w:i").length > 0
-    const underline = rPr?.getElementsByTagName("w:u").length > 0
-    const strike = rPr?.getElementsByTagName("w:strike").length > 0
+    const rPr = firstElementByTagName(run, "w:rPr")
+    const bold = rPr !== undefined && firstElementByTagName(rPr, "w:b") !== undefined
+    const italic = rPr !== undefined && firstElementByTagName(rPr, "w:i") !== undefined
+    const underline = rPr !== undefined && firstElementByTagName(rPr, "w:u") !== undefined
+    const strike = rPr !== undefined && firstElementByTagName(rPr, "w:strike") !== undefined
 
     plain += text
 
@@ -184,12 +225,12 @@ function extractRuns(
   return { plain, html, hasFormatting, hasFootnote }
 }
 
-function getParaStyle(p: Element): string | null {
-  const pPr = p.getElementsByTagName("w:pPr")[0]
+function getParaStyle(p: XmlElement): string | null {
+  const pPr = firstElementByTagName(p, "w:pPr")
   if (!pPr) return null
-  const pStyle = pPr.getElementsByTagName("w:pStyle")[0]
+  const pStyle = firstElementByTagName(pPr, "w:pStyle")
   if (!pStyle) return null
-  const val = pStyle.getAttribute("w:val") || ""
+  const val = getAttribute(pStyle, "w:val") || ""
 
   const headingMatch = val.match(/^Heading(\d+)$/i)
   if (headingMatch) return `Heading ${headingMatch[1]}`

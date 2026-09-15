@@ -140,7 +140,7 @@ describe("ContextualRunPill", () => {
       await Promise.resolve()
     })
     expect(onSetupNeeded).not.toHaveBeenCalled()
-    expect(transport.start).toHaveBeenCalledWith("p1", "file-1", undefined, "", undefined)
+    expect(transport.start).toHaveBeenCalledWith("p1", "file-1", undefined, "")
   })
 
   it("announces a visible recovery message when starting fails", async () => {
@@ -281,7 +281,7 @@ describe("ContextualRunPill", () => {
     expect(screen.queryByText(/Project default only/)).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Run Autopilot" }))
 
-    expect(transport.start).toHaveBeenCalledWith("p1", "file-1", undefined, "fr", undefined)
+    expect(transport.start).toHaveBeenCalledWith("p1", "file-1", undefined, "fr")
   })
 
   it("closes the default-run inspector when the editor switches to another language lane", async () => {

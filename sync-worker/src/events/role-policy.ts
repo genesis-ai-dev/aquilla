@@ -1,6 +1,7 @@
 import type { EventKind } from './types'
 
-// Numeric role levels matching frontier-server's role hierarchy.
+// Numeric role levels matching auth-worker's role hierarchy
+// (auth-worker/src/services/project-permissions.ts's ROLE_NAMES).
 // 100-gaps for future extensibility (e.g. inserting a 350 between
 // REVIEWER and CONTRIBUTOR if a workflow ever needs it).
 export const ROLE = {
@@ -36,17 +37,32 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   // direct re-imports. The import-bot service account is provisioned at
   // OWNER level out of band.
   //
-  // Sam, 2026-08-21: create/delete/reorder dropped to CONTRIBUTOR so the
-  // `allowLineCreation` project setting can admit contributors — reorder
-  // included because it is the chain bookkeeping riding every add and remove
-  // batch. This is the LOWEST reachable floor; authorize.ts conditionally
-  // re-imposes PROJECT_LEAD — all three refused below lead unless the
-  // project opted in, deletes additionally only for a cell a person added by
-  // hand (line-creation-authority.ts).
-  'source.cell.create': ROLE.CONTRIBUTOR,
+  // AQU-1068: create/delete/reorder sit at COMMENTER — reorder included
+  // because it is the chain bookkeeping riding every add and remove batch.
+  //
+  // SINCE 2026-09-09 THIS IS THE ONLY SERVER FLOOR ON THESE THREE KINDS, and
+  // that is deliberate. The project's `cellEditingFloor` tier used to be
+  // checked in authorize.ts on top of it; it is now a PRODUCT rule enforced
+  // where the buttons are drawn, because enforcing it here silently refused
+  // audio-cue re-import, DCS upstream import and diarization — three flows
+  // that emit these kinds through the user's own outbox. See the long note in
+  // authorize.ts. What survives at the perimeter is the rule that protects the
+  // client's file: a delete needs MAINTAINER unless the cell is one a person
+  // added by hand here.
+  //
+  // LOWERED FROM CONTRIBUTOR (Matthew's review, approved by Sam 2026-09-08)
+  // when the tier list grew Commenter and Reviewer rungs; at CONTRIBUTOR those
+  // two rungs were unreachable by construction, which is a setting that lies.
+  //
+  // The external API surface does not consult this table for these three kinds
+  // at all: `emitEventsFloor` (external/commands-emit-events.ts) hard-codes
+  // PROJECT_LEAD for create/delete/reorder, and since the tier check went away
+  // that hard-coded floor is now the ONLY thing holding integrations above
+  // this line. There is a test pinning it for exactly that reason.
+  'source.cell.create': ROLE.COMMENTER,
   'source.cell.commit': ROLE.PROJECT_LEAD,
-  'source.cell.delete': ROLE.CONTRIBUTOR,
-  'source.cell.reorder': ROLE.CONTRIBUTOR,
+  'source.cell.delete': ROLE.COMMENTER,
+  'source.cell.reorder': ROLE.COMMENTER,
   'source.cell.metadata.patch': ROLE.PROJECT_LEAD,
   'source.cell.reanchor': ROLE.PROJECT_LEAD,
 
@@ -94,6 +110,8 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   // editing flow — contributor-level, like target.* / cell.waive. It mutates
   // an existing row's display name, not the project's file inventory.
   'file.rename': ROLE.CONTRIBUTOR,
+  // Sidebar folder label — same class as file.rename (grouping, not inventory).
+  'file.corpus.set': ROLE.CONTRIBUTOR,
 
   // file.delete/file.restore are structural changes (soft-delete tombstone).
   // Require PROJECT_LEAD (500) — same as file.create and source.* imports.
@@ -109,6 +127,20 @@ export const REQUIRED_ROLE: Record<EventKind, number> = {
   'comment.edit': ROLE.COMMENTER,
   'comment.delete': ROLE.COMMENTER,
   'comment.resolve': ROLE.COMMENTER,
+
+  // Terminology: CONTRIBUTOR is the floor to PARTICIPATE — it buys you a
+  // suggestion (`term.create` with status 'draft'), which compiles to no rules
+  // and binds nobody. Every BINDING write (approving, editing, deleting, or
+  // creating an already-active term) has the org's configured
+  // `termbaseEditMinRole` put back on top of this in authorize.ts — the same
+  // conditional-raise shape `source.cell.create` uses for allowLineCreation.
+  // Reading this table alone will therefore UNDERSTATE the real floor; see
+  // termbase-authority.ts.
+  'term.create': ROLE.CONTRIBUTOR,
+  'term.update': ROLE.CONTRIBUTOR,
+  'term.delete': ROLE.CONTRIBUTOR,
+  'term.approve': ROLE.CONTRIBUTOR,
+  'term.reject': ROLE.CONTRIBUTOR,
 
   // Back-translations: writing a BT is a translator-level action (contributor+).
   // Viewing BTs is gated only at the read route (viewer+); the write event

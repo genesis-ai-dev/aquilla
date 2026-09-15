@@ -216,8 +216,22 @@ function ApprovalSummaryView({
   onReject: () => void
 }) {
   const { locale, t } = useI18n()
-  const { warnings, settingsChanges, memoryWrites, ...facts } = data.summary
-  const factEntries = Object.entries(facts).filter(([, v]) => typeof v === "number" || typeof v === "string")
+  // AQU-1234: a cell-structure changeset reports its effect as one nested
+  // object, which the flat number/string filter below would drop — leaving the
+  // reviewer with "No changes summarized." on the one command kind that
+  // rewrites a file's shape. Flatten it into the same fact list, dropping the
+  // zero counts so an insert doesn't read as a delete of nothing.
+  const { warnings, settingsChanges, memoryWrites, structure, ...facts } = data.summary
+  const structureEntries: [string, string | number][] =
+    structure && typeof structure === "object"
+      ? Object.entries(structure).filter(
+          ([, v]) => typeof v === "string" || (typeof v === "number" && v !== 0),
+        ) as [string, string | number][]
+      : []
+  const factEntries = [
+    ...structureEntries,
+    ...Object.entries(facts).filter(([, v]) => typeof v === "number" || typeof v === "string"),
+  ]
   const settingsEntries =
     settingsChanges && typeof settingsChanges === "object"
       ? Object.entries(settingsChanges).filter(([, v]) => typeof v === "string")

@@ -118,6 +118,14 @@ export const SURFACED_CAP = 3
 export function blastRadius(summary: ChangesetSummary): number {
   const events = (summary.events ?? []).reduce((n, e) => n + e.count, 0)
   const settingsKeys = Object.keys(summary.settingsChanges ?? {}).length
+  // A structural edit's radius is every row it moves — added, removed,
+  // re-anchored, and the translations it drops or rewrites. Counting only the
+  // added/removed cell would rank a split that rewrites six lanes below a
+  // one-cell translation edit.
+  const s = summary.structure
+  const structure = s
+    ? s.cellsAdded + s.cellsRemoved + s.cellsReanchored + s.targetsRemoved + s.targetsRewritten
+    : 0
   return (
     (summary.translationsAdded ?? 0) +
     (summary.translationsModified ?? 0) +
@@ -126,7 +134,8 @@ export function blastRadius(summary: ChangesetSummary): number {
     (summary.filesCreated ?? 0) +
     (summary.mediaLinked ?? 0) +
     events +
-    settingsKeys
+    settingsKeys +
+    structure
   )
 }
 

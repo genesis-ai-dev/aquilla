@@ -39,6 +39,20 @@ export interface EmitEventsSummaryEntry {
   testimony: boolean
 }
 
+/** Effect line for a cell-structure changeset (AQU-1234). Every count is
+ *  server-computed from the live chain at prepare, so the human on /approve/:id
+ *  sees how many rows actually move — not the agent's claim about it. */
+export interface StructureSummaryEntry {
+  command: 'InsertCell' | 'DeleteCell' | 'SplitCell'
+  fileId: string
+  cellsAdded: number
+  cellsRemoved: number
+  /** Rows re-pointed in the anchor chain so document order survives the edit. */
+  cellsReanchored: number
+  targetsRemoved: number
+  targetsRewritten: number
+}
+
 /** Server-computed effect summary — facts come from the plan, not the agent.
  *  SetTranslation changesets populate translations*; PlanImport changesets
  *  populate filesCreated/sourceCellsAdded/artifactLinked. */
@@ -114,7 +128,57 @@ export interface ChangesetSummary {
   settingsChanges?: Record<string, string>
   /** EmitEvents: per-kind effect lines (kind, count, testimony flag). */
   events?: EmitEventsSummaryEntry[]
+  /** InsertCell / DeleteCell / SplitCell: the one structural effect line. */
+  structure?: StructureSummaryEntry
   warnings: ChangesetWarning[]
+}
+
+/**
+ * Prepare-time ledger for a cell-structure changeset (AQU-1234).
+ *
+ * One loose shape rather than a union per command: it round-trips through the
+ * `summary` JSONB column, and the fields each command uses are documented
+ * below. Beyond the usual minted event ids it also carries the pinned parent
+ * heads and the CUT TEXT — a split's halves are computed at prepare from the
+ * source the pin proves is still live, so commit applies exactly what was
+ * approved rather than re-deriving it from whatever the cell says now.
+ */
+export interface StructurePlan {
+  kind: 'InsertCell' | 'DeleteCell' | 'SplitCell'
+  /** Delete/Split: the cell being removed or cut. */
+  cellId?: string
+  /** Delete/Split: that cell's pinned source chain head. */
+  sourceParentEventId?: string
+  /** Delete: the minted source.cell.delete id. */
+  deleteEventId?: string
+  /** Delete: the anchor the removed cell's successors inherit. */
+  anchorCellId?: string | null
+  /** Split: the minted source.cell.commit id that truncates the original. */
+  commitEventId?: string
+  /** Split: the two halves of the source text, cut at prepare. */
+  sourceHead?: string
+  sourceTail?: string
+  /** Insert/Split: the new cell and its minted source.cell.create id. */
+  newCellId?: string
+  createEventId?: string
+  /** Insert/Split: the new cell's `sequenceIndex`, midway between neighbours. */
+  sequenceIndex?: number
+  /** Split: the original's `type`, inherited by the second half. */
+  newCellType?: string
+  /** Rows to re-point, each with its pinned head and minted reorder id. */
+  reanchor: { cellId: string; parentEventId: string; eventId: string }[]
+  /** Target rows to drop (Delete, and Split with `targets: 'blank'`). */
+  targetDeletes?: { lane: string; eventId: string }[]
+  /** Split with `targets: 'divide'`: per lane, the pinned target head, the two
+   *  halves of the translation, and the minted commit ids for each. */
+  targetSplits?: {
+    lane: string
+    parentEventId: string
+    headValue: string
+    tailValue: string
+    headEventId: string
+    tailEventId: string
+  }[]
 }
 
 /** Prepare-time id ledger (W1-B, design §4). All event/file/cell ids a commit
@@ -190,6 +254,9 @@ export interface PlannedEventIds {
     attachEventId: string
     selectEventId: string
   }[]
+  /** InsertCell / DeleteCell / SplitCell: the whole structural plan — minted
+   *  event ids, pinned parent heads, and the prepare-time cut text. */
+  structure?: StructurePlan
 }
 
 /** Execution receipt recorded on commit. */

@@ -22,7 +22,8 @@ import {
   catalogIndexLines,
   describeCommand,
 } from '../../../db/shared/command-catalog'
-import { validateCommands, CREATE_PROJECT_FIELDS } from '../external/commands'
+import { requiredRoleForCommand, validateCommands, CREATE_PROJECT_FIELDS } from '../external/commands'
+import { structureCommandFloor } from '../external/commands-structure'
 import { POLICY_SETTINGS_KEYS } from '../external/commands-patch-settings'
 import { ALLOWED_EMIT_KINDS, TESTIMONY_EMIT_KINDS } from '../external/commands-emit-events'
 import { BRIEF_FIELD_MAX_CHARS, BRIEF_NOTES_MAX_CHARS } from '../external/commands-set-brief'
@@ -57,6 +58,7 @@ describe('command catalog — invariants', () => {
       SetTranslation: { kind: 'SetTranslation', fileId: 'f', cellId: 'c', value: 'v' },
       LinkMedia: { kind: 'LinkMedia', fileId: 'f', cellId: 'c', artifactId: 'a' },
       PlanImport: { kind: 'PlanImport', fileName: 'n', fileType: 'txt', cells: [{ content: 'x' }] },
+      CreateOrg: { kind: 'CreateOrg', name: 'O' },
       CreateProject: { kind: 'CreateProject', name: 'P' },
       UpdateProjectSettings: { kind: 'UpdateProjectSettings', projectId: 'p', settings: {}, ifMatchVersion: 0 },
       PatchSettings: { kind: 'PatchSettings', projectId: 'p', ops: [{ key: 'systemPrompt', value: 'x' }], ifMatchVersion: 0 },
@@ -69,6 +71,9 @@ describe('command catalog — invariants', () => {
       AddDecision: { kind: 'AddDecision', slug: 'divine-name', decision: 'Render Lord as Господь.' },
       AddNote: { kind: 'AddNote', fileId: 'f', cellId: 'c', note: 'why this rendering' },
       RetireExample: { kind: 'RetireExample', slug: 'lord-as-hospod' },
+      InsertCell: { kind: 'InsertCell', fileId: 'f', value: 'v' },
+      DeleteCell: { kind: 'DeleteCell', fileId: 'f', cellId: 'c' },
+      SplitCell: { kind: 'SplitCell', fileId: 'f', cellId: 'c', offset: 3, targets: 'blank' },
     }
     for (const entry of COMMAND_CATALOG) {
       const sample = minimal[entry.kind]
@@ -84,6 +89,20 @@ describe('command catalog — invariants', () => {
     expect(describeCommand('EmitEvents')?.minRoleLevel).toBe(ROLE.COMMENTER)
     expect(describeCommand('UpdateProjectSettings')?.minRoleLevel).toBe(ROLE.MAINTAINER)
     expect(describeCommand('Bogus')).toBeNull()
+  })
+
+  it('the structure commands publish the floor their engine enforces (AQU-1234)', () => {
+    for (const kind of ['InsertCell', 'DeleteCell', 'SplitCell']) {
+      const entry = describeCommand(kind)
+      expect(entry, `${kind} missing from the catalog`).not.toBeNull()
+      expect(entry!.minRoleLevel).toBe(structureCommandFloor())
+      expect(entry!.tier).toBe('structural')
+    }
+    // The catalog floor IS the prepare/commit floor — one source of truth.
+    expect(structureCommandFloor()).toBe(ROLE.PROJECT_LEAD)
+    expect(
+      requiredRoleForCommand({ kind: 'SplitCell', fileId: 'f', cellId: 'c', offset: 1, targets: 'blank' }),
+    ).toBe(describeCommand('SplitCell')!.minRoleLevel)
   })
 
   it('the role-filtered index narrows with level and formats one line per command', () => {
@@ -157,9 +176,10 @@ describe('get_capabilities — commands index (§6)', () => {
       expect(Object.keys(row).sort()).toEqual(['kind', 'minRoleLevel', 'tier', 'title'])
     }
     expect(payload.commands.note).toContain('describe_command')
-    // The legacy commandKinds field is untouched (frozen external behavior).
+    // The legacy commandKinds field is untouched (frozen external behavior),
+    // now including CreateOrg (AQU-1221).
     expect(payload.commandKinds).toEqual(
-      ['SetTranslation', 'PlanImport', 'CreateProject', 'UpdateProjectSettings', 'LinkMedia'],
+      ['SetTranslation', 'PlanImport', 'CreateOrg', 'CreateProject', 'UpdateProjectSettings', 'LinkMedia'],
     )
   })
 })

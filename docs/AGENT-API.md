@@ -669,3 +669,96 @@ Three properties of this surface are contract, not implementation detail:
   project (so "one person made these decisions" survives), uncorrelatable across projects.
   Keyed HMAC rather than a bare hash because usernames are low-entropy and the projectId is
   already known to the caller.
+
+## Status addendum (2026-09-10, AQU-1234 — cell-structure commands)
+
+The command layer could write a cell's TEXT (`SetTranslation`) and create a whole file
+(`PlanImport`), but not restructure an existing one. Three commands close that gap,
+implemented in `sync-worker/src/external/commands-structure.ts` (shapes, validation,
+floor) and `structure-engine.ts` (prepare/commit):
+
+- **`InsertCell`** `{ fileId, value, afterCellId?, cellId?, type?, canonicalRef?, startMs?,
+  endMs?, metadata? }` → `source.cell.create` plus a `source.cell.reorder` for whatever was
+  anchored at that position. `afterCellId: null`/omitted inserts at the file head.
+- **`DeleteCell`** `{ fileId, cellId }` → a `source.cell.reorder` per following row, a
+  `target.cell.delete` per translated lane, then `source.cell.delete`.
+- **`SplitCell`** `{ fileId, cellId, offset, targets, targetOffsets?, newCellId? }` →
+  `source.cell.commit` truncating the original, `source.cell.create` for the second half,
+  reorders, and either `target.cell.delete` per lane (`targets: 'blank'`) or a pair of
+  `target.cell.commit`s per lane (`targets: 'divide'`).
+
+All three use the SAME cell-lifecycle events the workspace emits, so the event log after an
+agent restructure is indistinguishable from a human one. Each must be the **sole command** in
+its changeset (a structural edit is one indivisible rewrite of a file's anchor chain; two in
+one plan would have to be ordered and re-pinned against a chain the first one moved), and each
+floors at **PROJECT_LEAD** — the same reasoning `emitEventsFloor` applies to `source.cell.*`:
+this surface never runs the app's per-event `allowLineCreation` carve-out, so restructuring
+source rows stays a re-import-shaped act.
+
+Unlike the other engines these pin their own heads in `plannedIds.structure` rather than the
+shared `preconditions` list: the shared drift gate compares both the source head and the lane's
+target head for every precondition it holds, and pinning through it would fail a perfectly good
+insert because somebody translated the successor cell in the meantime. A split's cut text is
+computed at prepare too, so commit applies exactly what was approved rather than re-cutting
+whatever the cell says at commit time.
+
+**Validation:** both halves of a split come out unvalidated. `'blank'` removes the target rows
+that held the validation; `'divide'` re-commits them, which resets `validated` because the
+chain head moved. This is stated in `describe_command`.
+
+### Round-trip safety — refusal, not repair
+
+Structural edits are **refused** on a file whose cells carry a preserved export slot (an IDML
+v2 / OOXML package-block locator), with `validation_failed` and
+`details.reason = "preserved_export_slots"`. Those exporters address cells BY locator and throw
+on any cell without one: inserting makes `cellContract` throw, deleting a rejoin sibling makes
+`mergeSlicedUnit` throw ("N of them are missing from this export"), and splitting would need
+consistent rejoin index/count/ranges plus a protected-HTML cut that no plain-text offset can
+make safely. Refusing keeps the hard requirement true by construction — a file that
+round-tripped before a structure command still round-trips after it. Both failure modes are
+pinned by tests in `src/lib/export/exporters/idml.rejoin.test.ts`.
+
+USFM's lossless bundle export overlays translations onto the preserved original **by canonical
+ref**, so it needs narrower guards instead:
+
+- `InsertCell` rejects a `canonicalRef` already used in the file (a duplicate silently drops
+  one of the two from the deliverable).
+- `SplitCell` is refused on a cell that has a canonical ref in a file with a preserved source
+  blob — the second half cannot reuse the ref, so it would vanish from the export.
+- `DeleteCell` is safe: the ref's override simply disappears and the original text stands.
+
+`SplitCell` also refuses cells carrying structured source or target HTML
+(`details.reason = "structured_source_html"` / `"structured_target_html"`) — a plain-text
+offset cannot cut markup without unbalancing it.
+
+**`DeleteCell` orphan guard:** `source.cell.delete`'s projection removes exactly one `cells`
+row and cleans up nothing else, so prepare refuses a cell that still owns validators, waivers,
+comments, back-translations, audio takes, cell links or assignment rows, naming them in
+`details.dependents`. This is the same reasoning the workspace's remove-line applies
+(`src/lib/timeline/user-lines.ts` `isLineEmpty`), generalized from "the line is empty" to "the
+line owns nothing" so an agent can still remove a stray imported row that has text.
+
+### MergeCells (deferred)
+
+`MergeCells` is deliberately **not** shipped. The issue scoped it as "include only if the
+semantics for combining validation state and history are clean" — they are not, and each corner
+is a product call rather than an implementation detail:
+
+1. **History.** Two cells are two independent event chains. A merge has to pick one chain to
+   survive and tombstone the other, or invent a join event the projection has no concept of.
+   Either way one cell's per-cell history stops being reachable from the surviving row, which
+   is a durable loss of the audit trail Aquilla's whole model rests on.
+2. **Validation.** If A is validated and B is not, the merged cell is neither validated nor
+   cleanly unvalidated: dropping A's validation discards real testimony, and keeping it claims
+   somebody checked text they never saw. `SplitCell` escapes this because BOTH halves honestly
+   lose validation; a merge has no equivalently honest answer.
+3. **Everything hanging off the losing cell** — validators, waivers, comments,
+   back-translations, audio takes, links, assignment rows — has to be re-pointed or dropped.
+   `DeleteCell` refuses rather than guess; a merge cannot refuse, because re-pointing is the
+   whole point of merging.
+4. **Lanes.** Merging cells translated in different lane sets means choosing, per lane, between
+   concatenation, one side, and blank — four commands' worth of policy inside one verb.
+
+The agent-reachable path in the meantime: `SetTranslation` the combined text onto the cell you
+want to keep, then `DeleteCell` the other once it owns nothing. That is two reviewable
+changesets with no invented semantics, and it is what the workspace does today.

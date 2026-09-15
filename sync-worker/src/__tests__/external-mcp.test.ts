@@ -249,9 +249,9 @@ describe('MCP tools/call — reads', () => {
     const { payload } = toolPayload(((await res.json()) as any).result)
     const p = payload as any
     expect(p.credentialMode).toBe('act')
-    // All five command kinds are now reported (Agent API v1.1).
+    // All six domain command kinds are now reported (Agent API v1.1 + AQU-1221).
     expect(p.commandKinds).toEqual(
-      ['SetTranslation', 'PlanImport', 'CreateProject', 'UpdateProjectSettings', 'LinkMedia'],
+      ['SetTranslation', 'PlanImport', 'CreateOrg', 'CreateProject', 'UpdateProjectSettings', 'LinkMedia'],
     )
     expect(p.limits.changesetExpirySeconds).toBe(3600) // CHANGESET_TTL_MS / 1000
     // Every number is imported from its owning module — no invented values.

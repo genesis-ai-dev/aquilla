@@ -30,10 +30,11 @@ export const MCP_TOOLS: McpToolDef[] = [
       'Discover what this API and THIS credential can do before attempting anything. ' +
       'Returns the API version, the autonomy mode of the calling credential (ask|act), ' +
       'the domain command kinds available (SetTranslation, PlanImport, CreateOrg, ' +
-      'CreateProject, UpdateProjectSettings, LinkMedia — PlanImport stages via preview_import/' +
-      'prepare_import or REST, the other five stage/commit via ' +
+      'CreateProject, UpdateProjectSettings, LinkMedia, and the cell-structure commands ' +
+      'InsertCell / DeleteCell / SplitCell — PlanImport stages via preview_import/' +
+      'prepare_import or REST, everything else stages/commits via ' +
       'prepare_translations/confirm_changeset — see the returned importing, ' +
-      'projectLifecycle and linkMedia fields for per-kind rules), the operational limits (changeset ' +
+      'projectLifecycle, linkMedia and structure fields for per-kind rules), the operational limits (changeset ' +
       'expiry, PlanImport max cells, artifact max bytes, max commands per changeset), the ' +
       'full list of stable machine-actionable error codes, and an explanation of the ' +
       'ask-mode approval flow (prepare -> approvalUrl -> a human approves in a browser -> ' +
@@ -452,7 +453,24 @@ export const MCP_TOOLS: McpToolDef[] = [
       'is JSON-RPC text and cannot carry that binary upload itself. Multiple LinkMedia ' +
       'commands may share one changeset with each other, but LinkMedia cannot mix with ' +
       'SetTranslation/CreateProject/UpdateProjectSettings in the same changeset. Requires ' +
-      'CONTRIBUTOR.',
+      'CONTRIBUTOR.\n' +
+      '  { kind: "InsertCell", fileId, value, afterCellId?, cellId?, type?, canonicalRef?, ' +
+      'startMs?, endMs?, metadata? } — add a source cell. `afterCellId` names the cell it ' +
+      'follows; null/omitted inserts at the head of the file. Whatever was anchored there is ' +
+      're-pointed onto the new cell so document order survives.\n' +
+      '  { kind: "DeleteCell", fileId, cellId } — remove a source cell and its translations, ' +
+      'closing the order chain over the gap. Refused while the cell still owns validators, ' +
+      'waivers, comments, back-translations, audio takes, links or assignment rows (the ' +
+      'error names them) — clear those first.\n' +
+      '  { kind: "SplitCell", fileId, cellId, offset, targets, targetOffsets?, newCellId? } — ' +
+      'cut the source text at `offset` into two cells. `targets` is REQUIRED: "blank" drops ' +
+      'the existing translations, "divide" cuts each lane at an explicit offset in ' +
+      '`targetOffsets: [{ laneId?, offset }]`, which must name EVERY translated lane. Both ' +
+      'halves end up unvalidated either way.\n' +
+      'All three are STRUCTURAL: each must be the SOLE command in its changeset, each ' +
+      'requires PROJECT_LEAD, and all three are refused on a file imported with preserved ' +
+      'export slots (IDML/OOXML locators) because a structural change would break its ' +
+      'round-trip export. Call describe_command for the full rules.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -486,9 +504,10 @@ export const MCP_TOOLS: McpToolDef[] = [
         commands: {
           type: 'array',
           description:
-            'CreateOrg / CreateProject / UpdateProjectSettings / LinkMedia commands to stage (Agent API ' +
-            'v1.1) — see this tool\'s description for per-kind shape, role gates, and ' +
-            'sole-command rules. PlanImport is not accepted here (REST-only).',
+            'CreateOrg / CreateProject / UpdateProjectSettings / LinkMedia / InsertCell / ' +
+            'DeleteCell / SplitCell commands to stage (Agent API v1.1) — see this tool\'s ' +
+            'description for per-kind shape, role gates, and sole-command rules. PlanImport ' +
+            'is not accepted here (REST-only).',
           items: {
             type: 'object',
             oneOf: [
@@ -555,6 +574,74 @@ export const MCP_TOOLS: McpToolDef[] = [
                   },
                 },
                 required: ['kind', 'fileId', 'cellId', 'artifactId'],
+                additionalProperties: false,
+              },
+              {
+                type: 'object',
+                properties: {
+                  kind: { type: 'string', enum: ['InsertCell'] },
+                  fileId: { type: 'string' },
+                  afterCellId: {
+                    type: ['string', 'null'],
+                    description: 'The cell the new one follows; null/omitted = the file head.',
+                  },
+                  cellId: { type: 'string', description: 'Optional client-chosen id for the new cell.' },
+                  value: { type: 'string', description: 'Source text; may be empty.' },
+                  type: { type: 'string' },
+                  canonicalRef: {
+                    type: 'string',
+                    description: 'Must be unused in the file — export overlays translations by ref.',
+                  },
+                  startMs: { type: 'number' },
+                  endMs: { type: 'number' },
+                  metadata: { type: 'object' },
+                },
+                required: ['kind', 'fileId', 'value'],
+                additionalProperties: false,
+              },
+              {
+                type: 'object',
+                properties: {
+                  kind: { type: 'string', enum: ['DeleteCell'] },
+                  fileId: { type: 'string' },
+                  cellId: { type: 'string' },
+                },
+                required: ['kind', 'fileId', 'cellId'],
+                additionalProperties: false,
+              },
+              {
+                type: 'object',
+                properties: {
+                  kind: { type: 'string', enum: ['SplitCell'] },
+                  fileId: { type: 'string' },
+                  cellId: { type: 'string' },
+                  offset: {
+                    type: 'number',
+                    description: 'Character offset into the source text; both halves must be non-empty.',
+                  },
+                  targets: {
+                    type: 'string',
+                    enum: ['blank', 'divide'],
+                    description:
+                      "'blank' drops existing translations; 'divide' cuts each lane at its targetOffsets offset.",
+                  },
+                  targetOffsets: {
+                    type: 'array',
+                    description:
+                      "Required with targets:'divide' — one entry per lane that HAS a translation.",
+                    items: {
+                      type: 'object',
+                      properties: {
+                        laneId: { type: 'string', description: 'Omit for the default lane.' },
+                        offset: { type: 'number' },
+                      },
+                      required: ['offset'],
+                      additionalProperties: false,
+                    },
+                  },
+                  newCellId: { type: 'string', description: 'Optional client-chosen id for the second half.' },
+                },
+                required: ['kind', 'fileId', 'cellId', 'offset', 'targets'],
                 additionalProperties: false,
               },
             ],

@@ -356,6 +356,65 @@ describe("useProjectSettings — write path", () => {
     })
   })
 
+  // AQU-1246: the Autopilot opt-in is the second sub-maintainer carve-out —
+  // a lead decides whether their own project tries the experiment. This
+  // mirrors auth-worker's carve-out, which stays authoritative; the client
+  // copy exists to stop a guaranteed-403 and to keep AQU-255 intact (never
+  // apply a below-floor patch locally).
+  describe("autopilotEnabled-only carve-out (AQU-1246)", () => {
+    it("lets a project lead (500) opt the project in", async () => {
+      mockSettingsFetch({
+        version: 1, updatedAt: "x", updatedBy: null,
+        settings: { sourceLanguage: "en" },
+      })
+      const patchSpy = vi.spyOn(restClient, "patchProjectSettings").mockResolvedValue({
+        kind: "ok",
+        value: { version: 2, updatedAt: "y", updatedBy: null, settings: { autopilotEnabled: true } },
+      })
+      const { result } = renderHook(() => useProjectSettings("p1", 500))
+      await waitFor(() => expect(result.current.hasFetched).toBe(true))
+      let got!: PatchOutcome
+      await act(async () => {
+        got = await result.current.patch({ autopilotEnabled: true })
+      })
+      expect(got.kind).toBe("ok")
+      expect(patchSpy).toHaveBeenCalled()
+    })
+
+    it("blocks a contributor (400) — and writes nothing locally", async () => {
+      const idbMod = await import("@/lib/store/project-index")
+      vi.mocked(idbMod.patchProject).mockClear()
+      mockSettingsFetch(null)
+      const patchSpy = vi.spyOn(restClient, "patchProjectSettings")
+      const { result } = renderHook(() => useProjectSettings("p1", 400))
+      await waitFor(() => expect(result.current.hasFetched).toBe(true))
+      let got!: PatchOutcome
+      await act(async () => {
+        got = await result.current.patch({ autopilotEnabled: true })
+      })
+      expect(got.kind).toBe("blocked")
+      if (got.kind === "blocked") expect(got.reason).toBe("role")
+      expect(patchSpy).not.toHaveBeenCalled()
+      expect(idbMod.patchProject).not.toHaveBeenCalled()
+    })
+
+    it("does NOT widen any other key — a lead bundling another key stays blocked", async () => {
+      mockSettingsFetch(null)
+      const patchSpy = vi.spyOn(restClient, "patchProjectSettings")
+      const { result } = renderHook(() => useProjectSettings("p1", 500))
+      await waitFor(() => expect(result.current.settings.sourceLanguage).toBe("en"))
+      let otherKey!: PatchOutcome
+      let bundled!: PatchOutcome
+      await act(async () => {
+        otherKey = await result.current.patch({ sourceLanguage: "fr" })
+        bundled = await result.current.patch({ autopilotEnabled: true, sourceLanguage: "fr" })
+      })
+      expect(otherKey.kind).toBe("blocked")
+      expect(bundled.kind).toBe("blocked")
+      expect(patchSpy).not.toHaveBeenCalled()
+    })
+  })
+
   it("unsynced project (roleLevel === null) writes locally with no server call", async () => {
     const idbMod = await import("@/lib/store/project-index")
     vi.mocked(idbMod.patchProject).mockClear()

@@ -28,10 +28,12 @@ vi.mock("@/lib/completion/frontier-health", () => ({
 
 vi.mock("@/lib/store/user-provider-override", () => ({
   getUserProviderOverride: () => null,
+  useUserProviderOverride: () => null,
 }))
 
 vi.mock("@/lib/store/user-api-keys", () => ({
   resolveApiKey: (_: string, key: string | undefined) => key ?? null,
+  useUserApiKey: () => undefined,
 }))
 
 vi.mock("@/lib/completion/compress-examples", () => ({

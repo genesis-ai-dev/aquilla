@@ -3,6 +3,11 @@ import { ROLE } from "@/lib/frontier/roles"
 /** Short role labels for floor hints and compact Security-page selects. */
 export const FLOOR_LABEL: Record<number, string> = {
   [ROLE.VIEWER]: "Viewer",
+  // AQU-1002: the comment floors are the first selects to offer these two
+  // rungs; without a short label their closed trigger fell through to the long
+  // option sentence.
+  [ROLE.COMMENTER]: "Commenter",
+  [ROLE.REVIEWER]: "Reviewer",
   [ROLE.CONTRIBUTOR]: "Contributor",
   [ROLE.PROJECT_LEAD]: "Project lead",
   [ROLE.MAINTAINER]: "Maintainer",

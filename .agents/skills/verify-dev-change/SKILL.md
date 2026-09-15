@@ -52,7 +52,8 @@ Use `browser_navigate` to reach the route your change touches. For project-scope
 
 - Workspace: `/project/dev-project`
 - Project settings: `/project/dev-project/settings`
-- Members: `/members`
+- Project members: `/project/dev-project/settings/members`
+- Org members: `/orgs/<id>/members` (or `/members` via org sidebar)
 - Voice studio: `/project/dev-project/voice`
 - Comments: `/project/dev-project/comments`
 

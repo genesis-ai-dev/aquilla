@@ -4,6 +4,7 @@ import type { Env, AuthUser } from "../types"
 import { ORG_WIDE_ACCESS_FLOOR, resolveProjectRole } from "./project-permissions"
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
 import { planUnitCountsSql, aoeTodayIso } from "../../../db/shared/plan-units"
+import { orgPathContribution } from "../../../db/shared/project-roles"
 
 /** Map numeric role level to a human-readable name. Used for secondarySources. */
 function roleNameForLevel(level: number): string {
@@ -117,6 +118,121 @@ export async function listUserOrgs(env: Env, user: AuthUser): Promise<UserOrgSum
   }
 
   return Array.from(byId.values()).sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""))
+}
+
+/** First page of the org-switcher catalog (platform-admin append). */
+export const ORG_DIRECTORY_DEFAULT_LIMIT = 40
+export const ORG_DIRECTORY_MAX_LIMIT = 100
+
+export function encodeOrgDirectoryCursor(id: number, name: string | null): string {
+  return `${id}:${encodeURIComponent(name ?? "")}`
+}
+
+export function decodeOrgDirectoryCursor(raw: string): { id: number; name: string } | null {
+  const sep = raw.indexOf(":")
+  if (sep < 0) return null
+  const id = Number(raw.slice(0, sep))
+  if (!Number.isInteger(id) || id < 1) return null
+  try {
+    return { id, name: decodeURIComponent(raw.slice(sep + 1)) }
+  } catch {
+    return null
+  }
+}
+
+export function clampOrgDirectoryLimit(raw: string | undefined): number {
+  const n = raw == null || raw === "" ? ORG_DIRECTORY_DEFAULT_LIMIT : Number(raw)
+  if (!Number.isFinite(n)) return ORG_DIRECTORY_DEFAULT_LIMIT
+  return Math.min(ORG_DIRECTORY_MAX_LIMIT, Math.max(1, Math.floor(n)))
+}
+
+/** Same page size as the org switcher — project tables and pickers share it. */
+export const PROJECT_DIRECTORY_DEFAULT_LIMIT = ORG_DIRECTORY_DEFAULT_LIMIT
+export const PROJECT_DIRECTORY_MAX_LIMIT = ORG_DIRECTORY_MAX_LIMIT
+
+export const clampProjectDirectoryLimit = clampOrgDirectoryLimit
+
+/** Same page size as the org switcher / project tables. */
+export const TEAM_DIRECTORY_DEFAULT_LIMIT = ORG_DIRECTORY_DEFAULT_LIMIT
+export const TEAM_DIRECTORY_MAX_LIMIT = ORG_DIRECTORY_MAX_LIMIT
+export const clampTeamDirectoryLimit = clampOrgDirectoryLimit
+export const encodeTeamDirectoryCursor = encodeOrgDirectoryCursor
+export const decodeTeamDirectoryCursor = decodeOrgDirectoryCursor
+
+export function encodeProjectDirectoryCursor(id: string, name: string): string {
+  return `${encodeURIComponent(id)}:${encodeURIComponent(name)}`
+}
+
+export function decodeProjectDirectoryCursor(raw: string): { id: string; name: string } | null {
+  const sep = raw.indexOf(":")
+  if (sep < 0) return null
+  try {
+    const id = decodeURIComponent(raw.slice(0, sep))
+    const name = decodeURIComponent(raw.slice(sep + 1))
+    if (!id) return null
+    return { id, name }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * One page of orgs the caller does not already reach via membership or a
+ * project grant. Used by GET /orgs?limit= for the switcher's infinite list —
+ * never by the unparameterized memberships fetch (session boot).
+ */
+export async function listPlatformAdminOrgsPage(
+  env: Env,
+  opts: {
+    excludeIds: ReadonlySet<number>
+    /** Lowercased substring; empty string matches all names. */
+    q: string
+    limit: number
+    cursor: { id: number; name: string } | null
+  },
+): Promise<{ orgs: Array<{ id: number; name: string | null }>; nextCursor: string | null }> {
+  const binds: unknown[] = []
+  const where: string[] = []
+
+  if (opts.q) {
+    where.push("strpos(lower(coalesce(name, '')), ?) > 0")
+    binds.push(opts.q)
+  }
+
+  const exclude = [...opts.excludeIds]
+  if (exclude.length > 0) {
+    where.push(`id NOT IN (${exclude.map(() => "?").join(", ")})`)
+    binds.push(...exclude)
+  }
+
+  if (opts.cursor) {
+    const cursorName = opts.cursor.name.toLowerCase()
+    where.push(
+      "(lower(coalesce(name, '')) > ? OR (lower(coalesce(name, '')) = ? AND id > ?))",
+    )
+    binds.push(cursorName, cursorName, opts.cursor.id)
+  }
+
+  const whereSql = where.length > 0 ? `WHERE ${where.join(" AND ")}` : ""
+  binds.push(opts.limit + 1)
+
+  const rows = await env.AQUILLA_PG.prepare(
+    `SELECT id, name FROM organizations
+      ${whereSql}
+      ORDER BY lower(coalesce(name, '')), id
+      LIMIT ?`,
+  )
+    .bind(...binds)
+    .all<{ id: number; name: string | null }>()
+
+  const list = rows.results ?? []
+  const hasMore = list.length > opts.limit
+  const page = hasMore ? list.slice(0, opts.limit) : list
+  const last = page[page.length - 1]
+  return {
+    orgs: page,
+    nextCursor: hasMore && last ? encodeOrgDirectoryCursor(last.id, last.name) : null,
+  }
 }
 
 /**
@@ -252,14 +368,23 @@ export async function bumpOrgActivity(
   if (last != null && now - last < ORG_ACTIVITY_DEBOUNCE_MS) return
   orgActivityBumpedAt.set(key, now)
   try {
+    // One round-trip: bump the org row AND record "this user used the app
+    // today" for retention (user_activity_days, see migration 0090). The CTE
+    // keeps the day insert independent of the UPDATE's WHERE, so a user whose
+    // row another isolate bumped seconds ago still gets today's activity day.
     await env.AQUILLA_PG.prepare(
-      `UPDATE org_members
-          SET last_active_at = CURRENT_TIMESTAMP
-        WHERE org_id = ? AND user_id = ?
-          AND (last_active_at IS NULL
-               OR last_active_at < now() - interval '5 minutes')`,
+      `WITH bump AS (
+         UPDATE org_members
+            SET last_active_at = CURRENT_TIMESTAMP
+          WHERE org_id = ? AND user_id = ?
+            AND (last_active_at IS NULL
+                 OR last_active_at < now() - interval '5 minutes')
+       )
+       INSERT INTO user_activity_days (user_id, day)
+       VALUES (?, (now() AT TIME ZONE 'UTC')::date)
+       ON CONFLICT DO NOTHING`,
     )
-      .bind(orgId, userId)
+      .bind(orgId, userId, userId)
       .run()
   } catch (err) {
     console.warn("bumpOrgActivity failed (non-fatal):", err)
@@ -436,11 +561,20 @@ export async function listEffectiveProjectMembers(
       .bind(orgId)
       .all<{ user_id: number; username: string; email: string | null; role_level: number }>()
 
+    // Direct and group paths are already recorded above, so `allPaths` tells
+    // us which other paths each org member holds on THIS project — exactly
+    // what orgPathContribution needs (AQU-435 floor + AQU-1274 no silent
+    // demotion). Same rule as the resolver, so this roster can't disagree
+    // with what enforcement does.
     for (const r of orgMembers.results ?? []) {
-      // AQU-435: only Maintainer+ org roles are an access path — a
-      // sub-maintainer org member does NOT appear as having access via org.
-      if (r.role_level < ORG_WIDE_ACCESS_FLOOR) continue
-      record(r.user_id, r.username, r.email, "org", r.role_level)
+      const existing = allPaths.get(r.user_id)?.paths ?? []
+      const level = orgPathContribution({
+        orgLevel: r.role_level,
+        hasDirectGrant: existing.some((p) => p.source === "override"),
+        hasGroupGrant: existing.some((p) => p.source === "group"),
+      })
+      if (level == null) continue
+      record(r.user_id, r.username, r.email, "org", level)
     }
   }
 
@@ -647,12 +781,21 @@ export async function listEffectiveMembersForOrg(
     if (r.role_level == null) continue
     record(r.project_id, r.user_id, r.username, "group", r.role_level)
   }
-  // org + creator paths apply to every accessible project. AQU-435: the org
-  // path exists only for Maintainer+ members.
+  // org + creator paths apply to every accessible project. AQU-435: below
+  // Maintainer the org path opens nothing; AQU-1274: it still keeps a team
+  // attachment from silently demoting a higher org role. Direct and group
+  // paths are recorded above, so the per-project map answers both questions.
   for (const p of projects) {
+    const perProject = ensure(p.id)
     for (const om of orgMembers.results ?? []) {
-      if (om.role_level < ORG_WIDE_ACCESS_FLOOR) continue
-      record(p.id, om.user_id, om.username, "org", om.role_level)
+      const existing = perProject.get(om.user_id)?.paths ?? []
+      const level = orgPathContribution({
+        orgLevel: om.role_level,
+        hasDirectGrant: existing.some((x) => x.source === "override"),
+        hasGroupGrant: existing.some((x) => x.source === "group"),
+      })
+      if (level == null) continue
+      record(p.id, om.user_id, om.username, "org", level)
     }
     const cu = creatorUsername.get(p.created_by)
     if (cu) record(p.id, p.created_by, cu, "creator", 700)
@@ -673,12 +816,74 @@ export interface OrgGroupSummary {
   isInternal: boolean
 }
 
-/** Groups in an org, with counts and whether the viewer is a member. */
-export async function listOrgGroups(
+export type TeamDirectoryVisibility = "all" | "internal" | "public"
+
+export type TeamDirectoryPageOpts = {
+  q: string
+  limit: number
+  cursor: { id: number; name: string } | null
+  visibility: TeamDirectoryVisibility
+}
+
+type OrgGroupDbRow = {
+  id: number
+  name: string
+  is_internal: number | boolean
+  member_count: number
+  project_count: number
+  viewer_is_member: number
+}
+
+function mapOrgGroupRow(r: OrgGroupDbRow): OrgGroupSummary {
+  return {
+    id: r.id,
+    name: r.name,
+    memberCount: r.member_count,
+    projectCount: r.project_count,
+    viewerIsMember: r.viewer_is_member === 1,
+    isInternal: r.is_internal === 1 || r.is_internal === true,
+  }
+}
+
+export function parseTeamDirectoryVisibility(raw: string | undefined): TeamDirectoryVisibility {
+  if (raw === "internal" || raw === "public" || raw === "all") return raw
+  return "all"
+}
+
+/**
+ * One page (or the full set) of teams in an org, ordered by name. Used by the
+ * org Teams table so search and infinite scroll do not dump every group.
+ * `memberOnly` is the AQU-789 gate: non-maintainers only see teams they belong to.
+ */
+export async function listOrgGroupsPage(
   env: Env,
   orgId: number,
   viewerId: number,
-): Promise<OrgGroupSummary[]> {
+  page: TeamDirectoryPageOpts | null,
+  access: { memberOnly: boolean },
+): Promise<{ groups: OrgGroupSummary[]; nextCursor: string | null }> {
+  const extraWhere: string[] = []
+  const extraBinds: unknown[] = []
+  if (access.memberOnly) {
+    extraWhere.push(
+      "EXISTS (SELECT 1 FROM group_members gm_vis WHERE gm_vis.group_id = g.id AND gm_vis.user_id = ?)",
+    )
+    extraBinds.push(viewerId)
+  }
+  if (page?.q) {
+    extraWhere.push("strpos(lower(g.name), ?) > 0")
+    extraBinds.push(page.q)
+  }
+  if (page?.visibility === "internal") extraWhere.push("g.is_internal IS TRUE")
+  else if (page?.visibility === "public") extraWhere.push("g.is_internal IS NOT TRUE")
+  if (page?.cursor) {
+    extraWhere.push("(lower(g.name) > ? OR (lower(g.name) = ? AND g.id > ?))")
+    extraBinds.push(page.cursor.name.toLowerCase(), page.cursor.name.toLowerCase(), page.cursor.id)
+  }
+  const extraWhereSql = extraWhere.length > 0 ? ` AND ${extraWhere.join(" AND ")}` : ""
+  const limitSql = page ? " LIMIT ?" : ""
+  if (page) extraBinds.push(page.limit + 1)
+
   const rows = await env.AQUILLA_PG.prepare(
     `SELECT g.id AS id, g.name AS name, g.is_internal AS is_internal,
             (SELECT COUNT(*) FROM group_members gm WHERE gm.group_id = g.id) AS member_count,
@@ -686,19 +891,31 @@ export async function listOrgGroups(
             (EXISTS (SELECT 1 FROM group_members gm2 WHERE gm2.group_id = g.id AND gm2.user_id = ?))::int AS viewer_is_member
        FROM groups g
       WHERE g.org_id = ?
-      ORDER BY LOWER(g.name)`,
+        ${extraWhereSql}
+      ORDER BY LOWER(g.name), g.id
+      ${limitSql}`,
   )
-    .bind(viewerId, orgId)
-    .all<{ id: number; name: string; is_internal: number | boolean; member_count: number; project_count: number; viewer_is_member: number }>()
+    .bind(viewerId, orgId, ...extraBinds)
+    .all<OrgGroupDbRow>()
 
-  return (rows.results ?? []).map((r) => ({
-    id: r.id,
-    name: r.name,
-    memberCount: r.member_count,
-    projectCount: r.project_count,
-    viewerIsMember: r.viewer_is_member === 1,
-    isInternal: r.is_internal === 1 || r.is_internal === true,
-  }))
+  const list = rows.results ?? []
+  const hasMore = page != null && list.length > page.limit
+  const pageRows = hasMore ? list.slice(0, page.limit) : list
+  const last = pageRows[pageRows.length - 1]
+  return {
+    groups: pageRows.map(mapOrgGroupRow),
+    nextCursor: hasMore && last ? encodeTeamDirectoryCursor(last.id, last.name) : null,
+  }
+}
+
+/** Groups in an org, with counts and whether the viewer is a member. */
+export async function listOrgGroups(
+  env: Env,
+  orgId: number,
+  viewerId: number,
+): Promise<OrgGroupSummary[]> {
+  const { groups } = await listOrgGroupsPage(env, orgId, viewerId, null, { memberOnly: false })
+  return groups
 }
 
 /** ISO-8601 for JSON; Hyperdrive may hand back a Date or a timestamp string. */
@@ -1010,10 +1227,20 @@ function validatedFromHistogram(raw: LaneDbRow["validator_histogram"], threshold
  * file per lane since migration 0055) — a SUM, not new bookkeeping. Lanes are
  * ordered default ('') first, then by tag, for deterministic output.
  */
-async function fetchPortfolioLanes(env: Env, orgIds: number[]): Promise<Map<string, PortfolioLane[]>> {
+async function fetchPortfolioLanes(
+  env: Env,
+  orgIds: number[],
+  projectIds?: readonly string[],
+): Promise<Map<string, PortfolioLane[]>> {
   const byProject = new Map<string, PortfolioLane[]>()
   if (orgIds.length === 0) return byProject
   const placeholders = orgIds.map(() => "?").join(", ")
+  const projectFilter =
+    projectIds != null && projectIds.length > 0
+      ? ` AND p.id IN (${projectIds.map(() => "?").join(", ")})`
+      : ""
+  const orgBinds: unknown[] = [...orgIds]
+  const projectBinds: unknown[] = projectIds != null && projectIds.length > 0 ? [...projectIds] : []
   const [laneRows, settingsRows] = await Promise.all([
     env.AQUILLA_PG.prepare(
       `SELECT fsp.project_id AS project_id, fsp.target_lang AS target_lang,
@@ -1024,8 +1251,8 @@ async function fetchPortfolioLanes(env: Env, orgIds: number[]): Promise<Map<stri
               fsp.structural_validator_histogram AS structural_validator_histogram
          FROM file_section_progress fsp
          JOIN projects p ON p.id = fsp.project_id
-        WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL AND fsp.scope = 'file'`,
-    ).bind(...orgIds).all<LaneDbRow>(),
+        WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL AND fsp.scope = 'file'${projectFilter}`,
+    ).bind(...orgBinds, ...projectBinds).all<LaneDbRow>(),
     env.AQUILLA_PG.prepare(
       // Driven FROM projects, not from project_settings: a project that has
       // never had a settings row still inherits its org's answer, and inner-
@@ -1039,8 +1266,8 @@ async function fetchPortfolioLanes(env: Env, orgIds: number[]): Promise<Map<stri
          FROM projects p
          LEFT JOIN project_settings ps ON ps.project_id = p.id
          LEFT JOIN org_settings os ON os.org_id = p.org_id
-        WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL`,
-    ).bind(...orgIds).all<PortfolioSettingsDbRow>(),
+        WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL${projectFilter}`,
+    ).bind(...orgBinds, ...projectBinds).all<PortfolioSettingsDbRow>(),
   ])
   const thresholds = readValidationCounts(settingsRows.results ?? [])
   // AQU-1083: which projects leave structural cells out. Absent = count them,
@@ -1242,13 +1469,43 @@ const portfolioCtes = (orgPredicate: string) => `
        ${planUnitCountsSql(`f.project_id IN (SELECT id FROM projects WHERE ${orgPredicate})`)}
      )`
 
-/** Per-project rollup over the org's non-archived projects (derive-on-read, one GROUP BY). */
-export async function getOrgPortfolio(
+export type PortfolioPageOpts = {
+  q: string
+  limit: number
+  cursor: { id: string; name: string } | null
+}
+
+/**
+ * One page (or the full set) of visible portfolio rows across `orgIds`,
+ * ordered by name. Used by the org / all-orgs project tables so search and
+ * infinite scroll do not dump every project to the client.
+ */
+export async function listOrgPortfolioPage(
   env: Env,
-  orgId: number,
+  orgIds: number[],
   viewer: { userId: number; isAdmin: boolean },
+  page: PortfolioPageOpts | null,
   now: number = Date.now(),
-): Promise<PortfolioRow[]> {
+): Promise<{ projects: OrgPortfolioRow[]; nextCursor: string | null }> {
+  const uniqueOrgIds = [...new Set(orgIds)].filter((id) => Number.isInteger(id) && id > 0)
+  if (uniqueOrgIds.length === 0) return { projects: [], nextCursor: null }
+
+  const placeholders = uniqueOrgIds.map(() => "?").join(", ")
+  const extraWhere: string[] = []
+  const extraBinds: unknown[] = []
+  if (page?.q) {
+    extraWhere.push("strpos(lower(p.name), ?) > 0")
+    extraBinds.push(page.q)
+  }
+  if (page?.cursor) {
+    extraWhere.push("(lower(p.name) > ? OR (lower(p.name) = ? AND p.id > ?))")
+    extraBinds.push(page.cursor.name.toLowerCase(), page.cursor.name.toLowerCase(), page.cursor.id)
+  }
+  const extraWhereSql = extraWhere.length > 0 ? ` AND ${extraWhere.join(" AND ")}` : ""
+  const orderSql = page ? "LOWER(p.name), p.id" : "p.org_id, LOWER(p.name)"
+  const limitSql = page ? " LIMIT ?" : ""
+  if (page) extraBinds.push(page.limit + 1)
+
   // Perf (dashboard 15s timeout fix):
   //  - The AQU-523 language pair reads the STORED generated columns on
   //    project_settings (migration 0054) — never (settings::jsonb)->>'…'
@@ -1259,8 +1516,10 @@ export async function getOrgPortfolio(
   //    grouped pass replaces them. It joins 1:1 on project_id, so MAX()
   //    collapses the file fan-out without affecting the SUMs (same for the
   //    1:1 project_settings join).
+  //  - pu (AQU-1097): plan-unit counts per project, same 1:1 MATERIALIZED
+  //    shape as au, bounded to the same org set.
   const rows = await env.AQUILLA_PG.prepare(
-    `${portfolioCtes('org_id = ?')}
+    `${portfolioCtes(`org_id IN (${placeholders})`)}
      SELECT p.org_id AS org_id, p.id AS id, p.name AS name, p.deadline_at AS deadline_at,${PORTFOLIO_CELL_COLUMNS}
             MAX(f.last_edit_at)                     AS last_edit_at,
             MAX(ps.source_language)                 AS source_language,
@@ -1269,21 +1528,47 @@ export async function getOrgPortfolio(
             COALESCE(MAX(au.validated_audio_cells), 0) AS validated_audio_cells,
             COALESCE(MAX(au.recorded_ms), 0)           AS recorded_ms,${PORTFOLIO_UNIT_COLUMNS}
        FROM projects p${PORTFOLIO_JOINS}
-      WHERE p.org_id = ? AND p.archived_at IS NULL
+      WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL
         AND ${PORTFOLIO_VISIBILITY_PREDICATE}
-      GROUP BY p.id, p.name
-      ORDER BY LOWER(p.name)`,
+        ${extraWhereSql}
+      GROUP BY p.org_id, p.id, p.name
+      ORDER BY ${orderSql}
+      ${limitSql}`,
   ).bind(
     // Org scopes in CTE order: the AQU-1083 policy, the audio scope inside it,
     // the plan-unit counts (preceded by their AoE cutoff date), then the outer
     // WHERE.
-    orgId, orgId,
-    aoeTodayIso(now), orgId,
-    orgId,
+    ...uniqueOrgIds, ...uniqueOrgIds,
+    aoeTodayIso(now), ...uniqueOrgIds,
+    ...uniqueOrgIds,
     viewer.isAdmin ? 1 : 0, viewer.userId, viewer.userId, viewer.userId, viewer.userId,
+    ...extraBinds,
   ).all<PortfolioDbRow>()
-  const lanesByProject = await fetchPortfolioLanes(env, [orgId])
-  return (rows.results ?? []).map((r) => mapPortfolioRow(r, lanesByProject))
+
+  const list = rows.results ?? []
+  const hasMore = page != null && list.length > page.limit
+  const pageRows = hasMore ? list.slice(0, page.limit) : list
+  const last = pageRows[pageRows.length - 1]
+  const lanesByProject = await fetchPortfolioLanes(
+    env,
+    uniqueOrgIds,
+    page ? pageRows.map((row) => row.id) : undefined,
+  )
+  return {
+    projects: pageRows.map((row) => ({ ...mapPortfolioRow(row, lanesByProject), orgId: row.org_id })),
+    nextCursor: hasMore && last ? encodeProjectDirectoryCursor(last.id, last.name) : null,
+  }
+}
+
+/** Per-project rollup over the org's non-archived projects (derive-on-read, one GROUP BY). */
+export async function getOrgPortfolio(
+  env: Env,
+  orgId: number,
+  viewer: { userId: number; isAdmin: boolean },
+  now: number = Date.now(),
+): Promise<PortfolioRow[]> {
+  const { projects } = await listOrgPortfolioPage(env, [orgId], viewer, null, now)
+  return projects.map(({ orgId: _orgId, ...project }) => project)
 }
 
 /**
@@ -1339,38 +1624,8 @@ export async function getOrgPortfolios(
   viewer: { userId: number; isAdmin: boolean },
   now: number = Date.now(),
 ): Promise<OrgPortfolioRow[]> {
-  const uniqueOrgIds = [...new Set(orgIds)].filter((id) => Number.isInteger(id) && id > 0)
-  if (uniqueOrgIds.length === 0) return []
-  const placeholders = uniqueOrgIds.map(() => "?").join(", ")
-  // One set-based aggregate keeps the request to a fixed number of database
-  // round trips regardless of organization count. The expensive cell_audio
-  // scan is still bounded to projects in the authorized org set. Lane metadata
-  // uses the small generated project_settings projections, so this no longer
-  // transfers/parses hundreds of MB of full settings blobs for large accounts.
-  const rows = await env.AQUILLA_PG.prepare(
-    `${portfolioCtes(`org_id IN (${placeholders})`)}
-     SELECT p.org_id AS org_id, p.id AS id, p.name AS name, p.deadline_at AS deadline_at,${PORTFOLIO_CELL_COLUMNS}
-            MAX(f.last_edit_at)                     AS last_edit_at,
-            MAX(ps.source_language)                 AS source_language,
-            MAX(ps.target_language)                 AS target_language,
-            COALESCE(MAX(au.audio_cells), 0)           AS audio_cells,
-            COALESCE(MAX(au.validated_audio_cells), 0) AS validated_audio_cells,
-            COALESCE(MAX(au.recorded_ms), 0)           AS recorded_ms,${PORTFOLIO_UNIT_COLUMNS}
-       FROM projects p${PORTFOLIO_JOINS}
-      WHERE p.org_id IN (${placeholders}) AND p.archived_at IS NULL
-        AND ${PORTFOLIO_VISIBILITY_PREDICATE}
-      GROUP BY p.org_id, p.id, p.name
-      ORDER BY p.org_id, LOWER(p.name)`,
-  ).bind(
-    // Same order as getOrgPortfolio: policy, audio, plan-unit counts (after
-    // their AoE cutoff date), outer WHERE.
-    ...uniqueOrgIds, ...uniqueOrgIds,
-    aoeTodayIso(now), ...uniqueOrgIds,
-    ...uniqueOrgIds,
-    viewer.isAdmin ? 1 : 0, viewer.userId, viewer.userId, viewer.userId, viewer.userId,
-  ).all<PortfolioDbRow>()
-  const lanesByProject = await fetchPortfolioLanes(env, uniqueOrgIds)
-  return (rows.results ?? []).map((row) => ({ ...mapPortfolioRow(row, lanesByProject), orgId: row.org_id }))
+  const { projects } = await listOrgPortfolioPage(env, orgIds, viewer, null, now)
+  return projects
 }
 
 export interface ProjectAccessBreakdown {
@@ -1403,9 +1658,6 @@ export async function getMemberEffectiveAccess(
     "SELECT role_level FROM org_members WHERE org_id = ? AND user_id = ?",
   ).bind(orgId, userId).first<{ role_level: number }>()
   const orgRole = orgRow?.role_level ?? null
-  // AQU-435: sub-maintainer org membership confers no project access, so it
-  // must not show up as a per-project grant path or inflate `resolved`.
-  const orgAccessRole = orgRole != null && orgRole >= ORG_WIDE_ACCESS_FLOOR ? orgRole : null
 
   const direct = await env.AQUILLA_PG.prepare(
     `SELECT pm.project_id AS project_id, p.name AS name, pm.role_level AS role_level
@@ -1431,7 +1683,9 @@ export async function getMemberEffectiveAccess(
   const ensure = (projectId: string, name: string): ProjectAccessBreakdown => {
     let row = map.get(projectId)
     if (!row) {
-      row = { projectId, projectName: name, direct: null, groups: [], org: orgAccessRole, creator: false, resolved: 0 }
+      // `org` is filled in per-project below — whether a sub-maintainer org
+      // role contributes depends on that project's other paths (AQU-1274).
+      row = { projectId, projectName: name, direct: null, groups: [], org: null, creator: false, resolved: 0 }
       map.set(projectId, row)
     }
     return row
@@ -1442,6 +1696,14 @@ export async function getMemberEffectiveAccess(
 
   for (const row of map.values()) {
     const groupMax = row.groups.reduce((m, g) => Math.max(m, g.roleLevel), 0)
+    // Same rule as the resolver (AQU-435 floor + AQU-1274 no-silent-demotion),
+    // so the drill-down can never claim a different resolved role than the
+    // one enforcement actually uses.
+    row.org = orgPathContribution({
+      orgLevel: orgRole,
+      hasDirectGrant: row.direct != null,
+      hasGroupGrant: groupMax > 0,
+    })
     row.resolved = Math.max(row.direct ?? 0, groupMax, row.org ?? 0, row.creator ? 700 : 0)
   }
 
@@ -1751,5 +2013,58 @@ export async function getOrgCountStructuralCellsForProject(
     .first<{ org_id: number | null }>()
   if (!project?.org_id) return null
   return getOrgCountStructuralCells(env, project.org_id)
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// AQU-1002: configurable comment floors
+//
+// Two more write floors on the same org_settings pattern. Partners split on
+// this one — AQU-999 hardened foreign resolve to CONTRIBUTOR, and some orgs
+// then wanted it lower (translators settle the threads on files they
+// translate) while others wanted it reserved for maintainers. A floor, not a
+// global default, is the only answer that serves both.
+//
+// Defaults reproduce post-AQU-999 behaviour exactly, so an org that never sets
+// them sees no change: COMMENTER (200) to open a thread, CONTRIBUTOR (400) to
+// resolve one somebody else opened.
+//
+// ENFORCEMENT LIVES IN SYNC-WORKER, which owns comments — see
+// sync-worker/src/events/comment-floors.ts, which reads the same two keys with
+// the same defaults. auth-worker only resolves them here so the floors can
+// travel with the project record for client gating (below), exactly as
+// termbaseEditMinRole does.
+// ──────────────────────────────────────────────────────────────────────────
+
+/** Default floor to open a comment thread when the org hasn't set one. */
+export const DEFAULT_COMMENT_CREATE_MIN_ROLE = 200 // ROLE.COMMENTER
+/** Default floor to resolve/reopen someone else's thread when unset. */
+export const DEFAULT_COMMENT_RESOLVE_MIN_ROLE = 400 // ROLE.CONTRIBUTOR
+
+export interface CommentFloors {
+  commentCreateMinRole: number
+  commentResolveMinRole: number
+}
+
+/** The floors in force for an org, each falling back independently. */
+export async function getCommentFloors(env: Env, orgId: number): Promise<CommentFloors> {
+  const settings = await loadOrgSettingsBlob(env, orgId)
+  return {
+    commentCreateMinRole: extractRoleFloor(
+      settings,
+      "commentCreateMinRole",
+      DEFAULT_COMMENT_CREATE_MIN_ROLE,
+    ),
+    commentResolveMinRole: extractRoleFloor(
+      settings,
+      "commentResolveMinRole",
+      DEFAULT_COMMENT_RESOLVE_MIN_ROLE,
+    ),
+  }
+}
+
+/** Defaults for a project with no org to consult (personal / not attached). */
+export const DEFAULT_COMMENT_FLOORS: CommentFloors = {
+  commentCreateMinRole: DEFAULT_COMMENT_CREATE_MIN_ROLE,
+  commentResolveMinRole: DEFAULT_COMMENT_RESOLVE_MIN_ROLE,
 }
 

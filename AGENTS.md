@@ -6,12 +6,16 @@ Rules for any AI coding assistant working in this repo (Claude Code, Cursor, Cop
 
 **`npm run build` (i.e. `tsc -b && vite build`) is the CI gate, not `tsc --noEmit`.** Do not revert the CI workflow to `--noEmit` — it misses project-reference / `erasableSyntaxOnly` errors that only `tsc -b` catches (see AQU-213 / AQU-219).
 
+Cloudflare PR previews use `pnpm build:workers-build`: `tsc -b && vite build`
+plus environment/artifact checks. They run no tests, lint, or secret scans.
+QA tests the published preview; its green check proves compilation only.
+
 ## Testing — non-negotiable
 
 Keep test coverage synchronized with behavior without running the entire suite after every coding step:
 
 1. **During implementation, run the directly affected tests.** Run the nearest unit/integration/worker tests and the specific smoke spec(s) covering the changed journey. Use `npx tsx scripts/e2e-up.ts -- <spec>` for targeted smoke coverage. Do not rerun the complete smoke suite after every prompt or incremental edit.
-2. **Use the proportional E2E gates.** During implementation, run the directly affected specs. The pre-push hook runs `pnpm test:e2e:affected`, which derives a small browser suite from the commits being pushed. The complete `npm run test:e2e:smoke` suite remains the merge/deploy/release gate; do not substitute the affected suite at that boundary.
+2. **Use the proportional E2E gates.** During implementation, run the directly affected specs. The pre-push hook runs `pnpm scan:secrets`, then `pnpm test:e2e:affected`, which derives a small browser suite from the commits being pushed. The complete `npm run test:e2e:smoke` suite remains the merge/deploy/release gate; do not substitute the affected suite at that boundary.
 3. **Smoke is for cross-layer product lies only.** A change gets a new `*.smoke.spec.ts` only when all of these are true: (a) a user can lose data, access, or a committed artifact if it breaks; (b) the assertion crosses at least two of SPA, auth-worker, sync-worker, Postgres, R2, or a second browser context; (c) no existing smoke journey already covers that contract — extend that file instead. Otherwise cover the change with Vitest/RTL (`src/**/*.test.tsx`) or a worker unit test. Do not add a Playwright smoke for toggles, dialogs, empty states, keyboard chrome, or single-component UI.
 4. **If your change touches a journey in `e2e/JOURNEYS.md`, extend that spec (or its RTL counterpart).** New cross-layer journeys get a new JOURNEYS row and a new smoke file. UI-only journeys get RTL coverage and a short “covered in RTL” note — not a new smoke file.
 5. **Changed behavior means changed tests at the right level.** If a feature, UI flow, label, role, selector, route, validation rule, or loading state changes, update the matching RTL test or smoke/page object in the same change. A stale test is a product bug. Prefer deleting a redundant smoke after RTL exists over parking it as non-smoke.
@@ -27,7 +31,7 @@ Keep test coverage synchronized with behavior without running the entire suite a
 15. **Machine speed must not decide correctness in any suite.** Unit, integration, worker, and E2E tests must wait for observable completion rather than elapsed time, and a slow result must never be skipped or treated as optional. Timeouts are stall watchdogs: keep them generous enough for supported slower machines, fail with useful diagnostics when they expire, and do not shorten them merely to speed up feedback. Resource-heavy suites must cap concurrency with settings supported by the installed runner version so they cannot exhaust a smaller machine.
 16. **Record the test-impact analysis before completion.** In the final work summary, name the changed contract or journey, its producers and consumers, the regression test added or updated, and the targeted commands actually run. If no test changed, state why existing coverage exercises the exact changed path; proximity alone is not evidence. When adding a new product area, update `scripts/lib/e2e-impact.ts` so its sentinel is selected even before an exact journey spec changes.
 
-Smoke tests are production guardrails for the ~25 cross-layer journeys in `e2e/JOURNEYS.md`. Shipping a persistence/collab/access/import contract change with a knowingly stale smoke is incomplete work. UI chrome belongs in Vitest/RTL. Pre-push runs `pnpm test:e2e:affected` (not full smoke); full smoke is the merge/deploy/release gate. Test creation and targeted execution are not optional.
+Smoke tests are production guardrails for the ~25 cross-layer journeys in `e2e/JOURNEYS.md`. Shipping a persistence/collab/access/import contract change with a knowingly stale smoke is incomplete work. UI chrome belongs in Vitest/RTL. Pre-push runs `pnpm scan:secrets` then `pnpm test:e2e:affected` (not full smoke); full smoke is the merge/deploy/release gate. Test creation and targeted execution are not optional.
 
 ## Conventions
 
@@ -81,14 +85,27 @@ For the E2E suite, prefer the existing `/__test__/reset` + alice/bob/carol helpe
 
 ## Slow-request logs — treat them as failures
 
-Both workers log any request that takes **≥ 5s**, even when it succeeds — as a
-`[slow-request]` console line locally and a `slow: <METHOD> <path>` warn in
-PostHog Logs in production (AQU-1005: only-error logging hid DB saturation for
-90 minutes because the SPA aborts at 15s and an aborted request produces no
-server-side error). **Dev flow rule:** a `[slow-request]` line in `pnpm dev` /
-e2e worker output is a defect to investigate before shipping, not noise — find
-the query behind it (Neon `pg_stat_statements` or an `EXPLAIN ANALYZE`) rather
-than raising the threshold.
+`auth-worker`, `sync-worker` and `agent-worker` each log any request that takes
+**≥ 5s**, even when it succeeds — as a `[slow-request]` console line locally and
+a `slow: <METHOD> <path>` warn in PostHog Logs in production (AQU-1005:
+only-error logging hid DB saturation for 90 minutes because the SPA aborts at
+15s and an aborted request produces no server-side error). **Dev flow rule:** a
+`[slow-request]` line in `pnpm dev` / e2e worker output is a defect to
+investigate before shipping, not noise — find the query behind it (Neon
+`pg_stat_statements` or an `EXPLAIN ANALYZE`) rather than raising the threshold.
+
+**The one exception is `agent-worker`'s `POST /sessions/:id/exec`** (AQU-1021): a
+multi-second run there is the contract, not a defect — callers get a 60s default
+budget and may request up to `MAX_TIMEOUT_MS` (300s). Holding it to the 5s bar
+would warn on every normal agent run and train devs to ignore the line, which is
+the signal AQU-1005 exists to protect. So `/exec` warns only when it outlives
+that 300s hard ceiling, which means the timeout race in `exec.ts` failed to fire.
+Every other agent-worker route — including `/health` and bearer-auth rejections
+— is on the shared 5s bar.
+
+Slow requests already **route into PostHog** (OTLP log records, severity `warn`,
+carrying `http.path` / `http.status` / `http.duration_ms`), so alerting is a
+PostHog-side saved-query/alert on `slow:` records rather than more worker code.
 
 ## Issue workflow (Linear — Aquilla team)
 

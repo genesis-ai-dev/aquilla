@@ -20,13 +20,22 @@
 // `targetLanguage` left unset identifying a source-only project (AD-9) is
 // purely a downstream interpretation.
 //
-// AQU-822: ONE key is permission-scoped rather than dumb-stored —
-// `terminology` (the project's termbase concepts). A write whose only
-// *changed* key is `terminology` is gated by the org's configurable
-// `termbaseEditMinRole` floor (default project_lead 500) instead of the
-// maintainer floor below, so an org can let its translators own terminology
-// without also handing them AI config, health thresholds, or languages.
-// Everything else keeps the maintainer gate, unchanged.
+// TWO keys are permission-scoped rather than dumb-stored:
+//
+//   AQU-822  `terminology` (the project's termbase concepts). A write whose
+//            only *changed* key is `terminology` is gated by the org's
+//            configurable `termbaseEditMinRole` floor (default project_lead
+//            500) instead of the maintainer floor below, so an org can let its
+//            translators own terminology without also handing them AI config,
+//            health thresholds, or languages.
+//   AQU-1246 `autopilotEnabled` (the project-wide opt-in to the experimental
+//            Autopilot surface). An autopilot-only write is admitted at
+//            project_lead 500 — whether your own project tries an experiment
+//            is a lead's call.
+//
+// Everything else keeps the maintainer gate, unchanged. Both carve-outs are
+// scoped to a write that changes NOTHING ELSE, so neither widens access to
+// any other key.
 
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
@@ -67,6 +76,21 @@ const TERMINOLOGY_KEY = "terminology"
  */
 const COUNT_STRUCTURAL_KEY = "countStructuralCells"
 const COUNT_STRUCTURAL_MIN_ROLE = ROLE.PROJECT_LEAD
+
+/**
+ * AQU-1246: the project-wide opt-in to the experimental Autopilot surface.
+ * A write whose only *changed* key is this one is admitted at
+ * project_lead(500)+.
+ *
+ * Before this ticket the whole gate was a device-local browser switch, so any
+ * member of any project could reveal the experiment in one click and the
+ * choice never left their machine. Moving it here makes it a project decision
+ * with a real floor, and lets it be flipped for a project without a client
+ * deploy. Admitting the key does NOT widen anything else: every other key in
+ * the blob keeps the maintainer gate above.
+ */
+const AUTOPILOT_KEY = "autopilotEnabled"
+const AUTOPILOT_WRITE_MIN_ROLE = ROLE.PROJECT_LEAD
 
 /**
  * Top-level settings keys whose value differs between the stored blob and an
@@ -177,12 +201,23 @@ projectSettings.on(
       // touches anything else — even alongside a permitted key — falls through
       // to the maintainer 403, so widening one of these can never widen access
       // to AI config, health, languages, or the rest.
-      const carveOutOnly = changed.every(
-        (key) => key === TERMINOLOGY_KEY || key === COUNT_STRUCTURAL_KEY,
+      const carveOutOnly = changed.length > 0 && changed.every(
+        (key) => key === TERMINOLOGY_KEY || key === COUNT_STRUCTURAL_KEY || key === AUTOPILOT_KEY,
       )
       if (!carveOutOnly) {
         return c.json(
           { error: `role >= maintainer (${SETTINGS_WRITE_MIN_ROLE}) required` },
+          403,
+        )
+      }
+      if (changed.includes(AUTOPILOT_KEY) && role.level < AUTOPILOT_WRITE_MIN_ROLE) {
+        // AQU-1246: this is the gate that decides whether the experimental
+        // Autopilot surface exists for the project at all. A lead owns that
+        // call for their own project; nobody below does. The check is here,
+        // not only in the client, because a hidden toggle is not a permission
+        // — the acceptance criterion is explicitly server-enforced.
+        return c.json(
+          { error: `role >= project_lead (${AUTOPILOT_WRITE_MIN_ROLE}) required to change the Autopilot opt-in` },
           403,
         )
       }

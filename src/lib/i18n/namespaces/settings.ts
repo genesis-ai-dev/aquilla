@@ -74,8 +74,8 @@ export const settings = defineNamespace({
     "settings.personalProvider.advancedToggleLabel": "AI provider (advanced)",
     "settings.personalProvider.description":
       "Use your own OpenAI-compatible endpoint instead of Frontier for AI " +
-      "translations. Stored only in this browser, never synced. Overrides any " +
-      "project-level provider setting.",
+      "translations. Stored only in this browser, never synced. Default for " +
+      "projects that don't have their own API key; a project key beats this.",
     // Rendered via <RichMessage> so the two path fragments keep their
     // monospace <code> styling instead of being flattened into plain text.
     "settings.personalProvider.trailingPathHint": "Trailing {v1Path} or {chatCompletionsPath} is fine.",
@@ -125,6 +125,35 @@ export const settings = defineNamespace({
     "settings.termbase.optionContributor": "Contributor (400) — translators manage terms",
     "settings.termbase.optionProjectLead": "Project lead (500) — default",
     "settings.termbase.optionMaintainer": "Maintainer (600) — most restrictive",
+
+    // ── CommentPermissionsSection (org settings → security) ──
+    "settings.commentPermissions.groupLabel": "Comments",
+    "settings.commentPermissions.groupDescription":
+      "Who can take part in comment threads on this org's projects. Only org " +
+      "owners can change these.",
+    "settings.commentPermissions.createLabel": "Who can comment",
+    "settings.commentPermissions.createDescription":
+      "Minimum role required to open a comment thread or post a reply. Below " +
+      "this role, threads are read-only.",
+    "settings.commentPermissions.resolveLabel": "Who can resolve others' threads",
+    "settings.commentPermissions.resolveDescription":
+      "Minimum role required to resolve or reopen a thread someone else " +
+      "opened. Whoever opened a thread can always resolve their own, whatever " +
+      "this is set to.",
+    // Open-dropdown option text for both comment floors; see the
+    // roster/progress options above for why the level number is baked in.
+    "settings.commentPermissions.createOptionCommenter": "Commenter (200) — default",
+    "settings.commentPermissions.createOptionReviewer": "Reviewer (300) — reviewers and above",
+    "settings.commentPermissions.createOptionContributor":
+      "Contributor (400) — translators and above",
+    "settings.commentPermissions.createOptionProjectLead": "Project lead (500) — leads and above",
+    "settings.commentPermissions.createOptionMaintainer": "Maintainer (600) — most restrictive",
+    "settings.commentPermissions.resolveOptionCommenter":
+      "Commenter (200) — anyone who can comment",
+    "settings.commentPermissions.resolveOptionReviewer": "Reviewer (300) — reviewers and above",
+    "settings.commentPermissions.resolveOptionContributor": "Contributor (400) — default",
+    "settings.commentPermissions.resolveOptionProjectLead": "Project lead (500) — leads and above",
+    "settings.commentPermissions.resolveOptionMaintainer": "Maintainer (600) — most restrictive",
 
     // ── UsageSection (Preferences → Usage) ──
     "settings.usage.historyLabel": "7-day audio history",

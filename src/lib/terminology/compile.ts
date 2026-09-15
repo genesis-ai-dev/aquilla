@@ -15,8 +15,8 @@
  */
 
 import type { TranslationRule } from "@/lib/parsers/types"
-import type { Concept } from "./types"
-import { termToRegexSource } from "./match"
+import type { Concept, TermMatchingSettings } from "./types"
+import { conceptToRegexSource, termToRegexSource } from "./match"
 import { t } from "@/lib/i18n/standalone"
 
 /**
@@ -35,7 +35,10 @@ function escapeRegex(s: string): string {
  * Only `active` concepts produce rules. The returned rules use existing
  * TranslationRule check types — no new check kinds are introduced.
  */
-export function compileConceptsToRules(concepts: Concept[]): TranslationRule[] {
+export function compileConceptsToRules(
+  concepts: Concept[],
+  termMatching?: TermMatchingSettings,
+): TranslationRule[] {
   const rules: TranslationRule[] = []
   const now = new Date().toISOString()
 
@@ -47,9 +50,11 @@ export function compileConceptsToRules(concepts: Concept[]): TranslationRule[] {
     )
     const forbidden = concept.renderings.filter((r) => r.status === "forbidden")
 
-    // Wildcard-aware source pattern (grac* matches grace/graced/gracia, etc.).
-    // termToRegexSource returns null for empty/whitespace terms → skip concept.
-    const sourcePattern = termToRegexSource(concept.sourceTerm)
+    // AQU-1271: the SOURCE side goes through the concept matcher, so the rule
+    // engine sees the same surface forms as chips, stats and the term page —
+    // wildcards plus mark-folding, project affixes, extra forms and exclusions.
+    // Returns null for empty/whitespace terms → skip concept.
+    const sourcePattern = conceptToRegexSource(concept, termMatching)
     if (sourcePattern === null) continue
 
     // source-requires-target: each source instance needs a counterpart rendering.

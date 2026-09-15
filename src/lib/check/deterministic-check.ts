@@ -28,8 +28,8 @@ import type { TranslationRule, RuleInfraction } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
 import { effectiveSourceText } from "@/lib/cell-text"
 import { checkRulesForCell } from "@/lib/rules/rule-engine"
-import { buildTermRegex } from "@/lib/terminology/match"
-import type { Concept } from "@/lib/terminology/types"
+import { buildConceptRegex, buildTermRegex } from "@/lib/terminology/match"
+import type { Concept, TermMatchingSettings } from "@/lib/terminology/types"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -111,12 +111,15 @@ export interface CheckRunResult {
 export function scanTermConsistency(
   cells: readonly CheckableCell[],
   concepts: readonly Concept[],
+  termMatching?: TermMatchingSettings,
 ): TermConsistencyFinding[] {
   const findings: TermConsistencyFinding[] = []
 
   for (const concept of concepts) {
     if (concept.status !== "active") continue
-    const sourceRe = buildTermRegex(concept.sourceTerm)
+    // AQU-1271: source side through the concept matcher so the check agrees
+    // with the rule engine, the chips and the glossary counts.
+    const sourceRe = buildConceptRegex(concept, termMatching)
     if (!sourceRe) continue
 
     const approved = concept.renderings.filter(
@@ -209,6 +212,8 @@ export interface CheckRunInput {
   rules: readonly TranslationRule[]
   /** Project term base; only `active` concepts are scanned. */
   concepts: readonly Concept[]
+  /** Project-level source matching defaults (AQU-1271). */
+  termMatching?: TermMatchingSettings
 }
 
 const CHUNK_SIZE = 100
@@ -241,7 +246,7 @@ export async function runDeterministicCheck(
   // Term pass (regex over short strings; one pass is cheap, but yield first
   // so the rule pass's last chunk paints).
   await nextTick()
-  const termFindings = scanTermConsistency(input.cells, activeConcepts)
+  const termFindings = scanTermConsistency(input.cells, activeConcepts, input.termMatching)
 
   const flaggedTermCells = termFindings.reduce(
     (n, f) => n + f.flaggedCells.length,

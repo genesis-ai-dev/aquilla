@@ -132,11 +132,11 @@ export function useRules(
   // subscription-priority order from useSubscribedConcepts.
   const terminologyRules = useMemo(
     () =>
-      compileConceptsToRules([
-        ...(subscribedConcepts ?? []),
-        ...(terminology ?? []),
-      ]),
-    [subscribedConcepts, terminology],
+      compileConceptsToRules(
+        [...(subscribedConcepts ?? []), ...(terminology ?? [])],
+        project?.termMatching,
+      ),
+    [subscribedConcepts, terminology, project?.termMatching],
   )
 
   // Order: builtins → org rules → project rules → terminology

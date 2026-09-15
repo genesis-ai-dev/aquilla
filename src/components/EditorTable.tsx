@@ -6349,6 +6349,7 @@ function EditorRow({
                     onDiscardLocal={handleDiscardLocalAndReload}
                     onNavigateCell={onNavigateCell}
                     terminologyConcepts={terminologyConcepts}
+                    termMatching={project.termMatching}
                     onTermChipClick={handleTermChipClick}
                     footnoteNumberOffset={targetFootnoteNumberOffset}
                     showFootnoteTooltips={!footnotePanelActive}

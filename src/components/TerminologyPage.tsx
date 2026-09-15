@@ -40,7 +40,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import type { Concept, TermRendering, RenderingStatus } from "@/lib/terminology/types"
+import type { Concept, TermRendering, RenderingStatus, TermMatchingSettings } from "@/lib/terminology/types"
 import { renderingStatusLabelKey } from "@/lib/terminology/types"
 import { mergeConcepts } from "@/lib/terminology/store"
 import { useConcepts } from "@/hooks/useConcepts"
@@ -601,13 +601,15 @@ interface LibraryStatsHeaderProps {
   /** Cell pairs from the active file (or all files if aggregated). Pass [] when
    *  no cell data is available yet — the header renders a placeholder state. */
   cells: CellPair[]
+  /** AQU-1271: project-level source-matching defaults. */
+  termMatching?: TermMatchingSettings
 }
 
-function LibraryStatsHeader({ concepts, cells }: LibraryStatsHeaderProps) {
+function LibraryStatsHeader({ concepts, cells, termMatching }: LibraryStatsHeaderProps) {
   const { t } = useI18n()
   const stats = useMemo(
-    () => computeTerminologyStats(concepts, cells),
-    [concepts, cells],
+    () => computeTerminologyStats(concepts, cells, termMatching),
+    [concepts, cells, termMatching],
   )
 
   const activeConcepts = stats.totalConcepts
@@ -907,6 +909,7 @@ export function TerminologyPage() {
           requestId: String(reqId),
           corpus: candidateCorpus,
           managed: concepts,
+          termMatching: project?.termMatching,
           maxCorpusStrings: CANDIDATE_CORPUS_CEILING,
         })
       } catch {
@@ -914,6 +917,7 @@ export function TerminologyPage() {
         if (cancelled) return
         const out = extractCandidates(candidateCorpus, {
           managed: concepts,
+          termMatching: project?.termMatching,
           maxCorpusStrings: CANDIDATE_CORPUS_CEILING,
         })
         setCandidates(out)
@@ -926,7 +930,7 @@ export function TerminologyPage() {
     return () => {
       cancelled = true
     }
-  }, [tab, candidateCorpus, concepts])
+  }, [tab, candidateCorpus, concepts, project?.termMatching])
   const [addOpen, setAddOpen] = useState(false)
   const [editTarget, setEditTarget] = useState<Concept | null>(null)
   const [importOpen, setImportOpen] = useState(false)
@@ -1252,6 +1256,7 @@ export function TerminologyPage() {
         canManageTermbase={canManageTermbase}
         onPromoteRendering={handlePromoteRendering}
         onRenderingsChange={handleRenderingsChange}
+        termMatching={project?.termMatching}
       />
     )
   }
@@ -1321,7 +1326,7 @@ export function TerminologyPage() {
         )}
 
         {/* Stats header — derived on read, no persistence */}
-        <LibraryStatsHeader concepts={concepts} cells={cellPairs} />
+        <LibraryStatsHeader concepts={concepts} cells={cellPairs} termMatching={project?.termMatching} />
 
         {/* Tab strip: managed Concepts vs review queue vs candidates vs violations */}
         <div className="flex items-center gap-2">
@@ -1378,6 +1383,7 @@ export function TerminologyPage() {
           <TerminologyViolationsInbox
             concepts={concepts}
             cells={allCells}
+            termMatching={project?.termMatching}
             onJumpToCell={() => navigate(`/project/${id}/editor`)}
           />
         ) : tab === "queue" ? (

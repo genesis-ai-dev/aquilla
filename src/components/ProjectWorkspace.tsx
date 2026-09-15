@@ -5521,6 +5521,7 @@ export function ProjectWorkspace() {
         cells: getActiveCells(),
         rules,
         concepts: localConcepts,
+        termMatching: project?.termMatching,
       })
       // Bail if the active file changed mid-run — don't clobber the new file's
       // state with this (now stale) file's findings.
@@ -5529,7 +5530,7 @@ export function ProjectWorkspace() {
     } finally {
       setCheckRunning(false)
     }
-  }, [activeFileId, checkRunning, getActiveCells, rules, localConcepts])
+  }, [activeFileId, checkRunning, getActiveCells, rules, localConcepts, project?.termMatching])
 
   // A check run describes one file's cells; switching files invalidates it.
   useEffect(() => {

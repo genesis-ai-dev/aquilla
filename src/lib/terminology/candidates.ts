@@ -20,8 +20,8 @@
  * to a particular language. Tokenization is Unicode-word based.
  */
 
-import type { Concept } from "./types"
-import { matchesTerm } from "./match"
+import type { Concept, TermMatchingSettings } from "./types"
+import { matchesConcept } from "./match"
 
 /**
  * Common English stopwords. Candidates that consist *entirely* of these tokens
@@ -183,6 +183,8 @@ export interface CandidateTerm {
 export interface ExtractCandidatesOptions {
   /** Existing managed concepts; their sourceTerms are flagged isManaged. */
   managed?: Concept[]
+  /** AQU-1271: project-level source-matching defaults applied to `managed`. */
+  termMatching?: TermMatchingSettings
   /**
    * Reference-corpus token frequency map (token -> count) for G² keyness.
    * When absent, a rest-of-corpus baseline is derived per term.
@@ -458,17 +460,17 @@ export function extractCandidates(
   const minTermFreq = opts.minTermFreq ?? DEFAULT_MIN_FREQ
   const maxResults = opts.maxResults ?? DEFAULT_MAX_RESULTS
 
-  // Managed source terms used to flag candidates as already-managed. We keep
-  // the raw term strings (not normalized) so wildcard markers (`grac*`) survive
-  // into the matcher. A candidate is managed if ANY managed term matches it via
-  // the shared wildcard-aware matcher — so `grac*` flags the candidate `grace`.
-  // For non-wildcard terms the matcher is exact whole-word, so this is
-  // backward-compatible with the prior exact-equality behaviour.
-  const managedTerms = (opts.managed ?? [])
-    .map((c) => c.sourceTerm)
-    .filter((t) => t.trim().length > 0)
+  // A candidate is already-managed if ANY managed CONCEPT matches it. AQU-1271:
+  // this goes through the shared concept matcher, so a candidate is flagged on
+  // the same surface forms the rule engine enforces — wildcards (`grac*` flags
+  // `grace`), extra `match.forms`, mark folding and project affixes — and an
+  // excluded form is NOT flagged. For a plain non-wildcard term the matcher is
+  // exact whole-word, so this stays backward-compatible with exact equality.
+  const managedConcepts = (opts.managed ?? []).filter(
+    (c) => c.sourceTerm.trim().length > 0,
+  )
   const isManagedTerm = (candidate: string): boolean =>
-    managedTerms.some((m) => matchesTerm(candidate, m))
+    managedConcepts.some((c) => matchesConcept(candidate, c, opts.termMatching))
 
   const boundedCorpus =
     opts.maxCorpusStrings != null && corpus.length > opts.maxCorpusStrings

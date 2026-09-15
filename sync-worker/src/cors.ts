@@ -1,7 +1,7 @@
 // CORS for browser-facing CQRS endpoints.
 //
 // The sync-worker is otherwise reached either as a partyserver WebSocket
-// (no preflight needed) or by frontier-server using SYNC_SECRET_KEY
+// (no preflight needed) or by auth-worker using SYNC_SECRET_KEY
 // (server-to-server, no preflight). The CQRS HTTP routes — /events,
 // /cells/audit-stats, /cell-validators — are the only paths the browser
 // hits cross-origin, so we add CORS headers narrowly here rather than
@@ -54,7 +54,7 @@ const CORS_HEADERS: Record<string, string> = {
   ].join(", "),
   // AQU-276: expose custom response headers so the browser-side fetch() can
   // read them via res.headers.get(). Without Expose-Headers, only the CORS
-  // "safelisted" headers (Content-Type, etc.) are readable from JS.
+  // safelisted headers (Content-Type, etc.) are readable from JS.
   "Access-Control-Expose-Headers": "X-Export-Mode, X-Usfm-Lossy-Verse-Count",
   "Access-Control-Max-Age": "86400",
   Vary: "Origin",

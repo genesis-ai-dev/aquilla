@@ -17,10 +17,13 @@ import { externalError } from './errors'
 import { AUTH_HINT } from './discovery-route'
 import { MCP_TOOLS } from './mcp-tools'
 import { callTool, UNKNOWN_TOOL } from './mcp-handlers'
+import { matchUiOnly, uiOnlyHint } from './ui-only'
 import type { ExternalEnv } from './types'
 import { validateApiCredential } from '../../../db/shared/api-credentials'
 
 const MCP_PATH = '/api/v1/external/mcp'
+/** Discovery root, quoted in uiOnly hints so an agent can read the full list. */
+const EXTERNAL_API_ROOT = '/api/v1/external'
 
 /** Protocol versions this server recognizes; an initialize echoes the client's
  *  when known, else pins the latest we implement. */
@@ -142,7 +145,18 @@ export async function handleExternalMcpRequest(
           : {}
       const result = await callTool(params.name, args, env, cred, token, ctx)
       if (result === UNKNOWN_TOOL) {
-        return rpcError(id, -32602, `unknown tool: ${params.name}`)
+        // AQU-1178: an invented tool name is often a probe at a deliberately
+        // browser-only surface (mint_credential, delete_project, approve_...).
+        // Say "never" and point at the uiOnly list rather than "unknown tool",
+        // which reads as "wrong name, guess again".
+        const uiOnly = matchUiOnly(params.name)
+        return rpcError(
+          id,
+          -32602,
+          uiOnly
+            ? `unknown tool: ${params.name} — ${uiOnlyHint(uiOnly, EXTERNAL_API_ROOT)}`
+            : `unknown tool: ${params.name}`,
+        )
       }
       return rpcResult(id, result)
     }

@@ -1,7 +1,9 @@
 // Agent API changeset routes (AQU-533). Mounted under
 //   /api/v1/external/projects/:projectId/changesets
 //     POST                 → prepare (stage a plan)
+//     GET                  → list this credential's changesets (AQU-1177 §1)
 //     GET  /:id            → fetch a changeset (summary + digest)
+//     GET  /:id/wait       → long-poll until approved / no longer staged (§2)
 //     POST /:id/commit     → commit (ask/act)
 //     POST /:id/discard    → discard a staged plan
 //
@@ -9,14 +11,24 @@
 // handler dispatch. Every response is JSON with a stable error contract
 // (errors.ts).
 
-import { errorResponse } from './errors'
+import { errorResponse, toErrorResponse } from './errors'
 import { AUTH_HINT } from './discovery-route'
 import { approvalUrlFor, handlePrepare } from './prepare'
 import { handleCommit } from './commit'
-import { loadChangeset, changesetToResponse } from './store'
+import {
+  CHANGESET_STATUSES,
+  changesetToResponse,
+  EXTERNAL_LIST_DEFAULT_LIMIT,
+  EXTERNAL_LIST_MAX_LIMIT,
+  listChangesetsPage,
+  loadChangeset,
+} from './store'
+import { clampWaitTimeout, waitForChangesetSettled, WAIT_MAX_TIMEOUT_MS } from './changeset-wait'
+import { encodeCursor, parsePageParams } from './pagination'
+import { assertCredentialScope } from './token-bridge'
 import { ROLE } from '../events/role-policy'
 import type { ExternalEnv, StoredChangeset } from './types'
-import { validateApiCredential } from '../../../db/shared/api-credentials'
+import { validateApiCredential, type ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/shared/rate-limit'
 
@@ -41,7 +53,7 @@ async function checkChangesetLifecycleRateLimit(
 }
 
 const ROUTE_RE =
-  /^\/api\/v1\/external\/projects\/([^/]+)\/changesets(?:\/([^/]+)(?:\/(commit|discard))?)?$/
+  /^\/api\/v1\/external\/projects\/([^/]+)\/changesets(?:\/([^/]+)(?:\/(commit|discard|wait))?)?$/
 
 function bearer(request: Request): string | null {
   const h = request.headers.get('Authorization') ?? ''
@@ -76,6 +88,124 @@ async function handleGet(
   return Response.json({ changeset: changesetToResponse(cs), approvalUrl })
 }
 
+/**
+ * Shared preamble for the routes added in AQU-1177: validate the PAT, spend one
+ * lifecycle throttle slot, confirm the credential's org/project SCOPE covers
+ * this project (a wrong-project PAT gets `scope_denied` → 403 here rather than
+ * a misleading empty list), and require a live VIEWER floor — the same read
+ * floor `handleGet` enforces, resolved fresh so a member removed after prepare
+ * loses access immediately.
+ */
+async function authorizeChangesetRead(
+  request: Request,
+  db: AquillaDb,
+  projectId: string,
+): Promise<{ cred: ApiCredentialContext } | Response> {
+  const cred = await validateApiCredential(db, bearer(request) ?? '')
+  if (!cred) {
+    return errorResponse('permission_denied', `invalid or missing API credential — ${AUTH_HINT}`)
+  }
+  const limited = await checkChangesetLifecycleRateLimit(db, cred.credentialId)
+  if (limited) return limited
+  try {
+    await assertCredentialScope(db, cred, projectId)
+  } catch (err) {
+    return toErrorResponse(err)
+  }
+  const role = await resolveProjectRoleShared(db, { id: cred.userId }, projectId)
+  if (!role || role.level < ROLE.VIEWER) {
+    return errorResponse('permission_denied', 'no project membership')
+  }
+  return { cred }
+}
+
+/**
+ * GET /changesets — this credential's staged/settled plans, newest-first
+ * (AQU-1177 §1). Scoped to the calling credential, matching the per-item rule
+ * in `handleGet`: a PAT sees the plans it staged, never a sibling agent's.
+ * `status` filters exactly against the schema's own status list; `limit` +
+ * opaque `cursor` page it.
+ */
+async function handleList(
+  request: Request,
+  env: ExternalEnv,
+  projectId: string,
+  url: URL,
+): Promise<Response> {
+  if (!env.AQUILLA_PG) return errorResponse('job_failed', 'AQUILLA_PG not configured')
+  const db = env.AQUILLA_PG
+  const auth = await authorizeChangesetRead(request, db, projectId)
+  if (auth instanceof Response) return auth
+
+  const status = url.searchParams.get('status') ?? undefined
+  if (status !== undefined && !(CHANGESET_STATUSES as readonly string[]).includes(status)) {
+    return errorResponse('validation_failed', `unknown status filter "${status}"`, {
+      statuses: CHANGESET_STATUSES,
+    })
+  }
+  const { limit, offset } = parsePageParams(url, {
+    defaultLimit: EXTERNAL_LIST_DEFAULT_LIMIT,
+    maxLimit: EXTERNAL_LIST_MAX_LIMIT,
+  })
+
+  const { rows, hasMore } = await listChangesetsPage(db, projectId, {
+    status,
+    credentialId: auth.cred.credentialId,
+    offset,
+    limit,
+  })
+  return Response.json({
+    changesets: rows.map((cs) => ({
+      ...changesetToResponse(cs),
+      approvalUrl: approvalUrlFor(env, cs.id),
+    })),
+    nextCursor: hasMore ? encodeCursor(offset + rows.length) : null,
+  })
+}
+
+/**
+ * GET /changesets/:id/wait — long-poll for the approval signal (AQU-1177 §2).
+ * Resolves as soon as a human approval lands or the plan leaves `staged`;
+ * otherwise returns the current row with `timedOut: true` once the (clamped)
+ * budget is spent, so the caller can simply call again. One throttle slot is
+ * spent per CALL, not per internal poll — that is the whole point of moving the
+ * wait server-side.
+ */
+async function handleWait(
+  request: Request,
+  env: ExternalEnv,
+  projectId: string,
+  id: string,
+  url: URL,
+): Promise<Response> {
+  if (!env.AQUILLA_PG) return errorResponse('job_failed', 'AQUILLA_PG not configured')
+  const db = env.AQUILLA_PG
+  const auth = await authorizeChangesetRead(request, db, projectId)
+  if (auth instanceof Response) return auth
+
+  const cs = await loadChangeset(db, projectId, id)
+  if (!cs) return errorResponse('not_found', `changeset ${id} not found`)
+  if (auth.cred.credentialId !== cs.credentialId) {
+    return errorResponse('permission_denied', 'credential did not create this changeset')
+  }
+
+  const rawTimeout = url.searchParams.get('timeoutMs')
+  if (rawTimeout !== null && !Number.isFinite(Number(rawTimeout))) {
+    return errorResponse('validation_failed', 'timeoutMs must be a number of milliseconds')
+  }
+  const timeoutMs = clampWaitTimeout(rawTimeout === null ? NaN : Number(rawTimeout))
+
+  const outcome = await waitForChangesetSettled(db, projectId, id, cs, timeoutMs)
+  return Response.json({
+    changeset: changesetToResponse(outcome.changeset),
+    approvalUrl: approvalUrlFor(env, outcome.changeset.id),
+    approved: outcome.approved,
+    timedOut: outcome.timedOut,
+    waitedMs: outcome.waitedMs,
+    maxTimeoutMs: WAIT_MAX_TIMEOUT_MS,
+  })
+}
+
 async function handleDiscard(
   request: Request,
   env: ExternalEnv,
@@ -94,6 +224,18 @@ async function handleDiscard(
   if (cred.credentialId !== cs.credentialId) {
     return errorResponse('permission_denied', 'credential did not create this changeset')
   }
+  // AQU-1225: a pre-creation changeset (a receipt-only CreateProject, W2-A) is
+  // staged under a project id that does not exist yet, so the membership check
+  // below can NEVER pass — the staging credential could not clean up its own
+  // junk and the row sat in the approval queue until it expired an hour later.
+  // Schema probing mass-produces exactly these. When the target project does
+  // not exist, credential ownership (asserted above) IS the authorization:
+  // no membership can exist to resolve, so this widens nothing — it only turns
+  // an unconditional denial into "the staging credential may discard its own
+  // changeset". Once the project exists, the live-role check applies unchanged.
+  if (!(await projectExists(db, projectId))) {
+    return discardChangesetCore(db, projectId, cs)
+  }
   // Live-role resolution on every call (§2): the credential owner must still
   // resolve SOME role on the project — a user removed after prepare cannot
   // discard, matching every other lifecycle op.
@@ -102,6 +244,17 @@ async function handleDiscard(
     return errorResponse('permission_denied', 'no project membership')
   }
   return discardChangesetCore(db, projectId, cs)
+}
+
+/** AQU-1225: does the changeset's target project row exist yet? A
+ *  not-yet-created project is the pre-creation (CreateProject) case, where the
+ *  membership gate is unresolvable by construction. */
+async function projectExists(db: AquillaDb, projectId: string): Promise<boolean> {
+  const row = await db
+    .prepare(`SELECT id FROM projects WHERE id = ?`)
+    .bind(projectId)
+    .first<{ id: string }>()
+  return row != null
 }
 
 /** Post-auth discard state machine, shared with the session routes (AQU-926):
@@ -142,15 +295,20 @@ export async function handleExternalChangesetsRequest(
 
   const projectId = decodeURIComponent(m[1])
   const id = m[2] ? decodeURIComponent(m[2]) : undefined
-  const action = m[3] as 'commit' | 'discard' | undefined
+  const action = m[3] as 'commit' | 'discard' | 'wait' | undefined
 
-  // Collection: POST → prepare.
+  // Collection: POST → prepare, GET → this credential's changesets.
   if (!id) {
-    if (request.method !== 'POST') return errorResponse('validation_failed', 'method not allowed')
-    return handlePrepare(request, env, projectId)
+    if (request.method === 'POST') return handlePrepare(request, env, projectId)
+    if (request.method === 'GET') return handleList(request, env, projectId, url)
+    return errorResponse('validation_failed', 'method not allowed')
   }
 
   // Item sub-actions.
+  if (action === 'wait') {
+    if (request.method !== 'GET') return errorResponse('validation_failed', 'method not allowed')
+    return handleWait(request, env, projectId, id, url)
+  }
   if (action === 'commit') {
     if (request.method !== 'POST') return errorResponse('validation_failed', 'method not allowed')
     return handleCommit(request, env, projectId, id, ctx)

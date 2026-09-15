@@ -299,7 +299,12 @@ are new in v1.1 (`sync-worker/src/external/{commands,prepare,commit}.ts`).
 - **`CreateProject`** (`{ kind: "CreateProject", name, projectId?, orgId? }`) — **receipt-only**:
   applies a plain row write via `db/shared/projects.ts` (creates the `projects` row plus an owner
   (700) `project_members` row for the caller), not an event. Must be the **sole command** in its
-  changeset. `projectId` is optional; when omitted, the **definitive** new project id is the
+  changeset. **`name` must be a real name, not a placeholder** (AQU-1140): derive it from what is
+  being imported — the source folder or file name, the publication/curriculum title, the language
+  pair — or ask the human. Content-free names (`default`, `untitled`, `new project`, `unnamed`,
+  `project`, …, matched case- and separator-insensitively and ignoring a trailing number) are
+  rejected with `validation_failed`; the name is what humans see in the workspace from then on.
+  Surrounding whitespace is trimmed before the row is written. `projectId` is optional; when omitted, the **definitive** new project id is the
   changeset's URL project id (the `:projectId` segment of `POST .../projects/:projectId/
   changesets` — yes, even though that project doesn't exist yet). Either way the definitive id is
   pinned into the plan at prepare time, so a crash-and-retry commit re-applies the same id rather

@@ -77,6 +77,7 @@ import {
 } from "./read-auth"
 
 export type { ExternalReadsEnv } from "./read-auth"
+export { mintInternalToken } from "./read-auth"
 
 const ME_RE = /^\/api\/v1\/external\/me$/
 const PROJECTS_RE = /^\/api\/v1\/external\/projects$/

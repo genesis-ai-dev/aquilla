@@ -15,8 +15,16 @@
 
 const EXTERNAL_ROOT = '/api/v1/external'
 
-export const DOCS_URL =
-  'https://github.com/genesis-ai-dev/aquilla/blob/main/docs/api/QUICKSTART.md'
+/** Where the map points callers for prose docs.
+ *
+ *  AQU-1222: this used to be
+ *  `https://github.com/genesis-ai-dev/aquilla/blob/main/docs/api/QUICKSTART.md`
+ *  — a PRIVATE repo, so the one link every external agent was handed 404'd for
+ *  everyone outside the org. The API now documents itself: this path is served
+ *  by this same unauthenticated route, from the same static map below, so it
+ *  cannot rot and cannot 404 for a logged-out caller. Host-relative for the
+ *  same reason the rest of the map is — the caller already reached this host. */
+export const DOCS_URL = `${EXTERNAL_ROOT}/docs`
 
 /** One-line auth teaching string, shared with the 401 sites in this tier. */
 export const AUTH_HINT =
@@ -50,12 +58,18 @@ function apiMap(): Record<string, unknown> {
       `1. GET ${EXTERNAL_ROOT}/me — confirm your token works; learn your mode (ask|act) and scope.`,
       `2. GET ${EXTERNAL_ROOT}/projects — find a projectId you can access.`,
       `3. GET ${EXTERNAL_ROOT}/projects/:projectId/files — list files; then .../files/:fileId/cells to read content.`,
+      `3a. GET ${EXTERNAL_ROOT}/projects/:projectId — the project itself: settings plus the live settingsVersion a PatchSettings ifMatchVersion must match.`,
+      `3b. GET ${EXTERNAL_ROOT}/commands/:kind — what a command kind takes, before you build one.`,
       `4. POST ${EXTERNAL_ROOT}/projects/:projectId/changesets with { "commands": [{ "kind": "SetTranslation", "fileId": "...", "cellId": "...", "value": "..." }] } — stages a plan, returns { changeset, digest, summary, approvalUrl }.`,
       `5. POST ${EXTERNAL_ROOT}/projects/:projectId/changesets/:id/commit — applies it (act mode). In ask mode this returns 428 confirmation_required: show the approvalUrl to a human, wait for their approval, then call commit again.`,
     ],
     endpoints: {
       'GET /api/v1/external/me': 'Who am I: userId, username, mode, scope. Start here.',
       'GET /api/v1/external/projects': 'List accessible projects (up to 100).',
+      'GET /api/v1/external/projects/:projectId': 'One project: { id, name, org_id, archived, role, settings, settingsVersion, settingsUpdatedAt }. Read settingsVersion here before staging PatchSettings — its ifMatchVersion must equal it or prepare returns plan_stale.',
+      'GET /api/v1/external/commands': 'Index of every command kind you can stage. No auth needed.',
+      'GET /api/v1/external/commands/:kind': 'One command kind’s full parameter doc, gotchas, and example (MCP: the describe_command tool). No auth needed.',
+      'GET /api/v1/external/docs': 'This API map rendered as Markdown prose. No auth needed.',
       'GET /api/v1/external/projects/:projectId/files': 'List a project’s files.',
       'GET /api/v1/external/projects/:projectId/files/:fileId/cells': 'Read a file’s cells (source + target). Supports since/limit/cursor, and lane=<tag> to filter targets to one target-language lane (see multiLanguage).',
       'GET /api/v1/external/projects/:projectId/files/:fileId/export': 'Export a file in its delivered format (round-trip: the original artifact with current translations substituted in). Optional lane=<tag>. See "exporting" below.',
@@ -165,6 +179,45 @@ function apiMap(): Record<string, unknown> {
   }
 }
 
+/** Render any JSON value from the API map as Markdown.
+ *
+ *  Deliberately generic: `apiMap()` above stays the SINGLE source of truth and
+ *  this function contributes no prose of its own, so the human-readable docs
+ *  cannot drift from the machine-readable map the way a hand-written file in
+ *  another repo did (AQU-1222). */
+function renderMarkdown(value: unknown, depth: number): string[] {
+  if (value === null || value === undefined) return ['_none_']
+  if (typeof value === 'string') return [value]
+  if (typeof value === 'number' || typeof value === 'boolean') return [String(value)]
+
+  if (Array.isArray(value)) {
+    const out: string[] = []
+    for (const item of value) {
+      const [head = '', ...tail] = renderMarkdown(item, depth + 1)
+      out.push(`- ${head}`, ...tail.map((line) => `  ${line}`))
+    }
+    return out
+  }
+
+  const out: string[] = []
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    const rendered = renderMarkdown(child, depth + 1)
+    if (rendered.length === 1 && !rendered[0].startsWith('- ')) {
+      out.push(`- **${key}** — ${rendered[0]}`)
+    } else {
+      // h2..h6 — Markdown has no deeper heading level.
+      out.push('', `${'#'.repeat(Math.min(6, depth + 2))} ${key}`, '', ...rendered, '')
+    }
+  }
+  return out
+}
+
+/** GET /api/v1/external/docs — the API map as prose, so `docs:` points at
+ *  something an external, logged-out caller can actually open. */
+function docsMarkdown(): string {
+  return ['# Aquilla Agent API', '', ...renderMarkdown(apiMap(), 0), ''].join('\n')
+}
+
 /** JSON body for unmatched /api/v1/external/* paths — same error envelope as
  *  every other external error, plus enough of a hint to self-correct. */
 function externalNotFound(pathname: string): Response {
@@ -205,6 +258,18 @@ export function handleExternalDiscoveryRequest(request: Request): Response | nul
       )
     }
     return Response.json(apiMap())
+  }
+
+  if (path === DOCS_URL) {
+    if (request.method !== 'GET') {
+      return Response.json(
+        { error: { code: 'validation_failed', message: `use GET ${DOCS_URL} for the API docs` } },
+        { status: 405, headers: { Allow: 'GET' } },
+      )
+    }
+    return new Response(docsMarkdown(), {
+      headers: { 'Content-Type': 'text/markdown; charset=utf-8' },
+    })
   }
 
   if (path.startsWith(`${EXTERNAL_ROOT}/`)) return externalNotFound(path)

@@ -248,4 +248,65 @@ describe("DELETE /api/v2/credentials/:id", () => {
     )
     expect(missing.status).toBe(404)
   })
+
+  // AQU-1180 — the `pii` flag decides whether an agent token can see the names
+  // of everyone who has edited the project. That is a decision about other
+  // people's safety, so it is off by default and an owner's call to turn on.
+  describe("pii flag (AQU-1180)", () => {
+    it("defaults to off when the field is omitted", async () => {
+      await seedUser(1, "alice")
+      const body = (await (await mint("alice", { name: "t", mode: "ask" })).json()) as CreateResponse
+      const ctx = await validateApiCredential(env.AQUILLA_PG, body.token)
+      expect(ctx?.pii).toBe(false)
+    })
+
+    it("lets an owner mint a pii credential scoped to their project", async () => {
+      await seedUser(1, "alice")
+      await seedProject("proj-1", 1)
+      await grantProjectRole("proj-1", 1, 700, 1) // OWNER
+      const res = await mint("alice", {
+        name: "pii token",
+        mode: "ask",
+        projectId: "proj-1",
+        pii: true,
+      })
+      expect(res.status).toBe(201)
+      const body = (await res.json()) as CreateResponse
+      const ctx = await validateApiCredential(env.AQUILLA_PG, body.token)
+      expect(ctx?.pii).toBe(true)
+    })
+
+    it("denies a non-owner (maintainer) minting pii: on", async () => {
+      await seedUser(1, "alice")
+      await seedUser(2, "owner")
+      await seedProject("proj-1", 2)
+      await grantProjectRole("proj-1", 1, 600, 2) // MAINTAINER — write access, not ownership
+      const res = await mint("alice", {
+        name: "pii token",
+        mode: "ask",
+        projectId: "proj-1",
+        pii: true,
+      })
+      expect(res.status).toBe(403)
+      expect((await res.json()) as { error: string }).toMatchObject({ error: "permission_denied" })
+    })
+
+    it("denies pii: on for an unscoped credential — there is no owner to decide", async () => {
+      await seedUser(1, "alice")
+      const res = await mint("alice", { name: "pii token", mode: "ask", pii: true })
+      expect(res.status).toBe(403)
+      expect((await res.json()) as { error: string }).toMatchObject({ error: "permission_denied" })
+    })
+
+    it("a maintainer can still mint a normal (scrubbed) credential", async () => {
+      await seedUser(1, "alice")
+      await seedUser(2, "owner")
+      await seedProject("proj-1", 2)
+      await grantProjectRole("proj-1", 1, 600, 2)
+      const res = await mint("alice", { name: "t", mode: "act", projectId: "proj-1", pii: false })
+      expect(res.status).toBe(201)
+      const body = (await res.json()) as CreateResponse
+      expect((await validateApiCredential(env.AQUILLA_PG, body.token))?.pii).toBe(false)
+    })
+  })
 })

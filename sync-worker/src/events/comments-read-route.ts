@@ -4,8 +4,19 @@
 //   Query params (all optional):
 //     fileId  — filter to a specific file
 //     cellId  — filter to a specific cell (requires fileId)
+//     limit   — page size (default 200, max 1000)
+//     cursor  — opaque keyset cursor from a previous page's `nextCursor`
 //
-// Returns { comments: CommentRow[] } ordered by created_at ASC.
+// Returns { comments: CommentRow[], nextCursor: string | null } ordered by
+// (created_at ASC, comment_id ASC). `nextCursor` is null on the last page.
+// Pre-pagination clients that ignore `nextCursor` still get the first 200
+// rows — the shape only gained a field.
+//
+//   GET /api/v1/projects/:projectId/comments/counts
+//
+// Cheap aggregate for badges: { unresolved, byFile: { [fileId|""]: n } } —
+// open (unresolved, non-deleted) root threads, grouped by file. Project-scoped
+// threads land under the "" key. One indexed GROUP BY, no row transfer.
 //
 // Auth: sync-token JWT scoped to projectId; minimum role COMMENTER (200).
 // Every query is double-scoped by the verified projectId from the JWT so a
@@ -83,13 +94,49 @@ function toOut(row: CommentRowRaw): CommentRowOut {
 }
 
 const PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/comments$/
+const COUNTS_PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/comments\/counts$/
+
+export const COMMENTS_DEFAULT_PAGE = 200
+const COMMENTS_MAX_PAGE = 1000
+
+interface CommentsCursor {
+  createdAt: number
+  commentId: string
+}
+
+/** Opaque keyset cursor: base64url of `${created_at}:${comment_id}`. */
+export function encodeCommentsCursor(c: CommentsCursor): string {
+  return btoa(`${c.createdAt}:${c.commentId}`).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+export function decodeCommentsCursor(raw: string): CommentsCursor | null {
+  try {
+    const b64 = raw.replace(/-/g, '+').replace(/_/g, '/')
+    const text = atob(b64 + '='.repeat((4 - (b64.length % 4)) % 4))
+    const sep = text.indexOf(':')
+    if (sep <= 0) return null
+    const createdAt = Number(text.slice(0, sep))
+    const commentId = text.slice(sep + 1)
+    if (!Number.isFinite(createdAt) || !commentId) return null
+    return { createdAt, commentId }
+  } catch {
+    return null
+  }
+}
+
+function parseLimit(raw: string | null): number {
+  const n = Math.floor(Number(raw))
+  if (!raw || !Number.isFinite(n) || n < 1) return COMMENTS_DEFAULT_PAGE
+  return Math.min(n, COMMENTS_MAX_PAGE)
+}
 
 export async function handleCommentsReadRequest(
   request: Request,
   env: CommentsReadEnv,
 ): Promise<Response | null> {
   const url = new URL(request.url)
-  const match = url.pathname.match(PATH_RE)
+  const countsMatch = url.pathname.match(COUNTS_PATH_RE)
+  const match = countsMatch ?? url.pathname.match(PATH_RE)
   if (!match) return null
   if (request.method !== 'GET') return null
 
@@ -113,8 +160,16 @@ export async function handleCommentsReadRequest(
     return new Response(auth.reason, { status: auth.status })
   }
 
+  if (countsMatch) return handleCounts(env.AQUILLA_PG, projectId)
+
   const fileId = url.searchParams.get('fileId')
   const cellId = url.searchParams.get('cellId')
+  const limit = parseLimit(url.searchParams.get('limit'))
+  const cursorRaw = url.searchParams.get('cursor')
+  const cursor = cursorRaw ? decodeCommentsCursor(cursorRaw) : null
+  if (cursorRaw && !cursor) {
+    return new Response('invalid cursor', { status: 400 })
+  }
 
   // Build the query. Always scope to the verified projectId first.
   // AQU-599: LEFT JOIN the source-side cell to surface its canonical reference
@@ -146,7 +201,19 @@ export async function handleCommentsReadRequest(
     binds.push(fileId)
   }
 
-  parts.push('ORDER BY cm.created_at ASC')
+  // Keyset: strictly after the last row of the previous page in
+  // (created_at, comment_id) order. Two comments can share a created_at (a
+  // batch flush stamps one serverTs), so the id tiebreak is what makes the
+  // cursor exact rather than skipping or repeating a row.
+  if (cursor) {
+    parts.push('AND (cm.created_at > ? OR (cm.created_at = ? AND cm.comment_id > ?))')
+    binds.push(cursor.createdAt, cursor.createdAt, cursor.commentId)
+  }
+
+  parts.push('ORDER BY cm.created_at ASC, cm.comment_id ASC')
+  // Over-fetch by one to learn whether a next page exists without a COUNT.
+  parts.push('LIMIT ?')
+  binds.push(limit + 1)
 
   const sql = parts.join(' ')
 
@@ -154,11 +221,55 @@ export async function handleCommentsReadRequest(
     const result = await env.AQUILLA_PG.prepare(sql)
       .bind(...binds)
       .all<CommentRowRaw>()
-    const comments: CommentRowOut[] = result.results.map(toOut)
-    return Response.json({ comments })
+    const rows = result.results
+    const page = rows.length > limit ? rows.slice(0, limit) : rows
+    const last = page[page.length - 1]
+    const nextCursor =
+      rows.length > limit && last
+        ? encodeCommentsCursor({ createdAt: Number(last.created_at), commentId: last.comment_id })
+        : null
+    const comments: CommentRowOut[] = page.map(toOut)
+    return Response.json({ comments, nextCursor })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     console.error('comments read failed:', message)
     return new Response('comments read failed', { status: 500 })
+  }
+}
+
+export interface CommentCountsOut {
+  /** Open root threads across the whole project. */
+  unresolved: number
+  /** Open root threads per file; project-scoped threads key on "". */
+  byFile: Record<string, number>
+}
+
+async function handleCounts(db: AquillaDb, projectId: string): Promise<Response> {
+  try {
+    const result = await db
+      .prepare(
+        `SELECT COALESCE(file_id, '') AS file_id, COUNT(*)::integer AS n
+           FROM comments
+          WHERE project_id = ?
+            AND parent_comment_id IS NULL
+            AND resolved = 0
+            AND deleted_at IS NULL
+          GROUP BY COALESCE(file_id, '')`,
+      )
+      .bind(projectId)
+      .all<{ file_id: string; n: number }>()
+    const byFile: Record<string, number> = {}
+    let unresolved = 0
+    for (const row of result.results) {
+      const n = Number(row.n)
+      byFile[row.file_id] = n
+      unresolved += n
+    }
+    const out: CommentCountsOut = { unresolved, byFile }
+    return Response.json(out)
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    console.error('comment counts failed:', message)
+    return new Response('comment counts failed', { status: 500 })
   }
 }

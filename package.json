@@ -15,7 +15,8 @@
     "predev:context": "node scripts/ensure-port-free.mjs 5173",
     "dev:context": "BRAND=context vite",
     "build": "pnpm idml:gate && tsc -b && vite build && tsx scripts/check-app-build.ts && tsx scripts/check-brand-build.ts aquilla",
-    "build:workers-build": "node scripts/assert-workers-build-env.mjs && node scripts/cloudflare-ci-checks.mjs",
+    "build:compile": "tsc -b && vite build",
+    "build:workers-build": "bash scripts/ci-build.sh",
     "build:workers-build:identity": "CI=1 pnpm --dir auth-worker install --frozen-lockfile && pnpm --dir auth-worker run build:workers-build",
     "build:workers-build:sync": "CI=1 pnpm --dir sync-worker install --frozen-lockfile && pnpm --dir sync-worker run build:workers-build",
     "build:codex": "pnpm idml:gate && BRAND=codex tsc -b && BRAND=codex vite build && tsx scripts/check-app-build.ts && tsx scripts/check-brand-build.ts codex",
@@ -32,6 +33,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:worker": "vitest run --config worker/vitest.config.ts --dir worker",
+    "test:daemon": "NODE_OPTIONS=--expose-gc vitest run scripts/migrate-daemon",
     "scan:secrets": "tsx scripts/secret-scan.ts",
     "admin:request": "tsx scripts/admin-request.ts",
     "test:idml": "pnpm --filter @aquilla/idml-roundtrip test",
@@ -65,7 +67,7 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "tauri:build:mac": "bash -c 'set -a; [ -f .env.signing ] && . ./.env.signing; set +a; tauri build'",
-    "deploy:workers-build": "node scripts/cloudflare-pr-preview.mjs --workers-build",
+    "deploy:workers-build": "node scripts/cloudflare-stack-preview.mjs",
     "deploy:workers-build:identity": "pnpm --dir auth-worker run deploy:workers-build",
     "deploy:workers-build:sync": "pnpm --dir sync-worker run deploy:workers-build",
     "deploy:aquilla:spa": "bash scripts/verify-deploy-branch.sh main && export VITE_AUTH_BASE=https://api.aquilla.app/identity VITE_SYNC_WORKER_HOST=api.aquilla.app/sync VITE_CHAT_BASE=https://api.aquilla.app/chat && npm run build && bash scripts/verify-dist-host.sh api.aquilla.app && rm -f dist/_redirects && node scripts/cloudflare-version-deploy.mjs web production && node scripts/verify-live-environment.mjs production --surface=spa",
@@ -100,9 +102,12 @@
     "neon:apply:dev": "tsx scripts/neon-target.ts dev apply",
     "neon:backfill:progress:dev": "tsx scripts/neon-target.ts dev backfill-progress",
     "neon:backfill:progress:prod": "tsx scripts/neon-target.ts production backfill-progress",
+    "neon:backfill:activity:dev": "tsx scripts/neon-target.ts dev backfill-activity",
+    "neon:backfill:activity:prod": "tsx scripts/neon-target.ts production backfill-activity",
     "migrate:users": "tsx scripts/migrate-users.ts",
     "neon:refresh:dev": "tsx scripts/refresh-neon-branch.ts dev",
-    "neon:refresh-dev": "pnpm neon:refresh:dev"
+    "neon:refresh-dev": "pnpm neon:refresh:dev",
+    "migrate:daemon": "tsx scripts/migrate-daemon/main.ts"
   },
   "dependencies": {
     "@aquilla/idml-roundtrip": "workspace:2.0.3",
@@ -187,7 +192,7 @@
     "vite": "^8.2.0",
     "vite-plugin-node-polyfills": "^0.28.0",
     "vitest": "^4.1.10",
-    "wrangler": "^4.118.0",
+    "wrangler": "^4.130.0",
     "yaml": "^2.9.0"
   },
   "pnpm": {

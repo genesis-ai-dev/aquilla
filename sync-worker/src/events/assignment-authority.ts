@@ -14,6 +14,8 @@
 // level, because this is a boolean carve-out rather than a floor — `false`
 // preserves pre-AQU-496 behavior byte-for-byte when the org hasn't opted in.
 
+import { makeRequestCache, type RequestCache } from './request-cache'
+
 /**
  * Look up the org's `allowSelfAssignment` setting for the project's org.
  *
@@ -25,25 +27,14 @@
 export async function resolveAllowSelfAssignment(
   db: AquillaDb,
   projectId: string,
+  // Per-request memo (request-cache.ts): the two rows below are read at most
+  // once per request however many events consult them. A fresh throwaway
+  // cache when the caller has none keeps the old signature working.
+  cache: RequestCache = makeRequestCache(db),
 ): Promise<boolean> {
-  const project = await db
-    .prepare(`SELECT org_id FROM projects WHERE id = ?`)
-    .bind(projectId)
-    .first<{ org_id: number | null }>()
+  const orgId = await cache.projectOrgId(projectId)
+  if (!orgId) return false
 
-  if (!project?.org_id) return false
-
-  const settings = await db
-    .prepare(`SELECT settings FROM org_settings WHERE org_id = ?`)
-    .bind(project.org_id)
-    .first<{ settings: string }>()
-
-  if (!settings) return false
-
-  try {
-    const parsed = JSON.parse(settings.settings)
-    return parsed?.allowSelfAssignment === true
-  } catch {
-    return false
-  }
+  const parsed = await cache.orgSettings(orgId)
+  return parsed?.allowSelfAssignment === true
 }

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import { render, screen } from "@testing-library/react"
 
 import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
@@ -239,6 +239,21 @@ describe("MediaTextHeader", () => {
     expect(screen.getByTestId("tl-dialogue-header")).toHaveTextContent("Dialogue")
     rerender(<MediaTextHeader cell={null} headingLabel="Dialogue" />)
     expect(screen.getByTestId("tl-dialogue-header")).toHaveTextContent("Dialogue")
+  })
+
+  it("offers a collapse control only when the workspace hands it one", () => {
+    // AQU-1119. Every optional control in this area works this way: no handler
+    // means no button, not a disabled one — outside the media lens there is
+    // nothing to collapse into, and a control the reader cannot act on is
+    // worse than none. It is also what keeps every other caller of this
+    // header rendering exactly what it rendered before.
+    const { rerender } = render(<MediaTextHeader cell={null} />)
+    expect(screen.queryByTestId("media-collapse-text")).toBeNull()
+
+    const onCollapse = vi.fn()
+    rerender(<MediaTextHeader cell={null} onCollapse={onCollapse} />)
+    const button = screen.getByRole("button", { name: "Hide the text" })
+    expect(button).toHaveAttribute("aria-expanded", "true")
   })
 
   it("pinning the label does NOT bring back the Camera pill for a text cell", () => {

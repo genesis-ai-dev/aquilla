@@ -3,8 +3,10 @@ import {
   renderIdmlUnitHtml,
   type IdmlParseResult,
   type IdmlProgress,
+  type IdmlStyleCatalog,
   type IdmlTranslationUnit,
 } from "@aquilla/idml-roundtrip"
+import { idmlStyleDisplayMetadata } from "@/lib/idml/style-catalog"
 import {
   parseIdmlInWorker,
   type IdmlWorkerCallOptions,
@@ -68,7 +70,10 @@ function emptyProtectedTarget(unit: IdmlTranslationUnit): {
  * protected anchors, locator, and v2 metadata regardless of which units the
  * adapter chose to import.
  */
-export function idmlUnitToTranslatableString(unit: IdmlTranslationUnit): TranslatableString {
+export function idmlUnitToTranslatableString(
+  unit: IdmlTranslationUnit,
+  styleCatalog?: IdmlStyleCatalog,
+): TranslatableString {
   const target = emptyProtectedTarget(unit)
   return {
     id: unit.id,
@@ -82,6 +87,14 @@ export function idmlUnitToTranslatableString(unit: IdmlTranslationUnit): Transla
     sourceLocator: unit.locator,
     metadata: {
       idml: unit.metadata,
+      ...(unit.paragraphStyleId ? { idmlParagraphStyle: unit.paragraphStyleId } : {}),
+      ...idmlStyleDisplayMetadata(
+        styleCatalog,
+        [
+          ...unit.slots.map((slot) => slot.characterStyleId),
+          ...(unit.paragraphStyleId ? [unit.paragraphStyleId] : []),
+        ],
+      ),
     },
   }
 }
@@ -112,9 +125,10 @@ function widestCellFieldBytes(cell: TranslatableString): number {
  */
 export function idmlUnitsToTranslatableStrings(
   units: readonly IdmlTranslationUnit[],
+  styleCatalog?: IdmlStyleCatalog,
 ): TranslatableString[] {
   return units.flatMap((unit) => {
-    const cell = idmlUnitToTranslatableString(unit)
+    const cell = idmlUnitToTranslatableString(unit, styleCatalog)
     if (widestCellFieldBytes(cell) <= MAX_CELL_TEXT_BYTES) return [cell]
     let parts: readonly IdmlTranslationUnit[]
     try {
@@ -124,7 +138,9 @@ export function idmlUnitsToTranslatableStrings(
       // it whole rather than guessing at a boundary it does not recognize.
       return [cell]
     }
-    return parts.length > 1 ? parts.map(idmlUnitToTranslatableString) : [cell]
+    return parts.length > 1
+      ? parts.map((part) => idmlUnitToTranslatableString(part, styleCatalog))
+      : [cell]
   })
 }
 
@@ -146,5 +162,5 @@ export async function extractIdmlStrings(
   options?: IdmlImportParseOptions,
 ): Promise<TranslatableString[]> {
   const result = await parse(buffer, profile, options)
-  return idmlUnitsToTranslatableStrings(result.units)
+  return idmlUnitsToTranslatableStrings(result.units, result.styleCatalog)
 }

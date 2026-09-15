@@ -128,6 +128,8 @@ interface ImportFileMeta {
   orderedBy?: string
   /** Compact normalized-import summary; per-unit locators are cell metadata. */
   importManifest?: Record<string, unknown>
+  /** Sidebar folder — "OT"/"NT" or a named collection such as a Biblica title. */
+  corpusMarker?: string
 }
 
 interface ImportCell {
@@ -482,8 +484,9 @@ export async function handleBulkImportRequest(
       }
       await runImportBatch(db, finalizeStmts)
     } catch (err) {
+      console.error("[import] finalization failed:", err)
       return withCors(
-        Response.json({ error: `Import finalization failed: ${String(err)}` }, { status: 500 }),
+        Response.json({ error: "Import finalization failed" }, { status: 500 }),
         request,
       )
     }
@@ -542,6 +545,7 @@ export async function handleBulkImportRequest(
         targetTextDirection: f.targetTextDirection,
         ...(f.orderedBy !== undefined ? { orderedBy: f.orderedBy } : {}),
         ...(f.importManifest !== undefined ? { importManifest: f.importManifest } : {}),
+        ...(f.corpusMarker !== undefined ? { corpusMarker: f.corpusMarker } : {}),
       },
       clientTs,
       serverTs: serverTs++,
@@ -708,8 +712,9 @@ export async function handleBulkImportRequest(
     // retaining the same atomic ordering and rollback behavior.
     await runImportBatch(db, stmts)
   } catch (err) {
+    console.error("[import] DB batch failed:", err)
     return withCors(
-      Response.json({ error: `DB batch failed: ${String(err)}` }, { status: 500 }),
+      Response.json({ error: "DB batch failed" }, { status: 500 }),
       request,
     )
   }

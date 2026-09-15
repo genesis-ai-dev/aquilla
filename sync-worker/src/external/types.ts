@@ -65,6 +65,9 @@ export interface ChangesetSummary {
     | 'UpdateProjectSettings'
     | 'PatchSettings'
     | 'SetBrief'
+    | 'AddOrgMember'
+    | 'SetOrgRole'
+    | 'RemoveOrgMember'
     | 'AddExample'
     | 'AddDecision'
     | 'RetireExample'
@@ -76,8 +79,15 @@ export interface ChangesetSummary {
   projectName?: string
   /** CreateProject: the definitive new project id. */
   newProjectId?: string
-  /** CreateProject: the target org id as a string, or 'personal' for org-less. */
+  /** CreateProject: the target org id as a string, or 'personal' for org-less.
+   *  Org-membership commands: the target org's name + id, for the approval page. */
   targetOrg?: string
+  /** AQU-1235: the username being added / changed / removed. */
+  orgMemberUsername?: string
+  /** AQU-1235: the org role the member is being moved TO, as a role name. */
+  orgMemberNewRole?: string
+  /** AQU-1235: the org role the member holds TODAY ('not a member' for an add). */
+  orgMemberCurrentRole?: string
   /** CreateProject: the language pair being seeded into settings, when the
    *  command carried one (AQU-1223) — rendered on /approve/:id so a human sees
    *  the configuration they are authorizing, not just the name. `''` (the
@@ -140,6 +150,17 @@ export interface PlannedEventIds {
   /** SetBrief (receipt-only): the settings version pinned at prepare — the
    *  brief lives in the settings blob, so it takes the same version guard. */
   setBrief?: { version: number }
+  /** AQU-1235 org membership (receipt-only): the resolved target org + user
+   *  (pinned at prepare so commit writes the SAME identity the human approved,
+   *  never a re-resolution of the username), plus the role the target held at
+   *  prepare — the drift guard — and the role being written (absent for a
+   *  removal). */
+  orgMember?: {
+    orgId: number
+    targetUserId: string
+    previousRole: number | null
+    role?: number
+  }
   /** AQU-1228 memory commands: the resolved memory path, and (for the adding
    *  kinds) the pre-minted agent_memories row id, so a crash-retry re-finds
    *  its own proposal instead of inserting a second one. RetireExample writes
@@ -181,14 +202,30 @@ export interface ReceiptOnlyReceipt {
   credentialId: string
   channel: ProvenanceChannel
   changesetId: string
-  command: 'CreateProject' | 'UpdateProjectSettings' | 'PatchSettings' | 'SetBrief'
+  command:
+    | 'CreateProject'
+    | 'UpdateProjectSettings'
+    | 'PatchSettings'
+    | 'SetBrief'
+    | 'AddOrgMember'
+    | 'SetOrgRole'
+    | 'RemoveOrgMember'
   appliedAt: string
   /** CreateProject: the created project id. UpdateProjectSettings /
-   *  PatchSettings / SetBrief: the updated project id. */
+   *  PatchSettings / SetBrief: the updated project id. Org membership: the
+   *  project the plan was filed under (the write itself is org-level). */
   projectId: string
   /** UpdateProjectSettings / PatchSettings / SetBrief: the new settings version
    *  after the write. */
   version?: number
+  /** AQU-1235: the org the membership change landed in. */
+  orgId?: number
+  /** AQU-1235: the user whose membership changed. */
+  targetUserId?: string
+  /** AQU-1235: the org role held before the change (null/absent = not a member). */
+  previousRole?: number
+  /** AQU-1235: the org role written (absent for a removal). */
+  role?: number
 }
 
 /** AQU-1228 receipt for the Living Memory write commands. Also receipt-only (a

@@ -448,6 +448,44 @@ export const MCP_TOOLS: McpToolDef[] = [
     },
   },
   {
+    name: 'export_file',
+    description:
+      'Export one file back out in its delivered format — the mirror of the import ' +
+      'tools, and the last step of "messy files in → clean deliverable out" (e.g. USFM ' +
+      'handed back to Paratext). Reconstructs the file from the ORIGINAL artifact ' +
+      'preserved at import time with the current translations substituted in; ' +
+      'untranslated segments keep their source text so the output stays valid. Args: ' +
+      'projectId, fileId (from read_content), lane (optional — which target-language ' +
+      'lane to export; omit for the default lane). Returns { fileName, contentType, ' +
+      'exportMode, lossyVerseCount, bytes, content } where `content` is the file text. ' +
+      'Read the fidelity fields before delivering: exportMode "round-trip" means ' +
+      'translations were injected, "raw-original"/"raw-sidecar" means the file has no ' +
+      'server-side target serializer yet and you are getting the preserved ORIGINAL ' +
+      'bytes with NO translations in them; lossyVerseCount > 0 (USFM) counts verses ' +
+      'whose footnotes/poetry/character markers the plain-text substitution dropped. ' +
+      'Errors: permission_denied if your live project role is below the org export ' +
+      'floor (MAINTAINER by default — export is gated higher than reading, and no ' +
+      'retry will change it); not_found if the file has no preserved source artifact ' +
+      '(it must be re-imported before it can be exported); validation_failed for a ' +
+      'binary or oversized result, naming the REST URL to fetch instead — MCP is ' +
+      'JSON-RPC text and cannot carry binary bodies, the same asymmetry as the ' +
+      'REST-only artifact upload on the import side.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        fileId: { type: 'string', description: 'File to export (from read_content).' },
+        lane: {
+          type: 'string',
+          description:
+            'Target-language lane to export (e.g. "es"). Omit for the default lane.',
+        },
+      },
+      required: ['projectId', 'fileId'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'get_changeset',
     description:
       'Fetch a staged changeset: its status (staged|committing|committed|discarded|stale|' +

@@ -25,6 +25,8 @@ import {
 } from './commands'
 import { changedPolicyKeys, commitPatchSettings } from './commands-patch-settings'
 import { commitSetBrief } from './commands-set-brief'
+import { isOrgMemberCommand, type OrgMemberCommand } from './commands-org-members'
+import { commitOrgMember } from './org-members-engine'
 import { commitMemoryCommand, isMemoryCommand } from './commands-memory'
 import { commitEmitEvents } from './emit-events-engine'
 import {
@@ -220,6 +222,12 @@ export async function commitChangesetCore(
   const setBriefCmd = cs.commands.find((c): c is SetBriefCommand => c.kind === 'SetBrief')
   if (setBriefCmd) {
     return commitSetBrief(db, cred, cs, setBriefCmd, channel)
+  }
+  // AQU-1235 org membership: receipt-only with an ORG-level gate, so like
+  // CreateProject it must run before the project-role precheck below.
+  const orgMemberCmd = cs.commands.find((c): c is OrgMemberCommand => isOrgMemberCommand(c))
+  if (orgMemberCmd) {
+    return commitOrgMember(db, cred, cs, orgMemberCmd, channel)
   }
 
   // AQU-1228 Living Memory writes: receipt-only, with their own floors and the

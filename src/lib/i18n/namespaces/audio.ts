@@ -216,9 +216,13 @@ export const audio = defineNamespace({
     "audio.recordingModal.autoAdvanceTitle": "Move on after saving",
     "audio.recordingModal.autoAdvanceOnDescription": "Jumps to the next line",
     "audio.recordingModal.autoAdvanceOffDescription": "Stays on this line",
+    "audio.recordingModal.countdownTitle": "Countdown",
+    "audio.recordingModal.countdownOnDescription": "Counts 3-2-1 before recording",
+    "audio.recordingModal.countdownOffDescription": "Starts recording straight away",
     "audio.recordingModal.beepTitle": "Countdown beep",
     "audio.recordingModal.beepOnDescription": "3-2-1 tones before recording",
     "audio.recordingModal.beepOffDescription": "Silent countdown",
+    "audio.recordingModal.beepNotApplicableDescription": "No countdown to beep",
     "audio.recordingModal.noTakesYet": "No takes yet — record one and it lands here.",
 
     // RecordingVideoSurface — the film panel inside that dialog, and the
@@ -367,6 +371,7 @@ export const audio = defineNamespace({
     "audio.aiError.modelNotAvailableTitle": "Model not available",
     "audio.aiError.tooLargeTitle": "Too much text for this model",
     "audio.aiError.geminiKeyRequiredTitle": "Gemini API key required",
+    "audio.aiError.openRouterKeyRequiredTitle": "OpenRouter API key required",
     "audio.aiError.geminiFailedTitle": "Gemini TTS failed",
     "audio.aiError.omnivoiceNotConfiguredTitle": "OmniVoice isn't configured",
     "audio.aiError.omnivoiceFailedTitle": "OmniVoice TTS failed",
@@ -1289,9 +1294,36 @@ export const audio = defineNamespace({
       "audio.recordingModal.settingsAriaLabel": {
         description:
           "Screen-reader name of the gear button at the end of the recorder's " +
-          "bottom strip. It opens a small menu holding two preferences: whether " +
-          "to move on to the next line after each save, and whether the countdown " +
-          "beeps.",
+          "bottom strip. It opens a small menu holding three preferences: whether " +
+          "to move on to the next line after each save, whether a 3-2-1 countdown " +
+          "runs before each take, and whether that countdown beeps.",
+      },
+      "audio.recordingModal.countdownTitle": {
+        description:
+          "Name of the preference in the recorder's gear menu that decides " +
+          "whether a 3-2-1 countdown runs before each take. The noun for the " +
+          "count-in itself, not an instruction.",
+        maxLength: 24,
+      },
+      "audio.recordingModal.countdownOnDescription": {
+        description:
+          "One-line description under that preference while the countdown is ON: " +
+          "pressing Record counts three, two, one and then starts capturing.",
+        maxLength: 40,
+      },
+      "audio.recordingModal.countdownOffDescription": {
+        description:
+          "One-line description under the same preference while the countdown is " +
+          "OFF: pressing Record begins capturing immediately, with no count-in.",
+        maxLength: 40,
+      },
+      "audio.recordingModal.beepNotApplicableDescription": {
+        description:
+          "One-line description under the 'Countdown beep' preference while the " +
+          "countdown itself has been turned off, which is why the beep control is " +
+          "greyed out and cannot be pressed: there is no countdown left for it to " +
+          "sound during. States the reason, does not instruct.",
+        maxLength: 40,
       },
       "audio.recordingModal.filmAriaLabel": {
         description:
@@ -1759,6 +1791,14 @@ export const audio = defineNamespace({
         description:
           "Popover heading when a Gemini-voice TTS request fails because no Gemini " +
           "API key is configured for the project.",
+      },
+      "audio.aiError.openRouterKeyRequiredTitle": {
+        description:
+          "Red-line / popover heading when text generation (the sparkle / draft " +
+          "path) fails because the hosted chat proxy has no OPENROUTER_API_KEY. " +
+          "Must never be worded as a Gemini or voice-engine problem — this is a " +
+          "text-generation credential, and the body tells the user to paste their " +
+          "own OpenRouter key under Custom provider (BYOK, not Aquilla usage).",
       },
       "audio.aiError.geminiFailedTitle": {
         description:

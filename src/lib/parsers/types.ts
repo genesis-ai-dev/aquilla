@@ -13,10 +13,28 @@ import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { PersistedTrackOverrides } from "@/lib/timeline/tracks"
 import type { CameraState } from "@/lib/sync/cells-read-types"
 
-export type FileType = "md" | "docx" | "pptx" | "idml" | "xlsx" | "txt" | "html" | "epub" | "json" | "po" | "properties" | "vtt" | "srt" | "sbv" | "usfm" | "ebible" | "helloao" | "xliff" | "tmx" | "csv" | "tsv" | "audio" | "video" | "obs" | "sdbh" | "custom"
+/**
+ * AQU-997: `"codex"` and `"source"` were reaching the client from the wire long
+ * before they were admitted here — `files.fileType` is the server's
+ * `kind ?? role`, so a migrated Codex notebook arrives as `"codex"` and a row
+ * with no `kind` falls back to its `role`, `"source"`. `cloud-projects.ts`
+ * widens both in with `f.type as FileType`, which is exactly why the gap went
+ * unnoticed: nothing type-errored, the values simply failed every predicate
+ * that tests membership of a literal set.
+ */
+export type FileType = "md" | "docx" | "pptx" | "idml" | "xlsx" | "txt" | "html" | "epub" | "json" | "po" | "properties" | "vtt" | "srt" | "sbv" | "usfm" | "ebible" | "helloao" | "xliff" | "tmx" | "csv" | "tsv" | "audio" | "video" | "obs" | "sdbh" | "codex" | "source" | "custom"
 
-/** File types whose parsers produce scripture-style sections (globalReferences populated, section labels meaningful). */
-export const SCRIPTURE_FILE_TYPES: ReadonlySet<FileType> = new Set(["usfm", "ebible", "helloao"])
+/** File types whose parsers produce scripture-style sections (globalReferences
+ *  populated, section labels meaningful).
+ *
+ *  AQU-997: `"codex"` — Aquilla's native Scripture notebook format, what every
+ *  book of a migrated Codex project is stored as — belongs here for the same
+ *  reason `"usfm"` does: its cells are verses, addressed canonically. Its
+ *  absence is what hid the Parallel Bibles panel (and its collapsed edge tab,
+ *  and file-tree expandability) for a project whose books are all codex files.
+ *  `"source"` is deliberately NOT here: it is the generic `role` fallback for
+ *  a row carrying no `kind`, not a Scripture format. */
+export const SCRIPTURE_FILE_TYPES: ReadonlySet<FileType> = new Set(["usfm", "ebible", "helloao", "codex"])
 export function fileTypeHasSections(type: FileType): boolean {
   return SCRIPTURE_FILE_TYPES.has(type)
 }
@@ -385,6 +403,18 @@ export interface ProjectRecord {
    * every terminology write, so this is an affordance value, not authority.
    */
   termbaseEditMinRole?: number | null
+  /**
+   * AQU-1002: the org's effective comment floors — the minimum role to open a
+   * thread (`commentCreateMinRole`) and to resolve/reopen a thread somebody
+   * else opened (`commentResolveMinRole`). Sent by the single-project endpoint
+   * so the comments drawer and Comments page can gate their controls honestly
+   * without an org-settings fetch of their own. Absent (older server /
+   * local-only project) ⇒ the defaults in `src/lib/sync/role-policy.ts`.
+   * sync-worker re-resolves both on every comment write, so these are
+   * affordance values, not authority.
+   */
+  commentCreateMinRole?: number | null
+  commentResolveMinRole?: number | null
   sourceLanguage: string
   targetLanguage: string
   /**
@@ -439,6 +469,12 @@ export interface ProjectRecord {
    * nagged as "not set up". Cleared when they opt back in from the step.
    */
   aiSetupSkipped?: boolean
+  /**
+   * Device-local: the user has picked how drafts run on this project
+   * (Frontier hosted, a project API key, or a personal override). The
+   * sparkle Set up AI dialog shows once until this is true.
+   */
+  aiProviderChosen?: boolean
   /** ISO timestamp set when the user dismisses the "your project is still using
    * default AI instructions" nudge, OR when they actually customize the system
    * prompt. Either way, we stop nagging. */
@@ -449,6 +485,15 @@ export interface ProjectRecord {
    * projects without this field fall back to registry defaults.
    */
   experimentalFlags?: Record<string, boolean>
+  /**
+   * AQU-1246: project-wide opt-in to the experimental Autopilot surface.
+   * Absent/false → no Autopilot UI renders anywhere for this project. Synced
+   * (see ProjectWideSettings.autopilotEnabled) rather than device-local, and
+   * writable only at project_lead(500)+ — server-enforced in auth-worker.
+   * Read through `isAutopilotVisible`, never directly, so the legacy
+   * device-local grandfather is honoured with it.
+   */
+  autopilotEnabled?: boolean
   /** AD-14 decay tunables. Absent → use DECAY_DEFAULTS. */
   decaySettings?: DecaySettings
   /** Required distinct validators for a text cell to count as "fully validated". Clamped [1, 15]. Default 1. Mirrors desktop manifest. */
@@ -664,6 +709,12 @@ export interface FileReference {
    * applicable and which belong to a build newer than this one.
    */
   trackOverrides?: PersistedTrackOverrides | null
+  /**
+   * AQU-656: true when this file has an original import blob. Set on
+   * document imports that uploaded source bytes; absent/false otherwise
+   * (audio/video, Codex-migrated, pre-sidecar).
+   */
+  hasOriginalSource?: boolean
   /**
    * The files-table `role` column. `"source"` for every ordinary import — the
    * value that matters is `"audio-cues"` (see `AUDIO_CUES_ROLE`), which marks a

@@ -74,7 +74,7 @@ describe("migrate-ingest seq pre-allocation (AQU-1005)", () => {
     const events = ["e1", "e2", "e3", "e4", "e5"].map((id, i) => cellCreate(id, `c${i}`, `v${i}`))
     const res = await handleMigrateIngestRequest(ingestRequest(events, { eventsOnly: true }), env())
     expect(res?.status).toBe(200)
-    expect(await res!.json()).toEqual({ accepted: 5 })
+    expect(await res!.json()).toEqual({ accepted: 5, replayed: 0 })
 
     const rows = await eventSeqs()
     expect(rows.map((r) => r.id)).toEqual(["e1", "e2", "e3", "e4", "e5"])
@@ -116,6 +116,16 @@ describe("migrate-ingest seq pre-allocation (AQU-1005)", () => {
     const rows = await eventSeqs()
     const n1 = rows.find((r) => r.id === "n1")!
     expect(Number(n1.server_seq)).toBeGreaterThan(100)
+  })
+
+  it("replayed ids skip projection statements (idempotent retry)", async () => {
+    await handleMigrateIngestRequest(ingestRequest([cellCreate("e1", "c1", "first")]), env())
+    // Simulate a retry that carries a *different* value for the same id.
+    const r = await handleMigrateIngestRequest(ingestRequest([cellCreate("e1", "c1", "changed")]), env())
+    expect(((await r!.json()) as { accepted: number }).accepted).toBe(0)
+    const rows = await t.pg.query<{ value: string }>("SELECT value FROM cells WHERE project_id=$1 AND cell_id=$2", [PROJECT, "c1"])
+    expect(rows.rows[0].value).toBe("first")
+    expect((await eventSeqs()).length).toBe(1)
   })
 
   it("non-eventsOnly still projects cells alongside the event rows", async () => {

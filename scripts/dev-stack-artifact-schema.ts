@@ -155,14 +155,22 @@ export async function finalizeSourceBlobSchema(
   return ["made file_source_blobs.raw_source nullable"]
 }
 
-/** Mirror migration 0080 for long-lived local databases. The generic
+/** Mirror migrations 0080 + 0087 for long-lived local databases. The generic
  * reconciler adds the `token_hash` columns and their unique indexes, but it
- * never rewrites an existing column, so a container created before 0080 keeps
- * the old NOT NULL on the plaintext `token` columns. Auth routes now write
- * `token = NULL, token_hash = sha256hex(token)`, and both failure paths are
- * deliberately silent to callers (password-reset request returns its generic
- * 200, registration's verification mint is best-effort) — so without this
- * repair, local reset/verification links quietly stop being minted. */
+ * never drops a column that has left schema.sql — so a container created
+ * before 0087 keeps the plaintext `token` column, and one created before 0080
+ * additionally keeps its old NOT NULL.
+ *
+ * Either shape breaks minting under the current routes, which no longer name
+ * `token` in their INSERT column lists at all: a leftover NOT NULL column with
+ * no default rejects the row outright. Both failure paths are deliberately
+ * silent to callers (password-reset request returns its generic 200,
+ * registration's verification mint is best-effort), so without this repair
+ * local reset/verification links quietly stop being minted, with nothing in
+ * the response to say why.
+ *
+ * Dropping the column subsumes the 0080 repair this function used to do, so
+ * it handles pre-0080 and pre-0087 databases in one step. */
 export async function finalizeAuthTokenSchema(
   client: PgSchemaClient,
   run: RunSchemaSql,
@@ -171,19 +179,19 @@ export async function finalizeAuthTokenSchema(
   for (const table of ["password_reset_tokens", "email_verification_tokens"]) {
     if (!(await tableExists(client, table))) continue
     const { rows } = await client.query(
-      `SELECT is_nullable
+      `SELECT 1
          FROM information_schema.columns
         WHERE table_schema = 'public'
           AND table_name = $1
           AND column_name = 'token'`,
       [table],
     )
-    if (rows[0]?.is_nullable !== "NO") continue
+    if (rows.length === 0) continue
     await run(
-      `ALTER TABLE ${table} ALTER COLUMN token DROP NOT NULL`,
-      `allowing hashed-at-rest auth tokens in ${table} (migration 0080)`,
+      `ALTER TABLE ${table} DROP COLUMN token`,
+      `dropping the plaintext token column in ${table} (migration 0087)`,
     )
-    patched.push(`made ${table}.token nullable`)
+    patched.push(`dropped ${table}.token`)
   }
   return patched
 }

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest"
 import { renderHook, waitFor } from "@testing-library/react"
 import { useHealth } from "./useHealth"
 import type { CellData } from "./useCells"
+import type { TranslationRule } from "@/lib/parsers/types"
 
 function cell(id: string, translated: string, endorsementCount = 0): CellData {
   return {
@@ -116,5 +117,32 @@ describe("useHealth — serverRollup override (AQU-181)", () => {
     )
     await waitFor(() => expect(result.current.healthMap.size).toBe(1))
     expect(result.current.projectHealth).toBe(100) // endorsement-count path: 5/5 → 100
+  })
+})
+
+// Kill switch (lib/health/kill-switch.ts): health/rule work is suspected of
+// driving client memory spikes. With `enabled: false` the hook must do no
+// decay or rule work at all — the cheap progress/comment derivation stays so
+// the sidebar keeps its bars.
+describe("useHealth — enabled: false kill switch", () => {
+  const forbidRule: TranslationRule = {
+    id: "r1", name: "no bonjour", description: "", severity: "major", source: "user",
+    scope: "project", enabled: true, createdAt: "2026-01-01",
+    check: { type: "target-forbids", targetPattern: "bonjour" },
+  }
+
+  it("skips decay health and rule checks but still derives file progress", () => {
+    const fileCells = new Map([["f", [cell("a", "bonjour", 5), cell("b", "", 0)]]])
+    const { result } = renderHook(() => useHealth(fileCells, [forbidRule], { enabled: false }))
+    expect(result.current.healthMap.size).toBe(0)
+    expect(result.current.infractions.size).toBe(0)
+    expect(result.current.projectHealth).toBe(0)
+    expect(result.current.fileProgress.get("f")).toEqual({ translated: 1, validated: 0, total: 2 })
+  })
+
+  it("still reports the infraction when enabled (control for the test above)", () => {
+    const fileCells = new Map([["f", [cell("a", "bonjour", 5)]]])
+    const { result } = renderHook(() => useHealth(fileCells, [forbidRule], { enabled: true }))
+    expect(result.current.infractions.get("a")?.length).toBe(1)
   })
 })

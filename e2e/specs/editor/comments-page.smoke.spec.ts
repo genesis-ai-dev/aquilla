@@ -118,7 +118,13 @@ test("comments page empty state, filters, search, and resolved surface session",
     await alice.goto(`/project/${projectId}/editor/file/${seeded.fileId}`)
     await ws.waitForEditor()
 
-    await alice.locator("aside").getByRole("button", { name: /^Comments$/ }).click()
+    // The sidebar item carries an open-thread count badge once the worker's
+    // counts aggregate lands, so its accessible name is "Comments 1" here
+    // (this session posted one thread). Accept the badge rather than racing it.
+    await alice
+      .locator("aside")
+      .getByRole("button", { name: /^Comments(?: \d+)?$/ })
+      .click()
     await alice.waitForURL(/\/project\/[^/]+\/comments/, { timeout: 10_000 })
     await expect(
       alice.locator("h1").filter({ hasText: /Comments/i }),

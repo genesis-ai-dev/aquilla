@@ -5,6 +5,8 @@
 //     [&topK=<n>]                — overrides project_settings.topK; capped at MAX_TOP_K
 //     [&validatedOnly=true]      — AI copilot filter: only return cells with a validated target
 //     [&excludeCellId=<uuid>]    — don't return this cell (the one the copilot is completing)
+//     [&targetLang=<lane>]       — AQU-1025: scope the target JOIN to this lane
+//                                  tag (`""` / omitted = default lane)
 //
 // Auth: sync-token JWT scoped to `projectId`. Viewer (100)+.
 //
@@ -124,6 +126,9 @@ export async function handleBranchingSearchRequest(
 
   const validatedOnly = url.searchParams.get("validatedOnly") === "true"
   const excludeCellId = url.searchParams.get("excludeCellId") ?? undefined
+  // AQU-1025: lane tag, not the Settings display name. Missing param → ""
+  // so pre-lanes clients keep the default-lane corpus.
+  const targetLang = url.searchParams.get("targetLang") ?? ""
 
   // Cache lookup. Build the key from a cheap MAX(event_id) query — we
   // can't use the corpus loader's corpusEventMax here because the corpus
@@ -142,6 +147,7 @@ export async function handleBranchingSearchRequest(
           topK: settings.topK,
           validatedOnly,
           excludeCellId: excludeCellId ?? null,
+          targetLang,
         })
         cacheKey = buildCacheKey(projectId, corpusEventMax, queryHash)
         const cached = await env.BRANCHING_SEARCH_KV.get(cacheKey, "json")
@@ -161,6 +167,7 @@ export async function handleBranchingSearchRequest(
       projectId,
       validatedOnly,
       excludeCellId,
+      targetLang,
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)

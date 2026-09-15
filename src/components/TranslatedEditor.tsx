@@ -136,6 +136,28 @@ export function shouldPublishPresenceDraft(previous: string, next: string): bool
   return Math.max(changedBefore, changedAfter) >= PRESENCE_WORD_BATCH_SIZE
 }
 
+/**
+ * What the typing-idle timer should do with the current draft.
+ *
+ * The word-boundary + two-word batch gates keep a live draft from leaking half
+ * a word on every pause, but a continuous typist who stops mid-word (or types
+ * one long word) would otherwise never be seen typing at all. So a draft that
+ * fails the gates is deferred exactly ONCE — the next idle window publishes it
+ * regardless, as long as the text actually changed. "typing…" then shows up
+ * within two idle windows (~1.3s) for any typist.
+ */
+export function presenceDraftIdleAction(args: {
+  atWordBoundary: boolean
+  alreadyDeferred: boolean
+  previous: string
+  next: string
+}): "publish" | "defer" | "skip" {
+  const { atWordBoundary, alreadyDeferred, previous, next } = args
+  if (next === previous) return "skip"
+  if (atWordBoundary && shouldPublishPresenceDraft(previous, next)) return "publish"
+  return alreadyDeferred ? "publish" : "defer"
+}
+
 export function isPresenceWordBoundary(text: string, caretOffset: number): boolean {
   if (caretOffset <= 0) return false
   const preceding = Array.from(text.slice(0, caretOffset)).at(-1)
@@ -534,6 +556,11 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   const presenceDraftIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastSelectionKeyRef = useRef<string | null>(null)
   const lastPublishedDraftRef = useRef(initialPlain)
+  /** Draft text last put ON THE WIRE this focus session — caret-only frames
+   *  omit `draftText` when it has not changed (bandwidth: every frame fans
+   *  out to all peers). Null until the first publish after focus. */
+  const lastSentDraftRef = useRef<string | null>(null)
+  const presenceDraftDeferredRef = useRef(false)
   const lastTypingEndedAtBoundaryRef = useRef(false)
   const lastCommittedRef = useRef<string>(initialPlain)
   // Latest typed-but-not-yet-committed snapshot. Held so the unmount cleanup
@@ -612,18 +639,22 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     const anchor = pmPositionToPlainPosition(doc, selection.anchor)
     const head = pmPositionToPlainPosition(doc, selection.head)
     const text = editorInstance.getText()
+    // Oversized cells still get live caret/selection presence, but wait for
+    // the durable commit before broadcasting their full text. A draft that
+    // already went out this session rides on the DO's stored copy instead.
+    const sendDraft = text.length <= MAX_PRESENCE_DRAFT_LENGTH && text !== lastSentDraftRef.current
     const next: TargetPresenceSelection = {
       side: "target",
       anchor,
       head,
-      // Oversized cells still get live caret/selection presence, but wait for
-      // the durable commit before broadcasting their full text.
-      ...(text.length <= MAX_PRESENCE_DRAFT_LENGTH ? { draftText: text } : {}),
+      ...(sendDraft ? { draftText: text } : {}),
     }
-    const key = `${next.side}:${next.anchor}:${next.head}:${next.draftText ?? ""}`
+    const key = `${next.side}:${next.anchor}:${next.head}:${text}`
     if (key === lastSelectionKeyRef.current) return
     lastSelectionKeyRef.current = key
     lastPublishedDraftRef.current = text
+    if (sendDraft) lastSentDraftRef.current = text
+    presenceDraftDeferredRef.current = false
     onSelectionChangeRef.current?.(next)
   }, [])
   const scheduleSelectionPublish = useCallback((editorInstance: TiptapEditor | null) => {
@@ -643,13 +674,23 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     if (presenceDraftIdleTimerRef.current !== null) {
       clearTimeout(presenceDraftIdleTimerRef.current)
     }
-    presenceDraftIdleTimerRef.current = setTimeout(() => {
+    const onIdle = () => {
       presenceDraftIdleTimerRef.current = null
-      const text = editorInstance.getText()
-      if (!lastTypingEndedAtBoundaryRef.current) return
-      if (!shouldPublishPresenceDraft(lastPublishedDraftRef.current, text)) return
+      const action = presenceDraftIdleAction({
+        atWordBoundary: lastTypingEndedAtBoundaryRef.current,
+        alreadyDeferred: presenceDraftDeferredRef.current,
+        previous: lastPublishedDraftRef.current,
+        next: editorInstance.getText(),
+      })
+      if (action === "skip") return
+      if (action === "defer") {
+        presenceDraftDeferredRef.current = true
+        presenceDraftIdleTimerRef.current = setTimeout(onIdle, PRESENCE_DRAFT_IDLE_MS)
+        return
+      }
       publishSelection(editorInstance)
-    }, PRESENCE_DRAFT_IDLE_MS)
+    }
+    presenceDraftIdleTimerRef.current = setTimeout(onIdle, PRESENCE_DRAFT_IDLE_MS)
   }, [publishSelection])
 
   const editor = useEditor({
@@ -708,9 +749,14 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
           // background tints competing with the recessed fill.
           // No fixed text-* class: font size inherits from the target column
           // wrapper, which carries the per-file font-size pref inline.
+          // AQU-1101: `break-words` on the editable surface too. ProseMirror's
+          // own `word-wrap: break-word` does not survive `prose`'s reset here,
+          // and without it the active cell re-widens its grid track the moment
+          // an unbreakable token is typed or pasted into it — the read surface
+          // and the editing surface have to agree or the row jumps on focus.
           compactHeight
-            ? "prose prose-sm max-w-none px-1 py-0 leading-snug focus:outline-none"
-            : "prose prose-sm max-w-none h-full min-h-[40px] px-1 py-0.5 leading-relaxed focus:outline-none",
+            ? "prose prose-sm max-w-none min-w-0 break-words px-1 py-0 leading-snug focus:outline-none"
+            : "prose prose-sm max-w-none h-full min-h-[40px] min-w-0 break-words px-1 py-0.5 leading-relaxed focus:outline-none",
           idmlContext && "whitespace-pre-wrap",
           "rounded-lg transition-colors",
           className
@@ -1231,6 +1277,8 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         presenceDraftIdleTimerRef.current = null
       }
       lastSelectionKeyRef.current = null
+      lastSentDraftRef.current = null
+      presenceDraftDeferredRef.current = false
       onSelectionChangeRef.current?.(null)
       if (idleTimerRef.current !== null) {
         clearTimeout(idleTimerRef.current)

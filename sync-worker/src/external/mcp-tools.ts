@@ -202,6 +202,62 @@ export const MCP_TOOLS: McpToolDef[] = [
     },
   },
   {
+    name: 'read_quality',
+    description:
+      'Audit a project\'s quality WITHOUT recomputing anything: per-file health score ' +
+      '(0-100, the mean confidence over translated cells) plus coverage — total, filled ' +
+      'and validated cell counts and their percentages — and the project-level rollup. ' +
+      'These are the SAME numbers the human sees on the in-app health ring and progress ' +
+      'surfaces (this tool delegates to the routes those surfaces read), so never derive ' +
+      'health or coverage yourself from read_content: your denominators will not match ' +
+      'theirs. Args: projectId; optional fileId to scope to one file, lane for one ' +
+      'target-language lane, limit/offset to page the per-file list. Returns ' +
+      '{ projectHealth, coverage, data: [{ fileId, name, health, coverage, ... }], ' +
+      'nextCursor }. health is null for a file with no translated cells (not started, ' +
+      'not unhealthy). Errors: scope_denied (403) if your credential is scoped to a ' +
+      'different project, not_found (404) for an unknown fileId, rate_limited (429).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        fileId: { type: 'string', description: 'Scope to one file; omit for the whole project (up to 200 files).' },
+        lane: { type: 'string', description: 'Target-language lane (e.g. "es"). Omit for the default lane.' },
+        limit: { type: 'number', description: 'Per-file page size.' },
+        offset: { type: 'number', description: 'Per-file page offset.' },
+      },
+      required: ['projectId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'read_term_consistency',
+    description:
+      'Answer "which terms are rendered inconsistently, and where?". For every ACTIVE ' +
+      'termbase concept with at least one approved (preferred|admitted) rendering, returns ' +
+      'totalOccurrences (translated cells whose SOURCE matches the concept\'s source term), ' +
+      'consistentCount + consistencyPercent, renderingUsage (which approved rendering was ' +
+      'used in which cellIds — the variant map), and flaggedCells (occurrences whose target ' +
+      'used NONE of the approved renderings — the drift). Runs the same scan as the in-app ' +
+      '"Check file" pass, so your findings match what a reviewer sees. Args: projectId; ' +
+      'optional fileId to scope to one book/file, lane, onlyDrift=true to return only ' +
+      'concepts with flagged cells, limit/offset. Feed flaggedCells straight into ' +
+      'prepare_translations to propose fixes. Errors: scope_denied (403), not_found (404), ' +
+      'rate_limited (429).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        fileId: { type: 'string', description: 'Scope the scan to one file; omit for the whole project.' },
+        lane: { type: 'string', description: 'Target-language lane (e.g. "es"). Omit for the default lane.' },
+        onlyDrift: { type: 'boolean', description: 'Return only concepts that have flagged cells.' },
+        limit: { type: 'number', description: 'Findings page size.' },
+        offset: { type: 'number', description: 'Findings page offset.' },
+      },
+      required: ['projectId'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'prepare_translations',
     description:
       'Stage a batch of commands as an immutable changeset (execution plan) WITHOUT applying ' +

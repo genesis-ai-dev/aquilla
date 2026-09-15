@@ -88,7 +88,7 @@ const PROMPT_PREVIEW_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/cells\/([^/]
  *  existing internal route handlers in-process without re-deriving their
  *  auth/ETag/anchor-chain logic. `fileId` is only meaningful to the doc-scoped
  *  verifier the DO uses; project-scoped read routes ignore it. */
-async function mintInternalToken(
+export async function mintInternalToken(
   env: ExternalReadsEnv,
   ctx: AuthedContext,
   projectId: string,

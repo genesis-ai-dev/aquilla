@@ -18,6 +18,9 @@ export default defineConfig({
     root: __dirname,
     environment: "happy-dom",
     setupFiles: ["./src/test-setup.ts"],
-    include: ["src/components/cell/CellVoicePanel.assign.test.tsx"],
+    include: [
+      "src/components/cell/CellVoicePanel.assign.test.tsx",
+      "src/components/ui/data-table.sort-header.test.tsx",
+    ],
   },
 })

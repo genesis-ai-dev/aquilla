@@ -193,9 +193,11 @@ describe('get_capabilities quickstart', () => {
     )
     const body = (await res!.json()) as any
     const payload = JSON.parse(body.result.content[0].text)
-    expect(payload.quickstart).toHaveLength(5)
+    expect(payload.quickstart).toHaveLength(6)
     expect(payload.quickstart[0]).toContain('get_identity_and_scope')
     expect(payload.quickstart[4]).toContain('confirm_changeset')
+    // The path ends where the work ends: pulling the deliverable back out (AQU-858).
+    expect(payload.quickstart[5]).toContain('export_file')
   })
 })
 

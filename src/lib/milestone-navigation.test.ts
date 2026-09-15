@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  cellIdsForMilestonePage,
   deriveMilestoneNavigation,
   readImportMilestone,
   type MilestoneNavigationCell,
@@ -115,5 +116,43 @@ describe("readImportMilestone", () => {
         milestone: { key: "part:first", kind: "unknown", label: "Part 1", shortLabel: "1" },
       },
     })).toBeUndefined()
+  })
+})
+
+describe("cellIdsForMilestonePage", () => {
+  const navigation = [
+    {
+      key: "scripture:GEN:1",
+      cellIds: ["c1", "c2"],
+      subsections: [
+        { key: "scripture:GEN:1:range:c1", cellIds: ["c1"] },
+        { key: "scripture:GEN:1:range:c2", cellIds: ["c2"] },
+      ],
+    },
+    { key: "scripture:GEN:2", cellIds: ["c3", "c4"] },
+  ]
+
+  it("returns every cell of the named milestone", () => {
+    expect(cellIdsForMilestonePage(navigation, "scripture:GEN:2")).toEqual(["c3", "c4"])
+  })
+
+  it("returns a subsection range when one is named", () => {
+    expect(cellIdsForMilestonePage(
+      navigation,
+      "scripture:GEN:1",
+      "scripture:GEN:1:range:c2",
+    )).toEqual(["c2"])
+  })
+
+  it("falls back to the whole milestone when the subsection is unknown", () => {
+    expect(cellIdsForMilestonePage(
+      navigation,
+      "scripture:GEN:1",
+      "missing",
+    )).toEqual(["c1", "c2"])
+  })
+
+  it("returns undefined when the milestone is unknown", () => {
+    expect(cellIdsForMilestonePage(navigation, "scripture:GEN:9")).toBeUndefined()
   })
 })

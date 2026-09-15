@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest"
 import {
   AUDIO_CUES_ROLE,
+  SCRIPTURE_FILE_TYPES,
   detectFileType,
   fileHasSections,
   isAudioCueFile,
@@ -72,6 +73,33 @@ describe("projectHasScriptureFiles", () => {
   it("false for undefined/empty file lists", () => {
     expect(projectHasScriptureFiles(undefined)).toBe(false)
     expect(projectHasScriptureFiles([])).toBe(false)
+  })
+})
+
+// AQU-997: every book of a migrated Codex project is stored as a `codex` file,
+// and `codex` was in neither the FileType union nor SCRIPTURE_FILE_TYPES — so
+// `fileHasSections` was false for all of them, which is the single predicate
+// behind the Parallel Bibles panel, its collapsed edge tab, and file-tree
+// expandability. These guard the set membership directly, because nothing else
+// can: the value reaches the client through `f.type as FileType`, so dropping
+// it again type-errors nowhere.
+
+describe("fileHasSections — native codex Scripture files (AQU-997)", () => {
+  it("treats a codex book as sectioned without needing hasScriptureContent", () => {
+    expect(fileHasSections({ type: "codex" })).toBe(true)
+    expect(SCRIPTURE_FILE_TYPES.has("codex")).toBe(true)
+  })
+
+  it("a project whose books are all codex counts as a scripture project", () => {
+    const burmeseOt: { type: FileType }[] = [{ type: "codex" }, { type: "codex" }]
+    expect(projectHasScriptureFiles(burmeseOt)).toBe(true)
+    // …which is what makes Bible resources default-on for it (AQU-460).
+    expect(resolveBibleResourcesEnabled(undefined, projectHasScriptureFiles(burmeseOt))).toBe(true)
+  })
+
+  it("'source' — the generic role fallback for a row with no kind — is NOT scripture", () => {
+    expect(fileHasSections({ type: "source" })).toBe(false)
+    expect(SCRIPTURE_FILE_TYPES.has("source")).toBe(false)
   })
 })
 

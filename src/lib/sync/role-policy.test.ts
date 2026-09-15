@@ -181,6 +181,12 @@ describe("role-policy (client mirror)", () => {
       expect(canOpenAssignUi(null, true)).toBe(false)
       expect(canOpenAssignUi(undefined, true)).toBe(false)
     })
+
+    it("uses the org-configured assignment floor for assigning others", () => {
+      expect(canOpenAssignUi(ROLE.REVIEWER, false, ROLE.REVIEWER)).toBe(true)
+      expect(canOpenAssignUi(ROLE.PROJECT_LEAD, false, ROLE.MAINTAINER)).toBe(false)
+      expect(canOpenAssignUi(ROLE.PROJECT_LEAD, true, ROLE.MAINTAINER)).toBe(true)
+    })
   })
 
   describe("canSubmitAssignment", () => {
@@ -210,6 +216,24 @@ describe("role-policy (client mirror)", () => {
 
     it("fails closed when roleLevel is unknown", () => {
       expect(canSubmitAssignment(null, true, 1, 1)).toBe(false)
+    })
+
+    it("allows assignment to others at a lowered org floor", () => {
+      expect(
+        canSubmitAssignment(ROLE.REVIEWER, false, 1, 2, ROLE.REVIEWER),
+      ).toBe(true)
+    })
+
+    it("requires self-assignment below a raised org floor", () => {
+      expect(
+        canSubmitAssignment(ROLE.PROJECT_LEAD, false, 1, 2, ROLE.MAINTAINER),
+      ).toBe(false)
+      expect(
+        canSubmitAssignment(ROLE.PROJECT_LEAD, true, 1, 1, ROLE.MAINTAINER),
+      ).toBe(true)
+      expect(
+        canSubmitAssignment(ROLE.PROJECT_LEAD, true, 1, 2, ROLE.MAINTAINER),
+      ).toBe(false)
     })
   })
 

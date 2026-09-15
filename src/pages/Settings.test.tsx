@@ -56,6 +56,8 @@ vi.mock("@/hooks/useOrgSettings", () => ({
     memberProgressViewMinRole: 600,
     // AQU-496: self-assignment authority — default leads-only.
     allowSelfAssignment: false,
+    // AQU-1037: assigning work to others defaults to Project lead.
+    assignmentMinRole: 500,
     // AQU-822: terminology floor — default Project lead.
     termbaseEditMinRole: 500,
     languageEditMinRole: 600,
@@ -160,6 +162,7 @@ describe("Security settings page", () => {
     expect(screen.getByLabelText(/who can view the roster/i)).toBeDefined()
     expect(screen.getByLabelText(/who can view member progress/i)).toBeDefined()
     expect(screen.getByLabelText(/who can export/i)).toBeDefined()
+    expect(screen.getByLabelText(/who can assign work/i)).toBeDefined()
     expect(screen.getByLabelText(/allow self-assignment/i)).toBeDefined()
     expect(screen.getByLabelText(/who can manage terminology/i)).toBeDefined()
   })

@@ -8,6 +8,7 @@
 import { ExternalError, errorResponse, toErrorResponse } from './errors'
 import { AUTH_HINT } from './discovery-route'
 import {
+  commandsContainAssignmentEvents,
   validateCommands,
   isStructureCommandKind,
   laneCellKey,
@@ -56,6 +57,7 @@ import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { loadProjectSettings } from '../../../db/shared/projects'
 import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/shared/rate-limit'
 import { ROLE } from '../events/role-policy'
+import { resolveAssignmentAuthority } from '../events/assignment-authority'
 
 // Staging primitives moved to stage.ts (AQU-926) so the new command modules
 // share them without an import cycle; re-exported here for existing importers
@@ -298,15 +300,20 @@ export async function prepareChangesetCore(
   // added/modified counts). Require the role FLOOR of the command kind being
   // staged — the same floor its commit hits at the /events perimeter, so a plan
   // the caller could never commit is denied here rather than leaked.
-  const requiredRole = Math.max(...validated.commands.map(requiredRoleForCommand))
+  const assignmentMinRole = commandsContainAssignmentEvents(validated.commands)
+    ? (await resolveAssignmentAuthority(db, projectId)).minRole
+    : undefined
+  const requiredRole = Math.max(
+    ...validated.commands.map((command) => requiredRoleForCommand(command, assignmentMinRole)),
+  )
   const resolvedRole = await resolveProjectRoleShared(db, { id: cred.userId }, projectId)
   if (!resolvedRole || resolvedRole.level < requiredRole) {
     return errorResponse('permission_denied', 'insufficient project role to stage this changeset')
   }
 
   // EmitEvents (AQU-926 §2): sole command (one command already batches many
-  // events). The static max-floor gate just ran; its engine adds the dynamic
-  // maintainer bumps + live existence/pin resolution.
+  // events). The max-floor gate just ran, including the dynamic org assignment
+  // floor; its engine adds maintainer bumps + live existence/pin resolution.
   const emitEvents = validated.commands.find(
     (c): c is EmitEventsCommand => c.kind === 'EmitEvents',
   )

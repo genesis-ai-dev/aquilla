@@ -14,6 +14,7 @@ import {
   cellKey,
   isStructureCommandKind,
   laneCellKey,
+  commandsContainAssignmentEvents,
   requiredRoleForCommand,
   type CreateOrgCommand,
   type CreateProjectCommand,
@@ -61,6 +62,7 @@ import { uuidv7 } from './uuid'
 import { audioObjectKey } from '../audio'
 import { handleEventsWriteRequest } from '../events/route'
 import { ROLE } from '../events/role-policy'
+import { resolveAssignmentAuthority } from '../events/assignment-authority'
 import type { RawEvent } from '../events/types'
 import type {
   ChangesetReceipt,
@@ -283,7 +285,12 @@ export async function commitChangesetCore(
   // backstop, but resolving here first means a member removed after prepare is
   // denied cleanly (permission_denied) instead of half-applying at the perimeter.
   // Runs for a crash-retry too — a member removed mid-commit is still stopped.
-  const requiredRole = Math.max(...cs.commands.map(requiredRoleForCommand))
+  const assignmentMinRole = commandsContainAssignmentEvents(cs.commands)
+    ? (await resolveAssignmentAuthority(db, projectId)).minRole
+    : undefined
+  const requiredRole = Math.max(
+    ...cs.commands.map((command) => requiredRoleForCommand(command, assignmentMinRole)),
+  )
   const resolvedRole = await resolveProjectRoleShared(db, { id: cred.userId }, projectId)
   if (!resolvedRole || resolvedRole.level < requiredRole) {
     return errorResponse('permission_denied', 'insufficient project role to commit this changeset')

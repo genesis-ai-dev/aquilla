@@ -30,7 +30,8 @@
 // Errors use the standard external envelope { error: { code, message } }.
 
 import { externalError } from './errors'
-import { authenticateAndScope, mintInternalToken, type ExternalReadsEnv } from './read-routes'
+import { mintInternalToken } from './read-routes'
+import { authenticateAndScope, type ExternalReadsEnv } from './read-auth'
 import { handleExportSourceRequest } from '../events/export-route'
 import { countRecentRateLimitEvents, recordRateLimitEvent } from '../../../db/shared/rate-limit'
 

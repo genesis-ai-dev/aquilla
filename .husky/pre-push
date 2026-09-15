@@ -4,20 +4,21 @@
 E2E_PUSH_REFS=$(cat)
 export E2E_PUSH_REFS
 
-# Credential gate — cheap, so it runs before the expensive E2E gate. A leaked
-# secret is the one push mistake that can't be walked back once it's on a
-# public remote, so block the push (rotate + remove, don't just delete the file).
-echo "[pre-push] scanning tracked files for credentials (pnpm run scan:secrets)…"
+# Tests create temporary Git repositories. Do not let this hook's repository
+# variables redirect their Git commands into the repository being pushed.
+for git_env_name in $(git rev-parse --local-env-vars); do
+  unset "$git_env_name"
+done
+
+# Keep pushes proportional: scan credentials, then select browser tests from
+# the pushed commits. Full unit/worker and smoke suites are not push gates.
+echo "[pre-push] scanning tracked files for credentials…"
 pnpm run scan:secrets
 status=$?
 if [ $status -ne 0 ]; then
-  echo ""
-  echo "❌ Secret scan found a possible credential. Push blocked."
-  echo "   Rotate the credential, remove it from the working tree, then re-push."
-  echo "   Bypass (NOT recommended): git push --no-verify"
+  echo "[pre-push] Secret scan failed. Push blocked."
   exit $status
 fi
-echo "[pre-push] ✅ secret scan clean"
 
 echo "[pre-push] running changed-file E2E gate (pnpm run test:e2e:affected)…"
 pnpm run test:e2e:affected

@@ -21,6 +21,7 @@ import { RoleLabel } from "@/components/RoleLabel"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { DataTable, DataTableColumnHeader, DataTableRowActionsButton } from "@/components/ui/data-table"
 import { missingLast, SORT_MISSING_LAST } from "@/components/ui/data-table-missing"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { TableEmptyState } from "@/components/ui/page"
@@ -94,6 +95,12 @@ export function OrgProjectsDataTable({
   toolbarTrailing,
   loading = false,
   loadingLabel,
+  searchValue,
+  onSearchChange,
+  searching = false,
+  hasMore = false,
+  onLoadMore,
+  loadingMore = false,
 }: {
   projects: OrgProjectRow[]
   now: number
@@ -137,6 +144,12 @@ export function OrgProjectsDataTable({
   toolbarTrailing?: ReactNode
   loading?: boolean
   loadingLabel?: string
+  searchValue?: string
+  onSearchChange?: (value: string) => void
+  searching?: boolean
+  hasMore?: boolean
+  onLoadMore?: () => void
+  loadingMore?: boolean
 }) {
   const { t } = useI18n()
   const navigate = useNavigate()
@@ -319,6 +332,59 @@ export function OrgProjectsDataTable({
             )
           },
         },
+        {
+          // AQU-1097: "which units are done" at org scale. Sorts by share
+          // done so the projects furthest from finished surface first;
+          // projects with nothing to plan sort last rather than reading as 0%.
+          id: "units",
+          accessorFn: (p) =>
+            missingLast(p.unitsTotal ? (p.unitsDone ?? 0) / p.unitsTotal : undefined),
+          sortUndefined: SORT_MISSING_LAST,
+          header: ({ column }) => (
+            <DataTableColumnHeader
+              column={column}
+              title={t("org.orgProjectsDataTable.unitsColumn")}
+              className="justify-end"
+              data-testid="project-table-units-header"
+            />
+          ),
+          meta: { align: "right", className: embedded ? "w-[5rem] whitespace-nowrap" : "w-[7rem]" },
+          cell: ({ row }) => {
+            const p = row.original
+            const total = p.unitsTotal ?? 0
+            // A project with no plannable files has nothing to say here. An
+            // em dash is honest; "0 of 0" reads like a failure.
+            if (total === 0) {
+              return (
+                <div data-testid="project-table-units-value" className="text-right text-muted-foreground">
+                  —
+                </div>
+              )
+            }
+            const done = p.unitsDone ?? 0
+            const overdue = p.unitsOverdue ?? 0
+            return (
+              <div
+                data-testid="project-table-units-value"
+                data-units-overdue={overdue > 0 ? "true" : undefined}
+                className="flex items-center justify-end gap-1.5 text-right tabular-nums text-muted-foreground"
+                aria-label={t("org.orgProjectsDataTable.unitsDoneAria", { done, total })}
+              >
+                <span>{t("org.orgProjectsDataTable.unitsDoneValue", { done, total })}</span>
+                {overdue > 0 && (
+                  <AppTooltip content={t("org.orgProjectsDataTable.unitsOverdueTooltip", { count: overdue })}>
+                    <span
+                      data-testid="project-table-units-overdue"
+                      className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive/12 px-1 text-[10px] font-semibold text-destructive"
+                    >
+                      {overdue}
+                    </span>
+                  </AppTooltip>
+                )}
+              </div>
+            )
+          },
+        },
       )
 
       if (!embedded) {
@@ -450,7 +516,7 @@ export function OrgProjectsDataTable({
     : null
 
   return (
-    <div className={cn(embedded && "flex min-h-0 min-w-0 w-full flex-1 flex-col")}>
+    <div className="flex min-h-0 min-w-0 w-full flex-1 flex-col">
       <DataTable
         key={`${layout}:${initialLens}`}
         columns={columns}
@@ -464,17 +530,27 @@ export function OrgProjectsDataTable({
         onRowClick={(p) => navigate(`/projects/${p.id}`)}
         initialSorting={[...lensToSorting(initialLens)]}
         searchPlaceholder="Search projects…"
-        fillHeight={embedded}
+        searchValue={searchValue}
+        onSearchChange={onSearchChange}
+        searching={searching}
+        fillHeight
         loading={loading}
         loadingLabel={loadingLabel}
-        globalFilterFn={(row, _columnId, filterValue) => {
+        hasMore={hasMore}
+        onLoadMore={onLoadMore}
+        loadingMore={loadingMore}
+        globalFilterFn={
+          onSearchChange
+            ? undefined
+            : (row, _columnId, filterValue) => {
           const q = String(filterValue).trim().toLowerCase()
           if (!q) return true
           const p = row.original
           // AQU-507: match PM username too, so the search box satisfies the
           // "filter by PM" half of the AC without a separate filter control.
           return `${p.name} ${p.orgName ?? ""} ${p.pm?.username ?? ""}`.toLowerCase().includes(q)
-        }}
+        }
+        }
         toolbar={
           <>
             {toolbarLeading}
@@ -522,14 +598,20 @@ export function OrgProjectsDataTable({
               )
         }
         emptyState={(table) => {
-          const search = String(table.getState().globalFilter ?? "").trim()
+          const search = (searchValue ?? String(table.getState().globalFilter ?? "")).trim()
           if (search) {
             return (
               <div className="flex flex-col items-center gap-3 py-10">
                 <p className="text-center text-sm text-muted-foreground">
                   {t("org.orgProjectsDataTable.noSearchMatch")}
                 </p>
-                <Button variant="outline" onClick={() => table.setGlobalFilter("")}>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    table.setGlobalFilter("")
+                    onSearchChange?.("")
+                  }}
+                >
                   {t("common.clear")}
                 </Button>
               </div>

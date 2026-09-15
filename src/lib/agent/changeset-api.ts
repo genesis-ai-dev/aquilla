@@ -90,7 +90,25 @@ export interface ChangesetApprovalSummary {
   /** EmitEvents changesets: every staged cell.validate / cell.unvalidate,
    *  itemized with the cell's current text (AQU-1184 guardrail 2). */
   testimony?: ChangesetSummaryTestimony[]
+  /** AQU-1228 Living Memory writes: the entry path being written or retired
+   *  plus a one-line preview of its content — the approval page renders these
+   *  explicitly, because approving IS the memory review. */
+  memoryWrites?: { path: string; action: string; preview: string }[]
+  /** InsertCell/DeleteCell/SplitCell: the one structural effect line — which
+   *  command, the file, and how many rows move (AQU-1234). */
+  structure?: ChangesetSummaryStructure
   [key: string]: unknown
+}
+
+/** Server-computed effect line for a cell-structure changeset. */
+export interface ChangesetSummaryStructure {
+  command: 'InsertCell' | 'DeleteCell' | 'SplitCell'
+  fileId: string
+  cellsAdded: number
+  cellsRemoved: number
+  cellsReanchored: number
+  targetsRemoved: number
+  targetsRewritten: number
 }
 
 /** GET /api/v2/changesets/:id/approval response (auth-worker

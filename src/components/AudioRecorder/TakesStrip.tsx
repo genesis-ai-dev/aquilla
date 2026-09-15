@@ -6,7 +6,7 @@
 // playable blobs and emits cell.audio.select / .remove / .rename.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Bird, Check, CloudAlert, CloudUpload, Pause, Pencil, Play, RotateCcw, Sparkles, Trash2 } from "lucide-react"
+import { Bird, Check, CloudAlert, CloudUpload, FileClock, Pause, Pencil, Play, RotateCcw, Sparkles, Trash2 } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -25,6 +25,7 @@ import {
   notifyAudioAttachmentsChanged,
   retryFailedAudioSync,
 } from "@/lib/audio/audio-attachments-bus"
+import { useRecordingTextDrift } from "@/hooks/useRecordingTextDrift"
 
 /** "Take 7" → 7; anything else → null. */
 function parseTakeNumber(label: string | null | undefined): number | null {
@@ -98,6 +99,23 @@ export function TakesStrip({
   const latestCircleRef = useRef<string | null>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const urlRef = useRef<string | null>(null)
+
+  // AQU-464: which of these takes were recorded against text that has since
+  // been re-worded. Recorded takes only — a generated (TTS) take is synthesised
+  // FROM the current text, so it cannot lag it, and flagging one would be noise.
+  const recordedTakeIds = useMemo(
+    () => takes.filter((t) => !t.voiceId && t.slot !== GENERATED_VOICE_SLOT).map((t) => t.audioId),
+    [takes],
+  )
+  const driftTokenFetcher = useMemo(() => audioSyncTokenFetcherForSession(session), [session])
+  const textDrift = useRecordingTextDrift({
+    enabled: Boolean(session?.jwt) && recordedTakeIds.length > 0,
+    projectId,
+    fileId,
+    cellId,
+    audioIds: recordedTakeIds,
+    getTokenForFile: driftTokenFetcher,
+  })
 
   // The take that actually SOUNDS, mirroring playback's preference order: a
   // recorded take holding the recording slot wins; otherwise the selected
@@ -498,6 +516,21 @@ export function TakesStrip({
                       >
                         <CloudAlert className="h-3 w-3" /> {t("audio.takesStrip.syncFailedRetry")}
                       </button>
+                    )}
+                    {/* AQU-464: this take speaks wording the line no longer
+                        carries. Advisory, not an error — reviewing audio
+                        against its own older text is the point. */}
+                    {textDrift.get(att.audioId)?.drifted && (
+                      <span
+                        title={t("audio.takesStrip.textDriftTooltip", {
+                          date: new Date(textDrift.get(att.audioId)!.recordedAt).toLocaleDateString(),
+                          text: textDrift.get(att.audioId)!.textAtRecording ?? "",
+                        })}
+                        data-testid={`take-text-drift-${att.audioId}`}
+                        className="flex shrink-0 items-center gap-0.5 rounded px-1 text-[10px] text-amber-700 dark:text-amber-400"
+                      >
+                        <FileClock className="h-3 w-3" /> {t("audio.takesStrip.textDriftBadge")}
+                      </span>
                     )}
                     <AppTooltip content={t("audio.takesStrip.renameTooltip")}>
                       <Button

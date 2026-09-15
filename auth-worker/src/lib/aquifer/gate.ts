@@ -22,8 +22,13 @@ import type { Env } from "../../types"
 /** Server projection of the client's SCRIPTURE_FILE_TYPES (src/lib/parsers/types.ts).
  *  `files.kind` is populated from the client's FileType on file.create.
  *  Fixed literal set (not user input) — inlined as an `IN (...)` list to
- *  match the codebase's existing placeholder convention. */
-const SCRIPTURE_FILE_KINDS = ["usfm", "ebible", "helloao"] as const
+ *  match the codebase's existing placeholder convention.
+ *
+ *  AQU-997: keep this list in step with SCRIPTURE_FILE_TYPES — `codex` (the
+ *  native Scripture notebook kind every migrated Codex book carries) was
+ *  missing from both, so a pure-codex project read as having no Scripture
+ *  files and was under-recognized for project-level Bible resources. */
+const SCRIPTURE_FILE_KINDS = ["usfm", "ebible", "helloao", "codex"] as const
 
 /** True when the project has at least one non-deleted native Scripture file or
  * a format-neutral import whose manifest contains canonical Scripture units. */

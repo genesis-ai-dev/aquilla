@@ -15,6 +15,7 @@
 // project A cannot read project B's termbase.
 
 import { verifyTokenForProject } from '../auth'
+import { readBlobConcepts } from './migrate-concepts'
 
 export interface ConceptsReadEnv {
   AQUILLA_PG?: AquillaDb
@@ -155,6 +156,35 @@ export async function handleConceptsReadRequest(
       .bind(...binds)
       .all<ConceptRowRaw>()
     const concepts: ConceptRowOut[] = result.results.map(toOut)
+
+    // AQU-1006 follow-up: READ-ONLY fallback to the legacy settings blob for a
+    // project that has not been migrated yet (scripts/migrate-concepts.ts).
+    //
+    // WHY A FALLBACK AT ALL, given the cutover was meant to be clean: a big
+    // termbase cannot be migrated inside a request. The largest on dev carries
+    // 961 concepts — measured at over two minutes — so a migrate-on-read would
+    // blow the Worker's budget, fail, and leave the project showing an EMPTY
+    // termbase on every subsequent read. An empty termbase is exactly the
+    // symptom that alarmed people on 2026-09-04, and it is worse here because
+    // it also silently disables every terminology check in the editor.
+    //
+    // WHY THIS DOES NOT REOPEN THE BUG: the blob is only ever READ here, never
+    // written. The data loss came from WRITES — each add rewrote the whole
+    // array from a stale snapshot. Every write now goes to the event log, so a
+    // read-only fallback carries none of that risk. It is pure legacy decode.
+    //
+    // Only when the projection is genuinely empty, so a migrated project never
+    // pays for this and can never be contaminated by leftover blob rows.
+    if (concepts.length === 0) {
+      const legacy = await readBlobConcepts(env.AQUILLA_PG, projectId)
+      if (legacy.length > 0) {
+        console.warn(
+          `concepts: serving ${legacy.length} legacy blob concept(s) for ${projectId}; ` +
+          'run scripts/migrate-concepts.ts --apply to migrate',
+        )
+        return Response.json({ concepts: legacy })
+      }
+    }
     return Response.json({ concepts })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)

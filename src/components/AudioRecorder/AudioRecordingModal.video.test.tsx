@@ -80,6 +80,8 @@ vi.mock("@/lib/audio/audio-coordinator", () => ({ pushAudioShortcutOverride: () 
 
 import { AudioRecordingModal } from "./AudioRecordingModal"
 import { resetRecordingFilmAudibleCacheForTests } from "@/lib/store/recording-film-audible-pref"
+import { resetRecordingCountdownCacheForTests } from "@/lib/store/recording-countdown-pref"
+import { resetCountdownBeepContextForTests } from "./useCountdown"
 
 const FILM = "https://cdn.example.com/ep.mp4"
 
@@ -115,6 +117,7 @@ describe("AudioRecordingModal — the film", () => {
     attachmentsState.byCellId = new Map()
     localStorage.clear()
     resetRecordingFilmAudibleCacheForTests()
+    resetRecordingCountdownCacheForTests()
   })
 
   it.each([
@@ -197,5 +200,153 @@ describe("AudioRecordingModal — the film", () => {
       play.mockRestore()
       pause.mockRestore()
     }
+  })
+})
+
+// AQU-1209 — the countdown is a preference now.
+//
+// It lives in this suite rather than a new one because the two things the
+// preference changes are exactly what this file already pins: the counting
+// phase between the click and the take, and the film's rolling lead-in, which
+// is timed from the count and therefore has to disappear with it.
+//
+// The pref is DEVICE-scoped and defaults to ON, so every assertion about the
+// default here doubles as the regression guard on the counted path.
+describe("AudioRecordingModal — the countdown preference", () => {
+  /** Stands in for the AudioContext `beepOnce` builds per tick. happy-dom has
+   *  none, so without it the real code's try/catch swallows every beep and a
+   *  "no beep" assertion would pass for the wrong reason. */
+  function installAudioContextSpy(): { oscillators: number } {
+    const record = { oscillators: 0 }
+    class FakeOsc {
+      frequency = { value: 0 }
+      type = ""
+      onended: (() => void) | null = null
+      connect() {}
+      start() {}
+      stop() {}
+    }
+    class FakeCtx {
+      currentTime = 0
+      state = "running"
+      destination = {}
+      createOscillator() { record.oscillators += 1; return new FakeOsc() }
+      createGain() {
+        return {
+          gain: { value: 0, setValueAtTime() {}, exponentialRampToValueAtTime() {} },
+          connect() {},
+        }
+      }
+      close() { return Promise.resolve() }
+    }
+    ;(globalThis as unknown as { AudioContext: unknown }).AudioContext = FakeCtx
+    return record
+  }
+
+  beforeEach(() => {
+    onlineState.value = true
+    recorderState.value = { kind: "idle" }
+    attachmentsState.byCellId = new Map()
+    localStorage.clear()
+    resetRecordingFilmAudibleCacheForTests()
+    resetRecordingCountdownCacheForTests()
+    recorderStart.mockClear()
+    // The beep context is a module singleton by design; drop it so this test's
+    // fake is the one the countdown would reach for.
+    resetCountdownBeepContextForTests()
+  })
+
+  it("counts by default: 3 on screen, a way to cancel it, and no take yet", async () => {
+    render(modal(projectNoFilesKey))
+    fireEvent.click(screen.getByTestId("rec-start"))
+
+    await waitFor(() => expect(screen.getByText("3")).toBeInTheDocument())
+    // Counting, not recording — the recorder is armed but has not been marked.
+    expect(recorderStart).not.toHaveBeenCalled()
+    // The anchor button is the count's Cancel for as long as the count runs.
+    expect(screen.queryByTestId("rec-start")).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: /cancel/i })).toBeInTheDocument()
+  })
+
+  // The whole point of the preference: the click IS zero.
+  it("with the countdown off, Record starts the take at once and never counts", async () => {
+    const audio = installAudioContextSpy()
+    localStorage.setItem("aq.recording-countdown.v1", "off")
+    resetRecordingCountdownCacheForTests()
+
+    const { rerender } = render(modal(projectNoFilesKey))
+    fireEvent.click(screen.getByTestId("rec-start"))
+
+    // The permission probe resolves async; the take begins on the other side.
+    await waitFor(() => expect(recorderStart).toHaveBeenCalledTimes(1))
+    // No counting phase ever existed: no digits, and the Record button is still
+    // the anchor rather than being replaced by "Cancel".
+    expect(screen.queryByText("3")).not.toBeInTheDocument()
+    expect(screen.getByTestId("rec-start")).toBeInTheDocument()
+    // …and nothing beeped, even though the beep toggle is still ON: there is no
+    // countdown left to sound.
+    expect(audio.oscillators).toBe(0)
+
+    // Zero's visual beat goes with it — GO announces an instant nothing led up
+    // to once the operator's own click is the cue.
+    recorderState.value = { kind: "recording", startedAt: Date.now() }
+    rerender(modal(projectNoFilesKey))
+    await waitFor(() => expect(screen.getByText("REC")).toBeInTheDocument())
+    expect(screen.queryByText("GO")).not.toBeInTheDocument()
+  })
+
+  // The lead-in is timed FROM the count, so with no count there is no lead-in:
+  // the picture is already parked on the line's first frame from the arm at
+  // open, and `running` inherits it. What must not happen is a rewind or a
+  // second play() under the operator's first word.
+  it("with the countdown off, the film is not re-armed for a lead-in", async () => {
+    const play = vi.spyOn(window.HTMLMediaElement.prototype, "play").mockResolvedValue(undefined)
+    try {
+      localStorage.setItem("aq.recording-countdown.v1", "off")
+      resetRecordingCountdownCacheForTests()
+
+      render(modal(projectWithFilm))
+      fireEvent.click(screen.getByTestId("rec-start"))
+      await waitFor(() => expect(recorderStart).toHaveBeenCalledTimes(1))
+
+      // Still idle as far as the surface is concerned — the recorder mock has
+      // not flipped — so nothing has asked the picture to move.
+      expect(play).not.toHaveBeenCalled()
+    } finally {
+      play.mockRestore()
+    }
+  })
+
+  it("greys the beep control out while the countdown is off, and gives it back", () => {
+    render(modal(projectNoFilesKey))
+    fireEvent.click(screen.getByTestId("rec-settings"))
+
+    const beep = screen.getByTestId("rec-beep") as HTMLButtonElement
+    // Default: the countdown runs, so the beep is a live choice.
+    expect(beep).not.toBeDisabled()
+    expect(beep).toHaveAttribute("aria-pressed", "true")
+
+    fireEvent.click(screen.getByTestId("rec-countdown"))
+    expect(screen.getByTestId("rec-beep")).toBeDisabled()
+    // Not applicable, not changed — the stored answer survives.
+    expect(screen.getByTestId("rec-beep")).toHaveAttribute("aria-pressed", "true")
+
+    fireEvent.click(screen.getByTestId("rec-countdown"))
+    expect(screen.getByTestId("rec-beep")).not.toBeDisabled()
+    expect(screen.getByTestId("rec-beep")).toHaveAttribute("aria-pressed", "true")
+  })
+
+  it("persists the opt-out per device", () => {
+    const { unmount } = render(modal(projectNoFilesKey))
+    fireEvent.click(screen.getByTestId("rec-settings"))
+    fireEvent.click(screen.getByTestId("rec-countdown"))
+    expect(localStorage.getItem("aq.recording-countdown.v1")).toBe("off")
+    unmount()
+
+    // A fresh session on the same device reads the stored opt-out back.
+    resetRecordingCountdownCacheForTests()
+    render(modal(projectNoFilesKey))
+    fireEvent.click(screen.getByTestId("rec-settings"))
+    expect(screen.getByTestId("rec-countdown")).toHaveAttribute("aria-pressed", "false")
   })
 })

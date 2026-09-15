@@ -165,5 +165,21 @@ export function makeTreasureHuntIdml(
       + paragraphs.join("")
       + `</Story></idPkg:Story>`,
   )
+  zip.file(
+    "Resources/Styles.xml",
+    `<?xml version="1.0" encoding="UTF-8"?>`
+      + `<idPkg:Styles xmlns:idPkg="${IDPKG}">`
+      + `<ParagraphStyle Self="ParagraphStyle/!meta_head" FontStyle="Bold"/>`
+      + `<ParagraphStyle Self="ParagraphStyle/!meta_hunt_head" FontStyle="Semibold SemiCondensed">`
+      + `<Properties><BasedOn type="object">ParagraphStyle/!meta_head</BasedOn></Properties>`
+      + `</ParagraphStyle>`
+      + `<ParagraphStyle Self="ParagraphStyle/!meta_fact_head" FontStyle="Regular">`
+      + `<Properties><BasedOn type="object">ParagraphStyle/!meta_hunt_head</BasedOn></Properties>`
+      + `</ParagraphStyle>`
+      + `<ParagraphStyle Self="ParagraphStyle/_intro_head" FontStyle="Bold"/>`
+      + `<CharacterStyle Self="CharacterStyle/_meta_style%3abold" FontStyle="Bold"/>`
+      + `<CharacterStyle Self="CharacterStyle/_meta_style%3aitalic" FontStyle="Italic"/>`
+      + `</idPkg:Styles>`,
+  )
   return zip.generateAsync({ type: "arraybuffer", compression: "DEFLATE" })
 }

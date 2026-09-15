@@ -85,7 +85,7 @@ import {
 import { shouldDismissCellErrorsOnBlur } from "@/lib/editor/cell-error-dismiss"
 import { CellExpansion } from "./CellExpansion"
 import { CellMetadataTab, hasCellMetadata } from "./CellMetadataTab"
-import { tokenizeWords, activeWordRange } from "@/lib/audio/timings"
+import { activeWordRange } from "@/lib/audio/timings"
 import { KaraokeReadText } from "./KaraokeReadText"
 import { resolveCurrentCellIndex } from "@/lib/editor/current-index"
 import { useCellAudio } from "@/hooks/useCellAudio"
@@ -3992,9 +3992,10 @@ interface EditorRowProps {
 // which adds an "Ask AI" action and matches the editor hover-rail aesthetic.
 
 // ────────────────────────────────────────────────────────────────────────────
-// SourceWithTermLookup — renders source plain text with per-word
-// TermLookupPopover triggers for any word that matches an active concept.
-// Words that have no matching concept render as plain text (no popover cost).
+// SourceWithTermLookup — renders source plain text with a TermLookupPopover
+// trigger over every span matching an active concept (multi-word terms and
+// wildcards included, via the shared matcher). Text outside a match renders
+// plain (no popover cost).
 // When no concepts are configured the component falls back to a plain
 // HighlightedText so there's zero overhead on projects that don't use
 // the terminology feature.
@@ -4015,7 +4016,7 @@ interface SourceWithTermLookupProps {
   footnoteNumberOffset?: number
 }
 
-function SourceWithTermLookup({
+export function SourceWithTermLookup({
   text,
   highlights,
   ranges,
@@ -4031,29 +4032,33 @@ function SourceWithTermLookup({
     [concepts],
   )
 
-  // Build a normalized concept index keyed by lowercased sourceTerm for O(1)
-  // per-word lookup. We do exact-word match (normalized, case-insensitive)
-  // per the task spec: "normalized, case-insensitive match against
-  // concept.sourceTerm". Both the raw lowercase and a punctuation-stripped
-  // form are checked so "God," and "God" both resolve.
-  const conceptIndex = useMemo(() => {
-    const idx = new Map<string, Concept[]>()
-    for (const c of activeConcepts) {
-      const key = c.sourceTerm.toLowerCase()
-      const existing = idx.get(key)
-      if (existing) existing.push(c)
-      else idx.set(key, [c])
+  // Match whole terms over the full text with the shared matcher, not
+  // word-by-word: a multi-word concept ("Holy Spirit", "son of man") is never
+  // equal to a single token, so an index keyed by token could never highlight
+  // one. findTermMatches also brings wildcard parity with the target-side
+  // chips (`grac*` → grace/graced).
+  const matches = useMemo(() => {
+    const found: Array<{ start: number; end: number }> = []
+    for (const concept of activeConcepts) {
+      for (const m of findTermMatches(text, concept.sourceTerm)) found.push(m)
     }
-    return idx
-  }, [activeConcepts])
-
-  // Tokenize the source text into words + inter-word whitespace segments.
-  const tokens = useMemo(() => tokenizeWords(text), [text])
+    // Longest-first at each offset, then drop anything overlapping an already
+    // taken span — a highlight may not start inside another one.
+    found.sort((a, b) => a.start - b.start || b.end - a.end)
+    const kept: Array<{ start: number; end: number }> = []
+    let taken = -1
+    for (const m of found) {
+      if (m.start < taken) continue
+      kept.push(m)
+      taken = m.end
+    }
+    return kept
+  }, [text, activeConcepts])
 
   // Fast path: no active concepts → plain HighlightedText, zero popover cost.
   // Font size inherits from the source column wrapper (per-file pref) — no
   // fixed text-* class here.
-  if (activeConcepts.length === 0) {
+  if (activeConcepts.length === 0 || matches.length === 0) {
     const Wrapper = inline ? "span" : "div"
     return (
       <Wrapper>
@@ -4068,55 +4073,57 @@ function SourceWithTermLookup({
     )
   }
 
-  // Build the inline spans: whitespace gaps between tokens are plain text;
-  // tokens are wrapped with TermLookupPopover when they match a concept.
+  // Build the inline spans: text between matches renders plain; each match is
+  // wrapped with TermLookupPopover.
   const parts: React.ReactNode[] = []
   let cursor = 0
-  for (let i = 0; i < tokens.length; i++) {
-    const { word, start, end } = tokens[i]
-    // Whitespace between previous token and this one.
+  for (let i = 0; i < matches.length; i++) {
+    const { start, end } = matches[i]
     if (start > cursor) {
-      parts.push(<React.Fragment key={`ws-${i}`}>{text.slice(cursor, start)}</React.Fragment>)
-    }
-    // Check raw lowercase and punctuation-stripped form so "God," → "god" matches "God".
-    const normalizedWord = word.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "")
-    const matchedConcepts = conceptIndex.get(word.toLowerCase()) ?? conceptIndex.get(normalizedWord)
-    if (matchedConcepts && matchedConcepts.length > 0) {
-      parts.push(
-        <TermLookupPopover
-          key={`term-${i}`}
-          sourceTerm={word}
-          concepts={activeConcepts}
-          onViewConcept={onViewConcept}
-        >
-          <span className="terminology-highlight">
-            <HighlightedText
-              text={word}
-              highlights={EMPTY_HIGHLIGHTS}
-              ranges={clipRangesToTextSlice(ranges, start, end)}
-              showEvidence={false}
-              onRangeClick={onRangeClick}
-            />
-          </span>
-        </TermLookupPopover>,
-      )
-    } else {
       parts.push(
         <HighlightedText
-          key={`w-${i}`}
-          text={word}
+          key={`gap-${i}`}
+          text={text.slice(cursor, start)}
           highlights={EMPTY_HIGHLIGHTS}
-          ranges={clipRangesToTextSlice(ranges, start, end)}
+          ranges={clipRangesToTextSlice(ranges, cursor, start)}
           showEvidence={false}
           onRangeClick={onRangeClick}
         />,
       )
     }
+    const matchedText = text.slice(start, end)
+    parts.push(
+      <TermLookupPopover
+        key={`term-${i}`}
+        sourceTerm={matchedText}
+        concepts={activeConcepts}
+        onViewConcept={onViewConcept}
+      >
+        <span className="terminology-highlight">
+          <HighlightedText
+            text={matchedText}
+            highlights={EMPTY_HIGHLIGHTS}
+            ranges={clipRangesToTextSlice(ranges, start, end)}
+            showEvidence={false}
+            onRangeClick={onRangeClick}
+          />
+        </span>
+      </TermLookupPopover>,
+    )
     cursor = end
   }
-  // Trailing whitespace after last token.
+  // Trailing text after the last match.
   if (cursor < text.length) {
-    parts.push(<React.Fragment key="ws-tail">{text.slice(cursor)}</React.Fragment>)
+    parts.push(
+      <HighlightedText
+        key="gap-tail"
+        text={text.slice(cursor)}
+        highlights={EMPTY_HIGHLIGHTS}
+        ranges={clipRangesToTextSlice(ranges, cursor, text.length)}
+        showEvidence={false}
+        onRangeClick={onRangeClick}
+      />,
+    )
   }
 
   const Wrapper = inline ? "span" : "div"

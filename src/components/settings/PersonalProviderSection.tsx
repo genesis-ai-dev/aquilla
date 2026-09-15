@@ -15,6 +15,8 @@ import { useI18n } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 import { isFieldInvalid } from "@/lib/forms/field-state"
 import { optionalString, requiredString } from "@/lib/forms/schemas"
+import { t } from "@/lib/i18n/standalone"
+import { customProviderNeedsKey } from "@/lib/completion/completion-service"
 import {
   clearUserProviderOverride,
   getUserProviderOverride,
@@ -25,13 +27,21 @@ const formSchema = z.object({
   endpoint: requiredString("Endpoint URL"),
   model: optionalString,
   apiKey: optionalString,
+}).superRefine((value, ctx) => {
+  if (customProviderNeedsKey(value.endpoint) && !value.apiKey.trim()) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["apiKey"],
+      message: t("projectSettings.advancedLlm.apiKeyRequiredError"),
+    })
+  }
 })
 
 /**
- * Advanced, opt-in: a personal AI provider override that beats per-project
- * settings on this device only. Hidden behind a disclosure so the default
- * Settings view stays uncluttered for users on the happy path (Frontier
- * managed model + sign-in).
+ * Advanced, opt-in: a personal AI provider default for this browser.
+ * A project-level custom key beats it. Hidden behind a disclosure so the
+ * default Settings view stays uncluttered for users on the happy path
+ * (Frontier managed model + sign-in).
  */
 export function PersonalProviderSection() {
   const { t } = useI18n()
@@ -87,7 +97,7 @@ export function PersonalProviderSection() {
             </p>
             <p className="text-xs text-muted-foreground">
               {hasOverride
-                ? "Active — your projects use this endpoint on this device."
+                ? "Active — default for projects without their own API key."
                 : "Optional. Most users should leave this off and use Frontier."}
             </p>
           </div>
@@ -164,32 +174,37 @@ export function PersonalProviderSection() {
 
               <form.Field
                 name="apiKey"
-                children={(field) => (
-                  <Field>
-                    <FieldLabel htmlFor="prov-key">
-                      {t("projectSettings.field.apiKey")} <OptionalMark />
-                    </FieldLabel>
-                    <Input
-                      id="prov-key"
-                      name={field.name}
-                      type="password"
-                      value={field.state.value}
-                      onBlur={field.handleBlur}
-                      onChange={(e) => field.handleChange(e.target.value)}
-                      placeholder={t("settings.personalProvider.apiKeyPlaceholder")}
-                      autoComplete="off"
-                    />
-                    <p className="text-[11px] text-muted-foreground">
-                      <RichMessage
-                        k="settings.personalProvider.authHeaderHint"
-                        values={{
-                          // i18n-exempt literal HTTP header, shown verbatim as syntax
-                          authHeader: <code className="font-mono">Authorization: Bearer …</code>,
-                        }}
+                children={(field) => {
+                  const invalid = isFieldInvalid(field)
+                  return (
+                    <Field data-invalid={invalid}>
+                      <FieldLabel htmlFor="prov-key">
+                        {t("projectSettings.field.apiKey")} <OptionalMark />
+                      </FieldLabel>
+                      <Input
+                        id="prov-key"
+                        name={field.name}
+                        type="password"
+                        value={field.state.value}
+                        onBlur={field.handleBlur}
+                        onChange={(e) => field.handleChange(e.target.value)}
+                        placeholder={t("settings.personalProvider.apiKeyPlaceholder")}
+                        autoComplete="off"
+                        aria-invalid={invalid}
                       />
-                    </p>
-                  </Field>
-                )}
+                      <p className="text-[11px] text-muted-foreground">
+                        <RichMessage
+                          k="settings.personalProvider.authHeaderHint"
+                          values={{
+                            // i18n-exempt literal HTTP header, shown verbatim as syntax
+                            authHeader: <code className="font-mono">Authorization: Bearer …</code>,
+                          }}
+                        />
+                      </p>
+                      {invalid && <FieldError errors={field.state.meta.errors} />}
+                    </Field>
+                  )
+                }}
               />
             </FieldGroup>
 

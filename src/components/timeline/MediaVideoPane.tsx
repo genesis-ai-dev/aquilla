@@ -97,8 +97,16 @@ export interface MediaVideoPaneProps {
   cells: CellData[]
   /** A nonce-keyed seek from the timeline. Applied unconditionally, because the
    *  queue drops seeks in several ordinary cases (no session, scrubbing into
-   *  the trailing pad, a gap no section owns) and the picture must still move. */
-  seekSec?: { sec: number; nonce: number } | null
+   *  the trailing pad, a gap no section owns) and the picture must still move.
+   *
+   *  AQU-1117: `play` rides ALONG WITH the seek rather than arriving as a
+   *  separate command, and that is the whole point. "Play from this cue" has to
+   *  start at the cue, not at wherever the film happened to be paused — and the
+   *  seek does not land for two commits after the press. A play issued from the
+   *  press site would sound the old position first and jump afterwards. Carried
+   *  here, the start goes through `requestPlayWhenReady`, which already waits
+   *  on `seeked`/`canplay`, so the first frame heard is the cue's. */
+  seekSec?: { sec: number; nonce: number; play?: boolean } | null
   /** A nonce-keyed play/pause from the timeline (Space). Deliberately a TOGGLE
    *  rather than a desired state: the picture keeps its native controls in the
    *  standalone arrangement, so anything stateful would drift out of step with
@@ -638,6 +646,12 @@ export function MediaVideoPane({
   // An explicit seek from the timeline. Applied whatever the queue thinks.
   const seekNonce = seekSec?.nonce
   const seekTarget = seekSec?.sec
+  /** AQU-1117: whether THIS seek also asked the picture to start. Read through
+   *  a ref because the effect below is keyed on the nonce alone (re-running it
+   *  on a changed flag would replay a stale seek); the render that carries a
+   *  new nonce also carries the flag that belongs to it. */
+  const seekWantsPlayRef = useRef(false)
+  seekWantsPlayRef.current = seekSec?.play === true
   /** A target held back because the element was still seeking. */
   const pendingScrubSeekRef = useRef<number | null>(null)
   /** The one place `currentTime` is written for a requested seek, so the
@@ -699,9 +713,28 @@ export function MediaVideoPane({
       // Still say where we are GOING, or the head sits on the old frame's
       // position for as long as the pipeline takes.
       publishPositionRef.current(sec)
-      return
+    } else {
+      applySeekRef.current(decided.seekSec)
     }
-    applySeekRef.current(decided.seekSec)
+
+    // AQU-1117: "Play from this cue" — this seek asked for the film as well as
+    // the frame. Issued AFTER the seek above so `requestPlayWhenReady` sees an
+    // element that is either already at the cue or still seeking to it; either
+    // way the first frame it starts on is the cue's, which is what separates
+    // this from a play command sent from the press site.
+    //
+    // Deliberately NOT a toggle. Pressing the button on a second cue while the
+    // film runs must jump and keep running, and a toggle would stop it.
+    // Standalone only (a slaved picture is the queue's to command), and never
+    // while the recorder holds the floor — `suspended`'s own watchdog would
+    // pause it back within 250ms, which is 250ms of the film in the take.
+    if (!seekWantsPlayRef.current || slaved || suspended) return
+    wantPlayRef.current = true
+    stallRef.current = IDLE_STALL_STATE
+    requestPlayWhenReady(video)
+    // The NONCE is the command: re-running on `slaved`, `suspended` or the
+    // stable play helper would replay a seek the user made long ago.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seekNonce, seekTarget])
 
   // Round 5: the playback bar has to DRIVE the picture it reports, so the pane

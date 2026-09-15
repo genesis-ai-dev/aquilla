@@ -580,6 +580,9 @@ export const importExport = defineNamespace({
     "importExport.dialog.voiceFilterAriaLabel": "Filter export by voice",
     "importExport.dialog.allVoices": "All voices",
     "importExport.dialog.voiceFilterHint": "Export will include only cells assigned to {voice}, across all camera angles.",
+    "importExport.dialog.chapterFilterAriaLabel": "Filter export by chapter",
+    "importExport.dialog.allChapters": "All chapters",
+    "importExport.dialog.chapterFilterHint": "Export will include only the cells in {chapter}.",
     "importExport.dialog.filenameLegend": "Filename",
     "importExport.dialog.filenameAriaLabel": "Export filename (without extension)",
     "importExport.dialog.projectScopeUsesProjectName": "Project-scope exports use the project name.",
@@ -701,6 +704,8 @@ export const importExport = defineNamespace({
     "importExport.status.downloadedFilesCount": plural({ one: "Downloaded {count} file", other: "Downloaded {count} files" }),
     "importExport.status.downloadedFile": "Downloaded {fileName}",
     "importExport.status.exportFailed": "Export failed.",
+    "importExport.errors.originalMissing":
+      "Original isn't in storage. Re-import to restore it.",
 
     // — Thrown-error triage: src/lib/import.ts (AQU-832 wave 3 error sweep) —
     // These are messages parser/upload helpers throw that reach the user
@@ -1398,6 +1403,13 @@ export const importExport = defineNamespace({
         description: "Hint below the voice filter once a specific voice is chosen. {voice} is bold-styled, rendered by RichMessage.",
         placeholders: { voice: "Bold-styled name of the selected cast voice." },
       },
+      "importExport.dialog.chapterFilterAriaLabel": {
+        description: "Accessible name for the chapter-scope select on the Export dialog.",
+      },
+      "importExport.dialog.chapterFilterHint": {
+        description: "Hint below the chapter scope once a single chapter is chosen. {chapter} is bold-styled, rendered by RichMessage.",
+        placeholders: { chapter: "Bold-styled label of the selected chapter, e.g. 'GEN 1'." },
+      },
       "importExport.dialog.filenameAriaLabel": {
         description: "Accessible name for the export filename input.",
       },
@@ -1561,6 +1573,10 @@ export const importExport = defineNamespace({
       "importExport.status.downloadedFile": {
         description: "Success-status message after a single-file client-side export (txt/md/tsv/csv/xlf/tmx/vtt/srt/plain-text-dump/metadata-csv).",
         placeholders: { fileName: "Name of the downloaded file — not translated." },
+      },
+      "importExport.errors.originalMissing": {
+        description:
+          "Toast when Download original fails because the stored blob pointer exists but the bytes are gone from storage. Tells the user to re-import.",
       },
       "importExport.errors.ebibleEmptyCorpus": {
         description: "Thrown when a chosen eBible translation's corpus file downloads but contains no text (often copyright-restricted).",

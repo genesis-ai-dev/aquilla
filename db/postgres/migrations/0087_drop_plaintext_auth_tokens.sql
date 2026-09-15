@@ -1,0 +1,49 @@
+-- Migration 0087: drop the plaintext `token` columns left behind by 0080
+-- ([Pen test] Auth & session mgmt weekly review, 2026-09-07 — Monday theme;
+-- finding OPS-31 in docs/OPSEC-REVIEW-2026-09-07.md).
+--
+-- This is the FOLLOW-UP step migration 0080 wrote down and left for later:
+--
+--   FOLLOW-UP (safe once the rollover window has passed — 24h for resets, 7d
+--   for verification): drop the plaintext arm from the four lookups in
+--   auth-worker/src/routes/auth.ts, then
+--     ALTER TABLE password_reset_tokens DROP COLUMN token;
+--     ALTER TABLE email_verification_tokens DROP COLUMN token;
+--
+-- 0080 deployed on 2026-08-24. Both windows (24h / 7d) closed on 2026-08-25
+-- and 2026-08-31 respectively — 14 and 7 days before this migration — so no
+-- row that could still be matched by the plaintext arm can be live: every
+-- pre-0080 row is past its own `expires_at`, and nothing has written a
+-- non-NULL `token` since 0080 shipped.
+--
+-- Order matters: the code change (dropping `OR (token_hash IS NULL AND
+-- token = ?)` from the four lookups, and `token` from the two INSERT column
+-- lists) ships in the same commit as this file and must be DEPLOYED FIRST.
+-- Deploying the worker first is safe in both directions — the new code never
+-- names the column, so it runs fine against a database that still has it —
+-- whereas applying this migration first would break the old code's INSERTs
+-- (they name `token` explicitly) for the length of the deploy window.
+--
+-- Why bother, given nothing reads the column any more: a dropped column is
+-- the only version of this that survives a restore. Backups, Neon branches
+-- and PITR snapshots taken before 0080 still carry live plaintext reset
+-- tokens; leaving the column in place means every future restore of one of
+-- those re-introduces a readable-credential table that the running code would
+-- silently accept again if the fallback arm were ever restored. Dropping it
+-- makes the hash-only shape the schema's own invariant rather than a property
+-- of the current query text.
+--
+-- Apply by hand against Neon (same convention as prior migrations in this
+-- directory — NOT applied automatically):
+--   set -a; . ./.env; set +a
+--   npx tsx scripts/pg.ts db/postgres/migrations/0087_drop_plaintext_auth_tokens.sql
+-- Verify: neither table has a `token` column, and both still have a
+-- `token_hash` column with a UNIQUE index.
+--
+-- Postgres drops a column's dependent indexes with it, so this also removes
+-- `idx_password_reset_tokens_token` and `idx_email_verification_tokens_token`
+-- (both plaintext lookup indexes, dead since 0080) with no separate DROP
+-- INDEX. They are removed from schema.sql in the same commit.
+
+ALTER TABLE password_reset_tokens DROP COLUMN IF EXISTS token;
+ALTER TABLE email_verification_tokens DROP COLUMN IF EXISTS token;

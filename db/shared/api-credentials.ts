@@ -32,6 +32,15 @@ export interface ApiCredentialContext {
   mode: "ask" | "act"
   orgId: string | null
   projectId: string | null
+  /**
+   * AQU-1180: may this credential see real human identities in agent-facing
+   * responses? OPTIONAL, and absent means NO — the safe default has to be the
+   * one you get by forgetting the field, not the one you get by remembering
+   * it. Only an OWNER of the credential's scope can mint a token with it on
+   * (auth-worker/src/routes/credentials.ts); a project's `agentAuthorship:
+   * none` setting overrides it back off (external/pii.ts).
+   */
+  pii?: boolean
 }
 
 /** Product of minting a token: the plaintext (shown once) + what to persist. */
@@ -84,6 +93,7 @@ interface CredentialRow {
   revoked_at: string | null
   last_used_at: string | null
   username: string
+  pii: boolean | null
 }
 
 /**
@@ -106,7 +116,8 @@ export async function validateApiCredential(
       `SELECT ac.id AS id, ac.user_id AS user_id, ac.mode AS mode,
               ac.org_id AS org_id, ac.project_id AS project_id,
               ac.expires_at AS expires_at, ac.revoked_at AS revoked_at,
-              ac.last_used_at AS last_used_at, u.username AS username
+              ac.last_used_at AS last_used_at, u.username AS username,
+              ac.pii AS pii
          FROM api_credentials ac
          JOIN users u ON u.id::text = ac.user_id
         WHERE ac.token_hash = ?`,
@@ -143,5 +154,7 @@ export async function validateApiCredential(
     mode: row.mode,
     orgId: row.org_id,
     projectId: row.project_id,
+    // Only an explicit true opts in — a NULL (pre-0091 row) stays scrubbed.
+    pii: row.pii === true,
   }
 }

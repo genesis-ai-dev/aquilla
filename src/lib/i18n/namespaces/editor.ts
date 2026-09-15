@@ -117,6 +117,9 @@ export const editor = defineNamespace({
       other: "{count} cells with stale source",
     }),
 
+    // — Per-cell action rail ————————————————————————————————————————
+    "editor.rail.moreActions": "More actions",
+
     // — Per-cell audio: record / upload / playback ——————————————————
     "editor.audio.record": "Record audio",
     "editor.audio.recordingDisabled": "Recording disabled",
@@ -377,6 +380,7 @@ export const editor = defineNamespace({
     "editor.view.directionOf": "{side} direction",
     "editor.view.decreaseFontSize": "Decrease {side} font size",
     "editor.view.increaseFontSize": "Increase {side} font size",
+    "editor.view.useAppFontSize": "Use app font size for {side}",
     "editor.view.directionMismatch":
       "{side} is forced {forced}, but content looks {detected}",
     "editor.view.dismissDirectionWarning": "Dismiss direction warning",
@@ -390,6 +394,10 @@ export const editor = defineNamespace({
     "editor.bibles.hide": "Hide parallel bibles",
     "editor.bibles.edgeTab": "Bibles",
     "editor.bibles.title": "Parallel Bibles",
+    "editor.bibles.noReferences": "No Bible references",
+    "editor.bibles.noReferencesDescription":
+      "The current cells have no Bible references with chapter and verse numbers. " +
+      "Parallel Bibles needs these references to show matching text.",
     "editor.bibles.scrollHint":
       "Scroll the editor to a verse to see it in other bible versions.",
     "editor.bibles.noVersions":
@@ -405,6 +413,23 @@ export const editor = defineNamespace({
     "editor.bibles.closePicker": "Close picker",
     "editor.bibles.addVersion": "Add version",
     "editor.bibles.attribution": "Text from the",
+
+    // — Verse-resources reference sidebar (AQU-461) ————————————————————
+    "editor.resources.openTooltip":
+      "Verse resources: the people, places and terms this verse mentions",
+    "editor.resources.show": "Show verse resources",
+    "editor.resources.hide": "Hide verse resources",
+    "editor.resources.edgeTab": "Helps",
+    "editor.resources.title": "Verse Resources",
+    "editor.resources.scrollHint":
+      "Scroll the editor to a verse to see the people, places and terms it mentions.",
+    "editor.resources.noneForRef": "No linked people, places or terms for {ref}.",
+    "editor.resources.failedToLoad": "Couldn't load resources: {error}",
+    "editor.resources.openMap": "Open map",
+    "editor.resources.mapAria": "Map showing {place} at {coords}",
+    "editor.resources.openExternal": "Open the full article",
+    "editor.resources.openExternalAria": "Open the full article about {entity}",
+    "editor.resources.attribution": "Reference data from the",
 
     // — Translation-notes reference sidebar ——————————————————————————
     "editor.tn.title": "Translation Notes",
@@ -1881,6 +1906,15 @@ export const editor = defineNamespace({
             "The number the sentence counts; it also selects which plural form is used.",
         },
       },
+      "editor.rail.moreActions": {
+        description:
+          "Tooltip and screen-reader name of the '…' overflow button in a cell's " +
+          "action rail (AQU-200). Opens a small menu holding the row's " +
+          "lower-frequency actions — record, upload audio, play, text-to-speech, " +
+          "footnote, comments, history — which no longer each get their own " +
+          "button. A noun phrase naming what is inside, not an imperative.",
+        maxLength: 20,
+      },
       "editor.audio.record": {
         description:
           "Tooltip and screen-reader name of the microphone button in a cell's " +
@@ -2967,6 +3001,17 @@ export const editor = defineNamespace({
             "editor.column.target.",
         },
       },
+      "editor.view.useAppFontSize": {
+        description:
+          "Tooltip and screen-reader name of the button that drops a column's " +
+          "custom size so it follows the app-wide font size again. Shown only " +
+          "after A+ or A− has pinned that column. Imperative.",
+        placeholders: {
+          side:
+            "Which column, lower-cased by the app from editor.column.source / " +
+            "editor.column.target.",
+        },
+      },
       "editor.view.directionMismatch": {
         description:
           "Warning toast when a column's direction has been forced by hand but " +
@@ -3038,6 +3083,14 @@ export const editor = defineNamespace({
           "Heading of the open parallel-bibles sidebar. 'Parallel' means shown " +
           "side by side with the user's own translation for comparison.",
         maxLength: 22,
+      },
+      "editor.bibles.noReferences": {
+        description: "Empty-state title when no usable Bible reference is available.",
+      },
+      "editor.bibles.noReferencesDescription": {
+        description:
+          "Explains why parallel text is unavailable for the current cells. " +
+          "Do not imply that the entire file lacks references or suggest scrolling fixes it.",
       },
       "editor.bibles.scrollHint": {
         description:
@@ -3127,6 +3180,98 @@ export const editor = defineNamespace({
           "It is followed immediately by a link whose text is the data source's " +
           "proper name, which is not translated — so this string ends mid-phrase on " +
           "purpose and the name cannot be moved in front of it.",
+      },
+      "editor.resources.openTooltip": {
+        description:
+          "Tooltip on the collapsed right-edge tab that opens the verse-resources " +
+          "sidebar. Two halves: the feature's name, then what it shows. 'Resources' " +
+          "here means published reference articles about the things the verse names " +
+          "(a person, a town, a key term), not files or project assets.",
+      },
+      "editor.resources.show": {
+        description:
+          "Screen-reader name of that same collapsed edge tab. Imperative.",
+      },
+      "editor.resources.hide": {
+        description:
+          "Screen-reader name of the X that collapses the verse-resources sidebar " +
+          "back to its edge tab. Nothing is unloaded or lost.",
+      },
+      "editor.resources.edgeTab": {
+        description:
+          "The one word printed vertically down the collapsed edge tab. Extremely " +
+          "tight — it must read rotated 90° in a 36px-wide column. 'Helps' is the " +
+          "field's own term for reference material that assists a translator. " +
+          "Abbreviate rather than let it overflow.",
+        maxLength: 10,
+      },
+      "editor.resources.title": {
+        description:
+          "Heading of the open verse-resources sidebar. Names what the panel lists: " +
+          "reference articles for the entities the currently-viewed verse mentions.",
+        maxLength: 24,
+      },
+      "editor.resources.scrollHint": {
+        description:
+          "Empty state shown before the editor has scrolled to a verse. Explains the " +
+          "interaction: the panel follows the editor's scroll position. Full sentence.",
+      },
+      "editor.resources.noneForRef": {
+        description:
+          "Empty state when a verse IS in view but the corpus links no entities to " +
+          "it — common for non-narrative verses. States the fact; nothing is broken " +
+          "and there is no action to take.",
+        placeholders: {
+          ref: "The verse being viewed, as book/chapter/verse (e.g. 'MAT 2 1'). Not translated.",
+        },
+      },
+      "editor.resources.failedToLoad": {
+        description:
+          "Error line replacing the list when the reference lookup fails (offline, " +
+          "or the upstream corpus is down). The verse itself is unaffected.",
+        placeholders: {
+          error: "Raw English error text from the failed request. Not translated.",
+        },
+      },
+      "editor.resources.openMap": {
+        description:
+          "Link under a place's locator map; opens that location on openstreetmap.org " +
+          "in a new tab, where it can be zoomed. Imperative, very tight — it sits on " +
+          "one 10px line opposite the coordinates.",
+        maxLength: 16,
+      },
+      "editor.resources.mapAria": {
+        description:
+          "Screen-reader description of the locator map image, which is otherwise " +
+          "just tiles. Names the place and reads out its coordinates, since a " +
+          "non-sighted user cannot see the marker.",
+        placeholders: {
+          place: "Name of the biblical place shown, e.g. 'Bethlehem (of Judah)'. Not translated.",
+          coords:
+            "Formatted latitude/longitude, e.g. '31.705°N, 35.210°E'. The N/S/E/W letters are " +
+            "English compass abbreviations. Not translated.",
+        },
+      },
+      "editor.resources.openExternal": {
+        description:
+          "Tooltip on the small external-link icon beside an entity's name; it opens " +
+          "that entity's full reference article on the source site in a new tab.",
+        maxLength: 24,
+      },
+      "editor.resources.openExternalAria": {
+        description:
+          "Screen-reader name of that same icon-only link. Icon-only, so this string " +
+          "is the only name it has, and it must say WHICH entity it opens.",
+        placeholders: {
+          entity: "Name of the person, place or term, e.g. 'Herod'. Not translated.",
+        },
+      },
+      "editor.resources.attribution": {
+        description:
+          "Opening words of the 10px attribution line at the foot of the sidebar. It " +
+          "is followed immediately by links whose text is each data source's proper " +
+          "name, which is not translated — so this string ends mid-phrase on purpose " +
+          "and the names cannot be moved in front of it.",
       },
       "editor.tn.title": {
         description:

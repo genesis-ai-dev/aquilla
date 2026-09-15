@@ -1895,7 +1895,7 @@ case 'cell.audio.attach': {
           .prepare(
             `UPDATE concepts SET status = 'active', updated_at = ?
              WHERE concept_id = ? AND project_id = ?
-               AND status = 'draft' AND deleted_at IS NULL`,
+               AND status IN ('draft', 'deprecated') AND deleted_at IS NULL`,
           )
           .bind(event.serverTs, p.conceptId, event.projectId),
       )

@@ -116,6 +116,48 @@ describe("POST /api/v1/ai/agent/run — access control", () => {
   })
 })
 
+// [Pen test] API security & data exposure (2026-09-03): every spend guard
+// below (AI budget, credit cap, word cap) is log-only in every deployed
+// environment — this per-user sliding-window throttle is the only thing that
+// actually blocks a flood against the shared OPENROUTER_API_KEY on the most
+// expensive of the two OpenRouter proxies (multi-turn tool loop).
+describe("POST /api/v1/ai/agent/run — rate limiting", () => {
+  it("429s a user that has flooded the window, without calling upstream", async () => {
+    await seedProjectWorld()
+    const jwt = await jwtFor("alice")
+    const upstream = vi
+      .spyOn(globalThis, "fetch")
+      .mockRejectedValue(new Error("must not reach upstream — rate limit should block first"))
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO auth_rate_limit_events (kind, identifier, success)
+       SELECT 'agent_run', 'user:1', 1 FROM generate_series(1, 60)`,
+    ).run()
+
+    const res = await postRun(jwt)
+
+    expect(res.status).toBe(429)
+    const body = (await res.json()) as { error: string }
+    expect(body.error).toBe("rate_limited")
+    expect(upstream).not.toHaveBeenCalled()
+  })
+
+  it("does not throttle a fresh user, even when another user has flooded the window", async () => {
+    await seedProjectWorld()
+    const jwt = await jwtFor("alice")
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO auth_rate_limit_events (kind, identifier, success)
+       SELECT 'agent_run', 'user:999', 1 FROM generate_series(1, 60)`,
+    ).run()
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      modelTurn({ role: "assistant", content: "All done." }),
+    )
+
+    const res = await postRun(jwt)
+
+    expect(res.status).toBe(200)
+  })
+})
+
 describe("POST /api/v1/ai/agent/run — scripted full loop", () => {
   it("sql → compressed block → emit → proposal frame → done", async () => {
     await seedProjectWorld()

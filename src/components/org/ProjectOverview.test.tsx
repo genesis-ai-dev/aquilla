@@ -175,6 +175,8 @@ const defaultOrgSettingsMock = (): OrgSettingsMock => ({
   orgProviderKeys: {},
   canExport: true,
   exportMinRole: null,
+  canEgress: false,
+  egressMinRole: 700,
   canViewRoster: true,
   rosterViewMinRole: 600,
   canViewMemberProgress: true,
@@ -183,6 +185,9 @@ const defaultOrgSettingsMock = (): OrgSettingsMock => ({
   allowSelfAssignment: false,
   // AQU-822: default termbase-edit floor (project_lead), as the server resolves it.
   termbaseEditMinRole: 500,
+  languageEditMinRole: 600,
+  commentCreateMinRole: 200,
+  commentResolveMinRole: 400,
   refresh: vi.fn(async () => null),
   patch: vi.fn(async () => ({ kind: "ok" as const, value: { orgId: 1, settings: {}, version: 2, updatedAt: null, updatedBy: null } })),
   requestPromotion: vi.fn(async () => ({ kind: "blocked" as const })),
@@ -435,12 +440,36 @@ describe("ProjectOverview Autopilot discovery flag", () => {
     expect(screen.queryByTestId("project-autopilot-panel-mock")).not.toBeInTheDocument()
   })
 
-  it("shows the overview surface under the default-on discovery flag", async () => {
+  it("hides the overview surface when the project has never opted in", async () => {
+    // AQU-1103 regression guard, at the surface the bug was reported on: a PM's
+    // project overview. This is the production shape — no `experimentalFlags`
+    // on the record at all — which used to fall through to a default-on
+    // registry entry and render an Autopilot panel reporting "Needs attention"
+    // on a project nobody had enrolled.
     fetchSyncToken.mockResolvedValue({ token: "tok" })
     fetchProjectFiles.mockResolvedValue([])
     getPortfolio.mockResolvedValue([])
     useProject.mockReturnValue({
       project: projectRecord({ level: 700 }),
+      status: "ready",
+      refresh,
+    })
+
+    renderOverview()
+
+    await screen.findByRole("heading", { level: 1, name: "John" })
+    expect(screen.queryByTestId("project-autopilot-panel-mock")).not.toBeInTheDocument()
+  })
+
+  it("shows the overview surface once the project has opted in", async () => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    fetchProjectFiles.mockResolvedValue([])
+    getPortfolio.mockResolvedValue([])
+    useProject.mockReturnValue({
+      project: projectRecord({
+        level: 700,
+        experimentalFlags: { contextualTranslation: true },
+      }),
       status: "ready",
       refresh,
     })
@@ -455,7 +484,10 @@ describe("ProjectOverview Autopilot discovery flag", () => {
     fetchProjectFiles.mockResolvedValue([])
     getPortfolio.mockResolvedValue([])
     useProject.mockReturnValue({
-      project: projectRecord({ level: 700 }),
+      project: projectRecord({
+        level: 700,
+        experimentalFlags: { contextualTranslation: true },
+      }),
       roleLevel: ROLE.VIEWER,
       status: "ready",
       refresh,
@@ -1432,5 +1464,151 @@ describe("plan board on the overview", () => {
     }])
     renderOverview()
     expect(await screen.findByTestId("plan-empty")).toBeInTheDocument()
+  })
+})
+
+// AQU-656: original-blob downloads. The files card they used to hang off was
+// replaced by the plan (AQU-1092); the gallery is now a compact assets card
+// that lists only files with a stored original.
+describe("imported originals on the overview (AQU-656)", () => {
+  beforeEach(() => {
+    fetchSyncToken.mockResolvedValue({ token: "tok" })
+    getPortfolio.mockResolvedValue([])
+    fetchProjectPlan.mockResolvedValue({
+      projectId: "p1", lane: "", validationCount: 1, revision: 1, units: [],
+    })
+  })
+
+  function fileWith(
+    fileId: string,
+    name: string,
+    hasOriginalSource = false,
+  ): import("@/lib/sync/cells-read").FileSummary {
+    return {
+      fileId, projectId: "p1", name, fileType: "usfm",
+      sourceLanguage: null, targetLanguage: null,
+      cellCount: 10, filledCount: 5, approvedCount: 2, wordCount: 100,
+      lastEditAt: null, hasOriginalSource,
+    }
+  }
+
+  function useFiles(files: import("@/lib/sync/cells-read").FileSummary[]) {
+    fetchProjectFiles.mockResolvedValue(files)
+    useProject.mockReturnValue({
+      project: projectRecord({
+        level: 400,
+        name: "My Project",
+        files: files.map((f) => ({
+          id: f.fileId, name: f.name, type: "usfm", createdAt: "x", cellCount: f.cellCount,
+        })),
+      }),
+      status: "ready",
+      refresh,
+    })
+  }
+
+  it("shows Download all originals and per-file download when a blob exists", async () => {
+    useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), canExport: true })
+    useFiles([
+      fileWith("f1", "Genesis.usfm", true),
+      fileWith("f2", "Notes.md"),
+    ])
+
+    renderOverview()
+
+    expect(await screen.findByTestId("imported-originals")).toBeInTheDocument()
+    expect(screen.getByTestId("download-originals-zip")).toHaveTextContent("Download all originals")
+    const original = screen.getByTestId("download-original-file")
+    expect(original.tagName).toBe("BUTTON")
+    expect(original).toHaveAttribute("aria-label", "Download original Genesis.usfm")
+    expect(screen.queryByRole("button", { name: "Download original Notes.md" })).not.toBeInTheDocument()
+    expect(screen.getByText("Genesis.usfm")).toBeInTheDocument()
+    expect(screen.queryByText("Notes.md")).not.toBeInTheDocument()
+  })
+
+  it("hides original-download controls when no file has a stored original", async () => {
+    useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), canExport: true })
+    useFiles([fileWith("f1", "Genesis.usfm")])
+
+    renderOverview()
+
+    await screen.findByTestId("plan-board")
+    expect(screen.queryByTestId("imported-originals")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("download-originals-zip")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("download-original-file")).not.toBeInTheDocument()
+  })
+
+  it("hides original-download controls when the caller is below the org's export floor", async () => {
+    useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), canExport: false })
+    useFiles([fileWith("f1", "Genesis.usfm", true)])
+
+    renderOverview()
+
+    await screen.findByTestId("plan-board")
+    expect(screen.queryByTestId("imported-originals")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("download-originals-zip")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("download-original-file")).not.toBeInTheDocument()
+  })
+
+  const manyOriginals = (n: number) =>
+    Array.from({ length: n }, (_, i) =>
+      fileWith(`f${i + 1}`, `Book${String(i + 1).padStart(2, "0")}.usfm`, true),
+    )
+
+  it("caps the list at five rows and reveals the rest a batch at a time or all at once", async () => {
+    useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), canExport: true })
+    useFiles(manyOriginals(12))
+
+    renderOverview()
+
+    const card = await screen.findByTestId("imported-originals")
+    expect(within(card).getAllByTestId("download-original-file")).toHaveLength(5)
+    expect(within(card).getByText("Book05.usfm")).toBeInTheDocument()
+    expect(within(card).queryByText("Book06.usfm")).not.toBeInTheDocument()
+    expect(within(card).getByRole("button", { name: "Show 5 more" })).toBeInTheDocument()
+    expect(within(card).getByRole("button", { name: "Show all (12)" })).toBeInTheDocument()
+
+    fireEvent.click(within(card).getByRole("button", { name: "Show 5 more" }))
+    expect(within(card).getAllByTestId("download-original-file")).toHaveLength(10)
+    expect(within(card).getByText("Book10.usfm")).toBeInTheDocument()
+    // Only two rows are left hidden, so another batch would equal "Show all".
+    expect(within(card).queryByRole("button", { name: "Show 5 more" })).not.toBeInTheDocument()
+
+    fireEvent.click(within(card).getByRole("button", { name: "Show all (12)" }))
+    expect(within(card).getAllByTestId("download-original-file")).toHaveLength(12)
+    expect(within(card).getByText("Book12.usfm")).toBeInTheDocument()
+    expect(within(card).queryByRole("button", { name: "Show all (12)" })).not.toBeInTheDocument()
+
+    fireEvent.click(within(card).getByRole("button", { name: "Show fewer" }))
+    expect(within(card).getAllByTestId("download-original-file")).toHaveLength(5)
+    expect(within(card).queryByText("Book06.usfm")).not.toBeInTheDocument()
+  })
+
+  it("expands everything at once from the first page", async () => {
+    useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), canExport: true })
+    useFiles(manyOriginals(23))
+
+    renderOverview()
+
+    const card = await screen.findByTestId("imported-originals")
+    expect(within(card).getAllByTestId("download-original-file")).toHaveLength(5)
+
+    fireEvent.click(within(card).getByRole("button", { name: "Show all (23)" }))
+    expect(within(card).getAllByTestId("download-original-file")).toHaveLength(23)
+    expect(within(card).queryByRole("button", { name: "Show 5 more" })).not.toBeInTheDocument()
+    expect(within(card).getByRole("button", { name: "Show fewer" })).toBeInTheDocument()
+  })
+
+  it("shows no paging controls when five or fewer files have an original", async () => {
+    useOrgSettingsMock.mockReturnValue({ ...defaultOrgSettingsMock(), canExport: true })
+    useFiles(manyOriginals(5))
+
+    renderOverview()
+
+    const card = await screen.findByTestId("imported-originals")
+    expect(within(card).getAllByTestId("download-original-file")).toHaveLength(5)
+    expect(within(card).queryByTestId("imported-originals-show-more")).not.toBeInTheDocument()
+    expect(within(card).queryByTestId("imported-originals-show-all")).not.toBeInTheDocument()
+    expect(within(card).queryByTestId("imported-originals-show-fewer")).not.toBeInTheDocument()
   })
 })

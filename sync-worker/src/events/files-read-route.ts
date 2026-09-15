@@ -39,6 +39,8 @@ interface FileRowRaw {
   word_count: number
   last_edit_at: number | null
   deleted_at: number | null
+  /** AQU-656: true when file_source_blobs has a row (pointer or legacy inline). */
+  has_original_source: boolean | number | null
 }
 
 interface FileSummary {
@@ -99,6 +101,8 @@ interface FileSummary {
   lastEditAt: number | null
   /** AQU-272: epoch-ms when this file was soft-deleted, or null if active. */
   deletedAt: number | null
+  /** AQU-656: original import blob exists (R2 or legacy raw_source). */
+  hasOriginalSource: boolean
 }
 
 /** Shape-check the recorded correction. `scale` is the only field that must be
@@ -164,6 +168,7 @@ function mapRow(row: FileRowRaw): FileSummary {
     wordCount: row.word_count,
     lastEditAt: row.last_edit_at,
     deletedAt: row.deleted_at ?? null,
+    hasOriginalSource: Boolean(row.has_original_source),
   }
 }
 
@@ -229,7 +234,8 @@ export async function handleFilesReadRequest(
     "COALESCE(p.total_count, f.cell_count) AS cell_count, " +
     "CASE WHEN p.file_id IS NULL THEN f.approved_count ELSE COALESCE(a.approved, 0) END AS approved_count, " +
     "COALESCE(p.filled_count, f.filled_count) AS filled_count, " +
-    "f.word_count, f.last_edit_at, f.deleted_at"
+    "f.word_count, f.last_edit_at, f.deleted_at, " +
+    "(b.file_id IS NOT NULL) AS has_original_source"
   const thresholdCte =
     "WITH thr AS (SELECT LEAST(15, GREATEST(1, CASE WHEN (settings::jsonb->>'validationCount') ~ '^[0-9]+$' " +
     "THEN (settings::jsonb->>'validationCount')::integer ELSE 1 END)) AS n FROM project_settings WHERE project_id = ?)"
@@ -240,7 +246,8 @@ export async function handleFilesReadRequest(
     // one listing row per lane.
     " LEFT JOIN file_section_progress p ON p.project_id = f.project_id AND p.file_id = f.id AND p.scope = 'file' AND p.section_key = '' AND p.target_lang = ''" +
     " LEFT JOIN thr ON true" +
-    " LEFT JOIN LATERAL (SELECT SUM(entry.value::integer)::integer AS approved FROM jsonb_each_text(p.validator_histogram) entry WHERE entry.key::integer >= COALESCE(thr.n, 1)) a ON true"
+    " LEFT JOIN LATERAL (SELECT SUM(entry.value::integer)::integer AS approved FROM jsonb_each_text(p.validator_histogram) entry WHERE entry.key::integer >= COALESCE(thr.n, 1)) a ON true" +
+    " LEFT JOIN file_source_blobs b ON b.file_id = f.id AND b.project_id = f.project_id"
   const orderBy = "ORDER BY f.last_edit_at DESC NULLS LAST, f.name ASC, f.id ASC"
 
   // ?trash=1 returns soft-deleted files only; default returns active files only.

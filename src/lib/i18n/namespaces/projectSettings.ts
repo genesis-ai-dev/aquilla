@@ -405,6 +405,7 @@ export const projectSettings = defineNamespace({
       other: "Connected — {count} models",
     }),
     "projectSettings.advancedLlm.endpointRequiredError": "Endpoint URL is required",
+    "projectSettings.advancedLlm.apiKeyRequiredError": "API key is required for this endpoint",
     "projectSettings.advancedLlm.connectionFailedError": "Connection failed",
     "projectSettings.loadingLabel": "Loading project settings",
     "projectSettings.advancedLlm.apiKeyLabelRequired": "API key *",

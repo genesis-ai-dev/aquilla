@@ -272,6 +272,33 @@ describe('POST /events — one malformed event does not take its batch down', ()
   })
 })
 
+// ── DB-failure error responses never echo raw driver/DB error text ────────
+
+describe('POST /events — DB batch failure responses stay generic', () => {
+  it('reports a generic "DB batch failed" reason, never the raw driver error, when the write transaction throws', async () => {
+    const token = await makeToken({ role: 600 })
+    const { db } = await makeTestDb()
+    const failingDb = Object.create(db) as typeof db
+    const failBatch = async () => {
+      throw new Error('relation "cells" violates constraint fk_cells_project_id_9f21 on column project_id')
+    }
+    failingDb.batch = failBatch
+    failingDb.batchPipelined = failBatch
+
+    const res = (await handleEventsWriteRequest(
+      await makeRequest([targetCreate()], token),
+      makeEnv(failingDb),
+    ))!
+    expect(res.status).toBe(200)
+
+    const body = (await res.json()) as any
+    expect(body.rejected).toHaveLength(1)
+    expect(body.rejected[0].status).toBe(500)
+    expect(body.rejected[0].reason).toBe('DB batch failed')
+    expect(body.rejected[0].reason).not.toMatch(/relation|constraint|fk_cells/)
+  })
+})
+
 // ── server_seq monotonicity ────────────────────────────────────────────
 
 describe('POST /events — server_seq', () => {

@@ -28,6 +28,8 @@ import { SyncingProvider, useSyncing } from "@/context/SyncingContext"
 import { OrgProvider } from "@/context/OrgContext"
 import { OutboxProvider } from "@/context/OutboxContext"
 import { OfflineStoreProvider } from "@/context/OfflineStoreContext"
+import { OfflineSyncManagerMount } from "@/components/OfflineSyncManagerMount"
+import { ConflictToast } from "@/components/ConflictToast"
 import { NavHistoryProvider } from "@/context/NavHistoryContext"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { LoadingOverlay } from "@/components/ui/loading-overlay"
@@ -266,9 +268,11 @@ export default function App() {
     // ones open instantly (Base UI grouping). `delay` only exists on the
     // Provider, so this is the one knob for hover timing across the app.
     <OfflineStoreProvider>
+      <OfflineSyncManagerMount />
       <TooltipProvider delay={600}>
         <SyncingProvider>
           <PrivateModeBanner />
+          <ConflictToast />
           {/* AQU-293: session-expiry banner — must be inside Router (uses useLocation) */}
           <SessionExpiredBanner />
           {/* AQU-885: a stored JWT that's already expired at boot goes straight to

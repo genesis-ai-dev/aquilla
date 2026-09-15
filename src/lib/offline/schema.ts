@@ -56,8 +56,17 @@ const eventQueue = State.SQLite.table({
     fileId: State.SQLite.text({ nullable: true }),
     cellId: State.SQLite.text({ nullable: true }),
     kind: State.SQLite.text(),
+    // The event's typed payload only (OutboxRawEvent["payload"]) — NOT the
+    // full envelope. `author`/`schemaVersion` are separate columns below so
+    // the sync adapter can reassemble a wire-valid OutboxRawEvent for
+    // POST /events without guessing at this column's shape.
     payload: State.SQLite.json(),
     parentId: State.SQLite.text({ nullable: true }),
+    // Username the event is attributed to — required on the wire envelope
+    // (OutboxRawEvent.author) and checked against the JWT claim server-side.
+    author: State.SQLite.text(),
+    // OUTBOX_SCHEMA_VERSION at enqueue time (src/lib/sync/outbox-types.ts).
+    schemaVersion: State.SQLite.integer(),
     clientTs: State.SQLite.datetime(),
     createdAt: State.SQLite.datetime(),
     status: State.SQLite.text({
@@ -151,6 +160,8 @@ const events = {
       kind: Schema.String,
       payload: Schema.Unknown,
       parentId: Schema.NullOr(Schema.String),
+      author: Schema.String,
+      schemaVersion: Schema.Number,
       clientTs: Schema.Date,
       createdAt: Schema.Date,
     }),
@@ -209,7 +220,7 @@ const materializers = State.SQLite.materializers(events, {
   "v1.CellRemoved": ({ projectId, fileId, cellId, side }) =>
     tables.cells.delete().where({ id: cellRowId(projectId, fileId, cellId, side) }),
 
-  "v1.EventQueued": ({ id, projectId, fileId, cellId, kind, payload, parentId, clientTs, createdAt }) =>
+  "v1.EventQueued": ({ id, projectId, fileId, cellId, kind, payload, parentId, author, schemaVersion, clientTs, createdAt }) =>
     tables.eventQueue.insert({
       id,
       projectId,
@@ -218,6 +229,8 @@ const materializers = State.SQLite.materializers(events, {
       kind,
       payload,
       parentId,
+      author,
+      schemaVersion,
       clientTs,
       createdAt,
       status: "pending",

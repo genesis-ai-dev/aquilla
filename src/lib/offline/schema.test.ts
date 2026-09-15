@@ -109,6 +109,8 @@ describe("event queue", () => {
         kind: "target.cell.commit",
         payload: { text: "En el principio" },
         parentId: "evt1",
+        author: "dev@local.test",
+        schemaVersion: 1,
         clientTs: new Date("2026-01-01T00:00:00Z"),
         createdAt: new Date("2026-01-01T00:00:00Z"),
       }),

@@ -9,7 +9,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react"
-import { AlertTriangle, Settings, X } from "lucide-react"
+import { AlertTriangle, RotateCcw, Settings, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Label } from "@/components/ui/label"
@@ -27,6 +27,7 @@ import { AppTooltip } from "@/components/ui/tooltip"
 import { toast } from "@/components/ui/toast"
 import { cn } from "@/lib/utils"
 import { MIN_FONT_SIZE, MAX_FONT_SIZE, FONT_SIZE_STEP } from "@/lib/store/file-view-prefs"
+import { setMilestoneSplit, useMilestoneSplit } from "@/lib/store/milestone-split-pref"
 import type { FootnoteViewMode } from "@/lib/footnotes/types"
 import type { TargetKeyTermHighlightMode } from "@/hooks/useTargetKeyTermHighlightPreference"
 import type { DirectionMode, TextDirection, TextDirectionSummary } from "@/lib/text-direction"
@@ -55,6 +56,8 @@ interface ViewSettingsMenuProps {
   directionWarningScope?: string | null
   cellLabelsEnabled: boolean
   tnSidebarEnabled: boolean
+  /** Per-browser switch for health ribbons, rule checks and the confidence overlay. */
+  healthCalculationsEnabled?: boolean
   /** AQU-317: USFM \f...\f* footnote display mode. */
   footnoteViewMode?: FootnoteViewMode
   /** When approved target renderings receive the quiet key-term highlight. */
@@ -63,13 +66,19 @@ interface ViewSettingsMenuProps {
   sourceFontSize: number
   /** Per-file target-column font size in px. */
   targetFontSize: number
+  /** True when this column has a stored size and no longer follows the app font. */
+  sourceFontSizeExplicit?: boolean
+  targetFontSizeExplicit?: boolean
   onLineNumbersChange: (v: boolean) => void
   onSourceDirectionModeChange: (v: DirectionMode) => void
   onTargetDirectionModeChange: (v: DirectionMode) => void
   onCellLabelsChange: (v: boolean) => void
   onSourceFontSizeChange: (v: number) => void
   onTargetFontSizeChange: (v: number) => void
+  onSourceFontSizeReset?: () => void
+  onTargetFontSizeReset?: () => void
   onTnSidebarChange: (v: boolean) => void
+  onHealthCalculationsChange?: (v: boolean) => void
   onFootnoteViewModeChange?: (v: FootnoteViewMode) => void
   onTargetKeyTermHighlightModeChange?: (v: TargetKeyTermHighlightMode) => void
 }
@@ -92,22 +101,29 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
   directionWarningScope,
   cellLabelsEnabled,
   tnSidebarEnabled,
+  healthCalculationsEnabled = true,
   footnoteViewMode = "off",
   targetKeyTermHighlightMode = "never",
   sourceFontSize,
   targetFontSize,
+  sourceFontSizeExplicit = false,
+  targetFontSizeExplicit = false,
   onLineNumbersChange,
   onSourceDirectionModeChange,
   onTargetDirectionModeChange,
   onCellLabelsChange,
   onSourceFontSizeChange,
   onTargetFontSizeChange,
+  onSourceFontSizeReset,
+  onTargetFontSizeReset,
   onTnSidebarChange,
+  onHealthCalculationsChange,
   onFootnoteViewModeChange,
   onTargetKeyTermHighlightModeChange,
 }, ref) {
   const t = useT()
   const [menuOpen, setMenuOpen] = useState(false)
+  const splitByMilestone = useMilestoneSplit()
   const mismatch = useMemo(
     () =>
       getManualDirectionMismatch({
@@ -278,6 +294,13 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
 
           <FieldGroup className="gap-3">
             <SwitchRow
+              id="view-split-milestones"
+              label={t("editor.milestone.splitAria")}
+              checked={splitByMilestone}
+              disabled={!fileOpen}
+              onCheckedChange={setMilestoneSplit}
+            />
+            <SwitchRow
               id="view-show-line-numbers"
               label={t("editor.view.showLineNumbers")}
               checked={lineNumbersEnabled}
@@ -296,6 +319,14 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
               checked={tnSidebarEnabled}
               onCheckedChange={onTnSidebarChange}
             />
+            {onHealthCalculationsChange && (
+              <SwitchRow
+                id="view-show-health-indicators"
+                label={t("editor.view.showHealthIndicators")}
+                checked={healthCalculationsEnabled}
+                onCheckedChange={onHealthCalculationsChange}
+              />
+            )}
           </FieldGroup>
 
           {onTargetKeyTermHighlightModeChange && (
@@ -383,13 +414,17 @@ export const ViewSettingsMenu = forwardRef<ViewSettingsMenuHandle, ViewSettingsM
               label={t("editor.column.source")}
               value={sourceFontSize}
               disabled={!fileOpen}
+              explicit={sourceFontSizeExplicit}
               onChange={onSourceFontSizeChange}
+              onReset={onSourceFontSizeReset}
             />
             <FontSizeRow
               label={t("editor.column.target")}
               value={targetFontSize}
               disabled={!fileOpen}
+              explicit={targetFontSizeExplicit}
               onChange={onTargetFontSizeChange}
+              onReset={onTargetFontSizeReset}
             />
           </div>
         </PopoverContent>
@@ -439,14 +474,19 @@ function FontSizeRow({
   label,
   value,
   disabled,
+  explicit,
   onChange,
+  onReset,
 }: {
   label: string
   value: number
   disabled: boolean
+  explicit: boolean
   onChange: (v: number) => void
+  onReset?: () => void
 }) {
   const t = useT()
+  const side = label.toLowerCase()
   return (
     <div
       className={cn(
@@ -456,12 +496,12 @@ function FontSizeRow({
     >
       <span>{label}</span>
       <span className="flex items-center gap-1">
-        <AppTooltip content={t("editor.view.decreaseFontSize", { side: label.toLowerCase() })}>
+        <AppTooltip content={t("editor.view.decreaseFontSize", { side })}>
           <Button
             type="button"
             variant="ghost"
             size="icon-xs"
-            aria-label={t("editor.view.decreaseFontSize", { side: label.toLowerCase() })}
+            aria-label={t("editor.view.decreaseFontSize", { side })}
             disabled={disabled || value <= MIN_FONT_SIZE}
             onClick={() => onChange(Math.max(MIN_FONT_SIZE, value - FONT_SIZE_STEP))}
             className="size-5"
@@ -470,12 +510,12 @@ function FontSizeRow({
           </Button>
         </AppTooltip>
         <span className="w-9 text-center text-[10px] tabular-nums text-muted-foreground">{value}px</span>
-        <AppTooltip content={t("editor.view.increaseFontSize", { side: label.toLowerCase() })}>
+        <AppTooltip content={t("editor.view.increaseFontSize", { side })}>
           <Button
             type="button"
             variant="ghost"
             size="icon-xs"
-            aria-label={t("editor.view.increaseFontSize", { side: label.toLowerCase() })}
+            aria-label={t("editor.view.increaseFontSize", { side })}
             disabled={disabled || value >= MAX_FONT_SIZE}
             onClick={() => onChange(Math.min(MAX_FONT_SIZE, value + FONT_SIZE_STEP))}
             className="size-5"
@@ -483,6 +523,23 @@ function FontSizeRow({
             <span className="text-[11px] leading-none select-none">A+</span>
           </Button>
         </AppTooltip>
+        <span className="flex size-5 items-center justify-center">
+          {explicit && onReset ? (
+            <AppTooltip content={t("editor.view.useAppFontSize", { side })}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                aria-label={t("editor.view.useAppFontSize", { side })}
+                disabled={disabled}
+                onClick={onReset}
+                className="size-5 text-muted-foreground"
+              >
+                <RotateCcw className="h-3 w-3" />
+              </Button>
+            </AppTooltip>
+          ) : null}
+        </span>
       </span>
     </div>
   )

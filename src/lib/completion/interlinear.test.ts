@@ -231,13 +231,27 @@ describe("buildAlignmentModel — cold-start Dice path", () => {
 
   it("excludes low-confidence noise below default threshold", () => {
     const model = buildAlignmentModel(SMALL_CORPUS)
-    const links = alignCell(
-      "God created",
-      "Dieu créa",
-      model,
-    )
-    for (const l of links) {
-      expect(l.confidence).toBeGreaterThanOrEqual(CONFIDENCE_MIN)
+    // Deliberately mismatched pair: the source verse and the target verse come
+    // from different rows of the corpus, so most source tokens only ever
+    // co-occurred with these target tokens incidentally. That is exactly the
+    // "noise" the default threshold exists to suppress.
+    const source = "God blessed the seventh day"
+    const target = "Dieu créa l homme à son image"
+
+    const unfiltered = alignCell(source, target, model, { threshold: 0 })
+    const noise = unfiltered.filter((l) => l.confidence < CONFIDENCE_MIN)
+    const signal = unfiltered.filter((l) => l.confidence >= CONFIDENCE_MIN)
+
+    // Guard against a vacuous test: this pair must actually generate noise,
+    // otherwise the assertions below prove nothing.
+    expect(noise.length).toBeGreaterThan(0)
+
+    const filtered = alignCell(source, target, model)
+
+    // The default threshold drops every sub-CONFIDENCE_MIN link and keeps the rest.
+    expect(filtered).toEqual(signal)
+    for (const n of noise) {
+      expect(filtered).not.toContainEqual(n)
     }
   })
 })
@@ -295,6 +309,41 @@ describe("buildAlignmentModel — warm EM path", () => {
 
     expect(model.isWarm).toBe(true)
     expect(countProbabilityEntries(model)).toBeLessThanOrEqual(pairs.length)
+  })
+
+  it("EM model returns no links for completely unseen tokens", () => {
+    const model = buildAlignmentModel(WARM_CORPUS)
+    expect(alignCell("xyzzy plugh", "zork frotz", model)).toEqual([])
+  })
+
+  it("EM model excludes low-confidence noise below default threshold", () => {
+    const model = buildAlignmentModel(WARM_CORPUS)
+    // Mismatched source/target rows — see the cold-start equivalent above.
+    const source = "God blessed the seventh day"
+    const target = "Dieu prononça toutes ces paroles"
+
+    const unfiltered = alignCell(source, target, model, { threshold: 0 })
+    const noise = unfiltered.filter((l) => l.confidence < CONFIDENCE_MIN)
+    const signal = unfiltered.filter((l) => l.confidence >= CONFIDENCE_MIN)
+
+    expect(noise.length).toBeGreaterThan(0)
+
+    const filtered = alignCell(source, target, model)
+    expect(filtered).toEqual(signal)
+    for (const n of noise) {
+      expect(filtered).not.toContainEqual(n)
+    }
+  })
+
+  it("EM model keeps a high-confidence link while dropping noise in the same cell", () => {
+    const model = buildAlignmentModel(WARM_CORPUS)
+    // "god"/"dieu" is the strongest association in the corpus; the trailing
+    // tokens are unrelated filler that must not survive the default threshold.
+    const links = alignCell("God xyzzy plugh", "Dieu zork frotz", model)
+    expect(links).toHaveLength(1)
+    expect(links[0].srcToken).toBe("god")
+    expect(links[0].tgtToken).toBe("dieu")
+    expect(links[0].confidence).toBeGreaterThan(CONFIDENCE_AMBER)
   })
 
   it("cold model is also deterministic", () => {

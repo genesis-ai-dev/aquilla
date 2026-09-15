@@ -134,11 +134,13 @@ beforeEach(() => {
   currentProject = makeProject()
 })
 
-describe("ProjectSettings — the Timeline card renders all three boxes", () => {
-  it("shows the timing lock, the add-lines box and the track-editing box", () => {
+// AQU-1068 retired the third box (add lines into the timeline's silences).
+// Its successor is the "who can add and remove cells" tier, covered in
+// ProjectSettings.cellEditing.test.tsx — which asserts this box is gone.
+describe("ProjectSettings — the Timeline card renders both boxes", () => {
+  it("shows the timing lock and the track-editing box", () => {
     renderSettings()
     expect(box("settings-timing-locked")).toBeTruthy()
-    expect(box("settings-allow-line-creation")).toBeTruthy()
     expect(box("settings-allow-track-editing")).toBeTruthy()
   })
 })
@@ -183,11 +185,12 @@ describe("ProjectSettings — allowTrackEditing (AQU-646 stage 2)", () => {
     expect(sent.allowTrackEditing).toBe(true)
   })
 
-  // The three boxes are independent switches, not one policy. Turning track
-  // editing on must not disturb the timing lock, which is a different question
-  // (may timings MOVE) with a different default (on).
+  // The boxes are independent switches, not one policy. Turning track editing
+  // on must not disturb the timing lock, which is a different question (may
+  // timings MOVE) with a different default (on), nor the cell-editing tier
+  // AQU-1068 put in the retired add-lines box's place.
   it("does not disturb its neighbours", async () => {
-    currentProject = makeProject({ timingLocked: true, allowLineCreation: false })
+    currentProject = makeProject({ timingLocked: true, cellEditingFloor: "none" })
     renderSettings()
     fireEvent.click(box("settings-allow-track-editing"))
     fireEvent.click(saveButton() as HTMLElement)
@@ -195,11 +198,11 @@ describe("ProjectSettings — allowTrackEditing (AQU-646 stage 2)", () => {
     const sent = patch.mock.calls[0]?.[0] as Record<string, unknown>
     expect(sent.allowTrackEditing).toBe(true)
     expect(sent).not.toHaveProperty("timingLocked")
-    expect(sent).not.toHaveProperty("allowLineCreation")
+    expect(sent).not.toHaveProperty("cellEditingFloor")
   })
 })
 
-describe("ProjectSettings — the two boxes that shipped uncovered", () => {
+describe("ProjectSettings — the timing lock, which shipped uncovered", () => {
   // Absent means LOCKED here, not unlocked: every project that predates the
   // setting must start ticked. The opposite reading would have quietly unlocked
   // every imported timing in the app.
@@ -216,14 +219,5 @@ describe("ProjectSettings — the two boxes that shipped uncovered", () => {
     fireEvent.click(saveButton() as HTMLElement)
     await waitFor(() => expect(patch).toHaveBeenCalled())
     expect((patch.mock.calls[0]?.[0] as Record<string, unknown>).timingLocked).toBe(false)
-  })
-
-  it("adding lines reads OFF by default and saves when turned on", async () => {
-    renderSettings()
-    expect(isChecked(box("settings-allow-line-creation"))).toBe(false)
-    fireEvent.click(box("settings-allow-line-creation"))
-    fireEvent.click(saveButton() as HTMLElement)
-    await waitFor(() => expect(patch).toHaveBeenCalled())
-    expect((patch.mock.calls[0]?.[0] as Record<string, unknown>).allowLineCreation).toBe(true)
   })
 })

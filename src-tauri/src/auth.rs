@@ -1,5 +1,4 @@
-// Auth module: system browser OAuth flow + deep-link token capture
-
+use crate::keychain;
 use tauri::Emitter;
 use tauri_plugin_opener::OpenerExt;
 use url::Url;
@@ -32,7 +31,7 @@ pub fn setup_deep_link_handler(app: &tauri::App) -> Result<(), Box<dyn std::erro
 /// Parses a `codex://auth/callback?token=<jwt>&refresh=<refresh_token>` URL,
 /// persists the credentials to the OS keychain, and notifies the SPA.
 fn handle_callback_url(app: &tauri::AppHandle, url_str: &str) {
-    match parse_and_store(url_str) {
+    match parse_and_store(app, url_str) {
         Ok(()) => {
             let _ = app.emit(
                 "auth://token-received",
@@ -48,8 +47,7 @@ fn handle_callback_url(app: &tauri::AppHandle, url_str: &str) {
     }
 }
 
-/// Parses the callback URL and writes credentials to the keychain.
-fn parse_and_store(url_str: &str) -> Result<(), String> {
+fn parse_and_store(app: &tauri::AppHandle, url_str: &str) -> Result<(), String> {
     let url = Url::parse(url_str).map_err(|e| format!("Invalid callback URL: {e}"))?;
 
     let mut token: Option<String> = None;
@@ -66,18 +64,5 @@ fn parse_and_store(url_str: &str) -> Result<(), String> {
     let token = token.ok_or_else(|| "Missing 'token' query parameter".to_string())?;
     let refresh = refresh.ok_or_else(|| "Missing 'refresh' query parameter".to_string())?;
 
-    // Write to the OS keychain directly (same logic as keychain::set_token but
-    // called without going through the Tauri command machinery).
-    let jwt_entry =
-        keyring::Entry::new("com.frontierrnd.codex", "jwt").map_err(|e| e.to_string())?;
-    jwt_entry.set_password(&token).map_err(|e| e.to_string())?;
-
-    let refresh_entry =
-        keyring::Entry::new("com.frontierrnd.codex", "refresh_token")
-            .map_err(|e| e.to_string())?;
-    refresh_entry
-        .set_password(&refresh)
-        .map_err(|e| e.to_string())?;
-
-    Ok(())
+    keychain::store_tokens(app, token, refresh)
 }

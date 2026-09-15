@@ -1,63 +1,71 @@
-// Use keyring crate v3 for cross-platform OS keychain access.
-// Service name: "com.frontierrnd.codex"
-// Key names: "jwt" and "refresh_token"
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::PathBuf;
+use tauri::Manager;
 
-const SERVICE: &str = "com.frontierrnd.codex";
-const JWT_KEY: &str = "jwt";
-const REFRESH_KEY: &str = "refresh_token";
-
-/// Returns the stored JWT from the OS keychain, or `None` if not set.
-#[tauri::command]
-pub fn get_token() -> Result<Option<String>, String> {
-    let entry = keyring::Entry::new(SERVICE, JWT_KEY).map_err(|e| e.to_string())?;
-    match entry.get_password() {
-        Ok(token) => Ok(Some(token)),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(e.to_string()),
-    }
+#[derive(Serialize, Deserialize, Default)]
+struct TokenStore {
+    jwt: Option<String>,
+    refresh_token: Option<String>,
 }
 
-/// Stores both the JWT and refresh token in the OS keychain.
-#[tauri::command]
-pub fn set_token(token: String, refresh_token: String) -> Result<(), String> {
-    let jwt_entry = keyring::Entry::new(SERVICE, JWT_KEY).map_err(|e| e.to_string())?;
-    jwt_entry.set_password(&token).map_err(|e| e.to_string())?;
-
-    let refresh_entry =
-        keyring::Entry::new(SERVICE, REFRESH_KEY).map_err(|e| e.to_string())?;
-    refresh_entry
-        .set_password(&refresh_token)
-        .map_err(|e| e.to_string())?;
-
-    Ok(())
+fn store_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map(|d| d.join("tokens.json"))
+        .map_err(|e| e.to_string())
 }
 
-/// Deletes both keychain entries. Ignores "not found" errors.
-#[tauri::command]
-pub fn clear_token() -> Result<(), String> {
-    let jwt_entry = keyring::Entry::new(SERVICE, JWT_KEY).map_err(|e| e.to_string())?;
-    match jwt_entry.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => {}
-        Err(e) => return Err(e.to_string()),
-    }
-
-    let refresh_entry =
-        keyring::Entry::new(SERVICE, REFRESH_KEY).map_err(|e| e.to_string())?;
-    match refresh_entry.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => {}
-        Err(e) => return Err(e.to_string()),
-    }
-
-    Ok(())
+fn read_store(app: &tauri::AppHandle) -> TokenStore {
+    store_path(app)
+        .ok()
+        .and_then(|p| fs::read_to_string(p).ok())
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
 }
 
-/// Returns the stored refresh token from the OS keychain, or `None` if not set.
-#[tauri::command]
-pub fn get_refresh_token() -> Result<Option<String>, String> {
-    let entry = keyring::Entry::new(SERVICE, REFRESH_KEY).map_err(|e| e.to_string())?;
-    match entry.get_password() {
-        Ok(token) => Ok(Some(token)),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(e) => Err(e.to_string()),
+fn write_store(app: &tauri::AppHandle, store: &TokenStore) -> Result<(), String> {
+    let path = store_path(app)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
+    fs::write(&path, serde_json::to_string_pretty(store).unwrap())
+        .map_err(|e| e.to_string())
+}
+
+pub fn store_tokens(app: &tauri::AppHandle, token: String, refresh_token: String) -> Result<(), String> {
+    let mut store = read_store(app);
+    store.jwt = Some(token);
+    store.refresh_token = Some(refresh_token);
+    write_store(app, &store)
+}
+
+#[tauri::command]
+pub fn get_token(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    Ok(read_store(&app).jwt)
+}
+
+#[tauri::command]
+pub fn set_token(
+    app: tauri::AppHandle,
+    token: String,
+    refresh_token: String,
+) -> Result<(), String> {
+    let mut store = read_store(&app);
+    store.jwt = Some(token);
+    store.refresh_token = Some(refresh_token);
+    write_store(&app, &store)
+}
+
+#[tauri::command]
+pub fn clear_token(app: tauri::AppHandle) -> Result<(), String> {
+    let mut store = read_store(&app);
+    store.jwt = None;
+    store.refresh_token = None;
+    write_store(&app, &store)
+}
+
+#[tauri::command]
+pub fn get_refresh_token(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    Ok(read_store(&app).refresh_token)
 }

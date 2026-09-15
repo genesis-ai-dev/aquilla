@@ -29,7 +29,7 @@ pub fn run() {
 
             let llm_config = LlmConfig::default();
             let router = llm_proxy::build_router(llm_config.clone());
-            tokio::spawn(async move {
+            tauri::async_runtime::spawn(async move {
                 let listener = tokio::net::TcpListener::bind("127.0.0.1:49152")
                     .await
                     .expect("failed to bind axum server");

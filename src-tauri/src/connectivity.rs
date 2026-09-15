@@ -24,7 +24,7 @@ pub async fn get_connectivity() -> bool {
 }
 
 pub fn start_connectivity_loop(app: tauri::AppHandle) {
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(10)).await;
             let online = check_connectivity_once().await;

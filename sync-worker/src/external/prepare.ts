@@ -50,7 +50,7 @@ import { ROLE } from '../events/role-policy'
 // Staging primitives moved to stage.ts (AQU-926) so the new command modules
 // share them without an import cycle; re-exported here for existing importers
 // (mcp-handlers, changesets-route, tests).
-export { approvalUrlFor, CHANGESET_TTL_MS } from './stage'
+export { approvalUrlFor, CHANGESET_ASK_TTL_MS, CHANGESET_TTL_MS } from './stage'
 
 function bearer(request: Request): string | null {
   const h = request.headers.get('Authorization') ?? ''

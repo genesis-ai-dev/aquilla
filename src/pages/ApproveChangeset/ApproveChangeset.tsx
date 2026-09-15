@@ -24,7 +24,7 @@ import {
 } from "@/lib/agent/changeset-api"
 import { t as standaloneT } from "@/lib/i18n/standalone"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
-import { fmtShortCalendarDate } from "@/lib/format-date"
+import { fmtLabeledDateTime } from "@/lib/format-date"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { ChangeList, ImportPreviewView } from "@/components/changesets/ChangeList"
 
@@ -337,8 +337,12 @@ function ApprovalSummaryView({
         <span>{t("agent.changeset.digestLabel")} <span className="font-mono">{data.digest.slice(0, 16)}…</span></span>
         <span>
           <DateTooltip value={data.expiresAt} label={t("common.date.expires")}>
+            {/* AQU-1177: the visible label carries the TIME, not just the day.
+                Ask-mode plans now live 24h, so "Expires September 5" leaves the
+                reviewer unable to tell whether they have ten hours or ten
+                minutes — exactly the question the deadline is here to answer. */}
             {t("common.expiresOn", {
-              date: fmtShortCalendarDate(data.expiresAt, undefined, locale),
+              date: fmtLabeledDateTime(data.expiresAt, "", undefined, locale),
             })}
           </DateTooltip>
         </span>

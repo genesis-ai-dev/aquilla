@@ -15,7 +15,8 @@ import type { ExternalErrorCode } from './errors'
 import { ROLE } from '../events/role-policy'
 import { assertCredentialScope } from './token-bridge'
 import { loadChangeset } from './store'
-import { approvalUrlFor, CHANGESET_TTL_MS } from './prepare'
+import { approvalUrlFor, CHANGESET_ASK_TTL_MS, CHANGESET_TTL_MS } from './prepare'
+import { WAIT_MAX_TIMEOUT_MS } from './changeset-wait'
 import { PLAN_IMPORT_MAX_CELLS } from './commands'
 import { MAX_ARTIFACT_BYTES, handleExternalArtifactsRequest } from './artifacts-route'
 import { SERVER_PARSEABLE_FILE_TYPES, CLIENT_ONLY_FORMATS } from './import-parse'
@@ -288,7 +289,13 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
       maxProjectsPerSearch: MAX_SEARCH_PROJECTS,
     },
     limits: {
+      // Act mode. Kept under its original name so existing callers keep reading
+      // the TTL that applies when THEY hold the whole loop.
       changesetExpirySeconds: CHANGESET_TTL_MS / 1000,
+      // Ask mode waits on a human, so it gets its own, longer deadline
+      // (AQU-1177 §3) — publish it rather than let an agent assume one hour.
+      changesetExpirySecondsAskMode: CHANGESET_ASK_TTL_MS / 1000,
+      changesetWaitMaxTimeoutMs: WAIT_MAX_TIMEOUT_MS,
       // Wave-1 validateCommands enforces no hard per-changeset command cap.
       maxCommandsPerChangeset: null,
       planImportMaxCells: PLAN_IMPORT_MAX_CELLS,
@@ -928,6 +935,104 @@ async function getChangeset(
   })
 }
 
+/** Wire shape of one changeset in the delegated REST responses. */
+interface ChangesetWire {
+  id: string
+  status: string
+  summary: unknown
+  digest: string
+  receipt: unknown
+  autonomyMode: string
+  createdAt: string
+  expiresAt: string
+  committedAt: string | null
+  approvalUrl?: string
+}
+
+/** Trim a changeset to the fields an agent acts on. The full commands and
+ *  preconditions arrays are deliberately omitted from LIST results — an agent
+ *  paging its inbox wants status and effect counts, not every plan re-serialized
+ *  (get_changeset returns the whole record when it actually needs it). */
+function changesetDigestView(cs: ChangesetWire, approvalUrl: string): Record<string, unknown> {
+  return {
+    changesetId: cs.id,
+    status: cs.status,
+    autonomyMode: cs.autonomyMode,
+    summary: cs.summary,
+    digest: cs.digest,
+    approvalUrl,
+    createdAt: cs.createdAt,
+    expiresAt: cs.expiresAt,
+    committedAt: cs.committedAt,
+  }
+}
+
+async function listChangesets(
+  env: ExternalEnv,
+  token: string,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const projectId = str(args, 'projectId')
+  if (!projectId) return fail('validation_failed', 'projectId is required')
+  const qs = new URLSearchParams()
+  const status = str(args, 'status')
+  if (status) qs.set('status', status)
+  const limit = args.limit
+  if (typeof limit === 'number') qs.set('limit', String(limit))
+  const cursor = str(args, 'cursor')
+  if (cursor) qs.set('cursor', cursor)
+
+  const suffix = qs.toString() ? `?${qs.toString()}` : ''
+  const req = new Request(
+    `${EXTERNAL_BASE}/${encodeURIComponent(projectId)}/changesets${suffix}`,
+    { headers: bearer(token) },
+  )
+  const res = await handleExternalChangesetsRequest(req, env)
+  if (!res) return fail('not_found', 'changesets route did not match')
+  if (!res.ok) return delegatedError(res)
+  const b = (await res.json()) as { changesets: ChangesetWire[]; nextCursor: string | null }
+  return ok({
+    changesets: b.changesets.map((cs) => changesetDigestView(cs, cs.approvalUrl ?? '')),
+    nextCursor: b.nextCursor,
+  })
+}
+
+async function waitForChangeset(
+  env: ExternalEnv,
+  token: string,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const projectId = str(args, 'projectId')
+  const changesetId = str(args, 'changesetId')
+  if (!projectId) return fail('validation_failed', 'projectId is required')
+  if (!changesetId) return fail('validation_failed', 'changesetId is required')
+  const timeoutMs = args.timeoutMs
+  const qs =
+    typeof timeoutMs === 'number' ? `?timeoutMs=${encodeURIComponent(String(timeoutMs))}` : ''
+
+  const req = new Request(
+    `${EXTERNAL_BASE}/${encodeURIComponent(projectId)}/changesets/${encodeURIComponent(changesetId)}/wait${qs}`,
+    { headers: bearer(token) },
+  )
+  const res = await handleExternalChangesetsRequest(req, env)
+  if (!res) return fail('not_found', 'changesets route did not match')
+  if (!res.ok) return delegatedError(res)
+  const b = (await res.json()) as {
+    changeset: ChangesetWire
+    approvalUrl: string
+    approved: boolean
+    timedOut: boolean
+    waitedMs: number
+  }
+  return ok({
+    ...changesetDigestView(b.changeset, b.approvalUrl),
+    approved: b.approved,
+    // Not an error: the human simply hasn't decided yet. Call again.
+    timedOut: b.timedOut,
+    waitedMs: b.waitedMs,
+  })
+}
+
 async function confirmChangeset(
   env: ExternalEnv,
   cred: ApiCredentialContext,
@@ -1052,6 +1157,10 @@ export async function callTool(
       return exportFile(env, token, args)
     case 'get_changeset':
       return getChangeset(env, token, args)
+    case 'list_changesets':
+      return listChangesets(env, token, args)
+    case 'wait_for_changeset':
+      return waitForChangeset(env, token, args)
     case 'confirm_changeset':
       return confirmChangeset(env, cred, token, args, ctx)
     case 'discard_changeset':

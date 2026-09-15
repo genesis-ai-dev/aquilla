@@ -91,6 +91,21 @@ describe("IDML structural parser", () => {
     expect(parsed.manifest.members).toHaveLength(9)
   })
 
+  it("exposes Bold and Italic FontStyle from Resources/Styles.xml", async () => {
+    const parsed = await parseIdml(await makeIdml({
+      "Resources/Styles.xml":
+        `<?xml version="1.0" encoding="UTF-8"?><idPkg:Styles xmlns:idPkg="urn:test">`
+        + `<CharacterStyle Self="CharacterStyle/Bold" FontStyle="Bold"/>`
+        + `<CharacterStyle Self="CharacterStyle/Italic" FontStyle="Italic"/>`
+        + `<CharacterStyle Self="CharacterStyle/Underline" Underline="true"/>`
+        + `</idPkg:Styles>`,
+    }))
+    expect(parsed.styleCatalog).toEqual({
+      "CharacterStyle/Bold": { bold: true, italic: false },
+      "CharacterStyle/Italic": { bold: false, italic: true },
+    })
+  })
+
   it("discovers designmap stories first and appends remaining stories deterministically", async () => {
     const parsed = await parseIdml(await makeIdml())
     expect(parsed.units.map((unit) => unit.locator.memberPath)).toEqual([

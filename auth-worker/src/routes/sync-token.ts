@@ -2,7 +2,7 @@
 //
 // Spec: docs/SYNC.md ("The flow (single-user, single-file)") in this repo.
 //
-// Request: { projectId, fileId, projectName? } + Bearer JWT.
+// Request: { projectId, fileId } + Bearer JWT.
 // Response: { token, expiresIn: 900, role: { level, name, source } }.
 //
 // Token claims must match apps/sync/src/auth.ts SyncTokenClaims:
@@ -11,23 +11,25 @@
 //
 // AQU-926: the mint core (freeze checks + AD-12 role resolution + scope load
 // + sign) lives in services/sync-token-mint.ts, shared with the agent
-// harness's propose_command tool. Auto-register (when projectId is unknown
-// AND a bootstrap payload was sent) stays here because it's a
-// project-creation path, not a resolution path; the inserted creator grant
-// resolves to OWNER on the next refresh.
+// harness's propose_command tool.
+//
+// AQU-299 / SEC-9: this route used to AUTO-REGISTER an unknown projectId when
+// the caller supplied a `projectName` bootstrap, inserting the row and handing
+// the caller OWNER. That let anyone who learned the UUID of a never-registered
+// project claim it (and created unlimited org-less projects). Minting a token
+// is an authorization step, never a project-creation step — creation goes
+// through POST /api/v2/projects, which the SPA already calls first and which
+// throws on failure (src/lib/sync/cloud-projects.ts createCloudProject), so no
+// project reaches this route unregistered. An unknown projectId is now a flat
+// 403, exactly like a known project the caller has no grant on.
 
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import { authMiddleware } from "../middleware/auth"
 import type { AuthHonoEnv } from "../middleware/auth"
-import { ROLE, type RoleResolution, type SyncTokenResponse } from "../types"
-import {
-  isPathSafeId,
-  mintSyncTokenForUser,
-  roleNameFor,
-  signSyncTokenWithRole,
-} from "../services/sync-token-mint"
+import type { SyncTokenResponse } from "../types"
+import { isPathSafeId, mintSyncTokenForUser } from "../services/sync-token-mint"
 
 const syncToken = new Hono<AuthHonoEnv>()
 
@@ -35,8 +37,7 @@ const syncToken = new Hono<AuthHonoEnv>()
 // R2 key templates on the sync-worker side — see isPathSafeId in
 // services/sync-token-mint.ts for the full threat note. The mint core
 // re-checks; rejecting here too keeps the caller-facing error a plain 400
-// validation failure (and covers the auto-register path, which signs without
-// going through mintSyncTokenForUser).
+// validation failure.
 const safeId = (label: string) =>
   z
     .string()
@@ -47,8 +48,10 @@ const safeId = (label: string) =>
 const syncTokenSchema = z.object({
   projectId: safeId("projectId"),
   fileId: safeId("fileId"),
-  // Optional bootstrap so an unknown projectId can be auto-registered
-  // on the caller's first request.
+  // AQU-299 / SEC-9: accepted and IGNORED. Older SPA builds still send a
+  // `projectName` (and `gitlabProjectId`) bootstrap alongside every mint; the
+  // schema keeps the field so those clients get a token instead of a 400, but
+  // nothing reads it any more. Drop it once no deployed client sends it.
   projectName: z.string().optional(),
 })
 
@@ -61,7 +64,7 @@ syncToken.post(
       return c.json({ error: "SYNC_SECRET_KEY not configured" }, 503)
     }
     const user = c.get("user")
-    const { projectId, fileId, projectName } = c.req.valid("json")
+    const { projectId, fileId } = c.req.valid("json")
 
     const minted = await mintSyncTokenForUser(c.env, user, projectId, fileId)
     if (minted.ok) {
@@ -83,37 +86,9 @@ syncToken.post(
       // GET /cells, not sync-token, so only writes are blocked.
       case "project_frozen":
         return c.json({ error: "Project is frozen" }, 403)
-      case "project_not_found": {
-        if (!projectName) {
-          return c.json({ error: "No access to project" }, 403)
-        }
-        // Auto-register an unknown projectId. The bootstrap payload (project
-        // name) is supplied by the client; the caller becomes the owner.
-        // Matches the auto-registration behaviour described in docs/SYNC.md.
-        try {
-          await c.env.AQUILLA_PG.prepare(
-            `INSERT INTO projects (id, name, created_by)
-             VALUES (?, ?, ?)`,
-          )
-            .bind(projectId, projectName, user.id)
-            .run()
-        } catch (err) {
-          console.error("[sync-token] auto-register failed:", err)
-          return c.json({ error: "Failed to register project" }, 500)
-        }
-        const resolved: RoleResolution = {
-          level: ROLE.OWNER,
-          name: roleNameFor(ROLE.OWNER),
-          source: "creator",
-        }
-        const signed = await signSyncTokenWithRole(c.env, user, projectId, fileId, resolved)
-        const response: SyncTokenResponse = {
-          token: signed.token,
-          expiresIn: signed.expiresIn,
-          role: resolved,
-        }
-        return c.json(response)
-      }
+      // AQU-299 / SEC-9: an unknown projectId is indistinguishable from one
+      // the caller has no grant on — same 403, no row created either way.
+      case "project_not_found":
       case "no_access":
         return c.json({ error: "No access to project" }, 403)
       // AQU-996: a role-resolution query failed with no grant found — the

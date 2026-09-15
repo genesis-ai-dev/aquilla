@@ -11,7 +11,10 @@ const MIME = "application/vnd.adobe.indesign-idml-package"
 const STORY = "Stories/Story_u1.xml"
 const IDPKG = "http://ns.adobe.com/AdobeInDesign/idml/1.0/packaging"
 
-async function makeIdmlParagraph(paragraphInner: string): Promise<ArrayBuffer> {
+async function makeIdmlParagraph(
+  paragraphInner: string,
+  stylesXml?: string,
+): Promise<ArrayBuffer> {
   const zip = new JSZip()
   zip.file("mimetype", MIME, { compression: "STORE" })
   zip.file(
@@ -28,6 +31,7 @@ async function makeIdmlParagraph(paragraphInner: string): Promise<ArrayBuffer> {
       + `</ParagraphStyleRange>`
       + `</Story></idPkg:Story>`,
   )
+  if (stylesXml) zip.file("Resources/Styles.xml", stylesXml)
   return zip.generateAsync({ type: "arraybuffer", compression: "DEFLATE" })
 }
 
@@ -102,6 +106,41 @@ describe("IDML v2 parser adapter", () => {
       cell.translatedHtml!,
       cell.metadata!.idml as IdmlFormatMetadataV2,
     ).valid).toBe(true)
+  })
+
+  it("records Bold/Italic FontStyle from Styles.xml for cell display", async () => {
+    const buffer = await makeIdmlParagraph(
+      `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/Emphasis">`
+        + `<Content>emphasized</Content></CharacterStyleRange>`,
+      `<?xml version="1.0" encoding="UTF-8"?><idPkg:Styles xmlns:idPkg="${IDPKG}">`
+        + `<CharacterStyle Self="CharacterStyle/Emphasis" FontStyle="Italic"/>`
+        + `</idPkg:Styles>`,
+    )
+    const strings = await extractIdmlStrings(buffer, (bytes, profile) => parseIdml(bytes, profile))
+    expect(strings[0]?.metadata).toMatchObject({
+      idmlParagraphStyle: "ParagraphStyle/Body",
+      idmlStyleDisplay: {
+        "CharacterStyle/Emphasis": { bold: false, italic: true },
+      },
+    })
+    expect(strings[0]?.originalHtml).toContain('data-idml-character-style="CharacterStyle/Emphasis"')
+  })
+
+  it("records a heading paragraph style so unstyled Treasure Hunt runs can display Bold", async () => {
+    const buffer = await makeIdmlParagraph(
+      `<CharacterStyleRange AppliedCharacterStyle="CharacterStyle/$ID/[No character style]">`
+        + `<Content>Genesis 1</Content></CharacterStyleRange>`,
+      `<?xml version="1.0" encoding="UTF-8"?><idPkg:Styles xmlns:idPkg="${IDPKG}">`
+        + `<ParagraphStyle Self="ParagraphStyle/Body" FontStyle="Semibold SemiCondensed"/>`
+        + `</idPkg:Styles>`,
+    )
+    const strings = await extractIdmlStrings(buffer, (bytes, profile) => parseIdml(bytes, profile))
+    expect(strings[0]?.metadata).toMatchObject({
+      idmlParagraphStyle: "ParagraphStyle/Body",
+      idmlStyleDisplay: {
+        "ParagraphStyle/Body": { bold: true, italic: false },
+      },
+    })
   })
 
   it("forwards the selected semantic profile to the injectable executor", async () => {

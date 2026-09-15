@@ -77,6 +77,11 @@ interface UsageRow {
 
 function makeStubDb(projectOrgId: number | null = 5) {
   const usageRows: UsageRow[] = []
+  // [Pen test] API security & data exposure (2026-09-03): backs the new
+  // per-user throttle in tts.ts — countRecentRateLimitEvents/recordRateLimitEvent
+  // (db/shared/rate-limit.ts) against the same auth_rate_limit_events table
+  // the external Agent API and auth-worker already use.
+  const rateLimitEvents: { kind: string; identifier: string }[] = []
 
   return {
     db: {
@@ -98,9 +103,20 @@ function makeStubDb(projectOrgId: number | null = 5) {
                 .reduce((s, r) => s + r.audio_seconds, 0)
               return { total_seconds: total } as unknown as T
             }
+            if (sql.includes("FROM auth_rate_limit_events")) {
+              const [kind, identifier] = boundArgs as [string, string]
+              const n = rateLimitEvents.filter(
+                (e) => e.kind === kind && e.identifier === identifier,
+              ).length
+              return { n } as unknown as T
+            }
             return null
           },
           async run() {
+            if (sql.includes("INSERT INTO auth_rate_limit_events")) {
+              const [kind, identifier] = boundArgs as [string, string]
+              rateLimitEvents.push({ kind, identifier })
+            }
             if (sql.includes("INSERT INTO tts_usage_daily")) {
               // Bind params: (user_id, org_id, date_utc, audio_seconds)
               // request_count is a literal 1 in the SQL — NOT a bind param.
@@ -146,6 +162,7 @@ function makeStubDb(projectOrgId: number | null = 5) {
       async close() {},
     } as unknown as AquillaDb,
     usageRows,
+    rateLimitEvents,
   }
 }
 
@@ -348,6 +365,41 @@ describe("POST /api/v1/voice/tts", () => {
     // WAV landed in R2 under the file-scoped audio path.
     const stored = await env.SNAPSHOTS._bytes(audioObjectKey(env, "p1", "f1", body.objectName))
     expect(stored && Array.from(stored)).toEqual([82, 73, 70, 70])
+  })
+
+  // [Pen test] API security & data exposure (2026-09-03): runTtsGuard's daily
+  // seconds cap is log-only unless TTS_BUDGET_ENFORCE is set (never true in any
+  // deployed environment), so this per-user sliding-window throttle is the
+  // only thing actually blocking a flood against the GPU-backed Modal endpoint.
+  describe("rate limiting", () => {
+    it("429s a user that has flooded the window, without calling Modal", async () => {
+      const { db, rateLimitEvents } = makeStubDb()
+      for (let i = 0; i < 200; i++) {
+        rateLimitEvents.push({ kind: "tts_synthesize", identifier: "user:1" })
+      }
+      const calls = stubModal(new Uint8Array([1]), 5)
+      const token = await makeToken({ userId: 1 })
+
+      const res = (await call(makeEnv(db), ttsReq({ projectId: "p1", fileId: "f1", text: "hi" }, token)))!
+
+      expect(res.status).toBe(429)
+      const body = (await res.json()) as { error: string }
+      expect(body.error).toBe("rate_limited")
+      expect(calls).toHaveLength(0)
+    })
+
+    it("does not throttle a fresh user, even when another user has flooded the window", async () => {
+      const { db, rateLimitEvents } = makeStubDb()
+      for (let i = 0; i < 200; i++) {
+        rateLimitEvents.push({ kind: "tts_synthesize", identifier: "user:999" })
+      }
+      stubModal(new Uint8Array([1]), 5)
+      const token = await makeToken({ userId: 1 })
+
+      const res = (await call(makeEnv(db), ttsReq({ projectId: "p1", fileId: "f1", text: "hi" }, token)))!
+
+      expect(res.status).toBe(200)
+    })
   })
 
   it("parses X-Audio-Duration-Seconds header correctly", async () => {

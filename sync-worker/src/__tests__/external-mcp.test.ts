@@ -195,7 +195,7 @@ describe('MCP transport', () => {
 })
 
 describe('MCP tools/list', () => {
-  it('returns all 17 tools each with an input schema', async () => {
+  it('returns all 19 tools each with an input schema', async () => {
     const env = makeEnv(tdb.db)
     const token = await credToken(tdb)
     const res = await rpc(env, token, { jsonrpc: '2.0', id: 2, method: 'tools/list' })
@@ -205,14 +205,14 @@ describe('MCP tools/list', () => {
       [
         'confirm_changeset', 'discard_changeset', 'export_file', 'find_similar_cells',
         'get_capabilities', 'get_changeset', 'get_identity_and_scope', 'get_project',
-        'list_projects', 'prepare_import', 'prepare_translations', 'preview_import',
-        'read_content', 'read_history',
+        'list_memory', 'list_projects', 'prepare_import', 'prepare_translations',
+        'preview_import', 'read_cell_memory', 'read_content', 'read_history',
         // AQU-1231 quality reads.
         'read_quality', 'read_term_consistency',
         'search_project',
       ].sort(),
     )
-    expect(body.result.tools).toHaveLength(17)
+    expect(body.result.tools).toHaveLength(19)
     for (const tool of body.result.tools) {
       expect(typeof tool.description).toBe('string')
       expect(tool.description.length).toBeGreaterThan(20)
@@ -285,6 +285,58 @@ describe('MCP tools/call — reads', () => {
     const projects = (payload as any).projects
     expect(projects).toHaveLength(1)
     expect(projects[0]).toMatchObject({ id: PROJECT, name: 'Project A', role_source: 'member' })
+  })
+
+  // AQU-1229: the memory tools are thin MCP mirrors of the REST reads (whose
+  // own behavior is covered in external-memory-reads.test.ts). What is only
+  // testable here is that the two names actually dispatch — a tool listed in
+  // the catalog but missing from the switch returns "unknown tool" at runtime
+  // while looking perfectly documented in tools/list.
+  it('list_memory and read_cell_memory dispatch through MCP', async () => {
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb)
+    await tdb.pg.query(
+      `INSERT INTO agent_memories (id, project_id, path, content, status)
+       VALUES ('99999999-9999-4999-8999-999999999999', $1, 'decisions/divine-name.md',
+               'Render Lord as Господь.', 'approved')`,
+      [PROJECT],
+    )
+
+    const listRes = await rpc(env, token, {
+      jsonrpc: '2.0', id: 40, method: 'tools/call',
+      params: { name: 'list_memory', arguments: { projectId: PROJECT } },
+    })
+    const list = toolPayload(((await listRes.json()) as any).result)
+    expect(list.isError).toBe(false)
+    expect((list.payload as any).data[0]).toMatchObject({
+      path: 'decisions/divine-name.md',
+      kind: 'decision',
+      status: 'approved',
+      inRetrieval: true,
+    })
+
+    const cellRes = await rpc(env, token, {
+      jsonrpc: '2.0', id: 41, method: 'tools/call',
+      params: { name: 'read_cell_memory', arguments: { projectId: PROJECT, fileId: FILE, cellId: 'cell-1' } },
+    })
+    const cell = toolPayload(((await cellRes.json()) as any).result)
+    expect(cell.isError).toBe(false)
+    expect((cell.payload as any).retrieval.scope).toBe('project')
+    expect((cell.payload as any).entries.map((e: { path: string }) => e.path)).toEqual([
+      'decisions/divine-name.md',
+    ])
+  })
+
+  it('read_cell_memory requires fileId', async () => {
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb)
+    const res = await rpc(env, token, {
+      jsonrpc: '2.0', id: 42, method: 'tools/call',
+      params: { name: 'read_cell_memory', arguments: { projectId: PROJECT, cellId: 'cell-1' } },
+    })
+    const { payload, isError } = toolPayload(((await res.json()) as any).result)
+    expect(isError).toBe(true)
+    expect(JSON.stringify(payload)).toContain('fileId is required')
   })
 
   // AQU-1232: the tool is pure argument marshalling over the REST route, so

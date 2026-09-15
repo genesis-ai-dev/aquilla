@@ -62,6 +62,8 @@ function apiMap(): Record<string, unknown> {
       'GET /api/v1/external/projects/:projectId/search?q=': 'Full-text search cells. Optional side=source|target.',
       'GET /api/v1/external/projects/:projectId/similar?cellId=': 'Translation memory: source cells most LIKE this one, each with its current target and a score in [0,1]. Pass cellId (the query cell is excluded) or text=<free text>, not both. Optional limit (default 10, max 50). LEXICAL ONLY — scored by term overlap, NOT by meaning: it will not find a paraphrase that shares no words. Use search when you know the words you want; use this when you have a line and want prior renderings of similar lines.',
       'GET /api/v1/external/projects/:projectId/cells/:cellId/history': 'Append-only event history for one cell.',
+      'GET /api/v1/external/projects/:projectId/memory': 'Living Memory: the project brief plus every memory entry (examples, decisions, notes, observations) with its status — the same rows the in-app Memory page shows. Filter with ?status=proposed|approved|rejected|archived and ?kind=example|decision|note|observation|other. Each entry carries inRetrieval: whether the copilot is actually being given it.',
+      'GET /api/v1/external/projects/:projectId/files/:fileId/cells/:cellId/memory': 'What the copilot’s retrieval would inject for that cell’s draft: the brief plus the capped approved-memory index. Retrieval is project-scoped today (no per-cell narrowing) — the response says so in retrieval.scope.',
       'GET /api/v1/external/projects/:projectId/quality': 'Quality signals per file: health score (0-100), coverage (total/filled/validated cells + percentages) and the project rollup. Optional fileId=<id> to scope to one file, lane=<tag> for one target-language lane. Same numbers the in-app health ring and progress surfaces show.',
       'GET /api/v1/external/projects/:projectId/terms/consistency': 'Term-consistency drift: per active concept, how many occurrences used an approved rendering, which cells used which rendering, and which cells used none. Optional fileId=<id>, lane=<tag>, onlyDrift=1 (findings with flagged cells only). Runs the same scan as the in-app "Check file" pass.',
       'POST /api/v1/external/projects/:projectId/artifacts': 'Upload raw bytes (max 25MB). Headers: x-artifact-name (required), content-type, x-artifact-kind (source|audio).',
@@ -89,6 +91,16 @@ function apiMap(): Record<string, unknown> {
       serverParseableFormats: ['csv', 'docx', 'json', 'md', 'obs', 'po', 'properties', 'sbv', 'srt', 'tsv', 'txt', 'usfm', 'vtt'],
       unsupportedFormats:
         'pptx, doc, html, xliff, tmx, usx, idml, paratext-project, zip need DOM/browser parsers and are not yet server-parseable — import them through the in-app Import dialog, or parse them yourself and stage raw PlanImport cells (POST .../changesets with a PlanImport command). A multi-book USFM artifact parses into one file per book; stage each book separately via resultIndex.',
+    },
+    livingMemory: {
+      note:
+        'Living Memory is what the copilot has learned about a project: one human-authored brief plus path-keyed entries (examples/<slug>.md, decisions/<slug>.md, notes/<file>/<cell>-<digest>.md, observations/…) that move proposed -> approved -> archived under human review. Only APPROVED entries reach a prompt, and only the most-recently-updated indexRenderCap of them; the copilot is given each one as path + first line and pulls full text just-in-time.',
+      reading: [
+        `GET ${EXTERNAL_ROOT}/projects/:projectId/memory — brief + entries + per-entry inRetrieval. Read this before proposing an entry: it tells you whether one already exists at that path and whether it was approved.`,
+        `GET ${EXTERNAL_ROOT}/projects/:projectId/files/:fileId/cells/:cellId/memory — exactly what retrieval would inject for that cell's draft, so you can predict what the copilot is working from.`,
+      ],
+      privacy:
+        'Author fields (createdBy/reviewedBy/brief.updatedBy) are per-project pseudonyms, never usernames — stable within a project, uncorrelatable across projects. Translator identity is not agent-readable.',
     },
     exporting: {
       note:

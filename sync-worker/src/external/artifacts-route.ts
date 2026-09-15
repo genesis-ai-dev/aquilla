@@ -81,7 +81,7 @@ export async function authArtifact(
   const db = env.AQUILLA_PG
   if (!db) return { ok: false, response: errorResponse('job_failed', 'AQUILLA_PG not configured') }
 
-  const cred = await validateApiCredential(db, bearer(request) ?? '')
+  const cred = await validateApiCredential(db, bearer(request) ?? '', request.headers.get('CF-Connecting-IP'))
   if (!cred) return { ok: false, response: errorResponse('permission_denied', `invalid or missing API credential — ${AUTH_HINT}`) }
 
   try {
@@ -152,7 +152,7 @@ export async function loadArtifact(
     .first<ArtifactRow>()
 }
 
-// ── POST (upload) ────────────────────────────────────────────────────────────
+// ── POST (upload) ──────────────────────────────────────────────────
 
 // [Pen test] API security & data exposure (2026-08-20): uploads (up to
 // MAX_ARTIFACT_BYTES = 25 MB each) had no per-credential throttle, unlike
@@ -270,7 +270,8 @@ async function handleUpload(
   } catch (err) {
     // Roll back the orphaned R2 object so a failed insert leaves no dangling blob.
     await env.SNAPSHOTS.delete(r2Key).catch(() => {})
-    return errorResponse('job_failed', `artifact insert failed: ${String(err)}`)
+    console.error("[external-artifacts] artifact insert failed:", err)
+    return errorResponse('job_failed', 'artifact insert failed')
   }
 
   return Response.json({
@@ -288,7 +289,7 @@ async function sha256HexBytes(bytes: Uint8Array): Promise<string> {
   return Array.from(new Uint8Array(hash), (b) => b.toString(16).padStart(2, '0')).join('')
 }
 
-// ── GET metadata / content ─────────────────────────────────────────────────
+// ── GET metadata / content ──────────────────────────────────────────
 
 // [Pen test] API security & data exposure (2026-08-27): metadata/inspect had
 // no throttle at all — only upload did. Cheap DB/64KB-sniff reads, so this
@@ -618,7 +619,7 @@ async function handleInspect(
   return Response.json({ detectedFormat, details })
 }
 
-// ── Router ──────────────────────────────────────────────────────────────────
+// ── Router ─────────────────────────────────────────────────────────────
 
 export async function handleExternalArtifactsRequest(
   request: Request,

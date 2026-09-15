@@ -88,7 +88,8 @@ export async function handleMigrateSettingsRequest(
       .bind(body.projectId, json)
       .run()
   } catch (err) {
-    return Response.json({ error: `settings upsert failed: ${String(err)}` }, { status: 500 })
+    console.error("[migrate-settings] upsert failed:", err)
+    return Response.json({ error: "settings upsert failed" }, { status: 500 })
   }
   return Response.json({ ok: true, bytes: json.length })
 }

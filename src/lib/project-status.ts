@@ -3,13 +3,14 @@ import { deadlineStatus, type PortfolioProject } from "@/lib/frontier/portfolio"
 /** User-facing project health labels — single source of truth. */
 export const PROJECT_STATUS_LABEL = {
   overdue: "Overdue",
+  behindPlan: "Behind plan",
   soon: "Due soon",
   stalled: "Stalled",
   onTrack: "On track",
   archived: "Archived",
 } as const
 
-export type ProjectAttentionKind = "overdue" | "soon" | "stalled"
+export type ProjectAttentionKind = "overdue" | "behind-plan" | "soon" | "stalled"
 
 export interface ProjectAttentionReason {
   kind: ProjectAttentionKind
@@ -43,6 +44,18 @@ export function portfolioAttentionReasons(p: PortfolioProject, now: number): Pro
   else if (dl === "soon") reasons.push({ kind: "soon", label: PROJECT_STATUS_LABEL.soon })
   if (portfolioActivityStatus(p, now) === "stalled") {
     reasons.push({ kind: "stalled", label: PROJECT_STATUS_LABEL.stalled })
+  }
+  // AQU-1097: a project can be comfortably inside its own deadline while units
+  // inside it are already late. That is the thing a PM overseeing many
+  // languages needs to see without opening each project.
+  //
+  // It gets its OWN kind and its own word. Reusing "Overdue" made one label
+  // mean two different things — the rollup count, the attention filter, the
+  // sort rank and the deadline tooltip all still mean the project's own
+  // deadline — so a row could read Overdue while every other surface agreed
+  // the project was fine, and nothing told the reader which was meant.
+  if (dl !== "overdue" && (p.unitsOverdue ?? 0) > 0) {
+    reasons.push({ kind: "behind-plan", label: PROJECT_STATUS_LABEL.behindPlan })
   }
   return reasons
 }

@@ -1,5 +1,6 @@
 import { test, expect } from "../../helpers/multi-user"
 import { jwtFor, seedProjectWithFile } from "../../helpers/seed-project"
+import { ProjectSettings } from "../../helpers/page-objects/ProjectSettings"
 
 interface PersistedActivityEvent {
   kind: string
@@ -58,15 +59,30 @@ test("project overview shows autopilot start, outcome, and durable activity", as
   expect(authBase).toMatch(/^http:\/\/127\.0\.0\.1:\d+/)
 
   const overviewPath = `/api/v2/projects/${seeded.projectId}/contextual/overview`
+  await alice.goto(`/projects/${seeded.projectId}`)
+
+  // AQU-1103: Autopilot is opt-in — a project nobody has switched on shows
+  // no Autopilot surface at all. The PM opts in from the overview's settings
+  // cog, which opens Settings as a modal OVER the still-mounted overview, and
+  // the panel must appear underneath as the toggle flips, with no reload:
+  // the marker below survives only if the document was never replaced.
+  const panel = alice.getByTestId("project-autopilot-panel")
+  await expect(alice.getByRole("heading", { level: 1, name: seeded.projectName })).toBeVisible()
+  await expect(panel).toHaveCount(0)
+  await alice.evaluate(() => { (window as unknown as { __aqu1103: boolean }).__aqu1103 = true })
+  const settings = new ProjectSettings(alice)
+  await settings.openFromOverview()
   const initialOverview = alice.waitForResponse((response) => {
     const url = new URL(response.url())
     return response.request().method() === "GET" && url.pathname === overviewPath
   })
-  await alice.goto(`/projects/${seeded.projectId}`)
+  await settings.enableAutopilotControls()
   expect((await initialOverview).ok()).toBe(true)
+  await settings.closeDialog()
+  await expect(alice).toHaveURL(new RegExp(`/projects/${seeded.projectId}$`))
+  expect(await alice.evaluate(() => (window as unknown as { __aqu1103?: boolean }).__aqu1103)).toBe(true)
 
   // The idle surface is a summary, not the old always-expanded table/checklist.
-  const panel = alice.getByTestId("project-autopilot-panel")
   await expect(panel).toBeVisible()
   await expect(panel.getByRole("heading", { name: "Autopilot" })).toBeVisible()
   const runButton = panel.getByRole("button", { name: "Run Autopilot" })
@@ -308,6 +324,12 @@ test("review count selects the historical run that owns its proposed evidence", 
   })
 
   await alice.goto(`/projects/${seeded.projectId}`)
+  // AQU-1103: opt in on this device first (default OFF); the panel appears
+  // under the settings modal as the flag flips.
+  const settings = new ProjectSettings(alice)
+  await settings.openFromOverview()
+  await settings.enableAutopilotControls()
+  await settings.closeDialog()
   const panel = alice.getByTestId("project-autopilot-panel")
   const reviewCount = panel.getByRole("button", { name: "View 2 ready to review" })
   await expect(reviewCount).toBeVisible()

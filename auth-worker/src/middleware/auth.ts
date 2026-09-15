@@ -33,6 +33,9 @@ export type SessionRejection =
   | "revoked"
   | "user_not_found"
   | "password_changed"
+  /** Session's total age (from `sst`) exceeds MAX_SESSION_AGE_DAYS — see the
+   *  [Pen test] comment below `resolveSession`'s absolute-age check. */
+  | "session_expired"
   /** Lookup failed (DB unreachable), as opposed to "no such user" — AQU-994. */
   | "hydration_error"
 
@@ -79,6 +82,25 @@ export async function resolveSession(
   // would otherwise authenticate forever.
   if (typeof payload.exp !== "number") {
     return { ok: false, reason: "invalid_token" }
+  }
+
+  // [Pen test] Auth & session mgmt (2026-09-14): the sliding refresh (AQU-995,
+  // POST /auth/refresh) re-mints a token past its half-life with no ceiling on
+  // the *session's* total age — `sst` (original login time) is carried
+  // forward across every refresh but was never actually checked against
+  // anything. A token kept alive by a script calling /auth/refresh every ~15
+  // days (half the 30-day lifetime) never had to die: the 30-day bound on a
+  // leaked/stolen credential's blast radius didn't hold once refresh shipped.
+  // This caps total session age at MAX_SESSION_AGE_DAYS (default 90) from the
+  // original login, independent of how often it's been refreshed, and is
+  // checked on every request (not just at refresh) so a session that crosses
+  // the cap is cut off immediately rather than merely losing its ability to
+  // extend further. `sst` falls back to `iat` for tokens minted before AQU-995
+  // added the claim, matching the fallback POST /auth/refresh already uses.
+  const sessionStartedAt = typeof payload.sst === "number" ? payload.sst : payload.iat
+  const maxSessionAgeSeconds = parseInt(env.MAX_SESSION_AGE_DAYS || "90", 10) * 24 * 60 * 60
+  if (Math.floor(Date.now() / 1000) - sessionStartedAt > maxSessionAgeSeconds) {
+    return { ok: false, reason: "session_expired" }
   }
 
   // Perf (2026-09): the revocation lookup + user hydration below are cached
@@ -182,6 +204,14 @@ export const authMiddleware = async (
       case "password_changed":
         return c.json(
           { error: "Token invalidated by a password change. Please log in again." },
+          401,
+        )
+      case "session_expired":
+        return c.json(
+          {
+            error: "Session expired after prolonged use. Please log in again.",
+            code: "session_expired",
+          },
           401,
         )
     }

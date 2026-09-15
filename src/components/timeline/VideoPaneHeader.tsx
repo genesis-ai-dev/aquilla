@@ -17,12 +17,36 @@
 // ProjectWorkspace around the media-video/media-table panels).
 
 import { useT } from "@/lib/i18n/I18nProvider"
+import { cn } from "@/lib/utils"
+import {
+  MEDIA_HEADER_ROW,
+  MediaSectionCollapseButton,
+  MediaSectionFullscreenButton,
+} from "./MediaSectionRail"
 
 export interface VideoPaneHeaderProps {
   src: string
+  /**
+   * AQU-1119: collapse the video section to a rail. Absent means no button —
+   * the error card renders this same header, and outside the media lens there
+   * is nothing to collapse into.
+   */
+  onCollapse?: () => void
+  /**
+   * AQU-1119: fold the OTHER sections so the picture has the lens to itself,
+   * and put them back. Absent means no button, same rule as onCollapse.
+   */
+  onToggleFullscreen?: () => void
+  /** Whether it already has the lens. Derived by the workspace, never stored. */
+  isFullscreen?: boolean
 }
 
-export function VideoPaneHeader({ src }: VideoPaneHeaderProps) {
+export function VideoPaneHeader({
+  src,
+  onCollapse,
+  onToggleFullscreen,
+  isFullscreen = false,
+}: VideoPaneHeaderProps) {
   const t = useT()
   let basename = src
   try {
@@ -33,9 +57,30 @@ export function VideoPaneHeader({ src }: VideoPaneHeaderProps) {
   return (
     <div
       data-testid="video-pane-header"
-      className="flex shrink-0 items-center gap-2 border-t border-border bg-muted/20 px-4 py-1.5"
+      className={cn(
+        "flex shrink-0 items-center gap-2 border-t border-border bg-muted/20 px-4 py-1.5",
+        // The same row height as the text header beside it and the rail that
+        // replaces it. Its own tallest child, the name pill, made it 5px
+        // shorter than the text header, so the two never quite lined up.
+        MEDIA_HEADER_ROW,
+      )}
     >
-      <span className="text-xs font-medium text-muted-foreground">{t("editor.timeline.videoPaneTitle")}</span>
+      <span className="text-sm font-semibold tracking-wide text-muted-foreground">
+        {t("editor.timeline.videoPaneTitle")}
+      </span>
+      {/* Beside the heading, pointing the way the section folds — the gutter's
+          own idiom. Icon-only and no taller than the name pill, per the note
+          at the top of this file: a browser pass and a unit test both read
+          this header's textContent, and the row's height is kept in lockstep
+          with the text header's opposite it. */}
+      {onCollapse && <MediaSectionCollapseButton section="video" onCollapse={onCollapse} />}
+      {onToggleFullscreen && (
+        <MediaSectionFullscreenButton
+          section="video"
+          isFullscreen={isFullscreen}
+          onToggle={onToggleFullscreen}
+        />
+      )}
       <span className="inline-flex min-w-0 items-center rounded-md border border-border bg-background px-2 py-0.5 text-[11px] text-foreground/80">
         <span className="truncate font-mono">{basename}</span>
       </span>

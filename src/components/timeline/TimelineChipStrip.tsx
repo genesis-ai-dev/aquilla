@@ -21,6 +21,11 @@ import { VolumeX } from "lucide-react"
 import { fmtClock } from "./format"
 import { MISSING_AUDIO_MESSAGE } from "@/lib/audio/play-queue"
 import { AppTooltip } from "@/components/ui/tooltip"
+import {
+  MEDIA_HEADER_ROW,
+  MediaSectionCollapseButton,
+  MediaSectionFullscreenButton,
+} from "./MediaSectionRail"
 import { uiSlotRef } from "@/lib/ui-slots"
 import type { CellData } from "@/hooks/useCells"
 import type { CameraState } from "@/lib/sync/cells-read-types"
@@ -286,6 +291,9 @@ export function MediaTextHeader({
   castName: castNameOverride,
   cameraState: cameraStateOverride,
   transcribe,
+  onCollapse,
+  onToggleFullscreen,
+  isFullscreen = false,
 }: {
   cell: CellData | null
   /**
@@ -326,6 +334,19 @@ export function MediaTextHeader({
    * timing readout below acts on chips and stays where it is.
    */
   transcribe?: TranscribeSelectionControlsProps | null
+  /**
+   * AQU-1119: collapse the whole text section to a rail.
+   *
+   * Absent means no button, which is what keeps every caller outside the media
+   * lens — and every existing test — rendering exactly what it did before.
+   */
+  onCollapse?: () => void
+  /**
+   * AQU-1119: fold the OTHER sections so the cells have the lens to
+   * themselves, and put them back. Absent handler, absent button.
+   */
+  onToggleFullscreen?: () => void
+  isFullscreen?: boolean
 }) {
   const t = useT()
   const isDialogue = (cell?.medium ?? "media") === "media"
@@ -345,16 +366,29 @@ export function MediaTextHeader({
   return (
     <div
       data-testid="tl-dialogue-header"
-      className="flex items-center gap-2 border-t border-border bg-muted/20 px-4 py-1.5"
+      // MEDIA_HEADER_ROW: one height with the video header beside this and the
+      // rail that replaces it, so the collapse control never changes row.
+      className={`flex items-center gap-2 border-t border-border bg-muted/20 px-4 py-1.5 ${MEDIA_HEADER_ROW}`}
     >
       {/* Same heading treatment as the toolbar's "Timeline" and the video
           pane's "Video" — a section label, not a data pill. It still names the
           KIND of the current chip (a subtitle chip reads "Subtitle"), and falls
           back to the section's own name when nothing is selected so the header
           doesn't blink in and out. */}
-      <span className="shrink-0 text-xs font-medium text-muted-foreground">
+      <span className="shrink-0 text-sm font-semibold tracking-wide text-muted-foreground">
         {headingLabel ?? (isDialogue ? t("editor.timeline.chipHeadingDialogue") : t("editor.timeline.chipHeadingSubtitle"))}
       </span>
+      {/* AQU-1119: beside the heading, pointing the way the section folds —
+          the gutter's own idiom, and where a reader looks for a disclosure
+          control. Absent handler, absent button. */}
+      {onCollapse && <MediaSectionCollapseButton section="text" onCollapse={onCollapse} />}
+      {onToggleFullscreen && (
+        <MediaSectionFullscreenButton
+          section="text"
+          isFullscreen={isFullscreen}
+          onToggle={onToggleFullscreen}
+        />
+      )}
       {castName && (
         <Pill>
           {t("editor.timeline.chipSpeaker")} <b className="font-semibold text-foreground">{castName}</b>

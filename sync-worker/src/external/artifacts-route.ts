@@ -270,7 +270,8 @@ async function handleUpload(
   } catch (err) {
     // Roll back the orphaned R2 object so a failed insert leaves no dangling blob.
     await env.SNAPSHOTS.delete(r2Key).catch(() => {})
-    return errorResponse('job_failed', `artifact insert failed: ${String(err)}`)
+    console.error("[external-artifacts] artifact insert failed:", err)
+    return errorResponse('job_failed', 'artifact insert failed')
   }
 
   return Response.json({

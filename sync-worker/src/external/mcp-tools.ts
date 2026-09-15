@@ -29,11 +29,12 @@ export const MCP_TOOLS: McpToolDef[] = [
     description:
       'Discover what this API and THIS credential can do before attempting anything. ' +
       'Returns the API version, the autonomy mode of the calling credential (ask|act), ' +
-      'the domain command kinds available (SetTranslation, PlanImport, CreateProject, ' +
-      'UpdateProjectSettings, LinkMedia — PlanImport stages via preview_import/' +
-      'prepare_import or REST, the other four stage/commit via ' +
+      'the domain command kinds available (SetTranslation, PlanImport, CreateOrg, ' +
+      'CreateProject, UpdateProjectSettings, LinkMedia, and the cell-structure commands ' +
+      'InsertCell / DeleteCell / SplitCell — PlanImport stages via preview_import/' +
+      'prepare_import or REST, everything else stages/commits via ' +
       'prepare_translations/confirm_changeset — see the returned importing, ' +
-      'projectLifecycle and linkMedia fields for per-kind rules), the operational limits (changeset ' +
+      'projectLifecycle, linkMedia and structure fields for per-kind rules), the operational limits (changeset ' +
       'expiry, PlanImport max cells, artifact max bytes, max commands per changeset), the ' +
       'full list of stable machine-actionable error codes, and an explanation of the ' +
       'ask-mode approval flow (prepare -> approvalUrl -> a human approves in a browser -> ' +
@@ -51,25 +52,75 @@ export const MCP_TOOLS: McpToolDef[] = [
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
   {
+    name: 'list_orgs',
+    description:
+      'List up to 100 organizations the credential covers — the workspace-level entry point ' +
+      'when you manage a whole partner account rather than one project. Each item has ' +
+      '{ id, name, role, role_source } where role is your live org role level and ' +
+      'role_source is owner|member. Scope narrows this and never widens it: an ORG-scoped ' +
+      'credential sees only that org, a PROJECT-scoped credential sees only the org owning ' +
+      'its project (nothing if that project is personal/org-less), and an unscoped ' +
+      'credential sees every org you belong to. Follow with list_projects { orgId } to ' +
+      'enumerate one org\'s projects. Takes no arguments.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
     name: 'list_projects',
     description:
       'List up to 100 projects the credential owner can access (via project membership, ' +
       'project creation, or org membership), further narrowed to the credential org/project ' +
       'scope. Archived projects are excluded. Each item has { id, name, org_id, role_source } ' +
       'where role_source hints how access is granted (creator|member|org). Use before ' +
-      'get_project / search_project to find a project id. Takes no arguments.',
-    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      'get_project / search_project to find a project id. Optional orgId restricts the list ' +
+      'to one org (get ids from list_orgs) — naming an org outside the credential\'s scope ' +
+      'returns scope_denied rather than an empty list.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        orgId: {
+          type: 'string',
+          description: 'Restrict to one org (from list_orgs). Omit for every accessible project.',
+        },
+      },
+      additionalProperties: false,
+    },
   },
   {
     name: 'get_project',
     description:
       'Fetch a single project by id after checking the credential scope and that the owner ' +
-      'has at least VIEWER role on it. Returns { id, name, org_id, archived, role } or a ' +
-      'not_found / scope_denied / permission_denied tool error.',
+      'has at least VIEWER role on it. Returns { id, name, org_id, archived, role, settings, ' +
+      'settingsVersion, settingsUpdatedAt } or a not_found / scope_denied / permission_denied ' +
+      'tool error. `settingsVersion` is the live project-settings version — read it here ' +
+      'before staging a PatchSettings/UpdateProjectSettings command, whose ifMatchVersion ' +
+      'must equal it or prepare returns plan_stale. (REST: GET .../projects/:projectId.)',
     inputSchema: {
       type: 'object',
       properties: { ...projectIdProp },
       required: ['projectId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'describe_command',
+    description:
+      'Look up the full parameter documentation for one changeset command kind — its params, ' +
+      'role floor, gotchas, and a worked example — so you can build a command correctly ' +
+      'instead of discovering its shape one validation_failed at a time. Args: kind ' +
+      '(optional). Omit kind to get the index of every command you may stage ' +
+      '({ kind, title, tier, minRoleLevel, oneLiner }); pass one (e.g. "PatchSettings", ' +
+      '"SetTranslation", "EmitEvents") to get that command\'s paramsDoc. An unknown kind ' +
+      'returns a not_found tool error listing the valid ones. Static documentation — it ' +
+      'reads no project data and needs no projectId. (REST: GET /api/v1/external/commands ' +
+      'and GET /api/v1/external/commands/:kind.)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        kind: {
+          type: 'string',
+          description: 'Command kind to document. Omit for the index of all command kinds.',
+        },
+      },
       additionalProperties: false,
     },
   },
@@ -90,6 +141,60 @@ export const MCP_TOOLS: McpToolDef[] = [
         limit: { type: 'number', description: 'Max results (default 50).' },
       },
       required: ['projectId', 'q'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'find_similar_cells',
+    description:
+      'Translation memory (the "how did we render lines like this before?" primitive). ' +
+      'Returns the source cells most SIMILAR to a given line, each with its current ' +
+      'target and a score in [0,1] (1 = identical wording), so you can reuse an existing ' +
+      'rendering instead of inventing one. Args: projectId (required), then exactly one of ' +
+      'cellId (a source cell in the project — it is excluded from its own results) or text ' +
+      '(free text); limit (optional, default 10, max 50). Returns { data, nextCursor } where ' +
+      'each row is { cellId, fileId, sourceValue, targetValue, targetLang, score }; cells ' +
+      'with no target yet are never returned. SIMILARITY IS LEXICAL (shared terms), NOT ' +
+      'semantic — a paraphrase with no words in common scores 0. Prefer search_project when ' +
+      'you already know which words to look for.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        cellId: { type: 'string', description: 'Source cell to find precedents for.' },
+        text: { type: 'string', description: 'Free text to find precedents for.' },
+        limit: { type: 'number', description: 'Max results (default 10, max 50).' },
+      },
+      required: ['projectId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'search_projects',
+    description:
+      'Full-text search SEVERAL projects in one call — the cross-project form of ' +
+      'search_project, for answering "where does this term appear across this partner\'s ' +
+      'workspace?" without one request per project. Args: projectIds (required, an explicit ' +
+      'array of 1-10 project ids — get them from list_projects), q (required), side ' +
+      '(optional, "source"|"target"), limit (optional). Returns { data, nextCursor, ' +
+      'projectIds } where every result carries the projectId it came from, merged and ranked ' +
+      'across projects. Scoping is strict: if ANY requested project is unknown, outside the ' +
+      'credential\'s scope, or one you have no membership on, the whole call fails ' +
+      '(not_found / scope_denied / permission_denied) — results are never silently partial. ' +
+      'Counts against the search rate limit once PER PROJECT searched.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        projectIds: {
+          type: 'array',
+          description: 'Explicit list of project ids to search (1-10).',
+          items: { type: 'string' },
+        },
+        q: { type: 'string', description: 'Search query string.' },
+        side: { type: 'string', enum: ['source', 'target'], description: 'Restrict to one side.' },
+        limit: { type: 'number', description: 'Max merged results (default 50).' },
+      },
+      required: ['projectIds', 'q'],
       additionalProperties: false,
     },
   },
@@ -141,12 +246,164 @@ export const MCP_TOOLS: McpToolDef[] = [
     },
   },
   {
+    name: 'get_prompt_preview',
+    description:
+      'See the prompt the project copilot would ACTUALLY send when drafting one cell — base ' +
+      'instructions after language substitution, the translation brief, the compiled rules ' +
+      'block (project/org rules plus terminology), the retrieved few-shot examples, and the ' +
+      'preceding approved-target discourse window — as both the assembled system+user ' +
+      'messages and the same content labeled by origin. Args: projectId, cellId, optional ' +
+      'targetLang (target-language lane tag; "" = default lane) and fileId (only needed when ' +
+      'the same cellId exists in more than one file). This is the verification half of prompt ' +
+      'tuning: after PatchSettings changes systemPrompt / completionSettings / ' +
+      'translationBrief / rules, or after a terminology entry lands, call this on a ' +
+      'representative cell to confirm the change actually reached the model instead of ' +
+      'inferring it from a draft. Read-only — it drafts nothing and spends no credits. ' +
+      'Returns not_found if the cell has no source row in this project, and ' +
+      'scope_denied / permission_denied like every other read. `warnings` names anything the ' +
+      'live draft call adds that a read cannot reproduce (footnote output contracts, ' +
+      'per-device provider overrides).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        cellId: { type: 'string', description: 'Cell id to preview the prompt for.' },
+        targetLang: {
+          type: 'string',
+          description: 'Target-language lane tag. Omit or "" for the project default lane.',
+        },
+        fileId: {
+          type: 'string',
+          description: 'Disambiguates a cellId present in more than one file.',
+        },
+      },
+      required: ['projectId', 'cellId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'list_memory',
+    description:
+      'Read a project’s Living Memory: the human-authored project brief plus every memory ' +
+      'entry the copilot learns from — examples (source→target pairs), decisions (standing ' +
+      'rendering rules), notes (per-cell rationale), and observations. Same rows a human ' +
+      'sees on the project’s Memory page, newest first. Each entry carries its path, kind, ' +
+      'status (proposed|approved|rejected|archived), full content, humanEdited, and ' +
+      '`inRetrieval` — whether the copilot is ACTUALLY being given it (only approved entries ' +
+      'within the index render cap are). Call this BEFORE proposing a memory entry: it shows ' +
+      'whether one already exists at that path, whether a human approved it, and whether a ' +
+      'human has edited it (human-edited entries are human-owned — raise a question instead ' +
+      'of re-proposing over them). Author fields are per-project pseudonyms, never usernames. ' +
+      'Args: projectId, optional status, kind, limit, cursor. Errors: permission_denied, ' +
+      'scope_denied, validation_failed (unknown status/kind), rate_limited.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        status: {
+          type: 'string',
+          enum: ['proposed', 'approved', 'rejected', 'archived'],
+          description: 'Only entries in this state. Omit for all states (what the in-app page shows).',
+        },
+        kind: {
+          type: 'string',
+          enum: ['example', 'decision', 'note', 'observation', 'other'],
+          description: 'Only entries of this kind (derived from the path prefix).',
+        },
+        limit: { type: 'number', description: 'Entries per page (1-200, default 50).' },
+        cursor: { type: 'string', description: 'Opaque cursor from a previous nextCursor.' },
+      },
+      required: ['projectId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'read_cell_memory',
+    description:
+      'Show what the copilot’s memory retrieval would inject for ONE cell’s draft: the ' +
+      'project brief plus the approved-memory index it is given (path + first line per ' +
+      'entry, which is all the prompt carries — full text is fetched just-in-time). Use it ' +
+      'to predict what the copilot is working from before asking it to draft, or to explain ' +
+      'a draft after the fact. NOTE the `retrieval.scope` field: retrieval is currently ' +
+      'PROJECT-scoped, i.e. the same brief and index for every cell in the project, with no ' +
+      'per-cell ranking or filtering — do not assume this returned set was narrowed to your ' +
+      'cell. `retrieval.truncated` tells you approved entries exist that are NOT being ' +
+      'injected. Args: projectId, fileId, cellId. Errors: not_found (no such cell), ' +
+      'permission_denied, scope_denied, rate_limited.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        fileId: { type: 'string', description: 'File the cell lives in.' },
+        cellId: { type: 'string', description: 'Cell whose retrieval context to preview.' },
+      },
+      required: ['projectId', 'fileId', 'cellId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'read_quality',
+    description:
+      'Audit a project\'s quality WITHOUT recomputing anything: per-file health score ' +
+      '(0-100, the mean confidence over translated cells) plus coverage — total, filled ' +
+      'and validated cell counts and their percentages — and the project-level rollup. ' +
+      'These are the SAME numbers the human sees on the in-app health ring and progress ' +
+      'surfaces (this tool delegates to the routes those surfaces read), so never derive ' +
+      'health or coverage yourself from read_content: your denominators will not match ' +
+      'theirs. Args: projectId; optional fileId to scope to one file, lane for one ' +
+      'target-language lane, limit/offset to page the per-file list. Returns ' +
+      '{ projectHealth, coverage, data: [{ fileId, name, health, coverage, ... }], ' +
+      'nextCursor }. health is null for a file with no translated cells (not started, ' +
+      'not unhealthy). Errors: scope_denied (403) if your credential is scoped to a ' +
+      'different project, not_found (404) for an unknown fileId, rate_limited (429).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        fileId: { type: 'string', description: 'Scope to one file; omit for the whole project (up to 200 files).' },
+        lane: { type: 'string', description: 'Target-language lane (e.g. "es"). Omit for the default lane.' },
+        limit: { type: 'number', description: 'Per-file page size.' },
+        offset: { type: 'number', description: 'Per-file page offset.' },
+      },
+      required: ['projectId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'read_term_consistency',
+    description:
+      'Answer "which terms are rendered inconsistently, and where?". For every ACTIVE ' +
+      'termbase concept with at least one approved (preferred|admitted) rendering, returns ' +
+      'totalOccurrences (translated cells whose SOURCE matches the concept\'s source term), ' +
+      'consistentCount + consistencyPercent, renderingUsage (which approved rendering was ' +
+      'used in which cellIds — the variant map), and flaggedCells (occurrences whose target ' +
+      'used NONE of the approved renderings — the drift). Runs the same scan as the in-app ' +
+      '"Check file" pass, so your findings match what a reviewer sees. Args: projectId; ' +
+      'optional fileId to scope to one book/file, lane, onlyDrift=true to return only ' +
+      'concepts with flagged cells, limit/offset. Feed flaggedCells straight into ' +
+      'prepare_translations to propose fixes. Errors: scope_denied (403), not_found (404), ' +
+      'rate_limited (429).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        fileId: { type: 'string', description: 'Scope the scan to one file; omit for the whole project.' },
+        lane: { type: 'string', description: 'Target-language lane (e.g. "es"). Omit for the default lane.' },
+        onlyDrift: { type: 'boolean', description: 'Return only concepts that have flagged cells.' },
+        limit: { type: 'number', description: 'Findings page size.' },
+        offset: { type: 'number', description: 'Findings page offset.' },
+      },
+      required: ['projectId'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'prepare_translations',
     description:
       'Stage a batch of commands as an immutable changeset (execution plan) WITHOUT applying ' +
       'them — the generic propose step for every MCP-stageable command kind (Agent API v1.1). ' +
       'Pass `translations` for a SetTranslation batch (as before), and/or `commands` for ' +
-      'CreateProject, UpdateProjectSettings, or LinkMedia. Resolves preconditions from live ' +
+      'CreateOrg, CreateProject, UpdateProjectSettings, or LinkMedia. Resolves preconditions from live ' +
       'state and computes a server-side effect summary (nothing is silently dropped) before ' +
       'returning { changesetId, summary, digest, mode, approvalUrl? }. If mode is "ask" you ' +
       'CANNOT commit directly: first DESCRIBE the staged plan in the conversation — the ' +
@@ -158,8 +415,24 @@ export const MCP_TOOLS: McpToolDef[] = [
       'preview_import / prepare_import tools (or REST; see get_capabilities.importing).\n\n' +
       '`commands` shapes (each enforced server-side; a validation_failed error names the ' +
       'violated rule):\n' +
+      '  { kind: "CreateOrg", name } — receipt-only (a plain row write, not an event); ' +
+      'must be the SOLE command in the changeset, and `name` is the ONLY field it accepts. ' +
+      'Creates a NEW organization owned by this credential\'s minting user (role 700) — ' +
+      'there is no owner parameter, and the agent never becomes a member itself. Requires an ' +
+      'UNSCOPED credential: an org-scoped or project-scoped one gets scope_denied. Any ' +
+      'tier/billing/entitlement field (plan, tier, addonPacks, …) is rejected with ' +
+      'validation_failed naming the field — a new org always gets the default tier. Capped ' +
+      'at 5 staged creations per credential per 15 minutes (rate_limited). Prepare ALWAYS ' +
+      'stages it ask-mode, so it always needs human approval at the approvalUrl. This tool ' +
+      'call still needs a `projectId` argument, but for CreateOrg it is only the changeset\'s ' +
+      'filing id — no project is created, and the receipt carries `orgId` instead of ' +
+      '`projectId`. Feed that orgId to a follow-up CreateProject to populate the new org.\n' +
       '  { kind: "CreateProject", name, projectId?, orgId? } — receipt-only (a plain row ' +
-      'write, not an event); must be the SOLE command in the changeset. `projectId` is ' +
+      'write, not an event); must be the SOLE command in the changeset. `name` must be a ' +
+      'REAL name derived from what you are importing (source folder or file name, the ' +
+      'publication/curriculum title, the language pair) or asked of the human — ' +
+      'content-free placeholders ("default", "untitled", "new project", …) are rejected ' +
+      'with validation_failed. `projectId` is ' +
       'optional: when omitted, the DEFINITIVE new project id is this tool call\'s own ' +
       '`projectId` argument (the changeset\'s URL project id) — set BOTH to the same value ' +
       'to avoid ambiguity, or omit the command\'s `projectId` and rely on the top-level one. ' +
@@ -180,7 +453,24 @@ export const MCP_TOOLS: McpToolDef[] = [
       'is JSON-RPC text and cannot carry that binary upload itself. Multiple LinkMedia ' +
       'commands may share one changeset with each other, but LinkMedia cannot mix with ' +
       'SetTranslation/CreateProject/UpdateProjectSettings in the same changeset. Requires ' +
-      'CONTRIBUTOR.',
+      'CONTRIBUTOR.\n' +
+      '  { kind: "InsertCell", fileId, value, afterCellId?, cellId?, type?, canonicalRef?, ' +
+      'startMs?, endMs?, metadata? } — add a source cell. `afterCellId` names the cell it ' +
+      'follows; null/omitted inserts at the head of the file. Whatever was anchored there is ' +
+      're-pointed onto the new cell so document order survives.\n' +
+      '  { kind: "DeleteCell", fileId, cellId } — remove a source cell and its translations, ' +
+      'closing the order chain over the gap. Refused while the cell still owns validators, ' +
+      'waivers, comments, back-translations, audio takes, links or assignment rows (the ' +
+      'error names them) — clear those first.\n' +
+      '  { kind: "SplitCell", fileId, cellId, offset, targets, targetOffsets?, newCellId? } — ' +
+      'cut the source text at `offset` into two cells. `targets` is REQUIRED: "blank" drops ' +
+      'the existing translations, "divide" cuts each lane at an explicit offset in ' +
+      '`targetOffsets: [{ laneId?, offset }]`, which must name EVERY translated lane. Both ' +
+      'halves end up unvalidated either way.\n' +
+      'All three are STRUCTURAL: each must be the SOLE command in its changeset, each ' +
+      'requires PROJECT_LEAD, and all three are refused on a file imported with preserved ' +
+      'export slots (IDML/OOXML locators) because a structural change would break its ' +
+      'round-trip export. Call describe_command for the full rules.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -214,17 +504,38 @@ export const MCP_TOOLS: McpToolDef[] = [
         commands: {
           type: 'array',
           description:
-            'CreateProject / UpdateProjectSettings / LinkMedia commands to stage (Agent API ' +
-            'v1.1) — see this tool\'s description for per-kind shape, role gates, and ' +
-            'sole-command rules. PlanImport is not accepted here (REST-only).',
+            'CreateOrg / CreateProject / UpdateProjectSettings / LinkMedia / InsertCell / ' +
+            'DeleteCell / SplitCell commands to stage (Agent API v1.1) — see this tool\'s ' +
+            'description for per-kind shape, role gates, and sole-command rules. PlanImport ' +
+            'is not accepted here (REST-only).',
           items: {
             type: 'object',
             oneOf: [
               {
                 type: 'object',
                 properties: {
+                  kind: { type: 'string', enum: ['CreateOrg'] },
+                  name: {
+                    type: 'string',
+                    description:
+                      'Organization name. The ONLY accepted field — tier/billing/entitlement fields are rejected.',
+                  },
+                },
+                required: ['kind', 'name'],
+                additionalProperties: false,
+              },
+              {
+                type: 'object',
+                properties: {
                   kind: { type: 'string', enum: ['CreateProject'] },
-                  name: { type: 'string' },
+                  name: {
+                    type: 'string',
+                    description:
+                      'The project\'s human-facing name. Derive it from what is being ' +
+                      'imported (source folder/file name, publication or curriculum ' +
+                      'title, language pair) or ask the human — placeholders like ' +
+                      '"default" or "untitled" are rejected.',
+                  },
                   projectId: {
                     type: 'string',
                     description: 'Optional — defaults to this call\'s top-level projectId.',
@@ -265,6 +576,74 @@ export const MCP_TOOLS: McpToolDef[] = [
                 required: ['kind', 'fileId', 'cellId', 'artifactId'],
                 additionalProperties: false,
               },
+              {
+                type: 'object',
+                properties: {
+                  kind: { type: 'string', enum: ['InsertCell'] },
+                  fileId: { type: 'string' },
+                  afterCellId: {
+                    type: ['string', 'null'],
+                    description: 'The cell the new one follows; null/omitted = the file head.',
+                  },
+                  cellId: { type: 'string', description: 'Optional client-chosen id for the new cell.' },
+                  value: { type: 'string', description: 'Source text; may be empty.' },
+                  type: { type: 'string' },
+                  canonicalRef: {
+                    type: 'string',
+                    description: 'Must be unused in the file — export overlays translations by ref.',
+                  },
+                  startMs: { type: 'number' },
+                  endMs: { type: 'number' },
+                  metadata: { type: 'object' },
+                },
+                required: ['kind', 'fileId', 'value'],
+                additionalProperties: false,
+              },
+              {
+                type: 'object',
+                properties: {
+                  kind: { type: 'string', enum: ['DeleteCell'] },
+                  fileId: { type: 'string' },
+                  cellId: { type: 'string' },
+                },
+                required: ['kind', 'fileId', 'cellId'],
+                additionalProperties: false,
+              },
+              {
+                type: 'object',
+                properties: {
+                  kind: { type: 'string', enum: ['SplitCell'] },
+                  fileId: { type: 'string' },
+                  cellId: { type: 'string' },
+                  offset: {
+                    type: 'number',
+                    description: 'Character offset into the source text; both halves must be non-empty.',
+                  },
+                  targets: {
+                    type: 'string',
+                    enum: ['blank', 'divide'],
+                    description:
+                      "'blank' drops existing translations; 'divide' cuts each lane at its targetOffsets offset.",
+                  },
+                  targetOffsets: {
+                    type: 'array',
+                    description:
+                      "Required with targets:'divide' — one entry per lane that HAS a translation.",
+                    items: {
+                      type: 'object',
+                      properties: {
+                        laneId: { type: 'string', description: 'Omit for the default lane.' },
+                        offset: { type: 'number' },
+                      },
+                      required: ['offset'],
+                      additionalProperties: false,
+                    },
+                  },
+                  newCellId: { type: 'string', description: 'Optional client-chosen id for the second half.' },
+                },
+                required: ['kind', 'fileId', 'cellId', 'offset', 'targets'],
+                additionalProperties: false,
+              },
             ],
           },
         },
@@ -285,9 +664,9 @@ export const MCP_TOOLS: McpToolDef[] = [
       'round-trip export later. (2) preview_import to check the parse. (3) prepare_import ' +
       'to stage a PlanImport changeset. (4) the normal confirm_changeset / approval flow. ' +
       'Server-parseable formats: txt, md, json, po, properties, obs, vtt, srt, sbv, csv, ' +
-      'tsv, usfm (format is auto-detected; pass fileType to override — required for po/' +
-      'properties/obs/sbv, which are not sniffable). DOM-bound formats (docx, pptx, html, ' +
-      'xliff, tmx, usx, idml) are NOT server-parseable — they return validation_failed ' +
+      'tsv, usfm, docx (format is auto-detected; pass fileType to override — required for ' +
+      'po/properties/obs/sbv, which are not sniffable). Still DOM-bound: pptx, html, ' +
+      'xliff, tmx, usx, idml are NOT server-parseable — they return validation_failed ' +
       'naming the client-side alternatives (in-app Import dialog, or raw PlanImport cells). ' +
       'Returns { fileName, fileType, totalCells, sampleCells (first 10), warnings, ' +
       'results } — `results` lists every parsed file when a multi-book USFM splits into ' +
@@ -363,6 +742,44 @@ export const MCP_TOOLS: McpToolDef[] = [
         changesetId: { type: 'string', description: 'Optional client-supplied UUIDv7 for idempotency.' },
       },
       required: ['projectId', 'artifactId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'export_file',
+    description:
+      'Export one file back out in its delivered format — the mirror of the import ' +
+      'tools, and the last step of "messy files in → clean deliverable out" (e.g. USFM ' +
+      'handed back to Paratext). Reconstructs the file from the ORIGINAL artifact ' +
+      'preserved at import time with the current translations substituted in; ' +
+      'untranslated segments keep their source text so the output stays valid. Args: ' +
+      'projectId, fileId (from read_content), lane (optional — which target-language ' +
+      'lane to export; omit for the default lane). Returns { fileName, contentType, ' +
+      'exportMode, lossyVerseCount, bytes, content } where `content` is the file text. ' +
+      'Read the fidelity fields before delivering: exportMode "round-trip" means ' +
+      'translations were injected, "raw-original"/"raw-sidecar" means the file has no ' +
+      'server-side target serializer yet and you are getting the preserved ORIGINAL ' +
+      'bytes with NO translations in them; lossyVerseCount > 0 (USFM) counts verses ' +
+      'whose footnotes/poetry/character markers the plain-text substitution dropped. ' +
+      'Errors: permission_denied if your live project role is below the org export ' +
+      'floor (MAINTAINER by default — export is gated higher than reading, and no ' +
+      'retry will change it); not_found if the file has no preserved source artifact ' +
+      '(it must be re-imported before it can be exported); validation_failed for a ' +
+      'binary or oversized result, naming the REST URL to fetch instead — MCP is ' +
+      'JSON-RPC text and cannot carry binary bodies, the same asymmetry as the ' +
+      'REST-only artifact upload on the import side.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        fileId: { type: 'string', description: 'File to export (from read_content).' },
+        lane: {
+          type: 'string',
+          description:
+            'Target-language lane to export (e.g. "es"). Omit for the default lane.',
+        },
+      },
+      required: ['projectId', 'fileId'],
       additionalProperties: false,
     },
   },

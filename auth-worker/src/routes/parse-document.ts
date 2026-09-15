@@ -192,8 +192,8 @@ parseDocument.post("/", authMiddleware, async (c) => {
       text = extractTextFromPdf(bytes)
     }
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Parse failed."
-    return c.json({ error: `Could not extract text: ${message}` }, 422)
+    console.error("parse-document extraction failed:", err)
+    return c.json({ error: "Could not extract text from file" }, 422)
   }
 
   if (!text.trim()) {

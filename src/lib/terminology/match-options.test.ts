@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { hasCombiningMarks, resolveMatchOptions } from "./match-options"
+import { hasCombiningMarks, pruneMatch, resolveMatchOptions } from "./match-options"
 
 describe("resolveMatchOptions", () => {
   // WHY: the whole point of script-derived defaults is that a user who selects
@@ -49,5 +49,21 @@ describe("resolveMatchOptions", () => {
     expect(r.prefixes).toEqual([])
     expect(r.suffixes).toEqual([])
     expect(r.maxAffixes).toBe(2)
+  })
+})
+
+describe("pruneMatch", () => {
+  // WHY: the add-concept form always carries a `match` object, so without
+  // pruning every new concept would persist empty arrays and undefined keys —
+  // making a term that took every default look like one whose owner had
+  // deliberately overridden the matcher.
+  it("drops empty values and returns undefined when nothing was set", () => {
+    expect(pruneMatch(undefined)).toBeUndefined()
+    expect(pruneMatch({})).toBeUndefined()
+    expect(pruneMatch({ forms: [], excludedForms: [] })).toBeUndefined()
+    expect(pruneMatch({ foldMarks: false, forms: [], excludedForms: ["x"] })).toEqual({
+      foldMarks: false,
+      excludedForms: ["x"],
+    })
   })
 })

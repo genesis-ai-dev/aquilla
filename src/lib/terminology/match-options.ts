@@ -6,7 +6,7 @@
  * stats, and the term page never disagree about what a term matches.
  */
 
-import type { Concept, TermMatchingSettings } from "./types"
+import type { Concept, TermMatchingSettings, TermMatchOptions } from "./types"
 
 export const DEFAULT_MAX_AFFIXES = 2
 
@@ -53,4 +53,20 @@ export function resolveMatchOptions(
     suffixes,
     maxAffixes: project?.maxAffixes ?? DEFAULT_MAX_AFFIXES,
   }
+}
+
+/**
+ * Strip a draft's match options down to what the user actually set: undefined
+ * keys and empty arrays carry no information, and persisting them would make
+ * every concept look like it had explicit overrides. Returns undefined when
+ * nothing is left, so callers can omit the field entirely.
+ */
+export function pruneMatch(match: TermMatchOptions | undefined): TermMatchOptions | undefined {
+  if (!match) return undefined
+  const out: TermMatchOptions = {}
+  if (match.foldMarks !== undefined) out.foldMarks = match.foldMarks
+  if (match.affixes !== undefined) out.affixes = match.affixes
+  if (match.forms && match.forms.length > 0) out.forms = [...match.forms]
+  if (match.excludedForms && match.excludedForms.length > 0) out.excludedForms = [...match.excludedForms]
+  return Object.keys(out).length > 0 ? out : undefined
 }

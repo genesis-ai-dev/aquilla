@@ -2,13 +2,17 @@
  * AddConceptPopover — source-selection "Add to terminology" form.
  *
  * Opens next to the selection toolbar (not a modal). Pre-fills the highlighted
- * source term, lets the user edit it, optionally add a rendering, and toggle
- * case-insensitive matching. Save progress lives in a toast owned by the
- * caller — this popover closes as soon as submit is accepted.
+ * source term, lets the user edit it and optionally add a rendering. AQU-1271:
+ * when the caller passes the open file's cells it also previews what the
+ * matcher will hit — a live count plus the discovered surface forms as
+ * toggleable chips — with the matching options (marks, affixes, case) behind
+ * one disclosure. Save progress lives in a toast owned by the caller — this
+ * popover closes as soon as submit is accepted.
  */
 
-import { useEffect, useId, useRef, useState, type ReactElement } from "react"
-import { useForm } from "@tanstack/react-form"
+import { useEffect, useId, useMemo, useRef, useState, type ReactElement } from "react"
+import { useForm, useStore } from "@tanstack/react-form"
+import { ChevronRight } from "lucide-react"
 import { z } from "zod"
 import { Popover, PopoverContent, PopoverHeader, PopoverTitle, PopoverTrigger } from "@/components/ui/popover"
 import { Button } from "@/components/ui/button"
@@ -18,13 +22,23 @@ import { Input } from "@/components/ui/input"
 import { isFieldInvalid } from "@/lib/forms/field-state"
 import { requiredString } from "@/lib/forms/schemas"
 import { useI18n } from "@/lib/i18n/I18nProvider"
-import type { ConceptDraft } from "@/lib/terminology/types"
+import { DiscoveredFormsChips } from "@/components/terminology/DiscoveredFormsChips"
+import { MatchOptionsFields } from "@/components/terminology/MatchOptionsFields"
+import { countConceptOccurrences, discoverForms } from "@/lib/terminology/discover-forms"
+import { hasCombiningMarks, pruneMatch, resolveMatchOptions } from "@/lib/terminology/match-options"
+import type { ConceptDraft, TermMatchingSettings, TermMatchOptions } from "@/lib/terminology/types"
 
 const formSchema = z.object({
   term: requiredString("Source term"),
   rendering: z.string(),
   caseInsensitive: z.boolean(),
   approve: z.boolean(),
+  match: z.object({
+    foldMarks: z.boolean().optional(),
+    affixes: z.boolean().optional(),
+    forms: z.array(z.string()).optional(),
+    excludedForms: z.array(z.string()).optional(),
+  }),
 })
 
 export interface AddConceptPopoverProps {
@@ -38,6 +52,16 @@ export interface AddConceptPopoverProps {
    * enforced terminology the user has no authority for.
    */
   canApprove?: boolean
+  /**
+   * Cells to preview the matcher against (the open file). Absent = no preview
+   * line and no discovered-form chips — the form still works, it just cannot
+   * say what the term will hit.
+   */
+  cells?: ReadonlyArray<{ id: string; original: string }>
+  /** Project affix inventory + fold defaults feeding the preview. */
+  termMatching?: TermMatchingSettings
+  /** Open project settings so the user can configure prefixes/suffixes. */
+  onSetUpAffixes?: () => void
   onConfirm: (draft: ConceptDraft) => void | Promise<void>
   onOpenChange?: (open: boolean) => void
   children: React.ReactNode
@@ -47,6 +71,9 @@ export function AddConceptPopover({
   sourceTerm,
   blockedReason,
   canApprove = false,
+  cells,
+  termMatching,
+  onSetUpAffixes,
   onConfirm,
   onOpenChange,
   children,
@@ -54,6 +81,7 @@ export function AddConceptPopover({
   const { t } = useI18n()
   const id = useId()
   const [open, setOpen] = useState(false)
+  const [optionsOpen, setOptionsOpen] = useState(false)
   const blocked = !!blockedReason
   // Snapshot of the source term taken when the popover opens. Opening focuses
   // the input, which collapses the browser selection; the parent then passes
@@ -61,17 +89,27 @@ export function AddConceptPopover({
   const seededTermRef = useRef("")
 
   const form = useForm({
-    defaultValues: { term: sourceTerm, rendering: "", caseInsensitive: true, approve: canApprove },
+    defaultValues: {
+      term: sourceTerm,
+      rendering: "",
+      caseInsensitive: true,
+      approve: canApprove,
+      match: {} as TermMatchOptions,
+    },
     validators: { onSubmit: formSchema },
     onSubmit: ({ value }) => {
       if (blocked) return
       const rendering = value.rendering.trim()
+      // Only what the user actually touched is persisted; an untouched form
+      // leaves `match` off entirely so the concept keeps live defaults.
+      const match = pruneMatch(value.match)
       setOpen(false)
       onOpenChange?.(false)
       void onConfirm({
         sourceTerm: value.term.trim(),
         ...(rendering ? { rendering } : {}),
         ...(value.caseInsensitive ? {} : { caseSensitive: true }),
+        ...(match ? { match } : {}),
         // Never send `approve: true` from a user who cannot approve, whatever
         // the form field says — the server would refuse it, and asking for
         // something guaranteed to fail produces a confusing error instead of
@@ -80,6 +118,40 @@ export function AddConceptPopover({
       })
     },
   })
+
+  // Live matcher preview (AQU-1271). These must recompute on every keystroke
+  // and every option toggle, so they read the form STORE — `form.state.values`
+  // during render is a snapshot React never re-runs us for.
+  const values = useStore(form.store, (s) => s.values)
+  const term = values.term
+  const match = values.match
+  const caseSensitive = !values.caseInsensitive
+  const previewConcept = useMemo(() => ({ sourceTerm: term, match, caseSensitive }), [term, match, caseSensitive])
+  const resolved = useMemo(() => resolveMatchOptions(previewConcept, termMatching), [previewConcept, termMatching])
+  const forms = useMemo(
+    () => (cells ? discoverForms(cells, previewConcept, termMatching) : []),
+    [cells, previewConcept, termMatching],
+  )
+  const count = useMemo(
+    () => (cells ? countConceptOccurrences(cells, previewConcept, termMatching) : 0),
+    [cells, previewConcept, termMatching],
+  )
+  // Offer the fold-marks toggle only where marks actually exist — on plain
+  // Latin text it is a checkbox that can never change an answer.
+  const showFoldMarks = hasCombiningMarks(term) || (cells?.some((c) => hasCombiningMarks(c.original)) ?? false)
+  const hasAffixInventory = resolved.prefixes.length > 0 || resolved.suffixes.length > 0
+
+  const toggleExclude = (surface: string, excluded: boolean) => {
+    const current = form.getFieldValue("match")
+    const currentExcluded = current.excludedForms ?? []
+    const next = excluded
+      ? [...new Set([...currentExcluded, surface])]
+      : currentExcluded.filter((f) => f !== surface)
+    form.setFieldValue("match", {
+      ...current,
+      ...(next.length > 0 ? { excludedForms: next } : { excludedForms: undefined }),
+    })
+  }
 
   useEffect(() => {
     if (!open) {
@@ -95,6 +167,7 @@ export function AddConceptPopover({
     form.setFieldValue("rendering", "")
     form.setFieldValue("caseInsensitive", true)
     form.setFieldValue("approve", canApprove)
+    form.setFieldValue("match", {})
   }, [open, sourceTerm, form, canApprove])
 
   function handleOpenChange(next: boolean) {
@@ -107,9 +180,11 @@ export function AddConceptPopover({
         form.setFieldValue("rendering", "")
         form.setFieldValue("caseInsensitive", true)
         form.setFieldValue("approve", canApprove)
+        form.setFieldValue("match", {})
       }
     } else {
       seededTermRef.current = ""
+      setOptionsOpen(false)
     }
     setOpen(next)
     onOpenChange?.(next)
@@ -157,6 +232,17 @@ export function AddConceptPopover({
                 )
               }}
             />
+            <p className="text-[11px] leading-snug text-muted-foreground">
+              {t("terminology.match.wildcardHint")}
+            </p>
+            {cells && (
+              <div className="grid gap-1.5">
+                <p className="text-[11px] leading-snug text-muted-foreground">
+                  {t("terminology.match.previewCount", { count })}
+                </p>
+                <DiscoveredFormsChips forms={forms} disabled={blocked} onToggleExclude={toggleExclude} />
+              </div>
+            )}
             <form.Field
               name="rendering"
               children={(field) => (
@@ -226,22 +312,37 @@ export function AddConceptPopover({
                 ) : null
               }
             />
-            <form.Field
-              name="caseInsensitive"
-              children={(field) => (
-                <div className="flex items-center gap-2">
-                  <Checkbox
-                    id={`${id}-case-insensitive`}
-                    checked={field.state.value}
-                    disabled={blocked}
-                    onCheckedChange={(checked) => field.handleChange(checked === true)}
-                  />
-                  <FieldLabel htmlFor={`${id}-case-insensitive`} className="text-xs font-normal">
-                    {t("terminology.addConcept.caseInsensitiveLabel")}
-                  </FieldLabel>
-                </div>
+            {/* AQU-1271: every "how should this term match" toggle — case,
+                marks, affixes — lives behind one disclosure. Defaults are
+                resolved from the project and the script, so the common case
+                never opens this. */}
+            <div className="grid gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                className="justify-start px-0 text-xs font-normal text-muted-foreground"
+                aria-expanded={optionsOpen}
+                onClick={() => setOptionsOpen((v) => !v)}
+              >
+                <ChevronRight className={optionsOpen ? "size-3 rotate-90" : "size-3"} aria-hidden />
+                {t("terminology.match.optionsLabel")}
+              </Button>
+              {optionsOpen && (
+                <MatchOptionsFields
+                  value={match}
+                  resolved={resolved}
+                  showFoldMarks={showFoldMarks}
+                  hasAffixInventory={hasAffixInventory}
+                  caseSensitive={caseSensitive}
+                  disabled={blocked}
+                  idPrefix={id}
+                  onChange={(next) => form.setFieldValue("match", next)}
+                  onCaseSensitiveChange={(v) => form.setFieldValue("caseInsensitive", !v)}
+                  onSetUpAffixes={onSetUpAffixes}
+                />
               )}
-            />
+            </div>
           </FieldGroup>
         </form>
 

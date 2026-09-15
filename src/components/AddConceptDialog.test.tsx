@@ -102,7 +102,11 @@ describe("AddConceptPopover", () => {
     renderPopover({ sourceTerm: "grace", onConfirm })
     await openPopover()
     await user.type(screen.getByLabelText(/rendering for new concept/i), "favor")
-    await user.click(screen.getByRole("checkbox", { name: /case insensitive/i }))
+    // AQU-1271: case sensitivity now lives inside the collapsed "Matching
+    // options" disclosure with the other matcher toggles, stated positively
+    // ("Match case exactly") rather than as a standalone inverted checkbox.
+    await user.click(screen.getByRole("button", { name: /matching options/i }))
+    await user.click(screen.getByRole("checkbox", { name: /match case exactly/i }))
     await user.click(screen.getByRole("button", { name: /add term/i }))
     await waitFor(() => {
       expect(onConfirm).toHaveBeenCalledWith({
@@ -172,6 +176,39 @@ describe("AddConceptPopover", () => {
     fireEvent.keyDown(screen.getByLabelText(/rendering for new concept/i), { key: "Enter" })
     await waitFor(() => {
       expect(onConfirm).toHaveBeenCalledWith({ sourceTerm: "peace", approve: false })
+    })
+  })
+
+  // WHY: the preview count and chips are how a user learns what the matcher
+  // will do BEFORE saving; an option toggle must re-count live, and a chip
+  // click must land in the submitted draft as an exclusion.
+  it("previews matches, toggles options live, and submits exclusions", async () => {
+    const user = userEvent.setup()
+    const onConfirm = vi.fn()
+    const cells = [
+      { id: "a", original: "וְהָאָ֗רֶץ הָיְתָה" },
+      { id: "b", original: "אֵת הָאָֽרֶץ׃" },
+      { id: "c", original: "nothing here" },
+    ]
+    renderPopover({
+      sourceTerm: "הָאָ֗רֶץ",
+      cells,
+      termMatching: { prefixes: ["ו"], suffixes: [] },
+      canApprove: true,
+      onConfirm,
+    })
+    await openPopover()
+    expect(await screen.findByText(/Matches 2 places/)).toBeTruthy()
+    await user.click(screen.getByRole("button", { name: /Exclude וְהָאָ֗רֶץ/ }))
+    expect(await screen.findByText(/Matches 1 place\b/)).toBeTruthy()
+    await user.click(screen.getByRole("button", { name: /add term/i }))
+    await waitFor(() => {
+      expect(onConfirm).toHaveBeenCalledWith(
+        expect.objectContaining({
+          sourceTerm: "הָאָ֗רֶץ",
+          match: expect.objectContaining({ excludedForms: ["וְהָאָ֗רֶץ"] }),
+        }),
+      )
     })
   })
 

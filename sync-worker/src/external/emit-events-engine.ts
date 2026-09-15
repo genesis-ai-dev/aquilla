@@ -34,6 +34,7 @@ import { uuidv7 } from './uuid'
 import { PROJECT_SENTINEL_FILE_ID as PROJECT_SENTINEL } from '../events/authorize'
 import { handleEventsWriteRequest } from '../events/route'
 import { ROLE, requiredRoleForForeignComment, roleLabel } from '../events/role-policy'
+import { resolveCommentFloors } from '../events/comment-floors'
 import type { CommentScope, EventKind, RawEvent } from '../events/types'
 import type {
   ChangesetReceipt,
@@ -44,6 +45,7 @@ import type {
   PlannedEventIds,
   ProvenanceChannel,
   StoredChangeset,
+  TestimonySummaryEntry,
 } from './types'
 import type { ApiCredentialContext } from '../../../db/shared/api-credentials'
 
@@ -57,6 +59,11 @@ const PIN_KINDS = new Set([
 
 /** Statements per POST to the /events perimeter (mirrors PLAN_IMPORT_CHUNK). */
 const EMIT_CHUNK = 100
+
+/** Per-cell text budget in the testimony summary (AQU-1184). Long enough to
+ *  recognise the sentence being endorsed, short enough that a 200-event batch
+ *  stays a reasonable summary JSONB. */
+const TESTIMONY_TEXT_MAX = 300
 
 interface CommentRow {
   comment_id: string
@@ -223,7 +230,7 @@ export async function prepareEmitEvents(
 ): Promise<Response> {
   const refs = collectRefs(cmd.events)
   const hasTerms = cmd.events.some((e) => TERM_EMIT_KINDS.has(e.kind))
-  const [states, files, comments, assignments, concepts, termbaseFloor] = await Promise.all([
+  const [states, files, comments, assignments, concepts, termbaseFloor, commentFloors] = await Promise.all([
     resolveCellStates(db, projectId, refs.cellRefs),
     loadFiles(db, projectId, refs.fileIds),
     loadComments(db, projectId, refs.commentIds),
@@ -231,6 +238,10 @@ export async function prepareEmitEvents(
     loadConcepts(db, projectId, refs.conceptIds),
     // Only pay for the org lookup when the batch actually touches terminology.
     hasTerms ? resolveTermbaseFloor(db, projectId) : Promise.resolve(0),
+    // AQU-1002: the org's configurable comment floors. Resolved once for the
+    // whole plan alongside the other reference loads — the plan is
+    // single-project, so there is nothing to key a cache on.
+    resolveCommentFloors(db, projectId),
   ])
 
   const failed = (i: number, message: string, details?: unknown): Response =>
@@ -258,6 +269,22 @@ export async function prepareEmitEvents(
         }
         if (e.kind === 'target.cell.repin' && s.sourceEventId == null) {
           return failed(i, `cell ${e.cellId} has no source to repin against`)
+        }
+        // AQU-1184 guardrail 1 — no validation-laundering of AI content.
+        // The in-app policy (AQU-983) deliberately skips ai_drafted cells in
+        // bulk validate so a reviewer must open each one; this surface must
+        // not become the way around it. There is NO flag to bypass this: an
+        // agent validating text an agent drafted is not review. A human
+        // target commit or an individual in-app validation clears
+        // cells.ai_drafted (AQU-292), after which the cell validates through
+        // here like any other. Drift the other way (the cell becomes an AI
+        // draft between prepare and commit) necessarily moves the target
+        // head, which the stored pin catches as plan_stale.
+        if (e.kind === 'cell.validate' && s.targetAiDrafted === true) {
+          return failed(
+            i,
+            `cell ${e.cellId} in file ${e.fileId} is an unreviewed AI draft — AI-drafted text must be reviewed by a human in the app before it can be validated; no API flag bypasses this`,
+          )
         }
         preconditionByKey.set(laneCellKey(e.fileId!, e.cellId!, e.laneId), {
           fileId: e.fileId!,
@@ -296,6 +323,15 @@ export async function prepareEmitEvents(
         const f = files.get(e.fileId)
         if (!f || f.deleted_at != null) return failed(i, `file ${e.fileId} does not exist`)
       }
+      // AQU-1002: org-configurable floor to open a thread or post a reply.
+      // Only ever raises the static COMMENTER floor the generic prepare gate
+      // already applied; mirrors the /events perimeter's own check.
+      if (callerRoleLevel < commentFloors.createMinRole) {
+        return errorResponse(
+          'permission_denied',
+          `events[${i}]: creating a comment requires ${roleLabel(commentFloors.createMinRole)} (${commentFloors.createMinRole})`,
+        )
+      }
       if (!e.payload.commentId) planned.commentId = uuidv7()
     }
 
@@ -306,10 +342,15 @@ export async function prepareEmitEvents(
       if (e.kind === 'comment.resolve' && row.parent_comment_id != null) {
         return failed(i, `comment ${commentId} is a reply — only top-level threads can be resolved`)
       }
-      // AQU-999: foreign-comment floor comes from FOREIGN_COMMENT_ROLE, the
-      // same table the /events perimeter reads — maintainer (600) for
-      // edit/delete, contributor (400) for resolve/reopen.
-      const foreignFloor = requiredRoleForForeignComment(e.kind)
+      // AQU-999: edit/delete read FOREIGN_COMMENT_ROLE, the same table the
+      // /events perimeter reads — maintainer (600) for both.
+      // AQU-1002: resolve/reopen instead reads the org's configurable floor,
+      // defaulting to AQU-999's contributor (400). Both perimeters resolve it
+      // the same way, so the policy cannot drift between them.
+      const foreignFloor =
+        e.kind === 'comment.resolve'
+          ? commentFloors.resolveMinRole
+          : requiredRoleForForeignComment(e.kind)
       if (row.author_id !== cred.username && callerRoleLevel < foreignFloor) {
         const verb = e.kind === 'comment.resolve' ? 'resolving' : 'mutating'
         return errorResponse(
@@ -416,7 +457,28 @@ export async function prepareEmitEvents(
       })
   }
   for (const entry of byKind.values()) entry.label = emitKindEffectLabel(entry.kind, entry.count)
-  const summary: ChangesetSummary = { events: [...byKind.values()], warnings: [] }
+  // AQU-1184 guardrail 2: name every staged validation cell-by-cell, with the
+  // text as the server currently reads it, so the approver endorses specific
+  // sentences rather than a count. Batches are capped at
+  // EMIT_EVENTS_MAX_EVENTS, so this list is bounded by construction.
+  const testimony: TestimonySummaryEntry[] = []
+  for (const e of normalized) {
+    if (e.kind !== 'cell.validate' && e.kind !== 'cell.unvalidate') continue
+    const value = states.get(laneCellKey(e.fileId!, e.cellId!, e.laneId))?.targetValue ?? ''
+    testimony.push({
+      kind: e.kind,
+      fileId: e.fileId!,
+      cellId: e.cellId!,
+      ...(e.laneId ? { laneId: e.laneId } : {}),
+      text: value.slice(0, TESTIMONY_TEXT_MAX),
+      truncated: value.length > TESTIMONY_TEXT_MAX,
+    })
+  }
+  const summary: ChangesetSummary = {
+    events: [...byKind.values()],
+    ...(testimony.length > 0 ? { testimony } : {}),
+    warnings: [],
+  }
 
   const command: EmitEventsCommand = { kind: 'EmitEvents', events: normalized }
   return stageAndRespond(db, env, {

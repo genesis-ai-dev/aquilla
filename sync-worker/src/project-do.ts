@@ -30,6 +30,7 @@ import {
   PresenceDraftThrottle,
   presenceSnapshot,
   PROJECT_DO_DEFAULT_LEASE_MS,
+  resolveConnId,
   stripPresenceDraft,
   sweepExpiredLeases,
   unpackBroadcastBody,
@@ -72,6 +73,12 @@ export const TOKEN_EXPIRED_CLOSE_CODE = 4401
 
 interface ConnectionState {
   ws: WebSocket
+  /**
+   * Per-socket presence key. Sent by the client as `?connId=` (generated per
+   * socket session in ws-reconciler.ts); older clients omit it and get a
+   * server-generated id — they still work, they just can't self-filter by it.
+   */
+  connId: string
   userId: string
   /** Numeric user id from verified token claims; null in ALLOW_UNAUTHENTICATED dev. */
   numericUserId: number | null
@@ -198,7 +205,8 @@ export class ProjectSync extends DurableObject<DOEnv> {
         const result = await this.linkSyncInFlight
         return Response.json(result)
       } catch (err) {
-        return new Response(`mirror sync failed: ${String(err)}`, { status: 500 })
+        console.error("[project-do] mirror sync failed:", err)
+        return new Response("mirror sync failed", { status: 500 })
       }
     }
 
@@ -359,16 +367,18 @@ export class ProjectSync extends DurableObject<DOEnv> {
       userId = url.searchParams.get("user") ?? "anon"
     }
 
+    const connId = resolveConnId(url.searchParams.get("connId"), this.connections)
+
     const pair = new WebSocketPair()
     const client = pair[0]
     const server = pair[1]
 
     server.accept()
 
-    const conn: ConnectionState = { ws: server, userId, numericUserId, role, tokenExpiresAt }
+    const conn: ConnectionState = { ws: server, connId, userId, numericUserId, role, tokenExpiresAt }
     this.connections.set(server, conn)
-    const joined: PresenceState = { userId, ts: Date.now() }
-    this.presence.set(userId, joined)
+    const joined: PresenceState = { connId, userId, ts: Date.now() }
+    this.presence.set(connId, joined)
     this.startLeaseSweep()
     // Snapshot of current roster (drafts stripped) so the new client sees
     // existing peers; everyone else learns about the newcomer via a diff.
@@ -419,7 +429,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
       // out of a cell indefinitely. Mirrors the write-drop policy already
       // applied to actual content writes (see shouldBeReadOnly callers).
       if (shouldBeReadOnly(conn.role)) return
-      const result = applyFocusClaim(this.locks, this.presence, conn.userId, msg, now)
+      const result = applyFocusClaim(this.locks, this.presence, conn, msg, now)
       this.locks = result.locks
       this.presence = result.presence
       for (const m of result.emit) this.broadcastToAll(m)
@@ -428,19 +438,19 @@ export class ProjectSync extends DurableObject<DOEnv> {
     }
     if (msg.t === "focus.renew") {
       if (shouldBeReadOnly(conn.role)) return
-      const result = applyFocusRenew(this.locks, this.presence, conn.userId, msg, now)
+      const result = applyFocusRenew(this.locks, this.presence, conn, msg, now)
       this.locks = result.locks
       return
     }
     if (msg.t === "focus.release") {
-      const result = applyFocusRelease(this.locks, this.presence, conn.userId, msg, now)
+      const result = applyFocusRelease(this.locks, this.presence, conn, msg, now)
       this.locks = result.locks
       this.presence = result.presence
       for (const m of result.emit) this.broadcastToAll(m)
       return
     }
     if (msg.t === "presence.update") {
-      const result = applyPresenceUpdate(this.presence, conn.userId, msg, now)
+      const result = applyPresenceUpdate(this.presence, conn, msg, now)
       this.presence = result.presence
       for (const m of result.emit) {
         if (m.t === "presence.draft") this.draftThrottle.push(m)
@@ -480,10 +490,10 @@ export class ProjectSync extends DurableObject<DOEnv> {
       if (state.userId === conn.userId) remaining++
     }
     const now = Date.now()
-    const result = applyDisconnect(this.locks, this.presence, conn.userId, now, remaining)
+    const result = applyDisconnect(this.locks, this.presence, conn, now, remaining)
     this.locks = result.locks
     this.presence = result.presence
-    if (remaining === 0) this.draftThrottle.clear(conn.userId)
+    this.draftThrottle.clear(conn.connId)
     for (const m of result.emit) this.broadcastToAll(m)
     if (this.connections.size === 0) this.stopLeaseSweep()
   }

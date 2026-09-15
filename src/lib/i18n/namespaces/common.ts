@@ -66,6 +66,7 @@ export const common = defineNamespace({
     //   for the specific surfaces it now serves.
     "common.done": "Done",
     "common.copy": "Copy",
+    "common.copied": "Copied",
     "common.revoke": "Revoke",
     "common.revoking": "Revoking…",
     "common.restore": "Restore",
@@ -497,6 +498,12 @@ export const common = defineNamespace({
           "button, and the last step of the product tour. Unlike common.close it marks a " +
           "flow as finished, not merely dismissed.",
         screenshot: "project-settings",
+      },
+      "common.copied": {
+        description:
+          "Transient confirmation replacing a Copy button's label for about a second after " +
+          "the copy succeeds.",
+        maxLength: 12,
       },
       "common.copy": {
         description:

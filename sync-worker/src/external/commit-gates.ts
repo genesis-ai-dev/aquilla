@@ -7,6 +7,7 @@ import { errorResponse } from './errors'
 import { loadChangeset } from './store'
 import type {
   ChangesetReceipt,
+  MemoryWriteReceipt,
   ProvenanceChannel,
   ReceiptOnlyReceipt,
   StoredChangeset,
@@ -69,7 +70,7 @@ export async function stampProvenance(
 export async function writeCommittedReceipt(
   db: AquillaDb,
   changesetId: string,
-  receipt: ChangesetReceipt | ReceiptOnlyReceipt,
+  receipt: ChangesetReceipt | ReceiptOnlyReceipt | MemoryWriteReceipt,
   confirmationId: string | null,
 ): Promise<void> {
   await db

@@ -6,6 +6,7 @@ import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, within } from "@testing-library/react"
 import type { ColumnDef } from "@tanstack/react-table"
 import { DataTable, DataTableColumnHeader, DataTableRowActionsButton } from "./data-table"
+import { allocateColumnWidths } from "./data-table-virtual"
 import { MenuItem } from "./menu-parts"
 
 interface Row {
@@ -194,6 +195,74 @@ describe("DataTable", () => {
     expect(shell.parentElement).toHaveClass("min-w-0")
   })
 
+  it("cancels negative horizontal margin so fillHeight scrollbars are not clipped", () => {
+    render(
+      <DataTable
+        columns={columns}
+        data={rows}
+        getRowId={(r) => String(r.id)}
+        fillHeight
+        className="-mx-2 overflow-visible"
+        testId="fill-table"
+      />,
+    )
+    const shell = screen.getByTestId("fill-table")
+    expect(shell).toHaveClass("mx-0")
+    expect(shell).not.toHaveClass("-mx-2")
+    expect(shell).not.toHaveClass("overflow-hidden")
+  })
+
+  it("virtualizes fillHeight rows with LegendList while keeping names queryable", () => {
+    render(
+      <DataTable
+        columns={columns}
+        data={rows}
+        getRowId={(r) => String(r.id)}
+        fillHeight
+      />,
+    )
+    expect(screen.getByTestId("legend-list-mock")).toBeInTheDocument()
+    expect(bodyNames()).toEqual(["Alpha", "Beta", "Gamma"])
+    const htmlTable = document.querySelector('[data-slot="table"]')
+    expect(htmlTable).toHaveClass("w-full")
+    expect(htmlTable).not.toHaveClass("min-w-max")
+  })
+
+  it("gives the name column leftover space with a 16rem floor", () => {
+    const hints = [null, null, 104, 104, 104, 120, 144, 152, 120, 40]
+    const wide = allocateColumnWidths(hints, 2000)
+    expect(wide[0]).toBe(2000 - 888 - 160)
+    expect(wide[1]).toBe(160)
+    expect(wide.slice(2)).toEqual([104, 104, 104, 120, 144, 152, 120, 40])
+
+    const fitted = allocateColumnWidths(hints, 1168)
+    expect(fitted.reduce((sum, w) => sum + w, 0)).toBeLessThanOrEqual(1168)
+    expect(fitted[0]).toBeGreaterThan(200)
+  })
+
+  it("keeps a non-fillHeight table as a single HTML table", () => {
+    render(
+      <DataTable columns={columns} data={rows} getRowId={(r) => String(r.id)} />,
+    )
+    expect(screen.queryByTestId("legend-list-mock")).not.toBeInTheDocument()
+    expect(screen.getAllByRole("table")).toHaveLength(1)
+  })
+
+  it("exposes the load-more sentinel in a fillHeight footer", () => {
+    render(
+      <DataTable
+        columns={columns}
+        data={rows}
+        getRowId={(r) => String(r.id)}
+        fillHeight
+        hasMore
+        onLoadMore={vi.fn()}
+        loadMoreTestId="fill-load-more"
+      />,
+    )
+    expect(screen.getByTestId("fill-load-more")).toBeInTheDocument()
+  })
+
   it("applies dense row padding when dense is set", () => {
     const { container } = render(
       <DataTable columns={columns} data={rows} getRowId={(r) => String(r.id)} dense />,
@@ -257,6 +326,26 @@ describe("DataTable", () => {
     expect(screen.getByRole("table")).toBeInTheDocument()
     expect(screen.queryByTestId("custom-empty")).not.toBeInTheDocument()
     expect(screen.getByTestId("loading-table").querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThan(0)
+  })
+
+  it("shows a spinner in the search field while searching without skeletonizing rows", () => {
+    render(
+      <DataTable
+        columns={columns}
+        data={rows}
+        searchPlaceholder="Search…"
+        searchValue="al"
+        onSearchChange={vi.fn()}
+        searching
+        testId="searching-table"
+      />,
+    )
+    const search = screen.getByLabelText("Search…")
+    expect(search).toBeEnabled()
+    expect(search.closest("[data-slot='input-group']")).toHaveAttribute("aria-busy", "true")
+    expect(screen.getByRole("status", { name: /searching/i })).toBeInTheDocument()
+    expect(screen.getByText("Alpha")).toBeInTheDocument()
+    expect(screen.getByTestId("searching-table").querySelectorAll('[data-slot="skeleton"]')).toHaveLength(0)
   })
 
   it("opens renderRowMenuItems from row right-click and from the ⋯ button", async () => {

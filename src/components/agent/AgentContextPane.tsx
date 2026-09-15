@@ -128,6 +128,10 @@ export function AgentContextPane({
   const title = isSource ? "Source" : "Target"
   const [editingCellId, setEditingCellId] = useState<string | null>(null)
   const [actionCellId, setActionCellId] = useState<string | null>(null)
+  // AQU-200: which row (if any) has its rail `⋯` overflow open. Kept here, not
+  // per-row, so at most one is open and so the open row's rail stays revealed
+  // while the pointer is inside the popup rather than on the row.
+  const [overflowCellId, setOverflowCellId] = useState<string | null>(null)
   const [writeError, setWriteError] = useState<{ cellId: string; message: string } | null>(null)
   const targetEditable = !isSource && editable && Boolean(onCommitTarget)
   const activeEditingCellId = editingCellId && cells.some((cell) => cell.cellId === editingCellId)
@@ -168,9 +172,18 @@ export function AgentContextPane({
             const editorLabel = `${cell.ref || "Cell"} — ${cell.status || "unvalidated"}`
             const canEditCell = targetEditable && !heldByLabel
             const targetHasRichFormatting = hasMeaningfulRichText(cell.targetHtml)
+            const idmlStyleCatalog = cell.idmlConfiguration?.kind === "ready"
+              ? cell.idmlConfiguration.context.styleCatalog
+              : undefined
+            const idmlParagraphStyleId = cell.idmlConfiguration?.kind === "ready"
+              ? cell.idmlConfiguration.context.paragraphStyleId
+              : undefined
             const completionState = completing?.get(cell.cellId)
             const isLoading = completionState === "searching" || completionState === "generating"
-            const actionsRevealed = !isSource && (actionCellId === cell.cellId || activeEditingCellId === cell.cellId)
+            const actionsRevealed = !isSource
+              && (actionCellId === cell.cellId
+                || activeEditingCellId === cell.cellId
+                || overflowCellId === cell.cellId)
             return (
               <article
                 key={cell.cellId}
@@ -202,7 +215,11 @@ export function AgentContextPane({
                   >
                     <div className={cn("whitespace-pre-wrap break-words leading-relaxed", !text && "italic text-muted-foreground")}>
                       {cell.sourceHtml ? (
-                        <SanitizedRichHtml html={cell.sourceHtml} />
+                        <SanitizedRichHtml
+                          html={cell.sourceHtml}
+                          idmlStyleCatalog={idmlStyleCatalog}
+                          idmlParagraphStyleId={idmlParagraphStyleId}
+                        />
                       ) : (
                         <EditorPlainReadText text={text} emptyLabel={t("agentWorkspace.noSourceText")} />
                       )}
@@ -228,13 +245,21 @@ export function AgentContextPane({
                   >
                     <div className="pointer-events-none absolute right-1 top-0.5 z-20">
                       <div className="pointer-events-auto">
+                        {/* AQU-200: same split as the editor's rail — AI
+                            generate stays a direct button, comments/history
+                            collapse behind the `⋯`. */}
                         <CellActionRail
                           revealed={actionsRevealed}
                           expanded={false}
                           onToggleExpanded={() => {}}
                           showDetailsToggle={false}
-                        >
-                          {onDraftTarget && (
+                          overflowOpen={overflowCellId === cell.cellId}
+                          onOverflowOpenChange={(open) =>
+                            setOverflowCellId(open ? cell.cellId : null)}
+                          overflowAttentionDot={
+                            (openCommentCounts?.get(cell.cellId) ?? 0) > 0 ? "primary" : null}
+                          overflowLabel={t("editor.rail.moreActions")}
+                          primary={onDraftTarget && (
                             <TargetDraftActions
                               targetText={cell.target}
                               status={cell.status}
@@ -248,6 +273,7 @@ export function AgentContextPane({
                               onAiSetupNeeded={onAiSetupNeeded}
                             />
                           )}
+                        >
                           <TargetReferenceActions
                             cellId={cell.cellId}
                             openCommentCount={openCommentCounts?.get(cell.cellId)}
@@ -315,6 +341,7 @@ export function AgentContextPane({
                           tabIndex={canEditCell ? 0 : undefined}
                           editable={canEditCell}
                           empty={!text}
+                          preserveWhitespace={Boolean(cell.idmlConfiguration)}
                           onClick={() => canEditCell && setEditingCellId(cell.cellId)}
                           onKeyDown={(event) => {
                             if (!canEditCell || event.key !== "Enter") return
@@ -323,7 +350,11 @@ export function AgentContextPane({
                           }}
                         >
                           {cell.idmlConfiguration && cell.targetHtml ? (
-                            <TargetIdmlHtml html={cell.targetHtml} />
+                            <TargetIdmlHtml
+                              html={cell.targetHtml}
+                              idmlStyleCatalog={idmlStyleCatalog}
+                              idmlParagraphStyleId={idmlParagraphStyleId}
+                            />
                           ) : targetHasRichFormatting && cell.targetHtml ? (
                             <TargetRichHtml html={cell.targetHtml} />
                           ) : (

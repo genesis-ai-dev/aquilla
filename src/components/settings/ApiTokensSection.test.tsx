@@ -154,6 +154,56 @@ describe("ApiTokensSection", () => {
     expect(screen.getAllByRole("button", { name: "Revoke" })).toHaveLength(1)
   })
 
+  it("shows each token's creation date and labels its reach by kind", async () => {
+    // A reader scanning this list needs to see blast radius without opening
+    // anything: whole-org tokens read differently from single-project ones,
+    // and "when did this appear" is how you spot one you didn't expect.
+    mockListCredentials.mockResolvedValue([
+      { ...ASK_CREDENTIAL, orgId: "1", projectId: null },
+      REVOKED_CREDENTIAL,
+    ])
+    render(<ApiTokensSection />)
+    expect(await screen.findByText(/Whole org: Acme Org/)).toBeInTheDocument()
+    expect(screen.getByText(/Project: Maintainer Project/)).toBeInTheDocument()
+    expect(screen.getAllByText(/^Created /)).toHaveLength(2)
+  })
+
+  it("picks up a token minted moments after browser approval, without a manual reload", async () => {
+    // Arriving from /connect-agent the credential does not exist yet — it is
+    // minted on the agent's next poll. One fetch on mount always misses it.
+    vi.useFakeTimers()
+    try {
+      window.history.replaceState(null, "", "/preferences/api-tokens?awaiting=1")
+      mockListCredentials.mockResolvedValue([])
+      render(<ApiTokensSection />)
+      await vi.waitFor(() => expect(screen.getByText(/No tokens yet/)).toBeInTheDocument())
+
+      mockListCredentials.mockResolvedValue([ASK_CREDENTIAL])
+      await vi.advanceTimersByTimeAsync(3000)
+      await vi.waitFor(() => expect(screen.getByText(/aqk_abc123/)).toBeInTheDocument())
+
+      // Having found it, the section stops polling rather than refreshing forever.
+      const calls = mockListCredentials.mock.calls.length
+      await vi.advanceTimersByTimeAsync(30000)
+      expect(mockListCredentials.mock.calls.length).toBe(calls)
+    } finally {
+      vi.useRealTimers()
+      window.history.replaceState(null, "", "/")
+    }
+  })
+
+  it("does not poll when the page was opened directly", async () => {
+    vi.useFakeTimers()
+    try {
+      render(<ApiTokensSection />)
+      await vi.waitFor(() => expect(mockListCredentials).toHaveBeenCalledTimes(1))
+      await vi.advanceTimersByTimeAsync(30000)
+      expect(mockListCredentials).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("renders an empty state when the caller has no tokens", async () => {
     mockListCredentials.mockResolvedValue([])
     render(<ApiTokensSection />)
@@ -223,6 +273,10 @@ describe("ApiTokensSection", () => {
     // Show-once dialog: the plaintext token renders, with the "never again" notice.
     expect(await screen.findByText("aqk_freshplaintext")).toBeInTheDocument()
     expect(screen.getByText(/you will not see it again/i)).toBeInTheDocument()
+    // Pasting a live credential into a chat or a log is how these leak. The
+    // warning has to name that, at the one moment the plaintext is on screen.
+    expect(screen.getByText(/Don't paste it into a chat/i)).toBeInTheDocument()
+    expect(screen.getByText(/act-mode access/i)).toBeInTheDocument()
 
     // Closing it makes it disappear for good — it isn't reachable again without
     // a fresh mint (the client never stores the plaintext).

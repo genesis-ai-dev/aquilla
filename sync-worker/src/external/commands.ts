@@ -140,6 +140,23 @@ export const CREATE_PROJECT_FIELDS: readonly string[] = [
   'targetLanguage',
 ]
 
+/** Create an organization (AQU-1221, receipt-only like CreateProject). Applies
+ *  a plain row write via db/shared/orgs.ts, NOT events. The credential's
+ *  minting user becomes the org's OWNER — an agent never becomes a member
+ *  itself, and there is no parameter that could name a different owner. Scope:
+ *  UNSCOPED credentials only — an org-scoped credential is confined to its own
+ *  org and a project-scoped one to its own project, so neither may mint a new
+ *  tenant. Like CreateProject it is forced to ask-mode at prepare, so every
+ *  agent-initiated org creation passes a human approval.
+ *
+ *  `name` is the only parameter, by design: tier / billing / entitlement fields
+ *  are not settable through this surface (a new org has no org_billing row,
+ *  i.e. the default plan=none), and supplying one is validation_failed. */
+export interface CreateOrgCommand {
+  kind: 'CreateOrg'
+  name: string
+}
+
 /** Update a project's settings blob with optimistic-concurrency control (spec
  *  §2, receipt-only — D8). Applies via db/shared/projects.ts's version-guarded
  *  write; when the validation threshold changes the shared module runs the
@@ -169,6 +186,7 @@ export type Command =
   | SetTranslationCommand
   | PlanImportCommand
   | CreateProjectCommand
+  | CreateOrgCommand
   | UpdateProjectSettingsCommand
   | LinkMediaCommand
   | PatchSettingsCommand
@@ -180,6 +198,34 @@ export type Command =
  *  rejected with validation_failed — the manifest-in-R2 pattern for larger
  *  imports is a Wave-3 TRACE (see docs/swarm/AGENT-API-TRACES.md). */
 export const PLAN_IMPORT_MAX_CELLS = 5000
+
+/** Longest org name CreateOrg will stage (AQU-1221). The column is TEXT; this
+ *  is a sanity bound so an agent cannot park a document in the org switcher. */
+export const CREATE_ORG_MAX_NAME_LENGTH = 120
+
+/** Fields a CreateOrg command may carry. Anything else is validation_failed
+ *  naming the field — the guardrail that keeps tier / billing / entitlement
+ *  values (`plan`, `tier`, `addonPacks`, …) off the agent surface entirely,
+ *  rather than silently ignoring them. */
+const CREATE_ORG_ALLOWED_FIELDS = new Set(['kind', 'name'])
+
+/** Billing/entitlement field names an agent might plausibly try, called out by
+ *  name so the rejection explains WHY rather than just "unsupported field".
+ *  Every one of these is owned by the Stripe/billing surface (org_billing),
+ *  never by org creation. */
+const CREATE_ORG_BILLING_FIELDS = new Set([
+  'tier',
+  'plan',
+  'billing',
+  'entitlements',
+  'entitlement',
+  'status',
+  'stripeCustomerId',
+  'stripeSubscriptionId',
+  'addonPacks',
+  'complimentaryWords',
+  'hardCapWords',
+])
 
 export interface CommandValidationIssue {
   index: number
@@ -560,6 +606,36 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
       })
       return
     }
+    if (c.kind === 'CreateOrg') {
+      // Reject a billing/entitlement field BEFORE the shape check so the
+      // message names the offending field even when `name` is also missing.
+      const billingField = Object.keys(c).find((k) => CREATE_ORG_BILLING_FIELDS.has(k))
+      if (billingField !== undefined) {
+        issues.push({
+          index,
+          message: `CreateOrg cannot set billing/entitlement field "${billingField}" — a new org always gets the default tier`,
+        })
+        return
+      }
+      const unknownField = Object.keys(c).find((k) => !CREATE_ORG_ALLOWED_FIELDS.has(k))
+      if (unknownField !== undefined) {
+        issues.push({ index, message: `CreateOrg does not accept field "${unknownField}"` })
+        return
+      }
+      if (!isNonEmptyString(c.name) || c.name.trim().length === 0) {
+        issues.push({ index, message: 'CreateOrg.name must be a non-empty string' })
+        return
+      }
+      if (c.name.length > CREATE_ORG_MAX_NAME_LENGTH) {
+        issues.push({
+          index,
+          message: `CreateOrg.name must be at most ${CREATE_ORG_MAX_NAME_LENGTH} characters`,
+        })
+        return
+      }
+      commands.push({ kind: 'CreateOrg', name: c.name.trim() })
+      return
+    }
     if (c.kind === 'UpdateProjectSettings') {
       if (!isNonEmptyString(c.projectId)) {
         issues.push({ index, message: 'UpdateProjectSettings.projectId must be a non-empty string' })
@@ -658,7 +734,17 @@ export function requiredRoleForCommand(c: Command): number {
   // (their role gate is org-level for CreateProject, project-MAINTAINER for
   // UpdateProjectSettings), so this generic per-command floor is never consulted
   // for them — but the union must be covered. MAINTAINER is the honest floor.
-  if (c.kind === 'CreateProject' || c.kind === 'UpdateProjectSettings') {
+  // CreateOrg (AQU-1221) likewise takes its own path: its gate is the
+  // credential's SCOPE (unscoped only), not any project role — there is no
+  // project, and no org either until it commits. MAINTAINER keeps it aligned
+  // with the other tenant-lifecycle command for index filtering; authority.ts
+  // and auth-worker's changeset-floor.ts carve it out of the floor rule the
+  // same way they carve out CreateProject.
+  if (
+    c.kind === 'CreateProject' ||
+    c.kind === 'CreateOrg' ||
+    c.kind === 'UpdateProjectSettings'
+  ) {
     return ROLE.MAINTAINER
   }
   // PatchSettings also takes its own path (dynamic per-key floors, incl. the

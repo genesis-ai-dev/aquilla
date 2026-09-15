@@ -13,6 +13,7 @@ import {
   requiredRoleForCommand,
   PLAN_IMPORT_MAX_CELLS,
   type Command,
+  type CreateOrgCommand,
   type CreateProjectCommand,
   type EmitEventsCommand,
   type LinkMediaCommand,
@@ -55,6 +56,22 @@ function bearer(request: Request): string | null {
 // stage unbounded changesets. Wide enough that a real agent loop staging a
 // plan every few seconds never trips it.
 const PREPARE_MAX_PER_CREDENTIAL = 300
+
+/**
+ * CreateOrg throttle (AQU-1221): at most 5 org-creation changesets staged per
+ * credential per 15-minute window (the shared sliding window in
+ * db/shared/rate-limit.ts). Org creation is the one agent command that mints a
+ * whole new TENANT, so a runaway loop is not merely noisy — it litters the
+ * user's org switcher and the platform-admin views with junk tenants that a
+ * human then has to clean up. Deliberately far tighter than the generic
+ * PREPARE_MAX_PER_CREDENTIAL: a legitimate partner-onboarding agent creates one
+ * org and moves on, so five in a quarter-hour is already generous.
+ *
+ * Counted at PREPARE. Every CreateOrg is forced to ask-mode, so a human
+ * approval already gates each commit; throttling the staging step is what stops
+ * an agent from flooding that human's approval queue in the first place.
+ */
+export const CREATE_ORG_MAX_PER_CREDENTIAL = 5
 
 /** PAT-authenticated entrypoint (REST + the MCP adapter's synthetic request):
  *  resolves the credential, parses the body, and hands off to the shared core
@@ -146,6 +163,19 @@ export async function prepareChangesetCore(
       )
     }
     return prepareOrgMember(db, cred, projectId, id, orgMember, env)
+  }
+
+  // CreateOrg (AQU-1221, receipt-only): sole command in its changeset. Like
+  // CreateProject it must skip assertCredentialScope — it creates a tenant, so
+  // neither the changeset's URL project nor any org exists to scope against.
+  const createOrg = validated.commands.find(
+    (c): c is CreateOrgCommand => c.kind === 'CreateOrg',
+  )
+  if (createOrg) {
+    if (validated.commands.length !== 1) {
+      return errorResponse('validation_failed', 'CreateOrg must be the only command in a changeset')
+    }
+    return prepareCreateOrg(db, cred, projectId, id, autonomyMode, createOrg, env)
   }
 
   // Every remaining command operates on an EXISTING project — enforce the
@@ -750,6 +780,73 @@ async function prepareCreateProject(
     warnings: [],
   }
   return stageReceiptOnlyChangeset(db, cred, urlProjectId, id, 'ask', cmd, plannedIds, summary, env)
+}
+
+/** The credential's minting user, in plain language, for the approval summary.
+ *  Falls back to the numeric id when the row is unreadable — the approval page
+ *  must always name SOMEONE as the incoming owner. */
+async function resolveOwnerLabel(db: AquillaDb, userId: string): Promise<string> {
+  const row = await db
+    .prepare(`SELECT username FROM users WHERE id = ?`)
+    .bind(userId)
+    .first<{ username: string | null }>()
+  return row?.username ?? `user ${userId}`
+}
+
+/**
+ * Prepare a CreateOrg changeset (AQU-1221). Enforces the scope rule (UNSCOPED
+ * credentials only), the per-credential creation throttle, and forces ask-mode
+ * so a human always approves the new tenant.
+ *
+ * No id is pinned in the plan: `organizations.id` is a generated identity
+ * column, so unlike CreateProject there is no client-choosable id to fix at
+ * prepare. The crash-retry guarantee the prepare-time-ids doctrine buys is
+ * provided instead at commit, by findRecentOrgByCreator (see db/shared/orgs.ts).
+ */
+async function prepareCreateOrg(
+  db: AquillaDb,
+  cred: ApiCredentialContext,
+  urlProjectId: string,
+  id: string,
+  autonomyMode: 'ask' | 'act',
+  cmd: CreateOrgCommand,
+  env: ExternalEnv,
+): Promise<Response> {
+  // Scope: creating a NEW tenant is outside any narrower scope by definition —
+  // an org-scoped credential is confined to the org it names, a project-scoped
+  // one to its project. Only an unscoped credential may mint an org.
+  if (cred.projectId != null) {
+    return errorResponse('scope_denied', 'a project-scoped credential cannot create organizations')
+  }
+  if (cred.orgId != null) {
+    return errorResponse('scope_denied', 'an org-scoped credential cannot create organizations')
+  }
+
+  // Per-credential creation throttle (see CREATE_ORG_MAX_PER_CREDENTIAL).
+  const identifier = `credential:${cred.credentialId}`
+  const recent = await countRecentRateLimitEvents(db, 'external_create_org', identifier)
+  if (recent >= CREATE_ORG_MAX_PER_CREDENTIAL) {
+    return errorResponse(
+      'rate_limited',
+      `organization creation rate limit exceeded (max ${CREATE_ORG_MAX_PER_CREDENTIAL} per 15 minutes per credential), slow down`,
+    )
+  }
+  await recordRateLimitEvent(db, 'external_create_org', identifier)
+
+  // Ask-mode is FORCED, as for CreateProject: an agent must never mint a tenant
+  // unattended, whatever mode its credential holds. `autonomyMode` is ignored.
+  void autonomyMode
+
+  // Effect summary the /approve page renders: what is created, and who ends up
+  // owning it. The owner is resolved server-side from the credential — the
+  // command has no owner parameter, so an agent can never point it elsewhere.
+  const summary: ChangesetSummary = {
+    command: 'CreateOrg',
+    orgName: cmd.name,
+    orgOwner: await resolveOwnerLabel(db, String(cred.userId)),
+    warnings: [],
+  }
+  return stageReceiptOnlyChangeset(db, cred, urlProjectId, id, 'ask', cmd, {}, summary, env)
 }
 
 /**

@@ -136,6 +136,31 @@ describe("ApproveChangeset", () => {
     expect(screen.queryByText(/No changes summarized/i)).not.toBeInTheDocument()
   })
 
+  it("names the org and its incoming owner for a CreateOrg changeset (AQU-1221)", async () => {
+    // The human approving a tenant creation must be told WHAT is created and WHO
+    // ends up owning it — an org name alone is not enough to authorize on.
+    const data = {
+      ...APPROVAL_DATA,
+      summary: {
+        command: "CreateOrg",
+        orgName: "Partner Co",
+        orgOwner: "alice",
+        warnings: [],
+      },
+    }
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(data), { status: 200 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    renderPage()
+
+    expect(await screen.findByText("CreateOrg")).toBeInTheDocument()
+    expect(screen.getByText(/org name/i)).toBeInTheDocument()
+    expect(screen.getByText("Partner Co")).toBeInTheDocument()
+    expect(screen.getByText(/org owner/i)).toBeInTheDocument()
+    expect(screen.getByText("alice")).toBeInTheDocument()
+    expect(screen.queryByText(/No changes summarized/i)).not.toBeInTheDocument()
+  })
+
   it("renders per-key settings previews for an UpdateProjectSettings changeset", async () => {
     const data = {
       ...APPROVAL_DATA,

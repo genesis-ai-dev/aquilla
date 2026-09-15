@@ -55,13 +55,14 @@ export interface ChangesetSummary {
   artifactLinked?: string
   /** LinkMedia: number of cells an audio artifact is attached to. */
   mediaLinked?: number
-  /** Receipt-only (CreateProject / UpdateProjectSettings / PatchSettings /
-   *  SetBrief / AddExample / AddDecision / RetireExample / AddNote): the
-   *  command kind, so the human on /approve/:id sees WHICH lifecycle op
-   *  they're approving instead of an empty "No changes summarized." box
-   *  (design §2 / blind-approval fix). */
+  /** Receipt-only (CreateProject / CreateOrg / UpdateProjectSettings /
+   *  PatchSettings / SetBrief / AddExample / AddDecision / RetireExample /
+   *  AddNote): the command kind, so the human on /approve/:id sees WHICH
+   *  lifecycle op they're approving instead of an empty "No changes
+   *  summarized." box (design §2 / blind-approval fix). */
   command?:
     | 'CreateProject'
+    | 'CreateOrg'
     | 'UpdateProjectSettings'
     | 'PatchSettings'
     | 'SetBrief'
@@ -93,6 +94,13 @@ export interface ChangesetSummary {
    *  the configuration they are authorizing, not just the name. `''` (the
    *  source-only shape) is shown as 'none'. */
   newProjectLanguages?: string
+  /** CreateOrg: the organization name being created (AQU-1221). */
+  orgName?: string
+  /** CreateOrg: who will own the new org, in plain language — the credential's
+   *  minting user, resolved server-side (an agent can never name someone else).
+   *  Rendered on /approve/:id as "Org owner: alice", so the human approving is
+   *  told both WHAT is created and WHO ends up owning it. */
+  orgOwner?: string
   /** Receipt-only UpdateProjectSettings: the changeset's project id. */
   projectId?: string
   /** UpdateProjectSettings: the pinned settings version this write guards on. */
@@ -204,6 +212,7 @@ export interface ReceiptOnlyReceipt {
   changesetId: string
   command:
     | 'CreateProject'
+    | 'CreateOrg'
     | 'UpdateProjectSettings'
     | 'PatchSettings'
     | 'SetBrief'
@@ -213,12 +222,15 @@ export interface ReceiptOnlyReceipt {
   appliedAt: string
   /** CreateProject: the created project id. UpdateProjectSettings /
    *  PatchSettings / SetBrief: the updated project id. Org membership: the
-   *  project the plan was filed under (the write itself is org-level). */
-  projectId: string
+   *  project the plan was filed under (the write itself is org-level). Absent
+   *  for CreateOrg — it creates no project, and the changeset's own project id
+   *  is a filing placeholder that never resolves to a row. */
+  projectId?: string
   /** UpdateProjectSettings / PatchSettings / SetBrief: the new settings version
    *  after the write. */
   version?: number
-  /** AQU-1235: the org the membership change landed in. */
+  /** CreateOrg: the created org id (AQU-1221). AQU-1235: the org the
+   *  membership change landed in. */
   orgId?: number
   /** AQU-1235: the user whose membership changed. */
   targetUserId?: string

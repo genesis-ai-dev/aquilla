@@ -96,6 +96,9 @@ export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec
   harmonize_min_role: { kind: 'enum', values: ['project_lead', 'maintainer'] },
   agentMemoryAutonomy: { kind: 'enum', values: ['human', 'agent-low-risk'] },
   contributeToGlobalTm: { kind: 'boolean' },
+  // AQU-1180: drops author fields from agent-facing reads. Recognised so an
+  // agent naming it gets permission_denied rather than "unknown key".
+  agentAuthorship: { kind: 'enum', values: ['none'] },
 
   // Capability switches
   allowLineCreation: { kind: 'boolean' },

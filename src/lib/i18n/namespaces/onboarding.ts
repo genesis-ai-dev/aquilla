@@ -499,6 +499,13 @@ export const onboarding = defineNamespace({
     "onboarding.apiTokens.orgHint": "Only orgs where you're at least a contributor are listed.",
     "onboarding.apiTokens.projectPlaceholder": "No project (org-wide)",
     "onboarding.apiTokens.expiryLabel": "Expiry",
+    // AQU-1180 — the mint screen has to say in plain words what turning this on
+    // exposes, because the people exposed are not the person clicking.
+    "onboarding.apiTokens.piiLabel": "Show translator names to the agent",
+    "onboarding.apiTokens.piiDescription":
+      "Off by default: the agent sees a stable anonymous id per person instead of a name, so it can tell edits apart without knowing who made them. Turn this on and every name it reads is sent to whichever AI service you paste the token into, and kept in that service's logs. Only an owner of the selected organization or project can turn it on.",
+    "onboarding.apiTokens.piiRequiresOwner":
+      "Select an organization or project you own to enable this.",
     "onboarding.apiTokens.nameRequired": "Give this token a name.",
     "onboarding.apiTokens.mintFailed": "Failed to mint token.",
     "onboarding.apiTokens.mintingButton": "Minting…",

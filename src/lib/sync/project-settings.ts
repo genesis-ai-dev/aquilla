@@ -197,6 +197,13 @@ export interface ProjectWideSettings {
    * route already refuses every write below maintainer.
    */
   timingLocked?: boolean
+  /**
+   * AQU-1180: drop author fields from every agent-facing read. `'none'` means
+   * `lastEditor`/`author` are ABSENT from the payload (not blanked), even for
+   * a credential minted with `pii`. Absent/any other value is the default
+   * (pseudonymous ids). Not agent-writable (`POLICY_SETTINGS_KEYS`).
+   */
+  agentAuthorship?: "none"
 }
 
 /** Absent means dubbing — the behaviour every project had before SUB-53. */

@@ -8,7 +8,7 @@
 // preview/retake step between stop and upload.
 
 import { type ChangeEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { AlertCircle, Check, ChevronLeft, ChevronRight, ChevronsRight, ChevronUp, Lock, Maximize2, Mic, Minimize2, RefreshCw, Settings2, Sparkles, Square, Upload, Volume2, VolumeX, X } from "lucide-react"
+import { AlertCircle, Check, ChevronLeft, ChevronRight, ChevronsRight, ChevronUp, Lock, Maximize2, Mic, Minimize2, RefreshCw, Settings2, Sparkles, Square, Timer, TimerOff, Upload, Volume2, VolumeX, X } from "lucide-react"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/spinner"
 import { Button } from "@/components/ui/button"
@@ -51,6 +51,7 @@ import {
 } from "@/lib/store/recording-video-collapsed-pref"
 import { TakesStrip, nextTakeLabel } from "./TakesStrip"
 import { useRecordingAutoAdvance, setRecordingAutoAdvance } from "@/lib/store/recording-auto-advance-pref"
+import { useRecordingCountdown, setRecordingCountdown } from "@/lib/store/recording-countdown-pref"
 import { setRecordingFormatPref, useRecordingFormatPref } from "@/lib/store/recording-format-pref"
 import { useFileAudioAttachments } from "@/hooks/useFileAudioAttachments"
 import { ACCEPT, OFFLINE_MESSAGE, attachAudioFileToCell, validateAudioFile } from "@/lib/audio/attach-file"
@@ -278,6 +279,11 @@ export function AudioRecordingModal({
   // raw fetch error. One copy of the message, used by every gate.
   const offlineMessage = t("audio.recordingModal.offlineMessage")
   const [beepEnabled, setBeepEnabled] = useState(true)
+  // AQU-1209: the count itself is optional. OFF means idle → recording with no
+  // counting phase at all — no numbers, no GO, no tones, no film lead-in — for
+  // the operator grinding through short lines who has stopped needing the cue.
+  // Persisted per device; ON is the default, so nothing changes uninvited.
+  const countdownEnabled = useRecordingCountdown()
   // SUB-50: saving jumps to the next cell — great on a pass down the file,
   // wrong when working one line over and over. Persisted per device.
   const autoAdvance = useRecordingAutoAdvance()
@@ -761,6 +767,20 @@ export function AudioRecordingModal({
       }
       // "granted" or "prompt" (system will ask, or already asked successfully).
       // Safe to run the countdown and hand off to the recorder.
+      //
+      // …unless the operator has turned the count off (AQU-1209), in which case
+      // this IS zero: no counting phase, no lead-in to set, straight into the
+      // take. The dialog pre-warms on open whenever permission is already
+      // granted, so the armed mark path is normally ready and start() flips to
+      // "recording" synchronously — the REC indicator arrives with the click.
+      // On the one press where it is not (a first-ever permission prompt),
+      // start() falls through to its own un-armed path and the take begins when
+      // the mic does. No artificial wait is inserted to cover that: the whole
+      // point of the preference is not waiting.
+      if (!countdownEnabled) {
+        void recorder.start()
+        return
+      }
       setPhase("counting")
       // Bring the mic AND the whole capture graph up now, during the countdown.
       // It runs armed — listening, discarding — so that when the count reaches
@@ -789,7 +809,7 @@ export function AudioRecordingModal({
         },
       })
     })
-  }, [beepEnabled, countdown, recorder, session?.jwt, online, stayOnThisLine])
+  }, [beepEnabled, countdownEnabled, countdown, recorder, session?.jwt, online, stayOnThisLine])
 
   const stopRecording = useCallback(() => {
     recorder.stop()
@@ -1771,9 +1791,12 @@ export function AudioRecordingModal({
                   {/* Zero's visual beat. The count block above flips to REC
                       within a frame of GO, so without this the word GO is
                       gone before it lands — and the silent fourth beat needs
-                      its visual (the audible one would print into the take). */}
+                      its visual (the audible one would print into the take).
+                      With the countdown off (AQU-1209) there is no zero to
+                      mark: the operator pressed Record and the take began, so
+                      GO would be announcing an instant nothing led up to. */}
                   {/* i18n-exempt "recording" is a RecorderPhase union tag, not copy */}
-                  {displayPhase === "recording" && elapsedMs < 700 && (
+                  {countdownEnabled && displayPhase === "recording" && elapsedMs < 700 && (
                     <div
                       className="pointer-events-none absolute inset-0 flex items-center justify-center text-3xl font-semibold text-foreground/70"
                       style={{ animation: "pop 700ms ease-out" }}
@@ -2134,8 +2157,9 @@ export function AudioRecordingModal({
                 </span>
               </AppTooltip>
 
-              {/* Auto-advance and the countdown beep: consulted rarely, and out
-                  of the header entirely so it can be identity and navigation. */}
+              {/* Auto-advance, the countdown and its beep: consulted rarely,
+                  and out of the header entirely so it can be identity and
+                  navigation. */}
               <Popover>
                 <PopoverTrigger
                   render={
@@ -2171,12 +2195,40 @@ export function AudioRecordingModal({
                       </span>
                     </span>
                   </button>
+                  {/* AQU-1209. Sits ABOVE the beep because it governs it: with
+                      the count off there is nothing left to beep, which is what
+                      the disabled state below says. */}
+                  <button
+                    type="button"
+                    data-testid="rec-countdown"
+                    aria-pressed={countdownEnabled}
+                    onClick={() => setRecordingCountdown(!countdownEnabled)}
+                    className="flex w-full items-start gap-2.5 rounded-md p-2 text-left hover:bg-muted"
+                  >
+                    {countdownEnabled ? (
+                      <Timer className="mt-0.5 h-4 w-4 shrink-0" />
+                    ) : (
+                      <TimerOff className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground/50" />
+                    )}
+                    <span className="min-w-0">
+                      <span className="block text-xs font-medium">{t("audio.recordingModal.countdownTitle")}</span>
+                      <span className="block text-[11px] leading-snug text-muted-foreground">
+                        {countdownEnabled
+                          ? t("audio.recordingModal.countdownOnDescription")
+                          : t("audio.recordingModal.countdownOffDescription")}
+                      </span>
+                    </span>
+                  </button>
+                  {/* Not applicable rather than gone: the operator keeps their
+                      beep setting, sees why it cannot be reached, and gets it
+                      back untouched the moment the count is on again. */}
                   <button
                     type="button"
                     data-testid="rec-beep"
                     aria-pressed={beepEnabled}
+                    disabled={!countdownEnabled}
                     onClick={() => setBeepEnabled(!beepEnabled)}
-                    className="flex w-full items-start gap-2.5 rounded-md p-2 text-left hover:bg-muted"
+                    className="flex w-full items-start gap-2.5 rounded-md p-2 text-left hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
                   >
                     {beepEnabled ? (
                       <Volume2 className="mt-0.5 h-4 w-4 shrink-0" />
@@ -2186,9 +2238,11 @@ export function AudioRecordingModal({
                     <span className="min-w-0">
                       <span className="block text-xs font-medium">{t("audio.recordingModal.beepTitle")}</span>
                       <span className="block text-[11px] leading-snug text-muted-foreground">
-                        {beepEnabled
-                          ? t("audio.recordingModal.beepOnDescription")
-                          : t("audio.recordingModal.beepOffDescription")}
+                        {!countdownEnabled
+                          ? t("audio.recordingModal.beepNotApplicableDescription")
+                          : beepEnabled
+                            ? t("audio.recordingModal.beepOnDescription")
+                            : t("audio.recordingModal.beepOffDescription")}
                       </span>
                     </span>
                   </button>

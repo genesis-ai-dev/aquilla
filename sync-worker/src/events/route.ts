@@ -1357,10 +1357,11 @@ export async function handleEventsWriteRequest(
         validationCount: validationCountForDispatch,
       })
     } catch (err) {
+      console.error(`[events] handler for ${rawEvent.kind} failed:`, err)
       rejected.push({
         id: rawEvent.id ?? '(unknown)',
         status: 500,
-        reason: `handler for ${rawEvent.kind} failed: ${err instanceof Error ? err.message : String(err)}`,
+        reason: `handler for ${rawEvent.kind} failed`,
       })
       continue
     }
@@ -1561,6 +1562,7 @@ export async function handleEventsWriteRequest(
         }
       }
     } catch (err) {
+      console.error("[events] DB batch failed:", err)
       const committed = new Set(committedEntries.map((entry) => entry.id))
       for (const entry of pendingEntries) {
         if (committed.has(entry.id)) {
@@ -1569,7 +1571,7 @@ export async function handleEventsWriteRequest(
           rejected.push({
             id: entry.id,
             status: 500,
-            reason: `DB batch failed: ${String(err)}`,
+            reason: "DB batch failed",
           })
         }
       }

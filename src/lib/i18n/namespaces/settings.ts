@@ -48,8 +48,8 @@ export const settings = defineNamespace({
     "settings.personalProvider.advancedToggleLabel": "AI provider (advanced)",
     "settings.personalProvider.description":
       "Use your own OpenAI-compatible endpoint instead of Frontier for AI " +
-      "translations. Stored only in this browser, never synced. Overrides any " +
-      "project-level provider setting.",
+      "translations. Stored only in this browser, never synced. Default for " +
+      "projects that don't have their own API key; a project key beats this.",
     // Rendered via <RichMessage> so the two path fragments keep their
     // monospace <code> styling instead of being flattened into plain text.
     "settings.personalProvider.trailingPathHint": "Trailing {v1Path} or {chatCompletionsPath} is fine.",

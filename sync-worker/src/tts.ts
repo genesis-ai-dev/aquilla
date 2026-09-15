@@ -191,7 +191,8 @@ export async function handleTtsRequest(
       body: modalBody,
     })
   } catch (err) {
-    return new Response(`TTS upstream unreachable: ${String(err)}`, { status: 502 })
+    console.error("[tts] upstream unreachable:", err)
+    return new Response("TTS upstream unreachable", { status: 502 })
   }
   if (!modalRes.ok) {
     const detail = await modalRes.text().catch(() => "")

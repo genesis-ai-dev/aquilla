@@ -505,7 +505,8 @@ function SynthStatusBadge({
       error.category === "omnivoice-failed" ||
       error.category === "seed-vc-not-configured" ||
       error.category === "seed-vc-failed" ||
-      error.category === "gemini-failed"
+      error.category === "gemini-failed" ||
+      error.category === "missing-openrouter-key"
     ) {
       // Soft fixes — the popover body explains what to do; no inline action.
     } else {
@@ -5518,6 +5519,10 @@ function EditorRow({
   // AQU-354: does a rail control specifically hold focus? Used to pin the rail
   // open (an in-progress interaction must never be idle-collapsed).
   const [railHasFocus, setRailHasFocus] = useState(false)
+  // AQU-200: the rail's `⋯` overflow. Lifted here (rather than owned by
+  // CellActionRail) because the rail's pin has to know about it — the popup
+  // portals out of the rail, so onFocusCapture can't.
+  const [railOverflowOpen, setRailOverflowOpen] = useState(false)
 
   // ── Expansion state ───────────────────────────────────────────────────────
   const alignmentModelForExpansion = useMemo(() => {
@@ -5559,6 +5564,15 @@ function EditorRow({
         : transcriptNeedsAttention
           ? "amber"
           : null
+
+  // AQU-200: the `⋯` now hides the two rail buttons that carried an
+  // at-a-glance signal of their own — open comments (primary dot) and an
+  // existing take (emerald dot on Play). Collapsing them must not make the
+  // row read as "nothing here", so the strongest of those signals moves onto
+  // the trigger. Comments win: an unread comment is addressed to a person,
+  // where "this line has audio" is only a state.
+  const railOverflowAttentionDot: "emerald" | "primary" | null =
+    openCommentCount > 0 ? "primary" : hasAudio ? "emerald" : null
 
   // First-open auto-tab: prefer the most-attention-worthy tab. Only applied
   // when the panel was closed and is being opened — once open, the user's
@@ -5605,6 +5619,7 @@ function EditorRow({
     railHasFocus,
     showMicDeniedHelp,
     showGenerateConfirm,
+    overflowOpen: railOverflowOpen,
     hasFocusWithin,
     remoteChangedWhileFocused,
   })
@@ -6633,66 +6648,83 @@ function EditorRow({
               onToggleExpanded={() => setExpanded((p) => !p)}
               alwaysShowChevron
               expansionAttentionDot={chevronAttentionDot}
-            >
-              <TargetDraftActions
-                targetText={visibleTranslated}
-                status={cell.status}
-                editable={editable}
-                isAnonymous={Boolean(isAnonymous)}
-                isCompletionConfigured={isCompletionConfigured}
-                isCompletionAvailable={isCompletionAvailable}
-                isLoading={isLoading}
-                onDraft={completeSingleAndReturn}
-                onRegenerate={() => onCompleteSingle(cell, { regenerate: true })}
-                onAiSetupNeeded={onAiSetupNeeded}
-                onDragStart={onDragStart}
-                onDragEnter={onDragEnter}
-                onConfirmOpenChange={setShowGenerateConfirm}
-              />
-
-              {/* p1-paragraph-ui-wiring (Task 3 + coordinator follow-up): draft
-                  the whole paragraph as one model call. ALL of the gates below
-                  must hold for the button to even render (unlike Sparkles,
-                  which stays visible in a disabled/"set up AI" state) — a
-                  paragraph-wide action that can't run yet shouldn't invite a
-                  click. Hidden when: the group is a single cell (the Sparkles
-                  button already covers it), the group has nothing left to
-                  draft (every cell already validated — resolves the silent
-                  no-op), or the parent didn't wire onCompleteParagraph.
-                  `groupBusy` covers BOTH this row's own in-flight state and
-                  any OTHER cell in the group still drafting (a validated
-                  start cell never gets its own `completing` entry, so relying
-                  on `isLoading` alone would let a second click re-fire
-                  completeParagraph mid-fan-out). */}
-              {cell.paragraphStart === true &&
-                editable &&
-                !isAnonymous &&
-                isCompletionConfigured &&
-                isCompletionAvailable &&
-                onCompleteParagraph &&
-                paragraphGroupSize !== undefined &&
-                paragraphGroupSize > 1 &&
-                (paragraphDraftableCount ?? 0) > 0 && (() => {
-                const groupBusy = paragraphGroupInFlight ?? isLoading
-                return (
-                  <RailButton
-                    icon={<PilcrowRight className="h-3.5 w-3.5" />}
-                    tooltip={groupBusy ? t("editor.ai.generating") : t("editor.ai.draftParagraph", { count: paragraphGroupSize })}
-                    onClick={() => {
-                      if (groupBusy) return
-                      setShowParagraphConfirm(true)
-                    }}
-                    disabled={groupBusy}
-                    pulsing={groupBusy}
+              overflowOpen={railOverflowOpen}
+              onOverflowOpenChange={setRailOverflowOpen}
+              overflowAttentionDot={railOverflowAttentionDot}
+              overflowLabel={t("editor.rail.moreActions")}
+              // AQU-200: AI-generate is the one action that stays a direct
+              // button. Validate is the other always-visible action, and it
+              // already lives in the row's left gutter — it is not moved.
+              // Paragraph-draft rides in `primary` beside the sparkle because
+              // it IS the generate action at group scale; it is already behind
+              // strict gates and only ever renders on a paragraph's first row,
+              // so it costs at most one extra button on a minority of rows.
+              primary={
+                <>
+                  <TargetDraftActions
+                    targetText={visibleTranslated}
+                    status={cell.status}
+                    editable={editable}
+                    isAnonymous={Boolean(isAnonymous)}
+                    isCompletionConfigured={isCompletionConfigured}
+                    isCompletionAvailable={isCompletionAvailable}
+                    isLoading={isLoading}
+                    onDraft={completeSingleAndReturn}
+                    onRegenerate={() => onCompleteSingle(cell, { regenerate: true })}
+                    onAiSetupNeeded={onAiSetupNeeded}
+                    onDragStart={onDragStart}
+                    onDragEnter={onDragEnter}
+                    onConfirmOpenChange={setShowGenerateConfirm}
                   />
-                )
-              })()}
 
-              {/* FRO-237: Direct mic button on the rail when no audio — one-click
-                  action without needing to open a popover ("just hit the record
-                  mic — quick action"). Replaces the redundant Record item inside
-                  the ⋯ popover. When audio IS present, FRO-236's Play icon on
-                  the overflow button already gives a direct play affordance.
+                  {/* p1-paragraph-ui-wiring (Task 3 + coordinator follow-up): draft
+                      the whole paragraph as one model call. ALL of the gates below
+                      must hold for the button to even render (unlike Sparkles,
+                      which stays visible in a disabled/"set up AI" state) — a
+                      paragraph-wide action that can't run yet shouldn't invite a
+                      click. Hidden when: the group is a single cell (the Sparkles
+                      button already covers it), the group has nothing left to
+                      draft (every cell already validated — resolves the silent
+                      no-op), or the parent didn't wire onCompleteParagraph.
+                      `groupBusy` covers BOTH this row's own in-flight state and
+                      any OTHER cell in the group still drafting (a validated
+                      start cell never gets its own `completing` entry, so relying
+                      on `isLoading` alone would let a second click re-fire
+                      completeParagraph mid-fan-out). */}
+                  {cell.paragraphStart === true &&
+                    editable &&
+                    !isAnonymous &&
+                    isCompletionConfigured &&
+                    isCompletionAvailable &&
+                    onCompleteParagraph &&
+                    paragraphGroupSize !== undefined &&
+                    paragraphGroupSize > 1 &&
+                    (paragraphDraftableCount ?? 0) > 0 && (() => {
+                    const groupBusy = paragraphGroupInFlight ?? isLoading
+                    return (
+                      <RailButton
+                        icon={<PilcrowRight className="h-3.5 w-3.5" />}
+                        tooltip={groupBusy ? t("editor.ai.generating") : t("editor.ai.draftParagraph", { count: paragraphGroupSize })}
+                        onClick={() => {
+                          if (groupBusy) return
+                          setShowParagraphConfirm(true)
+                        }}
+                        disabled={groupBusy}
+                        pulsing={groupBusy}
+                      />
+                    )
+                  })()}
+                </>
+              }
+            >
+              {/* AQU-200 moves the mic back behind the `⋯`, reversing FRO-237's
+                  promotion of it to a direct rail button ("just hit the record
+                  mic — quick action"). That was the right call against a rail of
+                  six buttons and the wrong one for a rail of two: the ticket
+                  names record among the actions that collapse. If recording
+                  turns out to be frequent enough to deserve the third direct
+                  slot, promote it back by moving this block into `primary` —
+                  nothing else has to change.
                   WARN fix: the button must NOT be disabled when micDenied —
                   disabled elements receive no mouse events, so the "click for
                   help" affordance is unreachable. Instead keep it enabled and

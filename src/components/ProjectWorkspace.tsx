@@ -19,7 +19,7 @@ import { useWorkspaceTabs, readLastActiveFileId } from "@/hooks/useWorkspaceTabs
 import { clearLastLocation, readLastLocation, writeLastLocation } from "@/lib/frontier/last-location-store"
 import { ROLE } from "@/lib/frontier/roles"
 import { languagesEqual } from "@/lib/language-normalize"
-import { readAtVersion, useActiveCellStore, useCellStoreVersion, type CellStore, type CellSummary } from "@/hooks/useActiveCellStore"
+import { readAtVersion, useActiveCellStore, useCellStoreVersion, type CellSummary } from "@/hooks/useActiveCellStore"
 import { useStaleSourceCells } from "@/hooks/useStaleSourceCells"
 import { triggerLinkSync } from "@/lib/sync/archive"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
@@ -31,6 +31,7 @@ import {
 } from "@/hooks/useCompletion"
 import { useTranslateAsReadPreference } from "@/hooks/useTranslateAsReadPreference"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
+import { shouldPromptAiSetup } from "@/lib/completion/completion-service"
 import {
   hasMateriallyBetterEvidence,
   translateAsReadAction,
@@ -65,7 +66,7 @@ import type { WorkspaceAction } from "@/lib/workspace-actions/types"
 import type { FileReference } from "@/lib/parsers/types"
 import { fileHasSections, fileOrderedBy, isMediaFileType, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
 import { isAudioCueFile, isSubtitleImportFile, resolveFileTimingMode, type AudioTimingMode } from "@/lib/parsers/types"
-import { isFlagEnabled } from "@/lib/features/flags"
+import { isAutopilotVisible } from "@/lib/features/flags"
 import { isDiscourseFile } from "@/lib/contextual/discourse-file"
 import {
   applyRemoteFrame as applyContextualFrame,
@@ -293,8 +294,9 @@ import { fileOptionsForAgentSurface } from "./editor-surface-toolbar"
 import { useFootnotesPreference } from "@/hooks/useFootnotesPreference"
 import type { VisibleFootnoteEntry } from "@/lib/footnotes/types"
 import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
-import { useFileFontSizes, setFileViewPref } from "@/lib/store/file-view-prefs"
-import { EditorScrollProvider, useEditorScroll } from "@/context/EditorScrollContext"
+import { useFileFontSizes, useFileFontSizeExplicit, setFileViewPref, clearFileFontSize } from "@/lib/store/file-view-prefs"
+import { EditorScrollProvider } from "@/context/EditorScrollContext"
+import { ScrollToGroupHandler } from "@/components/ScrollToGroupHandler"
 import { EditorActionsProvider } from "@/context/EditorActionsContext"
 import { detectSuggestions, type RenameSuggestion } from "@/lib/file-labeling/detect"
 import { canExportSourceFile, exportSourceFile } from "@/lib/file-source-export"
@@ -1665,7 +1667,7 @@ export function ProjectWorkspace() {
   // carried only part of a wave. Failing soft is deliberate — a missing
   // review surface must never keep a file from opening.
   const contextualAutopilotEnabled = Boolean(
-    project && isFlagEnabled(project, "contextualTranslation"),
+    project && isAutopilotVisible(project),
   )
   const contextualDraftScopeRef = useRef<ContextualDraftsScope | null>(null)
   const refreshContextualDrafts = useCallback(async (requestedScope?: ContextualDraftsScope) => {
@@ -1900,6 +1902,7 @@ export function ProjectWorkspace() {
   // FRO-251: per-file, per-side font sizes — adjusted from the View settings
   // (eye) menu, rendered by EditorTable.
   const fontSizes = useFileFontSizes(activeFileId)
+  const fontSizeExplicit = useFileFontSizeExplicit(activeFileId)
 
   // AQU-646: one answer for "is this a subtitle import?", shared with the
   // timing-mode resolver. The hand-rolled check this replaced missed `sbv`,
@@ -4649,6 +4652,8 @@ export function ProjectWorkspace() {
     activeLane,
     commitCompletedCells,
   )
+
+  const sparkleReady = isConfigured && !shouldPromptAiSetup(project?.aiProviderChosen)
 
   // AQU-620: adapter so the editor's per-cell AI action can request a plain
   // draft (`onCompleteSingle(cell)`) or an explicit regenerate
@@ -10333,12 +10338,16 @@ export function ProjectWorkspace() {
           onHealthCalculationsChange={setHealthCalculationsEnabled}
           sourceFontSize={fontSizes.source}
           targetFontSize={fontSizes.target}
+          sourceFontSizeExplicit={fontSizeExplicit.source}
+          targetFontSizeExplicit={fontSizeExplicit.target}
           onLineNumbersChange={fileMeta.setLineNumbersEnabled}
           onSourceDirectionModeChange={fileMeta.setSourceDirectionMode}
           onTargetDirectionModeChange={fileMeta.setTargetDirectionMode}
           onCellLabelsChange={setCellLabelsEnabled}
           onSourceFontSizeChange={(v) => { if (activeFileId) setFileViewPref(activeFileId, { sourceFontSize: v }) }}
           onTargetFontSizeChange={(v) => { if (activeFileId) setFileViewPref(activeFileId, { targetFontSize: v }) }}
+          onSourceFontSizeReset={() => { if (activeFileId) clearFileFontSize(activeFileId, "source") }}
+          onTargetFontSizeReset={() => { if (activeFileId) clearFileFontSize(activeFileId, "target") }}
           onTnSidebarChange={(v) => {
             setTnSidebarVisible(v)
             if (projectId) writeTnSidebarVisible(projectId, v)
@@ -10866,7 +10875,7 @@ export function ProjectWorkspace() {
               editable: !isReadOnly,
               onCommitTarget: handleAgentTargetCommit,
               isAnonymous: !frontierSession,
-              isCompletionConfigured: isConfigured,
+              isCompletionConfigured: sparkleReady,
               isCompletionAvailable,
               completing,
               onDraftTarget: handleAgentTargetDraft,
@@ -11337,7 +11346,7 @@ export function ProjectWorkspace() {
                 state: { backgroundLocation: location, projectSettingsModalDepth: 1 },
               })
             }
-            isCompletionConfigured={isConfigured} isCompletionAvailable={isCompletionAvailable} completing={completing}
+            isCompletionConfigured={sparkleReady} isCompletionAvailable={isCompletionAvailable} completing={completing}
             examples={examples} errors={errors} previews={previews}
             onClearCellErrors={clearCellErrors}
             onCompleteSingle={handleCompleteSingle} onCompleteBatch={completeBatch}
@@ -12365,58 +12374,6 @@ function MoveToCorpusDialog({
       </DialogContent>
     </Dialog>
   )
-}
-
-// ── ScrollToGroupHandler ───────────────────────────────────────────────────
-// Must render inside <EditorScrollProvider> so useEditorScroll() has context.
-// Watches editorScroll.pending and scrolls the first matching cell into view
-// via the forwarded editorRef.
-
-interface ScrollToGroupHandlerProps {
-  cellStore: CellStore
-  storeVersion: number
-  editorRef: React.RefObject<EditorTableHandle | null>
-}
-
-function ScrollToGroupHandler({ cellStore, storeVersion, editorRef }: ScrollToGroupHandlerProps) {
-  const editorScroll = useEditorScroll()
-
-  useEffect(() => {
-    void storeVersion
-    const pending = editorScroll.pending
-    if (!pending) return
-    const { group: groupId, section: sectionLabel, fileId: targetFileId } = pending
-
-    // FRO-250/254: only consume() when the active store belongs to the requested
-    // file. During a file-switch the pending request may already carry the NEW
-    // file's id while the store is still clearing/loading; consuming early would
-    // jump nowhere and burn the request.
-    const currentFileId = cellStore.getFileId()
-    if (targetFileId !== null && currentFileId !== targetFileId) {
-      // Leave the request pending until the store has been replaced.
-      return
-    }
-
-    editorScroll.consume()
-    if (!groupId && !sectionLabel) return
-
-    let idx = -1
-    if (sectionLabel) {
-      idx = cellStore.findIndexBySection(sectionLabel)
-    } else if (groupId) {
-      idx = cellStore.getAllSummaries().findIndex((cell) => (cell.group ?? "Ungrouped") === groupId)
-    }
-
-    if (idx >= 0) {
-      // Defer a tick so the virtualized list has the latest cell list after any
-      // file-switch that preceded this request.
-      setTimeout(() => {
-        editorRef.current?.scrollToCellIndex(idx)
-      }, 0)
-    }
-  }, [cellStore, editorScroll, editorRef, storeVersion])
-
-  return null
 }
 
 interface TrashedProjectScreenProps {

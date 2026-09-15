@@ -4,6 +4,13 @@
  * Produces rules that feed directly into the existing rule-engine so
  * terminology violations are DERIVED on read — no materialized verdicts.
  *
+ * AQU-1230: the compilation itself moved to ./compile-core, which is
+ * alias-free and worker-importable, so the Agent API's effective-prompt
+ * preview compiles a project's terminology into the SAME rules — and therefore
+ * the same injected prompt block — as the editor. This module is the app-facing
+ * entry point and the only place that knows about i18n: `name`/`description`
+ * are display strings and play no part in prompt injection.
+ *
  * Rules produced per active concept:
  *   preferred / admitted renderings → one `source-requires-target` rule
  *     (instance counts add up 1:1: each sourceTerm hit needs a counterpart
@@ -16,15 +23,23 @@
 
 import type { TranslationRule } from "@/lib/parsers/types"
 import type { Concept, TermMatchingSettings } from "./types"
-import { conceptToRegexSource, termToRegexSource } from "./match"
+import { termToRegexSource } from "./match"
+import { conceptToRegexSource } from "./concept-match"
 import { t } from "@/lib/i18n/standalone"
 
-/**
- * Escape a string for safe use inside a RegExp literal. Only used to build the
- * STABLE rule `id` discriminator for forbidden renderings (other code groups by
- * id, so the scheme must not change) — NOT for match patterns, which go through
- * the shared wildcard-aware matcher in ./match.
- */
+// AQU-1271's source-form matcher (`conceptToRegexSource`, below) reaches
+// `./types` for `Concept`/`TermMatchingSettings`, which is not
+// alias-free-reachable (types.ts imports `@/lib/i18n/messages/en`), so this
+// app-facing entry point compiles inline rather than delegating to
+// `./compile-core` (AQU-1230's worker-safe core, still used directly by
+// `sync-worker/src/external/prompt-preview.ts`). That core stays on the plain
+// `termToRegexSource` source match — no termMatching settings — for its
+// worker-side callers.
+
+/** Escape a string for safe use inside a RegExp literal. Only used to build
+ *  the STABLE rule `id` discriminator for forbidden renderings (other code
+ *  groups by id, so the scheme must not change) — NOT for match patterns,
+ *  which go through the shared wildcard-aware matcher in ./match. */
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }

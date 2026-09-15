@@ -31,6 +31,14 @@ export interface OrgWideSettings {
    */
   exportMinRole?: number
   /**
+   * AQU-907: Minimum role level required to use the org-wide Data egress
+   * surface (bulk zip of everything the org has). Default (when absent) =
+   * OWNER (700) — the most restrictive floor, unlike exportMinRole's
+   * MAINTAINER default, because one action here hands out the whole corpus.
+   * OWNER-only on write (permission-policy key).
+   */
+  egressMinRole?: number
+  /**
    * AQU-485: Minimum role level required to see the member roster (list +
    * count) on org and project surfaces. Default (when absent) = MAINTAINER
    * (600) — safe for sensitive teams that don't want to reveal who/how many

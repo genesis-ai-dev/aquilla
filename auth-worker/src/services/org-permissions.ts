@@ -4,6 +4,7 @@ import type { Env, AuthUser } from "../types"
 import { ORG_WIDE_ACCESS_FLOOR, resolveProjectRole } from "./project-permissions"
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
 import { planUnitCountsSql, aoeTodayIso } from "../../../db/shared/plan-units"
+import { orgPathContribution } from "../../../db/shared/project-roles"
 
 /** Map numeric role level to a human-readable name. Used for secondarySources. */
 function roleNameForLevel(level: number): string {
@@ -560,11 +561,20 @@ export async function listEffectiveProjectMembers(
       .bind(orgId)
       .all<{ user_id: number; username: string; email: string | null; role_level: number }>()
 
+    // Direct and group paths are already recorded above, so `allPaths` tells
+    // us which other paths each org member holds on THIS project — exactly
+    // what orgPathContribution needs (AQU-435 floor + AQU-1274 no silent
+    // demotion). Same rule as the resolver, so this roster can't disagree
+    // with what enforcement does.
     for (const r of orgMembers.results ?? []) {
-      // AQU-435: only Maintainer+ org roles are an access path — a
-      // sub-maintainer org member does NOT appear as having access via org.
-      if (r.role_level < ORG_WIDE_ACCESS_FLOOR) continue
-      record(r.user_id, r.username, r.email, "org", r.role_level)
+      const existing = allPaths.get(r.user_id)?.paths ?? []
+      const level = orgPathContribution({
+        orgLevel: r.role_level,
+        hasDirectGrant: existing.some((p) => p.source === "override"),
+        hasGroupGrant: existing.some((p) => p.source === "group"),
+      })
+      if (level == null) continue
+      record(r.user_id, r.username, r.email, "org", level)
     }
   }
 
@@ -771,12 +781,21 @@ export async function listEffectiveMembersForOrg(
     if (r.role_level == null) continue
     record(r.project_id, r.user_id, r.username, "group", r.role_level)
   }
-  // org + creator paths apply to every accessible project. AQU-435: the org
-  // path exists only for Maintainer+ members.
+  // org + creator paths apply to every accessible project. AQU-435: below
+  // Maintainer the org path opens nothing; AQU-1274: it still keeps a team
+  // attachment from silently demoting a higher org role. Direct and group
+  // paths are recorded above, so the per-project map answers both questions.
   for (const p of projects) {
+    const perProject = ensure(p.id)
     for (const om of orgMembers.results ?? []) {
-      if (om.role_level < ORG_WIDE_ACCESS_FLOOR) continue
-      record(p.id, om.user_id, om.username, "org", om.role_level)
+      const existing = perProject.get(om.user_id)?.paths ?? []
+      const level = orgPathContribution({
+        orgLevel: om.role_level,
+        hasDirectGrant: existing.some((x) => x.source === "override"),
+        hasGroupGrant: existing.some((x) => x.source === "group"),
+      })
+      if (level == null) continue
+      record(p.id, om.user_id, om.username, "org", level)
     }
     const cu = creatorUsername.get(p.created_by)
     if (cu) record(p.id, p.created_by, cu, "creator", 700)
@@ -1520,9 +1539,6 @@ export async function getMemberEffectiveAccess(
     "SELECT role_level FROM org_members WHERE org_id = ? AND user_id = ?",
   ).bind(orgId, userId).first<{ role_level: number }>()
   const orgRole = orgRow?.role_level ?? null
-  // AQU-435: sub-maintainer org membership confers no project access, so it
-  // must not show up as a per-project grant path or inflate `resolved`.
-  const orgAccessRole = orgRole != null && orgRole >= ORG_WIDE_ACCESS_FLOOR ? orgRole : null
 
   const direct = await env.AQUILLA_PG.prepare(
     `SELECT pm.project_id AS project_id, p.name AS name, pm.role_level AS role_level
@@ -1548,7 +1564,9 @@ export async function getMemberEffectiveAccess(
   const ensure = (projectId: string, name: string): ProjectAccessBreakdown => {
     let row = map.get(projectId)
     if (!row) {
-      row = { projectId, projectName: name, direct: null, groups: [], org: orgAccessRole, creator: false, resolved: 0 }
+      // `org` is filled in per-project below — whether a sub-maintainer org
+      // role contributes depends on that project's other paths (AQU-1274).
+      row = { projectId, projectName: name, direct: null, groups: [], org: null, creator: false, resolved: 0 }
       map.set(projectId, row)
     }
     return row
@@ -1559,6 +1577,14 @@ export async function getMemberEffectiveAccess(
 
   for (const row of map.values()) {
     const groupMax = row.groups.reduce((m, g) => Math.max(m, g.roleLevel), 0)
+    // Same rule as the resolver (AQU-435 floor + AQU-1274 no-silent-demotion),
+    // so the drill-down can never claim a different resolved role than the
+    // one enforcement actually uses.
+    row.org = orgPathContribution({
+      orgLevel: orgRole,
+      hasDirectGrant: row.direct != null,
+      hasGroupGrant: groupMax > 0,
+    })
     row.resolved = Math.max(row.direct ?? 0, groupMax, row.org ?? 0, row.creator ? 700 : 0)
   }
 

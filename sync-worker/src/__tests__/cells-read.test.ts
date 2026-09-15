@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import { handleCellsReadRequest, type CellsReadEnv } from "../events/cells-read-route"
 import { handleRebuildProjectionRequest } from "../events/rebuild"
 import { buildEventProjectionStmts, type PersistedEvent } from "../events/event-projection"
@@ -1066,11 +1066,9 @@ describe("project incarnation (AQU-943)", () => {
  *  number of rows without depending on internal query shapes. */
 function countingEnv(db: AquillaDb): { env: CellsReadEnv; counts: number[] } {
   const counts: number[] = []
-  // Monkey-patch `db.prepare` IN PLACE rather than wrapping it in a new
-  // object: the chain cache is intentionally scoped per AquillaDb instance
-  // identity (a WeakMap — see chainCacheFor in cells-read-route.ts), so a
-  // fresh wrapper object would look like an unrelated db to the cache and
-  // never see entries populated through the original `db` reference.
+  // Monkey-patches `db.prepare` in place. (The chain cache is module-level
+  // and keyed on projectId + ETag, so instance identity no longer matters —
+  // see the cross-instance test below.)
   const originalPrepare = db.prepare.bind(db)
   db.prepare = (sql: string) => {
     let bound = originalPrepare(sql)
@@ -1164,6 +1162,85 @@ describe("AQU-1160: chain-order cache", () => {
     console.log(
       `[AQU-1160 test evidence] file size=${N} cells; 4 cache-hit pages of ${limit} touched ${totalRowsRead} total rows (query counts: ${JSON.stringify(counts)})`,
     )
+  })
+
+  it("hits across distinct AquillaDb instances — production builds a fresh db per request (perf/cells-chain-cache)", async () => {
+    // sync-worker/src/index.ts constructs a brand-new PostgresDb via
+    // makePostgres() for EVERY request. A cache keyed on db-instance
+    // identity therefore never hits in production: each page re-runs the
+    // full-file SELECT. Model that here with two wrapper objects over the
+    // same underlying store — distinct identities, identical data.
+    const N = 300
+    const { db } = await makeTestDb({ cells: makeLinearChain(N) })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "file-x" })
+    const limit = 10
+
+    /** A NEW object per call (never the same identity twice), recording the
+     *  row count of every `.all()` it serves. */
+    const freshDb = (counts: number[]): AquillaDb => ({
+      prepare(sql: string) {
+        let bound = db.prepare(sql)
+        const wrapper = {
+          bind(...args: unknown[]) {
+            bound = bound.bind(...args)
+            return wrapper
+          },
+          async all<T>() {
+            const res = await bound.all<T>()
+            counts.push(res.results.length)
+            return res
+          },
+          async run<T>() {
+            return bound.run<T>()
+          },
+          async first<T>(colName?: string) {
+            return bound.first<T>(colName)
+          },
+          async raw<T>() {
+            return bound.raw<T>()
+          },
+        }
+        return wrapper
+      },
+    }) as unknown as AquillaDb
+
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {})
+    const logged = (marker: string) =>
+      logSpy.mock.calls.filter(([line]) => String(line).includes(marker)).length
+
+    const firstCounts: number[] = []
+    const firstRes = (await handleCellsReadRequest(
+      new Request(`https://w/api/v1/projects/proj-a/files/file-x/cells?side=target&limit=${limit}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+      { AQUILLA_PG: freshDb(firstCounts), SYNC_SECRET_KEY: SECRET },
+    ))!
+    const firstBody = (await firstRes.json()) as { cells: Array<{ cellId: string }>; nextCursor: string }
+    // Page 1 is the unavoidable miss: it paid the full-file cost.
+    expect(Math.max(...firstCounts)).toBe(N)
+    expect(logged("[cells-read] chain-cache miss")).toBe(1)
+    expect(logged("[cells-read] chain-cache hit")).toBe(0)
+
+    const secondCounts: number[] = []
+    const secondRes = (await handleCellsReadRequest(
+      new Request(
+        `https://w/api/v1/projects/proj-a/files/file-x/cells?side=target&limit=${limit}&cursor=${encodeURIComponent(firstBody.nextCursor)}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      ),
+      { AQUILLA_PG: freshDb(secondCounts), SYNC_SECRET_KEY: SECRET },
+    ))!
+    const secondBody = (await secondRes.json()) as { cells: Array<{ cellId: string }>; total: number }
+    expect(secondBody.cells.map((c) => c.cellId)).toEqual(
+      Array.from({ length: limit }, (_, i) => `lc${(limit + i).toString().padStart(5, "0")}`),
+    )
+    expect(secondBody.total).toBe(N)
+    // Page 2 came through a DIFFERENT db instance and must still be a cache
+    // hit: no query on this request may return anything near the whole file.
+    expect(Math.max(...secondCounts)).toBeLessThanOrEqual(limit)
+    // ...and it says so at the same verbosity the miss path logs at.
+    expect(logged("[cells-read] chain-cache miss")).toBe(1)
+    expect(logged("[cells-read] chain-cache hit")).toBe(1)
+    logSpy.mockRestore()
   })
 
   it("AC2: cache-hit pages reproduce the exact anchor-chain order the uncached walk produces (ties + orphans + multi-root)", async () => {

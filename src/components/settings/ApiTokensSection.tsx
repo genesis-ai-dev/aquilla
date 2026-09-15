@@ -1,3 +1,5 @@
+import { AUTH_BASE } from "@/lib/frontier/auth"
+import { buildConnectionInstructions } from "@/lib/sync/agent-connect"
 // Personal API tokens section for the Preferences page (AQU-533 §1 "Token
 // UI"). Lets a signed-in user mint, list, and revoke `aqk_…` personal-access
 // tokens for the external Agent API.
@@ -27,6 +29,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import {
@@ -167,6 +170,9 @@ export function ApiTokensSection() {
   const [refreshKey, setRefreshKey] = useState(0)
   const [mintResult, setMintResult] = useState<MintCredentialResult | null>(null)
   const [revokeTarget, setRevokeTarget] = useState<ApiCredential | null>(null)
+  const [connectionCopied, setConnectionCopied] = useState(false)
+  const [connectionCopyError, setConnectionCopyError] = useState(false)
+  const connectionInstructions = buildConnectionInstructions(AUTH_BASE, syncWorkerHttpOrigin())
   const [instructionsFor, setInstructionsFor] = useState<ApiCredential | null>(null)
 
   useEffect(() => {
@@ -200,6 +206,17 @@ export function ApiTokensSection() {
 
   return (
     <div className="space-y-2">
+      <SettingsGroup><SettingsRow label={t("onboarding.connect.setup")} block>
+        <div className="flex flex-col gap-3">
+          <p className="text-sm text-muted-foreground">{t("onboarding.connect.setupBody")}</p>
+          <Button variant="outline" onClick={async () => {
+            try { await navigator.clipboard.writeText(connectionInstructions); setConnectionCopied(true); setConnectionCopyError(false) }
+            catch { setConnectionCopyError(true) }
+          }}>{connectionCopied ? t("nav.version.copiedLabel") : t("onboarding.connect.copy")}</Button>
+          {connectionCopyError && <><p role="alert">{t("onboarding.connect.copyError")}</p>
+            <pre className="max-h-72 overflow-auto whitespace-pre-wrap text-xs">{connectionInstructions}</pre></>}
+        </div>
+      </SettingsRow></SettingsGroup>
       <div className="flex items-center justify-between gap-4 pl-4">
         <p className="font-heading text-base font-medium tracking-tight text-foreground">
           {t("onboarding.apiTokens.heading")}
@@ -574,6 +591,7 @@ function MintTokenDialog({
   const [orgId, setOrgId] = useState("")
   const [projectId, setProjectId] = useState("")
   const [expiry, setExpiry] = useState<ExpiryPresetId>("90d")
+  const [pii, setPii] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Re-entrancy guard: `busy` state only disables the submit button after a
@@ -598,6 +616,13 @@ function MintTokenDialog({
   // Act mode requires a project scope where the caller is >= MAINTAINER —
   // disabled (not just server-rejected) until that's true, per spec §1.
   const canAct = selectedProject != null && selectedProject.role.level >= ROLE.MAINTAINER
+  // AQU-1180: exposing translator names to an agent is a decision about other
+  // people's safety, so it takes an OWNER of the scope — mirrors the server's
+  // permission_denied rule rather than letting the user discover it on submit.
+  const selectedOrg = orgOptions.find((o) => String(o.id) === orgId) ?? null
+  const canPii =
+    (selectedProject != null && selectedProject.role.level >= ROLE.OWNER) ||
+    (selectedProject == null && selectedOrg != null && selectedOrg.role.level >= ROLE.OWNER)
 
   useEffect(() => {
     if (open) return
@@ -606,6 +631,7 @@ function MintTokenDialog({
     setOrgId("")
     setProjectId("")
     setExpiry("90d")
+    setPii(false)
     setError(null)
     setBusy(false)
   }, [open])
@@ -619,6 +645,12 @@ function MintTokenDialog({
   useEffect(() => {
     if (mode === "act" && !canAct) setMode("ask")
   }, [mode, canAct])
+
+  // Never leave the identity opt-in checked after the scope that authorized it
+  // is changed out from under it — the safe state has to be the sticky one.
+  useEffect(() => {
+    if (!canPii) setPii(false)
+  }, [canPii])
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -639,6 +671,7 @@ function MintTokenDialog({
         orgId: orgId || undefined,
         projectId: projectId || undefined,
         expiresAt: expiryToIso(expiry),
+        pii: pii || undefined,
       })
       onMinted(result)
       setOpen(false)
@@ -753,6 +786,27 @@ function MintTokenDialog({
                   </SelectGroup>
                 </SelectContent>
               </Select>
+            </Field>
+
+            <Field>
+              <div className={`flex items-start gap-2.5 text-sm ${!canPii ? "opacity-50" : ""}`}>
+                <Checkbox
+                  id="token-pii"
+                  data-testid="token-pii"
+                  checked={pii}
+                  onCheckedChange={(checked) => setPii(checked === true)}
+                  disabled={!canPii}
+                  className="mt-0.5"
+                />
+                <label htmlFor="token-pii">
+                  <strong>{t("onboarding.apiTokens.piiLabel")}</strong>
+                  <FieldDescription>
+                    {canPii
+                      ? t("onboarding.apiTokens.piiDescription")
+                      : t("onboarding.apiTokens.piiRequiresOwner")}
+                  </FieldDescription>
+                </label>
+              </div>
             </Field>
 
             {error && <FieldError role="alert">{error}</FieldError>}

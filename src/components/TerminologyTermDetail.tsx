@@ -12,6 +12,7 @@
 import { useMemo, useCallback, useState } from "react"
 import { X, CheckCircle2, AlertCircle, Minus, SquareArrowOutUpRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@/lib/utils"
@@ -29,7 +30,31 @@ import { RichMessage } from "@/lib/i18n/RichMessage"
 
 // ─── Status label helper ──────────────────────────────────────────────────────
 
-function RenderingChip({ rendering }: { rendering: TermRendering }) {
+/**
+ * AQU-1006 follow-up: the status order a click cycles through.
+ *
+ * preferred → admitted → forbidden → preferred. Deliberately a cycle rather
+ * than a dropdown: there are exactly three values, they are mutually
+ * exclusive, and the chip is already the thing you want to point at. The
+ * label always states the CURRENT status, so nothing depends on the user
+ * knowing the order.
+ */
+const RENDERING_STATUS_CYCLE: Record<TermRendering["status"], TermRendering["status"]> = {
+  preferred: "admitted",
+  admitted: "forbidden",
+  forbidden: "preferred",
+}
+
+function RenderingChip({
+  rendering,
+  onCycleStatus,
+  onRemove,
+}: {
+  rendering: TermRendering
+  /** Present only when the user may edit this concept's renderings. */
+  onCycleStatus?: () => void
+  onRemove?: () => void
+}) {
   const t = useT()
   const chipClass = cn(
     "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium",
@@ -39,10 +64,39 @@ function RenderingChip({ rendering }: { rendering: TermRendering }) {
     rendering.status === "forbidden" &&
       "bg-red-100 text-red-700 line-through dark:bg-red-950 dark:text-red-400",
   )
+  const editable = Boolean(onCycleStatus || onRemove)
   return (
-    <span className={chipClass}>
-      {rendering.rendering}
-      <span className="opacity-60">·{t(renderingStatusLabelKey(rendering.status))}</span>
+    <span className={cn(chipClass, editable && "pr-0.5")}>
+      {onCycleStatus ? (
+        <button
+          type="button"
+          onClick={onCycleStatus}
+          className="inline-flex items-center gap-1 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          title={t("terminology.termDetail.cycleStatusTitle")}
+          aria-label={t("terminology.termDetail.cycleStatusAria", {
+            rendering: rendering.rendering,
+            status: t(renderingStatusLabelKey(rendering.status)),
+          })}
+        >
+          {rendering.rendering}
+          <span className="opacity-60">·{t(renderingStatusLabelKey(rendering.status))}</span>
+        </button>
+      ) : (
+        <>
+          {rendering.rendering}
+          <span className="opacity-60">·{t(renderingStatusLabelKey(rendering.status))}</span>
+        </>
+      )}
+      {onRemove && (
+        <button
+          type="button"
+          onClick={onRemove}
+          className="ml-0.5 rounded-sm p-0.5 opacity-60 hover:opacity-100 focus-visible:ring-2 focus-visible:ring-ring outline-none"
+          aria-label={t("terminology.termDetail.removeRenderingAria", { rendering: rendering.rendering })}
+        >
+          <X className="size-2.5" aria-hidden />
+        </button>
+      )}
     </span>
   )
 }
@@ -257,6 +311,18 @@ export interface TerminologyTermDetailProps {
   examplesLoading?: boolean
   /** Jump to this occurrence in the editor. */
   onJumpToCell?: (cell: { cellId: string; fileId: string }) => void
+  /**
+   * AQU-1006 follow-up: replace this concept's rendering list.
+   *
+   * The detail page could previously only ADD a rendering, by promoting a
+   * predicted equivalent — there was no way to remove one or to change a
+   * rendering from required to forbidden without leaving for the edit dialog.
+   *
+   * Takes the WHOLE list rather than a per-item delta because that is what a
+   * `term.update` carries: renderings have no stable per-item id to merge on,
+   * so the projection replaces them wholesale. Callers emit one event.
+   */
+  onRenderingsChange?: (conceptId: string, renderings: TermRendering[]) => void | Promise<void>
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
@@ -274,6 +340,7 @@ export function TerminologyTermDetail({
   onPromoteRendering,
   examplesLoading = false,
   onJumpToCell,
+  onRenderingsChange,
 }: TerminologyTermDetailProps) {
   const t = useT()
   // Per-cell translated values — optimistic updates are already reflected via
@@ -312,6 +379,47 @@ export function TerminologyTermDetail({
     [onPromoteRendering, concept.id],
   )
 
+  // AQU-1006 follow-up: rendering edits. Each helper builds the FULL next list
+  // and hands it to the parent, which emits one `term.update` — renderings
+  // have no per-item identity to merge on, so they replace wholesale.
+  const canEditRenderings = canManageTermbase && Boolean(onRenderingsChange)
+
+  const handleCycleStatus = useCallback(
+    (index: number) => {
+      const next = concept.renderings.map((r, i) =>
+        i === index ? { ...r, status: RENDERING_STATUS_CYCLE[r.status] } : r,
+      )
+      void onRenderingsChange?.(concept.id, next)
+    },
+    [concept.renderings, concept.id, onRenderingsChange],
+  )
+
+  const handleRemoveRendering = useCallback(
+    (index: number) => {
+      void onRenderingsChange?.(concept.id, concept.renderings.filter((_, i) => i !== index))
+    },
+    [concept.renderings, concept.id, onRenderingsChange],
+  )
+
+  const [newRendering, setNewRendering] = useState("")
+  const handleAddRendering = useCallback(() => {
+    const trimmed = newRendering.trim()
+    if (!trimmed) return
+    // Don't duplicate an existing rendering (case-insensitive), matching the
+    // guard the promote path already applies.
+    if (concept.renderings.some((r) => r.rendering.trim().toLowerCase() === trimmed.toLowerCase())) {
+      setNewRendering("")
+      return
+    }
+    // New renderings land as "admitted", not "preferred": adding one should
+    // never silently demote whichever rendering the team already agreed on.
+    void onRenderingsChange?.(concept.id, [
+      ...concept.renderings,
+      { rendering: trimmed, status: "admitted" as const },
+    ])
+    setNewRendering("")
+  }, [newRendering, concept.renderings, concept.id, onRenderingsChange])
+
   return (
     <div className="flex flex-col min-h-screen bg-background">
       {/* Header */}
@@ -348,11 +456,51 @@ export function TerminologyTermDetail({
       {/* Concept metadata */}
       <div className="border-b px-4 py-3 space-y-2">
         {/* Renderings */}
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
           {concept.renderings.map((r, i) => (
-            <RenderingChip key={i} rendering={r} />
+            <RenderingChip
+              key={`${r.rendering}:${i}`}
+              rendering={r}
+              {...(canEditRenderings
+                ? {
+                    onCycleStatus: () => handleCycleStatus(i),
+                    onRemove: () => handleRemoveRendering(i),
+                  }
+                : {})}
+            />
           ))}
+          {canEditRenderings && (
+            <span className="inline-flex items-center gap-1">
+              <Input
+                value={newRendering}
+                onChange={(e) => setNewRendering(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault()
+                    handleAddRendering()
+                  }
+                }}
+                placeholder={t("terminology.termDetail.addRenderingPlaceholder")}
+                aria-label={t("terminology.termDetail.addRenderingAria")}
+                className="h-6 w-36 text-[11px]"
+              />
+              <Button
+                type="button"
+                size="xs"
+                variant="ghost"
+                onClick={handleAddRendering}
+                disabled={!newRendering.trim()}
+              >
+                {t("terminology.termDetail.addRenderingButton")}
+              </Button>
+            </span>
+          )}
         </div>
+        {canEditRenderings && concept.renderings.length > 0 && (
+          <p className="text-[11px] text-muted-foreground">
+            {t("terminology.termDetail.renderingEditHint")}
+          </p>
+        )}
 
         {/* Notes */}
         {concept.notes && (

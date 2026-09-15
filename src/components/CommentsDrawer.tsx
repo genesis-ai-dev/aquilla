@@ -6,7 +6,7 @@ import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord, CommentThread as CommentThreadType } from "@/lib/parsers/types"
 import type { CommentRecord } from "@/lib/sync/comments-read-types"
 import { useProjectPermissions } from "@/hooks/useProjectPermissions"
-import { canPerform, canMutateComment, foreignRoleFor } from "@/lib/sync/role-policy"
+import { canMutateComment, commentFloorsFrom } from "@/lib/sync/role-policy"
 import { denialMessage } from "@/lib/permissions/denial"
 import { ROLE, resolveRoleName } from "@/lib/frontier/roles"
 import { CommentThread } from "./CommentThread"
@@ -79,16 +79,22 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
   // object so resolvePermissions returns the full defaults — we must also check
   // the live syncRole.
   const roleLevel = project.syncRole?.level ?? null
-  const cloudCanComment = canPerform("comment.create", roleLevel)
-  const cloudCanResolve = canPerform("comment.resolve", roleLevel)
+  // AQU-1002: the org's configurable floors, off the project record. Absent
+  // (list endpoint, older server, local project) ⇒ the stock defaults, so this
+  // is a no-op for every org that hasn't set a policy.
+  const floors = commentFloorsFrom(project)
+  const cloudCanComment = canMutateComment("comment.create", roleLevel, true, floors)
+  const cloudCanResolve = canMutateComment("comment.resolve", roleLevel, true, floors)
   // When a syncRole is present, let it take precedence; fall back to legacy permissions.
   const canComment = roleLevel !== null ? cloudCanComment : permissions.canEditComments
   // The role floor for resolving YOUR OWN thread. Whether it also covers a
   // given thread depends on who wrote that thread — decided per row below.
   const canResolveOwn = roleLevel !== null ? cloudCanResolve : permissions.canResolveComments
   // Build a helpful denial message for viewers who cannot comment.
+  // AQU-1002: name the org's configured create floor, not the static one, so
+  // the sentence matches the bar the server will actually apply.
   const commentDenialReason = !canComment
-    ? denialMessage(t, ROLE.COMMENTER, roleLevel)
+    ? denialMessage(t, floors.createMinRole, roleLevel)
     : null
 
   // AQU-1000: resolve authority is per THREAD, not per user. The server
@@ -96,7 +102,9 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
   // floor; because the client flips `resolved` optimistically, offering the
   // control anyway made the thread close and then spring back open. Decide up
   // front instead, and when the answer is no, say why.
-  const foreignResolveFloor = foreignRoleFor("comment.resolve") ?? ROLE.MAINTAINER
+  // AQU-1002: the floor named in the denial sentence is the org's configured
+  // one, so the message matches the refusal the server would actually give.
+  const foreignResolveFloor = floors.resolveMinRole
   function resolveGateFor(thread: CommentThreadType): { canResolve: boolean; reason: string | null } {
     if (roleLevel === null) {
       // Local / git-imported project: no sync role to reason about, so keep the
@@ -107,7 +115,7 @@ export function CommentsDrawer({ project, cell, liveComments, onClose, onNewThre
     // the server will compare against a real author_id we cannot see, so the
     // safe, honest answer is the higher floor.
     const isOwnThread = currentUsername != null && thread.authorId === currentUsername
-    if (canMutateComment("comment.resolve", roleLevel, isOwnThread)) {
+    if (canMutateComment("comment.resolve", roleLevel, isOwnThread, floors)) {
       return { canResolve: true, reason: null }
     }
     if (!canResolveOwn) {

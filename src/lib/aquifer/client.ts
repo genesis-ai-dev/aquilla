@@ -52,6 +52,9 @@ export interface AquiferPageResponse {
   truncated: boolean
   /** PLAIN TEXT today — newlines, no markdown. */
   text: string
+  /** Markdown body, present once the site honours `format=md`. Same content as
+   *  `text`, which upstream keeps as a legacy alias — prefer this when set. */
+  markdown?: string
 }
 
 export interface AquiferAnswerCitation {

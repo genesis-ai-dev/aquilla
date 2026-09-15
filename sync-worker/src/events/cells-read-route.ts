@@ -346,27 +346,39 @@ interface ChainCacheEntry {
   cachedAt: number
 }
 
-const CHAIN_CACHE_MAX_ENTRIES = 8
+const CHAIN_CACHE_MAX_ENTRIES = 32
 const CHAIN_CACHE_TTL_MS = 10 * 60 * 1000
+// Upper bound on the SUM of cached ids across all entries. Each item is a
+// small object (~100 bytes with V8 overhead for a ~30-char cell id + side +
+// lane), so 200K ids is ~20MB worst case — comfortably inside a Worker
+// isolate's 128MB even alongside the request itself. A single file larger
+// than this is simply not cached (falls back to the full walk, which is the
+// pre-cache behavior, never wrong).
+const CHAIN_CACHE_MAX_TOTAL_ITEMS = 200_000
 
-// Scoped per AquillaDb instance via a WeakMap rather than one flat module
-// singleton: `fileId` alone is not a safe cross-project cache key (nothing
-// enforces global fileId uniqueness at this layer -- the route always scopes
-// its queries by project_id + file_id together), so the key below also
-// includes `projectId`, and the outer WeakMap keeps state from leaking
-// across unrelated AquillaDb bindings (e.g. isolated test databases in the
-// same process -- two independent test cases both querying `proj-a`/`file-x`
-// with no seeded events collided on the identical zero-watermark ETag when
-// this was a bare module Map).
-const chainCacheByDb = new WeakMap<AquillaDb, Map<string, ChainCacheEntry>>()
+// One module-level (isolate-local) Map, NOT keyed on the AquillaDb instance:
+// index.ts constructs a fresh PostgresDb for EVERY request, so a per-db
+// WeakMap could never hit across the sequential page requests this cache
+// exists for (every page re-ran the full-file SELECT in production).
+//
+// Staleness: the key embeds the response ETag, which is recomputed from the
+// watermark query on every request (fetchWatermarks → makeEtag:
+// fileId + projectEpoch + rebuiltSeq + maxSeq). Any write to the project
+// bumps maxSeq (a rebuild bumps rebuiltSeq, a re-incarnation bumps the
+// epoch), so a post-write request computes a different key and misses. The
+// cache can therefore never serve an ordering older than the watermark the
+// same request just read. `fileId` alone is not a safe cross-project key
+// (nothing enforces global fileId uniqueness at this layer), so the key
+// also carries `projectId`.
+const chainCache = new Map<string, ChainCacheEntry>()
+let chainCacheTotalItems = 0
 
-function chainCacheFor(db: AquillaDb): Map<string, ChainCacheEntry> {
-  let cache = chainCacheByDb.get(db)
-  if (!cache) {
-    cache = new Map()
-    chainCacheByDb.set(db, cache)
-  }
-  return cache
+/** Test-only: isolated test databases in one process all use the same
+ *  project/file ids with identical zero watermarks, so their ETags collide;
+ *  reset between tests to keep them independent. */
+export function resetChainCacheForTests(): void {
+  chainCache.clear()
+  chainCacheTotalItems = 0
 }
 
 function chainCacheKey(
@@ -378,27 +390,39 @@ function chainCacheKey(
   return `${projectId} ${etag} ${sideFilter ?? "*"} ${laneFilter ?? ""}`
 }
 
-function chainCacheGet(cache: Map<string, ChainCacheEntry>, key: string): ChainCacheEntry | null {
-  const entry = cache.get(key)
+function chainCacheDelete(key: string): void {
+  const entry = chainCache.get(key)
+  if (!entry) return
+  chainCache.delete(key)
+  chainCacheTotalItems -= entry.items.length
+}
+
+function chainCacheGet(key: string): ChainCacheEntry | null {
+  const entry = chainCache.get(key)
   if (!entry) return null
   if (Date.now() - entry.cachedAt > CHAIN_CACHE_TTL_MS) {
-    cache.delete(key)
+    chainCacheDelete(key)
     return null
   }
   // Touch for recency: re-insert so Map's insertion-order iteration doubles
   // as a cheap LRU for the eviction below.
-  cache.delete(key)
-  cache.set(key, entry)
+  chainCache.delete(key)
+  chainCache.set(key, entry)
   return entry
 }
 
-function chainCacheSet(cache: Map<string, ChainCacheEntry>, key: string, entry: ChainCacheEntry): void {
-  cache.delete(key)
-  cache.set(key, entry)
-  while (cache.size > CHAIN_CACHE_MAX_ENTRIES) {
-    const oldest = cache.keys().next().value
+function chainCacheSet(key: string, entry: ChainCacheEntry): void {
+  chainCacheDelete(key)
+  if (entry.items.length > CHAIN_CACHE_MAX_TOTAL_ITEMS) return
+  chainCache.set(key, entry)
+  chainCacheTotalItems += entry.items.length
+  while (
+    chainCache.size > CHAIN_CACHE_MAX_ENTRIES ||
+    chainCacheTotalItems > CHAIN_CACHE_MAX_TOTAL_ITEMS
+  ) {
+    const oldest = chainCache.keys().next().value
     if (oldest === undefined) break
-    cache.delete(oldest)
+    chainCacheDelete(oldest)
   }
 }
 
@@ -752,9 +776,8 @@ export async function handleCellsReadRequest(
   // caller's request order) and only when the watermark/ETag was computed
   // (i.e. cellIdsFilter is empty, same gate as the delta branch above).
   const useChainCache = etag !== null && (!cellIdsFilter || cellIdsFilter.length === 0)
-  const dbChainCache = useChainCache ? chainCacheFor(env.AQUILLA_PG) : null
   const cacheKey = useChainCache ? chainCacheKey(projectId, etag!, sideFilter, laneFilter) : null
-  const cached = dbChainCache && cacheKey ? chainCacheGet(dbChainCache, cacheKey) : null
+  const cached = cacheKey ? chainCacheGet(cacheKey) : null
 
   if (cached) {
     const offset = cursor?.offset ?? 0
@@ -901,8 +924,8 @@ export async function handleCellsReadRequest(
     ordered = walkAnchorChain(allRows)
   }
 
-  if (dbChainCache && cacheKey) {
-    chainCacheSet(dbChainCache, cacheKey, {
+  if (cacheKey) {
+    chainCacheSet(cacheKey, {
       items: ordered.map((r) => ({ cellId: r.cell_id, side: r.side, targetLang: r.target_lang ?? "" })),
       cachedAt: Date.now(),
     })

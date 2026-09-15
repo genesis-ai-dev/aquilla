@@ -18,6 +18,7 @@ import type { FileProgressResponse, ProgressCounts } from "@/lib/progress/file-p
 import { deriveMilestoneNavigation } from "@/lib/milestone-navigation"
 import type { ImportMilestoneKind } from "../../shared/import-contract"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
+import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
 
 const EMPTY_STATS: ReadonlyMap<string, CellAuditStats> = new Map()
 const EMPTY_TAKES: ReadonlySet<string> = new Set()
@@ -469,11 +470,24 @@ export class CellStore {
 
   findIndexBySection(label: string): number {
     this.ensureDerivedIndexes()
+    return this.findNavigationEntryBySection(label)?.firstIndex ?? -1
+  }
+
+  /** AQU-1244: the first cell ID of a section, for callers that must scroll by
+   *  ID rather than by whole-file index. With "Split into milestones" on the
+   *  editor only renders the current milestone's rows, so a whole-file index is
+   *  out of range (dropped) or points at an unrelated row of the page already
+   *  showing; the ID path turns to the milestone that contains the cell. */
+  findCellIdBySection(label: string): string | null {
+    this.ensureDerivedIndexes()
+    return this.findNavigationEntryBySection(label)?.firstCellId ?? null
+  }
+
+  private findNavigationEntryBySection(label: string): CellNavigationEntry | undefined {
     const normalizedKey = legacySectionKey(label)
-    const entry = this.navIndex.find((item) => (
+    return this.navIndex.find((item) => (
       item.key === label || item.label === label || item.key === normalizedKey
     ))
-    return entry?.firstIndex ?? -1
   }
 
   getSectionLabelForCellId(cellId: string | undefined | null): string {
@@ -1490,7 +1504,7 @@ export class CellStore {
       const subsections: CellNavigationSubsection[] = []
       for (let offset = 0; offset < group.cellIds.length; offset += MILESTONE_SUBSECTION_SIZE) {
         const cellIds = group.cellIds.slice(offset, offset + MILESTONE_SUBSECTION_SIZE)
-        const firstCellId = cellIds[0]!
+        const firstCellId = cellIds[0]
         subsections.push({
           key: `${group.milestone.key}:range:${firstCellId}`,
           label: `${offset + 1}–${offset + cellIds.length}`,
@@ -1926,16 +1940,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
 
   useEffect(() => {
     if (typeof window === "undefined") return
-    function onFocus() { void doFetch(true) }
-    function onVis() {
-      if (typeof document !== "undefined" && document.visibilityState === "visible") void doFetch(true)
-    }
-    window.addEventListener("focus", onFocus)
-    if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVis)
-    return () => {
-      window.removeEventListener("focus", onFocus)
-      if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVis)
-    }
+    return subscribeWindowRegainedFocus(() => { void doFetch(true) })
   }, [doFetch])
 
   const revalidate = useCallback(() => {

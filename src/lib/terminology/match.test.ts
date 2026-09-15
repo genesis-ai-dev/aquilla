@@ -73,9 +73,61 @@ describe("matchesTerm — inflectional wildcard", () => {
 
   it("termToRegexSource produces the documented boundary/wildcard shape", () => {
     expect(termToRegexSource("Lord")).toBe("(?<!\\p{L})Lord(?!\\p{L})")
-    expect(termToRegexSource("grac*")).toBe("(?<!\\p{L})grac\\p{L}*")
-    // leading `*` becomes a prefix letter-run (and naturally drops the leading
-    // boundary), so `*grace` = "any letter-run then grace then word boundary".
-    expect(termToRegexSource("*grace")).toBe("\\p{L}*grace(?!\\p{L})")
+    // WHY: the wildcard now spans marks as well as letters (AQU-1271), since
+    // `[\p{L}\p{M}]*` is a strict superset of the old `\p{L}*` — every term
+    // that matched before still matches (asserted behaviourally by the other
+    // tests in this file); this only documents the updated regex shape.
+    expect(termToRegexSource("grac*")).toBe("(?<!\\p{L})grac[\\p{L}\\p{M}]*")
+    // leading `*` becomes a prefix letter/mark-run (and naturally drops the
+    // leading boundary), so `*grace` = "any letter/mark-run then grace then
+    // word boundary".
+    expect(termToRegexSource("*grace")).toBe("[\\p{L}\\p{M}]*grace(?!\\p{L})")
+  })
+})
+
+describe("mark folding (foldMarks)", () => {
+  const term = "הָאָ֗רֶץ" // as selected in Gen 1:1, with revia accent
+
+  // WHY: the bug that started AQU-1271. A term selected with one accent must
+  // match the same word under another accent, or with no accent at all.
+  it("matches the same consonants under different pointing", () => {
+    expect(matchesTerm("הָאָ֑רֶץ", term, { foldMarks: true })).toBe(true)
+    expect(matchesTerm("הָאָרֶץ", term, { foldMarks: true })).toBe(true)
+    expect(matchesTerm("הארץ", term, { foldMarks: true })).toBe(true)
+  })
+
+  // WHY: without folding, behaviour must be byte-exact as before, so turning
+  // the option off restores the old semantics for projects that rely on it.
+  it("without foldMarks the old exact-pointing behaviour stands", () => {
+    expect(matchesTerm("הָאָ֑רֶץ", term)).toBe(false)
+    expect(matchesTerm(term, term)).toBe(true)
+  })
+
+  // WHY: editor decorations use match offsets. Folding must be done inside the
+  // regex so the match spans the original pointed text, not a stripped copy.
+  it("reports offsets in the original (pointed) haystack", () => {
+    const hay = "בְּרֵאשִׁית בָּרָא אֱלֹהִים אֵת הַשָּׁמַיִם וְאֵת הָאָֽרֶץ׃"
+    const re = buildTermRegex(term, "giu", { foldMarks: true })!
+    const m = re.exec(hay)!
+    expect(hay.slice(m.index, m.index + m[0].length)).toBe("הָאָֽרֶץ")
+  })
+
+  // WHY: the sheva before ה is a mark, so the leading boundary already passed
+  // on וְהָאָ֗רֶץ by accident. With folding that accident must not become a
+  // regression in the other direction: a plain consonantal ו IS a letter and
+  // must block the match until affixes (Task 3) allow it.
+  it("a prefixed consonant still blocks the leading boundary", () => {
+    expect(matchesTerm("והארץ", term, { foldMarks: true })).toBe(false)
+  })
+})
+
+describe("wildcard spans marks", () => {
+  // WHY: `*` used to expand to letters only, so `הָאָ*` stopped at the first
+  // vowel point. A wildcard is "the rest of the word", marks included.
+  it("`*` consumes letters and combining marks", () => {
+    expect(matchesTerm("הָאָ֗רֶץ", "הָאָ*")).toBe(true)
+    // Backward compat: Latin inflection unchanged.
+    expect(matchesTerm("graced", "grac*")).toBe(true)
+    expect(matchesTerm("grid", "grac*")).toBe(false)
   })
 })

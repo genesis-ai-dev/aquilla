@@ -31,6 +31,13 @@ test("sparkle button fills target cell from mock LLM (config injected via IDB)",
   await alice.reload()
   await ws.waitForEditor()
 
+  const setup = await ws.openAiSetupFromFirstCell()
+  await expect(setup.getByRole("button", { name: /Personal override/i })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  )
+  await ws.confirmAiSetup()
+
   await ws.clickSparkleOnFirstCell()
 
   // Mock LLM's default response is "Traducción de prueba".
@@ -56,4 +63,58 @@ test("sparkle button fills target cell from mock LLM (config injected via IDB)",
   await expect(
     ws.cellRow(0).getByRole("button", { name: /Validated/i }).first(),
   ).toHaveAttribute("aria-pressed", "true", { timeout: 15_000 })
+})
+
+test("Draft all persists one ten-cell model package in one events request", async ({ alice }) => {
+  test.setTimeout(90_000)
+  const seeded = await seedProjectWithFile(await jwtFor("alice"), {
+    name: `AI batch ${Date.now()}`,
+    fixturePath: new URL("../../fixtures/ten-cells.md", import.meta.url).pathname,
+  })
+  const ws = await openSeededProject(alice, seeded)
+
+  const llmBase = process.env.VITE_LLM_BASE_URL ?? ""
+  expect(llmBase).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/)
+  await applyUserProviderOverride(alice, alice.username, `${llmBase}/v1`)
+  await alice.reload()
+  await ws.waitForEditor()
+
+  const packagePost = alice.waitForRequest((request) => {
+    if (request.method() !== "POST") return false
+    if (new URL(request.url()).pathname !== "/events") return false
+    try {
+      const body = request.postDataJSON() as {
+        events?: Array<{ kind?: string }>
+      }
+      return body.events?.filter((event) => event.kind === "target.cell.commit")
+        .length === 10
+    } catch {
+      return false
+    }
+  }, { timeout: 30_000 })
+
+  await ws.openFileOverflowMenu()
+  await alice.getByRole("menuitem", { name: /Draft all \(review required\)/i }).click()
+  const dialog = alice.getByRole("dialog")
+  await expect(dialog).toBeVisible({ timeout: 5_000 })
+  await dialog.getByRole("checkbox").click()
+  await dialog.getByRole("button", { name: /^Draft all$/i }).click()
+
+  const request = await packagePost
+  const body = request.postDataJSON() as {
+    events: Array<{
+      cellId?: string
+      kind?: string
+      payload?: { ai_suggestion?: boolean }
+    }>
+  }
+  const commits = body.events.filter((event) => event.kind === "target.cell.commit")
+  expect(commits).toHaveLength(10)
+  expect(new Set(commits.map((event) => event.cellId)).size).toBe(10)
+  expect(commits.every((event) => event.payload?.ai_suggestion === true)).toBe(true)
+
+  await expect.poll(async () => {
+    const cells = await readProjectedCells(await jwtFor("alice"), seeded, "target")
+    return cells.filter((cell) => cell.aiDrafted).length
+  }, { timeout: 30_000, intervals: [500, 1_000] }).toBe(10)
 })

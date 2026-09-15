@@ -84,6 +84,7 @@ describe("Treasure Hunt Bible import", () => {
       kind: "idml",
       parserVersion: `${TREASURE_HUNT_PROFILE_ID}@1`,
       bookCode: "GEN",
+      corpusMarker: "Treasure Hunt Bible",
     })
 
     const cells = bodies.flatMap((body) => body.cells ?? [])
@@ -227,7 +228,7 @@ describe("Treasure Hunt Bible import", () => {
     // A Treasure Hunt volume has no `intro:*` paragraphs, which is the failure
     // the toggle exists to resolve — so the message has to point at the toggle.
     await expect(importBiblicaStudyNotes(await treasureHuntFile(), ctx))
-      .rejects.toThrow(/Treasure Hunt Bible or a Reach 4 Life file/)
+      .rejects.toThrow(/Treasure Hunt Bible, a Reach 4 Life or an EBL file/)
     expect(fetchMock).not.toHaveBeenCalled()
   })
 

@@ -207,12 +207,12 @@ export function RuleImportDialog({ completionSettings, onAdd, projectId }: Props
     if (file) handleFileAccepted(file)
   }
 
-  async function handleCommit(acceptedIndices: number[]) {
+  // AQU-198: the review screen hands back the accepted drafts *as edited*, so a
+  // name the user retyped there is the one that gets saved.
+  async function handleCommit(acceptedDrafts: RuleSuggestion[]) {
     setCommitting(true)
     try {
-      for (const i of acceptedIndices) {
-        const draft = drafts[i]
-        if (!draft) continue
+      for (const draft of acceptedDrafts) {
         await onAdd({
           name: draft.name,
           description: draft.description,

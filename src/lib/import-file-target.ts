@@ -15,7 +15,7 @@
 
 import type { SourceCellRef, EBibleMatchedCell } from "./import"
 import { parseUsfmLossless } from "./parsers/usfm-lossless"
-import { parseCueRange } from "./parsers/subtitle"
+import { parseCueRange, extractVttStrings } from "./parsers/subtitle"
 
 /** Cell descriptor for file-scoped matching — SourceCellRef plus the source
  *  text, which the review table shows so the user can eyeball alignment. */
@@ -140,7 +140,12 @@ function cellTimingMs(cell: FileTargetCellRef): { startMs: number; endMs: number
 
 /** Raw positional matching: data row N → file cell N. Empty rows keep their
  *  slot (so alignment holds) but produce no commit. Rows beyond the file's
- *  cell count become orphans. */
+ *  cell count become orphans.
+ *
+ *  Review-label priority: the incoming row's `ref` wins (a caller-supplied
+ *  label like a VTT cue timecode is the whole point of that field), then the
+ *  matched cell's canonical ref, then a bare `Row N`. Spreadsheet+order rows
+ *  carry no ref, so this reduces to the previous canonicalRef-first behavior. */
 function matchRowsPositionally(
   rows: TargetRow[],
   cells: FileTargetCellRef[],
@@ -158,7 +163,7 @@ function matchRowsPositionally(
       continue
     }
     matchedCount++
-    matched.push(toMatchedCell(cell, row.text, cell.canonicalRef ?? `Row ${i + 1}`))
+    matched.push(toMatchedCell(cell, row.text, row.ref ?? cell.canonicalRef ?? `Row ${i + 1}`))
   }
 
   return {
@@ -298,6 +303,36 @@ export function matchTargetRowsByOrder(
   return canMatchByOverlap
     ? matchTargetRowsByOverlap(rows, cells)
     : matchRowsPositionally(rows, cells)
+}
+
+/** Decode HTML entities commonly emitted by subtitle authoring tools
+ *  (`&nbsp;`, `&amp;`, `&lt;`, `&gt;`, `&quot;`, `&apos;` and the numeric
+ *  `&#160;`) so they don't show up literally in the target column.
+ *  Deliberately narrow: only entities observed in real partner VTTs are
+ *  decoded — the rest would risk mangling text that meant `&` literally. */
+function decodeSubtitleEntities(text: string): string {
+  return text
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&#160;/g, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&apos;/gi, "'")
+}
+
+/** Extract target rows from a WebVTT file: one row per cue, in cue order.
+ *  The cue's timestamp range becomes the row's `ref` so the review screen
+ *  labels rows by timecode (never an internal UUID). Matching aligns by
+ *  timecode overlap when both sides carry timings (AQU-1143), falling back
+ *  to cue N → cell N otherwise — see `matchTargetRowsByOrder`. Entity-decoded
+ *  so `&nbsp;` and similar don't appear literally in the imported translation. */
+export function vttToTargetRows(raw: string): TargetRow[] {
+  const cues = extractVttStrings(raw)
+  return cues.map((cue) => ({
+    ref: cue.context,
+    text: decodeSubtitleEntities(cue.original).trim(),
+  }))
 }
 
 /** Extract target rows from a USFM file: verse bodies + heading/title/intro

@@ -3,6 +3,7 @@ import {
   matchTargetRowsByRef,
   matchTargetRowsByOrder,
   usfmToTargetRows,
+  vttToTargetRows,
   type FileTargetCellRef,
   type TargetRow,
 } from "./import-file-target"
@@ -287,5 +288,98 @@ describe("usfmToTargetRows", () => {
     // aligned with source cells imported under the same setting.
     expect(refs.some((r) => r?.includes(":s"))).toBe(true)
     expect(refs).toContain("MAT 1:1")
+  })
+})
+
+// AQU-1142: WebVTT subtitle target import. Cues carry timestamps, not canonical
+// refs — matching is positional (cue N → cell N) and the row's `ref` field
+// carries the timestamp so the review screen labels rows by timecode.
+describe("vttToTargetRows", () => {
+  it("returns one row per cue, ref = timestamp, text = cue body", () => {
+    const vtt = [
+      "WEBVTT",
+      "",
+      "00:00:01.000 --> 00:00:04.000",
+      "Hello world",
+      "",
+      "00:00:05.000 --> 00:00:08.000",
+      "Second cue",
+    ].join("\n")
+    expect(vttToTargetRows(vtt)).toEqual([
+      { ref: "00:00:01.000 --> 00:00:04.000", text: "Hello world" },
+      { ref: "00:00:05.000 --> 00:00:08.000", text: "Second cue" },
+    ])
+  })
+
+  it("joins multi-line cues into a single row so cell N still lands on cue N", () => {
+    const vtt = [
+      "WEBVTT",
+      "",
+      "00:00:01.000 --> 00:00:04.000",
+      "Line one",
+      "Line two",
+    ].join("\n")
+    const rows = vttToTargetRows(vtt)
+    expect(rows).toHaveLength(1)
+    expect(rows[0].text).toBe("Line one\nLine two")
+  })
+
+  it("decodes &nbsp; and other common entities so they don't show up literally in the target column", () => {
+    // Partner sample (TheChosen_101_tpi.vtt) carries &nbsp; between short line
+    // continuations — showing that raw in the editor is a visible defect.
+    const vtt = [
+      "WEBVTT",
+      "",
+      "00:00:01.000 --> 00:00:04.000",
+      "Hello&nbsp;world &amp; friends",
+    ].join("\n")
+    expect(vttToTargetRows(vtt)[0].text).toBe("Hello world & friends")
+  })
+
+  it("skips WEBVTT header, numeric cue identifiers, and NOTE blocks", () => {
+    // The parser must never leak protocol lines into the translation. Every
+    // non-cue line here would land in the target column if the guard failed.
+    const vtt = [
+      "WEBVTT",
+      "Kind: captions",
+      "Language: en",
+      "",
+      "NOTE This block is a comment",
+      "and continues across lines.",
+      "",
+      "1",
+      "00:00:01.000 --> 00:00:04.000",
+      "Real translation",
+    ].join("\n")
+    const rows = vttToTargetRows(vtt)
+    expect(rows).toHaveLength(1)
+    expect(rows[0].text).toBe("Real translation")
+  })
+
+  it("preserves cue order even when the file's timestamps run out of order (partner sample)", () => {
+    // TheChosen_101_tpi.vtt has out-of-order timestamps at a handful of cues;
+    // positional matching means we care about the order rows arrive in, not
+    // whether their timestamps monotonically increase.
+    const vtt = [
+      "WEBVTT",
+      "",
+      "00:00:10.000 --> 00:00:12.000",
+      "cue 1",
+      "",
+      "00:00:05.000 --> 00:00:08.000",
+      "cue 2 (earlier timestamp)",
+      "",
+      "00:00:15.000 --> 00:00:18.000",
+      "cue 3",
+    ].join("\n")
+    expect(vttToTargetRows(vtt).map((r) => r.text)).toEqual([
+      "cue 1",
+      "cue 2 (earlier timestamp)",
+      "cue 3",
+    ])
+  })
+
+  it("returns an empty array for a header-only file so the panel can show its no-cues error", () => {
+    expect(vttToTargetRows("WEBVTT\n")).toEqual([])
   })
 })

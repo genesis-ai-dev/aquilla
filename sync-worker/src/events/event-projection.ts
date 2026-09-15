@@ -78,8 +78,8 @@ export function buildBulkTargetCellCommitStmt(
   db: AquillaDb,
   events: PersistedEvent<'target.cell.commit'>[],
   // AQU-1240: project's resolved default-lane tag (see laneOfEvent). Undefined
-  // => legacy '' , byte-identical while default_lane_migration is empty. All
-  // events in one bulk statement share a project, so a single tag applies.
+  // => legacy '' , byte-identical while no resolver is wired. All events in one
+  // bulk statement share a project, so a single tag applies.
   projectDefaultLane?: string | null,
 ): AquillaStatement {
   if (events.length === 0) throw new Error('buildBulkTargetCellCommitStmt: empty events')
@@ -146,14 +146,14 @@ export function buildBulkTargetCellCommitStmt(
  * laneQualifiedParentKey).
  *
  * AQU-1240 (the replay shim): `projectDefaultLane` is the real lane tag the
- * eliminated '' default lane was named for this project (from
- * default_lane_migration, resolved by resolveDefaultLane). When known, a
+ * eliminated '' default lane was named for this project (under v2, the
+ * lanes table's legacy_tag; resolver wired at the enable step). When known, a
  * target event with an absent/'' `targetLang` resolves to that tag instead of
  * '', so that '' and the tag denote the SAME lane at every read/replay/auth
  * site and 4-then-5 / 5-then-4 converge (design §2.5, §6).
  *
- * BEHAVIOR-NEUTRAL WHILE UNPOPULATED: `default_lane_migration` is empty until
- * the enable step, so the resolver yields null, this returns '' , and every
+ * BEHAVIOR-NEUTRAL WHILE NO RESOLVER IS WIRED: the 3rd arg is undefined until
+ * the enable step, so this returns '' , and every
  * key/scope is byte-identical to pre-1240. The '' -> tag flip is switched on
  * ONLY together with slice 4 (stop writing '') and slice 5 (backfill); enabling
  * it earlier forks history against new writes. Absent 3rd arg == legacy null.
@@ -423,10 +423,10 @@ export function buildEventProjectionStmts(
      */
     validationCount?: number
     /**
-     * AQU-1240: the project's resolved default-lane tag (from
-     * default_lane_migration via resolveDefaultLane), passed to laneOfEvent so
-     * a lane-less target event keys at that tag. Undefined/null => legacy ''
-     * (the state while the mapping table is empty), so leaving it unset here is
+     * AQU-1240: the project's resolved default-lane tag (under v2, from the
+     * lanes table's legacy_tag), passed to laneOfEvent so a lane-less target
+     * event keys at that tag. Undefined/null => legacy '' (the state while no
+     * resolver is wired), so leaving it unset here is
      * byte-identical to pre-1240. The live route wires + memoizes it only at
      * the enable step (with slices 4/5); resolving + passing it before then,
      * without also always emitting the tag on the wire, would fork history.

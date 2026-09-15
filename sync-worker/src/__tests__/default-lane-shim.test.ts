@@ -1,12 +1,14 @@
-// AQU-1240 slice 3b (machinery): the laneOfEvent replay shim + resolveDefaultLane.
-// These assert the NEW 3-arg behavior and the resolver contract. The separate
+// AQU-1240 slice 3b (machinery): the laneOfEvent replay shim.
+// These assert the NEW 3-arg behavior of laneOfEvent. The separate
 // lane-of-event.default-lane-baseline.test.ts pins the pre-1240 2-arg behavior;
 // both must hold because the 3rd arg is optional and defaults to legacy ''.
+//
+// (The v1 `resolveDefaultLane` reader over the `default_lane_migration` table
+// was dropped: under v2 the default-lane tag is carried by the `lanes` table's
+// `legacy_tag`, and the resolver is wired at the enable step.)
 
 import { describe, expect, it } from 'vitest'
 import { laneOfEvent } from '../events/event-projection'
-import { resolveDefaultLane } from '../events/default-lane'
-import type { AquillaDb } from '../../../db/shim/postgres'
 
 describe('laneOfEvent — AQU-1240 shim (projectDefaultLane)', () => {
   it('returns an explicit non-empty target lane verbatim, ignoring the default', () => {
@@ -31,30 +33,5 @@ describe('laneOfEvent — AQU-1240 shim (projectDefaultLane)', () => {
   it("NEVER laneifies source kinds, even with a default present (source is always '')", () => {
     expect(laneOfEvent('source.cell.create', { targetLang: 'es' }, 'en')).toBe('')
     expect(laneOfEvent('source.cell.commit', {}, 'en')).toBe('')
-  })
-})
-
-// Minimal AquillaDb stub: only prepare().bind().first() is exercised.
-function stubDb(row: { resolved_lane: string } | null): AquillaDb {
-  return {
-    prepare: () => ({
-      bind: () => ({
-        first: async () => row,
-      }),
-    }),
-  } as unknown as AquillaDb
-}
-
-describe('resolveDefaultLane — AQU-1240', () => {
-  it('returns the resolved tag when a mapping row exists', async () => {
-    expect(await resolveDefaultLane(stubDb({ resolved_lane: 'en' }), 'p1')).toBe('en')
-  })
-
-  it('returns null when the project has no mapping row (unpopulated table)', async () => {
-    expect(await resolveDefaultLane(stubDb(null), 'p1')).toBeNull()
-  })
-
-  it("returns null defensively when a row's resolved_lane is '' (guards a hand-edited row)", async () => {
-    expect(await resolveDefaultLane(stubDb({ resolved_lane: '' }), 'p1')).toBeNull()
   })
 })

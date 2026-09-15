@@ -1,4 +1,4 @@
--- 0090_project_member_lane_roles.sql — AQU-730: per-lane role grants.
+-- 0091_project_member_lane_roles.sql — AQU-730: per-lane role grants.
 --
 -- The third permission tier (org -> project -> LANE). REPLACES the kind='lane'
 -- rows of project_member_scopes with an ADDITIVE, LEVELED grant model:

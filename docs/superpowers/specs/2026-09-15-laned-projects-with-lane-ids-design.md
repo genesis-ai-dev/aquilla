@@ -125,8 +125,9 @@ forever. Matching on `name` would silently break every historical event the inst
 renames a lane — defeating the point of IDs.
 
 This subsumes the `default_lane_migration` table I built under v1: "which lane is blank?" is now
-"the lane with `legacy_tag=''`." That table is redundant for resolution and will be dropped (kept,
-if at all, only as a migration audit record).
+"the lane with `legacy_tag=''`." That table was redundant for resolution and has been **dropped in
+this PR** (migration `0091` freed and reassigned to `project_member_lane_roles`). Any per-project
+migration audit record we later want will live on the `lanes` rows themselves.
 
 ---
 
@@ -198,7 +199,7 @@ name→`lane_id` switch is a trivial edit.
 | Slice 0 characterization tests (`04fa5aff4`) | **Keep** — pin pre-migration behavior |
 | `laneOfEvent` shim machinery (`f1e7951fa`) | **Keep + generalize** — same seam; now resolves to `lane_id` via the §3 chain |
 | Registry completeness (`ab4744628`) | **Stepping stone** — JSON `targetLanes` is eventually superseded by `lanes`, but it removed the blocking validator and established "the primary is a real lane" |
-| `default_lane_migration` table (`c2eb11ff2`) | **Superseded** by `legacy_tag`; drop (or keep only as an audit record) |
+| `default_lane_migration` table (`c2eb11ff2`) | **Dropped in this PR** — superseded by `legacy_tag`; migration `0091` reused for `project_member_lane_roles` |
 | `project_member_lane_roles` (AQU-730) | **Re-key** name → `lane_id` (empty table, trivial) |
 
 ---

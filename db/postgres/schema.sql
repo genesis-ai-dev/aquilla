@@ -1029,7 +1029,7 @@ CREATE TABLE IF NOT EXISTS project_member_scopes (
     PRIMARY KEY (project_id, user_id, kind, value)
 );
 
--- Per-lane role grants (0090_project_member_lane_roles.sql, AQU-730). The third
+-- Per-lane role grants (0091_project_member_lane_roles.sql, AQU-730). The third
 -- permission tier (org -> project -> LANE), REPLACING the kind='lane' rows of
 -- project_member_scopes with an ADDITIVE, LEVELED grant model: a row grants
 -- (project,user) access to one lane at role_level. Below Maintainer (600),
@@ -1049,19 +1049,6 @@ CREATE TABLE IF NOT EXISTS project_member_lane_roles (
 );
 CREATE INDEX IF NOT EXISTS idx_pmlr_project_user
     ON project_member_lane_roles(project_id, user_id);
-
--- Per-project record of the default-lane migration (0091_default_lane_migration.sql,
--- AQU-1240). PERMANENT lookup for the laneOfEvent replay shim: resolves legacy ''/
--- absent target lanes to a project's real lane tag on target.cell.* events, for as
--- long as any legacy event exists. resolved_lane is never '' . A project with no
--- row is post-cutover (all events carry explicit tags); the shim throws rather than
--- defaults if it meets a legacy-shaped event there. Structure only until slices 3/5.
-CREATE TABLE IF NOT EXISTS default_lane_migration (
-    project_id    TEXT NOT NULL PRIMARY KEY,
-    resolved_lane TEXT NOT NULL CHECK (resolved_lane <> ''),
-    ran_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-    rows_by_table JSONB
-);
 
 -- AQU-533 Agent API: immutable changeset execution plans (0055). External
 -- callers submit domain commands; prepare compiles them into a staged plan

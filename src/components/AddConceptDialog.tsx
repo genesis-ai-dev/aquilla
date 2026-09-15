@@ -128,17 +128,23 @@ export function AddConceptPopover({
   const caseSensitive = !values.caseInsensitive
   const previewConcept = useMemo(() => ({ sourceTerm: term, match, caseSensitive }), [term, match, caseSensitive])
   const resolved = useMemo(() => resolveMatchOptions(previewConcept, termMatching), [previewConcept, termMatching])
+  // Gated on `open`: the toolbar mounts this popover the moment source text is
+  // selected, and each of these walks every cell in the file. Nothing is shown
+  // until the user actually opens the form, so nothing is scanned until then.
   const forms = useMemo(
-    () => (cells ? discoverForms(cells, previewConcept, termMatching) : []),
-    [cells, previewConcept, termMatching],
+    () => (open && cells ? discoverForms(cells, previewConcept, termMatching) : []),
+    [open, cells, previewConcept, termMatching],
   )
   const count = useMemo(
-    () => (cells ? countConceptOccurrences(cells, previewConcept, termMatching) : 0),
-    [cells, previewConcept, termMatching],
+    () => (open && cells ? countConceptOccurrences(cells, previewConcept, termMatching) : 0),
+    [open, cells, previewConcept, termMatching],
   )
   // Offer the fold-marks toggle only where marks actually exist — on plain
   // Latin text it is a checkbox that can never change an answer.
-  const showFoldMarks = hasCombiningMarks(term) || (cells?.some((c) => hasCombiningMarks(c.original)) ?? false)
+  const showFoldMarks = useMemo(
+    () => open && (hasCombiningMarks(term) || (cells?.some((c) => hasCombiningMarks(c.original)) ?? false)),
+    [open, term, cells],
+  )
   const hasAffixInventory = resolved.prefixes.length > 0 || resolved.suffixes.length > 0
 
   const toggleExclude = (surface: string, excluded: boolean) => {

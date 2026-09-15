@@ -1004,7 +1004,18 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // AQU-1271: the add-to-terminology popover previews its matcher against the
   // open file. `getAllSummaries()` is the store's own cached array, so calling
   // it costs nothing and its identity only changes when the cells do.
-  const getConceptPreviewCells = useCallback(() => cellStore.getAllSummaries(), [cellStore])
+  //
+  // The read goes through `readAtVersion` with the store's LIVE counter
+  // (`getAllVersion()`), not the `cellStoreVersion` React state: the version
+  // must participate so the React Compiler cannot memoize a stale snapshot,
+  // but putting it in this callback's deps would change the getter's identity
+  // on every projection bump and re-render every memoized row — the cost
+  // EditorActionsContext exists to avoid. A getter called at render time by
+  // the one mounted selection toolbar reads the current cells either way.
+  const getConceptPreviewCells = useCallback(
+    () => readAtVersion(cellStore.getAllVersion(), () => cellStore.getAllSummaries()),
+    [cellStore],
+  )
   const cellStoreVersion = useCellStoreVersion(cellStore)
   const audioFileId = cellStore.getFileId()
   const splitByMilestone = useMilestoneSplit()

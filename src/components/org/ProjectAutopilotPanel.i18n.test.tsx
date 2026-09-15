@@ -27,6 +27,8 @@ vi.mock("@/lib/i18n/I18nProvider", async () => {
     "autopilot.settings.experimentalDescription": "ميزات محلية على هذا الجهاز.",
     "autopilot.settings.controlsLabel": "إظهار عناصر تحكم Autopilot",
     "autopilot.settings.controlsDescription": "عناصر التحكم هذه لا تبدأ العمل.",
+    "autopilot.settings.autopilotLabel": "جرّب Autopilot",
+    "autopilot.settings.autopilotDescription": "تفعيل هذا الخيار لا يبدأ أي عمل.",
   }
   const t = (key: MessageKey, vars?: TVars) => {
     const replacement = replacements[key]
@@ -119,16 +121,22 @@ describe("localized Autopilot overview and settings wiring", () => {
     expect(screen.getByText(/1 file started و1 file skipped/)).toBeInTheDocument()
   })
 
-  it("resolves feature-flag metadata through its typed message keys", async () => {
-    render(<ExperimentalFlagsSection projectId="project-1" />)
+  it("resolves experimental-section metadata through its typed message keys", async () => {
+    render(
+      <ExperimentalFlagsSection
+        projectId="project-1"
+        roleLevel={700}
+        onSetAutopilotEnabled={() => {}}
+      />,
+    )
 
     expect(screen.getByText("ميزات تجريبية")).toBeInTheDocument()
     expect(screen.getByText("ميزات محلية على هذا الجهاز.")).toBeInTheDocument()
-    // AQU-1103: unchecked — Autopilot is opt-in, and this project stores no
-    // flag. The assertion this test exists for is the localized switch NAME
-    // resolving through the typed message key; its state just tracks the
-    // registry default.
-    expect(screen.getByRole("switch", { name: "إظهار عناصر تحكم Autopilot" })).not.toBeChecked()
-    expect(screen.getByText("عناصر التحكم هذه لا تبدأ العمل.")).toBeInTheDocument()
+    // AQU-1103 / AQU-1246: unchecked — Autopilot is opt-in, and this project
+    // has never been opted in. The assertion this test exists for is the
+    // localized switch NAME resolving through the typed message key; its state
+    // just tracks the project-wide default.
+    expect(screen.getByRole("switch", { name: "جرّب Autopilot" })).not.toBeChecked()
+    expect(screen.getByText("تفعيل هذا الخيار لا يبدأ أي عمل.")).toBeInTheDocument()
   })
 })

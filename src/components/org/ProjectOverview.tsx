@@ -30,7 +30,7 @@ import { downloadImportedOriginal, downloadImportedOriginalsZip } from "@/lib/fi
 import { AssignWork } from "./AssignWork"
 import { MemberActivityPanel } from "./MemberActivityPanel"
 import { ProjectAutopilotPanel } from "./ProjectAutopilotPanel"
-import { isFlagEnabled } from "@/lib/features/flags"
+import { isAutopilotVisible } from "@/lib/features/flags"
 import { getPortfolio, translatedPct, validatedPct, aiDraftedPct, audioPct, audioValidatedPct, audioValidatedOfRecordedPct, recordedMinutes, deadlineStatus, laneTranslatedPct, laneValidatedPct, type PortfolioProject, type PortfolioLane } from "@/lib/frontier/portfolio"
 import { OverviewLaneTable } from "./OverviewLaneTable"
 import { downloadBlob } from "@/lib/export/export-service"
@@ -1364,7 +1364,7 @@ export function ProjectOverview() {
                   only place that answers "what is drafting, and how much is
                   waiting on my team". Renders nothing when the backend isn't
                   deployed for this environment. */}
-              {project && isFlagEnabled(project, "contextualTranslation") && (
+              {project && isAutopilotVisible(project) && (
                 <ProjectAutopilotPanel
                   key={id}
                   projectId={id}

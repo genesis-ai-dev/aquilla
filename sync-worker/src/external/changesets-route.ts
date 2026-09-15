@@ -224,6 +224,18 @@ async function handleDiscard(
   if (cred.credentialId !== cs.credentialId) {
     return errorResponse('permission_denied', 'credential did not create this changeset')
   }
+  // AQU-1225: a pre-creation changeset (a receipt-only CreateProject, W2-A) is
+  // staged under a project id that does not exist yet, so the membership check
+  // below can NEVER pass — the staging credential could not clean up its own
+  // junk and the row sat in the approval queue until it expired an hour later.
+  // Schema probing mass-produces exactly these. When the target project does
+  // not exist, credential ownership (asserted above) IS the authorization:
+  // no membership can exist to resolve, so this widens nothing — it only turns
+  // an unconditional denial into "the staging credential may discard its own
+  // changeset". Once the project exists, the live-role check applies unchanged.
+  if (!(await projectExists(db, projectId))) {
+    return discardChangesetCore(db, projectId, cs)
+  }
   // Live-role resolution on every call (§2): the credential owner must still
   // resolve SOME role on the project — a user removed after prepare cannot
   // discard, matching every other lifecycle op.
@@ -232,6 +244,17 @@ async function handleDiscard(
     return errorResponse('permission_denied', 'no project membership')
   }
   return discardChangesetCore(db, projectId, cs)
+}
+
+/** AQU-1225: does the changeset's target project row exist yet? A
+ *  not-yet-created project is the pre-creation (CreateProject) case, where the
+ *  membership gate is unresolvable by construction. */
+async function projectExists(db: AquillaDb, projectId: string): Promise<boolean> {
+  const row = await db
+    .prepare(`SELECT id FROM projects WHERE id = ?`)
+    .bind(projectId)
+    .first<{ id: string }>()
+  return row != null
 }
 
 /** Post-auth discard state machine, shared with the session routes (AQU-926):

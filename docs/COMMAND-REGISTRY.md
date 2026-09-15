@@ -35,6 +35,8 @@ v1 entries: SetTranslation (prepared, 400) · LinkMedia (prepared, 400) · PlanI
 500) · CreateProject (structural, 600-org) · UpdateProjectSettings (structural, 600 — oneLiner
 says "deprecated: prefer PatchSettings") · **PatchSettings** (structural, 500) ·
 **EmitEvents** (structural, 200 — floor is per inner event kind; testimony kinds flagged).
+AQU-1228 adds the Living Memory writes: **AddExample** / **AddDecision** / **AddNote**
+(structural, 400) and **RetireExample** (structural, 500).
 
 ## 2. New commands (owner: sync-worker stream)
 
@@ -91,6 +93,40 @@ says "deprecated: prefer PatchSettings") · **PatchSettings** (structural, 500) 
 - Explicitly NOT in v1: `target.cell.commit` (use SetTranslation), `source.cell.*`,
   `cell.audio.*` (use LinkMedia), reorders/retimes/mirrors, `file.timing.set`, `file.create`.
 - Summary gains `events: { kind, count, testimony }[]` alongside existing fields.
+
+### Living Memory writes (AQU-1228) — AddExample / AddDecision / AddNote / RetireExample
+
+```ts
+{ kind: 'AddExample',    slug, source, target, note?, rationale? }  // examples/<slug>.md
+{ kind: 'AddDecision',   slug, decision, rationale? }               // decisions/<slug>.md
+{ kind: 'AddNote',       fileId, cellId, note, rationale? }         // notes/<file>/<cell>-<digest>.md
+{ kind: 'RetireExample', slug, rationale? }                         // archives examples/<slug>.md
+```
+
+- **Not EmitEvents.** Living Memory is not event-sourced — it is the `agent_memories` table
+  (`db/shared/agent-memory.ts`), path-keyed per project with its own
+  `proposed → approved → archived` lifecycle. So these are **receipt-only** commands on the
+  PatchSettings pattern: sole command, no compiled events, no cell preconditions.
+- **Two gates, one approval.** The changeset gate (ask-mode human confirmation) stands in for
+  the Memory-tab review — but only at the authority that review requires. A commit lands the
+  memory `approved` iff the changeset carried a real confirmation AND the confirming user
+  holds PROJECT_LEAD(500)+. Otherwise (act mode, or a contributor-level approver) it lands
+  `proposed` and still needs the in-app review. The receipt's `memoryStatus` reports which.
+- **Floors:** adding is the propose tier (CONTRIBUTOR 400, matching auth-worker's
+  `POST /agent-memory`); retiring is the review tier (PROJECT_LEAD 500, matching that route's
+  review endpoint) — un-publishing memory the whole project's copilot reads is a review act.
+- **Retrieval follows for free.** `buildMemoryContext` selects approved memories only, so
+  approving adds an entry to the next copilot prompt and retiring removes it. No retrieval
+  code changes.
+- **Human-edited rows are untouchable** through this surface (permission_denied, both for an
+  overwriting add and for a retire) — adversarial-panel B1/B2.
+- **Superseding archives, never mutates**: re-using a slug archives the prior version.
+  `AddNote`'s path carries a digest of the exact `(fileId, cellId)` so two cells whose ids
+  slugify alike never share a note slot. The cell must exist at prepare (`not_found`).
+- **Idempotency:** the `agent_memories` row id is minted at prepare (`plannedIds.memory`), so
+  a crash-retry re-finds its own proposal rather than inserting a duplicate.
+- Summary gains `memoryWrites: { path, action, preview }[]`; the receipt is
+  `MemoryWriteReceipt` (`memoryPath`, `memoryStatus`, and a `note` when review is pending).
 
 ## 3. Session principal + routes (owner: sync-worker stream)
 

@@ -17,6 +17,8 @@ import type { Command } from './commands'
 import { deepEqualJson } from './canonical'
 import type { EmitEventInput } from './commands-emit-events'
 import { normalizeSettings } from '../../../db/shared/projects'
+import { isBriefPatchSatisfied, readBriefFromSettings } from '../../../db/shared/brief'
+import { briefPatchOf } from './commands-set-brief'
 
 /** One live target cell, as the projection holds it. */
 export interface LiveTargetValue {
@@ -103,6 +105,17 @@ function satisfiesCommand(c: Command, live: SupersedeLiveState): Verdict {
       }
       return YES
     }
+    case 'SetBrief': {
+      if (!live.settings) return no('live settings were not resolved')
+      // Compare only the sections the patch NAMES: version/updatedAt always
+      // differ on a write, and unnamed sections are deliberately untouched.
+      const liveBrief = readBriefFromSettings(live.settings)
+      if (!liveBrief) return no('no live translation brief')
+      if (!isBriefPatchSatisfied(liveBrief, briefPatchOf(c))) {
+        return no('live brief sections differ from the planned text')
+      }
+      return YES
+    }
     case 'EmitEvents': {
       for (const [i, e] of c.events.entries()) {
         const verdict = satisfiesEvent(e, live)
@@ -116,6 +129,8 @@ function satisfiesCommand(c: Command, live: SupersedeLiveState): Verdict {
     case 'PlanImport':
       return no('creation commands are never satisfied by inspection')
     case 'CreateProject':
+      return no('creation commands are never satisfied by inspection')
+    case 'CreateOrg':
       return no('creation commands are never satisfied by inspection')
     case 'LinkMedia':
       return no('creation commands are never satisfied by inspection')

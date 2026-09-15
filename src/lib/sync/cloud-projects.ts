@@ -24,6 +24,8 @@ export interface CloudFileSummary {
   anchorFileId?: string | null
   bookCode?: string | null
   hasScriptureContent?: boolean
+  /** Sidebar folder. Absent when the file is ungrouped. */
+  corpusMarker?: string | null
   sourceLanguage?: string | null
   targetLanguage?: string | null
   /** Timeline-segment-model order lens ('time' | 'sequence'); absent ⇒ sequence. */
@@ -53,6 +55,12 @@ export interface CloudProjectSummary {
   /** AQU-822: the org's effective termbase-edit floor. Returned by the
    *  single-project endpoint; absent on the list endpoint / older servers. */
   termbaseEditMinRole?: number | null
+  /** AQU-1002: the org's effective comment floors — the minimum role to open a
+   *  thread, and to resolve/reopen a thread someone else opened. Returned by
+   *  the single-project endpoint; absent on the list endpoint / older servers,
+   *  where callers fall back to the pre-AQU-1002 defaults. */
+  commentCreateMinRole?: number | null
+  commentResolveMinRole?: number | null
   /** Present on the single-project endpoint; list endpoint filters archived rows. */
   archivedAt?: string | null
   /** Present on the single-project endpoint; used to show "archived by X" in Trash. */
@@ -179,6 +187,53 @@ export async function fetchAccessibleProjectsResult(
     // Network error — server unreachable.
     return { ok: false, reason: "unreachable" }
   }
+}
+
+/** First page size for project tables and pickers (matches auth-worker default). */
+export const PROJECT_DIRECTORY_PAGE_SIZE = 40
+
+export interface ProjectDirectoryPage {
+  projects: CloudProjectSummary[]
+  nextCursor: string | null
+}
+
+/**
+ * Paged GET /api/v2/projects. Pass `limit` so the catalog loads a page at a
+ * time instead of dumping every accessible (or, for platform admins, every)
+ * project into the client.
+ */
+export async function listProjectsPage(
+  jwt: string,
+  opts: {
+    q?: string
+    limit?: number
+    cursor?: string | null
+    orgId?: number
+    minRole?: number
+    archived?: boolean
+    signal?: AbortSignal
+  } = {},
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<ProjectDirectoryPage> {
+  const params = new URLSearchParams()
+  const q = opts.q?.trim()
+  if (q) params.set("q", q)
+  params.set("limit", String(opts.limit ?? PROJECT_DIRECTORY_PAGE_SIZE))
+  if (opts.cursor) params.set("cursor", opts.cursor)
+  if (opts.orgId != null) params.set("orgId", String(opts.orgId))
+  if (opts.minRole != null) params.set("minRole", String(opts.minRole))
+  if (opts.archived) params.set("archived", "true")
+  const res = await fetch(`${apiUrl}/api/v2/projects?${params}`, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${jwt}` },
+    signal: opts.signal,
+  })
+  if (!res.ok) {
+    const body = await res.text().catch(() => "")
+    throw new UserError(res.status, body, "project")
+  }
+  const body = (await res.json()) as { projects?: CloudProjectSummary[]; nextCursor?: string | null }
+  return { projects: body.projects ?? [], nextCursor: body.nextCursor ?? null }
 }
 
 /**
@@ -384,6 +439,7 @@ export function minimalProjectRecord(summary: CloudProjectSummary): ProjectRecor
       ...(f.anchorFileId ? { anchorFileId: f.anchorFileId } : {}),
       ...(f.bookCode ? { bookCode: f.bookCode } : {}),
       ...(f.hasScriptureContent ? { hasScriptureContent: true } : {}),
+      ...(f.corpusMarker?.trim() ? { corpusMarker: f.corpusMarker.trim() } : {}),
       ...(f.sourceLanguage ? { sourceLanguage: f.sourceLanguage } : {}),
       ...(f.targetLanguage ? { targetLanguage: f.targetLanguage } : {}),
       ...(f.orderedBy === "time" || f.orderedBy === "sequence" ? { orderedBy: f.orderedBy } : {}),
@@ -424,6 +480,14 @@ export function minimalProjectRecord(summary: CloudProjectSummary): ProjectRecor
   // callers read as the PROJECT_LEAD default.
   if (summary.termbaseEditMinRole !== undefined) {
     record.termbaseEditMinRole = summary.termbaseEditMinRole
+  }
+  // AQU-1002: same treatment for the comment floors — absent leaves them
+  // undefined, which the comment surfaces read as the stock defaults.
+  if (summary.commentCreateMinRole !== undefined) {
+    record.commentCreateMinRole = summary.commentCreateMinRole
+  }
+  if (summary.commentResolveMinRole !== undefined) {
+    record.commentResolveMinRole = summary.commentResolveMinRole
   }
   // AQU-476/478: propagate link mode/consumes/gate/cursor when present.
   if (summary.sourceLinkMode !== undefined) record.sourceLinkMode = summary.sourceLinkMode

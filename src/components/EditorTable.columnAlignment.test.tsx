@@ -80,14 +80,22 @@ const project: ProjectRecord = {
  * Pass `timecode: true` to attach cue timings so `context` becomes a VTT range
  * (the timeline-ordered / subtitle case).
  */
-function makeRows(id: string, { timecode = false }: { timecode?: boolean } = {}): CellRow[] {
+function makeRows(
+  id: string,
+  { timecode = false, castName }: { timecode?: boolean; castName?: string } = {},
+): CellRow[] {
   const timing = timecode ? { startMs: 0, endMs: 3970 } : {}
+  // The character sheet writes `cast_name` onto the SOURCE row (see the
+  // `cast.assign` projection in sync-worker), and buildCellData prefers the
+  // source row's metadata — so this is the shape a real imported row has.
+  const meta = castName === undefined ? {} : { metadata: { cast_name: castName } }
   return [
     {
       cellId: id, side: "source", value: "hello", valueHtml: null, type: "text",
       canonicalRef: "GEN 1:1", anchorCellId: null, eventId: `${id}-source`,
       sourceEventId: null, lastEditor: null, lastEditAt: 1, validated: false, wordCount: 1,
       ...timing,
+      ...meta,
     },
     {
       cellId: id, side: "target", value: "bonjour", valueHtml: null, type: "text",
@@ -110,10 +118,36 @@ const projectWithCast: ProjectRecord = {
   },
 } as unknown as ProjectRecord
 
-function renderTable({ lineNumbers = false, timecode = false, cellLabels = false }: { lineNumbers?: boolean; timecode?: boolean; cellLabels?: boolean } = {}) {
+/** AQU-1018: the same cast, but nothing assigned to `cell-1` yet — the state a
+ *  subtitle file is in the moment it lands, before any voice has been minted. */
+const projectCastUnassigned: ProjectRecord = {
+  ...project,
+  ttsSettings: { castAssignments: {}, voices: [{ id: "voice-ravi", name: "Ravi" }] },
+} as unknown as ProjectRecord
+
+/** AQU-1018: an assignment left pointing at a voice someone has since deleted.
+ *  `findVoice` returns nothing, so the assigned-voice rung yields no name. */
+const projectCastDeletedVoice: ProjectRecord = {
+  ...project,
+  ttsSettings: { castAssignments: { "cell-1": "voice-gone" }, voices: [] },
+} as unknown as ProjectRecord
+
+function renderTable({
+  lineNumbers = false,
+  timecode = false,
+  cellLabels = false,
+  castName,
+  projectOverride,
+}: {
+  lineNumbers?: boolean
+  timecode?: boolean
+  cellLabels?: boolean
+  castName?: string
+  projectOverride?: ProjectRecord
+} = {}) {
   const store = new CellStore()
   store.setRuntime({ projectId: project.id, fileId: "file-1", username: "tester", requiredValidations: 1, auditStats: new Map() })
-  store.replaceRows(makeRows("cell-1", { timecode }), { full: true, maxServerSeq: 1 })
+  store.replaceRows(makeRows("cell-1", { timecode, castName }), { full: true, maxServerSeq: 1 })
   const qc = new QueryClient()
   return render(
     <QueryClientProvider client={qc}>
@@ -125,7 +159,7 @@ function renderTable({ lineNumbers = false, timecode = false, cellLabels = false
           // `ttsSettings` at all — so the label was absent because there was no
           // cast to show, not because the gate withheld it. Delete the gate
           // entirely and that test still passed.
-          project={projectWithCast}
+          project={projectOverride ?? projectWithCast}
           cellStore={store}
           username="tester"
           isCompletionConfigured={false}
@@ -316,5 +350,98 @@ describe("EditorTable — the character label on source cells", () => {
     renderTable({ timecode: true })
     await screen.findByText("hello")
     expect(screen.queryByTestId("source-cell-label")).toBeNull()
+  })
+})
+
+// ── AQU-1018 ────────────────────────────────────────────────────────────────
+//
+// Come and See (Anna), 2026-08-26: on a freshly imported subtitle file "there
+// are no target files yet, so the translator has nothing to orient against."
+//
+// AQU-646 stage 6G had already given the source cell the layout she asked for —
+// character label in the top-left corner, the line, the timing underneath. What
+// it did NOT do was make the label resolve at import time: `labelText` climbed
+// from the ASSIGNED VOICE's name only, and a voice is minted by a `saveTts` that
+// lands after the `cast.assign` events (and not at all if that call fails, a
+// degraded-success window ProjectWorkspace documents). So the corner the layout
+// work reserved sat empty on exactly the file it was reserved for, while the
+// cast gutter three columns to its left drew the very same character's name off
+// `metadata.cast_name`.
+describe("EditorTable — the character on a row whose voice has not resolved", () => {
+  it("names the speaker from the cell's own cast_name when nothing is assigned yet", async () => {
+    renderTable({
+      timecode: true,
+      cellLabels: true,
+      castName: "little Mary Magdalene",
+      projectOverride: projectCastUnassigned,
+    })
+    await screen.findByText("hello")
+    expect(screen.getByTestId("source-cell-label")).toHaveTextContent("little Mary Magdalene")
+  })
+
+  // The invariant AQU-646 actually chose: the two corners agree with EACH OTHER.
+  // Adding a rung beneath the assigned voice must not split them.
+  it("shows the same name in the target corner", async () => {
+    renderTable({
+      timecode: true,
+      cellLabels: true,
+      castName: "little Mary Magdalene",
+      projectOverride: projectCastUnassigned,
+    })
+    await screen.findByText("hello")
+    expect(screen.getByTestId("target-header-lane")).toHaveTextContent("little Mary Magdalene")
+  })
+
+  // Anna's whole ask was orientation on a file with no targets: the name says
+  // WHO speaks, the timing says WHEN, and the line sits between them.
+  it("still carries the timing at the foot, so the row reads name / line / time", async () => {
+    renderTable({
+      timecode: true,
+      cellLabels: true,
+      castName: "little Mary Magdalene",
+      projectOverride: projectCastUnassigned,
+    })
+    await screen.findByText("hello")
+    const label = screen.getByTestId("source-cell-label")
+    const timing = screen.getByTestId("source-timing-line")
+    expect(timing.textContent).toBe("00:00:00.000 --> 00:00:03.970")
+    expect(label.compareDocumentPosition(timing) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  // An assignment pointing at a deleted voice used to strand the label at null
+  // even though the sheet's name was still on the cell. The cast gutter already
+  // survives this case (it renders the faded fallback circle WITH the name);
+  // the corner now does too.
+  it("falls back when the assignment points at a voice that no longer exists", async () => {
+    renderTable({
+      timecode: true,
+      cellLabels: true,
+      castName: "little Mary Magdalene",
+      projectOverride: projectCastDeletedVoice,
+    })
+    await screen.findByText("hello")
+    expect(screen.getByTestId("source-cell-label")).toHaveTextContent("little Mary Magdalene")
+  })
+
+  // The rung is BENEATH the assigned voice, not in front of it. Once a voice is
+  // assigned the corner keeps saying what it said before AQU-1018 — which is
+  // what stops this from quietly becoming the `cast_name` surface Sam ruled out.
+  it("still prefers the assigned voice's name over cast_name", async () => {
+    renderTable({ timecode: true, cellLabels: true, castName: "little Mary Magdalene" })
+    await screen.findByText("hello")
+    expect(screen.getByTestId("source-cell-label")).toHaveTextContent("Ravi")
+    expect(screen.getByTestId("source-cell-label")).not.toHaveTextContent("little Mary Magdalene")
+  })
+
+  // The preference is still the one gate over both corners.
+  it("stays hidden when cell labels are switched off", async () => {
+    renderTable({
+      timecode: true,
+      castName: "little Mary Magdalene",
+      projectOverride: projectCastUnassigned,
+    })
+    await screen.findByText("hello")
+    expect(screen.queryByTestId("source-cell-label")).toBeNull()
+    expect(screen.getByTestId("target-header-lane")).not.toHaveTextContent("little Mary Magdalene")
   })
 })

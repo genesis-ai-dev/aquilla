@@ -170,9 +170,9 @@ describe('term.* projection', () => {
     expect(withoutR.recorded[0].args[1]).toBeNull()
   })
 
-  it('approve promotes only a draft, so it cannot resurrect a rejected term', () => {
+  it('approve promotes a draft or restores an archived term, but cannot resurrect a deleted one', () => {
     const { recorded } = project('term.approve', { conceptId: 'cpt-1' })
-    expect(recorded[0].sql).toContain("status = 'draft'")
+    expect(recorded[0].sql).toContain("status IN ('draft', 'deprecated')")
     expect(recorded[0].sql).toContain('deleted_at IS NULL')
   })
 

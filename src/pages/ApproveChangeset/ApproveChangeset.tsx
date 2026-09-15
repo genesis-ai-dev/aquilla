@@ -216,12 +216,21 @@ function ApprovalSummaryView({
   onReject: () => void
 }) {
   const { locale, t } = useI18n()
-  const { warnings, settingsChanges, ...facts } = data.summary
+  const { warnings, settingsChanges, memoryWrites, ...facts } = data.summary
   const factEntries = Object.entries(facts).filter(([, v]) => typeof v === "number" || typeof v === "string")
   const settingsEntries =
     settingsChanges && typeof settingsChanges === "object"
       ? Object.entries(settingsChanges).filter(([, v]) => typeof v === "string")
       : []
+  // AQU-1228: a memory write's whole content IS what the human is approving —
+  // the generic fact list drops arrays, so render these explicitly or the page
+  // says "Command: AddDecision" and nothing about what the decision says.
+  const memoryEntries = Array.isArray(memoryWrites)
+    ? memoryWrites.filter(
+        (w): w is { path: string; action: string; preview: string } =>
+          !!w && typeof w === "object" && typeof w.path === "string" && typeof w.preview === "string",
+      )
+    : []
   const notStaged = data.status !== "staged"
   const working = actionPhase === "working"
 
@@ -240,7 +249,7 @@ function ApprovalSummaryView({
 
       <div className="rounded-md border bg-muted/30 p-3 space-y-1.5">
         <p className="text-sm font-medium">{t("agent.changeset.whatWillBeApplied")}</p>
-        {factEntries.length === 0 && settingsEntries.length === 0 ? (
+        {factEntries.length === 0 && settingsEntries.length === 0 && memoryEntries.length === 0 ? (
           <p className="text-xs text-muted-foreground">{t("agent.changeset.noChangesSummarized")}</p>
         ) : (
           <ul className="space-y-0.5 text-xs text-muted-foreground">
@@ -259,6 +268,19 @@ function ApprovalSummaryView({
                 <li key={key}>
                   <span className="font-mono">{key}</span>:{" "}
                   <span className="font-medium text-foreground">{value}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {memoryEntries.length > 0 && (
+          <div className="space-y-0.5 pt-1">
+            <p className="text-xs font-medium">{t("agent.changeset.memoryWrites")}</p>
+            <ul className="space-y-0.5 text-xs text-muted-foreground">
+              {memoryEntries.map((w) => (
+                <li key={w.path}>
+                  <span className="font-mono">{w.path}</span>:{" "}
+                  <span className="font-medium text-foreground">{w.preview}</span>
                 </li>
               ))}
             </ul>

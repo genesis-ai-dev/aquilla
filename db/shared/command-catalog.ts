@@ -39,6 +39,7 @@ const COMMENTER = 200
 const CONTRIBUTOR = 400
 const PROJECT_LEAD = 500
 const MAINTAINER = 600
+const OWNER = 700
 
 export const COMMAND_CATALOG: readonly CommandCatalogEntry[] = [
   {
@@ -100,6 +101,48 @@ The field set is CLOSED: any other key is \`validation_failed\` naming it. Nothi
 - Membership is not set here: use the \`InviteMember\` / \`SetRole\` family. A \`members\` field is rejected, not swallowed.
 - There is no project \`description\` field in the product; sending one is rejected.
 Gotcha: when \`projectId\` is omitted the changeset URL's project id becomes the definitive id, pinned at prepare (crash-retry re-applies the same id).`,
+  },
+  {
+    kind: 'AddOrgMember',
+    title: 'Add org member',
+    oneLiner: 'Add a user to an organization at an org role (owner-only).',
+    minRoleLevel: OWNER,
+    tier: 'governance',
+    agentReachable: true,
+    paramsDoc: `### AddOrgMember
+Params: \`{ orgId, username, role }\` — sole command; forced ask-mode regardless of credential mode.
+Receipt-only (a plain \`org_members\` row write, not an event). Requires org OWNER (700) on the target org; a project-scoped credential can never manage org membership.
+Gotchas:
+- The target is named by USERNAME and resolved server-side — you never supply a user id.
+- Fails if the user is already a member: use SetOrgRole to change an existing member's role.
+- \`role\` must be one of 100, 200, 300, 400, 500, 600, 700, and never above your own org role.
+- You cannot target yourself.
+Example: \`{ "kind": "AddOrgMember", "orgId": 42, "username": "maria", "role": 400 }\``,
+  },
+  {
+    kind: 'SetOrgRole',
+    title: 'Set org role',
+    oneLiner: 'Change an existing org member’s role (owner-only).',
+    minRoleLevel: OWNER,
+    tier: 'governance',
+    agentReachable: true,
+    paramsDoc: `### SetOrgRole
+Params: \`{ orgId, username, role }\` — sole command; forced ask-mode. Same owner gate, role cap and self-target rule as AddOrgMember.
+Gotchas:
+- The member's role at prepare is pinned; if someone else changes it before you commit you get \`plan_stale\` — re-read and re-prepare.
+- The last owner of an org cannot be demoted, and neither can the organization's own owner row.`,
+  },
+  {
+    kind: 'RemoveOrgMember',
+    title: 'Remove org member',
+    oneLiner: 'Remove a user from an organization (owner-only).',
+    minRoleLevel: OWNER,
+    tier: 'governance',
+    agentReachable: true,
+    paramsDoc: `### RemoveOrgMember
+Params: \`{ orgId, username }\` — sole command; forced ask-mode. Same owner gate and self-target rule as AddOrgMember.
+Also removes the user from that org's groups, exactly as the roster UI does, so no group-derived project access survives.
+Gotcha: the last owner of an org (and the organization's own owner row) cannot be removed.`,
   },
   {
     kind: 'PatchSettings',

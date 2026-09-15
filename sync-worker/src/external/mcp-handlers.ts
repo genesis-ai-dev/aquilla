@@ -20,6 +20,7 @@ import { PLAN_IMPORT_MAX_CELLS } from './commands'
 import { MAX_ARTIFACT_BYTES, handleExternalArtifactsRequest } from './artifacts-route'
 import { SERVER_PARSEABLE_FILE_TYPES, CLIENT_ONLY_FORMATS } from './import-parse'
 import { handleExternalReadRequest } from './read-routes'
+import { handleExternalExportRequest } from './export-route'
 import { handleExternalQualityRequest } from './quality-routes'
 import { handleExternalChangesetsRequest } from './changesets-route'
 import { listProjectsForCredential } from './projects-list'
@@ -105,6 +106,7 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
       '3. read_content with just projectId to list files; add fileId to read cells. search_project for full-text search.',
       '4. prepare_translations — stage your writes as a changeset. Nothing is applied yet. Returns { changesetId, digest, summary, mode, approvalUrl? }.',
       '5. confirm_changeset with that changesetId + digest. act mode: applies immediately. ask mode: first show the approvalUrl to a human and wait for them to approve in their browser, then call confirm_changeset — until then it returns confirmation_required and applies nothing.',
+      '6. export_file — when the work is done, pull the file back out in its delivered format (e.g. USFM for Paratext). See exporting below for the role floor and the fidelity fields to check before you hand the result to anyone.',
     ],
     // All five domain command kinds now ship (Agent API v1.1). PlanImport
     // stages via the dedicated preview_import / prepare_import tools (or raw
@@ -160,6 +162,33 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
         `${MAX_ARTIFACT_BYTES} bytes (25MB); imports max ${PLAN_IMPORT_MAX_CELLS} cells ` +
         'per changeset. A multi-book USFM artifact parses into one file per book — stage ' +
         'each book separately via resultIndex.',
+    },
+    exporting: {
+      // AQU-858: the mirror of `importing` above — the way a deliverable gets
+      // back OUT of Aquilla without a human clicking Export in the app.
+      mcpTool: 'export_file',
+      restEndpoint: 'GET /api/v1/external/projects/:projectId/files/:fileId/export?lane=<tag>',
+      minRoleLevel: ROLE.MAINTAINER,
+      maxInlineBytes: MCP_EXPORT_MAX_BYTES,
+      note:
+        'export_file reconstructs one file from the ORIGINAL artifact preserved at import ' +
+        'time with the current translations substituted in (untranslated segments keep their ' +
+        'source text, so the output stays valid). Export is gated HIGHER than reading: the ' +
+        'floor is the org\'s exportMinRole, MAINTAINER by default, and an org can raise or ' +
+        'lower it — permission_denied here will not change on retry. A file imported without ' +
+        'a preserved source artifact returns not_found and must be re-imported before it can ' +
+        'be exported.',
+      fidelity:
+        'Check exportMode before delivering: "round-trip" = translations substituted; ' +
+        '"raw-original"/"raw-sidecar" = this format has no server-side target serializer yet, ' +
+        'so you are getting the preserved ORIGINAL bytes with NO translations in them. For ' +
+        'USFM, lossyVerseCount counts verses whose intra-verse markers (footnotes, poetry, ' +
+        'character markers) the plain-text substitution dropped; 0 = clean round-trip.',
+      binaryAndLargeFiles:
+        `Binary results (docx/pptx/idml side-cars) and anything over ${MCP_EXPORT_MAX_BYTES} ` +
+        'bytes are not returned inline — export_file fails with validation_failed naming the ' +
+        'REST URL to fetch instead, the same MCP-cannot-carry-binary asymmetry as the ' +
+        'REST-only artifact upload on the import side.',
     },
     projectLifecycle: {
       mcpStagingTool: 'prepare_translations',
@@ -582,6 +611,87 @@ async function runParseArtifact(
   })
 }
 
+// ── delegated export (AQU-858) ───────────────────────────────────────────────
+
+/** Ceiling on an export returned inline through MCP. A JSON-RPC tool result is
+ *  text in a conversation, so a whole Bible-sized file would blow the client's
+ *  context long before it blew any wire limit. Above this the tool names the
+ *  REST URL instead of truncating — silently half-delivering a deliverable is
+ *  the one failure mode an export must never have. */
+export const MCP_EXPORT_MAX_BYTES = 512 * 1024
+
+/** Pull the suggested filename out of a Content-Disposition header. */
+function dispositionFileName(header: string | null): string | undefined {
+  const match = header?.match(/filename="([^"]*)"/)
+  return match?.[1] || undefined
+}
+
+async function exportFile(
+  env: ExternalEnv,
+  token: string,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const projectId = str(args, 'projectId')
+  const fileId = str(args, 'fileId')
+  if (!projectId) return fail('validation_failed', 'projectId is required')
+  if (!fileId) return fail('validation_failed', 'fileId is required')
+  if (!env.SNAPSHOTS) return fail('job_failed', 'SNAPSHOTS binding not configured')
+
+  const lane = str(args, 'lane')
+  const qs = lane ? `?lane=${encodeURIComponent(lane)}` : ''
+  const restPath = `/api/v1/external/projects/${encodeURIComponent(projectId)}/files/${encodeURIComponent(fileId)}/export${qs}`
+
+  const res = await handleExternalExportRequest(
+    new Request(`https://internal${restPath}`, { headers: bearer(token) }),
+    { ...env, SNAPSHOTS: env.SNAPSHOTS },
+  )
+  if (!res) return fail('not_found', 'export route did not match')
+  if (!res.ok) return delegatedError(res)
+
+  const contentType = res.headers.get('Content-Type') ?? 'application/octet-stream'
+  const fileName = dispositionFileName(res.headers.get('Content-Disposition')) ?? fileId
+  // The internal route only stamps X-Export-Mode on the fallbacks that hand
+  // back preserved bytes; its absence means translations WERE substituted.
+  const exportMode = res.headers.get('X-Export-Mode') ?? 'round-trip'
+  const lossyHeader = res.headers.get('X-Usfm-Lossy-Verse-Count')
+
+  if (!contentType.startsWith('text/')) {
+    return fail(
+      'validation_failed',
+      `"${fileName}" exports as ${contentType}, which MCP (JSON-RPC text) cannot carry — ` +
+        `fetch the bytes over REST instead: GET ${restPath}`,
+      { restPath, contentType, exportMode },
+    )
+  }
+
+  const content = await res.text()
+  const bytes = new TextEncoder().encode(content).length
+  if (bytes > MCP_EXPORT_MAX_BYTES) {
+    return fail(
+      'validation_failed',
+      `"${fileName}" is ${bytes} bytes, over the ${MCP_EXPORT_MAX_BYTES}-byte inline export ` +
+        `limit — fetch it over REST instead: GET ${restPath}`,
+      { restPath, bytes, maxBytes: MCP_EXPORT_MAX_BYTES, exportMode },
+    )
+  }
+
+  return ok({
+    fileName,
+    contentType,
+    exportMode,
+    ...(lossyHeader === null ? {} : { lossyVerseCount: Number(lossyHeader) }),
+    bytes,
+    content,
+    ...(exportMode === 'round-trip'
+      ? {}
+      : {
+          warning:
+            'This is the preserved ORIGINAL artifact — no translations are substituted into it, ' +
+            'because this format has no server-side target serializer yet. Do not deliver it as a translation.',
+        }),
+  })
+}
+
 async function getChangeset(
   env: ExternalEnv,
   token: string,
@@ -734,6 +844,8 @@ export async function callTool(
       return runParseArtifact(env, token, args, false)
     case 'prepare_import':
       return runParseArtifact(env, token, args, true)
+    case 'export_file':
+      return exportFile(env, token, args)
     case 'get_changeset':
       return getChangeset(env, token, args)
     case 'confirm_changeset':

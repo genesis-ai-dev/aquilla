@@ -80,6 +80,15 @@ function isNonEmptyString(v: unknown): v is string {
   return typeof v === 'string' && v.length > 0
 }
 
+/** Own-prototype-mutating keys. `merged[op.key] = op.value` in both
+ *  `patchProjectSettingsShared` (db/shared/projects.ts) and the supersede
+ *  comparison merge (external/supersede.ts) is a bracket assignment onto a
+ *  plain object literal — one of these as `op.key` reaches `Object.prototype`'s
+ *  `__proto__` accessor (or shadows `constructor`/`prototype`) before either
+ *  merge ever runs. Rejected once here, at the single point both call sites'
+ *  `PatchSettingsOp[]` is built from. */
+const DANGEROUS_SETTINGS_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
+
 /** Validate one raw PatchSettings command (shape only — floors and the version
  *  pin are prepare-time checks). Returns the typed command or pushes issues. */
 export function validatePatchSettingsCommand(
@@ -113,6 +122,10 @@ export function validatePatchSettingsCommand(
     const op = rawOp as Record<string, unknown>
     if (!isNonEmptyString(op.key)) {
       issues.push({ index, message: `PatchSettings.ops[${opIndex}].key must be a non-empty string` })
+      return null
+    }
+    if (DANGEROUS_SETTINGS_KEYS.has(op.key)) {
+      issues.push({ index, message: `PatchSettings.ops[${opIndex}].key "${op.key}" is a reserved key and cannot be used` })
       return null
     }
     if (!('value' in op)) {

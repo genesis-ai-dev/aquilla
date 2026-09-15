@@ -118,21 +118,41 @@ async function fetchCellsJson<T>(url: string, jwt: string): Promise<T> {
   throw lastError
 }
 
+/** Page size the SPA asks the files listing for. */
+export const FILES_PAGE_SIZE = 100
+
 /**
- * GET /api/v1/projects/:projectId/files
+ * GET /api/v1/projects/:projectId/files?limit=100&cursor=
  *
- * Returns every file in the project, ordered by recency (most-recent first).
- * Counters are projected from the event log — never out of date by more than
- * an onSave debounce window (~2s).
+ * Returns every file in the project, ordered by recency (most-recent first),
+ * fetched in pages of FILES_PAGE_SIZE and concatenated. Counters are projected
+ * from the event log — never out of date by more than an onSave debounce
+ * window (~2s). A worker that predates paging returns the full list with no
+ * cursor, which this loop handles as a single page.
  */
 export async function fetchProjectFiles(
   projectId: string,
   jwt: string,
 ): Promise<FileSummary[]> {
-  const url = `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}/files`
-  const res = await fetch(url, fetchInit(jwt))
-  const body = await readJson<{ files: FileSummary[] }>(res)
-  return body.files
+  const base = `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}/files`
+  const files: FileSummary[] = []
+  const seen = new Set<string>()
+  let cursor: string | null = null
+  do {
+    const params = new URLSearchParams({ limit: String(FILES_PAGE_SIZE) })
+    if (cursor) params.set("cursor", cursor)
+    const res = await fetch(`${base}?${params.toString()}`, fetchInit(jwt))
+    const body: { files: FileSummary[]; nextCursor?: string | null } = await readJson(res)
+    for (const f of body.files) {
+      // A file edited between two page fetches can move ahead of the cursor
+      // and reappear; keep the first copy.
+      if (seen.has(f.fileId)) continue
+      seen.add(f.fileId)
+      files.push(f)
+    }
+    cursor = body.nextCursor ?? null
+  } while (cursor)
+  return files
 }
 
 /**

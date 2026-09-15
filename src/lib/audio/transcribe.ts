@@ -12,6 +12,8 @@ import { noteModelDownloading, noteModelDownloadSettled } from "./prefetch"
 import { setTranscribeStatus } from "./transcribe-status"
 import { fetchCellAudio, parseFrontierAudioUrl, audioIdSeededWith } from "./upload"
 import { audioCacheGet, audioCachePut } from "./bytes-cache"
+import { applyCorrections } from "./transcript-corrections"
+import { loadTranscriptCorrections } from "@/lib/store/transcript-corrections-store"
 import { makeAudioSyncTokenFetcher } from "./sync-token-fetcher"
 import { resolvePcmWindow, type PcmTrimWindow } from "./pcm-window"
 import { emitCellAudioAttach } from "@/lib/sync/events-emit"
@@ -364,7 +366,7 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
       ? { trimStartMs: attachment?.trimStartMs ?? null, trimEndMs: attachment?.trimEndMs ?? null }
       : undefined
 
-    const result = await transcribeAudioImpl(bytes, {
+    const raw = await transcribeAudioImpl(bytes, {
       language: whisperLanguageFromTag(language) ?? undefined,
       trim,
       onProgress: (p) => {
@@ -379,6 +381,20 @@ export async function transcribeCell(args: TranscribeCellArgs): Promise<number> 
         }
       },
     })
+
+    // AQU-463: replay the corrections a human has already made in this project
+    // over the raw ASR output. Whisper is wrong the same way every time in a
+    // low-resource language, and the translator has fixed that word before —
+    // they should not have to fix it again. Substitutions are token-for-token
+    // (see transcript-corrections.ts), so the chunk list keeps its length and
+    // the timings below are the ones ASR produced.
+    const learned = loadTranscriptCorrections(projectId)
+    const result = learned.length > 0
+      ? {
+          text: applyCorrections(raw.text, learned),
+          chunks: raw.chunks.map((c) => ({ ...c, text: applyCorrections(c.text, learned) })),
+        }
+      : raw
 
     const wordCount = result.chunks.length
 

@@ -67,6 +67,8 @@ vi.mock("@/lib/frontier/portfolio", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/frontier/portfolio")>()),
   getPortfolio: vi.fn(async () => []),
   getPortfolios: vi.fn(async () => []),
+  getPortfolioPage: vi.fn(async () => ({ projects: [], nextCursor: null })),
+  getPortfoliosPage: vi.fn(async () => ({ projects: [], nextCursor: null })),
 }))
 
 function LocationProbe() {

@@ -14,17 +14,18 @@ import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { messageForStatus } from "@/lib/errors/user-error"
 import {
   approveChangeset,
-  ChangesetApiError,
   fetchChangesetApproval,
   rejectChangeset,
   type ChangesetApproval,
 } from "@/lib/agent/changeset-api"
-import { t as standaloneT } from "@/lib/i18n/standalone"
+import {
+  humanizeSummaryKey,
+  messageForChangesetError,
+} from "@/lib/agent/changeset-review"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
-import { fmtShortCalendarDate } from "@/lib/format-date"
+import { fmtLabeledDateTime } from "@/lib/format-date"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { ChangeList, ImportPreviewView } from "@/components/changesets/ChangeList"
 
@@ -45,31 +46,11 @@ type ActionState =
   | { phase: "rejected" }
   | { phase: "error"; message: string }
 
-/** Turn `translationsAdded` / `translations_added` into "Translations added". */
-function humanizeKey(key: string): string {
-  const spaced = key
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .replace(/_/g, " ")
-    .toLowerCase()
-  return spaced.charAt(0).toUpperCase() + spaced.slice(1)
-}
-
-/**
- * AQU-820: the returned string is rendered verbatim, so it is always ours and
- * keyed — the server's `error.message` is untranslated and often a raw
- * diagnostic. The status alone distinguishes the three cases worth naming;
- * anything that isn't an HTTP failure (network drop, timeout) reads as a
- * connectivity problem.
- */
-function messageForError(err: unknown): string {
-  if (!(err instanceof ChangesetApiError)) {
-    return "Couldn't reach the server. Check your connection and try again."
-  }
-  if (err.status === 403) return standaloneT("error.changeset.notAuthorized")
-  if (err.status === 404) return standaloneT("error.changeset.notFound")
-  if (err.status === 409) return standaloneT("error.changeset.notApprovable")
-  return messageForStatus(err.status, "", "changeset").message
-}
+/** Both helpers moved to `@/lib/agent/changeset-review` (AQU-841) so this page
+ *  and the approvals queue humanize summary keys and read changeset failures
+ *  the same way. Behaviour here is unchanged. */
+const messageForError = messageForChangesetError
+const humanizeKey = humanizeSummaryKey
 
 export function ApproveChangeset() {
   const t = useT()
@@ -216,12 +197,44 @@ function ApprovalSummaryView({
   onReject: () => void
 }) {
   const { locale, t } = useI18n()
-  const { warnings, settingsChanges, ...facts } = data.summary
-  const factEntries = Object.entries(facts).filter(([, v]) => typeof v === "number" || typeof v === "string")
+  const { warnings, settingsChanges, testimony, membershipChanges, memoryWrites, structure, ...facts } =
+    data.summary
+  // AQU-1184: validations are testimony — the approver must see every cell and
+  // its current text, never just a count.
+  const testimonyEntries = Array.isArray(testimony) ? testimony : []
+  // AQU-1234: a cell-structure changeset reports its effect as one nested
+  // object, which the flat number/string filter below would drop — leaving the
+  // reviewer with "No changes summarized." on the one command kind that
+  // rewrites a file's shape. Flatten it into the same fact list, dropping the
+  // zero counts so an insert doesn't read as a delete of nothing.
+  const structureEntries: [string, string | number][] =
+    structure && typeof structure === "object"
+      ? Object.entries(structure).filter(
+          ([, v]) => typeof v === "string" || (typeof v === "number" && v !== 0),
+        ) as [string, string | number][]
+      : []
+  const factEntries = [
+    ...structureEntries,
+    ...Object.entries(facts).filter(([, v]) => typeof v === "number" || typeof v === "string"),
+  ]
   const settingsEntries =
     settingsChanges && typeof settingsChanges === "object"
       ? Object.entries(settingsChanges).filter(([, v]) => typeof v === "string")
       : []
+  // AQU-1185: membership lines are server-authored plain language, listed
+  // one-per-change so a role grant is never approved blind.
+  const membershipEntries = Array.isArray(membershipChanges)
+    ? membershipChanges.filter((line): line is string => typeof line === "string")
+    : []
+  // AQU-1228: a memory write's whole content IS what the human is approving —
+  // the generic fact list drops arrays, so render these explicitly or the page
+  // says "Command: AddDecision" and nothing about what the decision says.
+  const memoryEntries = Array.isArray(memoryWrites)
+    ? memoryWrites.filter(
+        (w): w is { path: string; action: string; preview: string } =>
+          !!w && typeof w === "object" && typeof w.path === "string" && typeof w.preview === "string",
+      )
+    : []
   const notStaged = data.status !== "staged"
   const working = actionPhase === "working"
 
@@ -240,7 +253,10 @@ function ApprovalSummaryView({
 
       <div className="rounded-md border bg-muted/30 p-3 space-y-1.5">
         <p className="text-sm font-medium">{t("agent.changeset.whatWillBeApplied")}</p>
-        {factEntries.length === 0 && settingsEntries.length === 0 ? (
+        {factEntries.length === 0 &&
+        settingsEntries.length === 0 &&
+        membershipEntries.length === 0 &&
+        memoryEntries.length === 0 ? (
           <p className="text-xs text-muted-foreground">{t("agent.changeset.noChangesSummarized")}</p>
         ) : (
           <ul className="space-y-0.5 text-xs text-muted-foreground">
@@ -250,6 +266,18 @@ function ApprovalSummaryView({
               </li>
             ))}
           </ul>
+        )}
+        {membershipEntries.length > 0 && (
+          <div className="space-y-0.5 pt-1">
+            <p className="text-xs font-medium">{t("agent.changeset.membershipChanges")}</p>
+            <ul className="space-y-0.5 text-xs text-muted-foreground">
+              {membershipEntries.map((line, i) => (
+                <li key={i} className="font-medium text-foreground">
+                  {line}
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
         {settingsEntries.length > 0 && (
           <div className="space-y-0.5 pt-1">
@@ -264,7 +292,44 @@ function ApprovalSummaryView({
             </ul>
           </div>
         )}
+        {memoryEntries.length > 0 && (
+          <div className="space-y-0.5 pt-1">
+            <p className="text-xs font-medium">{t("agent.changeset.memoryWrites")}</p>
+            <ul className="space-y-0.5 text-xs text-muted-foreground">
+              {memoryEntries.map((w) => (
+                <li key={w.path}>
+                  <span className="font-mono">{w.path}</span>:{" "}
+                  <span className="font-medium text-foreground">{w.preview}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
+
+      {testimonyEntries.length > 0 && (
+        <div className="space-y-1.5">
+          <p className="text-sm font-medium">
+            {t("agent.changeset.testimonyHeading", { count: testimonyEntries.length })}
+          </p>
+          <div className="max-h-96 space-y-1.5 overflow-y-auto rounded-md border bg-muted/30 p-2">
+            <ul className="space-y-1.5 text-xs">
+              {testimonyEntries.map((entry, i) => (
+                <li key={`${entry.fileId}:${entry.cellId}:${entry.laneId ?? ""}:${i}`} className="space-y-0.5">
+                  <p className="font-mono text-[11px] text-muted-foreground">
+                    {entry.kind} · {entry.cellId}
+                    {entry.laneId ? ` · ${entry.laneId}` : ""}
+                  </p>
+                  <p className="text-foreground">
+                    {entry.text}
+                    {entry.truncated ? "…" : ""}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
 
       {data.changes && data.changes.items.length > 0 && (
         <div className="space-y-1.5">
@@ -301,8 +366,12 @@ function ApprovalSummaryView({
         <span>{t("agent.changeset.digestLabel")} <span className="font-mono">{data.digest.slice(0, 16)}…</span></span>
         <span>
           <DateTooltip value={data.expiresAt} label={t("common.date.expires")}>
+            {/* AQU-1177: the visible label carries the TIME, not just the day.
+                Ask-mode plans now live 24h, so "Expires September 5" leaves the
+                reviewer unable to tell whether they have ten hours or ten
+                minutes — exactly the question the deadline is here to answer. */}
             {t("common.expiresOn", {
-              date: fmtShortCalendarDate(data.expiresAt, undefined, locale),
+              date: fmtLabeledDateTime(data.expiresAt, "", undefined, locale),
             })}
           </DateTooltip>
         </span>
@@ -330,7 +399,16 @@ function ApprovalSummaryView({
         </Button>
       </div>
 
-      <div className="text-center">
+      {/* AQU-841 — an agent that staged several plans hands back several URLs.
+          From any one of them, this is the way to the rest without going back
+          to the agent for the next link. */}
+      <div className="flex flex-col items-center gap-1">
+        <Link
+          to={`/project/${data.projectId}/approvals`}
+          className="text-xs font-medium text-sky-600 hover:underline dark:text-sky-400"
+        >
+          {t("agent.approvals.queueLink")}
+        </Link>
         <BackToProjectLink data={data} />
       </div>
     </div>

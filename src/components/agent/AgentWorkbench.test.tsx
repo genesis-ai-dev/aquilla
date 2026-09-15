@@ -300,10 +300,15 @@ describe("AgentWorkbench three-pane layout", () => {
     fireEvent.click(targetActions.getByRole("button", { name: "Translate with AI" }))
     expect(props.workspace?.onDraftTarget).toHaveBeenCalledWith("c2")
 
-    fireEvent.click(targetActions.getByRole("button", { name: "Add comment" }))
+    // AQU-200: comments and history collapsed behind the rail's `⋯`. Open this
+    // row's overflow, then query off `screen` — the popup portals to the body,
+    // so it is deliberately NOT inside the row element.
+    fireEvent.click(targetActions.getByRole("button", { name: "More actions" }))
+
+    fireEvent.click(screen.getByRole("button", { name: "Add comment" }))
     expect(props.workspace?.onOpenComments).toHaveBeenCalledWith("c2")
 
-    fireEvent.click(targetActions.getByRole("button", { name: "Edit history" }))
+    fireEvent.click(screen.getByRole("button", { name: "Edit history" }))
     expect(props.workspace?.onOpenHistory).toHaveBeenCalledWith("c2")
   })
 

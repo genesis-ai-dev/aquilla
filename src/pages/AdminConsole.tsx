@@ -35,11 +35,13 @@ import { AdminPeopleSection } from "@/components/admin/AdminPeopleSection"
 import { AdminProjectsSection } from "@/components/admin/AdminProjectsSection"
 import { AdminActivityTimeline } from "@/components/admin/AdminActivityTimeline"
 import { AdminPlatformSection } from "@/components/admin/AdminPlatformSection"
+import { AdminRetentionSection } from "@/components/admin/AdminRetentionSection"
 import { AdminElevationGate } from "@/components/admin/AdminElevationGate"
 
-type Tab = "overview" | "tenants" | "teams" | "people" | "projects" | "activity" | "platform"
+type Tab = "overview" | "retention" | "tenants" | "teams" | "people" | "projects" | "activity" | "platform"
 const TABS: Array<{ key: Tab; label: string }> = [
   { key: "overview", label: "Overview" },
+  { key: "retention", label: "Retention" },
   { key: "tenants", label: "Tenants" },
   { key: "teams", label: "Teams" },
   { key: "people", label: "People" },
@@ -50,7 +52,7 @@ const TABS: Array<{ key: Tab; label: string }> = [
 
 /**
  * Site-wide admin console (/admin). Cross-tenant: read-only oversight
- * (Overview, Tenants, Teams, People, Projects, Activity) plus the editable
+ * (Overview, Retention, Tenants, Teams, People, Projects, Activity) plus the editable
  * Platform tab (AI settings, compute credits, Field Plan billing). Gated by
  * `useAdminElevation` — UX only; every /api/v2/admin/* call is enforced
  * server-side against the ADMIN_EMAILS allowlist behind the step-up elevation
@@ -193,6 +195,8 @@ export function AdminConsole() {
               />
             )}
           </TabsContent>
+
+          <TabsContent value="retention">{jwt && <AdminRetentionSection jwt={jwt} />}</TabsContent>
 
           <TabsContent value="tenants">
             <AdminTenantsSection orgs={orgs} teams={teams} onOpenOrg={openOrg} />

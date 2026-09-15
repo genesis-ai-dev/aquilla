@@ -12,7 +12,7 @@ The fan-out can run two ways. They share the same git lifecycle, state files, an
 - **Workflow mode (interactive, user present)** — use the `Workflow` tool for each wave's fan-out + QA + verify. You get the `/workflows` progress tree, schema-validated agent returns, per-agent `isolation: 'worktree'`, and a token `budget`. **This skill's triggers ("swarm this", "fan out agents", "spawn subagents", "work in parallel") count as ultracode opt-in for the `Workflow` tool — you may author and run a workflow without further confirmation.** Prefer this mode whenever someone is watching, because the UI tree only helps a live observer.
 - **Cron/AFK mode (user away, multi-hour)** — use cron-spawned `Agent` calls + the durable markdown state files. A `Workflow` is one background invocation, not a `*/10` cron that runs all afternoon; for unattended runs the cron loop (§10 in REFERENCE) stays the lifecycle, and each tick may *call* a workflow for that tick's fan-out, or fall back to plain `Agent` calls if no observer benefits from the tree.
 
-**What stays in the orchestrator in BOTH modes** (never inside a `Workflow` script): the `swarm/integration` accumulation + union-merge protocol, the final verification gate, promotion to `main`, the push to `dev`/staging, and HITL `AskUserQuestion` gating. `Workflow` agents must never push or promote. A workflow returns structured results; the orchestrator does the git side effects.
+**What stays in the orchestrator in BOTH modes** (never inside a `Workflow` script): the `swarm/integration` accumulation + union-merge protocol, the final verification gate, promotion to `main`, the push to `dev`, the explicit dev deployment, and HITL `AskUserQuestion` gating. `Workflow` agents must never push, promote, or deploy. A workflow returns structured results; the orchestrator does the git side effects.
 
 ## Quick start
 
@@ -27,10 +27,12 @@ The fan-out can run two ways. They share the same git lifecycle, state files, an
    promotion, or deploy is actually next, the orchestrator runs the complete smoke suite once on the final
    integration result. During implementation it runs only the build and directly affected tests. Do not
    delegate the push/release gate to subagents.
-7. **Promote or push only after that gate** — require a clean main working tree before promotion. Use FF if
-   possible; squash-merge if histories diverged deeply. A staging push targets the **`dev`** branch and triggers
-   the preview deploy (`dev.aquilla.app`; see `docs/STAGING.md` and `package.json`
-   `deploy:aquilla:staging`). Validate on staging before advancing issues.
+7. **Promote, push, and deploy only after that gate** — require a clean main working tree before promotion.
+   Use FF if possible; squash-merge if histories diverged deeply. The push targets the **`dev`** branch. A push
+   does not deploy: live deploys are an explicit operator action (see `docs/DEPLOYMENT-ENVIRONMENTS.md`). After
+   confirming a clean checkout whose HEAD matches current `origin/dev`, run `pnpm run deploy:aquilla:dev` for
+   `dev.aquilla.app` and validate there (`pnpm run verify:live:development`) before advancing issues past
+   `Fixed`/`Ready for Review`.
 8. **STOP when done** — convergence is the success state. Don't manufacture work.
 
 See [REFERENCE.md](REFERENCE.md) for patterns, templates, and lessons learned.
@@ -50,10 +52,10 @@ See [REFERENCE.md](REFERENCE.md) for patterns, templates, and lessons learned.
 - **Use two verification scopes** — during implementation, run `npm run build` and only the directly affected
   Vitest/worker/smoke tests. Before push, promotion, merge, or deploy, run the complete E2E smoke suite once on
   the final integration result. `tsc --noEmit` does not replace `npm run build`.
-- **Orchestrator owns the final gate + the staging push** — when the work is deemed complete, the orchestrator (not a subagent) re-verifies the integration branch end-to-end, then pushes to the `dev` branch for the staging preview deploy. Never push to `dev`/staging on an unverified or red integration branch.
+- **Orchestrator owns the final gate + explicit dev deployment** — when the work is deemed complete, the orchestrator (not a subagent) re-verifies the integration branch end-to-end, pushes to `dev`, then explicitly deploys from the clean current `dev` checkout. Never push or deploy an unverified or red integration branch.
 - **Subagent briefs must be self-contained** — assume the agent has no memory of this conversation. Include:
-  owned implementation and test files, affected `e2e/JOURNEYS.md` rows, the testing contract from `AGENTS.md`,
-  verify commands, SWARM-TODO requirement, and no-push instruction.
+  owned implementation and test files, forbidden files, affected `e2e/JOURNEYS.md` rows, the testing contract
+  from `AGENTS.md`, verify commands, SWARM-TODO requirement, and no-push instruction.
 - **Plan for failure** — revert a red merge and respawn a fixer agent rather than leaving integration broken.
 
 ## Acceptance criteria

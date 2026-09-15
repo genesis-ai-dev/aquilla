@@ -73,7 +73,7 @@ export async function extractBiblicaStudyNoteStrings(
 
   const strings = selection.notes.map((note) => {
     if (note.bookCode && !bookCodes.includes(note.bookCode)) bookCodes.push(note.bookCode)
-    const value = idmlUnitToTranslatableString(note.unit)
+    const value = idmlUnitToTranslatableString(note.unit, result.styleCatalog)
     const milestone = note.section
       ? sectionMilestone(note.section, sectionOrdinals)
       : undefined

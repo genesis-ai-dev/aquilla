@@ -39,11 +39,13 @@ vi.mock("@/lib/completion/frontier-health", () => ({
 // ---- Stub user-provider-override ----
 vi.mock("@/lib/store/user-provider-override", () => ({
   getUserProviderOverride: () => null,
+  useUserProviderOverride: () => null,
 }))
 
 // ---- Stub user-api-keys ----
 vi.mock("@/lib/store/user-api-keys", () => ({
   resolveApiKey: (_: string, key: string | undefined) => key ?? null,
+  useUserApiKey: () => undefined,
 }))
 
 // ---- Stub batch-completion ----

@@ -42,7 +42,12 @@ export function exportXliff12Structured(
   const seen = new Map<string, number>()
   const units = (cells as MetaCell[]).map((c, i) => {
     const meta = c.metadata?.xliff
-    let id = meta?.unitId ?? c.group ?? c.id ?? `u${i + 1}`
+    // `||`, not `??`, on the group: AQU-1068. A cell somebody ADDED here has no
+    // canonical ref, so `c.group` is the empty STRING rather than undefined —
+    // `??` passed it straight through, every added line got the id "", and the
+    // de-duper below turned them into "", "-2", "-3"… Falling through to the
+    // cell's own uuid gives each one an honest, unique unit id.
+    let id = meta?.unitId || c.group || c.id || `u${i + 1}`
     const dup = seen.get(id)
     seen.set(id, (dup ?? 0) + 1)
     if (dup) id = `${id}-${dup + 1}` // XLIFF requires unique trans-unit ids per file

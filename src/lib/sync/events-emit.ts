@@ -1242,6 +1242,7 @@ export interface FileCreateInput {
   targetTextDirection?: "ltr" | "rtl"
   /** Timeline-segment-model order lens: 'time' | 'sequence'. */
   orderedBy?: string
+  corpusMarker?: string
   author: string
   clientTs?: number
 }
@@ -1265,6 +1266,7 @@ export async function emitFileCreate(input: FileCreateInput): Promise<string> {
       ...(input.sourceTextDirection !== undefined ? { sourceTextDirection: input.sourceTextDirection } : {}),
       ...(input.targetTextDirection !== undefined ? { targetTextDirection: input.targetTextDirection } : {}),
       ...(input.orderedBy !== undefined ? { orderedBy: input.orderedBy } : {}),
+      ...(input.corpusMarker !== undefined ? { corpusMarker: input.corpusMarker } : {}),
     },
     clientTs: input.clientTs,
   })
@@ -1390,6 +1392,30 @@ export interface FileRenameInput {
  * null`), like `cell.audio.attach`; the server projects it as a `files`
  * UPDATE keyed on fileId.
  */
+export interface FileCorpusSetInput {
+  projectId: string
+  fileId: string
+  /** Sidebar folder label; null / blank clears the file back to Ungrouped. */
+  corpusMarker: string | null
+  author: string
+  clientTs?: number
+}
+
+/** Persist a file's sidebar group so it survives reload and other devices. */
+export async function emitFileCorpusSet(input: FileCorpusSetInput): Promise<string> {
+  const trimmed = input.corpusMarker?.trim() ?? ""
+  const { eventId } = await enqueueEvent({
+    kind: "file.corpus.set",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    parentId: null,
+    author: input.author,
+    payload: { corpusMarker: trimmed || null },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
 export async function emitFileRename(input: FileRenameInput): Promise<string> {
   const { eventId } = await enqueueEvent({
     kind: "file.rename",

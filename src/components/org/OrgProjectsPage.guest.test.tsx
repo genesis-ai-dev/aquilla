@@ -39,6 +39,7 @@ vi.mock("@/hooks/useOrgSettings", () => ({
     version: 1,
     allowSelfAssignment: false,
     termbaseEditMinRole: 500,
+    languageEditMinRole: 600,
     refresh: vi.fn(async () => null),
     patch: vi.fn(async () => ({ kind: "ok" as const })),
     requestPromotion: vi.fn(async () => ({ kind: "blocked" as const })),
@@ -65,6 +66,14 @@ vi.mock("@/lib/frontier/portfolio", async (importActual) => {
   return {
     ...actual,
     getPortfolio: (...a: unknown[]) => getPortfolio(...a),
+    getPortfolioPage: async (_jwt: string, _orgId: number, opts?: { q?: string }) => {
+      const projects = (await getPortfolio()) as Array<{ name: string }>
+      const q = opts?.q?.trim().toLowerCase() ?? ""
+      return {
+        projects: q ? projects.filter((p) => p.name.toLowerCase().includes(q)) : projects,
+        nextCursor: null,
+      }
+    },
   }
 })
 

@@ -15,6 +15,8 @@ import {
   type OutboxRecord,
 } from "./outbox"
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
+import { parseAppliedEventFrame } from "./ws-reconciler"
+import type { AppliedEventFrame } from "./live-apply"
 import { timeoutSignal } from "./fetch-timeout"
 import posthog from "@/lib/posthog"
 import { OUTBOX_QUARANTINED } from "@/lib/event-names"
@@ -52,6 +54,11 @@ interface PostBody {
    *  source row advanced since the translator last fetched. Event was accepted
    *  and projected (LWW) but flagged so the UI can surface a banner. */
   staleSource?: Array<{ id: string; currentSourceEventId: string }>
+  /** One `event.applied`-shaped frame per committed event (same builder as
+   *  the ProjectSync broadcast — carries `serverSeq` + the cell's projected
+   *  `rows` for cell-content kinds). Absent on older servers and on the
+   *  partial-commit path; the client then refetches as before. */
+  applied?: unknown[]
 }
 
 export interface StaleSiblingEntry {
@@ -112,6 +119,10 @@ export interface FlushDeps {
    *  The caller passes the full entry list so the UI can deep-link the user
    *  to the first affected cell's history drawer. */
   onStaleSiblings?: (entries: StaleSiblingEntry[]) => void
+  /** Called with the server's `applied[]` frames (parsed) for the events this
+   *  flush committed — the author's own write, projected. Also fans out to
+   *  `subscribeAppliedEvents` listeners. */
+  onApplied?: (frames: AppliedEventFrame[]) => void
   /** Called just before non-retryable 4xx rejections are dropped from the
    *  outbox. These arrive inside a 200 and used to disappear behind a
    *  console.error, so a refused write's optimistic UI simply reverted with no
@@ -123,7 +134,16 @@ export interface FlushDeps {
   onRejected?: (entries: RejectedEntry[]) => void
   /** Called before a permanent 403 is quarantined. Foreground committers use
    *  the exact event ids to clear optimistic state and avoid chaining future
-   *  writes onto a head the server refused. */
+   *  writes onto a head the server refused.
+   *
+   *  AQU-1068: `onRejected` deliberately skips this class (see its note),
+   *  which was fine while every optimistic write was a value edit a refetch
+   *  would correct. It is not fine for a write that changes the SHAPE of the
+   *  file: an optimistic insert or removal carries a freshness floor, so no
+   *  correcting fetch can undo it, and the caller has to. A permission
+   *  refusal is also the ONLY status the cell-editing gate ever returns, so a
+   *  rollback wired to `onRejected` alone can never fire for the one case it
+   *  exists for. */
   onForbidden?: (entries: ForbiddenEntry[]) => void
 }
 
@@ -186,6 +206,22 @@ export type FlushOutboxResult = {
 }
 
 type StaleSiblingsListener = (entries: StaleSiblingEntry[]) => void
+type AppliedListener = (frames: AppliedEventFrame[]) => void
+const appliedListeners = new Set<AppliedListener>()
+
+/**
+ * Tab-wide notification of the `applied[]` frames a flush got back. Like
+ * `subscribeStaleSiblings`: most inline "flush now" calls and the app-shell
+ * drain never pass `onApplied`, so the workspace subscribes once and lands
+ * every committed row into the active cell store — the same `liveApplier`
+ * path a peer's `event.applied` echo takes — instead of a by-ids GET.
+ * Listeners run BEFORE the flush promise resolves, so a committing handler
+ * that awaits the flush sees the head already in the store.
+ */
+export function subscribeAppliedEvents(listener: AppliedListener): () => void {
+  appliedListeners.add(listener)
+  return () => { appliedListeners.delete(listener) }
+}
 const staleSiblingsListeners = new Set<StaleSiblingsListener>()
 
 /**
@@ -423,6 +459,17 @@ async function flushOutboxBatchUnserialized(deps: FlushDeps): Promise<FlushOutbo
   }
 
   const acceptedIds = new Set((body.accepted ?? []).map((a) => a.id))
+  if (Array.isArray(body.applied) && body.applied.length > 0 && shouldSurface()) {
+    const frames: AppliedEventFrame[] = []
+    for (const raw of body.applied) {
+      const frame = parseAppliedEventFrame(raw)
+      if (frame) frames.push(frame)
+    }
+    if (frames.length > 0) {
+      deps.onApplied?.(frames)
+      for (const listener of appliedListeners) listener(frames)
+    }
+  }
   const permanentlyRejectedIds = new Set(
     (body.rejected ?? [])
       .filter((r) => r.status >= 400 && r.status < 500 && r.status !== 401 && r.status !== 403)

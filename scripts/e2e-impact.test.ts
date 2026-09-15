@@ -15,6 +15,7 @@ const specs = [
   "e2e/specs/editor/search.smoke.spec.ts",
   "e2e/specs/editor/workspace-actions-dropdown.smoke.spec.ts",
   "e2e/specs/orgs/account-switcher.smoke.spec.ts",
+  "e2e/specs/orgs/preferences-persist-reload.smoke.spec.ts",
   "e2e/specs/projects/project-settings.smoke.spec.ts",
   "e2e/specs/projects/route-health.smoke.spec.ts",
   "e2e/specs/rules/violation.smoke.spec.ts",
@@ -77,11 +78,46 @@ describe("changed-file E2E impact selection", () => {
     ], specs).specs).toContain("e2e/specs/projects/project-settings.smoke.spec.ts")
   })
 
+  it("maps app font-size preference and boot script to preferences persist-reload", () => {
+    for (const file of [
+      "src/branding/FontSize.tsx",
+      "src/pages/Preferences.tsx",
+      "src/lib/store/file-view-prefs.ts",
+      "index.html",
+    ]) {
+      expect(selectAffectedE2E([file], specs).specs, file).toContain(
+        "e2e/specs/orgs/preferences-persist-reload.smoke.spec.ts",
+      )
+    }
+  })
+
+  it("maps a format parser to the import journey rather than shared runtime", () => {
+    for (const file of [
+      "src/lib/parsers/biblica-ebl.ts",
+      "src/lib/biblica/ebl/notes.ts",
+    ]) {
+      expect(selectAffectedE2E([file], specs).specs, file).toContain(
+        "e2e/specs/editor/import-and-edit.smoke.spec.ts",
+      )
+    }
+  })
+
   it("uses core sentinels for unclassified runtime code", () => {
     expect(selectAffectedE2E(["src/context/AppContext.tsx"], specs).specs).toEqual([
       "e2e/specs/editor/workspace-actions-dropdown.smoke.spec.ts",
       "e2e/specs/projects/route-health.smoke.spec.ts",
     ])
+  })
+
+  it("maps original-source download to the export journey", () => {
+    const available = [...specs, "e2e/specs/editor/export.smoke.spec.ts"]
+    expect(selectAffectedE2E(["src/lib/sync/original-download.ts"], available).specs).toContain(
+      "e2e/specs/editor/export.smoke.spec.ts",
+    )
+    expect(selectAffectedE2E(
+      ["sync-worker/src/events/original-download-route.ts"],
+      available,
+    ).specs).toContain("e2e/specs/editor/export.smoke.spec.ts")
   })
 
   it("does not boot a browser for docs and unit-test-only changes", () => {

@@ -143,6 +143,10 @@ export type EventKind =
   // with is per-file too. Non-chain-mutating; maintainer floor (structural,
   // same clearance as project settings).
   | 'file.timing.set'
+  // Sidebar folder / corpus group for a file, stored in files.meta JSON.
+  // Non-chain-mutating; contributor-level — same class as file.rename (label
+  // cleanup), not track structure. Null clears the file back to Ungrouped.
+  | 'file.corpus.set'
   // Stage 1 (first-class timeline tracks): one track's presentation overrides
   // — rename, reorder, group, or the whole record of a user-added track —
   // stored in files.meta JSON under `trackOverrides`. Non-chain-mutating;
@@ -553,6 +557,11 @@ export interface EventPayloads {
     /** Versioned normalized-import summary persisted under files.meta. */
     importManifest?: Record<string, unknown>
     /**
+     * Sidebar folder for the file — "OT"/"NT" for scripture, or a named
+     * collection such as "Treasure Hunt Bible". Stored in files.meta.
+     */
+    corpusMarker?: string
+    /**
      * Internal re-import fold snapshot. The specialized re-import route uses
      * this to make event-log rebuilds reproduce the live merged file metadata
      * exactly. Normal genesis imports omit it.
@@ -560,10 +569,14 @@ export interface EventPayloads {
     projectionMeta?: Record<string, unknown>
   }
   // Rename a file's display label. Non-chain-mutating; parentId omitted.
-  // (Corpus/grouping marker is not server-backed yet — name only.)
   'file.rename': {
     /** New display name for the file in the project sidebar. */
     name: string
+  }
+  // Set/clear the file's sidebar corpus group, stored in files.meta JSON;
+  // null clears it (Ungrouped). Contributor-level, like file.rename.
+  'file.corpus.set': {
+    corpusMarker: string | null
   }
   // Soft-delete a file. Non-chain-mutating; parentId omitted.
   // Stamps `files.deleted_at`; cells and audio are retained (R2 wipe deferred).

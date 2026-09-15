@@ -8,6 +8,13 @@
 // projects they have no in-app grant to), further narrowed to the
 // credential's org/project scope. Archived projects are excluded. Capped at
 // 100 rows.
+//
+// AQU-1236: `opts.orgId` narrows the result to ONE org on top of the credential
+// scope — it is a filter, never a widening. Callers that accept an org id from
+// the client must first assert it is inside the credential's scope (see
+// assertOrgInCredentialScope in org-read-routes.ts); passing an out-of-scope id
+// here would simply intersect to an empty list rather than leak, but failing
+// loudly at the perimeter is the contract.
 
 import type { ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { ROLE } from '../events/role-policy'
@@ -20,6 +27,11 @@ export interface ExternalProjectListItem {
   role_source: string
 }
 
+export interface ListProjectsOptions {
+  /** Restrict to this org id, on top of the credential's own scope. */
+  orgId?: string
+}
+
 interface ProjectListRow {
   id: string
   name: string
@@ -30,6 +42,7 @@ interface ProjectListRow {
 export async function listProjectsForCredential(
   db: AquillaDb,
   cred: ApiCredentialContext,
+  opts: ListProjectsOptions = {},
 ): Promise<ExternalProjectListItem[]> {
   const uid = String(cred.userId)
   const binds: unknown[] = [uid, uid, uid, uid, uid]
@@ -57,6 +70,10 @@ export async function listProjectsForCredential(
   if (cred.orgId !== null) {
     sql += ` AND p.org_id::text = ?`
     binds.push(cred.orgId)
+  }
+  if (opts.orgId !== undefined) {
+    sql += ` AND p.org_id::text = ?`
+    binds.push(opts.orgId)
   }
   sql += ` ORDER BY p.name LIMIT 100`
 

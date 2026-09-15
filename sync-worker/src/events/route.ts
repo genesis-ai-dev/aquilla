@@ -45,6 +45,7 @@ import { broadcastRealtime } from './broadcast'
 import type { BroadcastEnv } from './broadcast'
 import { checkProjectMembership, type MembershipCheck } from './membership'
 import { ROLE, isForeignCommentKind, requiredRoleForForeignComment, roleLabel } from './role-policy'
+import { createCommentFloorsCache } from './comment-floors'
 import { sendCommentNotifications, type EmailService } from '../notification-email'
 import { laneRelevantHeadSeq } from './link-sync'
 import {
@@ -303,6 +304,57 @@ async function readEventAppliedRows(
   return out
 }
 
+/** One `event.applied` frame — the DO broadcast body and the `applied[]`
+ *  entry in the POST /events response share this exact shape. */
+export interface AppliedFrame {
+  t: 'event.applied'
+  id: string
+  kind: string
+  project: string
+  file?: string
+  cell?: string
+  by: string
+  via?: 'external'
+  serverSeq?: number
+  rows?: CellRowOut[]
+}
+
+function buildAppliedFrame(
+  entry: {
+    eventFrame: { id: string; kind: string; project: string; file?: string; cell?: string }
+    author: string
+    viaExternal?: boolean
+    serverSeq: number
+  },
+  rowsByCell: Map<string, CellRowOut[]> | null,
+): AppliedFrame {
+  const frame = entry.eventFrame
+  const carriesRows =
+    frame.file !== undefined && frame.cell !== undefined && isEventAppliedRowsKind(frame.kind)
+  return {
+    t: 'event.applied',
+    id: frame.id,
+    kind: frame.kind,
+    project: frame.project,
+    ...(frame.file ? { file: frame.file } : {}),
+    ...(frame.cell ? { cell: frame.cell } : {}),
+    // Verified author — lets the author's own client skip the
+    // "changed elsewhere" banner when its write bounces back.
+    by: entry.author,
+    // Agent-API channel marker — forces the credential owner's own
+    // browser to treat the frame as remote (no local outbox write
+    // exists to have already refetched). See PendingEntry.viaExternal.
+    ...(entry.viaExternal ? { via: 'external' as const } : {}),
+    // Additive: server_seq + current rows for cell-content events.
+    // `rows` is omitted (not empty) when the request exceeded the
+    // per-request cell cap — clients then refetch as before.
+    ...(carriesRows ? { serverSeq: entry.serverSeq } : {}),
+    ...(carriesRows && rowsByCell
+      ? { rows: rowsByCell.get(cellRowsKey(frame.project, frame.file!, frame.cell!)) ?? [] }
+      : {}),
+  }
+}
+
 export interface EventsRouteEnv {
   AQUILLA_PG?: AquillaDb
   SYNC_SECRET_KEY?: string
@@ -489,9 +541,11 @@ function headKeyOf(
  * Current `cells.event_id` per (project, file, cell, side, lane) for every
  * cell touched by a chain-mutating event in this request, in ONE SELECT.
  * Keyed by `headKeyOf()`. Drives (a) the AQU-1154 head compare-and-swap
- * pre-check and (b) the F5 stale-source pre-check (source side, lane '' —
- * advisory UX only: pinned commits are accepted + projected regardless; the
- * flag just drives the client's "source changed" banner).
+ * pre-check and (b) the two source-side checks a pinned target commit answers
+ * (source side, lane ''): the F5 stale-source flag is advisory only — the
+ * commit is accepted + projected regardless, the flag just drives the client's
+ * "source changed" banner — but a pin whose source row is ABSENT is refused
+ * outright (AQU-1068; see the per-event loop).
  */
 async function prefetchCellHeads(
   db: AquillaDb,
@@ -732,6 +786,9 @@ export async function handleEventsWriteRequest(
   let seqBase = 0
 
   const accepted: AcceptedEntry[] = []
+  /** `event.applied`-shaped frames for every committed entry — built once,
+   *  broadcast to peers AND returned to the author as `applied[]`. */
+  const appliedFrames: AppliedFrame[] = []
   const rejected: RejectedEntry[] = []
   // Chain-mutating events that were accepted (logged) but did NOT advance
   // the projection — stale siblings. Keyed by event id so we can `has`-check
@@ -871,6 +928,11 @@ export async function handleEventsWriteRequest(
     }
     return pending
   }
+
+  // AQU-1002: the org's configurable comment floors, resolved at most once per
+  // project per request. A batch of comment mutations would otherwise repeat
+  // the same two reads for every entry; non-comment batches never touch it.
+  const commentFloorsFor = createCommentFloorsCache(db)
 
   for (const [eventIndex, rawEvent] of rawEvents.entries()) {
     // Authorize.
@@ -1056,17 +1118,69 @@ export async function handleEventsWriteRequest(
       else cellHeads.set(headKey, candidate.id)
     }
 
-    // F5: AD-9 sourceEventId staleness validation for target.cell.commit.
-    // If the commit carries a sourceEventId pin and the source row has
-    // advanced beyond it, flag it so the client can surface a
-    // "source changed — please re-confirm" hint. The event is still accepted
-    // and projected (LWW) so the translator's work is not lost.
+    // Both checks a PINNED target.cell.commit answers against the source row it
+    // names: has that row been REMOVED (AQU-1068, refuse), or merely MOVED ON
+    // (F5/AD-9, accept and flag)? One `cellHeads` read serves both.
     if (rawEvent.kind === 'target.cell.commit' && rawEvent.fileId && rawEvent.cellId) {
       const tp = rawEvent.payload as { sourceEventId?: string | null }
       if (tp.sourceEventId) {
         const currentSourceEventId = cellHeads.get(
           `${cellKeyOf(rawEvent.projectId, rawEvent.fileId, rawEvent.cellId)}\0source\0`,
         )
+        // AQU-1068: the source row is GONE. Refuse, do not project.
+        //
+        // The chain this closes: a translator asks the AI to draft a cell on a
+        // slow connection, somebody deletes that cell while the draft is still
+        // generating, and the draft POSTs after the delete has landed. The
+        // projection's target commit is an `INSERT ... SELECT ... ON CONFLICT`
+        // that never asks whether a source row exists (event-projection.ts,
+        // the 'target.cell.commit' case), so the late draft RE-CREATES the cell
+        // as a target-only row — and the client appends target-only cells to
+        // the END of the file (joinSourceAndTarget, hooks/useCells.ts). That is
+        // Matthew's report: the translation "jumped to the second last cell",
+        // with nothing to undo it.
+        //
+        // THE PIN IS WHAT MAKES THIS SAFE TO REFUSE — do not widen the
+        // predicate to "no source row". A target-only row is a SUPPORTED shape
+        // in this codebase (progress-projection.ts counts them;
+        // cells-read-route.ts serves them), and a legitimate target-only commit
+        // carries NO pin. A pin is the client asserting "I composed this
+        // against source event X, which I read off a row that was there", so a
+        // pin with no row left means precisely one thing: that row has since
+        // been deleted. Drop `tp.sourceEventId` from the condition and every
+        // legitimate target-only commit dies alongside the orphans.
+        //
+        // Free: `prefetchCellHeads` above already loaded every `cells` row for
+        // every cell this request touches, and target.cell.commit is
+        // chain-mutating, so its cell is always in that set. A same-batch
+        // delete is caught too — the head-tracking block just above has already
+        // dropped the key for any earlier `source.cell.delete` in this loop, so
+        // a delete and a late draft arriving in ONE flush lands here as well.
+        //
+        // 409 (not 403): the client reads a 4xx that is neither 401 nor 403 as
+        // permanent, fires `onRejected` so the optimistic draft is rolled back
+        // with an explanation, and drops the event rather than retrying it
+        // forever (lib/sync/outbox-flush.ts).
+        if (currentSourceEventId === undefined) {
+          rejected.push({
+            id: rawEvent.id ?? '(unknown)',
+            status: 409,
+            // States only what the server knows. The usual cause is a
+            // removal, but the same shape arises when the cell's own
+            // `source.cell.create` was refused earlier in this very batch —
+            // a project that has not opted into cell editing, say — and the
+            // client shows this reason to the operator verbatim. Telling them
+            // a cell was removed when it never existed sends them looking in
+            // the wrong place.
+            reason: 'no source cell for this translation',
+          })
+          continue
+        }
+        // F5: AD-9 sourceEventId staleness validation. The source row is still
+        // there but has advanced beyond the pin — flag it so the client can
+        // surface a "source changed — please re-confirm" hint. The event is
+        // still accepted and projected (LWW) so the translator's work is not
+        // lost.
         if (currentSourceEventId && currentSourceEventId !== tp.sourceEventId) {
           staleSourceEntries.push({
             id: rawEvent.id,
@@ -1084,15 +1198,38 @@ export async function handleEventsWriteRequest(
     const callerRole = authResult.event.claims.roleLevel
     const callerUsername = authResult.event.claims.username
 
+    // AQU-1002: org-configurable floor to OPEN a thread or post a reply.
+    // authorize() has already applied the static COMMENTER floor; this only
+    // ever RAISES it, for an org that wants discussion reserved to reviewers
+    // and above. A configured floor below COMMENTER is a no-op — VIEWER is the
+    // only rung underneath and viewers have no write path at all.
+    if (rawEvent.kind === 'comment.create') {
+      const { createMinRole } = await commentFloorsFor(rawEvent.projectId)
+      if (callerRole < createMinRole) {
+        rejected.push({
+          id: rawEvent.id ?? '(unknown)',
+          status: 403,
+          reason: `role too low to create a comment (requires ${roleLabel(createMinRole)})`,
+        })
+        continue
+      }
+    }
+
     if (isForeignCommentKind(rawEvent.kind)) {
       const p = rawEvent.payload as { commentId?: string }
       if (p.commentId) {
         const authorId = commentAuthors.get(p.commentId)
 
         if (authorId !== undefined && authorId !== callerUsername) {
-          // Foreign comment mutation — floor per FOREIGN_COMMENT_ROLE
-          // (AQU-999): maintainer for edit/delete, contributor for resolve.
-          const foreignFloor = requiredRoleForForeignComment(rawEvent.kind)
+          // Foreign comment mutation. edit/delete keep the static
+          // FOREIGN_COMMENT_ROLE maintainer floor — rewriting or removing
+          // another person's words is not a policy orgs asked to tune.
+          // AQU-1002: resolve/reopen instead reads the org's configurable
+          // floor, defaulting to AQU-999's CONTRIBUTOR.
+          const foreignFloor =
+            rawEvent.kind === 'comment.resolve'
+              ? (await commentFloorsFor(rawEvent.projectId)).resolveMinRole
+              : requiredRoleForForeignComment(rawEvent.kind)
           if (callerRole < foreignFloor) {
             const verb = rawEvent.kind === 'comment.resolve' ? 'resolve' : 'mutate'
             rejected.push({
@@ -1274,10 +1411,11 @@ export async function handleEventsWriteRequest(
         validationCount: validationCountForDispatch,
       })
     } catch (err) {
+      console.error(`[events] handler for ${rawEvent.kind} failed:`, err)
       rejected.push({
         id: rawEvent.id ?? '(unknown)',
         status: 500,
-        reason: `handler for ${rawEvent.kind} failed: ${err instanceof Error ? err.message : String(err)}`,
+        reason: `handler for ${rawEvent.kind} failed`,
       })
       continue
     }
@@ -1478,6 +1616,7 @@ export async function handleEventsWriteRequest(
         }
       }
     } catch (err) {
+      console.error("[events] DB batch failed:", err)
       const committed = new Set(committedEntries.map((entry) => entry.id))
       for (const entry of pendingEntries) {
         if (committed.has(entry.id)) {
@@ -1486,7 +1625,7 @@ export async function handleEventsWriteRequest(
           rejected.push({
             id: entry.id,
             status: 500,
-            reason: `DB batch failed: ${String(err)}`,
+            reason: "DB batch failed",
           })
         }
       }
@@ -1578,54 +1717,33 @@ export async function handleEventsWriteRequest(
       await Promise.all(broadcasts)
     }
 
+    // Inline each committed cell's CURRENT projected rows (post-commit) so
+    // clients apply the head directly instead of a GET …/cells?cellIds=
+    // round-trip per event. ONE SELECT for every cell this request touched;
+    // skipped when none qualify. The same frames go to two places: the
+    // ProjectSync DO broadcast (peers) and the HTTP response `applied[]`
+    // (the author's own client, which would otherwise refetch after its
+    // outbox flush — see src/lib/sync/outbox-flush.ts onApplied).
+    const rowsByCell = await readEventAppliedRows(db, committedEntries)
+    for (const entry of committedEntries) {
+      appliedFrames.push(buildAppliedFrame(entry, rowsByCell))
+    }
+
     // Fan-out event.applied frames to ProjectSync DO so UI clients receive
     // real-time updates via the per-project WebSocket. Non-fatal — a missed
     // broadcast means the client will reconcile on its next poll/revalidate.
     if (env.ProjectSync && env.SYNC_SECRET_KEY) {
       // Group by project — one DO stub per project.
-      const byProject = new Map<string, typeof committedEntries>()
-      for (const entry of committedEntries) {
-        const project = entry.eventFrame.project
-        const list = byProject.get(project)
-        if (list) list.push(entry)
-        else byProject.set(project, [entry])
+      const byProject = new Map<string, AppliedFrame[]>()
+      for (const frame of appliedFrames) {
+        const list = byProject.get(frame.project)
+        if (list) list.push(frame)
+        else byProject.set(frame.project, [frame])
       }
-      // Inline each committed cell's CURRENT projected rows (post-commit) on
-      // its event.applied frame so clients apply the head directly instead
-      // of a GET …/cells?cellIds= round-trip per frame. ONE SELECT for every
-      // cell this request touched; skipped when none qualify.
-      const rowsByCell = await readEventAppliedRows(db, committedEntries)
       const doFanOut: Promise<void>[] = []
-      for (const [project, entries] of byProject) {
+      for (const [project, messages] of byProject) {
         const id = env.ProjectSync.idFromName(project)
         const stub = env.ProjectSync.get(id)
-        const messages = entries.map((entry) => {
-          const frame = entry.eventFrame
-          const carriesRows =
-            frame.file !== undefined && frame.cell !== undefined && isEventAppliedRowsKind(frame.kind)
-          return {
-            t: 'event.applied',
-            id: frame.id,
-            kind: frame.kind,
-            project: frame.project,
-            ...(frame.file ? { file: frame.file } : {}),
-            ...(frame.cell ? { cell: frame.cell } : {}),
-            // Verified author — lets the author's own client skip the
-            // "changed elsewhere" banner when its write bounces back.
-            by: entry.author,
-            // Agent-API channel marker — forces the credential owner's own
-            // browser to treat the frame as remote (no local outbox write
-            // exists to have already refetched). See PendingEntry.viaExternal.
-            ...(entry.viaExternal ? { via: 'external' as const } : {}),
-            // Additive: server_seq + current rows for cell-content events.
-            // `rows` is omitted (not empty) when the request exceeded the
-            // per-request cell cap — clients then refetch as before.
-            ...(carriesRows ? { serverSeq: entry.serverSeq } : {}),
-            ...(carriesRows && rowsByCell
-              ? { rows: rowsByCell.get(cellRowsKey(frame.project, frame.file!, frame.cell!)) ?? [] }
-              : {}),
-          }
-        })
         // PERF-8: ONE __broadcast subrequest per (project, request) — the
         // per-event fan-out burned ~1 subrequest per committed event against
         // the 1000/invocation cap. Single events keep the legacy one-message
@@ -1720,5 +1838,10 @@ export async function handleEventsWriteRequest(
       .filter((a) => staleEntries.has(a.id))
       .map((a) => staleEntries.get(a.id)!),
     staleSource: staleSourceEntries,
+    // Same shape as the `event.applied` WS frame, one per committed event.
+    // Lets the author's client land its own write's projected rows straight
+    // from the POST (no by-ids GET after the outbox flush). Omitted on the
+    // partial-commit (batch-failure) path above — clients refetch as before.
+    applied: appliedFrames,
   })
 }

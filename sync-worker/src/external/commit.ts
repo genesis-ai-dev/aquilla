@@ -121,7 +121,7 @@ export async function handleCommit(
   if (!env.AQUILLA_PG) return errorResponse('job_failed', 'AQUILLA_PG not configured')
   const db = env.AQUILLA_PG
 
-  const cred = await validateApiCredential(db, bearer(request) ?? "")
+  const cred = await validateApiCredential(db, bearer(request) ?? "", request.headers.get('CF-Connecting-IP'))
   if (!cred) return errorResponse('permission_denied', 'invalid or missing API credential')
 
   const identifier = `credential:${cred.credentialId}`
@@ -1152,9 +1152,13 @@ async function commitLinkMedia(
 
   // Prepare-time attach/select ids (§4), keyed by (fileId, cellId, artifactId).
   // Fall back to minting for changesets staged before the linkMedia ledger.
+  // Unambiguous separator via String.fromCharCode: a NUL character can't
+  // appear in a fileId, cellId, or artifactId, unlike a delimiter drawn
+  // from their own alphabet.
+  const KEY_SEP = String.fromCharCode(0)
   const plannedByKey = new Map(
     (cs.plannedIds?.linkMedia ?? []).map((p) => [
-      `${cellKey(p.fileId, p.cellId)}\u0000${p.artifactId}`,
+      `${cellKey(p.fileId, p.cellId)}${KEY_SEP}${p.artifactId}`,
       p,
     ]),
   )
@@ -1212,7 +1216,7 @@ async function commitLinkMedia(
       httpMetadata: artifact.content_type ? { contentType: artifact.content_type } : undefined,
     })
 
-    const planned = plannedByKey.get(`${cellKey(cmd.fileId, cmd.cellId)}\u0000${cmd.artifactId}`)
+    const planned = plannedByKey.get(`${cellKey(cmd.fileId, cmd.cellId)}${KEY_SEP}${cmd.artifactId}`)
     const attachId = planned?.attachEventId ?? uuidv7()
     const selectId = planned?.selectEventId ?? uuidv7()
     const url = `frontier-audio://${artifact.audio_id}`

@@ -25,6 +25,12 @@ import {
   type EmitEventsCommand,
 } from './commands-emit-events'
 import {
+  MEMBERSHIP_FLOOR,
+  isMembershipCommand,
+  validateMembershipCommand,
+  type MembershipCommand,
+} from './commands-membership'
+import {
   renameFileFloor,
   validateRenameFileCommand,
   type RenameFileCommand,
@@ -68,6 +74,13 @@ function isMemoryCommandKind(kind: string): boolean {
 export type { PlanImportCell, PlanImportManifest, PlanImportVariant } from './import-manifest'
 export type { PatchSettingsCommand, PatchSettingsOp } from './commands-patch-settings'
 export type { EmitEventsCommand, EmitEventInput } from './commands-emit-events'
+export type {
+  InviteMemberCommand,
+  MembershipCommand,
+  RemoveMemberCommand,
+  SetRoleCommand,
+} from './commands-membership'
+export { isMembershipCommand } from './commands-membership'
 export type { RenameFileCommand } from './commands-rename-file'
 export type {
   ArchiveProjectCommand,
@@ -223,6 +236,7 @@ export type Command =
   | LinkMediaCommand
   | PatchSettingsCommand
   | EmitEventsCommand
+  | MembershipCommand
   | RenameFileCommand
   | ProjectLifecycleCommand
   | SetBriefCommand
@@ -706,6 +720,11 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
       if (cmd) commands.push(cmd)
       return
     }
+    if (isMembershipCommand(c as { kind: string })) {
+      const cmd = validateMembershipCommand(c, index, issues)
+      if (cmd) commands.push(cmd)
+      return
+    }
     if (c.kind === 'RenameFile') {
       const cmd = validateRenameFileCommand(c, index, issues)
       if (cmd) commands.push(cmd)
@@ -821,6 +840,12 @@ export function requiredRoleForCommand(c: Command): number {
   if (c.kind === 'LinkMedia') {
     // Compiles to cell.audio.attach + cell.audio.select (both CONTRIBUTOR).
     return Math.max(REQUIRED_ROLE['cell.audio.attach'], REQUIRED_ROLE['cell.audio.select'])
+  }
+  // AQU-1185 membership commands: MAINTAINER, flat. Like the other receipt-only
+  // kinds they take their own prepare/commit path (which re-checks the grant and
+  // target caps live); this is the honest index-filtering floor.
+  if (isMembershipCommand(c)) {
+    return MEMBERSHIP_FLOOR
   }
   // AQU-1182 RenameFile: desugars to one file.rename event, so its floor IS
   // file.rename's perimeter floor (the UI's own floor for renaming a file).

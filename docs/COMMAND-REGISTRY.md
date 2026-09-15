@@ -34,9 +34,45 @@ export function describeCommand(kind: string): CommandCatalogEntry | null
 v1 entries: SetTranslation (prepared, 400) · LinkMedia (prepared, 400) · PlanImport (structural,
 500) · CreateProject (structural, 600-org) · UpdateProjectSettings (structural, 600 — oneLiner
 says "deprecated: prefer PatchSettings") · **PatchSettings** (structural, 500) ·
-**EmitEvents** (structural, 200 — floor is per inner event kind; testimony kinds flagged).
+**EmitEvents** (structural, 200 — floor is per inner event kind; testimony kinds flagged) ·
+**InviteMember / SetRole / RemoveMember** (governance, 600 — always ask-mode; see §2).
 AQU-1228 adds the Living Memory writes: **AddExample** / **AddDecision** / **AddNote**
 (structural, 400) and **RetireExample** (structural, 500).
+
+### Membership — InviteMember / SetRole / RemoveMember (AQU-1185)
+
+```ts
+{ kind: 'InviteMember', projectId: string, username: string, role: number }
+{ kind: 'SetRole',      projectId: string, username: string, role: number }
+{ kind: 'RemoveMember', projectId: string, username: string }
+```
+
+Receipt-only (a `project_members` row write, not events). Membership kinds batch with each
+other — max 25, one command per person — but never with another kind. Prepare **forces
+ask-mode** regardless of the credential's mode: every membership change a machine proposes
+passes a human at `/approve/:id`, which lists one plain-language line per change.
+
+Gates, enforced identically at prepare and at commit against the caller's **live** role:
+
+| Rule | Denial `details.code` |
+| --- | --- |
+| caller's effective project role ≥ MAINTAINER (600) | (`requiredRole: 600`) |
+| cannot grant a role above your own | `role_above_caller` |
+| cannot act on yourself (covers self-elevation) | `self_target` |
+| below OWNER, cannot touch anyone whose **effective** role ≥ yours | `target_outranks_caller` |
+| InviteMember on an existing direct member | `already_member` (409) |
+| SetRole / RemoveMember with no direct member row | `not_a_direct_member` (409) |
+
+The target cap reads the target's **effective** (max-wins) role, not the direct
+`project_members.role_level` the UI compares against — so a project OWNER who holds the
+project through the org or creator path, and therefore has no direct row, cannot be removed
+by a MAINTAINER's agent.
+
+Drift at commit is all-or-nothing: a plan whose end-state a human already applied is
+`superseded`, any other movement is `stale`, and nothing is written either way. Target user
+ids are pinned at prepare, so a username reassigned between prepare and commit is drift
+rather than a new target. The committed receipt carries the credential id plus every applied
+change (`kind`, `userId`, `username`, `role`, `previousRole`) as the audit record.
 
 ## 2. New commands (owner: sync-worker stream)
 

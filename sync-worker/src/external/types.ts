@@ -46,6 +46,7 @@ export type ReceiptOnlyCommandKind =
   | 'RenameProject'
   | 'ArchiveProject'
   | 'UnarchiveProject'
+  | 'Membership'
 
 /** Per-kind effect line for an EmitEvents changeset. `testimony` marks
  *  validation kinds (cell.validate / cell.unvalidate) so review UIs render
@@ -104,12 +105,12 @@ export interface ChangesetSummary {
   /** LinkMedia: number of cells an audio artifact is attached to. */
   mediaLinked?: number
   /** Receipt-only (CreateProject / CreateOrg / UpdateProjectSettings /
-   *  PatchSettings / SetBrief / AddOrgMember / SetOrgRole / RemoveOrgMember /
-   *  RenameProject / ArchiveProject / UnarchiveProject) plus the memory
-   *  commands (AddExample / AddDecision / RetireExample / AddNote): the
-   *  command kind, so the human on /approve/:id sees WHICH lifecycle op
-   *  they're approving instead of an empty "No changes summarized." box
-   *  (design §2 / blind-approval fix). */
+   *  PatchSettings / SetBrief / Membership / AddOrgMember / SetOrgRole /
+   *  RemoveOrgMember / RenameProject / ArchiveProject / UnarchiveProject)
+   *  plus the memory commands (AddExample / AddDecision / RetireExample /
+   *  AddNote): the command kind, so the human on /approve/:id sees WHICH
+   *  lifecycle op they're approving instead of an empty "No changes
+   *  summarized." box (design §2 / blind-approval fix). */
   command?: ReceiptOnlyCommandKind | 'AddExample' | 'AddDecision' | 'RetireExample' | 'AddNote'
   /** AQU-1228 memory commands: the memory path being written or retired, plus
    *  a one-line preview, so the human on /approve/:id sees the actual effect. */
@@ -157,6 +158,11 @@ export interface ChangesetSummary {
   settingsChanges?: Record<string, string>
   /** EmitEvents: per-kind effect lines (kind, count, testimony flag). */
   events?: EmitEventsSummaryEntry[]
+  /** AQU-1185 Membership: one plain-language line per membership change ("Add
+   *  alice to proj-a as contributor (400)"), rendered as its own list on the
+   *  approval page. A human approving a role grant must be able to read who,
+   *  what role, and which project without decoding the command JSON. */
+  membershipChanges?: string[]
   /** EmitEvents (AQU-1184): every staged cell.validate / cell.unvalidate,
    *  named individually with the cell's current text. Rendered as its own
    *  section on the approval page (an array, so the page's flat
@@ -277,6 +283,11 @@ export interface PlannedEventIds {
    *  assignment.create's assignmentId when the caller omitted them), so a
    *  crash-retry re-posts IDENTICAL ids and payloads. */
   emitEvents?: { eventId: string; commentId?: string; assignmentId?: string }[]
+  /** AQU-1185 Membership: the resolved target user id per command, in command
+   *  order. Pinned at prepare so the commit writes the PERSON the human
+   *  approved — a username that has since been reassigned to another account
+   *  is drift (plan_stale), not a target. */
+  membership?: { username: string; userId: string }[]
   /** LinkMedia: one entry per attach command — the target (fileId, cellId), the
    *  audio artifact id, and the minted cell.audio.attach + cell.audio.select
    *  event ids. A crash-and-retry re-posts these IDENTICAL ids, so the /events
@@ -304,6 +315,19 @@ export interface ChangesetReceipt {
   fileId?: string
 }
 
+/** AQU-1185: one applied membership change, recorded on the receipt so the
+ *  audit trail is self-contained — the changeset row already carries the
+ *  credential id, and this says exactly what that credential did to whom. */
+export interface MembershipReceiptEntry {
+  kind: 'InviteMember' | 'SetRole' | 'RemoveMember'
+  userId: string
+  username: string
+  /** The role granted (absent for RemoveMember). */
+  role?: number
+  /** The target's direct role before the write; null when they had no row. */
+  previousRole: number | null
+}
+
 /** W2-A receipt for the receipt-only project-lifecycle commands (spec §2 D8).
  *  These apply a plain row write, not events, so the event-shaped
  *  ChangesetReceipt does not fit — the receipt is a provenance stamp instead. */
@@ -314,7 +338,7 @@ export interface ReceiptOnlyReceipt {
   command: ReceiptOnlyCommandKind
   appliedAt: string
   /** CreateProject: the created project id. UpdateProjectSettings /
-   *  PatchSettings / SetBrief / RenameProject / ArchiveProject /
+   *  PatchSettings / SetBrief / Membership / RenameProject / ArchiveProject /
    *  UnarchiveProject: the project id it wrote. Org membership: the project
    *  the plan was filed under (the write itself is org-level). Absent for
    *  CreateOrg — it creates no project, and the changeset's own project id is
@@ -323,6 +347,8 @@ export interface ReceiptOnlyReceipt {
   /** UpdateProjectSettings / PatchSettings / SetBrief: the new settings version
    *  after the write. */
   version?: number
+  /** Membership: every applied change, in command order. */
+  membership?: MembershipReceiptEntry[]
   /** CreateOrg: the created org id (AQU-1221). AQU-1235: the org the
    *  membership change landed in. */
   orgId?: number

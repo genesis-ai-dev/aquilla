@@ -28,6 +28,11 @@ import {
   type UpdateProjectSettingsCommand,
 } from './commands'
 import { changedPolicyKeys, commitPatchSettings } from './commands-patch-settings'
+import {
+  commitMembership,
+  isMembershipCommand,
+  type MembershipCommand,
+} from './commands-membership'
 import { commitProjectLifecycle, isProjectLifecycleCommand } from './commands-project-lifecycle'
 import { commitSetBrief } from './commands-set-brief'
 import { isOrgMemberCommand, type OrgMemberCommand } from './commands-org-members'
@@ -230,6 +235,15 @@ export async function commitChangesetCore(
   )
   if (patchSettingsCmd) {
     return commitPatchSettings(db, cred, cs, patchSettingsCmd, channel)
+  }
+  // AQU-1185 membership: receipt-only, all-or-nothing, and its module re-runs
+  // the MAINTAINER floor plus the grant/target caps against the LIVE role graph
+  // before it writes a single row.
+  const membershipCmds = cs.commands.filter((c): c is MembershipCommand =>
+    isMembershipCommand(c),
+  )
+  if (membershipCmds.length > 0) {
+    return commitMembership(db, env, cred, cs, membershipCmds, channel, ctx)
   }
   // AQU-1182 project lifecycle: receipt-only like the above, with archived-
   // tolerant role resolution (the generic precheck below denies every archived

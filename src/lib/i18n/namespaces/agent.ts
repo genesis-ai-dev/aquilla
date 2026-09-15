@@ -111,6 +111,7 @@ export const agent = defineNamespace({
     "agent.changeset.whatWillBeApplied": "What will be applied",
     "agent.changeset.noChangesSummarized": "No changes summarized.",
     "agent.changeset.settingsChanges": "Settings changes",
+    "agent.changeset.membershipChanges": "Membership changes",
     "agent.changeset.memoryWrites": "Living Memory changes",
     "agent.changeset.changesHeading": "Changes ({count})",
     "agent.changeset.testimonyHeading": "Validations to endorse ({count})",

@@ -201,10 +201,19 @@ export interface IdmlSourceManifest {
   readonly diagnostics: readonly IdmlDiagnostic[]
 }
 
+export interface IdmlStyleEmphasis {
+  readonly bold: boolean
+  readonly italic: boolean
+}
+
+export type IdmlStyleCatalog = Readonly<Record<string, IdmlStyleEmphasis>>
+
 export interface IdmlParseResult {
   readonly units: readonly IdmlTranslationUnit[]
   readonly manifest: IdmlSourceManifest
   readonly diagnostics: readonly IdmlDiagnostic[]
+  /** Character styles whose FontStyle is Bold and/or Italic. Display-only. */
+  readonly styleCatalog?: IdmlStyleCatalog
 }
 
 export type IdmlSemanticProfile =

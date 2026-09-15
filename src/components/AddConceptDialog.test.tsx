@@ -70,7 +70,7 @@ describe("AddConceptPopover", () => {
 
     await waitFor(() => {
       expect(onConfirm).toHaveBeenCalledOnce()
-      expect(onConfirm).toHaveBeenCalledWith({ sourceTerm: "faith" })
+      expect(onConfirm).toHaveBeenCalledWith({ sourceTerm: "faith", approve: false })
     })
     expect(screen.queryByLabelText(/source term for new concept/i)).not.toBeInTheDocument()
   })
@@ -81,7 +81,7 @@ describe("AddConceptPopover", () => {
     await openPopover()
     fireEvent.click(screen.getByRole("button", { name: /add term/i }))
     await waitFor(() => {
-      expect(onConfirm).toHaveBeenCalledWith({ sourceTerm: "love" })
+      expect(onConfirm).toHaveBeenCalledWith({ sourceTerm: "love", approve: false })
     })
   })
 
@@ -92,7 +92,7 @@ describe("AddConceptPopover", () => {
     fireEvent.change(input, { target: { value: "Holy Spirit" } })
     fireEvent.click(screen.getByRole("button", { name: /add term/i }))
     await waitFor(() => {
-      expect(onConfirm).toHaveBeenCalledWith({ sourceTerm: "Holy Spirit" })
+      expect(onConfirm).toHaveBeenCalledWith({ sourceTerm: "Holy Spirit", approve: false })
     })
   })
 
@@ -109,8 +109,60 @@ describe("AddConceptPopover", () => {
         sourceTerm: "grace",
         rendering: "favor",
         caseSensitive: true,
+        approve: false,
       })
     })
+  })
+
+  // ── AQU-1006 follow-up: suggest vs. approve ──────────────────────────────
+  // Terminology has two authority levels. A DRAFT compiles to no rules, so it
+  // binds nobody and any contributor may write one; APPROVING puts the term
+  // into force and takes the org's termbase floor. These pin that the client
+  // never asks for more than the user actually has.
+
+  it("defaults to suggesting, so a caller that omits canApprove cannot enforce", async () => {
+    // `canApprove` defaults to the RESTRICTIVE answer on purpose: a caller
+    // that forgets to pass it produces suggestions rather than silently
+    // writing enforced terminology on behalf of someone with no authority.
+    const onConfirm = vi.fn()
+    renderPopover({ sourceTerm: "mercy", onConfirm })
+    await openPopover()
+    await userEvent.setup().click(screen.getByRole("button", { name: /add term/i }))
+    await waitFor(() => {
+      expect(onConfirm).toHaveBeenCalledWith({ sourceTerm: "mercy", approve: false })
+    })
+  })
+
+  it("approves when the user may approve and leaves the toggle on", async () => {
+    const onConfirm = vi.fn()
+    renderPopover({ sourceTerm: "mercy", onConfirm, canApprove: true })
+    await openPopover()
+    await userEvent.setup().click(screen.getByRole("button", { name: /add term/i }))
+    await waitFor(() => {
+      expect(onConfirm).toHaveBeenCalledWith({ sourceTerm: "mercy", approve: true })
+    })
+  })
+
+  it("lets an approver choose to suggest instead", async () => {
+    const onConfirm = vi.fn()
+    const user = userEvent.setup()
+    renderPopover({ sourceTerm: "mercy", onConfirm, canApprove: true })
+    await openPopover()
+    await user.click(screen.getByRole("checkbox", { name: /approve now/i }))
+    await user.click(screen.getByRole("button", { name: /add term/i }))
+    await waitFor(() => {
+      expect(onConfirm).toHaveBeenCalledWith({ sourceTerm: "mercy", approve: false })
+    })
+  })
+
+  it("disables the approve toggle for a user who cannot approve", async () => {
+    renderPopover({ sourceTerm: "mercy", canApprove: false })
+    await openPopover()
+    // The base-ui Checkbox renders a span with aria-disabled rather than a
+    // native `disabled` attribute, so toBeDisabled() does not apply.
+    expect(screen.getByRole("checkbox", { name: /approve now/i }))
+      .toHaveAttribute("aria-disabled", "true")
+    expect(screen.getByText(/approving terms needs a higher role/i)).toBeInTheDocument()
   })
 
   it("submits on Enter in the rendering field", async () => {
@@ -119,7 +171,7 @@ describe("AddConceptPopover", () => {
     await openPopover()
     fireEvent.keyDown(screen.getByLabelText(/rendering for new concept/i), { key: "Enter" })
     await waitFor(() => {
-      expect(onConfirm).toHaveBeenCalledWith({ sourceTerm: "peace" })
+      expect(onConfirm).toHaveBeenCalledWith({ sourceTerm: "peace", approve: false })
     })
   })
 

@@ -187,6 +187,15 @@ export const terminology = defineNamespace({
     "terminology.termDetail.noOccurrences": "No occurrences found in the loaded cells.",
     "terminology.termDetail.columnRef": "Ref",
     "terminology.termDetail.loadingExamples": "Loading examples…",
+    "terminology.termDetail.addRenderingPlaceholder": "Add rendering…",
+    "terminology.termDetail.addRenderingAria": "Add a rendering to this term",
+    "terminology.termDetail.addRenderingButton": "Add",
+    "terminology.termDetail.renderingEditHint":
+      "Click a rendering to change required / allowed / forbidden, or remove it.",
+    "terminology.termDetail.cycleStatusTitle": "Change status",
+    "terminology.termDetail.cycleStatusAria":
+      "{rendering} is {status} — change status",
+    "terminology.termDetail.removeRenderingAria": "Remove rendering {rendering}",
     "terminology.termDetail.goToCellAria": "Go to {ref}",
     "terminology.termDetail.enforcedCount": plural({
       one: "{count} enforced",
@@ -344,6 +353,15 @@ export const terminology = defineNamespace({
     "terminology.addConcept.renderingPlaceholder": "Optional rendering",
     "terminology.addConcept.renderingAriaLabel": "Rendering for new concept",
     "terminology.addConcept.caseInsensitiveLabel": "Case insensitive",
+    "terminology.addConcept.approveLabel": "Approve now (enforce this term)",
+    "terminology.addConcept.approveEnforcedHint":
+      "This term will be checked against every translation right away.",
+    "terminology.addConcept.approveSuggestionHint":
+      "Saved as a suggestion for review. Suggestions are not checked until approved.",
+    "terminology.addConcept.approveNoPermissionHint":
+      "Saved as a suggestion — approving terms needs a higher role on this project.",
+    "terminology.addConcept.noRenderingNotEnforcedHint":
+      "Add a rendering to enforce this term — without one there is nothing to check for.",
     "terminology.addConcept.savingToast": "Saving term…",
     "terminology.addConcept.savedToast": "Added “{term}”",
     "terminology.addConcept.viewEntry": "View entry",
@@ -472,6 +490,26 @@ export const terminology = defineNamespace({
           "Accessible name for the button removing one rendering; {position} is its " +
           "1-based position among the concept's renderings.",
         placeholders: { position: "1-based position of this rendering in the list." },
+      },
+      "terminology.termDetail.addRenderingAria": {
+        description:
+          "Accessible name for the text input on the term detail page where a new rendering is typed.",
+      },
+      "terminology.termDetail.cycleStatusAria": {
+        description:
+          "Accessible name for the button on the term detail page that cycles one rendering's " +
+          "status (required / allowed / forbidden); {rendering} is the rendering text and " +
+          "{status} its current status word.",
+        placeholders: {
+          rendering: "The rendering's text as typed by the translator.",
+          status: "The rendering's current status label (required, allowed, or forbidden).",
+        },
+      },
+      "terminology.termDetail.removeRenderingAria": {
+        description:
+          "Accessible name for the button on the term detail page that removes one rendering; " +
+          "{rendering} is the rendering text.",
+        placeholders: { rendering: "The rendering's text as typed by the translator." },
       },
       "terminology.row.collapseRenderingsAria": {
         description: "Accessible name for the row expander toggle when it is open.",

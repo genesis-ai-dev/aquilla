@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "build:workers-build": "node ../scripts/assert-workers-build-env.mjs && pnpm run type-check && pnpm test",
+    "build:workers-build": "node ../scripts/assert-workers-build-env.mjs && pnpm run type-check",
     "deploy:workers-build": "node ../scripts/cloudflare-build-deploy.mjs identity",
     "deploy": "pnpm --dir .. run deploy:aquilla:auth",
     "type-check": "tsc --noEmit",

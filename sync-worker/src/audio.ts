@@ -358,10 +358,8 @@ export async function handleAudioRequest(
         ])
       } catch (error) {
         if (!existing) await env.SNAPSHOTS.delete(key).catch(() => {})
-        return withAudioCors(new Response(
-          `audio artifact metadata write failed: ${error instanceof Error ? error.message : String(error)}`,
-          { status: 500 },
-        ))
+        console.error("[audio] artifact metadata write failed:", error)
+        return withAudioCors(new Response("audio artifact metadata write failed", { status: 500 }))
       }
     }
     return withAudioCors(

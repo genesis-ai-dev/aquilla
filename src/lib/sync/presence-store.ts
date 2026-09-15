@@ -14,20 +14,35 @@ export interface TargetPresenceSelection {
 }
 
 export interface PresenceUserSnapshot {
+  /**
+   * Per-socket key from the DO. Optional only for rows from pre-connId sync
+   * workers (and older tests); the store then keys the row by `userId`.
+   */
+  connId?: string
   userId: string
+  /** Lock-bearing: the cell the user holds the edit lease on. */
   focusedCell?: string
+  /** Non-lock-bearing: the row the user is on (selected/reading), lease or not. */
+  viewingCell?: string
   currentFileId?: string
   selection?: TargetPresenceSelection
   ts: number
 }
 
 export interface ProjectPresencePeer {
+  /**
+   * The connection's `connId`. A user with two tabs is TWO peers sharing a
+   * username and colour — the roster and cell badges list connections, not
+   * accounts, so people sharing one test login still see each other.
+   */
   peerId: string
   username: string
   color: string
   currentFileId?: string
   focusedCell?: string
+  viewingCell?: string
   selection?: TargetPresenceSelection
+  /** True iff the peer holds the edit lease on `focusedCell`. */
   isEditing: boolean
   lastSeenAt: number
 }
@@ -37,6 +52,12 @@ export interface CellPresencePeer extends ProjectPresencePeer {
 }
 
 type Listener = () => void
+
+interface PresenceDraft {
+  cellId: string
+  draftText: string
+  ts: number
+}
 
 function sameSelection(
   a: TargetPresenceSelection | undefined,
@@ -52,12 +73,19 @@ function sameSelection(
   )
 }
 
+/** Presence rows are keyed per socket; legacy workers send no connId. */
+function keyOf(user: Pick<PresenceUserSnapshot, "connId" | "userId">): string {
+  return user.connId ?? user.userId
+}
+
 function sameUser(a: PresenceUserSnapshot | undefined, b: PresenceUserSnapshot | undefined): boolean {
   if (!a && !b) return true
   if (!a || !b) return false
   return (
+    keyOf(a) === keyOf(b) &&
     a.userId === b.userId &&
     a.focusedCell === b.focusedCell &&
+    a.viewingCell === b.viewingCell &&
     a.currentFileId === b.currentFileId &&
     a.ts === b.ts &&
     sameSelection(a.selection, b.selection)
@@ -73,8 +101,14 @@ function sameRosterUser(
   return (
     a.userId === b.userId &&
     a.focusedCell === b.focusedCell &&
+    a.viewingCell === b.viewingCell &&
     a.currentFileId === b.currentFileId
   )
+}
+
+/** The row a user is on: the lease-held cell wins, else the selected row. */
+export function presentCellOf(user: Pick<PresenceUserSnapshot, "focusedCell" | "viewingCell">): string | undefined {
+  return user.focusedCell ?? user.viewingCell
 }
 
 function affectedCellIds(
@@ -83,21 +117,36 @@ function affectedCellIds(
 ): string[] {
   const ids = new Set<string>()
   if (before?.focusedCell) ids.add(before.focusedCell)
+  if (before?.viewingCell) ids.add(before.viewingCell)
   if (after?.focusedCell) ids.add(after.focusedCell)
+  if (after?.viewingCell) ids.add(after.viewingCell)
   return Array.from(ids)
 }
 
 export class ProjectPresenceStore {
   /**
-   * Every identity that represents the *current* user. Presence frames stamp
-   * the connection's `auth.claims.username`, but legacy tokens that predate the
+   * Every USERNAME form of the current user. Presence frames stamp the
+   * connection's `auth.claims.username`, but legacy tokens that predate the
    * username claim fall back to a `user:<numericId>` form (see
-   * sync-worker `project-do.ts`). Filtering by username alone would then leak
-   * the user's *own* presence back to them (AQU-559). We hold every known self
-   * form here and exclude all of them.
+   * sync-worker `project-do.ts`); we hold every known self form (AQU-559).
+   *
+   * These are NOT the primary self filter any more: rows are keyed per
+   * connection and "self" is our own socket's `connId` (see setSelfConnId), so
+   * another tab — or another person on a shared account — is a visible peer.
+   * Username matching is kept for (a) rows from pre-connId workers, which
+   * carry no connId, and (b) the synthetic lock-holder row, whose only
+   * identity is the lock's username.
    */
   private readonly selfIds: Set<string>
+  /** Our own socket's presence key; null until the reconciler opens. */
+  private selfConnId: string | null = null
   private users = new Map<string, PresenceUserSnapshot>()
+  /**
+   * Live draft text per connection, delivered by `presence.draft` frames (and
+   * by the `selection.draftText` of a full snapshot). Kept out of `users` so a
+   * draft frame never touches roster-visible state — only the cell it belongs to.
+   */
+  private drafts = new Map<string, PresenceDraft>()
   private lockHolders = new Map<string, string>()
   private rosterListeners = new Set<Listener>()
   private cellListeners = new Map<string, Set<Listener>>()
@@ -108,8 +157,33 @@ export class ProjectPresenceStore {
     this.selfIds = new Set(typeof currentUserId === "string" ? [currentUserId] : currentUserId)
   }
 
-  private isSelf(userId: string): boolean {
+  /** Self by socket when the row carries a connId; by username otherwise. */
+  private isSelfRow(user: Pick<PresenceUserSnapshot, "connId" | "userId">): boolean {
+    if (user.connId !== undefined) return user.connId === this.selfConnId
+    return this.selfIds.has(user.userId)
+  }
+
+  private isSelfUsername(userId: string): boolean {
     return this.selfIds.has(userId)
+  }
+
+  /**
+   * Record this client's own socket connId (fresh per connect, from the
+   * reconciler's onOpen). Re-filters anything already surfaced so a row that
+   * arrived under our connId before we knew it never shows as a peer.
+   */
+  setSelfConnId(connId: string | null): void {
+    if (this.selfConnId === connId) return
+    this.selfConnId = connId
+    this.refilterSelf()
+  }
+
+  private refilterSelf(): void {
+    this.rosterSnapshot = this.computePeers()
+    this.emitRoster()
+    for (const cellId of Array.from(this.cellSnapshots.keys())) {
+      this.updateCellSnapshot(cellId)
+    }
   }
 
   /**
@@ -121,20 +195,17 @@ export class ProjectPresenceStore {
   addSelfId(id: string): void {
     if (this.selfIds.has(id)) return
     this.selfIds.add(id)
-    this.rosterSnapshot = this.computePeers()
-    this.emitRoster()
-    for (const cellId of Array.from(this.cellSnapshots.keys())) {
-      this.updateCellSnapshot(cellId)
-    }
+    this.refilterSelf()
   }
 
   reset(): void {
     const affected = new Set<string>()
     for (const user of this.users.values()) {
-      if (user.focusedCell) affected.add(user.focusedCell)
+      for (const cellId of affectedCellIds(user, undefined)) affected.add(cellId)
     }
     for (const cellId of this.lockHolders.keys()) affected.add(cellId)
     this.users = new Map()
+    this.drafts = new Map()
     this.lockHolders = new Map()
     this.rosterSnapshot = EMPTY_PEERS
     this.cellSnapshots = new Map()
@@ -148,17 +219,20 @@ export class ProjectPresenceStore {
     let rosterChanged = this.users.size !== users.length
 
     for (const user of users) {
-      next.set(user.userId, user)
-      const old = this.users.get(user.userId)
+      const key = keyOf(user)
+      next.set(key, user)
+      const old = this.users.get(key)
       if (!sameRosterUser(old, user)) rosterChanged = true
       if (!sameUser(old, user)) {
         for (const cellId of affectedCellIds(old, user)) affected.add(cellId)
       }
+      if (this.syncDraftFromSnapshot(user) && user.focusedCell) affected.add(user.focusedCell)
     }
 
-    for (const [userId, old] of this.users) {
-      if (next.has(userId)) continue
+    for (const [key, old] of this.users) {
+      if (next.has(key)) continue
       rosterChanged = true
+      this.drafts.delete(key)
       for (const cellId of affectedCellIds(old, undefined)) affected.add(cellId)
     }
 
@@ -168,6 +242,71 @@ export class ProjectPresenceStore {
       this.emitRoster()
     }
     for (const cellId of affected) this.updateCellSnapshot(cellId)
+  }
+
+  /**
+   * `presence.diff`: exactly one user changed. Roster listeners fire only when a
+   * roster-visible field changed (focusedCell / currentFileId / joined); cell
+   * listeners fire for the cells the user left and entered.
+   */
+  applyPresenceDiff(user: PresenceUserSnapshot): void {
+    const key = keyOf(user)
+    const old = this.users.get(key)
+    this.users.set(key, user)
+    const draftChanged = this.syncDraftFromSnapshot(user)
+    if (!sameRosterUser(old, user)) {
+      this.rosterSnapshot = this.computePeers()
+      this.emitRoster()
+    }
+    if (sameUser(old, user) && !draftChanged) return
+    for (const cellId of affectedCellIds(old, user)) this.updateCellSnapshot(cellId)
+  }
+
+  /** `presence.left`: one socket closed (`connId`; legacy workers send the userId). */
+  applyPresenceLeft(connId: string): void {
+    const old = this.users.get(connId)
+    this.drafts.delete(connId)
+    if (!old) return
+    this.users.delete(connId)
+    this.rosterSnapshot = this.computePeers()
+    this.emitRoster()
+    for (const cellId of affectedCellIds(old, undefined)) this.updateCellSnapshot(cellId)
+  }
+
+  /**
+   * `presence.draft`: live draft text for one cell. Notifies ONLY that cell's
+   * listeners — never the roster — so typing peers do not re-render the
+   * workspace root. Exposed on the cell peer's `selection.draftText`.
+   */
+  applyPresenceDraft(connId: string, cellId: string, draftText: string, ts: number): void {
+    const previous = this.drafts.get(connId)
+    if (previous && previous.ts > ts) return
+    this.drafts.set(connId, { cellId, draftText, ts })
+    if (previous && previous.cellId !== cellId) this.updateCellSnapshot(previous.cellId)
+    this.updateCellSnapshot(cellId)
+  }
+
+  /**
+   * Mirror a snapshot/diff's selection into the drafts map: a user with no
+   * selection has no draft; a selection carrying `draftText` IS the draft; a
+   * selection without `draftText` (diffs strip it) leaves the live draft alone.
+   * Returns true when the stored draft changed.
+   */
+  private syncDraftFromSnapshot(user: PresenceUserSnapshot): boolean {
+    const key = keyOf(user)
+    const previous = this.drafts.get(key)
+    if (!user.selection) {
+      if (!previous) return false
+      this.drafts.delete(key)
+      return true
+    }
+    const draftText = user.selection.draftText
+    if (draftText === undefined) return false
+    const cellId = user.focusedCell
+    if (!cellId) return false
+    if (previous && previous.cellId === cellId && previous.draftText === draftText) return false
+    this.drafts.set(key, { cellId, draftText, ts: user.ts })
+    return true
   }
 
   applyLockClaimed(cellId: string, userId: string): void {
@@ -183,6 +322,12 @@ export class ProjectPresenceStore {
     this.updateCellSnapshot(cellId)
   }
 
+  /** Raw per-user snapshots (no drafts) — for lock-holder derivation and the
+   *  focus-lock hook, which still consume the full-roster frame shape. */
+  getUserSnapshots(): (PresenceUserSnapshot & { connId: string })[] {
+    return Array.from(this.users.values(), (u) => ({ ...u, connId: keyOf(u) }))
+  }
+
   getPeers(): ProjectPresencePeer[] {
     return this.rosterSnapshot
   }
@@ -194,26 +339,30 @@ export class ProjectPresenceStore {
   private computePeers(): ProjectPresencePeer[] {
     const peers: ProjectPresencePeer[] = []
     for (const user of this.users.values()) {
-      if (this.isSelf(user.userId)) continue
+      if (this.isSelfRow(user)) continue
       peers.push(this.toPeer(user))
     }
-    peers.sort((a, b) => a.username.localeCompare(b.username))
+    peers.sort((a, b) => a.username.localeCompare(b.username) || a.peerId.localeCompare(b.peerId))
     return peers
   }
 
   private computeCellPresence(cellId: string): CellPresencePeer[] {
     const peers: CellPresencePeer[] = []
     const explicitHolder = this.lockHolders.get(cellId)
+    // Usernames present on the row — the lock frame only names a username.
     const seen = new Set<string>()
 
     for (const user of this.users.values()) {
-      if (this.isSelf(user.userId)) continue
-      if (user.focusedCell !== cellId) continue
+      if (this.isSelfRow(user)) continue
+      if (presentCellOf(user) !== cellId) continue
       seen.add(user.userId)
       peers.push({ ...this.toPeer(user), cellId })
     }
 
-    if (explicitHolder && !this.isSelf(explicitHolder) && !seen.has(explicitHolder)) {
+    // Lock held by a username with no presence row on the cell. Locks are per
+    // USER, so our own username here may be this very tab's claim — filter by
+    // username, not connId.
+    if (explicitHolder && !this.isSelfUsername(explicitHolder) && !seen.has(explicitHolder)) {
       peers.push({
         peerId: explicitHolder,
         username: explicitHolder,
@@ -258,15 +407,25 @@ export class ProjectPresenceStore {
 
   private toPeer(user: PresenceUserSnapshot): ProjectPresencePeer {
     return {
-      peerId: user.userId,
+      peerId: keyOf(user),
       username: user.userId,
       color: peerColor(user.userId),
       currentFileId: user.currentFileId,
       focusedCell: user.focusedCell,
-      selection: user.selection,
+      viewingCell: user.viewingCell,
+      selection: this.selectionWithDraft(user),
       isEditing: Boolean(user.focusedCell),
       lastSeenAt: user.ts,
     }
+  }
+
+  private selectionWithDraft(user: PresenceUserSnapshot): TargetPresenceSelection | undefined {
+    const selection = user.selection
+    if (!selection) return undefined
+    const draft = this.drafts.get(keyOf(user))
+    if (!draft || draft.cellId !== user.focusedCell) return selection
+    if (selection.draftText === draft.draftText) return selection
+    return { ...selection, draftText: draft.draftText }
   }
 
   private emitRoster(): void {

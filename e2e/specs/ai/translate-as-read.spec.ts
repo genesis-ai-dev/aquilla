@@ -27,10 +27,11 @@ test("translate as read drafts the viewport without replacing human text", async
   await ws.editCell(0, "Human translation")
   mockLLM.setNextResponse("Viewport AI draft")
 
-  // "Translate as read" lives in the File options ⋯ menu as a checkbox item
-  // (moved off the toolbar in 2e924890; Base UI checkbox items keep the menu
-  // open on click, so checked state is assertable in place).
-  const toggle = alice.getByRole("menuitemcheckbox", { name: "Translate as read" })
+  // "Draft as you read" (relabelled from "Translate as read" in AQU-1078)
+  // lives in the File options ⋯ menu as a checkbox item (moved off the
+  // toolbar in 2e924890; Base UI checkbox items keep the menu open on click,
+  // so checked state is assertable in place).
+  const toggle = alice.getByRole("menuitemcheckbox", { name: "Draft as you read" })
   await ws.openFileOverflowMenu()
   await expect(toggle).toBeVisible()
   await toggle.click()

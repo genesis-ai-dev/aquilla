@@ -28,10 +28,12 @@ vi.mock("@/lib/completion/frontier-health", () => ({
 
 vi.mock("@/lib/store/user-provider-override", () => ({
   getUserProviderOverride: () => null,
+  useUserProviderOverride: () => null,
 }))
 
 vi.mock("@/lib/store/user-api-keys", () => ({
   resolveApiKey: (_: string, key: string | undefined) => key ?? null,
+  useUserApiKey: () => undefined,
 }))
 
 vi.mock("@/lib/completion/compress-examples", () => ({
@@ -160,6 +162,69 @@ describe("completeBatch — mid-run sub-batch failure (AQU-361)", () => {
     expect(finalProgress?.total).toBe(30)
     expect(finalProgress?.done).toBe(20)
     expect(finalProgress?.failed).toBe(10)
+    expect(finalProgress?.finished).toBe(true)
+  })
+})
+
+describe("completeBatch — coalesced chunk persistence (AQU-1145)", () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals()
+    clearBatchCompletionProgress()
+  })
+
+  it("commits one mapped model chunk through one batch callback and reports per-cell failures", async () => {
+    const cells = Array.from({ length: 10 }, (_, i) =>
+      makeCell(`cell-${i + 1}`, FILE_A, `Source sentence ${i + 1}`),
+    )
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve({
+          choices: [{ message: { content: encodeChunkResponse(cells) } }],
+        }),
+        body: null,
+      }),
+    )
+
+    const scalarCommit = vi.fn().mockResolvedValue(undefined)
+    const batchCommit = vi.fn().mockImplementation(async (drafts: unknown[]) =>
+      drafts.map((_, index) => index === 4
+        ? { status: "rejected" as const, reason: new Error("cell 5 enqueue failed") }
+        : { status: "fulfilled" as const, value: undefined }),
+    )
+    const { result } = renderHook(() =>
+      useCompletion(
+        SETTINGS, "English", "French",
+        searchMock, searchPassagesMock,
+        SESSION, scalarCommit, [],
+        cells as never, undefined, DEFAULT_DRAFT_CONTEXT, "", batchCommit,
+      ),
+    )
+
+    await act(async () => {
+      await result.current.completeBatch(cells as never)
+    })
+
+    expect(batchCommit).toHaveBeenCalledTimes(1)
+    expect(scalarCommit).not.toHaveBeenCalled()
+    const drafts = batchCommit.mock.calls[0][0]
+    expect(drafts).toHaveLength(10)
+    expect(drafts.map((draft: { cell: MinimalCell }) => draft.cell.id)).toEqual(
+      cells.map((cell) => cell.id),
+    )
+    expect(drafts[0]).toMatchObject({
+      text: "Translated 1",
+      author: "test-model",
+      provenance: { mode: "batch", model: "test-model", provider: "custom" },
+    })
+    expect(result.current.errors.get("cell-5")).toBe("cell 5 enqueue failed")
+    expect(result.current.errors.has("cell-1")).toBe(false)
+
+    const finalProgress = getCompletionBatchProgress()
+    expect(finalProgress?.total).toBe(10)
+    expect(finalProgress?.done).toBe(9)
+    expect(finalProgress?.failed).toBe(1)
     expect(finalProgress?.finished).toBe(true)
   })
 })

@@ -3,6 +3,7 @@ import "fake-indexeddb/auto"
 import {
   buildRawEvent,
   emitTargetCellCommit,
+  emitTargetCellCommits,
   emitSourceCellCommit,
   emitCellValidate,
   emitCellUnvalidate,
@@ -24,6 +25,7 @@ import { OUTBOX_SCHEMA_VERSION } from "./outbox-types"
 
 describe("events-emit", () => {
   beforeEach(async () => {
+    setCqrsOutboxBridge(null)
     await resetOutboxConnectionForTests()
     await new Promise<void>((resolve, reject) => {
       const d = indexedDB.deleteDatabase("aquilla-cqrs-outbox")
@@ -244,6 +246,95 @@ describe("events-emit", () => {
       const event = record.event as unknown as OutboxRawEvent<"target.cell.commit">
       expect(event.payload.ai_suggestion).toBe(true)
       expect(event.payload.ai_draft).toEqual(aiDraft)
+    })
+  })
+
+  describe("emitTargetCellCommits", () => {
+    it("atomically enqueues distinct AI commits with their own chain metadata", async () => {
+      const provenance = {
+        model: "test-model",
+        provider: "custom" as const,
+        promptVersion: "v1",
+        exampleIds: ["example-1"],
+        generatedAt: 123,
+        mode: "batch" as const,
+        projectState: {
+          sourceLanguage: "en",
+          targetLanguage: "fr",
+          approvedExampleCount: 1,
+        },
+      }
+      const ids = await emitTargetCellCommits([
+        {
+          projectId: "p",
+          fileId: "f",
+          cellId: "c1",
+          parentId: "head-1",
+          sourceEventId: "source-1",
+          value: "bonjour",
+          author: "model",
+          aiSuggestion: true,
+          aiDraft: provenance,
+        },
+        {
+          projectId: "p",
+          fileId: "f",
+          cellId: "c2",
+          parentId: "head-2",
+          sourceEventId: "source-2",
+          value: "monde",
+          author: "model",
+          targetLang: "fr",
+          aiSuggestion: true,
+          aiDraft: provenance,
+        },
+      ])
+
+      expect(ids).toHaveLength(2)
+      expect(new Set(ids).size).toBe(2)
+      const records = await peekOutboxBatch(10)
+      expect(records).toHaveLength(2)
+      expect(records.map((record) => record.event.cellId)).toEqual(["c1", "c2"])
+      const first = records[0].event as unknown as OutboxRawEvent<"target.cell.commit">
+      const second = records[1].event as unknown as OutboxRawEvent<"target.cell.commit">
+      expect(first.parentId).toBe("head-1")
+      expect(first.payload.sourceEventId).toBe("source-1")
+      expect(first.payload.ai_suggestion).toBe(true)
+      expect(first.payload.ai_draft).toEqual(provenance)
+      expect("targetLang" in first.payload).toBe(false)
+      expect(second.parentId).toBe("head-2")
+      expect(second.payload.targetLang).toBe("fr")
+    })
+
+    it("writes nothing when one input fails the role gate", async () => {
+      setCqrsOutboxBridge({
+        projectId: "p",
+        activeFileId: "f",
+        username: "u",
+        roleLevel: ROLE.COMMENTER,
+      })
+
+      await expect(emitTargetCellCommits([
+        {
+          projectId: "p",
+          fileId: "f",
+          cellId: "c1",
+          parentId: "head-1",
+          value: "bonjour",
+          author: "model",
+          aiSuggestion: true,
+        },
+        {
+          projectId: "p",
+          fileId: "f",
+          cellId: "c2",
+          parentId: "head-2",
+          value: "monde",
+          author: "model",
+          aiSuggestion: true,
+        },
+      ])).rejects.toBeInstanceOf(InsufficientRoleError)
+      expect(await outboxPendingCount()).toBe(0)
     })
   })
 

@@ -24,21 +24,31 @@ export const ROLE = {
 
 /** Minimum role level required to emit each event kind. Mirrors the server. */
 const REQUIRED_ROLE: Record<string, number> = {
-  // Sam, 2026-08-21: create/delete/reorder sit at CONTRIBUTOR so the "let
-  // people add new lines" project setting can admit contributors. Reorder is
-  // in the set because it is the chain bookkeeping RIDING every add and
-  // remove (handleAddLine/handleRemoveLine batch it in), and a floor that
-  // refused it silently killed the whole batch. This static floor is the
-  // LOWEST reachable one; the server conditionally re-imposes PROJECT_LEAD —
-  // all three refused below lead unless the project opted in, deletes
-  // additionally only for a cell a person added by hand (sync-worker
-  // authorize.ts + line-creation-authority.ts). The client gate's own rule
-  // applies: only block what is PROVABLY insufficient, and with the
-  // carve-out a contributor no longer is.
-  "source.cell.create": ROLE.CONTRIBUTOR,
+  // AQU-1068: create/delete/reorder sit at COMMENTER because this table is
+  // the LOWEST reachable floor, not the operative one. Reorder is in the set
+  // because it is the chain bookkeeping RIDING every add and remove
+  // (handleAddLine/handleRemoveLine batch it in), and a floor that refused it
+  // silently killed the whole batch.
+  //
+  // The project's `cellEditingFloor` decides who is actually offered these
+  // actions, and since 2026-09-09 it decides it HERE — in the client's
+  // affordances (cell-editing-gate.ts and its callers) rather than at the
+  // server perimeter, which now enforces only one rule: a delete needs
+  // MAINTAINER unless the cell is one a person added by hand. This table's own
+  // rule applies unchanged: only block what is PROVABLY insufficient, and no
+  // rank at or above the tier's lowest rung is — the tier decides, and this
+  // table cannot see it.
+  //
+  // LOWERED FROM CONTRIBUTOR (Matthew's review, approved by Sam 2026-09-08)
+  // in lock-step with the server, when the tier list grew Commenter and
+  // Reviewer rungs. Leaving it at CONTRIBUTOR here would have been the worse
+  // half of a drift: the server would admit a commenter's insert and this
+  // mirror would refuse to enqueue it, so the button would do nothing at all
+  // and never even produce the 403 that explains why.
+  "source.cell.create": ROLE.COMMENTER,
   "source.cell.commit": ROLE.PROJECT_LEAD,
-  "source.cell.delete": ROLE.CONTRIBUTOR,
-  "source.cell.reorder": ROLE.CONTRIBUTOR,
+  "source.cell.delete": ROLE.COMMENTER,
+  "source.cell.reorder": ROLE.COMMENTER,
 
   "target.cell.create": ROLE.CONTRIBUTOR,
   "target.cell.commit": ROLE.CONTRIBUTOR,

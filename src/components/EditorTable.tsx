@@ -11,13 +11,13 @@ import {
   MessageCircle, Play, Pause, Mic, MicOff, FileText,
   ArrowRight, Activity, NotebookPen, Pencil, ChevronDown, Music, Braces,
   Languages,
-  Lock,
   Pilcrow,
   PilcrowRight,
   X,
-  Plus,
   ArrowUp,
   ArrowDown,
+  Clock,
+  MoreVertical,
   Bold,
   VolumeX,
 } from "lucide-react"
@@ -101,11 +101,16 @@ import {
   useIsSelected,
 } from "@/lib/audio/selection"
 import { ttsStatusKey, useTtsStatus } from "@/lib/audio/tts"
-import { Popover, PopoverContent, PopoverDescription, PopoverTitle } from "@/components/ui/popover"
+import { Popover, PopoverContent, PopoverDescription, PopoverTitle, PopoverTrigger } from "@/components/ui/popover"
+import { Input } from "@/components/ui/input"
+import { parseTimecode, spanProblem } from "@/lib/timeline/timecode"
+import { fmtDragTime } from "@/components/timeline/format"
+import { isUserAddedLine } from "@/lib/timeline/user-line-origin"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -791,11 +796,31 @@ interface EditorTableProps {
     head: { startSec: number; endSec: number } | null
     /** Keyed by the cell whose row offers "insert below". */
     afterCell: ReadonlyMap<string, { startSec: number; endSec: number }>
-    onAddLine(startSec: number, endSec: number): void
-    /** The workspace owns what is removable, exactly as the timeline lane does. */
-    canRemove(cell: CellData): boolean
-    onRemoveLine(cellId: string): void
+    /**
+     * AQU-1068: untimed files insert by ANCHOR, not by clock. When true the
+     * two span fields above go unused and every row offers both directions —
+     * an ordinary text file has room everywhere, so there is no silence to
+     * measure.
+     */
+    untimed?: boolean
+    /**
+     * Round 3: what this ROW may do, and why not when it may not. The workspace
+     * owns the rule — the table supplies only the two facts it alone knows (is
+     * there a silence on either side of this row) and renders whatever comes
+     * back. A returned reason means the control is drawn DISABLED with that
+     * text, never omitted.
+     */
+    rowActions(
+      cell: CellData,
+      gaps: { gapAbove: boolean; gapBelow: boolean },
+    ): { above: string | null; below: string | null; remove: string | null }
   }
+  // AQU-1068 item 5: `onAddLine`, `onRemoveLine` and the untimed pair used to
+  // live on the object above. They are the same three functions for every row
+  // in the file, so they moved to EditorActionsContext when the controls moved
+  // INSIDE the row — a fresh closure per row would have re-rendered every
+  // rendered row on every store bump. What stays here is what genuinely varies
+  // per row: the silences and the rule that reads them.
   lineNumbersEnabled: boolean
   cellLabelsEnabled: boolean
   sourceDirectionMode?: DirectionMode
@@ -2282,16 +2307,54 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
             const state = completing.get(id)
             return state === "searching" || state === "generating"
           }) ?? false
-          // AQU-646: the row's STRUCTURAL controls — add a line into the
-          // silence after it, take an empty added line back. One map lookup and
-          // one predicate call per row; no scans.
+          // AQU-646 / AQU-1068: the row's STRUCTURAL controls — add a cell
+          // here, take one back. One map lookup and one predicate call per
+          // row; no scans.
           //
-          // `insertAbove` reaches only the first row, because that is the only
-          // row with a silence in front of it — everywhere else "above me" is
-          // "below my predecessor", which that row already offers.
-          const insertBelow = sourceLineEditing?.afterCell.get(cell.id) ?? null
-          const insertAbove = index === 0 ? (sourceLineEditing?.head ?? null) : null
-          const canRemoveLine = Boolean(sourceLineEditing?.canRemove(cell))
+          // The two file kinds answer "where can a cell go?" differently, and
+          // the answer is resolved HERE into plain thunks so RowStructureCorner
+          // never has to know about clocks:
+          //
+          //  - TIMED (a subtitle file with footage): only into a silence wide
+          //    enough to hold a line. No room, no button. `insertAbove` reaches
+          //    only the first row, because that is the only row with a silence
+          //    in front of it — everywhere else "above me" is "below my
+          //    predecessor", which that row already offers.
+          //
+          //  - UNTIMED (an ordinary text file): a cell can go anywhere, so
+          //    both directions are offered on every row. The redundancy is
+          //    deliberate here: pointing at the row you want to push down is
+          //    how people describe the act, and there is no gap to reason
+          //    about that would make one direction the "real" one.
+          // The silences on either side of this row, on a TIMED file.
+          //
+          // "Above" is the gap the PREVIOUS row owns — `insertSlotsByCell` keys
+          // each qualifying gap to the cue in front of it, and has already
+          // applied both the gap filter and the minimum-width floor, so this is
+          // a lookup rather than a search. The head slot is the one gap no cue
+          // precedes. Both directions are offered wherever there is room; the
+          // same silence being reachable from two rows is deliberate.
+          const untimedInserts = sourceLineEditing?.untimed
+          const previousCellId = index > 0 ? displayCellIds[index - 1] : null
+          const insertBelowSpan = untimedInserts ? null : (sourceLineEditing?.afterCell.get(cell.id) ?? null)
+          const insertAboveSpan = untimedInserts
+            ? null
+            : index === 0
+              ? (sourceLineEditing?.head ?? null)
+              : (previousCellId ? (sourceLineEditing?.afterCell.get(previousCellId) ?? null) : null)
+          const rowActions = sourceLineEditing?.rowActions(cell, {
+            gapAbove: Boolean(insertAboveSpan),
+            gapBelow: Boolean(insertBelowSpan),
+          })
+          // AQU-1068 item 5: the menu that shows these lives INSIDE the row
+          // now (it replaced the source pencil), so what travels down through
+          // `MemoizedRow` has to survive React.memo's shallow compare. Hence
+          // primitives only — three reason strings and the spans as four
+          // numbers. The actions are the same functions for every row in the
+          // file and go through EditorActionsContext instead; a fresh closure
+          // per row would re-render every rendered row on every store bump,
+          // which is the whole-file churn round 6 went into removing.
+          const neighbourTimes = timestampNeighbours(index, displayCellIds, cellStore)
           return (
       <div
         data-cell-id={cell.id}
@@ -2303,21 +2366,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           "relative",
           // The hover group for the structural strip below. Named so it cannot
           // be caught by the row's other `group` users.
-          (insertBelow || insertAbove || canRemoveLine) && "group/rowstrip",
+          sourceLineEditing && "group/rowstrip",
           untimedInTimeLens && "border-s-2 border-dashed border-amber-400/70",
           showParagraphBoundary && "mt-3",
         )}
       >
-        {sourceLineEditing && (
-          <RowStructureCorner
-            testId={`row-structure-${cell.id}`}
-            insertBelow={insertBelow}
-            insertAbove={insertAbove}
-            onAddLine={sourceLineEditing.onAddLine}
-            onRemove={canRemoveLine ? () => sourceLineEditing.onRemoveLine(cell.id) : undefined}
-            removeTestId={`row-remove-${cell.id}`}
-          />
-        )}
         {untimedInTimeLens && (
           <span className="pointer-events-none absolute start-1 top-1 z-10 rounded bg-amber-400/15 px-1 text-[9px] font-medium text-amber-600 dark:text-amber-400">
             {t("editor.row.noTimingBadge")}
@@ -2389,6 +2442,18 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           paragraphGroupSize={paragraphGroupInfo?.size}
           paragraphDraftableCount={paragraphGroupInfo?.draftableCount}
           paragraphGroupInFlight={paragraphGroupInFlight}
+          insertAboveReason={rowActions?.above ?? null}
+          insertBelowReason={rowActions?.below ?? null}
+          removeReason={rowActions?.remove ?? null}
+          structuralEditing={Boolean(sourceLineEditing)}
+          untimedInserts={Boolean(untimedInserts)}
+          insertAboveStartSec={insertAboveSpan?.startSec}
+          insertAboveEndSec={insertAboveSpan?.endSec}
+          insertBelowStartSec={insertBelowSpan?.startSec}
+          insertBelowEndSec={insertBelowSpan?.endSec}
+          prevStartSec={neighbourTimes.prevStartSec}
+          nextStartSec={neighbourTimes.nextStartSec}
+          timedFile={isTimeOrdered}
           isBacktranslationConfigured={isBacktranslationConfigured}
           backtranslating={backtranslating}
           backtranslationErrors={backtranslationErrors}
@@ -2844,110 +2909,457 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
  * affordance over an empty stretch of track; this is persistent row chrome. The
  * two surfaces asking the same question does not make them the same control.
  */
-function RowStructureCorner({
-  testId,
-  /** The silence after this row. Null = no room, so no `+` AT ALL — never a
-   *  disabled one. The same "no room, no add" rule the timeline's pencil obeys. */
-  insertBelow,
-  /** The silence before the FIRST cue. Only ever passed to the first row. */
-  insertAbove,
-  onAddLine,
-  onRemove,
-  removeTestId,
-}: {
-  testId: string
-  insertBelow: { startSec: number; endSec: number } | null
-  insertAbove: { startSec: number; endSec: number } | null
-  onAddLine(startSec: number, endSec: number): void
-  onRemove?: () => void
-  removeTestId?: string
+/**
+ * AQU-1068 item 5: the room a line has, for the timestamps form.
+ *
+ * Read off the rows on either side IN DISPLAY ORDER, which is what the person
+ * typing is looking at — on a time-ordered file the lens has already sorted by
+ * the clock, so the neighbour above really is the line before.
+ *
+ * A missing neighbour is `null`, not 0: the first line may start at the top of
+ * the file and the last may run as long as it likes, and a 0 would clamp both
+ * to nothing. A neighbour with no timings of its own is also null — an untimed
+ * row bounds nothing, which is exactly the mixed file `untimedInTimeLens`
+ * draws with a dashed edge.
+ */
+function timestampNeighbours(
+  index: number,
+  displayCellIds: readonly string[],
+  cellStore: CellStore,
+): { prevStartSec: number | null; nextStartSec: number | null } {
+  // Their STARTS, because the start is the only thing bounded: a line may
+  // overlap its neighbours as far as it likes, but the order of the starts is
+  // what the media lens and every timed export sort on.
+  //
+  // Walks OUTWARD past rows with no timing of their own. A timed file can hold
+  // untimed rows (the dashed edge `untimedInTimeLens` draws) and one of those
+  // bounds nothing, so stopping at the first would invent a limit where there
+  // is none. The scan ends at the first timed row, which is its neighbour in
+  // all but a file that is almost entirely untimed — and there the popover is
+  // not offered at all.
+  const startOf = (id: string | undefined): number | null => {
+    if (!id) return null
+    // Seconds already — `startTime` on the view is what the whole timeline
+    // works in; the milliseconds live on the row underneath.
+    const sec = cellStore.getCellView(id)?.startTime
+    return typeof sec === "number" ? sec : null
+  }
+  const scan = (step: -1 | 1): number | null => {
+    for (let at = index + step; at >= 0 && at < displayCellIds.length; at += step) {
+      const sec = startOf(displayCellIds[at])
+      if (sec !== null) return sec
+    }
+    return null
+  }
+  return { prevStartSec: scan(-1), nextStartSec: scan(1) }
+}
+
+/**
+ * AQU-1068 item 5: what the "Edit timestamps" entry needs.
+ *
+ * The bounds are the NEIGHBOURS' edges, passed in rather than looked up, so
+ * this component never has to know about the file's order — the row already
+ * resolved them.
+ */
+interface CellTimestampsProps {
+  startSec: number
+  endSec: number
+  /**
+   * The STARTS of the lines either side, in clock order — the only limit on a
+   * typed span. Null at either end of the file, and for a neighbour with no
+   * timing of its own. Overlap is free; it is the ORDER of the starts that has
+   * to hold, because that is what the media lens and every timed export sort
+   * on while the text table reads the anchor chain.
+   */
+  prevStartSec: number | null
+  nextStartSec: number | null
+  /** Set when the row itself cannot be retimed (imported audio, IDML), or the
+   *  project's timings are locked. The entry renders disabled with it. */
+  disabledReason?: string | null
+  /** True when the reason above is the project-wide lock AND this person can
+   *  lift it — the form opens inert, pointing at the setting. */
+  offerUnlock?: boolean
+  onUnlock?: () => void
+  onSave?: (startSec: number, endSec: number) => void
+}
+
+/**
+ * Typing a line's start and end, as an alternative to dragging its chip.
+ *
+ * Greenlit by Sam (2026-09-09) off Ryder's menu note. Dragging is the right
+ * tool for "about here" and the wrong one for "exactly 1:02.500", which is
+ * what a subtitle conformed against a script needs.
+ *
+ * It writes through the workspace's existing retime handler, so the lock check
+ * and the media-vs-text choice of event are shared with the drag rather than
+ * reimplemented. What it adds is reading what was typed (`parseTimecode`) and
+ * keeping it inside the neighbours (`clampSpan`) — the second of which is not
+ * politeness: the text table orders rows by the anchor chain while the media
+ * lens sorts by the clock, and a span pushed past its neighbour makes those
+ * two disagree.
+ */
+function CellTimestampsPopover({
+  cellId,
+  open,
+  onOpenChange,
+  startSec,
+  endSec,
+  prevStartSec,
+  nextStartSec,
+  disabledReason,
+  offerUnlock,
+  onUnlock,
+  onSave,
+}: CellTimestampsProps & {
+  cellId: string
+  open: boolean
+  onOpenChange: (open: boolean) => void
 }) {
-  // Above the early return: a hook after one runs in a different order on the
-  // renders that bail out, which is the rules-of-hooks error this was.
   const t = useT()
-  if (!insertBelow && !insertAbove && !onRemove) return null
-  // Both directions available (only ever the first row, and only while the
-  // file still opens on a silence) — the button has to ask which. One
-  // direction available: just do it. A one-item menu is a click for nothing.
-  const needsMenu = Boolean(insertAbove && insertBelow)
-  const square =
-    "flex h-6 w-6 items-center justify-center rounded-md border border-border bg-background text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground"
+  const [start, setStart] = useState("")
+  const [end, setEnd] = useState("")
+  const [error, setError] = useState<string | null>(null)
+
+  // Seed from the row every time it opens, never while it is open: a live
+  // reseed would fight the person typing when a collaborator's retime or
+  // their own optimistic write lands mid-edit.
+  useEffect(() => {
+    if (!open) return
+    setStart(fmtDragTime(startSec))
+    setEnd(fmtDragTime(endSec))
+    setError(null)
+  }, [open, startSec, endSec])
+
+  const locked = Boolean(disabledReason)
+  const commit = () => {
+    if (locked) return
+    const parsedStart = parseTimecode(start)
+    const parsedEnd = parseTimecode(end)
+    if (parsedStart === null || parsedEnd === null) {
+      setError(t("editor.cellMenu.badTime"))
+      return
+    }
+    // OVERLAP IS ALLOWED IN FULL (Sam, 2026-09-09): a line may run past the one
+    // after it, or begin under the tail of the one before, for as long as it
+    // likes. The only limit is that its START stays between its neighbours'
+    // starts, because that is what keeps the clock order and the anchor chain
+    // agreeing. Refused rather than repaired — silently moving a value
+    // somebody just typed is a worse surprise than being told, and it guesses
+    // at which of the two they meant.
+    const problem = spanProblem(parsedStart, parsedEnd, { prevStartSec, nextStartSec })
+    if (problem) {
+      setError(
+        problem === "inverted"
+          ? t("editor.cellMenu.invertedTimes")
+          : problem === "startsBeforePrevious"
+            ? t("editor.cellMenu.startsBeforePrevious", { from: fmtDragTime(prevStartSec ?? 0) })
+            : t("editor.cellMenu.startsAfterNext", { to: fmtDragTime(nextStartSec ?? 0) }),
+      )
+      return
+    }
+    onSave?.(parsedStart, parsedEnd)
+    onOpenChange(false)
+  }
+
+  const hint =
+    prevStartSec !== null && nextStartSec !== null
+      ? t("editor.cellMenu.betweenHint", { from: fmtDragTime(prevStartSec), to: fmtDragTime(nextStartSec) })
+      : prevStartSec !== null
+        ? t("editor.cellMenu.afterHint", { from: fmtDragTime(prevStartSec) })
+        : nextStartSec !== null
+          ? t("editor.cellMenu.beforeHint", { to: fmtDragTime(nextStartSec) })
+          : null
+
+  const field = (
+    id: "start" | "end",
+    label: string,
+    value: string,
+    onChange: (next: string) => void,
+  ) => (
+    <label className="flex min-w-0 flex-1 flex-col gap-1">
+      <span className="text-[11px] font-medium text-muted-foreground">{label}</span>
+      <Input
+        data-testid={`cell-times-${id}`}
+        value={value}
+        disabled={locked}
+        aria-invalid={error ? true : undefined}
+        aria-label={label}
+        inputMode="numeric"
+        className="h-7 font-mono text-xs tabular-nums"
+        onChange={(e) => {
+          onChange(e.target.value)
+          setError(null)
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault()
+            commit()
+          }
+        }}
+      />
+    </label>
+  )
+
   return (
-    <div
-      data-testid={testId}
-      className={cn(
-        "absolute right-2 bottom-1 z-20 flex items-center gap-1",
-        // Half-visible at rest; the whole row is the hover target, so reaching
-        // for the corner lights it before you arrive.
-        "opacity-50 transition-opacity group-hover/rowstrip:opacity-100 focus-within:opacity-100",
-      )}
-    >
-      {onRemove && (
-        <button
-          type="button"
-          title={t("editor.row.removeLine")}
-          aria-label={t("editor.row.removeLine")}
-          data-testid={removeTestId ?? `${testId}-remove`}
-          className={square}
-          onClick={(e) => {
-            e.stopPropagation()
-            onRemove()
-          }}
-        >
-          <X className="h-3.5 w-3.5" />
-        </button>
-      )}
-      {(insertBelow || insertAbove) &&
-        (needsMenu ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <button
-                  type="button"
-                  title={t("editor.row.addLine")}
-                  aria-label={t("editor.row.addLine")}
-                  data-testid={`${testId}-add`}
-                  className={square}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                </button>
-              }
-            />
-            <DropdownMenuContent align="end" className="min-w-[9rem]">
-              <DropdownMenuItem
-                data-testid="row-insert-above"
-                onClick={() => onAddLine(insertAbove!.startSec, insertAbove!.endSec)}
-              >
-                <ArrowUp className="mr-2 h-3.5 w-3.5" />
-                {t("editor.row.insertAbove")}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                data-testid="row-insert-below"
-                onClick={() => onAddLine(insertBelow!.startSec, insertBelow!.endSec)}
-              >
-                <ArrowDown className="mr-2 h-3.5 w-3.5" />
-                {t("editor.row.insertBelow")}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        ) : (
+    <Popover open={open} onOpenChange={onOpenChange}>
+      {/* Anchored to the row's corner, where the menu that opened it sits.
+          A real <button>: the kit asserts native button semantics on a
+          trigger, and a <span> here both warns and fails to anchor. It is
+          inert and unreachable — the menu entry is what opens this. */}
+      <PopoverTrigger
+        render={
           <button
             type="button"
-            title={insertAbove ? t("editor.row.addLineAbove") : t("editor.row.addLineBelow")}
-            aria-label={insertAbove ? t("editor.row.addLineAbove") : t("editor.row.addLineBelow")}
-            data-testid={`${testId}-add`}
-            className={square}
-            onClick={(e) => {
-              e.stopPropagation()
-              const span = insertBelow ?? insertAbove!
-              onAddLine(span.startSec, span.endSec)
-            }}
-          >
-            <Plus className="h-3.5 w-3.5" />
-          </button>
-        ))}
-    </div>
+            aria-hidden
+            tabIndex={-1}
+            className="pointer-events-none absolute end-1 top-1 size-6 opacity-0"
+          />
+        }
+      />
+      <PopoverContent align="end" className="w-72" data-testid={`cell-times-${cellId}`}>
+        <PopoverTitle className="text-xs font-medium">{t("editor.cellMenu.editTimestamps")}</PopoverTitle>
+        {locked ? (
+          <PopoverDescription data-testid="cell-times-locked" className="mt-1 text-[11px]">
+            {disabledReason}
+          </PopoverDescription>
+        ) : null}
+        <div className="mt-2 flex items-end gap-2">
+          {field("start", t("editor.cellMenu.startLabel"), start, setStart)}
+          {field("end", t("editor.cellMenu.endLabel"), end, setEnd)}
+        </div>
+        {hint && !locked ? (
+          <p className="mt-1 text-[11px] text-muted-foreground tabular-nums">{hint}</p>
+        ) : null}
+        {error ? (
+          <p data-testid="cell-times-error" className="mt-1 text-[11px] text-destructive">{error}</p>
+        ) : null}
+        <div className="mt-3 flex justify-end">
+          {locked ? (
+            offerUnlock ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                data-testid="cell-times-unlock"
+                onClick={() => {
+                  onOpenChange(false)
+                  onUnlock?.()
+                }}
+              >
+                {t("editor.cellMenu.unlockInSettings")}
+              </Button>
+            ) : null
+          ) : (
+            <Button type="button" size="sm" data-testid="cell-times-save" onClick={commit}>
+              {t("editor.cellMenu.saveTimestamps")}
+            </Button>
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+/**
+ * AQU-1068 item 5: THE source cell's menu.
+ *
+ * Ryder, relaying the Biblica debrief (2026-09-05): the pencil "should be more
+ * like a three-dot menu so it can offer more than 'edit text'". Until now this
+ * cell carried two unrelated affordances — a pencil floated at the source
+ * column's top-right, and a separate `[×][+]` corner that appeared on row
+ * hover. Two controls, one cell, neither hinting at the other. This is both of
+ * them, in the pencil's place.
+ *
+ * Every entry follows round 4's rule: an action this row cannot take is
+ * RENDERED, disabled, with its reason — an absent control cannot tell you
+ * whether the feature is broken or merely inapplicable. The reason rides
+ * inside the item as a second line rather than in a tooltip, because the menu
+ * kit sets `data-disabled:pointer-events-none` on every item, so a tooltip
+ * anchored to a disabled one would never open.
+ *
+ * The one exception is Edit timestamps, which is HIDDEN on a file with no
+ * clock (Sam, 2026-09-09). That is not a permission or a property of the row —
+ * an ordinary text file simply has no timings, and a permanently dead entry on
+ * every text project is furniture rather than an explanation.
+ */
+function CellSourceMenu({
+  cellId,
+  /** Insert after this row. */
+  onInsertBelow,
+  belowDisabledReason,
+  /** Insert before this row. On a timed file this is the silence in front of
+   *  the row — reachable from here AND as "insert below" on the row above,
+   *  which is deliberate redundancy: pointing at the row you want to push down
+   *  is how people describe the act. */
+  onInsertAbove,
+  aboveDisabledReason,
+  onRemove,
+  removeDisabledReason,
+  /** Toggling the inline source editor open and shut. Absent ⇒ this person
+   *  may not edit source text here at all. */
+  sourceEditing,
+  onToggleSourceEdit,
+  sourceEditDisabledReason,
+  /** Absent ⇒ this file has no clock, so the entry does not exist. */
+  timestamps,
+}: {
+  cellId: string
+  onInsertBelow?: () => void
+  belowDisabledReason?: string | null
+  onInsertAbove?: () => void
+  aboveDisabledReason?: string | null
+  onRemove?: () => void
+  removeDisabledReason?: string | null
+  sourceEditing?: boolean
+  onToggleSourceEdit?: () => void
+  sourceEditDisabledReason?: string | null
+  timestamps?: CellTimestampsProps
+}) {
+  const t = useT()
+  const [open, setOpen] = useState(false)
+  const [timesOpen, setTimesOpen] = useState(false)
+
+  const structural = onInsertAbove !== undefined || onInsertBelow !== undefined || onRemove !== undefined
+  // Nothing to offer at all: no menu. This is the PROJECT-level case the
+  // corner already handled by not rendering — the tier does not admit you, or
+  // the source is mirrored from upstream. Those never change while you are in
+  // the file, so a permanently dead button would be furniture.
+  if (!structural && !onToggleSourceEdit && !sourceEditDisabledReason && !timestamps) return null
+
+  return (
+    <>
+      <DropdownMenu open={open} onOpenChange={setOpen}>
+        <DropdownMenuTrigger
+          render={
+            <button
+              type="button"
+              data-testid={`cell-menu-${cellId}`}
+              aria-label={t("editor.cellMenu.trigger")}
+              title={t("editor.cellMenu.trigger")}
+              onClick={(e) => e.stopPropagation()}
+              className={cn(
+                // AQU-1134: the term action rail pops up over this corner and
+                // used to render BEHIND it. The rail sits at z-20, so the
+                // menu's own button has to stay below that — it was z-10 as
+                // the pencil and stays there.
+                "absolute end-1 top-1 z-10 flex size-6 shrink-0 items-center justify-center rounded-md",
+                "text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground",
+                // Present but quiet until the row is reached for, exactly as
+                // the pencil was. `open` pins it so the trigger does not fade
+                // out from under its own menu.
+                open || sourceEditing
+                  ? "bg-primary/10 text-primary opacity-100"
+                  : "opacity-0 focus-visible:opacity-100 [.group:hover:not([data-follow-hover-lock]_*)_&]:opacity-100",
+              )}
+            >
+              <MoreVertical className="h-3.5 w-3.5" />
+            </button>
+          }
+        />
+        <DropdownMenuContent align="end" className="min-w-[13rem]">
+          {(onToggleSourceEdit || sourceEditDisabledReason) && (
+            <RowInsertItem
+              testId="cell-menu-edit-source"
+              icon={<Pencil className="mr-2 h-3.5 w-3.5 shrink-0" />}
+              label={sourceEditing ? t("editor.source.doneEditing") : t("editor.source.editText")}
+              reason={sourceEditDisabledReason}
+              onSelect={onToggleSourceEdit}
+            />
+          )}
+          {timestamps && (
+            <RowInsertItem
+              testId="cell-menu-edit-timestamps"
+              icon={<Clock className="mr-2 h-3.5 w-3.5 shrink-0" />}
+              label={t("editor.cellMenu.editTimestamps")}
+              // A maintainer may OPEN it while the project is locked — the
+              // form is what points them at the setting, so the entry must not
+              // disable itself out of their reach. Everyone else gets the
+              // reason here, where a disabled entry belongs.
+              reason={timestamps.offerUnlock ? null : timestamps.disabledReason}
+              onSelect={() => setTimesOpen(true)}
+            />
+          )}
+          {structural && (onToggleSourceEdit || sourceEditDisabledReason || timestamps) && (
+            <DropdownMenuSeparator />
+          )}
+          {structural && (
+            <>
+              <RowInsertItem
+                testId="cell-menu-insert-above"
+                icon={<ArrowUp className="mr-2 h-3.5 w-3.5 shrink-0" />}
+                label={t("editor.row.insertAbove")}
+                reason={aboveDisabledReason}
+                onSelect={onInsertAbove}
+              />
+              <RowInsertItem
+                testId="cell-menu-insert-below"
+                icon={<ArrowDown className="mr-2 h-3.5 w-3.5 shrink-0" />}
+                label={t("editor.row.insertBelow")}
+                reason={belowDisabledReason}
+                onSelect={onInsertBelow}
+              />
+              <RowInsertItem
+                testId="cell-menu-remove"
+                icon={<X className="mr-2 h-3.5 w-3.5 shrink-0" />}
+                label={t("editor.row.removeLine")}
+                reason={removeDisabledReason}
+                onSelect={onRemove}
+              />
+            </>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {timestamps && (
+        <CellTimestampsPopover
+          cellId={cellId}
+          open={timesOpen}
+          onOpenChange={setTimesOpen}
+          {...timestamps}
+        />
+      )}
+    </>
+  )
+}
+
+/**
+ * One direction inside the `+` menu.
+ *
+ * The reason rides INSIDE the item as a second line rather than in a tooltip,
+ * and not by preference: the menu kit sets `data-disabled:pointer-events-none`
+ * on every item, so hover never reaches a disabled one and a tooltip anchored
+ * there would never open. Inline is better here anyway — always visible instead
+ * of hover-gated, and a menu has the room for it.
+ */
+function RowInsertItem({
+  testId,
+  icon,
+  label,
+  reason,
+  onSelect,
+}: {
+  testId: string
+  icon: React.ReactNode
+  label: string
+  reason?: string | null
+  onSelect?: () => void
+}) {
+  const disabled = Boolean(reason) || !onSelect
+  return (
+    <DropdownMenuItem
+      data-testid={testId}
+      disabled={disabled}
+      onClick={() => { if (!disabled) onSelect?.() }}
+    >
+      {icon}
+      <span className="flex min-w-0 flex-col">
+        <span>{label}</span>
+        {reason ? (
+          <span data-testid={`${testId}-reason`} className="text-xs text-muted-foreground">
+            {reason}
+          </span>
+        ) : null}
+      </span>
+    </DropdownMenuItem>
   )
 }
 
@@ -3074,6 +3486,33 @@ interface MemoizedRowProps {
    *  by the parent (from the `completing` map and the group's member ids) so
    *  this row's prop is a stable scalar instead of the whole map. */
   paragraphGroupInFlight: boolean
+  /**
+   * AQU-1068 item 5: the source cell's menu, as PRIMITIVES ONLY.
+   *
+   * These props are shallow-compared by React.memo on every table render, so
+   * an object or a closure here would re-render every rendered row on every
+   * store bump. The reasons are strings the wrapper already computes; the
+   * spans are the gap either side, as plain numbers; the actions live in
+   * EditorActionsContext, which exists for exactly this.
+   */
+  insertAboveReason: string | null
+  insertBelowReason: string | null
+  removeReason: string | null
+  /** Undefined ⇒ this row is offered no structural actions at all (the tier
+   *  does not admit this person, or the source is mirrored upstream). */
+  structuralEditing?: boolean
+  /** True on a file with no clock, where a cell goes anywhere and the spans
+   *  below are meaningless. */
+  untimedInserts?: boolean
+  insertAboveStartSec?: number
+  insertAboveEndSec?: number
+  insertBelowStartSec?: number
+  insertBelowEndSec?: number
+  /** The room this line has, for the timestamps form. Null at either end. */
+  prevStartSec: number | null
+  nextStartSec: number | null
+  /** True when this file runs on a clock, so timestamps can be typed at all. */
+  timedFile?: boolean
   isBacktranslationConfigured?: boolean
   backtranslating?: Set<string>
   backtranslationErrors?: Map<string, string>
@@ -3175,6 +3614,10 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     project, username, activeLane, editable, canValidate, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable,
     ruleMap, onCompleteSingle, onCompleteParagraph, paragraphGroupSize,
     paragraphDraftableCount, paragraphGroupInFlight,
+    insertAboveReason, insertBelowReason, removeReason,
+    structuralEditing, untimedInserts,
+    insertAboveStartSec, insertAboveEndSec, insertBelowStartSec, insertBelowEndSec,
+    prevStartSec, nextStartSec, timedFile,
     isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation, getStatisticalBt,
     getFootnoteDetails,
     onSeekToCue, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled,
@@ -3299,6 +3742,18 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         paragraphGroupSize={paragraphGroupSize}
         paragraphDraftableCount={paragraphDraftableCount}
         paragraphGroupInFlight={paragraphGroupInFlight}
+        insertAboveReason={insertAboveReason}
+        insertBelowReason={insertBelowReason}
+        removeReason={removeReason}
+        structuralEditing={structuralEditing}
+        untimedInserts={untimedInserts}
+        insertAboveStartSec={insertAboveStartSec}
+        insertAboveEndSec={insertAboveEndSec}
+        insertBelowStartSec={insertBelowStartSec}
+        insertBelowEndSec={insertBelowEndSec}
+        prevStartSec={prevStartSec}
+        nextStartSec={nextStartSec}
+        timedFile={timedFile}
         isBacktranslationConfigured={isBacktranslationConfigured}
         isBacktranslating={isBacktranslating}
         backtranslationError={backtranslationError}
@@ -3448,6 +3903,20 @@ interface EditorRowProps {
    *  the group has an in-flight completion — disables the button and blocks
    *  a duplicate `completeParagraph` call mid-fan-out. */
   paragraphGroupInFlight?: boolean
+  /** AQU-1068 item 5 — the source cell's menu. Primitives only; see the
+   *  matching block on MemoizedRowProps for why. */
+  insertAboveReason?: string | null
+  insertBelowReason?: string | null
+  removeReason?: string | null
+  structuralEditing?: boolean
+  untimedInserts?: boolean
+  insertAboveStartSec?: number
+  insertAboveEndSec?: number
+  insertBelowStartSec?: number
+  insertBelowEndSec?: number
+  prevStartSec?: number | null
+  nextStartSec?: number | null
+  timedFile?: boolean
   isBacktranslationConfigured?: boolean
   isBacktranslating?: boolean
   backtranslationError?: string
@@ -4268,6 +4737,10 @@ function EditorRow({
   cellInfractions, waivedInfractions, ruleMap,
   onCompleteSingle,
   onCompleteParagraph, paragraphGroupSize, paragraphDraftableCount, paragraphGroupInFlight,
+  insertAboveReason = null, insertBelowReason = null, removeReason = null,
+  structuralEditing, untimedInserts,
+  insertAboveStartSec, insertAboveEndSec, insertBelowStartSec, insertBelowEndSec,
+  prevStartSec = null, nextStartSec = null, timedFile,
   isBacktranslationConfigured, isBacktranslating, backtranslationError, onBacktranslate, onSaveBacktranslation,
   getStatisticalBt,
   getFootnoteDetails,
@@ -4304,6 +4777,8 @@ function EditorRow({
     onInfractionClick, onOpenComments, onOpenHistory, onOpenTerminologyConcept,
     onAiSetupNeeded, onOpenRecording,
     onMediaRowActivate, onAssignCastVoice, onClearCastVoice, onTakeSaved, audioHomeFor, myScopes,
+    onAddLineAt, onInsertCellBeside, onRemoveCell, onRetimeCell,
+    timingLocked, canUnlockTiming, onOpenTimingSettings,
   } = useEditorActions()
   // AQU-633: a scoped member can only validate cells in their assigned lane/file.
   // Combine the role capability with the per-cell scope check so an out-of-scope
@@ -4500,6 +4975,62 @@ function EditorRow({
     ? idmlConfiguration.context.paragraphStyleId
     : undefined
   const canEditSourceForCell = canEditSource && !idmlConfiguration
+
+  // AQU-1068 item 5: the source cell's menu. The row's own reasons arrived as
+  // strings; the actions come from context (stable for the whole file), and
+  // the two are joined here.
+  const insertAbove = !structuralEditing
+    ? undefined
+    : untimedInserts
+      ? () => onInsertCellBeside?.(cell.id, "above")
+      : insertAboveStartSec !== undefined && insertAboveEndSec !== undefined
+        ? () => onAddLineAt?.(insertAboveStartSec, insertAboveEndSec)
+        : undefined
+  const insertBelow = !structuralEditing
+    ? undefined
+    : untimedInserts
+      ? () => onInsertCellBeside?.(cell.id, "below")
+      : insertBelowStartSec !== undefined && insertBelowEndSec !== undefined
+        ? () => onAddLineAt?.(insertBelowStartSec, insertBelowEndSec)
+        : undefined
+
+  /**
+   * Why the timestamps entry is unavailable, or null when it is.
+   *
+   * The ROW's own nature answers first: imported audio and IDML rows refuse it
+   * for the same reasons they refuse a cell either side of them — moving the
+   * bounds of an audio segment changes which part of the clip it means, and
+   * IDML keeps its packaged layout. Then the project's timing lock, which is
+   * the permission here. Note that the tier is NOT consulted: moving a line in
+   * time is not restructuring the file.
+   */
+  const timestampsReason = !hasTiming(cell)
+    ? null // an untimed row in a timed file — nothing to edit yet
+    : (cell.medium ?? "text") === "media"
+      ? t("editor.row.mediaRemoveReason")
+      : idmlConfiguration
+        ? t("editor.row.idmlReason")
+        : timingLocked && !isUserAddedLine(cell)
+          ? t("editor.cellMenu.timingLocked")
+          : null
+  // Hidden entirely on a file with no clock (Sam, 2026-09-09): not a
+  // permission, just a fact about the file, and a dead entry on every text
+  // project is furniture rather than an explanation.
+  const timestamps = timedFile && hasTiming(cell)
+    ? {
+        startSec: cell.startTime ?? 0,
+        endSec: cell.endTime ?? 0,
+        prevStartSec,
+        nextStartSec,
+        disabledReason: timestampsReason,
+        // A maintainer may open the locked form: it is what points them at the
+        // setting. Only for the LOCK, never for a media or IDML row, where
+        // there is nothing to go and change.
+        offerUnlock: Boolean(timingLocked && canUnlockTiming && timestampsReason === t("editor.cellMenu.timingLocked")),
+        onUnlock: onOpenTimingSettings,
+        onSave: (startSec: number, endSec: number) => onRetimeCell?.(cell.id, startSec, endSec),
+      }
+    : undefined
   // AQU-847: an imported MEDIA section's `value` (→ `cell.original`) is the
   // import FILENAME; its real source text is the transcript. The read surface
   // already knew that (filename only as a placeholder before transcription) —
@@ -6121,45 +6652,28 @@ function EditorRow({
                 onToolbarMouseUp={handleToolbarMouseUp}
               />
             )}
-            {/* Source-edit affordance (project_lead+, non-live projects). Emits
-                source.cell.commit — the template-owner correction that propagates
-                downstream. Read-only source stays the default; editing is explicit.
-                Floated to the column's top-right so it costs no layout, rather
-                than taking a slot in the context line below — that line is
-                reserved for column alignment and is usually empty, so it has no
-                room to spare. */}
-            {canEditSourceForCell ? (
-              <AppTooltip content={sourceEditing ? t("editor.source.doneEditing") : t("editor.source.editText")}>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  aria-label={sourceEditing ? t("editor.source.doneEditing") : t("editor.source.editText")}
-                  aria-pressed={sourceEditing}
-                  onClick={() => setSourceEditing((v) => !v)}
-                  className={cn(
-                    "absolute end-1 top-1 z-10 shrink-0",
-                    sourceEditing
-                      ? "bg-primary/10 text-primary"
-                      : "text-muted-foreground/50 opacity-0 hover:text-foreground focus-visible:opacity-100 [.group:hover:not([data-follow-hover-lock]_*)_&]:opacity-100",
-                  )}
-                >
-                  <Pencil />
-                </Button>
-              </AppTooltip>
-            ) : sourceReadOnlyReasonForCell ? (
-              // Force-locked source lane (DCS pin): keep an explained
-              // affordance where the pencil would be instead of letting it
-              // silently vanish (AQU-615 review nit).
-              <AppTooltip content={sourceReadOnlyReasonForCell} className="max-w-xs">
-                <span
-                  aria-label={t("editor.source.locked")}
-                  className="absolute end-1 top-1 z-10 inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground/50 opacity-0 focus-visible:opacity-100 [.group:hover:not([data-follow-hover-lock]_*)_&]:opacity-100"
-                >
-                  <Lock className="size-3" />
-                </span>
-              </AppTooltip>
-            ) : null}
+            {/* AQU-1068 item 5: ONE menu for this cell, in the pencil's place.
+                Edit its source text, edit its timestamps, insert a cell either
+                side of it, take it out. Floated to the column's top-right so
+                it costs no layout, rather than taking a slot in the context
+                line below — that line is reserved for column alignment and is
+                usually empty, so it has no room to spare. */}
+            <CellSourceMenu
+              cellId={cell.id}
+              sourceEditing={sourceEditing}
+              onToggleSourceEdit={canEditSourceForCell ? () => setSourceEditing((v) => !v) : undefined}
+              // The DCS pin used to show a padlock where the pencil sat, so the
+              // affordance never silently vanished (AQU-615). It is the same
+              // idea, now as the entry's own reason.
+              sourceEditDisabledReason={canEditSourceForCell ? null : sourceReadOnlyReasonForCell}
+              onInsertAbove={insertAbove}
+              aboveDisabledReason={insertAboveReason}
+              onInsertBelow={insertBelow}
+              belowDisabledReason={insertBelowReason}
+              onRemove={structuralEditing ? () => onRemoveCell?.(cell.id) : undefined}
+              removeDisabledReason={removeReason}
+              timestamps={timestamps}
+            />
             {/* Context line. Rendered even when empty: its 20px (h-4 + mb-1)
                 mirrors the target column's header lane, and that mirror is what
                 puts the two columns' first text lines on the same baseline. Drop

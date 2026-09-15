@@ -62,6 +62,7 @@ import {
   ALL_ORGS_PARAM,
   editorReturnFromLocation,
   orgHomePath,
+  projectSettingsPath,
   withEditorReturn,
 } from "@/lib/navigation/org-paths"
 import { updateProject, patchProject, getProject, mergeServerProjectWithLocalCache } from "@/lib/store/project-index"
@@ -167,7 +168,7 @@ import {
 import { emitCastAssign, emitTargetCellCommit, emitTargetCellCommits, emitCellBacktranslationSet, emitFileRename, emitFileCorpusSet, emitFileDelete, emitFileRestore, emitCellValidate, emitCellUnvalidate, emitCellRetime, emitCellLaneRetime, emitCellAudioTrim, emitCellAudioPlace, emitCellLinkSet, emitFileVideoSet, emitFileTimingSet, emitFileTrackSet, emitTermCreate, enqueueEvents } from "@/lib/sync/events-emit"
 import { autoLinkable, planCueLinks } from "@/lib/timeline/cue-links"
 import type { CharacterAssignmentPlan } from "@/lib/import/character-sheet"
-import { resolveTimingLocked } from "@/lib/sync/project-settings"
+import { resolveCellEditingFloor, resolveTimingLocked } from "@/lib/sync/project-settings"
 import { buildCastAdditions, buildCastRemovals, carriesCharacterSheetData } from "@/lib/import/cast-from-speakers"
 import { ImportCharactersDialog } from "./timeline/ImportCharactersDialog"
 import { CharacterCheckDrawer, type ResolveChoice } from "./timeline/CharacterCheckDrawer"
@@ -183,7 +184,18 @@ import { resolveCueCharacter, formatCueCharacter } from "@/lib/timeline/cue-char
 import { CueLinkDrawer } from "./timeline/CueLinkDrawer"
 import { v7 as uuidv7 } from "uuid"
 import { sequenceBetween } from "@/lib/timeline/derive"
-import { isLineEmpty, isUserAddedLine, userLineOrigin } from "@/lib/timeline/user-lines"
+import { isUserAddedLine, userLineOrigin } from "@/lib/timeline/user-lines"
+import { buildCellRemovalInventory, type CellRemovalInventory } from "@/lib/cell-removal-inventory"
+import type { MessageKey } from "@/lib/i18n/messages/en"
+import {
+  canEditCells,
+  canRemoveImportedCells as canRemoveImportedCellsGate,
+  cellPlacement,
+  isImportedRow,
+  rowActionAvailability,
+  type RowActionReason,
+} from "@/lib/cell-editing-gate"
+import { useDcsUpstreamCursor } from "@/hooks/useDcsUpstreamCursor"
 import { MIN_ADDABLE_SPAN_SEC, targetOffsetMsFor } from "@/lib/timeline/lane-timing"
 import { audioIdSeededWith } from "@/lib/audio/upload"
 import {
@@ -1947,8 +1959,20 @@ export function ProjectWorkspace() {
   const [diarizePhase, setDiarizePhase] = useState<DiarizationPhase | null>(null)
   const [diarizeError, setDiarizeError] = useState<string | null>(null)
   const diarizeBusy = diarizePhase != null && diarizePhase !== "done" && diarizePhase !== "failed"
+  // MAINTAINER, and not merely because diarization is expensive. It REPLACES
+  // every media cell in the file — one `source.cell.delete` per imported
+  // segment, then one create per detected turn — so it is a re-import-shaped
+  // act, and the server holds removing an IMPORTED cell at maintainer whatever
+  // the project's tier says. Below that rank the deletes were refused one by
+  // one, silently, and the file was left half-replaced. Its two siblings were
+  // already gated this way: the audio-cue dialog on `canManageSources` and the
+  // DCS panel on its own IMPORT_MIN_ROLE. (Sam, 2026-09-09: maintainers only
+  // for now, revisit if people complain.)
   const canDiarize =
-    !!activeFile && fileOrderedBy(activeFile) === "time" && cellSummaries.some((c) => c.medium === "media")
+    !!activeFile &&
+    fileOrderedBy(activeFile) === "time" &&
+    cellSummaries.some((c) => c.medium === "media") &&
+    (project?.syncRole?.level ?? 0) >= ROLE.MAINTAINER
   const handleDiarize = useCallback(async () => {
     if (!project?.id || !activeFileId) return
     setDiarizeError(null)
@@ -1989,24 +2013,203 @@ export function ProjectWorkspace() {
   }, [project?.id, activeFileId, currentUsername, cellStore, getTokenForFile, getTokenForProjectFile, tts.settings, tts.saveTts, revalidateCells])
 
   /**
-   * AQU-646: take back a line you added. Deliberately narrow — only a line a
-   * person created here (`metadata.aquillaOrigin`), and only while it is still
-   * empty on every side. That is not timidity: `source.cell.delete`'s
-   * projection removes one row and cleans up nothing else, so a cell carrying
-   * takes, validators or comments would leave all of them behind. Clear those
-   * first and the line becomes removable.
+   * AQU-1068: undo an optimistic insert or removal the server refused.
+   *
+   * Wired to BOTH refusal callbacks. `onRejected` alone is not enough — it
+   * documents itself as deliberately skipping 403, and 403 is the only status
+   * the cell-editing gate returns, so a rollback on that callback alone can
+   * never fire for the case it exists for.
+   *
+   * The kind filter is ANY event in the batch, not just the create or delete.
+   * An insert and a removal each emit a `source.cell.reorder` to keep the
+   * anchor chain honest; if that companion is the one refused, the row is
+   * fine but the chain is not, and putting the row back is still the correct
+   * repair.
+   */
+  const rollbackRefusedCellChange = useCallback(
+    (
+      entries: { kind: string }[],
+      cellId: string,
+      restore?: Parameters<typeof cellStore.rollbackOptimisticSourceChange>[1],
+      message?: MessageKey,
+    ) => {
+      if (!entries.some((e) => e.kind.startsWith("source.cell.") || e.kind.startsWith("target.cell."))) return
+      cellStore.rollbackOptimisticSourceChange(cellId, restore)
+      if (message) toast.add({ type: "error", title: t(message) })
+    },
+    [cellStore, toast, t],
+  )
+
+  /**
+   * AQU-1068: an insert or a removal whose companion event was DEAD-LETTERED.
+   *
+   * "Accepted" is not "applied". Every add and remove sends a
+   * `source.cell.reorder` alongside its create or delete to keep the anchor
+   * chain honest, and each of those events is arbitrated separately: AD-2 is
+   * first-child-wins, so a collaborator who touched the same cell first takes
+   * the slot and ours is logged but never projected. The server reports that
+   * in `stale`, and until now nobody listened on these paths.
+   *
+   * The damage is silent and specific. A dropped re-anchor leaves the
+   * successor pointing at a cell that is being deleted, and `walkAnchorChain`
+   * appends whatever it cannot reach to the TAIL of the file — which is how a
+   * removal quietly reorders a document, and one of the two ways Matthew's
+   * cell ended up second from last.
+   *
+   * The repair is a single rebase, the same move `commitCompletedCell` already
+   * makes for a dead-lettered draft: read the cell's real head from the server
+   * and re-emit the same intent chained onto it. Bounded to one attempt — a
+   * second loss is a genuine concurrent conflict, and the caller then rolls
+   * back rather than fighting over the row.
+   *
+   * Returns true when every stale event was repaired.
+   */
+  const rebaseStaleCellStructureEvents = useCallback(
+    async (
+      staleIds: ReadonlySet<string>,
+      emitted: Awaited<ReturnType<typeof enqueueEvents>>,
+    ): Promise<boolean> => {
+      if (!project?.id || !activeFileId) return false
+      const losers = emitted.filter(
+        (e) =>
+          staleIds.has(e.eventId) &&
+          (e.event.kind === "source.cell.reorder" || e.event.kind === "source.cell.delete"),
+      )
+      if (losers.length === 0) return true
+
+      const mint = await getTokenForProjectFile(project.id, activeFileId)
+      if (!mint.token) return false
+      // One read for every cell that needs a new parent.
+      const cellIds = [...new Set(losers.map((e) => e.event.cellId).filter((id): id is string => Boolean(id)))]
+      const rows = await fetchCellsByIds(project.id, activeFileId, cellIds, mint.token)
+      const headByCell = new Map<string, string>()
+      for (const row of rows) {
+        if (row.side === "source" && row.eventId) headByCell.set(row.cellId, row.eventId)
+      }
+
+      const retries: Array<
+        | {
+            kind: "source.cell.reorder"
+            projectId: string
+            fileId: string
+            cellId: string
+            parentId: string
+            author: string
+            payload: { anchorCellId: string | null }
+          }
+        | {
+            kind: "source.cell.delete"
+            projectId: string
+            fileId: string
+            cellId: string
+            parentId: string
+            author: string
+            payload: Record<string, never>
+          }
+      > = []
+      for (const loser of losers) {
+        const cellId = loser.event.cellId
+        if (!cellId) continue
+        const head = headByCell.get(cellId)
+        if (!head) {
+          // No source row on the server. For a delete that is the outcome we
+          // wanted — somebody else removed it first, so the intent already
+          // holds. For a re-anchor there is nothing left to point anywhere.
+          continue
+        }
+        const base = { projectId: project.id, fileId: activeFileId, cellId, parentId: head, author: currentUsername }
+        if (loser.event.kind === "source.cell.reorder") {
+          // Re-send the ORIGINAL anchor: the intent ("sit after this cell") is
+          // still what we want; only the parent it chains onto was stale.
+          retries.push({
+            ...base,
+            kind: "source.cell.reorder" as const,
+            payload: loser.event.payload as { anchorCellId: string | null },
+          })
+        } else {
+          retries.push({ ...base, kind: "source.cell.delete" as const, payload: {} })
+        }
+      }
+      if (retries.length === 0) return true
+
+      const retried = await enqueueEvents(retries)
+      const retriedIds = new Set(retried.map((r) => r.eventId))
+      let lostAgain = false
+      await flushOutboxBatch({
+        getTokenForFile: getTokenForProjectFile,
+        onStaleSiblings: (entries) => {
+          if (entries.some((entry) => retriedIds.has(entry.id))) lostAgain = true
+        },
+        onRejected: (entries) => {
+          if (entries.some((entry) => retriedIds.has(entry.id))) lostAgain = true
+        },
+        onForbidden: (entries) => {
+          if (entries.some((entry) => retriedIds.has(entry.id))) lostAgain = true
+        },
+      })
+      return !lostAgain
+    },
+    [project?.id, activeFileId, currentUsername, getTokenForProjectFile],
+  )
+
+  /**
+   * Remove a cell: its source row, its translations in every lane, and — since
+   * AQU-1068 — everything hanging off it.
+   *
+   * This used to be narrow in two ways, and BOTH are now obsolete. It took
+   * only a line a person had added here, and only while that line was still
+   * empty on every side, because `source.cell.delete` removed one row and
+   * cleaned up nothing else, so a cell carrying takes, validators or comments
+   * would have left all of them behind. AQU-1068 gave the projection a real
+   * cascade (validators, takes, pairings, comments, waivers, back-translations,
+   * morph rows), so neither restriction has a reason left. Who may remove what
+   * is now the shared gate's business; this function only checks that there is
+   * something here to remove.
    */
   const handleRemoveLine = useCallback(
     async (cellId: string) => {
       if (!project?.id || !activeFileId) return
       const cell = getActiveCell(cellId)
-      if (!cell || !isUserAddedLine(cell) || !isLineEmpty(cell)) return
+      // AQU-1068: the qualifying test moved OUT of here and into the shared
+      // `canRemoveCell` predicate, which both surfaces already ask before
+      // offering the button — a maintainer may now take back any cell, and
+      // this function no longer gets to hold a second opinion about that.
+      // What stays is the sanity check: something has to be there to remove.
+      if (!cell) return
       const plan = cellStore.getRemovalPlan(cellId)
+      // Null here means the row is not yet confirmed by the server (see
+      // getRemovalPlan). Silence would read as a dead button — the exact
+      // failure Matt's QA caught on the add-line strip.
+      if (!plan && cellStore.getCellView(cellId)) {
+        toast.add({ type: "error", title: t("editor.removeCell.notYetSavedToast") })
+        return
+      }
       if (!plan) return
-      // One batch, in order: re-point the row that pointed at this one, drop
-      // any target rows, then the source row itself. The two chain-mutating
-      // events sit on DIFFERENT cells, so neither waits on the other's head.
-      await enqueueEvents([
+      // Take it off screen NOW; the flush and the confirming read follow. The
+      // snapshot is what puts it back if the server refuses.
+      const removed = cellStore.applyOptimisticSourceRemove(cellId)
+      // Two events: re-point the row that pointed at this one, then delete the
+      // source row. They sit on DIFFERENT cells, so neither waits on the
+      // other's head.
+      //
+      // THE TRANSLATIONS ARE NOT LISTED HERE any more. This used to batch one
+      // parent-less `target.cell.delete` per lane, which applied
+      // unconditionally while the source delete beside it still had to win its
+      // chain slot — so a stale removal took the translations and left the
+      // cell. The server's cascade now drops every lane's target row as part
+      // of `source.cell.delete`, under the same gate, so the two can no longer
+      // disagree. It also keeps the whole removal inside the one permission
+      // that is supposed to govern it: `target.cell.delete` floors at
+      // CONTRIBUTOR, so listing it here made removal impossible for the
+      // Commenter and Reviewer tiers this round added — the throw came before
+      // anything was enqueued, so the row left the screen with no request and
+      // no rollback.
+      //
+      // A SOURCE-LESS row (see getRemovalPlan) is the exception: there is no
+      // source event to carry the cascade, so its lanes are named explicitly.
+      let emitted: Awaited<ReturnType<typeof enqueueEvents>>
+      try {
+        emitted = await enqueueEvents([
         ...(plan.successor
           ? [
               {
@@ -2020,30 +2223,69 @@ export function ProjectWorkspace() {
               },
             ]
           : []),
-        ...plan.targetLangs.map((lang) => ({
-          kind: "target.cell.delete" as const,
-          projectId: project.id!,
-          fileId: activeFileId,
-          cellId,
-          parentId: null,
-          author: currentUsername,
-          payload: lang ? { targetLang: lang } : {},
-        })),
-        {
-          kind: "source.cell.delete" as const,
-          projectId: project.id,
-          fileId: activeFileId,
-          cellId,
-          parentId: plan.eventId,
-          author: currentUsername,
-          payload: {},
+        ...(plan.sourceless
+          ? plan.targetLangs.map((lang) => ({
+              kind: "target.cell.delete" as const,
+              projectId: project.id!,
+              fileId: activeFileId,
+              cellId,
+              parentId: null,
+              author: currentUsername,
+              payload: lang ? { targetLang: lang } : {},
+            }))
+          : [
+              {
+                kind: "source.cell.delete" as const,
+                projectId: project.id,
+                fileId: activeFileId,
+                cellId,
+                parentId: plan.eventId,
+                author: currentUsername,
+                payload: {},
+              },
+            ]),
+        ])
+      } catch (err) {
+        // `enqueueEvents` mirrors the role floors and throws on the FIRST input
+        // it refuses, before writing any of them — so nothing was queued, no
+        // flush will run, and neither refusal callback can fire. Without this
+        // the row simply stayed gone from the screen while the server kept it,
+        // behind a freshness floor no refetch could clear, and with no message.
+        console.error("[handleRemoveLine] refused before enqueue:", err)
+        cellStore.rollbackOptimisticSourceChange(cellId, removed)
+        toast.add({ type: "error", title: t("editor.removeCell.failedToast") })
+        return
+      }
+      const staleIds = new Set<string>()
+      await flushOutboxBatch({
+        getTokenForFile: getTokenForProjectFile,
+        // A freshness floor protects a row from every correcting fetch, so a
+        // refused removal would otherwise leave the cell gone from the screen
+        // and present on the server, permanently. Put it back and say so.
+        onRejected: (entries) =>
+          rollbackRefusedCellChange(entries, cellId, removed, "editor.removeCell.failedToast"),
+        onForbidden: (entries) =>
+          rollbackRefusedCellChange(entries, cellId, removed, "editor.removeCell.forbiddenToast"),
+        // "Accepted" is not "applied". A dead-lettered re-anchor leaves the
+        // successor pointing at the cell we just deleted, and the chain walk
+        // then appends it at the tail of the file — a removal that silently
+        // reorders the document. See rebaseStaleCellStructureEvents.
+        onStaleSiblings: (entries) => {
+          for (const entry of entries) staleIds.add(entry.id)
         },
-      ])
-      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      })
+      if (staleIds.size > 0 && !(await rebaseStaleCellStructureEvents(staleIds, emitted))) {
+        rollbackRefusedCellChange(
+          [{ kind: "source.cell.delete" }],
+          cellId,
+          removed,
+          "editor.removeCell.failedToast",
+        )
+      }
       revalidateCells()
       setTimelineSelectedCellId(null)
     },
-    [project?.id, activeFileId, currentUsername, getActiveCell, cellStore, getTokenForProjectFile, revalidateCells],
+    [project?.id, activeFileId, currentUsername, getActiveCell, cellStore, getTokenForProjectFile, revalidateCells, toast, t, rebaseStaleCellStructureEvents, rollbackRefusedCellChange],
   )
 
   // Media-lens empty state: attach a clip to the ACTIVE file by upload or
@@ -2651,14 +2893,24 @@ export function ProjectWorkspace() {
    * import dialog say "Replace" rather than "Import") and the recorder's
    * lookup for the line being performed.
    */
+  // AQU-1068 perf: ONE materialisation pass per store version for the
+  // render-time whole-file readers below (cast map, clearable count, the
+  // character-agreement compare). Each used to call getAllCellViews() itself,
+  // which builds a fresh view for every cell — three 31k-cell builds per
+  // store bump on a Bible, several bumps per insert. Click-time readers keep
+  // their own calls; they run once per gesture, not once per version.
+  const allCellViews = useMemo(
+    () => readAtVersion(cellStoreVersion, () => cellStore.getAllCellViews()),
+    [cellStore, cellStoreVersion],
+  )
   const castByCellId = useMemo(
     () =>
       new Map(
-        readAtVersion(cellStoreVersion, () => cellStore.getAllCellViews())
+        allCellViews
           .filter((c) => typeof c.metadata?.cast_name === "string" && c.metadata.cast_name !== "")
           .map((c) => [c.id, c]),
       ),
-    [cellStore, cellStoreVersion],
+    [allCellViews],
   )
   const characterCount = castByCellId.size
   /**
@@ -2670,11 +2922,8 @@ export function ProjectWorkspace() {
    * an angle onto an unnamed line.
    */
   const clearableCount = useMemo(
-    () =>
-      readAtVersion(cellStoreVersion, () => cellStore.getAllCellViews()).filter(
-        carriesCharacterSheetData,
-      ).length,
-    [cellStore, cellStoreVersion],
+    () => allCellViews.filter(carriesCharacterSheetData).length,
+    [allCellViews],
   )
 
   /**
@@ -2765,7 +3014,7 @@ export function ProjectWorkspace() {
         ? null
         : compareCharacterSources({
             cues: audioCues ?? [],
-            textCells: readAtVersion(cellStoreVersion, () => cellStore.getAllCellViews()),
+            textCells: allCellViews,
             links: cueLinks,
             resolutions: tts.settings?.characterResolutions,
             strictCamera,
@@ -2774,8 +3023,7 @@ export function ProjectWorkspace() {
       audioCues,
       audioCharacterCount,
       characterCount,
-      cellStore,
-      cellStoreVersion,
+      allCellViews,
       cueLinks,
       tts.settings?.characterResolutions,
       characterWrite,
@@ -4172,6 +4420,28 @@ export function ProjectWorkspace() {
     // the live store row instead; it was updated by the same write-back that
     // cleared the pending entry, so at least one of the two is always fresh.
     const liveCell = getActiveCell(cell.id)
+    // AQU-1068: the cell was REMOVED while the model was generating.
+    //
+    // The `?? cell` fallback below is for the mid-refetch window, where the
+    // snapshot is the best available copy of a row that still exists. When the
+    // row is gone for good it is the wrong answer entirely: the commit is sent
+    // anyway, the server projects a target row for a cell with no source, and
+    // the client shows that orphan at the tail of the file. That is Matthew's
+    // "the translation jumped to the second last cell", and it was
+    // unrecoverable because a source-less row could not be removed.
+    //
+    // Checked BEFORE the optimistic patch below, not just before the emit:
+    // `applyOptimisticTargetEdit` writes a shadow with a freshness floor, and a
+    // floor on a cell with no source row protects the phantom from every
+    // correcting fetch there will ever be.
+    if (!liveCell && cellStore.wasRemoved(cell.id)) {
+      const key = laneCellKey(cell.id)
+      pendingCompletionEventIdRef.current.delete(key)
+      pendingTargetCommitHeadsRef.current.delete(key)
+      // Silent: the row this would report on is no longer on screen, and the
+      // person who deleted it does not need to be told their deletion worked.
+      return
+    }
     const commitCell = liveCell ?? cell
     // IDML v2 model output is protected HTML, not plain text. Validate the
     // exact slot/token sequence before any optimistic mutation or event is
@@ -4315,7 +4585,7 @@ export function ProjectWorkspace() {
     // only that row's stats and cell data back (its authoritative event_id
     // becomes the next commit's parent) instead of re-fetching the file.
     confirmCommitted(cell.id, eventId)
-  }, [project?.id, project?.syncRole?.level, applyOptimisticTargetEdit, activeLane, laneCellKey, getActiveCell, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, refreshOutboxPending, revalidateCellStats, revalidateCell, confirmCommitted])
+  }, [project?.id, project?.syncRole?.level, applyOptimisticTargetEdit, activeLane, laneCellKey, getActiveCell, cellStore, resolveTargetCommitParentId, rememberPendingTargetCommit, getTokenForProjectFile, refreshOutboxPending, revalidateCellStats, revalidateCell, confirmCommitted])
 
   const commitCompletedCells = useCallback(async (
     drafts: CompletedCellDraft[],
@@ -4334,7 +4604,22 @@ export function ProjectWorkspace() {
     for (let index = 0; index < drafts.length; index++) {
       const draft = drafts[index]
       try {
-        const liveCell = getActiveCell(draft.cell.id) ?? draft.cell
+        const live = getActiveCell(draft.cell.id)
+        // AQU-1068: same rule as the single-cell path — a cell removed while
+        // the batch was generating takes its draft with it, rather than
+        // resurrecting as a source-less row at the tail of the file. A batch
+        // makes this MORE likely, not less: it is in flight for longer.
+        if (!live && cellStore.wasRemoved(draft.cell.id)) {
+          const key = laneCellKey(draft.cell.id)
+          pendingCompletionEventIdRef.current.delete(key)
+          pendingTargetCommitHeadsRef.current.delete(key)
+          results[index] = {
+            status: "rejected",
+            reason: new Error("This cell was removed while the draft was generating, so it was not saved"),
+          }
+          continue
+        }
+        const liveCell = live ?? draft.cell
         const completed = normalizeProtectedCompletion(liveCell, draft.text)
         const parentId = resolveTargetCommitParentId(liveCell)
         prepared.push({ index, draft, liveCell, completed, parentId })
@@ -5694,9 +5979,12 @@ export function ProjectWorkspace() {
     const sourceLanguage = activeFile?.sourceLanguage || project?.sourceLanguage
     const targetLanguage = activeLaneTargetLanguage || activeFile?.targetLanguage || project?.targetLanguage
 
-    // AQU-1104: the workbench is mounted only on the agent surface, yet this
-    // memo re-ran on every cell commit and walked every cell view in the file.
-    // Off the agent surface nothing reads it, so return the empty shape.
+    // AQU-1104 / AQU-1068: the workbench is mounted only on the agent surface,
+    // yet this memo re-ran on every cell commit and walked every cell view in
+    // the file — 31k on a Bible, where most of the insert/remove freeze lived.
+    // Off the agent surface nothing reads it, so return the empty shape;
+    // flipping the surface open recomputes in the same render, so it can never
+    // show stale data.
     if (!scopeAvailable || !agentOpen) {
       return {
         cells: [],
@@ -6538,12 +6826,22 @@ export function ProjectWorkspace() {
       // ONE batch, create first, so there is never a tick where the row exists
       // at the tail. The two chain-mutating events sit on different cells, so
       // neither waits on the other's head. source.cell.reorder carries the
-      // same CONTRIBUTOR floor as source.cell.create and rides the same
-      // `allowLineCreation` carve-out on the server (Sam, 2026-08-21 — the
-      // day this batch silently died for a contributor because the reorder
-      // still floored at PROJECT_LEAD and enqueueEvents throws per input,
-      // before writing anything).
-      await enqueueEvents([
+      // same static floor as source.cell.create (COMMENTER since the review
+      // round widened the tier list), which is what keeps the batch alive
+      // (Sam, 2026-08-21 — the day it silently died for a contributor because
+      // the reorder still floored at PROJECT_LEAD and enqueueEvents throws per
+      // input, before writing anything).
+      // Same instant-feedback path as handleAddCell — see its note.
+      cellStore.applyOptimisticSourceInsert({
+        cellId,
+        anchorCellId: before?.id ?? null,
+        reanchorCellId: oldHead?.cellId ?? successor?.id ?? null,
+        sequenceIndex: sequenceBetween(before?.sequenceIndex, after?.sequenceIndex),
+        startMs,
+        endMs,
+        metadata: { aquillaOrigin: userLineOrigin() },
+      })
+      const emitted = await enqueueEvents([
         {
           kind: "source.cell.create" as const,
           projectId: project.id,
@@ -6591,7 +6889,32 @@ export function ProjectWorkspace() {
             ]
           : []),
       ])
-      await flushOutboxBatch({ getTokenForFile: getTokenForProjectFile })
+      // The gap-insert path had NO rollback at all — the primary Chosen
+      // subtitle workflow applied an optimistic insert and, if the server
+      // refused it, left the row on screen forever behind its freshness floor.
+      const staleIds = new Set<string>()
+      await flushOutboxBatch({
+        getTokenForFile: getTokenForProjectFile,
+        onRejected: (entries) =>
+          rollbackRefusedCellChange(entries, cellId, undefined, "editor.addCell.failedToast"),
+        onForbidden: (entries) =>
+          rollbackRefusedCellChange(entries, cellId, undefined, "editor.addCell.forbiddenToast"),
+        // A dead-lettered re-anchor is the insert's silent failure mode: the
+        // new line is created, the row it should have displaced still claims
+        // the old anchor, and the chain walk drops the new line at the tail of
+        // the file. The row is fine; the ORDER is wrong.
+        onStaleSiblings: (entries) => {
+          for (const entry of entries) staleIds.add(entry.id)
+        },
+      })
+      if (staleIds.size > 0 && !(await rebaseStaleCellStructureEvents(staleIds, emitted))) {
+        rollbackRefusedCellChange(
+          [{ kind: "source.cell.create" }],
+          cellId,
+          undefined,
+          "editor.addCell.failedToast",
+        )
+      }
       revalidateCells()
       // Land on it exactly as clicking its row would — but not yet.
       // `revalidate()` is fire-and-forget, so the row does not exist on this
@@ -6602,7 +6925,104 @@ export function ProjectWorkspace() {
       setPendingNewCell({ cellId, thenRecord: Boolean(opts?.thenRecord) })
       return cellId
     },
-    [project?.id, activeFileId, currentUsername, getActiveCells, cellStore, getTokenForProjectFile, revalidateCells],
+    [project?.id, activeFileId, currentUsername, getActiveCells, cellStore, getTokenForProjectFile, revalidateCells, rebaseStaleCellStructureEvents, rollbackRefusedCellChange],
+  )
+
+  /**
+   * AQU-1068: insert a cell next to another one, on a file with no clock.
+   *
+   * The sibling of handleAddLine, and deliberately a separate function rather
+   * than a branch inside it: that one's whole job is to reason about a silence
+   * — how wide it is, which cells bracket it, whether there is room at all —
+   * and none of those questions exist here. An ordinary text file has room
+   * everywhere. What the two DO share is the part that must not diverge: one
+   * `source.cell.create` plus the reorder that keeps the anchor chain honest,
+   * emitted as ONE batch, create first, so there is never a tick where the row
+   * exists at the tail of the file.
+   *
+   * No startMs/endMs: they are optional on the payload and an untimed cell is
+   * first-class (a text import omits them too).
+   */
+  const handleAddCell = useCallback(
+    async (cellId: string, position: "above" | "below"): Promise<string | null> => {
+      if (!project?.id || !activeFileId) return null
+      const plan = cellStore.getInsertPlan(cellId, position)
+      if (!plan) return null
+      const newCellId = uuidv7()
+      // Show it NOW. The confirming read below is cheap on the wire but
+      // expensive in the store — an insert changes `order`, so `replaceRows`
+      // marks every cell in the file dirty and rebuilds every derived index.
+      // On a whole Bible that is seconds of nothing happening after the click.
+      cellStore.applyOptimisticSourceInsert({
+        cellId: newCellId,
+        anchorCellId: plan.anchorCellId,
+        reanchorCellId: plan.reanchor?.cellId ?? null,
+        sequenceIndex: sequenceBetween(plan.sequenceBefore, plan.sequenceAfter),
+        metadata: { aquillaOrigin: userLineOrigin() },
+      })
+      const emitted = await enqueueEvents([
+        {
+          kind: "source.cell.create" as const,
+          projectId: project.id,
+          fileId: activeFileId,
+          cellId: newCellId,
+          parentId: null,
+          author: currentUsername,
+          payload: {
+            cellId: newCellId,
+            anchorCellId: plan.anchorCellId,
+            value: "",
+            sequenceIndex: sequenceBetween(plan.sequenceBefore, plan.sequenceAfter),
+            // The one durable signal that a person made this cell rather than
+            // an import — the same marker the timeline's add writes, read back
+            // by isUserAddedLine and by the server's isUserInsertedCell.
+            metadata: { aquillaOrigin: userLineOrigin() },
+          },
+        },
+        // Re-point whatever pointed where the new cell now sits. Skipping this
+        // leaves two rows claiming one anchor, and walkAnchorChain breaks that
+        // tie by event id — a fresh uuidv7 sorts last, so the new cell would
+        // land at the TAIL of the file instead of where it was asked for.
+        ...(plan.reanchor
+          ? [
+              {
+                kind: "source.cell.reorder" as const,
+                projectId: project.id,
+                fileId: activeFileId,
+                cellId: plan.reanchor.cellId,
+                parentId: plan.reanchor.eventId,
+                author: currentUsername,
+                payload: { anchorCellId: newCellId },
+              },
+            ]
+          : []),
+      ])
+      const staleIds = new Set<string>()
+      await flushOutboxBatch({
+        getTokenForFile: getTokenForProjectFile,
+        onRejected: (entries) =>
+          rollbackRefusedCellChange(entries, newCellId, undefined, "editor.addCell.failedToast"),
+        onForbidden: (entries) =>
+          rollbackRefusedCellChange(entries, newCellId, undefined, "editor.addCell.forbiddenToast"),
+        // See handleAddLine: a dead-lettered re-anchor leaves the new cell
+        // correctly created and wrongly placed, at the tail of the file.
+        onStaleSiblings: (entries) => {
+          for (const entry of entries) staleIds.add(entry.id)
+        },
+      })
+      if (staleIds.size > 0 && !(await rebaseStaleCellStructureEvents(staleIds, emitted))) {
+        rollbackRefusedCellChange(
+          [{ kind: "source.cell.create" }],
+          newCellId,
+          undefined,
+          "editor.addCell.failedToast",
+        )
+      }
+      revalidateCells()
+      setPendingNewCell({ cellId: newCellId, thenRecord: false })
+      return newCellId
+    },
+    [project?.id, activeFileId, currentUsername, cellStore, getTokenForProjectFile, revalidateCells, rebaseStaleCellStructureEvents, rollbackRefusedCellChange],
   )
 
   /**
@@ -6647,6 +7067,56 @@ export function ProjectWorkspace() {
 
   /** Stable wrapper over the ref above — see `audioHomeRef`. */
   const audioHomeFor = useCallback((cell: CellData) => audioHomeRef.current(cell), [])
+  /**
+   * AQU-1068 item 5: the menu's three structural actions, as ONE stable
+   * identity each.
+   *
+   * `handleAddLine` and `handleAddCell` already take exactly these arguments;
+   * these wrappers exist only so the context value does not change identity
+   * when those callbacks are rebuilt, which would re-render the whole editor
+   * subtree on every store bump.
+   */
+  const handleAddLineRef = useRef<(startSec: number, endSec: number) => void>(() => {})
+  handleAddLineRef.current = (startSec, endSec) => { void handleAddLine(startSec, endSec) }
+  const handleAddLineAt = useCallback((startSec: number, endSec: number) => {
+    handleAddLineRef.current(startSec, endSec)
+  }, [])
+
+  const handleAddCellRef = useRef<(cellId: string, position: "above" | "below") => void>(() => {})
+  handleAddCellRef.current = (cellId, position) => { void handleAddCell(cellId, position) }
+  const handleInsertCellBeside = useCallback((cellId: string, position: "above" | "below") => {
+    handleAddCellRef.current(cellId, position)
+  }, [])
+
+  // Declared below this memo, so naming it directly in the dep array would hit
+  // the temporal dead zone — dep arrays are evaluated eagerly, unlike the
+  // callback bodies that already reference it.
+  const requestRemoveCellRef = useRef<(cellId: string) => void>(() => {})
+  const handleRemoveCell = useCallback((cellId: string) => {
+    requestRemoveCellRef.current(cellId)
+  }, [])
+
+  /**
+   * Take a maintainer to the switch that locks timings, rather than flipping
+   * it from inside the row (Sam, 2026-09-09).
+   *
+   * The lock is PROJECT-wide: unlocking it from a popover to fix one line
+   * would quietly free every file's timings for every member below maintainer.
+   * Sending them to the setting shows them the scope of what they are about to
+   * change, and teaches them where it lives for next time.
+   *
+   * `audio-media` is the pane group holding the Timeline card, and the
+   * `backgroundLocation` state opens it as a modal over the editor rather than
+   * navigating away from the file — the same shape the AI-setup link beside it
+   * uses.
+   */
+  const handleOpenTimingSettings = useCallback(() => {
+    if (!projectId) return
+    navigate(projectSettingsPath(projectId, "audio-media"), {
+      state: { backgroundLocation: location, projectSettingsModalDepth: 1 },
+    })
+  }, [navigate, projectId, location])
+
   const handleOpenTerminologyConcept = useCallback((conceptId: string) => {
     navigate(
       `/project/${projectId}/terminology?concept=${encodeURIComponent(conceptId)}`,
@@ -6665,7 +7135,17 @@ export function ProjectWorkspace() {
     onTakeSaved: handleTakeSaved, // AQU-646: a take gives a text-less line a target row
     audioHomeFor, // AQU-646 stage 3f: where this row's audio belongs
     myScopes, // AQU-633: per-cell validate scope gate
-  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleTakeSaved, audioHomeFor, myScopes])
+    // AQU-1068 item 5: the source cell's menu. Its REASONS are per-row and
+    // travel as strings; these are the same functions for every row, so they
+    // ride the context and stay out of React.memo's compare surface.
+    onAddLineAt: handleAddLineAt,
+    onInsertCellBeside: handleInsertCellBeside,
+    onRemoveCell: handleRemoveCell,
+    onRetimeCell: handleRetimeSubtitle,
+    timingLocked,
+    canUnlockTiming,
+    onOpenTimingSettings: handleOpenTimingSettings,
+  }), [handleInfractionClick, handleOpenComments, handleOpenHistory, handleOpenTerminologyConcept, handleAiSetupNeeded, handleOpenRecording, handleMediaRowActivate, handleAssignCastVoice, handleClearCastVoice, handleTakeSaved, audioHomeFor, myScopes, handleAddLineAt, handleInsertCellBeside, handleRemoveCell, handleRetimeSubtitle, timingLocked, canUnlockTiming, handleOpenTimingSettings])
 
   const handleAssignVoice = useCallback(async (cellId: string, voiceId: string) => {
     if (!audioProject || !frontierSession) return
@@ -7664,9 +8144,29 @@ export function ProjectWorkspace() {
   // seek context) were silently seeing attachment-less cells, so anything
   // gated on `selectedAudioId` no-oped. Read the per-file audio here once for
   // the audio lens and merge where needed.
+  /**
+   * AQU-1068: whether this read is needed at all, WITHOUT asking which panel is
+   * open.
+   *
+   * The removal confirmation counts a cell's recordings from this map, and the
+   * remove button now lives in the text lens too — so gating the read on
+   * `lens === "audio"` made the dialog say "there is nothing else attached to
+   * it" over a cell holding takes, and destroy them on confirm. The same
+   * round-1 shape one more time: a panel fact standing in for a cell fact,
+   * inside the very dialog whose honesty the whole confirm-and-remove trade
+   * rests on.
+   *
+   * Deliberately a SUPERSET of `canEditLines` (which is declared far below and
+   * additionally excludes mirrored sources): this only decides whether to
+   * fetch, so erring wide costs one read and erring narrow costs the truth.
+   * Everyone who can be shown the button is covered.
+   */
+  const mayRestructureCells =
+    resolveCellEditingFloor(project) != null &&
+    (project?.syncRole?.level ?? 0) >= (resolveCellEditingFloor(project) ?? Infinity)
   const { byCellId: workspaceAudioByCellId } = useFileAudioAttachments(
     project?.id ?? null,
-    lens === "audio" ? activeFileId : null,
+    lens === "audio" || mayRestructureCells ? activeFileId : null,
   )
   workspaceAudioByCellIdRef.current = workspaceAudioByCellId
 
@@ -8360,54 +8860,207 @@ export function ProjectWorkspace() {
   // lens that array is empty by design, and forcing it would cost a full
   // thousand-object rebuild on every store bump for a surface nobody is looking
   // at. This is why the controls are a media-lens affordance.
-  //
-  // Sam, 2026-08-21: who may edit lines at all. Leads and above always could
-  // and still can; a contributor qualifies only while the project has opted
-  // into `allowLineCreation` — "that setting is enabling lines being added or
-  // removed", the package travels together, and the server enforces the same
-  // split per event. The static canPerform floor is CONTRIBUTOR now, so the
-  // settings term is what keeps a contributor's buttons from being offers the
-  // server would refuse.
-  const canEditLines =
-    (project?.syncRole?.level ?? 0) >= ROLE.PROJECT_LEAD ||
-    ((project?.allowLineCreation ?? false) &&
-      canPerform("source.cell.create", project?.syncRole?.level ?? null))
-  const addLineCells = activeFile?.coreMediaUrl && legacyCellsNeeded
-    && !audioMergedCells.some((c) => (c.medium ?? "text") === "media")
-    && canEditLines
-    ? audioMergedCells
-    : null
+
+  /**
+   * AQU-1068: ask before destroying anything, and say what "anything" is.
+   *
+   * Removal used to need no dialog: only an EMPTY line somebody had added by
+   * hand could go, so there was nothing to warn about. A maintainer can now
+   * take out an imported cell, which may carry translations in several
+   * languages, recordings, comments and validations — none of them visible
+   * from the row. Sam chose confirm-and-remove over refusing until the cell is
+   * empty, and that trade only holds while the confirmation is honest.
+   *
+   * The take-back case keeps its single click: an empty line a person just
+   * added has nothing to inventory, and a dialog there would be ceremony.
+   */
+  const [pendingCellRemoval, setPendingCellRemoval] = useState<
+    { cellId: string; inventory: CellRemovalInventory } | null
+  >(null)
+
+  const requestRemoveCell = useCallback(
+    (cellId: string) => {
+      const cell = getActiveCell(cellId)
+      if (!cell) return
+      const plan = cellStore.getRemovalPlan(cellId)
+      // Count EVERY comment on the cell — replies and already-resolved threads
+      // included. The row badge counts open roots only, which is the right
+      // number for "needs attention" and the wrong one for "will be destroyed".
+      let commentCount = 0
+      for (const c of allProjectComments) {
+        if (c.scopeKind !== "cell" || c.cellId !== cellId) continue
+        if (c.deletedAt !== null) continue
+        commentCount++
+      }
+      const merged = mergeCellsWithAudio([cell], workspaceAudioByCellIdRef.current)[0] ?? cell
+      const inventory = buildCellRemovalInventory({
+        cell: merged,
+        targetLangs: plan?.targetLangs ?? [],
+        commentCount,
+        sharedTakeCount: (linkedTakesByCell.get(cellId) ?? []).filter((t) => t.sharedWith > 1).length,
+      })
+      if (inventory.isEmpty) {
+        void handleRemoveLine(cellId)
+        return
+      }
+      setPendingCellRemoval({ cellId, inventory })
+    },
+    [getActiveCell, cellStore, allProjectComments, linkedTakesByCell, handleRemoveLine, toast, t],
+  )
+
+  // Publish it to the stable wrapper the editor context hands the rows. See
+  // `handleRemoveCell` above for why the indirection exists.
+  requestRemoveCellRef.current = requestRemoveCell
+
+  // AQU-1068: who may add and remove cells at all. ONE question, asked of the
+  // project's configured tier — no rank clears it on its own, because the
+  // setting answers *whether* this project restructures its files. The static
+  // canPerform floor still applies underneath, so a viewer is refused even at
+  // the most permissive tier. authorize.ts asks exactly the same two things.
+  // Shares the settings read every other consumer uses (useProjectSettings),
+  // so this costs no extra fetch.
+  const { cursor: dcsCursor, loading: dcsCursorLoading } = useDcsUpstreamCursor(
+    project?.id ?? "",
+    project?.syncRole?.level ?? null,
+  )
+  // The truth table lives in cell-editing-gate.ts — this component has no test
+  // harness, and the rule deciding who is offered a destructive button should
+  // not be verified only in a browser.
+  const cellEditingSubject = {
+    floor: resolveCellEditingFloor(project),
+    roleLevel: project?.syncRole?.level ?? null,
+    staticFloorPasses: canPerform("source.cell.create", project?.syncRole?.level ?? null),
+    // A live source link mirrors this project's source from upstream, and a
+    // DCS pin has a repair path that overwrites local source divergence — so a
+    // cell added or removed under either would be silently undone. Loading
+    // counts as pinned, matching how the "Edit source" pencil treats it.
+    sourceIsMirrored:
+      project?.sourceLinkMode === "live" || dcsCursorLoading || dcsCursor !== null,
+  }
+  const canEditLines = canEditCells(cellEditingSubject)
+  const canRemoveImportedCells = canRemoveImportedCellsGate(cellEditingSubject)
+  /**
+   * WHERE can a cell go in this file? Answered from the FILE, never from which
+   * panel happens to be open — see cell-editing-gate.ts for why that
+   * distinction is the whole of round 1's classification bug.
+   */
+  const placement = cellPlacement({
+    orderedBy: activeFile ? fileOrderedBy(activeFile) : "sequence",
+  })
+
   const videoDurationForTable = useVideoDurationSec(activeFile?.coreMediaUrl ?? null)
-  // Matt's QA (2026-08-21): the table's "Add line below" strip ignored the
-  // `allowLineCreation` setting entirely — the timeline's pencil obeyed it
-  // while this second door stood open. The setting gates the INSERT slots
-  // only, not `addLineCells` itself: removal rides `sourceLineEditing` too,
-  // and taking a line back is never gated on policy — switching the setting
-  // off must not strand a line somebody already made.
+  /**
+   * The silences, for a file on a clock.
+   *
+   * Derived from the store's own summaries rather than from `audioMergedCells`,
+   * so the slots exist in EVERY lens: `deriveSourceRegions` reads nothing but
+   * `{id, startTime, endTime}`, which the (memoized) summaries already carry,
+   * and the merged-with-audio array those slots used to come from is empty
+   * unless a media panel is open. That is what confined this affordance to the
+   * media lens and what left a Chosen file with no controls at all in text.
+   *
+   * A file with no footage linked simply has no known tail, so there is no
+   * trailing gap after the last cue — head and between-cue gaps still stand.
+   */
   const insertSlots = useMemo(
     () =>
-      addLineCells && (project?.allowLineCreation ?? false)
+      canEditLines && placement === "gaps"
         ? insertSlotsByCell(
-            deriveSourceRegions(addLineCells, videoDurationForTable),
+            deriveSourceRegions(
+              readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()),
+              videoDurationForTable,
+            ),
             MIN_ADDABLE_SPAN_SEC,
           )
         : EMPTY_INSERT_SLOTS,
-    [addLineCells, project?.allowLineCreation, videoDurationForTable],
+    [canEditLines, placement, cellStore, cellStoreVersion, videoDurationForTable],
   )
+
+  /**
+   * THE single answer to "what may this row do, and why not?", asked by the
+   * text table and the timeline lane alike.
+   *
+   * Round 3 turned this from a boolean into a reason, because a control that
+   * silently fails to appear teaches nothing: Sam switched the setting on for
+   * an MP3 import, nothing happened, and there was no way to tell a broken
+   * feature from an inapplicable one. The truth table itself lives in
+   * cell-editing-gate.ts so it can be read and tested without a browser.
+   */
+  const rowActions = useCallback(
+    (cell: CellData, gaps: { gapAbove: boolean; gapBelow: boolean }) => {
+      const out = rowActionAvailability({
+        placement,
+        // The row IS audio. Read per row, not per file: `medium` rides the
+        // ordinary cell projection, so this needs no attachment fetch and no
+        // lens — and a mixed file can offer inserts on its text rows while
+        // refusing its audio ones.
+        isMediaCell: (cell.medium ?? "text") === "media",
+        // Same check the source pencil makes, so the two agree about which
+        // rows are packaged layout.
+        isIdmlCell: resolveIdmlEditorConfiguration(cell.metadata, cell.originalHtml) != null,
+        gapAbove: gaps.gapAbove,
+        gapBelow: gaps.gapBelow,
+        // A line somebody added here is theirs to take back at any rank;
+        // anything else is the client's own content. One shared definition —
+        // see `isImportedRow` for why it no longer asks about emptiness.
+        isImported: isImportedRow(cell),
+        canRemoveImported: canRemoveImportedCells,
+      })
+      // The label answers the ACTION the user reached for, not the row's
+      // nature — a dead insert is a question about a NEW cell, so the media
+      // cause reads differently there than on remove (round 4).
+      const label = (action: "insert" | "remove", reason: RowActionReason | null): string | null =>
+        reason == null
+          ? null
+          : reason === "media"
+            ? action === "insert"
+              ? t("editor.row.mediaInsertReason")
+              : t("editor.row.mediaRemoveReason")
+            : reason === "idml"
+              ? t("editor.row.idmlReason")
+              : reason === "noRoom"
+                ? t("editor.row.noRoomReason")
+                : t("editor.row.maintainerOnlyReason")
+      return {
+        above: label("insert", out.above),
+        below: label("insert", out.below),
+        remove: label("remove", out.remove),
+      }
+    },
+    [placement, canRemoveImportedCells, t],
+  )
+
+  /**
+   * The row controls, one shape for both file kinds, offered in BOTH lenses.
+   *
+   * There is no longer a "this file offers nothing" case: whoever may
+   * restructure the project sees the controls on every row, and a row that
+   * cannot take an action renders it disabled with its reason. What is still
+   * withheld entirely is PROJECT-level — the tier not admitting you, or a
+   * mirrored source — because those never change while you are in the file and
+   * a permanently dead control is furniture, not an explanation.
+   */
   const sourceLineEditing = useMemo(
-    () =>
-      addLineCells
-        ? {
-            head: insertSlots.head,
-            afterCell: insertSlots.afterCell,
-            onAddLine: (startSec: number, endSec: number) => void handleAddLine(startSec, endSec),
-            // The same predicate the timeline lane asks, so the two surfaces
-            // can never disagree about what is removable.
-            canRemove: (c: CellData) => isUserAddedLine(c) && isLineEmpty(c),
-            onRemoveLine: (cellId: string) => void handleRemoveLine(cellId),
-          }
-        : undefined,
-    [addLineCells, insertSlots, handleAddLine, handleRemoveLine],
+    () => {
+      if (!canEditLines) return undefined
+      // AQU-1068 item 5: only what varies per ROW is left here — the silences
+      // and the rule that reads them. The three actions moved to
+      // EditorActionsContext when the controls moved inside the row; see the
+      // note on `EditorTableProps.sourceLineEditing`.
+      if (placement === "anywhere") {
+        return {
+          // Unused on this path — an untimed file has no silences to measure —
+          // but the shape is shared, so they are supplied empty rather than
+          // made optional for one caller.
+          head: null,
+          afterCell: EMPTY_INSERT_SLOTS.afterCell,
+          untimed: true,
+          rowActions,
+        }
+      }
+      return { head: insertSlots.head, afterCell: insertSlots.afterCell, rowActions }
+    },
+    [canEditLines, placement, insertSlots, rowActions],
   )
 
   // AQU-646 SUB-53 / pre-merge round: which job THIS FILE is for. The mode is
@@ -11046,15 +11699,18 @@ export function ProjectWorkspace() {
                     onTogglePlay={handleTimelineTogglePlay}
                     onRequestLinkVideo={() => setLinkVideoOpen(true)}
                     onAddLine={handleAddLine}
-                    onRemoveLine={handleRemoveLine}
+                    // Through the confirmation, like the table's control —
+                    // the two surfaces must not differ about what removing
+                    // costs any more than about what is removable.
+                    onRemoveLine={requestRemoveCell}
                     // Creating a cell is a source.* write, PROJECT_LEAD+ on the
                     // server. Offering the button below that bar would mint a
                     // guaranteed 403 and wedge the outbox.
                     canAddLine={canEditLines}
-                    // Off unless this project has turned it on. Clearance and
-                    // policy stay separate props so switching this off still
-                    // leaves an already-added empty line deletable.
-                    allowLineCreation={project?.allowLineCreation ?? false}
+                    // The second gate: an imported line is the client's own
+                    // work, so taking one back is maintainer-only whatever
+                    // tier the project runs.
+                    canRemoveImportedCells={canRemoveImportedCells}
                     canLinkVideo={canPerform("file.video.set", project?.syncRole?.level ?? null)}
                     // AQU-646 stage 2: the audio VTT. The import writes cells,
                     // so it sits behind the SAME source.* floor as the add-line
@@ -12120,6 +12776,40 @@ export function ProjectWorkspace() {
         confirmLabel={t("nav.workspaceActions.deleteFile.confirmLabel")}
         variant="destructive"
         onConfirm={() => { if (pendingDeleteId) { void handleDeleteFile(pendingDeleteId) } setPendingDeleteId(null) }}
+      />
+      {/* AQU-1068: removing a cell says exactly what goes with it. Assembled
+          from fragments rather than one string, because which clauses apply
+          depends on what the cell actually carries — the house idiom (see
+          nav.workspaceActions.moreAfterThis) for a composed sentence. */}
+      <ConfirmActionDialog
+        open={pendingCellRemoval !== null}
+        onOpenChange={(v) => { if (!v) setPendingCellRemoval(null) }}
+        title={t("editor.removeCell.title")}
+        description={(() => {
+          const inv = pendingCellRemoval?.inventory
+          if (!inv) return ""
+          const parts: string[] = []
+          if (inv.laneCount > 0) parts.push(t("editor.removeCell.translations", { count: inv.laneCount }))
+          if (inv.takeCount > 0) parts.push(t("editor.removeCell.takes", { count: inv.takeCount }))
+          if (inv.commentCount > 0) parts.push(t("editor.removeCell.comments", { count: inv.commentCount }))
+          if (inv.validatorCount > 0) parts.push(t("editor.removeCell.validations", { count: inv.validatorCount }))
+          const lead = parts.length
+            ? `${t("editor.removeCell.lead")} ${parts.join(", ")}.`
+            : t("editor.removeCell.leadNothing")
+          const warnings = [
+            inv.hasSharedTake ? t("editor.removeCell.sharedTakeWarning") : null,
+            inv.milestoneLabel
+              ? t("editor.removeCell.milestoneWarning", { label: inv.milestoneLabel })
+              : null,
+          ].filter(Boolean)
+          return [lead, ...warnings, t("editor.removeCell.permanent")].join(" ")
+        })()}
+        confirmLabel={t("editor.removeCell.confirmLabel")}
+        variant="destructive"
+        onConfirm={() => {
+          if (pendingCellRemoval) void handleRemoveLine(pendingCellRemoval.cellId)
+          setPendingCellRemoval(null)
+        }}
       />
       {/* A remote timing-mode change, acknowledged (2026-08-06). */}
       <TimingModeChangedDialog ack={timingAck.ack} onAcknowledge={timingAck.acknowledge} />

@@ -134,7 +134,16 @@ export interface FlushDeps {
   onRejected?: (entries: RejectedEntry[]) => void
   /** Called before a permanent 403 is quarantined. Foreground committers use
    *  the exact event ids to clear optimistic state and avoid chaining future
-   *  writes onto a head the server refused. */
+   *  writes onto a head the server refused.
+   *
+   *  AQU-1068: `onRejected` deliberately skips this class (see its note),
+   *  which was fine while every optimistic write was a value edit a refetch
+   *  would correct. It is not fine for a write that changes the SHAPE of the
+   *  file: an optimistic insert or removal carries a freshness floor, so no
+   *  correcting fetch can undo it, and the caller has to. A permission
+   *  refusal is also the ONLY status the cell-editing gate ever returns, so a
+   *  rollback wired to `onRejected` alone can never fire for the one case it
+   *  exists for. */
   onForbidden?: (entries: ForbiddenEntry[]) => void
 }
 

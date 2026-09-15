@@ -64,7 +64,7 @@ function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): 
   assign("validationRoleFloor", settings.validationRoleFloor)
   assign("validationNamedUsers", settings.validationNamedUsers)
   assign("allowSelfValidation", settings.allowSelfValidation)
-  assign("allowLineCreation", settings.allowLineCreation)
+  assign("cellEditingFloor", settings.cellEditingFloor)
   // AQU-646 stage 2: the second gate on track editing. Must reach the workspace
   // or the add-track button and the colour menu would be invisible everywhere,
   // since they render only when this is on.

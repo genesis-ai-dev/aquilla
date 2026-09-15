@@ -27,6 +27,28 @@ describe("role-policy (client mirror)", () => {
     expect(requiredRoleFor("some.future.kind")).toBeNull()
   })
 
+  // AQU-1068: the three cell-editing kinds sit at COMMENTER — the LOWEST rung
+  // the project's `cellEditingFloor` may be set to, since that tier gate is
+  // what actually decides and it lives on the server. Lowered from CONTRIBUTOR
+  // with the server (Matthew's review, Sam approved 2026-09-08).
+  //
+  // This mirror is the half that fails SILENTLY when it drifts high: a
+  // commenter on a project whose tier is "commenter" would have their insert
+  // refused before it ever reached the outbox, so the button would do nothing
+  // and produce no 403 to explain itself.
+  it("mirrors the COMMENTER floor the cell-editing tiers are measured against", () => {
+    expect(requiredRoleFor("source.cell.create")).toBe(ROLE.COMMENTER)
+    expect(requiredRoleFor("source.cell.delete")).toBe(ROLE.COMMENTER)
+    expect(requiredRoleFor("source.cell.reorder")).toBe(ROLE.COMMENTER)
+    // Not a blanket drop: committing a source edit is still a lead's act.
+    expect(requiredRoleFor("source.cell.commit")).toBe(ROLE.PROJECT_LEAD)
+  })
+
+  it("lets the client enqueue a commenter's insert instead of blocking it locally", () => {
+    expect(canPerform("source.cell.create", ROLE.COMMENTER)).toBe(true)
+    expect(canPerform("source.cell.create", ROLE.VIEWER)).toBe(false)
+  })
+
   // ── AQU-1000: the foreign-comment floor ─────────────────────────────────
   //
   // REGRESSION GUARD. The mirror used to carry only the self floors, so

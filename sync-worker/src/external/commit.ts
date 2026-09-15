@@ -19,10 +19,12 @@ import {
   type LinkMediaCommand,
   type PatchSettingsCommand,
   type PlanImportCommand,
+  type SetBriefCommand,
   type SetTranslationCommand,
   type UpdateProjectSettingsCommand,
 } from './commands'
 import { changedPolicyKeys, commitPatchSettings } from './commands-patch-settings'
+import { commitSetBrief } from './commands-set-brief'
 import { isOrgMemberCommand, type OrgMemberCommand } from './commands-org-members'
 import { commitOrgMember } from './org-members-engine'
 import { commitMemoryCommand, isMemoryCommand } from './commands-memory'
@@ -214,6 +216,12 @@ export async function commitChangesetCore(
   )
   if (patchSettingsCmd) {
     return commitPatchSettings(db, cred, cs, patchSettingsCmd, channel)
+  }
+  // AQU-1227 SetBrief: receipt-only — merges its patch into the live brief and
+  // writes it back as the translationBrief settings key.
+  const setBriefCmd = cs.commands.find((c): c is SetBriefCommand => c.kind === 'SetBrief')
+  if (setBriefCmd) {
+    return commitSetBrief(db, cred, cs, setBriefCmd, channel)
   }
   // AQU-1235 org membership: receipt-only with an ORG-level gate, so like
   // CreateProject it must run before the project-role precheck below.

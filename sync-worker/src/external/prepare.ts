@@ -18,12 +18,14 @@ import {
   type LinkMediaCommand,
   type PatchSettingsCommand,
   type PlanImportCommand,
+  type SetBriefCommand,
   type SetTranslationCommand,
   type UpdateProjectSettingsCommand,
 } from './commands'
 import { isOrgMemberCommand, type OrgMemberCommand } from './commands-org-members'
 import { prepareOrgMember } from './org-members-engine'
 import { changedPolicyKeys, preparePatchSettings, previewSettingValue } from './commands-patch-settings'
+import { prepareSetBrief } from './commands-set-brief'
 import { isMemoryCommand, prepareMemoryCommand } from './commands-memory'
 import { prepareEmitEvents } from './emit-events-engine'
 import { resolveCellStates, type CellPrecondition } from './preconditions'
@@ -177,6 +179,18 @@ export async function prepareChangesetCore(
       return errorResponse('validation_failed', 'PatchSettings must be the only command in a changeset')
     }
     return preparePatchSettings(db, cred, projectId, id, autonomyMode, patchSettings, env)
+  }
+
+  // SetBrief (AQU-1227): sole command — it writes the `translationBrief` key of
+  // the same versioned settings blob, so sharing a changeset with another
+  // settings write would double-bump the version. Its role floor and version
+  // pin live in its module, like the two above.
+  const setBrief = validated.commands.find((c): c is SetBriefCommand => c.kind === 'SetBrief')
+  if (setBrief) {
+    if (validated.commands.length !== 1) {
+      return errorResponse('validation_failed', 'SetBrief must be the only command in a changeset')
+    }
+    return prepareSetBrief(db, cred, projectId, id, autonomyMode, setBrief, env)
   }
 
   // AQU-1228 Living Memory writes: sole command; receipt-only like

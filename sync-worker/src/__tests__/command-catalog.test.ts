@@ -25,6 +25,8 @@ import {
 import { validateCommands, CREATE_PROJECT_FIELDS } from '../external/commands'
 import { POLICY_SETTINGS_KEYS } from '../external/commands-patch-settings'
 import { ALLOWED_EMIT_KINDS, TESTIMONY_EMIT_KINDS } from '../external/commands-emit-events'
+import { BRIEF_FIELD_MAX_CHARS, BRIEF_NOTES_MAX_CHARS } from '../external/commands-set-brief'
+import { BRIEF_FIELD_IDS } from '../../../db/shared/brief'
 import { ROLE } from '../events/role-policy'
 
 const ROLE_LEVELS = [0, 100, 200, 300, 400, 500, 600, 700, 9999]
@@ -59,6 +61,7 @@ describe('command catalog — invariants', () => {
       UpdateProjectSettings: { kind: 'UpdateProjectSettings', projectId: 'p', settings: {}, ifMatchVersion: 0 },
       PatchSettings: { kind: 'PatchSettings', projectId: 'p', ops: [{ key: 'systemPrompt', value: 'x' }], ifMatchVersion: 0 },
       EmitEvents: { kind: 'EmitEvents', events: [{ kind: 'comment.create', payload: { body: 'hi' } }] },
+      SetBrief: { kind: 'SetBrief', projectId: 'p', parameters: { audience: 'Rural youth' }, ifMatchVersion: 0 },
       AddOrgMember: { kind: 'AddOrgMember', orgId: 1, username: 'u', role: 400 },
       SetOrgRole: { kind: 'SetOrgRole', orgId: 1, username: 'u', role: 400 },
       RemoveOrgMember: { kind: 'RemoveOrgMember', orgId: 1, username: 'u' },
@@ -103,6 +106,17 @@ describe('command catalog — invariants', () => {
       expect(ALLOWED_EMIT_KINDS).toContain(kind)
     }
     expect(emitDoc).toContain('testimony')
+  })
+
+  it('describe_command("SetBrief") documents every brief section id (AQU-1227)', () => {
+    const entry = describeCommand('SetBrief')!
+    expect(entry.minRoleLevel).toBe(ROLE.MAINTAINER)
+    for (const id of BRIEF_FIELD_IDS) {
+      expect(entry.paramsDoc, `SetBrief paramsDoc omits section "${id}"`).toContain(id)
+    }
+    // The caps the validator actually enforces, not prose approximations.
+    expect(entry.paramsDoc).toContain(String(BRIEF_FIELD_MAX_CHARS))
+    expect(entry.paramsDoc).toContain(String(BRIEF_NOTES_MAX_CHARS))
   })
 
   it("documents every field CreateProject actually accepts (AQU-1223)", () => {

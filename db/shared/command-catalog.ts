@@ -163,6 +163,26 @@ Gotchas:
 Example: \`{ "kind": "PatchSettings", "projectId": "p1", "ops": [{ "key": "targetLanes", "value": ["es","pt"] }], "ifMatchVersion": 7 }\``,
   },
   {
+    kind: 'SetBrief',
+    title: 'Set translation brief',
+    oneLiner: 'Write the project’s translation brief, section by section.',
+    minRoleLevel: MAINTAINER,
+    tier: 'structural',
+    agentReachable: true,
+    paramsDoc: `### SetBrief
+Params: \`{ projectId, parameters?, freeformNotes?, ifMatchVersion }\` — sole command; at least one of \`parameters\`/\`freeformNotes\`.
+\`parameters\` is a PARTIAL map of brief section id → answer text: named sections are replaced, every unnamed section keeps its live value. Section ids (interview order):
+- Purpose & audience: \`purpose\`, \`audience\`, \`useAndMedium\`, \`motiveSponsor\`
+- Standards: \`sourceTexts\`, \`targetVariety\`, \`registerNaturalness\`, \`literalness\`, \`keyTerms\`, \`constraints\`, \`qualityBar\`
+Writes the \`translationBrief\` key of the project settings blob — the same record the in-app brief builder reads, so an API-set brief satisfies the autopilot brief gate exactly like a hand-typed one.
+Gotchas:
+- An unknown section id is \`validation_failed\` (nothing is staged) — it is never silently dropped.
+- Section text caps at 4000 chars; \`freeformNotes\` at 8000.
+- \`ifMatchVersion\` is the SETTINGS version (not the brief's own \`version\`) and must match at prepare AND commit (plan_stale on drift) — read it first.
+- The L1 summary is carried over, not cleared, so it shows as stale in-app until regenerated — same as an in-app section edit.
+Example: \`{ "kind": "SetBrief", "projectId": "p1", "parameters": { "audience": "Rural youth, 15–25" }, "ifMatchVersion": 7 }\``,
+  },
+  {
     kind: 'UpdateProjectSettings',
     title: 'Update settings (deprecated)',
     oneLiner: 'Whole-blob settings replace — prefer PatchSettings.',

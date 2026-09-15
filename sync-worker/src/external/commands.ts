@@ -25,6 +25,11 @@ import {
   type EmitEventsCommand,
 } from './commands-emit-events'
 import {
+  SET_BRIEF_REQUIRED_ROLE,
+  validateSetBriefCommand,
+  type SetBriefCommand,
+} from './commands-set-brief'
+import {
   isOrgMemberCommand,
   validateOrgMemberCommand,
   type OrgMemberCommand,
@@ -47,6 +52,7 @@ function isMemoryCommandKind(kind: string): boolean {
 export type { PlanImportCell, PlanImportManifest, PlanImportVariant } from './import-manifest'
 export type { PatchSettingsCommand, PatchSettingsOp } from './commands-patch-settings'
 export type { EmitEventsCommand, EmitEventInput } from './commands-emit-events'
+export type { SetBriefCommand } from './commands-set-brief'
 export type {
   AddOrgMemberCommand,
   OrgMemberCommand,
@@ -167,6 +173,7 @@ export type Command =
   | LinkMediaCommand
   | PatchSettingsCommand
   | EmitEventsCommand
+  | SetBriefCommand
   | OrgMemberCommand
 
 /** Hard cap on source cells per PlanImport changeset. Above this the plan is
@@ -527,6 +534,11 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
       if (cmd) commands.push(cmd)
       return
     }
+    if (c.kind === 'SetBrief') {
+      const cmd = validateSetBriefCommand(c, index, issues)
+      if (cmd) commands.push(cmd)
+      return
+    }
     if (isOrgMemberCommand(c as { kind: string })) {
       const cmd = validateOrgMemberCommand(c, index, issues)
       if (cmd) commands.push(cmd)
@@ -593,6 +605,11 @@ export function requiredRoleForCommand(c: Command): number {
   // index-filtering floor per the command catalog.
   if (c.kind === 'PatchSettings') {
     return staticPatchSettingsFloor(c)
+  }
+  // SetBrief also takes its own receipt-only path; MAINTAINER is the honest
+  // floor (the same one PatchSettings applies to the translationBrief key).
+  if (c.kind === 'SetBrief') {
+    return SET_BRIEF_REQUIRED_ROLE
   }
   // EmitEvents: max REQUIRED_ROLE across the batch's event kinds — the same
   // floors its compiled events hit at the /events perimeter (dynamic bumps,

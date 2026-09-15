@@ -55,14 +55,16 @@ export interface ChangesetSummary {
   artifactLinked?: string
   /** LinkMedia: number of cells an audio artifact is attached to. */
   mediaLinked?: number
-  /** Receipt-only (CreateProject / UpdateProjectSettings / PatchSettings): the
-   *  command kind, so the human on /approve/:id sees WHICH lifecycle op they're
-   *  approving instead of an empty "No changes summarized." box (design §2 /
-   *  blind-approval fix). */
+  /** Receipt-only (CreateProject / UpdateProjectSettings / PatchSettings /
+   *  SetBrief / AddExample / AddDecision / RetireExample / AddNote): the
+   *  command kind, so the human on /approve/:id sees WHICH lifecycle op
+   *  they're approving instead of an empty "No changes summarized." box
+   *  (design §2 / blind-approval fix). */
   command?:
     | 'CreateProject'
     | 'UpdateProjectSettings'
     | 'PatchSettings'
+    | 'SetBrief'
     | 'AddOrgMember'
     | 'SetOrgRole'
     | 'RemoveOrgMember'
@@ -96,9 +98,11 @@ export interface ChangesetSummary {
   /** UpdateProjectSettings: the pinned settings version this write guards on. */
   ifMatchVersion?: number
   /** UpdateProjectSettings / PatchSettings: one truncated "key → preview" per
-   *  top-level settings key being written. Rendered as individual lines on the
-   *  approval page (an object, so the page's flat number/string filter ignores
-   *  it — the page reads it explicitly). */
+   *  top-level settings key being written. SetBrief uses the same shape, keyed
+   *  per brief section (`translationBrief.<fieldId>`), so the approval page
+   *  renders which sections change without a second summary field. Rendered as
+   *  individual lines on the approval page (an object, so the page's flat
+   *  number/string filter ignores it — the page reads it explicitly). */
   settingsChanges?: Record<string, string>
   /** EmitEvents: per-kind effect lines (kind, count, testimony flag). */
   events?: EmitEventsSummaryEntry[]
@@ -143,6 +147,9 @@ export interface PlannedEventIds {
   /** PatchSettings (receipt-only): the settings version pinned at prepare —
    *  same guard semantics as updateProjectSettings. */
   patchSettings?: { version: number }
+  /** SetBrief (receipt-only): the settings version pinned at prepare — the
+   *  brief lives in the settings blob, so it takes the same version guard. */
+  setBrief?: { version: number }
   /** AQU-1235 org membership (receipt-only): the resolved target org + user
    *  (pinned at prepare so commit writes the SAME identity the human approved,
    *  never a re-resolution of the username), plus the role the target held at
@@ -199,16 +206,17 @@ export interface ReceiptOnlyReceipt {
     | 'CreateProject'
     | 'UpdateProjectSettings'
     | 'PatchSettings'
+    | 'SetBrief'
     | 'AddOrgMember'
     | 'SetOrgRole'
     | 'RemoveOrgMember'
   appliedAt: string
   /** CreateProject: the created project id. UpdateProjectSettings /
-   *  PatchSettings: the updated project id. Org membership: the project the
-   *  plan was filed under (the write itself is org-level). */
+   *  PatchSettings / SetBrief: the updated project id. Org membership: the
+   *  project the plan was filed under (the write itself is org-level). */
   projectId: string
-  /** UpdateProjectSettings / PatchSettings: the new settings version after the
-   *  write. */
+  /** UpdateProjectSettings / PatchSettings / SetBrief: the new settings version
+   *  after the write. */
   version?: number
   /** AQU-1235: the org the membership change landed in. */
   orgId?: number

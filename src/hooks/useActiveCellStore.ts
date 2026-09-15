@@ -1504,7 +1504,7 @@ export class CellStore {
       const subsections: CellNavigationSubsection[] = []
       for (let offset = 0; offset < group.cellIds.length; offset += MILESTONE_SUBSECTION_SIZE) {
         const cellIds = group.cellIds.slice(offset, offset + MILESTONE_SUBSECTION_SIZE)
-        const firstCellId = cellIds[0]!
+        const firstCellId = cellIds[0]
         subsections.push({
           key: `${group.milestone.key}:range:${firstCellId}`,
           label: `${offset + 1}–${offset + cellIds.length}`,

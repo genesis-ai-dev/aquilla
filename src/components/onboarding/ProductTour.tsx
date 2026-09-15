@@ -94,7 +94,7 @@ export const TOUR_STEPS: TourStep[] = [
  *
  * `roleLevel == null` (role not yet resolved — e.g. org list still loading)
  * fails **open**, mirroring the existing role-gate convention in this
- * codebase (`RoleGatedStep`, `RulesPage`'s `userRoleLevel == null` branch):
+ * codebase (`RoleGatedStep`, `RulesSection`'s `roleLevel == null` branch):
  * an unresolved role is treated as unrestricted rather than as the lowest
  * role. This is a coach-mark tour, not a security boundary, so the failure
  * mode that matters is "step permanently missing because resolveSteps ran
@@ -415,7 +415,7 @@ interface ProductTourProps {
   onClose: () => void
   /**
    * AQU-512: caller's org role level (e.g. `activeOrg.role.level` from
-   * OrgContext — plain `number` there, same as RoleGatedStep/RulesPage's
+   * OrgContext — plain `number` there, same as RoleGatedStep/RulesSection's
    * `roleLevel` props), used to filter out PM-only steps for lower-
    * permission viewers. `null`/omitted = role unresolved, filterStepsByRole
    * fails open.

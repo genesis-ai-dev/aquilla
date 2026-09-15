@@ -39,5 +39,6 @@ export function deployStackPreview(options?: {
     command: string, args: string[],
     options: { cwd: string; env: NodeJS.ProcessEnv },
   ) => Promise<{ stdout: string }>
+  notify?: (options: { env: NodeJS.ProcessEnv; urls: Record<PreviewSurface, string> }) => Promise<void>
   verify?: (directory: string) => unknown
 }): Promise<{ name: string; urls: Record<PreviewSurface, string> }>

@@ -129,6 +129,7 @@ project_empty_signal AS (
 )
 SELECT
     pc.project_id,
+    p.org_id,
     pc.migration_class,
     pc.target_language AS raw_target_language,
     pc.resolved_tag AS backfill_tag_candidate,
@@ -139,9 +140,20 @@ SELECT
     COALESCE(pes.empty_assignments, 0) AS empty_assignments,
     COALESCE(pes.empty_lane_scopes, 0) AS empty_lane_scopes,
     COALESCE(pes.headline_empty_rows, 0) AS headline_empty_rows,
-    (SELECT COUNT(*)::bigint FROM events e WHERE e.project_id = pc.project_id) AS event_count
+    (SELECT COUNT(*)::bigint FROM events e WHERE e.project_id = pc.project_id) AS event_count,
+    -- AQU-1240 v2 (lane IDs): how many distinct target-lane values exist today.
+    -- This is the number of `lanes` rows the additive backfill will create for
+    -- this project (one per distinct value, incl. '' = the default lane).
+    (SELECT COUNT(DISTINCT c.target_lang)::bigint FROM cells c
+       WHERE c.project_id = pc.project_id AND c.side = 'target') AS distinct_target_lane_values,
+    -- Codex-origin signal: migrated events are authored 'legacy-import'. Not a
+    -- first-class provenance column (none exists), but a usable heuristic for
+    -- flagging importer-created projects that need the lane-id importer change.
+    (SELECT COUNT(*)::bigint FROM events e
+       WHERE e.project_id = pc.project_id AND e.author = 'legacy-import') AS legacy_import_event_count
 FROM project_class pc
 LEFT JOIN project_empty_signal pes ON pes.project_id = pc.project_id
+LEFT JOIN projects p ON p.id = pc.project_id
 WHERE COALESCE(pes.headline_empty_rows, 0) > 0
    OR pc.migration_class <> 'CLEAN'
 ORDER BY
@@ -217,6 +229,48 @@ FROM project_class pc
 LEFT JOIN has_empty_target_content het ON het.project_id = pc.project_id
 GROUP BY pc.migration_class
 ORDER BY
+    CASE pc.migration_class
+        WHEN 'BLANK' THEN 1
+        WHEN 'COLLIDE' THEN 2
+        WHEN 'ARCHIVED-COLLIDE' THEN 3
+        WHEN 'CLEAN' THEN 4
+    END;
+
+\echo ''
+\echo '=== 0c) Per-ORG rollup — migration class counts by owning org ==='
+\echo '    (which orgs own which blocks of cases; org_id NULL = no owning org)'
+\echo ''
+
+WITH project_lane_settings AS (
+    SELECT
+        ps.project_id,
+        NULLIF(BTRIM(ps.target_language), '') AS resolved_tag,
+        COALESCE(ps.target_lanes, '[]'::jsonb) AS target_lanes_json,
+        COALESCE((ps.settings::jsonb)->'archivedLanes', '[]'::jsonb) AS archived_lanes_json
+    FROM project_settings ps
+),
+project_class AS (
+    SELECT
+        pls.project_id,
+        CASE
+            WHEN pls.resolved_tag IS NULL THEN 'BLANK'
+            WHEN EXISTS (SELECT 1 FROM jsonb_array_elements_text(pls.target_lanes_json) AS tl(lane)
+                         WHERE LOWER(BTRIM(tl.lane)) = LOWER(pls.resolved_tag)) THEN 'COLLIDE'
+            WHEN EXISTS (SELECT 1 FROM jsonb_array_elements_text(pls.archived_lanes_json) AS al(lane)
+                         WHERE LOWER(BTRIM(al.lane)) = LOWER(pls.resolved_tag)) THEN 'ARCHIVED-COLLIDE'
+            ELSE 'CLEAN'
+        END AS migration_class
+    FROM project_lane_settings pls
+)
+SELECT
+    p.org_id,
+    pc.migration_class,
+    COUNT(*)::bigint AS project_count
+FROM project_class pc
+LEFT JOIN projects p ON p.id = pc.project_id
+GROUP BY p.org_id, pc.migration_class
+ORDER BY
+    p.org_id NULLS FIRST,
     CASE pc.migration_class
         WHEN 'BLANK' THEN 1
         WHEN 'COLLIDE' THEN 2

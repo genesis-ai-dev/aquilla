@@ -82,8 +82,8 @@ export function deriveMilestoneNavigation(
       resolved[index] = isScriptureMilestone(seed)
         ? seed
         : structural
-          ? nextScripture[index] ?? previous ?? fallback[index]!
-          : previous ?? nextScripture[index] ?? fallback[index]!
+          ? nextScripture[index] ?? previous ?? fallback[index]
+          : previous ?? nextScripture[index] ?? fallback[index]
     }
   } else if (seeds.some(Boolean)) {
     const nextSeed: (ImportMilestone | undefined)[] = new Array(cells.length)
@@ -107,11 +107,11 @@ export function deriveMilestoneNavigation(
       resolved[index] = current
         ?? (index < firstSeedIndex ? startMilestone : undefined)
         ?? nextSeed[index]
-        ?? fallback[index]!
+        ?? fallback[index]
     }
   } else {
     for (let index = 0; index < cells.length; index += 1) {
-      resolved[index] = fallback[index]!
+      resolved[index] = fallback[index]
     }
   }
 
@@ -123,7 +123,7 @@ export function deriveMilestoneNavigation(
     cellIds: string[]
   }>()
   cells.forEach((cell, index) => {
-    const assignment = resolved[index]!
+    const assignment = resolved[index]
     milestoneByCellId.set(cell.id, assignment)
     const existing = groups.get(assignment.key)
     if (existing) {
@@ -142,6 +142,31 @@ export function deriveMilestoneNavigation(
     milestoneByCellId,
     orderedMilestones: [...groups.values()],
   }
+}
+
+export interface MilestonePageEntry {
+  key: string
+  cellIds: readonly string[]
+  subsections?: readonly { key: string; cellIds: readonly string[] }[]
+}
+
+/**
+ * Cells that belong on one navigator destination. Split-into-milestones view
+ * always asks for the whole division. A subsection key is the picker jump
+ * into a 50-cell range of a long IDML story, used only in continuous view.
+ */
+export function cellIdsForMilestonePage(
+  navigation: readonly MilestonePageEntry[],
+  milestoneKey: string,
+  subsectionKey?: string,
+): readonly string[] | undefined {
+  const entry = navigation.find((item) => item.key === milestoneKey)
+  if (!entry) return undefined
+  if (subsectionKey) {
+    const subsection = entry.subsections?.find((item) => item.key === subsectionKey)
+    if (subsection) return subsection.cellIds
+  }
+  return entry.cellIds
 }
 
 function legacyMilestoneSeed(cell: MilestoneNavigationCell): ImportMilestone | undefined {

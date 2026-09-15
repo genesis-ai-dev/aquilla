@@ -286,7 +286,35 @@ async function verifySpa(config, options) {
   const appUrl = new URL(SPA_SHELL_PATH, config.appOrigin).href
   const html = await operationWithRetry(appUrl, async () => {
     const response = await options.fetchImpl(appUrl, {
-      headers: { Accept: "text/html" },
+      // Fetch the shell with the SAME cache semantics as the chunks it names
+      // (`fetchJavascriptGraph` below sends `no-cache`). Asymmetry here means
+      // comparing one build's asset list against another build's deployment:
+      // hashes the new bundle lacks fall through
+      // `not_found_handling = "single-page-application"` to the SPA shell, and
+      // the crawl reports "returned HTML instead of JavaScript; the deployed
+      // asset is missing" against a healthy deploy.
+      //
+      // THIS IS A CONSISTENCY FIX, NOT A PROVEN ROOT-CAUSE FIX. On
+      // aquilla-web-development (2026-09-04) the crawl asked for
+      // app-chunk-D3Jfvuvv and friends, which the just-uploaded bundle no
+      // longer contained, while that bundle's real entry chunk served correct
+      // JavaScript throughout — so the verifier definitely read an OLDER
+      // document than the one it validated against. What produced that older
+      // document was never established. Two candidates, and this header only
+      // helps with the first:
+      //   1. Cloudflare's edge cache. Note CF deliberately ignores a client
+      //      `Cache-Control: no-cache` for edge lookups, so this may be inert.
+      //      `/app` returned `cf-cache-status: HIT` with the header, without
+      //      it, and with a cache-busting query string alike.
+      //   2. Asset propagation lag — the promoted document going live in a
+      //      colo before its chunks finished propagating there. The retry loop
+      //      (DEFAULT_ATTEMPTS) is the real remedy for that one, and it is why
+      //      the failure presents as a stall that eventually goes green rather
+      //      than a hard failure.
+      // If this recurs, instrument which of the two it is before adding more
+      // cache-busting: a query string changes the cache key but also changes
+      // what is being verified, which is its own hazard.
+      headers: { Accept: "text/html", "Cache-Control": "no-cache" },
     })
     assertResponse(response, 200, "SPA entrypoint")
     return response.text()

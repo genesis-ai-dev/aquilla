@@ -277,6 +277,57 @@ describe("X-Usfm-Lossy-Verse-Count header (AQU-276)", () => {
   })
 })
 
+describe("?mode=raw — byte-exact original USFM upload", () => {
+  const rawReq = (token: string): Request =>
+    new Request("https://w/api/v1/projects/p1/files/f1/source?mode=raw", {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+
+  it("returns raw_source verbatim with X-Export-Mode: raw-original — translations are NOT injected", async () => {
+    const env: ExportRouteEnv = {
+      SYNC_SECRET_KEY: SECRET,
+      AQUILLA_PG: makeStubDb({
+        blob: { format: "usfm", raw_source: PLAIN_USFM },
+        // Translated cells exist — raw mode must ignore them entirely.
+        cells: [{ canonical_ref: "GEN 1:1", value: "Au commencement." }],
+      }),
+      SNAPSHOTS: makeStubBucket(),
+    }
+    const res = await handleExportSourceRequest(rawReq(await makeToken(600)), env)
+    expect(res?.status).toBe(200)
+    expect(await res?.text()).toBe(PLAIN_USFM)
+    expect(res?.headers.get("X-Export-Mode")).toBe("raw-original")
+    // Raw mode never runs the serializer, so the lossy count doesn't apply.
+    expect(res?.headers.get("X-Usfm-Lossy-Verse-Count")).toBeNull()
+  })
+
+  it("resolves R2-stored originals byte-exactly when raw_source moved to R2", async () => {
+    const bucket = makeStubBucket()
+    await bucket.put("sources/p1/f1", new TextEncoder().encode(PLAIN_USFM))
+    const env: ExportRouteEnv = {
+      SYNC_SECRET_KEY: SECRET,
+      AQUILLA_PG: makeStubDb({
+        blob: { format: "usfm", raw_source: null, r2_key: "sources/p1/f1" },
+      }),
+      SNAPSHOTS: bucket,
+    }
+    const res = await handleExportSourceRequest(rawReq(await makeToken(600)), env)
+    expect(res?.status).toBe(200)
+    expect(await res?.text()).toBe(PLAIN_USFM)
+    expect(res?.headers.get("X-Export-Mode")).toBe("raw-original")
+  })
+
+  it("keeps the export role floor: a viewer (100) is still 403'd in raw mode", async () => {
+    const env: ExportRouteEnv = {
+      SYNC_SECRET_KEY: SECRET,
+      AQUILLA_PG: makeStubDb({ blob: { format: "usfm", raw_source: PLAIN_USFM } }),
+      SNAPSHOTS: makeStubBucket(),
+    }
+    const res = await handleExportSourceRequest(rawReq(await makeToken(100)), env)
+    expect(res?.status).toBe(403)
+  })
+})
+
 describe("custom source preservation (AQU-635)", () => {
   it("returns the exact original text without pretending target injection is lossless", async () => {
     const raw = "kind|source|target\nheading|Opening|Ouverture\n"

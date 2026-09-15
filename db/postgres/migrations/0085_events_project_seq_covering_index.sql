@@ -1,0 +1,28 @@
+-- Covering replacement for idx_events_project_seq (prod pg_stat_statements,
+-- 8.6-day window ending 2026-09-04): the /migrate/event-ids cursor query
+--
+--   SELECT id, server_seq FROM events
+--    WHERE project_id = $1 AND server_seq > $2 ORDER BY server_seq LIMIT $3
+--
+-- ran 8.3K times at 393 ms mean, 25M shared blocks read and 6 GB of temp.
+-- EXPLAIN (ANALYZE, BUFFERS) on the largest project (201K events) showed two
+-- plans for the same statement:
+--   * after=0      → Index Scan on idx_events_project_seq, 50K heap fetches
+--                    (~6.5K pages, most dirtied while setting hint bits).
+--   * after=150000 → planner under-estimates the tail (5.2K est vs 64.5K
+--                    actual), flips to Bitmap Heap Scan (51K heap pages) +
+--                    external-merge Sort (3.6 MB on disk under work_mem=4MB),
+--                    1.5 s. That Sort is the temp-write source.
+-- Both plans pay for fetching `id` from the heap. Carrying `id` in the index
+-- makes the ordered path an Index Only Scan (no heap pages, no Sort), which
+-- the planner prefers regardless of the row estimate.
+--
+-- Same unique key as the old index, so uniqueness of (project_id, server_seq)
+-- is preserved; INCLUDE columns do not participate in the constraint. The
+-- old index is dropped in 0086 once this one exists.
+--
+-- Keep this file a SINGLE statement: CONCURRENTLY cannot run in a transaction
+-- block. If the build fails it leaves an INVALID index — `DROP INDEX
+-- idx_events_project_seq_id` and re-run.
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_events_project_seq_id
+  ON events(project_id, server_seq) INCLUDE (id);

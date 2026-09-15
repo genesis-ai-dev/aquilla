@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { tokenizeForConfidence, lexicalConfidence } from './lexical-confidence'
+import { tokenizeForConfidence, lexicalConfidence, lexicalSimilarity } from './lexical-confidence'
 
 describe('tokenizeForConfidence', () => {
   it('lowercases and splits on punctuation/whitespace', () => {
@@ -70,5 +70,40 @@ describe('lexicalConfidence (one-hop, term coverage)', () => {
       'अरामले अम्मीनादाब अम्मीनादाबले नहशोन नहशोनले सल्मोन व्यनात',
     ]
     expect(lexicalConfidence(query, validatedNeighbors)).toBe(1)
+  })
+})
+
+describe('lexicalSimilarity (AQU-1232)', () => {
+  it('is 1 for identical term sets and 0 for disjoint ones', () => {
+    expect(lexicalSimilarity('In the beginning', 'in, the BEGINNING!')).toBe(1)
+    expect(lexicalSimilarity('In the beginning', 'peace be with you')).toBe(0)
+  })
+
+  it('is symmetric', () => {
+    const a = 'God created the heavens'
+    const b = 'God created the earth also'
+    expect(lexicalSimilarity(a, b)).toBeCloseTo(lexicalSimilarity(b, a))
+  })
+
+  it('ranks a near-duplicate above a superset that merely contains the query', () => {
+    const query = 'God created the heavens'
+    const near = 'God created the earth'
+    // Contains every query term, plus a long tail — a coverage score would call
+    // this a perfect 1.0 and hand the agent the wrong precedent.
+    const superset = 'God created the heavens and every living creature upon the waters below'
+    expect(lexicalConfidence(query, [superset])).toBe(1) // the trap, for contrast
+    expect(lexicalSimilarity(query, near)).toBeGreaterThan(lexicalSimilarity(query, superset))
+  })
+
+  it('computes Jaccard over distinct terms', () => {
+    // A = {a,b,c}, B = {b,c,d} → |∩| = 2, |∪| = 4.
+    expect(lexicalSimilarity('a b c', 'b c d')).toBeCloseTo(0.5)
+    // Repeats do not skew it: A = {name}, B = {name, other} → 1/2.
+    expect(lexicalSimilarity('name name name', 'name other')).toBeCloseTo(0.5)
+  })
+
+  it('is 0 when either side has no terms', () => {
+    expect(lexicalSimilarity('', 'anything')).toBe(0)
+    expect(lexicalSimilarity('!!! ???', 'anything')).toBe(0)
   })
 })

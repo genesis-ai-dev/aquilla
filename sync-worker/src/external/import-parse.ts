@@ -22,9 +22,14 @@
 //
 // The parsers are the SPA's own worker-safe text parse core
 // (src/lib/parsers/parse-text-formats.ts — pure string/regex, no DOMParser),
-// imported directly like shared/import-contract.ts. DOM-bound formats (docx,
-// pptx, html, xliff, tmx, usx, idml) CANNOT run here; they return a structured
-// validation_failed naming the client-side alternatives instead of guessing.
+// imported directly like shared/import-contract.ts, plus the DOCX parser
+// (src/lib/parsers/docx.ts), which AQU-1237 moved off `DOMParser`/JSZip onto
+// the platform-only `xml-lite` + `zip-lite` readers. Because the server calls
+// the SAME `extractDocxStrings` the in-app Import dialog calls, an agent import
+// and a browser import of one file produce identical cells by construction.
+// The still-DOM-bound formats (pptx, html, xliff, tmx, usx, idml) CANNOT run
+// here; they return a structured validation_failed naming the client-side
+// alternatives instead of guessing.
 //
 // Role floor: CONTRIBUTOR to parse (same as artifact upload — preview is a step
 // of the import write workflow, not a plain read). Staging additionally hits
@@ -42,16 +47,26 @@ import {
   TEXT_PARSE_FILE_TYPES,
   type TextParseFileType,
 } from '../../../src/lib/parsers/parse-text-formats'
+import { extractDocxStrings } from '../../../src/lib/parsers/docx'
 import type { ParsedTextFileResult, TranslatableString } from '../../../src/lib/parsers/core-types'
 
+/** Formats parsed from BYTES rather than decoded text — zip containers whose
+ *  parser reads members itself. Routed around the text-parse core below. */
+export const BINARY_PARSE_FILE_TYPES: ReadonlySet<string> = new Set<string>(['docx'])
+
+/** The union the parse route accepts. */
+export type ServerParseFileType = TextParseFileType | 'docx'
+
 /** Formats the server can parse (published by discovery + get_capabilities). */
-export const SERVER_PARSEABLE_FILE_TYPES: readonly string[] = [...TEXT_PARSE_FILE_TYPES].sort()
+export const SERVER_PARSEABLE_FILE_TYPES: readonly string[] = [
+  ...TEXT_PARSE_FILE_TYPES,
+  ...BINARY_PARSE_FILE_TYPES,
+].sort()
 
 /** Detected formats we recognize but cannot parse in the worker (DOM-bound
  *  parsers, binary containers, or multi-member packages). Kept as data so the
  *  error and the capability docs can never drift. */
 export const CLIENT_ONLY_FORMATS: readonly string[] = [
-  'docx',
   'pptx',
   'doc',
   'html',
@@ -69,17 +84,19 @@ const CLIENT_ONLY_HINT =
   'PlanImport cells via POST .../changesets'
 
 /** Caller-supplied fileType spellings → canonical parse types. */
-const FILE_TYPE_ALIASES: Record<string, TextParseFileType> = {
+const FILE_TYPE_ALIASES: Record<string, ServerParseFileType> = {
   sfm: 'usfm',
   markdown: 'md',
   plaintext: 'txt',
   text: 'txt',
+  word: 'docx',
 }
 
 /** /inspect's detectedFormat values → canonical parse types. Formats absent
  *  here (po, properties, obs, sbv) are supported but not sniffable — callers
  *  name them explicitly via fileType. */
-const DETECTED_TO_PARSE: Record<string, TextParseFileType> = {
+const DETECTED_TO_PARSE: Record<string, ServerParseFileType> = {
+  docx: 'docx',
   usfm: 'usfm',
   json: 'json',
   csv: 'csv',
@@ -197,12 +214,13 @@ function resolveFileType(
   text: string,
   bytes: Uint8Array,
   artifactName: string,
-): { ok: true; fileType: TextParseFileType; detectedFormat: string | null } | { ok: false; response: Response } {
+): { ok: true; fileType: ServerParseFileType; detectedFormat: string | null } | { ok: false; response: Response } {
   if (explicit !== undefined) {
     const normalized = explicit.trim().toLowerCase()
-    const resolved = TEXT_PARSE_FILE_TYPES.has(normalized)
-      ? (normalized as TextParseFileType)
-      : FILE_TYPE_ALIASES[normalized]
+    const resolved =
+      TEXT_PARSE_FILE_TYPES.has(normalized) || BINARY_PARSE_FILE_TYPES.has(normalized)
+        ? (normalized as ServerParseFileType)
+        : FILE_TYPE_ALIASES[normalized]
     if (resolved) return { ok: true, fileType: resolved, detectedFormat: null }
     return {
       ok: false,
@@ -228,6 +246,31 @@ function resolveFileType(
         : `could not detect a server-parseable format (saw "${detectedFormat}") — pass fileType explicitly`,
       { detectedFormat, supportedFileTypes: SERVER_PARSEABLE_FILE_TYPES, clientOnlyFormats: CLIENT_ONLY_FORMATS },
     ),
+  }
+}
+
+/**
+ * Parse a byte-oriented (zip container) format into the same
+ * `ParsedTextFileResult[]` shape the text core returns, so everything
+ * downstream — cell mapping, cap checks, preview, staging — is shared.
+ *
+ * Each binary format delegates to the SPA parser the Import dialog uses; that
+ * shared call IS the browser/server parity guarantee the acceptance criteria
+ * asks for. Throws on malformed input (the caller turns it into a named
+ * validation_failed).
+ */
+async function parseBinaryFormat(
+  fileType: ServerParseFileType,
+  buffer: ArrayBuffer,
+  name: string,
+): Promise<ParsedTextFileResult[]> {
+  switch (fileType) {
+    case 'docx':
+      return [{ name, strings: await extractDocxStrings(buffer) }]
+    default:
+      // Unreachable while BINARY_PARSE_FILE_TYPES and this switch agree; the
+      // drift test in external-import-parse.test.ts keeps them agreeing.
+      throw new Error(`no binary parser registered for fileType "${fileType}"`)
   }
 }
 
@@ -267,8 +310,11 @@ export async function handleParseArtifact(
   // Bounded by the 25MB upload cap, which the worker already buffers on upload.
   const obj = await env.SNAPSHOTS.get(row.r2_key)
   if (!obj) return errorResponse('not_found', 'artifact bytes missing from storage')
-  const bytes = new Uint8Array(await obj.arrayBuffer())
-  // UTF-8 with BOM stripped — the DOM-free formats are text by definition.
+  const buffer = await obj.arrayBuffer()
+  const bytes = new Uint8Array(buffer)
+  // UTF-8 with BOM stripped — the text formats are text by definition. A binary
+  // container decodes to mojibake here; it is only used for format sniffing,
+  // and its parser reads the raw bytes instead.
   let text = new TextDecoder('utf-8').decode(bytes)
   if (text.charCodeAt(0) === 0xfeff) text = text.slice(1)
 
@@ -278,14 +324,20 @@ export async function handleParseArtifact(
 
   let results: ParsedTextFileResult[]
   try {
-    results = parseTextFormat({
-      fileType,
-      text,
-      name: row.name,
-      ...(body.excludeFrontMatter !== undefined ? { excludeFrontMatter: body.excludeFrontMatter } : {}),
-    })
+    results = BINARY_PARSE_FILE_TYPES.has(fileType)
+      ? await parseBinaryFormat(fileType, buffer, row.name)
+      : parseTextFormat({
+          fileType: fileType as TextParseFileType,
+          text,
+          name: row.name,
+          ...(body.excludeFrontMatter !== undefined ? { excludeFrontMatter: body.excludeFrontMatter } : {}),
+        })
   } catch (err) {
-    return errorResponse('validation_failed', `parse failed for fileType "${fileType}": ${String(err)}`, {
+    // Malformed archives, missing OOXML parts, and the zip-bomb guards all land
+    // here — a named failure at preview, never a silent partial import. Log
+    // server-side only; the raw error text must not reach the client.
+    console.error(`[external-import-parse] parse failed for fileType "${fileType}":`, err)
+    return errorResponse('validation_failed', `parse failed for fileType "${fileType}"`, {
       fileType,
       ...(detectedFormat ? { detectedFormat } : {}),
     })

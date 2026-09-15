@@ -42,7 +42,8 @@ function collectRefs(commands: readonly Command[]): PlanRefs {
       target.set(cellKey(c.fileId, c.cellId), { fileId: c.fileId, cellId: c.cellId })
       continue
     }
-    if (c.kind === 'PatchSettings') {
+    if (c.kind === 'PatchSettings' || c.kind === 'SetBrief') {
+      // SetBrief's end-state also lives in the settings blob (translationBrief).
       needsSettings = true
       continue
     }

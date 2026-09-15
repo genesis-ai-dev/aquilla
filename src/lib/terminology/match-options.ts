@@ -56,6 +56,29 @@ export function resolveMatchOptions(
 }
 
 /**
+ * Validate untrusted match options (a TBX note, a pasted JSON blob) into a
+ * TermMatchOptions. Field types are checked, not assumed: `resolveMatchOptions`
+ * calls `.map` on `forms`/`excludedForms`, so a string where an array belongs
+ * would throw at match time, far from the import that accepted it. Invalid
+ * fields are dropped rather than rejecting the whole import — a bad note must
+ * not cost the user the concept. Returns undefined when nothing valid remains.
+ */
+export function coerceMatchOptions(raw: unknown): TermMatchOptions | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined
+  const rec = raw as Record<string, unknown>
+  const out: TermMatchOptions = {}
+  if (typeof rec.foldMarks === "boolean") out.foldMarks = rec.foldMarks
+  if (typeof rec.affixes === "boolean") out.affixes = rec.affixes
+  for (const key of ["forms", "excludedForms"] as const) {
+    const value = rec[key]
+    if (!Array.isArray(value)) continue
+    const strings = value.filter((v): v is string => typeof v === "string")
+    if (strings.length > 0) out[key] = strings
+  }
+  return Object.keys(out).length > 0 ? out : undefined
+}
+
+/**
  * Strip a draft's match options down to what the user actually set: undefined
  * keys and empty arrays carry no information, and persisting them would make
  * every concept look like it had explicit overrides. Returns undefined when

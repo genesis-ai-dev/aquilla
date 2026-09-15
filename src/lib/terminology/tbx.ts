@@ -37,6 +37,7 @@
 
 import { v4 as uuid } from "uuid"
 import type { Concept, TermRendering, RenderingStatus, TermMatchOptions } from "./types"
+import { coerceMatchOptions } from "./match-options"
 
 // ---------------------------------------------------------------------------
 // TBX administrative-status ↔ RenderingStatus mapping
@@ -187,10 +188,7 @@ export function importConceptsTbx(xml: string): Concept[] {
     let match: TermMatchOptions | undefined
     if (head?.matchOptionsJson) {
       try {
-        const parsed: unknown = JSON.parse(head.matchOptionsJson)
-        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-          match = { ...(parsed as TermMatchOptions) }
-        }
+        match = coerceMatchOptions(JSON.parse(head.matchOptionsJson))
       } catch {
         // Lenient import: a malformed note is ignored.
       }

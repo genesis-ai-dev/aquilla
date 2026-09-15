@@ -167,6 +167,31 @@ describe("affixes", () => {
   })
 })
 
+describe("affix list hygiene", () => {
+  // WHY: folding collapses spellings, so the raw inventory a user types can
+  // produce duplicate or EMPTY alternatives in the affix group. An empty
+  // alternative makes `(?:…|)` match the empty string at every position, which
+  // silently turns the bounded affix group into a wildcard and makes the term
+  // match words it has no business matching. Dedupe must happen after folding.
+  it("dedupes folded affixes and never emits an empty alternative", () => {
+    const src = termToRegexSource("\u05d0\u05e8\u05e5", {
+      foldMarks: true,
+      prefixes: ["\u05d9\u05dd", "\u05d9\u05b4\u05dd", "\u05b0"],
+      suffixes: [],
+      maxAffixes: 2,
+    })
+    expect(src).not.toBeNull()
+    const group = src as string
+    // \u05d9\u05dd and \u05d9\u05b4\u05dd fold to one pattern, so it appears exactly once…
+    const alt = "\u05d9\\p{M}*\u05dd\\p{M}*"
+    expect(group.split(alt).length - 1).toBe(1)
+    // …and the mark-only affix contributes no empty alternative.
+    expect(group).not.toContain("|)")
+    expect(group).not.toContain("(?:|")
+    expect(() => new RegExp(group, "u")).not.toThrow()
+  })
+})
+
 describe("forms and exclusions", () => {
   // WHY: manual variants are the escape hatch when no option covers a form.
   it("match.forms are alternates with their own boundaries", () => {

@@ -135,10 +135,15 @@ function affixGroup(
 ): string {
   const list = (affixes ?? []).map((a) => a.trim()).filter((a) => a.length > 0)
   if (list.length === 0) return ""
-  const alts = [...new Set(list)]
+  // Dedupe and drop empties AFTER folding, not before: folding collapses
+  // differently-pointed spellings of one affix onto the same pattern (ים/יִם),
+  // and a mark-only affix folds away to nothing — an empty alternative would
+  // make the group match the empty string everywhere.
+  const folded = [...new Set(list)]
     .sort((a, b) => b.length - a.length)
     .map((a) => literalSegment(a, fold))
-    .join("|")
+  const alts = [...new Set(folded)].filter((p) => p.length > 0).join("|")
+  if (alts.length === 0) return ""
   const n = Math.max(1, Math.min(maxAffixes ?? 2, 4))
   // A prefix is followed by the marks that sit on its last letter; a suffix is
   // preceded by the marks sitting on the stem's last letter. When folding the
@@ -201,7 +206,8 @@ export function conceptToRegexSource(
   const excl = r.excludedForms
     .map((f) => literalSegment(f, r.foldMarks))
     .join("|")
-  // Anchored where the match would start: not preceded by a letter, and the
+  // Anchored where the match would start: not adjacent to a letter or
+  // combining mark (the same boundary class the term alternates use), and the
   // excluded surface must end at a word boundary so `הארץ` excludes only the
   // whole word, never a longer word that begins with it.
   return `(?!(?:${excl})${TRAIL_BOUNDARY})${body}`

@@ -256,13 +256,23 @@ describe("computeTerminologyStats — concept-matcher source side", () => {
     expect(stats.byConcept[0].enforced).toBe(1)
   })
 
-  it("does not count an excluded surface form", () => {
-    const stats = computeTerminologyStats(
-      [erets],
-      [cell("בָּאָ֣רֶץ", "in the land")],
-      settings,
-    )
-    expect(stats.byConcept[0].occurrences).toBe(0)
+  // WHY: an exclusion only earns its keep if the form it names WOULD otherwise
+  // be counted — the prefixed form וְהָאָ֗רֶץ is exactly what the affix inventory
+  // makes matchable, so the pair below proves the exclusion, not the matcher's
+  // indifference: same cell, same settings, one counted and one not.
+  it("does not count an excluded surface form that would otherwise match", () => {
+    const affixSettings = { prefixes: ["ו", "ה"], suffixes: [] }
+    const cells = [cell("וְהָאָ֗רֶץ הָיְתָה", "and the earth was")]
+    const excluding = makeConcept({
+      id: "c-erets-excl",
+      sourceTerm: "הָאָ֗רֶץ",
+      renderings: [{ rendering: "earth", status: "preferred" }],
+      match: { excludedForms: ["והארץ"] },
+    })
+    const plain = makeConcept({ ...excluding, id: "c-erets-plain", match: undefined })
+
+    expect(computeTerminologyStats([excluding], cells, affixSettings).byConcept[0].occurrences).toBe(0)
+    expect(computeTerminologyStats([plain], cells, affixSettings).byConcept[0].occurrences).toBe(1)
   })
 
   it("without project settings the affix forms are not occurrences", () => {

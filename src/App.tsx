@@ -65,7 +65,7 @@ const ProjectSettings = lazy(() =>
 const ProjectSettingsDialog = lazy(() =>
   import("@/components/ProjectSettings").then((m) => ({ default: m.ProjectSettingsDialog })),
 )
-// AQU-254: CommentsPage / LivingMemoryPage / TerminologyPage are now rendered
+// AQU-254: CommentsPage / LivingMemoryPage / the glossary editor are now rendered
 // inside ProjectWorkspace shell (lazy-imported there). The routes below all
 // point to ProjectWorkspace; the shell detects the path suffix and swaps only
 // the main content area. These top-level lazy imports are intentionally removed.

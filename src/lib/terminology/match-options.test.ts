@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { hasCombiningMarks, pruneMatch, resolveMatchOptions } from "./match-options"
+import { hasCombiningMarks, pruneMatch, resolveMatchOptions, coerceMatchOptions } from "./match-options"
 
 describe("resolveMatchOptions", () => {
   // WHY: the whole point of script-derived defaults is that a user who selects
@@ -65,5 +65,37 @@ describe("pruneMatch", () => {
       foldMarks: false,
       excludedForms: ["x"],
     })
+  })
+})
+
+describe("coerceMatchOptions", () => {
+  // WHY: match options can arrive from a hand-written or third-party TBX note,
+  // where nothing enforces the field types. resolveMatchOptions calls .map on
+  // forms/excludedForms, so a string there would throw at MATCH time — long
+  // after the import that accepted it, with no way to tell which concept is
+  // poisoned. Bad fields must be dropped at the door instead.
+  it("drops fields whose type is wrong instead of trusting them", () => {
+    expect(coerceMatchOptions({ forms: "אֶרֶץ" })).toBeUndefined()
+    expect(coerceMatchOptions({ foldMarks: "yes" })).toBeUndefined()
+    expect(coerceMatchOptions({ forms: ["a", 3, null, "b"] })).toEqual({ forms: ["a", "b"] })
+    expect(coerceMatchOptions({ foldMarks: "yes", affixes: false })).toEqual({ affixes: false })
+  })
+
+  // WHY: unknown keys would otherwise be persisted onto Concept.match forever,
+  // and every later reader would have to defend against them.
+  it("keeps only the known keys", () => {
+    expect(coerceMatchOptions({ foldMarks: true, maxAffixes: 9, junk: "x" })).toEqual({
+      foldMarks: true,
+    })
+  })
+
+  // WHY: a non-object note carries no options at all; callers rely on
+  // undefined to mean "leave concept.match unset" rather than storing {}.
+  it("returns undefined for non-objects and for an empty result", () => {
+    expect(coerceMatchOptions(null)).toBeUndefined()
+    expect(coerceMatchOptions(["forms"])).toBeUndefined()
+    expect(coerceMatchOptions("forms")).toBeUndefined()
+    expect(coerceMatchOptions({})).toBeUndefined()
+    expect(coerceMatchOptions({ forms: [] })).toBeUndefined()
   })
 })

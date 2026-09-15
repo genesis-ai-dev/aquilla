@@ -373,10 +373,6 @@ export const terminology = defineNamespace({
       one: "Matches {count} place in this file",
       other: "Matches {count} places in this file",
     }),
-    "terminology.match.previewCountProject": plural({
-      one: "Matches {count} place in this project",
-      other: "Matches {count} places in this project",
-    }),
     "terminology.match.formsLabel": "Forms",
     "terminology.match.formsEmpty": "No matches yet",
     "terminology.match.moreForms": "+{count} more",
@@ -861,12 +857,6 @@ export const terminology = defineNamespace({
           "Live match-preview stat while editing a concept's matching options, scoped " +
           "to the currently open file; {count} is the number of matching places found.",
         placeholders: { count: "The number of matches found in the current file." },
-      },
-      "terminology.match.previewCountProject": {
-        description:
-          "Live match-preview stat while editing a concept's matching options, scoped " +
-          "to the whole project; {count} is the number of matching places found.",
-        placeholders: { count: "The number of matches found across the project." },
       },
       "terminology.match.formsLabel": {
         description:

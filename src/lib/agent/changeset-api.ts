@@ -67,12 +67,29 @@ export interface ChangesetSummaryEvent {
   testimony?: boolean
 }
 
+/** One staged validation/unvalidation, named cell by cell (AQU-1184). The
+ *  approver has to see WHICH cells and WHAT text they are endorsing — a count
+ *  is not an approvable plan for testimony. Server-computed from the live
+ *  projection at prepare. */
+export interface ChangesetSummaryTestimony {
+  kind: string
+  fileId: string
+  cellId: string
+  laneId?: string
+  /** The cell's current target text, truncated server-side. */
+  text: string
+  truncated?: boolean
+}
+
 export interface ChangesetApprovalSummary {
   warnings?: { message: string }[]
   /** UpdateProjectSettings/PatchSettings: per-key truncated previews. */
   settingsChanges?: Record<string, string>
   /** EmitEvents changesets: per-kind counts with testimony marks. */
   events?: ChangesetSummaryEvent[]
+  /** EmitEvents changesets: every staged cell.validate / cell.unvalidate,
+   *  itemized with the cell's current text (AQU-1184 guardrail 2). */
+  testimony?: ChangesetSummaryTestimony[]
   /** AQU-1228 Living Memory writes: the entry path being written or retired
    *  plus a one-line preview of its content — the approval page renders these
    *  explicitly, because approving IS the memory review. */

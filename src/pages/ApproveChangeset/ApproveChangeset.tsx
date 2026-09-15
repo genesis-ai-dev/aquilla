@@ -216,12 +216,15 @@ function ApprovalSummaryView({
   onReject: () => void
 }) {
   const { locale, t } = useI18n()
+  const { warnings, settingsChanges, testimony, memoryWrites, structure, ...facts } = data.summary
+  // AQU-1184: validations are testimony — the approver must see every cell and
+  // its current text, never just a count.
+  const testimonyEntries = Array.isArray(testimony) ? testimony : []
   // AQU-1234: a cell-structure changeset reports its effect as one nested
   // object, which the flat number/string filter below would drop — leaving the
   // reviewer with "No changes summarized." on the one command kind that
   // rewrites a file's shape. Flatten it into the same fact list, dropping the
   // zero counts so an insert doesn't read as a delete of nothing.
-  const { warnings, settingsChanges, memoryWrites, structure, ...facts } = data.summary
   const structureEntries: [string, string | number][] =
     structure && typeof structure === "object"
       ? Object.entries(structure).filter(
@@ -301,6 +304,30 @@ function ApprovalSummaryView({
           </div>
         )}
       </div>
+
+      {testimonyEntries.length > 0 && (
+        <div className="space-y-1.5">
+          <p className="text-sm font-medium">
+            {t("agent.changeset.testimonyHeading", { count: testimonyEntries.length })}
+          </p>
+          <div className="max-h-96 space-y-1.5 overflow-y-auto rounded-md border bg-muted/30 p-2">
+            <ul className="space-y-1.5 text-xs">
+              {testimonyEntries.map((entry, i) => (
+                <li key={`${entry.fileId}:${entry.cellId}:${entry.laneId ?? ""}:${i}`} className="space-y-0.5">
+                  <p className="font-mono text-[11px] text-muted-foreground">
+                    {entry.kind} · {entry.cellId}
+                    {entry.laneId ? ` · ${entry.laneId}` : ""}
+                  </p>
+                  <p className="text-foreground">
+                    {entry.text}
+                    {entry.truncated ? "…" : ""}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
 
       {data.changes && data.changes.items.length > 0 && (
         <div className="space-y-1.5">

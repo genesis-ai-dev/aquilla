@@ -113,6 +113,7 @@ export const agent = defineNamespace({
     "agent.changeset.settingsChanges": "Settings changes",
     "agent.changeset.memoryWrites": "Living Memory changes",
     "agent.changeset.changesHeading": "Changes ({count})",
+    "agent.changeset.testimonyHeading": "Validations to endorse ({count})",
     "agent.changeset.warnings": "Warnings",
     "agent.changeset.digestLabel": "Digest:",
     // ── AQU-926 live review card (LiveChangesetCard): the card itself
@@ -507,6 +508,13 @@ export const agent = defineNamespace({
           "Heading over the sampled per-cell change list on the approval page, with " +
           "the total change count in parentheses.",
         placeholders: { count: "Total number of changes in the changeset (may exceed how many are listed below it)." },
+      },
+      "agent.changeset.testimonyHeading": {
+        description:
+          "Heading over the itemized list of staged cell validations on the approval " +
+          "page (AQU-1184). Each row names the cell and shows its current text, so the " +
+          "approver endorses specific translations rather than a bare count.",
+        placeholders: { count: "Number of validation/unvalidation entries listed below it." },
       },
       "agent.changeset.receiptApplied": {
         description:

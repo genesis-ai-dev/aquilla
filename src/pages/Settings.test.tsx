@@ -58,6 +58,7 @@ vi.mock("@/hooks/useOrgSettings", () => ({
     allowSelfAssignment: false,
     // AQU-822: terminology floor — default Project lead.
     termbaseEditMinRole: 500,
+    languageEditMinRole: 600,
     // AQU-1002: comment floors — defaults reproduce post-AQU-999 behaviour.
     commentCreateMinRole: 200,
     commentResolveMinRole: 400,

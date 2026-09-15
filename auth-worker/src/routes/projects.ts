@@ -53,12 +53,14 @@ import {
   decodeProjectDirectoryCursor,
   DEFAULT_COMMENT_FLOORS,
   DEFAULT_TERMBASE_EDIT_MIN_ROLE,
+  DEFAULT_LANGUAGE_EDIT_MIN_ROLE,
   encodeProjectDirectoryCursor,
   getCommentFloors,
   getEffectiveOrgRole,
   getOrCreateUserOrg,
   getRosterViewMinRole,
   getTermbaseEditMinRole,
+  getLanguageEditMinRole,
   listEffectiveProjectMembers,
 } from "../services/org-permissions"
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
@@ -697,6 +699,15 @@ projects.get("/:projectId", authMiddleware, async (c) => {
   // frame and on window focus; it never re-reads this record, so an org-level
   // flip could not reach a workspace that was already open.
   //
+  // AQU-1086: same deal for the org's language-edit floor — the Project
+  // Settings language fields and the Languages card gate on it, and the
+  // project-settings route re-resolves it on every language write.
+  const languageEditMinRole =
+    row.org_id != null
+      ? await getLanguageEditMinRole(c.env, row.org_id)
+      : DEFAULT_LANGUAGE_EDIT_MIN_ROLE
+
+
   // AQU-1002: the org's comment floors ride along for the same reason — the
   // comments drawer and Comments page gate their controls off the project
   // record and have no org-settings read of their own. Advisory only:
@@ -711,6 +722,7 @@ projects.get("/:projectId", authMiddleware, async (c) => {
     name: row.name,
     orgId: row.org_id,
     termbaseEditMinRole,
+    languageEditMinRole,
     commentCreateMinRole: commentFloors.commentCreateMinRole,
     commentResolveMinRole: commentFloors.commentResolveMinRole,
     archivedAt: row.archived_at,

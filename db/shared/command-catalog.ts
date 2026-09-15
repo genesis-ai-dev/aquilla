@@ -172,7 +172,7 @@ Example: \`{ "kind": "CreateOrg", "name": "Partner Co" }\``,
     paramsDoc: `### PatchSettings
 Params: \`{ projectId, ops: [{ key, value }], ifMatchVersion }\` — sole command; top-level settings keys only; each op replaces that key's value wholesale (one op per key — duplicates are rejected).
 Floors: \`terminology\` needs the org's termbase-edit floor (default PROJECT_LEAD 500); every other key needs MAINTAINER 600.
-Policy keys are NEVER writable by agents (permission_denied): agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, validationCount, validationCountAudio, allowSelfValidation, harmonize_min_role, contributeToGlobalTm.
+Policy keys are NEVER writable by agents (permission_denied): agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, validationCount, validationCountAudio, allowSelfValidation, harmonize_min_role, contributeToGlobalTm, agentAuthorship.
 Valid keys, with the value type each holds: ${PATCH_SETTINGS_KEY_DOC}. \`null\` clears any key (JSON cannot carry undefined, so there is no "delete").
 Gotchas:
 - A key not on that list is a typo, not a new setting: prepare rejects it with \`validation_failed\` naming the key, and a wrong value type is rejected the same way naming the expected type. Nothing reaches the approval queue either way.

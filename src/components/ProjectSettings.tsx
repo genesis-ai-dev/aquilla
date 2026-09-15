@@ -361,6 +361,9 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const {
     canEdit: canEditShared,
     reasonCannotEdit,
+    canEditLanguages,
+    reasonCannotEditLanguages,
+    languageEditFloor,
     patch: patchShared,
     version: sharedVersion,
     updatedAt: sharedUpdatedAt,
@@ -372,7 +375,13 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     // AQU-1083: what "Organization default" currently resolves to, from the
     // same response as the value it is the fallback for.
     orgCountStructuralCells,
-  } = useProjectSettings(id ?? null, project?.syncRole?.level ?? null, { roleTelemetry })
+  } = useProjectSettings(id ?? null, project?.syncRole?.level ?? null, {
+    // AQU-1086: the org's language-edit floor rides on the project record, so
+    // the language fields below can be enabled for a project lead when the org
+    // opted in — without loosening the maintainer floor on anything else.
+    languageEditMinRole: project?.languageEditMinRole,
+    roleTelemetry,
+  })
 
   // Org context for the termbase-sharing section. The user's org; the section's
   // server calls re-validate org-membership / org-ownership, so a mismatch just
@@ -438,6 +447,32 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const sharedDisabledTooltip =
     reasonCannotEdit === "offline" ? t("projectSettings.permission.reconnectToEdit")
     : reasonCannotEdit === "role" ? roleLockHint
+    : null
+
+  // AQU-1086: the language fields sit behind the org's configurable
+  // languageEditMinRole, so their lock hint must name the role the user
+  // actually needs (Project lead when the org lowered the floor, Maintainer by
+  // default) rather than a hardcoded Maintainer — the AQU-427 convention.
+  const languagePrivilegedRole = resolveRoleName(t, languageEditFloor, { plural: true })
+  const languageRoleLockHint = (
+    <PermissionLockHint
+      title={t("projectSettings.permission.onlyRoleCanModify", {
+        role: languagePrivilegedRole,
+      })}
+      onView={id ? () => setPrivilegedOpen(true) : undefined}
+      href={id ? undefined : PERMISSION_DOCS_URL}
+      linkLabel={
+        id
+          ? t("projectSettings.permission.viewPrivilegedMembers", {
+              role: languagePrivilegedRole,
+            })
+          : t("error.permissionDenied.learnMore")
+      }
+    />
+  )
+  const languageDisabledTooltip =
+    reasonCannotEditLanguages === "offline" ? t("projectSettings.permission.reconnectToEdit")
+    : reasonCannotEditLanguages === "role" ? languageRoleLockHint
     : null
 
   // AQU-765: renaming a synced project now persists to the server rename
@@ -1651,12 +1686,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               <SettingsRow
                 label={<label htmlFor="sl">{t("projectSettings.info.sourceLanguageLabel")}</label>}
                 control={
-                  <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip}>
+                  <DisabledFieldTooltip disabled={!canEditLanguages} tooltip={languageDisabledTooltip}>
                     <LanguageComboboxInput
                       id="sl"
                       value={sourceLanguage}
                       onValueChange={setSourceLanguage}
-                      disabled={!canEditShared}
+                      disabled={!canEditLanguages}
                       aria-label={t("projectSettings.info.sourceLanguageLabel")}
                       className="w-40 bg-background"
                     />
@@ -1666,12 +1701,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               <SettingsRow
                 label={<label htmlFor="tl">{t("projectSettings.info.targetLanguageLabel")}</label>}
                 control={
-                  <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip}>
+                  <DisabledFieldTooltip disabled={!canEditLanguages} tooltip={languageDisabledTooltip}>
                     <LanguageComboboxInput
                       id="tl"
                       value={targetLanguage}
                       onValueChange={setTargetLanguage}
-                      disabled={!canEditShared}
+                      disabled={!canEditLanguages}
                       aria-label={t("projectSettings.info.targetLanguageLabel")}
                       className="w-40 bg-background"
                     />
@@ -1688,8 +1723,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             defaultTargetLanguage={sharedSettingsBlob?.targetLanguage ?? project?.targetLanguage ?? ""}
             targetLanes={sharedSettingsBlob?.targetLanes ?? []}
             archivedLanes={sharedSettingsBlob?.archivedLanes ?? []}
-            canEdit={canEditShared}
-            disabledTooltip={sharedDisabledTooltip}
+            canEdit={canEditLanguages}
+            disabledTooltip={languageDisabledTooltip}
             patch={patchShared}
           />
         )}

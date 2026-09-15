@@ -235,9 +235,13 @@ describe('MCP tools/call — reads', () => {
     })
     const { payload, isError } = toolPayload(((await res.json()) as any).result)
     expect(isError).toBe(false)
+    // AQU-1180: the MCP adapter and REST /me must agree about what a token is
+    // allowed to learn — scope and autonomy yes, the human behind it no.
     expect(payload).toMatchObject({
-      userId: '1', username: 'alice', mode: 'act', orgId: null, projectId: PROJECT, credentialId: CRED_1,
+      mode: 'act', orgId: null, projectId: PROJECT, credentialId: CRED_1,
     })
+    expect(payload).not.toHaveProperty('userId')
+    expect(payload).not.toHaveProperty('username')
   })
 
   it('get_capabilities publishes real limits and error codes', async () => {

@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { buildPrompt, buildBatchPrompt, complete, fetchModels, normalizeOpenAIBaseUrl, resolveProvider, DEFAULT_APPROVED_EXAMPLE_COUNT, DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT, FRONTIER_CHAT_URL, collectValidatedPairs, selectApprovedExamples, buildRulesBlock, buildBriefBlock, activeProjectIdFromPath, normalizeCompletionMaxTokens } from "./completion-service"
+import { buildPrompt, buildBatchPrompt, complete, fetchModels, normalizeOpenAIBaseUrl, resolveProvider, resolveEffectiveCompletionSettings, isCompletionConfigured, shouldPromptAiSetup, DEFAULT_APPROVED_EXAMPLE_COUNT, DEFAULT_COMPLETION_MAX_TOKENS, DEFAULT_SYSTEM_PROMPT, FRONTIER_CHAT_URL, OPENROUTER_BYOK_ENDPOINT, isHostedOpenRouterUnconfigured, collectValidatedPairs, selectApprovedExamples, buildRulesBlock, buildBriefBlock, activeProjectIdFromPath, normalizeCompletionMaxTokens } from "./completion-service"
+import { setUserApiKey } from "@/lib/store/user-api-keys"
+import {
+  clearUserProviderOverride,
+  setUserProviderOverride,
+} from "@/lib/store/user-provider-override"
+import { resetClientLocalStorageOwnerForTests } from "@/lib/frontier/client-local-storage"
 import type { CompletionSettings, TranslationRule } from "@/lib/parsers/types"
 import type { FrontierSession } from "@/lib/frontier/types"
 
@@ -363,6 +369,121 @@ describe("resolveProvider", () => {
   })
 })
 
+describe("isCompletionConfigured", () => {
+  beforeEach(() => {
+    localStorage.clear()
+    resetClientLocalStorageOwnerForTests()
+    clearUserProviderOverride()
+  })
+  afterEach(() => {
+    clearUserProviderOverride()
+    localStorage.clear()
+    resetClientLocalStorageOwnerForTests()
+  })
+
+  it("treats Frontier as configured when a session JWT is present", () => {
+    expect(isCompletionConfigured({ ...BASE, provider: "frontier" }, "jwt-abc")).toBe(true)
+    expect(isCompletionConfigured({ ...BASE, provider: "frontier" }, null)).toBe(false)
+  })
+
+  it("treats custom OpenRouter with a key as configured even without a model", () => {
+    expect(isCompletionConfigured({
+      ...BASE,
+      provider: "custom",
+      endpoint: OPENROUTER_BYOK_ENDPOINT,
+      apiKey: "sk-or-user",
+      model: "",
+    }, "jwt-abc")).toBe(true)
+  })
+
+  it("does not treat custom OpenRouter as configured without a key", () => {
+    expect(isCompletionConfigured({
+      ...BASE,
+      provider: "custom",
+      endpoint: OPENROUTER_BYOK_ENDPOINT,
+      model: "moonshotai/kimi-k2",
+    }, "jwt-abc")).toBe(false)
+  })
+
+  it("allows a localhost custom endpoint without a key", () => {
+    expect(isCompletionConfigured({
+      ...BASE,
+      provider: "custom",
+      endpoint: "http://localhost:8000",
+      model: "",
+    }, null)).toBe(true)
+  })
+
+  it("lets a personal override with endpoint+key configure a Frontier project", () => {
+    expect(isCompletionConfigured(
+      { ...BASE, provider: "frontier" },
+      "jwt-abc",
+      { endpoint: OPENROUTER_BYOK_ENDPOINT, apiKey: "sk-or-override" },
+    )).toBe(true)
+  })
+
+  it("keeps a project OpenRouter key configured even if the personal override has no key", () => {
+    expect(isCompletionConfigured(
+      {
+        ...BASE,
+        provider: "custom",
+        endpoint: OPENROUTER_BYOK_ENDPOINT,
+        apiKey: "sk-or-project",
+      },
+      "jwt-abc",
+      { endpoint: OPENROUTER_BYOK_ENDPOINT },
+    )).toBe(true)
+  })
+
+  it("accepts a user-scoped completion key when the project record has none", () => {
+    setUserApiKey("completion", "sk-or-user-store")
+    expect(isCompletionConfigured({
+      ...BASE,
+      provider: "custom",
+      endpoint: OPENROUTER_BYOK_ENDPOINT,
+    }, "jwt-abc")).toBe(true)
+  })
+})
+
+describe("resolveEffectiveCompletionSettings", () => {
+  const projectCustom: CompletionSettings = {
+    ...BASE,
+    provider: "custom",
+    endpoint: OPENROUTER_BYOK_ENDPOINT,
+    apiKey: "sk-or-project",
+    model: "openai/gpt-4o-mini",
+  }
+  const override = {
+    endpoint: "https://openrouter.ai/api/v1",
+    apiKey: "sk-or-global",
+    model: "moonshotai/kimi-k2",
+  }
+
+  it("lets this project's API key beat the personal global override", () => {
+    const resolved = resolveEffectiveCompletionSettings(projectCustom, override)
+    expect(resolved.apiKey).toBe("sk-or-project")
+    expect(resolved.model).toBe("openai/gpt-4o-mini")
+  })
+
+  it("uses the personal override when the project is still on Frontier", () => {
+    const resolved = resolveEffectiveCompletionSettings(
+      { ...BASE, provider: "frontier" },
+      override,
+    )
+    expect(resolved.provider).toBe("custom")
+    expect(resolved.apiKey).toBe("sk-or-global")
+    expect(resolved.model).toBe("moonshotai/kimi-k2")
+  })
+})
+
+describe("shouldPromptAiSetup", () => {
+  it("asks once until the user has picked a drafting path", () => {
+    expect(shouldPromptAiSetup(undefined)).toBe(true)
+    expect(shouldPromptAiSetup(false)).toBe(true)
+    expect(shouldPromptAiSetup(true)).toBe(false)
+  })
+})
+
 describe("complete", () => {
   const fetchMock = vi.fn()
   beforeEach(() => { vi.stubGlobal("fetch", fetchMock); fetchMock.mockReset() })
@@ -476,6 +597,138 @@ describe("complete", () => {
     const [url, init] = fetchMock.mock.calls[0]
     expect(url).toBe("https://openrouter.ai/api/v1/chat/completions")
     expect((init as RequestInit).headers).toMatchObject({ Authorization: "Bearer sk-or-secret" })
+    expect(url).not.toBe(FRONTIER_CHAT_URL)
+    const body = JSON.parse((init as RequestInit).body as string)
+    expect(body).not.toHaveProperty("projectId")
+  })
+
+  describe("BYOK OpenRouter vs hosted Frontier (AQU-1158)", () => {
+    beforeEach(() => {
+      localStorage.clear()
+      resetClientLocalStorageOwnerForTests()
+      clearUserProviderOverride()
+    })
+    afterEach(() => {
+      clearUserProviderOverride()
+      localStorage.clear()
+      resetClientLocalStorageOwnerForTests()
+    })
+
+    it("never sends a custom OpenRouter request through the Frontier chat proxy", async () => {
+      fetchMock.mockResolvedValueOnce(okJson({ choices: [{ message: { content: "ok" } }] }))
+      await complete({
+        settings: {
+          ...BASE, provider: "custom",
+          endpoint: OPENROUTER_BYOK_ENDPOINT, apiKey: "sk-or-user",
+          model: "moonshotai/kimi-k2",
+        },
+        session: SESSION, messages: msg,
+      })
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      const [url, init] = fetchMock.mock.calls[0]
+      expect(url).toBe(`${OPENROUTER_BYOK_ENDPOINT}/chat/completions`)
+      expect((init as RequestInit).headers).toMatchObject({ Authorization: "Bearer sk-or-user" })
+      expect((init as RequestInit).headers).not.toMatchObject({ Authorization: "Bearer jwt-abc" })
+    })
+
+    it("personal override talks to OpenRouter with the user key, not the hosted proxy", async () => {
+      setUserProviderOverride({
+        endpoint: OPENROUTER_BYOK_ENDPOINT,
+        model: "moonshotai/kimi-k2",
+        apiKey: "sk-or-override",
+      })
+      fetchMock.mockResolvedValueOnce(okJson({ choices: [{ message: { content: "ok" } }] }))
+      await complete({
+        settings: { ...BASE, provider: "frontier" },
+        session: SESSION, messages: msg,
+      })
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      const [url, init] = fetchMock.mock.calls[0]
+      expect(url).toBe(`${OPENROUTER_BYOK_ENDPOINT}/chat/completions`)
+      expect((init as RequestInit).headers).toMatchObject({ Authorization: "Bearer sk-or-override" })
+      const body = JSON.parse((init as RequestInit).body as string)
+      expect(body).not.toHaveProperty("projectId")
+    })
+
+    it("project OpenRouter key beats a personal override at request time", async () => {
+      setUserProviderOverride({
+        endpoint: OPENROUTER_BYOK_ENDPOINT,
+        model: "moonshotai/kimi-k2",
+        apiKey: "sk-or-override",
+      })
+      fetchMock.mockResolvedValueOnce(okJson({ choices: [{ message: { content: "ok" } }] }))
+      await complete({
+        settings: {
+          ...BASE, provider: "custom",
+          endpoint: OPENROUTER_BYOK_ENDPOINT, apiKey: "sk-or-project",
+          model: "openai/gpt-4o-mini",
+        },
+        session: SESSION, messages: msg,
+      })
+      const [url, init] = fetchMock.mock.calls[0]
+      expect(url).toBe(`${OPENROUTER_BYOK_ENDPOINT}/chat/completions`)
+      expect((init as RequestInit).headers).toMatchObject({ Authorization: "Bearer sk-or-project" })
+      const body = JSON.parse((init as RequestInit).body as string)
+      expect(body.model).toBe("openai/gpt-4o-mini")
+    })
+
+    it("falls back to the user's OpenRouter key when hosted Frontier has none", async () => {
+      setUserApiKey("completion", "sk-or-saved")
+      fetchMock
+        .mockResolvedValueOnce(new Response(
+          JSON.stringify({ error: "OPENROUTER_API_KEY is not configured" }),
+          { status: 500, headers: { "Content-Type": "application/json" } },
+        ))
+        .mockResolvedValueOnce(okJson({ choices: [{ message: { content: "from-byok" } }] }))
+
+      const out = await complete({
+        settings: { ...BASE, provider: "frontier", model: "moonshotai/kimi-k2" },
+        session: SESSION, messages: msg,
+      })
+      expect(out).toBe("from-byok")
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+      expect(fetchMock.mock.calls[0][0]).toBe(FRONTIER_CHAT_URL)
+      const [url, init] = fetchMock.mock.calls[1]
+      expect(url).toBe(`${OPENROUTER_BYOK_ENDPOINT}/chat/completions`)
+      expect((init as RequestInit).headers).toMatchObject({ Authorization: "Bearer sk-or-saved" })
+      const body = JSON.parse((init as RequestInit).body as string)
+      expect(body).not.toHaveProperty("projectId")
+      expect(body.model).toBe("moonshotai/kimi-k2")
+    })
+
+    it("does not fall back when the user has no OpenRouter key", async () => {
+      fetchMock.mockResolvedValueOnce(new Response(
+        JSON.stringify({ error: "OPENROUTER_API_KEY is not configured" }),
+        { status: 500, headers: { "Content-Type": "application/json" } },
+      ))
+      await expect(
+        complete({ settings: { ...BASE, provider: "frontier" }, session: SESSION, messages: msg }),
+      ).rejects.toThrow(/OPENROUTER_API_KEY is not configured/)
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      expect(fetchMock.mock.calls[0][0]).toBe(FRONTIER_CHAT_URL)
+    })
+
+    it("uses a project completion key for the fallback, not the session JWT", async () => {
+      fetchMock
+        .mockResolvedValueOnce(new Response(
+          JSON.stringify({ error: "OPENROUTER_API_KEY is not configured" }),
+          { status: 500 },
+        ))
+        .mockResolvedValueOnce(okJson({ choices: [{ message: { content: "ok" } }] }))
+      await complete({
+        settings: { ...BASE, provider: "frontier", apiKey: "sk-or-project" },
+        session: SESSION, messages: msg,
+      })
+      const [, init] = fetchMock.mock.calls[1]
+      expect((init as RequestInit).headers).toMatchObject({ Authorization: "Bearer sk-or-project" })
+    })
+  })
+
+  it("recognizes the hosted OpenRouter miss independently of wrapping", () => {
+    expect(isHostedOpenRouterUnconfigured(500, '{"error":"OPENROUTER_API_KEY is not configured"}')).toBe(true)
+    expect(isHostedOpenRouterUnconfigured(503, '{"error":"openrouter_not_configured"}')).toBe(true)
+    expect(isHostedOpenRouterUnconfigured(500, "upstream exploded")).toBe(false)
+    expect(isHostedOpenRouterUnconfigured(402, '{"error":"OPENROUTER_API_KEY is not configured"}')).toBe(false)
   })
 
   it("custom: trims whitespace from apiKey", async () => {

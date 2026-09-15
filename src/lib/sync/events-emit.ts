@@ -18,6 +18,7 @@ import { v7 as uuidv7 } from "uuid"
 import { enqueueOutboxEvent, enqueueOutboxEvents } from "./outbox"
 import { getCqrsOutboxBridge } from "./cqrs-bridge"
 import { canPerform, requiredRoleFor, ROLE } from "./role-policy"
+import type { TermRendering } from "@/lib/terminology/types"
 import {
   OUTBOX_SCHEMA_VERSION,
   type OutboxEventKind,
@@ -1241,6 +1242,7 @@ export interface FileCreateInput {
   targetTextDirection?: "ltr" | "rtl"
   /** Timeline-segment-model order lens: 'time' | 'sequence'. */
   orderedBy?: string
+  corpusMarker?: string
   author: string
   clientTs?: number
 }
@@ -1264,6 +1266,7 @@ export async function emitFileCreate(input: FileCreateInput): Promise<string> {
       ...(input.sourceTextDirection !== undefined ? { sourceTextDirection: input.sourceTextDirection } : {}),
       ...(input.targetTextDirection !== undefined ? { targetTextDirection: input.targetTextDirection } : {}),
       ...(input.orderedBy !== undefined ? { orderedBy: input.orderedBy } : {}),
+      ...(input.corpusMarker !== undefined ? { corpusMarker: input.corpusMarker } : {}),
     },
     clientTs: input.clientTs,
   })
@@ -1389,6 +1392,30 @@ export interface FileRenameInput {
  * null`), like `cell.audio.attach`; the server projects it as a `files`
  * UPDATE keyed on fileId.
  */
+export interface FileCorpusSetInput {
+  projectId: string
+  fileId: string
+  /** Sidebar folder label; null / blank clears the file back to Ungrouped. */
+  corpusMarker: string | null
+  author: string
+  clientTs?: number
+}
+
+/** Persist a file's sidebar group so it survives reload and other devices. */
+export async function emitFileCorpusSet(input: FileCorpusSetInput): Promise<string> {
+  const trimmed = input.corpusMarker?.trim() ?? ""
+  const { eventId } = await enqueueEvent({
+    kind: "file.corpus.set",
+    projectId: input.projectId,
+    fileId: input.fileId,
+    parentId: null,
+    author: input.author,
+    payload: { corpusMarker: trimmed || null },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
 export async function emitFileRename(input: FileRenameInput): Promise<string> {
   const { eventId } = await enqueueEvent({
     kind: "file.rename",
@@ -1441,6 +1468,149 @@ export async function emitTargetCellRepin(input: TargetCellRepinInput): Promise<
       sourceEventId: input.sourceEventId,
       expectedTargetEventId: input.expectedTargetEventId,
     },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+// ── Terminology concepts (AQU-1006 follow-up) ────────────────────────────
+//
+// Project-scoped, so every term event rides the `__project__` sentinel fileId
+// and carries no cellId. `parentId` is always null: these are non-chain-
+// mutating, they move no cell head, and the projection is keyed on the
+// concept id rather than a parent chain.
+//
+// WHY THESE EXIST AT ALL, because "we could just PATCH the settings" is the
+// obvious objection and it is what broke: concepts used to live in the
+// project_settings JSON blob under one `terminology` key, so every add wrote
+// the WHOLE array from the writer's stale snapshot and silently destroyed
+// entries added by anyone else in the meantime. Each emitter below names ONE
+// concept. Do not add a bulk emitter that writes a whole termbase.
+
+/** Must match PROJECT_SENTINEL_FILE_ID in sync-worker/src/events/authorize.ts. */
+const PROJECT_SENTINEL_FILE_ID = "__project__"
+
+export interface TermCreateInput {
+  projectId: string
+  conceptId: string
+  sourceTerm: string
+  renderings: TermRendering[]
+  /**
+   * 'draft' is a SUGGESTION — it compiles to no rules, so it changes nothing
+   * for anyone else, and any contributor may write one. 'active' means the
+   * term is enforced immediately, which needs the org's termbase floor; the
+   * server refuses it at lower clearance rather than silently downgrading.
+   */
+  status: "active" | "draft" | "deprecated"
+  notes?: string
+  caseSensitive?: boolean
+  author: string
+  clientTs?: number
+}
+
+export async function emitTermCreate(input: TermCreateInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "term.create",
+    projectId: input.projectId,
+    fileId: PROJECT_SENTINEL_FILE_ID,
+    parentId: null,
+    author: input.author,
+    payload: {
+      conceptId: input.conceptId,
+      sourceTerm: input.sourceTerm,
+      renderings: input.renderings,
+      status: input.status,
+      ...(input.notes ? { notes: input.notes } : {}),
+      ...(input.caseSensitive ? { caseSensitive: true } : {}),
+    },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+export interface TermUpdateInput {
+  projectId: string
+  conceptId: string
+  /** Only the fields you pass are written; the rest keep their projected value. */
+  sourceTerm?: string
+  renderings?: TermRendering[]
+  notes?: string
+  caseSensitive?: boolean
+  author: string
+  clientTs?: number
+}
+
+export async function emitTermUpdate(input: TermUpdateInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "term.update",
+    projectId: input.projectId,
+    fileId: PROJECT_SENTINEL_FILE_ID,
+    parentId: null,
+    author: input.author,
+    payload: {
+      conceptId: input.conceptId,
+      // Spread-if-defined, NOT `?? null`: an absent key is what tells the
+      // projector to leave that column alone. Sending an explicit null would
+      // ask COALESCE to keep the old value too, but only by accident — and it
+      // would make "clear the notes" indistinguishable from "don't touch the
+      // notes" if the projector ever stopped using COALESCE.
+      ...(input.sourceTerm !== undefined ? { sourceTerm: input.sourceTerm } : {}),
+      ...(input.renderings !== undefined ? { renderings: input.renderings } : {}),
+      ...(input.notes !== undefined ? { notes: input.notes } : {}),
+      ...(input.caseSensitive !== undefined ? { caseSensitive: input.caseSensitive } : {}),
+    },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+export interface TermConceptRefInput {
+  projectId: string
+  conceptId: string
+  author: string
+  clientTs?: number
+}
+
+export async function emitTermDelete(input: TermConceptRefInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "term.delete",
+    projectId: input.projectId,
+    fileId: PROJECT_SENTINEL_FILE_ID,
+    parentId: null,
+    author: input.author,
+    payload: { conceptId: input.conceptId },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+/** Promote a suggested (draft) concept to enforced (active). */
+export async function emitTermApprove(input: TermConceptRefInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "term.approve",
+    projectId: input.projectId,
+    fileId: PROJECT_SENTINEL_FILE_ID,
+    parentId: null,
+    author: input.author,
+    payload: { conceptId: input.conceptId },
+    clientTs: input.clientTs,
+  })
+  return eventId
+}
+
+export interface TermRejectInput extends TermConceptRefInput {
+  /** 'deprecate' keeps the row visible in archives; 'delete' tombstones it. */
+  mode: "delete" | "deprecate"
+}
+
+export async function emitTermReject(input: TermRejectInput): Promise<string> {
+  const { eventId } = await enqueueEvent({
+    kind: "term.reject",
+    projectId: input.projectId,
+    fileId: PROJECT_SENTINEL_FILE_ID,
+    parentId: null,
+    author: input.author,
+    payload: { conceptId: input.conceptId, mode: input.mode },
     clientTs: input.clientTs,
   })
   return eventId

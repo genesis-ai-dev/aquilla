@@ -152,7 +152,8 @@ already-merged work; this is a recorded field lesson). Up to `--max` concurrent;
 live-UI verification slot (Step 6) reserved.
 
 **Claim the issue BEFORE spawning its agent.** The orchestrator moves the issue to **`Dispatched`**
-(`539bcf69-8c7a-4282-93d0-5631430b66ed`), assigns it to me, and records the agent id + branch in §3.
+(`539bcf69-8c7a-4282-93d0-5631430b66ed`), **keeps the existing assignee** (assign to me only if it
+is unassigned), and records the agent id + branch in §3.
 This claim is the lock that stops any other agent or `/swarm` re-run from double-grabbing it. Only
 after the status flip do you spawn the agent. (The agent then advances `Dispatched → Fixed` itself on
 success, per `/issue`.)
@@ -166,8 +167,8 @@ ln -sfn "$ROOT/node_modules" "$ROOT/.worktrees/aqu-###/node_modules"
 **Each brief MUST be fully self-contained** (the agent has no memory of this conversation) and include:
 - **Worktree path** (work ONLY here; `cd` here first) and its branch.
 - **The task = run the `/issue` lifecycle for AQU-###**: read `.claude/commands/issue.md` and follow it
-  for this issue. The orchestrator has already moved it to **`Dispatched`** and assigned it to you — do
-  not re-claim; just restate repro/acceptance, fix surgically (systematic-debugging for bugs /
+  for this issue. The orchestrator has already moved it to **`Dispatched`** (the `Todo` assignee is
+  kept) — do not re-claim or reassign; just restate repro/acceptance, fix surgically (systematic-debugging for bugs /
   brainstorming for improvements), verify, reconcile the spec (Step 2.5), then move the issue
   **`Dispatched → Fixed`** and post a Linear comment. A user-facing change without its corresponding journey
   tests is unfinished. **Leave it in `Dispatched` if you cannot finish**

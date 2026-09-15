@@ -184,6 +184,36 @@ describe("IDML editor sanitation and configuration", () => {
     expect(legacyPlainOnly.error).toMatch(/plain text but no formatting anchors/i)
   })
 
+  it("carries a display-only Bold/Italic catalog from cell metadata", () => {
+    const configuration = resolveIdmlEditorConfiguration(
+      {
+        idml: METADATA,
+        idmlStyleDisplay: { "CharacterStyle/Emphasis": { bold: false, italic: true } },
+      },
+      SOURCE_HTML,
+    )
+    expect(configuration).toMatchObject({
+      kind: "ready",
+      context: {
+        styleCatalog: { "CharacterStyle/Emphasis": { bold: false, italic: true } },
+      },
+    })
+  })
+
+  it("carries the paragraph style used for Treasure Hunt heading display", () => {
+    const configuration = resolveIdmlEditorConfiguration(
+      {
+        idml: METADATA,
+        biblica: { paragraphStyle: "ParagraphStyle/!meta_hunt_head" },
+      },
+      SOURCE_HTML,
+    )
+    expect(configuration).toMatchObject({
+      kind: "ready",
+      context: { paragraphStyleId: "ParagraphStyle/!meta_hunt_head" },
+    })
+  })
+
   it("fails closed for unsupported metadata instead of selecting the generic editor", () => {
     expect(hasIdmlCellMetadata({ idml: null })).toBe(true)
     expect(hasIdmlCellMetadata({ format: "idml" })).toBe(false)

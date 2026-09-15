@@ -171,6 +171,30 @@ describe("IDML export of a note block that was imported as several cells", () =>
     expect(story).toContain("<Content>In the beginning God created the heavens and the earth.</Content>")
   })
 
+  /**
+   * AQU-1234: the reason the Agent API refuses InsertCell / DeleteCell /
+   * SplitCell on a file imported with preserved export slots. A row that never
+   * came from the package has no locator, and the exporter has nowhere to put
+   * it — so ONE inserted line takes the whole deliverable down. Refusing the
+   * structural edit is what keeps this file round-trippable.
+   */
+  it("refuses to export a file containing a row that carries no IDML locator", async () => {
+    const { bytes, cells } = await importBiblicaCells()
+    for (const cell of cells) translate(cell)
+    const inserted: CellData = {
+      ...cells[0]!,
+      id: "inserted-line",
+      original: "A line somebody added after the import.",
+      originalHtml: undefined,
+      translatedHtml: undefined,
+      metadata: { aquillaOrigin: { version: 1, kind: "user-insert" } },
+    }
+
+    await expect(exportIdml(bytes, [...cells, inserted], directExecutor)).rejects.toThrow(
+      IdmlWebExportError,
+    )
+  })
+
   it("refuses to export a note block whose other sentences are absent", async () => {
     const { bytes, cells } = await importBiblicaCells()
     const sentences = cellsFor(cells, SAMPLE_NOTES.noteBlockSentences)

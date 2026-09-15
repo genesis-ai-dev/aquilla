@@ -25,6 +25,11 @@ import {
   type EmitEventsCommand,
 } from './commands-emit-events'
 import {
+  isOrgMemberCommand,
+  validateOrgMemberCommand,
+  type OrgMemberCommand,
+} from './commands-org-members'
+import {
   MEMORY_COMMAND_KINDS,
   isMemoryCommand,
   memoryCommandFloor,
@@ -42,6 +47,12 @@ function isMemoryCommandKind(kind: string): boolean {
 export type { PlanImportCell, PlanImportManifest, PlanImportVariant } from './import-manifest'
 export type { PatchSettingsCommand, PatchSettingsOp } from './commands-patch-settings'
 export type { EmitEventsCommand, EmitEventInput } from './commands-emit-events'
+export type {
+  AddOrgMemberCommand,
+  OrgMemberCommand,
+  RemoveOrgMemberCommand,
+  SetOrgRoleCommand,
+} from './commands-org-members'
 export type {
   AddExampleCommand,
   AddDecisionCommand,
@@ -156,6 +167,7 @@ export type Command =
   | LinkMediaCommand
   | PatchSettingsCommand
   | EmitEventsCommand
+  | OrgMemberCommand
 
 /** Hard cap on source cells per PlanImport changeset. Above this the plan is
  *  rejected with validation_failed — the manifest-in-R2 pattern for larger
@@ -515,6 +527,11 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
       if (cmd) commands.push(cmd)
       return
     }
+    if (isOrgMemberCommand(c as { kind: string })) {
+      const cmd = validateOrgMemberCommand(c, index, issues)
+      if (cmd) commands.push(cmd)
+      return
+    }
     // AQU-1228 Living Memory writes — four kinds sharing one validator.
     if (typeof c.kind === 'string' && isMemoryCommandKind(c.kind)) {
       const cmd = validateMemoryCommand(c, index, issues)
@@ -586,6 +603,14 @@ export function requiredRoleForCommand(c: Command): number {
   if (c.kind === 'LinkMedia') {
     // Compiles to cell.audio.attach + cell.audio.select (both CONTRIBUTOR).
     return Math.max(REQUIRED_ROLE['cell.audio.attach'], REQUIRED_ROLE['cell.audio.select'])
+  }
+  // AQU-1235 org-membership commands: like CreateProject these take their own
+  // prepare/commit path with an ORG-level gate (owner in the target org), so
+  // this generic project floor is never consulted for them. OWNER is the honest
+  // value — it keeps them out of every lower role's command index and makes an
+  // unreadable-plan authority check fail closed at the same height.
+  if (isOrgMemberCommand(c)) {
+    return ROLE.OWNER
   }
   // AQU-1228 memory writes compile to no events at all — their floor mirrors
   // auth-worker's agent-memory route (propose = CONTRIBUTOR, retire = the

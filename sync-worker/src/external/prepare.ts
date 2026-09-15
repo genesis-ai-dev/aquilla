@@ -21,6 +21,8 @@ import {
   type SetTranslationCommand,
   type UpdateProjectSettingsCommand,
 } from './commands'
+import { isOrgMemberCommand, type OrgMemberCommand } from './commands-org-members'
+import { prepareOrgMember } from './org-members-engine'
 import { changedPolicyKeys, preparePatchSettings, previewSettingValue } from './commands-patch-settings'
 import { isMemoryCommand, prepareMemoryCommand } from './commands-memory'
 import { prepareEmitEvents } from './emit-events-engine'
@@ -128,6 +130,20 @@ export async function prepareChangesetCore(
       return errorResponse('validation_failed', 'CreateProject must be the only command in a changeset')
     }
     return prepareCreateProject(db, cred, projectId, id, autonomyMode, createProject, env)
+  }
+
+  // AQU-1235 org membership (receipt-only): also ORG-level authority, so it
+  // likewise skips the project-scope / project-role gates below — the target is
+  // an org roster, not this project. Sole command, forced ask-mode.
+  const orgMember = validated.commands.find((c): c is OrgMemberCommand => isOrgMemberCommand(c))
+  if (orgMember) {
+    if (validated.commands.length !== 1) {
+      return errorResponse(
+        'validation_failed',
+        `${orgMember.kind} must be the only command in a changeset`,
+      )
+    }
+    return prepareOrgMember(db, cred, projectId, id, orgMember, env)
   }
 
   // Every remaining command operates on an EXISTING project — enforce the

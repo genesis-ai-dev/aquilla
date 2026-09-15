@@ -60,6 +60,7 @@ import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 import { partitionMembers, type ProjectMember } from "@/lib/frontier/members"
+import { SCRIPTURE_FILE_TYPES } from "@/lib/parsers/types"
 import type { FileReference, FileType } from "@/lib/parsers/types"
 import {
   createAssignment,
@@ -141,10 +142,12 @@ interface AssignModalProps {
 // "segment") so the modal reads correctly for non-scripture imports. When no
 // file is in scope (launched from a project lane) we fall back to the neutral
 // wording too.
-const SCRIPTURE_FILE_TYPES: ReadonlySet<FileType> = new Set([
-  "usfm",
-  "ebible",
-  "helloao",
+// AQU-997: derived from the canonical set rather than re-listed, so a format
+// admitted there (`codex` was missing from all three hand-maintained copies)
+// reaches the scope copy too. Only the `sdbh` extension is local: a lexicon is
+// addressed by verse for this modal's purposes but produces no sections.
+const VERSE_SCOPED_FILE_TYPES: ReadonlySet<FileType> = new Set<FileType>([
+  ...SCRIPTURE_FILE_TYPES,
   "sdbh",
 ])
 
@@ -233,7 +236,7 @@ export function AssignModal({
     () => (activeFileId ? projectFiles.find((f) => f.id === activeFileId) ?? null : null),
     [activeFileId, projectFiles],
   )
-  const isScripture = activeFile ? SCRIPTURE_FILE_TYPES.has(activeFile.type) : false
+  const isScripture = activeFile ? VERSE_SCOPED_FILE_TYPES.has(activeFile.type) : false
   const sectionNoun = isScripture
     ? t("editor.milestone.vocab.chapterPlural")
     : t("editor.milestone.vocab.sectionPlural")

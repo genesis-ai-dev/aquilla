@@ -21,6 +21,15 @@ import { REQUIRED_ROLE, ROLE } from '../events/role-policy'
  * Explicitly NOT here: target.cell.commit (use SetTranslation), source.cell.*,
  * cell.audio.* (use LinkMedia), reorders/retimes/mirrors, file.timing.set,
  * file.create (use PlanImport).
+ *
+ * AQU-1179 added the `term.*` block — the whole of the "term, rule and memory"
+ * widening the ticket asks for, because term.* is the only one of the three
+ * that HAS event kinds: rules and Living Memory are not on the event log
+ * (rules live in the settings blob behind PatchSettings; memory lives behind
+ * auth-worker's agent-memory API), so there is nothing for an allowlist to
+ * name. They join this list when — and only when — they are event-sourced.
+ * No source-edit, cell-structure, membership or project-lifecycle kind was
+ * added: those stay off the generic door until a human puts them on it.
  */
 export const ALLOWED_EMIT_KINDS: readonly string[] = [
   'comment.create',
@@ -39,6 +48,13 @@ export const ALLOWED_EMIT_KINDS: readonly string[] = [
   'assignment.create',
   'assignment.reassign',
   'assignment.unassign',
+  // Terminology concepts (AQU-1179). Project-scoped: no fileId/cellId on the
+  // envelope — the engine routes them under the project sentinel.
+  'term.create',
+  'term.update',
+  'term.delete',
+  'term.approve',
+  'term.reject',
 ] as const
 
 const ALLOWED_SET = new Set(ALLOWED_EMIT_KINDS)
@@ -50,9 +66,58 @@ export const TESTIMONY_EMIT_KINDS: ReadonlySet<string> = new Set([
   'cell.unvalidate',
 ])
 
+/** Terminology kinds — project-scoped (no fileId/cellId on the envelope). */
+export const TERM_EMIT_KINDS: ReadonlySet<string> = new Set([
+  'term.create',
+  'term.update',
+  'term.delete',
+  'term.approve',
+  'term.reject',
+])
+
 /** Hard cap on events per EmitEvents changeset — one human-reviewable plan,
  *  well under the /events perimeter's own per-request ceiling. */
 export const EMIT_EVENTS_MAX_EVENTS = 200
+
+/**
+ * Plain-language effect line for one staged kind (AQU-1179).
+ *
+ * The approval page renders THIS, not the raw event kind: the person clicking
+ * "approve" is a translation manager, not a developer, and `cell.backtranslation.set × 12`
+ * is not a sentence they can consent to. One phrasing per kind, count-aware,
+ * written as the effect on the project ("Add 3 comments"), never as the
+ * mechanism. Unknown kinds fall back to the raw kind so a newly allowlisted
+ * kind that forgets its phrasing degrades to today's output rather than an
+ * empty line.
+ */
+export function emitKindEffectLabel(kind: string, count: number): string {
+  const n = count
+  const s = (one: string, many: string) => (n === 1 ? `${one}` : `${n} ${many}`)
+  switch (kind) {
+    case 'comment.create': return `Add ${s('a comment', 'comments')}`
+    case 'comment.edit': return `Edit ${s('a comment', 'comments')}`
+    case 'comment.delete': return `Delete ${s('a comment', 'comments')}`
+    case 'comment.resolve': return `Resolve or reopen ${s('a comment thread', 'comment threads')}`
+    case 'cell.waive': return `Waive a quality rule on ${s('a line', 'lines')}`
+    case 'cell.unwaive': return `Restore a waived quality rule on ${s('a line', 'lines')}`
+    case 'cell.validate': return `Mark ${s('a translation', 'translations')} as validated — recorded under your name`
+    case 'cell.unvalidate': return `Remove validation from ${s('a translation', 'translations')}`
+    case 'cell.backtranslation.set': return `Save a back-translation for ${s('a line', 'lines')}`
+    case 'target.cell.repin': return `Clear the "source changed" flag on ${s('a line', 'lines')}`
+    case 'file.rename': return `Rename ${s('a file', 'files')}`
+    case 'file.delete': return `Move ${s('a file', 'files')} to the trash`
+    case 'file.restore': return `Restore ${s('a file', 'files')} from the trash`
+    case 'assignment.create': return `Assign work to ${s('a team member', 'team members')}`
+    case 'assignment.reassign': return `Reassign ${s('an assignment', 'assignments')} to someone else`
+    case 'assignment.unassign': return `Remove ${s('an assignment', 'assignments')}`
+    case 'term.create': return `Add ${s('a glossary term', 'glossary terms')}`
+    case 'term.update': return `Edit ${s('a glossary term', 'glossary terms')}`
+    case 'term.delete': return `Delete ${s('a glossary term', 'glossary terms')}`
+    case 'term.approve': return `Approve ${s('a glossary term', 'glossary terms')} — enforced for everyone on the project`
+    case 'term.reject': return `Reject ${s('a suggested glossary term', 'suggested glossary terms')}`
+    default: return `${kind} × ${n}`
+  }
+}
 
 /** One normalized plan event. `payload` holds only the caller-suppliable
  *  fields for its kind — server-resolved pins (editEventId, targetEventId,
@@ -204,6 +269,16 @@ export function validateEmitEventsCommand(
       issues.push({ index, message: `${where}: ${kind} requires fileId` })
       return null
     }
+    // Terminology is project-level: a fileId/cellId on the envelope would be
+    // silently discarded when the engine routes the event under the project
+    // sentinel, so reject it rather than accept a plan that reads as scoped.
+    if (TERM_EMIT_KINDS.has(kind) && (rawEvent.fileId !== undefined || rawEvent.cellId !== undefined)) {
+      issues.push({
+        index,
+        message: `${where}: ${kind} is project-level — omit fileId and cellId (the concept id rides the payload)`,
+      })
+      return null
+    }
     // comment.create's scope derives from the envelope (cell / file / project);
     // a cellId without its fileId would silently demote to a project comment.
     if (kind === 'comment.create' && rawEvent.cellId !== undefined && rawEvent.fileId === undefined) {
@@ -237,6 +312,40 @@ export function validateEmitEventsCommand(
     })
   }
   return { kind: 'EmitEvents', events }
+}
+
+/** Mirrors TermRenderingPayload in events/types.ts (redeclared locally so this
+ *  static module keeps its dependency-light shape). */
+interface TermRendering {
+  rendering: string
+  status: 'preferred' | 'admitted' | 'forbidden'
+}
+
+const RENDERING_STATUSES: ReadonlySet<string> = new Set(['preferred', 'admitted', 'forbidden'])
+
+/** A concept's rendering list — replaced wholesale by create/update, so it must
+ *  be fully valid or the whole event is rejected. */
+function validateRenderings(
+  value: unknown,
+  bad: (message: string) => null,
+): TermRendering[] | null {
+  if (!Array.isArray(value)) {
+    bad('renderings must be an array')
+    return null
+  }
+  const out: TermRendering[] = []
+  for (const [i, raw] of value.entries()) {
+    if (!isPlainObject(raw) || !isNonEmptyString(raw.rendering)) {
+      bad(`renderings[${i}].rendering must be a non-empty string`)
+      return null
+    }
+    if (typeof raw.status !== 'string' || !RENDERING_STATUSES.has(raw.status)) {
+      bad(`renderings[${i}].status must be 'preferred', 'admitted' or 'forbidden'`)
+      return null
+    }
+    out.push({ rendering: raw.rendering, status: raw.status as TermRendering['status'] })
+  }
+  return out
 }
 
 /** Per-kind payload whitelist + type checks. Returns the normalized payload or
@@ -368,6 +477,71 @@ function validatePayload(
     case 'assignment.unassign': {
       if (!isNonEmptyString(p.assignmentId)) return bad('assignmentId must be a non-empty string')
       return { assignmentId: p.assignmentId }
+    }
+    case 'term.create': {
+      if (p.conceptId !== undefined && !isNonEmptyString(p.conceptId)) {
+        return bad('conceptId must be a non-empty string when present')
+      }
+      if (!isNonEmptyString(p.sourceTerm)) return bad('sourceTerm must be a non-empty string')
+      const renderings = validateRenderings(p.renderings, bad)
+      if (renderings === null) return null
+      // Status is REQUIRED on create (unlike the app's own default) so an
+      // integration can never fall into 'active' by omission: proposing a term
+      // and enforcing one for every translator are different acts and the
+      // caller has to say which it meant. 'deprecated' is a review outcome,
+      // not a birth state — term.reject produces it.
+      if (p.status !== 'draft' && p.status !== 'active') return bad("status must be 'draft' or 'active'")
+      if (p.notes !== undefined && typeof p.notes !== 'string') return bad('notes must be a string when present')
+      if (p.caseSensitive !== undefined && typeof p.caseSensitive !== 'boolean') {
+        return bad('caseSensitive must be a boolean when present')
+      }
+      return {
+        ...(p.conceptId !== undefined ? { conceptId: p.conceptId } : {}),
+        sourceTerm: p.sourceTerm,
+        renderings,
+        status: p.status,
+        ...(p.notes !== undefined ? { notes: p.notes } : {}),
+        ...(p.caseSensitive !== undefined ? { caseSensitive: p.caseSensitive } : {}),
+      }
+    }
+    case 'term.update': {
+      if (!isNonEmptyString(p.conceptId)) return bad('conceptId must be a non-empty string')
+      if (p.sourceTerm !== undefined && !isNonEmptyString(p.sourceTerm)) {
+        return bad('sourceTerm must be a non-empty string when present')
+      }
+      let renderings: TermRendering[] | undefined
+      if (p.renderings !== undefined) {
+        const parsed = validateRenderings(p.renderings, bad)
+        if (parsed === null) return null
+        renderings = parsed
+      }
+      if (p.notes !== undefined && typeof p.notes !== 'string') return bad('notes must be a string when present')
+      if (p.caseSensitive !== undefined && typeof p.caseSensitive !== 'boolean') {
+        return bad('caseSensitive must be a boolean when present')
+      }
+      // `status` is deliberately absent: the review transitions are their own
+      // kinds (term.approve / term.reject) so the audit trail distinguishes
+      // "edited" from "approved". A status here would launder one into the other.
+      if (p.status !== undefined) {
+        return bad('status is not patchable — use term.approve or term.reject')
+      }
+      const patch: Record<string, unknown> = { conceptId: p.conceptId }
+      if (p.sourceTerm !== undefined) patch.sourceTerm = p.sourceTerm
+      if (renderings !== undefined) patch.renderings = renderings
+      if (p.notes !== undefined) patch.notes = p.notes
+      if (p.caseSensitive !== undefined) patch.caseSensitive = p.caseSensitive
+      if (Object.keys(patch).length === 1) return bad('must patch at least one field')
+      return patch
+    }
+    case 'term.delete':
+    case 'term.approve': {
+      if (!isNonEmptyString(p.conceptId)) return bad('conceptId must be a non-empty string')
+      return { conceptId: p.conceptId }
+    }
+    case 'term.reject': {
+      if (!isNonEmptyString(p.conceptId)) return bad('conceptId must be a non-empty string')
+      if (p.mode !== 'delete' && p.mode !== 'deprecate') return bad("mode must be 'delete' or 'deprecate'")
+      return { conceptId: p.conceptId, mode: p.mode }
     }
     default:
       // Unreachable — kind was checked against ALLOWED_SET.

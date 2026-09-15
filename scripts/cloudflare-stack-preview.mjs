@@ -7,6 +7,8 @@ import { runCommand, workersBuildPreviewAlias } from "./cloudflare-pr-preview.mj
 import { parseWranglerOutput } from "./cloudflare-version-deploy.mjs"
 import { assertSafeDeploymentArtifacts } from "./verify-deployment-artifacts.mjs"
 
+import { commentOnPreview } from "./cloudflare-preview-comment.mjs"
+
 export const PREVIEW_WORKERS = {
   web: "aquilla-web-preview",
   auth: "aquilla-auth-preview",
@@ -78,7 +80,7 @@ export function previewOrigin(entry, surface, name) {
   return url.origin
 }
 
-export async function deployStackPreview({ cwd = process.cwd(), env = process.env, run = runCommand, verify = assertSafeDeploymentArtifacts } = {}) {
+export async function deployStackPreview({ cwd = process.cwd(), env = process.env, run = runCommand, verify = assertSafeDeploymentArtifacts, notify = commentOnPreview } = {}) {
   const { branch, commitSha } = workersBuildMetadata(env)
   const name = workersBuildPreviewAlias(branch)
   const temp = mkdtempSync(join(tmpdir(), "aquilla-stack-preview-"))
@@ -135,6 +137,7 @@ export async function deployStackPreview({ cwd = process.cwd(), env = process.en
       appendFileSync(ciOutput, `${JSON.stringify(webOutput)}\n`)
     }
     console.log(`[cloudflare-preview] branch=${branch} commit=${commitSha} app=${urls.web} auth=${urls.auth} sync=${urls.sync}`)
+    await notify({ env, urls })
     return { name, urls }
   } finally {
     rmSync(temp, { recursive: true, force: true })

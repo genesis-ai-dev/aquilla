@@ -340,9 +340,29 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const settingsHref = (section?: string) =>
     withSettingsReturn(projectSettingsPath(id!, section), fromEditor ? returnTo : null)
 
+  // Declared ahead of useProjectSettings so the hydration event can carry the
+  // viewer's org role (AQU-1274). No conditional return sits between these
+  // calls, so hook order is unchanged.
+  const activeOrg = useActiveOrgOptional()
+  const roleTelemetry = useMemo(
+    () => ({
+      orgRole: activeOrg?.activeOrg?.role?.level ?? null,
+      resolvedRole: project?.syncRole?.level ?? null,
+      resolvedFrom: project?.syncRole?.source ?? null,
+    }),
+    [
+      activeOrg?.activeOrg?.role?.level,
+      project?.syncRole?.level,
+      project?.syncRole?.source,
+    ],
+  )
+
   const {
     canEdit: canEditShared,
     reasonCannotEdit,
+    canEditLanguages,
+    reasonCannotEditLanguages,
+    languageEditFloor,
     patch: patchShared,
     version: sharedVersion,
     updatedAt: sharedUpdatedAt,
@@ -351,13 +371,18 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     dismissConflict,
     hasFetched: sharedSettingsFetched,
     settings: sharedSettingsBlob,
-  } = useProjectSettings(id ?? null, project?.syncRole?.level ?? null)
+  } = useProjectSettings(id ?? null, project?.syncRole?.level ?? null, {
+    // AQU-1086: the org's language-edit floor rides on the project record, so
+    // the language fields below can be enabled for a project lead when the org
+    // opted in — without loosening the maintainer floor on anything else.
+    languageEditMinRole: project?.languageEditMinRole,
+    roleTelemetry,
+  })
 
   // Org context for the termbase-sharing section. The user's org; the section's
   // server calls re-validate org-membership / org-ownership, so a mismatch just
   // yields graceful empty/403 states.
   const { org } = useOrg()
-  const activeOrg = useActiveOrgOptional()
   const { session } = useFrontierSession()
   const isCloudProject = !!(project?.syncRole)
   // AQU-485: Members is a privacy-gated settings pane. Hide it entirely for
@@ -418,6 +443,32 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const sharedDisabledTooltip =
     reasonCannotEdit === "offline" ? t("projectSettings.permission.reconnectToEdit")
     : reasonCannotEdit === "role" ? roleLockHint
+    : null
+
+  // AQU-1086: the language fields sit behind the org's configurable
+  // languageEditMinRole, so their lock hint must name the role the user
+  // actually needs (Project lead when the org lowered the floor, Maintainer by
+  // default) rather than a hardcoded Maintainer — the AQU-427 convention.
+  const languagePrivilegedRole = resolveRoleName(t, languageEditFloor, { plural: true })
+  const languageRoleLockHint = (
+    <PermissionLockHint
+      title={t("projectSettings.permission.onlyRoleCanModify", {
+        role: languagePrivilegedRole,
+      })}
+      onView={id ? () => setPrivilegedOpen(true) : undefined}
+      href={id ? undefined : PERMISSION_DOCS_URL}
+      linkLabel={
+        id
+          ? t("projectSettings.permission.viewPrivilegedMembers", {
+              role: languagePrivilegedRole,
+            })
+          : t("error.permissionDenied.learnMore")
+      }
+    />
+  )
+  const languageDisabledTooltip =
+    reasonCannotEditLanguages === "offline" ? t("projectSettings.permission.reconnectToEdit")
+    : reasonCannotEditLanguages === "role" ? languageRoleLockHint
     : null
 
   // AQU-765: renaming a synced project now persists to the server rename
@@ -575,6 +626,41 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     setBibleResourcesEnabled((prev) => (prev === baseline.bibleResourcesEnabled ? project.bibleResourcesEnabled : prev))
   }, [project, baseline, sharedSettingsFetched])
 
+  // AQU-1115: the Source/Target Language fields rendered permanently EMPTY on a
+  // project that has both set. Same two-phase shape as the AQU-460 race above,
+  // but worse: this page passes `includeSettings: false` to `useProject` (it
+  // owns the editable settings hook below, and a second overlay request would
+  // be a duplicate GET), so `project` here is `minimalProjectRecord`, which
+  // hardcodes `sourceLanguage: ""` / `targetLanguage: ""` — the languages live
+  // ONLY in the shared settings blob and never reach `project` at all. The
+  // baseline seed therefore didn't just *race* the real values, it could never
+  // see them, so the fields stayed blank forever. (The Languages card below
+  // looked right because it reads `sharedSettingsBlob` directly — that
+  // discrepancy is exactly what the bug report describes.)
+  //
+  // Once this page's own settings GET has resolved, re-sync both fields from
+  // the blob. `hasFetched` fails closed (stays false on a failed GET), so a
+  // settings outage leaves the previous behavior rather than blanking anything.
+  const languagesResyncedRef = useRef(false)
+  useEffect(() => {
+    if (!baseline || !sharedSettingsFetched) return
+    if (languagesResyncedRef.current) return
+    languagesResyncedRef.current = true
+    // Absent stays absent — a project with a genuinely empty language must show
+    // an empty field, never an invented default. A free-text label that isn't
+    // in the language catalog rides through verbatim.
+    const nextSource = sharedSettingsBlob?.sourceLanguage ?? baseline.sourceLanguage
+    const nextTarget = sharedSettingsBlob?.targetLanguage ?? baseline.targetLanguage
+    if (nextSource === baseline.sourceLanguage && nextTarget === baseline.targetLanguage) return
+    setBaseline((prev) => (prev ? { ...prev, sourceLanguage: nextSource, targetLanguage: nextTarget } : prev))
+    // Only adopt the hydrated value where the user hasn't already typed over the
+    // (blank) seed — otherwise this would stomp an in-progress edit. Settling to
+    // the true server value must also not read as a user edit, which is why the
+    // baseline moves with it.
+    setSourceLanguage((prev) => (prev === baseline.sourceLanguage ? nextSource : prev))
+    setTargetLanguage((prev) => (prev === baseline.targetLanguage ? nextTarget : prev))
+  }, [baseline, sharedSettingsFetched, sharedSettingsBlob])
+
   const effectiveCompletionApiKey = apiKey.trim() || completionUserKey.trim()
 
   const loadModels = useCallback(async (opts: { force?: boolean } = {}) => {
@@ -590,7 +676,38 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       if (lastModelFetchKeyRef.current !== fetchKey) return
       setModels(list)
       setConnected(true)
+      const chosenModel = model || list[0] || ""
       if (list.length > 0 && !model) setModel(list[0])
+      // Connect (and the auto-probe after a key/endpoint pause) is the moment
+      // the user believes BYOK is ready. Persist immediately so the workspace
+      // sparkle gate sees Custom OpenRouter without a second "Save changes".
+      if (id && provider === "custom") {
+        const latest = (await getProject(id)) ?? project ?? undefined
+        if (latest) {
+          const nextCompletion = buildCompletionSettings(latest.completionSettings, {
+            provider: "custom",
+            endpoint: trimmedEndpoint,
+            ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+            model: chosenModel,
+          })
+          await updateProject({
+            ...latest,
+            completionSettings: nextCompletion,
+            aiProviderChosen: true,
+          })
+          setBaseline((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  provider: "custom",
+                  endpoint: trimmedEndpoint,
+                  apiKey,
+                  model: chosenModel,
+                }
+              : prev,
+          )
+        }
+      }
     } catch (err) {
       if (lastModelFetchKeyRef.current !== fetchKey) return
       setModels([])
@@ -599,7 +716,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     } finally {
       if (lastModelFetchKeyRef.current === fetchKey) setConnecting(false)
     }
-  }, [effectiveCompletionApiKey, endpoint, model])
+  }, [apiKey, effectiveCompletionApiKey, endpoint, id, model, project, provider])
 
   const isDirty = useMemo(() => {
     if (!baseline) return false
@@ -838,7 +955,13 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         const nextTtsSettings = geminiKeyChanged
           ? { ...latest.ttsSettings, apiKey: geminiApiKey || undefined }
           : latest.ttsSettings
-        await updateProject({ ...latest, ...localUpdates, completionSettings: nextCompletion, ttsSettings: nextTtsSettings })
+        await updateProject({
+          ...latest,
+          ...localUpdates,
+          completionSettings: nextCompletion,
+          ttsSettings: nextTtsSettings,
+          ...(Object.keys(completionUpdates).length > 0 ? { aiProviderChosen: true } : {}),
+        })
       }
 
       const sharedUpdates: ProjectWideSettings = {}
@@ -1559,12 +1682,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               <SettingsRow
                 label={<label htmlFor="sl">{t("projectSettings.info.sourceLanguageLabel")}</label>}
                 control={
-                  <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip}>
+                  <DisabledFieldTooltip disabled={!canEditLanguages} tooltip={languageDisabledTooltip}>
                     <LanguageComboboxInput
                       id="sl"
                       value={sourceLanguage}
                       onValueChange={setSourceLanguage}
-                      disabled={!canEditShared}
+                      disabled={!canEditLanguages}
                       aria-label={t("projectSettings.info.sourceLanguageLabel")}
                       className="w-40 bg-background"
                     />
@@ -1574,12 +1697,12 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
               <SettingsRow
                 label={<label htmlFor="tl">{t("projectSettings.info.targetLanguageLabel")}</label>}
                 control={
-                  <DisabledFieldTooltip disabled={!canEditShared} tooltip={sharedDisabledTooltip}>
+                  <DisabledFieldTooltip disabled={!canEditLanguages} tooltip={languageDisabledTooltip}>
                     <LanguageComboboxInput
                       id="tl"
                       value={targetLanguage}
                       onValueChange={setTargetLanguage}
-                      disabled={!canEditShared}
+                      disabled={!canEditLanguages}
                       aria-label={t("projectSettings.info.targetLanguageLabel")}
                       className="w-40 bg-background"
                     />
@@ -1596,8 +1719,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
             defaultTargetLanguage={sharedSettingsBlob?.targetLanguage ?? project?.targetLanguage ?? ""}
             targetLanes={sharedSettingsBlob?.targetLanes ?? []}
             archivedLanes={sharedSettingsBlob?.archivedLanes ?? []}
-            canEdit={canEditShared}
-            disabledTooltip={sharedDisabledTooltip}
+            canEdit={canEditLanguages}
+            disabledTooltip={languageDisabledTooltip}
             patch={patchShared}
           />
         )}
@@ -2421,7 +2544,20 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         )}
 
         {sectionsToRender.some((s) => s.id === "section-experimental") && id && (
-          <ExperimentalFlagsSection projectId={id} serverProject={project ?? undefined} />
+          <ExperimentalFlagsSection
+            projectId={id}
+            serverProject={project ?? undefined}
+            // AQU-1246: the Autopilot opt-in is a project-wide synced setting,
+            // not a device-local flag, so it reads from and writes through the
+            // shared settings blob. It saves immediately rather than joining
+            // the deferred Save bar — it is one switch with no dependent
+            // fields, and its role floor (project_lead) is lower than the bar's
+            // (maintainer), so folding it in would lock leads out of the one
+            // control they are allowed to touch.
+            autopilotEnabled={sharedSettingsBlob.autopilotEnabled}
+            roleLevel={project?.syncRole?.level ?? null}
+            onSetAutopilotEnabled={(enabled) => { void patchShared({ autopilotEnabled: enabled }) }}
+          />
         )}
           </div>
     </Page>

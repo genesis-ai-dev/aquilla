@@ -22,6 +22,7 @@ import {
   requiredRoleForCommand,
   type Command,
 } from './commands'
+import { isOrgMemberCommand } from './commands-org-members'
 import { errorResponse } from './errors'
 import type { StoredChangeset } from './types'
 import type { ApiCredentialContext } from '../../../db/shared/api-credentials'
@@ -42,11 +43,17 @@ export function requiredFloorForChangeset(
   )
 }
 
-/** True when a CreateProject plan keeps the creator rule: its authority is
- *  org-level (re-checked in the commit handler) and its target project may not
- *  exist yet, so no project role can be resolved against it. */
-function isProjectCreation(commands: readonly Command[]): boolean {
-  return commands.some((c) => c.kind === 'CreateProject')
+/** True when a plan keeps the creator rule instead of the project-role floor.
+ *  All cases are ORG-level or scope-level authority re-checked in the commit
+ *  handler, with no project role to resolve against: CreateProject's and
+ *  CreateOrg's (AQU-1221) target tenant may not exist yet, and an
+ *  org-membership plan (AQU-1235) does not concern the project it is merely
+ *  filed under. A floor would deny everyone, the person who staged the plan
+ *  included. */
+function isCreatorScoped(commands: readonly Command[]): boolean {
+  return commands.some(
+    (c) => c.kind === 'CreateProject' || c.kind === 'CreateOrg' || isOrgMemberCommand(c),
+  )
 }
 
 /**
@@ -59,7 +66,7 @@ export async function changesetAuthorityDenied(
   cs: StoredChangeset,
   cred: ApiCredentialContext,
 ): Promise<Response | null> {
-  if (isProjectCreation(cs.commands)) {
+  if (isCreatorScoped(cs.commands)) {
     if (String(cs.createdByUserId) === String(cred.userId)) return null
     return errorResponse('permission_denied', 'only the changeset creator may access it')
   }
@@ -84,6 +91,6 @@ export function visibleAtRole(
   userId: string,
   assignmentMinRole: number = DEFAULT_ASSIGNMENT_MIN_ROLE,
 ): boolean {
-  if (isProjectCreation(cs.commands)) return String(cs.createdByUserId) === String(userId)
+  if (isCreatorScoped(cs.commands)) return String(cs.createdByUserId) === String(userId)
   return roleLevel >= requiredFloorForChangeset(cs.commands, assignmentMinRole)
 }

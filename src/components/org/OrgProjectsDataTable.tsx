@@ -97,6 +97,12 @@ export function OrgProjectsDataTable({
   toolbarTrailing,
   loading = false,
   loadingLabel,
+  searchValue,
+  onSearchChange,
+  searching = false,
+  hasMore = false,
+  onLoadMore,
+  loadingMore = false,
 }: {
   projects: OrgProjectRow[]
   now: number
@@ -141,6 +147,12 @@ export function OrgProjectsDataTable({
   toolbarTrailing?: ReactNode
   loading?: boolean
   loadingLabel?: string
+  searchValue?: string
+  onSearchChange?: (value: string) => void
+  searching?: boolean
+  hasMore?: boolean
+  onLoadMore?: () => void
+  loadingMore?: boolean
 }) {
   const { t } = useI18n()
   const navigate = useNavigate()
@@ -517,7 +529,7 @@ export function OrgProjectsDataTable({
     : null
 
   return (
-    <div className={cn(embedded && "flex min-h-0 min-w-0 w-full flex-1 flex-col")}>
+    <div className="flex min-h-0 min-w-0 w-full flex-1 flex-col">
       <DataTable
         key={`${layout}:${initialLens}`}
         columns={columns}
@@ -531,17 +543,27 @@ export function OrgProjectsDataTable({
         onRowClick={(p) => navigate(`/projects/${p.id}`)}
         initialSorting={[...lensToSorting(initialLens)]}
         searchPlaceholder="Search projects…"
-        fillHeight={embedded}
+        searchValue={searchValue}
+        onSearchChange={onSearchChange}
+        searching={searching}
+        fillHeight
         loading={loading}
         loadingLabel={loadingLabel}
-        globalFilterFn={(row, _columnId, filterValue) => {
+        hasMore={hasMore}
+        onLoadMore={onLoadMore}
+        loadingMore={loadingMore}
+        globalFilterFn={
+          onSearchChange
+            ? undefined
+            : (row, _columnId, filterValue) => {
           const q = String(filterValue).trim().toLowerCase()
           if (!q) return true
           const p = row.original
           // AQU-507: match PM username too, so the search box satisfies the
           // "filter by PM" half of the AC without a separate filter control.
           return `${p.name} ${p.orgName ?? ""} ${p.pm?.username ?? ""}`.toLowerCase().includes(q)
-        }}
+        }
+        }
         toolbar={
           <>
             {toolbarLeading}
@@ -591,14 +613,20 @@ export function OrgProjectsDataTable({
               )
         }
         emptyState={(table) => {
-          const search = String(table.getState().globalFilter ?? "").trim()
+          const search = (searchValue ?? String(table.getState().globalFilter ?? "")).trim()
           if (search) {
             return (
               <div className="flex flex-col items-center gap-3 py-10">
                 <p className="text-center text-sm text-muted-foreground">
                   {t("org.orgProjectsDataTable.noSearchMatch")}
                 </p>
-                <Button variant="outline" onClick={() => table.setGlobalFilter("")}>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    table.setGlobalFilter("")
+                    onSearchChange?.("")
+                  }}
+                >
                   {t("common.clear")}
                 </Button>
               </div>

@@ -2,7 +2,7 @@ import type { CompletionSettings, CompletionProvider, TranslationRule } from "@/
 import type { FrontierSession } from "@/lib/frontier/types"
 import { resolveApiKey } from "@/lib/store/user-api-keys"
 import { effectiveSourceText, type SourceTextCell } from "@/lib/cell-text"
-import { getUserProviderOverride } from "@/lib/store/user-provider-override"
+import { getUserProviderOverride, type UserProviderOverride } from "@/lib/store/user-provider-override"
 import { t } from "@/lib/i18n/standalone"
 // AQU-1230: the pure prompt-assembly core lives in ./prompt-build so the Agent
 // API's effective-prompt preview (sync-worker) can call the SAME builders
@@ -117,6 +117,30 @@ const CHAT_BASE_OVERRIDE =
   ((import.meta.env.VITE_CHAT_BASE as string | undefined)?.replace(/\/+$/, "")) || ""
 export const FRONTIER_CHAT_URL = `${CHAT_BASE_OVERRIDE || CHAT_BASE_FALLBACK || "https://api.aquilla.app/chat"}/api/v1/chat/completions`
 
+/** Direct OpenRouter base used when hosted Frontier has no server key and the
+ *  user has supplied their own (BYOK). Browser → OpenRouter; no Aquilla bill. */
+export const OPENROUTER_BYOK_ENDPOINT = "https://openrouter.ai/api/v1"
+
+export function isHostedOpenRouterUnconfigured(status: number, body: string): boolean {
+  if (status !== 500 && status !== 503) return false
+  const lowered = body.toLowerCase()
+  return (
+    lowered.includes("openrouter_api_key is not configured") ||
+    lowered.includes("openrouter_not_configured")
+  )
+}
+
+function isFrontierChatProxy(endpoint: string): boolean {
+  const ep = endpoint.trim()
+  if (!ep || ep === FRONTIER_CHAT_URL) return true
+  return /aquilla\.app\/chat/i.test(ep)
+}
+
+function byokEndpointForFrontierFallback(settings: CompletionSettings): string {
+  const ep = (settings.endpoint ?? "").trim()
+  if (!ep || isFrontierChatProxy(ep)) return OPENROUTER_BYOK_ENDPOINT
+  return ep
+}
 
 /**
  * The project id of the project currently being edited, derived from the SPA
@@ -148,6 +172,75 @@ export function resolveProvider(settings: CompletionSettings): CompletionProvide
   // completionSettings object containing only `systemPrompt` (see
   // useProject.ts overlaySettings), and legacy IDB rows predate `endpoint`.
   return (settings.endpoint ?? "").trim() ? "custom" : "frontier"
+}
+
+/** Hosted OpenAI-compatible APIs that refuse unauthenticated chat. Local /
+ *  self-hosted endpoints do not need a key. */
+export function customProviderNeedsKey(endpoint: string): boolean {
+  const e = endpoint.trim().toLowerCase()
+  if (!e) return false
+  if (/^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(e)) return false
+  return /openrouter\.ai|openai\.com|groq\.com|together\.xyz|mistral\.ai|deepseek\.com/.test(e)
+}
+
+/** True when this project has its own custom endpoint (BYOK / self-hosted). */
+export function projectUsesOwnProvider(settings: CompletionSettings): boolean {
+  if (resolveProvider(settings) !== "custom") return false
+  const endpoint = (settings.endpoint ?? "").trim()
+  return Boolean(endpoint) && endpoint !== FRONTIER_CHAT_URL
+}
+
+/**
+ * Drafting target for a request.
+ *
+ * More specific wins: this project's custom provider beats the device-wide
+ * personal override. The override is only the default for projects still on
+ * Frontier (no project key of their own).
+ */
+export function resolveEffectiveCompletionSettings(
+  settings: CompletionSettings,
+  override?: UserProviderOverride | null,
+): CompletionSettings {
+  if (projectUsesOwnProvider(settings) || !override?.endpoint?.trim()) return settings
+  return {
+    ...settings,
+    provider: "custom",
+    endpoint: override.endpoint,
+    model: override.model || settings.model,
+    apiKey: override.apiKey,
+  }
+}
+
+/**
+ * Whether the sparkle / draft path may run. A personal override or a saved
+ * Custom endpoint is enough — do not also require a model (connecting to
+ * OpenRouter lists models; picking one is optional until the request fires)
+ * and never send the user back to the Set up AI modal.
+ */
+export function isCompletionConfigured(
+  settings: CompletionSettings,
+  sessionJwt: string | null | undefined,
+  override?: UserProviderOverride | null,
+): boolean {
+  const resolved = resolveEffectiveCompletionSettings(settings, override)
+  const provider = resolveProvider(resolved)
+  if (provider === "frontier") return Boolean(sessionJwt)
+  const endpoint = (resolved.endpoint ?? "").trim()
+  if (!endpoint) return false
+  if (customProviderNeedsKey(endpoint)) {
+    return Boolean(resolveApiKey("completion", resolved.apiKey))
+  }
+  return true
+}
+
+/**
+ * The sparkle Set up AI dialog is a one-time chooser (Frontier / project key /
+ * personal override). After they pick, this is false for that project.
+ * A personal override does not skip the prompt — it is only the default
+ * selection when the chooser opens.
+ */
+export function shouldPromptAiSetup(aiProviderChosen: boolean | undefined): boolean {
+  return aiProviderChosen !== true
 }
 
 // A segmented prompt preserves passage context (pronoun antecedents, tense
@@ -468,19 +561,10 @@ export interface CompleteOptions {
 }
 
 export async function complete(options: CompleteOptions): Promise<string> {
-  // Personal per-device override (set in user Settings) takes precedence over
-  // the project's completionSettings. This is the "advanced" path: the user
-  // wants their own endpoint/key for everything they translate on this device.
-  const override = getUserProviderOverride()
-  const effectiveSettings: CompletionSettings = override
-    ? {
-        ...options.settings,
-        provider: "custom",
-        endpoint: override.endpoint,
-        model: override.model || options.settings.model,
-        apiKey: override.apiKey,
-      }
-    : options.settings
+  const effectiveSettings = resolveEffectiveCompletionSettings(
+    options.settings,
+    getUserProviderOverride(),
+  )
   const provider = resolveProvider(effectiveSettings)
   const { url, headers } = await buildRequestTarget(provider, effectiveSettings, options.session)
 
@@ -519,6 +603,24 @@ export async function complete(options: CompleteOptions): Promise<string> {
       // Frontier returns 402 when subscription/credits are exhausted; surface message.
       if (provider === "frontier" && res.status === 402) {
         throw new Error(t("rules.completion.frontierLimitReached", { detail: text || t("rules.completion.outOfCredits") }))
+      }
+      // AQU-1158: hosted drafting has no OPENROUTER_API_KEY (typical on
+      // api.dev). If the user pasted their own completion key, talk to
+      // OpenRouter from the browser — that request never hits our chat
+      // proxy, so it is not billed as Aquilla usage.
+      if (provider === "frontier" && isHostedOpenRouterUnconfigured(res.status, text)) {
+        const byokKey = resolveApiKey("completion", effectiveSettings.apiKey)
+        if (byokKey) {
+          return complete({
+            ...options,
+            settings: {
+              ...effectiveSettings,
+              provider: "custom",
+              endpoint: byokEndpointForFrontierFallback(effectiveSettings),
+              apiKey: byokKey,
+            },
+          })
+        }
       }
       throw new Error(t("rules.completion.completionFailed", { status: res.status, text }))
     }

@@ -31,6 +31,7 @@ import {
 } from "@/hooks/useCompletion"
 import { useTranslateAsReadPreference } from "@/hooks/useTranslateAsReadPreference"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
+import { shouldPromptAiSetup } from "@/lib/completion/completion-service"
 import {
   hasMateriallyBetterEvidence,
   translateAsReadAction,
@@ -4650,6 +4651,8 @@ export function ProjectWorkspace() {
     activeLane,
     commitCompletedCells,
   )
+
+  const sparkleReady = isConfigured && !shouldPromptAiSetup(project?.aiProviderChosen)
 
   // AQU-620: adapter so the editor's per-cell AI action can request a plain
   // draft (`onCompleteSingle(cell)`) or an explicit regenerate
@@ -10865,7 +10868,7 @@ export function ProjectWorkspace() {
               editable: !isReadOnly,
               onCommitTarget: handleAgentTargetCommit,
               isAnonymous: !frontierSession,
-              isCompletionConfigured: isConfigured,
+              isCompletionConfigured: sparkleReady,
               isCompletionAvailable,
               completing,
               onDraftTarget: handleAgentTargetDraft,
@@ -11329,7 +11332,7 @@ export function ProjectWorkspace() {
                 state: { backgroundLocation: location, projectSettingsModalDepth: 1 },
               })
             }
-            isCompletionConfigured={isConfigured} isCompletionAvailable={isCompletionAvailable} completing={completing}
+            isCompletionConfigured={sparkleReady} isCompletionAvailable={isCompletionAvailable} completing={completing}
             examples={examples} errors={errors} previews={previews}
             onClearCellErrors={clearCellErrors}
             onCompleteSingle={handleCompleteSingle} onCompleteBatch={completeBatch}

@@ -625,7 +625,38 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       if (lastModelFetchKeyRef.current !== fetchKey) return
       setModels(list)
       setConnected(true)
+      const chosenModel = model || list[0] || ""
       if (list.length > 0 && !model) setModel(list[0])
+      // Connect (and the auto-probe after a key/endpoint pause) is the moment
+      // the user believes BYOK is ready. Persist immediately so the workspace
+      // sparkle gate sees Custom OpenRouter without a second "Save changes".
+      if (id && provider === "custom") {
+        const latest = (await getProject(id)) ?? project ?? undefined
+        if (latest) {
+          const nextCompletion = buildCompletionSettings(latest.completionSettings, {
+            provider: "custom",
+            endpoint: trimmedEndpoint,
+            ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+            model: chosenModel,
+          })
+          await updateProject({
+            ...latest,
+            completionSettings: nextCompletion,
+            aiProviderChosen: true,
+          })
+          setBaseline((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  provider: "custom",
+                  endpoint: trimmedEndpoint,
+                  apiKey,
+                  model: chosenModel,
+                }
+              : prev,
+          )
+        }
+      }
     } catch (err) {
       if (lastModelFetchKeyRef.current !== fetchKey) return
       setModels([])
@@ -634,7 +665,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     } finally {
       if (lastModelFetchKeyRef.current === fetchKey) setConnecting(false)
     }
-  }, [effectiveCompletionApiKey, endpoint, model])
+  }, [apiKey, effectiveCompletionApiKey, endpoint, id, model, project, provider])
 
   const isDirty = useMemo(() => {
     if (!baseline) return false
@@ -873,7 +904,13 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         const nextTtsSettings = geminiKeyChanged
           ? { ...latest.ttsSettings, apiKey: geminiApiKey || undefined }
           : latest.ttsSettings
-        await updateProject({ ...latest, ...localUpdates, completionSettings: nextCompletion, ttsSettings: nextTtsSettings })
+        await updateProject({
+          ...latest,
+          ...localUpdates,
+          completionSettings: nextCompletion,
+          ttsSettings: nextTtsSettings,
+          ...(Object.keys(completionUpdates).length > 0 ? { aiProviderChosen: true } : {}),
+        })
       }
 
       const sharedUpdates: ProjectWideSettings = {}

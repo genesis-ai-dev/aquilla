@@ -102,15 +102,24 @@ function applyDeviceLocalSettings(
   record: ProjectRecord,
   local: ProjectRecord | undefined,
 ): ProjectRecord {
-  if (!local?.completionSettings && !local?.experimentalFlags) return record
+  if (
+    !local ||
+    (!local.completionSettings &&
+      !local.experimentalFlags &&
+      local.aiProviderChosen === undefined)
+  ) {
+    return record
+  }
   const next: ProjectRecord = {
     ...record,
     ...(local.completionSettings ? { completionSettings: local.completionSettings } : {}),
     ...(local.experimentalFlags ? { experimentalFlags: local.experimentalFlags } : {}),
+    ...(local.aiProviderChosen !== undefined ? { aiProviderChosen: local.aiProviderChosen } : {}),
   }
   const unchanged =
     JSON.stringify(record.completionSettings ?? null) === JSON.stringify(next.completionSettings ?? null) &&
-    JSON.stringify(record.experimentalFlags ?? null) === JSON.stringify(next.experimentalFlags ?? null)
+    JSON.stringify(record.experimentalFlags ?? null) === JSON.stringify(next.experimentalFlags ?? null) &&
+    record.aiProviderChosen === next.aiProviderChosen
   return unchanged ? record : next
 }
 
@@ -235,11 +244,13 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
     return cleanup
   }, [refresh])
 
-  // AQU-1103: the device-local fields are written by Project settings, which
-  // opens as a route-modal OVER a still-mounted overview/workspace (App.tsx
-  // `backgroundLocation`), so nothing re-runs `refresh` for them. Re-overlay
-  // whenever this project's local record changes — that is what lets the
-  // Autopilot panel follow the Experimental toggle without a page reload.
+  // AQU-1103 / AQU-1158: device-local fields (experimentalFlags,
+  // completionSettings, aiProviderChosen) are written by Project settings /
+  // Set up AI, which open as a route-modal OVER a still-mounted
+  // overview/workspace (App.tsx `backgroundLocation`), so nothing re-runs
+  // `refresh` for them. Re-overlay whenever this project's local record changes
+  // — that is what lets Autopilot follow the Experimental toggle and the
+  // sparkle gate see Custom OpenRouter / BYOK without a page reload.
   // Deliberately not gated on `enabled`: a sub-route reusing an ancestor's
   // record must follow the same toggle, and an IDB read is not a resolve.
   useEffect(() => {

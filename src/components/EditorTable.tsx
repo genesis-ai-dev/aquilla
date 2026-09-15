@@ -505,7 +505,8 @@ function SynthStatusBadge({
       error.category === "omnivoice-failed" ||
       error.category === "seed-vc-not-configured" ||
       error.category === "seed-vc-failed" ||
-      error.category === "gemini-failed"
+      error.category === "gemini-failed" ||
+      error.category === "missing-openrouter-key"
     ) {
       // Soft fixes — the popover body explains what to do; no inline action.
     } else {

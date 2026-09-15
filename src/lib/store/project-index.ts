@@ -216,6 +216,9 @@ export function mergeServerProjectWithLocalCache(
     ...(local.aiSetupSkipped !== undefined
       ? { aiSetupSkipped: local.aiSetupSkipped }
       : {}),
+    ...(local.aiProviderChosen !== undefined
+      ? { aiProviderChosen: local.aiProviderChosen }
+      : {}),
     // AQU-701: voice settings chosen in the setup checklist (provider, BYOK
     // gemini key) are written to the device-local record; carry them across
     // server refetches, letting server-synced keys win where present.

@@ -608,6 +608,31 @@ The command layer is now the **shared write spine for both agent surfaces** (see
   `/api/v2/changesets/:id/approval|approve|reject` human gate; the SPA's live ChangesetCard
   commits after approval (per-item confirmation for testimony kinds).
 
+## Status addendum (2026-09-04, AQU-1176 — settings read + PatchSettings over MCP)
+
+The settings loop is now closed on the external surface: an agent can read what it is
+about to change instead of guessing the version and blind-overwriting a blob it has
+never seen.
+
+- **`GET /api/v1/external/projects/:projectId/settings`** — `{ projectId, settings,
+  version, updatedAt }` (`read-routes.ts`). Same credential/scope/role gate and
+  per-credential throttle as every other project read (VIEWER floor; wrong-project PAT
+  gets `scope_denied`). A project with no `project_settings` row reads as `{}` at
+  version 0 — patch against 0 to create it. `updated_by` is deliberately NOT echoed:
+  this is an agent-facing surface and that id names a human.
+- **`get_project_settings`** — the MCP mirror of that read, so an MCP-only agent can
+  obtain the `ifMatchVersion` its patch requires.
+- **`patch_settings`** — the dedicated MCP tool for the `PatchSettings` command. Pure
+  argument marshalling: per-key floors, the `POLICY_SETTINGS_KEYS` denial, the
+  sole-command rule, and the version guard stay server-side in
+  `commands-patch-settings.ts`, unchanged. `get_capabilities.projectSettings` documents
+  the shape, as does the API map's `settings` section.
+- `commandKinds` remains frozen at the v1.1 five under `commandKindsLegacy` (see the
+  AQU-926 addendum above); `commands.index` stays the authoritative vocabulary, and
+  `EmitEvents` is still REST-only for staging. (`describe_command` itself ships as an
+  MCP tool in the AQU-1222 addendum below, with an optional `kind` — omit it for the
+  index of every command.)
+
 ## Status addendum (2026-09-04, AQU-1182 — file + project lifecycle commands)
 
 Parity epic AQU-1181 items 17/21. All four commands are ask-mode-stageable through the same

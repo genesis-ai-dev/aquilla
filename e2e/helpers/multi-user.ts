@@ -31,6 +31,15 @@ export async function openAuthedPage(
   opts: { baseURL?: string; pinOrgId?: number } = {},
 ): Promise<Page> {
   const ctx = await browser.newContext()
+  // alice is a platform admin in the e2e stack (PLATFORM_ADMINS:alice in
+  // scripts/e2e-up.ts). GET /api/v2/orgs without query params is memberships
+  // only — the switcher loads the rest of the tenancy a page at a time. Seed
+  // her own org as active so she lands on a concrete org rather than the
+  // all-organizations aggregate (which has no "+ New Project" button).
+  // The guard keeps this a one-time default that in-test org switches can
+  // still override. Callers gate pinOrgId to the users that need it (alice
+  // in the alice/bob/carol fixtures; any extra in-test users that need the
+  // same treatment for the AQU-1060 six-editor load spec).
   if (opts.pinOrgId != null) {
     await ctx.addInitScript((orgId) => {
       // Always pin alice to her personal org — path-scoped `/orgs/:id` resume

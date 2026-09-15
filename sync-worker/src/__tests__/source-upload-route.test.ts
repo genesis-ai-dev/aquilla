@@ -186,6 +186,37 @@ describe("PUT /api/v1/projects/:projectId/files/:fileId/source", () => {
     expect(SNAPSHOTS._allKeys()).toHaveLength(0)
   })
 
+  it("returns a generic error, never the raw R2 exception text, when the storage upload itself fails", async () => {
+    const { db } = await makeTestDb({
+      projects: [{ id: "p1", name: "Test Project", created_by: 1 }],
+      files: [{ id: "f1", project_id: "p1", name: "test.docx", event_id: "ev1" }],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "p1", fileId: "f1", role: 500 })
+    const failingBucket = {
+      put: async () => {
+        throw new Error("R2 bucket aquilla-snapshots-prod: connection reset by peer at 10.2.4.17:443")
+      },
+    }
+    const bytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04])
+    const res = await handleSourceUploadRequest(new Request(
+      "https://x/api/v1/projects/p1/files/f1/source",
+      {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "X-Source-Format": "docx",
+          "X-Artifact-Id": "01900000-0000-7000-8000-000000000003",
+        },
+        body: bytes,
+      },
+    ), { SNAPSHOTS: failingBucket, AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET } as any)
+
+    expect(res?.status).toBe(502)
+    const text = await res?.text()
+    expect(text).toBe("source storage upload failed")
+    expect(text).not.toMatch(/10\.2\.4\.17|connection reset|aquilla-snapshots-prod/)
+  })
+
   it("preserves a custom text original with its explicit format", async () => {
     const { db } = await makeTestDb({
       projects: [{ id: "p1", name: "Test Project", created_by: 1 }],

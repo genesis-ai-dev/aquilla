@@ -67,6 +67,10 @@ export function sessionPrincipal(claims: SyncTokenClaims): ApiCredentialContext 
     mode: 'ask',
     orgId: null,
     projectId: null,
+    // AQU-1180: this principal is a signed-in human in their own browser, who
+    // already sees their teammates' names throughout the SPA. The scrub exists
+    // to keep identity out of third-party AI consoles, not out of the app.
+    pii: true,
   }
 }
 

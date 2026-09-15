@@ -32,6 +32,7 @@ import {
   normalizeSettings,
   patchProjectSettingsShared,
 } from '../../../db/shared/projects'
+import { validateSettingsKeyValue } from '../../../db/shared/project-settings-keys'
 import { ROLE } from '../events/role-policy'
 
 /** One top-level settings key replace. `value` is any JSON value (null stores
@@ -62,6 +63,10 @@ export const POLICY_SETTINGS_KEYS: readonly string[] = [
   'allowSelfValidation',
   'harmonize_min_role',
   'contributeToGlobalTm',
+  // AQU-1180: the switch that hides translator identity from agents. An agent
+  // able to flip this could talk a human into approving a settings changeset
+  // that turns its own team's names back on.
+  'agentAuthorship',
 ]
 
 const POLICY_KEY_SET = new Set(POLICY_SETTINGS_KEYS)
@@ -69,6 +74,25 @@ const POLICY_KEY_SET = new Set(POLICY_SETTINGS_KEYS)
 /** Default floor for the `terminology` key when the org sets none — mirrors
  *  auth-worker's DEFAULT_TERMBASE_EDIT_MIN_ROLE (org-permissions.ts). */
 export const DEFAULT_TERMBASE_EDIT_MIN_ROLE = ROLE.PROJECT_LEAD
+
+/** AQU-1086: settings keys gated by the org's `languageEditMinRole` rather
+ *  than the flat MAINTAINER floor. Must stay in lock-step with LANGUAGE_KEYS
+ *  in auth-worker/src/routes/project-settings.ts — the two surfaces write the
+ *  same blob and must not disagree about what a "language-only" change is. */
+export const LANGUAGE_SETTINGS_KEYS: readonly string[] = [
+  'sourceLanguage',
+  'targetLanguage',
+  'targetLanes',
+  'archivedLanes',
+]
+
+const LANGUAGE_KEY_SET = new Set(LANGUAGE_SETTINGS_KEYS)
+
+/** Default floor for the language keys when the org sets none — mirrors
+ *  auth-worker's DEFAULT_LANGUAGE_EDIT_MIN_ROLE (org-permissions.ts). Unlike
+ *  the termbase floor this default is MAINTAINER: an org opts IN to letting
+ *  project leads change languages. */
+export const DEFAULT_LANGUAGE_EDIT_MIN_ROLE = ROLE.MAINTAINER
 
 export interface PatchValidationIssue {
   index: number
@@ -78,6 +102,15 @@ export interface PatchValidationIssue {
 function isNonEmptyString(v: unknown): v is string {
   return typeof v === 'string' && v.length > 0
 }
+
+/** Own-prototype-mutating keys. `merged[op.key] = op.value` in both
+ *  `patchProjectSettingsShared` (db/shared/projects.ts) and the supersede
+ *  comparison merge (external/supersede.ts) is a bracket assignment onto a
+ *  plain object literal — one of these as `op.key` reaches `Object.prototype`'s
+ *  `__proto__` accessor (or shadows `constructor`/`prototype`) before either
+ *  merge ever runs. Rejected once here, at the single point both call sites'
+ *  `PatchSettingsOp[]` is built from. */
+const DANGEROUS_SETTINGS_KEYS = new Set(['__proto__', 'constructor', 'prototype'])
 
 /** Validate one raw PatchSettings command (shape only — floors and the version
  *  pin are prepare-time checks). Returns the typed command or pushes issues. */
@@ -114,9 +147,25 @@ export function validatePatchSettingsCommand(
       issues.push({ index, message: `PatchSettings.ops[${opIndex}].key must be a non-empty string` })
       return null
     }
+    if (DANGEROUS_SETTINGS_KEYS.has(op.key)) {
+      issues.push({ index, message: `PatchSettings.ops[${opIndex}].key "${op.key}" is a reserved key and cannot be used` })
+      return null
+    }
     if (!('value' in op)) {
       issues.push({ index, message: `PatchSettings.ops[${opIndex}].value is required (null to store null)` })
       return null
+    }
+    // AQU-1224: a key the settings schema doesn't carry is a TYPO, not a new
+    // setting — reject it here so nothing reaches the human approval queue,
+    // and name the key so the caller can correct it (describe_command lists
+    // the legal ones). Policy keys skip the VALUE check so they always resolve
+    // to the permission_denied prepare emits for them, never a type complaint.
+    if (!POLICY_KEY_SET.has(op.key)) {
+      const problem = validateSettingsKeyValue(op.key, op.value)
+      if (problem) {
+        issues.push({ index, message: `PatchSettings.ops[${opIndex}]: ${problem}` })
+        return null
+      }
     }
     // A duplicate key is a caller bug (later would silently clobber earlier),
     // unlike SetTranslation's loop-generated cell batches — reject, don't warn.
@@ -131,8 +180,15 @@ export function validatePatchSettingsCommand(
 }
 
 /** Static index floor for PatchSettings (catalog parity): PROJECT_LEAD when
- *  every op is `terminology`, else MAINTAINER. The dynamic org floor for
- *  `terminology` is resolved at prepare/commit. */
+ *  every op is `terminology`, else MAINTAINER. The dynamic org floors for
+ *  `terminology` (AQU-822) and the language keys (AQU-1086) are resolved at
+ *  prepare/commit.
+ *
+ *  The catalog advertises each key's DEFAULT floor, so the language keys stay
+ *  at MAINTAINER here — that is their default. An org that lowers
+ *  `languageEditMinRole` to PROJECT_LEAD makes the catalog conservative for
+ *  its leads (prepare/commit still admit the write), the mirror image of an
+ *  org that RAISES `termbaseEditMinRole`. */
 export function staticPatchSettingsFloor(cmd: PatchSettingsCommand): number {
   return cmd.ops.every((op) => op.key === 'terminology') ? ROLE.PROJECT_LEAD : ROLE.MAINTAINER
 }
@@ -171,34 +227,64 @@ export async function resolveTermbaseEditMinRole(
   db: AquillaDb,
   projectId: string,
 ): Promise<number> {
+  return resolveOrgRoleFloor(db, projectId, 'termbaseEditMinRole', DEFAULT_TERMBASE_EDIT_MIN_ROLE)
+}
+
+/** AQU-1086: effective floor for the language keys — the project org's
+ *  `languageEditMinRole`, default MAINTAINER. Mirrors auth-worker's
+ *  getLanguageEditMinRoleForProject. */
+export async function resolveLanguageEditMinRole(
+  db: AquillaDb,
+  projectId: string,
+): Promise<number> {
+  return resolveOrgRoleFloor(db, projectId, 'languageEditMinRole', DEFAULT_LANGUAGE_EDIT_MIN_ROLE)
+}
+
+/** Shared reader for the org_settings role-ladder floors above. */
+async function resolveOrgRoleFloor(
+  db: AquillaDb,
+  projectId: string,
+  key: string,
+  fallback: number,
+): Promise<number> {
   const project = await db
     .prepare(`SELECT org_id FROM projects WHERE id = ?`)
     .bind(projectId)
     .first<{ org_id: number | string | null }>()
-  if (!project?.org_id) return DEFAULT_TERMBASE_EDIT_MIN_ROLE
+  if (!project?.org_id) return fallback
   const row = await db
     .prepare(`SELECT settings FROM org_settings WHERE org_id = ?`)
     .bind(project.org_id)
     .first<{ settings: string | null }>()
-  if (!row?.settings) return DEFAULT_TERMBASE_EDIT_MIN_ROLE
+  if (!row?.settings) return fallback
   try {
     const parsed = JSON.parse(row.settings) as unknown
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      const raw = (parsed as Record<string, unknown>).termbaseEditMinRole
+      const raw = (parsed as Record<string, unknown>)[key]
       if (typeof raw === 'number' && Number.isFinite(raw) && raw >= 100 && raw <= 700) return raw
     }
   } catch {
     // Malformed org settings blob — fall through to the default floor.
   }
-  return DEFAULT_TERMBASE_EDIT_MIN_ROLE
+  return fallback
 }
 
-/** Max per-key floor across the ops: `terminology` → the resolved org floor;
- *  every other key → MAINTAINER (600). */
-function requiredRoleForOps(ops: readonly PatchSettingsOp[], termbaseFloor: number): number {
+/** Max per-key floor across the ops: `terminology` → the resolved org termbase
+ *  floor; a language key → the resolved org language floor; every other key →
+ *  MAINTAINER (600). Taking the MAX means a mixed batch is gated by its
+ *  strictest key, so lowering one floor never widens another. */
+function requiredRoleForOps(
+  ops: readonly PatchSettingsOp[],
+  termbaseFloor: number,
+  languageFloor: number,
+): number {
   let floor = 0
   for (const op of ops) {
-    floor = Math.max(floor, op.key === 'terminology' ? termbaseFloor : ROLE.MAINTAINER)
+    const keyFloor =
+      op.key === 'terminology' ? termbaseFloor
+      : LANGUAGE_KEY_SET.has(op.key) ? languageFloor
+      : ROLE.MAINTAINER
+    floor = Math.max(floor, keyFloor)
   }
   return floor
 }
@@ -235,8 +321,11 @@ export async function preparePatchSettings(
   const denial = policyOpDenial(cmd.ops)
   if (denial) return denial
 
-  const termbaseFloor = await resolveTermbaseEditMinRole(db, urlProjectId)
-  const requiredRole = requiredRoleForOps(cmd.ops, termbaseFloor)
+  const [termbaseFloor, languageFloor] = await Promise.all([
+    resolveTermbaseEditMinRole(db, urlProjectId),
+    resolveLanguageEditMinRole(db, urlProjectId),
+  ])
+  const requiredRole = requiredRoleForOps(cmd.ops, termbaseFloor, languageFloor)
   const role = await resolveProjectRoleShared(db, { id: cred.userId }, urlProjectId)
   if (!role || role.level < requiredRole) {
     return errorResponse('permission_denied', 'insufficient project role for these settings keys', {
@@ -305,8 +394,11 @@ export async function commitPatchSettings(
   const denial = policyOpDenial(cmd.ops)
   if (denial) return denial
 
-  const termbaseFloor = await resolveTermbaseEditMinRole(db, projectId)
-  const requiredRole = requiredRoleForOps(cmd.ops, termbaseFloor)
+  const [termbaseFloor, languageFloor] = await Promise.all([
+    resolveTermbaseEditMinRole(db, projectId),
+    resolveLanguageEditMinRole(db, projectId),
+  ])
+  const requiredRole = requiredRoleForOps(cmd.ops, termbaseFloor, languageFloor)
   const role = await resolveProjectRoleShared(db, { id: cred.userId }, projectId)
   if (!role || role.level < requiredRole) {
     return errorResponse('permission_denied', 'insufficient project role for these settings keys', {

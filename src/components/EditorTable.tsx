@@ -56,12 +56,9 @@ import { needsAttentionFromConfidence, resolveDecayConfig } from "@/lib/health/d
 import { readValidationCount } from "@/lib/progress/read-validation-count"
 import { StaleSourceIndicator } from "./StaleSourceIndicator"
 import { HealthRibbon } from "./HealthRibbon"
-import {
-  buildHealthRibbon,
-  preTranslationEvidence,
-  type HealthRibbonPoint,
-  type HealthRibbonStage,
-} from "@/lib/health/health-ribbon"
+import { type HealthRibbonPoint } from "@/lib/health/health-ribbon"
+import { ribbonInputCacheFor, type RibbonInputCache } from "@/lib/health/ribbon-inputs"
+import { useHealthCalculationsEnabled } from "@/lib/health/kill-switch"
 import { TranslatedEditor, type FootnoteInsertionAnchor, type TranslatedEditorHandle } from "./TranslatedEditor"
 import { TimelineAddMedia } from "./TimelineAddMedia"
 import { CellTtsButton } from "./CellTtsButton"
@@ -112,6 +109,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { CellPresenceBadges } from "./CellPresenceBadges"
 import { isLaneArchived } from "@/components/project-lane-archive"
 import { categorizeAiError } from "@/lib/audio/ai-error"
 import { CellAiStatusPopover } from "./CellAiStatusPopover"
@@ -131,6 +129,8 @@ import {
 import { TargetDraftActions, TargetReferenceActions } from "./cell/TargetCellActions"
 import { TargetValidationControl } from "./cell/TargetValidationControl"
 import { MilestoneNavigator, type MilestoneNavigationItem } from "./ChapterNavigator"
+import { cellIdsForMilestonePage } from "@/lib/milestone-navigation"
+import { getMilestoneSplit, useMilestoneSplit } from "@/lib/store/milestone-split-pref"
 import { EDITOR_SURFACE_TOOLBAR_CLASS } from "./editor-surface-toolbar"
 import { CellVoicePanel } from "./cell/CellVoicePanel"
 // CellAudioRecordButton: getUnsupportedReason used by the rail mic denied-help
@@ -164,18 +164,18 @@ import {
 } from "@/lib/text-direction"
 import { partitionInfractions } from "@/lib/rules/waivers"
 import { selectTermRules, computeLiveTermInfractions, mergeBlotInfractions } from "@/lib/rules/live-term-check"
-import { ViolationPopover, type ViolationAnchor } from "./ViolationPopover"
+import { ViolationToast } from "./ViolationToast"
 import { VOICE_ASSIGN_MIME } from "./VoiceLibraryPanel"
 import type { RangeHighlight } from "./HighlightedText"
 import { TermLookupPopover } from "./TermLookupPopover"
-import type { Concept } from "@/lib/terminology/types"
+import type { Concept, ConceptDraft } from "@/lib/terminology/types"
 import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { useFileFontSizes } from "@/lib/store/file-view-prefs"
 import { useEditorActions } from "@/context/EditorActionsContext"
 import { isInMemberScope } from "@/lib/sync/member-scopes"
-import { AddConceptDialog } from "./AddConceptDialog"
 import { SourceSelectionToolbar } from "./SourceSelectionToolbar"
 import { buildSourceChip, type ContextChip } from "@/lib/agent/context-chip"
+import { ownCastName } from "@/lib/timeline/cue-character"
 import { parseTimestampRange } from "@/lib/video/vtt-generator"
 import { FootnoteInline } from "./footnotes/FootnoteInline"
 import {
@@ -196,6 +196,7 @@ import { defaultFootnoteRef } from "@/lib/footnotes/refs"
 import { displayedSourceText, effectiveSourceText, projectedSourceValue, sourceCommitFields, sourceEditorSeed } from "@/lib/cell-text"
 import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
 import type { FootnoteViewMode, VisibleFootnoteEntry } from "@/lib/footnotes/types"
+import type { TargetKeyTermHighlightMode } from "@/hooks/useTargetKeyTermHighlightPreference"
 import { hasMeaningfulRichText } from "@/lib/richtext/editor-content"
 import {
   resolveIdmlEditorConfiguration,
@@ -225,8 +226,18 @@ const ESTIMATED_ROW_HEIGHT_PX = 140
 
 /** The gutter track widens by the character circle's w-6 when the cast
  *  gutter is on (stacked media lens). One shared type keeps the header row,
- *  paragraph bar, and rows in the same template. */
-type EditorGridCols = "grid-cols-[84px_1fr_1fr]" | "grid-cols-[132px_1fr_1fr]"
+ *  paragraph bar, and rows in the same template.
+ *
+ *  AQU-1101: the text tracks are `minmax(0,1fr)`, never a bare `1fr`. A bare
+ *  `1fr` carries an implicit `min-width: auto`, so a single unbreakable token
+ *  (a URL, a long identifier) widens ITS track to min-content and steals the
+ *  width from the sibling — source and target stop lining up with each other
+ *  and with the header row. Flooring the minimum at 0 makes the two tracks
+ *  equal fractions of the row whatever the content is; the cell surfaces then
+ *  break the token with `break-words` (see EditorCellSurface). */
+type EditorGridCols =
+  | "grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]"
+  | "grid-cols-[132px_minmax(0,1fr)_minmax(0,1fr)]"
 const LEGEND_LIST_DRAW_DISTANCE_PX = 240
 
 /**
@@ -494,7 +505,8 @@ function SynthStatusBadge({
       error.category === "omnivoice-failed" ||
       error.category === "seed-vc-not-configured" ||
       error.category === "seed-vc-failed" ||
-      error.category === "gemini-failed"
+      error.category === "gemini-failed" ||
+      error.category === "missing-openrouter-key"
     ) {
       // Soft fixes — the popover body explains what to do; no inline action.
     } else {
@@ -549,6 +561,10 @@ function SynthStatusBadge({
 // steady reference when the cell has no entry — otherwise every render would
 // mint a fresh [] and break React.memo for every row.
 const EMPTY_EXAMPLES: ScoredPair[] = []
+// Kill switch (lib/health/kill-switch.ts): with health off, every row shares
+// this one point so row memoization holds and no ribbon is rendered.
+const EMPTY_RIBBON: Map<string, HealthRibbonPoint> = new Map()
+const HEALTH_DISABLED_POINT: HealthRibbonPoint = { id: "health-disabled", stage: "untranslated", evidenceWeight: 1 }
 const EMPTY_INFRACTIONS: RuleInfraction[] = []
 const EMPTY_HIGHLIGHTS: ReturnType<typeof buildHighlightsFromExamples> = []
 const EMPTY_EXTRACTED_FOOTNOTES: ExtractedFootnote[] = []
@@ -562,6 +578,9 @@ const EMPTY_CELL_FOOTNOTE_DETAILS: CellFootnoteDetails = {
 const SELECTION_DRAG_THRESHOLD_PX = 3
 const SELECTION_EDGE_SCROLL_ZONE_PX = 56
 const SELECTION_EDGE_SCROLL_STEP_PX = 22
+/** AQU-1154: how long a departed peer's last draft stays over a row whose own
+ *  text has not caught up yet. Bounds the overlay if their commit never lands. */
+export const REMOTE_DRAFT_HOLD_MS = 15_000
 
 export type { BacktranslationActionSource }
 
@@ -696,6 +715,10 @@ interface EditorTableProps {
   /** Parent-managed focus claim/release (per-cell). */
   onClaimCell?: (cellId: string) => void
   onReleaseCell?: (cellId: string) => void
+  /** Fires with the row that owns keyboard/pointer focus (any surface in it),
+   *  or null when focus leaves the table. Non-lock-bearing presence: peers see
+   *  this user on the row even when they never activate the editor. */
+  onViewCell?: (cellId: string | null) => void
   onTargetPresenceSelection?: (cellId: string, selection: TargetPresenceSelection | null) => void
   /** Drop the "remote-changed-while-editing" flag for a cell. */
   onAckRemoteChange?: (cellId: string) => void
@@ -785,11 +808,13 @@ interface EditorTableProps {
   // cleanup) — pure pass-through, never consumed above the row.
   /** Re-read the project record from IDB after a settings change (e.g. voice library edits). */
   onProjectChanged?: () => void
-  /** Add-from-selection: create a DRAFT concept from a selected source token. */
-  onAddConceptFromSelection?: (sourceTerm: string) => void | Promise<void>
-  /** Non-null when the user cannot write to the termbase (below Maintainer) —
-   *  AddConceptDialog opens blocked with this reason instead of accepting input. */
+  /** Add-from-selection: create a terminology entry from selected source text. */
+  onAddConceptFromSelection?: (draft: ConceptDraft) => void | Promise<void>
+  /** Non-null when the user cannot write terminology (below Maintainer) —
+   *  the add-term popover opens blocked with this reason instead of accepting input. */
   addConceptBlockedReason?: string | null
+  /** May this user APPROVE a term (enforce it), vs only suggest one? */
+  canApproveConcept?: boolean
   onAskAiFromSelection?: (chip: ContextChip) => void
   /** Called when the user drops a voice chip onto a cell's audio area.
    *  Parent should assign the voice then trigger TTS generation. */
@@ -826,14 +851,6 @@ interface EditorTableProps {
    *  bounded to rows the user can currently see. */
   onVisibleCellIdsChange?: (cellIds: string[]) => void
   /**
-   * RACE-5: ref-backed lock check for commit-time enforcement. Reads the live
-   * lock map (updated synchronously on each WS frame) so a commit queued just
-   * after a `lock.claimed` frame arrives can't slip through a stale React render.
-   * Returns the holder userId/label, or null when the cell is free.
-   * Optional — when absent the existing `lockHolderLabel` prop is the only guard.
-   */
-  checkLockHolder?: (cellId: string) => string | null
-  /**
    * FRO-317: when true, USFM \f...\f* footnotes render as a distinct panel
    * immediately below each cell row. Editing is safe only for USFM files.
    */
@@ -842,6 +859,8 @@ interface EditorTableProps {
   footnotePanelActive?: boolean
   /** Current footnote display preference. */
   footnoteViewMode?: FootnoteViewMode
+  /** When approved target renderings receive the subtle key-term highlight. */
+  targetKeyTermHighlightMode?: TargetKeyTermHighlightMode
   /** Emits USFM footnotes from the currently visible virtual rows. */
   onVisibleFootnotesChange?: (entries: VisibleFootnoteEntry[]) => void
   /** Called after a target footnote is created so the parent can reveal footnotes. */
@@ -869,23 +888,23 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   audioLens, castGutter = false, ttsSettings, onOpenAudioSetup,
   onAttachMediaFile, onAttachMediaUrl,
   orderedBy,
-  onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, onAskAiFromSelection, onAssignVoice,
+  onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onAskAiFromSelection, onAssignVoice,
   onCellCommitted,
   getPendingTargetEventId,
   onOptimisticEdit,
   cellLockHolders,
   presenceStore,
   cellsWithRemoteChange,
-  onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
+  onClaimCell, onReleaseCell, onViewCell, onTargetPresenceSelection, onAckRemoteChange,
   staleCellIds,
   upstreamStaleCellIds,
   getTokenForFile,
   getAlignmentModel,
   onAlignmentSeedChange,
-  checkLockHolder,
   showFootnotesInline,
   footnotePanelActive,
   footnoteViewMode = "off",
+  targetKeyTermHighlightMode = "never",
   onVisibleRefChange,
   onVisibleCellIdsChange,
   onVisibleFootnotesChange,
@@ -919,6 +938,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     subsectionKey?: string
   } | null>(null)
   const clearChapterNavigationSelection = useCallback(() => {
+    if (getMilestoneSplit()) return
     setChapterNavigationSelection(null)
   }, [])
   const [activeEditorCellId, setActiveEditorCellId] = useState<string | null>(null)
@@ -944,6 +964,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     // just left must not wipe it.
     setFocusedRailCellId((cur) => railFocusOwnerOnBlur(cur, cellId))
   }, [])
+  // The focus-pinned row IS "where this user is" — publish it as presence so
+  // colleagues see the row even before (or without) an editor activation.
+  useEffect(() => {
+    onViewCell?.(focusedRailCellId)
+  }, [focusedRailCellId, onViewCell])
   useEffect(() => {
     const handleDocumentFocusIn = (event: FocusEvent) => {
       const target = event.target
@@ -973,7 +998,56 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const [hoveredFootnote, setHoveredFootnote] = useState<{ cellId: string; index: number } | null>(null)
   const isDragging = useRef(false)
   const dragCells = useRef<Set<string>>(new Set())
-  const displayCellIds = useCellIds(cellStore, orderedBy, !!audioLens)
+  const fileCellIds = useCellIds(cellStore, orderedBy, !!audioLens)
+  const cellStoreVersion = useCellStoreVersion(cellStore)
+  const audioFileId = cellStore.getFileId()
+  const splitByMilestone = useMilestoneSplit()
+  const pendingJumpCellIdRef = useRef<string | null>(null)
+  const milestoneNavigation = useMemo(() =>
+    readAtVersion(cellStoreVersion, () => cellStore.getNavigationIndex(fileCellIds)),
+  [cellStore, cellStoreVersion, fileCellIds])
+  const milestoneKeyByCellId = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const entry of milestoneNavigation) {
+      for (const cellId of entry.cellIds) map.set(cellId, entry.key)
+    }
+    return map
+  }, [milestoneNavigation])
+  const idmlMilestoneNavigation = useMemo(() =>
+    fileType === "idml" || readAtVersion(cellStoreVersion, () => milestoneNavigation.some((entry) => {
+      const view = cellStore.getCellView(entry.firstCellId)
+      return Boolean(view && resolveIdmlEditorConfiguration(view.metadata, view.originalHtml))
+    })),
+  [cellStore, cellStoreVersion, fileType, milestoneNavigation])
+  const subsectionKeyByCellId = useMemo(() => {
+    const map = new Map<string, string>()
+    if (!idmlMilestoneNavigation) return map
+    for (const entry of milestoneNavigation) {
+      for (const subsection of entry.subsections) {
+        for (const cellId of subsection.cellIds) map.set(cellId, subsection.key)
+      }
+    }
+    return map
+  }, [idmlMilestoneNavigation, milestoneNavigation])
+  const displayCellIds = useMemo(() => {
+    if (!splitByMilestone) return fileCellIds
+    const selected = chapterNavigationSelection?.fileId === audioFileId
+      ? chapterNavigationSelection
+      : null
+    const key = selected?.label && milestoneNavigation.some((entry) => entry.key === selected.label)
+      ? selected.label
+      : milestoneNavigation[0]?.key
+    if (!key) return fileCellIds
+    // The 50-cell ranges are picker jump targets, not extra pages: a 74-cell
+    // section stays one page when this toggle is on.
+    return cellIdsForMilestonePage(milestoneNavigation, key) ?? fileCellIds
+  }, [
+    audioFileId,
+    chapterNavigationSelection,
+    fileCellIds,
+    milestoneNavigation,
+    splitByMilestone,
+  ])
   const displayCellIdsRef = useRef<readonly string[]>(displayCellIds)
   const selectionDragRef = useRef<{
     pointerId: number
@@ -1087,9 +1161,34 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     }
   }, [setFollowHoverLock, hasListRows])
   const handleFollowRest = useCallback(() => setFollowHoverLock(false), [setFollowHoverLock])
+  const revealCellPage = useCallback((cellId: string): boolean => {
+    if (displayCellIdsRef.current.includes(cellId)) return true
+    if (!splitByMilestone) return false
+    const key = milestoneKeyByCellId.get(cellId)
+    if (!key) return false
+    const subsectionKey = idmlMilestoneNavigation
+      ? subsectionKeyByCellId.get(cellId)
+      : undefined
+    setChapterNavigationSelection({
+      fileId: audioFileId,
+      label: key,
+      ...(subsectionKey ? { subsectionKey } : {}),
+    })
+    pendingJumpCellIdRef.current = cellId
+    return true
+  }, [
+    audioFileId,
+    idmlMilestoneNavigation,
+    milestoneKeyByCellId,
+    splitByMilestone,
+    subsectionKeyByCellId,
+  ])
   const followScrollToCell = useCallback((cellId: string) => {
     const index = displayCellIdsRef.current.indexOf(cellId)
-    if (index < 0) return
+    if (index < 0) {
+      if (revealCellPage(cellId)) setFollowHoverLock(true)
+      return
+    }
     setFollowHoverLock(true)
     // A range picked in the segment navigator must not stay latched while
     // playback walks past it — drop it so the trigger quietly tracks the
@@ -1098,12 +1197,11 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     // 0.35: the running row rides high enough to leave reading room below.
     // Animated (Sam 2026-08-08): the follow glides instead of teleporting.
     programmaticListScroll(index, { viewPosition: 0.35, animated: true })
-  }, [clearChapterNavigationSelection, programmaticListScroll, setFollowHoverLock])
+  }, [clearChapterNavigationSelection, programmaticListScroll, revealCellPage, setFollowHoverLock])
 
   // Durable cell audio (AD-2 cell.audio.* grammar). Per-file read; overlay each
   // visible row's attachments + selected clips at render time, rather than
   // cloning the entire active file into audio-enriched CellData objects.
-  const audioFileId = cellStore.getFileId()
   const { byCellId: audioByCellId } = useFileAudioAttachments(project.id, audioFileId)
 
   // Timeline-segment-model (Scope A): the rendered row list. For a `'time'`-
@@ -1116,7 +1214,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // Combined-voice range lookup resolves through the active store at call time
   // so the editor does not keep a second full CellData[] just for audio.
   const isTimeOrdered = orderedBy === "time"
-  const cellStoreVersion = useCellStoreVersion(cellStore)
 
   useEffect(() => {
     if (!activeEditorCellId) return
@@ -1192,35 +1289,25 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // Cell-level quality estimates are noisy. Present a symmetric local trend
   // instead of a progress ring, while keeping the three evidence stages
   // separate so validated 100s never inflate nearby automatic estimates.
+  //
+  // AQU-1104: inputs are cached per cell on the store's per-cell version, so a
+  // commit re-derives only the cells it touched instead of every view in the
+  // file. The smoothing pass itself still runs over the whole list; it is a
+  // few arithmetic operations per cell.
+  // The cache is keyed to the store instance: per-cell versions are only
+  // comparable within one store, so a new store gets a fresh cache.
+  const ribbonInputCache = useMemo<RibbonInputCache>(() => ribbonInputCacheFor(cellStore), [cellStore])
+  const healthCalculationsEnabled = useHealthCalculationsEnabled()
   const healthRibbonByCellId = useMemo(() =>
-    readAtVersion(cellStoreVersion, () => buildHealthRibbon(
-      displayCellIds.map((id) => {
-        const view = cellStore.getCellView(id)
-        if (!view) return { id, scope: "missing", stage: "untranslated" as const }
-
-        const stage: HealthRibbonStage = view.status === "validated"
-          ? "validated"
-          : view.status === "empty" || !view.translated.trim()
-            ? "untranslated"
-            : "automatic"
-        const pre = stage === "untranslated"
-          ? preTranslationEvidence(effectiveSourceText(view), examples.get(id) ?? EMPTY_EXAMPLES)
-          : null
-
-        return {
-          id,
-          scope: `${view.fileId}:${view.group || view.section || "document"}`,
-          stage,
-          rawScore: stage === "validated"
-            ? 100
-            : stage === "automatic"
-              ? healthMap.get(id)
-              : pre?.score,
-          evidenceWeight: pre?.evidenceWeight ?? 1,
-        }
-      }),
-    )),
-  [cellStore, cellStoreVersion, displayCellIds, examples, healthMap])
+    !healthCalculationsEnabled ? EMPTY_RIBBON :
+    readAtVersion(cellStoreVersion, () => ribbonInputCache.ribbon<CellData>(displayCellIds, {
+      getCellVersion: cellStore.getCellVersion,
+      getCell: (id) => cellStore.getCellView(id),
+      sourceText: effectiveSourceText,
+      health: (id) => healthMap.get(id),
+      examples: (id) => examples.get(id) ?? EMPTY_EXAMPLES,
+    })),
+  [cellStore, cellStoreVersion, displayCellIds, examples, healthCalculationsEnabled, healthMap, ribbonInputCache])
 
   // FRO-251: per-file, per-side font size. Persisted in localStorage keyed by
   // fileId; adjusted from the View settings (eye) menu in the header.
@@ -1392,7 +1479,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
       // STORE order — but the list renders displayCellIds, which time-ordered
       // files re-sort by timing, so those jumps could land on the wrong row.
       const index = displayCellIdsRef.current.indexOf(cellId)
-      if (index < 0) return false
+      if (index < 0) return revealCellPage(cellId)
       clearChapterNavigationSelection()
       // Default "release": a jump the user is INSPECTING (search, presence,
       // findings) must not have playback yank the table back a beat later.
@@ -1439,7 +1526,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     pulseCells(cellIds) {
       pulseCellsDom(cellIds)
     },
-  }), [clearChapterNavigationSelection, displayCellIds.length, cellStore, focusCellEditorByIndex, getListQueryRoot, flashCellDom, pulseCellsDom, programmaticListScroll, issueFollowCommand])
+  }), [clearChapterNavigationSelection, displayCellIds.length, cellStore, focusCellEditorByIndex, getListQueryRoot, flashCellDom, pulseCellsDom, programmaticListScroll, issueFollowCommand, revealCellPage])
 
   // FRO-297: Focus the grid-row wrapper div (not TipTap) at `index`.
   // Used for Esc-to-grid and arrow-key navigation while NOT in edit mode.
@@ -1733,7 +1820,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // fixed width keeps Source header-aligned. No right gutter; the floating
   // action rail is absolutely positioned. Target reserves pe-9 for the
   // expand chevron.
-  const gridCols: EditorGridCols = castGutter ? "grid-cols-[132px_1fr_1fr]" : "grid-cols-[84px_1fr_1fr]"
+  const gridCols: EditorGridCols = castGutter
+    ? "grid-cols-[132px_minmax(0,1fr)_minmax(0,1fr)]"
+    : "grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]"
 
   const handleMouseUp = useCallback(() => {
     if (isDragging.current && dragCells.current.size > 1) {
@@ -1759,24 +1848,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   }, [cellStore])
 
   const firstVisibleCellId = displayCellIds[firstVisibleIndex] ?? null
-  const milestoneNavigation = useMemo(() =>
-    readAtVersion(cellStoreVersion, () => cellStore.getNavigationIndex(displayCellIds)),
-  [cellStore, cellStoreVersion, displayCellIds])
-
-  const milestoneKeyByCellId = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const entry of milestoneNavigation) {
-      for (const cellId of entry.cellIds) map.set(cellId, entry.key)
-    }
-    return map
-  }, [milestoneNavigation])
-
-  const idmlMilestoneNavigation = useMemo(() =>
-    fileType === "idml" || readAtVersion(cellStoreVersion, () => milestoneNavigation.some((entry) => {
-      const view = cellStore.getCellView(entry.firstCellId)
-      return Boolean(view && resolveIdmlEditorConfiguration(view.metadata, view.originalHtml))
-    })),
-  [cellStore, cellStoreVersion, fileType, milestoneNavigation])
 
   const currentMilestoneKey = useMemo(() => {
     const visibleIndex = chapterVisibleIndex ?? firstVisibleIndex
@@ -1836,30 +1907,46 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // cell and stays gap-free even when front matter, introductions, or other
   // paratextual cells sit before/among the content. Scripture files number by
   // canonical verse ref and don't consult this map.
+  // AQU-1146: per-cell "does this cell get a sequential number" is a
+  // structural fact (type + import metadata) that never changes on an
+  // ordinary target edit — cache it per cell, keyed by the store's per-cell
+  // version (same idiom as `ribbonInputCache` in ribbon-inputs.ts), so a
+  // commit that touches a handful of cells re-derives only those cells
+  // instead of re-resolving every cell view in the file. The ordinal count
+  // itself is still one cheap linear pass — only the `getCellView` +
+  // metadata check is skipped for unchanged cells.
+  const sequentialEntryCacheRef = useRef<Map<string, { version: number; isNumbered: boolean }>>(new Map())
   const sequentialNumberByCellId = useMemo(() =>
     readAtVersion(cellStoreVersion, () => {
+      const cache = sequentialEntryCacheRef.current
+      const nextCache = new Map<string, { version: number; isNumbered: boolean }>()
       const map = new Map<string, number>()
       let ordinal = 0
-      for (const id of displayCellIds) {
-        const view = cellStore.getCellView(id)
-        if (!view) continue
-        if (
-          view.type === "paratext"
-          || view.type === "heading"
-          || importDisplayLabel(view.metadata) === null
-        ) continue
-        map.set(id, ++ordinal)
+      for (const id of fileCellIds) {
+        const version = cellStore.getCellVersion(id)
+        let entry = cache.get(id)
+        if (!entry || entry.version !== version) {
+          const view = cellStore.getCellView(id)
+          const isNumbered = view != null
+            && view.type !== "paratext"
+            && view.type !== "heading"
+            && importDisplayLabel(view.metadata) !== null
+          entry = { version, isNumbered }
+        }
+        nextCache.set(id, entry)
+        if (entry.isNumbered) map.set(id, ++ordinal)
       }
+      sequentialEntryCacheRef.current = nextCache
       return map
     }),
-  [cellStore, cellStoreVersion, displayCellIds])
+  [cellStore, cellStoreVersion, fileCellIds])
 
   // p1-paragraph-ui-wiring (Task 3 + coordinator follow-up): paragraph group
   // info, keyed by the group's start cell id — drives the "Draft paragraph"
   // rail button's visibility/label/dialog copy and its in-flight guard. Only
   // start cells (the only ones the button can render on) need an entry, but
   // deriveParagraphs needs the full ordered per-file cell list to find file/
-  // paragraph boundaries, so this walks displayCellIds once, same idiom as
+  // paragraph boundaries, so this walks fileCellIds once, same idiom as
   // sequentialNumberByCellId above. Legacy imports (no paragraphStart flags
   // anywhere) still produce one group per file — harmless, since the rail
   // button is separately gated on `cell.paragraphStart === true`, which never
@@ -1877,37 +1964,45 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // boolean from the `completing` map (any member cell mid-draft ⇒ the
   // button disables/pulses, and a click can't re-fire while a previous
   // click's fan-out is still running).
+  // AQU-1146: same per-cell version cache idiom as sequentialNumberByCellId
+  // above. `fileId`/`paragraphStart` are structural (import-time) facts;
+  // `validated` changes on an ordinary commit but is cheap to carry in the
+  // same cached entry, which also means the draftable-count pass below reads
+  // it from the cache instead of calling `getCellView` a second time per
+  // group member.
+  const paragraphEntryCacheRef = useRef<
+    Map<string, { version: number; fileId: string; paragraphStart?: boolean; validated: boolean }>
+  >(new Map())
   const paragraphGroupInfoByCellId = useMemo(() =>
     readAtVersion(cellStoreVersion, () => {
-      const map = new Map<string, { size: number; draftableCount: number; memberIds: string[] }>()
+      const cache = paragraphEntryCacheRef.current
+      const nextCache = new Map<string, { version: number; fileId: string; paragraphStart?: boolean; validated: boolean }>()
       const orderedCells: { id: string; fileId: string; paragraphStart?: boolean }[] = []
-      for (const id of displayCellIds) {
-        const view = cellStore.getCellView(id)
-        if (!view) continue
-        orderedCells.push({ id: view.id, fileId: view.fileId, paragraphStart: view.paragraphStart })
+      for (const id of fileCellIds) {
+        const version = cellStore.getCellVersion(id)
+        let entry = cache.get(id)
+        if (!entry || entry.version !== version) {
+          const view = cellStore.getCellView(id)
+          if (!view) continue
+          entry = { version, fileId: view.fileId, paragraphStart: view.paragraphStart, validated: view.status === "validated" }
+        }
+        nextCache.set(id, entry)
+        orderedCells.push({ id, fileId: entry.fileId, paragraphStart: entry.paragraphStart })
       }
+      paragraphEntryCacheRef.current = nextCache
+      const map = new Map<string, { size: number; draftableCount: number; memberIds: string[] }>()
       for (const group of deriveParagraphs(orderedCells)) {
         if (group.length <= 1) continue
         let draftableCount = 0
         for (const id of group) {
-          if (cellStore.getCellView(id)?.status !== "validated") draftableCount++
+          if (!nextCache.get(id)?.validated) draftableCount++
         }
         map.set(group[0], { size: group.length, draftableCount, memberIds: group })
       }
       return map
     }),
-  [cellStore, cellStoreVersion, displayCellIds])
+  [cellStore, cellStoreVersion, fileCellIds])
 
-  const subsectionKeyByCellId = useMemo(() => {
-    const map = new Map<string, string>()
-    if (!idmlMilestoneNavigation) return map
-    for (const entry of milestoneNavigation) {
-      for (const subsection of entry.subsections) {
-        for (const cellId of subsection.cellIds) map.set(cellId, subsection.key)
-      }
-    }
-    return map
-  }, [idmlMilestoneNavigation, milestoneNavigation])
   const viewportCellId = displayCellIds[chapterVisibleIndex ?? firstVisibleIndex]
   const currentSubsectionKey = subsectionKeyByCellId.get(viewportCellId ?? "")
   const selectedChapterLabel = chapterNavigationSelection?.fileId === audioFileId
@@ -1954,21 +2049,79 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
 
   const handleChapterSelect = useCallback((key: string, subsectionKey?: string) => {
     const entry = milestoneNavigation.find((candidate) => candidate.key === key)
-    const subsection = entry?.subsections.find((candidate) => candidate.key === subsectionKey)
-    const index = subsection?.firstIndex ?? entry?.firstIndex ?? -1
-    if (index < 0) return
+    const subsection = idmlMilestoneNavigation
+      ? entry?.subsections.find((candidate) => candidate.key === subsectionKey)
+      : undefined
+    const targetCellId = subsection?.firstCellId ?? entry?.firstCellId
+    if (!targetCellId) return
     setChapterNavigationSelection({
       fileId: audioFileId,
       label: key,
       ...(subsection ? { subsectionKey: subsection.key } : {}),
     })
+    if (splitByMilestone) {
+      pendingJumpCellIdRef.current = targetCellId
+      return
+    }
+    const index = subsection?.firstIndex ?? entry?.firstIndex ?? -1
+    if (index < 0) return
     setFirstVisibleIndex(index)
     setChapterVisibleIndex(index)
     // Picking a range mid-playback is deliberate navigation AWAY — release
     // following (its long smooth scroll used to trip the truce as a fake
     // "user scroll" and kill follow as a side effect; now it's explicit).
     programmaticListScroll(index, { viewPosition: 0, animated: true, follow: "release" })
-  }, [audioFileId, milestoneNavigation, programmaticListScroll])
+  }, [audioFileId, idmlMilestoneNavigation, milestoneNavigation, programmaticListScroll, splitByMilestone])
+
+  // Settings can flip the split pref while this table is still mounted
+  // (the settings dialog sits over the editor). Pin the current visible
+  // cell's division before paint so paging does not jump to the first
+  // milestone.
+  useLayoutEffect(() => {
+    if (!splitByMilestone || !audioFileId) return
+    const selected = chapterNavigationSelection?.fileId === audioFileId
+      ? chapterNavigationSelection
+      : null
+    if (selected?.label && milestoneNavigation.some((entry) => entry.key === selected.label)) {
+      return
+    }
+    const visibleId = fileCellIds[chapterVisibleIndex ?? firstVisibleIndex]
+    const key = (visibleId && milestoneKeyByCellId.get(visibleId)) ?? milestoneNavigation[0]?.key
+    if (!key) return
+    const subsectionKey = idmlMilestoneNavigation && visibleId
+      ? subsectionKeyByCellId.get(visibleId)
+      : undefined
+    if (visibleId) pendingJumpCellIdRef.current = visibleId
+    setChapterNavigationSelection({
+      fileId: audioFileId,
+      label: key,
+      ...(subsectionKey ? { subsectionKey } : {}),
+    })
+  }, [
+    audioFileId,
+    chapterNavigationSelection,
+    chapterVisibleIndex,
+    fileCellIds,
+    firstVisibleIndex,
+    idmlMilestoneNavigation,
+    milestoneKeyByCellId,
+    milestoneNavigation,
+    splitByMilestone,
+  ])
+
+  useLayoutEffect(() => {
+    const cellId = pendingJumpCellIdRef.current
+    if (!cellId) return
+    const index = displayCellIds.indexOf(cellId)
+    if (index < 0) {
+      pendingJumpCellIdRef.current = null
+      return
+    }
+    pendingJumpCellIdRef.current = null
+    setFirstVisibleIndex(index)
+    setChapterVisibleIndex(index)
+    programmaticListScroll(index, { viewPosition: 0, animated: false, follow: "release" })
+  }, [displayCellIds, programmaticListScroll])
 
   // Parallel-bibles sidebar tracking: report the first visible row's canonical
   // ref as the user scrolls. Keyed on the derived ref string
@@ -2122,6 +2275,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           const paragraphGroupInfo = cell.paragraphStart === true
             ? paragraphGroupInfoByCellId.get(cell.id)
             : undefined
+          // AQU-1146: resolved here (once per rendered row) instead of inside
+          // MemoizedRow so the row's props stay per-cell scalars — see
+          // `MemoizedRowProps.paragraphGroupInFlight`.
+          const paragraphGroupInFlight = paragraphGroupInfo?.memberIds?.some((id) => {
+            const state = completing.get(id)
+            return state === "searching" || state === "generating"
+          }) ?? false
           // AQU-646: the row's STRUCTURAL controls — add a line into the
           // silence after it, take an empty added line back. One map lookup and
           // one predicate call per row; no scans.
@@ -2217,18 +2377,18 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onAckRemoteChange={onAckRemoteChange}
           isCompletionConfigured={isCompletionConfigured}
           isCompletionAvailable={isCompletionAvailable}
-          examples={examples}
-          completing={completing}
-          errors={errors}
-          previews={previews}
-          healthRibbonPoint={healthRibbonByCellId.get(cell.id)!}
+          cellExamples={examples.get(cell.id) ?? EMPTY_EXAMPLES}
+          completingState={completing.get(cell.id)}
+          cellError={errors.get(cell.id)}
+          previewText={previews.get(cell.id)}
+          healthRibbonPoint={healthRibbonByCellId.get(cell.id) ?? HEALTH_DISABLED_POINT}
           infractions={infractions}
           ruleMap={ruleMap}
           onCompleteSingle={onCompleteSingle}
           onCompleteParagraph={onCompleteParagraph}
           paragraphGroupSize={paragraphGroupInfo?.size}
           paragraphDraftableCount={paragraphGroupInfo?.draftableCount}
-          paragraphGroupMemberIds={paragraphGroupInfo?.memberIds}
+          paragraphGroupInFlight={paragraphGroupInFlight}
           isBacktranslationConfigured={isBacktranslationConfigured}
           backtranslating={backtranslating}
           backtranslationErrors={backtranslationErrors}
@@ -2262,6 +2422,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onProjectChanged={onProjectChanged}
           onAddConceptFromSelection={onAddConceptFromSelection}
           addConceptBlockedReason={addConceptBlockedReason}
+        canApproveConcept={canApproveConcept}
           onAskAiFromSelection={onAskAiFromSelection}
           onAssignVoice={onAssignVoice}
           onDragStart={handleDragStart}
@@ -2276,10 +2437,10 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           onAlignmentSeedChange={onAlignmentSeedChange}
           sourceFontSize={sourceFontSize}
           targetFontSize={targetFontSize}
-          checkLockHolder={checkLockHolder}
           showFootnotesInline={showFootnotesInline}
           footnotePanelActive={footnotePanelActive}
           footnoteViewMode={footnoteViewMode}
+          targetKeyTermHighlightMode={targetKeyTermHighlightMode}
           onFootnoteHoverChange={setHoveredFootnote}
           onFootnoteCreated={onFootnoteCreated}
           sourceFootnoteNumberOffset={footnoteOffsets.source}
@@ -2315,13 +2476,13 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     cellLockHolders,
     cellOpenCommentCount,
     cellsWithRemoteChange,
-    checkLockHolder,
     completing,
     displayCellIds,
     errors,
     examples,
     footnotePanelActive,
     footnoteViewMode,
+    targetKeyTermHighlightMode,
     getTokenForFile,
     getAlignmentModel,
     getStatisticalBt,
@@ -2416,6 +2577,7 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
                 activeKey={activeChapterLabel!}
                 activeSubsectionKey={activeSubsectionKey}
                 onSelect={handleChapterSelect}
+                pageByMilestone={splitByMilestone}
               />
             </div>
           </div>
@@ -2440,12 +2602,15 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
     <div className="flex h-full min-h-0 flex-col" onMouseUp={handleMouseUp}>
       {showStripNav && stripNavSlot
         ? createPortal(
-            <MilestoneNavigator
-              items={milestoneNavigationItems}
-              activeKey={activeChapterLabel}
-              activeSubsectionKey={activeSubsectionKey}
-              onSelect={handleChapterSelect}
-            />,
+            <div className="flex min-w-0 items-center gap-2">
+              <MilestoneNavigator
+                items={milestoneNavigationItems}
+                activeKey={activeChapterLabel}
+                activeSubsectionKey={activeSubsectionKey}
+                onSelect={handleChapterSelect}
+                pageByMilestone={splitByMilestone}
+              />
+            </div>,
             stripNavSlot,
           )
         : null}
@@ -2878,10 +3043,15 @@ interface MemoizedRowProps {
   onAckRemoteChange?: (cellId: string) => void
   isCompletionConfigured: boolean
   isCompletionAvailable: boolean
-  examples: Map<string, ScoredPair[]>
-  completing: Map<string, string>
-  errors: Map<string, string>
-  previews: Map<string, string>
+  /** AQU-1146: per-cell slice of the table's `examples` map, resolved by the
+   *  parent so this row's props are scalars — the map's identity changes on
+   *  every batch commit, and a `Map` prop would defeat `React.memo` on every
+   *  row even when only one cell's entry changed. Same reasoning for
+   *  `completingState`, `cellError`, and `previewText` below. */
+  cellExamples: ScoredPair[]
+  completingState?: string
+  cellError?: string
+  previewText?: string
   healthRibbonPoint: HealthRibbonPoint
   infractions: Map<string, RuleInfraction[]>
   ruleMap: Map<string, TranslationRule>
@@ -2899,12 +3069,11 @@ interface MemoizedRowProps {
    *  "N of M" copy and the button's hide-when-nothing-to-draft gate. Set
    *  alongside `paragraphGroupSize`. */
   paragraphDraftableCount?: number
-  /** p1-paragraph-ui-wiring (coordinator follow-up): every cell id in this
-   *  cell's paragraph group (including itself) — MemoizedRow-only, used to
-   *  derive `paragraphGroupInFlight` from the `completing` map. Never
-   *  forwarded to EditorRow (which gets the derived boolean instead, keeping
-   *  its prop surface a stable scalar). */
-  paragraphGroupMemberIds?: string[]
+  /** p1-paragraph-ui-wiring (coordinator follow-up): true while ANY cell in
+   *  this row's paragraph group is actively completing. AQU-1146: resolved
+   *  by the parent (from the `completing` map and the group's member ids) so
+   *  this row's prop is a stable scalar instead of the whole map. */
+  paragraphGroupInFlight: boolean
   isBacktranslationConfigured?: boolean
   backtranslating?: Set<string>
   backtranslationErrors?: Map<string, string>
@@ -2932,9 +3101,11 @@ interface MemoizedRowProps {
   audioLens: AudioLensContext | null
   onOpenAudioSetup?: () => void
   onProjectChanged?: () => void
-  /** Add-from-selection: create a DRAFT concept from a selected source token. */
-  onAddConceptFromSelection?: (sourceTerm: string) => void | Promise<void>
+  /** Add-from-selection: create a terminology entry from selected source text. */
+  onAddConceptFromSelection?: (draft: ConceptDraft) => void | Promise<void>
   addConceptBlockedReason?: string | null
+  /** May this user APPROVE a term (enforce it), vs only suggest one? */
+  canApproveConcept?: boolean
   onAskAiFromSelection?: (chip: ContextChip) => void
   onAssignVoice?: (cellId: string, voiceId: string) => void
   onDragStart: (cellId: string) => void
@@ -2959,14 +3130,14 @@ interface MemoizedRowProps {
   sourceFontSize?: number
   /** FRO-251: per-file target-column font size in px. Defaults to 14 when absent. */
   targetFontSize?: number
-  /** RACE-5: ref-backed live lock check — see EditorTableProps.checkLockHolder. */
-  checkLockHolder?: (cellId: string) => string | null
   /** FRO-317: when true, USFM \f...\f* footnotes render below each cell. */
   showFootnotesInline?: boolean
   /** True when inline/tray footnote detail is already visible elsewhere. */
   footnotePanelActive?: boolean
   /** Current footnote display preference. */
   footnoteViewMode?: FootnoteViewMode
+  /** When approved target renderings receive the subtle key-term highlight. */
+  targetKeyTermHighlightMode?: TargetKeyTermHighlightMode
   /** Reports the target footnote currently hovered in this row. */
   onFootnoteHoverChange?: (hovered: { cellId: string; index: number } | null) => void
   /** Called after a target footnote is created. */
@@ -2979,7 +3150,7 @@ interface MemoizedRowProps {
 
 const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
   const {
-    cell, linkedTakes, examples, completing, errors, previews, healthRibbonPoint, infractions,
+    cell, linkedTakes, cellExamples, completingState, cellError, previewText, healthRibbonPoint, infractions,
     backtranslating, backtranslationErrors, cellOpenCommentCount,
     rowIndex, contentNumber, gridCols, castGutter, ttsSettings,
     onDragStart: onDragStartParent, onDragEnter: onDragEnterParent,
@@ -3003,21 +3174,21 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     onDeactivateEditor,
     project, username, activeLane, editable, canValidate, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable,
     ruleMap, onCompleteSingle, onCompleteParagraph, paragraphGroupSize,
-    paragraphDraftableCount, paragraphGroupMemberIds,
+    paragraphDraftableCount, paragraphGroupInFlight,
     isBacktranslationConfigured, onBacktranslate, onSaveBacktranslation, getStatisticalBt,
     getFootnoteDetails,
     onSeekToCue, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled,
     sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, isAnonymous,
-    onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, onAskAiFromSelection, onAssignVoice,
+    onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onAskAiFromSelection, onAssignVoice,
     audioLens, onOpenAudioSetup,
     onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
     onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
     isStaleSource,
     isUpstreamStaleSource,
-    checkLockHolder,
     showFootnotesInline,
     footnotePanelActive,
     footnoteViewMode = "off",
+    targetKeyTermHighlightMode = "never",
     onFootnoteHoverChange,
     onFootnoteCreated,
     sourceFootnoteNumberOffset,
@@ -3029,7 +3200,6 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     const key = cellId.slice(0, 8)
     rowRenders.set(key, (rowRenders.get(key) ?? 0) + 1)
   }
-  const cellExamples = useMemo(() => examples.get(cellId) ?? EMPTY_EXAMPLES, [examples, cellId])
   const highlights = useMemo(() => buildHighlightsFromExamples(cellExamples), [cellExamples])
   const cellInfractions = useMemo(() => infractions.get(cellId) ?? EMPTY_INFRACTIONS, [infractions, cellId])
 
@@ -3038,37 +3208,26 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     [cellInfractions, cell.waivers],
   )
 
-  const completingState = completing.get(cellId)
   const isLoading = completingState === "searching" || completingState === "generating"
-  // p1-paragraph-ui-wiring (coordinator follow-up): true while ANY cell in
-  // this row's paragraph group is ACTIVELY completing — not just this row's
-  // own (a validated start cell never gets one post-skip, so relying on
-  // `isLoading` alone would let a second click re-fire completeParagraph
-  // mid-fan-out). Only paragraph-start rows with a >1-cell group carry
-  // `paragraphGroupMemberIds`; every other row's guard is trivially false.
-  // Matches `isLoading`'s value check above (searching/generating only) —
-  // presence alone is wrong: a stuck "error" entry (none of useCompletion's
-  // three catch paths clear it) would otherwise permanently disable/pulse
-  // the button for that group.
-  const paragraphGroupInFlight = useMemo(
-    () => paragraphGroupMemberIds?.some((id) => {
-      const state = completing.get(id)
-      return state === "searching" || state === "generating"
-    }) ?? false,
-    [paragraphGroupMemberIds, completing],
-  )
+  // p1-paragraph-ui-wiring (coordinator follow-up): `paragraphGroupInFlight`
+  // is true while ANY cell in this row's paragraph group is ACTIVELY
+  // completing — not just this row's own (a validated start cell never gets
+  // one post-skip, so relying on `isLoading` alone would let a second click
+  // re-fire completeParagraph mid-fan-out). AQU-1146: resolved by the parent
+  // from the full `completing` map + the group's member ids, and handed to
+  // this row as a stable boolean prop (see `MemoizedRowProps`).
   // Streaming preview text — populated chunk-by-chunk by useCompletion's
   // onChunk handler. We surface it in the target column so the user sees
   // tokens arrive in real time instead of waiting for the LLM to finish
   // AND the commit-to-outbox chain to land (which adds a network hop).
-  const completionPreview = previews.get(cellId)
+  const completionPreview = previewText
   const loadingPhase: "searching" | "generating" | null =
     completingState === "searching"
       ? "searching"
       : completingState === "generating"
         ? "generating"
         : null
-  const error = errors.get(cellId)
+  const error = cellError
   const isBacktranslating = backtranslating?.has(cellId)
   const backtranslationError = backtranslationErrors?.get(cellId)
   const openCommentCount = cellOpenCommentCount?.get(cellId) ?? 0
@@ -3169,6 +3328,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onProjectChanged={onProjectChanged}
         onAddConceptFromSelection={onAddConceptFromSelection}
         addConceptBlockedReason={addConceptBlockedReason}
+        canApproveConcept={canApproveConcept}
         onAskAiFromSelection={onAskAiFromSelection}
         onAssignVoice={onAssignVoice}
         onDragStart={handleDragStart}
@@ -3193,10 +3353,10 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         onAckRemoteChange={onAckRemoteChange}
         sourceFontSize={sourceFontSize}
         targetFontSize={targetFontSize}
-        checkLockHolder={checkLockHolder}
         showFootnotesInline={showFootnotesInline}
         footnotePanelActive={footnotePanelActive}
         footnoteViewMode={footnoteViewMode}
+        targetKeyTermHighlightMode={targetKeyTermHighlightMode}
         onFootnoteHoverChange={onFootnoteHoverChange}
         onFootnoteCreated={onFootnoteCreated}
         sourceFootnoteNumberOffset={sourceFootnoteNumberOffset}
@@ -3330,9 +3490,11 @@ interface EditorRowProps {
   audioLens: AudioLensContext | null
   onOpenAudioSetup?: () => void
   onProjectChanged?: () => void
-  /** Add-from-selection: create a DRAFT concept from a selected source token. */
-  onAddConceptFromSelection?: (sourceTerm: string) => void | Promise<void>
+  /** Add-from-selection: create a terminology entry from selected source text. */
+  onAddConceptFromSelection?: (draft: ConceptDraft) => void | Promise<void>
   addConceptBlockedReason?: string | null
+  /** May this user APPROVE a term (enforce it), vs only suggest one? */
+  canApproveConcept?: boolean
   onAskAiFromSelection?: (chip: ContextChip) => void
   onAssignVoice?: (cellId: string, voiceId: string) => void
   getTokenForFile?: (fileId: string) => Promise<string | null>
@@ -3340,14 +3502,14 @@ interface EditorRowProps {
   sourceFontSize?: number
   /** FRO-251: per-file target-column font size in px. Defaults to 14 when absent. */
   targetFontSize?: number
-  /** RACE-5: ref-backed live lock check — see EditorTableProps.checkLockHolder. */
-  checkLockHolder?: (cellId: string) => string | null
   /** FRO-317: when true, USFM \f...\f* footnotes render below the cell row. */
   showFootnotesInline?: boolean
   /** True when inline/tray footnote detail is already visible elsewhere. */
   footnotePanelActive?: boolean
   /** Current footnote display preference. */
   footnoteViewMode?: FootnoteViewMode
+  /** When approved target renderings receive the subtle key-term highlight. */
+  targetKeyTermHighlightMode?: TargetKeyTermHighlightMode
   /** Reports the target footnote currently hovered in this row. */
   onFootnoteHoverChange?: (hovered: { cellId: string; index: number } | null) => void
   /** Called after a target footnote is created. */
@@ -3375,7 +3537,7 @@ interface SourceWithTermLookupProps {
   showEvidence: boolean
   onRangeClick?: (ruleId: string, anchor: HTMLElement) => void
   concepts: Concept[]
-  onTermApply: (rendering: string) => void
+  onViewConcept?: (conceptId: string) => void
   /** Render as an inline span (used per-segment by UsfmSourceText). */
   inline?: boolean
   /** When true, note chips stay markers because detail is shown in a panel. */
@@ -3390,7 +3552,7 @@ function SourceWithTermLookup({
   showEvidence,
   onRangeClick,
   concepts,
-  onTermApply,
+  onViewConcept,
   inline = false,
 }: SourceWithTermLookupProps) {
   // All hooks must run unconditionally before any early return.
@@ -3455,15 +3617,30 @@ function SourceWithTermLookup({
           key={`term-${i}`}
           sourceTerm={word}
           concepts={activeConcepts}
-          onApply={onTermApply}
+          onViewConcept={onViewConcept}
         >
-          <span className="underline decoration-dotted decoration-primary/60 underline-offset-2 hover:decoration-primary">
-            {word}
+          <span className="terminology-highlight">
+            <HighlightedText
+              text={word}
+              highlights={EMPTY_HIGHLIGHTS}
+              ranges={clipRangesToTextSlice(ranges, start, end)}
+              showEvidence={false}
+              onRangeClick={onRangeClick}
+            />
           </span>
         </TermLookupPopover>,
       )
     } else {
-      parts.push(<React.Fragment key={`w-${i}`}>{word}</React.Fragment>)
+      parts.push(
+        <HighlightedText
+          key={`w-${i}`}
+          text={word}
+          highlights={EMPTY_HIGHLIGHTS}
+          ranges={clipRangesToTextSlice(ranges, start, end)}
+          showEvidence={false}
+          onRangeClick={onRangeClick}
+        />,
+      )
     }
     cursor = end
   }
@@ -3831,6 +4008,7 @@ function TargetReadText({
   onTermChipClick,
   footnotePanelActive,
   footnoteNumberOffset = 0,
+  showKeyTermHighlights = false,
 }: {
   text: string
   ranges: RangeHighlight[]
@@ -3839,6 +4017,7 @@ function TargetReadText({
   onTermChipClick?: (term: string, anchor: HTMLElement) => void
   footnotePanelActive?: boolean
   footnoteNumberOffset?: number
+  showKeyTermHighlights?: boolean
 }) {
   const segments = useMemo(() => segmentUsfmForDisplay(text), [text])
 
@@ -3850,6 +4029,7 @@ function TargetReadText({
         ranges={ranges}
         onRangeClick={onRangeClick}
         onTermChipClick={onTermChipClick}
+        showKeyTermHighlights={showKeyTermHighlights}
       />
     )
   }
@@ -3888,6 +4068,7 @@ function TargetReadText({
         ranges={clipRangesToSegment(ranges, seg)}
         onRangeClick={onRangeClick}
         onTermChipClick={onTermChipClick}
+        showKeyTermHighlights={showKeyTermHighlights}
       />,
     )
   })
@@ -3895,18 +4076,20 @@ function TargetReadText({
   return <div>{parts}</div>
 }
 
-function TargetDecoratedText({
+export function TargetDecoratedText({
   text,
   concepts,
   ranges,
   onRangeClick,
   onTermChipClick,
+  showKeyTermHighlights = false,
 }: {
   text: string
   concepts: Concept[]
   ranges: RangeHighlight[]
   onRangeClick?: (ruleId: string, anchor: HTMLElement) => void
   onTermChipClick?: (term: string, anchor: HTMLElement) => void
+  showKeyTermHighlights?: boolean
 }) {
   const t = useT()
   const matches = useMemo(() => {
@@ -3915,8 +4098,13 @@ function TargetDecoratedText({
 
     const out: Array<{ start: number; end: number; term: string }> = []
     for (const concept of activeConcepts) {
-      for (const match of findTermMatches(text, concept.sourceTerm)) {
-        out.push({ ...match, term: concept.sourceTerm })
+      const approvedRenderings = concept.renderings.filter(
+        (rendering) => rendering.status === "preferred" || rendering.status === "admitted",
+      )
+      for (const rendering of approvedRenderings) {
+        for (const match of findTermMatches(text, rendering.rendering)) {
+          out.push({ ...match, term: concept.sourceTerm })
+        }
       }
     }
     out.sort((a, b) => a.start - b.start || b.end - a.end)
@@ -3962,21 +4150,16 @@ function TargetDecoratedText({
 
     const matchedText = text.slice(match.start, match.end)
     parts.push(
-      <span key={`t-${index}-term`} className="term-chip-host" data-source-term={match.term}>
-        <HighlightedText
-          text={matchedText}
-          highlights={EMPTY_HIGHLIGHTS}
-          ranges={clipRangesToTextSlice(ranges, match.start, match.end)}
-          showEvidence={false}
-          onRangeClick={onRangeClick}
-        />
-        <AppTooltip content={t("editor.term.managed", { term: match.term })}>
+      <AppTooltip key={`t-${index}-term`} content={t("editor.term.managed", { term: match.term })}>
         <span
           role={onTermChipClick ? "button" : undefined}
           tabIndex={onTermChipClick ? 0 : undefined}
           aria-label={t("editor.term.managed", { term: match.term })}
+          className={cn(
+            "term-chip-host",
+            showKeyTermHighlights && "terminology-highlight",
+          )}
           data-source-term={match.term}
-          className="term-chip term-chip-preferred"
           onClick={onTermChipClick ? (event) => {
             event.stopPropagation()
             onTermChipClick(match.term, event.currentTarget)
@@ -3987,9 +4170,16 @@ function TargetDecoratedText({
             event.stopPropagation()
             onTermChipClick(match.term, event.currentTarget)
           } : undefined}
-        />
-        </AppTooltip>
-      </span>,
+        >
+          <HighlightedText
+            text={matchedText}
+            highlights={EMPTY_HIGHLIGHTS}
+            ranges={clipRangesToTextSlice(ranges, match.start, match.end)}
+            showEvidence={false}
+            onRangeClick={onRangeClick}
+          />
+        </span>
+      </AppTooltip>,
     )
     cursor = match.end
   })
@@ -4087,7 +4277,7 @@ function EditorRow({
   onEscapeToGrid, onGridRowKeyNav,
   rowIndex, contentNumber, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols, castGutter, ttsSettings,
   isAnonymous, micDenied,
-  audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection, addConceptBlockedReason, onAskAiFromSelection,
+  audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onAskAiFromSelection,
   onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
   onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
   isStaleSource,
@@ -4096,21 +4286,23 @@ function EditorRow({
   onAlignmentSeedChange,
   sourceFontSize = 14,
   targetFontSize = 14,
-  checkLockHolder,
   showFootnotesInline,
   footnotePanelActive,
   footnoteViewMode = "off",
+  targetKeyTermHighlightMode = "never",
   onFootnoteHoverChange,
   onFootnoteCreated,
   sourceFootnoteNumberOffset,
   targetFootnoteNumberOffset,
 }: EditorRowProps) {
   const t = useT()
+  const healthCalculationsEnabled = useHealthCalculationsEnabled()
   // FRO perf cleanup: pure pass-through openers (never consumed by
   // EditorTable/MemoizedRow) come from context instead of the prop chain —
   // keeps them out of MemoizedRow's React.memo compare surface.
   const {
-    onInfractionClick, onOpenComments, onOpenHistory, onAiSetupNeeded, onOpenRecording,
+    onInfractionClick, onOpenComments, onOpenHistory, onOpenTerminologyConcept,
+    onAiSetupNeeded, onOpenRecording,
     onMediaRowActivate, onAssignCastVoice, onClearCastVoice, onTakeSaved, audioHomeFor, myScopes,
   } = useEditorActions()
   // AQU-633: a scoped member can only validate cells in their assigned lane/file.
@@ -4143,25 +4335,58 @@ function EditorRow({
     }
     return latest?.selection?.draftText
   }, [remoteCellPresence])
+  // AQU-1154 (invariant I4: an overlay never replaces newer text with older).
+  // A peer's live draft is newer than this row's projection while they are in
+  // the cell, and it STAYS newer after they leave until their commit lands
+  // here — on a slow link that is seconds later. Snapping back to the row on
+  // blur showed the pre-edit text. So: an empty live draft never renders (the
+  // row wins), and the last non-empty draft is held after the peer leaves
+  // until this row's own text changes or a bounded timeout elapses.
+  const liveRemoteDraft = remoteDraftText || undefined
+  const [heldRemoteDraft, setHeldRemoteDraft] = useState<{
+    text: string
+    targetEventIdAtStart: string | null
+    translatedAtStart: string | null
+  } | null>(null)
+  useEffect(() => {
+    const targetEventId = cell.targetEventId ?? null
+    const translated = cell.translated ?? null
+    setHeldRemoteDraft((cur) => {
+      const rowChanged = cur !== null
+        && (cur.targetEventIdAtStart !== targetEventId || cur.translatedAtStart !== translated)
+      const base = rowChanged ? null : cur
+      if (liveRemoteDraft === undefined) return base
+      if (base && base.text === liveRemoteDraft) return base
+      return {
+        text: liveRemoteDraft,
+        targetEventIdAtStart: base?.targetEventIdAtStart ?? targetEventId,
+        translatedAtStart: base?.translatedAtStart ?? translated,
+      }
+    })
+  }, [liveRemoteDraft, cell.targetEventId, cell.translated])
+  const holdingRemoteDraft = liveRemoteDraft === undefined && heldRemoteDraft !== null
+  useEffect(() => {
+    if (!holdingRemoteDraft) return
+    const timer = setTimeout(() => setHeldRemoteDraft(null), REMOTE_DRAFT_HOLD_MS)
+    return () => clearTimeout(timer)
+  }, [holdingRemoteDraft])
+  const overlayDraftText = liveRemoteDraft ?? heldRemoteDraft?.text
   const [openRuleId, setOpenRuleId] = useState<string | null>(null)
-  const [openRuleAnchor, setOpenRuleAnchor] = useState<ViolationAnchor | null>(null)
   // AQU-664: hover ("wave over") a violation blot → preview its rule
   // explanation. Separate from the click path (openRuleId) so a light,
   // non-interactive popover appears on hover and dismisses on mouse-out.
-  const [hoveredRule, setHoveredRule] = useState<{ ruleId: string; anchor: ViolationAnchor } | null>(null)
+  const [hoveredRule, setHoveredRule] = useState<{
+    ruleId: string
+    anchor: { getBoundingClientRect: () => DOMRect }
+  } | null>(null)
   // AQU-664: live editor text, published on a short debounce by TranslatedEditor
   // so terminology blots recompute off the live buffer (not the ~1.2s commit).
   const [liveTargetText, setLiveTargetText] = useState<string | null>(null)
   const examplesExpanded = false
   // FRO-204: chip click state for TermLookupPopover on target editor chips.
   const [termChipState, setTermChipState] = useState<{ term: string; anchor: HTMLElement } | null>(null)
-  // Track whether the target editor has a non-empty text selection when a chip is clicked.
-  const targetHasSelectionRef = useRef(false)
-  // The exact selected target text captured at chip-click time, so Apply can
-  // REPLACE that selection (spec 2c) rather than append. Cleared when no selection.
-  const targetSelectionTextRef = useRef("")
   // Add-from-selection (Slice 5): the source-side text the user has selected,
-  // surfaced as an "Add to termbase" affordance. Null when nothing selected.
+  // surfaced as an "Add to terminology" affordance. Null when nothing selected.
   const [sourceSelection, setSourceSelection] = useState<string | null>(null)
   // FRO-260: ref mirror of sourceSelection so onClick handlers can read the
   // captured text even if a selectionchange event already cleared the React
@@ -4173,8 +4398,10 @@ function EditorRow({
   // sourceSelection before onClick fires.
   const toolbarMouseDownRef = useRef(false)
   // Controls the confirm dialog shown before creating the draft concept.
-  const [showAddConceptDialog, setShowAddConceptDialog] = useState(false)
+  const [addTermOpen, setAddTermOpen] = useState(false)
   const pendingTargetEventIdRef = useRef<string | null>(cell.targetEventId ?? null)
+  /** Id of the last target.cell.commit this row enqueued (null until one is). */
+  const lastCommittedEventIdRef = useRef<string | null>(null)
   // Source-edit affordance (project_lead+ on non-live projects). Editing the
   // SOURCE lane emits source.cell.commit — the template-owner correction that
   // propagates to downstream linked projects. `sourceDraft` is a LOCAL optimistic
@@ -4266,6 +4493,12 @@ function EditorRow({
     () => resolveIdmlEditorConfiguration(cell.metadata, cell.originalHtml),
     [cell.metadata, cell.originalHtml],
   )
+  const idmlStyleCatalog = idmlConfiguration?.kind === "ready"
+    ? idmlConfiguration.context.styleCatalog
+    : undefined
+  const idmlParagraphStyleId = idmlConfiguration?.kind === "ready"
+    ? idmlConfiguration.context.paragraphStyleId
+    : undefined
   const canEditSourceForCell = canEditSource && !idmlConfiguration
   // AQU-847: an imported MEDIA section's `value` (→ `cell.original`) is the
   // import FILENAME; its real source text is the transcript. The read surface
@@ -4334,6 +4567,9 @@ function EditorRow({
   const hasInlineFootnotes = sourceFootnotes.length > 0 || targetFootnotes.length > 0
   const isDocxFile = (cell.fileId ?? "").endsWith(".docx")
   const terminologyConcepts = project.terminology ?? EMPTY_CONCEPTS
+  const showTargetKeyTermHighlights =
+    targetKeyTermHighlightMode === "always" ||
+    (targetKeyTermHighlightMode === "focused" && isRowFocused)
 
   useEffect(() => {
     if (!localTargetDraft) return
@@ -4358,6 +4594,21 @@ function EditorRow({
   useEffect(() => {
     if (cell.targetEventId) pendingTargetEventIdRef.current = cell.targetEventId
   }, [cell.targetEventId])
+
+  // AQU-1154 (I2/I4): the local hold above only clears on exact value match.
+  // If the projected head moves to an event this row did NOT commit, our
+  // commit either lost the head compare-and-swap or was superseded — either
+  // way the server row is the newer truth, so drop the hold instead of
+  // painting the losing text forever. Declared after the pendingTargetEventId
+  // sync so the id we committed is read from its own ref, not that one.
+  useEffect(() => {
+    if (!localTargetDraft) return
+    const head = cell.targetEventId
+    const committed = lastCommittedEventIdRef.current
+    if (head && committed && head !== committed) {
+      setLocalTargetDraft(null)
+    }
+  }, [cell.targetEventId, localTargetDraft])
 
   const ruleSeverity = useMemo(() => {
     const m = new Map<string, "major" | "minor">()
@@ -4496,19 +4747,14 @@ function EditorRow({
       console.warn("[editor-commit] aborting: role too low for target.cell.commit")
       return false
     }
-    // RACE-5 — Lock re-check at commit time. Uses the ref-backed `checkLockHolder`
-    // (updated synchronously on every WS frame) as the authoritative source so
-    // a commit queued in the debounce window just after another user's
-    // `lock.claimed` arrives can't slip through a stale React render.
-    // `lockHolderLabel` (from the last render) is the fallback when offline
-    // or when `checkLockHolder` is not wired. Advisory: never blocks when the
-    // socket is down (offline edits still flow through; FWW handles conflicts).
-    const liveHolder = checkLockHolder?.(cell.id) ?? lockHolderLabel
-    if (liveHolder) {
-      console.warn("[editor-commit] aborting: lock held by", liveHolder)
-      void onCellCommitted?.(cell.id)
-      return false
-    }
+    // AQU-1154: the focus lock is advisory — it drives the read-only affordance
+    // and the "X is editing" label, never the write path. This used to abort
+    // the commit when presence said someone else held the cell, which silently
+    // threw away the user's text: a socket flap drops our lease server-side,
+    // the reconnect did not re-claim, a peer claimed, and our next idle/blur
+    // commit vanished with only a console.warn while our editor still showed
+    // it. The server head-check is the real arbiter; the commit always
+    // proceeds to the outbox and any loss surfaces through stale handling.
     const idmlCommitError = validateIdmlEditorCommit(idmlConfiguration, valueHtml)
     if (idmlCommitError) {
       setWriteError(idmlCommitError)
@@ -4524,11 +4770,15 @@ function EditorRow({
     setWriteError(null)
     // RACE-3/QW-2: use the last event id we enqueued for this cell as parentId
     // rather than the lagging projection value. The workspace-level getter
-    // survives Legend List row remounts; the row-local ref covers repeated
-    // commits while this exact row instance remains mounted.
+    // survives Legend List row remounts and is the one the workspace CLEARS
+    // when the server reports that pending commit stale (AQU-1154), so when
+    // it is wired the row-local ref must not be consulted — it would re-chain
+    // on the losing id. The row-local ref only covers hosts without a
+    // workspace getter.
     const parentId =
-      getPendingTargetEventId?.(cell.id) ??
-      pendingTargetEventIdRef.current ??
+      (getPendingTargetEventId
+        ? getPendingTargetEventId(cell.id)
+        : pendingTargetEventIdRef.current) ??
       cell.targetEventId ??
       cell.sourceEventId ??
       null
@@ -4549,6 +4799,7 @@ function EditorRow({
         targetLang: activeLane,
       })
       pendingTargetEventIdRef.current = eventId
+      lastCommittedEventIdRef.current = eventId
       // Restore codex behaviour: a direct human edit auto-validates the cell
       // ("a human has touched it"). The target.cell.commit above cleared any
       // prior validators (audit-stats-overlay resets activeValidators on every
@@ -4600,7 +4851,7 @@ function EditorRow({
       })
       return false
     }
-  }, [editable, canValidate, project.id, project.syncRole?.level, project.allowSelfValidation, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, checkLockHolder, idmlConfiguration, t])
+  }, [editable, canValidate, project.id, project.syncRole?.level, project.allowSelfValidation, cell.fileId, cell.id, cell.targetEventId, cell.translated, cell.translatedHtml, cell.sourceEventId, username, activeLane, onCellCommitted, getPendingTargetEventId, onOptimisticEdit, idmlConfiguration, t])
 
   // AQU-618: run a single-cell AI generate/Replace, then return the translator
   // to the edited cell and confirm the save. Both entry points — the Replace
@@ -4729,26 +4980,6 @@ function EditorRow({
     return () => window.cancelAnimationFrame(frame)
   }, [sourceEditing])
 
-  // Terminology apply (spec 2c): REPLACE the active target selection with the
-  // chosen rendering. The Apply affordance is only surfaced when there was a
-  // non-empty selection at chip-click time (see handleTermChipClick), and the
-  // selected text is captured in targetSelectionTextRef. We replace the first
-  // occurrence of that selected text in the current target plain text. When
-  // there is no selection (defensive fallback), we append so the translator
-  // can still chain multiple terms. Uses the same commit path as keyboard edits.
-  const handleTermApply = useCallback((rendering: string) => {
-    const existing = visibleTranslated ?? ""
-    const selected = targetSelectionTextRef.current
-    let next: string
-    if (selected && existing.includes(selected)) {
-      next = existing.replace(selected, rendering)
-    } else {
-      const trimmed = existing.trim()
-      next = trimmed ? `${trimmed} ${rendering}` : rendering
-    }
-    handleEditorCommit({ value: next, valueHtml: next })
-  }, [visibleTranslated, handleEditorCommit])
-
   const captureFootnoteAnchor = useCallback(() => {
     pendingFootnoteAnchorRef.current = translatedEditorRef.current?.getFootnoteInsertionAnchor() ?? null
   }, [])
@@ -4802,43 +5033,35 @@ function EditorRow({
     })
   }, [cell, openAddFootnoteDialog])
 
-  // Add-from-selection (Slice 5): capture a source-side text selection so the
-  // translator can promote it to a DRAFT concept without leaving the editor.
+  // Add-from-selection: capture a source-side text selection so the
+  // translator can add it to terminology without leaving the editor.
   const handleSourceMouseUp = useCallback(() => {
     if (!onAddConceptFromSelection && !onAskAiFromSelection) return
     const sel = window.getSelection()
     const text = sel && !sel.isCollapsed ? sel.toString().trim() : ""
-    const captured = text.length > 0 ? text : null
-    // FRO-260: keep the ref in sync with state so onClick handlers can read
-    // the captured text even after the selectionchange race clears the state.
-    capturedSelectionRef.current = captured
-    setSourceSelection(captured)
+    // A collapsed mouseup must not wipe a prior capture. The add-term popover
+    // lives inside this source cell, so its mouseup bubbles here after focus
+    // has already collapsed the browser selection (AQU-1006 / AQU-260).
+    if (!text) return
+    capturedSelectionRef.current = text
+    setSourceSelection(text)
   }, [onAddConceptFromSelection, onAskAiFromSelection])
 
-  // Opens the confirm dialog — actual creation happens in handleAddConceptConfirm.
-  // FRO-260: read from capturedSelectionRef (not sourceSelection state) so the
-  // dialog opens even when the selectionchange event already cleared the state
-  // before this onClick fires (the mousedown-blur race).
-  const handleAddSelectionToTermbase = useCallback(() => {
-    const text = capturedSelectionRef.current
-    if (!text) return
-    // Re-sync state so AddConceptDialog receives the correct pre-fill term even
-    // if the selectionchange handler cleared it between mousedown and click.
-    setSourceSelection(text)
-    setShowAddConceptDialog(true)
+  const handleAddTermOpenChange = useCallback((open: boolean) => {
+    if (open) {
+      const text = capturedSelectionRef.current
+      if (text) setSourceSelection(text)
+    }
+    setAddTermOpen(open)
   }, [])
 
-  const handleAddConceptConfirm = useCallback(async (term: string) => {
-    await onAddConceptFromSelection?.(term)
-    setShowAddConceptDialog(false)
+  const handleCreateTerm = useCallback((draft: ConceptDraft) => {
     capturedSelectionRef.current = null
     setSourceSelection(null)
+    setAddTermOpen(false)
     window.getSelection()?.removeAllRanges()
+    void onAddConceptFromSelection?.(draft)
   }, [onAddConceptFromSelection])
-
-  const handleAddConceptCancel = useCallback(() => {
-    setShowAddConceptDialog(false)
-  }, [])
 
   // FRO-260: toolbar mouse-down/up guards used by the selectionchange handler.
   // Set when the user presses down on a SelectionTermActions button so the
@@ -4873,17 +5096,16 @@ function EditorRow({
 
   // FRO-248: clear source selection when the browser selection collapses (user
   // clicked elsewhere or selected text in a different row). This prevents the
-  // "Add to termbase" toolbar from floating over a different row's content.
+  // "Add to terminology" toolbar from floating over a different row's content.
   // FRO-260: guard — do NOT clear when the user is pressing down on a toolbar
   // button (toolbarMouseDownRef=true). The selectionchange fires before onClick
   // in the mousedown-click sequence; clearing here would make onClick see null.
   useEffect(() => {
     if (!sourceSelection) return
-    // While the AddConceptDialog is open it owns the captured term — its
-    // auto-focus collapses the browser selection, and clearing sourceSelection
-    // here would wipe the dialog's pre-fill (the dialog re-syncs its input
-    // from the prop while open).
-    if (showAddConceptDialog) return
+    // While the add-term popover is open it owns the captured term — focusing
+    // an input collapses the browser selection, and clearing sourceSelection
+    // here would unmount the toolbar (and the popover) mid-edit.
+    if (addTermOpen) return
     const handleSelectionChange = () => {
       // Suppress if the user is mid-click on the SelectionTermActions toolbar.
       if (toolbarMouseDownRef.current) return
@@ -4894,16 +5116,10 @@ function EditorRow({
     }
     document.addEventListener("selectionchange", handleSelectionChange)
     return () => document.removeEventListener("selectionchange", handleSelectionChange)
-  }, [sourceSelection, showAddConceptDialog])
+  }, [sourceSelection, addTermOpen])
 
-  // FRO-204: Chip click handler for terminology chips in the target (TranslatedEditor).
-  // Records whether the target editor had a non-empty text selection at click time
-  // so we can conditionally surface the Apply affordance in the popover.
+  // FRO-204: Chip click handler for terminology chips in the target.
   const handleTermChipClick = useCallback((term: string, anchor: HTMLElement) => {
-    const sel = window.getSelection()
-    const selText = sel && !sel.isCollapsed ? sel.toString() : ""
-    targetHasSelectionRef.current = selText.trim().length > 0
-    targetSelectionTextRef.current = selText
     setTermChipState({ term, anchor })
   }, [])
 
@@ -5190,11 +5406,24 @@ function EditorRow({
   // parsers produce (<b>, <i>, <u>, <s>, <code>). Anything else in an imported
   // document — notably <img>/<a>, which DOMPurify's defaults let through —
   // is dropped rather than rendered. See OPS-8.
-  // Prefer the explicitly-assigned cast member's name; fall back to the cell's
-  // own label (e.g. a chapter/verse marker from USFM), then nothing.
+  // Prefer the explicitly-assigned cast member's name; then the character the
+  // cell itself names; then the cell's own label (e.g. a chapter/verse marker
+  // from USFM), then nothing.
+  //
+  // AQU-1018: `ownCastName` is the middle rung, and it is what makes a freshly
+  // imported subtitle row say who is speaking. The assigned-voice name only
+  // resolves once `castAssignments` has landed AND the voice is still in the
+  // library, and neither holds at the moment the client actually needs the
+  // label: on import there are no targets yet to read the name off, the
+  // character sheet's `cast.assign` events land BEFORE the `saveTts` that mints
+  // the voices (a documented degraded-success window in
+  // ProjectWorkspace.handleImportCharacters), and deleting a voice later strands
+  // every assignment pointing at it. In all three the sheet's `cast_name` is
+  // sitting right there on the cell — the cast gutter has always drawn it — and
+  // the two corners went blank anyway.
   const castVoiceId = cellLabelsEnabled ? assignedCastVoiceId(project.ttsSettings, cell.id) : undefined
   const castName = castVoiceId ? findVoice(project.ttsSettings, castVoiceId)?.name : undefined
-  const labelText = castName ?? cell.cellLabel ?? null
+  const labelText = castName ?? ownCastName(cell) ?? cell.cellLabel ?? null
   const showCellLabel = cellLabelsEnabled && labelText
 
   // The cell number tints by worst severity. That's the whole signal — the
@@ -5278,6 +5507,10 @@ function EditorRow({
   // AQU-354: does a rail control specifically hold focus? Used to pin the rail
   // open (an in-progress interaction must never be idle-collapsed).
   const [railHasFocus, setRailHasFocus] = useState(false)
+  // AQU-200: the rail's `⋯` overflow. Lifted here (rather than owned by
+  // CellActionRail) because the rail's pin has to know about it — the popup
+  // portals out of the rail, so onFocusCapture can't.
+  const [railOverflowOpen, setRailOverflowOpen] = useState(false)
 
   // ── Expansion state ───────────────────────────────────────────────────────
   const alignmentModelForExpansion = useMemo(() => {
@@ -5319,6 +5552,15 @@ function EditorRow({
         : transcriptNeedsAttention
           ? "amber"
           : null
+
+  // AQU-200: the `⋯` now hides the two rail buttons that carried an
+  // at-a-glance signal of their own — open comments (primary dot) and an
+  // existing take (emerald dot on Play). Collapsing them must not make the
+  // row read as "nothing here", so the strongest of those signals moves onto
+  // the trigger. Comments win: an unread comment is addressed to a person,
+  // where "this line has audio" is only a state.
+  const railOverflowAttentionDot: "emerald" | "primary" | null =
+    openCommentCount > 0 ? "primary" : hasAudio ? "emerald" : null
 
   // First-open auto-tab: prefer the most-attention-worthy tab. Only applied
   // when the panel was closed and is being opened — once open, the user's
@@ -5365,6 +5607,7 @@ function EditorRow({
     railHasFocus,
     showMicDeniedHelp,
     showGenerateConfirm,
+    overflowOpen: railOverflowOpen,
     hasFocusWithin,
     remoteChangedWhileFocused,
   })
@@ -5427,7 +5670,7 @@ function EditorRow({
     // row still holds it; a newer focus may already own it).
     onRowFocusRelease(cell.id)
     // FRO-248: clear source-text selection when focus leaves this row so the
-    // "Add to termbase" toolbar never floats over a different row's content.
+    // "Add to terminology" toolbar never floats over a different row's content.
     capturedSelectionRef.current = null
     setSourceSelection(null)
   }
@@ -5467,20 +5710,12 @@ function EditorRow({
     }
   }
 
-  // Inline rule click → open expansion to issues tab and remember which rule
-  // is active so the ViolationPopover can anchor to the clicked blot.
-  // Expanding the row re-renders the editor and detaches the blot's DOM node,
-  // and a detached anchor makes the popover fall back to the viewport origin —
-  // so snapshot the rect and anchor to a virtual element instead.
-  const openInlineRule = useCallback((ruleId: string, anchor: HTMLElement) => {
-    // AQU-664: clicking commits to the full (waive-capable) popover — clear any
-    // transient hover preview so the two don't stack.
+  // Inline rule click → open the standard bottom-right violation toast. Keep
+  // the row collapsed and clear the transient hover preview so one gesture
+  // produces one violation surface.
+  const openInlineRule = useCallback((ruleId: string, _anchor: HTMLElement) => {
     setHoveredRule(null)
-    setExpanded(true)
-    setExpansionTab("issues")
     setOpenRuleId(ruleId)
-    const rect = anchor.getBoundingClientRect()
-    setOpenRuleAnchor({ getBoundingClientRect: () => rect })
   }, [])
 
   // AQU-664: hover ("wave over") a blot → snapshot its rect and preview the
@@ -5849,7 +6084,12 @@ function EditorRow({
               // source column. pe-7 clears the floating pencil.
               // select-text: global chrome disables selection; source must stay
               // selectable for add-to-termbase / Ask AI from selection.
-              "relative flex h-full min-h-[40px] flex-col rounded-lg px-2 py-1.5 pe-7 select-text transition-[colors,opacity]",
+              // AQU-1101: min-w-0 + break-words. `minmax(0,1fr)` floors the
+              // TRACK, but a grid item keeps `min-width: auto` and would still
+              // overflow its area on an unbreakable token; min-w-0 lets it
+              // shrink and break-words (inherited by the text below) breaks the
+              // token instead of blowing the column out.
+              "relative flex h-full min-h-[40px] min-w-0 flex-col break-words rounded-lg px-2 py-1.5 pe-7 select-text transition-[colors,opacity]",
               // Match the target well — same muted fill + ring (not a darker
               // primary-tinted edit chrome).
               "focus-within:bg-muted focus-within:ring-1 focus-within:ring-ring/40 focus-within:ring-inset",
@@ -5865,15 +6105,18 @@ function EditorRow({
           >
             {/* Source-selection toolbar. Appears when source text is selected:
                 "Ask AI" pushes the selection into the agent as a context chip,
-                "Add to terms" promotes it to a DRAFT concept, and a "View term"
-                button appears when the selection matches an active concept. */}
-            {sourceSelection && (
+                "Add to terminology" opens a popover to create an entry, and a
+                "View term" button appears when the selection matches an active concept. */}
+            {(sourceSelection || addTermOpen) && (
               <SourceSelectionToolbar
-                sourceSelection={sourceSelection}
+                sourceSelection={sourceSelection ?? capturedSelectionRef.current ?? ""}
                 concepts={terminologyConcepts}
                 onAskAi={handleAskAiFromSelection}
-                onAddToTermbase={onAddConceptFromSelection ? handleAddSelectionToTermbase : undefined}
-                onTermApply={handleTermApply}
+                onAddToTermbase={onAddConceptFromSelection ? handleCreateTerm : undefined}
+                addConceptBlockedReason={addConceptBlockedReason}
+        canApproveConcept={canApproveConcept}
+                onAddOpenChange={handleAddTermOpenChange}
+                onViewConcept={onOpenTerminologyConcept}
                 onToolbarMouseDown={handleToolbarMouseDown}
                 onToolbarMouseUp={handleToolbarMouseUp}
               />
@@ -5929,13 +6172,14 @@ function EditorRow({
                   2026-08-26) — "put that character label also in the top left
                   of source cells… we'll just scoot the time range over".
 
-                  THE SAME VALUE THE TARGET CORNER SHOWS, deliberately: the two
-                  names in this app are not interchangeable (the sheet's
-                  `cast_name` is what the timeline, the recorder and the exports
-                  print), and Sam's call was that these two corners agree with
-                  each other rather than with those. It therefore rides the
-                  same "Show cell labels" preference and goes blank in the same
-                  places.
+                  THE SAME VALUE THE TARGET CORNER SHOWS, deliberately: Sam's
+                  call was that these two corners agree with EACH OTHER, so both
+                  read the one `labelText` and both ride the "Show cell labels"
+                  preference. AQU-1018 did not weaken that — it only gave
+                  `labelText` a `cast_name` rung beneath the assigned voice, so
+                  the corners now agree with the timeline/recorder/exports in the
+                  cases where they used to agree on NOTHING. The two names still
+                  are not interchangeable, and an assigned voice still wins.
 
                   `dir="auto"` because the lane is forced LTR for timecodes and
                   a name is not a timecode. The width cap is what does the
@@ -5973,7 +6217,11 @@ function EditorRow({
                 className="w-full !px-0"
               />
             ) : (cell.medium !== "media" && (sourceDraft?.valueHtml || cell.originalHtml)) ? (
-              <SanitizedRichHtml html={sourceDraft?.valueHtml || cell.originalHtml || ""} />
+              <SanitizedRichHtml
+                html={sourceDraft?.valueHtml || cell.originalHtml || ""}
+                idmlStyleCatalog={idmlStyleCatalog}
+                idmlParagraphStyleId={idmlParagraphStyleId}
+              />
             ) : (
               <UsfmSourceText
                 // AQU-646: an imported media segment's stored `value` is the
@@ -5989,7 +6237,7 @@ function EditorRow({
                 showEvidence={examplesExpanded}
                 onRangeClick={openInlineRule}
                 concepts={terminologyConcepts}
-                onTermApply={handleTermApply}
+                onViewConcept={onOpenTerminologyConcept}
                 footnotePanelActive={footnotePanelActive}
                 footnoteNumberOffset={sourceFootnoteNumberOffset}
               />
@@ -6029,13 +6277,13 @@ function EditorRow({
           )}
           fontSize={targetFontSize}
           busy={isSynthBusy}
-          leading={(
+          leading={healthCalculationsEnabled ? (
             <HealthRibbon
               point={healthRibbonPoint}
               hasMajorIssue={hasMajorInfraction}
               hasIssue={hasAnyIssue}
             />
-          )}
+          ) : undefined}
           header={(
             <>
             {showCellLabel && (
@@ -6045,6 +6293,7 @@ function EditorRow({
                 </span>
               </AppTooltip>
             )}
+            <CellPresenceBadges peers={remoteCellPresence} />
             {/* AQU-1041: no AI-draft tag here. The cell header renders the same
                 for a machine draft as for a human-typed one. The underlying
                 `cell.aiDrafted` provenance stays — the org overview's AI-drafted
@@ -6136,6 +6385,7 @@ function EditorRow({
                     editable={editable && !isLoading && !lockHolderLabel}
                     subdued={showCompletionOverlay}
                     empty={!visibleTranslated?.trim()}
+                    preserveWhitespace={Boolean(idmlConfiguration)}
                     onClick={(event) => {
                       event.stopPropagation()
                       requestTargetEdit(idmlConfiguration
@@ -6157,12 +6407,16 @@ function EditorRow({
                         renderer so a new target-text variant inherits the mask
                         instead of having to remember it. */}
                     <div ref={targetReadContentRef} data-ph-mask>
-                      {remoteDraftText !== undefined ? (
+                      {overlayDraftText !== undefined ? (
                         <span data-remote-presence-draft>
-                          {remoteDraftText || "\u200b"}
+                          {overlayDraftText}
                         </span>
                       ) : idmlConfiguration && visibleTranslatedHtml ? (
-                        <TargetIdmlHtml html={visibleTranslatedHtml} />
+                        <TargetIdmlHtml
+                          html={visibleTranslatedHtml}
+                          idmlStyleCatalog={idmlStyleCatalog}
+                          idmlParagraphStyleId={idmlParagraphStyleId}
+                        />
                       ) : targetHasRichFormatting && visibleTranslatedHtml ? (
                         <TargetRichHtml
                           html={visibleTranslatedHtml}
@@ -6181,6 +6435,7 @@ function EditorRow({
                             onTermChipClick={handleTermChipClick}
                             footnotePanelActive={footnotePanelActive}
                             footnoteNumberOffset={targetFootnoteNumberOffset}
+                            showKeyTermHighlights={showTargetKeyTermHighlights}
                           />
                         )
                       ) : (
@@ -6193,31 +6448,23 @@ function EditorRow({
                     />
                   </EditorTargetReadSurface>
                 )}
-              {/* FRO-204: Terminology chip popover — controlled via termChipState.
-                  Anchored to the chip DOM element that was clicked. Apply is
-                  offered only when the target had a non-empty text selection
-                  at click time (per spec).
+              {/* FRO-204: Terminology highlight popover — controlled via termChipState.
+                  Anchored to the highlighted term that was clicked.
                   We pass a dummy <span/> trigger so TermLookupPopover renders
                   the popover body; the BaseUI Popover controlled-open + external
-                  anchor positions it on the clicked chip. */}
-              {termChipState && (() => {
-                const concepts = terminologyConcepts
-                const onApply = targetHasSelectionRef.current
-                  ? (rendering: string) => { handleTermApply(rendering); setTermChipState(null) }
-                  : undefined
-                return (
-                  <TermLookupPopover
-                    sourceTerm={termChipState.term}
-                    concepts={concepts}
-                    onApply={onApply}
-                    open
-                    onOpenChange={(isOpen: boolean) => { if (!isOpen) setTermChipState(null) }}
-                    anchor={termChipState.anchor}
-                  >
-                    <span />
-                  </TermLookupPopover>
-                )
-              })()}
+                  anchor positions it on the clicked highlight. */}
+              {termChipState && (
+                <TermLookupPopover
+                  sourceTerm={termChipState.term}
+                  concepts={terminologyConcepts}
+                  onViewConcept={onOpenTerminologyConcept}
+                  open
+                  onOpenChange={(isOpen: boolean) => { if (!isOpen) setTermChipState(null) }}
+                  anchor={termChipState.anchor}
+                >
+                  <span />
+                </TermLookupPopover>
+              )}
               {/* Streaming preview overlay — visible while the LLM is
                   running and the target is still empty. Once committed text
                   is present, the editor becomes the single visible layer even
@@ -6385,66 +6632,83 @@ function EditorRow({
               onToggleExpanded={() => setExpanded((p) => !p)}
               alwaysShowChevron
               expansionAttentionDot={chevronAttentionDot}
-            >
-              <TargetDraftActions
-                targetText={visibleTranslated}
-                status={cell.status}
-                editable={editable}
-                isAnonymous={Boolean(isAnonymous)}
-                isCompletionConfigured={isCompletionConfigured}
-                isCompletionAvailable={isCompletionAvailable}
-                isLoading={isLoading}
-                onDraft={completeSingleAndReturn}
-                onRegenerate={() => onCompleteSingle(cell, { regenerate: true })}
-                onAiSetupNeeded={onAiSetupNeeded}
-                onDragStart={onDragStart}
-                onDragEnter={onDragEnter}
-                onConfirmOpenChange={setShowGenerateConfirm}
-              />
-
-              {/* p1-paragraph-ui-wiring (Task 3 + coordinator follow-up): draft
-                  the whole paragraph as one model call. ALL of the gates below
-                  must hold for the button to even render (unlike Sparkles,
-                  which stays visible in a disabled/"set up AI" state) — a
-                  paragraph-wide action that can't run yet shouldn't invite a
-                  click. Hidden when: the group is a single cell (the Sparkles
-                  button already covers it), the group has nothing left to
-                  draft (every cell already validated — resolves the silent
-                  no-op), or the parent didn't wire onCompleteParagraph.
-                  `groupBusy` covers BOTH this row's own in-flight state and
-                  any OTHER cell in the group still drafting (a validated
-                  start cell never gets its own `completing` entry, so relying
-                  on `isLoading` alone would let a second click re-fire
-                  completeParagraph mid-fan-out). */}
-              {cell.paragraphStart === true &&
-                editable &&
-                !isAnonymous &&
-                isCompletionConfigured &&
-                isCompletionAvailable &&
-                onCompleteParagraph &&
-                paragraphGroupSize !== undefined &&
-                paragraphGroupSize > 1 &&
-                (paragraphDraftableCount ?? 0) > 0 && (() => {
-                const groupBusy = paragraphGroupInFlight ?? isLoading
-                return (
-                  <RailButton
-                    icon={<PilcrowRight className="h-3.5 w-3.5" />}
-                    tooltip={groupBusy ? t("editor.ai.generating") : t("editor.ai.draftParagraph", { count: paragraphGroupSize })}
-                    onClick={() => {
-                      if (groupBusy) return
-                      setShowParagraphConfirm(true)
-                    }}
-                    disabled={groupBusy}
-                    pulsing={groupBusy}
+              overflowOpen={railOverflowOpen}
+              onOverflowOpenChange={setRailOverflowOpen}
+              overflowAttentionDot={railOverflowAttentionDot}
+              overflowLabel={t("editor.rail.moreActions")}
+              // AQU-200: AI-generate is the one action that stays a direct
+              // button. Validate is the other always-visible action, and it
+              // already lives in the row's left gutter — it is not moved.
+              // Paragraph-draft rides in `primary` beside the sparkle because
+              // it IS the generate action at group scale; it is already behind
+              // strict gates and only ever renders on a paragraph's first row,
+              // so it costs at most one extra button on a minority of rows.
+              primary={
+                <>
+                  <TargetDraftActions
+                    targetText={visibleTranslated}
+                    status={cell.status}
+                    editable={editable}
+                    isAnonymous={Boolean(isAnonymous)}
+                    isCompletionConfigured={isCompletionConfigured}
+                    isCompletionAvailable={isCompletionAvailable}
+                    isLoading={isLoading}
+                    onDraft={completeSingleAndReturn}
+                    onRegenerate={() => onCompleteSingle(cell, { regenerate: true })}
+                    onAiSetupNeeded={onAiSetupNeeded}
+                    onDragStart={onDragStart}
+                    onDragEnter={onDragEnter}
+                    onConfirmOpenChange={setShowGenerateConfirm}
                   />
-                )
-              })()}
 
-              {/* FRO-237: Direct mic button on the rail when no audio — one-click
-                  action without needing to open a popover ("just hit the record
-                  mic — quick action"). Replaces the redundant Record item inside
-                  the ⋯ popover. When audio IS present, FRO-236's Play icon on
-                  the overflow button already gives a direct play affordance.
+                  {/* p1-paragraph-ui-wiring (Task 3 + coordinator follow-up): draft
+                      the whole paragraph as one model call. ALL of the gates below
+                      must hold for the button to even render (unlike Sparkles,
+                      which stays visible in a disabled/"set up AI" state) — a
+                      paragraph-wide action that can't run yet shouldn't invite a
+                      click. Hidden when: the group is a single cell (the Sparkles
+                      button already covers it), the group has nothing left to
+                      draft (every cell already validated — resolves the silent
+                      no-op), or the parent didn't wire onCompleteParagraph.
+                      `groupBusy` covers BOTH this row's own in-flight state and
+                      any OTHER cell in the group still drafting (a validated
+                      start cell never gets its own `completing` entry, so relying
+                      on `isLoading` alone would let a second click re-fire
+                      completeParagraph mid-fan-out). */}
+                  {cell.paragraphStart === true &&
+                    editable &&
+                    !isAnonymous &&
+                    isCompletionConfigured &&
+                    isCompletionAvailable &&
+                    onCompleteParagraph &&
+                    paragraphGroupSize !== undefined &&
+                    paragraphGroupSize > 1 &&
+                    (paragraphDraftableCount ?? 0) > 0 && (() => {
+                    const groupBusy = paragraphGroupInFlight ?? isLoading
+                    return (
+                      <RailButton
+                        icon={<PilcrowRight className="h-3.5 w-3.5" />}
+                        tooltip={groupBusy ? t("editor.ai.generating") : t("editor.ai.draftParagraph", { count: paragraphGroupSize })}
+                        onClick={() => {
+                          if (groupBusy) return
+                          setShowParagraphConfirm(true)
+                        }}
+                        disabled={groupBusy}
+                        pulsing={groupBusy}
+                      />
+                    )
+                  })()}
+                </>
+              }
+            >
+              {/* AQU-200 moves the mic back behind the `⋯`, reversing FRO-237's
+                  promotion of it to a direct rail button ("just hit the record
+                  mic — quick action"). That was the right call against a rail of
+                  six buttons and the wrong one for a rail of two: the ticket
+                  names record among the actions that collapse. If recording
+                  turns out to be frequent enough to deserve the third direct
+                  slot, promote it back by moving this block into `primary` —
+                  nothing else has to change.
                   WARN fix: the button must NOT be disabled when micDenied —
                   disabled elements receive no mouse events, so the "click for
                   help" affordance is unreachable. Instead keep it enabled and
@@ -6984,21 +7248,16 @@ function EditorRow({
         const rule = ruleMap.get(openRuleId)
         if (!inf || !rule) return null
         return (
-          <ViolationPopover
+          <ViolationToast
             open
             onOpenChange={(next) => {
-              if (!next) {
-                setOpenRuleId(null)
-                setOpenRuleAnchor(null)
-              }
+              if (!next) setOpenRuleId(null)
             }}
             infraction={inf}
             ruleName={translateRuleName(rule, t)}
             waivers={cell.waivers ?? []}
-            anchor={openRuleAnchor}
             onOpenRule={(ruleId) => {
               setOpenRuleId(null)
-              setOpenRuleAnchor(null)
               onInfractionClick?.(ruleId)
             }}
             onWaive={handleWaive}
@@ -7008,10 +7267,10 @@ function EditorRow({
       })()}
 
       {/* AQU-664: hover ("wave over") preview of a violation blot's rule
-          explanation. Non-interactive and separate from the click popover — it
+          explanation. Non-interactive and separate from the click toast — it
           appears on mouse-in and dismisses on mouse-out (see handleRuleHover /
           TranslatedEditor's blot hover handlers). Suppressed while the click
-          popover is open so the two never stack. */}
+          toast is open so the two never stack. */}
       {hoveredRule && !openRuleId && (() => {
         const inf = blotInfractions.find((i) => i.ruleId === hoveredRule.ruleId)
         const rule = ruleMap.get(hoveredRule.ruleId)
@@ -7031,18 +7290,6 @@ function EditorRow({
           </Popover>
         )
       })()}
-
-      {/* Add-from-selection confirm dialog (FRO-260). Mounted per-row so it
-          is scoped to the cell whose selection triggered it. */}
-      {onAddConceptFromSelection && (
-        <AddConceptDialog
-          open={showAddConceptDialog}
-          sourceTerm={sourceSelection ?? ""}
-          blockedReason={addConceptBlockedReason}
-          onConfirm={handleAddConceptConfirm}
-          onCancel={handleAddConceptCancel}
-        />
-      )}
 
       {/* p1-paragraph-ui-wiring (Task 3): confirm before drafting the whole
           paragraph group as one unit. Always confirms — no per-preference

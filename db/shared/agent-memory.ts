@@ -220,6 +220,10 @@ const MEMORY_COLS = `id, project_id, path, content, status, human_edited,
 // ──────────────────────────────────────────────────────────────────────────
 
 export interface CreateProposalInput {
+  /** Pre-minted row id. Callers that must survive a crash-and-retry (the
+   *  changeset engine pins it at prepare) pass it so the retry can find its own
+   *  row instead of inserting a duplicate proposal. Omit to mint one. */
+  id?: string
   projectId: string
   path: string
   content: string
@@ -245,7 +249,7 @@ export async function createProposal(
   const contentErr = validateMemoryContent(input.content)
   if (contentErr) return { status: "validation_failed", message: contentErr.message }
 
-  const id = crypto.randomUUID()
+  const id = input.id ?? crypto.randomUUID()
   const provenanceJson =
     input.provenance != null ? JSON.stringify(input.provenance) : null
   const row = await db
@@ -299,6 +303,73 @@ export async function getMemory(db: AquillaDb, id: string): Promise<AgentMemory 
     .bind(id)
     .first<MemoryRow>()
   return row ? rowToMemory(row) : null
+}
+
+/** Read the memory currently APPROVED at (project, path), if any. The partial
+ *  UNIQUE index guarantees at most one. */
+export async function getApprovedMemoryByPath(
+  db: AquillaDb,
+  projectId: string,
+  path: string,
+): Promise<AgentMemory | null> {
+  const row = await db
+    .prepare(
+      `SELECT ${MEMORY_COLS} FROM agent_memories
+        WHERE project_id = ? AND path = ? AND status = 'approved'
+        LIMIT 1`,
+    )
+    .bind(projectId, path)
+    .first<MemoryRow>()
+  return row ? rowToMemory(row) : null
+}
+
+export interface RetireMemoryInput {
+  projectId: string
+  path: string
+  reviewedBy?: string | null
+  /**
+   * Retiring a `human_edited=true` row destroys human-owned memory, so the
+   * caller must say so explicitly. The agent surfaces NEVER set this — they
+   * refuse instead (adversarial-panel B1/B2, same doctrine as the approve-time
+   * supersede guard).
+   */
+  retireHumanEdited?: boolean
+}
+
+export type RetireMemoryResult =
+  | { status: "ok"; memory: AgentMemory }
+  | { status: "not_found" }
+  | { status: "human_edited"; existing: { id: string; path: string } }
+
+/**
+ * Retire the approved memory at (project, path) → `archived`. Retirement is a
+ * retrieval change, not an erasure: the row keeps its content and history, and
+ * `buildMemoryContext` (approved-only) simply stops selecting it, so the next
+ * copilot prompt no longer carries it. Rejecting a still-`proposed` row is a
+ * different act — that is `reviewMemory('reject')`.
+ */
+export async function retireMemory(
+  db: AquillaDb,
+  input: RetireMemoryInput,
+): Promise<RetireMemoryResult> {
+  const current = await getApprovedMemoryByPath(db, input.projectId, input.path)
+  if (!current) return { status: "not_found" }
+  if (current.humanEdited && input.retireHumanEdited !== true) {
+    return { status: "human_edited", existing: { id: current.id, path: current.path } }
+  }
+  const row = await db
+    .prepare(
+      `UPDATE agent_memories
+          SET status = 'archived', reviewed_by = ?, updated_at = now()
+        WHERE id = ? AND status = 'approved'
+        RETURNING ${MEMORY_COLS}`,
+    )
+    .bind(input.reviewedBy ?? null, current.id)
+    .first<MemoryRow>()
+  // A 0-row update means a concurrent writer already moved this row off
+  // 'approved' — the end state the caller wanted, reached by someone else.
+  if (!row) return { status: "not_found" }
+  return { status: "ok", memory: rowToMemory(row) }
 }
 
 export interface ReviewMemoryInput {
@@ -755,7 +826,46 @@ export interface MemoryContext {
   readMemory(path: string): Promise<string | null>
 }
 
-function firstLine(content: string): string {
+/**
+ * Max approved-memory entries rendered into the copilot's prompt index
+ * (adversarial-panel mem-m1). The index is ordered most-recently-updated
+ * first; entries past the cap are NOT injected — they are reachable only via
+ * `readMemory`/`read_memory`.
+ *
+ * Lives here rather than beside the prompt assembly (auth-worker
+ * `lib/agent/prompt-augment.ts`) because the Agent API's read model reports
+ * what retrieval *would* inject (AQU-1229) and must use the same cap — a
+ * second copy of the number would silently drift from the prompt it claims to
+ * describe.
+ */
+export const MEMORY_INDEX_RENDER_CAP = 50
+
+/**
+ * Kind of a memory entry, derived from its path prefix. The write commands
+ * (AQU-1228) key entries by path — `examples/<slug>.md`, `decisions/<slug>.md`,
+ * `notes/<file>/<cell>-<digest>.md` — and the in-app agent proposes under
+ * `observations/`. The prefix IS the kind; nothing else records it.
+ */
+export type MemoryKind = "example" | "decision" | "note" | "observation" | "other"
+
+const KIND_BY_PREFIX: ReadonlyArray<{ prefix: string; kind: MemoryKind }> = [
+  { prefix: "examples/", kind: "example" },
+  { prefix: "decisions/", kind: "decision" },
+  { prefix: "notes/", kind: "note" },
+  { prefix: "observations/", kind: "observation" },
+]
+
+/** Classify a memory path into its kind; anything unprefixed is "other". */
+export function memoryKindForPath(path: string): MemoryKind {
+  for (const { prefix, kind } of KIND_BY_PREFIX) {
+    if (path.startsWith(prefix)) return kind
+  }
+  return "other"
+}
+
+/** First non-empty line of an entry — the one-line summary the prompt index
+ *  and the Agent API read model both show in place of full content. */
+export function memoryFirstLine(content: string): string {
   for (const line of content.split("\n")) {
     const trimmed = line.trim()
     if (trimmed) return trimmed
@@ -778,7 +888,7 @@ export async function buildMemoryContext(
   const approved = await listMemories(db, projectId, "approved")
   const memoryIndex: MemoryIndexEntry[] = approved.map((m) => ({
     path: m.path,
-    firstLine: firstLine(m.content),
+    firstLine: memoryFirstLine(m.content),
     humanEdited: m.humanEdited,
   }))
 

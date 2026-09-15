@@ -460,6 +460,21 @@ projects.get("/", authMiddleware, async (c) => {
   //   ?9-?11 : user.id for WHERE access check (created_by, pm, om)
   //   ?12-?13: orgFilter (IS NULL bypass + equality)
   //   ?14-?15: minRole (IS NULL bypass + threshold)
+  // AQU-1274: the org path's contribution to max-wins, as SQL. Must stay
+  // equivalent to db/shared/project-roles.ts::orgPathContribution — this list
+  // endpoint is where `project.syncRole` comes from, so if it disagrees with
+  // the single-project resolver the SPA gates panels on the wrong role (which
+  // is how the Biblica ETT report surfaced). Maintainer+ contributes outright;
+  // below that the org role only stops a team attachment from demoting, so it
+  // contributes when a group grant exists and no explicit direct grant does.
+  // Contains no `?` placeholders, so positional binds are unaffected.
+  const orgContribSql = `CASE
+              WHEN om.role_level >= ${ORG_WIDE_ACCESS_FLOOR} THEN om.role_level
+              WHEN om.role_level IS NOT NULL
+                AND pm.role_level IS NULL
+                AND gg.max_grant IS NOT NULL THEN om.role_level
+              ELSE 0 END`
+
   const extraWhere: string[] = []
   const extraBinds: unknown[] = []
   if (q) {
@@ -488,21 +503,21 @@ projects.get("/", authMiddleware, async (c) => {
             GREATEST(
               COALESCE(pm.role_level, 0),
               COALESCE(gg.max_grant,  0),
-              CASE WHEN om.role_level >= ${ORG_WIDE_ACCESS_FLOOR} THEN om.role_level ELSE 0 END,
+              ${orgContribSql},
               CASE WHEN p.created_by = ? THEN 700 ELSE 0 END
             ) AS role_level,
             CASE
               WHEN pm.role_level IS NOT NULL
                 AND pm.role_level >= COALESCE(gg.max_grant, 0)
-                AND pm.role_level >= (CASE WHEN om.role_level >= ${ORG_WIDE_ACCESS_FLOOR} THEN om.role_level ELSE 0 END)
+                AND pm.role_level >= (${orgContribSql})
                 AND pm.role_level >= (CASE WHEN p.created_by = ? THEN 700 ELSE 0 END)
               THEN 'override'
               WHEN gg.max_grant IS NOT NULL
-                AND gg.max_grant >= (CASE WHEN om.role_level >= ${ORG_WIDE_ACCESS_FLOOR} THEN om.role_level ELSE 0 END)
+                AND gg.max_grant >= (${orgContribSql})
                 AND gg.max_grant >= (CASE WHEN p.created_by = ? THEN 700 ELSE 0 END)
               THEN 'group'
-              WHEN om.role_level >= ${ORG_WIDE_ACCESS_FLOOR}
-                AND om.role_level >= (CASE WHEN p.created_by = ? THEN 700 ELSE 0 END)
+              WHEN (${orgContribSql}) > 0
+                AND (${orgContribSql}) >= (CASE WHEN p.created_by = ? THEN 700 ELSE 0 END)
               THEN 'org'
               ELSE 'creator'
             END AS role_source
@@ -541,7 +556,7 @@ projects.get("/", authMiddleware, async (c) => {
         AND (?::int IS NULL OR GREATEST(
               COALESCE(pm.role_level, 0),
               COALESCE(gg.max_grant,  0),
-              CASE WHEN om.role_level >= ${ORG_WIDE_ACCESS_FLOOR} THEN om.role_level ELSE 0 END,
+              ${orgContribSql},
               CASE WHEN p.created_by = ? THEN 700 ELSE 0 END
             ) >= ?)
         ${extraWhereSql}

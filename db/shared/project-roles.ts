@@ -22,9 +22,54 @@
 import type { AquillaDb, AquillaStatement } from "../shim/postgres"
 
 // AQU-435: mirrors auth-worker/src/services/project-permissions.ts's
-// ORG_WIDE_ACCESS_FLOOR (maintainer) — org-level roles below this contribute
-// no project access.
-const ORG_WIDE_ACCESS_FLOOR = 600
+// ORG_WIDE_ACCESS_FLOOR (maintainer) — org-level roles below this open no
+// project on their own.
+export const ORG_WIDE_ACCESS_FLOOR = 600
+
+/**
+ * AQU-1274: how much the org path contributes to max-wins.
+ *
+ * AQU-435 made a sub-maintainer `org_members` row contribute *nothing*, which
+ * conflated two separate questions:
+ *
+ *   (a) may an org grant OPEN a project the user has no other path into?
+ *       — correctly Maintainer+ only; that is what AQU-435 was about.
+ *   (b) may an org grant raise the LEVEL on a project the user already
+ *       reaches by another path? — collateral damage: it was silenced too.
+ *
+ * The result was a silent demotion. A Project Lead (500) on the org who
+ * reaches a project through a team attached at Contributor (400) resolved to
+ * 400: her higher org role was dropped on the floor, which is exactly the
+ * demotion AD-12 max-wins forbids ("adding a grant at a lower role does not
+ * demote"). Reported live by the Biblica ETT Pattani Malay team.
+ *
+ * So a sub-floor org role contributes its level iff:
+ *
+ *   1. a **team (group) grant already opens the project** — the user gains no
+ *      project they could not already see, so AQU-435's visibility floor is
+ *      fully intact (a sub-maintainer org member with no other path still
+ *      resolves to null and still 403s); and
+ *   2. there is **no direct `project_members` row** — an explicit per-person,
+ *      per-project grant is a deliberate decision and must still be able to
+ *      restrict someone below their org role. Only the bulk team attachment,
+ *      which is routinely left at the Contributor default, stops demoting.
+ *
+ * Returns the level the org path contributes, or null for no contribution.
+ */
+export function orgPathContribution(args: {
+  orgLevel: number | null
+  hasDirectGrant: boolean
+  hasGroupGrant: boolean
+}): number | null {
+  const { orgLevel, hasDirectGrant, hasGroupGrant } = args
+  if (orgLevel == null) return null
+  // Maintainer+ is an access path in its own right (AQU-435, unchanged).
+  if (orgLevel >= ORG_WIDE_ACCESS_FLOOR) return orgLevel
+  // Below the floor: never creates access, and never overrides an explicit
+  // per-project grant. It only stops a team attachment from demoting.
+  if (hasDirectGrant || !hasGroupGrant) return null
+  return orgLevel
+}
 
 const ROLE_NAMES: Record<number, string> = {
   100: "viewer",
@@ -143,13 +188,18 @@ export async function resolveProjectRoleShared(
   if (override) contributions.push({ source: "override", level: override.role_level })
   if (group?.role_level != null)
     contributions.push({ source: "group", level: group.role_level })
-  // AQU-435: the org path fires only at Maintainer+ — a sub-maintainer
-  // org_members row contributes nothing. Mirrors auth-worker's
-  // project-permissions.ts::resolveProjectRole; without this floor a PAT
-  // held by any org member (down to Viewer) resolved to full org-wide
-  // project access via the external Agent API.
-  if (org && org.role_level >= ORG_WIDE_ACCESS_FLOOR)
-    contributions.push({ source: "org", level: org.role_level })
+  // AQU-435 / AQU-1274: Maintainer+ is an access path on its own; below that
+  // the org role only keeps a team attachment from demoting someone. Without
+  // the floor a PAT held by any org member (down to Viewer) resolved to full
+  // org-wide project access via the external Agent API — see
+  // orgPathContribution for the full rule.
+  const orgContribution = orgPathContribution({
+    orgLevel: org?.role_level ?? null,
+    hasDirectGrant: override != null,
+    hasGroupGrant: group?.role_level != null,
+  })
+  if (orgContribution != null)
+    contributions.push({ source: "org", level: orgContribution })
   if (String(project.created_by) === String(user.id))
     contributions.push({ source: "creator", level: 700 })
   // Platform operators (ADMIN_EMAILS allowlist) get owner-level on every

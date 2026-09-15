@@ -31,6 +31,7 @@ import type { Env } from "../types"
 import type { AuthUser, RoleResolution } from "../types"
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
 import { memoize } from "../lib/request-memo"
+import { orgPathContribution } from "../../../db/shared/project-roles"
 
 export const ROLE_NAMES: Record<number, string> = {
   100: "viewer",
@@ -239,10 +240,17 @@ async function resolveGrantPaths(
     contributions.push({ source: "override", level: override.row.role_level })
   if (group.row?.role_level != null)
     contributions.push({ source: "group", level: group.row.role_level })
-  // AQU-435: the org path fires only at Maintainer+ — a sub-maintainer
-  // org_members row contributes nothing.
-  if (org.row && org.row.role_level >= ORG_WIDE_ACCESS_FLOOR)
-    contributions.push({ source: "org", level: org.row.role_level })
+  // AQU-435 / AQU-1274: Maintainer+ is an access path on its own; below that
+  // the org role contributes only to stop a team attachment from silently
+  // demoting a higher org role. The rule lives in db/shared/project-roles.ts
+  // so this resolver and the Agent-API port cannot drift apart on it.
+  const orgContribution = orgPathContribution({
+    orgLevel: org.row?.role_level ?? null,
+    hasDirectGrant: override.row != null,
+    hasGroupGrant: group.row?.role_level != null,
+  })
+  if (orgContribution != null)
+    contributions.push({ source: "org", level: orgContribution })
   if (project.created_by === user.id)
     contributions.push({ source: "creator", level: 700 })
   // Platform operators (ADMIN_EMAILS allowlist) get owner-level on every

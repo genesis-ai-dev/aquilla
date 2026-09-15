@@ -131,3 +131,7 @@ UI chrome that used to be one smoke file per click is covered under
 
 When you change one of these surfaces, update the matching `*.test.tsx`. If RTL
 is missing, add it — then delete any leftover smoke, do not park it as non-smoke.
+
+Parallel Bibles missing-reference empty state is covered in RTL:
+`src/components/ParallelBiblesSidebar.test.tsx` (absent/book-only references,
+version picker access, and recovery when a valid reference appears).

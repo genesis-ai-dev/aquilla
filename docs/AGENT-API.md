@@ -337,7 +337,7 @@ CRUD surface with MCP bolted on.
 | Projects | `list_projects`, `get_project`, `create_project`, `update_project` |
 | Artifacts | `create_artifact_upload`, `inspect_artifact` |
 | Ingestion | `preview_import`, `prepare_import` — **implemented**: both parse an already-uploaded source artifact server-side with the built-in DOM-free parsers (txt, md, json, po, properties, obs, vtt, srt, sbv, csv, tsv, usfm, docx; 5000-cell cap) — preview returns cells without staging, prepare stages a `PlanImport` changeset linking the artifact. Upload stays REST-only (`POST …/artifacts`, 25MB). REST equivalent: `POST …/artifacts/:artifactId/parse` (body `{ "stage": true }` to stage). `docx` is parsed by the SAME `extractDocxStrings` the in-app Import dialog runs (AQU-1237 moved it off `DOMParser`/JSZip onto the platform-only `xml-lite`/`zip-lite` readers), so an agent import and a browser import of one file yield identical cells. Still DOM-bound and not yet server-parseable: pptx, html, xliff, tmx, usx, idml. |
-| Reading | `search_project`, `read_content`, `read_history`, `find_similar_cells`, `list_memory`, `read_cell_memory` |
+| Reading | `search_project`, `read_content`, `read_history`, `find_similar_cells`, `get_prompt_preview`, `list_memory`, `read_cell_memory` |
 | Quality | `read_quality`, `read_term_consistency` — **implemented (AQU-1231)**: per-file health (0-100) + coverage (total/filled/validated + percentages) and the project rollup; and the term-consistency drift list (per active concept: occurrences, consistent count/percent, which approved rendering was used in which cells, and the cells that used none). Both are PARITY reads — `read_quality` delegates to the internal `health-rollup` and `files/:fileId/progress` routes the in-app health ring and progress surfaces read, and `read_term_consistency` runs the SPA's own scan (`src/lib/check/term-consistency-scan.ts`, shared with the in-app "Check file" pass). Whatever counting rules the progress projection applies (e.g. AQU-1083's headings/paratextual exclusion) the API inherits by construction — there is no second denominator to keep in step. REST equivalents: `GET …/projects/:projectId/quality` and `GET …/projects/:projectId/terms/consistency` (both take optional `fileId`, `lane`; the latter also `onlyDrift=1`). |
 | Translation | `prepare_translations` |
 | Verification | `run_checks` — structured, actionable failures (e.g. `"term 'covenant' rendered 3 ways: [refs]"`), never a bare 400. The term-consistency half of this now exists as `read_term_consistency` (above); `run_checks` remains unimplemented for the RULE pass. |
@@ -554,6 +554,35 @@ The command layer is now the **shared write spine for both agent surfaces** (see
   `credential_id = 'session'`, forced ask mode, `channel: "app"` provenance, and the existing
   `/api/v2/changesets/:id/approval|approve|reject` human gate; the SPA's live ChangesetCard
   commits after approval (per-item confirmation for testimony kinds).
+
+## Status addendum (2026-09-10, AQU-1230 — effective-prompt preview)
+
+Prompt tuning through the Agent API was write-only: `PatchSettings` can change
+`systemPrompt`, `completionSettings`, `translationBrief` and `rules`, and the terminology
+path can add concepts, but nothing showed what the copilot actually receives after
+injection. An agent had to change a setting, draft a cell, and infer.
+
+- **New read** — `GET /api/v1/external/projects/:projectId/cells/:cellId/prompt-preview`
+  (optional `targetLang=<lane>`, `fileId=<id>`), MCP tool `get_prompt_preview`. Returns
+  the assembled `messages` (system + user, exactly as sent) alongside `parts` — base
+  instructions after language substitution, the brief block, the compiled rules block,
+  `injectedTerms`, the retrieved `examples`, and the preceding approved-target discourse
+  window — plus `generation` (the project's provider/model/temperature/maxTokens/topK)
+  and `retrieval` (primitive, corpus size, upstream project). VIEWER floor, standard
+  external rate limit; it drafts nothing and spends no credits.
+- **Fidelity by construction, not by re-implementation.** The pure prompt builders moved
+  out of `src/lib/completion/completion-service.ts` (browser-bound: `import.meta.env`,
+  `window`, storage, i18n) into `src/lib/completion/prompt-build.ts`, and concept→rule
+  compilation into `src/lib/terminology/compile-core.ts`. Both are alias-free and
+  worker-importable — the same contract as `src/lib/parsers/parse-text-formats.ts` — so
+  the preview calls the builders the editor calls, over the same AD-13 branching-search
+  retrieval and the same compiled terminology rules. `completion-service.ts` re-exports
+  them, so no SPA call site changed.
+- **What a read cannot reproduce is named, not omitted.** `warnings` flags an empty
+  effective source (an untranscribed media section) and USFM footnote markers, whose
+  output contract the live call derives from the open editor buffer. Per-device provider
+  overrides (user Settings, `localStorage`) are invisible server-side, so `generation`
+  reports the project's configuration.
 
 ## Status addendum (2026-09-10, AQU-1229 — Living Memory read model)
 

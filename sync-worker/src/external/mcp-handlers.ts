@@ -442,6 +442,32 @@ async function readHistory(
   return runRead(env, token, `${encodeURIComponent(projectId)}/cells/${encodeURIComponent(cellId)}/history`)
 }
 
+/** AQU-1230 — the assembled copilot prompt for one cell. Delegates to the REST
+ *  read so auth, scope, role and rate limiting stay in one place. */
+async function getPromptPreview(
+  env: ExternalEnv,
+  token: string,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const projectId = str(args, 'projectId')
+  const cellId = str(args, 'cellId')
+  if (!projectId) return fail('validation_failed', 'projectId is required')
+  if (!cellId) return fail('validation_failed', 'cellId is required')
+  const params = new URLSearchParams()
+  const targetLang = str(args, 'targetLang')
+  // '' is a MEANINGFUL lane (the default lane) and is also the route's own
+  // default, so it need not be sent.
+  if (targetLang) params.set('targetLang', targetLang)
+  const fileId = str(args, 'fileId')
+  if (fileId) params.set('fileId', fileId)
+  const qs = params.toString() ? `?${params.toString()}` : ''
+  return runRead(
+    env,
+    token,
+    `${encodeURIComponent(projectId)}/cells/${encodeURIComponent(cellId)}/prompt-preview${qs}`,
+  )
+}
+
 // ── delegated quality reads (AQU-1231) ───────────────────────────────────────
 
 /** Same delegation shape as runRead, against the quality router. */
@@ -858,6 +884,8 @@ export async function callTool(
       return readContent(env, token, args)
     case 'read_history':
       return readHistory(env, token, args)
+    case 'get_prompt_preview':
+      return getPromptPreview(env, token, args)
     case 'list_memory':
       return listMemory(env, token, args)
     case 'read_cell_memory':

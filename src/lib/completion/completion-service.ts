@@ -4,66 +4,35 @@ import { resolveApiKey } from "@/lib/store/user-api-keys"
 import { effectiveSourceText, type SourceTextCell } from "@/lib/cell-text"
 import { getUserProviderOverride } from "@/lib/store/user-provider-override"
 import { t } from "@/lib/i18n/standalone"
+// AQU-1230: the pure prompt-assembly core lives in ./prompt-build so the Agent
+// API's effective-prompt preview (sync-worker) can call the SAME builders
+// instead of re-deriving them server-side. This module keeps everything that
+// needs the browser (Vite env, storage-backed keys, i18n, fetch) and re-exports
+// the core so existing importers are unaffected.
+import {
+  buildBriefBlock,
+  buildPrompt,
+  buildRulesBlock,
+  DEFAULT_APPROVED_EXAMPLE_COUNT,
+  DEFAULT_SYSTEM_PROMPT,
+  selectApprovedExamples,
+  type ChatMessage,
+  type ValidatedPair,
+} from "./prompt-build"
+
+export {
+  buildBriefBlock,
+  buildPrompt,
+  buildRulesBlock,
+  DEFAULT_APPROVED_EXAMPLE_COUNT,
+  DEFAULT_SYSTEM_PROMPT,
+  selectApprovedExamples,
+}
+export type { ChatMessage, PromptRule, ValidatedPair } from "./prompt-build"
 
 // ---------------------------------------------------------------------------
 // Memory primitives
 // ---------------------------------------------------------------------------
-
-/**
- * A validated source→target pair surfaced from the project's cell store.
- * Used as few-shot examples that capture this team's terminology decisions.
- */
-export interface ValidatedPair {
-  cellId?: string
-  source: string
-  target: string
-}
-
-/**
- * Research-backed default for Luna: keep the global approved-example pool
- * small enough to stay focused, while leaving room for local discourse
- * context. This is a TOTAL prompt budget, not a per-retriever allowance.
- */
-export const DEFAULT_APPROVED_EXAMPLE_COUNT = 10
-
-function normalizedExampleSource(source: string): string {
-  return source.trim().replace(/\s+/g, " ").toLowerCase()
-}
-
-/**
- * Merge canonical retrieval with the local approved-cell fallback into one
- * bounded prompt pool. Retrieved examples win; local cells only fill unused
- * slots. Examples already present in the live request or immediate discourse
- * window are excluded, and source text is preserved in full.
- */
-export function selectApprovedExamples(
-  retrieved: ValidatedPair[],
-  fallback: ValidatedPair[],
-  limit: number,
-  excludedContext: { source: string }[] = [],
-): ValidatedPair[] {
-  if (limit <= 0) return []
-
-  const excludedSources = new Set(
-    excludedContext.map((context) => normalizedExampleSource(context.source)).filter(Boolean),
-  )
-  const seenSources = new Set<string>()
-  const seenCellIds = new Set<string>()
-  const selected: ValidatedPair[] = []
-
-  for (const example of [...retrieved, ...fallback]) {
-    if (selected.length >= limit) break
-    const sourceKey = normalizedExampleSource(example.source)
-    if (!sourceKey || !example.target.trim() || excludedSources.has(sourceKey)) continue
-    if (seenSources.has(sourceKey) || (example.cellId && seenCellIds.has(example.cellId))) continue
-
-    selected.push(example)
-    seenSources.add(sourceKey)
-    if (example.cellId) seenCellIds.add(example.cellId)
-  }
-
-  return selected
-}
 
 /**
  * Extract validated source→target pairs from a snapshot of the project's
@@ -117,63 +86,6 @@ export function collectValidatedPairs(
   }))
 }
 
-/**
- * Render active project rules as a concise terminology/guidance block that
- * can be injected into a system prompt. Only `source-requires-target` rules
- * are rendered as explicit "if you see X → use Y" guidance; other check
- * types become a simple "avoid: X" instruction. Disabled rules are skipped.
- *
- * Returns an empty string when there are no active, injectable rules.
- */
-export function buildRulesBlock(rules: TranslationRule[]): string {
-  const active = rules.filter((r) => r.enabled)
-  if (!active.length) return ""
-
-  const lines: string[] = []
-  for (const rule of active) {
-    const { check } = rule
-    if (check.type === "source-requires-target") {
-      lines.push(`- When the source contains "${check.sourcePattern}", the translation must include "${check.targetPattern}".`)
-    } else if (check.type === "target-forbids") {
-      lines.push(`- Do NOT use "${check.targetPattern}" in the translation.`)
-    } else if (check.type === "source-target-match") {
-      lines.push(`- The pattern "${check.pattern}" must appear in the translation when present in the source.`)
-    }
-    // builtin checks are algorithmic; no useful prompt injection
-  }
-
-  if (!lines.length) return ""
-  return "Project terminology and style rules (MUST follow):\n" + lines.join("\n")
-}
-
-/**
- * Render the brief's L1 summary as a labeled block for the system prompt.
- * Empty/blank input → "" (caller skips injection). The brief states the
- * project's purpose, audience, register, and constraints; it sits ABOVE the
- * mechanical rules block so the model reads intent before specifics.
- */
-export function buildBriefBlock(summary: string | undefined | null): string {
-  const s = (summary ?? "").trim()
-  if (!s) return ""
-  return "Translation brief (the project's purpose and standards — follow it):\n" + s
-}
-
-export const DEFAULT_SYSTEM_PROMPT =
-  "You are a translation assistant completing a project that translates from {sourceLanguage} into {targetLanguage}.\n\n" +
-  "The translation examples the user provides are your PRIMARY source of truth. Treat every observable convention in them as binding: reproduce the project's wording, spelling, tone, register, punctuation, formatting, and style rather than substituting defaults associated with the {targetLanguage} label. This may be an ultra-low-resource language, so follow the project's own evidence above general knowledge.\n\n" +
-  "Always translate from {sourceLanguage} to {targetLanguage}, relying strictly on the reference data and context provided. The language may be an ultra-low-resource language, so it is critical to follow the patterns and style of the provided reference data closely.\n\n" +
-  "To produce the translation, follow these steps:\n" +
-  "1. Analyze the provided reference data to understand the translation patterns and style.\n" +
-  "2. Complete the translation of the given source line or passage.\n" +
-  "3. Ensure your translation is consistent with the existing partial translation and surrounding context.\n" +
-  "4. Pay careful attention to the provided reference data — match its terminology, register, and conventions as closely as possible.\n" +
-  "5. Translate only into {targetLanguage}.\n" +
-  "6. When unsure, err on the side of literalness and stay consistent with the examples.\n" +
-  "7. Preserve the line breaks and any inline formatting present in the source.\n\n" +
-  "Output rules (strictly enforced):\n" +
-  "- Output ONLY the {targetLanguage} translation of the final source line — nothing else.\n" +
-  "- No commentary, explanations, labels, headers, markdown, language names, or restated source text. Just the translated text."
-
 export const DEFAULT_COMPLETION_MAX_TOKENS = 16384
 
 // Former defaults (512 pre-2026-07-29, then 4096). Saving any project setting
@@ -205,7 +117,6 @@ const CHAT_BASE_OVERRIDE =
   ((import.meta.env.VITE_CHAT_BASE as string | undefined)?.replace(/\/+$/, "")) || ""
 export const FRONTIER_CHAT_URL = `${CHAT_BASE_OVERRIDE || CHAT_BASE_FALLBACK || "https://api.aquilla.app/chat"}/api/v1/chat/completions`
 
-interface ChatMessage { role: "system" | "user" | "assistant"; content: string }
 
 /**
  * The project id of the project currently being edited, derived from the SPA
@@ -237,87 +148,6 @@ export function resolveProvider(settings: CompletionSettings): CompletionProvide
   // completionSettings object containing only `systemPrompt` (see
   // useProject.ts overlaySettings), and legacy IDB rows predate `endpoint`.
   return (settings.endpoint ?? "").trim() ? "custom" : "frontier"
-}
-
-export function buildPrompt(options: {
-  sourceLanguage: string; targetLanguage: string; systemPrompt: string
-  sourceText: string; examples: { source: string; target: string }[]
-  /** Active project rules — injected as a "must follow" block in the system prompt. */
-  rules?: TranslationRule[]
-  /** Pre-filtered validated pairs from the project — prepended to examples. */
-  validatedPairs?: ValidatedPair[]
-  /** How to render few-shot examples. Default "source-and-target". */
-  exampleFormat?: "source-and-target" | "target-only"
-  /** The project brief's L1 summary — injected before the rules block. */
-  briefSummary?: string
-  /** Committed target of the immediately preceding cells (document order) — the
-   *  discourse window. Rendered last (closest to the live source) because it is
-   *  real continuity, not a retrieved example. Left-context is the TARGET, not the
-   *  source: it is what gives connectives and participant reference real flow. (D4) */
-  precedingContext?: { source: string; target: string }[]
-  /** Extra task instruction appended to the system prompt after the rules
-   *  block. Must be placeholder-free — it is appended AFTER the
-   *  {sourceLanguage}/{targetLanguage} substitution. Used by the footnote
-   *  output contract (buildFootnoteInstruction); instructions must live here,
-   *  never inside `sourceText`, where they contradict the base prompt's
-   *  "translate the final source line only" rule. */
-  systemAddendum?: string
-  /** Labelled context block rendered in the user message after
-   *  precedingContext and immediately BEFORE the final `Source:` line — never
-   *  inside it. Used for the source-footnote listing. */
-  preSourceBlock?: string
-}): ChatMessage[] {
-  let sys = options.systemPrompt
-    .replace(/\{sourceLanguage\}/g, options.sourceLanguage)
-    .replace(/\{targetLanguage\}/g, options.targetLanguage)
-
-  const briefBlock = buildBriefBlock(options.briefSummary)
-  if (briefBlock) sys = sys + "\n\n" + briefBlock
-
-  // Inject rules block after the base system prompt so it is always visible.
-  if (options.rules?.length) {
-    const block = buildRulesBlock(options.rules)
-    if (block) sys = sys + "\n\n" + block
-  }
-
-  if (options.systemAddendum) sys = sys + "\n\n" + options.systemAddendum
-
-  const targetOnly = options.exampleFormat === "target-only"
-
-  // Validated pairs lead the few-shot examples; search-retrieved examples follow.
-  // Drop incomplete pairs (empty source or target): the branching-search corpus
-  // keeps source-only cells (COALESCE(t.value,'') in loadCorpus) so in-progress
-  // projects still retrieve neighbors, but an example with an empty target
-  // teaches the model nothing and leaks a blank "Translation:" into the prompt.
-  // Mirrors the reference impl (codex-editor shared.ts fetchFewShotExamples).
-  // In target-only mode we still require a non-empty target; source is omitted.
-  const allExamples = [...(options.validatedPairs ?? []), ...options.examples]
-    .filter((ex) => (targetOnly ? ex.target.trim() : ex.source.trim() && ex.target.trim()))
-
-  // In target-only mode, append a note so the model understands what the
-  // examples represent (reference translations, not source→target alignments).
-  if (targetOnly) {
-    sys = sys + "\n\nThe examples provided are reference translations in the target language. Use them to imitate the style, terminology, and patterns of this project."
-  }
-
-  let user = ""
-  if (targetOnly) {
-    for (const ex of allExamples) user += `Target: ${ex.target}\n\n`
-  } else {
-    for (const ex of allExamples) user += `Source: ${ex.source}\nTranslation: ${ex.target}\n\n`
-  }
-  // Immediately-preceding committed context (discourse window): render after the
-  // few-shot examples and just before the live source so it sits closest to what
-  // the model is about to translate. Skip blank pairs. (D4)
-  for (const ctx of options.precedingContext ?? []) {
-    if (ctx.source.trim() && ctx.target.trim()) {
-      user += `Source: ${ctx.source}\nTranslation: ${ctx.target}\n\n`
-    }
-  }
-  if (options.preSourceBlock) user += `${options.preSourceBlock}\n\n`
-  user += `Source: ${options.sourceText}\nTranslation:`
-
-  return [{ role: "system", content: sys }, { role: "user", content: user.trim() }]
 }
 
 // A segmented prompt preserves passage context (pronoun antecedents, tense

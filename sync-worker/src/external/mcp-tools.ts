@@ -166,6 +166,42 @@ export const MCP_TOOLS: McpToolDef[] = [
     },
   },
   {
+    name: 'get_prompt_preview',
+    description:
+      'See the prompt the project copilot would ACTUALLY send when drafting one cell — base ' +
+      'instructions after language substitution, the translation brief, the compiled rules ' +
+      'block (project/org rules plus terminology), the retrieved few-shot examples, and the ' +
+      'preceding approved-target discourse window — as both the assembled system+user ' +
+      'messages and the same content labeled by origin. Args: projectId, cellId, optional ' +
+      'targetLang (target-language lane tag; "" = default lane) and fileId (only needed when ' +
+      'the same cellId exists in more than one file). This is the verification half of prompt ' +
+      'tuning: after PatchSettings changes systemPrompt / completionSettings / ' +
+      'translationBrief / rules, or after a terminology entry lands, call this on a ' +
+      'representative cell to confirm the change actually reached the model instead of ' +
+      'inferring it from a draft. Read-only — it drafts nothing and spends no credits. ' +
+      'Returns not_found if the cell has no source row in this project, and ' +
+      'scope_denied / permission_denied like every other read. `warnings` names anything the ' +
+      'live draft call adds that a read cannot reproduce (footnote output contracts, ' +
+      'per-device provider overrides).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        cellId: { type: 'string', description: 'Cell id to preview the prompt for.' },
+        targetLang: {
+          type: 'string',
+          description: 'Target-language lane tag. Omit or "" for the project default lane.',
+        },
+        fileId: {
+          type: 'string',
+          description: 'Disambiguates a cellId present in more than one file.',
+        },
+      },
+      required: ['projectId', 'cellId'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'list_memory',
     description:
       'Read a project’s Living Memory: the human-authored project brief plus every memory ' +

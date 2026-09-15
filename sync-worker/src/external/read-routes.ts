@@ -7,6 +7,7 @@
 //   GET /api/v1/external/projects/:projectId/files?limit=&cursor=
 //   GET /api/v1/external/projects/:projectId/files/:fileId/cells?since=&limit=&cursor=
 //   GET /api/v1/external/projects/:projectId/cells/:cellId/history?limit=&cursor=
+//   GET /api/v1/external/projects/:projectId/cells/:cellId/prompt-preview?targetLang=&fileId=
 //
 // /me and /projects are the REST cold-start pair (mirrors of the MCP
 // get_identity_and_scope / list_projects tools): they need only a valid
@@ -60,6 +61,7 @@ import { listProjectsForCredential } from "./projects-list"
 import { countRecentRateLimitEvents, recordRateLimitEvent } from "../../../db/shared/rate-limit"
 import { paginate, parsePageParams } from "./pagination"
 import { handleExternalSimilarRequest } from "./similar-route"
+import { handlePromptPreview } from "./prompt-preview"
 import {
   authenticateAndScope,
   authenticateCredential,
@@ -76,6 +78,7 @@ const SEARCH_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/search$/
 const FILE_CELLS_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/files\/([^/]+)\/cells$/
 const FILES_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/files$/
 const CELL_HISTORY_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/cells\/([^/]+)\/history$/
+const PROMPT_PREVIEW_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/cells\/([^/]+)\/prompt-preview$/
 
 // ---------------------------------------------------------------------------
 // Shared auth + scope gate — see read-auth.ts (also used by similar-route.ts)
@@ -403,6 +406,28 @@ async function handleExternalCellHistory(
 }
 
 // ---------------------------------------------------------------------------
+// GET /api/v1/external/projects/:projectId/cells/:cellId/prompt-preview
+// — AQU-1230. The assembled copilot prompt for one cell, plus the labeled
+// parts it was built from. Assembly lives in prompt-preview.ts; the perimeter
+// (credential, scope, live role, rate limit) stays here with every other read.
+// ---------------------------------------------------------------------------
+
+async function handleExternalPromptPreview(
+  request: Request,
+  env: ExternalReadsEnv,
+  projectId: string,
+  cellId: string,
+): Promise<Response> {
+  const authed = await authenticateAndScope(request, env, projectId)
+  if (!authed.ok) return authed.response
+  if (env.AQUILLA_PG) {
+    const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.ctx.credential.credentialId)
+    if (limited) return limited
+  }
+  return handlePromptPreview(request, { AQUILLA_PG: env.AQUILLA_PG }, projectId, cellId)
+}
+
+// ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
 
@@ -435,6 +460,18 @@ export async function handleExternalReadRequest(
 
   match = url.pathname.match(FILES_RE)
   if (match) return handleExternalFiles(request, env, decodeURIComponent(match[1]))
+
+  // Must be checked before CELL_HISTORY_RE only for readability — both are
+  // anchored, so they cannot collide.
+  match = url.pathname.match(PROMPT_PREVIEW_RE)
+  if (match) {
+    return handleExternalPromptPreview(
+      request,
+      env,
+      decodeURIComponent(match[1]),
+      decodeURIComponent(match[2]),
+    )
+  }
 
   match = url.pathname.match(CELL_HISTORY_RE)
   if (match) {

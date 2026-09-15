@@ -214,4 +214,26 @@ describe("useProject — device-local flags follow the settings toggle live (AQU
     })
     expect(seen).toHaveLength(renders)
   })
+
+  it("overlays a saved aiProviderChosen flag without remounting the reader (AQU-1158)", async () => {
+    await createProject(localRecord("p-chosen"))
+    function Reader({ projectId }: { projectId: string }) {
+      const { project, status } = useProject(projectId)
+      return (
+        <>
+          <output data-testid="status">{status}</output>
+          <output data-testid="chosen">{String(project?.aiProviderChosen ?? "unset")}</output>
+        </>
+      )
+    }
+    render(<Reader projectId="p-chosen" />)
+    await waitForReady()
+    expect(screen.getByTestId("chosen")).toHaveTextContent("unset")
+
+    await act(async () => {
+      await patchProject("p-chosen", (p) => ({ ...p, aiProviderChosen: true }))
+    })
+    await waitFor(() => expect(screen.getByTestId("chosen")).toHaveTextContent("true"))
+    expect(mockResolve).toHaveBeenCalledTimes(1)
+  })
 })

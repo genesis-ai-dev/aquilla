@@ -1,6 +1,9 @@
 // CLI entrypoint for the migrate daemon. Parses args, wires the stages, and
-// holds the same R2 run lock `scripts/migrate-all.ts --apply` takes — the two
-// are mutually exclusive writers against the same prod project set.
+// holds the same R2 run lock `scripts/migrate-all.ts --apply` (content pass)
+// takes — the two are mutually exclusive writers against the same prod
+// project set. The nightly `--audio-fast --apply` pass uses a *different*
+// lock key (see scripts/migrate-all.ts) so it no longer contends with this
+// daemon's continuous lease — see docs/MIGRATE-DAEMON.md, Cutover checklist.
 import os from "node:os"
 import fs from "node:fs"
 import path from "node:path"
@@ -111,6 +114,13 @@ export interface ProcLike {
   exit(code?: number): never
 }
 
+// systemd's default KillMode=control-group signals the whole cgroup (pnpm +
+// tsx + node), so this process routinely receives its own SIGTERM plus one
+// forwarded by a parent within a few ms of each other on every `systemctl
+// restart`. Duplicates arriving inside this window are folded into the first
+// signal; only a genuinely later signal escalates to a hard exit.
+const DUPLICATE_SIGNAL_GRACE_MS = 2_000
+
 export async function withLock(
   config: DaemonConfig,
   fn: (release: () => Promise<void>) => Promise<void>,
@@ -120,9 +130,12 @@ export async function withLock(
     lock?: RunLock | null
     /** Test seam: override signal wiring and process.exit. Defaults to the real `process`. */
     proc?: ProcLike
+    /** Test seam: clock used to gate duplicate signals. Defaults to `Date.now`. */
+    now?: () => number
   } = {},
 ): Promise<void> {
   const proc: ProcLike = opts.proc ?? (process as unknown as ProcLike)
+  const now = opts.now ?? Date.now
   const lock = opts.lock !== undefined ? opts.lock : acquireLock(config)
   if (lock) {
     try {
@@ -140,13 +153,23 @@ export async function withLock(
   const release = async (): Promise<void> => { if (beat) clearInterval(beat); await lock?.release() }
 
   let draining = false
+  let drainStartedAt = 0
   const hardExit = (sig: NodeJS.Signals): void => {
     void release().finally(() => proc.exit(sig === "SIGINT" ? 130 : 143))
   }
   const onSignal = (sig: NodeJS.Signals): void => {
     if (!opts.onSignal) { hardExit(sig); return }
-    if (draining) { log(`! second ${sig} received while draining — exiting immediately`); hardExit(sig); return }
+    if (draining) {
+      if (now() - drainStartedAt < DUPLICATE_SIGNAL_GRACE_MS) {
+        log(`duplicate ${sig} received within ${DUPLICATE_SIGNAL_GRACE_MS}ms of the first — ignoring (still draining)`)
+        return
+      }
+      log(`! second ${sig} received while draining — exiting immediately`)
+      hardExit(sig)
+      return
+    }
     draining = true
+    drainStartedAt = now()
     log(`${sig} received — draining in-flight work before releasing the lock`)
     opts.onSignal(sig)
   }

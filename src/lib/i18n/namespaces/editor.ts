@@ -117,6 +117,9 @@ export const editor = defineNamespace({
       other: "{count} cells with stale source",
     }),
 
+    // — Per-cell action rail ————————————————————————————————————————
+    "editor.rail.moreActions": "More actions",
+
     // — Per-cell audio: record / upload / playback ——————————————————
     "editor.audio.record": "Record audio",
     "editor.audio.recordingDisabled": "Recording disabled",
@@ -377,6 +380,7 @@ export const editor = defineNamespace({
     "editor.view.directionOf": "{side} direction",
     "editor.view.decreaseFontSize": "Decrease {side} font size",
     "editor.view.increaseFontSize": "Increase {side} font size",
+    "editor.view.useAppFontSize": "Use app font size for {side}",
     "editor.view.directionMismatch":
       "{side} is forced {forced}, but content looks {detected}",
     "editor.view.dismissDirectionWarning": "Dismiss direction warning",
@@ -1773,6 +1777,15 @@ export const editor = defineNamespace({
             "The number the sentence counts; it also selects which plural form is used.",
         },
       },
+      "editor.rail.moreActions": {
+        description:
+          "Tooltip and screen-reader name of the '…' overflow button in a cell's " +
+          "action rail (AQU-200). Opens a small menu holding the row's " +
+          "lower-frequency actions — record, upload audio, play, text-to-speech, " +
+          "footnote, comments, history — which no longer each get their own " +
+          "button. A noun phrase naming what is inside, not an imperative.",
+        maxLength: 20,
+      },
       "editor.audio.record": {
         description:
           "Tooltip and screen-reader name of the microphone button in a cell's " +
@@ -2853,6 +2866,17 @@ export const editor = defineNamespace({
         description:
           "Tooltip and screen-reader name of the 'A+' button that makes one " +
           "column's text one step larger. Imperative.",
+        placeholders: {
+          side:
+            "Which column, lower-cased by the app from editor.column.source / " +
+            "editor.column.target.",
+        },
+      },
+      "editor.view.useAppFontSize": {
+        description:
+          "Tooltip and screen-reader name of the button that drops a column's " +
+          "custom size so it follows the app-wide font size again. Shown only " +
+          "after A+ or A− has pinned that column. Imperative.",
         placeholders: {
           side:
             "Which column, lower-cased by the app from editor.column.source / " +

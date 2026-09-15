@@ -51,14 +51,38 @@ export const MCP_TOOLS: McpToolDef[] = [
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
   {
+    name: 'list_orgs',
+    description:
+      'List up to 100 organizations the credential covers — the workspace-level entry point ' +
+      'when you manage a whole partner account rather than one project. Each item has ' +
+      '{ id, name, role, role_source } where role is your live org role level and ' +
+      'role_source is owner|member. Scope narrows this and never widens it: an ORG-scoped ' +
+      'credential sees only that org, a PROJECT-scoped credential sees only the org owning ' +
+      'its project (nothing if that project is personal/org-less), and an unscoped ' +
+      'credential sees every org you belong to. Follow with list_projects { orgId } to ' +
+      'enumerate one org\'s projects. Takes no arguments.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
     name: 'list_projects',
     description:
       'List up to 100 projects the credential owner can access (via project membership, ' +
       'project creation, or org membership), further narrowed to the credential org/project ' +
       'scope. Archived projects are excluded. Each item has { id, name, org_id, role_source } ' +
       'where role_source hints how access is granted (creator|member|org). Use before ' +
-      'get_project / search_project to find a project id. Takes no arguments.',
-    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      'get_project / search_project to find a project id. Optional orgId restricts the list ' +
+      'to one org (get ids from list_orgs) — naming an org outside the credential\'s scope ' +
+      'returns scope_denied rather than an empty list.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        orgId: {
+          type: 'string',
+          description: 'Restrict to one org (from list_orgs). Omit for every accessible project.',
+        },
+      },
+      additionalProperties: false,
+    },
   },
   {
     name: 'get_project',
@@ -141,6 +165,35 @@ export const MCP_TOOLS: McpToolDef[] = [
         limit: { type: 'number', description: 'Max results (default 10, max 50).' },
       },
       required: ['projectId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'search_projects',
+    description:
+      'Full-text search SEVERAL projects in one call — the cross-project form of ' +
+      'search_project, for answering "where does this term appear across this partner\'s ' +
+      'workspace?" without one request per project. Args: projectIds (required, an explicit ' +
+      'array of 1-10 project ids — get them from list_projects), q (required), side ' +
+      '(optional, "source"|"target"), limit (optional). Returns { data, nextCursor, ' +
+      'projectIds } where every result carries the projectId it came from, merged and ranked ' +
+      'across projects. Scoping is strict: if ANY requested project is unknown, outside the ' +
+      'credential\'s scope, or one you have no membership on, the whole call fails ' +
+      '(not_found / scope_denied / permission_denied) — results are never silently partial. ' +
+      'Counts against the search rate limit once PER PROJECT searched.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        projectIds: {
+          type: 'array',
+          description: 'Explicit list of project ids to search (1-10).',
+          items: { type: 'string' },
+        },
+        q: { type: 'string', description: 'Search query string.' },
+        side: { type: 'string', enum: ['source', 'target'], description: 'Restrict to one side.' },
+        limit: { type: 'number', description: 'Max merged results (default 50).' },
+      },
+      required: ['projectIds', 'q'],
       additionalProperties: false,
     },
   },

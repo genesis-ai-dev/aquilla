@@ -24,7 +24,7 @@ import {
 } from "@/lib/agent/changeset-api"
 import { t as standaloneT } from "@/lib/i18n/standalone"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
-import { fmtShortCalendarDate } from "@/lib/format-date"
+import { fmtLabeledDateTime } from "@/lib/format-date"
 import { DateTooltip } from "@/components/ui/date-tooltip"
 import { ChangeList, ImportPreviewView } from "@/components/changesets/ChangeList"
 
@@ -216,13 +216,16 @@ function ApprovalSummaryView({
   onReject: () => void
 }) {
   const { locale, t } = useI18n()
+  const { warnings, settingsChanges, testimony, membershipChanges, memoryWrites, structure, ...facts } =
+    data.summary
+  // AQU-1184: validations are testimony — the approver must see every cell and
+  // its current text, never just a count.
+  const testimonyEntries = Array.isArray(testimony) ? testimony : []
   // AQU-1234: a cell-structure changeset reports its effect as one nested
   // object, which the flat number/string filter below would drop — leaving the
   // reviewer with "No changes summarized." on the one command kind that
   // rewrites a file's shape. Flatten it into the same fact list, dropping the
   // zero counts so an insert doesn't read as a delete of nothing.
-  const { warnings, settingsChanges, membershipChanges, memoryWrites, structure, ...facts } =
-    data.summary
   const structureEntries: [string, string | number][] =
     structure && typeof structure === "object"
       ? Object.entries(structure).filter(
@@ -323,6 +326,30 @@ function ApprovalSummaryView({
         )}
       </div>
 
+      {testimonyEntries.length > 0 && (
+        <div className="space-y-1.5">
+          <p className="text-sm font-medium">
+            {t("agent.changeset.testimonyHeading", { count: testimonyEntries.length })}
+          </p>
+          <div className="max-h-96 space-y-1.5 overflow-y-auto rounded-md border bg-muted/30 p-2">
+            <ul className="space-y-1.5 text-xs">
+              {testimonyEntries.map((entry, i) => (
+                <li key={`${entry.fileId}:${entry.cellId}:${entry.laneId ?? ""}:${i}`} className="space-y-0.5">
+                  <p className="font-mono text-[11px] text-muted-foreground">
+                    {entry.kind} · {entry.cellId}
+                    {entry.laneId ? ` · ${entry.laneId}` : ""}
+                  </p>
+                  <p className="text-foreground">
+                    {entry.text}
+                    {entry.truncated ? "…" : ""}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
+
       {data.changes && data.changes.items.length > 0 && (
         <div className="space-y-1.5">
           <p className="text-sm font-medium">
@@ -358,8 +385,12 @@ function ApprovalSummaryView({
         <span>{t("agent.changeset.digestLabel")} <span className="font-mono">{data.digest.slice(0, 16)}…</span></span>
         <span>
           <DateTooltip value={data.expiresAt} label={t("common.date.expires")}>
+            {/* AQU-1177: the visible label carries the TIME, not just the day.
+                Ask-mode plans now live 24h, so "Expires September 5" leaves the
+                reviewer unable to tell whether they have ten hours or ten
+                minutes — exactly the question the deadline is here to answer. */}
             {t("common.expiresOn", {
-              date: fmtShortCalendarDate(data.expiresAt, undefined, locale),
+              date: fmtLabeledDateTime(data.expiresAt, "", undefined, locale),
             })}
           </DateTooltip>
         </span>

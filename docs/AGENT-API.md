@@ -370,6 +370,37 @@ CRUD surface with MCP bolted on.
 `get_capabilities` + `get_identity_and_scope` are what make the cold-start test (§6)
 passable: an agent must be able to learn what it may do before trying to do it.
 
+### Intentionally UI-only — the `uiOnly` map section (AQU-1178)
+
+Knowing what the API *won't* do is part of learning what it will. Some capabilities are
+browser-only **by design**, not by backlog: they are the steps whose whole value is that a
+human account holder performs them. Left undocumented they read as gaps, so agents kept
+probing for endpoints that will never exist and burning turns on `not_found`.
+
+The list is published as a `uiOnly` section in both adapters — REST `GET /api/v1/external`
+and MCP `get_capabilities` — and quoted back in the misses:
+
+| `uiOnly` id | Not exposed | Why it is a human's job | Where the human does it |
+| --- | --- | --- | --- |
+| `credential-minting` | Minting, rotating, or revoking `aqk_` credentials | A token that can mint tokens makes revocation meaningless and lets an agent outlive its own grant | Preferences → Account → "API tokens" (identity host, browser session) |
+| `project-deletion` | Deleting/archiving a project; bulk-deleting its files or members | Irreversible for everyone on the project, and there is no changeset to review | Project Settings → Danger zone |
+| `billing` | Plans, credits, payment methods, invoices, entitlements | Money movement is bound to the account holder and the payment provider's own authenticated flow | Org Settings → Billing |
+| `changeset-approval` | Approving your own staged changeset in ask mode | The gate only means something if a person other than the caller performs it — an API that could approve would be act mode wearing a costume | The `approvalUrl` from prepare, in a browser |
+
+Behaviour these rows buy:
+
+- An unmatched `/api/v1/external/**` path that looks like one of these probes returns its
+  `not_found` with the exclusion's reason, the human path, and `details.uiOnly: "<id>"`
+  instead of the generic "check the API map" hint. Unknown MCP tool names
+  (`mint_credential`, `delete_project`, …) get the same treatment on their JSON-RPC error.
+- **One source, no drift.** The rows above, the two published `uiOnly` sections, and the
+  404/unknown-tool hints all come from `UI_ONLY_SURFACES` in
+  [`sync-worker/src/external/ui-only.ts`](../sync-worker/src/external/ui-only.ts); a test
+  asserts this table lists exactly those ids. Add a row there — never a second list.
+
+A capability that is merely *unbuilt* does not belong in `uiOnly`: the section promises
+"never", not "not yet". Deferred work lives in §8 instead.
+
 ### Operational contract
 
 - **Idempotency keys on all mutations** (UUIDv7, consistent with the outbox design)
@@ -576,6 +607,51 @@ The command layer is now the **shared write spine for both agent surfaces** (see
   `credential_id = 'session'`, forced ask mode, `channel: "app"` provenance, and the existing
   `/api/v2/changesets/:id/approval|approve|reject` human gate; the SPA's live ChangesetCard
   commits after approval (per-item confirmation for testimony kinds).
+
+## Status addendum (2026-09-04, AQU-1182 — file + project lifecycle commands)
+
+Parity epic AQU-1181 items 17/21. All four commands are ask-mode-stageable through the same
+prepare → human approval → commit engine as everything above; none introduces a new event kind
+or a new mutation, and no delete of any kind is exposed.
+
+- **`RenameFile`** — `{ fileId, name }`, CONTRIBUTOR 400 (the UI's own floor for renaming a
+  file). Deliberately **sugar**: prepare desugars a RenameFile batch into the equivalent
+  `EmitEvents` `file.rename` batch and hands it to that engine, so there is one compile path,
+  one set of existence checks, and one prepare-time id ledger. The changeset you read back
+  therefore holds `file.rename` events, not a `RenameFile` entry. The named command exists
+  because `describe_command` and the role-filtered index are how an agent discovers what it may
+  do — "rename a file" is discoverable, "hand-build a `file.rename` payload" is not.
+- **`RenameProject`** — `{ projectId, name }`, MAINTAINER 600. **`ArchiveProject` /
+  `UnarchiveProject`** — `{ projectId }`, OWNER 700. Receipt-only row writes in the
+  `CreateProject` family (D8): each is the sole command in its changeset, mirrors auth-worker
+  `routes/projects.ts` (`PATCH /:projectId`, `POST|DELETE /:projectId/archive`) byte for byte,
+  and re-runs its guards live at commit. All three are **forced to ask-mode** at prepare
+  regardless of the credential's or request's mode (CreateProject's precedent): these reshape
+  or retire the whole project, so an act-mode credential running unattended is a hazard, not a
+  speed win. `RenameFile` deliberately does NOT force ask — it is a CONTRIBUTOR-floor label
+  edit, and forcing approval on it while `SetTranslation` (which writes actual translation
+  content at the same floor) stays act-capable would be incoherent.
+- **Archived-tolerant role resolution** — `resolveProjectRoleShared` denies every archived
+  project, which would make `UnarchiveProject` unreachable by construction. The lifecycle path
+  uses the new `resolveProjectRoleIncludingArchivedShared` instead — the shared-module twin of
+  the resolver auth-worker's own archive endpoints use. Ordinary read/write authority is
+  untouched.
+- **End-state checks** — archiving an already-archived project (or renaming to the name it
+  already has) is `validation_failed` at prepare, and `plan_stale` with
+  `details.status: "superseded"` at commit when a human got there first. A crash-retry
+  (`status = 'committing'`) skips that check and re-applies idempotently.
+- **Still not reachable, deliberately.** File *delete* stays out of the named-command surface
+  while soft-delete/trash semantics are in flux (AQU-272) — it remains available only through
+  the raw `EmitEvents` door. Project *delete* stays UI-only: archive is recoverable, delete is
+  not. `ReorderFile` and `SetFileAnchor` from the original issue are **not implemented**: there
+  is no file-ordering concept in the schema at all (`files` has no order column;
+  `files-read-route.ts` orders by `last_edit_at, name`) and `files.anchor_file_id` is written
+  only by `file.create`/import-reconcile, with no event kind that changes it afterwards and no
+  UI affordance whose floor could be mirrored. Both need new event semantics, which the issue
+  explicitly excluded — see the AQU-1182 thread.
+- **MCP** — the new kinds pass through `prepare_translations`' `commands` array like
+  `PatchSettings` and `EmitEvents` do, but (like those two) are not yet in that tool's
+  `oneOf` input schema. A strict MCP client will reject them client-side; REST is unaffected.
 
 ## Status addendum (2026-09-09, AQU-1222 — the read half of the settings surface)
 

@@ -210,6 +210,65 @@ describe("ApproveChangeset", () => {
     expect(screen.queryByText(/No changes summarized/i)).not.toBeInTheDocument()
   })
 
+  it("AQU-1184: names every staged validation with its cell and current text, not just a count", async () => {
+    const data = {
+      ...APPROVAL_DATA,
+      summary: {
+        events: [
+          { kind: "cell.validate", count: 2, testimony: true },
+          { kind: "comment.create", count: 1, testimony: false },
+        ],
+        testimony: [
+          {
+            kind: "cell.validate",
+            fileId: "f1",
+            cellId: "GEN 1:1",
+            text: "En el principio creó Dios los cielos y la tierra",
+            truncated: false,
+          },
+          {
+            kind: "cell.validate",
+            fileId: "f1",
+            cellId: "GEN 1:2",
+            laneId: "pt",
+            text: "Y la tierra estaba desordenada y vacía",
+            truncated: true,
+          },
+        ],
+        warnings: [],
+      },
+    }
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(data), { status: 200 }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    renderPage()
+
+    // The approver endorses specific sentences — each cell id and its text are on the page.
+    expect(await screen.findByText(/Validations to endorse \(2\)/i)).toBeInTheDocument()
+    expect(screen.getByText(/cell\.validate · GEN 1:1/)).toBeInTheDocument()
+    expect(
+      screen.getByText("En el principio creó Dios los cielos y la tierra"),
+    ).toBeInTheDocument()
+    // Lane-qualified rows name their lane, and truncated text is marked as cut.
+    expect(screen.getByText(/cell\.validate · GEN 1:2 · pt/)).toBeInTheDocument()
+    expect(screen.getByText("Y la tierra estaba desordenada y vacía…")).toBeInTheDocument()
+    // The array must not leak into the flat fact list as "[object Object]".
+    expect(screen.queryByText(/\[object Object\]/)).not.toBeInTheDocument()
+  })
+
+  it("AQU-1184: a changeset with no validations renders no testimony section", async () => {
+    const data = {
+      ...APPROVAL_DATA,
+      summary: { events: [{ kind: "comment.create", count: 1, testimony: false }], warnings: [] },
+    }
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(data), { status: 200 })))
+
+    renderPage()
+
+    expect(await screen.findByText("Blackfoot")).toBeInTheDocument()
+    expect(screen.queryByText(/Validations to endorse/i)).not.toBeInTheDocument()
+  })
+
   it("renders the entry path and content preview for a Living Memory changeset", async () => {
     // AQU-1228: approving IS the memory review, so the human must see WHAT the
     // entry says — "Command: AddDecision" alone is a blind approval.

@@ -226,7 +226,66 @@ Not here: target text (use SetTranslation), source edits, audio (use LinkMedia),
 Gotchas:
 - Head pins (editEventId / targetEventId / sourceEventId / expectedTargetEventId) are SERVER-RESOLVED from the live projection at prepare — omit them; a supplied value is rejected. Commit re-checks the pins (plan_stale on drift).
 - Every referenced cell/comment/file/assignment must exist at prepare — one bad reference rejects the whole plan (no silent skips).
-- payload shapes match the app's event vocabulary — call describe_command or docs before hand-building unfamiliar payloads.`,
+- payload shapes match the app's event vocabulary — call describe_command or docs before hand-building unfamiliar payloads.
+
+Validation guardrails (\`cell.validate\` / \`cell.unvalidate\`; AQU-1184) — these are policy, not preferences, and no parameter turns any of them off:
+- **AI-drafted text cannot be validated through this API.** A \`cell.validate\` whose cell is still an unreviewed machine draft (\`ai_drafted\`) is rejected at prepare with \`validation_failed\` naming that cell, and it rejects the WHOLE plan. This mirrors the in-app rule that AI output is reviewed one cell at a time. To validate such a cell, a human edits or validates it in the app first (either clears the marker); an agent cannot clear it on its own behalf.
+- **Explicit cells only.** Every event names one \`(fileId, cellId)\`. There is no wildcard, glob, range, \`"*"\`, or "validate all" form — such a value is simply a cell id that does not exist, and prepare rejects the plan.
+- **Every staged validation is itemized for the approver.** The effect summary lists each cell id with the text as the server reads it, so approval endorses specific sentences, not a count. Validations are testimony tier: review UIs confirm them per item and never bulk-apply them.
+- **Project validation policy still governs the commit.** The compiled events go through the /events perimeter as the credential's own user, so the validation role floor, the validator allowlist, and \`allowSelfValidation\` apply exactly as they do in the app — a credential cannot validate what its owner could not.`,
+  },
+  {
+    kind: 'RenameFile',
+    title: 'Rename file',
+    oneLiner: 'Change a file’s display label in the project sidebar.',
+    minRoleLevel: CONTRIBUTOR,
+    tier: 'prepared',
+    agentReachable: true,
+    paramsDoc: `### RenameFile
+Params: \`{ fileId, name }\` — batch several per changeset; cannot mix with other command kinds.
+\`name\` is trimmed; 1–256 chars, matching the UI's rename field. Compiles to \`file.rename\` through the /events perimeter, at the same CONTRIBUTOR floor the UI rename uses.
+Gotchas:
+- Sugar over EmitEvents: the staged plan you read back holds the equivalent \`file.rename\` events, not a \`RenameFile\` entry. Behavior is identical either way.
+- The file must exist and not be deleted at prepare, and is re-checked at commit (plan_stale on drift).
+- File DELETE is deliberately not offered as its own command — soft-delete/trash semantics are still in flux (AQU-272).
+Example: \`{ "kind": "RenameFile", "fileId": "f1", "name": "Mark (draft 2)" }\``,
+  },
+  {
+    kind: 'RenameProject',
+    title: 'Rename project',
+    oneLiner: 'Change a project’s name (maintainer+).',
+    minRoleLevel: MAINTAINER,
+    tier: 'structural',
+    agentReachable: true,
+    paramsDoc: `### RenameProject
+Params: \`{ projectId, name }\` — sole command in its changeset; \`projectId\` must equal the changeset's project.
+Receipt-only (a plain \`projects\` row write, not an event), gated at MAINTAINER 600 — the same floor as the UI's rename. Always staged in ask-mode regardless of credential mode, so it always needs human approval at the approvalUrl before commit.
+\`name\` is trimmed; 1–256 chars. Renaming to the name the project already has is rejected at prepare (nothing to do), and, if a human gets there first, lands as \`superseded\` at commit.`,
+  },
+  {
+    kind: 'ArchiveProject',
+    title: 'Archive project',
+    oneLiner: 'Move a project to Trash — recoverable (owner only).',
+    minRoleLevel: OWNER,
+    tier: 'structural',
+    agentReachable: true,
+    paramsDoc: `### ArchiveProject
+Params: \`{ projectId }\` — sole command in its changeset; \`projectId\` must equal the changeset's project.
+Receipt-only (stamps \`projects.archived_at\`), OWNER 700 only — the same floor as the UI's archive. Always staged in ask-mode regardless of credential mode: no agent archives a project unattended. Reversible with UnarchiveProject; project DELETE is never exposed to any agent surface.
+Gotchas:
+- Archiving an already-archived project is rejected at prepare, and lands as \`superseded\` at commit if a human archived it first.
+- Once archived, ordinary project reads and writes stop resolving for everyone; only the lifecycle commands still reach the project.`,
+  },
+  {
+    kind: 'UnarchiveProject',
+    title: 'Restore project',
+    oneLiner: 'Restore a project from Trash (owner only).',
+    minRoleLevel: OWNER,
+    tier: 'structural',
+    agentReachable: true,
+    paramsDoc: `### UnarchiveProject
+Params: \`{ projectId }\` — sole command in its changeset; \`projectId\` must equal the changeset's project.
+Receipt-only (clears \`projects.archived_at\`), OWNER 700 only — the same floor as the UI's restore. Always staged in ask-mode, like ArchiveProject. Unarchiving a project that is not archived is rejected at prepare, and lands as \`superseded\` at commit if a human restored it first.`,
   },
   {
     kind: 'InviteMember',

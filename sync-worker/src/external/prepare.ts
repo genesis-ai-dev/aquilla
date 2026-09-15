@@ -21,6 +21,8 @@ import {
   type LinkMediaCommand,
   type PatchSettingsCommand,
   type PlanImportCommand,
+  type ProjectLifecycleCommand,
+  type RenameFileCommand,
   type SetBriefCommand,
   type SetTranslationCommand,
   type UpdateProjectSettingsCommand,
@@ -33,6 +35,8 @@ import {
   prepareMembership,
   type MembershipCommand,
 } from './commands-membership'
+import { isProjectLifecycleCommand, prepareProjectLifecycle } from './commands-project-lifecycle'
+import { renameFileToEmitEvents } from './commands-rename-file'
 import { prepareSetBrief } from './commands-set-brief'
 import { isMemoryCommand, prepareMemoryCommand } from './commands-memory'
 import { prepareEmitEvents } from './emit-events-engine'
@@ -51,7 +55,7 @@ import { ROLE } from '../events/role-policy'
 // Staging primitives moved to stage.ts (AQU-926) so the new command modules
 // share them without an import cycle; re-exported here for existing importers
 // (mcp-handlers, changesets-route, tests).
-export { approvalUrlFor, CHANGESET_TTL_MS } from './stage'
+export { approvalUrlFor, CHANGESET_ASK_TTL_MS, CHANGESET_TTL_MS } from './stage'
 
 function bearer(request: Request): string | null {
   const h = request.headers.get('Authorization') ?? ''
@@ -239,6 +243,23 @@ export async function prepareChangesetCore(
     return prepareMembership(db, cred, projectId, id, membership, env)
   }
 
+  // Project lifecycle (AQU-1182): RenameProject / ArchiveProject /
+  // UnarchiveProject — receipt-only row writes, sole command per changeset. They
+  // MUST precede the generic role gate below: that gate resolves the role with
+  // resolveProjectRoleShared, which denies every archived project, so an
+  // UnarchiveProject would be permission_denied by construction. Their module
+  // resolves the archived-tolerant role instead (the same resolver auth-worker's
+  // own archive endpoints use) and enforces the per-kind UI floor itself.
+  const lifecycle = validated.commands.find(
+    (c): c is ProjectLifecycleCommand => isProjectLifecycleCommand(c),
+  )
+  if (lifecycle) {
+    if (validated.commands.length !== 1) {
+      return errorResponse('validation_failed', `${lifecycle.kind} must be the only command in a changeset`)
+    }
+    return prepareProjectLifecycle(db, cred, projectId, id, autonomyMode, lifecycle, env)
+  }
+
   // SetBrief (AQU-1227): sole command — it writes the `translationBrief` key of
   // the same versioned settings blob, so sharing a changeset with another
   // settings write would double-bump the version. Its role floor and version
@@ -289,6 +310,33 @@ export async function prepareChangesetCore(
       return errorResponse('validation_failed', 'EmitEvents must be the only command in a changeset')
     }
     return prepareEmitEvents(db, cred, projectId, id, autonomyMode, emitEvents, env, resolvedRole.level)
+  }
+
+  // RenameFile (AQU-1182): sugar over a single `file.rename` event. Desugar into
+  // the equivalent EmitEvents command and hand it to that engine — one compile
+  // path, one set of existence checks, one prepare-time id ledger. The role gate
+  // above already enforced file.rename's floor (requiredRoleForCommand returns
+  // it verbatim), so the plan an agent could not commit is refused here too.
+  const renameFiles = validated.commands.filter(
+    (c): c is RenameFileCommand => c.kind === 'RenameFile',
+  )
+  if (renameFiles.length > 0) {
+    if (renameFiles.length !== validated.commands.length) {
+      return errorResponse(
+        'validation_failed',
+        'RenameFile cannot be mixed with other command kinds in one changeset',
+      )
+    }
+    return prepareEmitEvents(
+      db,
+      cred,
+      projectId,
+      id,
+      autonomyMode,
+      renameFileToEmitEvents(renameFiles),
+      env,
+      resolvedRole.level,
+    )
   }
 
   // Cell-structure commands (AQU-1234): sole command per changeset. A

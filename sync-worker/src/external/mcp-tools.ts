@@ -38,8 +38,11 @@ export const MCP_TOOLS: McpToolDef[] = [
       'expiry, PlanImport max cells, artifact max bytes, max commands per changeset), the ' +
       'full list of stable machine-actionable error codes, and an explanation of the ' +
       'ask-mode approval flow (prepare -> approvalUrl -> a human approves in a browser -> ' +
-      'confirm_changeset). This is the recommended first call: it tells an agent its ' +
-      'ceiling so it does not attempt commits it cannot make. Takes no arguments.',
+      'confirm_changeset). The returned uiOnly field lists what this API deliberately does ' +
+      'NOT expose and never will (credential minting, project deletion, billing, approving ' +
+      'your own changeset) — read it instead of probing for those endpoints. This is the ' +
+      'recommended first call: it tells an agent its ceiling so it does not attempt commits ' +
+      'it cannot make. Takes no arguments.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
   {
@@ -801,6 +804,59 @@ export const MCP_TOOLS: McpToolDef[] = [
       properties: {
         ...projectIdProp,
         changesetId: { type: 'string' },
+      },
+      required: ['projectId', 'changesetId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'list_changesets',
+    description:
+      'List the changesets THIS credential staged in a project, newest first — so you can ' +
+      'see what is still awaiting a human, what expired while you were away, and what already ' +
+      'committed, without having remembered every changesetId. Args: projectId, optional ' +
+      'status (staged|committing|committed|discarded|stale|superseded|expired), optional ' +
+      'limit (default 25, max 100) and cursor. Returns { changesets, nextCursor } — pass ' +
+      'nextCursor back as cursor to page; a null nextCursor means you have them all. Note a ' +
+      'staged ask-mode changeset stays "staged" even after a human approves it (approval is ' +
+      'recorded separately and released by confirm_changeset), so use wait_for_changeset to ' +
+      'learn about an approval — not this list.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        status: {
+          type: 'string',
+          description: 'Exact status filter. Omit for every status.',
+        },
+        limit: { type: 'number', description: 'Page size, 1–100 (default 25).' },
+        cursor: { type: 'string', description: 'Opaque nextCursor from the previous page.' },
+      },
+      required: ['projectId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'wait_for_changeset',
+    description:
+      'Block until an ask-mode changeset is approved by a human or otherwise stops waiting — ' +
+      'instead of polling get_changeset in a loop. Call this right after you hand the ' +
+      'approvalUrl to a human. Returns as soon as EITHER a human approval is recorded ' +
+      '(approved: true — call confirm_changeset now, the approval is short-lived) OR the ' +
+      'status leaves "staged" (rejected shows as "discarded"; also committed/expired/stale/' +
+      'superseded). If nothing happens within the timeout it returns timedOut: true with the ' +
+      'current changeset and you simply call again — that is a normal outcome, not an error. ' +
+      'Args: projectId, changesetId, optional timeoutMs (default 25000, max 60000; 0 means ' +
+      'check now without waiting).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        changesetId: { type: 'string' },
+        timeoutMs: {
+          type: 'number',
+          description: 'How long to wait, in ms. Default 25000, capped at 60000.',
+        },
       },
       required: ['projectId', 'changesetId'],
       additionalProperties: false,

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { termToRegexSource, buildTermRegex, matchesTerm } from "./match"
+import { termToRegexSource, buildTermRegex, matchesTerm, conceptToRegexSource, findConceptMatches, matchesConcept } from "./match"
 
 describe("matchesTerm — inflectional wildcard", () => {
   // WHY: the whole feature is that a managed source term `grac*` should catch
@@ -72,16 +72,16 @@ describe("matchesTerm — inflectional wildcard", () => {
   })
 
   it("termToRegexSource produces the documented boundary/wildcard shape", () => {
-    expect(termToRegexSource("Lord")).toBe("(?<!\\p{L})Lord(?!\\p{L})")
+    expect(termToRegexSource("Lord")).toBe("(?<![\\p{L}\\p{M}])Lord(?![\\p{L}\\p{M}])")
     // WHY: the wildcard now spans marks as well as letters (AQU-1271), since
     // `[\p{L}\p{M}]*` is a strict superset of the old `\p{L}*` — every term
     // that matched before still matches (asserted behaviourally by the other
     // tests in this file); this only documents the updated regex shape.
-    expect(termToRegexSource("grac*")).toBe("(?<!\\p{L})grac[\\p{L}\\p{M}]*")
+    expect(termToRegexSource("grac*")).toBe("(?<![\\p{L}\\p{M}])grac[\\p{L}\\p{M}]*")
     // leading `*` becomes a prefix letter/mark-run (and naturally drops the
     // leading boundary), so `*grace` = "any letter/mark-run then grace then
     // word boundary".
-    expect(termToRegexSource("*grace")).toBe("[\\p{L}\\p{M}]*grace(?!\\p{L})")
+    expect(termToRegexSource("*grace")).toBe("[\\p{L}\\p{M}]*grace(?![\\p{L}\\p{M}])")
   })
 })
 
@@ -129,5 +129,86 @@ describe("wildcard spans marks", () => {
     // Backward compat: Latin inflection unchanged.
     expect(matchesTerm("graced", "grac*")).toBe(true)
     expect(matchesTerm("grid", "grac*")).toBe(false)
+  })
+})
+
+describe("affixes", () => {
+  const project = { prefixes: ["ו", "ה", "ב", "כ", "ל", "מ"], suffixes: ["ים", "י"], maxAffixes: 2 }
+  const concept = { sourceTerm: "הָאָ֗רֶץ" }
+
+  // WHY: the user's Gen 1:1 case. Prefixed forms must match once the project
+  // says which prefixes exist; the code knows nothing about Hebrew.
+  it("matches prefixed forms from the project inventory", () => {
+    expect(matchesConcept("וְהָאָ֗רֶץ", concept, project)).toBe(true)
+    expect(matchesConcept("והארץ", concept, project)).toBe(true)
+    // ב replaces ה here (בָּאָ֣רֶץ has no article), so it must NOT match this term.
+    expect(matchesConcept("בָּאָ֣רֶץ", concept, project)).toBe(false)
+  })
+
+  // WHY: chaining is bounded so a long run of prefix letters cannot swallow an
+  // unrelated word that merely ends in the term.
+  it("respects maxAffixes", () => {
+    const one = { ...project, maxAffixes: 1 }
+    expect(matchesConcept("ולהארץ", concept, one)).toBe(false)
+    expect(matchesConcept("ולהארץ", concept, project)).toBe(true)
+  })
+
+  // WHY: per-concept opt-out. A proper noun should not absorb prefixes even in
+  // an affix-heavy project.
+  it("a concept can opt out with match.affixes=false", () => {
+    expect(matchesConcept("והארץ", { ...concept, match: { affixes: false } }, project)).toBe(false)
+  })
+
+  // WHY: Latin suffixes, to prove nothing is script-specific.
+  it("works for Latin suffix inventories", () => {
+    const en = { prefixes: [], suffixes: ["s", "es", "ed", "ing"] }
+    expect(matchesConcept("the graces", { sourceTerm: "grace" }, en)).toBe(true)
+    expect(matchesConcept("disgrace", { sourceTerm: "grace" }, en)).toBe(false)
+  })
+})
+
+describe("forms and exclusions", () => {
+  // WHY: manual variants are the escape hatch when no option covers a form.
+  it("match.forms are alternates with their own boundaries", () => {
+    const c = { sourceTerm: "אֶרֶץ", match: { forms: ["אָרֶץ"] } }
+    expect(matchesConcept("הָאָרֶץ", c, { prefixes: ["ה"], suffixes: [] })).toBe(true)
+  })
+
+  // WHY: the discovered-forms chip UX writes excludedForms; excluding a surface
+  // form must remove it everywhere the matcher is used (rules, chips, counts).
+  it("excludedForms suppress a whole surface form", () => {
+    const project = { prefixes: ["ו", "ה"], suffixes: [] }
+    const c = { sourceTerm: "הארץ", match: { excludedForms: ["והארץ"] } }
+    expect(matchesConcept("הארץ", c, project)).toBe(true)
+    expect(matchesConcept("והארץ", c, project)).toBe(false)
+    // Exclusion is compared folded when foldMarks is on.
+    const pointed = { sourceTerm: "הָאָ֗רֶץ", match: { excludedForms: ["וְהָאָ֗רֶץ"] } }
+    expect(matchesConcept("וְהָאָֽרֶץ", pointed, project)).toBe(false)
+  })
+
+  // WHY: discoverForms needs to list excluded forms so they can be re-included.
+  it("findConceptMatches can include excluded forms on request", () => {
+    const project = { prefixes: ["ו"], suffixes: [] }
+    const c = { sourceTerm: "הארץ", match: { excludedForms: ["והארץ"] } }
+    expect(findConceptMatches("והארץ הארץ", c, project).map((m) => m.surface)).toEqual(["הארץ"])
+    expect(findConceptMatches("והארץ הארץ", c, project, { includeExcluded: true }).map((m) => m.surface)).toEqual(["והארץ", "הארץ"])
+  })
+
+  // WHY: regex-injection safety extends to forms, affixes and exclusions.
+  it("escapes regex metacharacters in forms, affixes and exclusions", () => {
+    const c = { sourceTerm: "a.b", match: { forms: ["c+d"], excludedForms: ["(x)"] } }
+    expect(matchesConcept("axb", c, { prefixes: ["["], suffixes: [] })).toBe(false)
+    expect(matchesConcept("c+d", c)).toBe(true)
+    expect(conceptToRegexSource(c)).not.toBeNull()
+  })
+
+  // WHY: compile.ts hands the rule engine ONE sourcePattern; everything above
+  // must be expressible as a single regex source.
+  it("conceptToRegexSource returns a single compilable pattern", () => {
+    const src = conceptToRegexSource(
+      { sourceTerm: "הָאָ֗רֶץ", match: { forms: ["אֶרֶץ"], excludedForms: ["והארץ"] } },
+      { prefixes: ["ו", "ה"], suffixes: ["ים"] },
+    )!
+    expect(() => new RegExp(src, "giu")).not.toThrow()
   })
 })

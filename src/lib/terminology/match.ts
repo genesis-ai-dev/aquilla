@@ -1,3 +1,6 @@
+import type { Concept, TermMatchingSettings } from "./types"
+import { resolveMatchOptions } from "./match-options"
+
 /**
  * Shared terminology matcher — inflectional wildcard support.
  *
@@ -36,16 +39,22 @@
  * Word boundaries
  * ---------------
  * `\b` is ASCII-centric, so we use letter-class lookarounds instead:
- *   - leading boundary  → `(?<!\p{L})`  (not preceded by a letter)
- *   - trailing boundary → `(?!\p{L})`   (not followed by a letter)
+ *   - leading boundary  → `(?<![\p{L}\p{M}])`  (not preceded by a letter or mark)
+ *   - trailing boundary → `(?![\p{L}\p{M}])`   (not followed by a letter or mark)
+ * Marks are included in the boundary class because a combining mark (a vowel
+ * point, accent, diacritic, …) is word-internal, not a separator: with
+ * mark-folding on, a plain `(?<!\p{L})` only inspects the single adjacent code
+ * point, so a real preceding consonant separated from the term by just a mark
+ * (e.g. a sheva) would be missed and the boundary would incorrectly fire mid-word.
  * A term WITHOUT a leading `*` gets a leading boundary; WITHOUT a trailing `*`
  * gets a trailing boundary. A term WITH a trailing `*` ends in `\p{L}*` and gets
  * NO trailing boundary, so the inflectional suffix is consumed greedily.
  *
  * Backward compatibility: a term with NO `*` becomes
- * `(?<!\p{L})escaped(?!\p{L})` — i.e. exact whole-word, case-insensitive,
- * Unicode-aware matching, a strict superset of the old `\b…\b` behaviour for
- * the cases the app cares about (whole-word, alphabetic terms).
+ * `(?<![\p{L}\p{M}])escaped(?![\p{L}\p{M}])` — i.e. exact whole-word,
+ * case-insensitive, Unicode-aware matching, a strict superset of the old
+ * `\b…\b` behaviour for the cases the app cares about (whole-word, alphabetic
+ * terms).
  *
  * Regex-injection safety: every non-`*` character is regex-escaped, so a term
  * like `a.b` matches the literal text "a.b", never "axb".
@@ -56,8 +65,8 @@ function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }
 
-const LEAD_BOUNDARY = "(?<!\\p{L})"
-const TRAIL_BOUNDARY = "(?!\\p{L})"
+const LEAD_BOUNDARY = "(?<![\\p{L}\\p{M}])"
+const TRAIL_BOUNDARY = "(?![\\p{L}\\p{M}])"
 /** A wildcard `*` expands to the rest of an inflected word: letters AND marks. */
 const WILDCARD = "[\\p{L}\\p{M}]*"
 /** Zero-or-more combining marks; interleaved after every literal char when folding. */
@@ -158,4 +167,86 @@ export function matchesTerm(
   const flags = opts?.caseSensitive ? "u" : "iu"
   const re = buildTermRegex(term, flags, opts)
   return re !== null && re.test(haystack)
+}
+
+type ConceptLike = Pick<Concept, "sourceTerm" | "match"> & { caseSensitive?: boolean }
+
+export interface ConceptRegexOpts {
+  /** Skip the exclusion lookahead so excluded surface forms still match. */
+  includeExcluded?: boolean
+}
+
+/**
+ * One regex source for a whole concept: sourceTerm + match.forms as
+ * alternates, each with boundaries and affix groups; excludedForms as a
+ * leading negative lookahead anchored at the same word start.
+ */
+export function conceptToRegexSource(
+  concept: ConceptLike,
+  project?: TermMatchingSettings,
+  opts: ConceptRegexOpts = {},
+): string | null {
+  const r = resolveMatchOptions(concept, project)
+  const termOpts: TermRegexOptions = {
+    foldMarks: r.foldMarks,
+    ...(r.affixes ? { prefixes: r.prefixes, suffixes: r.suffixes, maxAffixes: r.maxAffixes } : {}),
+  }
+  const alts = [concept.sourceTerm, ...r.forms]
+    .map((t) => termToRegexSource(t, termOpts))
+    .filter((p): p is string => p !== null)
+  if (alts.length === 0) return null
+  const body = alts.length === 1 ? alts[0] : `(?:${alts.join("|")})`
+
+  if (opts.includeExcluded || r.excludedForms.length === 0) return body
+  const excl = r.excludedForms
+    .map((f) => literalSegment(f, r.foldMarks))
+    .join("|")
+  // Anchored where the match would start: not preceded by a letter, and the
+  // excluded surface must end at a word boundary so `הארץ` excludes only the
+  // whole word, never a longer word that begins with it.
+  return `(?!(?:${excl})${TRAIL_BOUNDARY})${body}`
+}
+
+export function buildConceptRegex(
+  concept: ConceptLike,
+  project?: TermMatchingSettings,
+  flags = "iu",
+  opts?: ConceptRegexOpts,
+): RegExp | null {
+  const src = conceptToRegexSource(concept, project, opts)
+  return src === null ? null : new RegExp(src, flags)
+}
+
+export function matchesConcept(haystack: string, concept: ConceptLike, project?: TermMatchingSettings): boolean {
+  if (!haystack) return false
+  const re = buildConceptRegex(concept, project, concept.caseSensitive ? "u" : "iu")
+  return re !== null && re.test(haystack)
+}
+
+export interface ConceptMatch {
+  start: number
+  end: number
+  surface: string
+}
+
+/** Every non-overlapping match with [start,end) offsets in the ORIGINAL text. */
+export function findConceptMatches(
+  haystack: string,
+  concept: ConceptLike,
+  project?: TermMatchingSettings,
+  opts?: ConceptRegexOpts,
+): ConceptMatch[] {
+  if (!haystack) return []
+  const re = buildConceptRegex(concept, project, concept.caseSensitive ? "gu" : "giu", opts)
+  if (!re) return []
+  const out: ConceptMatch[] = []
+  let m: RegExpExecArray | null
+  while ((m = re.exec(haystack)) !== null) {
+    if (m[0].length === 0) {
+      re.lastIndex += 1
+      continue
+    }
+    out.push({ start: m.index, end: m.index + m[0].length, surface: m[0] })
+  }
+  return out
 }

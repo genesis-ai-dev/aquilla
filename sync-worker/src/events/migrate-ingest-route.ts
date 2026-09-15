@@ -225,7 +225,8 @@ export async function handleMigrateIngestRequest(
   try {
     seqBase = nextSeq = await allocateSeqRange(db, body.projectId, fresh.length)
   } catch (err) {
-    return Response.json({ error: `seq allocation failed: ${String(err)}` }, { status: 500 })
+    console.error("[migrate-ingest] seq allocation failed:", err)
+    return Response.json({ error: "seq allocation failed" }, { status: 500 })
   }
 
   // Pass 2: stamp seqs from the pre-allocated block, in body order, and emit
@@ -274,7 +275,8 @@ export async function handleMigrateIngestRequest(
       await runBatch(stmts.slice(i, i + limit))
     }
   } catch (err) {
-    return Response.json({ error: `DB batch failed: ${String(err)}` }, { status: 500 })
+    console.error("[migrate-ingest] DB batch failed:", err)
+    return Response.json({ error: "DB batch failed" }, { status: 500 })
   }
 
   return Response.json({ accepted: fresh.length, replayed: replayed.size })

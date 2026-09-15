@@ -334,8 +334,10 @@ export async function handleParseArtifact(
         })
   } catch (err) {
     // Malformed archives, missing OOXML parts, and the zip-bomb guards all land
-    // here — a named failure at preview, never a silent partial import.
-    return errorResponse('validation_failed', `parse failed for fileType "${fileType}": ${String(err)}`, {
+    // here — a named failure at preview, never a silent partial import. Log
+    // server-side only; the raw error text must not reach the client.
+    console.error(`[external-import-parse] parse failed for fileType "${fileType}":`, err)
+    return errorResponse('validation_failed', `parse failed for fileType "${fileType}"`, {
       fileType,
       ...(detectedFormat ? { detectedFormat } : {}),
     })

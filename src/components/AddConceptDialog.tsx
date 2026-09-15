@@ -22,11 +22,19 @@ import { Input } from "@/components/ui/input"
 import { isFieldInvalid } from "@/lib/forms/field-state"
 import { requiredString } from "@/lib/forms/schemas"
 import { useI18n } from "@/lib/i18n/I18nProvider"
+import { CellStore, readAtVersion, useCellStoreVersion } from "@/hooks/useActiveCellStore"
 import { DiscoveredFormsChips } from "@/components/terminology/DiscoveredFormsChips"
 import { MatchOptionsFields } from "@/components/terminology/MatchOptionsFields"
 import { countConceptOccurrences, discoverForms } from "@/lib/terminology/discover-forms"
 import { hasCombiningMarks, pruneMatch, resolveMatchOptions } from "@/lib/terminology/match-options"
 import type { ConceptDraft, TermMatchingSettings, TermMatchOptions } from "@/lib/terminology/types"
+
+/**
+ * Stand-in for a caller that passes no store. `useCellStoreVersion` subscribes
+ * and so cannot be called conditionally; an empty real store is cheaper and
+ * more honest than a hand-rolled fake of the interface.
+ */
+const EMPTY_CELL_STORE = new CellStore()
 
 const formSchema = z.object({
   term: requiredString("Source term"),
@@ -53,11 +61,17 @@ export interface AddConceptPopoverProps {
    */
   canApprove?: boolean
   /**
-   * Cells to preview the matcher against (the open file). Absent = no preview
-   * line and no discovered-form chips — the form still works, it just cannot
-   * say what the term will hit.
+   * The open file's cell store, previewed against while the popover is open.
+   * Absent = no preview line and no discovered-form chips — the form still
+   * works, it just cannot say what the term will hit.
+   *
+   * The STORE, not a cells array, and that is load-bearing: this component
+   * subscribes to it directly, so a commit anywhere in the file re-renders the
+   * open popover and nothing else. Handing rows a cells array (or a getter)
+   * instead left the preview on whatever snapshot the memoized row last
+   * rendered with.
    */
-  cells?: ReadonlyArray<{ id: string; original: string }>
+  cellStore?: CellStore
   /** Project affix inventory + fold defaults feeding the preview. */
   termMatching?: TermMatchingSettings
   /** Open project settings so the user can configure prefixes/suffixes. */
@@ -71,7 +85,7 @@ export function AddConceptPopover({
   sourceTerm,
   blockedReason,
   canApprove = false,
-  cells,
+  cellStore,
   termMatching,
   onSetUpAffixes,
   onConfirm,
@@ -131,19 +145,24 @@ export function AddConceptPopover({
   // Gated on `open`: the toolbar mounts this popover the moment source text is
   // selected, and each of these walks every cell in the file. Nothing is shown
   // until the user actually opens the form, so nothing is scanned until then.
+  const storeVersion = useCellStoreVersion(cellStore ?? EMPTY_CELL_STORE)
+  const cells = useMemo(
+    () => (open && cellStore ? readAtVersion(storeVersion, () => cellStore.getAllSummaries()) : undefined),
+    [open, cellStore, storeVersion],
+  )
   const forms = useMemo(
-    () => (open && cells ? discoverForms(cells, previewConcept, termMatching) : []),
-    [open, cells, previewConcept, termMatching],
+    () => (cells ? discoverForms(cells, previewConcept, termMatching) : []),
+    [cells, previewConcept, termMatching],
   )
   const count = useMemo(
-    () => (open && cells ? countConceptOccurrences(cells, previewConcept, termMatching) : 0),
-    [open, cells, previewConcept, termMatching],
+    () => (cells ? countConceptOccurrences(cells, previewConcept, termMatching) : 0),
+    [cells, previewConcept, termMatching],
   )
   // Offer the fold-marks toggle only where marks actually exist — on plain
   // Latin text it is a checkbox that can never change an answer.
   const showFoldMarks = useMemo(
-    () => open && (hasCombiningMarks(term) || (cells?.some((c) => hasCombiningMarks(c.original)) ?? false)),
-    [open, term, cells],
+    () => hasCombiningMarks(term) || (cells?.some((c) => hasCombiningMarks(c.original)) ?? false),
+    [term, cells],
   )
   const hasAffixInventory = resolved.prefixes.length > 0 || resolved.suffixes.length > 0
 

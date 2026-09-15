@@ -1001,21 +1001,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   const isDragging = useRef(false)
   const dragCells = useRef<Set<string>>(new Set())
   const fileCellIds = useCellIds(cellStore, orderedBy, !!audioLens)
-  // AQU-1271: the add-to-terminology popover previews its matcher against the
-  // open file. `getAllSummaries()` is the store's own cached array, so calling
-  // it costs nothing and its identity only changes when the cells do.
-  //
-  // The read goes through `readAtVersion` with the store's LIVE counter
-  // (`getAllVersion()`), not the `cellStoreVersion` React state: the version
-  // must participate so the React Compiler cannot memoize a stale snapshot,
-  // but putting it in this callback's deps would change the getter's identity
-  // on every projection bump and re-render every memoized row — the cost
-  // EditorActionsContext exists to avoid. A getter called at render time by
-  // the one mounted selection toolbar reads the current cells either way.
-  const getConceptPreviewCells = useCallback(
-    () => readAtVersion(cellStore.getAllVersion(), () => cellStore.getAllSummaries()),
-    [cellStore],
-  )
   const cellStoreVersion = useCellStoreVersion(cellStore)
   const audioFileId = cellStore.getFileId()
   const splitByMilestone = useMilestoneSplit()
@@ -2441,7 +2426,6 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
           addConceptBlockedReason={addConceptBlockedReason}
           canApproveConcept={canApproveConcept}
           onSetUpAffixes={onSetUpAffixes}
-          getConceptPreviewCells={getConceptPreviewCells}
           onAskAiFromSelection={onAskAiFromSelection}
           onAssignVoice={onAssignVoice}
           onDragStart={handleDragStart}
@@ -3128,11 +3112,6 @@ interface MemoizedRowProps {
   /** AQU-1271: open project settings at the terminology section so the user can
    *  configure the prefixes/suffixes the add-popover's matcher offers. */
   onSetUpAffixes?: () => void
-  /** AQU-1271: this file's cells, for the add-popover's live match preview.
-   *  A GETTER, not an array: rows forward it untouched and only the mounted
-   *  selection toolbar ever calls it, so the row memo keeps a stable prop and
-   *  no row re-renders when cell text changes. */
-  getConceptPreviewCells?: () => ReadonlyArray<{ id: string; original: string }>
   onAskAiFromSelection?: (chip: ContextChip) => void
   onAssignVoice?: (cellId: string, voiceId: string) => void
   onDragStart: (cellId: string) => void
@@ -3206,7 +3185,7 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
     getFootnoteDetails,
     onSeekToCue, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled,
     sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, isAnonymous,
-    onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, getConceptPreviewCells, onAskAiFromSelection, onAssignVoice,
+    onJumpToCell, micDenied, onProjectChanged, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection, onAssignVoice,
     audioLens, onOpenAudioSetup,
     onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
     onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
@@ -3357,7 +3336,6 @@ const MemoizedRow = React.memo(function MemoizedRow(props: MemoizedRowProps) {
         addConceptBlockedReason={addConceptBlockedReason}
         canApproveConcept={canApproveConcept}
         onSetUpAffixes={onSetUpAffixes}
-        getConceptPreviewCells={getConceptPreviewCells}
         onAskAiFromSelection={onAskAiFromSelection}
         onAssignVoice={onAssignVoice}
         onDragStart={handleDragStart}
@@ -3527,11 +3505,6 @@ interface EditorRowProps {
   /** AQU-1271: open project settings at the terminology section so the user can
    *  configure the prefixes/suffixes the add-popover's matcher offers. */
   onSetUpAffixes?: () => void
-  /** AQU-1271: this file's cells, for the add-popover's live match preview.
-   *  A GETTER, not an array: rows forward it untouched and only the mounted
-   *  selection toolbar ever calls it, so the row memo keeps a stable prop and
-   *  no row re-renders when cell text changes. */
-  getConceptPreviewCells?: () => ReadonlyArray<{ id: string; original: string }>
   onAskAiFromSelection?: (chip: ContextChip) => void
   onAssignVoice?: (cellId: string, voiceId: string) => void
   getTokenForFile?: (fileId: string) => Promise<string | null>
@@ -4314,7 +4287,7 @@ function EditorRow({
   onEscapeToGrid, onGridRowKeyNav,
   rowIndex, contentNumber, lineNumbersEnabled, scriptureNumbering, cellLabelsEnabled, sourceDirectionMode, targetDirectionMode, sourceTextDirection, targetTextDirection, gridCols, castGutter, ttsSettings,
   isAnonymous, micDenied,
-  audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, getConceptPreviewCells, onAskAiFromSelection,
+  audioLens, onOpenAudioSetup, onAssignVoice, onAddConceptFromSelection, addConceptBlockedReason, canApproveConcept, onSetUpAffixes, onAskAiFromSelection,
   onCellCommitted, getPendingTargetEventId, onOptimisticEdit, lockHolderLabel, presenceStore, remoteChangedWhileFocused,
   onClaimCell, onReleaseCell, onTargetPresenceSelection, onAckRemoteChange,
   isStaleSource,
@@ -4341,6 +4314,7 @@ function EditorRow({
     onInfractionClick, onOpenComments, onOpenHistory, onOpenTerminologyConcept,
     onAiSetupNeeded, onOpenRecording,
     onMediaRowActivate, onAssignCastVoice, onClearCastVoice, onTakeSaved, audioHomeFor, myScopes,
+    cellStore: previewCellStore,
   } = useEditorActions()
   // AQU-633: a scoped member can only validate cells in their assigned lane/file.
   // Combine the role capability with the per-cell scope check so an out-of-scope
@@ -6138,7 +6112,7 @@ function EditorRow({
                 onAddToTermbase={onAddConceptFromSelection ? handleCreateTerm : undefined}
                 addConceptBlockedReason={addConceptBlockedReason}
                 canApproveConcept={canApproveConcept}
-                cells={getConceptPreviewCells?.()}
+                cellStore={previewCellStore}
                 termMatching={project.termMatching}
                 onSetUpAffixes={onSetUpAffixes}
                 onAddOpenChange={handleAddTermOpenChange}

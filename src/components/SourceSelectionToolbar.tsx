@@ -5,6 +5,7 @@
 import { useMemo } from "react"
 import { BookOpen, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import type { CellStore } from "@/hooks/useActiveCellStore"
 import type { Concept, ConceptDraft, TermMatchingSettings } from "@/lib/terminology/types"
 import { TermLookupPopover } from "./TermLookupPopover"
 import { AddConceptPopover } from "./AddConceptDialog"
@@ -18,8 +19,9 @@ export interface SourceSelectionToolbarProps {
   addConceptBlockedReason?: string | null
   /** May this user APPROVE a term (enforce it), vs only suggest one? */
   canApproveConcept?: boolean
-  /** AQU-1271: cells the add-popover previews the matcher against (this file). */
-  cells?: ReadonlyArray<{ id: string; original: string }>
+  /** AQU-1271: the open file's cell store; the add-popover subscribes to it
+   *  for its live match preview. */
+  cellStore?: CellStore
   /** Project affix inventory + fold defaults feeding that preview. */
   termMatching?: TermMatchingSettings
   /** Open project settings so the user can configure prefixes/suffixes. */
@@ -39,7 +41,7 @@ export function SourceSelectionToolbar({
   onAddToTermbase,
   addConceptBlockedReason,
   canApproveConcept,
-  cells,
+  cellStore,
   termMatching,
   onSetUpAffixes,
   onAddOpenChange,
@@ -99,7 +101,7 @@ export function SourceSelectionToolbar({
           sourceTerm={sourceSelection}
           blockedReason={addConceptBlockedReason}
           canApprove={canApproveConcept}
-          cells={cells}
+          cellStore={cellStore}
           termMatching={termMatching}
           onSetUpAffixes={onSetUpAffixes}
           onConfirm={onAddToTermbase}

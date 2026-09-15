@@ -7,9 +7,43 @@
  */
 
 import { describe, it, expect, vi } from "vitest"
-import { render, screen, fireEvent, waitFor } from "@testing-library/react"
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { AddConceptPopover } from "./AddConceptDialog"
+import { CellStore } from "@/hooks/useActiveCellStore"
+import type { CellRow } from "@/lib/sync/cells-read-types"
+
+function sourceRow(cellId: string, value: string): CellRow {
+  return {
+    cellId,
+    side: "source",
+    value,
+    valueHtml: null,
+    type: null,
+    canonicalRef: null,
+    anchorCellId: null,
+    eventId: `source-${cellId}`,
+    sourceEventId: null,
+    lastEditor: "alice",
+    lastEditAt: 1,
+    validated: false,
+    wordCount: 1,
+    endorsementCount: 0,
+  }
+}
+
+function seededStore(rows: CellRow[]): CellStore {
+  const store = new CellStore()
+  store.setRuntime({
+    projectId: "p1",
+    fileId: "f1",
+    username: "alice",
+    requiredValidations: 1,
+    auditStats: new Map(),
+  })
+  store.replaceRows(rows)
+  return store
+}
 
 function renderPopover(props: Partial<Parameters<typeof AddConceptPopover>[0]> = {}) {
   const defaults = {
@@ -185,14 +219,15 @@ describe("AddConceptPopover", () => {
   it("previews matches, toggles options live, and submits exclusions", async () => {
     const user = userEvent.setup()
     const onConfirm = vi.fn()
-    const cells = [
-      { id: "a", original: "וְהָאָ֗רֶץ הָיְתָה" },
-      { id: "b", original: "אֵת הָאָֽרֶץ׃" },
-      { id: "c", original: "nothing here" },
+    const rows = [
+      sourceRow("a", "וְהָאָ֗רֶץ הָיְתָה"),
+      sourceRow("b", "אֵת הָאָֽרֶץ׃"),
+      sourceRow("c", "nothing here"),
     ]
+    const cellStore = seededStore(rows)
     renderPopover({
       sourceTerm: "הָאָ֗רֶץ",
-      cells,
+      cellStore,
       termMatching: { prefixes: ["ו"], suffixes: [] },
       canApprove: true,
       onConfirm,
@@ -210,6 +245,27 @@ describe("AddConceptPopover", () => {
         }),
       )
     })
+  })
+
+  // WHY: stale-snapshot regression (AQU-1271 review). The preview used to be
+  // handed a cells array through the memoized editor row, so a commit anywhere
+  // else in the file left an OPEN popover counting against a dead snapshot.
+  // The popover subscribes to the store itself; a new matching cell must show
+  // up in the count without the popover being reopened.
+  it("re-counts while open when the file's cells change underneath", async () => {
+    const rows = [
+      sourceRow("a", "וְהָאָ֗רֶץ הָיְתָה"),
+      sourceRow("b", "nothing here"),
+    ]
+    const cellStore = seededStore(rows)
+    renderPopover({ sourceTerm: "הָאָ֗רֶץ", cellStore, termMatching: { prefixes: ["ו"], suffixes: [] } })
+    await openPopover()
+    expect(await screen.findByText(/Matches 1 place\b/)).toBeTruthy()
+
+    act(() => {
+      cellStore.replaceRows([...rows, sourceRow("c", "אֵת הָאָֽרֶץ׃")], { full: true })
+    })
+    expect(await screen.findByText(/Matches 2 places/)).toBeTruthy()
   })
 
   it("closes on Cancel without calling onConfirm", async () => {

@@ -101,6 +101,15 @@ export interface EditorActionsContextValue {
   audioHomeFor?: (
     cell: import("@/hooks/useCells").CellData,
   ) => readonly import("@/hooks/useCells").CellData[] | null
+  /**
+   * AQU-1271: the open file's cell store, for the add-to-terminology popover's
+   * live match preview. The popover subscribes to it itself, so a commit
+   * anywhere in the file re-renders only the open popover — passing rows a
+   * cells array (or a getter) instead pinned the preview to whatever snapshot
+   * the memoized row last rendered with. Context rather than a row prop: rows
+   * only forward it, and the store object is identity-stable.
+   */
+  cellStore?: import("@/hooks/useActiveCellStore").CellStore
 }
 
 const EditorActionsContext = createContext<EditorActionsContextValue>({})

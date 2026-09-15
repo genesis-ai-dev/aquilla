@@ -63,6 +63,7 @@ describe('command catalog — invariants', () => {
       UpdateProjectSettings: { kind: 'UpdateProjectSettings', projectId: 'p', settings: {}, ifMatchVersion: 0 },
       PatchSettings: { kind: 'PatchSettings', projectId: 'p', ops: [{ key: 'systemPrompt', value: 'x' }], ifMatchVersion: 0 },
       EmitEvents: { kind: 'EmitEvents', events: [{ kind: 'comment.create', payload: { body: 'hi' } }] },
+      DraftCells: { kind: 'DraftCells', fileId: 'f', cellIds: ['c'] },
       SetSource: { kind: 'SetSource', fileId: 'f', cellId: 'c', value: 'v' },
       SetTranscription: { kind: 'SetTranscription', fileId: 'f', cellId: 'c', transcription: 't' },
       SetTiming: { kind: 'SetTiming', fileId: 'f', cellId: 'c', startMs: 0, endMs: 1 },

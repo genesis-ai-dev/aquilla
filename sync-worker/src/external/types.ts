@@ -13,6 +13,10 @@ export type ExternalEnv = EventsRouteEnv & {
   SNAPSHOTS?: R2Bucket
   /** Optional R2 key prefix for PR/staging isolation (mirrors audio.ts). */
   R2_KEY_PREFIX?: string
+  /** Identity-worker base URL — the DraftCells command (AQU-1186) calls its
+   *  internal drafting endpoint with the SYNC_SECRET_KEY shared secret, the
+   *  same server-to-server pattern as monday-notify.ts. */
+  AUTH_WORKER_URL?: string
 }
 
 /** A skipped / warned item — nothing is ever silently dropped (§3). */

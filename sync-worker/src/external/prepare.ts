@@ -5,7 +5,7 @@
 // the plan with a digest, and inserts a staged changeset (idempotent on the
 // client-supplied UUIDv7 id). Nothing is applied here — ask/act commit does that.
 
-import { errorResponse, toErrorResponse } from './errors'
+import { ExternalError, errorResponse, toErrorResponse } from './errors'
 import { AUTH_HINT } from './discovery-route'
 import {
   validateCommands,
@@ -17,6 +17,7 @@ import {
   type CreateOrgCommand,
   type StructureCommand,
   type CreateProjectCommand,
+  type DraftCellsCommand,
   type EmitEventsCommand,
   type LinkMediaCommand,
   type PatchSettingsCommand,
@@ -30,6 +31,8 @@ import {
 import { isOrgMemberCommand, type OrgMemberCommand } from './commands-org-members'
 import { prepareOrgMember } from './org-members-engine'
 import { changedPolicyKeys, preparePatchSettings, previewSettingValue } from './commands-patch-settings'
+import { assertWithinBatchCap, requestDrafts } from './commands-draft-cells'
+import { completionBatchSizeFromSettings } from '../../../db/shared/completion-batch'
 import {
   isMembershipCommand,
   prepareMembership,
@@ -314,6 +317,25 @@ export async function prepareChangesetCore(
     return prepareEmitEvents(db, cred, projectId, id, autonomyMode, emitEvents, env, resolvedRole.level)
   }
 
+  // DraftCells (AQU-1186): a prepare-time expansion — run the project's copilot
+  // NOW, then fall through the ordinary SetTranslation path with the generated
+  // text. Sole command in its changeset (one command already batches many
+  // cells, and the cap is per-changeset).
+  const draftCells = validated.commands.find(
+    (c): c is DraftCellsCommand => c.kind === 'DraftCells',
+  )
+  let pending: Command[] = validated.commands
+  if (draftCells) {
+    if (validated.commands.length !== 1) {
+      return errorResponse('validation_failed', 'DraftCells must be the only command in a changeset')
+    }
+    try {
+      pending = await expandDraftCells(db, env, cred, projectId, draftCells)
+    } catch (err) {
+      return toErrorResponse(err)
+    }
+  }
+
   // AQU-1183 cell-field family (SetSource / SetTranscription / SetTiming /
   // SetTrackOverride): its own prepare path. These write EXISTING cell/file
   // fields — two of them compile to the chain-mutating `source.cell.commit`,
@@ -386,11 +408,11 @@ export async function prepareChangesetCore(
   // PlanImport is a whole-file operation, not a per-cell batch — it takes its
   // own prepare path (no cell preconditions; a duplicate-name precondition). A
   // PlanImport must be the sole command in its changeset.
-  const planImports = validated.commands.filter(
+  const planImports = pending.filter(
     (c): c is PlanImportCommand => c.kind === 'PlanImport',
   )
   if (planImports.length > 0) {
-    if (validated.commands.length !== 1) {
+    if (pending.length !== 1) {
       return errorResponse(
         'validation_failed',
         'PlanImport must be the only command in a changeset',
@@ -402,11 +424,11 @@ export async function prepareChangesetCore(
   // LinkMedia takes its own prepare path (per-cell audio attach, not a
   // per-cell translation batch). For v1 a LinkMedia changeset holds only
   // LinkMedia commands — mixing with SetTranslation is rejected.
-  const linkMedia = validated.commands.filter(
+  const linkMedia = pending.filter(
     (c): c is LinkMediaCommand => c.kind === 'LinkMedia',
   )
   if (linkMedia.length > 0) {
-    if (linkMedia.length !== validated.commands.length) {
+    if (linkMedia.length !== pending.length) {
       return errorResponse(
         'validation_failed',
         'LinkMedia cannot be mixed with other command kinds in one changeset',
@@ -415,8 +437,9 @@ export async function prepareChangesetCore(
     return prepareLinkMedia(db, cred, projectId, id, autonomyMode, linkMedia, env)
   }
 
-  // Past the PlanImport branch every remaining command is a SetTranslation.
-  const setCommands = validated.commands.filter(
+  // Past the PlanImport branch every remaining command is a SetTranslation —
+  // either the caller's own, or the ones DraftCells just materialized.
+  const setCommands = pending.filter(
     (c): c is SetTranslationCommand => c.kind === 'SetTranslation',
   )
 
@@ -517,6 +540,62 @@ export async function prepareChangesetCore(
     summary,
     plannedIds,
   })
+}
+
+/**
+ * Expand a DraftCells command into the SetTranslation commands the rest of the
+ * prepare path already knows how to stage (AQU-1186).
+ *
+ * Order matters and is the cost rail: the per-changeset cap is checked BEFORE
+ * any model call, so an over-cap request costs nothing and names the cap. Only
+ * then does the drafting bridge run; a credit-exhausted org throws out of here
+ * with a named error and never reaches stageAndRespond, which is what makes
+ * "exhaustion stages nothing" true rather than aspirational.
+ *
+ * The returned commands carry SERVER-MINTED `aiDraft` provenance so the commit
+ * lands as `ai_drafted` — a human reviews it as AI work, exactly as they would
+ * an in-app draft. No auto-commit: this only ever produces a staged plan.
+ */
+async function expandDraftCells(
+  db: AquillaDb,
+  env: ExternalEnv,
+  cred: ApiCredentialContext,
+  projectId: string,
+  cmd: DraftCellsCommand,
+): Promise<Command[]> {
+  const projectSettings = await loadProjectSettings(db, projectId)
+  assertWithinBatchCap(cmd, completionBatchSizeFromSettings(projectSettings.settings))
+
+  const { drafts } = await requestDrafts(env, {
+    projectId,
+    userId: cred.userId,
+    fileId: cmd.fileId,
+    cellIds: cmd.cellIds,
+    ...(cmd.instructions !== undefined ? { instructions: cmd.instructions } : {}),
+  })
+
+  // Only ever stage cells the caller actually asked for: the plan a human
+  // approves must match the plan the agent proposed, so a backend that widened
+  // the work list (or echoed a stale one) cannot smuggle extra writes in.
+  const requested = new Set(cmd.cellIds)
+  const scoped = drafts.filter((d) => requested.has(d.cellId))
+
+  if (scoped.length === 0) {
+    throw new ExternalError(
+      'job_failed',
+      'the copilot returned no usable drafts for these cells — nothing was staged; retry, or draft fewer cells',
+      { requested: cmd.cellIds.length },
+    )
+  }
+
+  return scoped.map((d) => ({
+    kind: 'SetTranslation' as const,
+    fileId: cmd.fileId,
+    cellId: d.cellId,
+    value: d.value,
+    ...(cmd.laneId ? { laneId: cmd.laneId } : {}),
+    ...(d.aiDraft !== undefined && d.aiDraft !== null ? { aiDraft: d.aiDraft } : {}),
+  }))
 }
 
 /**

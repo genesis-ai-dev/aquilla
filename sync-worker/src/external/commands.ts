@@ -8,6 +8,7 @@
 // dependency-free.
 
 import { REQUIRED_ROLE, ROLE } from '../events/role-policy'
+import type { AiDraftProvenance } from '../events/types'
 import {
   validatePlanImportManifest,
   type PlanImportCell,
@@ -24,6 +25,11 @@ import {
   validateEmitEventsCommand,
   type EmitEventsCommand,
 } from './commands-emit-events'
+import {
+  draftCellsFloor,
+  validateDraftCellsCommand,
+  type DraftCellsCommand,
+} from './commands-draft-cells'
 import {
   cellFieldsFloor,
   isCellFieldCommand,
@@ -85,6 +91,7 @@ function isMemoryCommandKind(kind: string): boolean {
 export type { PlanImportCell, PlanImportManifest, PlanImportVariant } from './import-manifest'
 export type { PatchSettingsCommand, PatchSettingsOp } from './commands-patch-settings'
 export type { EmitEventsCommand, EmitEventInput } from './commands-emit-events'
+export type { DraftCellsCommand } from './commands-draft-cells'
 export type {
   CellFieldCommand,
   SetSourceCommand,
@@ -145,6 +152,13 @@ export interface SetTranslationCommand {
    *  lane. Prepare rejects an unregistered lane — register it with
    *  UpdateProjectSettings first. */
   laneId?: string
+  /** SERVER-MINTED (AQU-1186). Set only by the DraftCells prepare path when it
+   *  materializes the copilot's output into SetTranslation commands; it makes
+   *  the compiled commit carry `ai_suggestion` + `ai_draft`, so the cell lands
+   *  as `ai_drafted` and a human reviews it as AI work. `validateCommands`
+   *  rebuilds every command from known keys only, so a caller CANNOT set this
+   *  on a hand-written SetTranslation — provenance is never self-asserted. */
+  aiDraft?: AiDraftProvenance
 }
 
 /** Create a file and its source cells via the changeset pipeline (AQU-533 §5).
@@ -256,6 +270,7 @@ export type Command =
   | LinkMediaCommand
   | PatchSettingsCommand
   | EmitEventsCommand
+  | DraftCellsCommand
   | CellFieldCommand
   | MembershipCommand
   | RenameFileCommand
@@ -741,6 +756,11 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
       if (cmd) commands.push(cmd)
       return
     }
+    if (c.kind === 'DraftCells') {
+      const cmd = validateDraftCellsCommand(c, index, issues)
+      if (cmd) commands.push(cmd)
+      return
+    }
     // AQU-1183 cell-field commands (SetSource / SetTranscription / SetTiming /
     // SetTrackOverride) — one validator for the family.
     if (isCellFieldKind(c.kind)) {
@@ -868,6 +888,10 @@ export function requiredRoleForCommand(c: Command): number {
   if (c.kind === 'LinkMedia') {
     // Compiles to cell.audio.attach + cell.audio.select (both CONTRIBUTOR).
     return Math.max(REQUIRED_ROLE['cell.audio.attach'], REQUIRED_ROLE['cell.audio.select'])
+  }
+  if (c.kind === 'DraftCells') {
+    // Expands at prepare into SetTranslation → target.cell.commit.
+    return draftCellsFloor()
   }
   // AQU-1183: the cell-field family. Each command's floor is the max
   // REQUIRED_ROLE across the events it compiles to — PROJECT_LEAD for a source

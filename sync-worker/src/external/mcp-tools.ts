@@ -520,6 +520,15 @@ export const MCP_TOOLS: McpToolDef[] = [
       'commands may share one changeset with each other, but LinkMedia cannot mix with ' +
       'SetTranslation/CreateProject/UpdateProjectSettings in the same changeset. Requires ' +
       'CONTRIBUTOR.\n' +
+      '  { kind: "DraftCells", fileId, cellIds, laneId?, instructions? } — ask the PROJECT\'S ' +
+      'OWN copilot to draft those cells instead of writing the text yourself, so the result ' +
+      'carries this project\'s terminology, example pairs and brief. Must be the SOLE command ' +
+      'in the changeset. `cellIds` is explicit and non-empty — wildcards are rejected; the ' +
+      'per-changeset cap is the project\'s configured completion batch size (default 10, max ' +
+      '50) and an over-cap request names the cap so you can split the work. Drafting spends ' +
+      'the org\'s credits (an exhausted org returns rate_limited and stages NOTHING). The ' +
+      'staged cells commit as AI drafts awaiting human review — `aiDrafted`/`aiDraft` show ' +
+      'up in cell reads until a person edits or validates them. Requires CONTRIBUTOR.\n' +
       '  { kind: "InsertCell", fileId, value, afterCellId?, cellId?, type?, canonicalRef?, ' +
       'startMs?, endMs?, metadata? } — add a source cell. `afterCellId` names the cell it ' +
       'follows; null/omitted inserts at the head of the file. Whatever was anchored there is ' +
@@ -570,10 +579,10 @@ export const MCP_TOOLS: McpToolDef[] = [
         commands: {
           type: 'array',
           description:
-            'CreateOrg / CreateProject / UpdateProjectSettings / LinkMedia / InsertCell / ' +
-            'DeleteCell / SplitCell commands to stage (Agent API v1.1) — see this tool\'s ' +
-            'description for per-kind shape, role gates, and sole-command rules. PlanImport ' +
-            'is not accepted here (REST-only).',
+            'CreateOrg / CreateProject / UpdateProjectSettings / LinkMedia / DraftCells / ' +
+            'InsertCell / DeleteCell / SplitCell commands to stage (Agent API v1.1) — see this ' +
+            'tool\'s description for per-kind shape, role gates, and sole-command rules. ' +
+            'PlanImport is not accepted here (REST-only).',
           items: {
             type: 'object',
             oneOf: [
@@ -640,6 +649,32 @@ export const MCP_TOOLS: McpToolDef[] = [
                   },
                 },
                 required: ['kind', 'fileId', 'cellId', 'artifactId'],
+                additionalProperties: false,
+              },
+              {
+                type: 'object',
+                properties: {
+                  kind: { type: 'string', enum: ['DraftCells'] },
+                  fileId: { type: 'string' },
+                  cellIds: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    minItems: 1,
+                    description:
+                      'Explicit cell ids to draft. Wildcards ("*", "all") are rejected; the cap is ' +
+                      "the project's configured completion batch size (default 10, max 50).",
+                  },
+                  laneId: {
+                    type: 'string',
+                    description:
+                      'Target-language lane (a registered settings.targetLanes tag). Omit for the default lane.',
+                  },
+                  instructions: {
+                    type: 'string',
+                    description: 'Optional extra steer for this batch, passed to the drafting prompt.',
+                  },
+                },
+                required: ['kind', 'fileId', 'cellIds'],
                 additionalProperties: false,
               },
               {

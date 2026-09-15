@@ -152,6 +152,14 @@ export default defineConfig(({ mode }) => ({
       // main graph. kokoro-js/phonemizer are excluded below — they must be
       // worker-bundled without Node shims.
       "@huggingface/transformers",
+      // src/lib/offline/store.ts isn't statically reachable yet (Tauri-only,
+      // not wired into App.tsx), so Vite's crawler never discovers this deep
+      // Effect-based dependency tree on cold start. Without pre-inclusion,
+      // the first call to getOfflineStore() triggers a mid-session
+      // re-optimize + full reload (white screen, cleared console).
+      "@livestore/livestore",
+      "@livestore/adapter-web",
+      "@livestore/react",
     ],
     // Prebundling kokoro-js with the main-thread Node polyfills injects
     // `process.versions.node` into phonemizer. The worker then loads that

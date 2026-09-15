@@ -189,6 +189,53 @@ export async function fetchAccessibleProjectsResult(
   }
 }
 
+/** First page size for project tables and pickers (matches auth-worker default). */
+export const PROJECT_DIRECTORY_PAGE_SIZE = 40
+
+export interface ProjectDirectoryPage {
+  projects: CloudProjectSummary[]
+  nextCursor: string | null
+}
+
+/**
+ * Paged GET /api/v2/projects. Pass `limit` so the catalog loads a page at a
+ * time instead of dumping every accessible (or, for platform admins, every)
+ * project into the client.
+ */
+export async function listProjectsPage(
+  jwt: string,
+  opts: {
+    q?: string
+    limit?: number
+    cursor?: string | null
+    orgId?: number
+    minRole?: number
+    archived?: boolean
+    signal?: AbortSignal
+  } = {},
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<ProjectDirectoryPage> {
+  const params = new URLSearchParams()
+  const q = opts.q?.trim()
+  if (q) params.set("q", q)
+  params.set("limit", String(opts.limit ?? PROJECT_DIRECTORY_PAGE_SIZE))
+  if (opts.cursor) params.set("cursor", opts.cursor)
+  if (opts.orgId != null) params.set("orgId", String(opts.orgId))
+  if (opts.minRole != null) params.set("minRole", String(opts.minRole))
+  if (opts.archived) params.set("archived", "true")
+  const res = await fetch(`${apiUrl}/api/v2/projects?${params}`, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${jwt}` },
+    signal: opts.signal,
+  })
+  if (!res.ok) {
+    const body = await res.text().catch(() => "")
+    throw new UserError(res.status, body, "project")
+  }
+  const body = (await res.json()) as { projects?: CloudProjectSummary[]; nextCursor?: string | null }
+  return { projects: body.projects ?? [], nextCursor: body.nextCursor ?? null }
+}
+
 /**
  * GET /api/v2/projects — every non-archived project the caller can access.
  * Pass `orgId` to scope the list to a specific org (appends `?orgId=N`).

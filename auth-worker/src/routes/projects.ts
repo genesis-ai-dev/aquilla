@@ -49,8 +49,11 @@ import { getFileChapters, getMyAssignments, getProjectAssignmentRoster } from ".
 import {
   bumpOrgActivity,
   canViewRoster,
+  clampProjectDirectoryLimit,
+  decodeProjectDirectoryCursor,
   DEFAULT_COMMENT_FLOORS,
   DEFAULT_TERMBASE_EDIT_MIN_ROLE,
+  encodeProjectDirectoryCursor,
   getCommentFloors,
   getEffectiveOrgRole,
   getOrCreateUserOrg,
@@ -391,6 +394,15 @@ projects.post(
 
 // ──────────────────────────────────────────────────────────────────────────
 // GET /api/v2/projects — list caller's accessible projects + files
+//
+// Unparameterized (session boot / OrgContext): grants the caller actually
+// holds. Platform operators do NOT receive the rest of the tenancy here —
+// that dump made boot and every project table O(all projects).
+//
+// Picker mode (`q`, `limit`, and/or `cursor`): one page, name-keyset. Admins
+// page the catalog; everyone else pages their accessible set. `?orgId=` still
+// scopes to one org, and an admin listing that org still sees every project
+// in it (bounded to the org, not the tenancy).
 // ──────────────────────────────────────────────────────────────────────────
 
 projects.get("/", authMiddleware, async (c) => {
@@ -416,10 +428,20 @@ projects.get("/", authMiddleware, async (c) => {
     return c.json({ error: "invalid minRole" }, 400)
   }
 
-  // Platform operators see every project (the WHERE access predicate is
-  // bypassed below); their effective role is forced to 700/"platform" in the
-  // JS mapping, mirroring the resolver in project-permissions.ts.
+  const qRaw = (c.req.query("q") ?? "").trim()
+  const q = qRaw.toLowerCase()
+  const limitRaw = c.req.query("limit")
+  const cursorRaw = c.req.query("cursor")
+  const pickerMode = limitRaw != null || cursorRaw != null || qRaw !== ""
+  const cursor = cursorRaw ? decodeProjectDirectoryCursor(cursorRaw) : null
+  if (cursorRaw && !cursor) return c.json({ error: "invalid cursor" }, 400)
+  const pageLimit = pickerMode ? clampProjectDirectoryLimit(limitRaw) : null
+
+  // Platform operators see every project in an org-scoped list, or one page
+  // of the tenancy in picker mode. Unparameterized boot never bypasses.
   const isAdmin = isPlatformAdminEmail(c.env, user.email)
+  const adminBypass = isAdmin && (orgFilter !== null || pickerMode)
+  const minRoleBind = minRole !== null && !adminBypass ? minRole : null
 
   // AD-12 max-wins across direct + group + org + creator. Each path is
   // computed in the same query; role_level = MAX(coalesced levels). On a
@@ -431,13 +453,28 @@ projects.get("/", authMiddleware, async (c) => {
   // org_members row neither reveals a project nor contributes to its
   // resolved role. Mirrors resolveProjectRole.
   //
-  // Params (positional ?): 10 user.id binds + isAdmin + 2 orgFilter binds.
+  // Params (positional ?): 10 user.id binds + isAdmin + 2 orgFilter binds
+  // + optional minRole / q / cursor / limit.
   //   ?1-?4  : user.id for creator CASE expressions
   //   ?5-?7  : user.id for LEFT JOIN conditions (pm, om, gm)
   //   ?8     : isAdmin (1/0) — platform operators bypass the access check
   //   ?9-?11 : user.id for WHERE access check (created_by, pm, om)
-  //   ?12    : orgFilter (NULL or number) — IS NULL check (no-filter case)
-  //   ?13    : orgFilter (NULL or number) — equality check (filter case)
+  //   ?12-?13: orgFilter (IS NULL bypass + equality)
+  //   ?14-?15: minRole (IS NULL bypass + threshold)
+  const extraWhere: string[] = []
+  const extraBinds: unknown[] = []
+  if (q) {
+    extraWhere.push("strpos(lower(p.name), ?) > 0")
+    extraBinds.push(q)
+  }
+  if (cursor) {
+    extraWhere.push("(lower(p.name) > ? OR (lower(p.name) = ? AND p.id > ?))")
+    extraBinds.push(cursor.name.toLowerCase(), cursor.name.toLowerCase(), cursor.id)
+  }
+  const extraWhereSql = extraWhere.length > 0 ? ` AND ${extraWhere.join(" AND ")}` : ""
+  const limitSql = pageLimit != null ? " LIMIT ?" : ""
+  if (pageLimit != null) extraBinds.push(pageLimit + 1)
+
   const rows = await c.env.AQUILLA_PG.prepare(
     `SELECT p.id, p.name, p.org_id, o.name AS org_name, p.archived_at, p.is_active,
             p.source_project_id,
@@ -502,14 +539,26 @@ projects.get("/", authMiddleware, async (c) => {
           OR (p.org_id IS NOT NULL AND om.user_id = ? AND om.role_level >= ${ORG_WIDE_ACCESS_FLOOR})
         )
         AND (?::bigint IS NULL OR p.org_id = ?::bigint)
-      ORDER BY LOWER(p.name)`,
+        AND (?::int IS NULL OR GREATEST(
+              COALESCE(pm.role_level, 0),
+              COALESCE(gg.max_grant,  0),
+              CASE WHEN om.role_level >= ${ORG_WIDE_ACCESS_FLOOR} THEN om.role_level ELSE 0 END,
+              CASE WHEN p.created_by = ? THEN 700 ELSE 0 END
+            ) >= ?)
+        ${extraWhereSql}
+      ORDER BY LOWER(p.name), p.id
+      ${limitSql}`,
   )
     .bind(
       user.id, user.id, user.id, user.id,  // ?1-?4: CASE-when-creator
       user.id, user.id, user.id,           // ?5-?7: pm.user_id, om.user_id, gm.user_id
-      isAdmin ? 1 : 0,                     // ?8: platform-operator bypass
+      adminBypass ? 1 : 0,                 // ?8: platform-operator bypass
       user.id, user.id, user.id,           // ?9-?11: WHERE: created_by, pm, om
       orgFilter, orgFilter,                // ?12-?13: org filter (IS NULL bypass + equality)
+      minRoleBind,                         // minRole IS NULL bypass
+      user.id,                             // GREATEST created_by in minRole clause
+      minRoleBind,                         // minRole threshold
+      ...extraBinds,
     )
     .all<{
       id: string
@@ -526,17 +575,18 @@ projects.get("/", authMiddleware, async (c) => {
       role_source: "creator" | "override" | "org" | "group"
     }>()
 
-  // AQU-321: apply minRole filter before loading files (avoid extra DB round-trip).
   const allRows = rows.results ?? []
-  const filteredRows = minRole !== null && !isAdmin
-    ? allRows.filter((r) => r.role_level >= minRole)
-    : allRows
+  const hasMore = pageLimit != null && allRows.length > pageLimit
+  const pageRows = hasMore ? allRows.slice(0, pageLimit) : allRows
+  const last = pageRows[pageRows.length - 1]
+  const nextCursor =
+    hasMore && last ? encodeProjectDirectoryCursor(last.id, last.name) : null
 
-  const projectIds = filteredRows.map((r) => r.id)
+  const projectIds = pageRows.map((r) => r.id)
   const filesByProject = await loadFilesByProject(c.env, projectIds)
 
   return c.json({
-    projects: filteredRows.map((row) => {
+    projects: pageRows.map((row) => {
       // Platform operators resolve as owner everywhere (resolveProjectRole's
       // "platform" path); a genuine 700-level grant keeps its attribution.
       const role =
@@ -570,6 +620,7 @@ projects.get("/", authMiddleware, async (c) => {
         files: filesByProject.get(row.id) ?? [],
       }
     }),
+    nextCursor,
   })
 })
 

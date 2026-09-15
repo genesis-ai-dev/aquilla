@@ -41,8 +41,11 @@ describe("full-stack Cloudflare previews", () => {
       }) + "\n")
       return { stdout: "" }
     })
+    const notify = vi.fn(async () => {
+      expect(configs.map(({ surface }) => surface)).toEqual(["auth", "sync", "web", "auth", "sync"])
+    })
     const verify = vi.fn()
-    const result = await deployStackPreview({ cwd: "/tmp/preview-contract-fixture", env: { ...env, WRANGLER_OUTPUT_FILE_DIRECTORY: outputDirectory }, run, verify })
+    const result = await deployStackPreview({ cwd: "/tmp/preview-contract-fixture", env: { ...env, WRANGLER_OUTPUT_FILE_DIRECTORY: outputDirectory }, run, verify, notify })
     expect(configs.map(({ surface }) => surface)).toEqual(["auth", "sync", "web", "auth", "sync"])
     expect(configs[0].config.previews.vars.SYNC_WORKER_URL).toBe("https://preview-not-ready.invalid")
     expect(configs[3].config.previews.vars).toMatchObject({
@@ -54,6 +57,7 @@ describe("full-stack Cloudflare previews", () => {
     expect(JSON.parse(readFileSync(join(outputDirectory, "wrangler-output-aquilla-preview.json"), "utf8"))).toMatchObject({
       type: "preview", worker_name: PREVIEW_WORKERS.web, preview_urls: [result.urls.web],
     })
+    expect(notify).toHaveBeenCalledWith({ env: { ...env, WRANGLER_OUTPUT_FILE_DIRECTORY: outputDirectory }, urls: result.urls })
     expect(verify).toHaveBeenCalledWith("/tmp/preview-contract-fixture/dist")
     expect(run.mock.calls.filter(([, args]) => args[1] === "vite")).toHaveLength(1)
   })

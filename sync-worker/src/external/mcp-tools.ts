@@ -94,6 +94,31 @@ export const MCP_TOOLS: McpToolDef[] = [
     },
   },
   {
+    name: 'find_similar_cells',
+    description:
+      'Translation memory (the "how did we render lines like this before?" primitive). ' +
+      'Returns the source cells most SIMILAR to a given line, each with its current ' +
+      'target and a score in [0,1] (1 = identical wording), so you can reuse an existing ' +
+      'rendering instead of inventing one. Args: projectId (required), then exactly one of ' +
+      'cellId (a source cell in the project — it is excluded from its own results) or text ' +
+      '(free text); limit (optional, default 10, max 50). Returns { data, nextCursor } where ' +
+      'each row is { cellId, fileId, sourceValue, targetValue, targetLang, score }; cells ' +
+      'with no target yet are never returned. SIMILARITY IS LEXICAL (shared terms), NOT ' +
+      'semantic — a paraphrase with no words in common scores 0. Prefer search_project when ' +
+      'you already know which words to look for.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        cellId: { type: 'string', description: 'Source cell to find precedents for.' },
+        text: { type: 'string', description: 'Free text to find precedents for.' },
+        limit: { type: 'number', description: 'Max results (default 10, max 50).' },
+      },
+      required: ['projectId'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'read_content',
     description:
       'Read project content. Omit fileId to LIST the project\'s files; provide fileId to ' +
@@ -137,6 +162,122 @@ export const MCP_TOOLS: McpToolDef[] = [
         cellId: { type: 'string', description: 'Cell id whose history to read.' },
       },
       required: ['projectId', 'cellId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'list_memory',
+    description:
+      'Read a project’s Living Memory: the human-authored project brief plus every memory ' +
+      'entry the copilot learns from — examples (source→target pairs), decisions (standing ' +
+      'rendering rules), notes (per-cell rationale), and observations. Same rows a human ' +
+      'sees on the project’s Memory page, newest first. Each entry carries its path, kind, ' +
+      'status (proposed|approved|rejected|archived), full content, humanEdited, and ' +
+      '`inRetrieval` — whether the copilot is ACTUALLY being given it (only approved entries ' +
+      'within the index render cap are). Call this BEFORE proposing a memory entry: it shows ' +
+      'whether one already exists at that path, whether a human approved it, and whether a ' +
+      'human has edited it (human-edited entries are human-owned — raise a question instead ' +
+      'of re-proposing over them). Author fields are per-project pseudonyms, never usernames. ' +
+      'Args: projectId, optional status, kind, limit, cursor. Errors: permission_denied, ' +
+      'scope_denied, validation_failed (unknown status/kind), rate_limited.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        status: {
+          type: 'string',
+          enum: ['proposed', 'approved', 'rejected', 'archived'],
+          description: 'Only entries in this state. Omit for all states (what the in-app page shows).',
+        },
+        kind: {
+          type: 'string',
+          enum: ['example', 'decision', 'note', 'observation', 'other'],
+          description: 'Only entries of this kind (derived from the path prefix).',
+        },
+        limit: { type: 'number', description: 'Entries per page (1-200, default 50).' },
+        cursor: { type: 'string', description: 'Opaque cursor from a previous nextCursor.' },
+      },
+      required: ['projectId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'read_cell_memory',
+    description:
+      'Show what the copilot’s memory retrieval would inject for ONE cell’s draft: the ' +
+      'project brief plus the approved-memory index it is given (path + first line per ' +
+      'entry, which is all the prompt carries — full text is fetched just-in-time). Use it ' +
+      'to predict what the copilot is working from before asking it to draft, or to explain ' +
+      'a draft after the fact. NOTE the `retrieval.scope` field: retrieval is currently ' +
+      'PROJECT-scoped, i.e. the same brief and index for every cell in the project, with no ' +
+      'per-cell ranking or filtering — do not assume this returned set was narrowed to your ' +
+      'cell. `retrieval.truncated` tells you approved entries exist that are NOT being ' +
+      'injected. Args: projectId, fileId, cellId. Errors: not_found (no such cell), ' +
+      'permission_denied, scope_denied, rate_limited.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        fileId: { type: 'string', description: 'File the cell lives in.' },
+        cellId: { type: 'string', description: 'Cell whose retrieval context to preview.' },
+      },
+      required: ['projectId', 'fileId', 'cellId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'read_quality',
+    description:
+      'Audit a project\'s quality WITHOUT recomputing anything: per-file health score ' +
+      '(0-100, the mean confidence over translated cells) plus coverage — total, filled ' +
+      'and validated cell counts and their percentages — and the project-level rollup. ' +
+      'These are the SAME numbers the human sees on the in-app health ring and progress ' +
+      'surfaces (this tool delegates to the routes those surfaces read), so never derive ' +
+      'health or coverage yourself from read_content: your denominators will not match ' +
+      'theirs. Args: projectId; optional fileId to scope to one file, lane for one ' +
+      'target-language lane, limit/offset to page the per-file list. Returns ' +
+      '{ projectHealth, coverage, data: [{ fileId, name, health, coverage, ... }], ' +
+      'nextCursor }. health is null for a file with no translated cells (not started, ' +
+      'not unhealthy). Errors: scope_denied (403) if your credential is scoped to a ' +
+      'different project, not_found (404) for an unknown fileId, rate_limited (429).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        fileId: { type: 'string', description: 'Scope to one file; omit for the whole project (up to 200 files).' },
+        lane: { type: 'string', description: 'Target-language lane (e.g. "es"). Omit for the default lane.' },
+        limit: { type: 'number', description: 'Per-file page size.' },
+        offset: { type: 'number', description: 'Per-file page offset.' },
+      },
+      required: ['projectId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'read_term_consistency',
+    description:
+      'Answer "which terms are rendered inconsistently, and where?". For every ACTIVE ' +
+      'termbase concept with at least one approved (preferred|admitted) rendering, returns ' +
+      'totalOccurrences (translated cells whose SOURCE matches the concept\'s source term), ' +
+      'consistentCount + consistencyPercent, renderingUsage (which approved rendering was ' +
+      'used in which cellIds — the variant map), and flaggedCells (occurrences whose target ' +
+      'used NONE of the approved renderings — the drift). Runs the same scan as the in-app ' +
+      '"Check file" pass, so your findings match what a reviewer sees. Args: projectId; ' +
+      'optional fileId to scope to one book/file, lane, onlyDrift=true to return only ' +
+      'concepts with flagged cells, limit/offset. Feed flaggedCells straight into ' +
+      'prepare_translations to propose fixes. Errors: scope_denied (403), not_found (404), ' +
+      'rate_limited (429).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        fileId: { type: 'string', description: 'Scope the scan to one file; omit for the whole project.' },
+        lane: { type: 'string', description: 'Target-language lane (e.g. "es"). Omit for the default lane.' },
+        onlyDrift: { type: 'boolean', description: 'Return only concepts that have flagged cells.' },
+        limit: { type: 'number', description: 'Findings page size.' },
+        offset: { type: 'number', description: 'Findings page offset.' },
+      },
+      required: ['projectId'],
       additionalProperties: false,
     },
   },
@@ -285,9 +426,9 @@ export const MCP_TOOLS: McpToolDef[] = [
       'round-trip export later. (2) preview_import to check the parse. (3) prepare_import ' +
       'to stage a PlanImport changeset. (4) the normal confirm_changeset / approval flow. ' +
       'Server-parseable formats: txt, md, json, po, properties, obs, vtt, srt, sbv, csv, ' +
-      'tsv, usfm (format is auto-detected; pass fileType to override — required for po/' +
-      'properties/obs/sbv, which are not sniffable). DOM-bound formats (docx, pptx, html, ' +
-      'xliff, tmx, usx, idml) are NOT server-parseable — they return validation_failed ' +
+      'tsv, usfm, docx (format is auto-detected; pass fileType to override — required for ' +
+      'po/properties/obs/sbv, which are not sniffable). Still DOM-bound: pptx, html, ' +
+      'xliff, tmx, usx, idml are NOT server-parseable — they return validation_failed ' +
       'naming the client-side alternatives (in-app Import dialog, or raw PlanImport cells). ' +
       'Returns { fileName, fileType, totalCells, sampleCells (first 10), warnings, ' +
       'results } — `results` lists every parsed file when a multi-book USFM splits into ' +
@@ -363,6 +504,44 @@ export const MCP_TOOLS: McpToolDef[] = [
         changesetId: { type: 'string', description: 'Optional client-supplied UUIDv7 for idempotency.' },
       },
       required: ['projectId', 'artifactId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'export_file',
+    description:
+      'Export one file back out in its delivered format — the mirror of the import ' +
+      'tools, and the last step of "messy files in → clean deliverable out" (e.g. USFM ' +
+      'handed back to Paratext). Reconstructs the file from the ORIGINAL artifact ' +
+      'preserved at import time with the current translations substituted in; ' +
+      'untranslated segments keep their source text so the output stays valid. Args: ' +
+      'projectId, fileId (from read_content), lane (optional — which target-language ' +
+      'lane to export; omit for the default lane). Returns { fileName, contentType, ' +
+      'exportMode, lossyVerseCount, bytes, content } where `content` is the file text. ' +
+      'Read the fidelity fields before delivering: exportMode "round-trip" means ' +
+      'translations were injected, "raw-original"/"raw-sidecar" means the file has no ' +
+      'server-side target serializer yet and you are getting the preserved ORIGINAL ' +
+      'bytes with NO translations in them; lossyVerseCount > 0 (USFM) counts verses ' +
+      'whose footnotes/poetry/character markers the plain-text substitution dropped. ' +
+      'Errors: permission_denied if your live project role is below the org export ' +
+      'floor (MAINTAINER by default — export is gated higher than reading, and no ' +
+      'retry will change it); not_found if the file has no preserved source artifact ' +
+      '(it must be re-imported before it can be exported); validation_failed for a ' +
+      'binary or oversized result, naming the REST URL to fetch instead — MCP is ' +
+      'JSON-RPC text and cannot carry binary bodies, the same asymmetry as the ' +
+      'REST-only artifact upload on the import side.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        fileId: { type: 'string', description: 'File to export (from read_content).' },
+        lane: {
+          type: 'string',
+          description:
+            'Target-language lane to export (e.g. "es"). Omit for the default lane.',
+        },
+      },
+      required: ['projectId', 'fileId'],
       additionalProperties: false,
     },
   },

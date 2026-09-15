@@ -601,6 +601,15 @@ CREATE TABLE plan_units (
       CHECK ((done_at IS NULL) = (done_by IS NULL))
 );
 
+-- Retention rollup: one row per user per UTC day they used the app. Written by
+-- auth-worker bumpOrgActivity; read by the admin retention view + recap email.
+-- See db/postgres/migrations/0090_user_activity_days.sql for the rationale.
+CREATE TABLE user_activity_days (
+    user_id BIGINT NOT NULL,
+    day     DATE   NOT NULL,
+    PRIMARY KEY (user_id, day)
+);
+
 CREATE TABLE cell_validators (
     project_id  TEXT NOT NULL,
     file_id     TEXT NOT NULL,
@@ -834,6 +843,7 @@ CREATE TABLE cell_word_morph (
 
 CREATE INDEX idx_activity_logs_timestamp ON activity_logs(timestamp);
 CREATE INDEX idx_activity_logs_user_id ON activity_logs(user_id);
+CREATE INDEX idx_user_activity_days_day ON user_activity_days(day);
 CREATE INDEX assignment_cells_by_assignment ON assignment_cells(assignment_id);
 CREATE INDEX assignments_assignee ON assignments(assignee_user_id);
 CREATE INDEX assignments_project ON assignments(project_id);
@@ -1606,3 +1616,22 @@ CREATE INDEX IF NOT EXISTS contextual_decisions_run
 --   SELECT setval(pg_get_serial_sequence('groups','id'),        COALESCE((SELECT MAX(id) FROM groups),1));
 --   SELECT setval(pg_get_serial_sequence('activity_logs','id'), COALESCE((SELECT MAX(id) FROM activity_logs),1));
 --   SELECT setval(pg_get_serial_sequence('password_reset_tokens','id'), COALESCE((SELECT MAX(id) FROM password_reset_tokens),1));
+-- AQU-1205: RFC 8628 device grants. Only hashes of both codes persist.
+CREATE TABLE IF NOT EXISTS agent_authorizations (
+  device_hash TEXT PRIMARY KEY,
+  user_code_hash TEXT NOT NULL UNIQUE,
+  client_id TEXT NOT NULL,
+  agent_name TEXT NOT NULL,
+  mode TEXT NOT NULL CHECK (mode IN ('ask', 'act')),
+  requested_project_id TEXT,
+  project_id TEXT,
+  user_id TEXT,
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending', 'approved', 'denied', 'consumed')),
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_poll_at TIMESTAMPTZ,
+  poll_interval INTEGER NOT NULL DEFAULT 5
+);
+CREATE INDEX IF NOT EXISTS agent_authorizations_expiry
+  ON agent_authorizations(expires_at);

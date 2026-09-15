@@ -1,6 +1,8 @@
 # Operational Security Review — 2026-09-07
 
-_Tenth pass in the standing series. Follows `docs/OPSEC-REVIEW-2026-09-03.md`
+_Written as the tenth pass in the standing series, but landing after two later
+ones. Follows `docs/OPSEC-REVIEW-2026-09-14.md` (OPS-29, OPS-30),
+`docs/OPSEC-REVIEW-2026-09-03.md`
 (OPS-27, OPS-28), `docs/OPSEC-REVIEW-2026-08-31.md`
 (OPS-25, OPS-26), `docs/OPSEC-REVIEW-2026-08-27.md` (OPS-22…OPS-24),
 `docs/OPSEC-REVIEW-2026-08-24.md` (OPS-18…OPS-21),
@@ -9,13 +11,17 @@ _Tenth pass in the standing series. Follows `docs/OPSEC-REVIEW-2026-09-03.md`
 `docs/OPSEC-REVIEW-2026-08-13.md` (OPS-8…OPS-10),
 `docs/OPSEC-REVIEW-2026-08-11.md`, `docs/OPSEC-REVIEW-2026-08-10.md`
 (OPS-1…OPS-7) and `docs/OPSEC.md` (V1…V9). New findings continue the **OPS-n**
-series at OPS-29._
+series at OPS-31._
 
-_Numbering note: this pass and the 2026-09-03 one ran concurrently on separate
-branches and both originally claimed OPS-27/OPS-28. 09-03 merged to `dev`
-first, so its numbers stand and the two findings below were renumbered from
-OPS-27/OPS-28 to **OPS-29/OPS-30** when this branch rebased onto it. The
-content is unchanged._
+_Numbering note: OPS-n is assigned at write time, and three passes ran
+concurrently on separate branches, so the two findings below have been
+renumbered twice. They were written as OPS-27/OPS-28; the 2026-09-03 pass
+merged to `dev` first with those numbers, so they became OPS-29/OPS-30; then
+the 2026-09-14 pass merged ahead of this branch with *those* numbers, so they
+are now **OPS-31/OPS-32**. Merge order wins each time. The content is unchanged
+throughout — no finding was dropped, merged into another, or given a number
+that belongs to a different pass. The durable fix is scheduling (concurrent
+OPSEC passes should not race for the same counter), not further renumbering._
 
 Every finding is labelled **FACT** (verified against a file:line or a test run
 at this commit) or **JUDGMENT** (reasoned inference).
@@ -47,10 +53,10 @@ the two things #569 does **not**:
    post-rollover cleanup, which `docs/OPSEC-REVIEW-2026-08-31.md` flagged as
    "carried forward, and now overdue… the cheapest open item in the series"
    and which #569 does not touch (its diff includes neither
-   `auth-worker/src/routes/auth.ts` nor a migration). That is **OPS-29**,
+   `auth-worker/src/routes/auth.ts` nor a migration). That is **OPS-31**,
    fixed here.
 2. **It reviews #569's own change adversarially**, before it merges. That is
-   **OPS-30**, reported not fixed — the code lives on another branch.
+   **OPS-32**, reported not fixed — the code lives on another branch.
 
 Both sit squarely inside the Monday theme. Neither duplicates #569.
 
@@ -58,7 +64,7 @@ Both sit squarely inside the Monday theme. Neither duplicates #569.
 
 ## Findings
 
-### OPS-29 — The pre-0080 plaintext-token fallback outlived its rollover window by two weeks, and the reset tests were riding it — **FIXED** [FACT]
+### OPS-31 — The pre-0080 plaintext-token fallback outlived its rollover window by two weeks, and the reset tests were riding it — **FIXED** [FACT]
 
 **Background.** Migration `0080_auth_token_hashing.sql` (OPS-20, 2026-08-24)
 moved `password_reset_tokens` and `email_verification_tokens` to hash-at-rest.
@@ -160,7 +166,7 @@ reading it back. A regression in the hash lookup would have shipped green.
   0080 "make nullable" repair, so one step now handles pre-0080 and pre-0087
   databases alike.
 
-### OPS-30 — PR #569's invalid-PAT throttle locks out valid tokens from a shared egress IP, and probably increases DB load rather than reducing it — **REPORTED, not fixed** [FACT on the mechanics, JUDGMENT on the impact]
+### OPS-32 — PR #569's invalid-PAT throttle locks out valid tokens from a shared egress IP, and probably increases DB load rather than reducing it — **REPORTED, not fixed** [FACT on the mechanics, JUDGMENT on the impact]
 
 This is a review of an **unmerged** change on another branch
 (`claude/inspiring-maxwell-u6l8sv`, PR #569). It is not a defect in `dev`. It
@@ -249,7 +255,7 @@ open: `project_invites` and `org_invites` store raw tokens (OPS-26).
 ## 2. Threats
 
 Unchanged from `docs/OPSEC.md` §2. The actor relevant to this pass is the one
-OPS-20 was written for and OPS-29 finishes closing: **anyone who obtains a
+OPS-20 was written for and OPS-31 finishes closing: **anyone who obtains a
 read-only copy of the database** — a Neon branch or snapshot, a PITR restore, a
 backup, a replica, a support query, an over-broad analytics grant. That actor
 needs no application access, no password and no mailbox, leaves no trace in the
@@ -260,21 +266,21 @@ by restoring any pre-0080 backup into the live schema.
 
 Reviewed this pass:
 
-- Deprecated compatibility code paths outliving their stated expiry (OPS-29) —
+- Deprecated compatibility code paths outliving their stated expiry (OPS-31) —
   **found and closed**. The generalisable weakness is that 0080 wrote its exit
   criteria into a migration header, which nothing reads on a schedule. See §5.
 - Test fixtures drifting onto a compatibility path and silently vacating
-  coverage of the real one (OPS-29) — **found and closed**.
-- A new control introducing an availability failure mode (OPS-30) — **found,
+  coverage of the real one (OPS-31) — **found and closed**.
+- A new control introducing an availability failure mode (OPS-32) — **found,
   reported to #569**.
 
 ## 4. Risk
 
 | Finding | Likelihood | Impact | Net |
 |---|---|---|---|
-| OPS-29 (plaintext column + arm) | Low — needs a pre-0080 backup restored into the live schema | High — live account-takeover tokens, no trace | **Medium**, and cheap to close |
-| OPS-29 (reset flow untested) | Certain — it was already the case for 14 days | Medium — a hash-lookup regression ships green | **Medium** |
-| OPS-30 (shared-IP lockout) | Medium — one buggy client behind a shared NAT | Medium — 15-minute Agent-API outage for co-located callers | **Medium**, pre-merge and cheap to change |
+| OPS-31 (plaintext column + arm) | Low — needs a pre-0080 backup restored into the live schema | High — live account-takeover tokens, no trace | **Medium**, and cheap to close |
+| OPS-31 (reset flow untested) | Certain — it was already the case for 14 days | Medium — a hash-lookup regression ships green | **Medium** |
+| OPS-32 (shared-IP lockout) | Medium — one buggy client behind a shared NAT | Medium — 15-minute Agent-API outage for co-located callers | **Medium**, pre-merge and cheap to change |
 
 ## 5. Countermeasures
 
@@ -343,7 +349,7 @@ Recommended, not applied:
 
 ## Not fixed here — needs follow-up
 
-- **OPS-30** — belongs to PR #569; reported there.
+- **OPS-32** — belongs to PR #569; reported there.
 - **OPS-26** — invite tokens plaintext at rest. Blocked on a product decision
   (§6).
 - **OPS-24** — the credit-guard check-then-act race. Needs a pass scoped to

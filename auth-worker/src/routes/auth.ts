@@ -272,7 +272,7 @@ auth.post("/register", zValidator("json", registerSchema), async (c) => {
         // digest, same as the reset token. This one is lower-value (it marks
         // an address verified, it doesn't take over the account) but it lived
         // in plaintext next to the reset token for the same reason, and the
-        // fix is identical. (2026-09-07, OPS-29: the plaintext `token` column
+        // fix is identical. (2026-09-07, OPS-31: the plaintext `token` column
         // is gone — migration 0081 — so there is no longer a NULL to write.)
         await c.env.AQUILLA_PG.prepare(
           `INSERT INTO email_verification_tokens (user_id, token_hash, expires_at)
@@ -762,7 +762,7 @@ const verifyEmailSchema = z.object({ token: z.string().min(8) })
 // (deleted on success), so a second click returns 404 ("already used").
 auth.post("/verify-email", zValidator("json", verifyEmailSchema), async (c) => {
   const { token } = c.req.valid("json")
-  // [Pen test] Auth & session mgmt (2026-09-07, OPS-29): digest-only lookup.
+  // [Pen test] Auth & session mgmt (2026-09-07, OPS-31): digest-only lookup.
   // The pre-0080 plaintext fallback arm was removed once the 7-day rollover
   // window had elapsed; migration 0081 then dropped the column it read.
   const tokenHash = await sha256Hex(token)
@@ -990,7 +990,7 @@ auth.post(
 
       // [Pen test] Auth & session mgmt (2026-08-24): match on the SHA-256
       // digest, never on stored plaintext. The pre-0080 `token_hash IS NULL`
-      // rollover arm was dropped on 2026-09-07 (OPS-29) once the 24-hour
+      // rollover arm was dropped on 2026-09-07 (OPS-31) once the 24-hour
       // window had long elapsed; migration 0081 dropped the column it read.
       const resetToken = await c.env.AQUILLA_PG.prepare(
         `SELECT expires_at FROM password_reset_tokens
@@ -1058,7 +1058,7 @@ auth.post(
 
       // [Pen test] Auth & session mgmt (2026-08-24): match on the SHA-256
       // digest, never on stored plaintext. The pre-0080 `token_hash IS NULL`
-      // rollover arm was dropped on 2026-09-07 (OPS-29) once the 24-hour
+      // rollover arm was dropped on 2026-09-07 (OPS-31) once the 24-hour
       // window had long elapsed; migration 0081 dropped the column it read.
       const resetToken = await c.env.AQUILLA_PG.prepare(
         `SELECT expires_at FROM password_reset_tokens

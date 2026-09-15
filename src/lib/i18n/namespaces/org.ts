@@ -13,6 +13,67 @@ export const org = defineNamespace({
     "org.breadcrumb.allOrganizations": "All organizations",
     "org.breadcrumb.organizationFallback": "Organization",
 
+    // -- OrgDataEgress: maintainer/owner multi-project archive --
+    "org.egress.title": "Data egress",
+    "org.egress.description": "Everything your organization has stored — review it, filter it, and take it with you as one zip archive.",
+    "org.egress.selectOrgDescription": "Data egress is managed within a single organization.",
+    "org.egress.roleRequired":
+      "Data egress is available to organization owners, and to other roles when an owner enables them in Settings.",
+    "org.egress.exportCount": plural({ one: "Export {count} file", other: "Export {count} files" }),
+    "org.egress.loading": "Loading organization files",
+    "org.egress.loadFailed": "Couldn’t load files",
+    "org.egress.portfolioUnavailable": "Portfolio stats are unavailable — lane, audio, and last-edit columns may be incomplete.",
+    "org.egress.policyRestricted": "Export restricted by org policy",
+    "org.egress.selectAll": "Select all files",
+    "org.egress.selectFile": "Select {file}",
+    "org.egress.column.lanes": "Lanes",
+    "org.egress.column.lastEdit": "Last edit",
+    "org.egress.filterPlaceholder": "Filter files…",
+    "org.egress.selectedCount": "{selected} of {total} selected",
+    "org.egress.options.title": "Export options",
+    "org.egress.options.textMode": "Text export mode",
+    "org.egress.options.text.original.label": "Original format (round-trip)",
+    "org.egress.options.text.original.description": "Each file in the format it was imported as; formats without a round-trip exporter use the conversion format below.",
+    "org.egress.options.text.convert.label": "Convert to…",
+    "org.egress.options.text.convert.description": "Every file re-serialized to one uniform format.",
+    "org.egress.options.text.none.label": "Text off",
+    "org.egress.options.text.none.description": "No text entries in the export.",
+    "org.egress.options.conversionFormat": "Conversion format",
+    "org.egress.options.targetLanes": "Target lanes",
+    "org.egress.options.lane": "Lane {lane}",
+    "org.egress.options.includeSources": "Include original source documents",
+    "org.egress.options.includeSourcesDescription": "The raw files you uploaded, exactly as stored.",
+    "org.egress.options.audioMode": "Audio export mode",
+    "org.egress.options.audio.none.description": "No audio in the export.",
+    "org.egress.options.audio.separate.label": "Every clip separately",
+    "org.egress.options.audio.separate.description": "One audio file per cell recording.",
+    "org.egress.options.audio.file.label": "One clip per file",
+    "org.egress.options.audio.file.description": "All of a file’s recordings joined in document order.",
+    "org.egress.options.audio.voice.label": "One clip per voice",
+    "org.egress.options.audio.voice.description": "Each voice’s recordings joined together, no gaps.",
+    "org.egress.options.audio.timeline.label": "Voice timeline stems (silence while others speak)",
+    "org.egress.options.audio.timeline.description": "One aligned track per voice; all tracks share the file’s timeline.",
+    "org.egress.options.useCache": "Reuse cached exports for unchanged projects",
+    "org.egress.options.empty": "These options would export nothing — pick a lane, an audio mode, or source documents.",
+    "org.egress.options.estimate": "{fileCount} · {cellCount}",
+    "org.egress.options.estimateAudio": " · ~{minutes} min recorded audio",
+    "org.egress.results.preparing": "Preparing",
+    "org.egress.results.preparingExport": "Preparing export…",
+    "org.egress.results.exportingText": "Exporting text",
+    "org.egress.results.exportingAudio": "Exporting audio",
+    "org.egress.results.packaging": "Packaging",
+    "org.egress.results.finishing": "Finishing",
+    "org.egress.results.projectStatus": "{phase} — {project} ({current} of {total}){cached}",
+    "org.egress.results.phaseStatus": "{phase}…",
+    "org.egress.results.cachedSuffix": " (cached)",
+    "org.egress.results.progress": "Export progress",
+    "org.egress.results.failed": "Export failed: {message}",
+    "org.egress.results.complete": "Export complete — your download has started.",
+    "org.egress.results.cached": "cached",
+    "org.egress.results.entryCount": plural({ one: "{count} entry", other: "{count} entries" }),
+    "org.egress.results.skipped": "Skipped {scope}: {reason}",
+    "org.egress.results.noteLine": "Note: {file}: {note}",
+
     // -- OrgSwitcher: sidebar dropdown that swaps the active org --
     "org.switcher.workspaceFallback": "Workspace",
     "org.switcher.triggerAriaLabel": "Organization switcher: {org}",
@@ -28,6 +89,7 @@ export const org = defineNamespace({
     "org.switcher.retryOrganizationsAriaLabel": "Retry loading organizations",
     "org.switcher.retrySharedOrganizationsAriaLabel": "Retry loading shared organizations",
     "org.switcher.couldNotLoadSharedOrganizations": "Couldn’t load shared organizations",
+    "org.switcher.searchFailed": "Couldn’t search organizations",
 
     // -- LaneChips: per-lane progress chips on an OrgHome project row --
     "org.laneChips.tooltip": "{label} — {pct} translated",
@@ -515,6 +577,17 @@ export const org = defineNamespace({
     "org.exportSettings.roleOptionMaintainer": "{role} ({level}) — default",
     "org.exportSettings.roleOptionOwner": "{role} ({level}) — most restrictive",
     "org.exportSettings.saveFailedFallback": "Couldn't save the export permission.",
+
+    // -- OrgSettingsSecurity › EgressAccessSection: who may use Data egress (AQU-907) --
+    "org.egressSettings.whoCanEgressLabel": "Who can use Data egress",
+    "org.egressSettings.whoCanEgressDescription":
+      "Minimum role that can open the organization-wide Data egress page and " +
+      "download everything as one archive. Owners always can; each project's " +
+      "export permission still applies to what ends up in the archive.",
+    "org.egressSettings.ownersOnlyPolicyNote": "Only org owners can change who can use Data egress.",
+    "org.egressSettings.roleOptionViewer": "{role} ({level}) — anyone with project access",
+    "org.egressSettings.roleOptionOwner": "{role} ({level}) — default",
+    "org.egressSettings.saveFailedFallback": "Couldn't save the egress permission.",
 
     // -- AddLanguagePopover: "+ Language" quick action on an OrgHome project row --
     "org.addLanguagePopover.triggerLabel": "Language",
@@ -1095,6 +1168,7 @@ export const org = defineNamespace({
     // "Find an organization…" placeholder → org.switcher.searchPlaceholder (identical text)
     // "Find an organization" aria-label → org.switcher.searchAriaLabel (identical text)
     // "No organizations found." → org.switcher.noOrganizationsFound (identical text)
+    // "Couldn't search organizations" → org.switcher.searchFailed (identical text)
     // "Create" → org.switcher.create (identical text)
 
     // -- OverviewLaneTable: per-project lane table (AQU-538 §3.3) --
@@ -1177,6 +1251,11 @@ export const org = defineNamespace({
     "org.projectOverview.plan.noMatchTitle": "Nothing matches",
     "org.projectOverview.plan.noMatch": "No unit matches the filters you have set. Clear them to see the whole plan again.",
     "org.projectOverview.plan.showingCount": "Showing {shown} of {total}.",
+    // AQU-1255: the card draws the first few rows and stops. The count lives
+    // in the label so the button says what it opens, to a reader and a screen
+    // reader alike.
+    "org.projectOverview.plan.showAll": "Show all {count}",
+    "org.projectOverview.plan.showFewer": "Show fewer",
     "org.projectOverview.plan.viewStatus": "By status",
     "org.projectOverview.plan.viewOrder": "In order",
     "org.projectOverview.plan.needsDate": "Needs a date",
@@ -1227,6 +1306,73 @@ export const org = defineNamespace({
           "Last-row control on the single-organization Overview's project table that expands the ten-project preview to reveal the remaining projects inline. Count is how many rows are still hidden, not the org total.",
         placeholders: { count: "Number of projects not currently shown." },
       },
+      "org.egress.exportCount": {
+        description: "Primary action on Data egress, showing how many selected files will be exported.",
+        placeholders: { count: "Number of selected files; also selects the plural form." },
+      },
+      "org.egress.selectFile": {
+        description: "Accessible name for one file-row selection checkbox.",
+        placeholders: { file: "File name — not translated." },
+      },
+      "org.egress.selectedCount": {
+        description: "Selection summary above the organization file inventory.",
+        placeholders: {
+          selected: "Number of selected files.",
+          total: "Total number of files in the organization inventory.",
+        },
+      },
+      "org.egress.options.lane": {
+        description: "Accessible name for one target-lane checkbox in export options.",
+        placeholders: { lane: "Target lane display label — not translated." },
+      },
+      "org.egress.options.estimate": {
+        description: "Compact file-and-cell estimate at the bottom of Data egress options.",
+        placeholders: {
+          fileCount: "Already-localized file count, such as '2 files'.",
+          cellCount: "Already-localized cell count, such as '40 cells'.",
+        },
+      },
+      "org.egress.options.estimateAudio": {
+        description: "Optional audio-duration suffix appended to the Data egress estimate.",
+        placeholders: { minutes: "Rounded number of recorded-audio minutes." },
+      },
+      "org.egress.results.projectStatus": {
+        description: "Live export progress line for one project in a multi-project organization export.",
+        placeholders: {
+          phase: "Localized current export phase.",
+          project: "Project name — not translated.",
+          current: "One-based current project number.",
+          total: "Total number of projects being exported.",
+          cached: "Localized cached suffix, or an empty string.",
+        },
+      },
+      "org.egress.results.phaseStatus": {
+        description: "Live organization-level packaging status after all individual projects finish.",
+        placeholders: { phase: "Localized current export phase." },
+      },
+      "org.egress.results.failed": {
+        description: "Terminal Data egress error message.",
+        placeholders: { message: "Verbatim technical failure reason." },
+      },
+      "org.egress.results.entryCount": {
+        description: "Number of archive entries produced for one project.",
+        placeholders: { count: "Number of produced archive entries; also selects the plural form." },
+      },
+      "org.egress.results.skipped": {
+        description: "Transparency line naming one skipped export scope and its reason.",
+        placeholders: {
+          scope: "File, lane, source, or audio scope identifier — not translated.",
+          reason: "Verbatim skip reason from the export engine or server.",
+        },
+      },
+      "org.egress.results.noteLine": {
+        description:
+          "Transparency line under a project's export results carrying one file's caveat — e.g. that a source document is not the byte-exact original upload. Only the leading word is translatable copy.",
+        placeholders: {
+          file: "File name — not translated.",
+          note: "Verbatim caveat from the export engine.",
+        },
+      },
       "org.switcher.triggerAriaLabel": {
         description:
           "Accessible name for the sidebar button that opens the org switcher dropdown. {org} is the currently selected organization's name (or 'All organizations'/'Workspace').",
@@ -1246,6 +1392,10 @@ export const org = defineNamespace({
       "org.switcher.retrySharedOrganizationsAriaLabel": {
         description:
           "Accessible name for the retry control shown when loading the project directory that backs shared/guest organizations failed. Used both when it replaces the whole switcher (no member orgs) and on the inline retry row inside the open dropdown (member orgs still shown).",
+      },
+      "org.switcher.searchFailed": {
+        description:
+          "Empty-state copy in the org switcher when a server-side organization search failed. Distinct from the member-list load failure, which replaces the whole switcher with a retry affordance.",
       },
       "org.laneChips.tooltip": {
         description:
@@ -1776,6 +1926,40 @@ export const org = defineNamespace({
       "org.exportSettings.saveFailedFallback": {
         description:
           "Error shown under the export-permission dropdown when saving the new setting failed and the server gave no explanation of its own — the setting is unchanged and the reader can simply try again. A complete sentence in the product's voice.",
+      },
+      "org.egressSettings.whoCanEgressLabel": {
+        description:
+          "Label for the dropdown that sets the lowest organization role allowed to open the Data egress page (the organization-wide bulk download), and also the name read aloud for that dropdown by screen readers. A question-shaped noun phrase with no question mark — it names the choice rather than asking one. 'Data egress' is the page's own title (org.egress.title) and must match it.",
+      },
+      "org.egressSettings.whoCanEgressDescription": {
+        description:
+          "Explanatory paragraph under the Data-egress permission dropdown, addressed to the administrator making the choice. Two statements: owners always have access regardless of the chosen floor, and each project's separate export permission still filters what the archive can contain.",
+      },
+      "org.egressSettings.ownersOnlyPolicyNote": {
+        description:
+          "Sentence explaining that the Data-egress permission dropdown is not editable by this reader, because changing it is reserved for owners of the organization. Shown as quiet helper text under the dropdown and again as an error when a save is refused for the same reason. A complete sentence stating a rule, not an instruction to the reader.",
+      },
+      "org.egressSettings.roleOptionViewer": {
+        description:
+          "The lowest entry in the Data-egress permission dropdown. Same shape as org.exportSettings.roleOptionPlain, with a note after the dash saying that choosing it lets everyone with project access use Data egress — the most permissive setting.",
+        placeholders: {
+          role: "The role's already-translated display name, resolved from common.role.* — do not translate it again here.",
+          level:
+            "The role's numeric level (100–700), a fixed permission code shared with the server. Keep it in Western digits and do not localize the numerals.",
+        },
+      },
+      "org.egressSettings.roleOptionOwner": {
+        description:
+          "The highest entry in the Data-egress permission dropdown. Same shape as org.exportSettings.roleOptionPlain, with a one-word note after the dash marking it as the value in force unless somebody changes it — for this setting the owner level is the default, unlike the export dropdown where maintainer is.",
+        placeholders: {
+          role: "The role's already-translated display name, resolved from common.role.* — do not translate it again here.",
+          level:
+            "The role's numeric level (100–700), a fixed permission code shared with the server. Keep it in Western digits and do not localize the numerals.",
+        },
+      },
+      "org.egressSettings.saveFailedFallback": {
+        description:
+          "Error shown under the Data-egress permission dropdown when saving the new setting failed and the server gave no explanation of its own — the setting is unchanged and the reader can simply try again. A complete sentence in the product's voice.",
       },
       "org.addLanguagePopover.triggerAriaLabel": {
         description:
@@ -2387,6 +2571,19 @@ export const org = defineNamespace({
           shown: "Units passing the filter \u2014 a number.",
           total: "Units in the project \u2014 a number.",
         },
+      },
+      "org.projectOverview.plan.showAll": {
+        description:
+          "Button below a truncated plan list that draws every remaining row in place. The count is the total number of rows the list would draw right now (after any filter), not the project total.",
+        placeholders: {
+          count: "Rows the list would draw once expanded — a number.",
+        },
+        maxLength: 18,
+      },
+      "org.projectOverview.plan.showFewer": {
+        description:
+          "Button at the bottom of a fully expanded plan list that collapses it back to the first few rows. Paired with 'Show all'.",
+        maxLength: 16,
       },
       "org.projectOverview.plan.viewStatus": {
         description:

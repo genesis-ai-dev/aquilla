@@ -121,15 +121,56 @@ routine never modifies test files.
 
 ## Additional candidates from the 2026-08-11 component cleanup run
 
-- **`src/components/RulesPage.tsx`** and its test (671 lines total) — superseded by
-  `RulesSurface` in `ProjectWorkspace`; the old route’s removed UI is already documented
-  in the corresponding smoke spec. Confirm zero real importers before deletion.
+- **`src/components/RulesPage.tsx`** — done in the 2026-09-14 run. Confirmed zero real
+  importers (no route entry in `App.tsx`, no colocated test file, not brand-gated, not
+  imported by any e2e spec — `e2e/JOURNEYS.md` mentions it only in prose, which is a
+  frozen path left untouched). `RulesSurface` (mounted via `ProjectSettings/RulesSection.tsx`)
+  is the confirmed live replacement — it re-imports `BuiltinChecksList`, the same shared
+  child `RulesPage.tsx` used to render. Deleted the 347-line file plus its now-orphaned
+  `eslint-suppressions.json` entry, and fixed three directly-stale comments this deletion
+  caused (`src/lib/qa/checks.ts`, `src/hooks/useOrgSettings.ts`,
+  `src/components/onboarding/ProductTour.tsx` — all referenced `RulesPage.tsx` as a live
+  convention example). `pnpm test` full suite: 1070/1070 files passed after (baseline had
+  1 pre-existing failure, the known `AssignedToMe.test.tsx` full-suite-only flake — see the
+  issue #410 family below — which did not reproduce this run, consistent with intermittent).
+  It turned out **not** to have a colocated test (the original 2026-08-11 note guessed
+  "671 lines total" including a test file that doesn't actually exist).
 - **`src/components/TerminologyPage.tsx`** and its test (2,034 lines total) — superseded
   by `GlossaryEditorContent` / `GlossaryEditor`. This needs a dedicated review because of
   its size; confirm no e2e spec still depends on it.
 - **`src/lib/sync/projects-read.ts`**, `projects-read-types.ts`, and their test (220 lines)
   — unused Phase 2b wrapper. Grep precise paths/exports before deleting: a different,
-  live `fetchAccessibleProjects` exists in `cloud-projects.ts`.
+  live `fetchAccessibleProjects` exists in `cloud-projects.ts`. **Blocked** by this
+  routine's "no test file may be modified" rule: its only real importer is its own test
+  file (`projects-read.test.ts`), and deleting the source without the test breaks the
+  suite — the test would need to be deleted too, which this routine cannot do. Needs a
+  human (or a non-code-health change) to remove the pairing together.
+
+## `rules.page.*` i18n keys — orphaned by the `RulesPage.tsx` deletion above (2026-09-14)
+
+- **Found**: while deleting `src/components/RulesPage.tsx` this run, confirmed via
+  `grep -rn "rules\.page\." src --include=*.tsx --include=*.ts | grep -v src/lib/i18n/`
+  (empty result) that 7 message keys under the `rules.page.*` namespace —
+  `rules.page.heading`, `rules.page.corpusLoadErrorPrefix`, `rules.page.readOnlySuffix`,
+  `rules.page.rulesCardTitle`, `rules.page.noRulesYet`, `rules.page.deleteRuleDialogTitle`,
+  `rules.page.deleteRuleAriaLabel` — defined in `src/lib/i18n/namespaces/rules.ts` (under
+  its `── RulesPage.tsx (standalone rules page) ──` section header, ~line 385) were used
+  by nothing else. (`rules.loadingLabel`, defined in the same block, is *not* orphaned —
+  `src/components/ProjectSettings/RulesSection.tsx:129` still uses it, so leave it alone.)
+- **Friction**: each key also has a translated entry in every locale message file under
+  `src/lib/i18n/messages/*.ts` (confirmed present in at least `mfa.ts`, `zh-Hans.ts`,
+  `zh-Hant.ts`, `ar.ts`, `my.ts`, `th.ts` — likely all ~14+ locales). Removing the 7 keys
+  cleanly means touching the base namespace file's `messages`/`context.keys` blocks *and*
+  every locale file's corresponding entries — easily 15-20 files, well past this run's
+  single-theme budget when it's already spent on the component deletion itself.
+- **Why deferred**: pure scope-control — orphaned translation strings are inert (unused
+  keys don't fail build/lint/test), so there's no urgency forcing this into the same PR as
+  the component deletion. A future type-tightening or dead-code run can pick this up as its
+  own single-file-family sweep.
+- **Proof needed**: re-confirm each key still has zero non-i18n-file references (code
+  moves), then delete the `messages`/`context.keys` entries in `rules.ts` plus the matching
+  key in every locale file under `src/lib/i18n/messages/`; `pnpm build` and `pnpm test`
+  should stay green throughout since nothing reads these strings.
 
 ## 2026-08-11 — type-tightening + complexity survey (chore/code-health-2026-08-11, second run)
 
@@ -184,11 +225,21 @@ future pass (verify each still applies — code moves):
     (389: 13 errors, 376 warnings) once accounting for the `packages/idml-roundtrip/dist`
     build-artifact noise below, no test file touched. Baseline and final were each run in
     a fully isolated `git worktree`/checkout to rule out read races with the edits.
-  - **Remaining**: `src/lib/export/audio-bwf.ts:85`,
-    `src/lib/export/audio-by-character.ts:326`, `src/lib/audio/whisper-worker.ts:186`,
-    `src/hooks/useActiveCellStore.ts:1366`, `src/components/MultiProjectInviteDialog.tsx:126`,
-    `src/lib/import/normalized-manifest.ts:471` — 6 files, not attempted this run to stay
-    inside the ≤8-file budget.
+  - **Status**: `src/lib/export/audio-bwf.ts`, `src/lib/export/audio-by-character.ts`,
+    `src/hooks/useActiveCellStore.ts`, `src/components/MultiProjectInviteDialog.tsx`, and
+    `src/lib/import/normalized-manifest.ts` done in the 2026-09-11 run — 5 redundant
+    array/index non-null assertions removed (each a loop-bounded array index or a
+    `Record<string, T>` index-signature read, both typed non-optional without
+    `noUncheckedIndexedAccess`). `src/lib/audio/whisper-worker.ts:186` was in this list but
+    turned out **not** redundant: `npx tsc -b` failed after removing it —
+    `c.timestamp` is `[number | null, number | null]` (an explicit nullable tuple, not an
+    inferred-non-optional index read), and the `!` narrows past a `.filter(c =>
+    c.timestamp[0] != null && ...)` guard that TS can't carry through the chained `.map()`.
+    Reverted that one site; left as a genuine assertion, not a candidate for a future pass.
+    `npx tsc -b --force` clean on the other 5, `pnpm lint` byte-identical to baseline (once
+    excluding `packages/idml-roundtrip/dist`, rebuilt as a side effect of `tsc -b` — see the
+    build-artifact-noise entry below), `pnpm test` 1058/1058 files identical pass count
+    before and after, no test file touched.
 - **Proof needed when revisited**: same as this run — isolate with `npx tsc --noEmit -p
   tsconfig.app.json` scoped to the touched file(s) plus full `pnpm test`/`pnpm lint`
   byte-identical-failure-list comparison; no test files touched.

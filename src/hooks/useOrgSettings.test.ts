@@ -18,6 +18,7 @@ import {
   useOrgSettings,
   canEditRosterProgressFloor,
   canEditTermbaseFloor,
+  canEditEgressFloor,
   canEditCommentFloors,
 } from "./useOrgSettings"
 import * as restClient from "@/lib/sync/org-settings"
@@ -458,6 +459,80 @@ describe("canEditTermbaseFloor — owner-only write gate (AQU-822)", () => {
   it("denies when the caller's role is unknown (null/undefined)", () => {
     expect(canEditTermbaseFloor(null)).toBe(false)
     expect(canEditTermbaseFloor(undefined)).toBe(false)
+  })
+})
+
+describe("useOrgSettings — canEgress OWNER default floor (AQU-907)", () => {
+  // The Data egress surface hands out the org's ENTIRE corpus in one action,
+  // so absence of egressMinRole must resolve to the most restrictive default
+  // (OWNER) — a regression to exportMinRole's null-means-allow pattern here
+  // would silently expose every org's bulk export to every maintainer.
+  it("maintainer (600) in an org with NO explicit egressMinRole is DENIED (default=Owner)", async () => {
+    mockFetchResponse = makeEgressResponse() // no egressMinRole key at all
+    const { result } = renderHook(() => useOrgSettings(1, 600))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+
+    expect(result.current.egressMinRole).toBe(700) // resolved default, not null
+    expect(result.current.canEgress).toBe(false)
+  })
+
+  it("an owner (700) is permitted BEFORE the fetch resolves — owners meet every valid floor", () => {
+    // Owners never wait on the settings GET: valid floors are capped at 700,
+    // so 700 passes unconditionally and the primary persona gets no flash of
+    // an absent surface.
+    const { result } = renderHook(() => useOrgSettings(1, 700))
+    expect(result.current.hasFetched).toBe(false)
+    expect(result.current.canEgress).toBe(true)
+  })
+
+  it("below-owner callers stay closed before the fetch (disclosure gate, like the roster)", () => {
+    const { result } = renderHook(() => useOrgSettings(1, 600))
+    expect(result.current.hasFetched).toBe(false)
+    expect(result.current.canEgress).toBe(false)
+  })
+
+  it("an owner-opened floor (600) admits a maintainer but not a project lead", async () => {
+    mockFetchResponse = makeEgressResponse(600)
+    const { result: maintainer } = renderHook(() => useOrgSettings(1, 600))
+    await waitFor(() => expect(maintainer.current.hasFetched).toBe(true))
+    expect(maintainer.current.canEgress).toBe(true)
+
+    const { result: lead } = renderHook(() => useOrgSettings(1, 500))
+    await waitFor(() => expect(lead.current.hasFetched).toBe(true))
+    expect(lead.current.canEgress).toBe(false)
+  })
+
+  it("a garbage server floor (9999) resolves to the OWNER default, not to open", async () => {
+    mockFetchResponse = makeEgressResponse(9999)
+    const { result } = renderHook(() => useOrgSettings(1, 600))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    expect(result.current.egressMinRole).toBe(700)
+    expect(result.current.canEgress).toBe(false)
+  })
+})
+
+function makeEgressResponse(egressMinRole?: number): OrgSettingsResponse {
+  return {
+    orgId: 1,
+    settings: egressMinRole !== undefined ? { egressMinRole } : {},
+    version: 1,
+    updatedAt: "2026-01-01T00:00:00Z",
+    updatedBy: 1,
+  }
+}
+
+describe("canEditEgressFloor — owner-only write gate (AQU-907)", () => {
+  it("denies a maintainer (600) — a maintainer must not widen the bulk-export surface", () => {
+    expect(canEditEgressFloor(600)).toBe(false)
+  })
+
+  it("permits an owner (700)", () => {
+    expect(canEditEgressFloor(700)).toBe(true)
+  })
+
+  it("denies when the caller's role is unknown (null/undefined)", () => {
+    expect(canEditEgressFloor(null)).toBe(false)
+    expect(canEditEgressFloor(undefined)).toBe(false)
   })
 })
 

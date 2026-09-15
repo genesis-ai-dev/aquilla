@@ -293,7 +293,7 @@ import { fileOptionsForAgentSurface } from "./editor-surface-toolbar"
 import { useFootnotesPreference } from "@/hooks/useFootnotesPreference"
 import type { VisibleFootnoteEntry } from "@/lib/footnotes/types"
 import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
-import { useFileFontSizes, setFileViewPref } from "@/lib/store/file-view-prefs"
+import { useFileFontSizes, useFileFontSizeExplicit, setFileViewPref, clearFileFontSize } from "@/lib/store/file-view-prefs"
 import { EditorScrollProvider, useEditorScroll } from "@/context/EditorScrollContext"
 import { EditorActionsProvider } from "@/context/EditorActionsContext"
 import { detectSuggestions, type RenameSuggestion } from "@/lib/file-labeling/detect"
@@ -1900,6 +1900,7 @@ export function ProjectWorkspace() {
   // FRO-251: per-file, per-side font sizes — adjusted from the View settings
   // (eye) menu, rendered by EditorTable.
   const fontSizes = useFileFontSizes(activeFileId)
+  const fontSizeExplicit = useFileFontSizeExplicit(activeFileId)
 
   // AQU-646: one answer for "is this a subtitle import?", shared with the
   // timing-mode resolver. The hand-rolled check this replaced missed `sbv`,
@@ -10327,12 +10328,16 @@ export function ProjectWorkspace() {
           onHealthCalculationsChange={setHealthCalculationsEnabled}
           sourceFontSize={fontSizes.source}
           targetFontSize={fontSizes.target}
+          sourceFontSizeExplicit={fontSizeExplicit.source}
+          targetFontSizeExplicit={fontSizeExplicit.target}
           onLineNumbersChange={fileMeta.setLineNumbersEnabled}
           onSourceDirectionModeChange={fileMeta.setSourceDirectionMode}
           onTargetDirectionModeChange={fileMeta.setTargetDirectionMode}
           onCellLabelsChange={setCellLabelsEnabled}
           onSourceFontSizeChange={(v) => { if (activeFileId) setFileViewPref(activeFileId, { sourceFontSize: v }) }}
           onTargetFontSizeChange={(v) => { if (activeFileId) setFileViewPref(activeFileId, { targetFontSize: v }) }}
+          onSourceFontSizeReset={() => { if (activeFileId) clearFileFontSize(activeFileId, "source") }}
+          onTargetFontSizeReset={() => { if (activeFileId) clearFileFontSize(activeFileId, "target") }}
           onTnSidebarChange={(v) => {
             setTnSidebarVisible(v)
             if (projectId) writeTnSidebarVisible(projectId, v)
@@ -10799,7 +10804,10 @@ export function ProjectWorkspace() {
             <Suspense fallback={<LoadingPanel label={t("terminology.loadingLabel")} />}>
               <GlossaryEditorContent
                 files={projectFiles}
-                project={project}
+                // The projection-folded record: `project.terminology` is the retired
+                // settings blob, so a glossary handed the raw record shows the blob
+                // and never a term that was created through the event log.
+                project={editorProject ?? project}
                 patchSettings={patchSettings}
               />
             </Suspense>

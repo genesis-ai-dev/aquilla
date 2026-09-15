@@ -83,6 +83,7 @@ import parseDocumentRoutes from "./routes/parse-document"
 import termbaseSubscriptionRoutes from "./routes/termbase-subscriptions"
 import usageRoutes from "./routes/usage"
 import credentialsRoutes from "./routes/credentials"
+import agentConnectRoutes from "./routes/agent-connect"
 import changesetApprovalsRoutes from "./routes/changeset-approvals"
 import importClassifyRoutes from "./routes/import-classify"
 import importSandboxRoutes from "./routes/import-sandbox"
@@ -305,6 +306,7 @@ app.route("/api/v2/monday", mondayRoutes)
 // External API credentials (PATs) for the Agent API (AQU-533 §2). Mint/list/
 // revoke; live role is re-resolved on every downstream API call.
 app.route("/api/v2/credentials", credentialsRoutes)
+app.route("/api/v2/agent-connect", agentConnectRoutes)
 // One-time human approval assertion for ask-mode changesets (AQU-533 §3).
 // Browser-session-authenticated — distinct from the API-credential-gated
 // agent surface in sync-worker's /api/v1/external/projects/*/changesets.

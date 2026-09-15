@@ -21,6 +21,7 @@ import { MAX_ARTIFACT_BYTES, handleExternalArtifactsRequest } from './artifacts-
 import { SERVER_PARSEABLE_FILE_TYPES, CLIENT_ONLY_FORMATS } from './import-parse'
 import { handleExternalReadRequest } from './read-routes'
 import { handleExternalMemoryReadRequest } from './memory-read-routes'
+import { handleExternalQualityRequest } from './quality-routes'
 import { handleExternalChangesetsRequest } from './changesets-route'
 import { listProjectsForCredential } from './projects-list'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
@@ -412,6 +413,57 @@ async function readHistory(
   return runRead(env, token, `${encodeURIComponent(projectId)}/cells/${encodeURIComponent(cellId)}/history`)
 }
 
+// ── delegated quality reads (AQU-1231) ───────────────────────────────────────
+
+/** Same delegation shape as runRead, against the quality router. */
+async function runQualityRead(env: ExternalEnv, token: string, path: string): Promise<McpToolResult> {
+  const req = new Request(`${EXTERNAL_BASE}/${path}`, { headers: bearer(token) })
+  const res = await handleExternalQualityRequest(req, env)
+  if (!res) return fail('not_found', 'quality route did not match')
+  if (!res.ok) return delegatedError(res)
+  return ok(await res.json())
+}
+
+/** fileId / lane / limit / offset — shared by both quality tools. */
+function qualityParams(args: Record<string, unknown>): URLSearchParams {
+  const params = new URLSearchParams()
+  const fileId = str(args, 'fileId')
+  if (fileId) params.set('fileId', fileId)
+  const lane = str(args, 'lane')
+  if (lane) params.set('lane', lane)
+  if (typeof args.limit === 'number') params.set('limit', String(args.limit))
+  if (typeof args.offset === 'number') params.set('offset', String(args.offset))
+  return params
+}
+
+async function readQuality(
+  env: ExternalEnv,
+  token: string,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const projectId = str(args, 'projectId')
+  if (!projectId) return fail('validation_failed', 'projectId is required')
+  const qs = qualityParams(args).toString()
+  return runQualityRead(env, token, `${encodeURIComponent(projectId)}/quality${qs ? `?${qs}` : ''}`)
+}
+
+async function readTermConsistency(
+  env: ExternalEnv,
+  token: string,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const projectId = str(args, 'projectId')
+  if (!projectId) return fail('validation_failed', 'projectId is required')
+  const params = qualityParams(args)
+  if (args.onlyDrift === true) params.set('onlyDrift', '1')
+  const qs = params.toString()
+  return runQualityRead(
+    env,
+    token,
+    `${encodeURIComponent(projectId)}/terms/consistency${qs ? `?${qs}` : ''}`,
+  )
+}
+
 // ── delegated changesets ─────────────────────────────────────────────────────
 
 interface PrepareBody {
@@ -700,6 +752,10 @@ export async function callTool(
       return listMemory(env, token, args)
     case 'read_cell_memory':
       return readCellMemory(env, token, args)
+    case 'read_quality':
+      return readQuality(env, token, args)
+    case 'read_term_consistency':
+      return readTermConsistency(env, token, args)
     case 'prepare_translations':
       return prepareTranslations(env, token, args, ctx)
     case 'preview_import':

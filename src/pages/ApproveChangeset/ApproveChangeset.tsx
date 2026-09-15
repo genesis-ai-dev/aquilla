@@ -14,15 +14,16 @@ import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { messageForStatus } from "@/lib/errors/user-error"
 import {
   approveChangeset,
-  ChangesetApiError,
   fetchChangesetApproval,
   rejectChangeset,
   type ChangesetApproval,
 } from "@/lib/agent/changeset-api"
-import { t as standaloneT } from "@/lib/i18n/standalone"
+import {
+  humanizeSummaryKey,
+  messageForChangesetError,
+} from "@/lib/agent/changeset-review"
 import { useI18n, useT } from "@/lib/i18n/I18nProvider"
 import { fmtLabeledDateTime } from "@/lib/format-date"
 import { DateTooltip } from "@/components/ui/date-tooltip"
@@ -45,31 +46,11 @@ type ActionState =
   | { phase: "rejected" }
   | { phase: "error"; message: string }
 
-/** Turn `translationsAdded` / `translations_added` into "Translations added". */
-function humanizeKey(key: string): string {
-  const spaced = key
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .replace(/_/g, " ")
-    .toLowerCase()
-  return spaced.charAt(0).toUpperCase() + spaced.slice(1)
-}
-
-/**
- * AQU-820: the returned string is rendered verbatim, so it is always ours and
- * keyed — the server's `error.message` is untranslated and often a raw
- * diagnostic. The status alone distinguishes the three cases worth naming;
- * anything that isn't an HTTP failure (network drop, timeout) reads as a
- * connectivity problem.
- */
-function messageForError(err: unknown): string {
-  if (!(err instanceof ChangesetApiError)) {
-    return "Couldn't reach the server. Check your connection and try again."
-  }
-  if (err.status === 403) return standaloneT("error.changeset.notAuthorized")
-  if (err.status === 404) return standaloneT("error.changeset.notFound")
-  if (err.status === 409) return standaloneT("error.changeset.notApprovable")
-  return messageForStatus(err.status, "", "changeset").message
-}
+/** Both helpers moved to `@/lib/agent/changeset-review` (AQU-841) so this page
+ *  and the approvals queue humanize summary keys and read changeset failures
+ *  the same way. Behaviour here is unchanged. */
+const messageForError = messageForChangesetError
+const humanizeKey = humanizeSummaryKey
 
 export function ApproveChangeset() {
   const t = useT()
@@ -418,7 +399,16 @@ function ApprovalSummaryView({
         </Button>
       </div>
 
-      <div className="text-center">
+      {/* AQU-841 — an agent that staged several plans hands back several URLs.
+          From any one of them, this is the way to the rest without going back
+          to the agent for the next link. */}
+      <div className="flex flex-col items-center gap-1">
+        <Link
+          to={`/project/${data.projectId}/approvals`}
+          className="text-xs font-medium text-sky-600 hover:underline dark:text-sky-400"
+        >
+          {t("agent.approvals.queueLink")}
+        </Link>
         <BackToProjectLink data={data} />
       </div>
     </div>

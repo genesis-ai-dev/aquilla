@@ -22,6 +22,7 @@ import { peekOutboxBatch, subscribeToOutbox } from "@/lib/sync/outbox"
 import { formatVttTime } from "@/lib/video/vtt-generator"
 import { decodeHtmlEntities } from "@/lib/html-entities"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
+import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
 
 // AQU-538 (slice 2): one source, N target lanes; `''` is the default lane.
 // SWARM-TODO(AQU-538): slice 1 adds `targetLang` to `CellRow` in
@@ -1142,24 +1143,11 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   // doFetch(true) goes through the `?since=` delta path whenever a watermark
   // exists, so alt-tabbing back to a Bible-sized book costs one tiny request
   // instead of ~60 full pages (PERF-4).
+  // The WHEN is shared across every read hook (one wave per focus return,
+  // rate-limited) — see window-focus-revalidate.ts.
   useEffect(() => {
     if (typeof window === "undefined") return
-    function onFocus() { void doFetch(true) }
-    function onVis() {
-      if (typeof document !== "undefined" && document.visibilityState === "visible") {
-        void doFetch(true)
-      }
-    }
-    window.addEventListener("focus", onFocus)
-    if (typeof document !== "undefined") {
-      document.addEventListener("visibilitychange", onVis)
-    }
-    return () => {
-      window.removeEventListener("focus", onFocus)
-      if (typeof document !== "undefined") {
-        document.removeEventListener("visibilitychange", onVis)
-      }
-    }
+    return subscribeWindowRegainedFocus(() => { void doFetch(true) })
   }, [doFetch])
 
   const revalidate = useCallback(() => {
@@ -1189,12 +1177,12 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   // revalidate on any error so we never end up with stale local state on a
   // transient network blip.
   //
-  // FUTURE: replace this HTTP round-trip with a server-pushed row payload
-  // on the existing `event.applied` WS frame (Supabase-realtime style). That
-  // saves a round-trip per change and is the right shape for the deferred
-  // AD-13/14 neighborhood propagation, which will dirty many cells per
-  // event — fanning out N targeted GETs would be worse than today's full
-  // refetch. See TODO in sync-worker/src/events/event-projection.ts.
+  // This is now the FALLBACK only: `event.applied` WS frames and the
+  // `POST /events` response (`applied[]`) both carry the cell's projected
+  // rows, which land through src/lib/sync/live-apply.ts (peers) and
+  // src/lib/sync/flush-applied.ts (own writes) without a GET. The GET
+  // remains for frames without rows (older worker, >cap batch, partial
+  // commit) and for the error/discard paths above.
   const cellFetchInFlightRef = useRef<Set<string>>(new Set())
   // Self-reference so the discard-exhaustion path below can re-kick a fresh
   // targeted fetch after the in-flight marker clears (a useCallback can't

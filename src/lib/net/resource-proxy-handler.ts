@@ -32,6 +32,7 @@ export const EXTERNAL_CONTENT_HOSTS: readonly string[] = [
   "cdn.door43.org", // Door43 media (OBS images)
   "bible.helloao.org", // Free Use Bible API (helloao)
   "raw.githubusercontent.com", // BibleNLP/ebible corpus + translations.csv
+  "tile.openstreetmap.org", // basemap tiles for the verse-resources locator map (AQU-461)
 ]
 
 /** True when `host` is an allow-listed content host we're willing to proxy. */
@@ -111,13 +112,36 @@ export async function proxyResourceRequest(
     if (value) forwardHeaders.set(name, value)
   }
 
+  // [Pen test] Input validation & injection (2026-09-02): `redirect: "follow"`
+  // would let an allow-listed host redirect this Worker to an arbitrary host
+  // (private/internal addresses included) without re-checking the allow-list,
+  // defeating the whole point of this handler. Follow redirects manually, one
+  // hop at a time, re-validating each `Location` host against the same
+  // allow-list before fetching it.
   let upstreamRes: Response
   try {
-    upstreamRes = await fetchImpl(upstream, {
-      method: request.method,
-      headers: forwardHeaders,
-      redirect: "follow",
-    })
+    let nextUrl = upstream
+    let hop = 0
+    for (;;) {
+      const res = await fetchImpl(nextUrl, {
+        method: request.method,
+        headers: forwardHeaders,
+        redirect: "manual",
+      })
+      if (res.status < 300 || res.status >= 400 || !res.headers.has("location")) {
+        upstreamRes = res
+        break
+      }
+      hop += 1
+      if (hop > 5) {
+        return new Response("Too many redirects", { status: 502 })
+      }
+      const location = new URL(res.headers.get("location")!, nextUrl)
+      if (location.protocol !== "https:" || !allowed.includes(location.hostname)) {
+        return new Response("Forbidden: redirect target not proxyable", { status: 502 })
+      }
+      nextUrl = location.toString()
+    }
   } catch (err) {
     return new Response(
       `Upstream fetch failed: ${err instanceof Error ? err.message : String(err)}`,

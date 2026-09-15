@@ -22,7 +22,14 @@
 
 import JSZip from "jszip"
 import type { CellData } from "@/hooks/useCells"
-import { packageBlockKey, translationsByPackageBlock } from "../import-locators"
+import {
+  packageBlockKey,
+  translationsByPackageBlock,
+  removedPackageBlockKeys,
+  insertionsAfterPackageBlock,
+  type RemovedCellLocatorSource,
+} from "../import-locators"
+import { isUserAddedLine } from "@/lib/timeline/user-line-origin"
 
 export interface PptxExportResult {
   blob: Blob
@@ -30,6 +37,10 @@ export interface PptxExportResult {
   injected: number
   /** Number of paragraphs that were left as-is (no translation). */
   untouched: number
+  /** AQU-1068: paragraphs dropped because their cell was removed in the app. */
+  removed: number
+  /** AQU-1068: new paragraphs written for cells added in the app. */
+  inserted: number
   /** Translated paragraphs whose source had mixed run formatting keep only
    *  the first run's styling — surfaced per segment (additive field). */
   warnings: { segment: string; detail: string }[]
@@ -49,9 +60,16 @@ export interface PptxExportResult {
  * Legacy cells without locators keep the prior positional fallback.
  * Untranslated groups (empty `translated`) leave the paragraph unchanged.
  */
+export interface PptxExportOptions {
+  /** AQU-1068: source cells this file has LOST, from the server's event log
+   *  (`fetchRemovedCells`). Their paragraphs leave the deck. */
+  removedCells?: readonly RemovedCellLocatorSource[]
+}
+
 export async function exportPptx(
   rawPptxBytes: ArrayBuffer,
   cells: CellData[],
+  options: PptxExportOptions = {},
 ): Promise<PptxExportResult> {
   const zip = await JSZip.loadAsync(rawPptxBytes)
 
@@ -73,6 +91,13 @@ export async function exportPptx(
   const groupToTranslation = new Map<string, string>()
 
   for (const cell of cells) {
+    // AQU-1068: a line somebody ADDED here has no place in the original
+    // package, and the legacy fallback below maps cells to paragraphs BY
+    // POSITION — so letting one into this array shifts every mapping after it
+    // and writes translations into the wrong paragraphs of the client's own
+    // document. Locator-based files are already immune (an added line has no
+    // locator, so it is simply skipped); this is the positional path's guard.
+    if (isUserAddedLine(cell)) continue
     const legacyGroup = cell.group || cell.id
     if (!groupToTranslation.has(legacyGroup)) {
       groupOrder.push(legacyGroup)
@@ -88,15 +113,48 @@ export async function exportPptx(
   }
   const locatedTranslations = translationsByPackageBlock(cells)
   const hasLocatedTranslations = locatedTranslations.size > 0
+  // AQU-1068. Both built BEFORE the deck walk, for the reason the guard above
+  // exists: a mapping computed while the tree is being mutated writes
+  // translations into the wrong paragraphs of the client's own deck.
+  const removedKeys = removedPackageBlockKeys(options.removedCells ?? [])
+  const insertions = insertionsAfterPackageBlock(cells, isUserAddedLine)
 
   let injected = 0
   let untouched = 0
+  let removed = 0
+  let inserted = 0
   const warnings: { segment: string; detail: string }[] = []
   // Running index of non-empty paragraphs across the whole deck.
   let paraCursor = 0
 
   const parser = new DOMParser()
   const serializer = new XMLSerializer()
+
+  /**
+   * AQU-1068: write out cells added UNDER this paragraph, as new paragraphs of
+   * their own cloned from the anchor — so the added text inherits the anchor's
+   * run and paragraph properties rather than arriving unstyled.
+   *
+   * A PowerPoint text box does NOT reflow: its shape has a fixed extent, so a
+   * slide can overflow and the added text may sit outside the visible box.
+   * Sam's call (2026-09-09) is that this is the lesser failure — the content is
+   * in the file and the client can resize the box, whereas content that never
+   * arrives cannot be recovered at all — and the export dialog says a slide may
+   * overflow.
+   */
+  function insertAfter(anchor: Element, blockKey: string): boolean {
+    const texts = insertions.get(blockKey)
+    if (!texts || texts.length === 0) return false
+    let after: Element = anchor
+    for (const text of texts) {
+      const clone = anchor.cloneNode(true) as Element
+      if (!injectTranslationIntoParagraph(clone, text)) continue
+      after.parentNode?.insertBefore(clone, after.nextSibling)
+      after = clone
+      inserted++
+    }
+    return true
+  }
 
   for (const slideFile of slideFiles) {
     const xmlStr = await zip.file(slideFile)!.async("string")
@@ -105,27 +163,47 @@ export async function exportPptx(
     const shapes = doc.getElementsByTagName("p:sp")
     let slideMutated = false
 
-    for (let spIdx = 0; spIdx < shapes.length; spIdx++) {
-      const paragraphs = shapes[spIdx].getElementsByTagName("a:p")
+    const shapeList = Array.from(shapes)
+    for (let spIdx = 0; spIdx < shapeList.length; spIdx++) {
+      // SNAPSHOT, because `getElementsByTagName` returns a LIVE collection and
+      // this loop now inserts and removes paragraphs. Iterating the live list
+      // while mutating it shifts `pIdx` and `length` underneath the walk, which
+      // silently skips paragraphs — and the locator path indexes by `pIdx`, so
+      // every translation after the first edit would land on the wrong one.
+      const paragraphs = Array.from(shapeList[spIdx].getElementsByTagName("a:p"))
 
       for (let pIdx = 0; pIdx < paragraphs.length; pIdx++) {
         const p = paragraphs[pIdx]
         // Skip-empty rule mirrors the parser: only text inside a:r runs counts.
         if (!paragraphPlainText(p).trim()) continue
 
-        const located = locatedTranslations.get(packageBlockKey(
+        const blockKey = packageBlockKey(
           slideFile,
           `p:sp[${spIdx + 1}]/p:txBody/a:p[${pIdx + 1}]`,
-        ))
+        )
+        const located = locatedTranslations.get(blockKey)
+
+        // AQU-1068: this paragraph's cell was removed in the app, so the
+        // paragraph leaves the deck. The snapshot above means the removal
+        // cannot disturb the indices this walk is built on.
+        if (removedKeys.has(blockKey)) {
+          p.parentNode?.removeChild(p)
+          removed++
+          slideMutated = true
+          continue
+        }
+
         const group = groupOrder[paraCursor]
         paraCursor++
         if (!located && (hasLocatedTranslations || !group)) {
           untouched++
+          if (insertAfter(p, blockKey)) slideMutated = true
           continue
         }
         const translation = located?.plain ?? (group ? groupToTranslation.get(group) : undefined) ?? ""
         if (!translation) {
           untouched++
+          if (insertAfter(p, blockKey)) slideMutated = true
           continue
         }
 
@@ -142,6 +220,7 @@ export async function exportPptx(
         } else {
           untouched++
         }
+        if (insertAfter(p, blockKey)) slideMutated = true
       }
     }
 
@@ -158,7 +237,7 @@ export async function exportPptx(
     mimeType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   })
 
-  return { blob, injected, untouched, warnings }
+  return { blob, injected, untouched, removed, inserted, warnings }
 }
 
 /**

@@ -1,7 +1,9 @@
 import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
 import app from "../index"
+import { sha256Hex } from "../../../db/shared/api-credentials"
 import { jwtFor, authHeader } from "./helpers/db"
+import { clearSessionCache } from "../lib/session-cache"
 
 // [Pen test] Auth & session mgmt (2026-07-20): a password reset previously
 // did nothing to the access tokens already issued for the account — a
@@ -22,19 +24,27 @@ function register(username: string, email: string, password: string): Promise<Re
 }
 
 async function setPasswordChangedAt(username: string, iso: string): Promise<void> {
+  // Written straight to the DB (= from another isolate). The session cache
+  // would serve the pre-reset row until SESSION_CACHE_TTL_MS elapses — the
+  // documented window (lib/session-cache.ts). Clearing models that; the
+  // in-isolate eviction is covered in session-cache.test.ts.
+  clearSessionCache()
   await env.AQUILLA_PG.prepare("UPDATE users SET password_changed_at = ? WHERE username = ?")
     .bind(iso, username)
     .run()
 }
 
+/** Plant a reset token in the shape the route actually writes: digest only
+ *  (OPS-20/OPS-31). The plaintext is never stored, so a test that needs a
+ *  usable token has to hash it in the same way the handler will. */
 async function seedToken(username: string, token: string, expiresAt: string): Promise<void> {
   const u = await env.AQUILLA_PG.prepare("SELECT id FROM users WHERE username = ?")
     .bind(username)
     .first<{ id: number }>()
   await env.AQUILLA_PG.prepare(
-    "INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES (?, ?, ?)",
+    "INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES (?, ?, ?)",
   )
-    .bind(u!.id, token, expiresAt)
+    .bind(u!.id, await sha256Hex(token), expiresAt)
     .run()
 }
 

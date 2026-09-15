@@ -25,6 +25,15 @@ vi.mock("@/lib/audio/audio-attachments-bus", () => ({
   injectOptimisticAudioRemove: (...args: unknown[]) => injectOptimisticRemove(...args),
 }))
 
+// AQU-464: the strip resolves each take against the cell's text history. That
+// read is the hook's own concern (covered by src/lib/audio/text-drift.test.ts);
+// here we drive its RESULT so the strip's rendering is tested without a fetch.
+import type { RecordingTextDrift } from "@/lib/audio/text-drift"
+let driftResult = new Map<string, RecordingTextDrift>()
+vi.mock("@/hooks/useRecordingTextDrift", () => ({
+  useRecordingTextDrift: () => driftResult,
+}))
+
 import { TakesStrip } from "./TakesStrip"
 
 const session = { jwt: "jwt", username: "dir" } as never
@@ -39,7 +48,21 @@ beforeEach(() => {
   emitSelect.mockClear()
   emitRemove.mockClear()
   notify.mockClear()
+  driftResult = new Map()
 })
+
+function drift(audioId: string, over: Partial<RecordingTextDrift> = {}): RecordingTextDrift {
+  return {
+    audioId,
+    recordedAt: Date.parse("2026-06-30T10:00:00Z"),
+    textAtRecording: "In the beginning",
+    textAtRecordingEventId: "c1",
+    latestText: "At the first",
+    latestTextEventId: "c2",
+    drifted: true,
+    ...over,
+  }
+}
 
 describe("TakesStrip", () => {
   it("renders nothing when there are no takes", () => {
@@ -471,5 +494,47 @@ describe("TakesStrip — reporting the last take", () => {
     )
     deleteFirstTake()
     await waitFor(() => expect(onLastTakeRemoved).toHaveBeenCalledWith("c1"))
+  })
+
+  // AQU-464 — audio↔text drift.
+  describe("text drift", () => {
+    it("flags a take recorded against text that has since changed", async () => {
+      driftResult = new Map([["a", drift("a")]])
+      render(<TakesStrip {...common} takes={[take("a", 1000)]} selectedAudioId="a" />)
+
+      const badge = await screen.findByTestId("take-text-drift-a")
+      expect(badge.textContent).toContain("Text changed")
+      // The tooltip must quote the wording AS RECORDED — that is the whole
+      // point of the feature, not just "something changed".
+      expect(badge.getAttribute("title")).toContain("In the beginning")
+    })
+
+    it("leaves an undrifted take unmarked", () => {
+      driftResult = new Map([["a", drift("a", { drifted: false })]])
+      render(<TakesStrip {...common} takes={[take("a", 1000)]} selectedAudioId="a" />)
+
+      expect(screen.queryByTestId("take-text-drift-a")).toBeNull()
+    })
+
+    it("does not mark a take the resolver could not place", () => {
+      // Absent from the map means "cannot say" — never render that as a flag.
+      driftResult = new Map()
+      render(<TakesStrip {...common} takes={[take("a", 1000)]} selectedAudioId="a" />)
+
+      expect(screen.queryByTestId("take-text-drift-a")).toBeNull()
+    })
+
+    it("marks only the takes that drifted, not every take on the cell", () => {
+      driftResult = new Map([
+        ["a", drift("a")],
+        ["b", drift("b", { drifted: false })],
+      ])
+      render(
+        <TakesStrip {...common} takes={[take("a", 1000), take("b", 1000)]} selectedAudioId="b" />,
+      )
+
+      expect(screen.queryByTestId("take-text-drift-a")).toBeTruthy()
+      expect(screen.queryByTestId("take-text-drift-b")).toBeNull()
+    })
   })
 })

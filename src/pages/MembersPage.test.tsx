@@ -32,6 +32,7 @@ vi.mock("@/hooks/useOrgSettings", () => ({
     memberProgressViewMinRole: 600,
     allowSelfAssignment: false,
     termbaseEditMinRole: 500,
+    languageEditMinRole: 600,
     refresh: vi.fn(async () => null),
     patch: vi.fn(async () => ({ kind: "ok" as const })),
     requestPromotion: vi.fn(async () => ({ kind: "blocked" as const })),

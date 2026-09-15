@@ -249,6 +249,10 @@ export const audio = defineNamespace({
     "audio.takesStrip.syncFailedTooltip":
       "Couldn't save to the server — this take is still on this device. Retry to send it again.",
     "audio.takesStrip.syncFailedRetry": "Not saved — retry",
+    "audio.takesStrip.textDriftBadge": "Text changed",
+    "audio.takesStrip.textDriftTooltip":
+      "Recorded {date}, when this line read: “{text}”. The text has changed since — " +
+      "re-record to match, or keep this take if you are reviewing the older wording.",
     "audio.takesStrip.playTakeTooltip": "Play take",
     "audio.takesStrip.removeNoiseTooltip": "Remove noise (adds a cleaned take)",
     "audio.takesStrip.revertTooltip": "Revert to the original recording",
@@ -1398,6 +1402,27 @@ export const audio = defineNamespace({
           "Label on the small red button shown on a take that failed to save to the " +
           "server; pressing it queues the save again. Very short — it sits inline on " +
           "a compact take row.",
+      },
+      "audio.takesStrip.textDriftBadge": {
+        description:
+          "Very short label on an amber badge marking a take that was recorded " +
+          "against an OLDER version of this line's text — the wording has been " +
+          "edited since the recording was made, so the audio and the text no longer " +
+          "agree. Not an error: the take is fine, it just speaks the old wording. " +
+          "Sits inline on a compact take row beside the take's name.",
+        maxLength: 16,
+      },
+      "audio.takesStrip.textDriftTooltip": {
+        description:
+          "Hover title on that badge. Gives the date the take was recorded and " +
+          "quotes the line's wording AS IT READ THEN, then says the text has since " +
+          "changed and names the two reasonable responses. Deliberately not a " +
+          "warning — reviewing audio against its own older wording is a normal " +
+          "workflow, so the tone is informative.",
+        placeholders: {
+          date: "Date the recording was made, already formatted for the user's locale.",
+          text: "The line's text as it read at the moment of recording, quoted verbatim.",
+        },
       },
       "audio.takesStrip.playTakeTooltip": {
         description:

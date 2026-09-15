@@ -38,8 +38,12 @@ export class SyncTokenError extends Error {
   }
 }
 
-/** Optional bootstrap payload so the server can auto-register an unknown
- *  projectId on the caller's first /sync-token request. */
+/** Legacy bootstrap payload. AQU-299 / SEC-9: the server no longer
+ *  auto-registers an unknown projectId from it — POST /api/v2/projects
+ *  (createCloudProject, called on create and throwing on failure) is the only
+ *  project-creation path, and /sync-token 403s anything unregistered. Still
+ *  sent by the workspace and accepted-but-ignored server-side; remove once no
+ *  deployed client sends it. */
 export interface ProjectBootstrap {
   projectName?: string
   gitlabProjectId?: number

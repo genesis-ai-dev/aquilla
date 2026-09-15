@@ -1,3 +1,5 @@
+import { AUTH_BASE } from "@/lib/frontier/auth"
+import { buildConnectionInstructions } from "@/lib/sync/agent-connect"
 // Personal API tokens section for the Preferences page (AQU-533 §1 "Token
 // UI"). Lets a signed-in user mint, list, and revoke `aqk_…` personal-access
 // tokens for the external Agent API.
@@ -167,6 +169,9 @@ export function ApiTokensSection() {
   const [refreshKey, setRefreshKey] = useState(0)
   const [mintResult, setMintResult] = useState<MintCredentialResult | null>(null)
   const [revokeTarget, setRevokeTarget] = useState<ApiCredential | null>(null)
+  const [connectionCopied, setConnectionCopied] = useState(false)
+  const [connectionCopyError, setConnectionCopyError] = useState(false)
+  const connectionInstructions = buildConnectionInstructions(AUTH_BASE, syncWorkerHttpOrigin())
   const [instructionsFor, setInstructionsFor] = useState<ApiCredential | null>(null)
 
   useEffect(() => {
@@ -200,6 +205,17 @@ export function ApiTokensSection() {
 
   return (
     <div className="space-y-2">
+      <SettingsGroup><SettingsRow label={t("onboarding.connect.setup")} block>
+        <div className="flex flex-col gap-3">
+          <p className="text-sm text-muted-foreground">{t("onboarding.connect.setupBody")}</p>
+          <Button variant="outline" onClick={async () => {
+            try { await navigator.clipboard.writeText(connectionInstructions); setConnectionCopied(true); setConnectionCopyError(false) }
+            catch { setConnectionCopyError(true) }
+          }}>{connectionCopied ? t("nav.version.copiedLabel") : t("onboarding.connect.copy")}</Button>
+          {connectionCopyError && <><p role="alert">{t("onboarding.connect.copyError")}</p>
+            <pre className="max-h-72 overflow-auto whitespace-pre-wrap text-xs">{connectionInstructions}</pre></>}
+        </div>
+      </SettingsRow></SettingsGroup>
       <div className="flex items-center justify-between gap-4 pl-4">
         <p className="font-heading text-base font-medium tracking-tight text-foreground">
           {t("onboarding.apiTokens.heading")}

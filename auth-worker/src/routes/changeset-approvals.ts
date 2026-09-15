@@ -120,11 +120,12 @@ async function authorityDenied(
   cs: ChangesetRow,
   verb: string,
 ): Promise<ReturnType<typeof errorJson> | null> {
-  // Org-level plans keep the creator rule: a project-creation plan's project
-  // does not exist until commit, and an org-membership plan (AQU-1235) does not
-  // concern the project it is filed under — so no project role resolves against
-  // either and a floor would deny everyone. Their real gate is the org-role
-  // check at prepare/commit.
+  // Org-level plans keep the creator rule: a tenant-creation plan (CreateProject
+  // / CreateOrg) names a project/org that does not exist until commit — for
+  // CreateOrg it never exists at all — and an org-membership plan (AQU-1235)
+  // does not concern the project it is filed under. Either way no project role
+  // resolves against the plan and a floor would deny everyone. Their real gate
+  // is the org-role / credential-scope check at prepare/commit.
   if (planIsCreatorScoped(cs.commands)) {
     if (cs.created_by_user_id === String(user.id)) return null
     return errorJson(

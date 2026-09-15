@@ -15,16 +15,21 @@ import type { ExternalErrorCode } from './errors'
 import { ROLE } from '../events/role-policy'
 import { assertCredentialScope } from './token-bridge'
 import { loadChangeset } from './store'
-import { approvalUrlFor, CHANGESET_TTL_MS } from './prepare'
+import { approvalUrlFor, CHANGESET_ASK_TTL_MS, CHANGESET_TTL_MS } from './prepare'
+import { WAIT_MAX_TIMEOUT_MS } from './changeset-wait'
 import { PLAN_IMPORT_MAX_CELLS } from './commands'
 import { MAX_ARTIFACT_BYTES, handleExternalArtifactsRequest } from './artifacts-route'
 import { SERVER_PARSEABLE_FILE_TYPES, CLIENT_ONLY_FORMATS } from './import-parse'
+import { uiOnlySection } from './ui-only'
 import { handleExternalReadRequest } from './read-routes'
 import { handleExternalMemoryReadRequest } from './memory-read-routes'
 import { handleExternalExportRequest } from './export-route'
 import { handleExternalQualityRequest } from './quality-routes'
 import { handleExternalChangesetsRequest } from './changesets-route'
 import { listProjectsForCredential } from './projects-list'
+import { loadProjectDetail } from './project-detail'
+import { listOrgsForCredential } from './orgs-list'
+import { MAX_SEARCH_PROJECTS } from './search-reads'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { COMMAND_CATALOG } from '../../../db/shared/command-catalog'
 import type { ApiCredentialContext } from '../../../db/shared/api-credentials'
@@ -91,7 +96,8 @@ function bearer(token: string): Record<string, string> {
  *  `channel: 'mcp'` into the provenance envelope (§2) instead of the REST default. */
 const MCP_CHANNEL_HEADER: Record<string, string> = { 'x-aquilla-channel': 'mcp' }
 
-const EXTERNAL_BASE = 'https://internal/api/v1/external/projects'
+const EXTERNAL_ROOT = 'https://internal/api/v1/external'
+const EXTERNAL_BASE = `${EXTERNAL_ROOT}/projects`
 
 // ── direct reads ─────────────────────────────────────────────────────────────
 
@@ -103,26 +109,46 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
     // the workflow from per-tool descriptions.
     quickstart: [
       '1. get_identity_and_scope — confirm who you are, your mode (ask|act), and your org/project scope.',
-      '2. list_projects — find a projectId.',
-      '3. read_content with just projectId to list files; add fileId to read cells. search_project for full-text search. list_memory for what the copilot has learned about the project (and read_cell_memory for what it is given on one cell).',
+      '2. list_projects — find a projectId. Managing a whole workspace? list_orgs first, then list_projects { orgId } per org.',
+      '3. read_content with just projectId to list files; add fileId to read cells. search_project for full-text search in one project, search_projects { projectIds: [...] } across several, find_similar_cells for translation-memory precedents. list_memory for what the copilot has learned about the project (and read_cell_memory for what it is given on one cell).',
       '4. prepare_translations — stage your writes as a changeset. Nothing is applied yet. Returns { changesetId, digest, summary, mode, approvalUrl? }.',
       '5. confirm_changeset with that changesetId + digest. act mode: applies immediately. ask mode: first show the approvalUrl to a human and wait for them to approve in their browser, then call confirm_changeset — until then it returns confirmation_required and applies nothing.',
       '6. export_file — when the work is done, pull the file back out in its delivered format (e.g. USFM for Paratext). See exporting below for the role floor and the fidelity fields to check before you hand the result to anyone.',
     ],
-    // All five domain command kinds now ship (Agent API v1.1). PlanImport
+    // All six domain command kinds now ship (Agent API v1.1 + AQU-1221).
+    // PlanImport stages via the dedicated preview_import / prepare_import tools
+    // (or raw REST PlanImport cells); prepare_translations's `commands`
+    // argument still does not accept it. CreateOrg / CreateProject /
+    // UpdateProjectSettings / LinkMedia stage through the SAME
+    // prepare_translations / confirm_changeset tools as SetTranslation, via
+    // that `commands` argument — see projectLifecycle and linkMedia below for
+    // their per-kind rules.
+    commandKinds: [
+      'SetTranslation',
+      'PlanImport',
+      'CreateOrg',
+      'CreateProject',
+      'UpdateProjectSettings',
+      'LinkMedia',
+    ],
+    // FROZEN legacy field (Agent API v1.1) — the five kinds stageable through
+    // prepare_translations's `commands` argument, kept byte-stable for callers
+    // that branch on it under its original name. It is NOT the live command
+    // list: newer kinds (PatchSettings, EmitEvents) are published in
+    // `commands.index` below and documented by describe_command. PlanImport
     // stages via the dedicated preview_import / prepare_import tools (or raw
-    // REST PlanImport cells); prepare_translations's `commands` argument still
-    // does not accept it. CreateProject / UpdateProjectSettings / LinkMedia
-    // stage through the SAME prepare_translations / confirm_changeset tools as
-    // SetTranslation, via that `commands` argument — see projectLifecycle and
-    // linkMedia below for their per-kind rules.
-    commandKinds: ['SetTranslation', 'PlanImport', 'CreateProject', 'UpdateProjectSettings', 'LinkMedia'],
+    // REST PlanImport cells); `commands` still does not accept it.
+    // CreateProject / UpdateProjectSettings / LinkMedia stage through the
+    // SAME prepare_translations / confirm_changeset tools as SetTranslation —
+    // see projectLifecycle and linkMedia below for their per-kind rules;
+    // PatchSettings has its own patch_settings tool (see projectSettings).
+    commandKindsLegacy: ['SetTranslation', 'PlanImport', 'CreateProject', 'UpdateProjectSettings', 'LinkMedia'],
     // AQU-926 command registry: the role-agnostic catalog index (every
     // agent-reachable command, incl. the newer PatchSettings / EmitEvents).
-    // Static floors only — dynamic checks (org overrides, per-event floors)
-    // run at prepare. Full per-command params docs are served by the in-app
-    // harness's describe_command tool; a matching MCP tool is planned (P3) —
-    // do not invent one from this index.
+    // Static floors only — dynamic checks (org overrides, per-key/per-event
+    // floors) run at prepare. Full per-command params docs come from the
+    // describe_command tool, which serves this same shared catalog on both
+    // the MCP and in-app surfaces (AQU-1222).
     commands: {
       index: COMMAND_CATALOG.filter((c) => c.agentReachable).map((c) => ({
         kind: c.kind,
@@ -132,9 +158,32 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
       })),
       note:
         'Commands stage via prepare_translations `commands` (or REST .../changesets) and ' +
-        'commit via confirm_changeset. describe_command (in-app agent harness) serves each ' +
-        "command's full parameter doc; it is not yet an MCP tool.",
+        'commit via confirm_changeset. Call describe_command({ kind }) for any command\'s ' +
+        'full parameter doc — params, floors, gotchas, worked example — before hand-building ' +
+        'one; omit kind for the index. EmitEvents is REST-only for now (POST ' +
+        '.../changesets); every other agent-reachable kind is stageable over MCP.',
     },
+    projectSettings: {
+      readTool: 'get_project_settings',
+      patchTool: 'patch_settings',
+      note:
+        'Read settings + their live version with get_project_settings, then change specific ' +
+        'keys with patch_settings { projectId, ops: [{ key, value }], ifMatchVersion } — a ' +
+        'field-scoped write: keys you do not name stay byte-identical. `ifMatchVersion` must ' +
+        'equal the live version at prepare AND commit (plan_stale on drift), so always read ' +
+        'before you patch. Floors: `terminology` needs the org termbase-edit floor (default ' +
+        'PROJECT_LEAD 500), every other key MAINTAINER 600. Policy keys governing agent ' +
+        'oversight itself (agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, ' +
+        'validationCount, validationCountAudio, allowSelfValidation, harmonize_min_role, ' +
+        'contributeToGlobalTm) are NEVER writable by an agent (permission_denied). ' +
+        'PatchSettings must be the sole command in its changeset, and — like every write — ' +
+        'applies only at confirm_changeset. Prefer it over the deprecated whole-blob ' +
+        'UpdateProjectSettings, which can clobber keys you never read.',
+    },
+    // AQU-1178: the permanent exclusions. Published from the same module the
+    // REST discovery map and the external 404 hints read, so the three cannot
+    // drift (sync-worker/src/external/ui-only.ts).
+    uiOnly: uiOnlySection(),
     planImport: {
       stagingChannels: ['rest', 'mcp'],
       mcpStagingTool: 'prepare_import',
@@ -195,17 +244,23 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
       mcpStagingTool: 'prepare_translations',
       commitTool: 'confirm_changeset',
       note:
-        'CreateProject and UpdateProjectSettings are receipt-only (a plain row write, not an ' +
-        'event) — stage via prepare_translations\'s `commands` argument and commit with ' +
-        'confirm_changeset exactly like SetTranslation. Each must be the sole command in its ' +
-        'changeset. CreateProject requires an unscoped or org-scoped credential with org ' +
+        'CreateOrg, CreateProject and UpdateProjectSettings are receipt-only (a plain row ' +
+        'write, not an event) — stage via prepare_translations\'s `commands` argument and ' +
+        'commit with confirm_changeset exactly like SetTranslation. Each must be the sole ' +
+        'command in its changeset. CreateOrg (AQU-1221) starts a whole new tenant: it takes ' +
+        'ONLY a name, requires an UNSCOPED credential (org- or project-scoped gets ' +
+        'scope_denied), makes the credential\'s minting user the org OWNER, rejects any ' +
+        'tier/billing/entitlement field with validation_failed naming it, and is capped at 5 ' +
+        'staged creations per credential per 15 minutes (rate_limited). Its receipt carries ' +
+        'orgId, not projectId — feed that orgId to a follow-up CreateProject to populate the ' +
+        'new org. CreateProject requires an unscoped or org-scoped credential with org ' +
         'role >= MAINTAINER (a project-scoped credential gets scope_denied) — and prepare ' +
-        'ALWAYS stages CreateProject in ask-mode regardless of credential mode, so it always ' +
-        'requires human approval at the approvalUrl before it can commit; a project id ' +
-        'claimed by another caller between prepare and commit returns ' +
+        'ALWAYS stages CreateOrg and CreateProject in ask-mode regardless of credential ' +
+        'mode, so they always require human approval at the approvalUrl before they can ' +
+        'commit; a project id claimed by another caller between prepare and commit returns ' +
         'conflict. UpdateProjectSettings requires project role >= MAINTAINER and a matching ' +
         'ifMatchVersion (else plan_stale). Receipt shape: { credentialId, channel, ' +
-        'changesetId, command, appliedAt, projectId, version? }.',
+        'changesetId, command, appliedAt, projectId?, orgId?, version? }.',
     },
     linkMedia: {
       mcpStagingTool: 'prepare_translations',
@@ -218,6 +273,23 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
         'prepare_translations\'s `commands` argument. Multiple LinkMedia commands may share ' +
         'one changeset; LinkMedia cannot mix with any other command kind.',
     },
+    structure: {
+      mcpStagingTool: 'prepare_translations',
+      commitTool: 'confirm_changeset',
+      commandKinds: ['InsertCell', 'DeleteCell', 'SplitCell'],
+      note:
+        'Cell-structure commands change a file\'s SHAPE — add a row, remove one, or cut a ' +
+        'long source sentence in two — using the same cell-lifecycle events the workspace ' +
+        'emits, so the event log is indistinguishable from a human edit. Stage via ' +
+        'prepare_translations\'s `commands` argument; each must be the SOLE command in its ' +
+        'changeset and requires PROJECT_LEAD. All three are REFUSED on a file imported with ' +
+        'preserved export slots (IDML/OOXML locators), because those exporters address ' +
+        'cells by locator and a structural change would break the round trip. DeleteCell is ' +
+        'refused while the cell still owns validators, waivers, comments, back-translations, ' +
+        'audio takes, links or assignment rows. SplitCell requires an explicit `targets` ' +
+        '("blank" or "divide"); both halves come out unvalidated either way. MergeCells is ' +
+        'NOT available — see docs/AGENT-API.md for why it is deferred.',
+    },
     multiLanguage: {
       note:
         'A project can hold MULTIPLE target languages at once via target-language lanes. A ' +
@@ -226,7 +298,7 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
         'target per lane. Omitting the lane everywhere uses the default lane (the project\'s ' +
         'single targetLanguage) — existing single-language callers need no changes.',
       workflow: [
-        '1. Register the lanes once: stage UpdateProjectSettings with settings.targetLanes: ["es", "pt"] (merge into the existing settings blob — the write replaces it — and pass the live ifMatchVersion).',
+        '1. Register the lanes once: get_project_settings for the live version, then patch_settings { ops: [{ key: "targetLanes", value: ["es", "pt"] }], ifMatchVersion } — a field-scoped write, so the rest of the settings blob is untouched.',
         '2. Write per lane: each SetTranslation entry takes an optional laneId ("es" or "pt"). An unregistered laneId is rejected at prepare with validation_failed.',
         '3. Read per lane: read_content takes an optional lane argument — target cells are filtered to that lane (source cells are always included). Omit it to get every lane (each target row carries its targetLang).',
         '4. Importing a file can seed several lanes at once: PlanImport cells take variants: [{ laneId, content }] (REST-only).',
@@ -235,8 +307,31 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
         'Preconditions and drift (plan_stale) are lane-scoped: concurrent edits to the SAME ' +
         'cell in DIFFERENT lanes never invalidate each other\'s changesets.',
     },
+    // AQU-1236: org-scoped reads. PATs are scoped org-or-project, so a console
+    // managing a partner's whole workspace can work from one org-scoped token
+    // instead of one token per project.
+    orgScopedReads: {
+      tools: ['list_orgs', 'list_projects', 'search_projects'],
+      note:
+        'list_orgs returns the orgs this credential covers; list_projects takes an optional ' +
+        'orgId to enumerate one of them; search_projects searches an explicit list of up to ' +
+        `${MAX_SEARCH_PROJECTS} projects in one call, each result carrying its projectId. ` +
+        'Scope only ever narrows: an org-scoped credential is confined to that org, a ' +
+        'project-scoped one to its single project (and that project\'s org), and naming ' +
+        'anything outside it returns scope_denied rather than an empty result. ' +
+        'search_projects is strict — one unauthorized project in the list fails the whole ' +
+        'call, so a result set is never silently partial — and costs one search-rate-limit ' +
+        'unit per project searched.',
+      maxProjectsPerSearch: MAX_SEARCH_PROJECTS,
+    },
     limits: {
+      // Act mode. Kept under its original name so existing callers keep reading
+      // the TTL that applies when THEY hold the whole loop.
       changesetExpirySeconds: CHANGESET_TTL_MS / 1000,
+      // Ask mode waits on a human, so it gets its own, longer deadline
+      // (AQU-1177 §3) — publish it rather than let an agent assume one hour.
+      changesetExpirySecondsAskMode: CHANGESET_ASK_TTL_MS / 1000,
+      changesetWaitMaxTimeoutMs: WAIT_MAX_TIMEOUT_MS,
       // Wave-1 validateCommands enforces no hard per-changeset command cap.
       maxCommandsPerChangeset: null,
       planImportMaxCells: PLAN_IMPORT_MAX_CELLS,
@@ -264,19 +359,34 @@ function getIdentityAndScope(cred: ApiCredentialContext): McpToolResult {
   })
 }
 
-async function listProjects(env: ExternalEnv, cred: ApiCredentialContext): Promise<McpToolResult> {
+async function listOrgs(env: ExternalEnv, cred: ApiCredentialContext): Promise<McpToolResult> {
   if (!env.AQUILLA_PG) return fail('job_failed', 'AQUILLA_PG not configured')
-  // Shared with REST GET /api/v1/external/projects (projects-list.ts) so the
-  // two adapters can never drift.
-  const projects = await listProjectsForCredential(env.AQUILLA_PG, cred)
-  return ok({ projects })
+  // Shared with REST GET /api/v1/external/orgs (orgs-list.ts) — AQU-1236.
+  const orgs = await listOrgsForCredential(env.AQUILLA_PG, cred)
+  return ok({ orgs })
 }
 
-interface ProjectRow {
-  id: string
-  name: string
-  org_id: number | string | bigint | null
-  archived_at: string | null
+async function listProjects(
+  env: ExternalEnv,
+  cred: ApiCredentialContext,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  if (!env.AQUILLA_PG) return fail('job_failed', 'AQUILLA_PG not configured')
+  // AQU-1236: an org id from the caller narrows the list, but only inside the
+  // credential's own scope — an org-scoped credential naming a different org
+  // gets scope_denied, matching the REST route rather than returning [].
+  const orgId = str(args, 'orgId')
+  if (orgId !== undefined && cred.orgId !== null && cred.orgId !== orgId) {
+    return fail('scope_denied', 'credential is not scoped to this org')
+  }
+  // Shared with REST GET /api/v1/external/projects (projects-list.ts) so the
+  // two adapters can never drift.
+  const projects = await listProjectsForCredential(
+    env.AQUILLA_PG,
+    cred,
+    orgId !== undefined ? { orgId } : {},
+  )
+  return ok({ projects })
 }
 
 async function getProject(
@@ -296,17 +406,56 @@ async function getProject(
   if (!resolved || resolved.level < ROLE.VIEWER) {
     return fail('permission_denied', 'no project membership (VIEWER role required)')
   }
-  const row = await db
-    .prepare('SELECT id, name, org_id, archived_at FROM projects WHERE id = ?')
-    .bind(projectId)
-    .first<ProjectRow>()
-  if (!row) return fail('not_found', `project ${projectId} not found`)
+  // AQU-1222: shared with the REST GET /projects/:projectId route so the two
+  // adapters cannot drift — and so both carry settingsVersion, the number
+  // PatchSettings.ifMatchVersion has to match.
+  const detail = await loadProjectDetail(db, projectId, resolved.level)
+  if (!detail) return fail('not_found', `project ${projectId} not found`)
+  return ok(detail)
+}
+
+// ── describe_command ─────────────────────────────────────────────────────────
+
+/** AQU-1222: the command catalog's L2 params doc, previously reachable only
+ *  from the in-app agent harness (auth-worker command-tools.ts) even though
+ *  get_capabilities.commands pointed external agents at it. Same shared catalog,
+ *  so the two describe_command surfaces answer identically.
+ *
+ *  No role gate: the catalog is static documentation, and every credential
+ *  already sees the same index through get_capabilities. Kinds with
+ *  agentReachable=false are governance-only and stay indistinguishable from
+ *  unknown on every agent surface (audit §6.7). */
+function describeCommandTool(args: Record<string, unknown>): McpToolResult {
+  const index = COMMAND_CATALOG.filter((c) => c.agentReachable)
+  const kind = str(args, 'kind')
+  if (!kind) {
+    // No kind → the index, so a caller that guessed the argument name wrong
+    // still learns what it may ask about instead of just being rejected.
+    return ok({
+      commands: index.map((c) => ({
+        kind: c.kind,
+        title: c.title,
+        tier: c.tier,
+        minRoleLevel: c.minRoleLevel,
+        oneLiner: c.oneLiner,
+      })),
+      note: 'Call describe_command({ kind }) for one command\'s full parameter doc.',
+    })
+  }
+
+  const entry = index.find((c) => c.kind === kind)
+  if (!entry) {
+    return fail('not_found', `unknown command "${kind}"`, {
+      details: { availableKinds: index.map((c) => c.kind) },
+    })
+  }
   return ok({
-    id: row.id,
-    name: row.name,
-    org_id: row.org_id == null ? null : String(row.org_id),
-    archived: row.archived_at != null,
-    role: resolved.level,
+    kind: entry.kind,
+    title: entry.title,
+    tier: entry.tier,
+    minRoleLevel: entry.minRoleLevel,
+    oneLiner: entry.oneLiner,
+    paramsDoc: entry.paramsDoc,
   })
 }
 
@@ -407,6 +556,42 @@ async function findSimilarCells(
   return runRead(env, token, `${encodeURIComponent(projectId)}/similar?${params.toString()}`)
 }
 
+/** Cross-project search (AQU-1236) — delegates to REST
+ *  GET /api/v1/external/search, which sits at the external ROOT rather than
+ *  under /projects, so it cannot use runRead's project-scoped base. */
+async function searchProjects(
+  env: ExternalEnv,
+  token: string,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const q = str(args, 'q')
+  if (!q) return fail('validation_failed', 'q is required')
+  if (!Array.isArray(args.projectIds)) {
+    return fail('validation_failed', 'projectIds must be an array of project ids')
+  }
+  const projectIds = args.projectIds.filter((p): p is string => typeof p === 'string' && p.length > 0)
+  if (projectIds.length === 0) {
+    return fail('validation_failed', 'projectIds must be a non-empty array of project ids')
+  }
+  if (projectIds.length > MAX_SEARCH_PROJECTS) {
+    return fail(
+      'validation_failed',
+      `too many projects: ${projectIds.length} requested, max ${MAX_SEARCH_PROJECTS} per call`,
+    )
+  }
+
+  const params = new URLSearchParams({ q, projectIds: projectIds.join(',') })
+  const side = str(args, 'side')
+  if (side) params.set('side', side)
+  if (typeof args.limit === 'number') params.set('limit', String(args.limit))
+
+  const req = new Request(`${EXTERNAL_ROOT}/search?${params.toString()}`, { headers: bearer(token) })
+  const res = await handleExternalReadRequest(req, env)
+  if (!res) return fail('not_found', 'read route did not match')
+  if (!res.ok) return delegatedError(res)
+  return ok(await res.json())
+}
+
 async function readContent(
   env: ExternalEnv,
   token: string,
@@ -440,6 +625,44 @@ async function readHistory(
   if (!projectId) return fail('validation_failed', 'projectId is required')
   if (!cellId) return fail('validation_failed', 'cellId is required')
   return runRead(env, token, `${encodeURIComponent(projectId)}/cells/${encodeURIComponent(cellId)}/history`)
+}
+
+/** MCP mirror of REST GET .../projects/:projectId/settings (AQU-1176) — the
+ *  version read that makes patch_settings' ifMatchVersion usable. */
+async function readProjectSettings(
+  env: ExternalEnv,
+  token: string,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const projectId = str(args, 'projectId')
+  if (!projectId) return fail('validation_failed', 'projectId is required')
+  return runRead(env, token, `${encodeURIComponent(projectId)}/settings`)
+}
+
+/** AQU-1230 — the assembled copilot prompt for one cell. Delegates to the REST
+ *  read so auth, scope, role and rate limiting stay in one place. */
+async function getPromptPreview(
+  env: ExternalEnv,
+  token: string,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const projectId = str(args, 'projectId')
+  const cellId = str(args, 'cellId')
+  if (!projectId) return fail('validation_failed', 'projectId is required')
+  if (!cellId) return fail('validation_failed', 'cellId is required')
+  const params = new URLSearchParams()
+  const targetLang = str(args, 'targetLang')
+  // '' is a MEANINGFUL lane (the default lane) and is also the route's own
+  // default, so it need not be sent.
+  if (targetLang) params.set('targetLang', targetLang)
+  const fileId = str(args, 'fileId')
+  if (fileId) params.set('fileId', fileId)
+  const qs = params.toString() ? `?${params.toString()}` : ''
+  return runRead(
+    env,
+    token,
+    `${encodeURIComponent(projectId)}/cells/${encodeURIComponent(cellId)}/prompt-preview${qs}`,
+  )
 }
 
 // ── delegated quality reads (AQU-1231) ───────────────────────────────────────
@@ -545,8 +768,22 @@ async function prepareTranslations(
     return fail('validation_failed', 'translations or commands must be a non-empty array')
   }
 
+  return stageCommands(env, token, projectId, commands, str(args, 'changesetId'), ctx)
+}
+
+/** Stage `commands` through the REST changesets route and shape the shared
+ *  prepare response every staging tool returns. The route's validateCommands
+ *  stays the single source of truth for per-kind shape/floor/scope rules — no
+ *  staging tool re-derives any of it. */
+async function stageCommands(
+  env: ExternalEnv,
+  token: string,
+  projectId: string,
+  commands: Record<string, unknown>[],
+  changesetId: string | undefined,
+  ctx?: Pick<ExecutionContext, 'waitUntil'>,
+): Promise<McpToolResult> {
   const body: Record<string, unknown> = { commands }
-  const changesetId = str(args, 'changesetId')
   if (changesetId) body.id = changesetId
 
   const req = new Request(`${EXTERNAL_BASE}/${encodeURIComponent(projectId)}/changesets`, {
@@ -574,6 +811,37 @@ async function prepareTranslations(
           nextStep: 'act mode: call confirm_changeset with this changesetId and digest to commit.',
         }),
   })
+}
+
+/** patch_settings (AQU-1176): the dedicated MCP door onto the PatchSettings
+ *  command. Only the argument marshalling lives here — per-key floors, the
+ *  policy-key denial, the sole-command rule, and the ifMatchVersion guard are
+ *  all enforced server-side by commands-patch-settings.ts at prepare/commit. */
+async function patchSettings(
+  env: ExternalEnv,
+  token: string,
+  args: Record<string, unknown>,
+  ctx?: Pick<ExecutionContext, 'waitUntil'>,
+): Promise<McpToolResult> {
+  const projectId = str(args, 'projectId')
+  if (!projectId) return fail('validation_failed', 'projectId is required')
+  if (!Array.isArray(args.ops) || args.ops.length === 0) {
+    return fail('validation_failed', 'ops must be a non-empty array of { key, value }')
+  }
+  if (typeof args.ifMatchVersion !== 'number') {
+    return fail(
+      'validation_failed',
+      'ifMatchVersion is required (a number) — read it from get_project_settings',
+    )
+  }
+
+  const command = {
+    kind: 'PatchSettings',
+    projectId,
+    ops: args.ops,
+    ifMatchVersion: args.ifMatchVersion,
+  }
+  return stageCommands(env, token, projectId, [command], str(args, 'changesetId'), ctx)
 }
 
 // ── delegated import parsing (preview_import / prepare_import) ───────────────
@@ -760,6 +1028,104 @@ async function getChangeset(
   })
 }
 
+/** Wire shape of one changeset in the delegated REST responses. */
+interface ChangesetWire {
+  id: string
+  status: string
+  summary: unknown
+  digest: string
+  receipt: unknown
+  autonomyMode: string
+  createdAt: string
+  expiresAt: string
+  committedAt: string | null
+  approvalUrl?: string
+}
+
+/** Trim a changeset to the fields an agent acts on. The full commands and
+ *  preconditions arrays are deliberately omitted from LIST results — an agent
+ *  paging its inbox wants status and effect counts, not every plan re-serialized
+ *  (get_changeset returns the whole record when it actually needs it). */
+function changesetDigestView(cs: ChangesetWire, approvalUrl: string): Record<string, unknown> {
+  return {
+    changesetId: cs.id,
+    status: cs.status,
+    autonomyMode: cs.autonomyMode,
+    summary: cs.summary,
+    digest: cs.digest,
+    approvalUrl,
+    createdAt: cs.createdAt,
+    expiresAt: cs.expiresAt,
+    committedAt: cs.committedAt,
+  }
+}
+
+async function listChangesets(
+  env: ExternalEnv,
+  token: string,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const projectId = str(args, 'projectId')
+  if (!projectId) return fail('validation_failed', 'projectId is required')
+  const qs = new URLSearchParams()
+  const status = str(args, 'status')
+  if (status) qs.set('status', status)
+  const limit = args.limit
+  if (typeof limit === 'number') qs.set('limit', String(limit))
+  const cursor = str(args, 'cursor')
+  if (cursor) qs.set('cursor', cursor)
+
+  const suffix = qs.toString() ? `?${qs.toString()}` : ''
+  const req = new Request(
+    `${EXTERNAL_BASE}/${encodeURIComponent(projectId)}/changesets${suffix}`,
+    { headers: bearer(token) },
+  )
+  const res = await handleExternalChangesetsRequest(req, env)
+  if (!res) return fail('not_found', 'changesets route did not match')
+  if (!res.ok) return delegatedError(res)
+  const b = (await res.json()) as { changesets: ChangesetWire[]; nextCursor: string | null }
+  return ok({
+    changesets: b.changesets.map((cs) => changesetDigestView(cs, cs.approvalUrl ?? '')),
+    nextCursor: b.nextCursor,
+  })
+}
+
+async function waitForChangeset(
+  env: ExternalEnv,
+  token: string,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const projectId = str(args, 'projectId')
+  const changesetId = str(args, 'changesetId')
+  if (!projectId) return fail('validation_failed', 'projectId is required')
+  if (!changesetId) return fail('validation_failed', 'changesetId is required')
+  const timeoutMs = args.timeoutMs
+  const qs =
+    typeof timeoutMs === 'number' ? `?timeoutMs=${encodeURIComponent(String(timeoutMs))}` : ''
+
+  const req = new Request(
+    `${EXTERNAL_BASE}/${encodeURIComponent(projectId)}/changesets/${encodeURIComponent(changesetId)}/wait${qs}`,
+    { headers: bearer(token) },
+  )
+  const res = await handleExternalChangesetsRequest(req, env)
+  if (!res) return fail('not_found', 'changesets route did not match')
+  if (!res.ok) return delegatedError(res)
+  const b = (await res.json()) as {
+    changeset: ChangesetWire
+    approvalUrl: string
+    approved: boolean
+    timedOut: boolean
+    waitedMs: number
+  }
+  return ok({
+    ...changesetDigestView(b.changeset, b.approvalUrl),
+    approved: b.approved,
+    // Not an error: the human simply hasn't decided yet. Call again.
+    timedOut: b.timedOut,
+    waitedMs: b.waitedMs,
+  })
+}
+
 async function confirmChangeset(
   env: ExternalEnv,
   cred: ApiCredentialContext,
@@ -843,21 +1209,31 @@ export async function callTool(
       return getCapabilities(cred)
     case 'get_identity_and_scope':
       return getIdentityAndScope(cred)
+    case 'list_orgs':
+      return listOrgs(env, cred)
     case 'list_projects':
-      return listProjects(env, cred)
+      return listProjects(env, cred, args)
     case 'get_project': {
       const projectId = str(args, 'projectId')
       if (!projectId) return fail('validation_failed', 'projectId is required')
       return getProject(env, cred, projectId)
     }
+    case 'describe_command':
+      return describeCommandTool(args)
     case 'search_project':
       return searchProject(env, token, args)
     case 'find_similar_cells':
       return findSimilarCells(env, token, args)
+    case 'search_projects':
+      return searchProjects(env, token, args)
     case 'read_content':
       return readContent(env, token, args)
     case 'read_history':
       return readHistory(env, token, args)
+    case 'get_project_settings':
+      return readProjectSettings(env, token, args)
+    case 'get_prompt_preview':
+      return getPromptPreview(env, token, args)
     case 'list_memory':
       return listMemory(env, token, args)
     case 'read_cell_memory':
@@ -868,6 +1244,8 @@ export async function callTool(
       return readTermConsistency(env, token, args)
     case 'prepare_translations':
       return prepareTranslations(env, token, args, ctx)
+    case 'patch_settings':
+      return patchSettings(env, token, args, ctx)
     case 'preview_import':
       return runParseArtifact(env, token, args, false)
     case 'prepare_import':
@@ -876,6 +1254,10 @@ export async function callTool(
       return exportFile(env, token, args)
     case 'get_changeset':
       return getChangeset(env, token, args)
+    case 'list_changesets':
+      return listChangesets(env, token, args)
+    case 'wait_for_changeset':
+      return waitForChangeset(env, token, args)
     case 'confirm_changeset':
       return confirmChangeset(env, cred, token, args, ctx)
     case 'discard_changeset':

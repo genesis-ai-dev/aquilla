@@ -67,17 +67,53 @@ export interface ChangesetSummaryEvent {
   testimony?: boolean
 }
 
+/** One staged validation/unvalidation, named cell by cell (AQU-1184). The
+ *  approver has to see WHICH cells and WHAT text they are endorsing — a count
+ *  is not an approvable plan for testimony. Server-computed from the live
+ *  projection at prepare. */
+export interface ChangesetSummaryTestimony {
+  kind: string
+  fileId: string
+  cellId: string
+  laneId?: string
+  /** The cell's current target text, truncated server-side. */
+  text: string
+  truncated?: boolean
+}
+
 export interface ChangesetApprovalSummary {
   warnings?: { message: string }[]
   /** UpdateProjectSettings/PatchSettings: per-key truncated previews. */
   settingsChanges?: Record<string, string>
   /** EmitEvents changesets: per-kind counts with testimony marks. */
   events?: ChangesetSummaryEvent[]
+  /** AQU-1185 membership changesets: one plain-language line per change
+   *  ("Add ana to p1 as contributor (400)"). Server-authored — the approver
+   *  must be able to see who, what role, and which project without reading
+   *  the command JSON. */
+  membershipChanges?: string[]
+  /** EmitEvents changesets: every staged cell.validate / cell.unvalidate,
+   *  itemized with the cell's current text (AQU-1184 guardrail 2). */
+  testimony?: ChangesetSummaryTestimony[]
   /** AQU-1228 Living Memory writes: the entry path being written or retired
    *  plus a one-line preview of its content — the approval page renders these
    *  explicitly, because approving IS the memory review. */
   memoryWrites?: { path: string; action: string; preview: string }[]
+  /** InsertCell/DeleteCell/SplitCell: the one structural effect line — which
+   *  command, the file, and how many rows move (AQU-1234). */
+  structure?: ChangesetSummaryStructure
   [key: string]: unknown
+}
+
+/** Server-computed effect line for a cell-structure changeset. */
+export interface ChangesetSummaryStructure {
+  command: 'InsertCell' | 'DeleteCell' | 'SplitCell'
+  fileId: string
+  cellsAdded: number
+  cellsRemoved: number
+  cellsReanchored: number
+  targetsRemoved: number
+  targetsRewritten: number
 }
 
 /** GET /api/v2/changesets/:id/approval response (auth-worker

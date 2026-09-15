@@ -269,6 +269,7 @@ export async function handleTtsRequest(
     wavBytes = synth.wavBytes
     durationSeconds = Number.isFinite(synth.durationSeconds) ? Math.max(0, synth.durationSeconds) : 0
   } catch (err) {
+    console.error("[tts] upstream unreachable:", err)
     const message = err instanceof Error ? err.message : String(err)
     return new Response(message, { status: 502 })
   }

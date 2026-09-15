@@ -78,6 +78,7 @@ import { handleExternalExportRequest } from "./external/export-route"
 import { handleExternalQualityRequest } from "./external/quality-routes"
 import { handleExternalMcpRequest } from "./external/mcp-route"
 import { handleExternalDiscoveryRequest } from "./external/discovery-route"
+import { handleExternalCommandsDocRequest } from "./external/commands-doc-route"
 export { ProjectSync } from "./project-do"
 // Inert legacy DO class — kept exported so deploys don't trip the
 // "script does not export class 'FileSync'" guard. See file-sync-legacy.ts.
@@ -86,6 +87,7 @@ import { makePostgres } from "../../db/shim/postgres"
 import { migrateFenceResponse } from "./lib/migrate-fence"
 import { shipLog, shipErrorResponse } from "./posthog-logs"
 import { deploymentEnvironmentError, unauthenticatedBypassError } from "./environment-guard"
+import { asReadonlyR2, type ReadonlyR2Bucket } from "./lib/readonly-r2"
 
 declare global {
   // eslint-disable-next-line @typescript-eslint/no-namespace -- Cloudflare namespace augmentation requires this syntax
@@ -99,10 +101,14 @@ declare global {
       /** R2 media/original-import blob bucket. Not used for Y.Doc state. */
       SNAPSHOTS: R2Bucket
       /** Read-only binding to GitLab's LFS object-storage bucket
-       *  (codex-attachments-v1-1), used only by /migrate/audio-copy to copy
-       *  legacy audio bytes bucket→bucket without leaving Cloudflare. Absent in
-       *  envs that don't run the audio import. */
-      LFS_SRC?: R2Bucket
+       *  (codex-attachments-v1-1), used only by /migrate/audio-copy and
+       *  /migrate/source-artifact-copy to copy legacy bytes bucket→bucket
+       *  without leaving Cloudflare. Absent in envs that don't run the audio
+       *  import. Typed as ReadonlyR2Bucket (not R2Bucket) because the R2
+       *  binding itself has no read-only mode — `fetch` below wraps the raw
+       *  binding with `asReadonlyR2` so put/delete are enforced, not just
+       *  documented, against someone else's bucket. */
+      LFS_SRC?: ReadonlyR2Bucket
       /** The events + projections store. NOT a D1 binding — it is the
        *  D1-compatible Postgres (Neon) shim, injected per-request at the top of
        *  `fetch` from HYPERDRIVE. Typed as `AquillaDb` only because the ~80
@@ -280,7 +286,15 @@ const worker = {
       )
     }
     const pgShim: { close(): Promise<void> } = makePostgres(env.HYPERDRIVE.connectionString)
-    env = { ...env, AQUILLA_PG: pgShim as unknown as AquillaDb }
+    // The runtime injects a full R2Bucket regardless of our narrower
+    // LFS_SRC type above — wrap it once here so every downstream route only
+    // ever holds a get/head/list handle, never put/delete.
+    const rawLfsSrc = env.LFS_SRC as unknown as R2Bucket | undefined
+    env = {
+      ...env,
+      AQUILLA_PG: pgShim as unknown as AquillaDb,
+      LFS_SRC: rawLfsSrc ? asReadonlyR2(rawLfsSrc) : undefined,
+    }
     try {
     const projectArchiveResponse = await handleProjectArchiveRequest(request, env, notifyProjectDo)
     if (projectArchiveResponse) return projectArchiveResponse
@@ -464,6 +478,12 @@ const worker = {
     // AQU-533 (W2-B): Agent API source-artifact upload / inspect.
     const externalArtifactsResponse = await handleExternalArtifactsRequest(request, env)
     if (externalArtifactsResponse) return withCors(externalArtifactsResponse, request)
+
+    // Static command documentation (the REST half of describe_command).
+    // Unauthenticated like the discovery root, and mounted with it so both sit
+    // just ahead of the 404 fallback.
+    const externalCommandsDocResponse = handleExternalCommandsDocRequest(request)
+    if (externalCommandsDocResponse) return withCors(externalCommandsDocResponse, request)
 
     // Agent API discovery root + JSON 404 fallback. MUST stay after every
     // other /api/v1/external/* handler — it claims the root and anything the

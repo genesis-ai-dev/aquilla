@@ -470,11 +470,24 @@ export class CellStore {
 
   findIndexBySection(label: string): number {
     this.ensureDerivedIndexes()
+    return this.findNavigationEntryBySection(label)?.firstIndex ?? -1
+  }
+
+  /** AQU-1244: the first cell ID of a section, for callers that must scroll by
+   *  ID rather than by whole-file index. With "Split into milestones" on the
+   *  editor only renders the current milestone's rows, so a whole-file index is
+   *  out of range (dropped) or points at an unrelated row of the page already
+   *  showing; the ID path turns to the milestone that contains the cell. */
+  findCellIdBySection(label: string): string | null {
+    this.ensureDerivedIndexes()
+    return this.findNavigationEntryBySection(label)?.firstCellId ?? null
+  }
+
+  private findNavigationEntryBySection(label: string): CellNavigationEntry | undefined {
     const normalizedKey = legacySectionKey(label)
-    const entry = this.navIndex.find((item) => (
+    return this.navIndex.find((item) => (
       item.key === label || item.label === label || item.key === normalizedKey
     ))
-    return entry?.firstIndex ?? -1
   }
 
   getSectionLabelForCellId(cellId: string | undefined | null): string {

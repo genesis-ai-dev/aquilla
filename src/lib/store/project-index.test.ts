@@ -296,6 +296,12 @@ describe("mergeServerProjectWithLocalCache — client-local overlays", () => {
     expect(mergeServerProjectWithLocalCache(server, local).aiSetupSkipped).toBe(false)
   })
 
+  it("carries the local aiProviderChosen flag onto the server record", () => {
+    const server = makeProject({ id: "s-chosen" })
+    const local = { ...server, aiProviderChosen: true }
+    expect(mergeServerProjectWithLocalCache(server, local).aiProviderChosen).toBe(true)
+  })
+
   it("leaves aiSetupSkipped unset when the local cache has no opinion", () => {
     const server = makeProject({ id: "s3" })
     expect(mergeServerProjectWithLocalCache(server, { ...server }).aiSetupSkipped).toBeUndefined()

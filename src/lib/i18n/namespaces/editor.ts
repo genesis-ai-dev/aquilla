@@ -117,6 +117,9 @@ export const editor = defineNamespace({
       other: "{count} cells with stale source",
     }),
 
+    // — Per-cell action rail ————————————————————————————————————————
+    "editor.rail.moreActions": "More actions",
+
     // — Per-cell audio: record / upload / playback ——————————————————
     "editor.audio.record": "Record audio",
     "editor.audio.recordingDisabled": "Recording disabled",
@@ -391,6 +394,10 @@ export const editor = defineNamespace({
     "editor.bibles.hide": "Hide parallel bibles",
     "editor.bibles.edgeTab": "Bibles",
     "editor.bibles.title": "Parallel Bibles",
+    "editor.bibles.noReferences": "No Bible references",
+    "editor.bibles.noReferencesDescription":
+      "The current cells have no Bible references with chapter and verse numbers. " +
+      "Parallel Bibles needs these references to show matching text.",
     "editor.bibles.scrollHint":
       "Scroll the editor to a verse to see it in other bible versions.",
     "editor.bibles.noVersions":
@@ -1774,6 +1781,15 @@ export const editor = defineNamespace({
             "The number the sentence counts; it also selects which plural form is used.",
         },
       },
+      "editor.rail.moreActions": {
+        description:
+          "Tooltip and screen-reader name of the '…' overflow button in a cell's " +
+          "action rail (AQU-200). Opens a small menu holding the row's " +
+          "lower-frequency actions — record, upload audio, play, text-to-speech, " +
+          "footnote, comments, history — which no longer each get their own " +
+          "button. A noun phrase naming what is inside, not an imperative.",
+        maxLength: 20,
+      },
       "editor.audio.record": {
         description:
           "Tooltip and screen-reader name of the microphone button in a cell's " +
@@ -2942,6 +2958,14 @@ export const editor = defineNamespace({
           "Heading of the open parallel-bibles sidebar. 'Parallel' means shown " +
           "side by side with the user's own translation for comparison.",
         maxLength: 22,
+      },
+      "editor.bibles.noReferences": {
+        description: "Empty-state title when no usable Bible reference is available.",
+      },
+      "editor.bibles.noReferencesDescription": {
+        description:
+          "Explains why parallel text is unavailable for the current cells. " +
+          "Do not imply that the entire file lacks references or suggest scrolling fixes it.",
       },
       "editor.bibles.scrollHint": {
         description:

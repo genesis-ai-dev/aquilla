@@ -29,16 +29,20 @@ export const MCP_TOOLS: McpToolDef[] = [
     description:
       'Discover what this API and THIS credential can do before attempting anything. ' +
       'Returns the API version, the autonomy mode of the calling credential (ask|act), ' +
-      'the domain command kinds available (SetTranslation, PlanImport, CreateProject, ' +
-      'UpdateProjectSettings, LinkMedia — PlanImport stages via preview_import/' +
-      'prepare_import or REST, the other four stage/commit via ' +
+      'the domain command kinds available (SetTranslation, PlanImport, CreateOrg, ' +
+      'CreateProject, UpdateProjectSettings, LinkMedia, and the cell-structure commands ' +
+      'InsertCell / DeleteCell / SplitCell — PlanImport stages via preview_import/' +
+      'prepare_import or REST, everything else stages/commits via ' +
       'prepare_translations/confirm_changeset — see the returned importing, ' +
-      'projectLifecycle and linkMedia fields for per-kind rules), the operational limits (changeset ' +
+      'projectLifecycle, linkMedia and structure fields for per-kind rules), the operational limits (changeset ' +
       'expiry, PlanImport max cells, artifact max bytes, max commands per changeset), the ' +
       'full list of stable machine-actionable error codes, and an explanation of the ' +
       'ask-mode approval flow (prepare -> approvalUrl -> a human approves in a browser -> ' +
-      'confirm_changeset). This is the recommended first call: it tells an agent its ' +
-      'ceiling so it does not attempt commits it cannot make. Takes no arguments.',
+      'confirm_changeset). The returned uiOnly field lists what this API deliberately does ' +
+      'NOT expose and never will (credential minting, project deletion, billing, approving ' +
+      'your own changeset) — read it instead of probing for those endpoints. This is the ' +
+      'recommended first call: it tells an agent its ceiling so it does not attempt commits ' +
+      'it cannot make. Takes no arguments.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
   {
@@ -51,25 +55,138 @@ export const MCP_TOOLS: McpToolDef[] = [
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
   {
+    name: 'list_orgs',
+    description:
+      'List up to 100 organizations the credential covers — the workspace-level entry point ' +
+      'when you manage a whole partner account rather than one project. Each item has ' +
+      '{ id, name, role, role_source } where role is your live org role level and ' +
+      'role_source is owner|member. Scope narrows this and never widens it: an ORG-scoped ' +
+      'credential sees only that org, a PROJECT-scoped credential sees only the org owning ' +
+      'its project (nothing if that project is personal/org-less), and an unscoped ' +
+      'credential sees every org you belong to. Follow with list_projects { orgId } to ' +
+      'enumerate one org\'s projects. Takes no arguments.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
     name: 'list_projects',
     description:
       'List up to 100 projects the credential owner can access (via project membership, ' +
       'project creation, or org membership), further narrowed to the credential org/project ' +
       'scope. Archived projects are excluded. Each item has { id, name, org_id, role_source } ' +
       'where role_source hints how access is granted (creator|member|org). Use before ' +
-      'get_project / search_project to find a project id. Takes no arguments.',
-    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      'get_project / search_project to find a project id. Optional orgId restricts the list ' +
+      'to one org (get ids from list_orgs) — naming an org outside the credential\'s scope ' +
+      'returns scope_denied rather than an empty list.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        orgId: {
+          type: 'string',
+          description: 'Restrict to one org (from list_orgs). Omit for every accessible project.',
+        },
+      },
+      additionalProperties: false,
+    },
   },
   {
     name: 'get_project',
     description:
       'Fetch a single project by id after checking the credential scope and that the owner ' +
-      'has at least VIEWER role on it. Returns { id, name, org_id, archived, role } or a ' +
-      'not_found / scope_denied / permission_denied tool error.',
+      'has at least VIEWER role on it. Returns { id, name, org_id, archived, role, settings, ' +
+      'settingsVersion, settingsUpdatedAt } or a not_found / scope_denied / permission_denied ' +
+      'tool error. `settingsVersion` is the live project-settings version — read it here ' +
+      'before staging a PatchSettings/UpdateProjectSettings command, whose ifMatchVersion ' +
+      'must equal it or prepare returns plan_stale. (REST: GET .../projects/:projectId.)',
     inputSchema: {
       type: 'object',
       properties: { ...projectIdProp },
       required: ['projectId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'get_project_settings',
+    description:
+      'Read a project\'s settings blob and its LIVE settings version (AQU-1176). Returns ' +
+      '{ projectId, settings, version, updatedAt }. Call this BEFORE patch_settings: ' +
+      '`version` is the value you pass as that tool\'s ifMatchVersion, and `settings` shows ' +
+      'you the keys that already exist so you replace the right one. A project with no ' +
+      'settings row yet reads as {} at version 0 (patch against 0 to create it). Needs ' +
+      'VIEWER; scope errors mirror every other project read (not_found / scope_denied / ' +
+      'permission_denied). Args: projectId.',
+    inputSchema: {
+      type: 'object',
+      properties: { ...projectIdProp },
+      required: ['projectId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'patch_settings',
+    description:
+      'Stage a FIELD-SCOPED project-settings change as a changeset (AQU-926 PatchSettings) — ' +
+      'the safe replacement for the deprecated whole-blob UpdateProjectSettings: keys you ' +
+      'do not name are left byte-identical, so you cannot clobber settings you never read. ' +
+      'Args: projectId, ops (array of { key, value } — top-level settings keys only; each op ' +
+      'replaces that key\'s value wholesale; one op per key, duplicates are rejected), ' +
+      'ifMatchVersion (the version from get_project_settings — stale values return ' +
+      'plan_stale at prepare AND again at commit), changesetId (optional UUIDv7 for ' +
+      'idempotency). JSON cannot express undefined, so a key cannot be deleted — write null. ' +
+      'Floors: `terminology` needs the org termbase-edit floor (default PROJECT_LEAD 500); ' +
+      'every other key needs MAINTAINER 600. The policy keys that govern agent oversight ' +
+      'itself (agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, ' +
+      'validationCount, validationCountAudio, allowSelfValidation, harmonize_min_role, ' +
+      'contributeToGlobalTm) are NEVER writable through any agent surface — an op naming one ' +
+      'returns permission_denied. PatchSettings must be the SOLE command in its changeset. ' +
+      'Returns { changesetId, summary, digest, mode, approvalUrl? } exactly like ' +
+      'prepare_translations — nothing is applied until confirm_changeset (ask mode: a human ' +
+      'approves at the approvalUrl first).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        ops: {
+          type: 'array',
+          description: 'Top-level settings keys to replace.',
+          items: {
+            type: 'object',
+            properties: {
+              key: { type: 'string', description: 'Top-level settings key, e.g. "targetLanes".' },
+              value: { description: 'Any JSON value; replaces that key wholesale.' },
+            },
+            required: ['key', 'value'],
+          },
+        },
+        ifMatchVersion: {
+          type: 'number',
+          description: 'Live settings version from get_project_settings.',
+        },
+        changesetId: { type: 'string', description: 'Optional client-supplied UUIDv7 for idempotency.' },
+      },
+      required: ['projectId', 'ops', 'ifMatchVersion'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'describe_command',
+    description:
+      'Look up the full parameter documentation for one changeset command kind — its params, ' +
+      'role floor, gotchas, and a worked example — so you can build a command correctly ' +
+      'instead of discovering its shape one validation_failed at a time. Args: kind ' +
+      '(optional). Omit kind to get the index of every command you may stage ' +
+      '({ kind, title, tier, minRoleLevel, oneLiner }); pass one (e.g. "PatchSettings", ' +
+      '"SetTranslation", "EmitEvents") to get that command\'s paramsDoc. An unknown kind ' +
+      'returns a not_found tool error listing the valid ones. Static documentation — it ' +
+      'reads no project data and needs no projectId. (REST: GET /api/v1/external/commands ' +
+      'and GET /api/v1/external/commands/:kind.)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        kind: {
+          type: 'string',
+          description: 'Command kind to document. Omit for the index of all command kinds.',
+        },
+      },
       additionalProperties: false,
     },
   },
@@ -119,6 +236,35 @@ export const MCP_TOOLS: McpToolDef[] = [
     },
   },
   {
+    name: 'search_projects',
+    description:
+      'Full-text search SEVERAL projects in one call — the cross-project form of ' +
+      'search_project, for answering "where does this term appear across this partner\'s ' +
+      'workspace?" without one request per project. Args: projectIds (required, an explicit ' +
+      'array of 1-10 project ids — get them from list_projects), q (required), side ' +
+      '(optional, "source"|"target"), limit (optional). Returns { data, nextCursor, ' +
+      'projectIds } where every result carries the projectId it came from, merged and ranked ' +
+      'across projects. Scoping is strict: if ANY requested project is unknown, outside the ' +
+      'credential\'s scope, or one you have no membership on, the whole call fails ' +
+      '(not_found / scope_denied / permission_denied) — results are never silently partial. ' +
+      'Counts against the search rate limit once PER PROJECT searched.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        projectIds: {
+          type: 'array',
+          description: 'Explicit list of project ids to search (1-10).',
+          items: { type: 'string' },
+        },
+        q: { type: 'string', description: 'Search query string.' },
+        side: { type: 'string', enum: ['source', 'target'], description: 'Restrict to one side.' },
+        limit: { type: 'number', description: 'Max merged results (default 50).' },
+      },
+      required: ['projectIds', 'q'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'read_content',
     description:
       'Read project content. Omit fileId to LIST the project\'s files; provide fileId to ' +
@@ -160,6 +306,42 @@ export const MCP_TOOLS: McpToolDef[] = [
       properties: {
         ...projectIdProp,
         cellId: { type: 'string', description: 'Cell id whose history to read.' },
+      },
+      required: ['projectId', 'cellId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'get_prompt_preview',
+    description:
+      'See the prompt the project copilot would ACTUALLY send when drafting one cell — base ' +
+      'instructions after language substitution, the translation brief, the compiled rules ' +
+      'block (project/org rules plus terminology), the retrieved few-shot examples, and the ' +
+      'preceding approved-target discourse window — as both the assembled system+user ' +
+      'messages and the same content labeled by origin. Args: projectId, cellId, optional ' +
+      'targetLang (target-language lane tag; "" = default lane) and fileId (only needed when ' +
+      'the same cellId exists in more than one file). This is the verification half of prompt ' +
+      'tuning: after PatchSettings changes systemPrompt / completionSettings / ' +
+      'translationBrief / rules, or after a terminology entry lands, call this on a ' +
+      'representative cell to confirm the change actually reached the model instead of ' +
+      'inferring it from a draft. Read-only — it drafts nothing and spends no credits. ' +
+      'Returns not_found if the cell has no source row in this project, and ' +
+      'scope_denied / permission_denied like every other read. `warnings` names anything the ' +
+      'live draft call adds that a read cannot reproduce (footnote output contracts, ' +
+      'per-device provider overrides).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        cellId: { type: 'string', description: 'Cell id to preview the prompt for.' },
+        targetLang: {
+          type: 'string',
+          description: 'Target-language lane tag. Omit or "" for the project default lane.',
+        },
+        fileId: {
+          type: 'string',
+          description: 'Disambiguates a cellId present in more than one file.',
+        },
       },
       required: ['projectId', 'cellId'],
       additionalProperties: false,
@@ -287,7 +469,7 @@ export const MCP_TOOLS: McpToolDef[] = [
       'Stage a batch of commands as an immutable changeset (execution plan) WITHOUT applying ' +
       'them — the generic propose step for every MCP-stageable command kind (Agent API v1.1). ' +
       'Pass `translations` for a SetTranslation batch (as before), and/or `commands` for ' +
-      'CreateProject, UpdateProjectSettings, or LinkMedia. Resolves preconditions from live ' +
+      'CreateOrg, CreateProject, UpdateProjectSettings, or LinkMedia. Resolves preconditions from live ' +
       'state and computes a server-side effect summary (nothing is silently dropped) before ' +
       'returning { changesetId, summary, digest, mode, approvalUrl? }. If mode is "ask" you ' +
       'CANNOT commit directly: first DESCRIBE the staged plan in the conversation — the ' +
@@ -299,8 +481,24 @@ export const MCP_TOOLS: McpToolDef[] = [
       'preview_import / prepare_import tools (or REST; see get_capabilities.importing).\n\n' +
       '`commands` shapes (each enforced server-side; a validation_failed error names the ' +
       'violated rule):\n' +
+      '  { kind: "CreateOrg", name } — receipt-only (a plain row write, not an event); ' +
+      'must be the SOLE command in the changeset, and `name` is the ONLY field it accepts. ' +
+      'Creates a NEW organization owned by this credential\'s minting user (role 700) — ' +
+      'there is no owner parameter, and the agent never becomes a member itself. Requires an ' +
+      'UNSCOPED credential: an org-scoped or project-scoped one gets scope_denied. Any ' +
+      'tier/billing/entitlement field (plan, tier, addonPacks, …) is rejected with ' +
+      'validation_failed naming the field — a new org always gets the default tier. Capped ' +
+      'at 5 staged creations per credential per 15 minutes (rate_limited). Prepare ALWAYS ' +
+      'stages it ask-mode, so it always needs human approval at the approvalUrl. This tool ' +
+      'call still needs a `projectId` argument, but for CreateOrg it is only the changeset\'s ' +
+      'filing id — no project is created, and the receipt carries `orgId` instead of ' +
+      '`projectId`. Feed that orgId to a follow-up CreateProject to populate the new org.\n' +
       '  { kind: "CreateProject", name, projectId?, orgId? } — receipt-only (a plain row ' +
-      'write, not an event); must be the SOLE command in the changeset. `projectId` is ' +
+      'write, not an event); must be the SOLE command in the changeset. `name` must be a ' +
+      'REAL name derived from what you are importing (source folder or file name, the ' +
+      'publication/curriculum title, the language pair) or asked of the human — ' +
+      'content-free placeholders ("default", "untitled", "new project", …) are rejected ' +
+      'with validation_failed. `projectId` is ' +
       'optional: when omitted, the DEFINITIVE new project id is this tool call\'s own ' +
       '`projectId` argument (the changeset\'s URL project id) — set BOTH to the same value ' +
       'to avoid ambiguity, or omit the command\'s `projectId` and rely on the top-level one. ' +
@@ -321,7 +519,33 @@ export const MCP_TOOLS: McpToolDef[] = [
       'is JSON-RPC text and cannot carry that binary upload itself. Multiple LinkMedia ' +
       'commands may share one changeset with each other, but LinkMedia cannot mix with ' +
       'SetTranslation/CreateProject/UpdateProjectSettings in the same changeset. Requires ' +
-      'CONTRIBUTOR.',
+      'CONTRIBUTOR.\n' +
+      '  { kind: "DraftCells", fileId, cellIds, laneId?, instructions? } — ask the PROJECT\'S ' +
+      'OWN copilot to draft those cells instead of writing the text yourself, so the result ' +
+      'carries this project\'s terminology, example pairs and brief. Must be the SOLE command ' +
+      'in the changeset. `cellIds` is explicit and non-empty — wildcards are rejected; the ' +
+      'per-changeset cap is the project\'s configured completion batch size (default 10, max ' +
+      '50) and an over-cap request names the cap so you can split the work. Drafting spends ' +
+      'the org\'s credits (an exhausted org returns rate_limited and stages NOTHING). The ' +
+      'staged cells commit as AI drafts awaiting human review — `aiDrafted`/`aiDraft` show ' +
+      'up in cell reads until a person edits or validates them. Requires CONTRIBUTOR.\n' +
+      '  { kind: "InsertCell", fileId, value, afterCellId?, cellId?, type?, canonicalRef?, ' +
+      'startMs?, endMs?, metadata? } — add a source cell. `afterCellId` names the cell it ' +
+      'follows; null/omitted inserts at the head of the file. Whatever was anchored there is ' +
+      're-pointed onto the new cell so document order survives.\n' +
+      '  { kind: "DeleteCell", fileId, cellId } — remove a source cell and its translations, ' +
+      'closing the order chain over the gap. Refused while the cell still owns validators, ' +
+      'waivers, comments, back-translations, audio takes, links or assignment rows (the ' +
+      'error names them) — clear those first.\n' +
+      '  { kind: "SplitCell", fileId, cellId, offset, targets, targetOffsets?, newCellId? } — ' +
+      'cut the source text at `offset` into two cells. `targets` is REQUIRED: "blank" drops ' +
+      'the existing translations, "divide" cuts each lane at an explicit offset in ' +
+      '`targetOffsets: [{ laneId?, offset }]`, which must name EVERY translated lane. Both ' +
+      'halves end up unvalidated either way.\n' +
+      'All three are STRUCTURAL: each must be the SOLE command in its changeset, each ' +
+      'requires PROJECT_LEAD, and all three are refused on a file imported with preserved ' +
+      'export slots (IDML/OOXML locators) because a structural change would break its ' +
+      'round-trip export. Call describe_command for the full rules.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -355,17 +579,38 @@ export const MCP_TOOLS: McpToolDef[] = [
         commands: {
           type: 'array',
           description:
-            'CreateProject / UpdateProjectSettings / LinkMedia commands to stage (Agent API ' +
-            'v1.1) — see this tool\'s description for per-kind shape, role gates, and ' +
-            'sole-command rules. PlanImport is not accepted here (REST-only).',
+            'CreateOrg / CreateProject / UpdateProjectSettings / LinkMedia / DraftCells / ' +
+            'InsertCell / DeleteCell / SplitCell commands to stage (Agent API v1.1) — see this ' +
+            'tool\'s description for per-kind shape, role gates, and sole-command rules. ' +
+            'PlanImport is not accepted here (REST-only).',
           items: {
             type: 'object',
             oneOf: [
               {
                 type: 'object',
                 properties: {
+                  kind: { type: 'string', enum: ['CreateOrg'] },
+                  name: {
+                    type: 'string',
+                    description:
+                      'Organization name. The ONLY accepted field — tier/billing/entitlement fields are rejected.',
+                  },
+                },
+                required: ['kind', 'name'],
+                additionalProperties: false,
+              },
+              {
+                type: 'object',
+                properties: {
                   kind: { type: 'string', enum: ['CreateProject'] },
-                  name: { type: 'string' },
+                  name: {
+                    type: 'string',
+                    description:
+                      'The project\'s human-facing name. Derive it from what is being ' +
+                      'imported (source folder/file name, publication or curriculum ' +
+                      'title, language pair) or ask the human — placeholders like ' +
+                      '"default" or "untitled" are rejected.',
+                  },
                   projectId: {
                     type: 'string',
                     description: 'Optional — defaults to this call\'s top-level projectId.',
@@ -404,6 +649,100 @@ export const MCP_TOOLS: McpToolDef[] = [
                   },
                 },
                 required: ['kind', 'fileId', 'cellId', 'artifactId'],
+                additionalProperties: false,
+              },
+              {
+                type: 'object',
+                properties: {
+                  kind: { type: 'string', enum: ['DraftCells'] },
+                  fileId: { type: 'string' },
+                  cellIds: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    minItems: 1,
+                    description:
+                      'Explicit cell ids to draft. Wildcards ("*", "all") are rejected; the cap is ' +
+                      "the project's configured completion batch size (default 10, max 50).",
+                  },
+                  laneId: {
+                    type: 'string',
+                    description:
+                      'Target-language lane (a registered settings.targetLanes tag). Omit for the default lane.',
+                  },
+                  instructions: {
+                    type: 'string',
+                    description: 'Optional extra steer for this batch, passed to the drafting prompt.',
+                  },
+                },
+                required: ['kind', 'fileId', 'cellIds'],
+                additionalProperties: false,
+              },
+              {
+                type: 'object',
+                properties: {
+                  kind: { type: 'string', enum: ['InsertCell'] },
+                  fileId: { type: 'string' },
+                  afterCellId: {
+                    type: ['string', 'null'],
+                    description: 'The cell the new one follows; null/omitted = the file head.',
+                  },
+                  cellId: { type: 'string', description: 'Optional client-chosen id for the new cell.' },
+                  value: { type: 'string', description: 'Source text; may be empty.' },
+                  type: { type: 'string' },
+                  canonicalRef: {
+                    type: 'string',
+                    description: 'Must be unused in the file — export overlays translations by ref.',
+                  },
+                  startMs: { type: 'number' },
+                  endMs: { type: 'number' },
+                  metadata: { type: 'object' },
+                },
+                required: ['kind', 'fileId', 'value'],
+                additionalProperties: false,
+              },
+              {
+                type: 'object',
+                properties: {
+                  kind: { type: 'string', enum: ['DeleteCell'] },
+                  fileId: { type: 'string' },
+                  cellId: { type: 'string' },
+                },
+                required: ['kind', 'fileId', 'cellId'],
+                additionalProperties: false,
+              },
+              {
+                type: 'object',
+                properties: {
+                  kind: { type: 'string', enum: ['SplitCell'] },
+                  fileId: { type: 'string' },
+                  cellId: { type: 'string' },
+                  offset: {
+                    type: 'number',
+                    description: 'Character offset into the source text; both halves must be non-empty.',
+                  },
+                  targets: {
+                    type: 'string',
+                    enum: ['blank', 'divide'],
+                    description:
+                      "'blank' drops existing translations; 'divide' cuts each lane at its targetOffsets offset.",
+                  },
+                  targetOffsets: {
+                    type: 'array',
+                    description:
+                      "Required with targets:'divide' — one entry per lane that HAS a translation.",
+                    items: {
+                      type: 'object',
+                      properties: {
+                        laneId: { type: 'string', description: 'Omit for the default lane.' },
+                        offset: { type: 'number' },
+                      },
+                      required: ['offset'],
+                      additionalProperties: false,
+                    },
+                  },
+                  newCellId: { type: 'string', description: 'Optional client-chosen id for the second half.' },
+                },
+                required: ['kind', 'fileId', 'cellId', 'offset', 'targets'],
                 additionalProperties: false,
               },
             ],
@@ -563,6 +902,59 @@ export const MCP_TOOLS: McpToolDef[] = [
       properties: {
         ...projectIdProp,
         changesetId: { type: 'string' },
+      },
+      required: ['projectId', 'changesetId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'list_changesets',
+    description:
+      'List the changesets THIS credential staged in a project, newest first — so you can ' +
+      'see what is still awaiting a human, what expired while you were away, and what already ' +
+      'committed, without having remembered every changesetId. Args: projectId, optional ' +
+      'status (staged|committing|committed|discarded|stale|superseded|expired), optional ' +
+      'limit (default 25, max 100) and cursor. Returns { changesets, nextCursor } — pass ' +
+      'nextCursor back as cursor to page; a null nextCursor means you have them all. Note a ' +
+      'staged ask-mode changeset stays "staged" even after a human approves it (approval is ' +
+      'recorded separately and released by confirm_changeset), so use wait_for_changeset to ' +
+      'learn about an approval — not this list.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        status: {
+          type: 'string',
+          description: 'Exact status filter. Omit for every status.',
+        },
+        limit: { type: 'number', description: 'Page size, 1–100 (default 25).' },
+        cursor: { type: 'string', description: 'Opaque nextCursor from the previous page.' },
+      },
+      required: ['projectId'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'wait_for_changeset',
+    description:
+      'Block until an ask-mode changeset is approved by a human or otherwise stops waiting — ' +
+      'instead of polling get_changeset in a loop. Call this right after you hand the ' +
+      'approvalUrl to a human. Returns as soon as EITHER a human approval is recorded ' +
+      '(approved: true — call confirm_changeset now, the approval is short-lived) OR the ' +
+      'status leaves "staged" (rejected shows as "discarded"; also committed/expired/stale/' +
+      'superseded). If nothing happens within the timeout it returns timedOut: true with the ' +
+      'current changeset and you simply call again — that is a normal outcome, not an error. ' +
+      'Args: projectId, changesetId, optional timeoutMs (default 25000, max 60000; 0 means ' +
+      'check now without waiting).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        changesetId: { type: 'string' },
+        timeoutMs: {
+          type: 'number',
+          description: 'How long to wait, in ms. Default 25000, capped at 60000.',
+        },
       },
       required: ['projectId', 'changesetId'],
       additionalProperties: false,

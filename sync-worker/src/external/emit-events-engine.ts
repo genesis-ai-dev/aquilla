@@ -42,6 +42,7 @@ import type {
   PlannedEventIds,
   ProvenanceChannel,
   StoredChangeset,
+  TestimonySummaryEntry,
 } from './types'
 import type { ApiCredentialContext } from '../../../db/shared/api-credentials'
 
@@ -55,6 +56,11 @@ const PIN_KINDS = new Set([
 
 /** Statements per POST to the /events perimeter (mirrors PLAN_IMPORT_CHUNK). */
 const EMIT_CHUNK = 100
+
+/** Per-cell text budget in the testimony summary (AQU-1184). Long enough to
+ *  recognise the sentence being endorsed, short enough that a 200-event batch
+ *  stays a reasonable summary JSONB. */
+const TESTIMONY_TEXT_MAX = 300
 
 interface CommentRow {
   comment_id: string
@@ -219,6 +225,22 @@ export async function prepareEmitEvents(
         if (e.kind === 'target.cell.repin' && s.sourceEventId == null) {
           return failed(i, `cell ${e.cellId} has no source to repin against`)
         }
+        // AQU-1184 guardrail 1 — no validation-laundering of AI content.
+        // The in-app policy (AQU-983) deliberately skips ai_drafted cells in
+        // bulk validate so a reviewer must open each one; this surface must
+        // not become the way around it. There is NO flag to bypass this: an
+        // agent validating text an agent drafted is not review. A human
+        // target commit or an individual in-app validation clears
+        // cells.ai_drafted (AQU-292), after which the cell validates through
+        // here like any other. Drift the other way (the cell becomes an AI
+        // draft between prepare and commit) necessarily moves the target
+        // head, which the stored pin catches as plan_stale.
+        if (e.kind === 'cell.validate' && s.targetAiDrafted === true) {
+          return failed(
+            i,
+            `cell ${e.cellId} in file ${e.fileId} is an unreviewed AI draft — AI-drafted text must be reviewed by a human in the app before it can be validated; no API flag bypasses this`,
+          )
+        }
         preconditionByKey.set(laneCellKey(e.fileId!, e.cellId!, e.laneId), {
           fileId: e.fileId!,
           cellId: e.cellId!,
@@ -345,7 +367,28 @@ export async function prepareEmitEvents(
     if (entry) entry.count++
     else byKind.set(e.kind, { kind: e.kind, count: 1, testimony: TESTIMONY_EMIT_KINDS.has(e.kind) })
   }
-  const summary: ChangesetSummary = { events: [...byKind.values()], warnings: [] }
+  // AQU-1184 guardrail 2: name every staged validation cell-by-cell, with the
+  // text as the server currently reads it, so the approver endorses specific
+  // sentences rather than a count. Batches are capped at
+  // EMIT_EVENTS_MAX_EVENTS, so this list is bounded by construction.
+  const testimony: TestimonySummaryEntry[] = []
+  for (const e of normalized) {
+    if (e.kind !== 'cell.validate' && e.kind !== 'cell.unvalidate') continue
+    const value = states.get(laneCellKey(e.fileId!, e.cellId!, e.laneId))?.targetValue ?? ''
+    testimony.push({
+      kind: e.kind,
+      fileId: e.fileId!,
+      cellId: e.cellId!,
+      ...(e.laneId ? { laneId: e.laneId } : {}),
+      text: value.slice(0, TESTIMONY_TEXT_MAX),
+      truncated: value.length > TESTIMONY_TEXT_MAX,
+    })
+  }
+  const summary: ChangesetSummary = {
+    events: [...byKind.values()],
+    ...(testimony.length > 0 ? { testimony } : {}),
+    warnings: [],
+  }
 
   const command: EmitEventsCommand = { kind: 'EmitEvents', events: normalized }
   return stageAndRespond(db, env, {

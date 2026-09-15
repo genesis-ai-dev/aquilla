@@ -10,6 +10,10 @@ import {
 import { useNavHistoryTitle } from "@/context/NavHistoryContext"
 import { deriveNavTitleKey } from "@/lib/navigation/deriveTitle"
 import { deriveCellAreaState } from "@/lib/editor/cell-area-state"
+import {
+  resolveRecordingRowCellId,
+  resolveScopeLabelCellId as resolveScopeLabelCellIdFor,
+} from "@/lib/editor/milestone-jump-targets"
 import { CellAreaPlaceholder } from "./CellAreaPlaceholder"
 import { WorkspaceSkeleton } from "./WorkspaceSkeleton"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
@@ -19,7 +23,7 @@ import { useWorkspaceTabs, readLastActiveFileId } from "@/hooks/useWorkspaceTabs
 import { clearLastLocation, readLastLocation, writeLastLocation } from "@/lib/frontier/last-location-store"
 import { ROLE } from "@/lib/frontier/roles"
 import { languagesEqual } from "@/lib/language-normalize"
-import { readAtVersion, useActiveCellStore, useCellStoreVersion, type CellStore, type CellSummary } from "@/hooks/useActiveCellStore"
+import { readAtVersion, useActiveCellStore, useCellStoreVersion, type CellSummary } from "@/hooks/useActiveCellStore"
 import { useStaleSourceCells } from "@/hooks/useStaleSourceCells"
 import { triggerLinkSync } from "@/lib/sync/archive"
 import { useDebouncedValue } from "@/hooks/useDebouncedValue"
@@ -31,6 +35,7 @@ import {
 } from "@/hooks/useCompletion"
 import { useTranslateAsReadPreference } from "@/hooks/useTranslateAsReadPreference"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
+import { shouldPromptAiSetup } from "@/lib/completion/completion-service"
 import {
   hasMateriallyBetterEvidence,
   translateAsReadAction,
@@ -65,7 +70,7 @@ import type { WorkspaceAction } from "@/lib/workspace-actions/types"
 import type { FileReference } from "@/lib/parsers/types"
 import { fileHasSections, fileOrderedBy, isMediaFileType, projectHasScriptureFiles, resolveBibleResourcesEnabled } from "@/lib/parsers/types"
 import { isAudioCueFile, isSubtitleImportFile, resolveFileTimingMode, type AudioTimingMode } from "@/lib/parsers/types"
-import { isFlagEnabled } from "@/lib/features/flags"
+import { isAutopilotVisible } from "@/lib/features/flags"
 import { isDiscourseFile } from "@/lib/contextual/discourse-file"
 import {
   applyRemoteFrame as applyContextualFrame,
@@ -295,7 +300,8 @@ import { useFootnotesPreference } from "@/hooks/useFootnotesPreference"
 import type { VisibleFootnoteEntry } from "@/lib/footnotes/types"
 import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
 import { useFileFontSizes, useFileFontSizeExplicit, setFileViewPref, clearFileFontSize } from "@/lib/store/file-view-prefs"
-import { EditorScrollProvider, useEditorScroll } from "@/context/EditorScrollContext"
+import { EditorScrollProvider } from "@/context/EditorScrollContext"
+import { ScrollToGroupHandler } from "@/components/ScrollToGroupHandler"
 import { EditorActionsProvider } from "@/context/EditorActionsContext"
 import { detectSuggestions, type RenameSuggestion } from "@/lib/file-labeling/detect"
 import { canExportSourceFile, exportSourceFile } from "@/lib/file-source-export"
@@ -1668,7 +1674,7 @@ export function ProjectWorkspace() {
   // carried only part of a wave. Failing soft is deliberate — a missing
   // review surface must never keep a file from opening.
   const contextualAutopilotEnabled = Boolean(
-    project && isFlagEnabled(project, "contextualTranslation"),
+    project && isAutopilotVisible(project),
   )
   const contextualDraftScopeRef = useRef<ContextualDraftsScope | null>(null)
   const refreshContextualDrafts = useCallback(async (requestedScope?: ContextualDraftsScope) => {
@@ -4655,6 +4661,8 @@ export function ProjectWorkspace() {
     commitCompletedCells,
   )
 
+  const sparkleReady = isConfigured && !shouldPromptAiSetup(project?.aiProviderChosen)
+
   // AQU-620: adapter so the editor's per-cell AI action can request a plain
   // draft (`onCompleteSingle(cell)`) or an explicit regenerate
   // (`onCompleteSingle(cell, { regenerate: true })`) — the latter maps to the
@@ -5542,18 +5550,19 @@ export function ProjectWorkspace() {
     setCheckOpen(false)
   }, [activeFileId])
 
-  // FRO-192: resolve the first cell index matching an assignment's scopeLabel
-  // (chapter section). -1 when nothing matches (e.g. a book-scope label with no
-  // chapter sections) — callers fall back to the top of the file.
-  const resolveScopeLabelIndex = useCallback((scopeLabel: string): number => {
-    const chapterPart = scopeLabel.split(" in ")[0]?.trim() ?? scopeLabel
-    const chapters = chapterPart.split(",").map((s) => s.trim()).filter(Boolean)
-    for (const ch of chapters) {
-      const idx = cellStore.findIndexBySection(ch)
-      if (idx >= 0) return idx
-    }
-    return -1
-  }, [cellStore])
+  // FRO-192: resolve the first cell matching an assignment's scopeLabel
+  // (chapter section). AQU-1245: a cell ID, not a whole-file row index — see
+  // lib/editor/milestone-jump-targets.ts. `null` when nothing matches (e.g. a
+  // book-scope label with no chapter sections) — callers fall back to the top
+  // of the file.
+  const resolveScopeLabelCellId = useCallback((scopeLabel: string): string | null => (
+    resolveScopeLabelCellIdFor(cellStore, scopeLabel)
+  ), [cellStore])
+
+  // The top of the file, for an assignment whose scope resolves to no section.
+  const firstCellId = useCallback((): string | null => (
+    cellStore.getAllSummaries()[0]?.id ?? null
+  ), [cellStore])
 
   // AQU-690: jump to an assignment from the "My assignments" panel — open its
   // file, switch to its lane, then scroll to its first cell. Order matters: the
@@ -5571,9 +5580,11 @@ export function ProjectWorkspace() {
       return
     }
     // AQU-1147: fresh read at call time, no version dependency (see handleResolveCharacter).
-    const idx = resolveScopeLabelIndex(a.scopeLabel)
-    editorRef.current?.scrollToCellIndex(idx >= 0 ? idx : 0)
-  }, [activeFileId, resolveScopeLabelIndex, setActiveLane, workspaceTabs])
+    // AQU-1245: by cell ID, so the jump turns to the assignment's milestone
+    // when "Split into milestones" is on and its chapter is off the page.
+    const cellId = resolveScopeLabelCellId(a.scopeLabel) ?? firstCellId()
+    if (cellId) editorRef.current?.scrollToCellId(cellId)
+  }, [activeFileId, firstCellId, resolveScopeLabelCellId, setActiveLane, workspaceTabs])
 
   // Consume a parked assignment scroll once the target file's cells have
   // loaded (AQU-690; mirrors the presence-peer deferred jump).
@@ -5582,9 +5593,12 @@ export function ProjectWorkspace() {
     if (!pending || pending.fileId !== activeFileId) return
     if (cellStore.getCellCount() === 0) return
     pendingScopeScrollRef.current = null
-    const idx = readAtVersion(cellStoreVersion, () => resolveScopeLabelIndex(pending.scopeLabel))
-    editorRef.current?.scrollToCellIndex(idx >= 0 ? idx : 0)
-  }, [activeFileId, cellStore, cellStoreVersion, resolveScopeLabelIndex])
+    const cellId = readAtVersion(
+      cellStoreVersion,
+      () => resolveScopeLabelCellId(pending.scopeLabel) ?? firstCellId(),
+    )
+    if (cellId) editorRef.current?.scrollToCellId(cellId)
+  }, [activeFileId, cellStore, cellStoreVersion, firstCellId, resolveScopeLabelCellId])
 
   // ── last-location: write on file change ──────────────────────────────────
   // Persist the active file whenever it changes so a fresh open resumes here.
@@ -10869,7 +10883,7 @@ export function ProjectWorkspace() {
               editable: !isReadOnly,
               onCommitTarget: handleAgentTargetCommit,
               isAnonymous: !frontierSession,
-              isCompletionConfigured: isConfigured,
+              isCompletionConfigured: sparkleReady,
               isCompletionAvailable,
               completing,
               onDraftTarget: handleAgentTargetDraft,
@@ -11333,7 +11347,7 @@ export function ProjectWorkspace() {
                 state: { backgroundLocation: location, projectSettingsModalDepth: 1 },
               })
             }
-            isCompletionConfigured={isConfigured} isCompletionAvailable={isCompletionAvailable} completing={completing}
+            isCompletionConfigured={sparkleReady} isCompletionAvailable={isCompletionAvailable} completing={completing}
             examples={examples} errors={errors} previews={previews}
             onClearCellErrors={clearCellErrors}
             onCompleteSingle={handleCompleteSingle} onCompleteBatch={completeBatch}
@@ -11842,11 +11856,17 @@ export function ProjectWorkspace() {
             // when the modal closes. A CUE has no row of its own, so the scroll
             // follows its linked subtitle instead — and an unlinked cue simply
             // does not scroll, which is honest: there is no row to show.
-            const rowId = audioCueCells
-              ? (cueLinks.textForCue.get(cellId) ?? [])[0]
-              : cellId
-            const idx = rowId ? cellStore.findIndexByCellId(rowId) : -1
-            if (idx >= 0) editorRef.current?.scrollToCellIndex(idx)
+            //
+            // AQU-1245: by cell ID, so advancing off the end of a chapter turns
+            // the table behind the modal to the next chapter's page instead of
+            // dropping the scroll (an out-of-range whole-file index) or landing
+            // on an unrelated row of the page still showing.
+            const rowId = resolveRecordingRowCellId({
+              cellId,
+              isCueArrangement: Boolean(audioCueCells),
+              linkedTextIds: cueLinks.textForCue.get(cellId),
+            })
+            if (rowId) editorRef.current?.scrollToCellId(rowId)
             // A cell transition (auto-advance or Next/Prev) means the take is
             // confirmed — stop deferring a pending timing-mode heads-up.
             timingAck.surfaceNow()
@@ -12363,58 +12383,6 @@ function MoveToCorpusDialog({
       </DialogContent>
     </Dialog>
   )
-}
-
-// ── ScrollToGroupHandler ───────────────────────────────────────────────────
-// Must render inside <EditorScrollProvider> so useEditorScroll() has context.
-// Watches editorScroll.pending and scrolls the first matching cell into view
-// via the forwarded editorRef.
-
-interface ScrollToGroupHandlerProps {
-  cellStore: CellStore
-  storeVersion: number
-  editorRef: React.RefObject<EditorTableHandle | null>
-}
-
-function ScrollToGroupHandler({ cellStore, storeVersion, editorRef }: ScrollToGroupHandlerProps) {
-  const editorScroll = useEditorScroll()
-
-  useEffect(() => {
-    void storeVersion
-    const pending = editorScroll.pending
-    if (!pending) return
-    const { group: groupId, section: sectionLabel, fileId: targetFileId } = pending
-
-    // FRO-250/254: only consume() when the active store belongs to the requested
-    // file. During a file-switch the pending request may already carry the NEW
-    // file's id while the store is still clearing/loading; consuming early would
-    // jump nowhere and burn the request.
-    const currentFileId = cellStore.getFileId()
-    if (targetFileId !== null && currentFileId !== targetFileId) {
-      // Leave the request pending until the store has been replaced.
-      return
-    }
-
-    editorScroll.consume()
-    if (!groupId && !sectionLabel) return
-
-    let idx = -1
-    if (sectionLabel) {
-      idx = cellStore.findIndexBySection(sectionLabel)
-    } else if (groupId) {
-      idx = cellStore.getAllSummaries().findIndex((cell) => (cell.group ?? "Ungrouped") === groupId)
-    }
-
-    if (idx >= 0) {
-      // Defer a tick so the virtualized list has the latest cell list after any
-      // file-switch that preceded this request.
-      setTimeout(() => {
-        editorRef.current?.scrollToCellIndex(idx)
-      }, 0)
-    }
-  }, [cellStore, editorScroll, editorRef, storeVersion])
-
-  return null
 }
 
 interface TrashedProjectScreenProps {

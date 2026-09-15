@@ -36,7 +36,7 @@
  */
 
 import { v4 as uuid } from "uuid"
-import type { Concept, TermRendering, RenderingStatus } from "./types"
+import type { Concept, TermRendering, RenderingStatus, TermMatchOptions } from "./types"
 
 // ---------------------------------------------------------------------------
 // TBX administrative-status ↔ RenderingStatus mapping
@@ -85,7 +85,19 @@ ${entries}
 
 function termEntry(c: Concept): string {
   const note = c.notes ? `\n      <note>${xmlEscape(c.notes)}</note>` : ""
-  const sourceLang = `\n      <langSet xml:lang="source">\n        <tig><term>${xmlEscape(c.sourceTerm)}</term></tig>\n      </langSet>`
+  const { forms = [], ...optionsOnly } = c.match ?? {}
+  const optionNote =
+    Object.keys(optionsOnly).length > 0
+      ? `\n          <termNote type="aquillaMatchOptions">${xmlEscape(JSON.stringify(optionsOnly))}</termNote>`
+      : ""
+  const headTig = `        <tig>\n          <term>${xmlEscape(c.sourceTerm)}</term>${optionNote}\n        </tig>`
+  const variantTigs = forms
+    .map(
+      (f) =>
+        `        <tig>\n          <term>${xmlEscape(f)}</term>\n          <termNote type="termType">variant</termNote>\n        </tig>`,
+    )
+    .join("\n")
+  const sourceLang = `\n      <langSet xml:lang="source">\n${[headTig, variantTigs].filter(Boolean).join("\n")}\n      </langSet>`
   const targetTigs = c.renderings
     .map(
       (r) =>
@@ -128,13 +140,16 @@ export function importConceptsTbx(xml: string): Concept[] {
     const notes = noteMatch ? xmlUnescape(noteMatch[1].trim()) : undefined
 
     // Collect langSets in order: first = source, rest = target.
-    const langSets: Array<{ lang: string; tigs: Array<{ term: string; status?: string }> }> = []
+    const langSets: Array<{
+      lang: string
+      tigs: Array<{ term: string; status?: string; termType?: string; matchOptionsJson?: string }>
+    }> = []
     const langSetRe = /<langSet[^>]*>([\s\S]*?)<\/langSet>/g
     let lsMatch: RegExpExecArray | null
     while ((lsMatch = langSetRe.exec(block)) !== null) {
       const lsAttr = lsMatch[0].match(/xml:lang="([^"]*)"/)
       const lang = lsAttr ? lsAttr[1] : "unknown"
-      const tigs: Array<{ term: string; status?: string }> = []
+      const tigs: Array<{ term: string; status?: string; termType?: string; matchOptionsJson?: string }> = []
       const tigRe = /<tig[^>]*>([\s\S]*?)<\/tig>/g
       let tigMatch: RegExpExecArray | null
       while ((tigMatch = tigRe.exec(lsMatch[1])) !== null) {
@@ -146,14 +161,41 @@ export function importConceptsTbx(xml: string): Concept[] {
           /<termNote[^>]*type="administrativeStatus"[^>]*>([\s\S]*?)<\/termNote>/,
         )
         const status = statusMatch ? statusMatch[1].trim() : undefined
-        tigs.push({ term, status })
+        const typeMatch = tigBlock.match(/<termNote[^>]*type="termType"[^>]*>([\s\S]*?)<\/termNote>/)
+        const optMatch = tigBlock.match(
+          /<termNote[^>]*type="aquillaMatchOptions"[^>]*>([\s\S]*?)<\/termNote>/,
+        )
+        tigs.push({
+          term,
+          status,
+          termType: typeMatch?.[1].trim(),
+          matchOptionsJson: optMatch ? xmlUnescape(optMatch[1].trim()) : undefined,
+        })
       }
       langSets.push({ lang, tigs })
     }
 
     if (langSets.length === 0) continue
-    const sourceTerm = langSets[0].tigs[0]?.term
+    const head = langSets[0].tigs[0]
+    const sourceTerm = head?.term
     if (!sourceTerm) continue
+
+    const forms = langSets[0].tigs
+      .slice(1)
+      .filter((t) => t.termType === "variant")
+      .map((t) => t.term)
+    let match: TermMatchOptions | undefined
+    if (head?.matchOptionsJson) {
+      try {
+        const parsed: unknown = JSON.parse(head.matchOptionsJson)
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          match = { ...(parsed as TermMatchOptions) }
+        }
+      } catch {
+        // Lenient import: a malformed note is ignored.
+      }
+    }
+    if (forms.length > 0) match = { ...(match ?? {}), forms }
 
     const renderings: TermRendering[] = []
     for (const ls of langSets.slice(1)) {
@@ -172,6 +214,7 @@ export function importConceptsTbx(xml: string): Concept[] {
       notes: notes || undefined,
       status: "active",
       createdAt: now,
+      ...(match ? { match } : {}),
     })
   }
 

@@ -83,6 +83,8 @@ import {
 import { resolveTimingLocked } from "@/lib/sync/project-settings"
 import { DEFAULT_DRAFT_CONTEXT } from "@/lib/completion/draft-context"
 import { ValidationSettingsSection } from "./ProjectSettings/ValidationSettingsSection"
+import { TermMatchingSection } from "./ProjectSettings/TermMatchingSection"
+import type { TermMatchingSettings } from "@/lib/terminology/types"
 import { DecaySettingsSection } from "./ProjectSettings/DecaySettingsSection"
 import { AudioMediaStrategySection } from "./ProjectSettings/AudioMediaStrategySection"
 import { TermbaseSharingSection } from "./ProjectSettings/TermbaseSharingSection"
@@ -245,6 +247,7 @@ interface Baseline {
   /** AQU-634: when true, USFM imports exclude book-name/title/TOC + intro-block
    *  front matter. Absent/false imports front matter (the default). */
   importExcludeFrontMatter: boolean
+  termMatching: TermMatchingSettings
 }
 
 function buildBaseline(project: ProjectRecord): Baseline {
@@ -296,6 +299,7 @@ function buildBaseline(project: ProjectRecord): Baseline {
     geminiApiKey: project.ttsSettings?.apiKey ?? "",
     precedingTargetCells: project.draftContext?.precedingTargetCells ?? DEFAULT_DRAFT_CONTEXT.precedingTargetCells,
     importExcludeFrontMatter: project.importExcludeFrontMatter ?? false,
+    termMatching: project.termMatching ?? { prefixes: [], suffixes: [] },
   }
 }
 
@@ -480,6 +484,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
   const [precedingTargetCells, setPrecedingTargetCells] = useState(DEFAULT_DRAFT_CONTEXT.precedingTargetCells)
   // AQU-634: per-project USFM front-matter opt-out.
   const [importExcludeFrontMatter, setImportExcludeFrontMatter] = useState(false)
+  // AQU-1271: project-wide affix inventory for terminology prefix/suffix matching.
+  const [termMatching, setTermMatching] = useState<TermMatchingSettings>({ prefixes: [], suffixes: [] })
   // Pre-merge round: the Media timeline's timing mode moved OUT of Project
   // Settings — it is FILE-level now (file.timing.set), controlled from the
   // timeline toolbar with the same maintainer floor.
@@ -538,6 +544,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     setGeminiApiKey(b.geminiApiKey)
     setPrecedingTargetCells(b.precedingTargetCells)
     setImportExcludeFrontMatter(b.importExcludeFrontMatter)
+    setTermMatching(b.termMatching)
   }, [])
 
   // Seed once when the project first loads. We intentionally don't reseed on
@@ -673,7 +680,8 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
       !decayEqual(decaySettings, baseline.decaySettings) ||
       geminiApiKey !== baseline.geminiApiKey ||
       precedingTargetCells !== baseline.precedingTargetCells ||
-      importExcludeFrontMatter !== baseline.importExcludeFrontMatter
+      importExcludeFrontMatter !== baseline.importExcludeFrontMatter ||
+      JSON.stringify(termMatching) !== JSON.stringify(baseline.termMatching)
     )
   }, [
     baseline, name, sourceLanguage, targetLanguage, username, provider, endpoint, apiKey,
@@ -685,7 +693,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     allowTrackEditing,
     timingLocked,
     harmonizeMinRole, bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey,
-    precedingTargetCells, importExcludeFrontMatter,
+    precedingTargetCells, importExcludeFrontMatter, termMatching,
   ])
 
   // Warn before browser-level navigation (back button, tab close, reload).
@@ -900,6 +908,10 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         sharedUpdates.draftContext = { precedingTargetCells }
         changedFieldLabels.push("draft context")
       }
+      if (JSON.stringify(termMatching) !== JSON.stringify(baseline.termMatching)) {
+        sharedUpdates.termMatching = termMatching
+        changedFieldLabels.push("term matching affixes")
+      }
 
       if (Object.keys(sharedUpdates).length > 0) {
         const out = await patchShared(sharedUpdates)
@@ -973,6 +985,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
         geminiApiKey,
         precedingTargetCells,
         importExcludeFrontMatter,
+        termMatching,
       }
       setBaseline(newBaseline)
       // Refresh `useProject` in the background so other components see the
@@ -1007,7 +1020,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
     autoSyncEnabled, autoSyncInterval, validationCount, validationCountAudio,
     validationRoleFloor, validationNamedUsers, allowSelfValidation, harmonizeMinRole,
     bibleResourcesEnabled, audioMediaStrategy, decaySettings, geminiApiKey, patchShared, refresh, applyBaseline, project,
-    precedingTargetCells, importExcludeFrontMatter, getJwt, isCloudProject, t,
+    precedingTargetCells, importExcludeFrontMatter, termMatching, getJwt, isCloudProject, t,
   ])
 
   const handleSaveAndClose = useCallback(async () => {
@@ -2424,6 +2437,7 @@ export function ProjectSettings({ modal = false }: ProjectSettingsProps = {}) {
                 }
               />
             </SettingsGroup>
+            <TermMatchingSection value={termMatching} onChange={setTermMatching} disabled={!canEditShared} />
           </div>
         )}
         {searchGroupLabel("section-termbase-sharing")}

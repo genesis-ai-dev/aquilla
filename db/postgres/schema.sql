@@ -534,6 +534,9 @@ CREATE TABLE cells (
     -- of the TMS-style model). Non-'' lanes are BCP-47-ish tags chosen by the
     -- add-a-language flow; the projection treats the value as opaque.
     target_lang       TEXT NOT NULL DEFAULT '',
+    -- AQU-1240 v2: opaque lane this row belongs to (see lanes(id)). Additive and
+    -- nullable until the backfill populates it and reads cut over from target_lang.
+    lane_id           TEXT,
     -- Replaces SQLite FTS5. Maintained automatically; no triggers needed.
     value_tsv         tsvector GENERATED ALWAYS AS (to_tsvector('simple', value)) STORED,
     PRIMARY KEY (project_id, file_id, cell_id, side, target_lang)
@@ -550,6 +553,7 @@ CREATE TABLE file_section_progress (
     scope               TEXT NOT NULL,
     section_key         TEXT NOT NULL DEFAULT '',
     target_lang         TEXT NOT NULL DEFAULT '',
+    lane_id             TEXT, -- AQU-1240 v2: additive; see lanes(id)
     total_count         INTEGER NOT NULL DEFAULT 0 CHECK (total_count >= 0),
     filled_count        INTEGER NOT NULL DEFAULT 0 CHECK (filled_count >= 0),
     validator_histogram JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -615,6 +619,7 @@ CREATE TABLE cell_validators (
     file_id     TEXT NOT NULL,
     cell_id     TEXT NOT NULL,
     target_lang TEXT NOT NULL DEFAULT '',
+    lane_id     TEXT, -- AQU-1240 v2: additive; see lanes(id)
     event_id    TEXT NOT NULL,
     username    TEXT NOT NULL,
     decided_ts  BIGINT NOT NULL,
@@ -775,6 +780,7 @@ CREATE TABLE assignments (
     -- pinned to. '' = the default lane (every pre-lane assignment). Not part of
     -- the PK — assignment_id stays the key; a lane is a property of the unit.
     target_lang      TEXT NOT NULL DEFAULT '',
+    lane_id          TEXT, -- AQU-1240 v2: additive; see lanes(id)
     cells_total      INTEGER NOT NULL DEFAULT 0,
     deadline         TEXT,
     note             TEXT,
@@ -1183,6 +1189,7 @@ CREATE TABLE IF NOT EXISTS artifact_bindings (
     binding_role    TEXT NOT NULL
                       CHECK (binding_role IN ('source', 'target', 'support', 'roundtrip-output')),
     target_lang     TEXT NOT NULL DEFAULT '',
+    lane_id         TEXT, -- AQU-1240 v2: additive; see lanes(id)
     member_path     TEXT NOT NULL DEFAULT '',
     profile_id      TEXT NOT NULL,
     profile_version TEXT NOT NULL,
@@ -1362,6 +1369,7 @@ CREATE TABLE IF NOT EXISTS scene_briefs (
   start_cell_id text NOT NULL,      -- endpoint UUIDs, never ordinals
   end_cell_id text NOT NULL,
   target_lang text NOT NULL DEFAULT '',
+  lane_id text, -- AQU-1240 v2: additive; see lanes(id)
   construal text NOT NULL,          -- L2: situation/participants/tenor/moves markdown
   ambiguity_register jsonb NOT NULL DEFAULT '[]',
   l1_summary text,                  -- ≤1600 chars, injected into draft prompts
@@ -1430,6 +1438,7 @@ CREATE TABLE IF NOT EXISTS contextual_runs (
   project_id text NOT NULL,
   file_id text NOT NULL,
   target_lang text NOT NULL DEFAULT '', -- lane ('' = the file's single target language)
+  lane_id text, -- AQU-1240 v2: additive; see lanes(id)
   status text NOT NULL DEFAULT 'running'
     CHECK (status IN ('running','pausing','paused','parked','waiting','done','failed','terminated')),
   initiated_by text,                    -- username
@@ -1487,6 +1496,7 @@ CREATE TABLE IF NOT EXISTS contextual_drafts (
   file_id text NOT NULL,
   cell_id text NOT NULL,
   target_lang text NOT NULL DEFAULT '', -- lane ('' = project default); copied from the owning run
+  lane_id text, -- AQU-1240 v2: additive; see lanes(id)
   scene_brief_id text,
   text text NOT NULL,
   verdicts jsonb,                       -- verifier verdict summary for the review card

@@ -27,6 +27,7 @@ import {
   Bot,
   BrainCircuit,
   Building2,
+  Download,
   FileText,
   FolderOpen,
   House,
@@ -56,6 +57,7 @@ export const NAV_PAGE_ICONS = {
   assigned: ListTodo,
   members: Users,
   archived: Archive,
+  egress: Download,
   settings: Settings,
   admin: ShieldUser,
   shared: Share2,
@@ -77,6 +79,7 @@ const LABEL_ICONS: Record<string, LucideIcon> = {
   Members: NAV_PAGE_ICONS.members,
   "Members matrix": NAV_PAGE_ICONS.members,
   Archived: NAV_PAGE_ICONS.archived,
+  "Data egress": NAV_PAGE_ICONS.egress,
   "Archived projects": NAV_PAGE_ICONS.archived,
   "Recently deleted": NAV_PAGE_ICONS.file,
   Settings: NAV_PAGE_ICONS.settings,
@@ -140,6 +143,8 @@ export function deriveNavIcon(pathname: string): LucideIcon {
         return NAV_PAGE_ICONS.projects
       case "archived":
         return NAV_PAGE_ICONS.archived
+      case "egress":
+        return NAV_PAGE_ICONS.egress
       case "assigned":
         return NAV_PAGE_ICONS.assigned
       case "settings":

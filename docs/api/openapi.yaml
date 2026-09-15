@@ -684,6 +684,72 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorEnvelope" }
 
+  /api/v1/external/projects/{projectId}/similar:
+    get:
+      summary: Source cells most similar to a line, with their targets (lexical)
+      description: >
+        Translation memory for agents. Returns the source cells whose wording is
+        closest to the query, each with its current target and a symmetric
+        similarity score in [0, 1]. Pass exactly one of cellId (the query cell is
+        excluded from its own results) or text. Cells with no target are never
+        returned. v1 ranks by LEXICAL term overlap only — not by meaning — so a
+        paraphrase sharing no words scores 0.
+      security: [{ apiCredentialBearer: [] }]
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: cellId
+          in: query
+          description: Source cell to find precedents for. Mutually exclusive with text.
+          schema: { type: string }
+        - name: text
+          in: query
+          description: Free text to find precedents for. Mutually exclusive with cellId.
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 10, maximum: 50 }
+        - name: cursor
+          in: query
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        cellId: { type: string }
+                        fileId: { type: string }
+                        sourceValue: { type: string }
+                        targetValue: { type: string }
+                        targetLang: { type: string }
+                        score: { type: number, minimum: 0, maximum: 1 }
+                  nextCursor: { type: [string, "null"] }
+        "400":
+          description: validation_failed — neither or both of cellId/text supplied.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "403":
+          description: permission_denied / scope_denied
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "404":
+          description: not_found — no such source cell in this project.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+
   /api/v1/external/projects/{projectId}/files:
     get:
       summary: List a project's files

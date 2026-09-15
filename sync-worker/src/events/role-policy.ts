@@ -1,6 +1,7 @@
 import type { EventKind } from './types'
 
-// Numeric role levels matching frontier-server's role hierarchy.
+// Numeric role levels matching auth-worker's role hierarchy
+// (auth-worker/src/services/project-permissions.ts's ROLE_NAMES).
 // 100-gaps for future extensibility (e.g. inserting a 350 between
 // REVIEWER and CONTRIBUTOR if a workflow ever needs it).
 export const ROLE = {

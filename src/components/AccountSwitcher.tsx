@@ -23,6 +23,7 @@ import { FrontierForgotPasswordForm } from "./git-import/FrontierForgotPasswordF
 import { cn } from "@/lib/utils"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 type AuthMode = "login" | "signup" | "forgot"
@@ -292,22 +293,14 @@ export function AccountSwitcher({
   )
 }
 
-/** Non-prod environment label derived from the Vite mode at build time. */
-const ENV_HINT: string | null = (() => {
-  const mode = import.meta.env.MODE as string | undefined
-  if (!mode || mode === "production") return null
-  if (mode === "development") return "dev"
-  return mode
-})()
-
-interface EntrySummary {
+export interface EntrySummary {
   key: string
   username: string
   email?: string
   active: boolean
 }
 
-function AccountMenuEntry({
+export function AccountMenuEntry({
   summary,
   onSelect,
 }: {
@@ -324,15 +317,9 @@ function AccountMenuEntry({
     >
       <InitialsAvatar name={summary.username} size="xs" shape="square" menuSafe />
       <div className="flex min-w-0 flex-col gap-0.5">
-        <div className="flex min-w-0 items-baseline gap-2">
-          <span className="truncate font-medium">{summary.username}</span>
-          {summary.email && (
-            <span className="min-w-0 truncate text-xs text-muted-foreground">{summary.email}</span>
-          )}
-        </div>
-        {ENV_HINT && (
-          <span className="truncate text-xs text-amber-600 dark:text-amber-500">{ENV_HINT}</span>
-        )}
+        <AppTooltip content={summary.email} side="right" align="start">
+          <span className="w-fit min-w-0 break-words font-medium">{summary.username}</span>
+        </AppTooltip>
       </div>
       {summary.active && <Check className="size-4 shrink-0 opacity-60" />}
     </DropdownMenuItem>

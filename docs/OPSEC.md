@@ -27,17 +27,17 @@
 > PR gate is red on `dev` and fails in the first of three sequential phases, so
 > the worker test suites and the SPA build never execute at all; reported with
 > patches rather than fixed, since none of it is auth/session work.
-> `docs/OPSEC-REVIEW-2026-08-27.md` is the most recent pass — the second on API
-> security & data exposure, closing the two items the first one deliberately
-> deferred: OPS-22 (rate limiting completed on every remaining external Agent
-> API route — reads, artifact meta/content/inspect, changeset GET/discard) and
+> `docs/OPSEC-REVIEW-2026-08-27.md` covers the second pass on API security &
+> data exposure, closing the two items the first one deliberately deferred:
+> OPS-22 (rate limiting completed on every remaining external Agent API
+> route — reads, artifact meta/content/inspect, changeset GET/discard) and
 > OPS-23 (two audio-id fields that bypassed the codebase's own `isPathSafeId`
 > convention). It also records OPS-24 — a confirmed check-then-act race in
 > credit-cap enforcement across concurrent chat requests, traced to its
 > mechanics but reported rather than fixed, since a correct fix means
 > redesigning the credit-guard/ledger interaction, not a same-day patch.
-> `docs/OPSEC-REVIEW-2026-08-31.md` is the most recent pass — the third on
-> auth & session management, taking up the invite-storage question 08-24
+> `docs/OPSEC-REVIEW-2026-08-31.md` covers the third pass on auth & session
+> management, taking up the invite-storage question 08-24
 > handed forward. It adds OPS-25 (the three public invite-preview routes each
 > hand-rolled a "best-effort caller" helper that checked only signature and
 > `exp`, skipping *both* the `jti` logout denylist and the
@@ -47,6 +47,30 @@
 > rather than fixed, because three product surfaces deliberately re-display a
 > live invite token and hashing them is a product decision, not a port of
 > OPS-20's migration).
+> `docs/OPSEC-REVIEW-2026-09-03.md` is the most recent pass — the fourth on
+> API security & data exposure. It adds OPS-27: the first-party
+> `/api/v1/chat/completions`, `/api/v1/ai/agent/run`, and `/api/v1/voice/tts`
+> proxies had no rate limiting at all, and every spend guard on them
+> (`AI_BUDGET_ENFORCE`/`CREDIT_ENFORCE`/`TTS_BUDGET_ENFORCE`) defaults to
+> log-only in every deployed environment — fixed with a per-user throttle on
+> each route; whether to ever flip the enforce flags is flagged as a separate
+> product decision, not auto-changed. OPS-28 closes two routes that echoed
+> raw database error text to the caller.
+>
+> `docs/OPSEC-REVIEW-2026-09-14.md` is the most recent pass, and the first on
+> **third-party data egress from the browser** rather than on what an attacker
+> can pull out of our servers. OPS-29: the five routes that carry a bearer
+> credential in the URL (`/join/:token`, `/join-org/:token`, `/link/:token`,
+> `?token=` on `/reset-password` and `/verify-email`) had that credential
+> exported verbatim to PostHog on every event — `$current_url`/`$pathname`, the
+> persisted `$initial_*` person properties, and the session replay's own rrweb
+> `href` — because input/text masking covers rendered DOM text and a URL is
+> neither; fixed with a `before_send` redaction hook plus a drift guard. OPS-30:
+> four parsers quoted the imported document's own text into the thrown message,
+> which the import surfaces send on as `IMPORT_FAILED.error_message` and
+> `captureException`. That pass also flags — without changing — that analytics
+> consent defaults to *enabled* before any choice is recorded, which is exactly
+> the `/link/:token` fresh-browser case.
 
 _Standing OPSEC review of Aquilla's handling of sensitive data. Complements
 `docs/SECURITY-NOTES-2026-06-10.md` (application-security findings, June audit)
@@ -207,14 +231,12 @@ nothing, including for the credential scan added in V5.
 the first thing to resolve, because it gates whether anything else in §5 is
 actually enforced.
 
-**Update (2026-08-12, dev merge): resolved by relocation, not repair.** AQU-564
-retired Actions as the pull-request gate entirely: `ci.yml` now has no
-`pull_request`/`push` trigger (dispatch-only fallback), and PR validation runs
-in Cloudflare Workers Builds via `scripts/cloudflare-ci-checks.mjs`. The
-credential scan from V5 accordingly runs in that script's `lint` lane — the
-enforced path — with the `ci.yml` lint step retained as a mirror for dispatch
-runs. "CI is green" is meaningful again, provided the Workers Builds check is
-required on the target branch.
+**Update (2026-09-09, AQU-1219): validation runs before push.** Cloudflare
+Workers Builds now compiles previews only. `.husky/pre-push` runs
+`pnpm scan:secrets` before the existing commit-based affected E2E gate. The dispatch-only `ci.yml` retains manual equivalents.
+A green preview check confirms compilation, not security or functional testing.
+Local hooks can be bypassed; API-created commits do not execute them. QA reviews
+published previews under this explicitly chosen policy.
 
 ### V5 — No credential scanning in the toolchain — **FIXED IN THIS CHANGE** [FACT]
 
@@ -284,6 +306,14 @@ generic invite unfurl copy so no org/project/inviter name reaches link scrapers
 forwarded in a screenshot or a pasted URL, which is a user-behaviour problem, not
 a code one. See §5.
 
+**Update (2026-09-14, OPS-29):** those mitigations did not cover our *own*
+outbound analytics — PostHog exported these URLs verbatim in `$current_url`,
+in the persisted `$initial_*` person properties, and in the session replay's
+rrweb `href`. Now redacted at the event boundary
+(`src/lib/analytics-redaction.ts`); see `docs/OPSEC-REVIEW-2026-09-14.md`. That
+pass also extends this row to the three token-bearing routes that post-date it:
+`/link/:token`, `/reset-password?token=` and `/verify-email?token=`.
+
 ---
 
 ## 4. Risk assessment
@@ -321,19 +351,17 @@ resolved by AQU-564 — see its section above.)
 | Fail closed on the sync auth bypass in deployed environments | `sync-worker/src/environment-guard.ts`, `index.ts`, `project-do.ts` |
 | Baseline HTTP security headers on the web surface | `worker/security-headers.ts` |
 | Invite tokens fingerprinted, never logged whole | `src/lib/sync/invites.ts` |
-| Credential scanning as a required CI check | `scripts/secret-scan.ts`; lint lane of `scripts/cloudflare-ci-checks.mjs` (the enforced PR gate), mirrored in `.github/workflows/ci.yml` (`lint`) |
-| SPA Worker suite actually runs | `pnpm run test:worker` — spa lane of `scripts/cloudflare-ci-checks.mjs`, mirrored in the ci.yml `unit` job |
+| Credential scanning before push | `scripts/secret-scan.ts`; first command in `.husky/pre-push`; manual fallback in `.github/workflows/ci.yml` |
+| SPA Worker suite available for targeted/manual validation | `pnpm run test:worker`; manual ci.yml `unit` job |
 | auth-worker `hono` floor raised above the SEC-7 advisory | `auth-worker/package.json` |
 
 Every one has a test. A control without a test is V4 waiting to happen again.
 
 ### Recommended next, in order
 
-0. ~~**Get CI actually running again (V4a).**~~ Done via AQU-564: the PR gate
-   moved off Actions to Cloudflare Workers Builds
-   (`scripts/cloudflare-ci-checks.mjs`); every control above now rides an
-   enforced lane there. Residual: confirm the Workers Builds check is marked
-   required on `dev`/`main` branch protection.
+0. **Validation ownership (AQU-1219).** Local push hooks run automated checks;
+   Cloudflare compiles previews for QA. Do not interpret its branch-protection
+   check as evidence that tests or credential scanning ran.
 1. **Split `SECRET_KEY` / `SYNC_SECRET_KEY` per environment (V7).** Highest
    leverage remaining. Replace cross-env token portability with a dev-only test
    fixture — the testing convenience it buys is not worth prod credentials

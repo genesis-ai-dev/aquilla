@@ -239,6 +239,7 @@ import { LeftDock, type DockTab } from "./LeftDock"
 import { usePersistedDockTab } from "@/hooks/usePersistedDockTab"
 import { TranslationNotesSidebar, readTnSidebarVisible, writeTnSidebarVisible } from "./TranslationNotesSidebar"
 import { ParallelBiblesSidebar, readParallelBiblesOpen, writeParallelBiblesOpen } from "./ParallelBiblesSidebar"
+import { VerseResourcesSidebar, readVerseResourcesOpen, writeVerseResourcesOpen } from "./VerseResourcesSidebar"
 import { InactiveProjectBanner } from "./InactiveProjectBanner"
 import { OfflineBanner } from "./OfflineBanner"
 import { useProjectLifecycle } from "@/hooks/useProjectLifecycle"
@@ -293,11 +294,13 @@ import { fileOptionsForAgentSurface } from "./editor-surface-toolbar"
 import { useFootnotesPreference } from "@/hooks/useFootnotesPreference"
 import type { VisibleFootnoteEntry } from "@/lib/footnotes/types"
 import { deleteFootnote, spliceFootnoteText } from "@/lib/footnotes/splice"
-import { useFileFontSizes, setFileViewPref } from "@/lib/store/file-view-prefs"
+import { useFileFontSizes, useFileFontSizeExplicit, setFileViewPref, clearFileFontSize } from "@/lib/store/file-view-prefs"
 import { EditorScrollProvider, useEditorScroll } from "@/context/EditorScrollContext"
 import { EditorActionsProvider } from "@/context/EditorActionsContext"
 import { detectSuggestions, type RenameSuggestion } from "@/lib/file-labeling/detect"
 import { canExportSourceFile, exportSourceFile } from "@/lib/file-source-export"
+import { downloadImportedOriginal } from "@/lib/file-original-download"
+import { useOriginalSourceFlags } from "@/hooks/useOriginalSourceFlags"
 import { applySuggestions, buildUndo, hasEffectiveChange } from "@/lib/file-labeling/apply"
 import { renameFile, moveFileToCorpus, renameCorpus, deleteFile } from "@/lib/store/file-operations"
 import { deleteFileProjection } from "@/lib/sync/file-projection"
@@ -1192,6 +1195,8 @@ export function ProjectWorkspace() {
     project?.origin?.kind === "git" ? project?.origin.gitlabProjectId : undefined,
   ])
 
+  const originalSourceIds = useOriginalSourceFlags(project?.id, project?.files ?? [], getTokenForFile)
+
   // AQU-1006 follow-up: this project's concepts, read from the sync-worker
   // projection. `project.terminology` (the settings-blob key) is retired — it
   // could only express "here is the entire termbase", so every add rewrote the
@@ -1724,14 +1729,18 @@ export function ProjectWorkspace() {
   // 2026-08-07 (wire b): a text-table row click points the timeline at that
   // cell. Nonce'd so repeat clicks on the same row re-center; the callback is
   // identity-stable (mirror ref) because it rides in editorActionsValue.
-  const [timelineActivateRequest, setTimelineActivateRequest] = useState<{ cellId: string; nonce: number } | null>(null)
+  const [timelineActivateRequest, setTimelineActivateRequest] = useState<{ cellId: string; nonce: number; play?: boolean } | null>(null)
   const timelineStackedRef = useRef(timelineStacked)
   timelineStackedRef.current = timelineStacked
   const activateNonceRef = useRef(0)
-  const handleMediaRowActivate = useCallback((cellId: string) => {
+  // AQU-1117: `play` is the one caller that means "and roll from there" — the
+  // cell rail's "Play from this cue". The row-click path (EditorActionsContext
+  // types this as a one-argument call) can never set it, so a row click keeps
+  // its cue-only contract by construction rather than by convention.
+  const handleMediaRowActivate = useCallback((cellId: string, opts?: { play?: boolean }) => {
     if (!timelineStackedRef.current) return
     activateNonceRef.current += 1
-    setTimelineActivateRequest({ cellId, nonce: activateNonceRef.current })
+    setTimelineActivateRequest({ cellId, nonce: activateNonceRef.current, play: opts?.play === true })
     // 2026-08-08: pointing playback somewhere is "watch this" — re-engage the
     // table's playback follow even if an earlier scroll had released it.
     editorRef.current?.setMediaFollow?.("engage")
@@ -1895,6 +1904,7 @@ export function ProjectWorkspace() {
   // FRO-251: per-file, per-side font sizes — adjusted from the View settings
   // (eye) menu, rendered by EditorTable.
   const fontSizes = useFileFontSizes(activeFileId)
+  const fontSizeExplicit = useFileFontSizeExplicit(activeFileId)
 
   // AQU-646: one answer for "is this a subtitle import?", shared with the
   // timing-mode resolver. The hand-rolled check this replaced missed `sbv`,
@@ -3858,8 +3868,16 @@ export function ProjectWorkspace() {
   // it points playback at the line the way everything else does — the same pair
   // the "land on a new line" effect uses. Only offered where there is something
   // to play into (see its render site), so it is present and working or absent.
+  //
+  // AQU-1117: and it PLAYS. The icon and the tooltip both promise "play from
+  // here", but it was wired onto the seek-only path a row click and a chip
+  // click use, so it inherited their "cue, paused" contract and the press read
+  // as dead — you had to reach for the bar's Play afterwards. The intent rides
+  // down with the seek (see TimelineEditor's onPlayFromTime) so the film starts
+  // AT the cue rather than at wherever it was paused. Only the linked-video
+  // arrangement acts on it; the film-less ones still cue (AQU-1118).
   const handleCueSeek = useCallback((cellId: string) => {
-    handleMediaRowActivate(cellId)
+    handleMediaRowActivate(cellId, { play: true })
     editorRef.current?.scrollToCellId(cellId, { flash: true, follow: "engage" })
   }, [handleMediaRowActivate])
 
@@ -5807,12 +5825,19 @@ export function ProjectWorkspace() {
   const [parallelBiblesOpen, setParallelBiblesOpen] = useState<boolean>(() =>
     projectId ? readParallelBiblesOpen(projectId) : false,
   )
+  // Verse-resources sidebar (AQU-461, Aquifer): same tracked ref as the
+  // parallel bibles, its own open state.
+  const [verseResourcesOpen, setVerseResourcesOpen] = useState<boolean>(() =>
+    projectId ? readVerseResourcesOpen(projectId) : false,
+  )
   // AQU-1016: was `useState` here — every scroll step re-rendered this whole
   // shell to feed a value only the parallel-bibles panel reads. It now lives
   // in the shared editor-viewport store (src/hooks/useEditorViewportStore.ts);
   // writes below go straight to the store, and this read only subscribes
   // (and thus only re-renders the shell) while a parallel-bibles panel is
   // actually shown for the active file — the same gate the render sites use.
+  // The AQU-461 verse-resources panel renders under a subset of that gate,
+  // so the same subscription serves both.
   const parallelBiblesPanelActive = centerSurface === "editor" && !!activeFile && fileHasSections(activeFile)
   const trackedCellRef = useEditorViewportTrackedCellRef(parallelBiblesPanelActive)
   // Drop the tracked ref when switching files so the previous file's verse
@@ -9397,7 +9422,7 @@ export function ProjectWorkspace() {
   // seeks — no session to mint tokens, or a target inside the trailing pad that
   // no section owns — and in those cases the picture must still move, so the
   // pane cannot infer position from queue progress alone.
-  const [videoSeek, setVideoSeek] = useState<{ sec: number; nonce: number } | null>(null)
+  const [videoSeek, setVideoSeek] = useState<{ sec: number; nonce: number; play?: boolean } | null>(null)
   /** Space, when the picture is the transport. A nonce rather than a desired
    *  state: the picture keeps its native controls, and only a toggle against
    *  the element's own `paused` can stay in step with them. */
@@ -9440,7 +9465,7 @@ export function ProjectWorkspace() {
     pauseAllTransports()
   }, [])
   const handleTimelineScrubEnd = useCallback(() => { scrubbingRef.current = false }, [])
-  const handleTimelineSeekToTime = useCallback((sec: number) => {
+  const handleTimelineSeekToTime = useCallback((sec: number, opts?: { play?: boolean }) => {
     // AQU-646 stage 3h: A FILE WITH TIMINGS AND NO MASTER — the virtual clock
     // is the transport, so the seek ends here, exactly as it ends at the
     // picture below. Without this arm the call fell through to the queue,
@@ -9454,7 +9479,13 @@ export function ProjectWorkspace() {
       virtualClockSeek(Math.max(0, sec))
       return
     }
-    setVideoSeek((prev) => ({ sec: Math.max(0, sec), nonce: (prev?.nonce ?? 0) + 1 }))
+    // AQU-1117: "and start playing" is stamped ONLY where the picture is the
+    // transport. This is the one expression that decides it, for the same
+    // reason `videoIsTransport` itself is written once: the queue arrangement
+    // would get a second driver fighting it for the element, and the virtual
+    // arrangement returned above — play parity there is AQU-1118's slice.
+    const play = opts?.play === true && videoIsTransport
+    setVideoSeek((prev) => ({ sec: Math.max(0, sec), nonce: (prev?.nonce ?? 0) + 1, play }))
     // AQU-646 stage 5: A SCRUB MOVES THE PICTURE AND NOTHING ELSE (Sam).
     //
     // Placed AFTER the stamp so the frame still follows the hand, and BEFORE
@@ -9501,6 +9532,13 @@ export function ProjectWorkspace() {
       { play: false },
     )
   }, [project?.id, audioMergedCells, frontierSession, videoIsTransport, virtualIsTransport])
+
+  /** AQU-1117: "Play from this cue" — the same routing as an ordinary seek,
+   *  with the start riding along on the stamp so the film begins at the cue
+   *  rather than at wherever it was paused. */
+  const handleTimelinePlayFromTime = useCallback((sec: number) => {
+    handleTimelineSeekToTime(sec, { play: true })
+  }, [handleTimelineSeekToTime])
 
   // Round 7 (SUB-44): Space in the media lens — the transport bar's 3-state
   // toggle against the QUEUE: playing → pause, paused → resume, idle → start
@@ -9902,6 +9940,20 @@ export function ProjectWorkspace() {
         },
       })
     }
+    if (activeFile && projectId && canExportByOrgPolicy && originalSourceIds.has(activeFile.id)) {
+      items.push({
+        id: "file-download-original",
+        label: t("fileDetails.downloadOriginal"),
+        icon: Download,
+        onClick: () => {
+          void downloadImportedOriginal({
+            projectId,
+            file: activeFile,
+            getToken: getTokenForFile,
+          })
+        },
+      })
+    }
     if (currentRoleLevel >= ROLE.PROJECT_LEAD) {
       items.push({ id: "sep-file-delete", type: "separator" })
       items.push({
@@ -9936,6 +9988,7 @@ export function ProjectWorkspace() {
     hasUnfinished,
     lens,
     openExportFlow,
+    originalSourceIds,
     project,
     projectId,
     suggestions.length,
@@ -10279,12 +10332,16 @@ export function ProjectWorkspace() {
           onHealthCalculationsChange={setHealthCalculationsEnabled}
           sourceFontSize={fontSizes.source}
           targetFontSize={fontSizes.target}
+          sourceFontSizeExplicit={fontSizeExplicit.source}
+          targetFontSizeExplicit={fontSizeExplicit.target}
           onLineNumbersChange={fileMeta.setLineNumbersEnabled}
           onSourceDirectionModeChange={fileMeta.setSourceDirectionMode}
           onTargetDirectionModeChange={fileMeta.setTargetDirectionMode}
           onCellLabelsChange={setCellLabelsEnabled}
           onSourceFontSizeChange={(v) => { if (activeFileId) setFileViewPref(activeFileId, { sourceFontSize: v }) }}
           onTargetFontSizeChange={(v) => { if (activeFileId) setFileViewPref(activeFileId, { targetFontSize: v }) }}
+          onSourceFontSizeReset={() => { if (activeFileId) clearFileFontSize(activeFileId, "source") }}
+          onTargetFontSizeReset={() => { if (activeFileId) clearFileFontSize(activeFileId, "target") }}
           onTnSidebarChange={(v) => {
             setTnSidebarVisible(v)
             if (projectId) writeTnSidebarVisible(projectId, v)
@@ -10751,7 +10808,10 @@ export function ProjectWorkspace() {
             <Suspense fallback={<LoadingPanel label={t("terminology.loadingLabel")} />}>
               <GlossaryEditorContent
                 files={projectFiles}
-                project={project}
+                // The projection-folded record: `project.terminology` is the retired
+                // settings blob, so a glossary handed the raw record shows the blob
+                // and never a term that was created through the event log.
+                project={editorProject ?? project}
                 patchSettings={patchSettings}
               />
             </Suspense>
@@ -11011,6 +11071,7 @@ export function ProjectWorkspace() {
                       void handleToggleCueLink(textCellId, cueCellId, linked)
                     }}
                     onSeekToTime={handleTimelineSeekToTime}
+                    onPlayFromTime={handleTimelinePlayFromTime}
                     onScrubStart={handleTimelineScrubStart}
                     onScrubEnd={handleTimelineScrubEnd}
                     tracks={timelineTracks}
@@ -11382,8 +11443,19 @@ export function ProjectWorkspace() {
         aside={(() => {
           const showParallelBibles =
             centerSurface === "editor" && !!activeFile && fileHasSections(activeFile)
+          // AQU-461: verse resources ride the same scripture-editor condition,
+          // plus the project's Bible-resources gate (the aquifer routes 404
+          // when it's off, so an ungated tab would only ever show an error).
+          const showVerseResources =
+            showParallelBibles &&
+            !!project &&
+            resolveBibleResourcesEnabled(
+              project.bibleResourcesEnabled,
+              projectHasScriptureFiles(project.files),
+            )
           const hasRightAside =
             (showParallelBibles && parallelBiblesOpen) ||
+            (showVerseResources && verseResourcesOpen) ||
             tnSidebarVisible ||
             checkOpen ||
             drawerRuleId !== null ||
@@ -11406,6 +11478,22 @@ export function ProjectWorkspace() {
                     const next = !parallelBiblesOpen
                     setParallelBiblesOpen(next)
                     if (projectId) writeParallelBiblesOpen(projectId, next)
+                  }}
+                />
+              )}
+              {/* AQU-461: Verse Resources (Aquifer) — open panel only; the
+                  collapsed edge tab rides in asideEdge alongside the bibles'. */}
+              {showVerseResources && verseResourcesOpen && (
+                <VerseResourcesSidebar
+                  key={activeFile!.id}
+                  projectId={project!.id}
+                  trackedRef={trackedCellRef}
+                  getJwt={() => jwtRef.current}
+                  open
+                  onToggle={() => {
+                    const next = !verseResourcesOpen
+                    setVerseResourcesOpen(next)
+                    if (projectId) writeVerseResourcesOpen(projectId, next)
                   }}
                 />
               )}
@@ -11535,23 +11623,50 @@ export function ProjectWorkspace() {
             </>
           )
         })()}
-        asideEdge={
-          centerSurface === "editor" &&
-          activeFile &&
-          fileHasSections(activeFile) &&
-          !parallelBiblesOpen ? (
-            <ParallelBiblesSidebar
-              key={`${activeFile.id}-edge`}
-              trackedRef={trackedCellRef}
-              open={false}
-              onToggle={() => {
-                const next = !parallelBiblesOpen
-                setParallelBiblesOpen(next)
-                if (projectId) writeParallelBiblesOpen(projectId, next)
-              }}
-            />
-          ) : null
-        }
+        asideEdge={(() => {
+          const inScriptureEditor =
+            centerSurface === "editor" && !!activeFile && fileHasSections(activeFile)
+          if (!inScriptureEditor) return null
+          // AQU-461: two collapsed tabs can stack here — bibles and verse
+          // resources — each shown only while its own panel is closed.
+          const verseResourcesAvailable =
+            !!project &&
+            resolveBibleResourcesEnabled(
+              project.bibleResourcesEnabled,
+              projectHasScriptureFiles(project.files),
+            )
+          if (parallelBiblesOpen && !(verseResourcesAvailable && !verseResourcesOpen)) return null
+          return (
+            <>
+              {!parallelBiblesOpen && (
+                <ParallelBiblesSidebar
+                  key={`${activeFile!.id}-edge`}
+                  trackedRef={trackedCellRef}
+                  open={false}
+                  onToggle={() => {
+                    const next = !parallelBiblesOpen
+                    setParallelBiblesOpen(next)
+                    if (projectId) writeParallelBiblesOpen(projectId, next)
+                  }}
+                />
+              )}
+              {verseResourcesAvailable && !verseResourcesOpen && (
+                <VerseResourcesSidebar
+                  key={`${activeFile!.id}-resources-edge`}
+                  projectId={project!.id}
+                  trackedRef={trackedCellRef}
+                  getJwt={() => jwtRef.current}
+                  open={false}
+                  onToggle={() => {
+                    const next = !verseResourcesOpen
+                    setVerseResourcesOpen(next)
+                    if (projectId) writeVerseResourcesOpen(projectId, next)
+                  }}
+                />
+              )}
+            </>
+          )
+        })()}
         statusBar={
           (() => {
             // Audio playback chrome belongs to the open file — hide it on

@@ -31,6 +31,7 @@ import {
   requiredRoleForCommand,
   type Command,
 } from "../../../sync-worker/src/external/commands"
+import { ORG_MEMBER_COMMAND_KINDS } from "../../../sync-worker/src/external/commands-org-members"
 import { describeCommand } from "../../../db/shared/command-catalog"
 import { getTermbaseEditMinRoleForProject } from "../services/org-permissions"
 import { ROLE, type Env } from "../types"
@@ -94,6 +95,25 @@ export function planCreatesProject(commandsRaw: unknown): boolean {
   const rawList = parseCommandList(commandsRaw)
   if (!rawList) return false
   return rawList.some((raw) => isRecord(raw) && raw.kind === "CreateProject")
+}
+
+/**
+ * True when the plan keeps the creator rule rather than a project-role floor.
+ * Project creation (above) plus the AQU-1235 org-membership commands: both are
+ * ORG-level authority, re-checked at prepare and commit against the caller's
+ * live org role, with no project role that could resolve against the plan.
+ *
+ * Mirrors isCreatorScoped in sync-worker/src/external/authority.ts — the kinds
+ * are imported, not restated, so the two copies cannot drift.
+ */
+export function planIsCreatorScoped(commandsRaw: unknown): boolean {
+  if (planCreatesProject(commandsRaw)) return true
+  const rawList = parseCommandList(commandsRaw)
+  if (!rawList) return false
+  const orgKinds: readonly string[] = ORG_MEMBER_COMMAND_KINDS
+  return rawList.some(
+    (raw) => isRecord(raw) && typeof raw.kind === "string" && orgKinds.includes(raw.kind),
+  )
 }
 
 /** True when the plan patches the `terminology` settings key — the one op

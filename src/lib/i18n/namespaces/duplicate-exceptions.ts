@@ -861,6 +861,12 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "Custom badge. org.projectOverview.laneDefaultFallback names the unnamed " +
     "target LANE shown when a project has no named lanes — a placeholder noun " +
     "('the default one'), a different grammatical role.",
+  "onboarding.preferences.fontSize.default":
+    "Option in the app-wide font-size select for the baseline UI scale (root " +
+    "unset, today's sizes). Distinct from terminology.livingMemory.prompt.defaultBadge " +
+    "(a status badge on a built-in prompt) and org.projectOverview.laneDefaultFallback " +
+    "(placeholder name of an unnamed workflow lane). A scale choice, a badge, and a " +
+    "lane noun take different words outside English.",
   "terminology.livingMemory.section.examples.title":
     "Index-row title for the validated-example-pairs section of Living Memory " +
     "— a plain plural noun heading. agent.run.tool.examples is the display " +

@@ -55,25 +55,54 @@ export interface ChangesetSummary {
   artifactLinked?: string
   /** LinkMedia: number of cells an audio artifact is attached to. */
   mediaLinked?: number
-  /** Receipt-only (CreateProject / UpdateProjectSettings / PatchSettings): the
-   *  command kind, so the human on /approve/:id sees WHICH lifecycle op they're
-   *  approving instead of an empty "No changes summarized." box (design §2 /
-   *  blind-approval fix). */
-  command?: 'CreateProject' | 'UpdateProjectSettings' | 'PatchSettings'
+  /** Receipt-only (CreateProject / UpdateProjectSettings / PatchSettings /
+   *  SetBrief / AddExample / AddDecision / RetireExample / AddNote): the
+   *  command kind, so the human on /approve/:id sees WHICH lifecycle op
+   *  they're approving instead of an empty "No changes summarized." box
+   *  (design §2 / blind-approval fix). */
+  command?:
+    | 'CreateProject'
+    | 'UpdateProjectSettings'
+    | 'PatchSettings'
+    | 'SetBrief'
+    | 'AddOrgMember'
+    | 'SetOrgRole'
+    | 'RemoveOrgMember'
+    | 'AddExample'
+    | 'AddDecision'
+    | 'RetireExample'
+    | 'AddNote'
+  /** AQU-1228 memory commands: the memory path being written or retired, plus
+   *  a one-line preview, so the human on /approve/:id sees the actual effect. */
+  memoryWrites?: { path: string; action: 'add' | 'retire'; preview: string }[]
   /** CreateProject: the project name being created. */
   projectName?: string
   /** CreateProject: the definitive new project id. */
   newProjectId?: string
-  /** CreateProject: the target org id as a string, or 'personal' for org-less. */
+  /** CreateProject: the target org id as a string, or 'personal' for org-less.
+   *  Org-membership commands: the target org's name + id, for the approval page. */
   targetOrg?: string
+  /** AQU-1235: the username being added / changed / removed. */
+  orgMemberUsername?: string
+  /** AQU-1235: the org role the member is being moved TO, as a role name. */
+  orgMemberNewRole?: string
+  /** AQU-1235: the org role the member holds TODAY ('not a member' for an add). */
+  orgMemberCurrentRole?: string
+  /** CreateProject: the language pair being seeded into settings, when the
+   *  command carried one (AQU-1223) — rendered on /approve/:id so a human sees
+   *  the configuration they are authorizing, not just the name. `''` (the
+   *  source-only shape) is shown as 'none'. */
+  newProjectLanguages?: string
   /** Receipt-only UpdateProjectSettings: the changeset's project id. */
   projectId?: string
   /** UpdateProjectSettings: the pinned settings version this write guards on. */
   ifMatchVersion?: number
   /** UpdateProjectSettings / PatchSettings: one truncated "key → preview" per
-   *  top-level settings key being written. Rendered as individual lines on the
-   *  approval page (an object, so the page's flat number/string filter ignores
-   *  it — the page reads it explicitly). */
+   *  top-level settings key being written. SetBrief uses the same shape, keyed
+   *  per brief section (`translationBrief.<fieldId>`), so the approval page
+   *  renders which sections change without a second summary field. Rendered as
+   *  individual lines on the approval page (an object, so the page's flat
+   *  number/string filter ignores it — the page reads it explicitly). */
   settingsChanges?: Record<string, string>
   /** EmitEvents: per-kind effect lines (kind, count, testimony flag). */
   events?: EmitEventsSummaryEntry[]
@@ -118,6 +147,25 @@ export interface PlannedEventIds {
   /** PatchSettings (receipt-only): the settings version pinned at prepare —
    *  same guard semantics as updateProjectSettings. */
   patchSettings?: { version: number }
+  /** SetBrief (receipt-only): the settings version pinned at prepare — the
+   *  brief lives in the settings blob, so it takes the same version guard. */
+  setBrief?: { version: number }
+  /** AQU-1235 org membership (receipt-only): the resolved target org + user
+   *  (pinned at prepare so commit writes the SAME identity the human approved,
+   *  never a re-resolution of the username), plus the role the target held at
+   *  prepare — the drift guard — and the role being written (absent for a
+   *  removal). */
+  orgMember?: {
+    orgId: number
+    targetUserId: string
+    previousRole: number | null
+    role?: number
+  }
+  /** AQU-1228 memory commands: the resolved memory path, and (for the adding
+   *  kinds) the pre-minted agent_memories row id, so a crash-retry re-finds
+   *  its own proposal instead of inserting a second one. RetireExample writes
+   *  no row, so it carries the path only. */
+  memory?: { path: string; memoryId?: string }
   /** EmitEvents: one entry per plan event, in event order — the compiled event
    *  id plus any payload ids minted at prepare (comment.create's commentId /
    *  assignment.create's assignmentId when the caller omitted them), so a
@@ -154,14 +202,48 @@ export interface ReceiptOnlyReceipt {
   credentialId: string
   channel: ProvenanceChannel
   changesetId: string
-  command: 'CreateProject' | 'UpdateProjectSettings' | 'PatchSettings'
+  command:
+    | 'CreateProject'
+    | 'UpdateProjectSettings'
+    | 'PatchSettings'
+    | 'SetBrief'
+    | 'AddOrgMember'
+    | 'SetOrgRole'
+    | 'RemoveOrgMember'
   appliedAt: string
   /** CreateProject: the created project id. UpdateProjectSettings /
-   *  PatchSettings: the updated project id. */
+   *  PatchSettings / SetBrief: the updated project id. Org membership: the
+   *  project the plan was filed under (the write itself is org-level). */
   projectId: string
-  /** UpdateProjectSettings / PatchSettings: the new settings version after the
-   *  write. */
+  /** UpdateProjectSettings / PatchSettings / SetBrief: the new settings version
+   *  after the write. */
   version?: number
+  /** AQU-1235: the org the membership change landed in. */
+  orgId?: number
+  /** AQU-1235: the user whose membership changed. */
+  targetUserId?: string
+  /** AQU-1235: the org role held before the change (null/absent = not a member). */
+  previousRole?: number
+  /** AQU-1235: the org role written (absent for a removal). */
+  role?: number
+}
+
+/** AQU-1228 receipt for the Living Memory write commands. Also receipt-only (a
+ *  row write, not events), but it reports WHERE the memory landed and in WHAT
+ *  state — `proposed` still needs an in-app review before the copilot reads it,
+ *  so the caller must never have to infer that from silence. */
+export interface MemoryWriteReceipt {
+  credentialId: string
+  channel: ProvenanceChannel
+  changesetId: string
+  command: 'AddExample' | 'AddDecision' | 'RetireExample' | 'AddNote'
+  appliedAt: string
+  projectId: string
+  /** The `agent_memories.path` written or retired. */
+  memoryPath: string
+  memoryStatus: 'proposed' | 'approved' | 'archived'
+  /** Present when the write still needs a human review to take effect. */
+  note?: string
 }
 
 /** The full stored plan, as persisted in `changesets`. */
@@ -194,7 +276,7 @@ export interface StoredChangeset {
    *  landed — commit falls back to minting for backward compat. */
   plannedIds: PlannedEventIds | null
   digest: string
-  receipt: ChangesetReceipt | ReceiptOnlyReceipt | null
+  receipt: ChangesetReceipt | ReceiptOnlyReceipt | MemoryWriteReceipt | null
   confirmationId: string | null
   createdAt: string
   expiresAt: string

@@ -72,6 +72,21 @@ Design notes, each load-bearing:
   `''` sentinel, so **no row anywhere is ever blank**. The `side` column on `cells` stays (it is
   cheap and self-describing); `role` is the lane-table mirror that makes "one shared source lane
   per project" explicit.
+
+> **Note — "source is not a lane," and why we model it as one anyway.**
+> Conceptually the source is *not* a translation lane: there is one shared source text consumed by
+> every target lane, and it is never lane-addressable. Ryder's mental model keeps source separate,
+> and that is the correct domain picture. We still give each project a `role='source'` row for one
+> concrete engineering reason: it lets **every** content row carry a non-null `lane_id`. That buys a
+> single uniform join (row → `lanes`), an enforceable `lane_id NOT NULL` + FK, and a real home for
+> the source's `name`/`lang_code` — instead of a `lane_id IS NULL` special case that every reader
+> must remember to handle, which is exactly the `NULL`/`''` sentinel ambiguity this whole effort
+> exists to delete. The honest alternative (source rows keep `lane_id` NULL) is defensible, but it
+> trades a named, constrained row for an unnamed sentinel. `role` is also what keeps the source lane
+> distinct from the default *target* lane, which otherwise both looked like `''`.
+> **Decision (2026-09-16, Luke):** keep source-as-lane; the "no blank rows" benefit outweighs the
+> conceptual impurity. (Overrides Ryder's hesitation on the shared understanding that he would want
+> the null-free invariant.)
 - **`legacy_tag`** — THE mechanism that makes rename-safe replay work (§3). Immutable. The default
   lane's row has `legacy_tag = ''`.
 

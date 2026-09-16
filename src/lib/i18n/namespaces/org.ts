@@ -1286,6 +1286,7 @@ export const org = defineNamespace({
     // many chapters are in the list, which the caller passes alongside — it is
     // not in the string, the same arrangement the summary pills use.
     "org.projectOverview.plan.shortfallWhere": plural({ one: "chapter {list}", other: "chapters {list}" }),
+    "org.projectOverview.plan.shortfallWhereMore": plural({ one: "{list} and {count} more", other: "{list} and {count} more" }),
     // The links out of the plan and into the editor, landing on the first cell
     // that is actually missing something. Two keys rather than one with a
     // {kind} placeholder: an inflecting language cannot build "first
@@ -2695,6 +2696,14 @@ export const org = defineNamespace({
         description:
           "Tail of the inspector's shortfall line, naming which chapters the outstanding cells are in: \"chapters 3, 4 and 9\". The number of chapters in the list selects the plural form and is passed alongside; like the summary pills, it never appears in the string itself.",
         placeholders: { list: "The chapter numbers, already joined into one list by the caller — e.g. '3, 4 and 9'. Not translated." },
+      },
+      "org.projectOverview.plan.shortfallWhereMore": {
+        description:
+          "Replaces the bare chapter list on a plan row when the outstanding work is spread over more chapters than the row has room to name. The first few are named and the rest are counted, because a row that listed forty numbers would push everything else off the line.",
+        placeholders: {
+          list: "The first few chapter numbers, already joined for this locale.",
+          count: "How many further chapters are short — a number. The plural form is selected by it.",
+        },
       },
       "org.projectOverview.plan.goToFirstUntranslated": {
         description:

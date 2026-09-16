@@ -211,7 +211,29 @@ export function planShortfallParts(s: PlanShortfall): PlanShortfallPart[] {
     { kind: "record", count: s.toRecord },
     { kind: "audio_validate", count: s.toAudioValidate },
   ]
-  return all.filter((p) => p.count > 0).slice(0, 2)
+  const present = all.filter((p) => p.count > 0)
+  if (present.length <= 2) return present
+
+  // Three or four things outstanding and room for two. Medium order holds —
+  // translation still leads validation, because a cell nobody has written
+  // cannot be validated and naming the blocked queue first reads as the wrong
+  // instruction — but it cannot be allowed to drop the medium that actually
+  // put this unit where it is. A book six cells from fully translated, four
+  // from fully validated and two hundred takes from recorded would otherwise
+  // read "6 cells to translate · 4 cells to validate" and never mention the two
+  // hundred, which is both the largest number on the row and the only one the
+  // grouping used.
+  //
+  // So: first two in medium order, and if neither of them belongs to the worse
+  // medium, the second gives way to the one that does.
+  const chosen = present.slice(0, 2)
+  const isAudio = (p: PlanShortfallPart) => p.kind === "record" || p.kind === "audio_validate"
+  const audioIsWorse = s.worst === Math.max(s.toRecord, s.toAudioValidate) && s.worst > 0
+  if (audioIsWorse && !chosen.some(isAudio)) {
+    const worstAudio = present.filter(isAudio).reduce((a, b) => (b.count > a.count ? b : a))
+    return [chosen[0], worstAudio]
+  }
+  return chosen
 }
 
 /**
@@ -405,9 +427,22 @@ export function sortNearlyComplete(
   )
 }
 
-/** Group + order for rendering. Empty groups are dropped, not rendered blank. */
-export function groupPlanUnits(units: readonly PlanUnit[], now: number): PlanGroup[] {
-  const audioFiles = audioFileIds(units)
+/**
+ * Group + order for rendering. Empty groups are dropped, not rendered blank.
+ *
+ * PASS `audioFiles` WHEN THE LIST IS FILTERED. Derived from `units` it would be
+ * derived from whatever subset the caller handed over, and audio expectation is
+ * a fact about a file, not about the rows currently on screen: filtering a
+ * whole-Bible board down to one text-only book would take that book's dubbed
+ * siblings out of the set, stop counting the takes it is missing, and move the
+ * row into Nearly complete. A search box must never change what a row MEANS.
+ */
+export function groupPlanUnits(
+  units: readonly PlanUnit[],
+  now: number,
+  audioFilesOverride?: ReadonlySet<string>,
+): PlanGroup[] {
+  const audioFiles = audioFilesOverride ?? audioFileIds(units)
   const by = new Map<PlanUnitStatus, PlanUnit[]>()
   for (const u of units) {
     const k = planUnitStatus(u, now, audioFiles)

@@ -216,7 +216,14 @@ export function PlanBoard({
     () => filterPlanUnits(units, { query, needsDateOnly }),
     [units, query, needsDateOnly],
   )
-  const groups = useMemo(() => groupPlanUnits(visible, now), [visible, now])
+  const audioFiles = useMemo(() => audioFileIds(units), [units])
+  // `audioFiles` comes from the UNFILTERED units and is handed in rather than
+  // re-derived: see groupPlanUnits' own note on why a search box must not be
+  // able to change which group a row is in.
+  const groups = useMemo(
+    () => groupPlanUnits(visible, now, audioFiles),
+    [visible, now, audioFiles],
+  )
 
   // The summary counts the WHOLE project, never the filtered view. "1 of 3
   // done" under a filter that hid the other sixty-three would be a lie, and
@@ -239,7 +246,6 @@ export function PlanBoard({
    * And it is derived from `units`, never from `visible`: a filter that hid
    * the one recorded book must not change what the remaining rows MEAN.
    */
-  const audioFiles = useMemo(() => audioFileIds(units), [units])
 
   /**
    * Every row the current narrowing and arrangement would draw, in drawn

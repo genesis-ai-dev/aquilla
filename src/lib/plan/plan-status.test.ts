@@ -325,6 +325,18 @@ describe("planShortfallParts", () => {
     expect(planShortfallParts(s).map((p) => p.kind)).toEqual(["translate", "validate"])
   })
 
+  it("never drops the worse medium, even when two text terms would fill the line", () => {
+    // Six cells to translate, four to validate, and two hundred takes to
+    // record. Medium order alone would name the two small text numbers and say
+    // nothing about the two hundred — the largest number on the row, and the
+    // one that decided which group the row is in.
+    const s = planUnitShortfall(counts(300, 294, 290, 100, 0), true)
+    expect(s.toTranslate).toBe(6)
+    expect(s.toValidate).toBe(4)
+    expect(s.toRecord).toBe(200)
+    expect(planShortfallParts(s).map((p) => p.kind)).toEqual(["translate", "record"])
+  })
+
   it("names recording on its own when the text is finished and the takes are not", () => {
     expect(planShortfallParts(planUnitShortfall(counts(100, 100, 100, 40, 0), true))).toEqual([
       { kind: "record", count: 60 },

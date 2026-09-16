@@ -19,6 +19,7 @@
 import { useLayoutEffect, useRef, useState, type RefObject } from "react"
 import { useT, useI18n } from "@/lib/i18n/I18nProvider"
 import { fmtDeadlineDate } from "@/lib/format-date"
+import { formatList } from "@/lib/i18n/format"
 import {
   planPct,
   planUnitIsNearlyComplete,
@@ -148,6 +149,13 @@ function useAssigneeChipCapacity(
   return capacity
 }
 
+/**
+ * How many short chapters a row names before it starts counting the rest. The
+ * third column is the narrowest of the three and the name beside it must never
+ * truncate, so the list is what gives way.
+ */
+const WHERE_CHAPTERS_NAMED = 3
+
 export function PlanRow({
   unit,
   now,
@@ -231,10 +239,20 @@ export function PlanRow({
       ? t("org.projectOverview.plan.shortfallPair", { first: leftToDo, second: note })
       : leftToDo
   } else if (line1LeftToDo && shortfallText !== null && chapterList.length > 0) {
-    line2 = t("org.projectOverview.plan.shortfallWhere", {
-      count: chapterList.length,
-      list: chapterList.join(", "),
-    })
+    // Named up to three, then counted. A nearly-complete Psalms can be short in
+    // forty chapters, and forty numbers joined into one line is not a sentence
+    // a reader finishes — it pushes the row's own height around and says less
+    // than "chapters 4, 22, 78 and 37 more" does. Three is what fits beside the
+    // widest book name at the narrowest width this column is allowed to reach.
+    //
+    // `formatList` rather than join(", "): the separator and the final
+    // conjunction are locale business, and Intl already owns them.
+    const named = chapterList.slice(0, WHERE_CHAPTERS_NAMED)
+    const rest = chapterList.length - named.length
+    const list = formatList(named, locale)
+    line2 = rest > 0
+      ? t("org.projectOverview.plan.shortfallWhereMore", { count: rest, list })
+      : t("org.projectOverview.plan.shortfallWhere", { count: chapterList.length, list })
   }
 
   // Where the click lands, said in words for a screen reader. Only the two text

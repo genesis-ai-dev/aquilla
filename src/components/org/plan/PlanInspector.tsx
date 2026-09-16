@@ -139,7 +139,13 @@ export function PlanInspector({
   const [openSectionKey, setOpenSectionKey] = useState<string | null>(null)
   const openSection = sections.find((s) => s.key === openSectionKey) ?? null
   const shortChapters = sections.filter(
-    (s) => planSectionShortfall(s, showAudio).worst > 0,
+    // `hasAudio`, not `showAudio`. showAudio is a PROJECT-wide question — does
+    // this project track audio at all, and therefore should an audio bar be
+    // drawn — and answering the per-chapter one with it counts every chapter of
+    // a text-only book as short by all its takes. The panel's own status is
+    // judged per FILE two dozen lines up; these two numbers sit on the same
+    // screen and must be asked the same question.
+    (s) => planSectionShortfall(s, hasAudio).worst > 0,
   ).length
 
   // `usePlanUnitSections` starts at `loading: false` and only flips it true
@@ -298,7 +304,7 @@ export function PlanInspector({
             <Label>{t(sectionsHeadingKey as never)}</Label>
             <PlanChapterGrid
               sections={sections}
-              showAudio={showAudio}
+              showAudio={hasAudio}
               nearlyComplete={nearlyComplete}
               selectedKey={openSectionKey}
               onSelect={(key) => setOpenSectionKey((open) => (open === key ? null : key))}

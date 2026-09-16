@@ -26,7 +26,7 @@ describe("changed-file E2E impact selection", () => {
     for (const file of ["config/pricing/stripe-sandbox.json", "db/shared/billing-offers.ts", "db/shared/billing-workspace.ts", "src/pages/Login.tsx", "src/components/onboarding/OnboardingWizard.tsx",
       "auth-worker/src/services/org-permissions.ts", "db/postgres/migrations/0092_workspace_billing.sql", "db/postgres/migrations/0093_workspace_checkout_attempts.sql",
       "db/postgres/migrations/0095_workspace_subscription_state.sql",
-      "db/postgres/migrations/0096_workspace_plan_change_reviews.sql", "db/postgres/migrations/0097_workspace_usage_requests.sql", "db/postgres/migrations/0098_workspace_usage_provider_ref.sql", "db/shared/billing-cost.ts", "auth-worker/src/routes/chat.ts", "auth-worker/src/routes/import-classify.ts", "auth-worker/src/routes/agent.ts", "db/shared/workspace-access.ts",
+      "db/postgres/migrations/0096_workspace_plan_change_reviews.sql", "db/postgres/migrations/0097_workspace_usage_requests.sql", "db/postgres/migrations/0098_workspace_usage_provider_ref.sql", "db/shared/billing-cost.ts", "auth-worker/src/routes/chat.ts", "auth-worker/src/routes/import-classify.ts", "auth-worker/src/routes/agent.ts", "auth-worker/src/routes/contextual.ts", "db/shared/workspace-access.ts",
       "src/components/org/BillingOffers.tsx", "auth-worker/src/lib/billing/catalog.ts"]) {
       expect(selectAffectedE2E([file], specs).specs).toContain(
         "e2e/specs/orgs/org-settings-billing.smoke.spec.ts")

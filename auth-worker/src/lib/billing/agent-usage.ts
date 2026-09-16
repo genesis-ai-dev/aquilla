@@ -15,11 +15,11 @@ export class AgentUsageMeter {
   constructor(private env: Env, private scope: { orgId: number; userId: number; projectId: string }) {}
   readonly maxOutputTokens = METERED_MAX_OUTPUT_TOKENS
 
-  async admitStep(input: { model: string; promptChars: number }): Promise<AgentStepAdmission> {
+  async admitStep(input: { model: string; promptChars: number; maxOutputTokens?: number }): Promise<AgentStepAdmission> {
     let maxRawCostCents: number
     try {
       maxRawCostCents = boundRequestCostCents(await readRateCard(this.env),
-        { model: input.model, promptChars: input.promptChars, maxOutputTokens: this.maxOutputTokens })
+        { model: input.model, promptChars: input.promptChars, maxOutputTokens: input.maxOutputTokens ?? this.maxOutputTokens })
     } catch (error) {
       return { ok: false, reason: error instanceof Error && error.message === 'Model price unavailable' ? 'unpriced' : 'unavailable' }
     }
@@ -45,3 +45,18 @@ export class AgentUsageMeter {
 
 export function agentUsageEnabled(env: Env) { return env.BILLING_CHAT_USAGE_REHEARSAL === 'true' }
 export function agentUsageAllowed(env: Env, requestUrl: string) { return chatUsageRehearsalAllowed(env, requestUrl) }
+/** Background work has no request URL; the provider URL carries the loopback gate. */
+export function backgroundUsageAllowed(env: Env) {
+  return Boolean(env.OPENROUTER_BASE_URL) && chatUsageRehearsalAllowed(env, env.OPENROUTER_BASE_URL!)
+}
+/** Shape shared with the draft tool: reserve now, settle or hold after. */
+export type PaidCallAdmit = (input: { model: string; promptChars: number; maxOutputTokens?: number }) => Promise<
+  { ok: true; settle: (body: unknown) => Promise<unknown>; hold: (body: unknown) => Promise<unknown> }
+  | { ok: false; reason: AgentStepRefusal }>
+export function paidCallAdmit(meter: AgentUsageMeter): PaidCallAdmit {
+  return async input => {
+    const admission = await meter.admitStep(input)
+    if (!admission.ok) return admission
+    return { ok: true, settle: body => meter.settleStep(admission.requestId, body), hold: body => meter.holdStep(admission.requestId, body) }
+  }
+}

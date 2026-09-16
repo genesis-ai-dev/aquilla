@@ -60,8 +60,9 @@ every LLM producer is connected. Measured 2026-08 rates from the local
   start at workspace creation; unknown/legacy/covered workspaces require their
   separate access contract instead of automatic reclassification.
 - The authenticated chat, import-classification, and agent routes now consume
-  this foundation in explicit local scripted-provider rehearsal; contextual
-  background work, indexing, and Monday analysis remain unconnected. It does
+  this foundation in explicit local scripted-provider rehearsal, and the
+  autopilot graph funds background waves from the run owner; knowledge
+  indexing and Monday analysis remain unconnected. It does
   not authorize users itself: funded endpoints must validate project access first,
   calculate a trusted maximum cost, reserve before the call, and settle afterward.
   Billing usage remains unavailable until all active producers are connected.
@@ -72,7 +73,7 @@ every LLM producer is connected. Measured 2026-08 rates from the local
 | --- | --- | --- |
 | `auth-worker/src/routes/chat.ts` | Post-response cost and input words; streaming uses a flat cost estimate | Authorize owning workspace; reserve before provider call; reconcile streamed/non-streamed result. Projectless, unknown, and unauthorized projects currently fall back to org 0, so do not reuse this behavior for enforced billing. |
 | `auth-worker/src/routes/agent.ts` and `lib/agent/tools/draft.ts` | Legacy aggregate run cost after run; local rehearsal reserves and settles each orchestrator turn and drafting pass (`agent-usage.ts`) | Remaining: capability checks, legacy guard retirement, contextual background work. Exhaustion stops the next step and preserves staged work. |
-| `auth-worker/src/routes/contextual.ts` and `lib/contextual/tick.ts` | Optional `CostMeter` instrumentation; not the product billing ledger | Resolve project owner for background leases, resume, and multi-wave work; reserve/settle each provider call and stop further waves after exhaustion. |
+| `auth-worker/src/routes/contextual.ts` and `lib/contextual/tick.ts` | Local rehearsal reserves and settles each graph call via `makeLlmCall({ admit })`, funded by the run's persisted owner; exhaustion pauses at the span edge | Remaining: segmentation generation pass, automatic resume after reset, legacy guard retirement. |
 | `auth-worker/src/routes/import-classify.ts` | Legacy cost plus sampled input words on valid result; local rehearsal reserves before the call and settles reported cost even for rejected recipes | Remaining: real-provider cost bound; a retry with a new key reserves again (same key returns 409). Manual import is untouched. |
 | `auth-worker/src/routes/import-sandbox.ts` | Cost plus filename words | Filename word count does not measure conversion-model work. Integrate selected unit and preserve source/commit artifacts on exhaustion. |
 | `auth-worker/src/lib/knowledge/index-doc.ts` | Direct provider request | Resolve document/project ownership; include or explicitly classify system-funded indexing before launch. |

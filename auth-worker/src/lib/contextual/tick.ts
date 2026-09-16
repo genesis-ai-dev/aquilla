@@ -49,6 +49,7 @@ import { selectCellPairs, type CellPair } from "../agent/tools/select-cells"
 import { rulesForLane, type LintRule } from "../agent/lint"
 import { loadProjectContext, type ProjectContext } from "./project-context"
 import { openRouterExtras } from "../llm-vendor"
+import type { PaidCallAdmit } from "../billing/agent-usage"
 import { deriveSpanSeeds, seedsFromBoundaries } from "./segment"
 import { lintSpanDraft } from "./lint-node"
 import { runSpan, EXAMPLES_TARGET } from "./pipeline"
@@ -173,6 +174,10 @@ export function makeLlmCall(cfg: {
   /** Cap on HTTP requests in flight through THIS LlmCall at any moment.
    *  0/undefined = uncapped (the OpenRouter default). */
   maxInFlight?: number
+  /** AQU-837 weekly-allowance admission: reserve before the request, settle
+   *  the reported cost after. A refusal throws `usage_<reason>` before any
+   *  attempt; a failed call holds its reservation for reconciliation. */
+  admit?: PaidCallAdmit
 }): LlmCall {
   // Span concurrency is not request concurrency: one span fans its verifier
   // panel out three-wide, so N spans burst to ~3N requests. Against an upstream
@@ -224,6 +229,7 @@ export function makeLlmCall(cfg: {
     const MAX_ATTEMPTS = 5
 
     interface UpstreamBody {
+      id?: string
       choices?: { message?: { content?: string | null } }[]
       usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: number }
       timings?: { predicted_per_second?: number }
@@ -232,6 +238,12 @@ export function makeLlmCall(cfg: {
       | { ok: true; body: UpstreamBody }
       | { ok: false; status: number; code: "http_error" | "invalid_response" }
 
+    let admission: Awaited<ReturnType<PaidCallAdmit>> | undefined
+    if (cfg.admit) {
+      admission = await cfg.admit({ model, promptChars: req.system.length + req.user.length, maxOutputTokens: req.maxTokens })
+      if (!admission.ok) throw new Error(`usage_${admission.reason}`)
+    }
+    const hold = async () => { if (admission?.ok) await admission.hold(undefined) }
     let body!: UpstreamBody
     for (let attempt = 1; ; attempt++) {
       startedAt = Date.now()
@@ -268,6 +280,7 @@ export function makeLlmCall(cfg: {
         })
       } catch {
         report(failed)
+        await hold()
         throw new Error(cfg.signal?.aborted ? "provider_request_aborted" : "provider_transport_error")
       }
       if (outcome.ok) {
@@ -285,6 +298,7 @@ export function makeLlmCall(cfg: {
         const code = outcome.code === "invalid_response"
           ? "provider_invalid_response"
           : "provider_http_error"
+        await hold()
         throw new Error(`${code} status=${outcome.status}`)
       }
       // Exponential backoff with jitter — without the jitter every rejected
@@ -292,6 +306,7 @@ export function makeLlmCall(cfg: {
       const backoffMs = Math.min(1000 * 2 ** (attempt - 1), 8000) * (0.5 + Math.random())
       await new Promise((r) => setTimeout(r, backoffMs))
     }
+    if (admission?.ok) await admission.settle({ id: body.id, usage: body.usage })
     const tps = body.timings?.predicted_per_second
     report({
       promptTokens: body.usage?.prompt_tokens ?? 0,

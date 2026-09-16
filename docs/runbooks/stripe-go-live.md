@@ -2,6 +2,28 @@
 
 Updated: 2026-09-16. Tickets: AQU-837 (billing readiness), AQU-1091 (pricing and app UI).
 
+## Autopilot cost-ledger integration — 2026-09-16
+
+- [x] Meter every contextual graph call (construe, summarize, draft, verifiers)
+  as its own step through `makeLlmCall`'s new `admit` hook: reserve the
+  live-card bound with the call's own `maxTokens` before the request, settle
+  the reported cost after, hold on transport/HTTP failure. Retries within one
+  call share one reservation; capacity rejections are not charged.
+- [x] Fund background and sweeper-resumed runs from the run's persisted role
+  snapshot owner and the project's workspace; metering on with no owner, no
+  workspace, or a non-local provider fails the run rather than running unmetered.
+- [x] Exhaustion requests a pause; the tick confirms `paused` at the next span
+  edge and staged drafts stay reviewable. Spans already in flight in that wave
+  fail their remaining calls with `usage_exhausted` and are reported as failed.
+- [ ] Resume after the weekly reset is manual (Play). Segmentation generation
+  and the remaining producers (knowledge indexing, Monday analysis) are still
+  unconnected; legacy guards and the per-run cap remain.
+
+Test impact: new `billing-contextual-usage.test.ts` (three real-Postgres route
+tests: owner-funded settlement of every graph call with provider refs, pause on
+a spent week without a provider call, unowned/non-local refusals). Existing
+contextual route and tick suites pass (49). Worker lint and type checks pass.
+
 ## Agent per-step cost-ledger integration — 2026-09-16
 
 - [x] Meter every paid agent model call as its own step under the same local
@@ -117,8 +139,9 @@ classify route to the billing journey. No UI or browser behavior changes.
   held-usage reconciliation checkpoint above; live-provider sweep still pending.
 - [ ] Connect agent, background/contextual work, imports, and speech to the same
   ledger; complete capability checks and authoritative usage percentages.
-  Agent and import classification are connected (checkpoints above); speech
-  is unmetered by decision; contextual work and percentages remain.
+  Agent, import classification, and autopilot are connected (checkpoints
+  above); speech is unmetered by decision; percentages and legacy guard
+  retirement remain.
 
 Test impact: new `billing-chat-usage.test.ts` composes signed Checkout activation
 with the actual authenticated chat route, provider-shaped JSON/SSE responses, and

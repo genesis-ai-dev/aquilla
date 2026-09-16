@@ -360,7 +360,7 @@ function PlanTile({
           // that reaches into the gap, and every badge but the last column's
           // came out shaved flat on one side. Lifting the badge out of that
           // order is what lets it actually sit on top of its neighbours.
-          className={`absolute -top-[6px] -end-[6px] z-10 flex h-[15px] min-w-[15px] items-center justify-center rounded-full px-[3px] text-[9.5px] leading-none font-bold text-white dark:text-[oklch(0.2_0.04_245)] ${PLAN_TONE.nearly_complete.dot}`}
+          className={`absolute -top-[5px] -end-[5px] z-10 flex h-[13px] min-w-[13px] items-center justify-center rounded-full px-[2.5px] text-[8.5px] leading-none font-bold text-white dark:text-[oklch(0.2_0.04_245)] ${PLAN_TONE.nearly_complete.dot}`}
         >
           {worst}
         </span>

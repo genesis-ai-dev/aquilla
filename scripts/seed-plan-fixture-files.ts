@@ -13,10 +13,11 @@
  */
 import { makePostgres, type AquillaDb } from "../db/shim/postgres"
 import { fullProgressRecomputeStmts } from "../sync-worker/src/events/progress-projection"
+import { readPlanUnitsSql, type PlanUnitRow } from "../db/shared/plan-units"
 import {
   DOCS_ASSIGNMENTS, DOCS_FILES, DOCS_PROJECT_ID, DOCS_PROJECT_NAME, LANE2,
   VALIDATION_COUNT, VTT_ASSIGNMENTS, VTT_FILES, VTT_PROJECT_ID, VTT_PROJECT_NAME,
-  assignedCells, cellsForFile, expectedCounts,
+  assignedCells, cellsForFile, cueSheetId, cuesForFile, expectedCounts, linksForFile,
   type FixtureAssignment, type FixtureFile,
 } from "../src/lib/plan/plan-fixture-files"
 
@@ -65,7 +66,7 @@ async function seedProject(db: AquillaDb, p: Project): Promise<void> {
     "(SELECT assignment_id FROM assignments WHERE project_id = ?)",
   ).bind(p.id).run()
   for (const table of [
-    "cell_audio", "cells", "file_section_progress", "files", "plan_units",
+    "cell_audio", "cell_links", "cells", "file_section_progress", "files", "plan_units",
     "assignments", "project_settings", "project_members", "events",
   ]) {
     await db.prepare(`DELETE FROM ${table} WHERE project_id = ?`).bind(p.id).run()
@@ -91,15 +92,49 @@ async function seedProject(db: AquillaDb, p: Project): Promise<void> {
       .map(([user, level]) => [p.id, user, level, OWNER]))
 
   const fileId = (f: FixtureFile) => `plan-1278-${f.id}`
+  const sheetId = (f: FixtureFile) => cueSheetId(fileId(f))
   const eventOf = (f: FixtureFile) => `${p.id}-ev-${f.id}`
+  const sheetEventOf = (f: FixtureFile) => `${p.id}-ev-${f.id}-cues`
+  /** The episodes somebody is dubbing: each gets a hidden audio-cue sibling. */
+  const sheeted = p.files.filter((f) => f.cues !== undefined)
+
+  // THE CUE SHEET, as `src/lib/import/audio-vtt.ts` writes one: its own file,
+  // named after the anchor, `role: 'audio-cues'` as the discriminator, `kind`
+  // still 'vtt' so nothing has to learn a new file type, and `anchor_file_id`
+  // pointing back at the episode. It never appears in a file list and it is
+  // never a planning unit — the board reads THROUGH it for the takes.
   await insertRows(db, "events",
     ["id", "schema_version", "project_id", "file_id", "kind", "author",
      "payload", "client_ts", "server_ts", "server_seq"],
-    p.files.map((f, i) => [eventOf(f), 1, p.id, fileId(f), "file.create", "dev", "{}", NOW, NOW, i + 1]))
-  await insertRows(db, "files",
-    ["id", "project_id", "name", "kind", "event_id", "created_by",
-     "created_at", "updated_at", "last_edit_at"],
-    p.files.map((f) => [fileId(f), p.id, f.name, f.kind, eventOf(f), "dev", NOW, NOW, NOW - DAY]))
+    [
+      ...p.files.map((f, i) =>
+        [eventOf(f), 1, p.id, fileId(f), "file.create", "dev", "{}", NOW, NOW, i + 1]),
+      ...sheeted.map((f, i) =>
+        [sheetEventOf(f), 1, p.id, sheetId(f), "file.create", "dev", "{}", NOW, NOW,
+         p.files.length + i + 1]),
+    ])
+  const FILE_COLUMNS = [
+    "id", "project_id", "name", "kind", "role", "anchor_file_id", "meta", "cell_count",
+    "event_id", "created_by", "created_at", "updated_at", "last_edit_at",
+  ]
+  await insertRows(db, "files", FILE_COLUMNS, [
+    ...p.files.map((f) => [
+      fileId(f), p.id, f.name, f.kind, null, null,
+      JSON.stringify(f.kind === "vtt" ? { orderedBy: "time", importFormat: "vtt" } : {}),
+      f.cells, eventOf(f), "dev", NOW, NOW, NOW - DAY,
+    ]),
+    ...sheeted.map((f) => [
+      sheetId(f), p.id, `${f.name} · audio cues`, "vtt", "audio-cues", fileId(f),
+      JSON.stringify({
+        orderedBy: "time",
+        importFormat: "vtt",
+        aquillaImport: {
+          audioVtt: { sourceFileName: `${f.id}_audio_timestamps.vtt`, cueCount: f.cues },
+        },
+      }),
+      f.cues, sheetEventOf(f), "dev", NOW, NOW, NOW - DAY,
+    ]),
+  ])
 
   const sourceRows: unknown[][] = []
   const targetRows: unknown[][] = []
@@ -110,6 +145,8 @@ async function seedProject(db: AquillaDb, p: Project): Promise<void> {
     tail.set(chain, cellId)
     return prev
   }
+
+  const linkRows: unknown[][] = []
 
   for (const f of p.files) {
     const isMedia = f.kind === "vtt"
@@ -132,12 +169,6 @@ async function seedProject(db: AquillaDb, p: Project): Promise<void> {
           c.validated ? 1 : 0, c.validated ? VALIDATION_COUNT : 0, 4, null, null,
         ])
       }
-      if (c.recorded) {
-        audioRows.push([
-          p.id, fileId(f), c.cellId, `${c.cellId}-take1`, "take",
-          `local://${c.cellId}.webm`, 1, 0, 0, eventOf(f), NOW - DAY, 2400,
-        ])
-      }
       if (p.secondLane.includes(f.id) && i < Math.floor(f.cells / 2)) {
         // Half the file, every third cell unvalidated: a lane visibly behind.
         const validated = i % 3 !== 0
@@ -148,12 +179,41 @@ async function seedProject(db: AquillaDb, p: Project): Promise<void> {
         ])
       }
     }
+
+    // The sheet's own cues, and the takes ON THEM. A take never touches the
+    // subtitle file: that is the fact the board had to be taught, and seeding
+    // it any other way is what made the first version of this fixture prove
+    // nothing. Cues are longer than subtitle lines — a line of speech against a
+    // line of reading — which is why there are fewer of them.
+    for (const [i, cue] of cuesForFile(f).entries()) {
+      const span = Math.round((f.cells / (f.cues ?? 1)) * CUE_MS)
+      sourceRows.push([
+        p.id, sheetId(f), cue.cellId, "source", "", `Cue ${f.name} ${i + 1}`, "cue", null,
+        linkTo(`${f.id}|cues|`, cue.cellId), sheetEventOf(f), "dev", NOW - 2 * DAY,
+        0, 0, 4, i * span, i * span + span - 1500,
+      ])
+      if (cue.recorded) {
+        audioRows.push([
+          p.id, sheetId(f), cue.cellId, `${cue.cellId}-take1`, "take",
+          `local://${cue.cellId}.webm`, 1, 0, 0, sheetEventOf(f), NOW - DAY, 2400,
+        ])
+      }
+    }
+    for (const l of linksForFile(f)) {
+      linkRows.push([
+        p.id, "text-audio", fileId(f), l.from, sheetId(f), l.to, 1, "auto", null,
+        sheetEventOf(f), NOW - DAY,
+      ])
+    }
   }
   await insertRows(db, "cells", CELL_COLUMNS, sourceRows)
   await insertRows(db, "cells", CELL_COLUMNS, targetRows)
   await insertRows(db, "cell_audio",
     ["project_id", "file_id", "cell_id", "audio_id", "slot", "url", "selected",
      "deleted", "approved", "event_id", "created_ts", "duration_ms"], audioRows)
+  await insertRows(db, "cell_links",
+    ["project_id", "kind", "from_file_id", "from_cell_id", "to_file_id", "to_cell_id",
+     "linked", "origin", "confidence", "event_id", "created_ts"], linkRows)
 
   const planRows = p.files
     .filter((f) => f.targetDateInDays !== undefined || f.doneDaysAgo !== undefined)
@@ -185,41 +245,55 @@ async function seedProject(db: AquillaDb, p: Project): Promise<void> {
   await insertRows(db, "assignment_cells",
     ["assignment_id", "file_id", "cell_id"], assignmentCells)
 
+  // The sheets recompute too, or the takes exist in `cell_audio` and in no
+  // projection row — and the board reads projection rows.
   for (const f of p.files) await db.batch(fullProgressRecomputeStmts(db, p.id, fileId(f), NOW))
+  for (const f of sheeted) await db.batch(fullProgressRecomputeStmts(db, p.id, sheetId(f), NOW))
 
   console.log(
-    `  ${p.name}: ${sourceRows.length} source cells, ${targetRows.length} target cells, ` +
-    `${audioRows.length} takes, ${assignmentRows.length} assignments, ${planRows.length} planned units`,
+    `  ${p.name}: ${sourceRows.length} source cells (${sheeted.length} cue sheets), ` +
+    `${targetRows.length} target cells, ${audioRows.length} takes, ` +
+    `${linkRows.length} text-audio links, ${assignmentRows.length} assignments, ` +
+    `${planRows.length} planned units`,
   )
 }
 
-interface FileRow {
-  file_id: string
-  total_count: number
-  filled_count: number
-  audio_count: number
-  audio_validated_count: number
-  validated_count: number
+/** Cells endorsed by at least the project's threshold, out of the histogram. */
+function validatedFrom(histogram: Record<string, number> | string | null): number {
+  const h: Record<string, number> =
+    typeof histogram === "string" ? JSON.parse(histogram || "{}") : (histogram ?? {})
+  return Object.entries(h)
+    .filter(([endorsements]) => Number(endorsements) >= VALIDATION_COUNT)
+    .reduce((sum, [, cells]) => sum + Number(cells), 0)
 }
 
+/**
+ * Read the fixture back THROUGH THE BOARD'S OWN QUERY, not through the
+ * projection rows underneath it.
+ *
+ * `readPlanUnitsSql` is what the plan route runs, so this checks the cue-sheet
+ * fold as well as the projection: that the sheet is not a unit of its own, that
+ * its takes surface on the episode, and that they arrive with the sheet's
+ * denominator rather than the episode's cell count.
+ */
 async function verify(db: AquillaDb, p: Project): Promise<boolean> {
-  const rows = (await db.prepare(
-    `SELECT p.file_id, p.total_count, p.filled_count, p.audio_count, p.audio_validated_count,
-            COALESCE((SELECT SUM(value::int) FROM jsonb_each_text(p.validator_histogram)
-                       WHERE key::int >= ?), 0)::int AS validated_count
-       FROM file_section_progress p
-      WHERE p.project_id = ? AND p.scope = 'file' AND p.target_lang = ''`,
-  ).bind(VALIDATION_COUNT, p.id).all<FileRow>()).results
+  const rows = (await db.prepare(readPlanUnitsSql()).bind(p.id, "").all<PlanUnitRow>()).results ?? []
   const byFile = new Map(rows.map((r) => [r.file_id, r]))
   let ok = true
-  console.log(`\n  ${p.name}\n  file                     cells  filled   valid   audio`)
+  if (rows.length !== p.files.length) {
+    console.log(`\n  ${rows.length} units for ${p.files.length} files — a cue sheet became a row`)
+    ok = false
+  }
+  console.log(`\n  ${p.name}\n  file                     cells  filled   valid   audio   of`)
   for (const f of p.files) {
     const r = byFile.get(`plan-1278-${f.id}`)
     if (!r) { console.log(`  ${f.name.padEnd(24)} MISSING`); ok = false; continue }
     const got = {
       totalCount: Number(r.total_count), filledCount: Number(r.filled_count),
-      validatedCount: Number(r.validated_count), audioCount: Number(r.audio_count),
+      validatedCount: validatedFrom(r.validator_histogram),
+      audioCount: Number(r.audio_count),
       audioValidatedCount: Number(r.audio_validated_count),
+      audioTotalCount: r.audio_total_count == null ? null : Number(r.audio_total_count),
     }
     const want = expectedCounts(f)
     const diffs = (Object.keys(want) as Array<keyof typeof want>)
@@ -228,6 +302,7 @@ async function verify(db: AquillaDb, p: Project): Promise<boolean> {
     console.log(
       `  ${f.name.padEnd(24)}${String(got.totalCount).padStart(5)}${String(got.filledCount).padStart(8)}` +
       `${String(got.validatedCount).padStart(8)}${String(got.audioCount).padStart(8)}` +
+      `${(got.audioTotalCount == null ? "—" : String(got.audioTotalCount)).padStart(6)}` +
       (diffs.length > 0 ? `   ← ${diffs.join(", ")}` : ""),
     )
   }

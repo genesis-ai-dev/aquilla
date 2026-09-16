@@ -11,13 +11,15 @@
  * being true fails by name.
  *
  * What these two projects prove that the Bible one cannot:
- *  - a unit with no chapters at all still gets the row, the shortfall line,
- *    the link and the assignment block, and the inspector says WHY there is
- *    no grid — one sentence for a media file, another for a document;
+ *  - a unit with no chapters at all still gets the row, the shortfall line
+ *    and the link, and its inspector shows no chapter block at all rather
+ *    than explaining an absence;
  *  - a person's "· ch. 12" tail stays silent when the unit has no chapters,
  *    instead of naming a time bucket or an empty key;
- *  - the audio term is judged per FILE inside one project — the dubbed
- *    episodes are short on takes, the undubbed ones are judged on text alone;
+ *  - THE CUE SHEET. A dubbed episode records against a hidden `audio-cues`
+ *    sibling whose cell count is its own, and the board has to read the
+ *    takes from there — see `cuesForFile`. The undubbed episodes have no
+ *    sheet and are judged on text alone;
  *  - the seven-cell floor makes a five-cell README "nearly complete" at 60%,
  *    which is the tiny-file edge Sam still has to rule on.
  */
@@ -43,10 +45,20 @@ export interface FixtureFile {
   untranslated: number
   /** Cells not validated, translated or not. */
   shortText: number
-  /** Only meaningful when `dubbed`: cells with no take. */
+  /**
+   * How many cues the linked audio-cue sheet holds — the shape a dubbing
+   * project really has. Absent means no sheet, which is an episode nobody is
+   * dubbing and a file judged on its text alone.
+   *
+   * DELIBERATELY NOT `cells`. The sheet is a separate import of a separate
+   * file: a cue is a line of speech where a subtitle is a line of reading, and
+   * The Chosen's first episode is 646 subtitle cells against 548 cues. A
+   * fixture that made them equal would pass every test while hiding the only
+   * thing this fixture exists to prove.
+   */
+  cues?: number
+  /** Only meaningful with `cues`: how many of those cues have no take. */
   shortAudio: number
-  /** Every cell carries a take (minus `shortAudio`). Only VTT files. */
-  dubbed?: boolean
   targetDateInDays?: number
   doneDaysAgo?: number
   expect: ExpectedStatus
@@ -54,25 +66,26 @@ export interface FixtureFile {
 }
 
 /**
- * THE SUBTITLE PROJECT — nine episodes, each its own unit. Three are dubbed,
- * so the audio gate is exercised per file inside one project: an undubbed
- * episode must never be short by its whole cue count.
+ * THE SUBTITLE PROJECT — ten episodes, each its own unit. Four carry a cue
+ * sheet, so the audio gate is exercised per file inside one project: an
+ * episode nobody is dubbing must never be short by its whole cue count.
  */
 export const VTT_FILES: FixtureFile[] = [
   {
     id: "s1e1", name: "Season 1 · Episode 1", kind: "vtt", cells: 120,
-    untranslated: 0, shortText: 3, shortAudio: 0, dubbed: true,
+    untranslated: 0, shortText: 3, cues: 100, shortAudio: 0,
     expect: "nearly_complete",
-    note: "Dubbed, three cues unvalidated. Row: '3 cells to validate'; the inspector " +
-      "has no grid and says the sections are time ranges. The link still works: " +
-      "it lands on the first unvalidated cue. Assigned to alice.",
+    note: "Fully dubbed — 100 takes on 100 cues — and three subtitle cells " +
+      "unvalidated. Row: '3 cells to validate'; AUD reads 100% because the " +
+      "takes are counted against the CUE SHEET. Against the 120 subtitle " +
+      "cells this same episode reads 83% and is never done. Assigned to alice.",
   },
   {
     id: "s1e2", name: "Season 1 · Episode 2", kind: "vtt", cells: 150,
     untranslated: 40, shortText: 70, shortAudio: 0,
     expect: "in_progress",
-    note: "Not dubbed, mid-way. Judged on text alone — its 150 missing takes " +
-      "must not count, because this file has no recordings to be short of.",
+    note: "No cue sheet, mid-way. Judged on text alone — its 150 missing takes " +
+      "must not count, because nobody is dubbing this episode.",
   },
   {
     id: "s1e3", name: "Season 1 · Episode 3", kind: "vtt", cells: 100,
@@ -83,10 +96,11 @@ export const VTT_FILES: FixtureFile[] = [
   },
   {
     id: "s1e4", name: "Season 1 · Episode 4", kind: "vtt", cells: 130,
-    untranslated: 0, shortText: 0, shortAudio: 5, dubbed: true,
+    untranslated: 0, shortText: 0, cues: 110, shortAudio: 5,
     expect: "nearly_complete",
-    note: "Text finished, five takes missing. Nearly complete BY AUDIO, row " +
-      "reads '5 takes to record', and NO link — the cue detail carries no audio.",
+    note: "Text finished, five of its 110 cues unrecorded. Nearly complete BY " +
+      "AUDIO, row reads '5 takes to record', and NO link — there is no cell to " +
+      "land on when the text is finished.",
   },
   {
     id: "s1e5", name: "Season 1 · Episode 5", kind: "vtt", cells: 90,
@@ -119,11 +133,23 @@ export const VTT_FILES: FixtureFile[] = [
   },
   {
     id: "s2e1", name: "Season 2 · Episode 1", kind: "vtt", cells: 200,
-    untranslated: 20, shortText: 60, shortAudio: 40, dubbed: true,
+    untranslated: 20, shortText: 60, cues: 170, shortAudio: 40,
     expect: "in_progress",
-    note: "Dubbed and in flight on both mediums, three people assigned. The row " +
-      "shows three avatars; the inspector lists all three with their own bars " +
-      "and no '· ch.' tail, because an episode has no chapters to name.",
+    note: "Dubbing under way on both mediums, three people assigned. The row " +
+      "shows three avatars; the inspector lists all three with TEXT BARS ONLY " +
+      "— an assignment holds subtitle cells and the takes live on the cue " +
+      "sheet, so nobody's recorded count can be computed yet (Sam's later " +
+      "ticket) — and no '· ch.' tail, an episode having no chapters to name.",
+  },
+  {
+    id: "s2e2", name: "Season 2 · Episode 2", kind: "vtt", cells: 140,
+    untranslated: 0, shortText: 0, cues: 120, shortAudio: 120,
+    expect: "in_progress",
+    note: "THE EMPTY CUE SHEET. Text finished and signed off, 120 cues imported " +
+      "and not one recorded. The sheet IS the declaration that dubbing is " +
+      "planned, so the row says '120 takes to record' and stays In progress. " +
+      "Without that rule this episode reads 'Nothing left' until the first " +
+      "take lands and then moves BACKWARDS out of Nearly complete.",
   },
 ]
 
@@ -137,9 +163,9 @@ export const DOCS_FILES: FixtureFile[] = [
     id: "route", name: "northern-route.docx", kind: "docx", cells: 120,
     untranslated: 0, shortText: 4, shortAudio: 0,
     expect: "nearly_complete",
-    note: "Four cells to validate. The inspector must say the file has no " +
-      "sections to plan by — NOT that its sections are time ranges. Assigned " +
-      "to alice and bob, half each.",
+    note: "Four cells to validate. The inspector shows NO chapter block at all " +
+      "— a Word file has nothing to plan by and an explanation of that is one " +
+      "more thing to read. Assigned to alice and bob, half each.",
   },
   {
     id: "briefing", name: "route-briefing.pptx", kind: "pptx", cells: 40,
@@ -205,16 +231,19 @@ export interface FixtureCell {
   /** '' when nobody has translated it. */
   target: string
   validated: boolean
-  recorded: boolean
 }
 
 /**
  * Every cell of one file, with its state decided. Outstanding cells come first
  * in document order, which is what makes "Go to first unvalidated" land on a
  * cell a tester can predict.
+ *
+ * NO `recorded` HERE, and that is the shape this fixture got wrong the first
+ * time. A subtitle cell is never recorded: the take belongs to a cue on the
+ * sheet beside it. See `cuesForFile`.
  */
 export function cellsForFile(f: FixtureFile): FixtureCell[] {
-  if (f.untranslated > f.shortText || f.shortText > f.cells || f.shortAudio > f.cells) {
+  if (f.untranslated > f.shortText || f.shortText > f.cells) {
     throw new Error(`${f.id}: outstanding counts exceed the file`)
   }
   return Array.from({ length: f.cells }, (_, i) => {
@@ -224,9 +253,53 @@ export function cellsForFile(f: FixtureFile): FixtureCell[] {
       cellId: `${f.id}-${i + 1}`,
       target: untranslated ? "" : `Ziel ${f.name} ${i + 1}`,
       validated: !unvalidated,
-      recorded: (f.dubbed ?? false) && i >= f.shortAudio,
     }
   })
+}
+
+/** The id the cue sheet is seeded under, derived so no caller has to know it. */
+export function cueSheetId(fileId: string): string {
+  return `${fileId}-cues`
+}
+
+export interface FixtureCue {
+  cellId: string
+  recorded: boolean
+}
+
+/**
+ * The cues on this file's audio sheet, or none where there is no sheet.
+ *
+ * Unrecorded cues come first, for the same reason unvalidated cells do: a
+ * tester looking for the work should find it at the top.
+ */
+export function cuesForFile(f: FixtureFile): FixtureCue[] {
+  if (f.cues === undefined) return []
+  if (f.shortAudio > f.cues) throw new Error(`${f.id}: more unrecorded cues than cues`)
+  return Array.from({ length: f.cues }, (_, i) => ({
+    cellId: `${f.id}-cue-${i + 1}`,
+    recorded: i >= f.shortAudio,
+  }))
+}
+
+/**
+ * Subtitle cell → cue, the `text-audio` links the importer's auto-linker makes.
+ *
+ * THE PLAN BOARD NEVER READS THESE. They are seeded because the fixture has to
+ * be the real shape and not merely the shape the board happens to look at: the
+ * editor follows them to play a cue's take beside its subtitle, and a fixture
+ * that skipped them would be a project no editor could open. The mapping is
+ * many-to-one and not total — real cue counts run well under the subtitle
+ * count, and the last cells of an episode are often left unlinked.
+ */
+export function linksForFile(f: FixtureFile): Array<{ from: string; to: string }> {
+  const cues = cuesForFile(f)
+  if (cues.length === 0) return []
+  const cells = cellsForFile(f)
+  return cells.slice(0, cells.length - 2).map((c, i) => ({
+    from: c.cellId,
+    to: cues[Math.min(Math.floor((i * cues.length) / cells.length), cues.length - 1)].cellId,
+  }))
 }
 
 export interface FixtureCounts {
@@ -235,17 +308,26 @@ export interface FixtureCounts {
   validatedCount: number
   audioCount: number
   audioValidatedCount: number
+  /** The cue sheet's own cell count, or null where the file has no sheet. */
+  audioTotalCount: number | null
 }
 
-/** What the projection should produce for one file. No structural cells here. */
+/**
+ * What the board should read for one file. No structural cells here.
+ *
+ * The audio pair comes off the CUE SHEET and the text pair off the file, which
+ * is the whole point: these are two files' projections folded into one row.
+ */
 export function expectedCounts(f: FixtureFile): FixtureCounts {
   const cells = cellsForFile(f)
+  const cues = cuesForFile(f)
   return {
     totalCount: cells.length,
     filledCount: cells.filter((c) => c.target !== "").length,
     validatedCount: cells.filter((c) => c.validated && c.target !== "").length,
-    audioCount: cells.filter((c) => c.recorded).length,
+    audioCount: cues.filter((c) => c.recorded).length,
     audioValidatedCount: 0,
+    audioTotalCount: f.cues ?? null,
   }
 }
 

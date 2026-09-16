@@ -26,7 +26,8 @@ import { fmtDeadlineDate } from "@/lib/format-date"
 import { formatRelativeTime } from "@/lib/i18n/format"
 import { isKnownBookCode } from "@/lib/file-labeling/bible-book-names"
 import {
-  planPct, planShortfallParts, planUnitIsNearlyComplete, planUnitLabel, planUnitNote,
+  planAudioTotal, planPct, planShortfallParts, planUnitExpectsAudio,
+  planUnitIsNearlyComplete, planUnitLabel, planUnitNote,
   planUnitShortfall, planUnitStatus, type PlanUnit,
 } from "@/lib/plan/plan-status"
 import { classifyPlanSection, isMediaFileKind, numberedBookCodes } from "@/lib/plan/plan-section"
@@ -132,8 +133,14 @@ export function PlanInspector({
   // Absent (a lone inspector in a test, say) the vocabulary falls back to the
   // unit's own count, which is the right answer when there is no wider list to
   // consult.
-  const hasAudio = audioFiles ? audioFiles.has(unit.fileId) : unit.audioCount > 0
+  const hasAudio = audioFiles ? audioFiles.has(unit.fileId) : planUnitExpectsAudio(unit)
   const shortfall = planUnitShortfall(unit, hasAudio)
+  // AQU-1278: the cue sheet's cell count on a dubbing project, the unit's own
+  // everywhere else. See `planAudioTotal`. The bars here are the only place it
+  // is needed — the "Assigned to" block is handed its own audio gate by
+  // `ProjectOverview`, which turns it off on a unit that records against a
+  // sheet, and a file with a sheet has no chapter grid to feed.
+  const audioTotal = planAudioTotal(unit)
   // Not `status === "nearly_complete"`: a unit that is ALSO overdue is filed
   // under Overdue, and it is precisely the row that needs its shortfall said
   // out loud. `planUnitIsNearlyComplete` asks the same question with the date
@@ -306,12 +313,12 @@ export function PlanInspector({
             {showAudio && (
               <PlanBar
                 label={t("org.projectOverview.plan.audioBarLabel")}
-                outer={planPct(unit.audioCount, unit.totalCount)}
-                inner={planPct(unit.audioValidatedCount, unit.totalCount)}
+                outer={planPct(unit.audioCount, audioTotal)}
+                inner={planPct(unit.audioValidatedCount, audioTotal)}
                 tone="audio"
                 aria={t("org.projectOverview.plan.audioBarsAria", {
-                  recorded: planPct(unit.audioCount, unit.totalCount),
-                  validated: planPct(unit.audioValidatedCount, unit.totalCount),
+                  recorded: planPct(unit.audioCount, audioTotal),
+                  validated: planPct(unit.audioValidatedCount, audioTotal),
                 })}
               />
             )}

@@ -322,3 +322,169 @@ describe("the headings policy reaches the audio numbers too", () => {
     })
   })
 })
+
+// AQU-1278. Nothing in this file used to make a dubbing project's audio
+// visible, because nothing in the SCHEMA does: the takes hang off a hidden
+// cue sheet, the board correctly refuses to plan that sheet, and the subtitle
+// file it anchors to has never held a take in its life. Every episode of The
+// Chosen read 0% recorded on a board sitting six inches from the editor that
+// was playing the recordings.
+describe("audio comes from the linked cue sheet", () => {
+  /** An episode and, unless `sheets` says otherwise, one cue sheet on it. */
+  function dubbed(sheets: Array<Record<string, unknown>>) {
+    return {
+      files: [
+        file("ep1", { name: "Episode 1", kind: "vtt", cell_count: 646 }),
+        ...sheets.map((s) => file(String(s.id), {
+          name: "Episode 1 · audio cues", kind: "vtt", role: "audio-cues",
+          anchor_file_id: "ep1", ...s,
+        })),
+      ],
+    }
+  }
+
+  it("reads the sheet's takes against the sheet's own cell count", async () => {
+    // 646 subtitle cells, 548 cues, 548 takes. Measured against the subtitles
+    // a fully dubbed episode reads 85% and never finishes.
+    const { db } = await makeTestDb({
+      ...dubbed([{ id: "cues1", cell_count: 548 }]),
+      file_section_progress: [
+        progress("ep1", "file", "", { total_count: 646, filled_count: 600 }),
+        progress("cues1", "file", "", {
+          total_count: 548, audio_count: 548, audio_validated_count: 12,
+        }),
+      ],
+    })
+    const body = (await (await get(db)).json()) as PlanResponse
+    expect(body.units).toHaveLength(1)
+    expect(body.units[0]).toMatchObject({
+      fileId: "ep1",
+      totalCount: 646,
+      audioCount: 548,
+      audioValidatedCount: 12,
+      audioTotalCount: 548,
+    })
+  })
+
+  it("says null, not zero, for a unit with no cue sheet", async () => {
+    // Null is what tells the client to keep measuring audio against the text
+    // total, which is what every unit in existence did before this.
+    const { db } = await makeTestDb({
+      files: [file("bk", { cell_count: 40 })],
+      file_section_progress: [
+        progress("bk", "file", "", { total_count: 40, audio_count: 9 }),
+      ],
+    })
+    const body = (await (await get(db)).json()) as PlanResponse
+    expect(body.units[0]).toMatchObject({ audioCount: 9, audioTotalCount: null })
+  })
+
+  it("declares audio expected on a sheet nobody has recorded into yet", async () => {
+    // The sheet IS the declaration: somebody imported cues for this episode,
+    // so the dubbing is planned. Zero takes out of 548, not "text-only".
+    const { db } = await makeTestDb({
+      ...dubbed([{ id: "cues1", cell_count: 548 }]),
+      file_section_progress: [
+        progress("ep1", "file", "", { total_count: 646 }),
+        progress("cues1", "file", "", { total_count: 548 }),
+      ],
+    })
+    const body = (await (await get(db)).json()) as PlanResponse
+    expect(body.units[0]).toMatchObject({ audioCount: 0, audioTotalCount: 548 })
+  })
+
+  it("falls back to the sheet's cell_count before its projection row exists", async () => {
+    const { db } = await makeTestDb({
+      ...dubbed([{ id: "cues1", cell_count: 548 }]),
+      file_section_progress: [progress("ep1", "file", "", { total_count: 646 })],
+    })
+    const body = (await (await get(db)).json()) as PlanResponse
+    expect(body.units[0]).toMatchObject({ audioCount: 0, audioTotalCount: 548 })
+  })
+
+  it("never lets the anchor's own audio stand in for a sheet's", async () => {
+    // A subtitle file with takes on it is not a shape the importer makes, but
+    // if one existed those takes are not the dubbing: the sheet is what was
+    // recorded, and an empty sheet means nothing has been.
+    const { db } = await makeTestDb({
+      ...dubbed([{ id: "cues1", cell_count: 548 }]),
+      file_section_progress: [
+        progress("ep1", "file", "", { total_count: 646, audio_count: 640 }),
+        progress("cues1", "file", "", { total_count: 548, audio_count: 3 }),
+      ],
+    })
+    const body = (await (await get(db)).json()) as PlanResponse
+    expect(body.units[0]).toMatchObject({ audioCount: 3, audioTotalCount: 548 })
+  })
+
+  it("ignores a tombstoned sheet", async () => {
+    const { db } = await makeTestDb({
+      ...dubbed([{ id: "cues1", cell_count: 548, deleted_at: TS }]),
+      file_section_progress: [
+        progress("ep1", "file", "", { total_count: 646, audio_count: 4 }),
+        progress("cues1", "file", "", { total_count: 548, audio_count: 548 }),
+      ],
+    })
+    const body = (await (await get(db)).json()) as PlanResponse
+    expect(body.units[0]).toMatchObject({ audioCount: 4, audioTotalCount: null })
+  })
+
+  it("takes the newest sheet when a re-import left two", async () => {
+    // Ids are UUIDv7, so the greatest is the most recently minted — the same
+    // rule the editor uses to pick a file's cue sibling.
+    const { db } = await makeTestDb({
+      ...dubbed([
+        { id: "cues-a", cell_count: 100 },
+        { id: "cues-b", cell_count: 548 },
+      ]),
+      file_section_progress: [
+        progress("ep1", "file", "", { total_count: 646 }),
+        progress("cues-a", "file", "", { total_count: 100, audio_count: 100 }),
+        progress("cues-b", "file", "", { total_count: 548, audio_count: 7 }),
+      ],
+    })
+    const body = (await (await get(db)).json()) as PlanResponse
+    expect(body.units[0]).toMatchObject({ audioCount: 7, audioTotalCount: 548 })
+  })
+
+  it("leaves a BOOK unit alone — a sheet anchors to a file, not to a book", async () => {
+    const { db } = await makeTestDb({
+      files: [
+        file("bible", { name: "Whole Bible" }),
+        file("cues1", { role: "audio-cues", anchor_file_id: "bible", cell_count: 548 }),
+      ],
+      file_section_progress: [
+        progress("bible", "book", "GEN", { total_count: 25, audio_count: 5 }),
+        progress("cues1", "file", "", { total_count: 548, audio_count: 548 }),
+      ],
+    })
+    const body = (await (await get(db)).json()) as PlanResponse
+    expect(body.units[0]).toMatchObject({
+      sectionKey: "GEN", audioCount: 5, audioTotalCount: null,
+    })
+  })
+
+  it("changes the ETag when only the cue sheet's row moves", async () => {
+    // Recording a take touches no row of the subtitle file. Without the
+    // sheet's stamp in the ETag the board that now reads its audio from the
+    // sheet would answer 304 to every request after the first one.
+    const { db } = await makeTestDb({
+      ...dubbed([{ id: "cues1", cell_count: 548 }]),
+      file_section_progress: [
+        progress("ep1", "file", "", { total_count: 646 }),
+        progress("cues1", "file", "", { total_count: 548 }),
+      ],
+    })
+    const tag = (await get(db)).headers.get("ETag")!
+    expect((await get(db, { headers: { "If-None-Match": tag } })).status).toBe(304)
+
+    await db.prepare(
+      `UPDATE file_section_progress SET audio_count = 9, updated_at = updated_at + 1000
+        WHERE project_id = ? AND file_id = 'cues1'`,
+    ).bind(P).run()
+
+    const after = await get(db, { headers: { "If-None-Match": tag } })
+    expect(after.status).toBe(200)
+    expect(((await after.json()) as PlanResponse).units[0].audioCount).toBe(9)
+  })
+})

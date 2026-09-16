@@ -44,6 +44,15 @@ export interface PlanUnit {
   validatedCount: number
   audioCount: number
   audioValidatedCount: number
+  /**
+   * What the two audio counts are OUT OF, when that is not `totalCount`.
+   *
+   * A dubbing project records against a hidden cue sheet whose cell count is
+   * its own — see the cue-sheet note in `db/shared/plan-units.ts`. Null means
+   * the unit has no cue sheet and audio shares the text denominator, which is
+   * every unit that existed before AQU-1278.
+   */
+  audioTotalCount: number | null
   lastEditAt: number | null
   targetDate: string | null
   doneAt: number | null
@@ -100,6 +109,12 @@ function toUnit(row: PlanUnitRow, validationCount: number, countStructural: bool
     validatedCount: c.validatedCount,
     audioCount: c.audioCount,
     audioValidatedCount: c.audioValidatedCount,
+    // Not through `counts()`: a cue sheet holds cues, and a cue is never a
+    // heading or a paratext line, so the structural policy has nothing to
+    // subtract from this denominator. The pair above still goes through it,
+    // which costs nothing on a sheet whose structural share is zero and keeps
+    // one path for both shapes.
+    audioTotalCount: row.audio_total_count == null ? null : Number(row.audio_total_count),
     lastEditAt: row.last_edit_at == null ? null : Number(row.last_edit_at),
     targetDate: row.target_date ?? null,
     doneAt: row.done_at == null ? null : Number(row.done_at),

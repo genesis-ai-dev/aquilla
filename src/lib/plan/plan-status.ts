@@ -30,6 +30,12 @@ export interface PlanUnit {
   validatedCount: number
   audioCount: number
   audioValidatedCount: number
+  /**
+   * AQU-1278: what the two audio counts are OUT OF. See `planAudioTotal` —
+   * null or absent means they share `totalCount`, which is every unit but a
+   * subtitle file with a linked cue sheet.
+   */
+  audioTotalCount?: number | null
   lastEditAt: number | null
   /** Calendar date 'YYYY-MM-DD', lane-independent. Null when unplanned. */
   targetDate: string | null
@@ -118,6 +124,41 @@ export function planUnitHasContent(u: Pick<PlanUnit, "filledCount" | "audioCount
 }
 
 /**
+ * How many cells this unit's audio is measured against.
+ *
+ * Normally the unit's own cells — record the book, count the book. A dubbing
+ * project is the exception: its takes hang off a hidden cue sheet whose cell
+ * count is nobody's business but its own, and The Chosen's first episode is
+ * 646 subtitle cells against 548 cues. Measuring 548 takes against 646 cells
+ * would leave a fully dubbed episode reading 85% recorded forever.
+ *
+ * `audioTotalCount` is null on every unit without a cue sheet, and ABSENT from
+ * a worker that predates AQU-1278 — both mean "share the text denominator",
+ * which is what the board did before this existed.
+ */
+export function planAudioTotal(
+  u: Pick<PlanUnit, "totalCount" | "audioTotalCount">,
+): number {
+  return u.audioTotalCount ?? u.totalCount
+}
+
+/**
+ * Does this unit expect recordings at all?
+ *
+ * A LINKED CUE SHEET IS AN EXPECTATION even with no take in it yet. That is
+ * the whole point of the sheet: somebody imported an audio-cue file for this
+ * episode, so the dubbing is planned, and a board that waited for the first
+ * take would call the episode text-only right up until it stopped being it.
+ * Below that, the older signal stands — a take exists, so recording is under
+ * way.
+ */
+export function planUnitExpectsAudio(
+  u: Pick<PlanUnit, "audioCount" | "audioTotalCount">,
+): boolean {
+  return (u.audioTotalCount ?? 0) > 0 || u.audioCount > 0
+}
+
+/**
  * Which FILES carry recordings. Audio expectation has to be judged per file,
  * never per project: `planHasAudio` answers "does this project track audio at
  * all", and a project holding one dubbed episode alongside sixty-five text
@@ -128,13 +169,15 @@ export function planUnitHasContent(u: Pick<PlanUnit, "filledCount" | "audioCount
  * Per file is the honest grain: the books of a whole-Bible audio import share
  * one file, so recording any of them marks the rest as expected too.
  *
- * Known limit: a file where recording has not started at all reads as text-only
- * and is judged on text alone. That is the same blindness `planHasAudio` has
- * had since AQU-1093, and inventing an expectation from `fileKind` would guess.
+ * Known limit, now half-closed: a file where recording has not started reads
+ * as text-only unless it has a cue sheet. A subtitle file's sheet says the
+ * dubbing is planned before the first take exists; a whole-Bible audio import
+ * has no such declaration, so it still announces itself by being recorded.
+ * Inventing an expectation from `fileKind` would guess.
  */
 export function audioFileIds(units: readonly PlanUnit[]): ReadonlySet<string> {
   const ids = new Set<string>()
-  for (const u of units) if (u.audioCount > 0) ids.add(u.fileId)
+  for (const u of units) if (planUnitExpectsAudio(u)) ids.add(u.fileId)
   return ids
 }
 
@@ -167,9 +210,14 @@ const atLeastZero = (n: number): number => (n > 0 ? n : 0)
  * `hasAudio` comes from `audioFileIds`, not from the unit — see that function.
  */
 export function planUnitShortfall(u: PlanUnit, hasAudio: boolean): PlanShortfall {
+  // AQU-1278: every audio term counts against the CUE SHEET where there is
+  // one, never the subtitle cells. See `planAudioTotal` — on a dubbing project
+  // the two totals differ by a hundred cells and the text one is the wrong
+  // number to subtract a take count from.
+  const audioTotal = planAudioTotal(u)
   const toTranslate = atLeastZero(u.totalCount - u.filledCount)
   const toValidate = atLeastZero(u.filledCount - u.validatedCount)
-  const toRecord = hasAudio ? atLeastZero(u.totalCount - u.audioCount) : 0
+  const toRecord = hasAudio ? atLeastZero(audioTotal - u.audioCount) : 0
   const toAudioValidate =
     hasAudio && !AUDIO_JUDGED_ON_RECORDED
       ? atLeastZero(u.audioCount - u.audioValidatedCount)
@@ -180,7 +228,7 @@ export function planUnitShortfall(u: PlanUnit, hasAudio: boolean): PlanShortfall
   const audioShort = hasAudio
     ? AUDIO_JUDGED_ON_RECORDED
       ? toRecord
-      : atLeastZero(u.totalCount - u.audioValidatedCount)
+      : atLeastZero(audioTotal - u.audioValidatedCount)
     : 0
   return {
     toTranslate,
@@ -255,7 +303,7 @@ export function planUnitStatus(
   now: number,
   /**
    * Files that carry recordings, from `audioFileIds` over the WHOLE board.
-   * Omitted, the unit's own `audioCount` stands in — right for a lone pill,
+   * Omitted, the unit's own expectation stands in — right for a lone pill,
    * wrong for a board, which is why every board path passes the set.
    */
   audioFiles?: ReadonlySet<string>,
@@ -275,8 +323,15 @@ export function planUnitStatus(
   // file with nothing IN it. `planUnitHasContent` keeps out the book nobody has
   // started, which is short by everything and belongs in Not started.
   if (started && u.totalCount > 0) {
-    const hasAudio = audioFiles ? audioFiles.has(u.fileId) : u.audioCount > 0
+    const hasAudio = audioFiles ? audioFiles.has(u.fileId) : planUnitExpectsAudio(u)
     const { worst } = planUnitShortfall(u, hasAudio)
+    // ONE THRESHOLD PER UNIT, and it is the unit's own cell count even when
+    // audio is counted against a cue sheet of a different size. The row is one
+    // row; "a few cells from finished" is one question about it, and a unit
+    // whose text and audio each had their own bar for clearing would be nearly
+    // complete by one number and not the other with nothing on screen saying
+    // which. The two counts differ by a hundred or so out of six hundred, so
+    // the alternative buys a threshold a handful of cells tighter.
     if (worst <= planNearlyCompleteThreshold(u.totalCount)) return "nearly_complete"
   }
   return started ? "in_progress" : "not_started"

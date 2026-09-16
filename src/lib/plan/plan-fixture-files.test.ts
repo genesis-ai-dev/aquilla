@@ -11,7 +11,9 @@ import {
   VTT_FILES,
   assignedCells,
   cellsForFile,
+  cuesForFile,
   expectedCounts,
+  linksForFile,
   type FixtureFile,
 } from "./plan-fixture-files"
 import {
@@ -78,22 +80,63 @@ describe.each([
 describe("what only the subtitle fixture can prove", () => {
   const units = VTT_FILES.map(unitFor)
   const audioFiles = audioFileIds(units)
+  const byName = (name: string) => units.find((u) => u.fileName === name)!
 
-  it("expects audio of the dubbed episodes only", () => {
-    // The per-file gate inside ONE project: an undubbed episode must not be
-    // short by its whole cue count because its neighbour was recorded.
-    const dubbed = VTT_FILES.filter((f) => f.dubbed).map((f) => `plan-1278-${f.id}`)
-    expect([...audioFiles].sort()).toEqual(dubbed.sort())
-    const undubbed = units.find((u) => u.fileName === "Season 1 · Episode 2")!
-    expect(planUnitShortfall(undubbed, audioFiles.has(undubbed.fileId)).toRecord).toBe(0)
+  it("expects audio of the episodes with a cue sheet, and only those", () => {
+    // The per-file gate inside ONE project: an episode nobody is dubbing must
+    // not be short by its whole cue count because its neighbour was recorded.
+    const sheeted = VTT_FILES.filter((f) => f.cues !== undefined).map((f) => `plan-1278-${f.id}`)
+    expect([...audioFiles].sort()).toEqual(sheeted.sort())
+    const noSheet = byName("Season 1 · Episode 2")
+    expect(planUnitShortfall(noSheet, audioFiles.has(noSheet.fileId)).toRecord).toBe(0)
   })
 
-  it("makes the dubbed-but-unrecorded episode nearly complete by audio alone", () => {
-    const e4 = units.find((u) => u.fileName === "Season 1 · Episode 4")!
+  it("counts a fully dubbed episode's takes against its cues, not its subtitles", () => {
+    // 120 subtitle cells, 100 cues, 100 takes. Against the subtitles this reads
+    // twenty takes short and never leaves In progress.
+    const e1 = byName("Season 1 · Episode 1")
+    expect(e1.audioTotalCount).toBe(100)
+    expect(planUnitShortfall(e1, true).toRecord).toBe(0)
+    const { audioTotalCount: _drop, ...asSubtitles } = e1
+    expect(planUnitShortfall(asSubtitles, true).toRecord).toBe(20)
+  })
+
+  it("makes the mostly-dubbed episode nearly complete by audio alone", () => {
+    const e4 = byName("Season 1 · Episode 4")
     const s = planUnitShortfall(e4, true)
     expect(s.toValidate).toBe(0)
     expect(s.toRecord).toBe(5)
     expect(s.worst).toBeLessThanOrEqual(planNearlyCompleteThreshold(e4.totalCount))
+  })
+
+  it("keeps a finished-text episode with an empty cue sheet out of Nearly complete", () => {
+    // The sheet is the declaration that dubbing is planned. Without it this
+    // episode reads "Nothing left" and then moves BACKWARDS on the first take.
+    const e = byName("Season 2 · Episode 2")
+    expect(e.audioCount).toBe(0)
+    expect(e.audioTotalCount).toBe(120)
+    expect(planUnitShortfall(e, audioFiles.has(e.fileId)).toRecord).toBe(120)
+    const { audioTotalCount: _drop, ...noSheet } = e
+    expect(planUnitStatus(noSheet, NOW, new Set())).toBe("nearly_complete")
+  })
+
+  it("links every subtitle cell but the last two, to a cue that exists", () => {
+    // The board ignores these; the editor does not, and a fixture nobody can
+    // open in the editor is not the real shape.
+    for (const f of VTT_FILES) {
+      const links = linksForFile(f)
+      if (f.cues === undefined) {
+        expect(links).toEqual([])
+        continue
+      }
+      const cells = new Set(cellsForFile(f).map((c) => c.cellId))
+      const cues = new Set(cuesForFile(f).map((c) => c.cellId))
+      expect(links).toHaveLength(f.cells - 2)
+      for (const l of links) {
+        expect(cells.has(l.from)).toBe(true)
+        expect(cues.has(l.to)).toBe(true)
+      }
+    }
   })
 })
 

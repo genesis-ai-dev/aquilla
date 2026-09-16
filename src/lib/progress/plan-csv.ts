@@ -6,7 +6,7 @@
 // and how far along it is.
 
 import type { PlanUnit, PlanUnitStatus } from "@/lib/plan/plan-status"
-import { audioFileIds, planUnitLabel, planUnitStatus } from "@/lib/plan/plan-status"
+import { audioFileIds, planAudioTotal, planUnitLabel, planUnitStatus } from "@/lib/plan/plan-status"
 
 const HEADER = [
   "Unit",
@@ -74,8 +74,10 @@ export function planRowsToCsv(units: readonly PlanUnit[], now: number): string {
     u.doneBy ?? "",
     pct(u.filledCount, u.totalCount),
     pct(u.validatedCount, u.totalCount),
-    pct(u.audioCount, u.totalCount),
-    pct(u.audioValidatedCount, u.totalCount),
+    // AQU-1278: against the cue sheet where the takes actually live, so the
+    // export and the board agree on a dubbing project's percentage too.
+    pct(u.audioCount, planAudioTotal(u)),
+    pct(u.audioValidatedCount, planAudioTotal(u)),
     isoDate(u.lastEditAt),
   ])
   return [HEADER, ...rows].map((row) => row.map((c) => escapeCell(String(c))).join(",")).join("\r\n")

@@ -34,6 +34,13 @@ export interface PlanUnit {
   validatedCount: number
   audioCount: number
   audioValidatedCount: number
+  /**
+   * AQU-1278: what the two audio counts are out of, when that is not
+   * `totalCount` — a dubbing project's takes hang off a hidden cue sheet with
+   * a cell count of its own. Null (and absent, from a worker that predates
+   * this) means audio shares the text denominator.
+   */
+  audioTotalCount?: number | null
   lastEditAt: number | null
   targetDate: string | null
   doneAt: number | null

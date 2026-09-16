@@ -1111,7 +1111,17 @@ export function ProjectOverview() {
           // Per FILE, not per project: a person assigned text in a book whose
           // file carries no recordings is not short a single take, and the
           // audio bar on their row would be a column of zeroes saying they are.
-          showAudio={planAudioFiles.has(selectedPlanUnit.fileId)}
+          //
+          // AQU-1278: and never on a unit that records against a CUE SHEET. An
+          // assignment holds subtitle cells; the takes live on a different
+          // file's cells, so an assignee's recorded count on a dubbing project
+          // is structurally zero however much of the episode they have dubbed.
+          // Sam ruled this a real gap and a later ticket — **TODO: assignment-
+          // level audio on dubbing projects** — and text-only until then.
+          showAudio={
+            planAudioFiles.has(selectedPlanUnit.fileId) &&
+            selectedPlanUnit.audioTotalCount == null
+          }
           minRole={orgSettings.memberProgressViewMinRole}
           viewerRoleLevel={projectRoleLevel}
           ready={orgSettings.hasFetched}

@@ -21,7 +21,9 @@ import { useT, useI18n } from "@/lib/i18n/I18nProvider"
 import { fmtDeadlineDate } from "@/lib/format-date"
 import { formatList } from "@/lib/i18n/format"
 import {
+  planAudioTotal,
   planPct,
+  planUnitExpectsAudio,
   planUnitIsNearlyComplete,
   planUnitLabel,
   planUnitShortfall,
@@ -197,11 +199,14 @@ export function PlanRow({
   const status = planUnitStatus(unit, now, audioFiles)
   const translated = planPct(unit.filledCount, unit.totalCount)
   const validated = planPct(unit.validatedCount, unit.totalCount)
-  const recorded = planPct(unit.audioCount, unit.totalCount)
-  const audioValidated = planPct(unit.audioValidatedCount, unit.totalCount)
+  // AQU-1278: against the CUE SHEET on a dubbing project, whose cell count is
+  // its own — a fully dubbed episode would otherwise read 85% forever.
+  const audioTotal = planAudioTotal(unit)
+  const recorded = planPct(unit.audioCount, audioTotal)
+  const audioValidated = planPct(unit.audioValidatedCount, audioTotal)
   const note = usePlanRowNote(unit, now, audioFiles)
 
-  const hasAudio = audioFiles ? audioFiles.has(unit.fileId) : unit.audioCount > 0
+  const hasAudio = audioFiles ? audioFiles.has(unit.fileId) : planUnitExpectsAudio(unit)
   const shortfall = planUnitShortfall(unit, hasAudio)
   const nearly = planUnitIsNearlyComplete(unit, now, audioFiles)
   const shortfallText = usePlanShortfallText(shortfall)

@@ -20,6 +20,8 @@ import {
   planShortfallParts,
   sortNearlyComplete,
   audioFileIds,
+  planAudioTotal,
+  planUnitExpectsAudio,
   AUDIO_JUDGED_ON_RECORDED,
 } from "./plan-status"
 
@@ -267,6 +269,56 @@ describe("the audio gate is per FILE, not per project", () => {
   it("would sink every one of them if audio were read project-wide", () => {
     const projectWide = new Set(["ep1", "bible"])
     for (const b of books) expect(planUnitStatus(b, NOW, projectWide)).toBe("in_progress")
+  })
+})
+
+describe("a dubbing project's audio is counted against its CUE SHEET", () => {
+  // The real shape, from The Chosen: 646 subtitle cells, a hidden cue sheet of
+  // 548 cues, and every take hanging off a cue. The two counts are not meant
+  // to match — a cue is a line of speech and a subtitle is a line of reading —
+  // so a take count measured against the subtitles can never reach the end.
+  const SUBTITLES = 646
+  const CUES = 548
+  const episode = (audio: number, over: Partial<PlanUnit> = {}): PlanUnit =>
+    counts(SUBTITLES, SUBTITLES, SUBTITLES, audio, 0, { audioTotalCount: CUES, ...over })
+
+  it("measures the takes against the cues, so a finished dub finishes", () => {
+    expect(planAudioTotal(episode(CUES))).toBe(CUES)
+    expect(planUnitShortfall(episode(CUES), true).toRecord).toBe(0)
+  })
+
+  it("would leave that same episode 98 takes short against its subtitles", () => {
+    // The bug this fixes, stated as the number a reader would have seen. 98 is
+    // well past the 39-cell threshold, so a fully dubbed, fully validated
+    // episode sat in In progress with no way to leave it.
+    const { audioTotalCount: _drop, ...noSheet } = episode(CUES)
+    expect(planUnitShortfall(noSheet, true).toRecord).toBe(SUBTITLES - CUES)
+    expect(planUnitStatus(noSheet, NOW, new Set(["f1"]))).toBe("in_progress")
+    expect(planUnitStatus(episode(CUES), NOW, new Set(["f1"]))).toBe("nearly_complete")
+  })
+
+  it("treats an empty cue sheet as audio EXPECTED, not as a text-only file", () => {
+    // The sheet is the declaration: somebody imported cues for this episode, so
+    // the dubbing is planned before a single take exists. Without this the
+    // board calls the episode finished right up until recording starts, then
+    // moves it backwards on the first take.
+    const untouched = episode(0)
+    expect(planUnitExpectsAudio(untouched)).toBe(true)
+    expect([...audioFileIds([untouched])]).toEqual(["f1"])
+    expect(planUnitShortfall(untouched, true).toRecord).toBe(CUES)
+    expect(planUnitStatus(untouched, NOW, audioFileIds([untouched]))).toBe("in_progress")
+  })
+
+  it("leaves every unit without a sheet exactly as it was", () => {
+    // Null from this worker, absent from one that predates AQU-1278. Both mean
+    // "audio shares the text denominator", which is what the board always did.
+    const textOnly = counts(100, 100, 100, 0, 0)
+    expect(planAudioTotal(textOnly)).toBe(100)
+    expect(planAudioTotal({ ...textOnly, audioTotalCount: null })).toBe(100)
+    expect(planUnitExpectsAudio(textOnly)).toBe(false)
+    expect(audioFileIds([textOnly]).size).toBe(0)
+    // And a book recorded in its own file still announces itself by its takes.
+    expect(planUnitExpectsAudio(counts(100, 100, 100, 3, 0))).toBe(true)
   })
 })
 

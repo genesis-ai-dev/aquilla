@@ -99,8 +99,11 @@ export const VTT_FILES: FixtureFile[] = [
     untranslated: 0, shortText: 0, cues: 110, shortAudio: 5,
     expect: "nearly_complete",
     note: "Text finished, five of its 110 cues unrecorded. Nearly complete BY " +
-      "AUDIO, row reads '5 takes to record', and NO link — there is no cell to " +
-      "land on when the text is finished.",
+      "AUDIO; the row reads '5 takes to record'. The INSPECTOR offers no 'Go to " +
+      "first…' link beside it — there is no outstanding text cell to land on — " +
+      "while the row's own shortfall still opens the file, which is the rule " +
+      "`openPlanShortfall` states: a link that lands nearby beats one that " +
+      "silently does nothing.",
   },
   {
     id: "s1e5", name: "Season 1 · Episode 5", kind: "vtt", cells: 90,
@@ -148,9 +151,12 @@ export const VTT_FILES: FixtureFile[] = [
     expect: "in_progress",
     note: "THE EMPTY CUE SHEET. Text finished and signed off, 120 cues imported " +
       "and not one recorded. The sheet IS the declaration that dubbing is " +
-      "planned, so the row says '120 takes to record' and stays In progress. " +
-      "Without that rule this episode reads 'Nothing left' until the first " +
-      "take lands and then moves BACKWARDS out of Nearly complete.",
+      "planned, so the row sits in In progress under an empty AUD bar and says " +
+      "nothing about being finished. Without that rule it reads 'Nothing left' " +
+      "in Nearly complete until the first take lands, then moves BACKWARDS. " +
+      "(The 120 outstanding takes are not NAMED on the row: only a nearly-" +
+      "complete row speaks its shortfall, which is the rule flagged for " +
+      "re-confirmation at review.)",
   },
 ]
 

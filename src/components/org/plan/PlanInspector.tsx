@@ -16,7 +16,7 @@
 // are the things you touch once and read never, and they were pushing the
 // shortfall below the fold on a short panel.
 
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react"
+import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react"
 import { useT, useI18n } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
@@ -30,14 +30,14 @@ import {
   planUnitIsNearlyComplete, planUnitLabel, planUnitNote,
   planUnitShortfall, planUnitStatus, type PlanUnit,
 } from "@/lib/plan/plan-status"
-import { classifyPlanSection, isMediaFileKind, numberedBookCodes } from "@/lib/plan/plan-section"
+import { classifyPlanSection, numberedBookCodes } from "@/lib/plan/plan-section"
 import type { PlanUnitPatch } from "@/lib/sync/plan"
 import { usePlanUnitSections, type PlanSection } from "@/hooks/usePlanUnitSections"
 import { PlanStatusPill } from "./PlanStatusPill"
 import { PlanBar } from "./PlanBar"
 import { PlanChapterGrid, PlanGridLegend, planSectionShortfall } from "./PlanChapterGrid"
 import { PLAN_TONE } from "./plan-tone"
-import { usePlanStatusNote } from "./use-plan-note"
+import { usePlanShortfallText, usePlanStatusNote } from "./use-plan-note"
 import { useSectionVerses, type SectionVersesState } from "./use-section-verses"
 import { shortVerses, verseChipLabel, verseChipSplit, verseChipsThatFit } from "./verse-chips"
 
@@ -121,7 +121,7 @@ export function PlanInspector({
   // `usePlanStatusNote` is a hook and cannot be called conditionally.
   const noteKind = planUnitNote(unit, now, audioFiles)?.kind ?? null
   const validatedPct = planPct(unit.validatedCount, unit.totalCount)
-  const { sections, loading, error } = usePlanUnitSections({ projectId, unit, getToken, lane })
+  const { sections } = usePlanUnitSections({ projectId, unit, getToken, lane })
 
   // AQU-1278. `audioFiles` comes from the board, which computes it over every
   // unit: whether audio is EXPECTED is a fact about the FILE, not about this
@@ -146,6 +146,10 @@ export function PlanInspector({
   // out loud. `planUnitIsNearlyComplete` asks the same question with the date
   // stripped, so the row and this panel cannot drift apart.
   const nearlyComplete = planUnitIsNearlyComplete(unit, now, audioFiles)
+  // The same words the row uses, from the same renderer: "3 cells to validate",
+  // or "6 to translate · 8 to validate" when two mediums are outstanding. Null
+  // means nothing is, which on a unit nobody has marked done is its own news.
+  const shortfallText = usePlanShortfallText(shortfall)
 
   // A book breaks into chapters; anything else breaks into sections. The unit
   // itself decides, the same way the board refuses to call every row a book.
@@ -187,22 +191,15 @@ export function PlanInspector({
     (s) => planSectionShortfall(s, hasAudio).worst > 0,
   ).length
 
-  // `usePlanUnitSections` starts at `loading: false` and only flips it true
-  // inside its own effect, so a unit's FIRST render is indistinguishable from a
-  // finished read that found nothing — which is exactly the state that prints
-  // "this file's sections are time ranges". Waiting for one effect pass keeps
-  // that line off the screen for the frame before the fetch even starts.
-  //
-  // The disable below is the point of the thing rather than a wart on it: "one
-  // effect pass has happened" is a fact only an effect can report, and the rule
-  // is warning about exactly the cascading render this wants.
-  const [asked, setAsked] = useState(false)
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setAsked(true)
-  }, [])
-  const breakdownReadable = projectId != null && getToken != null
-  const showBreakdown = sections.length > 0 || (breakdownReadable && asked && !loading && !error)
+  // NO SECTIONS, NO BLOCK — AQU-1278, Sam's call 2026-09-16. This used to
+  // render the heading and a sentence explaining the absence: one for a media
+  // file whose sections are time buckets, another for a Word document that has
+  // none at all. A panel that spends a heading and a line of prose on something
+  // it is not going to show is worse than a panel that simply moves on, and
+  // the explanation had to be right about the file's kind to not be a lie.
+  // With it goes the loading-vs-empty dance the sentence needed: nothing is
+  // drawn until there is something to draw.
+  const showBreakdown = sections.length > 0
 
   // A rejected write used to roll back in silence: the optimistic value
   // appeared, the server refused it, the row snapped back, and nothing said
@@ -337,6 +334,50 @@ export function PlanInspector({
                 {t("org.projectOverview.plan.audioSharedAcrossLanes")}
               </p>
             )}
+            {/* WHAT IS LEFT, AND THE WAY TO IT — under the bars, for every kind
+                of unit. AQU-1278 first put this on the chapter grid's summary
+                line, which is where the mockup drew it and where it reads best
+                on a book; Sam found the hole that placement leaves (2026-09-16).
+                A subtitle file and a Word document have no grid at all, so the
+                one link that takes a manager to the remaining work existed for
+                books and for nothing else — on exactly the units whose whole
+                panel is these two bars.
+                Beneath the bars it belongs to the unit rather than to its
+                chapters, which is what it always measured. The grid keeps the
+                per-chapter count. */}
+            {nearlyComplete && (
+              <div
+                className="flex flex-wrap items-center justify-between gap-x-2.5 gap-y-1 ps-8 text-[11.5px]"
+                data-testid="plan-unit-shortfall"
+              >
+                <span className={shortfallText ? `font-medium ${PLAN_TONE.nearly_complete.text}` : "text-muted-foreground"}>
+                  {shortfallText ?? t("org.projectOverview.plan.nothingLeft")}
+                </span>
+                {/* NEARLY COMPLETE ONLY, and so are the grid's count badges. A
+                    unit with ninety chapters to go gets no link, on the grounds
+                    that "first outstanding cell" is not a useful place to stand
+                    when nearly everything is outstanding; you open the file, not
+                    a cell. THIS IS FLAGGED FOR RE-CONFIRMATION AT BUILD REVIEW:
+                    it is the one rule in AQU-1278 that withholds something from
+                    the majority of units, and if the answer changes it changes
+                    on the condition above and in the `nearlyComplete` prop
+                    passed to the grid, nowhere else. */}
+                {openKind != null && onGoToFirstOpen && (
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className="h-auto gap-1 p-0 text-[12px]"
+                    data-testid="plan-go-to-first-open"
+                    onClick={() => onGoToFirstOpen(openKind)}
+                  >
+                    {t(openKind === "untranslated"
+                      ? "org.projectOverview.plan.goToFirstUntranslated"
+                      : "org.projectOverview.plan.goToFirstUnvalidated")}
+                    <ArrowRight className="h-3 w-3" aria-hidden />
+                  </Button>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -354,7 +395,6 @@ export function PlanInspector({
               sections={sections}
               showAudio={hasAudio}
               nearlyComplete={nearlyComplete}
-              mediaFile={isMediaFileKind((unit as { fileKind?: string | null }).fileKind)}
               selectedKey={openSectionKey}
               onSelect={(key) =>
                 setOpenSectionKey((open) => {
@@ -367,57 +407,28 @@ export function PlanInspector({
               }
             />
 
-            {sections.length > 0 && (
-              <div
-                className="flex flex-wrap items-center justify-between gap-x-2.5 gap-y-1 text-[11.5px]"
-                data-testid="plan-grid-summary"
-              >
-                {/* ONE of the two, never both. "3 chapters short" and "47 of 50
-                    complete" are the same fact counted from opposite ends, and
-                    a line carrying both made a reader do the subtraction to
-                    check they agreed. What is left wins while anything is left;
-                    the complete line takes over when nothing is, where it is
-                    the more direct way to say the book is finished. */}
-                {shortChapters > 0 ? (
-                  <span className="font-medium text-foreground">
-                    {t("org.projectOverview.plan.chaptersShort", { count: shortChapters })}
-                  </span>
-                ) : (
-                  <span className="text-muted-foreground">
-                    {t("org.projectOverview.plan.chaptersComplete", {
-                      done: sections.length,
-                      total: sections.length,
-                    })}
-                  </span>
-                )}
-
-                {/* NEARLY COMPLETE ONLY — and so are the grid's count badges. A
-                    unit with ninety chapters to go gets no link, on the grounds
-                    that "first outstanding cell" is not a useful place to stand
-                    when nearly everything is outstanding; you open the file,
-                    not a cell. THIS IS FLAGGED FOR RE-CONFIRMATION AT BUILD
-                    REVIEW: it is the one rule in AQU-1278 that withholds
-                    something from the majority of units, and if the answer
-                    changes it changes here and in the `nearlyComplete` prop
-                    passed to the grid, nowhere else.
-                    It shares the summary's line, right-aligned, because the
-                    two belong together: how much is left, and the way to it. */}
-                {nearlyComplete && openKind != null && onGoToFirstOpen && (
-                  <Button
-                    variant="link"
-                    size="sm"
-                    className="h-auto gap-1 p-0 text-[12px]"
-                    data-testid="plan-go-to-first-open"
-                    onClick={() => onGoToFirstOpen(openKind)}
-                  >
-                    {t(openKind === "untranslated"
-                      ? "org.projectOverview.plan.goToFirstUntranslated"
-                      : "org.projectOverview.plan.goToFirstUnvalidated")}
-                    <ArrowRight className="h-3 w-3" aria-hidden />
-                  </Button>
-                )}
-              </div>
-            )}
+            {/* ONE of the two, never both. "3 chapters short" and "47 of 50
+                complete" are the same fact counted from opposite ends, and a
+                line carrying both made a reader do the subtraction to check
+                they agreed. What is left wins while anything is left; the
+                complete line takes over when nothing is, where it is the more
+                direct way to say the book is finished.
+                The link used to share this line. It moved up under the bars,
+                where every unit can have one — see `plan-unit-shortfall`. */}
+            <div className="text-[11.5px]" data-testid="plan-grid-summary">
+              {shortChapters > 0 ? (
+                <span className="font-medium text-foreground">
+                  {t("org.projectOverview.plan.chaptersShort", { count: shortChapters })}
+                </span>
+              ) : (
+                <span className="text-muted-foreground">
+                  {t("org.projectOverview.plan.chaptersComplete", {
+                    done: sections.length,
+                    total: sections.length,
+                  })}
+                </span>
+              )}
+            </div>
 
             {/* One chapter, opened from the grid: the same nested bars the unit
                 itself draws, so the part is measured exactly like the whole. */}

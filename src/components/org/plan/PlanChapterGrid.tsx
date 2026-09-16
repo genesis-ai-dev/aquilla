@@ -107,18 +107,17 @@ function tileFacts(section: PlanSection, hasAudio: boolean): TileFacts {
 }
 
 export function PlanChapterGrid({
-  sections, showAudio, nearlyComplete, selectedKey, onSelect, mediaFile = false,
+  sections, showAudio, nearlyComplete, selectedKey, onSelect,
 }: {
-  /** Already narrowed to this unit by `usePlanUnitSections`. */
-  sections: readonly PlanSection[]
   /**
-   * AQU-1278: is the unit a media file? It decides which sentence explains an
-   * empty grid. A subtitle file HAS sections — five-minute time buckets nobody
-   * plans by — where a Word document simply has none, and telling a reader
-   * their memo's "sections are time ranges" was the first thing the document
-   * fixture showed up.
+   * Already narrowed to this unit by `usePlanUnitSections`, and never empty:
+   * the inspector renders no chapter block at all for a unit with no sections
+   * (AQU-1278, Sam 2026-09-16). This used to print a sentence explaining the
+   * absence, in two wordings — "these are time ranges" for a subtitle file,
+   * "no chapters or sections" for a Word document — and the explanation was
+   * more to read than the thing it stood in for.
    */
-  mediaFile?: boolean
+  sections: readonly PlanSection[]
   /** Whether this project records audio at all; the right half is drawn only then. */
   showAudio: boolean
   /**
@@ -136,20 +135,6 @@ export function PlanChapterGrid({
   onSelect: (key: string) => void
 }) {
   const t = useT()
-
-  // A media file's sections are all five-minute time buckets ("t:300000"), and
-  // `sectionBelongsToUnit` rejects every one of them — so a dubbed episode
-  // arrives here with an empty list, not a short one. Saying why beats an empty
-  // frame, which every reader reads as a load that failed.
-  if (sections.length === 0) {
-    return (
-      <p data-testid="plan-grid-empty" className="text-[11.5px] leading-relaxed text-muted-foreground">
-        {t(mediaFile
-          ? "org.projectOverview.plan.gridEmptyMedia"
-          : "org.projectOverview.plan.gridEmptyDocument")}
-      </p>
-    )
-  }
 
   // POSITION BY THE PARSED NUMBER, NEVER BY ARRAY INDEX. A section row exists
   // only where cells exist, and AQU-1083's structural subtraction can empty one

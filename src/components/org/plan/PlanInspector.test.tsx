@@ -341,30 +341,18 @@ describe("the chapter grid (AQU-1278)", () => {
     expect(screen.queryByTestId("plan-tile-badge-GEN 2")).toBeNull()
   })
 
-  it("explains itself on a media file instead of drawing an empty frame", async () => {
-    // Every section of a dubbed episode is a five-minute time bucket, and
-    // `sectionBelongsToUnit` rejects all of them — so the list arrives empty.
+  it("shows no chapter block at all on a file with no sections", async () => {
+    // AQU-1278, Sam 2026-09-16. A dubbed episode's sections are five-minute
+    // time buckets, which `sectionBelongsToUnit` rejects, so the list arrives
+    // empty; a Word document's is empty because it has none. This used to
+    // print a heading and a sentence explaining which — more to read than the
+    // thing it stood in for, and a lie whenever it guessed the kind wrong.
     const getToken = withSections([section("t:0"), section("t:1")])
-    renderInspector(
-      // `fileKind` rides the wire on every unit; the inspector reads it to pick
-      // the sentence. The plan-status type does not declare it, so it is added
-      // the way the real objects carry it.
-      { ...unit({ sectionKey: "", fileName: "Day 12.mp3" }), fileKind: "vtt" } as never,
-      true, false, getToken,
-    )
-    await waitFor(() => expect(screen.getByTestId("plan-grid-empty")).toBeInTheDocument())
-    expect(screen.getByTestId("plan-grid-empty")).toHaveTextContent("time ranges")
+    renderInspector(unit({ sectionKey: "", fileName: "Season 1 · Episode 1" }), true, false, getToken)
+    await waitFor(() => expect(screen.getByTestId("plan-inspector-bars")).toBeInTheDocument())
+    expect(screen.queryByTestId("plan-sections")).toBeNull()
     expect(screen.queryByTestId("plan-chapter-grid")).toBeNull()
-  })
-
-  it("tells a document it has no sections, not that they are time ranges", async () => {
-    const getToken = withSections([])
-    renderInspector(
-      { ...unit({ sectionKey: "", fileName: "northern-route.docx" }), fileKind: "docx" } as never,
-      true, false, getToken,
-    )
-    await waitFor(() => expect(screen.getByTestId("plan-grid-empty")).toBeInTheDocument())
-    expect(screen.getByTestId("plan-grid-empty")).toHaveTextContent("no chapters or sections")
+    expect(screen.queryByTestId("plan-grid-summary")).toBeNull()
   })
 
   it("keeps the grid out of a panel that was never able to read the breakdown", () => {
@@ -372,7 +360,6 @@ describe("the chapter grid (AQU-1278)", () => {
     // has no chapters" — and saying the second would be a lie.
     renderInspector(unit({ sectionKey: "GEN", fileName: "Whole Bible" }))
     expect(screen.queryByTestId("plan-sections")).toBeNull()
-    expect(screen.queryByTestId("plan-grid-empty")).toBeNull()
   })
 
   it("says how much of the unit is left, and only that", async () => {
@@ -479,6 +466,54 @@ describe("the link into the editor (AQU-1278)", () => {
     await waitFor(() => expect(screen.getByTestId("plan-chapter-grid")).toBeInTheDocument())
     expect(goLinks()).toHaveLength(0)
     expect(screen.queryByTestId("plan-go-to-first-open")).toBeNull()
+    expect(screen.queryByTestId("plan-unit-shortfall")).toBeNull()
+  })
+
+  it("keeps the link with the unit's own shortfall, not with the chapter grid", async () => {
+    // It shared the grid's summary line until Sam found what that costs — see
+    // the test below. The summary keeps the per-chapter count and nothing else.
+    const getToken = withSections([section("GEN 1")])
+    renderInspector(
+      nearlyDone({ sectionKey: "GEN", fileName: "Whole Bible" }),
+      true, false, getToken, { onGoToFirstOpen: vi.fn() },
+    )
+    await waitFor(() => expect(screen.getByTestId("plan-chapter-grid")).toBeInTheDocument())
+    const line = screen.getByTestId("plan-unit-shortfall")
+    expect(line).toContainElement(screen.getByTestId("plan-go-to-first-open"))
+    expect(line).toHaveTextContent("5 cells to validate")
+    expect(screen.getByTestId("plan-grid-summary")).not.toHaveTextContent(/Go to first/)
+  })
+
+  it("STILL OFFERS THE LINK on a file with no chapters to hang it on", async () => {
+    // The hole the old placement left, and the reason it moved. A subtitle file
+    // and a Word document have no grid, so the one link that takes a manager to
+    // the remaining work existed for books and for nothing else — on exactly
+    // the units whose whole panel is two bars.
+    const onGoToFirstOpen = vi.fn()
+    const getToken = withSections([])
+    renderInspector(
+      nearlyDone({ sectionKey: "", fileName: "northern-route.docx" }),
+      true, false, getToken, { onGoToFirstOpen },
+    )
+    await waitFor(() => expect(screen.getByTestId("plan-unit-shortfall")).toBeInTheDocument())
+    expect(screen.queryByTestId("plan-sections")).toBeNull()
+    expect(goLinks()).toHaveLength(1)
+    fireEvent.click(screen.getByTestId("plan-go-to-first-open"))
+    expect(onGoToFirstOpen).toHaveBeenCalledWith("unvalidated")
+  })
+
+  it("says 'Nothing left' where there is nothing to link to", async () => {
+    const getToken = withSections([])
+    renderInspector(
+      unit({
+        sectionKey: "", fileName: "glossary.txt",
+        totalCount: 100, filledCount: 100, validatedCount: 100,
+      }),
+      true, false, getToken, { onGoToFirstOpen: vi.fn() },
+    )
+    await waitFor(() => expect(screen.getByTestId("plan-unit-shortfall")).toBeInTheDocument())
+    expect(screen.getByTestId("plan-unit-shortfall")).toHaveTextContent("Nothing left")
+    expect(goLinks()).toHaveLength(0)
   })
 })
 

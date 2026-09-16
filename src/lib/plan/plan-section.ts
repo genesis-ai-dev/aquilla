@@ -119,15 +119,3 @@ export function planSectionLabel(key: string, numbered: ReadonlySet<string>): st
 export function isTimeBucketKey(key: string): boolean {
   return key.startsWith(TIME_BUCKET_PREFIX)
 }
-
-/**
- * Is a file of this kind a media file — one whose sections are time buckets?
- *
- * `files.kind` is whatever the importer wrote: 'vtt', 'srt', 'sbv' for
- * subtitles, 'audio' and 'media' for the audio-first and linked-video shapes.
- * Anything else — 'usfm', 'docx', 'pptx', 'txt', 'md', 'idml', or nothing at
- * all — is text, and a text file with no sections simply has none.
- */
-export function isMediaFileKind(kind: string | null | undefined): boolean {
-  return kind === "vtt" || kind === "srt" || kind === "sbv" || kind === "audio" || kind === "media"
-}

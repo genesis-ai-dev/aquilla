@@ -26,6 +26,7 @@ const imports = new Hono<{ Bindings: Env; Variables: Variables }>()
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 const MAX_SAMPLE_CHARS = 12_000
 const MIN_IMPORT_ROLE = 500
+const CLASSIFY_MAX_TOKENS = 1200
 
 const classifyRequestSchema = z.object({
   projectId: z.string().trim().min(1).max(255),
@@ -165,13 +166,15 @@ imports.post(
 
     if (usage) {
       try {
-        const created = await admitChatUsage(c.env, { ...usage, userId: user.id, projectId: input.projectId })
+        const created = await admitChatUsage(c.env, { ...usage, userId: user.id, projectId: input.projectId,
+          model, promptChars: promptFor(input).reduce((n, m) => n + m.content.length, 0), maxOutputTokens: CLASSIFY_MAX_TOKENS })
         // A repeated key never starts another provider call.
         if (!created) return c.json({ error: "usage_request_already_admitted" }, 409)
       } catch (error) {
         if (error instanceof Error && error.message === "Weekly AI allowance exhausted") {
           return c.json({ error: "weekly_ai_allowance_exhausted", message: "This workspace has used its available AI allowance. Try again after the weekly reset or update its plan." }, 429)
         }
+        if (error instanceof Error && error.message === "Model price unavailable") return c.json({ error: "model_price_unavailable" }, 503)
         return c.json({ error: "usage_accounting_unavailable" }, 503)
       }
     }
@@ -186,7 +189,7 @@ imports.post(
           model,
           messages: promptFor(input),
           temperature: 0,
-          max_tokens: 1200,
+          max_tokens: CLASSIFY_MAX_TOKENS,
           stream: false,
           ...openRouterExtras(c.env.OPENROUTER_BASE_URL),
           response_format: { type: "json_object" },

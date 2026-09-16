@@ -155,6 +155,6 @@ MONDAY_REDIRECT_URI="http://localhost:5173/oauth/callback"
 # Local scripted-provider weekly usage verification only (chat completions and
 # import classification). Requires WRANGLER_LOCAL=1 and loopback request +
 # OPENROUTER_BASE_URL. Never enable for live providers.
-# Reserves 1 raw cent per local test request; settles reported cost, never an estimate.
+# Reserves a bound from the provider's live /models prices; settles reported cost, never an estimate.
 # Also enables the maintainer-only usage-rehearsal held/reconcile endpoints.
 # BILLING_CHAT_USAGE_REHEARSAL="false"

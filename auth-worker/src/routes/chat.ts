@@ -1,4 +1,4 @@
-import { admitChatUsage, chatUsageRehearsalAllowed, meterChatStream, settleChatUsage, type ChatUsage } from '../lib/billing/chat-usage'
+import { admitChatUsage, chatUsageRehearsalAllowed, METERED_MAX_OUTPUT_TOKENS, meterChatStream, settleChatUsage, type ChatUsage } from '../lib/billing/chat-usage'
 // POST /api/v1/chat/completions — OpenAI-compatible authenticated proxy to
 // OpenRouter. Streams via SSE when `stream: true`; otherwise returns the
 // upstream JSON verbatim so codex-web's existing client code keeps working.
@@ -190,13 +190,17 @@ chat.post(
     const chatWords = countWords(request.messages.map((m) => m.content).join(" "))
 
     if (usage) {
+      // Metered requests carry a server-enforced output cap so the bound holds.
+      request.max_tokens = Math.min(request.max_tokens ?? METERED_MAX_OUTPUT_TOKENS, METERED_MAX_OUTPUT_TOKENS)
       try {
-        const created = await admitChatUsage(c.env, { ...usage, userId: user.id, projectId: request.projectId! })
+        const created = await admitChatUsage(c.env, { ...usage, userId: user.id, projectId: request.projectId!,
+          model, promptChars: request.messages.reduce((n, m) => n + m.content.length, 0), maxOutputTokens: request.max_tokens })
         if (!created) return c.json({ error: 'usage_request_already_admitted' }, 409)
       } catch (error) {
         if (error instanceof Error && error.message === 'Weekly AI allowance exhausted') {
           return c.json({ error: 'weekly_ai_allowance_exhausted', message: 'This workspace has used its available AI allowance. Try again after the weekly reset or update its plan.' }, 429)
         }
+        if (error instanceof Error && error.message === 'Model price unavailable') return c.json({ error: 'model_price_unavailable' }, 503)
         return c.json({ error: 'usage_accounting_unavailable' }, 503)
       }
     }

@@ -45,6 +45,10 @@ every LLM producer is connected. Measured 2026-08 rates from the local
   raw settled cost, rate snapshots, and terminal-state constraints. It is prepared,
   not deployed. Freshly fetched main `c1aad5636` ends at migration 0089;
   0097 does not collide there. Recheck pending branches at release integration.
+- `rate-card.ts` reads OpenRouter's live model prices (cached) and bounds a
+  request from prompt characters and the enforced output cap; unknown models
+  are refused. `reserveWorkspaceUsage` admits only below 100% and lets a bound
+  end up to 5% over (`OVERAGE_FACTOR`).
 - `workspace-usage.ts` reads the verified workspace entitlement inside the same
   organization lock used by billing changes. It reserves against settled plus
   outstanding usage, deduplicates request IDs, and settles actual cost atomically.

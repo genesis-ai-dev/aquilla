@@ -6,8 +6,10 @@ import { completedPayment, config } from './helpers/workspace-billing'
 import { authHeader, jwtFor } from './helpers/db'
 import { readUsageTotals } from '../lib/billing/workspace-usage'
 import { readBillingWorkspace } from '../lib/billing/workspace'
+import { resetRateCardCache } from '../lib/billing/rate-card'
+import { rateCard, withRateCard } from './helpers/rate-card'
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => { vi.unstubAllGlobals(); resetRateCardCache() })
 async function setup() {
   const paid = await completedPayment('pro', 'month')
   expect((await paid.send()).status).toBe(200)
@@ -24,8 +26,9 @@ async function setup() {
   const totals = () => readUsageTotals(env.AQUILLA_PG, 1, period)
   return { settings, send, totals }
 }
+const completions = (fetch: ReturnType<typeof vi.fn>) => fetch.mock.calls.filter(([url]) => String(url).includes('/chat/completions')).length
 function upstream(text: string, stream = false) {
-  return vi.fn(async () => new Response(text, { headers: { 'Content-Type': stream ? 'text/event-stream' : 'application/json' } }))
+  return withRateCard(vi.fn(async () => new Response(text, { headers: { 'Content-Type': stream ? 'text/event-stream' : 'application/json' } })))
 }
 it('passes real authenticated chat output through cost settlement and blocks duplicate execution', async () => {
   const f = await setup()
@@ -37,19 +40,19 @@ it('passes real authenticated chat output through cost settlement and blocks dup
   expect(response.headers.get('X-Billing-Usage-Status')).toBe('settled')
   expect((await f.totals()).settled).toBe(500_000)
   expect((await f.send()).status).toBe(409)
-  expect(fetch).toHaveBeenCalledTimes(1)
+  expect(completions(fetch)).toBe(1)
 })
 it('preserves streamed bytes across arbitrary chunk boundaries and settles only at completion', async () => {
   const f = await setup()
   const text = 'data: {"choices":[{"delta":{"content":"héllo"}}]}\r\n\r\ndata: {"usage":{"cost":0.0025}}\r\n\r\ndata: [DONE]\r\n\r\n'
   const bytes = new TextEncoder().encode(text)
   let offset = 0
-  vi.stubGlobal('fetch', vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
+  vi.stubGlobal('fetch', withRateCard(vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
     pull(controller) { if (offset === bytes.length) controller.close(); else controller.enqueue(bytes.slice(offset, ++offset)) },
-  }))))
+  })))))
   const response = await f.send({ stream: true })
   expect(response.status).toBe(200)
-  expect((await f.totals()).reserved).toBe(4_000_000)
+  expect((await f.totals()).reserved).toBe(1_562_500)
   expect(await response.text()).toBe(text)
   expect(await f.totals()).toEqual({ reserved: 0, settled: 1_000_000, committed: 1_000_000 })
 })
@@ -62,18 +65,18 @@ it.each(['missing', 'truncated', 'malformed', 'oversized'])('retains uncertain %
   vi.stubGlobal('fetch', upstream(text, true))
   const response = await f.send({ stream: true })
   expect(await response.text()).toBe(text)
-  expect((await f.totals()).reserved).toBe(4_000_000)
+  expect((await f.totals()).reserved).toBe(1_562_500)
   expect((await f.totals()).settled).toBe(0)
 })
 it('keeps the reservation after client cancellation and cancels the provider reader', async () => {
   const f = await setup(); const canceled = vi.fn()
-  vi.stubGlobal('fetch', vi.fn(async () => new Response(new ReadableStream({
+  vi.stubGlobal('fetch', withRateCard(vi.fn(async () => new Response(new ReadableStream({
     pull(controller) { controller.enqueue(new TextEncoder().encode('data: {"choices":[]}\n\n')) }, cancel: canceled,
-  }))))
+  })))))
   const response = await f.send({ stream: true })
   const reader = response.body!.getReader(); await reader.read(); await reader.cancel()
   expect(canceled).toHaveBeenCalledTimes(1)
-  expect((await f.totals()).reserved).toBe(4_000_000)
+  expect((await f.totals()).reserved).toBe(1_562_500)
 })
 it('returns valid content with pending accounting when provider cost is missing', async () => {
   const f = await setup(); const body = { choices: [{ message: { content: 'Saved answer' } }] }
@@ -81,14 +84,14 @@ it('returns valid content with pending accounting when provider cost is missing'
   const response = await f.send()
   expect(await response.json()).toEqual(body)
   expect(response.headers.get('X-Billing-Usage-Status')).toBe('pending')
-  expect((await f.totals()).reserved).toBe(4_000_000)
+  expect((await f.totals()).reserved).toBe(1_562_500)
 })
 it('blocks exhausted allowance before starting the provider', async () => {
   const f = await setup()
   const fetch = upstream(JSON.stringify({ choices: [], usage: { cost: 0.13 } })); vi.stubGlobal('fetch', fetch)
   expect((await f.send()).status).toBe(200)
   expect((await f.send({}, {}, crypto.randomUUID())).status).toBe(429)
-  expect(fetch).toHaveBeenCalledTimes(1)
+  expect(completions(fetch)).toBe(1)
 })
 it('rejects projectless and unauthorized requests instead of billing org zero', async () => {
   const f = await setup(); const fetch = upstream('{}'); vi.stubGlobal('fetch', fetch)
@@ -96,29 +99,29 @@ it('rejects projectless and unauthorized requests instead of billing org zero', 
   expect((await f.send({ projectId: undefined })).status).toBe(403)
   expect((await f.send({ projectId: 'other' })).status).toBe(403)
   expect((await f.send({ projectId: 'unknown' })).status).toBe(403)
-  expect(fetch).not.toHaveBeenCalled()
+  expect(completions(fetch)).toBe(0)
 })
 it('fails closed when rehearsal targets a real provider or deployed worker', async () => {
   const f = await setup(); const fetch = upstream('{}'); vi.stubGlobal('fetch', fetch)
   expect((await f.send({}, { OPENROUTER_BASE_URL: 'https://openrouter.ai/api/v1' })).status).toBe(503)
   expect((await f.send({}, { WRANGLER_LOCAL: undefined })).status).toBe(503)
-  expect(fetch).not.toHaveBeenCalled()
+  expect(completions(fetch)).toBe(0)
 })
 it('retains the reservation after provider failure', async () => {
-  const f = await setup(); vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('Connection lost') }))
+  const f = await setup(); vi.stubGlobal('fetch', withRateCard(vi.fn(async () => { throw new Error('Connection lost') })))
   expect((await f.send()).status).toBe(500)
-  expect((await f.totals()).reserved).toBe(4_000_000)
+  expect((await f.totals()).reserved).toBe(1_562_500)
 })
 
 it('settles before delivering DONE when the client stops without draining transport EOF', async () => {
   const f = await setup()
   let sent = false
-  vi.stubGlobal('fetch', vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
+  vi.stubGlobal('fetch', withRateCard(vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
     pull(controller) {
       if (!sent) { sent = true; controller.enqueue(new TextEncoder().encode('data: {"usage":{"cost":0.001}}\n\ndata: [DONE]\n\n')) }
       // Keep the transport open: the client considers DONE the completion boundary.
     },
-  }))))
+  })))))
   const response = await f.send({ stream: true }); const reader = response.body!.getReader()
   const chunk = await reader.read()
   expect(new TextDecoder().decode(chunk.value)).toContain('[DONE]')

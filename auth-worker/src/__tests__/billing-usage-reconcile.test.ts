@@ -1,5 +1,7 @@
 import { env } from 'cloudflare:test'
 import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import path from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import app from '../index'
 import type { Env } from '../types'
@@ -7,8 +9,10 @@ import { completedPayment, config } from './helpers/workspace-billing'
 import { authHeader, jwtFor, seedUser } from './helpers/db'
 import { readUsageRequest, readUsageTotals, settleWorkspaceUsage } from '../lib/billing/workspace-usage'
 import { readBillingWorkspace } from '../lib/billing/workspace'
+import { resetRateCardCache } from '../lib/billing/rate-card'
+import { rateCard } from './helpers/rate-card'
 
-afterEach(() => vi.unstubAllGlobals())
+afterEach(() => { vi.unstubAllGlobals(); resetRateCardCache() })
 async function setup() {
   const paid = await completedPayment('pro', 'month')
   expect((await paid.send()).status).toBe(200)
@@ -36,6 +40,7 @@ function provider(completion: Response | (() => Response), generation: (id: stri
   const calls: string[] = []
   vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
     const url = String(input instanceof Request ? input.url : input); calls.push(url)
+    if (url.endsWith('/models')) return rateCard()
     if (url.includes('/generation')) return generation(new URL(url).searchParams.get('id') ?? '')
     return typeof completion === 'function' ? completion() : completion.clone()
   }))
@@ -63,7 +68,7 @@ it('records the stream generation id on truncation and reconciles it later', asy
   const response = await f.chat(id, { stream: true })
   await response.text()
   expect((await f.request(id))!.provider_ref).toBe('gen-stream')
-  expect((await f.totals()).reserved).toBe(4_000_000)
+  expect((await f.totals()).reserved).toBe(1_562_500)
   expect(await (await f.reconcile(id)).json()).toEqual({ status: 'settled' })
   expect(await f.totals()).toEqual({ reserved: 0, settled: 400_000, committed: 400_000 })
 })
@@ -82,10 +87,10 @@ it('keeps unreferenced, unavailable, and mismatched records held without contact
   expect(await (await f.reconcile(referenced)).json()).toEqual({ status: 'unavailable' })
   record = { data: { id: 'gen-2', total_cost: 'free' } }
   expect(await (await f.reconcile(referenced)).json()).toEqual({ status: 'unavailable' })
-  expect(await f.totals()).toEqual({ reserved: 8_000_000, settled: 0, committed: 8_000_000 })
+  expect(await f.totals()).toEqual({ reserved: 3_125_000, settled: 0, committed: 3_125_000 })
   record = { data: { id: 'gen-2', total_cost: 0.001 } }
   expect(await (await f.reconcile(referenced)).json()).toEqual({ status: 'settled' })
-  expect(await f.totals()).toEqual({ reserved: 4_000_000, settled: 400_000, committed: 4_400_000 })
+  expect(await f.totals()).toEqual({ reserved: 1_562_500, settled: 400_000, committed: 1_962_500 })
 })
 it('rejects a conflicting provider reference instead of rebinding the request', async () => {
   const f = await setup(); const id = crypto.randomUUID()
@@ -106,16 +111,16 @@ it('gates reconciliation to local rehearsal, maintainers, and known requests', a
   expect((await f.reconcile(id, { OPENROUTER_BASE_URL: 'https://openrouter.ai/api/v1' })).status).toBe(503)
   expect((await f.reconcile(crypto.randomUUID())).status).toBe(404)
   expect((await f.reconcile('not-a-uuid')).status).toBe(400)
-  expect((await f.totals()).reserved).toBe(4_000_000)
+  expect((await f.totals()).reserved).toBe(1_562_500)
 })
 it('replays the provider reference migration without losing held usage', async () => {
   const f = await setup(); const id = crypto.randomUUID()
   provider(json({ id: 'gen-1', choices: [] }), () => json({}))
   await f.chat(id)
-  const migration = readFileSync(new URL('../../../db/postgres/migrations/0098_workspace_usage_provider_ref.sql', import.meta.url), 'utf8')
+  const migration = readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../db/postgres/migrations/0098_workspace_usage_provider_ref.sql'), 'utf8')
   await env.AQUILLA_PG.exec(migration)
   await env.AQUILLA_PG.exec(migration)
   expect((await f.request(id))!.provider_ref).toBe('gen-1')
   await expect(env.AQUILLA_PG.exec("UPDATE workspace_usage_requests SET provider_ref = ''")).rejects.toThrow()
-  expect((await f.totals()).reserved).toBe(4_000_000)
+  expect((await f.totals()).reserved).toBe(1_562_500)
 })

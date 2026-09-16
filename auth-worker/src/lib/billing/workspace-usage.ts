@@ -3,6 +3,8 @@ import { MICRO_UNITS_PER_UNIT, quoteProviderCost, type CostRail } from '../../..
 import { readBillingWorkspace } from './workspace'
 import { weeklyAllowance, weeklyUsagePeriod } from './pricing-model'
 
+export const OVERAGE_FACTOR = 1.05
+
 interface UsageRequest {
   org_id: number; request_id: string; user_id: number; project_id: string
   rail: CostRail; rate_version: string; multiplier: number
@@ -98,7 +100,12 @@ export async function reserveWorkspaceUsage(db: AquillaDb, input: {
     } : weeklyUsagePeriod(org!.created_at, now.toISOString())
     const allowance = weeklyAllowance(workspace.entitlement?.access?.offer ?? 'free') * MICRO_UNITS_PER_UNIT
     const totals = await readUsageTotals(tx, input.orgId, period)
-    if (quote.microUnits > allowance - totals.committed) throw new Error('Weekly AI allowance exhausted')
+    // Decision 2026-09-16: nothing new starts at or past 100%, but a bounded
+    // request may finish up to 5% over so a pessimistic bound does not strand
+    // the last step of the week. Customers only ever see 100%.
+    if (totals.committed >= allowance || totals.committed + quote.microUnits > allowance * OVERAGE_FACTOR) {
+      throw new Error('Weekly AI allowance exhausted')
+    }
     await tx.prepare(`INSERT INTO workspace_usage_requests
       (org_id, request_id, user_id, project_id, rail, rate_version, multiplier,
        period_start, period_end, reserved_micro_units)

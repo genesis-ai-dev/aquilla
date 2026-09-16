@@ -2,6 +2,26 @@
 
 Updated: 2026-09-16. Tickets: AQU-837 (billing readiness), AQU-1091 (pricing and app UI).
 
+## Live rate card and reservation bound — 2026-09-16
+
+- [x] Replace the fixed one-cent rehearsal reservation with a bound priced from
+  OpenRouter's live model list (`rate-card.ts`, cached ten minutes per provider):
+  prompt characters ÷ 2 as tokens plus the enforced output cap. Metered chat
+  caps `max_tokens` at 4096 server-side; classify uses its fixed 1,200.
+- [x] Refuse a model missing from the live card (`model_price_unavailable`,
+  503) before any provider call. Prices are never estimated or defaulted.
+- [x] Admission rule per the 2026-09-16 decisions: nothing starts at or past
+  100% of the weekly allowance; a bounded request may end up to 5% over.
+  Settlement records the true cost; customers only ever see 100%.
+- [ ] The loopback rehearsal gate still applies; deployed enforcement waits on
+  the remaining producers and the legacy ledger retirement.
+
+Test impact: new `billing-rate-card.test.ts` (four unit tests: bound math,
+unknown model, cache TTL, malformed cards) and an overage case in the ledger
+suite (17). Chat (13), import (5), and reconcile (6) suites now script the
+model list through `helpers/rate-card.ts` with exact binary prices so reserved
+totals assert as integers. Unmetered classify and chat guard suites pass (19).
+
 ## Held-usage reconciliation — 2026-09-16
 
 - [x] Persist the provider generation id (`provider_ref`) on usage requests.
@@ -66,8 +86,9 @@ classify route to the billing journey. No UI or browser behavior changes.
   `BILLING_CHAT_USAGE_REHEARSAL=true` requires `WRANGLER_LOCAL=1` and loopback
   request/provider URLs. Its one-cent reservation is for scripted local tests,
   not a validated upper bound or estimated bill for a real provider.
-- [ ] Validate server-owned real-provider cost bounds and model routing before
-  enabling actual funded-provider enforcement. Do not silently remove the gate.
+- [x] Validate server-owned real-provider cost bounds and model routing before
+  enabling actual funded-provider enforcement. Bound now comes from the live
+  rate card (checkpoint above); routing stays server-owned. Gate unchanged.
 - [x] Persist provider generation references and verify reconciliation of held
   requests after interrupted delivery or persistence failure. See the
   held-usage reconciliation checkpoint above; live-provider sweep still pending.

@@ -1,6 +1,10 @@
 import type { Env } from '../../types'
 import { readProviderCostCents } from '../../../../db/shared/billing-cost'
 import { recordUsageProviderRef, reserveWorkspaceUsage, settleWorkspaceUsage, validProviderRef } from './workspace-usage'
+import { boundRequestCostCents, readRateCard } from './rate-card'
+
+/** Server-enforced output cap while metering; clients cannot raise it. */
+export const METERED_MAX_OUTPUT_TOKENS = 4096
 
 export interface ChatUsage { orgId: number; requestId: string }
 const loopback = (url: string) => {
@@ -10,8 +14,9 @@ const loopback = (url: string) => {
     && !parsed.username && !parsed.password
 }
 
-/** This first integration only targets the local scripted provider. Real
- * providers require validated request-cost bounds before enabling enforcement.
+/** This integration still targets the local scripted provider: the live rate
+ * card and reservation bound are in place, but deployed enforcement waits on
+ * the remaining producers and the legacy ledger retirement.
  */
 export function chatUsageRehearsalAllowed(env: Env, requestUrl: string) {
   try {
@@ -21,11 +26,11 @@ export function chatUsageRehearsalAllowed(env: Env, requestUrl: string) {
 }
 export async function admitChatUsage(env: Env, input: {
   orgId: number; userId: number; projectId: string; requestId: string
+  model: string; promptChars: number; maxOutputTokens: number
 }) {
-  // Scripted local provider reservation only; never an actual-cost fallback.
-  const result = await reserveWorkspaceUsage(env.AQUILLA_PG, {
-    ...input, rail: 'llm', maxRawCostCents: 1,
-  })
+  const { model, promptChars, maxOutputTokens, ...request } = input
+  const maxRawCostCents = boundRequestCostCents(await readRateCard(env), { model, promptChars, maxOutputTokens })
+  const result = await reserveWorkspaceUsage(env.AQUILLA_PG, { ...request, rail: 'llm', maxRawCostCents })
   return result.created
 }
 

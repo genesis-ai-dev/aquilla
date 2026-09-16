@@ -139,3 +139,19 @@ it('replays the real migration without losing usage or accepting an invalid acco
   await expect(env.AQUILLA_PG.exec("UPDATE workspace_usage_requests SET state = 'settled'")).rejects.toThrow()
   expect((await readUsageTotals(env.AQUILLA_PG, 1, period)).reserved).toBe(40 * MICRO_UNITS_PER_UNIT)
 })
+
+it('lets a bounded request finish up to 5% over the week but starts nothing at 100%', async () => {
+  // Pro: 50 units = 12.5 raw cents. Reserving 12 cents leaves the week at 96%.
+  const { input, now, period } = await setup()
+  await reserveWorkspaceUsage(env.AQUILLA_PG, { ...input, maxRawCostCents: 12 }, now)
+  // 1.5 cents would end at 108%: refused. 0.6 cents ends at 100.8%: allowed.
+  await expect(reserveWorkspaceUsage(env.AQUILLA_PG, { ...input, requestId: 'too-far', maxRawCostCents: 1.5 }, now)).rejects.toThrow('exhausted')
+  await reserveWorkspaceUsage(env.AQUILLA_PG, { ...input, requestId: 'last-step', maxRawCostCents: 0.6 }, now)
+  expect((await readUsageTotals(env.AQUILLA_PG, 1, period)).committed).toBe(50.4 * MICRO_UNITS_PER_UNIT)
+  // Past 100% nothing new starts, however small.
+  await expect(reserveWorkspaceUsage(env.AQUILLA_PG, { ...input, requestId: 'tiny', maxRawCostCents: 0.0001 }, now)).rejects.toThrow('exhausted')
+  // Settling below the bound reopens admission; the ledger keeps the true total.
+  await settleWorkspaceUsage(env.AQUILLA_PG, 1, 'last-step', 0.1)
+  expect((await readUsageTotals(env.AQUILLA_PG, 1, period)).committed).toBe(48.4 * MICRO_UNITS_PER_UNIT)
+  await reserveWorkspaceUsage(env.AQUILLA_PG, { ...input, requestId: 'reopened', maxRawCostCents: 0.5 }, now)
+})

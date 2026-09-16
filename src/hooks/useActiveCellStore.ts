@@ -9,6 +9,7 @@ import {
   mergeCellsDelta,
   readCellsCache,
   scheduleCellsCacheWrite,
+  walkAnchorChain,
 } from "@/lib/sync/cells-cache"
 import { peekOutboxBatch, subscribeToOutbox } from "@/lib/sync/outbox"
 import { extractUsfmFootnotes, type ExtractedFootnote } from "@/lib/footnotes/extract"
@@ -251,6 +252,21 @@ export class CellStore {
   private pendingProgressEventIds: string[] = []
   private optimisticEdits = new Map<string, OptimisticEdit>()
   private freshnessFloors = new Map<string, number>()
+  /**
+   * AQU-1068: cells this store has watched LEAVE the file — removed here, or
+   * removed by a collaborator and confirmed by a delta.
+   *
+   * It exists to answer one question no other state can: `getCellView` returns
+   * null both for "this cell is gone" and for "this store is looking at a
+   * different file now", and a write that is in flight when its cell is
+   * removed has to tell those apart. Dropping the write is right in the first
+   * case and would lose work in the second.
+   *
+   * Never cleared per-cell except by a rollback that puts the row back —
+   * `reset()` clears the whole set, because on a file switch the ids stop
+   * meaning anything.
+   */
+  private removedCellIds = new Set<string>()
   private cellVersionById = new Map<string, number>()
   // Feeds per-cell versions from one store-lifetime counter that reset() never
   // rewinds. useSyncExternalStore bails out when getCellVersion returns a value
@@ -379,6 +395,10 @@ export class CellStore {
     this.pendingProgressEventIds = []
     this.optimisticEdits = new Map()
     this.freshnessFloors = new Map()
+    // A different file's ids say nothing about this one — and keeping them
+    // would make `wasRemoved` claim a cell was deleted when the store simply
+    // moved on, which is the exact confusion the set exists to prevent.
+    this.removedCellIds = new Set()
     this.cellVersionById = new Map()
     this.maxServerSeq = null
     this.projectEpoch = null
@@ -470,11 +490,24 @@ export class CellStore {
 
   findIndexBySection(label: string): number {
     this.ensureDerivedIndexes()
+    return this.findNavigationEntryBySection(label)?.firstIndex ?? -1
+  }
+
+  /** AQU-1244: the first cell ID of a section, for callers that must scroll by
+   *  ID rather than by whole-file index. With "Split into milestones" on the
+   *  editor only renders the current milestone's rows, so a whole-file index is
+   *  out of range (dropped) or points at an unrelated row of the page already
+   *  showing; the ID path turns to the milestone that contains the cell. */
+  findCellIdBySection(label: string): string | null {
+    this.ensureDerivedIndexes()
+    return this.findNavigationEntryBySection(label)?.firstCellId ?? null
+  }
+
+  private findNavigationEntryBySection(label: string): CellNavigationEntry | undefined {
     const normalizedKey = legacySectionKey(label)
-    const entry = this.navIndex.find((item) => (
+    return this.navIndex.find((item) => (
       item.key === label || item.label === label || item.key === normalizedKey
     ))
-    return entry?.firstIndex ?? -1
   }
 
   getSectionLabelForCellId(cellId: string | undefined | null): string {
@@ -716,14 +749,47 @@ export class CellStore {
    * Reads `sourceById` because `CellData` carries neither field.
    */
   getRemovalPlan(cellId: string): {
+    /** Empty for a source-less row: there is no source event to chain onto. */
     eventId: string
     anchorCellId: string | null
     successor: { cellId: string; eventId: string } | null
     /** The target-side rows to take with it, per language lane. */
     targetLangs: string[]
+    /**
+     * AQU-1068: this row has TARGET rows but no source. The caller must emit
+     * the per-lane target deletes and nothing else — no source delete, no
+     * re-anchor.
+     */
+    sourceless: boolean
   } | null {
     const source = this.sourceById.get(cellId)
-    if (!source) return null
+    if (!source) {
+      // A GHOST: a translation whose cell was removed while the draft was in
+      // flight. The server projects a target row for it and the read route
+      // hands it back with no source, so it lands at the tail of the file
+      // (see `joinSourceAndTarget`) and used to be unremovable — this branch
+      // returning null was the "no way to recover from it" in Matthew's
+      // report. There is no chain to mend: nothing can anchor to a cell with
+      // no source row.
+      const langs = this.laneTargetLangsFor(cellId)
+      if (langs.length === 0) return null
+      return { eventId: "", anchorCellId: null, successor: null, targetLangs: langs, sourceless: true }
+    }
+    // AQU-1068: NOT YET CONFIRMED, so not yet removable.
+    //
+    // An optimistically inserted row has no event id — the outbox has not been
+    // flushed. Removing it anyway sends a delete whose parent is the empty
+    // string, and worse, a `source.cell.reorder` on the sibling carrying the
+    // SAME parent the insert's own reorder already claimed. AD-2 is
+    // first-child-wins, so the second is dead-lettered and the sibling is left
+    // anchored on the server to a cell that no longer exists — the chain
+    // corruption the re-point exists to prevent, arrived at from the other
+    // side. Offline it is not even a race: both batches flush together and the
+    // later reorder loses every time.
+    //
+    // The caller reports this rather than failing silently; the window closes
+    // as soon as the insert's flush lands.
+    if (!source.eventId) return null
     let successor: { cellId: string; eventId: string } | null = null
     for (const [id, row] of this.sourceById) {
       if (row.anchorCellId === cellId) {
@@ -731,13 +797,86 @@ export class CellStore {
         break
       }
     }
+    return {
+      eventId: source.eventId,
+      anchorCellId: source.anchorCellId,
+      successor,
+      targetLangs: this.laneTargetLangsFor(cellId),
+      sourceless: false,
+    }
+  }
+
+  /** Every lane holding a target row for this cell, active lane first. */
+  private laneTargetLangsFor(cellId: string): string[] {
     const targetLangs: string[] = []
     const own = this.targetById.get(cellId)
     if (own) targetLangs.push(own.targetLang ?? "")
     for (const row of this.otherLaneTargetRows) {
       if (row.cellId === cellId) targetLangs.push(row.targetLang ?? "")
     }
-    return { eventId: source.eventId, anchorCellId: source.anchorCellId, successor, targetLangs }
+    return targetLangs
+  }
+
+  /**
+   * AQU-1068: everything INSERTING a cell next to another one needs, for a file
+   * with no clock to consult.
+   *
+   * The timed insert (handleAddLine) picks its neighbours by TIME, because on a
+   * subtitle file the clock is what the user is looking at. An ordinary text
+   * file has no clock, so the anchor chain IS the order, and this reads it
+   * directly.
+   *
+   * Returns the anchor the NEW cell takes, the row that must be re-pointed at
+   * it (its former occupant), and both neighbouring sequence indices so the
+   * caller can mint one between them.
+   *
+   *  - "below": the new cell anchors to `cellId`; whatever was anchored to
+   *    `cellId` re-anchors to the new cell.
+   *  - "above": the new cell takes `cellId`'s own anchor; `cellId` itself
+   *    re-anchors to the new cell. When `cellId` is the chain head that anchor
+   *    is null, and the new cell becomes the head — which is exactly why the
+   *    re-point is not optional: two rows claiming a null anchor is the bug
+   *    getChainHeadCellId documents.
+   */
+  getInsertPlan(cellId: string, position: "above" | "below"): {
+    anchorCellId: string | null
+    /** The row whose anchor must be re-pointed at the new cell. */
+    reanchor: { cellId: string; eventId: string } | null
+    sequenceBefore: number | undefined
+    sequenceAfter: number | undefined
+  } | null {
+    const target = this.sourceById.get(cellId)
+    if (!target) return null
+
+    const index = this.order.indexOf(cellId)
+    if (index < 0) return null
+    const prevId = index > 0 ? this.order[index - 1] : null
+    const nextId = index + 1 < this.order.length ? this.order[index + 1] : null
+    const seq = (id: string | null) =>
+      id == null ? undefined : this.getCellView(id)?.sequenceIndex
+
+    if (position === "below") {
+      let successor: { cellId: string; eventId: string } | null = null
+      for (const [id, row] of this.sourceById) {
+        if (row.anchorCellId === cellId) {
+          successor = { cellId: id, eventId: row.eventId }
+          break
+        }
+      }
+      return {
+        anchorCellId: cellId,
+        reanchor: successor,
+        sequenceBefore: seq(cellId),
+        sequenceAfter: seq(nextId),
+      }
+    }
+
+    return {
+      anchorCellId: target.anchorCellId,
+      reanchor: { cellId, eventId: target.eventId },
+      sequenceBefore: seq(prevId),
+      sequenceAfter: seq(cellId),
+    }
   }
 
   /**
@@ -890,8 +1029,28 @@ export class CellStore {
   }
 
   replaceChangedRows(changedCellIds: string[], rows: CellRow[], maxServerSeq?: number): void {
+    // AQU-1068: a delta names every cell an event touched and carries those
+    // cells' CURRENT rows, so a changed id with no row is the server telling us
+    // the cell is gone — the only signal a collaborator's removal ever gives
+    // this client. Recorded before the merge, which drops the rows and takes
+    // the evidence with it.
+    if (changedCellIds.length > 0) {
+      const present = new Set(rows.map((row) => row.cellId))
+      for (const cellId of changedCellIds) {
+        if (!present.has(cellId)) this.removedCellIds.add(cellId)
+      }
+    }
     const merged = mergeCellsDelta(this.toRows(), changedCellIds, rows)
     this.replaceRows(merged, { changedCellIds, maxServerSeq })
+  }
+
+  /**
+   * AQU-1068: has this cell left the file, as opposed to never having been in
+   * this store? See `removedCellIds`. A write that finds its cell missing asks
+   * this before deciding whether to drop itself.
+   */
+  wasRemoved(cellId: string): boolean {
+    return this.removedCellIds.has(cellId)
   }
 
   toRows(): CellRow[] {
@@ -965,8 +1124,22 @@ export class CellStore {
         keep.delete(key)
       }
     }
+    // AQU-1068: anything still in `keep` is protected but ABSENT from the
+    // server's buffer, and pushing it here puts it at the TAIL. For a value
+    // edit that was always harmless — the row already had a place in the
+    // buffer's order. An optimistically INSERTED row is the first kind that is
+    // protected and genuinely absent (a full stream taken before the insert
+    // landed cannot contain it), so a just-added line would teleport to the
+    // bottom of a sequence-ordered file and stay there until something
+    // unrelated refetched. Re-walking the chain puts it back where its anchor
+    // says, which is what the delta path effectively already does.
+    const appended = keep.size > 0
     for (const row of keep.values()) out.push(row)
-    return { rows: out, discardedCellIds }
+    if (!appended) return { rows: out, discardedCellIds }
+    const sources: CellRow[] = []
+    const rest: CellRow[] = []
+    for (const row of out) (row.side === "source" ? sources : rest).push(row)
+    return { rows: [...walkAnchorChain(sources), ...rest], discardedCellIds }
   }
 
   setPendingState(
@@ -1118,6 +1291,219 @@ export class CellStore {
     this.emit([cellId])
   }
 
+  /**
+   * AQU-1068: a cell someone just added, visible on the SAME TICK.
+   *
+   * Insert used to wait on a flush round-trip plus a confirming read before the
+   * row existed at all. On a whole Bible that read is cheap on the wire (the
+   * delta carries two or three cells) but expensive here: an insert changes
+   * `order`, and `replaceRows` then treats EVERY cell in the file as changed —
+   * 31k version bumps and a full derived-index rebuild — so the click sat there
+   * for seconds. Applying the insert locally first makes it instant, and the
+   * confirming read becomes a correction nobody waits for.
+   *
+   * The freshness floor is what keeps this safe: it marks the new cell and the
+   * re-anchored sibling as newer than any fetch already in flight, so a delta
+   * that started before this write cannot resurrect the old order. Same
+   * mechanism the target-edit path has used since round 7.
+   *
+   * ROLLBACK IS THE CALLER'S JOB. A floor protects a row indefinitely, so an
+   * insert the server refuses would otherwise leave a phantom that no refetch
+   * can clear — `ProjectWorkspace` undoes it on a rejected flush.
+   */
+  applyOptimisticSourceInsert(row: {
+    cellId: string
+    anchorCellId: string | null
+    /** The row whose anchor now points at the new cell, if there was one. */
+    reanchorCellId?: string | null
+    sequenceIndex?: number
+    value?: string
+    startMs?: number
+    endMs?: number
+    metadata?: Record<string, unknown> | null
+  }): void {
+    if (this.sourceById.has(row.cellId)) return
+    const seq = ++this.writeSeq
+    const now = Date.now()
+    this.sourceById.set(row.cellId, {
+      cellId: row.cellId,
+      side: "source",
+      targetLang: "",
+      value: row.value ?? "",
+      valueHtml: null,
+      type: null,
+      canonicalRef: null,
+      anchorCellId: row.anchorCellId,
+      // No event id yet — the outbox has not been flushed. `getRemovalPlan`
+      // reads this to build a delete's parent, so taking the line straight back
+      // before the flush lands is refused rather than sent with a bad parent.
+      eventId: "",
+      sourceEventId: null,
+      lastEditor: this.ctx.username,
+      lastEditAt: now,
+      validated: false,
+      wordCount: 0,
+      endorsementCount: 0,
+      ...(row.sequenceIndex != null ? { sequenceIndex: row.sequenceIndex } : {}),
+      ...(row.startMs != null ? { startMs: row.startMs } : {}),
+      ...(row.endMs != null ? { endMs: row.endMs } : {}),
+      ...(row.metadata != null ? { metadata: row.metadata } : {}),
+    } as CellRow)
+    this.freshnessFloors.set(row.cellId, seq)
+
+    // The sibling that used to sit where the new cell now does.
+    if (row.reanchorCellId) {
+      const sibling = this.sourceById.get(row.reanchorCellId)
+      if (sibling) {
+        this.sourceById.set(row.reanchorCellId, { ...sibling, anchorCellId: row.cellId })
+        this.freshnessFloors.set(row.reanchorCellId, ++this.writeSeq)
+      }
+    }
+
+    // Position: directly after its anchor, or at the head when it has none.
+    // Splicing rather than pushing is the whole point — appending would put the
+    // row at the bottom of the file until the confirming read re-walked the
+    // chain, which is exactly the drift the anchor re-point exists to prevent.
+    const at = row.anchorCellId ? this.sourceOrder.indexOf(row.anchorCellId) : -1
+    const insertAt = at >= 0 ? at + 1 : 0
+    this.sourceOrder.splice(insertAt, 0, row.cellId)
+    const orderAt = row.anchorCellId ? this.order.indexOf(row.anchorCellId) : -1
+    this.order.splice(orderAt >= 0 ? orderAt + 1 : 0, 0, row.cellId)
+    this.indexById = new Map(this.order.map((id, index) => [id, index]))
+    this.listVersion++
+
+    this.rebuildDerivedIndexes()
+    this.bumpCells(row.reanchorCellId ? [row.cellId, row.reanchorCellId] : [row.cellId])
+    this.fileVersion++
+    this.emit(row.reanchorCellId ? [row.cellId, row.reanchorCellId] : [row.cellId])
+  }
+
+  /**
+   * ...and the same for taking one out. Drops the source row and every lane's
+   * target row, re-points the successor onto the removed cell's own anchor, and
+   * floors both so an in-flight delta cannot bring the row back.
+   *
+   * Returns what it removed, so the caller can restore it if the server refuses.
+   *
+   * AQU-1068: `source` is optional because a GHOST row — target rows whose
+   * source was deleted while a draft was in flight — is exactly a row a user
+   * needs to be able to take out. Refusing here (as this did) is what left
+   * Matthew's stranded translation on screen with no way to remove it.
+   */
+  applyOptimisticSourceRemove(cellId: string): {
+    source: CellRow | undefined
+    target: CellRow | undefined
+    otherLanes: CellRow[]
+    orderIndex: number
+    successorCellId: string | null
+  } | null {
+    const source = this.sourceById.get(cellId)
+    const target = this.targetById.get(cellId)
+    const hasOtherLane = this.otherLaneTargetRows.some((r) => r.cellId === cellId)
+    // Nothing on any side: there is no row here to remove.
+    if (!source && !target && !hasOtherLane) return null
+    const seq = ++this.writeSeq
+    const otherLanes = this.otherLaneTargetRows.filter((r) => r.cellId === cellId)
+    const orderIndex = this.order.indexOf(cellId)
+
+    // A ghost has no source row, so nothing can be anchored to it and there is
+    // no chain to repair — the successor hunt only applies to a real removal.
+    let successorCellId: string | null = null
+    if (source) {
+      for (const [id, r] of this.sourceById) {
+        if (r.anchorCellId === cellId) { successorCellId = id; break }
+      }
+      if (successorCellId) {
+        const successor = this.sourceById.get(successorCellId)!
+        this.sourceById.set(successorCellId, { ...successor, anchorCellId: source.anchorCellId })
+        this.freshnessFloors.set(successorCellId, ++this.writeSeq)
+      }
+    }
+
+    this.sourceById.delete(cellId)
+    this.targetById.delete(cellId)
+    this.otherLaneTargetRows = this.otherLaneTargetRows.filter((r) => r.cellId !== cellId)
+    const si = this.sourceOrder.indexOf(cellId)
+    if (si >= 0) this.sourceOrder.splice(si, 1)
+    const ti = this.targetOrder.indexOf(cellId)
+    if (ti >= 0) this.targetOrder.splice(ti, 1)
+    if (orderIndex >= 0) this.order.splice(orderIndex, 1)
+    this.indexById = new Map(this.order.map((id, index) => [id, index]))
+    this.optimisticEdits.delete(targetOverlayKey(cellId, this.ctx.lane ?? ""))
+    this.freshnessFloors.set(cellId, seq)
+    // The cell has left the file. Anything still in flight for it — an AI draft
+    // generating right now — must be dropped rather than re-creating it as a
+    // source-less row at the tail.
+    this.removedCellIds.add(cellId)
+    this.listVersion++
+
+    this.rebuildDerivedIndexes()
+    if (successorCellId) this.bumpCells([successorCellId])
+    this.fileVersion++
+    this.emit(successorCellId ? [cellId, successorCellId] : [cellId])
+    return { source, target, otherLanes, orderIndex, successorCellId }
+  }
+
+  /**
+   * Undo of the two above, for a write the server refused. Restores the rows
+   * and the order exactly, and CLEARS the freshness floors — without that the
+   * phantom would be protected from every correcting fetch forever.
+   */
+  rollbackOptimisticSourceChange(
+    cellId: string,
+    restore?: {
+      source: CellRow | undefined
+      target: CellRow | undefined
+      otherLanes: CellRow[]
+      orderIndex: number
+      successorCellId: string | null
+    } | null,
+  ): void {
+    // The row is back (or never left), so it is no longer a removed cell — and
+    // a write still in flight for it should be allowed to land after all.
+    this.removedCellIds.delete(cellId)
+    if (restore) {
+      if (restore.source) this.sourceById.set(cellId, restore.source)
+      if (restore.target) this.targetById.set(cellId, restore.target)
+      if (restore.otherLanes.length) this.otherLaneTargetRows = [...this.otherLaneTargetRows, ...restore.otherLanes]
+      if (restore.successorCellId) {
+        const successor = this.sourceById.get(restore.successorCellId)
+        if (successor) this.sourceById.set(restore.successorCellId, { ...successor, anchorCellId: cellId })
+        this.freshnessFloors.delete(restore.successorCellId)
+      }
+      const at = restore.orderIndex >= 0 ? Math.min(restore.orderIndex, this.order.length) : this.order.length
+      this.order.splice(at, 0, cellId)
+      // Only a row that HAS a source belongs in the source chain. Putting a
+      // ghost back there would invent a source row the server never had.
+      if (restore.source && !this.sourceOrder.includes(cellId)) this.sourceOrder.splice(at, 0, cellId)
+      if (restore.target && !this.targetOrder.includes(cellId)) this.targetOrder.push(cellId)
+    } else {
+      // Undoing an INSERT: the row and whatever it displaced.
+      const inserted = this.sourceById.get(cellId)
+      if (inserted) {
+        for (const [id, r] of this.sourceById) {
+          if (r.anchorCellId === cellId) {
+            this.sourceById.set(id, { ...r, anchorCellId: inserted.anchorCellId })
+            this.freshnessFloors.delete(id)
+            break
+          }
+        }
+      }
+      this.sourceById.delete(cellId)
+      this.targetById.delete(cellId)
+      const si = this.sourceOrder.indexOf(cellId)
+      if (si >= 0) this.sourceOrder.splice(si, 1)
+      const oi = this.order.indexOf(cellId)
+      if (oi >= 0) this.order.splice(oi, 1)
+    }
+    this.freshnessFloors.delete(cellId)
+    this.indexById = new Map(this.order.map((id, index) => [id, index]))
+    this.listVersion++
+    this.rebuildDerivedIndexes()
+    this.fileVersion++
+    this.emitAll()
+  }
+
   // Round 7 (AQU-646): optimistic TIMING/metadata patch — chip moves and
   // subtitle retimes apply instantly instead of snapping back for the
   // flush+revalidate round-trip. Mirrors the projections' shapes: startMs/
@@ -1224,6 +1610,25 @@ export class CellStore {
     this.freshnessFloors.set(cellId, ++this.writeSeq)
   }
 
+  /**
+   * Put `sourceOrder` back into anchor-chain order.
+   *
+   * Reuses the cache's `walkAnchorChain` — the same walk the server's read
+   * performs, with the same first-child-wins tie-break and the same
+   * append-the-unreachable rule, so a broken chain loses no rows. It is also
+   * explicitly stacked rather than recursive, which matters here: a Bible's
+   * chain is one cell deep per verse, so a recursive walk would overflow at
+   * around thirty thousand.
+   */
+  private resortSourceOrderByChain(): void {
+    const rows: CellRow[] = []
+    for (const id of this.sourceOrder) {
+      const row = this.sourceById.get(id)
+      if (row) rows.push(row)
+    }
+    this.sourceOrder = walkAnchorChain(rows).map((r) => r.cellId)
+  }
+
   replaceRowsForCell(cellId: string, rows: CellRow[]): void {
     const lane = this.ctx.lane ?? ""
     const source = rows.find((row) => row.side === "source")
@@ -1237,8 +1642,21 @@ export class CellStore {
       if (row.side === "target" && laneOf(row) !== lane) this.otherLaneTargetRows.push(row)
     }
     if (source) {
+      // AQU-1068: a targeted read appends, but position is a function of the
+      // ANCHORS — so re-derive it whenever they can have changed: a row that is
+      // new to us, or one whose anchor moved. A collaborator's insert arrives
+      // as both (the new cell, then the sibling it displaced), and the file is
+      // only in the right order once the second has landed.
+      //
+      // Before this, such a cell simply showed up at the bottom until the next
+      // full or delta read re-walked the chain. Display order hid it on
+      // time-ordered files, where the lens re-sorts by clock; on a
+      // sequence-ordered one it was plainly wrong.
+      const previousAnchor = this.sourceById.get(cellId)?.anchorCellId
+      const anchorMoved = !this.sourceById.has(cellId) || previousAnchor !== source.anchorCellId
       this.sourceById.set(cellId, source)
       if (!this.sourceOrder.includes(cellId)) this.sourceOrder.push(cellId)
+      if (anchorMoved) this.resortSourceOrderByChain()
     } else {
       this.sourceById.delete(cellId)
       this.sourceOrder = this.sourceOrder.filter((id) => id !== cellId)
@@ -1491,7 +1909,7 @@ export class CellStore {
       const subsections: CellNavigationSubsection[] = []
       for (let offset = 0; offset < group.cellIds.length; offset += MILESTONE_SUBSECTION_SIZE) {
         const cellIds = group.cellIds.slice(offset, offset + MILESTONE_SUBSECTION_SIZE)
-        const firstCellId = cellIds[0]!
+        const firstCellId = cellIds[0]
         subsections.push({
           key: `${group.milestone.key}:range:${firstCellId}`,
           label: `${offset + 1}–${offset + cellIds.length}`,
@@ -1663,6 +2081,13 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
       setIsError(false)
       return
     }
+    // AQU-1068: a soft fetch asked for while another fetch is running is
+    // QUEUED, not dropped. It used to be dropped — and on a big file the
+    // initial stream holds the flight slot for seconds, which is exactly when
+    // an insert's confirming refetch arrives. Dropping it left the new row
+    // unconfirmed (so removal refused it as unsaved) until something unrelated
+    // refetched. One flag, not a queue: every soft fetch means "catch up now",
+    // so N requests collapse into one run after the current fetch finishes.
     if (soft && inFlightRef.current) {
       pendingSoftRefetchRef.current = true
       return
@@ -1800,7 +2225,19 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
         discardedProtected = discardedCellIds.size > 0
         store.replaceRows(kept, { full: true })
       } else {
-        store.replaceRows(hardRows, { full: true })
+        // AQU-1068: the hard path replaces EVERY row, and a cold-cache open of
+        // a big file streams for seconds — long enough for someone to insert a
+        // cell mid-stream. The stream's rows were read before that insert
+        // projected, so an unprotected replace silently drops the new row from
+        // this tab (the server already has it). Same merge as the soft path:
+        // rows written after the stream began survive, and the chain re-walk
+        // inside mergeProtectedRows puts an inserted row where its anchor
+        // says. `reset()` cleared the floors when this fetch began, so a floor
+        // above startSeq here can only mean a write made during the stream.
+        store.clearConfirmedShadows(hardRows, startSeq)
+        const { rows: kept, discardedCellIds } = store.mergeProtectedRows(hardRows, startSeq)
+        discardedProtected = discardedCellIds.size > 0
+        store.replaceRows(kept, { full: true })
       }
 
       const watermark = streamTorn || discardedProtected ? null : streamMaxSeq

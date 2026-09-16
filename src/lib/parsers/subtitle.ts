@@ -11,7 +11,11 @@ const TIMESTAMP_SRT = /^\d{2}:\d{2}:\d{2},\d{3}\s+-->\s+\d{2}:\d{2}:\d{2},\d{3}/
 const CUE_RANGE_RE =
   /(\d{2}):(\d{2}):(\d{2})[.,](\d{3})\s+-->\s+(\d{2}):(\d{2}):(\d{2})[.,](\d{3})/
 
-function parseCueRange(ts: string): { start: number; end: number } | null {
+/** Parse a `HH:MM:SS.mmm --> HH:MM:SS.mmm` cue range (VTT `.` or SRT `,`
+ *  fractions) into seconds. Exported so the file-scoped target import can
+ *  recover a cue's timings from its timecode label — see
+ *  `matchTargetRowsByOverlap` in `lib/import-file-target.ts` (AQU-1143). */
+export function parseCueRange(ts: string): { start: number; end: number } | null {
   const m = ts.match(CUE_RANGE_RE)
   if (!m) return null
   const start = Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]) + Number(m[4]) / 1000

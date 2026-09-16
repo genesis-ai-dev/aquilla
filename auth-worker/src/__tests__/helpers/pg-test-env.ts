@@ -46,6 +46,9 @@ export const env = {
   SYNC_SECRET_KEY: "sync-secret",
   ALGORITHM: "HS256",
   ACCESS_TOKEN_EXPIRE_MINUTES: "43200",
+  // Undefined -> resolveSession's own 90-day default. Suites that need a
+  // tighter/looser cap set this per-test.
+  MAX_SESSION_AGE_DAYS: undefined as string | undefined,
   EMAIL_FROM: "noreply@support.aquilla.app",
   BASE_URL: "https://aquilla.app",
   SYNC_WORKER_URL: "https://api.aquilla.app/sync",

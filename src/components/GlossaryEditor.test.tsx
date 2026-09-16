@@ -36,6 +36,20 @@ vi.mock("@/hooks/useProjectCells", () => ({
 }))
 
 const patchSettings = vi.fn().mockResolvedValue({ kind: "ok" })
+// Writes must become term.* events — never a settings-blob PATCH. The blob is
+// retired: a PATCHed term is one nothing else (the editor, other users) reads.
+const emitTermCreate = vi.fn(async (_input?: unknown) => "e-create")
+const emitTermUpdate = vi.fn(async (_input?: unknown) => "e-update")
+const emitTermDelete = vi.fn(async (_input?: unknown) => "e-delete")
+const emitTermApprove = vi.fn(async (_input?: unknown) => "e-approve")
+const emitTermReject = vi.fn(async (_input?: unknown) => "e-reject")
+vi.mock("@/lib/sync/events-emit", () => ({
+  emitTermCreate: (input: unknown) => emitTermCreate(input),
+  emitTermUpdate: (input: unknown) => emitTermUpdate(input),
+  emitTermDelete: (input: unknown) => emitTermDelete(input),
+  emitTermApprove: (input: unknown) => emitTermApprove(input),
+  emitTermReject: (input: unknown) => emitTermReject(input),
+}))
 let mockProject: ProjectRecord
 let mockProjectLoading = false
 // AQU-1006 follow-up: concepts come from the sync-worker projection via
@@ -76,6 +90,7 @@ function concept(p: Partial<Concept>): Concept {
 
 beforeEach(() => {
   patchSettings.mockClear()
+  for (const m of [emitTermCreate, emitTermUpdate, emitTermDelete, emitTermApprove, emitTermReject]) m.mockClear()
   projectCellsEnabled = false
   projectCellsLoading = false
   projectCellFiles = []
@@ -125,6 +140,32 @@ describe("GlossaryEditor", () => {
     expect(screen.getByText("grace")).toBeInTheDocument()
   })
 
+  it("persists a rendering removed from the concept detail view as a term event", async () => {
+    // The detail view is where a lead actually reads a term's usage, so the
+    // rendering edits it offers have to reach the event log from there — not
+    // only from the glossary row's edit dialog.
+    mockProject = {
+      id: "p1",
+      name: "P",
+      terminology: [
+        concept({
+          renderings: [
+            { rendering: "favor", status: "preferred" },
+            { rendering: "gracia", status: "admitted" },
+          ],
+        }),
+      ],
+    } as unknown as ProjectRecord
+    renderEditor({}, "/project/p1/terminology?concept=c1")
+
+    fireEvent.click(await screen.findByRole("button", { name: /remove rendering favor/i }))
+
+    await waitFor(() => expect(emitTermUpdate).toHaveBeenCalled())
+    expect(emitTermUpdate.mock.calls[0][0]).toMatchObject({
+      renderings: [{ rendering: "gracia", status: "admitted" }],
+    })
+  })
+
   it("renders the workspace-owned glossary immediately without a duplicate project resolve", () => {
     mockProjectLoading = true
     const workspaceProject = {
@@ -150,15 +191,17 @@ describe("GlossaryEditor", () => {
     expect(screen.getByText("wrath")).toBeInTheDocument()
   })
 
-  it("archiving an active concept persists status=deprecated", async () => {
+  it("archiving an active concept emits term.reject(deprecate), never a settings PATCH", async () => {
     renderEditor()
     fireEvent.click(screen.getByRole("button", { name: /archive term/i }))
-    await waitFor(() => expect(patchSettings).toHaveBeenCalled())
-    const arg = patchSettings.mock.calls[0][0] as { terminology: Concept[] }
-    expect(arg.terminology[0].status).toBe("deprecated")
+    await waitFor(() => expect(emitTermReject).toHaveBeenCalled())
+    expect(emitTermReject).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: "p1", conceptId: "c1", mode: "deprecate", author: "tester" }),
+    )
+    expect(patchSettings).not.toHaveBeenCalled()
   })
 
-  it("adding a term via the create dialog persists a new active concept", async () => {
+  it("adding a term via the create dialog emits term.create for an active concept", async () => {
     renderEditor()
     fireEvent.click(screen.getByRole("button", { name: /add term/i }))
     const dialog = screen.getByRole("dialog")
@@ -169,11 +212,19 @@ describe("GlossaryEditor", () => {
       target: { value: "misericordia" },
     })
     fireEvent.click(within(dialog).getByRole("button", { name: /add term/i }))
-    await waitFor(() => expect(patchSettings).toHaveBeenCalled())
-    const arg = patchSettings.mock.calls[0][0] as { terminology: Concept[] }
-    const added = arg.terminology.find((c) => c.sourceTerm === "mercy")
-    expect(added?.status).toBe("active")
-    expect(added?.renderings).toEqual([{ rendering: "misericordia", status: "preferred" }])
+    await waitFor(() => expect(emitTermCreate).toHaveBeenCalled())
+    expect(emitTermCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: "p1",
+        sourceTerm: "mercy",
+        status: "active",
+        renderings: [{ rendering: "misericordia", status: "preferred" }],
+        author: "tester",
+      }),
+    )
+    // The optimistic row shows before the flush lands.
+    expect(screen.getByText("mercy")).toBeInTheDocument()
+    expect(patchSettings).not.toHaveBeenCalled()
   })
 
   it("requires both a source and rendering before adding an active term", () => {
@@ -224,9 +275,9 @@ describe("GlossaryEditor", () => {
     fireEvent.blur(second)
     fireEvent.click(screen.getByRole("button", { name: "Remove rendering 1" }))
 
-    await waitFor(() => expect(patchSettings).toHaveBeenCalledTimes(3))
-    const last = patchSettings.mock.calls.at(-1)?.[0] as { terminology: Concept[] }
-    expect(last.terminology[0].renderings).toEqual([
+    await waitFor(() => expect(emitTermUpdate).toHaveBeenCalledTimes(3))
+    const last = emitTermUpdate.mock.calls.at(-1)?.[0] as unknown as { renderings: Concept["renderings"] }
+    expect(last.renderings).toEqual([
       { rendering: "alternate", status: "admitted" },
     ])
     await waitFor(() => {

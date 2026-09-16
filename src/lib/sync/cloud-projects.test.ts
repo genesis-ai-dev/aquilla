@@ -3,6 +3,7 @@ import { describe, it, expect, vi, afterEach } from "vitest"
 import {
   fetchAccessibleProjects,
   fetchOrgDeletedFiles,
+  listProjectsPage,
   minimalProjectRecord,
   renameProject,
   resolveCloudProject,
@@ -67,6 +68,40 @@ describe("fetchAccessibleProjects", () => {
 
     global.fetch = vi.fn(async () => { throw new Error("offline") }) as unknown as typeof fetch
     expect(await fetchAccessibleProjects("jwt", undefined, API)).toEqual([])
+  })
+})
+
+describe("listProjectsPage", () => {
+  afterEach(() => { global.fetch = originalFetch })
+
+  it("GETs /api/v2/projects with limit, q, cursor, and orgId", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url = input instanceof Request ? input.url : String(input)
+      expect(url).toContain(`${API}/api/v2/projects?`)
+      expect(url).toContain("q=mar")
+      expect(url).toContain("limit=40")
+      expect(url).toContain("cursor=a%3AActs")
+      expect(url).toContain("orgId=1")
+      return new Response(
+        JSON.stringify({
+          projects: [{ id: "pb", name: "Mark", role: { level: 700, name: "owner", source: "creator" } }],
+          nextCursor: "pb:Mark",
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      )
+    })
+    global.fetch = fetchMock as unknown as typeof fetch
+
+    const page = await listProjectsPage("jwt-user", {
+      q: "mar",
+      limit: 40,
+      cursor: "a:Acts",
+      orgId: 1,
+    }, API)
+    expect(page).toEqual({
+      projects: [{ id: "pb", name: "Mark", role: { level: 700, name: "owner", source: "creator" } }],
+      nextCursor: "pb:Mark",
+    })
   })
 })
 

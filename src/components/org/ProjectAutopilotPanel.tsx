@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { Link } from "react-router-dom"
 import {
   AlertTriangle,
   ChevronRight,
@@ -30,6 +31,7 @@ import {
   type ContextualOverview,
   type ContextualOverviewFile,
   type ProjectRunStartResult,
+  type StartBlockerId,
 } from "@/lib/contextual/transport"
 import { useI18n, type TFunction } from "@/lib/i18n/I18nProvider"
 
@@ -255,6 +257,51 @@ function ActionWidget({
   )
 }
 
+/** The prerequisites the server refuses to start without (AQU-827), rendered
+ *  as the fix rather than as a rejection: each one names the missing piece and
+ *  links to the exact surface that supplies it. The button is disabled instead
+ *  of hidden so the capability stays discoverable while it is unavailable. */
+function StartGateNotice({
+  projectId,
+  blockers,
+  t,
+}: {
+  projectId: string
+  blockers: StartBlockerId[]
+  t: TFunction
+}) {
+  const links: Record<StartBlockerId, { to: string; label: string; detail: string }> = {
+    languages: {
+      to: `/project/${projectId}/settings`,
+      label: t("autopilot.startGate.settingsLink"),
+      detail: t("autopilot.startGate.languages"),
+    },
+    brief: {
+      to: `/project/${projectId}/memory/brief`,
+      label: t("autopilot.startGate.briefLink"),
+      detail: t("autopilot.startGate.brief"),
+    },
+  }
+  return (
+    <div className="rounded-md border border-dashed p-3 text-sm" data-testid="autopilot-start-gate">
+      <p className="font-medium">{t("autopilot.startGate.title")}</p>
+      <ul className="mt-2 flex flex-col gap-1.5">
+        {blockers.map((id) => (
+          <li key={id} className="flex flex-wrap items-baseline gap-x-2">
+            <span className="text-muted-foreground">{links[id].detail}</span>
+            <Link
+              to={links[id].to}
+              className="text-xs text-primary underline-offset-2 hover:underline"
+            >
+              {links[id].label}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 export function ProjectAutopilotPanel({ projectId, fileNames, canStart }: ProjectAutopilotPanelProps) {
   const { locale, t } = useI18n()
   const [overview, setOverview] = useState<ContextualOverview | null>(null)
@@ -362,6 +409,10 @@ export function ProjectAutopilotPanel({ projectId, fileNames, canStart }: Projec
     WORKING_STATUSES.has(file.status) || file.status === "paused" || fileHasQueuedWork(file),
   )
   const showStart = canStart && !initialLoadFailed && (starting || !hasBlockingRun)
+  // The server rejects a start without these (AQU-827); mirror it here so the
+  // user is told what is missing instead of pressing a button that fails.
+  const startBlockers = overview.readiness?.startBlockers ?? []
+  const startBlocked = startBlockers.length > 0
 
   return (
     <>
@@ -375,7 +426,7 @@ export function ProjectAutopilotPanel({ projectId, fileNames, canStart }: Projec
           <CardDescription>{primaryLine(state, overview, workingDone, workingTotal, workingFileCount, workingTotalsKnown, starting, initialLoadFailed, t)}</CardDescription>
           {showStart && (
             <CardAction>
-              <Button type="button" size="sm" variant={state === "not-started" ? "default" : "outline"} disabled={starting} onClick={() => void handleStart()}>
+              <Button type="button" size="sm" variant={state === "not-started" ? "default" : "outline"} disabled={starting || startBlocked} onClick={() => void handleStart()}>
                 {starting ? <LoaderCircle data-icon="inline-start" className="animate-spin motion-reduce:animate-none" aria-hidden /> : <PencilSparkles data-icon="inline-start" aria-hidden />}
                 {t("autopilot.action.run")}
               </Button>
@@ -384,6 +435,9 @@ export function ProjectAutopilotPanel({ projectId, fileNames, canStart }: Projec
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           {starting && <p role="status" aria-live="polite" className="text-sm font-medium">{t("autopilot.feedback.starting")}</p>}
+          {showStart && startBlocked && (
+            <StartGateNotice projectId={projectId} blockers={startBlockers} t={t} />
+          )}
           {state !== "not-started" && <AutopilotProcessGraph overview={overview} compact />}
           {state === "working" && !starting && workingTotalsKnown && workingTotal > 0 && (
             <Progress

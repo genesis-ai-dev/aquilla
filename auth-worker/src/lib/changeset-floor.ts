@@ -14,25 +14,28 @@
 // (role-policy, the command modules, db/shared) — no sync-worker binding, R2,
 // or Durable Object type reaches auth-worker through it.
 //
-// One value it cannot supply: the org's DYNAMIC termbase-edit floor for a
-// `terminology` PatchSettings op. sync-worker keeps that arithmetic private
-// (requiredRoleForOps), so the static floor is raised — never lowered — with
-// auth-worker's own getTermbaseEditMinRoleForProject, which sync-worker's copy
-// documents itself as mirroring. Raising can only over-enforce, and only for an
-// org that deliberately LOWERED termbaseEditMinRole below PROJECT_LEAD.
+// Org-configurable floors are resolved here before the command walk:
+// assignment EmitEvents use assignmentMinRole exactly (so lowering and raising
+// both work), while terminology PatchSettings retains its existing
+// raise-only mirror of sync-worker's private requiredRoleForOps arithmetic.
 //
 // SWARM-TODO(AQU-CMDREG-P1): once sync-worker's external/authority.ts
 // (§2.3, built in parallel) has landed, collapse the max-over-commands walk and
-// the CreateProject carve-out below onto its requiredFloorForChangeset /
-// isProjectCreation, and export requiredRoleForOps so the termbase raise above
+// the tenant-creation carve-out below onto its requiredFloorForChangeset /
+// isTenantCreation, and export requiredRoleForOps so the termbase raise above
 // can become an exact match instead of a ceiling.
 
 import {
+  commandsContainAssignmentEvents,
   requiredRoleForCommand,
   type Command,
 } from "../../../sync-worker/src/external/commands"
+import { ORG_MEMBER_COMMAND_KINDS } from "../../../sync-worker/src/external/commands-org-members"
 import { describeCommand } from "../../../db/shared/command-catalog"
-import { getTermbaseEditMinRoleForProject } from "../services/org-permissions"
+import {
+  getAssignmentMinRoleForProject,
+  getTermbaseEditMinRoleForProject,
+} from "../services/org-permissions"
 import { ROLE, type Env } from "../types"
 
 /** Floor for a plan whose stored commands cannot be read as the known command
@@ -80,20 +83,43 @@ function asFloorCommand(raw: unknown): Command | null {
 }
 
 /**
- * True when the plan CREATES a project. Such a plan keeps the creator rule:
- * its authority is org-level (re-checked at commit) and the project it names
- * does not exist until commit, so no project role can resolve against it —
- * a role floor would deny everyone, including the person who staged it.
+ * True when the plan CREATES a tenant — a project (CreateProject) or an
+ * organization (CreateOrg, AQU-1221). Such a plan keeps the creator rule: its
+ * authority is org-level or scope-level (re-checked at commit) and the project
+ * it is filed under does not exist until commit — for CreateOrg it never
+ * exists at all — so no project role can resolve against it, and a role floor
+ * would deny everyone, including the person who staged it.
  *
  * Mirrors the same carve-out in sync-worker/src/external/authority.ts. Both
  * copies exist only because the rule has to be applied on two different
  * principal shapes (browser session here, credential context there); the FLOOR
  * itself is imported, never restated.
  */
-export function planCreatesProject(commandsRaw: unknown): boolean {
+export function planCreatesTenant(commandsRaw: unknown): boolean {
   const rawList = parseCommandList(commandsRaw)
   if (!rawList) return false
-  return rawList.some((raw) => isRecord(raw) && raw.kind === "CreateProject")
+  return rawList.some(
+    (raw) => isRecord(raw) && (raw.kind === "CreateProject" || raw.kind === "CreateOrg"),
+  )
+}
+
+/**
+ * True when the plan keeps the creator rule rather than a project-role floor.
+ * Project creation (above) plus the AQU-1235 org-membership commands: both are
+ * ORG-level authority, re-checked at prepare and commit against the caller's
+ * live org role, with no project role that could resolve against the plan.
+ *
+ * Mirrors isCreatorScoped in sync-worker/src/external/authority.ts — the kinds
+ * are imported, not restated, so the two copies cannot drift.
+ */
+export function planIsCreatorScoped(commandsRaw: unknown): boolean {
+  if (planCreatesTenant(commandsRaw)) return true
+  const rawList = parseCommandList(commandsRaw)
+  if (!rawList) return false
+  const orgKinds: readonly string[] = ORG_MEMBER_COMMAND_KINDS
+  return rawList.some(
+    (raw) => isRecord(raw) && typeof raw.kind === "string" && orgKinds.includes(raw.kind),
+  )
 }
 
 /** True when the plan patches the `terminology` settings key — the one op
@@ -127,7 +153,12 @@ export async function requiredRoleForChangeset(
 
   let floor: number
   try {
-    floor = Math.max(...commands.map(requiredRoleForCommand))
+    const assignmentMinRole = commandsContainAssignmentEvents(commands)
+      ? await getAssignmentMinRoleForProject(env, projectId)
+      : undefined
+    floor = Math.max(
+      ...commands.map((command) => requiredRoleForCommand(command, assignmentMinRole)),
+    )
   } catch {
     return UNREADABLE_PLAN_FLOOR
   }

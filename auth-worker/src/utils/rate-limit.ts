@@ -93,6 +93,9 @@ export type RateLimitKind =
   | "admin_elevation_verify"
   | "register"
   | "credential_mint"
+  | "agent_authorize"
+  | "agent_code"
+  | "agent_decision"
   | "access_link_redeem"
 
 /** Roughly 1-in-50 calls also prunes stale rows so the table stays bounded

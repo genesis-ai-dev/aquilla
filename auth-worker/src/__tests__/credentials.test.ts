@@ -76,6 +76,37 @@ describe("POST /api/v2/credentials + validateApiCredential", () => {
     expect(await validateApiCredential(env.AQUILLA_PG, "")).toBeNull()
   })
 
+  it("throttles invalid-credential attempts per source IP, without punishing other IPs or opted-out callers", async () => {
+    await seedUser(1, "alice")
+    const body = (await (await mint("alice", { name: "t", mode: "ask" })).json()) as CreateResponse
+
+    const attackerIp = "203.0.113.7"
+    // Exhaust the per-IP invalid-attempt budget with garbage tokens.
+    for (let i = 0; i < 30; i++) {
+      expect(await validateApiCredential(env.AQUILLA_PG, "aqk_" + "0".repeat(40), attackerIp)).toBeNull()
+    }
+    // The budget is now spent — even a genuinely valid token from that IP is
+    // rejected without a DB lookup, since the whole point is to stop the flood
+    // regardless of whether any individual guess would have succeeded.
+    expect(await validateApiCredential(env.AQUILLA_PG, body.token, attackerIp)).toBeNull()
+
+    // A different source IP was never recorded against and isn't throttled.
+    expect(await validateApiCredential(env.AQUILLA_PG, body.token, "198.51.100.9")).not.toBeNull()
+
+    // Callers that don't pass an IP (e.g. legacy call sites) skip throttling
+    // entirely rather than sharing one global bucket.
+    expect(await validateApiCredential(env.AQUILLA_PG, body.token)).not.toBeNull()
+  })
+
+  it("never throttles repeated attempts with the correct token", async () => {
+    await seedUser(1, "alice")
+    const body = (await (await mint("alice", { name: "t", mode: "ask" })).json()) as CreateResponse
+    const ip = "203.0.113.8"
+    for (let i = 0; i < 40; i++) {
+      expect(await validateApiCredential(env.AQUILLA_PG, body.token, ip)).not.toBeNull()
+    }
+  })
+
   it("rejects an expired credential", async () => {
     await seedUser(1, "alice")
     const body = (await (await mint("alice", { name: "t", mode: "ask" })).json()) as CreateResponse
@@ -247,5 +278,66 @@ describe("DELETE /api/v2/credentials/:id", () => {
       env,
     )
     expect(missing.status).toBe(404)
+  })
+
+  // AQU-1180 — the `pii` flag decides whether an agent token can see the names
+  // of everyone who has edited the project. That is a decision about other
+  // people's safety, so it is off by default and an owner's call to turn on.
+  describe("pii flag (AQU-1180)", () => {
+    it("defaults to off when the field is omitted", async () => {
+      await seedUser(1, "alice")
+      const body = (await (await mint("alice", { name: "t", mode: "ask" })).json()) as CreateResponse
+      const ctx = await validateApiCredential(env.AQUILLA_PG, body.token)
+      expect(ctx?.pii).toBe(false)
+    })
+
+    it("lets an owner mint a pii credential scoped to their project", async () => {
+      await seedUser(1, "alice")
+      await seedProject("proj-1", 1)
+      await grantProjectRole("proj-1", 1, 700, 1) // OWNER
+      const res = await mint("alice", {
+        name: "pii token",
+        mode: "ask",
+        projectId: "proj-1",
+        pii: true,
+      })
+      expect(res.status).toBe(201)
+      const body = (await res.json()) as CreateResponse
+      const ctx = await validateApiCredential(env.AQUILLA_PG, body.token)
+      expect(ctx?.pii).toBe(true)
+    })
+
+    it("denies a non-owner (maintainer) minting pii: on", async () => {
+      await seedUser(1, "alice")
+      await seedUser(2, "owner")
+      await seedProject("proj-1", 2)
+      await grantProjectRole("proj-1", 1, 600, 2) // MAINTAINER — write access, not ownership
+      const res = await mint("alice", {
+        name: "pii token",
+        mode: "ask",
+        projectId: "proj-1",
+        pii: true,
+      })
+      expect(res.status).toBe(403)
+      expect((await res.json()) as { error: string }).toMatchObject({ error: "permission_denied" })
+    })
+
+    it("denies pii: on for an unscoped credential — there is no owner to decide", async () => {
+      await seedUser(1, "alice")
+      const res = await mint("alice", { name: "pii token", mode: "ask", pii: true })
+      expect(res.status).toBe(403)
+      expect((await res.json()) as { error: string }).toMatchObject({ error: "permission_denied" })
+    })
+
+    it("a maintainer can still mint a normal (scrubbed) credential", async () => {
+      await seedUser(1, "alice")
+      await seedUser(2, "owner")
+      await seedProject("proj-1", 2)
+      await grantProjectRole("proj-1", 1, 600, 2)
+      const res = await mint("alice", { name: "t", mode: "act", projectId: "proj-1", pii: false })
+      expect(res.status).toBe(201)
+      const body = (await res.json()) as CreateResponse
+      expect((await validateApiCredential(env.AQUILLA_PG, body.token))?.pii).toBe(false)
+    })
   })
 })

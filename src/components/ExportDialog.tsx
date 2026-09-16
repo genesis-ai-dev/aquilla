@@ -51,7 +51,8 @@ import { Spinner } from "@/components/ui/spinner"
 import { Input } from "@/components/ui/input"
 import { downloadBlob } from "@/lib/export/export-service"
 import { collectInlineStyleWarnings, type ExportFidelityWarning } from "@/lib/export/fidelity"
-import { downloadSourceFile, downloadProjectZip, fetchSourceSidecar } from "@/lib/sync/source-export"
+import { chapterFilenameSuffix, filterCellsByChapter, listChapterLabels } from "@/lib/export/chapter-scope"
+import { downloadSourceFile, downloadProjectZip, fetchSourceSidecar, fetchRemovedCells } from "@/lib/sync/source-export"
 import { exportPlainTextStructured } from "@/lib/export/exporters/plaintext"
 import { exportMarkdownStructured } from "@/lib/export/exporters/markdown"
 import { exportTsv } from "@/lib/export/exporters/tsv"
@@ -88,6 +89,7 @@ import {
   idmlOrgEligible,
 } from "@/lib/idml/release-gate"
 import { idmlTelemetryProperties } from "@/lib/idml/telemetry"
+import { hasPackageLocators } from "@/lib/export/import-locators"
 
 export type ExportFormat = "usfm" | "txt" | "md" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "srt" | "audio-by-character" | "audio-by-line" | "character-sheets" | "project-report" | "docx" | "pptx" | "idml" | "plain-text-dump" | "metadata-csv" | "sdbh-xml"
 export type ExportScope = "file" | "project"
@@ -414,6 +416,46 @@ export function ExportDialog({
       : option
   )), [effectiveIdmlCopy.description, effectiveIdmlCopy.label])
   const nativeOption = nativeFormatId ? formatOptions.find((f) => f.id === nativeFormatId)! : null
+
+  /**
+   * AQU-1068 (2026-09-09): what a native round-trip export does with content
+   * added or removed in the app, in this file, in plain words.
+   *
+   * Sam reversed August's decision: an added cell is ALWAYS content the client's
+   * file is missing, so USFM, Word and PowerPoint now carry it. This replaced a
+   * WARNING that said the opposite — and that warning was wrong twice over, so
+   * the scoping below is part of the fix rather than cosmetic:
+   *
+   *   - It fired for every type in NATIVE_EXPORT_BY_FILE_TYPE, which includes
+   *     md, txt, xliff, tmx, csv and tsv. Those render from scratch and have
+   *     always included added lines (exporters/added-lines.test.ts pins it), so
+   *     the warning was false on six of the ten types it reached.
+   *   - InDesign cannot take an added or removed cell AT ALL — the editor
+   *     refuses the actions on every IDML row — so "won't be included" described
+   *     a situation that cannot arise.
+   *
+   * Null means say nothing: either the file has no added or removed content, or
+   * the format re-renders and simply carries everything.
+   */
+  const structuralNote = useMemo(() => {
+    if (!nativeFormatId) return null
+    // Word and PowerPoint place content by a per-paragraph locator recorded at
+    // import. A file imported before that existed is matched BY POSITION, where
+    // an inserted or dropped paragraph shifts every later one onto the wrong
+    // text — so those files carry neither, and should say so.
+    if (nativeFormatId === "docx" || nativeFormatId === "pptx") {
+      if (!hasPackageLocators(cells)) return "importExport.dialog.structuralNoteLegacy" as const
+      return nativeFormatId === "docx"
+        ? ("importExport.dialog.structuralNoteDocx" as const)
+        : ("importExport.dialog.structuralNotePptx" as const)
+    }
+    if (nativeFormatId === "usfm") return "importExport.dialog.structuralNoteUsfm" as const
+    // IDML, and sdbh-xml, which addresses by LEXID and has the same problem.
+    if (nativeFormatId === "idml" || nativeFormatId === "sdbh-xml") {
+      return "importExport.dialog.structuralNoteUnplaceable" as const
+    }
+    return null
+  }, [nativeFormatId, cells])
 
   const [format, setFormat] = useState<ExportFormat>(nativeFormatId ?? "tsv")
   const [scope, setScope] = useState<ExportScope>("file")
@@ -753,6 +795,20 @@ export function ExportDialog({
   const isProjectOnlyFormat = format === "sdbh-xml" || format === "project-report"
   const effectiveScope: ExportScope = isProjectOnlyFormat ? "project" : isFileOnlyFormat ? "file" : scope
 
+  /**
+   * AQU-465: the formats a chapter can be sliced out of.
+   *
+   * Exactly the formats built from the in-memory cell array (the `filteredCells`
+   * branch of handleExport). The round-trip formats are deliberately absent:
+   * USFM/DOCX/PPTX/IDML reinject translations into the ORIGINAL document —
+   * USFM server-side — so there is no cell array to filter, and handing back a
+   * one-chapter .docx would mean rebuilding the document rather than exporting
+   * it. Those stay whole-file.
+   */
+  const chapterScopeFormats = ["txt", "md", "tsv", "csv", "xlf", "tmx", "vtt", "srt", "plain-text-dump", "metadata-csv"] as const
+  const supportsChapterScope = (fmt: ExportFormat): boolean =>
+    (chapterScopeFormats as readonly string[]).includes(fmt)
+
   // SDBH XML export needs the original MARBLE edition as the skeleton.
   const [sdbhSkeleton, setSdbhSkeleton] = useState<File | null>(null)
   const hasSdbhFiles = projectFiles.some((f) => f.type === "sdbh")
@@ -845,6 +901,16 @@ export function ExportDialog({
     return Array.from(names).sort()
   }, [cells])
 
+  // Same Base UI label rule as `chapterItems` below: without `items` the
+  // "All voices" option ("") renders an empty trigger.
+  const voiceItems = useMemo(
+    () => [
+      { value: "", label: t("importExport.dialog.allVoices") },
+      ...distinctVoices.map((v) => ({ value: v, label: v })),
+    ],
+    [distinctVoices, t],
+  )
+
   // Reset voice filter when dialog closes or cells change.
   useEffect(() => {
     if (!open) setVoiceFilter("")
@@ -858,6 +924,45 @@ export function ExportDialog({
     if (!voiceFilter) return cs
     return cs.filter((c) => getCellVoice(c) === voiceFilter)
   }
+
+  // AQU-465: Chapter scope — the middle ground between "current file" and
+  // "whole project". "" = every chapter, the same "no filter" contract the
+  // voice filter uses.
+  const [chapterFilter, setChapterFilter] = useState<string>("")
+
+  const chapterLabels = useMemo(() => listChapterLabels(cells), [cells])
+
+  // Base UI resolves the trigger's label from the root's `items`, not from
+  // the mounted <SelectItem>s, and falls back to the raw value string when
+  // there are none. "GEN 2" is its own label so it looked fine; "" — the
+  // "All chapters" option — rendered an empty trigger.
+  const chapterItems = useMemo(
+    () => [
+      { value: "", label: t("importExport.dialog.allChapters") },
+      ...chapterLabels.map((c) => ({ value: c, label: c })),
+    ],
+    [chapterLabels, t],
+  )
+
+  /** Only offered where it means something: a file with more than one chapter,
+   *  exporting itself (not the project) through a cell-array format. */
+  const canScopeToChapter =
+    effectiveScope === "file" && supportsChapterScope(format) && chapterLabels.length > 1
+  const activeChapter = canScopeToChapter ? chapterFilter : ""
+
+  // Drop the chapter on close, on a file switch, and whenever the remembered
+  // label is not in the current file. WITHOUT THE LAST CLAUSE a "GEN 3" left
+  // over from the previous file would filter every cell away and export an
+  // empty document — the same trap the format-reset effect above guards.
+  useEffect(() => {
+    if (!open) setChapterFilter("")
+  }, [open])
+  useEffect(() => {
+    setChapterFilter("")
+  }, [activeFileId])
+  useEffect(() => {
+    if (chapterFilter && !chapterLabels.includes(chapterFilter)) setChapterFilter("")
+  }, [chapterFilter, chapterLabels])
 
   // Load cells for all project files when project scope is selected and the
   // format is a client-side one. Disabled until the user actually picks
@@ -973,7 +1078,12 @@ export function ExportDialog({
         const rawBytes = await fetchSourceSidecar({ projectId, fileId: activeFileId, getToken, targetLang })
         setStatus({ kind: "busy", msg: t("importExport.status.injectingTranslations") })
         const { exportDocx } = await import("@/lib/export/exporters/docx")
-        const result = await exportDocx(rawBytes, cells)
+        // AQU-1068: what this file LOST. Without it a removed paragraph is
+        // indistinguishable from an untranslated one, and the exporter keeps
+        // the client's original words for a line somebody deliberately took
+        // out. Fails soft to an empty list — never blocks the download.
+        const removedCells = await fetchRemovedCells({ projectId, fileId: activeFileId, getToken })
+        const result = await exportDocx(rawBytes, cells, { removedCells })
         const baseName = buildExportStem(false) // AQU-437: user-chosen stem
         downloadBlob(result.blob, `${baseName}.docx`)
         setFidelityWarnings([
@@ -999,7 +1109,9 @@ export function ExportDialog({
         const rawBytes = await fetchSourceSidecar({ projectId, fileId: activeFileId, getToken, targetLang })
         setStatus({ kind: "busy", msg: t("importExport.status.injectingTranslations") })
         const { exportPptx } = await import("@/lib/export/exporters/pptx")
-        const result = await exportPptx(rawBytes, cells)
+        // See the docx branch above.
+        const removedCells = await fetchRemovedCells({ projectId, fileId: activeFileId, getToken })
+        const result = await exportPptx(rawBytes, cells, { removedCells })
         const baseName = buildExportStem(false)
         downloadBlob(result.blob, `${baseName}.pptx`)
         setFidelityWarnings([
@@ -1350,13 +1462,24 @@ export function ExportDialog({
         // the AUDIO character sheet was imported — so filtering here would
         // silently hand back an empty file on every project that imported only
         // the subtitle sheet.
-        const filteredCells = opts?.audioCues ? (audioCells ?? []) : applyVoiceFilter(cells)
+        //
+        // AQU-465: the chapter narrows the same array, after the voice. It is
+        // NOT applied to the cues (they are the sibling's rows, filtered above
+        // for the same reason the voice filter skips them) and not to the
+        // primary "Download <file>" action — that one means "give me my file
+        // back", whole, whatever chapter the fold happens to be showing.
+        const chapter = overrideFormat || opts?.audioCues ? "" : activeChapter
+        const filteredCells = opts?.audioCues
+          ? (audioCells ?? [])
+          : [...filterCellsByChapter(applyVoiceFilter(cells), chapter)]
         let blob: Blob
         // `_audio` rather than the sibling's own name (`<file> · audio cues`),
         // which carries a space and a middle dot and would need sanitising
         // into something unrecognisable anyway. This matches the audio zips'
         // suffixes, so all four of this file's audio deliverables sort together.
-        const baseName = buildExportStem(false) + (opts?.audioCues ? "_audio" : "")
+        const baseName = buildExportStem(false)
+          + chapterFilenameSuffix(chapter)
+          + (opts?.audioCues ? "_audio" : "")
         const ext = fmtOption.ext
         switch (fmt) {
           case "txt":
@@ -1893,6 +2016,7 @@ export function ExportDialog({
             <p className="text-xs text-muted-foreground text-center leading-relaxed">
               {t("importExport.dialog.nativeFormatHint", { label: t(nativeOption.labelKey) })}
               {nativeOption.lossy && ` ${t("importExport.dialog.someFormattingMayNotCarryOver")}`}
+              {structuralNote && ` ${t(structuralNote)}`}
             </p>
           </div>
         )}
@@ -2035,6 +2159,45 @@ export function ExportDialog({
           )}
         </fieldset>
 
+        {/* AQU-465: Chapter scope — only shown when the file has chapters to
+            choose between and the format can be sliced by one */}
+        {canScopeToChapter && (
+          <fieldset className="flex flex-col gap-1.5">
+            <legend className="text-xs font-medium text-muted-foreground mb-1.5">
+              {t("editor.milestone.vocab.chapterPlural")}
+            </legend>
+            <Select
+              value={chapterFilter}
+              onValueChange={(v) => setChapterFilter(v ?? "")}
+              items={chapterItems}
+            >
+              <SelectTrigger
+                size="sm"
+                className="w-full"
+                aria-label={t("importExport.dialog.chapterFilterAriaLabel")}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="">{t("importExport.dialog.allChapters")}</SelectItem>
+                  {chapterLabels.map((c) => (
+                    <SelectItem key={c} value={c}>{c}</SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+            {chapterFilter && (
+              <p className="text-[10px] text-muted-foreground">
+                <RichMessage
+                  k="importExport.dialog.chapterFilterHint"
+                  values={{ chapter: <strong>{chapterFilter}</strong> }}
+                />
+              </p>
+            )}
+          </fieldset>
+        )}
+
         {/* AQU-439: Voice filter — only shown when cells have cast assignments */}
         {distinctVoices.length > 0 && (
           <fieldset className="flex flex-col gap-1.5">
@@ -2044,6 +2207,7 @@ export function ExportDialog({
             <Select
               value={voiceFilter}
               onValueChange={(v) => setVoiceFilter(v ?? "")}
+              items={voiceItems}
             >
               <SelectTrigger
                 size="sm"

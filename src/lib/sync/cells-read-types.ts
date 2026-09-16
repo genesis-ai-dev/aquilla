@@ -45,6 +45,8 @@ export interface FileSummary {
   lastEditAt: number | null
   /** AQU-272: epoch-ms when this file was soft-deleted, or null when active. */
   deletedAt?: number | null
+  /** AQU-656: original import blob exists. Absent on older sync-workers. */
+  hasOriginalSource?: boolean
 }
 
 /**

@@ -20,6 +20,10 @@ vi.mock("@/lib/sync/source-export", () => ({
   downloadSourceFile: vi.fn(),
   downloadProjectZip: vi.fn(),
   fetchSourceSidecar: vi.fn(),
+  // AQU-1068: the docx/pptx branches ask the server what the file has LOST
+  // before injecting. It fails soft to an empty list in production, so an
+  // empty list is also the right default here.
+  fetchRemovedCells: vi.fn(async () => []),
 }))
 vi.mock("@/lib/export/exporters/pptx", () => ({
   exportPptx: vi.fn(),
@@ -85,6 +89,8 @@ describe("ExportDialog — native download is the primary action", () => {
       blob: new Blob(["pptx"]),
       injected: 1,
       untouched: 0,
+      removed: 0,
+      inserted: 0,
       warnings: [],
     })
 

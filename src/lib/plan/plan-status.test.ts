@@ -309,6 +309,16 @@ describe("a dubbing project's audio is counted against its CUE SHEET", () => {
     expect(planUnitStatus(untouched, NOW, audioFileIds([untouched]))).toBe("in_progress")
   })
 
+  it("draws the audio bars for a project that is planning to dub but has not started", () => {
+    // `planHasAudio` decides whether a bar is drawn and `audioFileIds` whether
+    // a unit is judged on takes. They ask the same question on purpose: split
+    // them and a project whose sheets arrived before its recordings would have
+    // every row short by its whole cue count with no bar anywhere to say why.
+    const untouched = [episode(0, { fileId: "ep1" })]
+    expect(planHasAudio(untouched)).toBe(true)
+    expect(audioFileIds(untouched).has("ep1")).toBe(true)
+  })
+
   it("leaves every unit without a sheet exactly as it was", () => {
     // Null from this worker, absent from one that predates AQU-1278. Both mean
     // "audio shares the text denominator", which is what the board always did.

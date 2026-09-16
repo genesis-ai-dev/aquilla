@@ -602,7 +602,16 @@ export function filterPlanUnits(units: readonly PlanUnit[], filter: PlanFilter):
   })
 }
 
-/** Does this project track audio at all? Drives whether audio bars render. */
+/**
+ * Does this project track audio at all? Drives whether audio bars render.
+ *
+ * Asks `planUnitExpectsAudio`, the same question `audioFileIds` asks, and that
+ * is load-bearing rather than tidy. The two decide different things — whether
+ * a bar is DRAWN, and whether a unit is JUDGED on its takes — and if they
+ * disagreed, a project whose cue sheets were imported before anyone started
+ * recording would have every row short by its whole cue count with no audio
+ * bar anywhere to say why.
+ */
 export function planHasAudio(units: readonly PlanUnit[]): boolean {
-  return units.some((u) => u.audioCount > 0)
+  return units.some(planUnitExpectsAudio)
 }

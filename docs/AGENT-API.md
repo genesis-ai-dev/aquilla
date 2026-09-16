@@ -125,8 +125,43 @@ economics) lives in the AQU-533 comment thread, not here.
   exceeds the user's current role. Every command passes the same per-action permission
   checks as the in-app path.
 
+- **Carry an identity ceiling (`pii`, AQU-1180) — default off.** Everything this API
+  returns lands in whatever third-party AI console holds the token, including that
+  vendor's logs and retention, so collaborator identity is withheld unless a human
+  released it deliberately. See "Collaborator identity" below.
+
 Invariant: **the agent can never exceed the credential, and the credential can never
 exceed the user.**
+
+### Collaborator identity (AQU-1180)
+
+For translation teams in restricted regions, *who* produced a translation is a safety
+fact about a person, not a preference. An agent needs none of it to translate. So:
+
+| Layer | Default | Who can change it |
+| --- | --- | --- |
+| Author fields (`lastEditor` on cells, `author` on history) | stable per-project pseudonym `u_xxxxxxxx` | credential `pii` flag |
+| `GET /me` / `get_identity_and_scope` | `credentialId` + mode + scope; no `userId`/`username` | credential `pii` flag |
+| Project-wide | authorship exposed pseudonymously | project setting `agentAuthorship` |
+
+- **Pseudonyms are HMAC(SYNC_SECRET_KEY, projectId ‖ author)**, truncated to 8 hex. Stable
+  within a project, so an agent can group edits by person; distinct *across* projects, so
+  two agents comparing notes cannot re-identify anyone by intersecting ids. Machine authors
+  (`importer`, `system`, `agent`) pass through verbatim — pseudonymising them destroys
+  provenance and protects nobody.
+- **`pii: true` at mint** returns real identities. Requires **OWNER** of the credential's
+  scoped org/project (`permission_denied` otherwise), and an unscoped credential can never
+  carry it — there is no owner of "everything this user can reach" to make the call.
+- **`agentAuthorship: 'none'`** on a project drops author fields **entirely — absent, not
+  blanked**: a present-but-null `lastEditor` still discloses that an editor exists and is
+  being hidden. It overrides the credential flag, so a team's opt-out cannot be undone by
+  issuing a token. The key is in `POLICY_SETTINGS_KEYS`, so no agent surface can write it.
+- **Every read is attributable.** `agent_read_audit` records one row per read call
+  (credential, project, resource + id, row count) so an exposure found later traces back to
+  the token that pulled it.
+
+Implementation: `sync-worker/src/external/pii.ts` (the single scrub choke-point, applied at
+the external boundary — the internal SPA read path legitimately shows real names).
 
 Auth transport: personal access tokens for the initial developer preview; OAuth 2.1
 for broadly compatible remote MCP (connector directories) as a fast follow.
@@ -358,7 +393,7 @@ CRUD surface with MCP bolted on.
 | Orgs | `list_orgs` — **implemented** (AQU-1236): the orgs a credential covers, `{ id, name, role, role_source }`. REST: `GET …/orgs` and `GET …/orgs/:orgId/projects` |
 | Projects | `list_projects` (optional `orgId` filter — AQU-1236), `get_project`, `create_project`, `update_project` |
 | Artifacts | `create_artifact_upload`, `inspect_artifact` |
-| Ingestion | `preview_import`, `prepare_import` — **implemented**: both parse an already-uploaded source artifact server-side with the built-in DOM-free parsers (txt, md, json, po, properties, obs, vtt, srt, sbv, csv, tsv, usfm, docx; 5000-cell cap) — preview returns cells without staging, prepare stages a `PlanImport` changeset linking the artifact. Upload stays REST-only (`POST …/artifacts`, 25MB). REST equivalent: `POST …/artifacts/:artifactId/parse` (body `{ "stage": true }` to stage). `docx` is parsed by the SAME `extractDocxStrings` the in-app Import dialog runs (AQU-1237 moved it off `DOMParser`/JSZip onto the platform-only `xml-lite`/`zip-lite` readers), so an agent import and a browser import of one file yield identical cells. Still DOM-bound and not yet server-parseable: pptx, html, xliff, tmx, usx, idml. |
+| Ingestion | `preview_import`, `prepare_import` — **implemented**: both parse an already-uploaded source artifact server-side with the built-in DOM-free parsers (txt, md, json, po, properties, obs, vtt, srt, sbv, csv, tsv, usfm, docx; 5000-cell cap) — preview returns cells without staging, prepare stages a `PlanImport` changeset linking the artifact. Upload stays REST-only (`POST …/artifacts`, 25MB). REST equivalent: `POST …/artifacts/:artifactId/parse` (body `{ "stage": true }` to stage). `docx` is parsed by the SAME `extractDocxStrings` the in-app Import dialog runs (AQU-1237 moved it off `DOMParser`/JSZip onto the platform-only `xml-lite`/`zip-lite` readers), so an agent import and a browser import of one file yield identical cells. Still DOM-bound and not yet server-parseable: pptx, html, xliff, tmx, usx, idml. **USFM is content-only (AQU-1283):** the `agent:usfm` profile declares `fidelity: "content-only"` and now delivers it — footnotes/endnotes/cross-refs are lifted out of `value` into `metadata.usfmNotes[{ kind, caller, ref, text }]`, character markers are unwrapped, paragraph/poetry markers become line breaks, and USFM `~` becomes a space, so a cell value carries no `\` marker. The original bytes still round-trip on export through the preserved artifact. **`excludeFrontMatter` defaults to the project's `importExcludeFrontMatter` setting** when the request omits it; both the preview and the stage envelope echo `excludeFrontMatter: { value, source: "request" \| "project-setting" \| "default" }`, and the preview reports exactly what the commit will contain. |
 | Reading | `search_project`, `search_projects` (cross-project, explicit id list, max 10 — AQU-1236), `read_content`, `read_history`, `read_comments`, `find_similar_cells`, `get_prompt_preview`, `list_memory`, `read_cell_memory` |
 | Quality | `read_quality`, `read_term_consistency` — **implemented (AQU-1231)**: per-file health (0-100) + coverage (total/filled/validated + percentages) and the project rollup; and the term-consistency drift list (per active concept: occurrences, consistent count/percent, which approved rendering was used in which cells, and the cells that used none). Both are PARITY reads — `read_quality` delegates to the internal `health-rollup` and `files/:fileId/progress` routes the in-app health ring and progress surfaces read, and `read_term_consistency` runs the SPA's own scan (`src/lib/check/term-consistency-scan.ts`, shared with the in-app "Check file" pass). Whatever counting rules the progress projection applies (e.g. AQU-1083's headings/paratextual exclusion) the API inherits by construction — there is no second denominator to keep in step. REST equivalents: `GET …/projects/:projectId/quality` and `GET …/projects/:projectId/terms/consistency` (both take optional `fileId`, `lane`; the latter also `onlyDrift=1`). |
 | Translation | `prepare_translations` |
@@ -592,8 +627,11 @@ The command layer is now the **shared write spine for both agent surfaces** (see
   command, one op per key; `POLICY_SETTINGS_KEYS` are never agent-writable) and `EmitEvents`
   (≤200 role-allowed events per sole-command changeset from `ALLOWED_EMIT_KINDS`: comments,
   waives, validations (testimony-flagged), back-translation, repin, file rename/delete/restore,
-  assignments incl. reassign; head pins are server-resolved, whole-plan rejection on any bad
-  reference). `UpdateProjectSettings` is deprecated and now rejects policy-key changes.
+  assignments incl. reassign, and terminology `term.create|update|delete|approve|reject`
+  (AQU-1179 — project-level, binding writes gated by the org's termbase floor); head pins are
+  server-resolved, whole-plan rejection on any bad reference; the effect summary carries a
+  plain-language `label` per kind for the human approval page).
+  `UpdateProjectSettings` is deprecated and now rejects policy-key changes.
 - **Living Memory writes (AQU-1228)** — `AddExample` / `AddDecision` / `AddNote` (CONTRIBUTOR)
   and `RetireExample` (PROJECT_LEAD), each a sole-command receipt-only changeset writing the
   `agent_memories` table (Living Memory is not event-sourced, so these do NOT ride
@@ -639,6 +677,43 @@ it live in the same thread the people on the project are reading.
   `pii` grant; the raw `authorLabel` never leaves the worker. Same scheme as AQU-1180's
   `external/pii.ts`, so the ids agree once that lands and this collapses into a `mapAuthor()`
   call (which additionally honours a project's `agentAuthorship: none` opt-out).
+
+## Status addendum (2026-09-05, AQU-1186 — DraftCells)
+
+Parity epic AQU-1181 item 7: agents could only write text they wrote themselves, and had
+no way to tell a pending AI draft from a committed human value.
+
+- **New command — `DraftCells`** (`{ fileId, cellIds, laneId?, instructions? }`, sole
+  command, CONTRIBUTOR). Runs the **project's own copilot** over the named cells and stages
+  the result as one changeset. It is a *prepare-time expansion*: drafting happens once, at
+  prepare, and the generated text is materialized into ordinary `SetTranslation` commands
+  carrying server-minted `aiDraft` provenance — so the whole existing pipeline
+  (preconditions, digest, approval gate, provenance stamping, crash-retry id ledger)
+  applies unchanged, and the human approves text they can actually read. Committed cells
+  land `ai_drafted = 1`, identical to an in-app draft.
+- **Cost rails.** `cellIds` is explicit and non-empty — wildcards are rejected outright.
+  The per-changeset cap is the project's configured completion batch size
+  (`db/shared/completion-batch.ts`, mirroring AQU-586's `completionBatchSizeFor`: default
+  10, clamp 50); an over-cap request is rejected **naming the cap** and never reaches the
+  model. Spend meters through the existing credits system on the `agent` rail against the
+  project's org; an exhausted org returns `rate_limited` and **nothing is staged**.
+- **Where the model runs.** The drafting pipeline stays in auth-worker, which owns the
+  OpenRouter key, the model allowlist and the credit ledger. sync-worker calls
+  `POST /api/v1/ai/agent/internal/draft-cells` with the `SYNC_SECRET_KEY` shared secret
+  (the same server-to-server pattern as `monday/internal/push`). That endpoint returns
+  drafts and **never writes** — staging and the approval gate stay with the changeset
+  engine. `auth-worker/src/lib/agent/tools/draft.ts` now exposes `generateDrafts`
+  (generation only) with `executeDraft` layered on top, so the in-app agent tool and the
+  external command share one pipeline rather than two copies of the copilot.
+- **`aiDraft` in reads.** `aiDrafted` + `aiDraft` already ride the external cells read
+  (`GET .../files/:fileId/cells`, via `cells-read-route`'s serializer); they are now
+  pinned by a regression test so an agent can always distinguish a pending AI draft from
+  the committed value.
+- **Known divergence.** `completionBatchSize` is written by the SPA into the local project
+  record and is not yet synced into the server's `project_settings` blob, so the
+  server-side cap reads the default (10) until it is. The resolver accepts both
+  `completionSettings.completionBatchSize` and a top-level `completionBatchSize` so it
+  picks the value up the moment either lands.
 
 ## Status addendum (2026-09-04, AQU-1176 — settings read + PatchSettings over MCP)
 
@@ -895,3 +970,48 @@ is a product call rather than an implementation detail:
 The agent-reachable path in the meantime: `SetTranslation` the combined text onto the cell you
 want to keep, then `DeleteCell` the other once it owns nothing. That is two reviewable
 changesets with no invented semantics, and it is what the workspace does today.
+
+## Status addendum (2026-09-16, AQU-1283 / AQU-1282 / AQU-1294 — partner-setup hotfix)
+
+Found while standing up the IBT Siberian Tatar pilot (`sibtatar`) end-to-end through this
+API. Four gaps, all on the path every partner USFM import takes.
+
+- **Imports are content-only for real (AQU-1283).** See the Ingestion row above. Cell
+  `value` no longer carries `\` markers; footnotes move to `metadata.usfmNotes`;
+  `importExcludeFrontMatter` is honoured on the agent path and echoed back with its
+  source. Note that excluding front matter also drops `\h`/`\mt1` titles — the same
+  categories the browser importer drops — so the book intro simply is not imported. That
+  is usually the wrong trade for a Bible project: the intro is part of the file and
+  skipping it leaves it untranslated. Leave the setting off unless a partner asks.
+- **`systemPrompt` reaches the preview (AQU-1283).** `prompt-preview` now resolves the
+  top-level `systemPrompt` settings key (what `PatchSettings` writes) before falling back
+  to `completionSettings.systemPrompt` and then the stock template. A key that validated
+  but did nothing is worse than no key.
+- **Policy keys tighten-only (AQU-1282).** See COMMAND-REGISTRY.md. An agent setting up a
+  partner project in a restricted region can now set `contributeToGlobalTm: false` and
+  `agentAuthorship: "none"` itself, under the same human approval as any other write.
+- **The brief reaches the copilot (AQU-1282).** `SetBrief` writes the 11 sections, but the
+  copilot reads the rendered L1 summary, which only the in-app brief builder used to
+  generate — so an API-written brief was invisible to the AI until a human clicked
+  Regenerate. Now `SetBrief`'s commit renders the summary best-effort (receipt carries
+  `briefSummary: { rendered, chars, model } | { rendered: false, reason }`), and the new
+  **`RegenerateBriefSummary`** command (sole, ask-mode, MAINTAINER, settings
+  `ifMatchVersion`) re-runs it on demand. Rendering happens server-side through
+  auth-worker's `POST /api/v1/ai/agent/internal/brief-summary`, metered on the org's
+  `agent` credit rail like any other paid call; a render failure never fails the section
+  write and never consumes the human approval.
+- **`GET …/memory`'s brief block now agrees with `prompt-preview`.** It reports
+  `settings.translationBrief` (the record the drafting prompt actually injects) with
+  `reachesCopilot`, `sections` and `l1Stale`; the older `project_briefs` row is reported
+  separately as `legacyBrief` when it is non-empty. Two read surfaces disagreeing about
+  "the brief" is how the original bug went unnoticed. The in-app agent harness still
+  injects the legacy row — unifying those two briefs is a follow-up.
+- **`ProjectSetup`, the intake template, and the `project-setup` skill (AQU-1294).** Setting
+  up one partner project took 8 approval URLs across 6 sequenced changesets, in an order
+  only the agent knew. `ProjectSetup` is one command, one changeset, one approval: the
+  server owns the expansion order and every version guard, so `plan_stale` cannot happen
+  inside a plan. `GET /api/v1/external/setup-template` serves the partner intake form as
+  Markdown plus a JSON schema, and `POST …/setup-template/parse` turns a filled form back
+  into a `ProjectSetup` body with every blank named. `GET /api/v1/external/skills` serves
+  the sequencing prose itself, so the workflow lives in one server-owned place instead of
+  each partner's chat history.

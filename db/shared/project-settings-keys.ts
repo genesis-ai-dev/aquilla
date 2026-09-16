@@ -11,8 +11,9 @@
 // It mirrors `ProjectWideSettings` in src/lib/sync/project-settings.ts — the
 // SPA's view of the same blob — plus two keys that live only server-side:
 // the `healthSettings`/`decaySettings` alias pair normalizeSettings() keeps in
-// step (db/shared/projects.ts) and the policy keys that are never agent-
-// writable but must still be RECOGNISED here, so naming one earns the
+// step (db/shared/projects.ts) and the policy keys that are agent-writable
+// only in their restrictive direction (AQU-1282, db/shared/policy-direction.ts)
+// but must still be RECOGNISED here, so a loosening write earns the
 // `permission_denied` it deserves rather than being mistaken for a typo.
 //
 // Adding a settings key? Add it here too, or agents cannot write it.
@@ -86,7 +87,8 @@ export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec
   algorithmicChecks: { kind: 'object' },
   terminology: { kind: 'object[]' },
 
-  // Validation policy (all POLICY keys — listed so they resolve to
+  // Validation policy (all POLICY keys — writable in the restrictive direction
+  // only, see db/shared/policy-direction.ts; a loosening write resolves to
   // permission_denied rather than "unknown key")
   validationCount: { kind: 'number' },
   validationCountAudio: { kind: 'number' },
@@ -96,6 +98,15 @@ export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec
   harmonize_min_role: { kind: 'enum', values: ['project_lead', 'maintainer'] },
   agentMemoryAutonomy: { kind: 'enum', values: ['human', 'agent-low-risk'] },
   contributeToGlobalTm: { kind: 'boolean' },
+  // AQU-1180: drops author fields from agent-facing reads. Recognised so an
+  // agent naming it gets permission_denied rather than "unknown key".
+  agentAuthorship: { kind: 'enum', values: ['none'] },
+  // AQU-1068: who may add/remove cells; "none" = nobody (the default). Ordered
+  // loosest → tightest in db/shared/policy-direction.ts.
+  cellEditingFloor: {
+    kind: 'enum',
+    values: ['none', 'commenter', 'reviewer', 'contributor', 'project_lead', 'maintainer'],
+  },
 
   // Capability switches
   allowLineCreation: { kind: 'boolean' },

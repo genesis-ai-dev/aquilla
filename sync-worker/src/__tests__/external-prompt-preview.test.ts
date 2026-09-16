@@ -275,6 +275,32 @@ describe("external prompt preview", () => {
       expect(body.messages[0].content).toContain("Aimed at oral communities.")
     })
 
+    // AQU-1283: PatchSettings writes the TOP-LEVEL `systemPrompt` key (the SPA
+    // syncs it into completionSettings.systemPrompt on its next load); the
+    // preview must read it from there or an agent's edit is invisible.
+    it("reads the top-level systemPrompt key PatchSettings writes", async () => {
+      await putSettings(testDb, "proj-a", {
+        sourceLanguage: "English",
+        targetLanguage: "French",
+        systemPrompt: "Top-level {sourceLanguage}→{targetLanguage} prompt.",
+      })
+      const { body } = await preview(testDb, token)
+      expect(body.parts.base).toBe("Top-level English→French prompt.")
+      expect(body.messages[0].content).toContain("Top-level English→French prompt.")
+    })
+
+    it("top-level systemPrompt wins over the nested completionSettings copy", async () => {
+      await putSettings(testDb, "proj-a", {
+        sourceLanguage: "English",
+        targetLanguage: "French",
+        systemPrompt: "Top-level wins.",
+        completionSettings: { systemPrompt: "Nested loses." },
+      })
+      const { body } = await preview(testDb, token)
+      expect(body.parts.base).toBe("Top-level wins.")
+      expect(body.messages[0].content).not.toContain("Nested loses.")
+    })
+
     it("404s a cell with no source row in this project", async () => {
       const { status, body } = await preview(testDb, token, "nope")
       expect(status).toBe(404)

@@ -114,6 +114,10 @@ export function OrgOverview() {
   const canEditVisibility = canEditRosterProgressFloor(activeOrg?.role?.level)
   const memberProgressReady = orgSettings.hasFetched
   const memberProgressViewerRole = activeOrg?.role?.level ?? null
+  const assignmentRoleByProjectId = useMemo(
+    () => new Map(accessibleProjects.map((project) => [project.id, project.role.level])),
+    [accessibleProjects],
+  )
 
   const [pendingInvites, setPendingInvites] = useState<MyPendingInvite[]>([])
 
@@ -353,6 +357,10 @@ export function OrgOverview() {
                     <WorkloadRollup
                       jwt={jwt}
                       orgId={activeOrgId}
+                      canUnassignProject={(projectId) =>
+                        (assignmentRoleByProjectId.get(projectId) ?? 0) >=
+                        orgSettings.assignmentMinRole
+                      }
                       action={
                         <SectionVisibilityBadge
                           minRole={orgSettings.memberProgressViewMinRole}

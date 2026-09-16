@@ -967,10 +967,11 @@ export function AudioRecordingModal({
     }
   }, [online, activeCell, session, ttsBusy, project, username, recordingTakes, audioEntry?.selectedAudioId, sourceClip, targetSlot])
 
-  // Settle on the next line after a brief success indication. Shared by the
-  // recorded and the uploaded path so keeping a take means exactly the same
-  // thing either way — the upload control below exists to inherit this, among
-  // the rest of the phase machine.
+  // Settle on the next line after a brief success indication. The RECORDED path
+  // only: this used to be shared with the uploaded one so that keeping a take
+  // meant the same thing either way, and AQU-1216 reversed that inheritance —
+  // an upload has no performance to end, so it stays put (see
+  // `attachPickedFile`). Everything else in the phase machine is still shared.
   //
   // SUB-50: opt-out for repeat takes on one line, and the handle is tracked so
   // closing or navigating inside the 450ms window can't fire a stray jump after
@@ -1212,8 +1213,9 @@ export function AudioRecordingModal({
   //
   // That inheritance is the whole argument for a modal-owned control rather
   // than reusing the cell rail's upload button: the same "Uploading…" stage,
-  // the same saved state, the same auto-advance, the same error surface — and a
-  // take LABEL, which the rail cannot supply because it has no takes list.
+  // the same saved state, the same error surface — and a take LABEL, which the
+  // rail cannot supply because it has no takes list. Auto-advance is the one
+  // part deliberately NOT inherited; see the tail of this callback (AQU-1216).
   const attachPickedFile = useCallback(async (file: File) => {
     if (!activeCell) return
     // A courtesy check, not the guarantee: `attachAudioFileToCell` validates
@@ -1247,7 +1249,16 @@ export function AudioRecordingModal({
       })
       onTakeSaved?.(activeCell.id)
       returnToReady(`${label} added`)
-      scheduleAutoAdvance()
+      // AQU-1216: the upload path STOPS here — it does not inherit the recorded
+      // take's auto-advance. A performance ends when you save it, so moving on
+      // is the next thing you meant; a picked file arrives with no such moment,
+      // and jumping half a second later left the operator on a different line
+      // with nothing on screen to say where the file went ("I uploaded
+      // successfully, but it only showed up in the Takes dropdown"). So: stay,
+      // and OPEN the takes list, which is where the new take is circled as the
+      // keeper and can be auditioned. In the plain layout that drawer is always
+      // rendered, so this is a no-op there and the flag costs nothing.
+      setTakesOpen(true)
     } catch (e) {
       setErrorMessage(e instanceof Error ? e.message : String(e))
       setPhase("error")
@@ -1259,7 +1270,7 @@ export function AudioRecordingModal({
     // transitively and the callback was rebuilt whenever it changed. Named
     // explicitly anyway, because that chain is two hops of coincidence away
     // from someone decoupling the takes list from the track.
-  }, [activeCell, session, project.id, username, recordingTakes, targetSlot, onTakeSaved, scheduleAutoAdvance, returnToReady])
+  }, [activeCell, session, project.id, username, recordingTakes, targetSlot, onTakeSaved, returnToReady])
 
   const uploadInputRef = useRef<HTMLInputElement | null>(null)
   const onUploadInputChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {

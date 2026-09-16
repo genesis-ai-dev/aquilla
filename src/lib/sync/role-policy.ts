@@ -24,21 +24,31 @@ export const ROLE = {
 
 /** Minimum role level required to emit each event kind. Mirrors the server. */
 const REQUIRED_ROLE: Record<string, number> = {
-  // Sam, 2026-08-21: create/delete/reorder sit at CONTRIBUTOR so the "let
-  // people add new lines" project setting can admit contributors. Reorder is
-  // in the set because it is the chain bookkeeping RIDING every add and
-  // remove (handleAddLine/handleRemoveLine batch it in), and a floor that
-  // refused it silently killed the whole batch. This static floor is the
-  // LOWEST reachable one; the server conditionally re-imposes PROJECT_LEAD —
-  // all three refused below lead unless the project opted in, deletes
-  // additionally only for a cell a person added by hand (sync-worker
-  // authorize.ts + line-creation-authority.ts). The client gate's own rule
-  // applies: only block what is PROVABLY insufficient, and with the
-  // carve-out a contributor no longer is.
-  "source.cell.create": ROLE.CONTRIBUTOR,
+  // AQU-1068: create/delete/reorder sit at COMMENTER because this table is
+  // the LOWEST reachable floor, not the operative one. Reorder is in the set
+  // because it is the chain bookkeeping RIDING every add and remove
+  // (handleAddLine/handleRemoveLine batch it in), and a floor that refused it
+  // silently killed the whole batch.
+  //
+  // The project's `cellEditingFloor` decides who is actually offered these
+  // actions, and since 2026-09-09 it decides it HERE — in the client's
+  // affordances (cell-editing-gate.ts and its callers) rather than at the
+  // server perimeter, which now enforces only one rule: a delete needs
+  // MAINTAINER unless the cell is one a person added by hand. This table's own
+  // rule applies unchanged: only block what is PROVABLY insufficient, and no
+  // rank at or above the tier's lowest rung is — the tier decides, and this
+  // table cannot see it.
+  //
+  // LOWERED FROM CONTRIBUTOR (Matthew's review, approved by Sam 2026-09-08)
+  // in lock-step with the server, when the tier list grew Commenter and
+  // Reviewer rungs. Leaving it at CONTRIBUTOR here would have been the worse
+  // half of a drift: the server would admit a commenter's insert and this
+  // mirror would refuse to enqueue it, so the button would do nothing at all
+  // and never even produce the 403 that explains why.
+  "source.cell.create": ROLE.COMMENTER,
   "source.cell.commit": ROLE.PROJECT_LEAD,
-  "source.cell.delete": ROLE.CONTRIBUTOR,
-  "source.cell.reorder": ROLE.CONTRIBUTOR,
+  "source.cell.delete": ROLE.COMMENTER,
+  "source.cell.reorder": ROLE.COMMENTER,
 
   "target.cell.create": ROLE.CONTRIBUTOR,
   "target.cell.commit": ROLE.CONTRIBUTOR,
@@ -309,35 +319,35 @@ export function canMutateComment(
  * `sync-worker/src/events/authorize.ts` — UX gate only, never the security
  * boundary; the server re-checks independently on every `assignment.create`.
  *
- * Leads/maintainers (>= PROJECT_LEAD) can always open it, regardless of the
- * setting. Below that, a member (CONTRIBUTOR+) can open it ONLY when the org
- * has opted into `allowSelfAssignment` — and even then, `canSubmitAssignment`
- * below still restricts what they can submit to themselves only.
+ * A caller at the org's assignmentMinRole can open it for any assignee.
+ * Below that floor, CONTRIBUTOR+ can open it only when the org has opted into
+ * allowSelfAssignment, and canSubmitAssignment restricts them to themselves.
  */
 export function canOpenAssignUi(
   roleLevel: number | null | undefined,
   allowSelfAssignment: boolean,
+  assignmentMinRole: number = ROLE.PROJECT_LEAD,
 ): boolean {
   if (roleLevel == null) return false
-  if (roleLevel >= ROLE.PROJECT_LEAD) return true
+  if (roleLevel >= assignmentMinRole) return true
   return allowSelfAssignment && roleLevel >= ROLE.CONTRIBUTOR
 }
 
 /**
  * AQU-496: whether `roleLevel` may submit `assignment.create` assigning
- * `assigneeUserId`. Leads/maintainers may assign anyone. Below-lead callers
- * may ONLY self-assign (assigneeUserId === callerUserId), and only when
- * `allowSelfAssignment` is on — mirrors the server's `isSelfAssignCreate`
- * check in `sync-worker/src/events/authorize.ts`.
+ * `assigneeUserId`. Callers at assignmentMinRole may assign anyone.
+ * Below-floor callers may only self-assign (assigneeUserId === callerUserId),
+ * and only when allowSelfAssignment is on.
  */
 export function canSubmitAssignment(
   roleLevel: number | null | undefined,
   allowSelfAssignment: boolean,
   callerUserId: number | null | undefined,
   assigneeUserId: number,
+  assignmentMinRole: number = ROLE.PROJECT_LEAD,
 ): boolean {
   if (roleLevel == null) return false
-  if (roleLevel >= ROLE.PROJECT_LEAD) return true
+  if (roleLevel >= assignmentMinRole) return true
   if (!allowSelfAssignment || roleLevel < ROLE.CONTRIBUTOR) return false
   return callerUserId != null && callerUserId === assigneeUserId
 }
@@ -358,4 +368,30 @@ export function canSubmitAssignment(
  */
 export function canSwitchLanes(roleLevel: number | null | undefined): boolean {
   return roleLevel != null && roleLevel >= ROLE.MAINTAINER
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// AQU-1086: the org-configurable project-language edit floor.
+//
+// CLIENT MIRROR of auth-worker's DEFAULT_LANGUAGE_EDIT_MIN_ROLE /
+// getLanguageEditMinRoleForProject (services/org-permissions.ts). The server
+// re-resolves the floor on every language write, so this is an affordance
+// value used to disable controls — never authority.
+//
+// The default is MAINTAINER, i.e. the behaviour before this issue: an org opts
+// in to project-lead language editing by lowering `languageEditMinRole` on
+// Org Settings → Security. Deliberately different from the termbase floor
+// (glossary-view.ts), which defaults to PROJECT_LEAD.
+// ──────────────────────────────────────────────────────────────────────────
+
+/** Floor for editing a project's languages when the org hasn't configured one. */
+export const DEFAULT_LANGUAGE_EDIT_MIN_ROLE = ROLE.MAINTAINER
+
+/** Clamp an org-configured language floor to the role ladder, else the default. */
+export function resolveLanguageEditFloor(minRole?: number | null): number {
+  if (typeof minRole !== "number" || !Number.isFinite(minRole)) {
+    return DEFAULT_LANGUAGE_EDIT_MIN_ROLE
+  }
+  if (minRole < 100 || minRole > 700) return DEFAULT_LANGUAGE_EDIT_MIN_ROLE
+  return minRole
 }

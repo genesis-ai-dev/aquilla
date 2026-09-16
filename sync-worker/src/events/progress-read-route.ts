@@ -56,6 +56,13 @@ export interface SectionProgressDetailResponse {
   revision: number
   validationCount: number
   verses: Array<{
+    /**
+     * AQU-1278: the SOURCE cell's id, so the plan board can deep-link the
+     * editor (?cellId=<id>) at the first outstanding cell of a unit. It has to
+     * come from the source row: the target join is a LEFT JOIN, so `t.cell_id`
+     * is NULL for exactly the untranslated verses the link exists to reach.
+     */
+    cellId: string
     ref: string
     filled: boolean
     validated: boolean
@@ -211,7 +218,8 @@ export async function handleProgressReadRequest(
     const countStructural = await readCountStructuralCells(env.AQUILLA_PG, projectId)
     const [rowsResult, validationCount, revisionRow] = await Promise.all([
       env.AQUILLA_PG.prepare(
-        `SELECT s.canonical_ref,
+        `SELECT s.cell_id,
+                s.canonical_ref,
                 COALESCE(t.value, '') AS target_value,
                 COALESCE(t.endorsement_count, 0) AS endorsement_count
            FROM cells s
@@ -229,6 +237,7 @@ export async function handleProgressReadRequest(
                 END) = ?
             ${countStructural ? '' : `AND NOT (${structuralPredicateSql('s')})`}`,
       ).bind(lane, projectId, fileId, sectionKey).all<{
+        cell_id: string
         canonical_ref: string | null
         target_value: string
         endorsement_count: number | string
@@ -246,7 +255,16 @@ export async function handleProgressReadRequest(
     // The policy is part of the cache key. Without it a reader who flips the
     // switch keeps being served the arrangement they just changed away from.
     const structuralTag = countStructural ? '' : ':nostruct'
-    const etag = `"progress:${fileId}:${encodeURIComponent(sectionKey)}:${revision}:v${validationCount}${structuralTag}${laneTag}"`
+    // `s2` marks the response SHAPE, the way the file-level ETag below has since
+    // AQU-1098. This key went without a shape marker for as long as the shape
+    // never changed; the day it did — AQU-1278 adding `cellId` to every verse —
+    // it needed one, because nothing else in the key moves when only the shape
+    // moves. Revision, validationCount, the policy and the lane are all
+    // properties of the DATA, so a client holding a pre-cellId body would have
+    // been handed a 304 forever and the plan board's "go to the first
+    // outstanding cell" link would have silently done nothing, on exactly the
+    // chapters a user had already looked at.
+    const etag = `"progress:${fileId}:${encodeURIComponent(sectionKey)}:${revision}:v${validationCount}:s2${structuralTag}${laneTag}"`
     if (request.headers.get('If-None-Match') === etag) {
       return new Response(null, { status: 304, headers: { ETag: etag, 'Cache-Control': 'private, no-cache' } })
     }
@@ -258,6 +276,7 @@ export async function handleProgressReadRequest(
       verses: rowsResult.results
         .filter((row): row is typeof row & { canonical_ref: string } => Boolean(row.canonical_ref))
         .map((row) => ({
+          cellId: row.cell_id,
           ref: row.canonical_ref,
           filled: row.target_value.trim().length > 0,
           validated: Number(row.endorsement_count) >= validationCount,

@@ -45,9 +45,15 @@ import {
   resolveProjectRoleIncludingArchived,
   ROLE_NAMES,
 } from "../services/project-permissions"
-import { getFileChapters, getMyAssignments, getProjectAssignmentRoster } from "../services/assignments"
+import {
+  getFileChapters,
+  getMyAssignments,
+  getProjectAssignmentRoster,
+  getUnitAssignments,
+} from "../services/assignments"
 import {
   bumpOrgActivity,
+  canViewMemberProgress,
   canViewRoster,
   clampProjectDirectoryLimit,
   decodeProjectDirectoryCursor,
@@ -57,6 +63,8 @@ import {
   encodeProjectDirectoryCursor,
   getCommentFloors,
   getEffectiveOrgRole,
+  getMemberProgressViewMinRole,
+  DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE,
   getOrCreateUserOrg,
   getRosterViewMinRole,
   getTermbaseEditMinRole,
@@ -1001,6 +1009,62 @@ projects.get("/:projectId/assignments/all", authMiddleware, async (c) => {
   if (role.level < ROLE.MAINTAINER) return c.json({ error: "maintainer+ required" }, 403)
   const roster = await getProjectAssignmentRoster(c.env, projectId)
   return c.json({ roster })
+})
+
+/**
+ * GET /api/v2/projects/:projectId/assignments/unit — every live assignment
+ * covering ONE planning unit, with each assignee's own progress inside it
+ * (AQU-1278, the plan inspector's "Assigned to" section).
+ *
+ *   ?fileId=  required — the unit's file
+ *   ?section= the unit's section key; '' / absent means the whole file
+ *   ?lane=    target-language lane the inspector is showing; '' = default
+ *
+ * GATED ON THE ORG'S memberProgressViewMinRole, NOT on a hard MAINTAINER
+ * floor like /assignments/all above it. That route's hard 600 is a real bug
+ * waiting for someone to trip it: the client's Team card decides whether to
+ * render per-member progress from the org's CONFIGURABLE
+ * memberProgressViewMinRole, so an org that lowers the floor to Contributor
+ * gets a section that renders and then 403s on every fetch. Reading the same
+ * floor the client reads is what keeps the server and the screen agreeing —
+ * this is per-member progress, which is exactly what that setting governs
+ * (AQU-485).
+ *
+ * A project with no org (org_id null — a personal project) has no org policy
+ * to consult, so any member sees it, mirroring /:projectId/members.
+ */
+projects.get("/:projectId/assignments/unit", authMiddleware, async (c) => {
+  const user = c.get("user")
+  const projectId = c.req.param("projectId") as string
+  const fileId = c.req.query("fileId") ?? ""
+  if (!fileId) return c.json({ error: "fileId required" }, 400)
+  const sectionKey = c.req.query("section") ?? ""
+  const lane = c.req.query("lane") ?? ""
+
+  const role = await resolveProjectRole(c.env, user, projectId)
+  if (!role) return c.json({ error: "no access to project" }, 403)
+
+  const project = await c.env.AQUILLA_PG.prepare("SELECT org_id FROM projects WHERE id = ?")
+    .bind(projectId)
+    .first<{ org_id: number | null }>()
+  if (!project) return c.json({ error: "project not found" }, 404)
+
+  // A project with no org still has a floor. The default is MAINTAINER, and
+  // applying it here rather than skipping the check is the difference between
+  // "this org chose who may see per-person productivity" and "a personal
+  // project hands every viewer each assignee's name, deadline and four
+  // progress counts". There is no org to ask, so the answer is the default,
+  // not the absence of one — the same reading every other floor takes for an
+  // org-less project (see getLanguageEditMinRoleForProject).
+  const progressMinRole = project.org_id != null
+    ? await getMemberProgressViewMinRole(c.env, project.org_id)
+    : DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE
+  if (!canViewMemberProgress(role.level, progressMinRole)) {
+    return c.json({ error: "member progress hidden by org policy" }, 403)
+  }
+
+  const assignments = await getUnitAssignments(c.env, projectId, fileId, sectionKey, lane)
+  return c.json({ assignments })
 })
 
 /**

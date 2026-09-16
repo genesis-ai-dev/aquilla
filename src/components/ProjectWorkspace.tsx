@@ -485,6 +485,15 @@ function projectRecordsEquivalent(a: ProjectRecord | null, b: ProjectRecord | nu
 const PRESENCE_LOCK_STALE_CLEAR_MS = 31_000
 /** Trailing throttle for row-selection presence (`viewingCell`). */
 const VIEWING_CELL_PRESENCE_THROTTLE_MS = 250
+/**
+ * How many cell-store versions a parked scroll (`pendingCellScrollRef`) may
+ * spend looking for its row before it gives up. AQU-1278: it needs more than
+ * one because a file's cells stream in — the target can land two or three
+ * versions after the store stops being empty — but it needs a ceiling far more,
+ * because an id the file simply does not have would otherwise retry on every
+ * version bump for the rest of the session (see the consuming effect).
+ */
+const PENDING_CELL_SCROLL_MAX_ATTEMPTS = 8
 
 function sameStringMap(a: ReadonlyMap<string, string>, b: ReadonlyMap<string, string>): boolean {
   if (a.size !== b.size) return false
@@ -910,8 +919,30 @@ export function ProjectWorkspace() {
     if (!nextFileId) return
     // If there is a remembered cell, park it in the ref so the scroll-restore
     // effect can consume it once cells are loaded.
-    if (savedLoc?.cellId && savedLoc.fileId === nextFileId) {
-      pendingCellScrollRef.current = { cellId: savedLoc.cellId, flash: false }
+    //
+    // AQU-1278: …unless a `?cellId=` deep link has already parked one. Both
+    // write the same ref, and declaration order does NOT settle who wins:
+    // effects only run top-down on the MOUNT pass, and this effect re-runs
+    // every time its asynchronously-resolving deps (`project`, `fileIds`,
+    // `projectFiles`) settle — routinely several commits after the deep-link
+    // effect below has already parked. Without this guard the user's remembered
+    // position quietly replaced the cell a "go to the first unvalidated cell"
+    // link had asked for, and the link appeared to land on a random row. The
+    // link is an explicit request; this restore is a convenience, so the link
+    // wins. (It can also not be re-checked from the URL here: when the routed
+    // file isn't in the project yet we redirect to `/editor`, which drops the
+    // query string — the ref is the only surviving record of the intent.)
+    if (
+      savedLoc?.cellId &&
+      savedLoc.fileId === nextFileId &&
+      pendingCellScrollRef.current?.source !== "link"
+    ) {
+      pendingCellScrollRef.current = {
+        cellId: savedLoc.cellId,
+        flash: false,
+        fileId: nextFileId,
+        source: "restore",
+      }
     }
     const target = `/project/${projectId}/editor/file/${nextFileId}`
     if (redirectTo(target)) setSelectedFileId(nextFileId)
@@ -980,10 +1011,27 @@ export function ProjectWorkspace() {
 
   // FRO-295: CommentsPage deep-links here with ?cellId=<id>. Park the value so
   // the scroll-restore effect (below) can consume it once cells are loaded.
+  //
+  // AQU-1278 added `&flash=1` (see `editorCellHref`). The flag exists because
+  // this used to hard-code `flash: false` for every caller: the plan board's
+  // "go to the first outstanding cell" link scrolled the row into view with
+  // NOTHING marking which row it was, which from the user's chair is
+  // indistinguishable from a link that did nothing at all. Comments links stay
+  // unflashed — they arrive from a thread that already names the cell — so the
+  // flash is opt-in per link rather than switched on for everybody here.
   useEffect(() => {
     const cellId = searchParams.get("cellId")
-    if (cellId) pendingCellScrollRef.current = { cellId, flash: false }
-  }, [searchParams])
+    if (!cellId) return
+    pendingCellScrollRef.current = {
+      cellId,
+      flash: searchParams.get("flash") === "1",
+      // The link names its file in the path; parking it lets the consumer drop
+      // this entry if the user ends up somewhere else (a link to a file this
+      // project doesn't have gets redirected away before it can ever land).
+      fileId: routeFileId ?? null,
+      source: "link",
+    }
+  }, [searchParams, routeFileId])
   const [commentsCellId, setCommentsCellId] = useState<string | null>(null)
   const [historyCellId, setHistoryCellId] = useState<string | null>(null)
   // Phase 0.5 deterministic "Check file" (agentic-harness strategy §4, no
@@ -1148,7 +1196,30 @@ export function ProjectWorkspace() {
   // navigation (or an AQU-646 media→text trace, which also flashes). Set by
   // the restore effect / deep-link / switchLens; consumed by the effect that
   // fires when `cells` are available AND the text editor is mounted.
-  const pendingCellScrollRef = useRef<{ cellId: string; flash: boolean } | null>(null)
+  //
+  // AQU-1278 widened the entry from `{ cellId, flash }`:
+  // - `fileId` is the file the cell was parked FOR. The parker always knows it
+  //   (the restore parks for the file it is about to navigate to), and the
+  //   consumer needs it so a park left over from a file the user has since left
+  //   is dropped instead of scrolling whatever file is open now.
+  // - `source` ranks the three parkers against each other. Only one ordering
+  //   question exists today and it is settled in the restore effect: a `link`
+  //   is an explicit request from the user and outranks a `restore`, which is
+  //   only a convenience. `trace` is the media→text hand-off, which can never
+  //   race either (it fires from a click, long after both).
+  const pendingCellScrollRef = useRef<{
+    cellId: string
+    flash: boolean
+    fileId: string | null
+    source: "link" | "restore" | "trace"
+  } | null>(null)
+  // AQU-1278 give-up bookkeeping for the park above: the cell we have been
+  // trying, whether we were ever actually in its file, and how many store
+  // versions we have spent. Keyed by cell id so that ANY fresh park starts with
+  // a full budget without every parker having to remember to reset a counter.
+  const pendingCellScrollTryRef = useRef<
+    { cellId: string; arrived: boolean; attempts: number } | null
+  >(null)
   // Mirrors currentUsername (computed later in the function) so effects that
   // are declared before currentUsername can access it via ref.
   const currentUsernameRef = useRef<string>("local")
@@ -5786,12 +5857,18 @@ export function ProjectWorkspace() {
         setMediaTraceCellId(idx >= 0 ? cellStore.getAllSummaries()[idx]?.id ?? null : null)
       } else if (timelineSelectedCellIdRef.current) {
         // MEDIA → TEXT: park for the consume effect — scroll + brief flash,
-        // no edit-focus change.
-        pendingCellScrollRef.current = { cellId: timelineSelectedCellIdRef.current, flash: true }
+        // no edit-focus change. The trace is always within the open file (the
+        // lens switch doesn't navigate), so it parks against `activeFileId`.
+        pendingCellScrollRef.current = {
+          cellId: timelineSelectedCellIdRef.current,
+          flash: true,
+          fileId: activeFileId,
+          source: "trace",
+        }
       }
     }
     setLens(next)
-  }, [lens, setLens, activeFile, cellStore])
+  }, [lens, setLens, activeFile, activeFileId, cellStore])
 
   // Traces never outlive the file they were captured in.
   useEffect(() => {
@@ -5930,13 +6007,54 @@ export function ProjectWorkspace() {
   // mounts (the ref attaches during commit, before effects run — same pass);
   // the id-based scroll also fixes the store-vs-display index mismatch on
   // time-ordered files.
+  //
+  // AQU-1278: this park can now GIVE UP, which it previously could not.
+  // `scrollToCellId` returns false for an id the open file doesn't have — a
+  // cell deleted since the link was written, a remembered position in a file
+  // that has since been re-imported, a plan-board link to a file the redirect
+  // above swapped out — and the old body only cleared the ref on success. So
+  // one stale id re-ran this scroll on EVERY cell-store version bump for the
+  // rest of the session (a version bump is one committed keystroke), and it
+  // followed the user into other files, where it would hijack their scroll
+  // position the moment an unrelated file happened to contain a matching id.
+  // Two exits now: the attempt budget, and leaving the file it was parked for.
   useEffect(() => {
     const pending = pendingCellScrollRef.current
     if (!pending) return
     if (readAtVersion(cellStoreVersion, () => cellStore.getCellCount()) === 0) return
-    const ok = editorRef.current?.scrollToCellId(pending.cellId, { flash: pending.flash }) ?? false
-    if (ok) pendingCellScrollRef.current = null
-  }, [cellStore, cellStoreVersion, lens])
+    const editor = editorRef.current
+    // No text editor mounted (media lens). Wait for it rather than spending an
+    // attempt — that wait IS the AQU-646 media→text trace's mechanism.
+    if (!editor) return
+
+    const giveUp = () => {
+      pendingCellScrollRef.current = null
+      pendingCellScrollTryRef.current = null
+    }
+    let attempt = pendingCellScrollTryRef.current
+    if (!attempt || attempt.cellId !== pending.cellId) {
+      attempt = { cellId: pending.cellId, arrived: false, attempts: 0 }
+      pendingCellScrollTryRef.current = attempt
+    }
+    // A park is made BEFORE the navigation that opens its file, so a file
+    // mismatch is ambiguous on its own: it means either "the route hasn't
+    // caught up yet" or "the user has moved on". `arrived` tells them apart —
+    // only a mismatch AFTER we were once in the parked file is a departure.
+    // The budget below covers the other case (a file we never reach at all).
+    const onParkedFile = !pending.fileId || pending.fileId === activeFileId
+    if (onParkedFile) attempt.arrived = true
+    else if (attempt.arrived) {
+      giveUp()
+      return
+    }
+
+    attempt.attempts += 1
+    // Never scroll a file this cell wasn't parked for: that is the hijack.
+    const ok = onParkedFile
+      ? editor.scrollToCellId(pending.cellId, { flash: pending.flash })
+      : false
+    if (ok || attempt.attempts >= PENDING_CELL_SCROLL_MAX_ATTEMPTS) giveUp()
+  }, [activeFileId, cellStore, cellStoreVersion, lens])
 
   const drawerRule = rules.find((r) => r.id === drawerRuleId) || null
   const drawerInfractions = drawerRuleId

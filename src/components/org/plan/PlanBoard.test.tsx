@@ -21,21 +21,57 @@ function renderBoard(units: PlanUnit[], selectedId: string | null = null) {
   return { onSelect }
 }
 
+/**
+ * AQU-1278. 100 cells with 96 validated is four short, under the
+ * max(6% of 100, 7) = 7 threshold, so this unit is Nearly complete. It carries
+ * no target date on purpose: the whole case the group exists for is the unit
+ * nobody dated, which no other signal on the board could surface.
+ */
+function nearlyDone(over: Partial<PlanUnit> = {}): PlanUnit {
+  return unit({ filledCount: 100, validatedCount: 96, ...over })
+}
+
 describe("grouping", () => {
-  it("orders groups by urgency, with Done last", () => {
+  it("puts Nearly complete under the two dated groups and above In progress, Done last", () => {
+    // The rung AQU-1278 settled on. A blown date still outranks "a few cells
+    // left", so Overdue and Due soon keep the top — but a unit four cells from
+    // finished is more actionable than the rest of In progress, so it sits
+    // directly above it rather than being buried inside it.
     renderBoard([
       unit({ fileId: "a", doneAt: NOW, doneBy: "r" }),
       unit({ fileId: "b", targetDate: "2026-08-01" }),
       unit({ fileId: "c", filledCount: 5 }),
       unit({ fileId: "d" }),
+      unit({ fileId: "e", targetDate: "2026-09-05", filledCount: 5 }),
+      nearlyDone({ fileId: "f" }),
     ])
     const groups = screen.getAllByTestId(/^plan-group-/).map((el) => el.getAttribute("data-testid"))
     expect(groups).toEqual([
       "plan-group-overdue",
+      "plan-group-soon",
+      "plan-group-nearly_complete",
       "plan-group-in_progress",
       "plan-group-not_started",
       "plan-group-done",
     ])
+  })
+
+  it("sends a unit a handful of cells from done to the new group, not to In progress", () => {
+    // The row this feature is for: before AQU-1278 a book four cells short and
+    // a book at 40% sat in the same group, sorted by a date neither of them
+    // had, and only the width of a bar told them apart.
+    renderBoard([
+      nearlyDone({ fileId: "near", fileName: "Titus" }),
+      unit({ fileId: "mid", fileName: "Judges", filledCount: 40 }),
+    ])
+    const near = screen.getByTestId("plan-group-nearly_complete")
+    expect(within(near).getByTestId("plan-row-near-")).toBeInTheDocument()
+    expect(
+      within(screen.getByTestId("plan-group-in_progress")).getByTestId("plan-row-mid-"),
+    ).toBeInTheDocument()
+    // And above it on the page, which is the entire claim of the new rung.
+    const groups = screen.getAllByTestId(/^plan-group-/).map((el) => el.getAttribute("data-testid"))
+    expect(groups).toEqual(["plan-group-nearly_complete", "plan-group-in_progress"])
   })
 
   it("hides empty groups so a healthy project reads short", () => {
@@ -46,8 +82,12 @@ describe("grouping", () => {
   })
 
   it("counts the rows in each group header", () => {
-    renderBoard([unit({ fileId: "a" }), unit({ fileId: "b" }), unit({ fileId: "c", filledCount: 1 })])
+    renderBoard([
+      unit({ fileId: "a" }), unit({ fileId: "b" }), unit({ fileId: "c", filledCount: 1 }),
+      nearlyDone({ fileId: "d" }), nearlyDone({ fileId: "e", validatedCount: 100 }),
+    ])
     expect(within(screen.getByTestId("plan-group-not_started")).getByText("2")).toBeInTheDocument()
+    expect(within(screen.getByTestId("plan-group-nearly_complete")).getByText("2")).toBeInTheDocument()
   })
 
   it("puts the soonest target first within a group", () => {
@@ -76,6 +116,31 @@ describe("summary", () => {
   it("shows no overdue badge when everything is on time", () => {
     renderBoard([unit({ filledCount: 1 })])
     expect(screen.queryByTestId("plan-summary-overdue")).toBeNull()
+  })
+
+  it("gives nearly complete its own pill, ahead of in progress in the strip", () => {
+    // AQU-1278. Ahead of it because the strip reads in urgency order like the
+    // groups below, and this is the one number a manager can act on today.
+    renderBoard([
+      nearlyDone({ fileId: "a" }),
+      nearlyDone({ fileId: "b", validatedCount: 99 }),
+      unit({ fileId: "c", filledCount: 40 }),
+    ])
+    expect(screen.getByTestId("plan-summary-nearly-complete")).toHaveTextContent("2 nearly complete")
+    // Counted APART from in progress, never on top of it: two pills describing
+    // the same unit would make the strip add up to more than the project.
+    expect(screen.getByTestId("plan-summary-in-progress")).toHaveTextContent("1 in progress")
+    const pills = screen.getAllByTestId(/^plan-summary/).map((el) => el.getAttribute("data-testid"))
+    expect(pills).toEqual([
+      "plan-summary",
+      "plan-summary-nearly-complete",
+      "plan-summary-in-progress",
+    ])
+  })
+
+  it("drops the nearly complete pill when nothing is close, like its siblings", () => {
+    renderBoard([unit({ filledCount: 40 })])
+    expect(screen.queryByTestId("plan-summary-nearly-complete")).toBeNull()
   })
 })
 
@@ -251,14 +316,23 @@ describe("filtering by name", () => {
     expect(rowCount()).toBe(3)
   })
 
-  it("KEEPS THE SUMMARY PROJECT-WIDE while filtered", () => {
+  it("KEEPS EVERY SUMMARY PILL PROJECT-WIDE while filtered, the AQU-1278 one included", () => {
     // The load-bearing invariant. "1 of 1 done" under a filter that hid the
-    // other two would be a lie, and the strip is the one thing on this card a
+    // other three would be a lie, and the strip is the one thing on this card a
     // reader trusts without checking.
-    renderBoard(BOOKS)
+    //
+    // The new pill is pinned HERE rather than in a test of its own: it is the
+    // same invariant, and a parallel test is exactly how the two drift until
+    // one pill counts the filtered view and the others count the project.
+    renderBoard([
+      ...BOOKS,
+      nearlyDone({ fileId: "b", sectionKey: "NUM", fileName: "Bible.usfm", validatedCount: 97 }),
+    ])
+    expect(screen.getByTestId("plan-summary-nearly-complete")).toHaveTextContent("1 nearly complete")
     fireEvent.change(screen.getByTestId("plan-filter"), { target: { value: "genesis" } })
-    expect(screen.getByTestId("plan-summary")).toHaveTextContent("1 of 3 done")
-    expect(screen.getByTestId("plan-filter-note")).toHaveTextContent("Showing 1 of 3.")
+    expect(screen.getByTestId("plan-summary")).toHaveTextContent("1 of 4 done")
+    expect(screen.getByTestId("plan-summary-nearly-complete")).toHaveTextContent("1 nearly complete")
+    expect(screen.getByTestId("plan-filter-note")).toHaveTextContent("Showing 1 of 4.")
   })
 })
 
@@ -475,6 +549,26 @@ describe("truncating a long plan", () => {
     const inProgress = screen.getByTestId("plan-group-in_progress")
     expect(within(inProgress).getAllByTestId(/^plan-row-/).length).toBe(2)
     expect(within(inProgress).getByText("4")).toBeInTheDocument()
+  })
+
+  it("spends the cap through the new group in display order, not around it", () => {
+    // AQU-1278 inserted a fourth group into the middle of the sequence, and the
+    // budget is spent in DISPLAY order: 2 overdue, then 2 nearly complete,
+    // leaving one row for In progress — whose header still says 3, because a
+    // count that shrank to match the rows drawn would hide the work.
+    renderBoard([
+      ...manyUnits(2, { targetDate: "2026-08-01" }).map((u, i) => ({ ...u, sectionKey: `O${i}` })),
+      ...manyUnits(2, { filledCount: 100, validatedCount: 97 })
+        .map((u, i) => ({ ...u, sectionKey: `N${i}` })),
+      ...manyUnits(3).map((u, i) => ({ ...u, sectionKey: `P${i}` })),
+    ])
+    expect(rowCount()).toBe(5)
+    expect(within(screen.getByTestId("plan-group-overdue")).getAllByTestId(/^plan-row-/).length).toBe(2)
+    const nearly = screen.getByTestId("plan-group-nearly_complete")
+    expect(within(nearly).getAllByTestId(/^plan-row-/).length).toBe(2)
+    const inProgress = screen.getByTestId("plan-group-in_progress")
+    expect(within(inProgress).getAllByTestId(/^plan-row-/).length).toBe(1)
+    expect(within(inProgress).getByText("3")).toBeInTheDocument()
   })
 
   it("lets a folded group's rows go to the groups below it", () => {

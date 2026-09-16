@@ -28,6 +28,7 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import {
+  audioFileIds,
   filterPlanUnits,
   groupPlanUnits,
   planHasAudio,
@@ -59,9 +60,20 @@ import { PlanRow } from "./PlanRow"
  */
 const PLAN_ROW_CAP = 5
 
+/**
+ * The line of small print on the right of each group header. It exists because
+ * a group whose membership nobody can predict reads as a bug — and AQU-1278's
+ * group is the one that most needs it, since "nearly" is a rule rather than a
+ * fact a reader can see in the row. Its hint spells the threshold out.
+ *
+ * TYPE-CHECKED, unlike `PLAN_GROUP_ORDER`: this is an exhaustive Record, so a
+ * status added to the union without a hint here fails the build rather than
+ * rendering a group with a blank margin.
+ */
 const GROUP_HINT_KEY: Record<PlanUnitStatus, string> = {
   overdue: "org.projectOverview.plan.groupHintOverdue",
   soon: "org.projectOverview.plan.groupHintSoon",
+  nearly_complete: "org.projectOverview.plan.groupHintNearlyComplete",
   in_progress: "org.projectOverview.plan.groupHintInProgress",
   not_started: "org.projectOverview.plan.groupHintNotStarted",
   done: "org.projectOverview.plan.groupHintDone",
@@ -106,6 +118,7 @@ function PlanStat({ value, label, tone, testId }: {
 export function PlanBoard({
   units, now, projectId, selectedId, onSelect, actions, emptyAction,
   status = "ready", onRetry, orderRef,
+  shortChaptersByUnit, assigneesByUnit, onOpenShortfall,
 }: {
   units: PlanUnit[]
   now: number
@@ -133,6 +146,33 @@ export function PlanBoard({
   actions?: React.ReactNode
   /** The one action that creates rows, offered when there are none. */
   emptyAction?: React.ReactNode
+  /**
+   * AQU-1278. Which chapters of a unit are still short, keyed by `planUnitId`
+   * — the row draws them as "chapters 3, 9, 41".
+   *
+   * The board only ROUTES this; it never fetches it. The chapter detail comes
+   * from a per-unit read, and a board that fired one of those per row would
+   * open sixty-six requests to draw a plan nobody has scrolled to yet. The
+   * owner (ProjectOverview) fetches for the rows it decides are worth it and
+   * hands back a map, so a unit with no entry simply draws no chapter line.
+   */
+  shortChaptersByUnit?: ReadonlyMap<string, string[]>
+  /**
+   * AQU-1278. Who is working on each unit, keyed by `planUnitId`.
+   *
+   * Typed structurally rather than imported from `@/lib/sync/assignments`: the
+   * board renders a name and keys by an id, and nothing else about an
+   * assignment record is its business — so the assignment read can grow
+   * fields without touching this signature.
+   */
+  assigneesByUnit?: ReadonlyMap<string, readonly { userId: number; username: string | null }[]>
+  /**
+   * AQU-1278. Open the editor at this unit's FIRST OUTSTANDING CELL — the one
+   * link that turns "4 cells short" into work. Routed, not implemented: the
+   * board has no idea where the editor lives or how a workspace is opened,
+   * and ProjectOverview already owns both.
+   */
+  onOpenShortfall?: (unit: PlanUnit) => void
 }) {
   const t = useT()
   const listRef = useRef<HTMLDivElement | null>(null)
@@ -186,6 +226,20 @@ export function PlanBoard({
   // column of zeroes, matching what the Progress card already does. Judged on
   // the whole project so a filter cannot make a column appear and disappear.
   const showAudio = useMemo(() => planHasAudio(units), [units])
+  /**
+   * AQU-1278: which FILES carry recordings. Computed ONCE over the whole board
+   * and handed down, for two reasons that are both bugs if you skip it.
+   *
+   * A row left to judge audio from its own `audioCount` would call every
+   * not-yet-recorded book of a dubbed whole-Bible file "text-only" and declare
+   * it nearly complete on its text alone — the row and the group header would
+   * then disagree about the same unit, since `groupPlanUnits` already judges
+   * this per file across the board.
+   *
+   * And it is derived from `units`, never from `visible`: a filter that hid
+   * the one recorded book must not change what the remaining rows MEAN.
+   */
+  const audioFiles = useMemo(() => audioFileIds(units), [units])
 
   /**
    * Every row the current narrowing and arrangement would draw, in drawn
@@ -278,19 +332,34 @@ export function PlanBoard({
     [step, selectedId, onSelect],
   )
 
-  const renderRow = (unit: PlanUnit) => (
-    <PlanRow
-      key={planUnitId(unit)}
-      unit={unit}
-      now={now}
-      showAudio={showAudio}
-      // In Order mode no header above the row carries its status, so the row
-      // carries it itself.
-      showStatus={view === "order"}
-      selected={planUnitId(unit) === selectedId}
-      onSelect={() => onSelect(planUnitId(unit))}
-    />
-  )
+  const renderRow = (unit: PlanUnit) => {
+    const id = planUnitId(unit)
+    return (
+      <PlanRow
+        key={id}
+        unit={unit}
+        now={now}
+        showAudio={showAudio}
+        audioFiles={audioFiles}
+        // AQU-1278. Both maps are looked up HERE rather than passed whole: a
+        // row handed the map would re-render whenever any other row's chapters
+        // or assignees arrived, and on a sixty-six row board that is the whole
+        // board re-rendering once per background read.
+        shortChapters={shortChaptersByUnit?.get(id)}
+        assignees={assigneesByUnit?.get(id)}
+        // Bound to the unit here, exactly like `onSelect` below it, so a row
+        // never has to know how a unit is addressed. Absent when the owner
+        // supplied no handler, so the row can drop the link rather than render
+        // a button that does nothing.
+        onOpenShortfall={onOpenShortfall ? () => onOpenShortfall(unit) : undefined}
+        // In Order mode no header above the row carries its status, so the row
+        // carries it itself.
+        showStatus={view === "order"}
+        selected={id === selectedId}
+        onSelect={() => onSelect(id)}
+      />
+    )
+  }
 
   return (
     <div className="overflow-hidden rounded-lg border bg-card" data-testid="plan-board">
@@ -310,6 +379,21 @@ export function PlanBoard({
               value={summary.overdue}
               tone="late"
               label={t("org.projectOverview.plan.summaryOverdueLabel", { count: summary.overdue })}
+            />
+          )}
+          {/* AQU-1278. BEFORE the in-progress pill, not after it. The strip
+              reads in urgency order like the groups below it do, and nearly
+              complete is the more actionable number of the two: it is the one
+              bucket a manager can actually empty this week. Its count comes
+              out of `inFlight` rather than being added on top — the two pills
+              must never describe the same unit twice. */}
+          {summary.nearlyComplete > 0 && (
+            <PlanStat
+              testId="plan-summary-nearly-complete"
+              value={summary.nearlyComplete}
+              label={t("org.projectOverview.plan.summaryNearlyCompleteLabel", {
+                count: summary.nearlyComplete,
+              })}
             />
           )}
           {summary.inFlight > 0 && (

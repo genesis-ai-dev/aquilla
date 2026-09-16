@@ -873,6 +873,10 @@ CREATE INDEX idx_activity_logs_timestamp ON activity_logs(timestamp);
 CREATE INDEX idx_activity_logs_user_id ON activity_logs(user_id);
 CREATE INDEX idx_user_activity_days_day ON user_activity_days(day);
 CREATE INDEX assignment_cells_by_assignment ON assignment_cells(assignment_id);
+-- AQU-1278 (0093): the reverse lookup — "which assignments cover this file's
+-- cells?" — that the plan inspector's per-unit read joins by. cell_id rides
+-- along because that join pairs straight onto `cells` on (file_id, cell_id).
+CREATE INDEX assignment_cells_by_file ON assignment_cells(file_id, cell_id);
 CREATE INDEX assignments_assignee ON assignments(assignee_user_id);
 CREATE INDEX assignments_project ON assignments(project_id);
 CREATE INDEX idx_cell_audio_file ON cell_audio(project_id, file_id) WHERE deleted = 0;

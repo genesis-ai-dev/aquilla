@@ -6,7 +6,7 @@
 // and how far along it is.
 
 import type { PlanUnit, PlanUnitStatus } from "@/lib/plan/plan-status"
-import { planUnitLabel, planUnitStatus } from "@/lib/plan/plan-status"
+import { audioFileIds, planUnitLabel, planUnitStatus } from "@/lib/plan/plan-status"
 
 const HEADER = [
   "Unit",
@@ -21,11 +21,24 @@ const HEADER = [
   "Last activity",
 ] as const
 
-/** Human-readable status, matching the board's own vocabulary. */
+/**
+ * Human-readable status, worded exactly as the board's English group headings
+ * are worded, so a manager who sorts this column recognises the groups they
+ * were just looking at. Plain literals and not i18n keys on purpose: the export
+ * is a file that gets mailed on and opened by someone who never saw the board,
+ * and a spreadsheet column is filtered on its text.
+ *
+ * Exhaustive by type, and that is the safety net. A status added to the union
+ * and forgotten here would export an empty Status cell on every row it applied
+ * to — a silence nobody reads as a bug — so the compiler refuses the build
+ * until the new status is named. That is how AQU-1278's `nearly_complete`
+ * announced itself.
+ */
 const STATUS_TEXT: Record<PlanUnitStatus, string> = {
   done: "Done",
   overdue: "Overdue",
   soon: "Due soon",
+  nearly_complete: "Nearly complete",
   in_progress: "In progress",
   not_started: "Not started",
 }
@@ -44,9 +57,18 @@ function isoDate(ms: number | null): string {
 
 /** RFC 4180: CRLF line endings, quotes doubled inside quoted fields. */
 export function planRowsToCsv(units: readonly PlanUnit[], now: number): string {
+  // AQU-1278: whether audio is EXPECTED is decided per file across the whole
+  // export, the same way the board decides it. Omitting this set makes
+  // `planUnitStatus` fall back to the row's own `audioCount`, which is right
+  // for a lone pill and wrong for a listing: an unrecorded book inside a file
+  // whose other books are dubbed would then be judged on its text alone and
+  // exported as Nearly complete, while the board — counting the recordings it
+  // is missing — still calls it In progress. The two surfaces have to say the
+  // same word about the same row, or the export is the one that gets believed.
+  const audioFiles = audioFileIds(units)
   const rows = units.map((u) => [
     planUnitLabel(u),
-    STATUS_TEXT[planUnitStatus(u, now)],
+    STATUS_TEXT[planUnitStatus(u, now, audioFiles)],
     u.targetDate ?? "",
     isoDate(u.doneAt),
     u.doneBy ?? "",

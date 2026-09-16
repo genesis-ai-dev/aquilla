@@ -9,15 +9,180 @@
 // column of thirty-one identical "In progress" chips is noise. What the row
 // carries instead is the thing that varies and the group cannot say: the date,
 // and the one line that says how late, how soon, or how recently touched.
+//
+// AQU-1278 gave the third column a second question to answer — what is LEFT —
+// because that is the one a manager actually opens this board with once the
+// dates are set. It only ever appears on a unit that is nearly finished, where
+// the answer is short enough to be a fact rather than a report, and it never
+// pushes the date off the row: the date keeps line one whenever there is one.
 
+import { useLayoutEffect, useRef, useState, type RefObject } from "react"
 import { useT, useI18n } from "@/lib/i18n/I18nProvider"
 import { fmtDeadlineDate } from "@/lib/format-date"
-import { planPct, planUnitLabel, planUnitStatus, type PlanUnit } from "@/lib/plan/plan-status"
+import {
+  planPct,
+  planUnitLabel,
+  planUnitShortfall,
+  planUnitStatus,
+  type PlanUnit,
+} from "@/lib/plan/plan-status"
+import { InitialsAvatar } from "@/components/InitialsAvatar"
+import { AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { PlanBar } from "./PlanBar"
 import { PlanStatusPill } from "./PlanStatusPill"
-import { usePlanRowNote } from "./use-plan-note"
+import { usePlanRowNote, usePlanShortfallText } from "./use-plan-note"
 
-export function PlanRow({ unit, now, selected, showAudio, showStatus = false, onSelect }: {
+/** Whoever is on the hook for some slice of this unit. */
+export interface PlanRowAssignee {
+  userId: number
+  username: string | null
+}
+
+/**
+ * At most three faces, then a count. Three is where the group still reads as
+ * individuals rather than as a texture, and it is what fits beside a book name
+ * in the narrowest column on the board.
+ */
+const MAX_ASSIGNEE_CHIPS = 3
+
+// Geometry of the chip strip, in pixels, written as numbers because the
+// measurement below is arithmetic and not a class name. `InitialsAvatar`
+// size="xs" is `size-5` (20px); `AvatarGroup`'s `-space-x-1.5` overlaps each
+// chip 6px onto the one before it, so every chip after the first costs 14; and
+// `gap-2` (8px) separates the strip from whatever precedes it. Change a class
+// below and change these with it — nothing connects the two, and the symptom of
+// a mismatch is a name that truncates by a few pixels on some rows only.
+const CHIP_PX = 20
+const CHIP_STEP_PX = 14
+const CHIP_GAP_PX = 8
+
+/** How many chips fit in `available` pixels, given they overlap. */
+function chipsThatFit(available: number): number {
+  if (available < CHIP_GAP_PX + CHIP_PX) return 0
+  return 1 + Math.floor((available - CHIP_GAP_PX - CHIP_PX) / CHIP_STEP_PX)
+}
+
+/**
+ * Split a set of assignees into the faces this row can show and the number it
+ * has to fold into a "+N" chip.
+ *
+ * THE COUNT CHIP IS RESERVED FIRST AND DROPPED LAST, which is the whole rule in
+ * one line. A squeezed row is allowed to show fewer NAMES than it has — that is
+ * a detail the inspector carries anyway — but it must never show fewer PEOPLE,
+ * because a manager who counts two faces and assigns a third body to the work
+ * has been misled by the board rather than informed by it. So when only one
+ * slot survives, that slot holds "+4" and not one arbitrary face.
+ *
+ * Kept module-private on purpose: exporting it costs this file its fast-refresh
+ * guarantee (a module that exports anything but components reloads whole, and
+ * the board loses its selection on every save), and the rule is observable from
+ * the outside — narrow the column and count the chips.
+ */
+function assigneeChipSplit(
+  total: number,
+  capacity: number,
+): { shown: number; overflow: number } {
+  if (total <= 0) return { shown: 0, overflow: 0 }
+  const wanted = Math.min(MAX_ASSIGNEE_CHIPS, total)
+  if (total === wanted && capacity >= wanted) return { shown: wanted, overflow: 0 }
+  // Everything below here needs a count chip, so one slot is spoken for.
+  const shown = Math.max(0, Math.min(wanted, capacity - 1))
+  return { shown, overflow: total - shown }
+}
+
+/**
+ * How many chip slots the name column can spare, measured.
+ *
+ * THE NAME NEVER LOSES SPACE TO A CHIP. It is the narrowest of the three
+ * columns and a half-truncated book name is the one thing on this board that
+ * must not happen, so the chips are fitted into what the name leaves rather
+ * than the other way round — hence a measurement instead of a flexbox rule.
+ *
+ * `scrollWidth` on the name is what makes this stable. It reports the name's
+ * CONTENT width in both states: unsqueezed the element is already content-sized
+ * (a flex item that does not grow), and squeezed the `truncate` overflow keeps
+ * the full text measurable underneath. Read the name's laid-out width instead
+ * and the measurement feeds back into itself — chips shrink the name, the
+ * smaller name frees room, more chips appear — and the row oscillates.
+ *
+ * Re-measured on RESIZE and nothing else. The resize that matters is the
+ * inspector docking and undocking beside the board, which takes a third of the
+ * width away from every row at once; scroll changes nothing here, and a
+ * listener per row on a sixty-six-row board would cost far more than it buys.
+ */
+function useAssigneeChipCapacity(
+  cellRef: RefObject<HTMLElement | null>,
+  nameRef: RefObject<HTMLElement | null>,
+  reservedRef: RefObject<HTMLElement | null>,
+  label: string,
+  enabled: boolean,
+): number {
+  // Until something has been measured, assume there is room. The alternative —
+  // start at zero and grow — makes every row flash a bare "+N" before settling,
+  // and in a test environment with no ResizeObserver (happy-dom) it would mean
+  // the chips never render at all and could never be asserted on.
+  const [capacity, setCapacity] = useState(Number.POSITIVE_INFINITY)
+
+  useLayoutEffect(() => {
+    const cell = cellRef.current
+    const name = nameRef.current
+    if (!enabled || !cell || !name) return
+
+    const measure = () => {
+      const reserved = reservedRef.current?.offsetWidth ?? 0
+      setCapacity(chipsThatFit(cell.clientWidth - name.scrollWidth - reserved))
+    }
+
+    measure()
+    if (typeof ResizeObserver === "undefined") return // happy-dom
+
+    const observer = new ResizeObserver(measure)
+    observer.observe(cell)
+    return () => observer.disconnect()
+    // `label` is in the deps because a longer name eats the same room a narrower
+    // column would, and no resize fires when only the text changes.
+  }, [cellRef, nameRef, reservedRef, label, enabled])
+
+  return capacity
+}
+
+/**
+ * Does this unit qualify as nearly complete ON ITS WORK ALONE?
+ *
+ * Deliberately not `status === "nearly_complete"`. A unit that is both late and
+ * nearly finished is filed under Overdue, because a blown date outranks a short
+ * queue (see `PLAN_GROUP_ORDER`) — and that row is precisely the one that needs
+ * the shortfall said out loud, since "23 days late, nothing left" and "23 days
+ * late, three hundred cells to go" are the same row today and two very
+ * different phone calls.
+ *
+ * Asked by stripping the date and re-asking the vocabulary rather than by
+ * re-deriving the rule here: the six-percent threshold, the empty-file guard
+ * and the not-started guard all stay in plan-status.ts, so a change to any of
+ * them reaches this row for free. A unit a manager has MARKED DONE still
+ * answers "done" — it keeps its "marked on" note and never grows a shortfall.
+ */
+function isNearlyComplete(
+  unit: PlanUnit,
+  now: number,
+  audioFiles: ReadonlySet<string> | undefined,
+): boolean {
+  return planUnitStatus({ ...unit, targetDate: null }, now, audioFiles) === "nearly_complete"
+}
+
+export function PlanRow({
+  unit,
+  now,
+  selected,
+  showAudio,
+  showStatus = false,
+  onSelect,
+  audioFiles,
+  shortChapters,
+  onOpenShortfall,
+  assignees,
+}: {
   unit: PlanUnit
   now: number
   selected: boolean
@@ -29,15 +194,93 @@ export function PlanRow({ unit, now, selected, showAudio, showStatus = false, on
    */
   showStatus?: boolean
   onSelect: () => void
+  /**
+   * Files that carry recordings, from `audioFileIds` over the WHOLE board.
+   * Optional so the row stays testable alone; omitted, the unit's own audio
+   * count stands in, which is right for one row and wrong for a board.
+   */
+  audioFiles?: ReadonlySet<string>
+  /** Labels of the chapters still short, already ordered — e.g. ["12", "40"]. */
+  shortChapters?: string[]
+  /** Opens the editor at the first outstanding cell. Absent → plain text. */
+  onOpenShortfall?: () => void
+  assignees?: readonly PlanRowAssignee[]
 }) {
   const t = useT()
   const { locale } = useI18n()
-  const status = planUnitStatus(unit, now)
+  const status = planUnitStatus(unit, now, audioFiles)
   const translated = planPct(unit.filledCount, unit.totalCount)
   const validated = planPct(unit.validatedCount, unit.totalCount)
   const recorded = planPct(unit.audioCount, unit.totalCount)
   const audioValidated = planPct(unit.audioValidatedCount, unit.totalCount)
-  const note = usePlanRowNote(unit, now)
+  const note = usePlanRowNote(unit, now, audioFiles)
+
+  const hasAudio = audioFiles ? audioFiles.has(unit.fileId) : unit.audioCount > 0
+  const shortfall = planUnitShortfall(unit, hasAudio)
+  const nearly = isNearlyComplete(unit, now, audioFiles)
+  const shortfallText = usePlanShortfallText(shortfall)
+  // Null from the renderer means nothing is outstanding, which on a unit nobody
+  // has marked done is itself the news — see `nothingLeft` in the catalog.
+  const leftToDo = nearly ? (shortfallText ?? t("org.projectOverview.plan.nothingLeft")) : null
+
+  const label = planUnitLabel(unit)
+  const nameCellRef = useRef<HTMLSpanElement>(null)
+  const nameRef = useRef<HTMLSpanElement>(null)
+  const pillRef = useRef<HTMLSpanElement>(null)
+  const capacity = useAssigneeChipCapacity(
+    nameCellRef,
+    nameRef,
+    pillRef,
+    label,
+    (assignees?.length ?? 0) > 0,
+  )
+  const { shown, overflow } = assigneeChipSplit(assignees?.length ?? 0, capacity)
+
+  // LINE 1 is the date whenever there is one, unchanged and red when it has been
+  // blown. Only a unit with no date at all gives the line up, and then only to
+  // say what is left — which is the same trade the column has always made:
+  // whatever varies most between rows wins the line.
+  const line1LeftToDo = !unit.targetDate && leftToDo !== null
+  const openable = line1LeftToDo && shortfallText !== null && onOpenShortfall !== undefined
+
+  // LINE 2 carries whatever line 1 could not. A dated nearly-complete unit puts
+  // the shortfall here, ahead of the note, joined by the catalog's own pair
+  // separator; an undated one has already spent line 1 on the shortfall, so this
+  // line points at WHERE the remaining cells are instead of repeating it.
+  const chapterList = shortChapters ?? []
+  let line2: string | null = note
+  if (unit.targetDate && leftToDo !== null) {
+    line2 = note
+      ? t("org.projectOverview.plan.shortfallPair", { first: leftToDo, second: note })
+      : leftToDo
+  } else if (line1LeftToDo && shortfallText !== null && chapterList.length > 0) {
+    line2 = t("org.projectOverview.plan.shortfallWhere", {
+      count: chapterList.length,
+      list: chapterList.join(", "),
+    })
+  }
+
+  // Where the click lands, said in words for a screen reader. Only the two text
+  // media can be named: the catalog has no wording for "first unrecorded", and
+  // borrowing one of these for a recording queue would tell a reader the link
+  // goes somewhere it does not. A record-led shortfall therefore keeps the
+  // visible count as its own accessible name, which is true if terse.
+  //
+  // An aria-label REPLACES the text it labels, so the destination is joined to
+  // the count rather than sent in its place — "4 cells to validate · Go to
+  // first unvalidated". The join borrows `shortfallPair`, which exists to put
+  // two already-rendered fragments together under a separator a translator
+  // chooses; a hand-written one here would be untranslated copy in a .tsx.
+  const openDestination =
+    shortfall.toTranslate > 0
+      ? t("org.projectOverview.plan.goToFirstUntranslated")
+      : shortfall.toValidate > 0
+        ? t("org.projectOverview.plan.goToFirstUnvalidated")
+        : null
+  const openLabel =
+    openDestination && leftToDo
+      ? t("org.projectOverview.plan.shortfallPair", { first: leftToDo, second: openDestination })
+      : null
 
   return (
     <li>
@@ -50,16 +293,58 @@ export function PlanRow({ unit, now, selected, showAudio, showStatus = false, on
         data-selected={selected ? "true" : undefined}
         aria-current={selected ? "true" : undefined}
         onClick={onSelect}
-        className={`grid w-full grid-cols-1 items-center gap-2 px-[17px] py-3 text-start transition-colors hover:bg-muted/60 md:grid-cols-[minmax(150px,1fr)_minmax(240px,1.8fr)_minmax(130px,0.7fr)] md:gap-4 ${
+        // AQU-1278 widened the third column from minmax(130px,0.7fr) and took
+        // every pixel of it off the bars, which had the slack: the minimums
+        // still add to 520 and the fractions still add to 3.5, so nothing else
+        // on the board reflows. The bars lose width they were only stretching
+        // into; the date column gained a second line with words in it.
+        className={`grid w-full grid-cols-1 items-center gap-2 px-[17px] py-3 text-start transition-colors hover:bg-muted/60 md:grid-cols-[minmax(150px,1fr)_minmax(200px,1.6fr)_minmax(170px,0.9fr)] md:gap-4 ${
           selected ? "bg-muted shadow-[inset_3px_0_0_var(--color-primary)]" : ""
         }`}
       >
-        <span className="flex min-w-0 flex-col gap-0.5">
+        <span ref={nameCellRef} className="flex min-w-0 flex-col gap-0.5">
           <span className="flex min-w-0 items-center gap-2">
-            <span className="truncate text-[13.5px] font-semibold text-foreground">
-              {planUnitLabel(unit)}
+            <span ref={nameRef} className="truncate text-[13.5px] font-semibold text-foreground">
+              {label}
             </span>
-            {showStatus && <PlanStatusPill status={status} now={now} compact />}
+            {/*
+              The pill is measured, so it is wrapped in something with a width of
+              its own and pinned with `shrink-0`: a pill that squeezed when the
+              chips arrived would change the very number that decides how many
+              chips arrive. It also stays welded to the name — the chips take the
+              end of the strip, where dropping one leaves no hole behind it.
+            */}
+            {showStatus && (
+              <span ref={pillRef} className="shrink-0">
+                <PlanStatusPill status={status} now={now} compact />
+              </span>
+            )}
+            {assignees && assignees.length > 0 && (
+              <AvatarGroup
+                className="shrink-0 -space-x-1.5 *:data-[slot=avatar]:ring-background"
+                aria-label={t("org.projectOverview.plan.assignedTo")}
+              >
+                {assignees.slice(0, shown).map((a) => {
+                  // A username is nullable on the wire. The numeric id is a poor
+                  // label but an honest one, and it still colours and initials
+                  // deterministically, so the same person keeps the same chip.
+                  const name = a.username ?? `#${a.userId}`
+                  return (
+                    <AppTooltip key={a.userId} content={name}>
+                      <InitialsAvatar name={name} size="xs" />
+                    </AppTooltip>
+                  )
+                })}
+                {overflow > 0 && (
+                  <AvatarGroupCount
+                    className="size-5 text-[9px] font-semibold"
+                    aria-label={t("org.projectOverview.plan.moreAssignees", { count: overflow })}
+                  >
+                    +{overflow}
+                  </AvatarGroupCount>
+                )}
+              </AvatarGroup>
+            )}
           </span>
           <span className="text-[11.5px] tabular-nums text-muted-foreground">
             {t("org.projectOverview.plan.cellCount", { count: unit.totalCount })}
@@ -88,24 +373,57 @@ export function PlanRow({ unit, now, selected, showAudio, showStatus = false, on
           )}
         </span>
 
-        {/* The reason the board exists: when is it due, and how is it going. */}
+        {/* The reason the board exists: when is it due, what is left, and how is it going. */}
         <span className="flex flex-col gap-0.5 md:text-end">
           <span
             data-testid={`plan-date-${unit.fileId}-${unit.sectionKey}`}
             className={`text-[12.5px] tabular-nums ${
               status === "overdue"
                 ? "font-semibold text-destructive"
-                : unit.targetDate
+                : unit.targetDate || line1LeftToDo
                   ? "text-foreground"
                   : "text-muted-foreground"
             }`}
           >
-            {unit.targetDate
-              ? fmtDeadlineDate(unit.targetDate, now, locale)
-              : t("org.projectOverview.plan.noTargetShort")}
+            {unit.targetDate ? (
+              fmtDeadlineDate(unit.targetDate, now, locale)
+            ) : openable ? (
+              /*
+                NOT A <button>. This row is itself a button, and a button inside
+                a button is invalid HTML that React warns about and that some
+                browsers un-nest while parsing — the inner control then loses its
+                click entirely. A span carrying the button ROLE keeps the pointer
+                and keyboard behaviour without the nesting, and the propagation
+                stop is what keeps a click here from also selecting the row: this
+                link means "take me to the work", not "tell me more about it".
+              */
+              <span
+                role="button"
+                tabIndex={0}
+                data-testid={`plan-shortfall-${unit.fileId}-${unit.sectionKey}`}
+                aria-label={openLabel ?? undefined}
+                className="cursor-pointer rounded-sm underline-offset-2 hover:underline focus-visible:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onOpenShortfall?.()
+                }}
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter" && e.key !== " ") return
+                  // Space scrolls the board and Enter would activate the row
+                  // underneath; both have to be swallowed, not just handled.
+                  e.preventDefault()
+                  e.stopPropagation()
+                  onOpenShortfall?.()
+                }}
+              >
+                {leftToDo}
+              </span>
+            ) : (
+              (leftToDo ?? t("org.projectOverview.plan.noTargetShort"))
+            )}
           </span>
           <span className="text-[11.5px] text-muted-foreground">
-            {note ?? "—"}
+            {line2 ?? "—"}
           </span>
         </span>
       </button>

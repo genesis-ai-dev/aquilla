@@ -1,56 +1,19 @@
 import type { AquillaDb, AquillaStatement } from '../../../db/shim/postgres'
 import { structuralPredicateSql } from './structural-cells'
+// AQU-1278: the section/book key expressions moved to db/shared/plan-keys.ts
+// when auth-worker's per-unit assignment read started needing them. They are
+// re-exported here so every existing importer of this module keeps working and
+// so the file still reads as the one place the projection's grouping is
+// defined — the definition simply now lives where both workers can reach it.
+import {
+  bookKeyExpr,
+  sectionKeyExpr,
+  TIMELINE_SECTION_MS,
+} from '../../../db/shared/plan-keys'
+
+export { bookKeyExpr, sectionKeyExpr, TIMELINE_SECTION_MS }
 
 export const MAX_VALIDATOR_HISTOGRAM_BUCKET = 15
-
-/**
- * AQU-805: bucket size for time-based (media/timeline) sections — 5 minutes,
- * mirroring the in-app jump navigation's TIMELINE_MILESTONE_MS so the
- * project-overview file breakdown groups media progress the same way.
- */
-export const TIMELINE_SECTION_MS = 5 * 60 * 1000
-
-/**
- * AQU-805: the section grouping key for a source cell, as a SQL expression.
- *
- * Canonical (Scripture) files key by "<BOOK> <CHAPTER>" — the canonical_ref
- * before the verse colon — exactly as before. Media / timeline files carry no
- * canonical_ref but do carry start_ms; they key into ~5-minute time buckets
- * ("t:<zero-padded bucket-start ms>") so a single-episode media file shows a
- * per-section breakdown instead of only a flat cell count. The bucket-start ms
- * is zero-padded to a fixed width so the key sorts lexically in time order and
- * the read route's string sort needs no time-awareness. Cells with neither a
- * canonical ref nor a start_ms produce '' and are filtered out (untimed).
- */
-export function sectionKeyExpr(alias: string): string {
-  const canonical = `TRIM(SPLIT_PART(COALESCE(${alias}.canonical_ref, ''), ':', 1))`
-  return `CASE
-    WHEN ${canonical} <> '' THEN ${canonical}
-    WHEN ${alias}.start_ms IS NOT NULL
-      THEN 't:' || LPAD(((${alias}.start_ms / ${TIMELINE_SECTION_MS}) * ${TIMELINE_SECTION_MS})::text, 12, '0')
-    ELSE ''
-  END`
-}
-
-/**
- * AQU-1093: the BOOK grouping key for a source cell, as a SQL expression.
- *
- * A section key is "<BOOK> <CHAPTER>"; the book is its first token. Media
- * files key by time bucket ("t:<ms>") and have no book, and a cell with
- * neither yields '' — both are excluded from book rows.
- *
- * A book-only canonical_ref (a one-chapter book referenced as "TIT") produces
- * section_key 'TIT' AND book_key 'TIT'. Those are different rows with the same
- * key, which is why every grouping below carries `scope` alongside the key.
- */
-export function bookKeyExpr(alias: string): string {
-  const section = sectionKeyExpr(alias)
-  return `CASE
-    WHEN ${section} <> '' AND ${section} NOT LIKE 't:%'
-      THEN SPLIT_PART(${section}, ' ', 1)
-    ELSE ''
-  END`
-}
 
 /**
  * Whether the file is Scripture at all: does any source cell carry a

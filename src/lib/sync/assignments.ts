@@ -142,6 +142,73 @@ export async function getProjectAssignments(
 }
 
 /**
+ * One live assignment covering ONE planning unit, with that person's OWN
+ * progress inside it (mirrors UnitAssignment on the server — AQU-1278).
+ *
+ * Every count below is over that assignment's cells INSIDE THIS UNIT and
+ * nothing else: `cellsTotal` is not the assignment's whole size, it is the
+ * part of it that lands in the unit on screen. That is the only grain at which
+ * "Anna: 940 of 950" can be read against the unit's own bar directly above it.
+ *
+ * `translated`/`validated` are measured in the lane the caller asked for;
+ * `recorded`/`audioValidated` are lane-independent, because `cell_audio` has
+ * no target_lang column — one recording is the recording, whichever text lane
+ * you are looking at.
+ *
+ * `targetLang` is the lane the ASSIGNMENT is pinned to (AQU-538 §3.5, '' = the
+ * default lane), which need not be the lane being viewed — see
+ * getUnitAssignments.
+ */
+export interface UnitAssignment {
+  assignmentId: string
+  assigneeUserId: number
+  username: string | null
+  scopeLabel: string
+  targetLang: string
+  deadline: string | null
+  cellsTotal: number
+  translated: number
+  validated: number
+  recorded: number
+  audioValidated: number
+}
+
+/**
+ * Every live assignment covering one planning unit (AQU-1278), for the plan
+ * inspector's "Assigned to" section.
+ *
+ * `sectionKey` is '' for a file-grain unit — the whole file, no section
+ * predicate — and a Bible book code ("GEN") for a sub-file one. `lane` is the
+ * lane the inspector is showing; '' is the default lane and, like every other
+ * read in this app, is sent as an empty value rather than omitted so the
+ * server never has to guess which lane "absent" meant.
+ *
+ * NOT FILTERED BY LANE, deliberately. The server returns assignments pinned to
+ * OTHER lanes too, because their cells are spoken for either way and dropping
+ * them would show an empty section on a unit that is fully assigned. Callers
+ * label the odd ones out from each row's own `targetLang`.
+ *
+ * AD-3: a plain fetch, subscribed to nothing. A caller that creates or removes
+ * an assignment must re-invoke this itself — see getProjectAssignments' note,
+ * which this read shares word for word.
+ */
+export async function getUnitAssignments(
+  jwt: string,
+  projectId: string,
+  fileId: string,
+  sectionKey: string,
+  lane: string,
+): Promise<UnitAssignment[]> {
+  const query = new URLSearchParams({ fileId, section: sectionKey, lane })
+  const res = await fetchWithTimeout(
+    `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/assignments/unit?${query.toString()}`,
+    { headers: { Authorization: `Bearer ${jwt}` } },
+  )
+  if (!res.ok) throw new UserError(res.status, "", "project")
+  return ((await res.json()) as { assignments: UnitAssignment[] }).assignments
+}
+
+/**
  * Distinct chapters in a file (for the assign picker's chapter dropdown).
  * Natural-sorted server-side; each value feeds createAssignment's
  * `scope[].chapter` (→ resolver LIKE 'GEN 1:%') directly. Any project member.

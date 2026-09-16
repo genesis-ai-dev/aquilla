@@ -37,20 +37,66 @@ export interface PlanUnit {
   doneBy: string | null
 }
 
-export type PlanUnitStatus = "done" | "overdue" | "soon" | "in_progress" | "not_started"
+export type PlanUnitStatus =
+  | "done"
+  | "overdue"
+  | "soon"
+  | "nearly_complete"
+  | "in_progress"
+  | "not_started"
 
 /**
  * Group order is a claim about urgency, and the order IS the answer the board
  * gives: Overdue first because it is the only group anyone acts on today,
  * Done last because it is evidence rather than work.
+ *
+ * AQU-1278 put Nearly complete UNDER the two date-driven groups and above the
+ * rest. A blown date still outranks "a few cells left" — a unit that is both
+ * stays Overdue, and its row says "Nothing left" on the second line so it is
+ * still findable. What the new group buys is the case nobody could see before:
+ * work that is almost finished and has no date at all.
+ *
+ * NOT TYPE-CHECKED. This is a plain array, so a status missing from it simply
+ * never renders — and `isPlanUnitStatus` in plan-view.ts derives fold
+ * persistence from it, so the fold breaks too. `plan-status.test.ts` asserts
+ * every member of the union appears here exactly once; keep that test.
  */
 export const PLAN_GROUP_ORDER: readonly PlanUnitStatus[] = [
   "overdue",
   "soon",
+  "nearly_complete",
   "in_progress",
   "not_started",
   "done",
 ] as const
+
+/**
+ * AQU-1278: a unit is NEARLY COMPLETE when its worse medium is short by at most
+ * six percent of its cells, or seven cells, whichever is larger. Sam's call
+ * (2026-09-15): the percentage is what scales, and the seven-cell floor is what
+ * lets a short book qualify at all — six percent of Philemon's twenty-five
+ * cells is one and a half, so a percentage alone would mean the shortest books
+ * in the Bible could never be nearly anything.
+ */
+export function planNearlyCompleteThreshold(totalCount: number): number {
+  return Math.max(Math.ceil(totalCount * 0.06), 7)
+}
+
+/**
+ * Audio is judged on RECORDED rather than validated, and the audio-validated
+ * term is suppressed in the words as well as the rule.
+ *
+ * `cell.audio.validate` exists server-side (AQU-508) and NO CLIENT EMITS IT —
+ * there is no recording-review UI, so `audioValidatedCount` is zero on every
+ * project in existence. Measuring it would put every audio book permanently out
+ * of reach of this group, and would make every row read "1,213 takes to
+ * validate". AQU-490 is the open client half.
+ *
+ * WHEN AQU-490 LANDS THIS FLIPS, and nothing will fail to tell you: the numbers
+ * would simply keep measuring the wrong thing. `plan-status.test.ts` pins both
+ * arms of this constant so the flip has a test waiting for it.
+ */
+export const AUDIO_JUDGED_ON_RECORDED = true
 
 /** Stable id for a unit — the storage key, and the React key. */
 export function planUnitId(u: Pick<PlanUnit, "fileId" | "sectionKey">): string {
@@ -72,6 +118,103 @@ export function planUnitHasContent(u: Pick<PlanUnit, "filledCount" | "audioCount
 }
 
 /**
+ * Which FILES carry recordings. Audio expectation has to be judged per file,
+ * never per project: `planHasAudio` answers "does this project track audio at
+ * all", and a project holding one dubbed episode alongside sixty-five text
+ * books would answer yes for every one of them. Each text book's audio
+ * shortfall would then be its entire cell count, the worse medium would always
+ * be audio, and NOTHING WOULD EVER BE NEARLY COMPLETE.
+ *
+ * Per file is the honest grain: the books of a whole-Bible audio import share
+ * one file, so recording any of them marks the rest as expected too.
+ *
+ * Known limit: a file where recording has not started at all reads as text-only
+ * and is judged on text alone. That is the same blindness `planHasAudio` has
+ * had since AQU-1093, and inventing an expectation from `fileKind` would guess.
+ */
+export function audioFileIds(units: readonly PlanUnit[]): ReadonlySet<string> {
+  const ids = new Set<string>()
+  for (const u of units) if (u.audioCount > 0) ids.add(u.fileId)
+  return ids
+}
+
+/** Outstanding work in a unit, per medium. Every term is floored at zero. */
+export interface PlanShortfall {
+  toTranslate: number
+  toValidate: number
+  toRecord: number
+  toAudioValidate: number
+  /** The worse medium's outstanding cells — the number the group rule judges. */
+  worst: number
+}
+
+/** Never let a difference go negative; see `planUnitShortfall`'s note on audio. */
+const atLeastZero = (n: number): number => (n > 0 ? n : 0)
+
+/**
+ * What this unit still needs.
+ *
+ * EVERY TERM IS CLAMPED, and the audio one is why. The projection counts takes
+ * on structural cells, and there is no `structural_audio_count` column to
+ * subtract — so when the AQU-1083 policy excludes headings, the read subtracts
+ * them from `totalCount` but not from `audioCount`, and a book whose headings
+ * were voiced comes back with MORE audio than cells. Unclamped, `total − audio`
+ * goes negative, sails under any threshold, and the unit is declared nearly
+ * complete precisely because someone recorded its headings.
+ *
+ * `hasAudio` comes from `audioFileIds`, not from the unit — see that function.
+ */
+export function planUnitShortfall(u: PlanUnit, hasAudio: boolean): PlanShortfall {
+  const toTranslate = atLeastZero(u.totalCount - u.filledCount)
+  const toValidate = atLeastZero(u.filledCount - u.validatedCount)
+  const toRecord = hasAudio ? atLeastZero(u.totalCount - u.audioCount) : 0
+  const toAudioValidate =
+    hasAudio && !AUDIO_JUDGED_ON_RECORDED
+      ? atLeastZero(u.audioCount - u.audioValidatedCount)
+      : 0
+  // Text's outstanding set is everything not yet validated — untranslated cells
+  // are a subset of it, so this is one number, not a sum.
+  const textShort = atLeastZero(u.totalCount - u.validatedCount)
+  const audioShort = hasAudio
+    ? AUDIO_JUDGED_ON_RECORDED
+      ? toRecord
+      : atLeastZero(u.totalCount - u.audioValidatedCount)
+    : 0
+  return {
+    toTranslate,
+    toValidate,
+    toRecord,
+    toAudioValidate,
+    worst: Math.max(textShort, audioShort),
+  }
+}
+
+/**
+ * The shortfall as the row and the inspector say it, worst-first and capped at
+ * two parts — "6 to translate · 34 to validate". A structured list rather than
+ * a string because the words are translated; `use-plan-note.ts` renders it.
+ *
+ * Translation leads validation because it is the bigger hole: a cell nobody has
+ * written cannot be validated, so listing the validation debt first would name
+ * a queue that is blocked on the other number.
+ */
+export type PlanShortfallPart =
+  | { kind: "translate"; count: number }
+  | { kind: "validate"; count: number }
+  | { kind: "record"; count: number }
+  | { kind: "audio_validate"; count: number }
+
+export function planShortfallParts(s: PlanShortfall): PlanShortfallPart[] {
+  const all: PlanShortfallPart[] = [
+    { kind: "translate", count: s.toTranslate },
+    { kind: "validate", count: s.toValidate },
+    { kind: "record", count: s.toRecord },
+    { kind: "audio_validate", count: s.toAudioValidate },
+  ]
+  return all.filter((p) => p.count > 0).slice(0, 2)
+}
+
+/**
  * Done is an explicit human mark and outranks everything — a unit can read
  * Done while its bars sit below 100%, which is the point: the mark records a
  * judgment the percentages cannot make.
@@ -83,7 +226,16 @@ export function planUnitHasContent(u: Pick<PlanUnit, "filledCount" | "audioCount
  * one lane and untouched in the other, and a PM on the French tab wants the
  * French truth.
  */
-export function planUnitStatus(u: PlanUnit, now: number): PlanUnitStatus {
+export function planUnitStatus(
+  u: PlanUnit,
+  now: number,
+  /**
+   * Files that carry recordings, from `audioFileIds` over the WHOLE board.
+   * Omitted, the unit's own `audioCount` stands in — right for a lone pill,
+   * wrong for a board, which is why every board path passes the set.
+   */
+  audioFiles?: ReadonlySet<string>,
+): PlanUnitStatus {
   if (u.doneAt != null) return "done"
   const started = planUnitHasContent(u)
   if (u.targetDate) {
@@ -92,6 +244,16 @@ export function planUnitStatus(u: PlanUnit, now: number): PlanUnitStatus {
       if (isDeadlineOverdue(t, now)) return "overdue"
       if (t + AOE_GRACE_MS - now <= DEADLINE_SOON_WINDOW_MS) return "soon"
     }
+  }
+  // AQU-1278. Both guards are load-bearing. `totalCount > 0` keeps an empty
+  // file out: its shortfall is zero, zero clears every threshold, and it would
+  // otherwise be promoted above In progress and labelled "Nothing left" — a
+  // file with nothing IN it. `planUnitHasContent` keeps out the book nobody has
+  // started, which is short by everything and belongs in Not started.
+  if (started && u.totalCount > 0) {
+    const hasAudio = audioFiles ? audioFiles.has(u.fileId) : u.audioCount > 0
+    const { worst } = planUnitShortfall(u, hasAudio)
+    if (worst <= planNearlyCompleteThreshold(u.totalCount)) return "nearly_complete"
   }
   return started ? "in_progress" : "not_started"
 }
@@ -159,8 +321,12 @@ function targetTime(targetDate: string | null): number | null {
  * never read "0 days late", because it does not become overdue until the grace
  * period has already carried it past a full day.
  */
-export function planUnitNote(u: PlanUnit, now: number): PlanUnitNote | null {
-  const status = planUnitStatus(u, now)
+export function planUnitNote(
+  u: PlanUnit,
+  now: number,
+  audioFiles?: ReadonlySet<string>,
+): PlanUnitNote | null {
+  const status = planUnitStatus(u, now, audioFiles)
   if (status === "done") return u.doneAt != null ? { kind: "marked", at: u.doneAt } : null
   const target = targetTime(u.targetDate)
   if (status === "overdue" && target != null) {
@@ -169,7 +335,12 @@ export function planUnitNote(u: PlanUnit, now: number): PlanUnitNote | null {
   if (status === "soon" && target != null) {
     return { kind: "days_until", days: Math.max(0, Math.ceil((target - now) / 86_400_000)) }
   }
-  if (status === "in_progress" && !u.targetDate) return { kind: "no_target" }
+  // AQU-1278: `nearly_complete` is a started unit too, and it is the status a
+  // planner most wants a date on. Leaving it out here blanked the note beside
+  // the inspector's pill for exactly the units this feature is about.
+  if ((status === "in_progress" || status === "nearly_complete") && !u.targetDate) {
+    return { kind: "no_target" }
+  }
   return null
 }
 
@@ -178,6 +349,7 @@ export const PLAN_STATUS_LABEL_KEY: Record<PlanUnitStatus, string> = {
   done: "org.projectOverview.plan.statusDone",
   overdue: "org.projectOverview.plan.statusOverdue",
   soon: "org.projectOverview.plan.statusSoon",
+  nearly_complete: "org.projectOverview.plan.statusNearlyComplete",
   in_progress: "org.projectOverview.plan.statusInProgress",
   not_started: "org.projectOverview.plan.statusNotStarted",
 }
@@ -187,18 +359,48 @@ export interface PlanGroup {
   units: PlanUnit[]
 }
 
+/**
+ * Nearly complete sorts by how little is left, closest to the finish first, so
+ * the book that needs one validation sits above the one that needs ninety. Ties
+ * fall through to the ordinary comparator, which keeps a dated unit ahead of an
+ * undated one and Genesis ahead of Exodus.
+ *
+ * The ordinary comparator cannot do this on its own: it sorts by target date
+ * first, so a finished book with a date in November would sort below an
+ * unfinished one due tomorrow.
+ */
+export function sortNearlyComplete(
+  units: readonly PlanUnit[],
+  audioFiles: ReadonlySet<string>,
+): PlanUnit[] {
+  const worstOf = new Map<string, number>()
+  for (const u of units) {
+    worstOf.set(planUnitId(u), planUnitShortfall(u, audioFiles.has(u.fileId)).worst)
+  }
+  return sortUnitsInGroup(units).sort(
+    (a, b) => (worstOf.get(planUnitId(a)) ?? 0) - (worstOf.get(planUnitId(b)) ?? 0),
+  )
+}
+
 /** Group + order for rendering. Empty groups are dropped, not rendered blank. */
 export function groupPlanUnits(units: readonly PlanUnit[], now: number): PlanGroup[] {
+  const audioFiles = audioFileIds(units)
   const by = new Map<PlanUnitStatus, PlanUnit[]>()
   for (const u of units) {
-    const k = planUnitStatus(u, now)
+    const k = planUnitStatus(u, now, audioFiles)
     const list = by.get(k)
     if (list) list.push(u)
     else by.set(k, [u])
   }
   return PLAN_GROUP_ORDER.flatMap((status) => {
     const list = by.get(status)
-    return list && list.length > 0 ? [{ status, units: sortUnitsInGroup(list) }] : []
+    if (!list || list.length === 0) return []
+    return [{
+      status,
+      units: status === "nearly_complete"
+        ? sortNearlyComplete(list, audioFiles)
+        : sortUnitsInGroup(list),
+    }]
   })
 }
 
@@ -207,20 +409,32 @@ export interface PlanSummary {
   done: number
   overdue: number
   inFlight: number
+  /** AQU-1278: a few cells from finished. Counted apart from `inFlight`. */
+  nearlyComplete: number
 }
 
-/** The strip above the board. Deliberately unit-agnostic: "2 of 6 done". */
+/**
+ * The strip above the board. Deliberately unit-agnostic: "2 of 6 done".
+ *
+ * NOT TYPE-CHECKED — this is an if/else chain, not an exhaustive map, so a
+ * status added to the union and forgotten here falls out of every pill and the
+ * numbers above the board quietly shrink. `plan-status.test.ts` asserts the
+ * buckets sum to the unit count; keep that test.
+ */
 export function planSummary(units: readonly PlanUnit[], now: number): PlanSummary {
+  const audioFiles = audioFileIds(units)
   let done = 0
   let overdue = 0
   let inFlight = 0
+  let nearlyComplete = 0
   for (const u of units) {
-    const s = planUnitStatus(u, now)
+    const s = planUnitStatus(u, now, audioFiles)
     if (s === "done") done += 1
     else if (s === "overdue") overdue += 1
+    else if (s === "nearly_complete") nearlyComplete += 1
     else if (s === "in_progress" || s === "soon") inFlight += 1
   }
-  return { total: units.length, done, overdue, inFlight }
+  return { total: units.length, done, overdue, inFlight, nearlyComplete }
 }
 
 /** A whole-number percentage, floored at 0 while a denominator is still zero. */

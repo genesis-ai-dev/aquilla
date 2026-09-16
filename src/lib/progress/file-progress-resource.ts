@@ -35,7 +35,14 @@ export interface SectionProgressDetailResponse {
   sectionKey: string
   revision: number
   validationCount: number
-  verses: Array<{ ref: string; filled: boolean; validated: boolean }>
+  /**
+   * AQU-1278: `cellId` is the SOURCE cell's id, which the plan board turns into
+   * an editor deep link (?cellId=<id>) at the first outstanding cell. Required,
+   * not optional: the server has always been able to send it and the section
+   * ETag gained a `:s2` shape marker the day it started to, so no cache can
+   * hand a reader a body from before the field existed.
+   */
+  verses: Array<{ cellId: string; ref: string; filled: boolean; validated: boolean }>
 }
 
 interface ProgressCacheEntry {

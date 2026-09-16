@@ -212,22 +212,60 @@ describe('GET file progress', () => {
     expect((await projected.json() as FileProgressResponse).sections).toHaveLength(2)
   })
 
-  it('returns compact verse state only when a chapter is explicitly requested', async () => {
+  it('returns compact verse state, with the cell id, only when a chapter is explicitly requested', async () => {
     const { db } = await fixture()
     await db.batch(fullProgressRecomputeStmts(db, PROJECT, FILE, 100))
     const token = await makeTestToken(SECRET, { projectId: PROJECT, fileId: FILE })
-    const response = (await handleProgressReadRequest(new Request(
-      `https://worker/api/v1/projects/${PROJECT}/files/${FILE}/progress/sections/${encodeURIComponent('GEN 1')}`,
-      { headers: { Authorization: `Bearer ${token}` } },
-    ), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
+    const url = `https://worker/api/v1/projects/${PROJECT}/files/${FILE}/progress/sections/${encodeURIComponent('GEN 1')}`
+    const response = (await handleProgressReadRequest(new Request(url, {
+      headers: { Authorization: `Bearer ${token}` },
+    }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
     expect(response.status).toBe(200)
     const body = await response.json() as SectionProgressDetailResponse
+    // AQU-1278 deliberately reversed this payload's old "and no cell ids" rule.
+    // The plan board deep-links the editor at a unit's first outstanding cell
+    // (?cellId=<id>), and this is the only endpoint that knows which cell that
+    // is; without the id there is nothing to build the link out of. The id is
+    // the SOURCE row's, so an untranslated verse has one too — c2 below has no
+    // target text at all and still carries its id.
     expect(body.verses).toEqual([
-      { ref: 'GEN 1:1', filled: true, validated: true },
-      { ref: 'GEN 1:2', filled: false, validated: false },
+      { cellId: 'c1', ref: 'GEN 1:1', filled: true, validated: true },
+      { cellId: 'c2', ref: 'GEN 1:2', filled: false, validated: false },
     ])
+    // What the payload must still never grow is cell CONTENT. A chapter is
+    // fetched on demand while a reader browses the overview, and the whole
+    // reason it is affordable is that a verse costs an id, a ref and two
+    // booleans. Source or target text here would multiply that by the length of
+    // a chapter, for a caller that only ever draws squares.
     expect(JSON.stringify(body)).not.toContain('source c1')
-    expect(JSON.stringify(body)).not.toContain('cellId')
+    expect(JSON.stringify(body)).not.toContain('uno')
+  })
+
+  it('does not honor a section ETag minted before verses carried cell ids', async () => {
+    // The shape changed without the revision, the validation count, the policy
+    // or the lane changing with it, so only the `s2` shape marker separates the
+    // two bodies. Without it this request would 304 and the reader would keep a
+    // cellId-less chapter — and a dead deep link — until something unrelated
+    // moved the revision.
+    const { db } = await fixture()
+    await db.batch(fullProgressRecomputeStmts(db, PROJECT, FILE, 100))
+    const token = await makeTestToken(SECRET, { projectId: PROJECT, fileId: FILE })
+    const url = `https://worker/api/v1/projects/${PROJECT}/files/${FILE}/progress/sections/${encodeURIComponent('GEN 1')}`
+    const fresh = (await handleProgressReadRequest(new Request(url, {
+      headers: { Authorization: `Bearer ${token}` },
+    }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
+    const etag = fresh.headers.get('ETag')!
+    expect(etag).toBe('"progress:file-progress:GEN%201:7:v2:s2"')
+
+    const stale = (await handleProgressReadRequest(new Request(url, {
+      headers: { Authorization: `Bearer ${token}`, 'If-None-Match': etag.replace(':s2', '') },
+    }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
+    expect(stale.status).toBe(200)
+
+    const current = (await handleProgressReadRequest(new Request(url, {
+      headers: { Authorization: `Bearer ${token}`, 'If-None-Match': etag },
+    }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
+    expect(current.status).toBe(304)
   })
 })
 
@@ -372,6 +410,37 @@ describe('structural aggregates (AQU-1083)', () => {
          FROM file_section_progress
         WHERE project_id = ? AND file_id = ? AND scope = ? AND target_lang = ''`,
     ).bind(P, F, scope).first<Record<string, unknown>>()
+
+  // The predicate that EXCLUDES structural cells on read is the negation of the
+  // one that counts them, and the two do not behave alike on a null type. A
+  // bare `NOT (type IN (...))` is NULL for a null type, and WHERE drops a NULL
+  // row exactly as it drops a false one — so every untyped cell in the file
+  // disappeared the moment a team turned headings off, and the chapter came
+  // back EMPTY rather than merely short. `structuralPredicateSql` coalesces for
+  // this reason; without it this test returns no verses at all.
+  it('keeps untyped cells when the policy excludes structural ones', async () => {
+    const { db } = await makeTestDb({
+      files: [{ id: F, project_id: P, name: 'GEN', event_id: 'f-evt' }],
+      cells: [
+        // A spreadsheet import the classifier could not type: null, not 'verse'.
+        src('u1', 'GEN 1:1', null), tgt('u1', 'uno', 0),
+        src('h1', 'GEN 1:h:1', 'heading'), tgt('h1', 'titulo', 0),
+      ],
+      // The policy resolver drives FROM projects, so the project row is what
+      // makes its settings reachable at all — a settings row alone is invisible.
+      projects: [{ id: P, name: 'Struct', created_by: 1 }],
+      project_settings: [{ project_id: P, settings: '{"countStructuralCells":false}' }],
+    })
+    await db.batch(fullProgressRecomputeStmts(db, P, F, 100))
+    const token = await makeTestToken(SECRET, { projectId: P, fileId: F })
+    const response = (await handleProgressReadRequest(new Request(
+      `https://worker/api/v1/projects/${P}/files/${F}/progress/sections/${encodeURIComponent('GEN 1')}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    ), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
+    expect(response.status).toBe(200)
+    const body = await response.json() as SectionProgressDetailResponse
+    expect(body.verses.map((v) => v.ref)).toEqual(['GEN 1:1'])
+  })
 
   it('records the structural subset on the file rollup', async () => {
     const { db } = await fixture()

@@ -53,13 +53,15 @@ import {
   planUnitIsNearlyComplete,
   planUnitId,
   planUnitLabel,
+  planOpenKind,
   planUnitShortfall,
+  type PlanOpenKind,
   type PlanUnit,
 } from "@/lib/plan/plan-status"
 import { sectionBelongsToUnit, type PlanSection } from "@/hooks/usePlanUnitSections"
 import {
   getFileProgress,
-  getFileSectionProgress,
+  getPlanFirstOpenCell,
   prefetchFileProgress,
 } from "@/lib/progress/file-progress-resource"
 import { editorCellHref } from "@/components/project-workspace-lane-deeplink"
@@ -925,12 +927,13 @@ export function ProjectOverview() {
   /**
    * Open the editor at a unit's first outstanding cell.
    *
-   * The walk is the plan's own ordering, not a search: the unit's sections in
-   * the order the server returned them (canonical), the first one that is short
-   * in the medium being asked for, then that chapter's detail — which is the
-   * only response that carries `cellId` — for the first verse that fails the
-   * predicate. Untranslated leads unvalidated for the reason
-   * `planShortfallParts` gives: a cell nobody has written cannot be validated.
+   * ONE REQUEST, answered by the server (`readFirstOpenCell`). This used to
+   * walk the unit's chapters client-side and read one chapter's verses, which
+   * worked for Scripture and for nothing else — a document has no chapters to
+   * walk and a subtitle file's sections are time buckets, so on both the link
+   * opened the file and stopped. Audio could never be asked at all. Now the
+   * server orders the unit's cells the way the editor does and answers for
+   * every queue, cue sheets included.
    *
    * THE LANE IS ALWAYS PASSED, including as the empty default. An ABSENT lane
    * param means "no deep-link intent, leave the editor in whatever language it
@@ -938,54 +941,30 @@ export function ProjectOverview() {
    * that is itself lane-scoped must always say which lane, or the reader lands
    * on the right cell in someone else's language.
    *
-   * Nothing resolvable — an unread file, a chapter whose detail read fails,
-   * audio-only shortfall with no text cell to stand on — still opens the FILE.
-   * A link that silently does nothing is worse than one that lands nearby.
+   * Nothing resolvable — a read that fails, a queue with nothing in it — still
+   * opens the FILE. A link that silently does nothing is worse than one that
+   * lands nearby.
    */
   const openPlanShortfall = useCallback(
-    async (unit: PlanUnit, kind?: "untranslated" | "unvalidated") => {
+    async (unit: PlanUnit, kind?: PlanOpenKind) => {
       if (!id || !getPlanToken) return
       const hasAudio = planAudioFiles.has(unit.fileId)
-      const wanted =
-        kind ?? (planUnitShortfall(unit, hasAudio).toTranslate > 0 ? "untranslated" : "unvalidated")
+      const wanted = kind ?? planOpenKind(planUnitShortfall(unit, hasAudio))
       let cellId: string | null = null
-      try {
-        let sections = planFileSections.get(unit.fileId)
-        if (!sections) {
-          // The board can be clicked before the section sweep above has reached
-          // this file. One read, through the same freshness-gated resource.
-          const body = await getFileProgress(id, unit.fileId, () => getPlanToken(), planLane)
-          const numbered = numberedBookCodes(body.sections.map((s) => s.key))
-          sections = body.sections.map((section) => ({
-            key: section.key,
-            label: planSectionLabel(section.key, numbered),
-            totalCount: section.totalCount,
-            filledCount: section.filledCount,
-            validatedCount: section.validatedCount,
-            audioCount: section.audioCount ?? 0,
-            audioValidatedCount: section.audioValidatedCount ?? 0,
-          }))
-        }
-        const target = sections.find((section) => {
-          if (!sectionBelongsToUnit(section.key, unit.sectionKey)) return false
-          const short = planSectionShortfall(section, hasAudio)
-          return wanted === "untranslated" ? short.toTranslate > 0 : short.toValidate > 0
-        })
-        if (target) {
-          const detail = await getFileSectionProgress(
-            id, unit.fileId, target.key, () => getPlanToken(), planLane,
+      if (wanted) {
+        try {
+          cellId = await getPlanFirstOpenCell(
+            id, unit.fileId, unit.sectionKey, wanted, () => getPlanToken(), planLane,
           )
-          const verse = detail.verses.find((v) => (wanted === "untranslated" ? !v.filled : !v.validated))
-          cellId = verse?.cellId ?? null
+        } catch {
+          cellId = null
         }
-      } catch {
-        cellId = null
       }
       // `flash` only rides with a cell: a scroll with no marker looks, from the
       // reader's chair, exactly like a link that did nothing.
       openWorkspace(editorCellHref(id, unit.fileId, cellId, planLane, cellId != null))
     },
-    [id, getPlanToken, planLane, planFileSections, planAudioFiles, openWorkspace],
+    [id, getPlanToken, planLane, planAudioFiles, openWorkspace],
   )
 
   // AQU-1094/1095: setting a date and marking a unit done are maintainer work,

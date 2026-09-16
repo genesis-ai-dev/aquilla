@@ -1313,6 +1313,8 @@ export const org = defineNamespace({
     // untranslated" from a noun it is handed at runtime.
     "org.projectOverview.plan.goToFirstUntranslated": "Go to first untranslated",
     "org.projectOverview.plan.goToFirstUnvalidated": "Go to first unvalidated",
+    "org.projectOverview.plan.goToFirstUnrecorded": "Go to first unrecorded",
+    "org.projectOverview.plan.goToFirstUnsigned": "Go to first take to sign off",
     // AQU-1096: the list controls. Neutral throughout — the orphaned
     // filterFiles* keys say "files", which this surface never does.
     "org.projectOverview.plan.filterPlaceholder": "Filter by name\u2026",
@@ -2773,6 +2775,14 @@ export const org = defineNamespace({
       "org.projectOverview.plan.goToFirstUnvalidated": {
         description:
           "Link in the inspector that opens the editor on this unit, scrolled to the first translated cell nobody has validated. Offered where the outstanding work is validation rather than translation.",
+      },
+      "org.projectOverview.plan.goToFirstUnrecorded": {
+        description:
+          "Link in the inspector and on a board row that opens the editor on this unit, scrolled to the first cell with no recorded take. Offered once the unit's text is finished and the outstanding work is recording. On a dubbing project it lands on the subtitle cell whose linked cue has no take.",
+      },
+      "org.projectOverview.plan.goToFirstUnsigned": {
+        description:
+          "Link that opens the editor at the first recorded take nobody has signed off (selected and approved). 'Sign off' rather than 'validate', matching shortfallAudioValidateBrief, so it cannot be confused with text validation. Not offered today — audio is judged on what has been recorded until AQU-490 ships.",
       },
       "org.projectOverview.plan.filterPlaceholder": {
         description:

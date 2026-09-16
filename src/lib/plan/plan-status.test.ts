@@ -20,6 +20,7 @@ import {
   planShortfallParts,
   sortNearlyComplete,
   audioFileIds,
+  planOpenKind,
   planAudioTotal,
   planUnitExpectsAudio,
   AUDIO_JUDGED_ON_RECORDED,
@@ -800,5 +801,35 @@ describe("sortUnitsInGroup is a total order", () => {
       mk("", "Zeta"), mk("EXO", "Bible"), mk("", "Alpha"), mk("GEN", "Bible"),
     ]).map((u) => u.sectionKey || u.fileName)
     expect(out).toEqual(["GEN", "EXO", "Alpha", "Zeta"])
+  })
+})
+
+describe("planOpenKind — where the link lands", () => {
+  // Round 5: one rule for the words and the link. The link goes to the queue
+  // the row names FIRST, so the two can never point at different places.
+  it("follows the text while any of it is outstanding, translation first", () => {
+    expect(planOpenKind(planUnitShortfall(counts(100, 94, 60, 0), false))).toBe("untranslated")
+    expect(planOpenKind(planUnitShortfall(counts(100, 100, 60, 0), false))).toBe("unvalidated")
+    // Even when audio is the worse medium by far: "6 to translate · 90 to
+    // record" still links to the text, because a cell nobody has written is
+    // the one that blocks everything else.
+    expect(planOpenKind(planUnitShortfall(counts(100, 94, 94, 10), true))).toBe("untranslated")
+  })
+
+  it("goes to the takes once the text is finished — Sam's ask", () => {
+    expect(planOpenKind(planUnitShortfall(counts(100, 100, 100, 90), true))).toBe("unrecorded")
+  })
+
+  it("has nothing to point at when nothing is left", () => {
+    expect(planOpenKind(planUnitShortfall(counts(100, 100, 100, 100), true))).toBeNull()
+    // …and ignores audio entirely on a file that has none.
+    expect(planOpenKind(planUnitShortfall(counts(100, 100, 100, 0), false))).toBeNull()
+  })
+
+  it("never asks for sign-off while audio is judged on recording", () => {
+    // AQU-490 flips `AUDIO_JUDGED_ON_RECORDED`; until then the fourth queue is
+    // unreachable, and this is the test that will start failing when it is.
+    expect(AUDIO_JUDGED_ON_RECORDED).toBe(true)
+    expect(planOpenKind(planUnitShortfall(counts(100, 100, 100, 100, 40), true))).toBeNull()
   })
 })

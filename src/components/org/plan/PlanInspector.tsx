@@ -26,9 +26,9 @@ import { fmtDeadlineDate } from "@/lib/format-date"
 import { formatRelativeTime } from "@/lib/i18n/format"
 import { isKnownBookCode } from "@/lib/file-labeling/bible-book-names"
 import {
-  planAudioTotal, planPct, planShortfallParts, planUnitExpectsAudio,
+  planAudioTotal, planOpenKind, planPct, planShortfallParts, planUnitExpectsAudio,
   planUnitIsNearlyComplete, planUnitLabel, planUnitNote,
-  planUnitShortfall, planUnitStatus, type PlanUnit,
+  planUnitShortfall, planUnitStatus, type PlanOpenKind, type PlanUnit,
 } from "@/lib/plan/plan-status"
 import { classifyPlanSection, numberedBookCodes } from "@/lib/plan/plan-section"
 import type { PlanUnitPatch } from "@/lib/sync/plan"
@@ -37,7 +37,7 @@ import { PlanStatusPill } from "./PlanStatusPill"
 import { PlanBar } from "./PlanBar"
 import { PlanChapterGrid, PlanGridLegend, planSectionShortfall } from "./PlanChapterGrid"
 import { PLAN_TONE } from "./plan-tone"
-import { usePlanShortfallText, usePlanStatusNote } from "./use-plan-note"
+import { GO_TO_FIRST_KEY, usePlanShortfallText, usePlanStatusNote } from "./use-plan-note"
 import { useSectionVerses, type SectionVersesState } from "./use-section-verses"
 import { shortVerses, verseChipLabel } from "./verse-chips"
 
@@ -100,7 +100,7 @@ export function PlanInspector({
    * untranslated cells before it has unvalidated ones, which is all this
    * callback carries. Absent, no link renders — nothing to navigate to.
    */
-  onGoToFirstOpen?: (kind: "untranslated" | "unvalidated") => void
+  onGoToFirstOpen?: (kind: PlanOpenKind) => void
   /**
    * AQU-1278: open the editor at ONE cell, from a verse chip in the chapter
    * card. Same division of labour as `onGoToFirstOpen` — this panel knows which
@@ -226,15 +226,14 @@ export function PlanInspector({
     languageLabel,
   ].filter(Boolean).join(" · ")
 
-  // ONE LINK, NEVER TWO. Translation leads validation for the reason
-  // `planShortfallParts` gives: a cell nobody has written cannot be validated,
-  // so a link to the first unvalidated cell in a unit that still has blanks
-  // names a queue blocked on the other one. With nothing outstanding in either,
-  // there is no cell to land on and no link — a unit can be nearly complete on
-  // its text and still short on audio, and "go to first unvalidated" would then
-  // scroll the editor to nothing.
-  const openKind: "untranslated" | "unvalidated" | null =
-    shortfall.toTranslate > 0 ? "untranslated" : shortfall.toValidate > 0 ? "unvalidated" : null
+  // ONE LINK, NEVER TWO, and it goes where the words point: the queue the
+  // shortfall names first, by the one rule in `planOpenKind`. Text before
+  // audio, and within text translation before validation, because a cell
+  // nobody has written cannot be validated. So a unit whose text is finished
+  // and whose takes are not sends its reader to the first cell with no take
+  // (Sam, 2026-09-16), where it used to offer nothing at all. Null only when
+  // nothing is outstanding, which is "Nothing left" and has no cell to land on.
+  const openKind = planOpenKind(shortfall)
 
   return (
     <aside
@@ -380,9 +379,7 @@ export function PlanInspector({
                     data-testid="plan-go-to-first-open"
                     onClick={() => onGoToFirstOpen(openKind)}
                   >
-                    {t(openKind === "untranslated"
-                      ? "org.projectOverview.plan.goToFirstUntranslated"
-                      : "org.projectOverview.plan.goToFirstUnvalidated")}
+                    {t(GO_TO_FIRST_KEY[openKind] as never)}
                     <ArrowRight className="h-3 w-3" aria-hidden />
                   </Button>
                 )}
@@ -615,11 +612,11 @@ function PlanChapterCard({
       )
     : null
 
-  // Chips only exist for the two TEXT queues: the verse detail carries `filled`
-  // and `validated` and nothing about audio, so a chapter short on takes alone
-  // has no per-cell answer to give and says so by showing no chips at all.
-  const chipLead: "untranslated" | "unvalidated" | null =
-    lead?.kind === "translate" ? "untranslated" : lead?.kind === "validate" ? "unvalidated" : null
+  // The chips list the chapter's own lead queue — the same rule as the link,
+  // so a chapter that reads "5 takes to record" lists the five verses with no
+  // take. A worker from before verses carried take state sends no flags, and
+  // an audio lead then draws no chips rather than every verse.
+  const chipLead = planOpenKind(shortfall)
   const short = verses?.status === "ready" && chipLead
     ? shortVerses(verses.verses, chipLead)
     : []

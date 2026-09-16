@@ -21,6 +21,7 @@ import {
   type PlanShortfall,
   type PlanShortfallPart,
   type PlanUnit,
+  type PlanOpenKind,
 } from "@/lib/plan/plan-status"
 
 function useRenderNote(): (
@@ -174,4 +175,17 @@ export function usePlanRowNote(
   if (!note) return activity
   if (note.kind === "no_target" && !nearlyComplete) return activity
   return rendered
+}
+
+/**
+ * What the link into the editor says, per queue. Four separate strings rather
+ * than one with a slot, because "first untranslated" inflects as a whole in
+ * most languages. Shared by the board row and the inspector so the two can
+ * never describe the same destination differently.
+ */
+export const GO_TO_FIRST_KEY: Record<PlanOpenKind, string> = {
+  untranslated: "org.projectOverview.plan.goToFirstUntranslated",
+  unvalidated: "org.projectOverview.plan.goToFirstUnvalidated",
+  unrecorded: "org.projectOverview.plan.goToFirstUnrecorded",
+  unsigned: "org.projectOverview.plan.goToFirstUnsigned",
 }

@@ -10,7 +10,7 @@ import {
   counts,
   handleProgressReadRequest,
   type FileProgressResponse,
-  type SectionProgressDetailResponse,
+  type SectionProgressDetailResponse, readFirstOpenCell
 } from '../events/progress-read-route'
 
 const SECRET = 'progress-secret'
@@ -230,8 +230,8 @@ describe('GET file progress', () => {
     // the SOURCE row's, so an untranslated verse has one too — c2 below has no
     // target text at all and still carries its id.
     expect(body.verses).toEqual([
-      { cellId: 'c1', ref: 'GEN 1:1', filled: true, validated: true },
-      { cellId: 'c2', ref: 'GEN 1:2', filled: false, validated: false },
+      { cellId: 'c1', ref: 'GEN 1:1', filled: true, validated: true, recorded: false, audioValidated: false },
+      { cellId: 'c2', ref: 'GEN 1:2', filled: false, validated: false, recorded: false, audioValidated: false },
     ])
     // What the payload must still never grow is cell CONTENT. A chapter is
     // fetched on demand while a reader browses the overview, and the whole
@@ -256,10 +256,10 @@ describe('GET file progress', () => {
       headers: { Authorization: `Bearer ${token}` },
     }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
     const etag = fresh.headers.get('ETag')!
-    expect(etag).toBe('"progress:file-progress:GEN%201:7:v2:s2"')
+    expect(etag).toBe('"progress:file-progress:GEN%201:7:v2:s3"')
 
     const stale = (await handleProgressReadRequest(new Request(url, {
-      headers: { Authorization: `Bearer ${token}`, 'If-None-Match': etag.replace(':s2', '') },
+      headers: { Authorization: `Bearer ${token}`, 'If-None-Match': etag.replace(':s3', '') },
     }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
     expect(stale.status).toBe(200)
 
@@ -695,5 +695,193 @@ describe('GET file progress under the structural policy (AQU-1083)', () => {
       .bind(JSON.stringify({ countStructuralCells: false })).run()
     const { body } = await get(db)
     expect(body.file).toMatchObject({ totalCount: 2, filledCount: 0 })
+  })
+})
+
+// AQU-1278, round 5: where "Go to first …" lands, answered by the server for
+// every shape of file — which is the only place it can be answered for all of
+// them, since a document has no chapters to walk and a dubbing project's takes
+// are not even on the file being asked about.
+describe('the first outstanding cell of a unit (readFirstOpenCell)', () => {
+  const src = (fileId: string, cellId: string, over: Record<string, unknown> = {}) => ({
+    project_id: PROJECT, file_id: fileId, cell_id: cellId, side: 'source', type: 'verse',
+    value: `source ${cellId}`, canonical_ref: null, anchor_cell_id: null, start_ms: null,
+    event_id: `ev-${cellId}`, last_editor: 'alice', last_edit_at: 1,
+    validated: 0, endorsement_count: 0, word_count: 2, ...over,
+  })
+  const tgt = (fileId: string, cellId: string, value: string, endorsements = 0) => ({
+    project_id: PROJECT, file_id: fileId, cell_id: cellId, side: 'target', target_lang: '',
+    value, canonical_ref: null, event_id: `tev-${cellId}`, last_editor: 'alice',
+    last_edit_at: 2, validated: endorsements >= 1 ? 1 : 0, endorsement_count: endorsements,
+    word_count: value ? 1 : 0,
+  })
+  const take = (fileId: string, cellId: string, over: Record<string, unknown> = {}) => ({
+    project_id: PROJECT, file_id: fileId, cell_id: cellId, audio_id: `take-${cellId}`,
+    slot: 'take', url: `local://${cellId}.webm`, selected: 1, deleted: 0, approved: 0,
+    event_id: `aev-${cellId}`, created_ts: 3, ...over,
+  })
+  const file = (id: string, over: Record<string, unknown> = {}) =>
+    ({ id, project_id: PROJECT, name: id, event_id: `fev-${id}`, ...over })
+  const settings = (extra: Record<string, unknown> = {}) => [{
+    project_id: PROJECT, settings: JSON.stringify({ validationCount: 1, ...extra }), version: 1,
+  }]
+
+  it('walks a book in canonical order and answers each text queue', async () => {
+    // GEN 1 finished; GEN 2:2 and GEN 10:1 untranslated; GEN 2:1 unvalidated.
+    // Inserted out of order on purpose — canonical order is the claim.
+    const { db } = await makeTestDb({
+      files: [file('bible')],
+      project_settings: settings(),
+      cells: [
+        src('bible', 'g10', { canonical_ref: 'GEN 10:1' }),
+        src('bible', 'g1', { canonical_ref: 'GEN 1:1' }), tgt('bible', 'g1', 'done', 1),
+        src('bible', 'g2b', { canonical_ref: 'GEN 2:2' }),
+        src('bible', 'g2a', { canonical_ref: 'GEN 2:1' }), tgt('bible', 'g2a', 'written', 0),
+        src('bible', 'e1', { canonical_ref: 'EXO 1:1' }),
+      ],
+    })
+    expect(await readFirstOpenCell(db, PROJECT, 'bible', 'GEN', 'untranslated', '')).toBe('g2b')
+    expect(await readFirstOpenCell(db, PROJECT, 'bible', 'GEN', 'unvalidated', '')).toBe('g2a')
+    // Scoped to the book: Exodus's blank is not Genesis's.
+    expect(await readFirstOpenCell(db, PROJECT, 'bible', 'EXO', 'untranslated', '')).toBe('e1')
+    expect(await readFirstOpenCell(db, PROJECT, 'bible', 'EXO', 'unvalidated', '')).toBeNull()
+  })
+
+  it("answers the audio queues from the cells' own takes", async () => {
+    const { db } = await makeTestDb({
+      files: [file('bible')],
+      project_settings: settings(),
+      cells: [
+        src('bible', 'v1', { canonical_ref: 'GEN 1:1' }), tgt('bible', 'v1', 'a', 1),
+        src('bible', 'v2', { canonical_ref: 'GEN 1:2' }), tgt('bible', 'v2', 'b', 1),
+        src('bible', 'v3', { canonical_ref: 'GEN 1:3' }), tgt('bible', 'v3', 'c', 1),
+        src('bible', 'v4', { canonical_ref: 'GEN 1:4' }), tgt('bible', 'v4', 'd', 1),
+      ],
+      cell_audio: [
+        take('bible', 'v1', { approved: 1 }),   // signed off
+        take('bible', 'v2', { deleted: 1 }),    // a deleted take is no take
+        take('bible', 'v3'),                    // recorded, not signed off
+      ],
+    })
+    expect(await readFirstOpenCell(db, PROJECT, 'bible', 'GEN', 'unrecorded', '')).toBe('v2')
+    expect(await readFirstOpenCell(db, PROJECT, 'bible', 'GEN', 'unsigned', '')).toBe('v3')
+    expect(await readFirstOpenCell(db, PROJECT, 'bible', 'GEN', 'untranslated', '')).toBeNull()
+  })
+
+  it('walks a document by its anchor chain, not by id', async () => {
+    // Ids chosen to sort the WRONG way lexically; the chain says head → mid → tail.
+    const { db } = await makeTestDb({
+      files: [file('memo')],
+      project_settings: settings(),
+      cells: [
+        src('memo', 'z-head'), tgt('memo', 'z-head', 'x', 1),
+        src('memo', 'a-tail', { anchor_cell_id: 'm-mid' }),
+        src('memo', 'm-mid', { anchor_cell_id: 'z-head' }),
+      ],
+    })
+    expect(await readFirstOpenCell(db, PROJECT, 'memo', '', 'untranslated', '')).toBe('m-mid')
+  })
+
+  it('walks a timed file by start time', async () => {
+    const { db } = await makeTestDb({
+      files: [file('ep')],
+      project_settings: settings(),
+      cells: [
+        src('ep', 'late', { start_ms: 9000 }),
+        src('ep', 'early', { start_ms: 1000 }),
+      ],
+    })
+    expect(await readFirstOpenCell(db, PROJECT, 'ep', '', 'untranslated', '')).toBe('early')
+  })
+
+  it("follows a dubbing project's links to the subtitle cell whose cue has no take", async () => {
+    // Takes live on the cue sheet; the link has to land on a cell the editor
+    // can open, which is the subtitle cell linked to the unrecorded cue.
+    const { db } = await makeTestDb({
+      files: [
+        file('ep', { kind: 'vtt' }),
+        file('ep-cues', { kind: 'vtt', role: 'audio-cues', anchor_file_id: 'ep' }),
+      ],
+      project_settings: settings(),
+      cells: [
+        src('ep', 's1', { start_ms: 1000 }), tgt('ep', 's1', 'a', 1),
+        src('ep', 's2', { start_ms: 2000 }), tgt('ep', 's2', 'b', 1),
+        src('ep', 's3', { start_ms: 3000 }), tgt('ep', 's3', 'c', 1),
+        src('ep', 's4', { start_ms: 4000 }), tgt('ep', 's4', 'd', 1),  // linked to nothing
+        src('ep-cues', 'q1', { type: 'cue', start_ms: 1000 }),
+        src('ep-cues', 'q2', { type: 'cue', start_ms: 2000 }),
+        src('ep-cues', 'q3', { type: 'cue', start_ms: 3000 }),
+      ],
+      cell_links: ['s1|q1', 's2|q2', 's3|q3'].map((pair) => {
+        const [from, to] = pair.split('|')
+        return {
+          project_id: PROJECT, kind: 'text-audio', from_file_id: 'ep', from_cell_id: from,
+          to_file_id: 'ep-cues', to_cell_id: to, linked: 1, origin: 'auto',
+          event_id: `lev-${from}`, created_ts: 4,
+        }
+      }),
+      cell_audio: [
+        take('ep-cues', 'q1'),                  // recorded, not signed off
+        take('ep-cues', 'q3', { approved: 1 }), // signed off
+      ],
+    })
+    expect(await readFirstOpenCell(db, PROJECT, 'ep', '', 'unrecorded', '')).toBe('s2')
+    expect(await readFirstOpenCell(db, PROJECT, 'ep', '', 'unsigned', '')).toBe('s1')
+    // The sheet's own cells are never the answer for the subtitle file.
+    expect(await readFirstOpenCell(db, PROJECT, 'ep', '', 'untranslated', '')).toBeNull()
+  })
+
+  it("ignores a tombstoned cue sheet and falls back to the file's own takes", async () => {
+    const { db } = await makeTestDb({
+      files: [
+        file('ep', { kind: 'vtt' }),
+        file('ep-cues', { kind: 'vtt', role: 'audio-cues', anchor_file_id: 'ep', deleted_at: 5 }),
+      ],
+      project_settings: settings(),
+      cells: [src('ep', 's1', { start_ms: 1000 }), tgt('ep', 's1', 'a', 1), src('ep-cues', 'q1', { type: 'cue' })],
+      cell_links: [{
+        project_id: PROJECT, kind: 'text-audio', from_file_id: 'ep', from_cell_id: 's1',
+        to_file_id: 'ep-cues', to_cell_id: 'q1', linked: 1, origin: 'auto', event_id: 'l', created_ts: 4,
+      }],
+    })
+    // No sheet, no take on s1 itself → s1 is the first unrecorded cell.
+    expect(await readFirstOpenCell(db, PROJECT, 'ep', '', 'unrecorded', '')).toBe('s1')
+  })
+
+  it('never sends a reader to a heading the project does not count', async () => {
+    // The policy is read FROM `projects` (its own value, else the org's), so
+    // the project has to exist for its opt-out to be seen at all.
+    const { db } = await makeTestDb({
+      organizations: [{ id: 1, name: 'Org', owner_user_id: 1 }],
+      projects: [{ id: PROJECT, name: 'Plan', org_id: 1 }],
+      org_settings: [{ org_id: 1, settings: '{}', version: 1 }],
+      files: [file('bible')],
+      project_settings: settings({ countStructuralCells: false }),
+      cells: [
+        src('bible', 'h', { canonical_ref: 'GEN 1:0', type: 'heading' }),
+        src('bible', 'v1', { canonical_ref: 'GEN 1:1' }),
+      ],
+    })
+    expect(await readFirstOpenCell(db, PROJECT, 'bible', 'GEN', 'untranslated', '')).toBe('v1')
+  })
+
+  it('serves the answer over HTTP and refuses a queue it does not know', async () => {
+    const { db } = await makeTestDb({
+      files: [file('bible')],
+      project_settings: settings(),
+      cells: [src('bible', 'v1', { canonical_ref: 'GEN 1:1' })],
+    })
+    const token = await makeTestToken(SECRET, { projectId: PROJECT, fileId: 'bible' })
+    const base = `https://worker/api/v1/projects/${PROJECT}/files/bible/progress/first-open`
+    const ok = (await handleProgressReadRequest(new Request(`${base}?unit=GEN&kind=untranslated`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
+    expect(ok.status).toBe(200)
+    expect(await ok.json()).toEqual({ fileId: 'bible', unit: 'GEN', kind: 'untranslated', cellId: 'v1' })
+
+    const bad = (await handleProgressReadRequest(new Request(`${base}?unit=GEN&kind=unfinished`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
+    expect(bad.status).toBe(400)
   })
 })

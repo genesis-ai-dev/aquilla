@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import type { ReactNode } from "react"
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { PlanInspector } from "./PlanInspector"
-import type { PlanUnit } from "@/lib/plan/plan-status"
+import type { PlanOpenKind, PlanUnit } from "@/lib/plan/plan-status"
 
 // Every test below used to pass getToken={null}, which short-circuits
 // usePlanUnitSections before it fetches — so the whole AQU-1098 breakdown (the
@@ -54,7 +54,7 @@ const nearlyDone = (over: Partial<PlanUnit> = {}): PlanUnit =>
   unit({ totalCount: 100, filledCount: 100, validatedCount: 95, ...over })
 
 type InspectorExtras = {
-  onGoToFirstOpen?: (kind: "untranslated" | "unvalidated") => void
+  onGoToFirstOpen?: (kind: PlanOpenKind) => void
   onOpenCell?: (cellId: string) => void
   laneCount?: number
   assignments?: ReactNode
@@ -502,6 +502,39 @@ describe("the link into the editor (AQU-1278)", () => {
     expect(onGoToFirstOpen).toHaveBeenCalledWith("unvalidated")
   })
 
+  it("sends a unit whose text is finished to the first cell with no take", async () => {
+    // Sam, 2026-09-16: "if all text is translated … but some cells are missing
+    // takes, could the link take you to the cells that are missing takes?"
+    // Ninety of a hundred recorded is ten short, under the threshold, so the
+    // unit is nearly complete BY AUDIO and the link follows the audio.
+    const onGoToFirstOpen = vi.fn()
+    const getToken = withSections([section("GEN 1")])
+    renderInspector(
+      nearlyDone({ sectionKey: "GEN", fileName: "Whole Bible", validatedCount: 100, audioCount: 94 }),
+      true, true, getToken, { onGoToFirstOpen },
+    )
+    await waitFor(() => expect(screen.getByTestId("plan-unit-shortfall")).toBeInTheDocument())
+    expect(screen.getByTestId("plan-unit-shortfall")).toHaveTextContent("6 takes to record")
+    expect(goLinks()).toHaveLength(1)
+    expect(screen.getByTestId("plan-go-to-first-open")).toHaveTextContent("Go to first unrecorded")
+    fireEvent.click(screen.getByTestId("plan-go-to-first-open"))
+    expect(onGoToFirstOpen).toHaveBeenCalledWith("unrecorded")
+  })
+
+  it("still leads with the text while any of it is outstanding", async () => {
+    // Text before audio: "2 to validate · 6 to record" links to the text,
+    // because that is the queue the words name first.
+    const onGoToFirstOpen = vi.fn()
+    const getToken = withSections([section("GEN 1")])
+    renderInspector(
+      nearlyDone({ sectionKey: "GEN", validatedCount: 98, audioCount: 94 }),
+      true, true, getToken, { onGoToFirstOpen },
+    )
+    await waitFor(() => expect(screen.getByTestId("plan-go-to-first-open")).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId("plan-go-to-first-open"))
+    expect(onGoToFirstOpen).toHaveBeenCalledWith("unvalidated")
+  })
+
   it("says 'Nothing left' where there is nothing to link to", async () => {
     const getToken = withSections([])
     renderInspector(
@@ -521,8 +554,11 @@ describe("the link into the editor (AQU-1278)", () => {
 // here is for the worse" — the card showed a raw section key and two bars in
 // percentages where the mockup has a title, a count, and a chip per verse.
 describe("the chapter card", () => {
-  const verse = (cellId: string, ref: string, over: Partial<{ filled: boolean; validated: boolean }> = {}) =>
-    ({ cellId, ref, filled: true, validated: true, ...over })
+  const verse = (
+    cellId: string,
+    ref: string,
+    over: Partial<{ filled: boolean; validated: boolean; recorded: boolean; audioValidated: boolean }> = {},
+  ) => ({ cellId, ref, filled: true, validated: true, ...over })
 
   const openChapter = async (
     u: PlanUnit,
@@ -639,19 +675,40 @@ describe("the chapter card", () => {
     expect(screen.queryByTestId("plan-verse-more")).toBeNull()
   })
 
-  it("draws no chip row for a chapter short on audio alone", async () => {
-    // The verse detail carries `filled` and `validated` and nothing about
-    // audio, so there is no per-cell answer to give.
+  it("lists the verses with no take on a chapter short on audio alone", async () => {
+    // Round 5 (Sam, 2026-09-16): the verse detail carries take state now, so
+    // a finished chapter with takes missing points at the takes — the same
+    // rule the link follows.
     await openChapter(
-      nearlyDone({ sectionKey: "GEN", audioCount: 90 }),
+      nearlyDone({ sectionKey: "GEN", validatedCount: 100, audioCount: 90 }),
       [section("GEN 12", {
         totalCount: 20, filledCount: 20, validatedCount: 20,
         audioCount: 18, audioValidatedCount: 18,
       })],
-      [verse("c1", "GEN 12:1")],
+      [
+        verse("c1", "GEN 12:1", { recorded: true, audioValidated: true }),
+        verse("c2", "GEN 12:2", { recorded: false, audioValidated: false }),
+        verse("c3", "GEN 12:3", { recorded: true, audioValidated: false }),
+        verse("c4", "GEN 12:4", { recorded: false, audioValidated: false }),
+      ],
     )
     expect(screen.getByTestId("plan-chapter-detail-left"))
       .toHaveTextContent("2 takes not yet recorded")
+    const row = screen.getByTestId("plan-chapter-verses")
+    expect([...row.children].map((c) => c.textContent)).toEqual(["12:2", "12:4"])
+  })
+
+  it("draws no chips for an audio lead when the verses carry no take state", async () => {
+    // A worker from before the `s3` section shape: an absent flag is
+    // "unknown", and unknown must never render as "every verse is short".
+    await openChapter(
+      nearlyDone({ sectionKey: "GEN", validatedCount: 100, audioCount: 90 }),
+      [section("GEN 12", {
+        totalCount: 20, filledCount: 20, validatedCount: 20,
+        audioCount: 18, audioValidatedCount: 18,
+      })],
+      [verse("c1", "GEN 12:1"), verse("c2", "GEN 12:2")],
+    )
     expect(screen.queryByTestId("plan-chapter-verses")).toBeNull()
   })
 

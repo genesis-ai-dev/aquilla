@@ -1,5 +1,6 @@
 import { verifyTokenForProject } from '../auth'
 import { readCountStructuralCells, structuralPredicateSql } from './structural-cells'
+import { walkAnchorChain } from './cells-read-route'
 
 export interface ProgressReadEnv {
   AQUILLA_PG?: AquillaDb
@@ -71,11 +72,37 @@ export interface SectionProgressDetailResponse {
     ref: string
     filled: boolean
     validated: boolean
+    /**
+     * AQU-1278, round 5: the verse's own takes, so the chapter card can list the
+     * unrecorded verses the way it lists the unvalidated ones. Own cells only —
+     * a dubbing project's takes live on its cue sheet, and a subtitle file has
+     * no chapter card to draw them on.
+     */
+    recorded: boolean
+    audioValidated: boolean
   }>
+}
+
+/**
+ * The four queues a plan link can point at, in the order the board names them:
+ * text before audio, and within each, the job that unblocks the other first.
+ * Mirrors `planOpenKind` on the client.
+ */
+export const PLAN_OPEN_KINDS = ['untranslated', 'unvalidated', 'unrecorded', 'unsigned'] as const
+export type PlanOpenKind = (typeof PLAN_OPEN_KINDS)[number]
+
+export interface PlanFirstOpenResponse {
+  fileId: string
+  /** The unit's section key: a book code, or '' for a whole file. */
+  unit: string
+  kind: PlanOpenKind
+  /** The SOURCE cell to land on, or null when nothing in the unit is outstanding in that queue. */
+  cellId: string | null
 }
 
 const PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/files\/([^/]+)\/progress$/
 const SECTION_PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/files\/([^/]+)\/progress\/sections\/([^/]+)$/
+const FIRST_OPEN_PATH_RE = /^\/api\/v1\/projects\/([^/]+)\/files\/([^/]+)\/progress\/first-open$/
 const MAX_VALIDATION_LEVELS = 15
 const BOOK_ORDER = [
   'GEN','EXO','LEV','NUM','DEU','JOS','JDG','RUT','1SA','2SA','1KI','2KI','1CH','2CH','EZR','NEH','EST','JOB','PSA','PRO','ECC','SNG','ISA','JER','LAM','EZK','DAN','HOS','JOL','AMO','OBA','JON','MIC','NAM','HAB','ZEP','HAG','ZEC','MAL',
@@ -202,6 +229,153 @@ export async function readValidationCount(db: AquillaDb, projectId: string): Pro
   }
 }
 
+/**
+ * A cell's chapter key, as the projection derives it: everything before the
+ * ':' of `canonical_ref` ("GEN 12" from "GEN 12:4"), or the whole ref where
+ * there is no ':' (a bare "GEN"), or '' where there is no ref at all.
+ */
+function chapterKeySql(alias: string): string {
+  return `BTRIM(CASE
+                  WHEN POSITION(':' IN COALESCE(${alias}.canonical_ref, '')) > 0
+                    THEN SPLIT_PART(${alias}.canonical_ref, ':', 1)
+                  ELSE COALESCE(${alias}.canonical_ref, '')
+                END)`
+}
+
+/**
+ * Does the cell at (`fileExpr`, `cellExpr`) carry a live take — or, with
+ * `signed`, one that is selected AND approved? The definitions are the
+ * projection's (`AUDIO_CTE_SQL`): a cell HAS audio when any take is live, and
+ * is validated when its selected take is approved. Correlated on `s`, the
+ * source-cell alias every query here uses, for the project id.
+ */
+function liveTakeSql(fileExpr: string, cellExpr: string, signed: boolean): string {
+  return `EXISTS (SELECT 1 FROM cell_audio a
+                   WHERE a.project_id = s.project_id AND a.file_id = ${fileExpr}
+                     AND a.cell_id = ${cellExpr} AND a.deleted = 0${
+                       signed ? ' AND a.selected = 1 AND a.approved = 1' : ''
+                     })`
+}
+
+interface FirstOpenRow {
+  cell_id: string
+  canonical_ref: string | null
+  anchor_cell_id: string | null
+  event_id: string
+  start_ms: number | string | null
+  target_value: string
+  endorsement_count: number | string
+  has_take: boolean
+  take_signed: boolean
+  cues_unrecorded: number | string
+  cues_unsigned: number | string
+}
+
+/**
+ * The cells of one unit in DOCUMENT ORDER, decided the way the editor decides
+ * it: Scripture by canonical reference, a timed file by its start times, and
+ * anything else by walking the anchor chain. One rule per shape, and the
+ * shape is read off the rows rather than off `files.kind`, which falls back
+ * through `role` to 'codex' and cannot be trusted to say what a file is.
+ */
+function inDocumentOrder<T extends FirstOpenRow>(rows: T[]): T[] {
+  if (rows.some((r) => r.canonical_ref)) {
+    const withRef = rows
+      .filter((r) => r.canonical_ref)
+      .sort((a, b) => compareCanonicalRefs(a.canonical_ref!, b.canonical_ref!))
+    return [...withRef, ...rows.filter((r) => !r.canonical_ref)]
+  }
+  if (rows.some((r) => r.start_ms != null)) {
+    const at = (r: T) => (r.start_ms == null ? Number.POSITIVE_INFINITY : Number(r.start_ms))
+    return [...rows].sort((a, b) => at(a) - at(b))
+  }
+  return walkAnchorChain(rows)
+}
+
+/**
+ * AQU-1278, round 5: the first cell of a unit that is outstanding in one
+ * queue — where "Go to first untranslated / unvalidated / unrecorded /
+ * take to sign off" lands.
+ *
+ * Server-side because only the server can answer it for every shape at once.
+ * The client used to walk a book's chapters and read one chapter's verses,
+ * which worked for Scripture and for nothing else: a Word document has no
+ * chapters to walk and a subtitle file's sections are time buckets nobody
+ * plans by, so on both the link opened the file and stopped. And audio could
+ * never be asked at all — the verse detail carried no take state, and on a
+ * dubbing project the takes are not even on this file.
+ *
+ * `unit` is the unit's section key: '' for a whole file, a book code for a
+ * book inside a Scripture file (its scope is every chapter of that book plus
+ * its bare front-matter key). THE CUE SHEET: where the file has an anchored
+ * `audio-cues` sibling, a subtitle cell is "unrecorded" when a cue it links
+ * to has no live take, and "unsigned" when a linked cue's take is not yet
+ * selected and approved — the link lands on the subtitle cell, which is the
+ * one the editor can open, and the cue is a click away from it. Newest sheet
+ * wins, as everywhere. A subtitle cell with no linked cue has nothing to
+ * record and is never a target.
+ *
+ * The structural policy applies: a heading the project does not count is not
+ * a cell to be sent to.
+ */
+export async function readFirstOpenCell(
+  db: AquillaDb,
+  projectId: string,
+  fileId: string,
+  unit: string,
+  kind: PlanOpenKind,
+  lane: string,
+): Promise<string | null> {
+  const [countStructural, validationCount, sheet] = await Promise.all([
+    readCountStructuralCells(db, projectId),
+    readValidationCount(db, projectId),
+    db.prepare(
+      `SELECT id FROM files
+        WHERE project_id = ? AND anchor_file_id = ? AND role = 'audio-cues' AND deleted_at IS NULL
+        ORDER BY id DESC LIMIT 1`,
+    ).bind(projectId, fileId).first<{ id: string }>(),
+  ])
+  // '' is never a file id, so binding it where there is no sheet makes both
+  // link counts zero without a second shape of the query.
+  const sheetId = sheet?.id ?? ''
+  const key = chapterKeySql('s')
+  const linkedCues = (predicate: string) =>
+    `(SELECT COUNT(*) FROM cell_links l
+       WHERE l.project_id = s.project_id AND l.kind = 'text-audio' AND l.linked = 1
+         AND l.from_file_id = s.file_id AND l.from_cell_id = s.cell_id AND l.to_file_id = ?
+         AND ${predicate})`
+  const cueTake = liveTakeSql('l.to_file_id', 'l.to_cell_id', false)
+  const cueSigned = liveTakeSql('l.to_file_id', 'l.to_cell_id', true)
+  const { results } = await db.prepare(
+    `SELECT s.cell_id, s.canonical_ref, s.anchor_cell_id, s.event_id, s.start_ms,
+            COALESCE(t.value, '') AS target_value,
+            COALESCE(t.endorsement_count, 0) AS endorsement_count,
+            ${liveTakeSql('s.file_id', 's.cell_id', false)} AS has_take,
+            ${liveTakeSql('s.file_id', 's.cell_id', true)} AS take_signed,
+            ${linkedCues(`NOT ${cueTake}`)} AS cues_unrecorded,
+            ${linkedCues(`${cueTake} AND NOT ${cueSigned}`)} AS cues_unsigned
+       FROM cells s
+       LEFT JOIN cells t
+         ON t.project_id = s.project_id AND t.file_id = s.file_id
+        AND t.cell_id = s.cell_id AND t.side = 'target' AND t.target_lang = ?
+      WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
+        ${unit ? `AND (${key} = ? OR ${key} LIKE ?)` : ''}
+        ${countStructural ? '' : `AND NOT (${structuralPredicateSql('s')})`}`,
+  ).bind(sheetId, sheetId, lane, projectId, fileId, ...(unit ? [unit, `${unit} %`] : [])).all<FirstOpenRow>()
+
+  const onSheet = sheetId !== ''
+  const outstanding = (r: FirstOpenRow): boolean => {
+    const filled = r.target_value.trim().length > 0
+    switch (kind) {
+      case 'untranslated': return !filled
+      case 'unvalidated': return filled && Number(r.endorsement_count) < validationCount
+      case 'unrecorded': return onSheet ? Number(r.cues_unrecorded) > 0 : !r.has_take
+      case 'unsigned': return onSheet ? Number(r.cues_unsigned) > 0 : r.has_take && !r.take_signed
+    }
+  }
+  return inDocumentOrder(results ?? []).find(outstanding)?.cell_id ?? null
+}
+
 export async function handleProgressReadRequest(
   request: Request,
   env: ProgressReadEnv,
@@ -210,7 +384,8 @@ export async function handleProgressReadRequest(
   const pathname = url.pathname
   const match = pathname.match(PATH_RE)
   const sectionMatch = pathname.match(SECTION_PATH_RE)
-  if ((!match && !sectionMatch) || request.method !== 'GET') return null
+  const firstOpenMatch = pathname.match(FIRST_OPEN_PATH_RE)
+  if ((!match && !sectionMatch && !firstOpenMatch) || request.method !== 'GET') return null
   if (!env.SYNC_SECRET_KEY) return new Response('SYNC_SECRET_KEY not configured', { status: 500 })
   if (!env.AQUILLA_PG) return new Response('AQUILLA_PG binding not configured', { status: 500 })
 
@@ -219,7 +394,7 @@ export async function handleProgressReadRequest(
   // ?lane=<tag> selects a non-default lane's rows.
   const lane = url.searchParams.get('lane') ?? ''
 
-  const routeMatch = sectionMatch ?? match!
+  const routeMatch = firstOpenMatch ?? sectionMatch ?? match!
   const projectId = decodeURIComponent(routeMatch[1])
   const fileId = decodeURIComponent(routeMatch[2])
   const authHeader = request.headers.get('Authorization') ?? ''
@@ -227,6 +402,20 @@ export async function handleProgressReadRequest(
   if (!token) return new Response('missing Authorization header', { status: 401 })
   const auth = await verifyTokenForProject(token, projectId, env.SYNC_SECRET_KEY)
   if (!auth.ok) return new Response(auth.reason, { status: auth.status })
+
+  if (firstOpenMatch) {
+    const unit = (url.searchParams.get('unit') ?? '').trim()
+    const kindParam = url.searchParams.get('kind') ?? ''
+    if (!(PLAN_OPEN_KINDS as readonly string[]).includes(kindParam)) {
+      return new Response(`unknown kind: ${kindParam}`, { status: 400 })
+    }
+    const kind = kindParam as PlanOpenKind
+    const cellId = await readFirstOpenCell(env.AQUILLA_PG, projectId, fileId, unit, kind, lane)
+    const body: PlanFirstOpenResponse = { fileId, unit, kind, cellId }
+    // A click, not a poll: no ETag, and nothing to keep — the answer moves
+    // with every edit and the reader is about to be taken to it.
+    return Response.json(body, { headers: { 'Cache-Control': 'private, no-store' } })
+  }
 
   if (sectionMatch) {
     const sectionKey = decodeURIComponent(sectionMatch[3]).trim()
@@ -236,7 +425,9 @@ export async function handleProgressReadRequest(
         `SELECT s.cell_id,
                 s.canonical_ref,
                 COALESCE(t.value, '') AS target_value,
-                COALESCE(t.endorsement_count, 0) AS endorsement_count
+                COALESCE(t.endorsement_count, 0) AS endorsement_count,
+                ${liveTakeSql('s.file_id', 's.cell_id', false)} AS has_take,
+                ${liveTakeSql('s.file_id', 's.cell_id', true)} AS take_signed
            FROM cells s
            LEFT JOIN cells t
              ON t.project_id = s.project_id
@@ -245,17 +436,15 @@ export async function handleProgressReadRequest(
             AND t.side = 'target'
             AND t.target_lang = ?
           WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
-            AND BTRIM(CASE
-                  WHEN POSITION(':' IN COALESCE(s.canonical_ref, '')) > 0
-                    THEN SPLIT_PART(s.canonical_ref, ':', 1)
-                  ELSE COALESCE(s.canonical_ref, '')
-                END) = ?
+            AND ${chapterKeySql('s')} = ?
             ${countStructural ? '' : `AND NOT (${structuralPredicateSql('s')})`}`,
       ).bind(lane, projectId, fileId, sectionKey).all<{
         cell_id: string
         canonical_ref: string | null
         target_value: string
         endorsement_count: number | string
+        has_take: boolean
+        take_signed: boolean
       }>(),
       readValidationCount(env.AQUILLA_PG, projectId),
       env.AQUILLA_PG.prepare(
@@ -278,8 +467,9 @@ export async function handleProgressReadRequest(
     // properties of the DATA, so a client holding a pre-cellId body would have
     // been handed a 304 forever and the plan board's "go to the first
     // outstanding cell" link would have silently done nothing, on exactly the
-    // chapters a user had already looked at.
-    const etag = `"progress:${fileId}:${encodeURIComponent(sectionKey)}:${revision}:v${validationCount}:s2${structuralTag}${laneTag}"`
+    // chapters a user had already looked at. `s3` is the same lesson applied
+    // again, for the two audio flags each verse carries now.
+    const etag = `"progress:${fileId}:${encodeURIComponent(sectionKey)}:${revision}:v${validationCount}:s3${structuralTag}${laneTag}"`
     if (request.headers.get('If-None-Match') === etag) {
       return new Response(null, { status: 304, headers: { ETag: etag, 'Cache-Control': 'private, no-cache' } })
     }
@@ -295,6 +485,8 @@ export async function handleProgressReadRequest(
           ref: row.canonical_ref,
           filled: row.target_value.trim().length > 0,
           validated: Number(row.endorsement_count) >= validationCount,
+          recorded: row.has_take,
+          audioValidated: row.take_signed,
         }))
         .sort((a, b) => compareCanonicalRefs(a.ref, b.ref)),
     }

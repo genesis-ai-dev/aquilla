@@ -738,3 +738,21 @@ describe("the selected row", () => {
     expect(row.className).not.toMatch(/(^|\s)bg-muted(\s|$)/)
   })
 })
+
+describe("the row's link follows the audio once the text is done (round 5)", () => {
+  it("names the first unrecorded cell as its destination", () => {
+    const onOpenShortfall = vi.fn()
+    render(
+      <PlanBoard
+        units={[unit({ filledCount: 100, validatedCount: 100, audioCount: 96 })]}
+        now={NOW} projectId="p1" selectedId={null} onSelect={vi.fn()}
+        onOpenShortfall={onOpenShortfall}
+      />,
+    )
+    const link = screen.getByTestId("plan-shortfall-f1-")
+    expect(link).toHaveTextContent("4 takes to record")
+    expect(link).toHaveAttribute("aria-label", "4 takes to record · Go to first unrecorded")
+    fireEvent.click(link)
+    expect(onOpenShortfall).toHaveBeenCalledTimes(1)
+  })
+})

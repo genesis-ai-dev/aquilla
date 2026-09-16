@@ -239,6 +239,32 @@ export function planUnitShortfall(u: PlanUnit, hasAudio: boolean): PlanShortfall
   }
 }
 
+/** The queue a unit's link lands in. Mirrors the sync worker's `PLAN_OPEN_KINDS`. */
+export type PlanOpenKind = "untranslated" | "unvalidated" | "unrecorded" | "unsigned"
+
+/**
+ * Where the unit's link should land: the first cell outstanding in the queue
+ * the row NAMES FIRST.
+ *
+ * One rule for the words and the link, so they can never point at different
+ * queues. `planShortfallParts` already puts translation ahead of validation (a
+ * cell nobody has written cannot be validated) and text ahead of audio, so
+ * "6 to translate · 200 to record" links to the first untranslated cell, and
+ * once the text is done the same link goes to the first cell with no take —
+ * which is what Sam asked for (2026-09-16): a finished chapter with takes
+ * missing should send you to the takes. Null when nothing is outstanding.
+ */
+export function planOpenKind(s: PlanShortfall): PlanOpenKind | null {
+  const lead = planShortfallParts(s)[0]
+  if (!lead) return null
+  switch (lead.kind) {
+    case "translate": return "untranslated"
+    case "validate": return "unvalidated"
+    case "record": return "unrecorded"
+    case "audio_validate": return "unsigned"
+  }
+}
+
 /**
  * The shortfall as the row and the inspector say it, worst-first and capped at
  * two parts — "6 to translate · 34 to validate". A structured list rather than

@@ -47,3 +47,24 @@ describe("what a chip prints", () => {
     expect(verseChipLabel("Scene 4 opening", "Scene 4")).toBe("Scene 4 opening")
   })
 })
+
+describe("which verses are short — audio", () => {
+  const rec = (cellId: string, recorded: boolean, audioValidated = false) =>
+    ({ ...verse(cellId, `GEN 1:${cellId}`), recorded, audioValidated })
+
+  it("lists the verses with no take for an unrecorded lead", () => {
+    expect(shortVerses([rec("1", true), rec("2", false), rec("3", false)], "unrecorded").map((v) => v.cellId))
+      .toEqual(["2", "3"])
+  })
+
+  it("lists recorded takes nobody has signed off for an unsigned lead", () => {
+    expect(shortVerses([rec("1", true, true), rec("2", true), rec("3", false)], "unsigned").map((v) => v.cellId))
+      .toEqual(["2"])
+  })
+
+  it("lists nothing for an audio lead when the verses carry no take state", () => {
+    // An older worker sends neither flag; unknown is not outstanding.
+    expect(shortVerses([verse("1", "GEN 1:1"), verse("2", "GEN 1:2")], "unrecorded")).toEqual([])
+    expect(shortVerses([verse("1", "GEN 1:1")], "unsigned")).toEqual([])
+  })
+})

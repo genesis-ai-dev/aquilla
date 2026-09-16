@@ -211,11 +211,22 @@ function mapRow(row: CellRowRaw): CellRowOut {
  * the wrong default for a read API that should surface everything in the
  * projection.
  */
-function walkAnchorChain(rows: CellRowRaw[]): CellRowRaw[] {
+/**
+ * What the chain walk needs of a row. Exported (AQU-1278) so the plan board's
+ * "first outstanding cell" read can order a document's cells exactly as the
+ * editor does, rather than growing a second idea of document order.
+ */
+export interface AnchorChainRow {
+  cell_id: string
+  anchor_cell_id: string | null
+  event_id: string
+}
+
+export function walkAnchorChain<T extends AnchorChainRow>(rows: T[]): T[] {
   if (rows.length === 0) return []
 
   // anchor_cell_id (null → "") → ordered children by event_id.
-  const byAnchor = new Map<string, CellRowRaw[]>()
+  const byAnchor = new Map<string, T[]>()
   const cellIds = new Set<string>()
   for (const r of rows) {
     cellIds.add(r.cell_id)
@@ -231,9 +242,9 @@ function walkAnchorChain(rows: CellRowRaw[]): CellRowRaw[] {
     bucket.sort((a, b) => (a.event_id < b.event_id ? -1 : a.event_id > b.event_id ? 1 : 0))
   }
 
-  const ordered: CellRowRaw[] = []
+  const ordered: T[] = []
   const visited = new Set<string>()
-  const byEventId = (a: CellRowRaw, b: CellRowRaw): number =>
+  const byEventId = (a: T, b: T): number =>
     a.event_id < b.event_id ? -1 : a.event_id > b.event_id ? 1 : 0
 
   // Depth-first descent. Each cell's id becomes the anchor key for the next
@@ -273,7 +284,7 @@ function walkAnchorChain(rows: CellRowRaw[]): CellRowRaw[] {
   // event_id order and walk its descendants, so runs that still chain
   // together stay contiguous behind their orphaned head.
   if (visited.size < rows.length) {
-    const roots: CellRowRaw[] = []
+    const roots: T[] = []
     for (const r of rows) {
       if (visited.has(r.cell_id)) continue
       if (r.anchor_cell_id !== null && !cellIds.has(r.anchor_cell_id)) roots.push(r)
@@ -292,7 +303,7 @@ function walkAnchorChain(rows: CellRowRaw[]): CellRowRaw[] {
   // they'd otherwise drop out entirely, which is the wrong default for a
   // read API that should surface everything in the projection.
   if (visited.size < rows.length) {
-    const orphans: CellRowRaw[] = []
+    const orphans: T[] = []
     for (const r of rows) {
       if (!visited.has(r.cell_id)) orphans.push(r)
     }

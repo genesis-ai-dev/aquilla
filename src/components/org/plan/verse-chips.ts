@@ -13,30 +13,41 @@
 // are short and what each chip says. The chips are still a fixed width, so
 // the strip reads as a set where a ragged one reads as a sentence.
 
+import type { PlanOpenKind } from "@/lib/plan/plan-status"
+
 /** A verse as the chapter detail returns it. */
 export interface ShortVerse {
   cellId: string
   ref: string
   filled: boolean
   validated: boolean
+  /**
+   * The verse's own takes. Optional: a worker from before they were sent
+   * omits both, and an absent flag is "unknown" — an audio lead then lists
+   * no chips rather than every verse.
+   */
+  recorded?: boolean
+  audioValidated?: boolean
 }
 
 /**
  * Which verses of a chapter are outstanding, in the order the server returned
  * them (canonical).
  *
- * `lead` follows the unit's own shortfall: a chapter with untranslated cells
- * lists THOSE, because a cell nobody has written cannot be validated and a chip
- * pointing at one would send a reader to do the other job first. Otherwise it
- * lists the unvalidated. Never both — the row has space for one queue.
+ * `lead` is the chapter's own `planOpenKind`: a chapter with untranslated
+ * cells lists THOSE, because a cell nobody has written cannot be validated and
+ * a chip pointing at one would send a reader to do the other job first; then
+ * the unvalidated; then, once the text is finished, the verses with no take,
+ * and after AQU-490 the takes nobody has signed off. Never two queues — the
+ * row has space for one.
  */
-export function shortVerses(
-  verses: readonly ShortVerse[],
-  lead: "untranslated" | "unvalidated",
-): ShortVerse[] {
-  return lead === "untranslated"
-    ? verses.filter((v) => !v.filled)
-    : verses.filter((v) => v.filled && !v.validated)
+export function shortVerses(verses: readonly ShortVerse[], lead: PlanOpenKind): ShortVerse[] {
+  switch (lead) {
+    case "untranslated": return verses.filter((v) => !v.filled)
+    case "unvalidated": return verses.filter((v) => v.filled && !v.validated)
+    case "unrecorded": return verses.filter((v) => v.recorded === false)
+    case "unsigned": return verses.filter((v) => v.recorded === true && v.audioValidated === false)
+  }
 }
 
 /**

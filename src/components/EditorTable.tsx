@@ -4752,6 +4752,33 @@ function SourceReferenceAttachments({ metadata }: { metadata?: Record<string, un
   )
 }
 
+// ---------------------------------------------------------------------------
+// SourceTagChips — small read-only chips from the extensible
+// `cell.metadata.tags` bucket (a flat list of labels). Importers that know a
+// cell's category — the SDBH lexicon's headword / "Contextual meaning" / Gloss
+// tags (AQU-793) — put it here so the reader sees it on the row itself instead
+// of opening the metadata drawer. Non-array or empty values render nothing.
+// ---------------------------------------------------------------------------
+function SourceTagChips({ metadata }: { metadata?: Record<string, unknown> | null }) {
+  const tags = (metadata as { tags?: unknown } | null | undefined)?.tags
+  if (!Array.isArray(tags)) return null
+  const labels = tags.filter((tag): tag is string => typeof tag === "string" && tag.trim().length > 0)
+  if (labels.length === 0) return null
+  return (
+    <span data-testid="source-tag-chips" className="flex shrink-0 items-center gap-1">
+      {labels.map((tag, i) => (
+        <span
+          key={`${tag}-${i}`}
+          dir="auto"
+          className="rounded bg-muted px-1 text-[10px] leading-4 text-foreground"
+        >
+          {tag}
+        </span>
+      ))}
+    </span>
+  )
+}
+
 function EditorRow({
   project, cell, linkedTakes, isEditorActive, isRowFocused, onRowFocusPin, onRowFocusRelease, onClearCellErrors, onActivateEditor, getEditorActivationVersion, onDeactivateEditor,
   username, activeLane = "", editable, canValidate, canEditSource, sourceReadOnlyReason, isCompletionConfigured, isCompletionAvailable, isLoading,
@@ -6742,6 +6769,7 @@ function EditorRow({
                   "GEN 1:1", still belongs at the top: it names what the line IS
                   rather than when it happens, and it is centred as it was. */}
               {!contextIsTimecode && <span className="min-w-0 truncate">{cell.context}</span>}
+              <SourceTagChips metadata={cell.metadata} />
             </div>
             <SourceReferenceAttachments metadata={cell.metadata} />
             {sourceEditing ? (

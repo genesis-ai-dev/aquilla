@@ -195,7 +195,7 @@ describe('MCP transport', () => {
 })
 
 describe('MCP tools/list', () => {
-  it('returns all 28 tools each with an input schema', async () => {
+  it('returns all 29 tools each with an input schema', async () => {
     const env = makeEnv(tdb.db)
     const token = await credToken(tdb)
     const res = await rpc(env, token, { jsonrpc: '2.0', id: 2, method: 'tools/list' })
@@ -210,14 +210,14 @@ describe('MCP tools/list', () => {
         'get_skill',
         'list_changesets',
         'list_memory', 'list_orgs', 'list_projects', 'patch_settings', 'prepare_import',
-        'prepare_translations', 'preview_import', 'read_cell_memory', 'read_content',
-        'read_history',
+        'prepare_translations', 'preview_import', 'read_cell_memory', 'read_comments',
+        'read_content', 'read_history',
         // AQU-1231 quality reads.
         'read_quality', 'read_term_consistency',
         'search_project', 'search_projects', 'wait_for_changeset',
       ].sort(),
     )
-    expect(body.result.tools).toHaveLength(28)
+    expect(body.result.tools).toHaveLength(29)
     for (const tool of body.result.tools) {
       expect(typeof tool.description).toBe('string')
       expect(tool.description.length).toBeGreaterThan(20)

@@ -107,8 +107,9 @@ export const VTT_FILES: FixtureFile[] = [
     untranslated: 0, shortText: 2, shortAudio: 0,
     targetDateInDays: -10,
     expect: "overdue",
-    note: "Two cues short and ten days late. Stays in Overdue; line 2 still " +
-      "says '2 cells to validate · 10 days late'.",
+    note: "Two cues short and ten days late. Stays in Overdue; line 2 reads " +
+      "'2 cells to validate · 10 days late', and the shortfall is the LINK — " +
+      "a target date used to cost a row that.",
   },
   {
     id: "s1e6", name: "Season 1 · Episode 6", kind: "vtt", cells: 110,
@@ -192,7 +193,8 @@ export const DOCS_FILES: FixtureFile[] = [
     untranslated: 0, shortText: 3, shortAudio: 0,
     targetDateInDays: -6,
     expect: "overdue",
-    note: "Three short and six days late. Overdue, with the shortfall on line 2.",
+    note: "Three short and six days late. Overdue, with the shortfall on line 2 " +
+      "and clickable there.",
   },
   {
     id: "cover", name: "cover-letter.docx", kind: "docx", cells: 30,

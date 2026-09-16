@@ -655,6 +655,61 @@ describe("what the third column says", () => {
   })
 })
 
+// AQU-1278, Sam's second review: a date used to cost a row its link and its
+// chapter list. Line 1 belongs to the date, so both moved to line 2 as plain
+// grey text — on EVERY dated row, not only the overdue ones. A unit four cells
+// from finished said so and gave the reader nowhere to click.
+describe("a target date does not cost the row its link", () => {
+  // Three days out, so the row is filed under Due soon and its note says so —
+  // the fullest version of line 2, with all three fragments on it.
+  const dated = (over: Partial<PlanUnit> = {}) =>
+    nearlyDone({ targetDate: "2026-09-05", ...over })
+  const shortfall = () => screen.getByTestId("plan-shortfall-f1-")
+
+  const withRow = (units: PlanUnit[], props: Partial<React.ComponentProps<typeof PlanBoard>> = {}) =>
+    render(
+      <PlanBoard units={units} now={NOW} projectId="p1" selectedId={null}
+        onSelect={vi.fn()} {...props} />,
+    )
+
+  it("keeps the date on line 1 and puts the shortfall, the chapters and the note on line 2", () => {
+    withRow([dated()], { shortChaptersByUnit: new Map([["f1:", ["12", "40"]]]) })
+    expect(screen.getByTestId("plan-date-f1-")).toHaveTextContent("September 5")
+    expect(screen.getByTestId("plan-date-f1-").nextElementSibling!.textContent)
+      .toBe("4 cells to validate · chapters 12 and 40 · in 3 days")
+  })
+
+  it("makes that shortfall the link, and a click on it does not select the row", () => {
+    const onSelect = vi.fn()
+    const onOpenShortfall = vi.fn()
+    withRow([dated()], { onSelect, onOpenShortfall })
+    fireEvent.click(shortfall())
+    expect(onOpenShortfall).toHaveBeenCalledTimes(1)
+    expect(onSelect).not.toHaveBeenCalled()
+  })
+
+  it("links an OVERDUE row too — the one a manager could close today", () => {
+    const onOpenShortfall = vi.fn()
+    withRow([dated({ targetDate: "2026-08-18" })], { onOpenShortfall })
+    expect(screen.getByTestId("plan-date-f1-").parentElement!)
+      .toHaveTextContent("4 cells to validate · 15 days late")
+    fireEvent.click(shortfall())
+    expect(onOpenShortfall).toHaveBeenCalledTimes(1)
+  })
+
+  it("offers no link on a dated row with nothing left to open", () => {
+    // "Nothing left" has no first outstanding cell to land on.
+    withRow([dated({ validatedCount: 100 })], { onOpenShortfall: vi.fn() })
+    expect(screen.queryByTestId("plan-shortfall-f1-")).toBeNull()
+    expect(screen.getByTestId("plan-date-f1-").parentElement!).toHaveTextContent("Nothing left")
+  })
+
+  it("offers no link on a row that is not nearly complete, dated or not", () => {
+    withRow([unit({ targetDate: "2026-09-05", filledCount: 40 })], { onOpenShortfall: vi.fn() })
+    expect(screen.queryByTestId("plan-shortfall-f1-")).toBeNull()
+  })
+})
+
 describe("naming the lane", () => {
   // The tabs that choose the lane live in the Progress card a screen above, so
   // a reader standing at the board could not tell which language they were

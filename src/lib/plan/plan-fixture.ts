@@ -109,7 +109,8 @@ export const TEXT_BOOKS: Book[] = [
     targetDateInDays: -15,
     expect: "overdue",
     note: "Nearly finished AND two weeks overdue. Stays in Overdue, because a blown " +
-      "date outranks a short queue, but line 2 still says what is left. The ranking " +
+      "date outranks a short queue, but line 2 still says what is left — AS A LINK, " +
+      "which a dated row used to be denied. The ranking " +
       "rule, and the reason a finished-but-late book is still findable.",
   },
   {
@@ -157,7 +158,8 @@ export const AUDIO_BOOKS: Book[] = [
     targetDateInDays: 4,
     expect: "soon",
     note: "Short on AUDIO only, and due this week. Due soon takes the group because " +
-      "the date outranks, and line 2 still says '4 takes to record'.",
+      "the date outranks, and line 2 still says '4 takes to record' — no link on " +
+      "that one, there being no cell to land on when only takes are missing.",
   },
   {
     code: "LUK", chapters: 24, perChapter: 10,

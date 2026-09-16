@@ -2,6 +2,29 @@
 
 Updated: 2026-09-16. Tickets: AQU-837 (billing readiness), AQU-1091 (pricing and app UI).
 
+## Agent per-step cost-ledger integration — 2026-09-16
+
+- [x] Meter every paid agent model call as its own step under the same local
+  rehearsal gate: the orchestrator turn and both nested drafting passes each
+  reserve their live-card bound before the call and settle their reported cost
+  (`lib/billing/agent-usage.ts`; `upstream.ts` now captures the generation id).
+  Metered calls carry the 4096 output cap.
+- [x] Exhaustion stops the next step, never work already done: the run ends
+  `capped` with a `budget.exhausted` frame carrying `reason: "weekly_allowance"`,
+  a refused drafting pass returns a tool error, and staged proposals survive.
+- [x] Provider errors, transport failures, and missing cost hold the step's
+  reservation (with its generation id when known) for reconciliation. Unpriced
+  models end the run with `model_price_unavailable`; unowned projects get 403.
+- [ ] Legacy per-run credit/word guards and the per-run cost cap still run
+  beside the weekly ledger until every producer is connected.
+
+Test impact: new `billing-agent-usage.test.ts` (five real-Postgres route tests:
+settled turns with provider refs, nested drafting steps, exhaustion before the
+provider, mid-run drafting refusal at exactly 100%, held/unpriced/unowned
+cases). Existing agent route, harness, upstream, tools, and command suites pass
+(52). Worker lint and type checks pass. The agent route and its upstream/draft
+modules join the billing impact mapping.
+
 ## Live rate card and reservation bound — 2026-09-16
 
 - [x] Replace the fixed one-cent rehearsal reservation with a bound priced from
@@ -94,6 +117,8 @@ classify route to the billing journey. No UI or browser behavior changes.
   held-usage reconciliation checkpoint above; live-provider sweep still pending.
 - [ ] Connect agent, background/contextual work, imports, and speech to the same
   ledger; complete capability checks and authoritative usage percentages.
+  Agent and import classification are connected (checkpoints above); speech
+  is unmetered by decision; contextual work and percentages remain.
 
 Test impact: new `billing-chat-usage.test.ts` composes signed Checkout activation
 with the actual authenticated chat route, provider-shaped JSON/SSE responses, and

@@ -29,6 +29,8 @@ export interface DraftModelConfig {
   apiKey: string
   /** Full chat-completions URL (mock-aware, resolved by the route). */
   url: string
+  /** Output cap forwarded to the provider (set when the run is metered). */
+  maxTokens?: number
 }
 
 export interface DraftContext {
@@ -45,6 +47,10 @@ export interface DraftContext {
   /** Re-check the enclosing agent run's cost/token cap between the two paid
    *  phases. Direct unit callers may omit it (no enclosing run budget). */
   canContinuePaidWork?: () => boolean
+  /** Weekly-allowance admission for each paid pass (AQU-837). Reserves before
+   *  the call; the returned settle records the provider body afterwards. */
+  admitPaidCall?: (input: { model: string; promptChars: number }) => Promise<
+    { ok: true; settle: (body: unknown) => Promise<unknown>; hold: (body: unknown) => Promise<unknown> } | { ok: false; message: string }>
 }
 
 export interface DraftOutcome extends ToolOutcome {
@@ -98,13 +104,14 @@ Rules:
 }
 
 interface UpstreamJson {
+  id?: string
   choices?: { message?: { content?: string | null } }[]
   usage?: { prompt_tokens?: number; completion_tokens?: number; cost?: number }
   error?: { message?: string }
 }
 
 type DraftModelResult =
-  | { ok: true; content: string; usage?: UpstreamJson["usage"] }
+  | { ok: true; content: string; usage?: UpstreamJson["usage"]; id?: string }
   | { ok: false; error: string }
 
 async function callDraftModel(
@@ -124,6 +131,7 @@ async function callDraftModel(
       stream: false,
       usage: { include: true },
       reasoning: { effort: "none" },
+      ...(modelCfg.maxTokens ? { max_tokens: modelCfg.maxTokens } : {}),
     }),
     signal,
   })
@@ -137,7 +145,28 @@ async function callDraftModel(
     ok: true,
     content: data.choices?.[0]?.message?.content ?? "",
     ...(data.usage ? { usage: data.usage } : {}),
+    ...(typeof data.id === "string" ? { id: data.id } : {}),
   }
+}
+/** Metered pass: reserve, call, then settle or hold. Unmetered runs call directly. */
+async function callPaidPass(
+  ctx: DraftContext,
+  modelCfg: DraftModelConfig,
+  messages: { role: "system" | "user"; content: string }[],
+): Promise<DraftModelResult> {
+  if (!ctx.admitPaidCall) return callDraftModel(modelCfg, messages, ctx.signal)
+  const admission = await ctx.admitPaidCall({ model: modelCfg.model, promptChars: messages.reduce((n, m) => n + m.content.length, 0) })
+  if (!admission.ok) return { ok: false, error: admission.message }
+  let result: DraftModelResult
+  try {
+    result = await callDraftModel(modelCfg, messages, ctx.signal)
+  } catch (error) {
+    await admission.hold(undefined)
+    throw error
+  }
+  // A provider error is an uncertain charge: the reservation stays held.
+  await (result.ok ? admission.settle({ id: result.id, usage: result.usage }) : admission.hold(undefined))
+  return result
 }
 
 /** Tolerant parse of the drafting model's JSON array. */
@@ -238,13 +267,13 @@ export async function executeDraft(
   // model sees the request to translate. This is deliberately two calls, not
   // one prompt asking the model to "think first" and draft in the same pass.
   ctx.sendProgress(`Researching ${work.length} cells`, 0, work.length)
-  const researched = await callDraftModel(
+  const researched = await callPaidPass(
+    ctx,
     modelCfg,
     [
       { role: "system", content: researchSystemPrompt(ctx, examplesBlock, precedingBlock) },
       { role: "user", content: `Research these ${work.length} source segments:${instructions}\n${numbered}` },
     ],
-    ctx.signal,
   )
   if (!researched.ok) return { ok: false, text: `error: drafting research ${researched.error}` }
   if (researched.usage) ctx.addUsage(researched.usage)
@@ -261,7 +290,8 @@ export async function executeDraft(
   ctx.sendProgress(`Researching ${work.length} cells`, work.length, work.length)
 
   ctx.sendProgress(`Drafting ${work.length} cells`, 0, work.length)
-  const generated = await callDraftModel(
+  const generated = await callPaidPass(
+    ctx,
     modelCfg,
     [
       { role: "system", content: draftSystemPrompt(ctx, examplesBlock, precedingBlock) },
@@ -272,7 +302,6 @@ export async function executeDraft(
           `Translate these ${work.length} segments:${instructions}\n${numbered}`,
       },
     ],
-    ctx.signal,
   )
   if (!generated.ok) return { ok: false, text: `error: drafting generation ${generated.error}` }
   if (generated.usage) ctx.addUsage(generated.usage)

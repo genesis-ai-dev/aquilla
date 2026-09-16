@@ -15,7 +15,7 @@ it('prices a request from the live card with the enforced output cap and refuses
     .toBe((5 + 4096) * OUTPUT_PRICE * 100)
   expect(() => boundRequestCostCents(card, { model: 'anthropic/claude-opus-5', promptChars: 10, maxOutputTokens: 10 })).toThrow('Model price unavailable')
   expect(() => boundRequestCostCents(card, { model: 'local-test', promptChars: 10, maxOutputTokens: 0 })).toThrow('Invalid request bound')
-  expect(fetch.mock.calls[0]![1]).toMatchObject({ headers: { Authorization: 'Bearer k' } })
+  expect((fetch.mock.calls[0] as unknown[])[1]).toMatchObject({ headers: { Authorization: 'Bearer k' } })
 })
 it('holds a free model to a positive reservation so its request still occupies the ledger', async () => {
   vi.stubGlobal('fetch', vi.fn(async () => rateCard([{ id: 'free', prompt: 0, completion: 0 }])))

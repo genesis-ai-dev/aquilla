@@ -30,7 +30,7 @@ import { compactConvo, loadSession, saveSession, type StoredMessage } from "../l
 import { executeRead, type ReadArgs } from "../lib/agent/tools/read"
 import { executeExamples, type ExamplesArgs } from "../lib/agent/tools/examples"
 import { executeSearch, type SearchArgs } from "../lib/agent/tools/search"
-import { executeDraft, type DraftArgs } from "../lib/agent/tools/draft"
+import { executeDraft, type DraftArgs, type DraftContext } from "../lib/agent/tools/draft"
 import type { ToolResultData } from "../lib/agent/tools/types"
 import { parseAquiferOp } from "../lib/agent/aquifer-guard"
 import { aquiferSearch, aquiferReadPage, type AquiferCitation } from "../lib/aquifer/client"
@@ -47,6 +47,7 @@ import { buildAugmentSystemPrompt } from "../lib/agent/prompt-augment"
 import { sandboxDestroy } from "../lib/agent/sandbox-client"
 import { openRouterExtras, streamUsageOptions } from "../lib/llm-vendor"
 import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
+import { AgentUsageMeter, agentUsageAllowed, agentUsageEnabled } from "../lib/billing/agent-usage"
 import {
   runCode,
   loadArtifact,
@@ -537,6 +538,14 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
   if (!agentWordCheck.ok) {
     return c.json(wordCapBody(agentWordCheck.reason), 429)
   }
+  // AQU-837 weekly allowance (local scripted-provider rehearsal only). Enforced
+  // usage never funds an unowned project from org 0.
+  let usage: AgentUsageMeter | undefined
+  if (agentUsageEnabled(c.env)) {
+    if (!agentUsageAllowed(c.env, c.req.url)) return c.json({ error: "usage_rehearsal_unavailable" }, 503)
+    if (orgId <= 0) return c.json({ error: "forbidden", message: "This project has no billing workspace" }, 403)
+    usage = new AgentUsageMeter(c.env, { orgId, userId: user.id, projectId: body.projectId })
+  }
 
   // Session-native conversation (v2): load the stored convo — including tool
   // results — so a follow-up reuses what prior runs discovered. Ownership is
@@ -581,7 +590,7 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
       const send = (frame: AgentFrame) => {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(frame)}\n\n`))
       }
-      runAgentLoop({ env, body, storedConvo, storedUntrusted, user, roleLevel: role.level, runId, orgId, model: agentModel, draftModel: resolveDraftModel(c.env, platformSettings, agentModel), signal, send })
+      runAgentLoop({ env, body, storedConvo, storedUntrusted, user, roleLevel: role.level, runId, orgId, model: agentModel, draftModel: resolveDraftModel(c.env, platformSettings, agentModel), signal, send, usage })
         .catch((err) => {
           // Last-resort: surface, then settle the ledger as error.
           try {
@@ -656,9 +665,11 @@ interface LoopArgs {
   draftModel: string
   signal: AbortSignal
   send: (frame: AgentFrame) => void
+  /** Weekly-allowance meter; undefined when metering is off. */
+  usage?: AgentUsageMeter
 }
 
-async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, roleLevel, runId, orgId, model, draftModel, signal, send }: LoopArgs): Promise<void> {
+async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, roleLevel, runId, orgId, model, draftModel, signal, send, usage }: LoopArgs): Promise<void> {
   const aliases = new AliasMap()
   const sqlVars: SqlVarContext = {
     projectId: body.projectId,
@@ -866,26 +877,52 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
       // untrusted-content tool (contracts §2).
       untrusted.usedThisTurn = false
 
+      // AQU-837: reserve this turn's bound against the weekly allowance before
+      // the provider sees it. Exhaustion stops the run here; staged work stays.
+      let stepRequestId: string | undefined
+      if (usage) {
+        const admission = await usage.admitStep({ model, promptChars: JSON.stringify({ messages: convo, tools }).length })
+        if (!admission.ok) {
+          if (admission.reason === "exhausted") {
+            status = "capped"
+            send({ type: "budget.exhausted", runId, spentCredits: toCredits(costCents), capCredits: toCredits(costCapCents), reason: "weekly_allowance" })
+          } else {
+            status = "error"
+            send({ type: "error", message: admission.reason === "unpriced" ? "model_price_unavailable" : "usage_accounting_unavailable" })
+          }
+          break
+        }
+        stepRequestId = admission.requestId
+      }
       const turnStartedAt = Date.now()
-      const upstream = await fetch(resolveOpenRouterUrl(env), {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model,
-          messages: convo,
-          tools,
-          stream: true,
-          ...openRouterExtras(env.OPENROUTER_BASE_URL),
-          ...streamUsageOptions(env.OPENROUTER_BASE_URL),
-        }),
-        signal,
-      })
+      let upstream: Response
+      try {
+        upstream = await fetch(resolveOpenRouterUrl(env), {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model,
+            messages: convo,
+            tools,
+            stream: true,
+            ...openRouterExtras(env.OPENROUTER_BASE_URL),
+            ...streamUsageOptions(env.OPENROUTER_BASE_URL),
+            ...(usage ? { max_tokens: usage.maxOutputTokens } : {}),
+          }),
+          signal,
+        })
+      } catch (error) {
+        // Uncertain charge: the reservation stays held for reconciliation.
+        if (usage && stepRequestId) await usage.holdStep(stepRequestId, undefined)
+        throw error
+      }
 
       if (!upstream.ok) {
         const text = await upstream.text()
+        if (usage && stepRequestId) await usage.holdStep(stepRequestId, undefined)
         meter.add({
           surface: "agent",
           runId,
@@ -907,6 +944,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
       let message: UpstreamMessage
       try {
         const turn = await readModelTurn(upstream, (text) => send({ type: "assistant_delta", text }))
+        if (usage && stepRequestId) await usage.settleStep(stepRequestId, { id: turn.id, usage: turn.usage })
         message = turn.message
         promptTokens += turn.usage?.prompt_tokens ?? 0
         completionTokens += turn.usage?.completion_tokens ?? 0
@@ -992,6 +1030,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
             model: draftModel,
             apiKey: env.OPENROUTER_API_KEY ?? "",
             url: resolveOpenRouterUrl(env),
+            ...(usage ? { maxTokens: usage.maxOutputTokens } : {}),
             sourceLanguage: languages.sourceLanguage,
             targetLanguage: languages.targetLanguage,
             briefSummary,
@@ -1019,6 +1058,19 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
           },
           canContinuePaidWork: () =>
             costCents < costCapCents && promptTokens + completionTokens <= TOKEN_CEILING,
+          admitPaidCall: usage
+            ? async (input) => {
+                const admission = await usage.admitStep(input)
+                if (!admission.ok) {
+                  if (admission.reason === "exhausted") {
+                    send({ type: "budget.exhausted", runId, spentCredits: toCredits(costCents), capCredits: toCredits(costCapCents), reason: "weekly_allowance" })
+                    return { ok: false, message: "error: weekly AI allowance exhausted — this pass was not started" }
+                  }
+                  return { ok: false, message: `error: ${admission.reason === "unpriced" ? "model price unavailable" : "usage accounting unavailable"} — this pass was not started` }
+                }
+                return { ok: true, settle: (body) => usage.settleStep(admission.requestId, body), hold: (body) => usage.holdStep(admission.requestId, body) }
+              }
+            : undefined,
           // Acceptance-rate denominator (0051): staged commits per run. The
           // numerator lands in the event log when the user Applies.
           countStaged: (n) => {
@@ -1122,6 +1174,7 @@ interface ToolCallEnv {
     model: string
     apiKey: string
     url: string
+    maxTokens?: number
     sourceLanguage?: string
     targetLanguage?: string
     briefSummary?: string
@@ -1130,6 +1183,7 @@ interface ToolCallEnv {
   addUsage: (usage: { prompt_tokens?: number; completion_tokens?: number; cost?: number }) => void
   /** True while another paid sub-call fits under the run's cost/token caps. */
   canContinuePaidWork: () => boolean
+  admitPaidCall?: DraftContext["admitPaidCall"]
   /** Folds staged target.cell.commit events into the run's staged_count. */
   countStaged: (n: number) => void
   /** AQU-AGENT §2 harness context (sandbox / import / memory tools). */
@@ -1284,8 +1338,9 @@ async function runDraftTool(args: DraftArgs, t: ToolCallEnv): Promise<string> {
       sendProgress: (label, done, total) => t.send({ type: "progress", label, done, total }),
       addUsage: t.addUsage,
       canContinuePaidWork: t.canContinuePaidWork,
+      admitPaidCall: t.admitPaidCall,
     },
-    { model: t.draft.model, apiKey: t.draft.apiKey, url: t.draft.url },
+    { model: t.draft.model, apiKey: t.draft.apiKey, url: t.draft.url, maxTokens: t.draft.maxTokens },
   )
   if (outcome.proposal) {
     t.send({ type: "proposal", proposal: outcome.proposal })

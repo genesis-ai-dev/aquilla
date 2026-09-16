@@ -22,7 +22,7 @@
 // reads.
 
 import type { Env } from "../types"
-import { bookKeyExpr } from "../../../db/shared/plan-keys"
+import { bookKeyExpr, sectionKeyExpr } from "../../../db/shared/plan-keys"
 
 /** Per-assignee rollup for the manager workload view. */
 export interface AssigneeWorkload {
@@ -225,6 +225,29 @@ export interface UnitAssignment {
   validated: number
   recorded: number
   audioValidated: number
+  /**
+   * AQU-1278: the same five counts again, broken out per chapter, in canonical
+   * order. Summing any column across this array gives the aggregate above it.
+   *
+   * COUNTS, not a ready-made "these chapters are short" list, and the choice
+   * matters. What counts as short is `planUnitShortfall` on the client — it
+   * owns the zero clamp and `AUDIO_JUDGED_ON_RECORDED`, the flag that flips
+   * the day AQU-490 ships a recording-review UI. A `shortChapters` computed
+   * here would be a second copy of that rule, in another language, on the far
+   * side of a wire, and it would keep answering the old question after the
+   * flag moved. Handing over the numbers keeps one definition.
+   */
+  chapters: UnitAssignmentChapter[]
+}
+
+/** One chapter's share of an assignment. `key` is a section key: "GEN 12". */
+export interface UnitAssignmentChapter {
+  key: string
+  total: number
+  translated: number
+  validated: number
+  recorded: number
+  audioValidated: number
 }
 
 /** Endorsement-count cap, mirroring progress-read-route's MAX_VALIDATION_LEVELS. */
@@ -329,6 +352,12 @@ export async function getUnitAssignments(
             a.scope_label      AS scope_label,
             a.target_lang      AS target_lang,
             a.deadline         AS deadline,
+            -- AQU-1278. One row per (assignment, chapter) rather than per
+            -- assignment: the inspector needs to say WHICH chapters a person
+            -- still owes work in, and which chapters of the unit nobody holds.
+            -- The aggregate the panel already showed is the sum over these,
+            -- folded below, so no existing number moves.
+            ${sectionKeyExpr("c")} AS chapter_key,
             COUNT(*)::integer AS cells_total,
             COUNT(*) FILTER (WHERE TRIM(COALESCE(t.value, '')) <> '')::integer AS translated,
             COUNT(*) FILTER (WHERE COALESCE(t.endorsement_count, 0) >= ?)::integer AS validated,
@@ -362,7 +391,7 @@ export async function getUnitAssignments(
         AND NOT (pol.exclude_structural AND COALESCE(c.type, '') IN ('heading', 'paratext'))
         ${sectionPredicate}
       GROUP BY a.assignment_id, a.assignee_user_id, u.username, a.scope_label,
-               a.target_lang, a.deadline, a.created_at
+               a.target_lang, a.deadline, a.created_at, ${sectionKeyExpr("c")}
       ORDER BY a.created_at DESC, a.assignment_id`,
   )
     // Binds are positional, so they follow the statement's own order: the
@@ -388,6 +417,7 @@ export async function getUnitAssignments(
       scope_label: string
       target_lang: string
       deadline: string | null
+      chapter_key: string
       cells_total: number
       translated: number
       validated: number
@@ -395,19 +425,58 @@ export async function getUnitAssignments(
       audio_validated: number
     }>()
 
-  return (rows.results ?? []).map((r) => ({
-    assignmentId: r.assignment_id,
-    assigneeUserId: r.assignee_user_id,
-    username: r.assignee_username,
-    scopeLabel: r.scope_label,
-    targetLang: r.target_lang ?? "",
-    deadline: r.deadline,
-    cellsTotal: r.cells_total,
-    translated: r.translated,
-    validated: r.validated,
-    recorded: r.recorded,
-    audioValidated: r.audio_validated,
-  }))
+  // Fold the per-chapter rows back into one entry per assignment, summing as we
+  // go. A Map keyed on the assignment id preserves FIRST-SEEN order, which is
+  // the ORDER BY's order (newest assignment first) — the order this panel has
+  // always listed people in, and one the caller must not have to restore.
+  const byAssignment = new Map<string, UnitAssignment>()
+  for (const r of rows.results ?? []) {
+    let entry = byAssignment.get(r.assignment_id)
+    if (!entry) {
+      entry = {
+        assignmentId: r.assignment_id,
+        assigneeUserId: r.assignee_user_id,
+        username: r.assignee_username,
+        scopeLabel: r.scope_label,
+        targetLang: r.target_lang ?? "",
+        deadline: r.deadline,
+        cellsTotal: 0,
+        translated: 0,
+        validated: 0,
+        recorded: 0,
+        audioValidated: 0,
+        chapters: [],
+      }
+      byAssignment.set(r.assignment_id, entry)
+    }
+    entry.cellsTotal += r.cells_total
+    entry.translated += r.translated
+    entry.validated += r.validated
+    entry.recorded += r.recorded
+    entry.audioValidated += r.audio_validated
+    entry.chapters.push({
+      key: r.chapter_key,
+      total: r.cells_total,
+      translated: r.translated,
+      validated: r.validated,
+      recorded: r.recorded,
+      audioValidated: r.audio_validated,
+    })
+  }
+
+  // Canonical order within each assignment, so "GEN 2" precedes "GEN 10" and a
+  // caller can take the first short chapter as THE one to name. Across books —
+  // only reachable on a file-grain unit — this falls back to the book CODE's
+  // alphabetical order, not the canon's: auth-worker has no book table, and
+  // importing one to sort a line that says "ch. 12" is not a trade worth making.
+  for (const entry of byAssignment.values()) {
+    entry.chapters.sort((a, b) => {
+      const ka = chapterSortKey(a.key)
+      const kb = chapterSortKey(b.key)
+      return ka.book === kb.book ? ka.num - kb.num : ka.book.localeCompare(kb.book)
+    })
+  }
+  return [...byAssignment.values()]
 }
 
 /** A single open assignment in the caller's inbox. */

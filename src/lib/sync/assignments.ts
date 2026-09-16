@@ -171,6 +171,26 @@ export interface UnitAssignment {
   validated: number
   recorded: number
   audioValidated: number
+  /**
+   * AQU-1278: the same counts per chapter, canonically ordered, so the panel
+   * can name WHERE a person's outstanding work is and which chapters of the
+   * unit nobody holds. Summing a column gives the aggregate above.
+   *
+   * OPTIONAL ON THE WIRE on purpose. The client and the workers deploy
+   * separately, and a page talking to a worker that predates this field would
+   * otherwise crash on `.map` rather than quietly drop one line of detail.
+   */
+  chapters?: UnitAssignmentChapter[]
+}
+
+/** One chapter's share of an assignment. `key` is a section key: "GEN 12". */
+export interface UnitAssignmentChapter {
+  key: string
+  total: number
+  translated: number
+  validated: number
+  recorded: number
+  audioValidated: number
 }
 
 /**

@@ -247,6 +247,108 @@ describe("getUnitAssignments (AQU-1278 plan inspector)", () => {
   })
 })
 
+// AQU-1278. The panel used to be able to say how much of a unit a person still
+// owed, but never WHERE — and the unit could not say which of its chapters
+// nobody held at all, because the read had already aggregated the answer away.
+describe("per-chapter coverage on a unit's assignments", () => {
+  it("names the chapters each assignment covers, in canonical order", async () => {
+    await seedUnit()
+    const [anna] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "")
+    expect(anna.chapters.map((c) => c.key)).toEqual(["GEN 1", "GEN 2"])
+    expect(anna.chapters).toEqual([
+      // g1 and g2: both translated, g1 endorsed, both recorded, g1 signed off.
+      { key: "GEN 1", total: 2, translated: 2, validated: 1, recorded: 2, audioValidated: 1 },
+      // g3: a source cell with no target row and only a DELETED take.
+      { key: "GEN 2", total: 1, translated: 0, validated: 0, recorded: 0, audioValidated: 0 },
+    ])
+  })
+
+  it("keeps every aggregate equal to the sum of its chapters", async () => {
+    await seedUnit()
+    // The fold's own invariant. A GROUP BY that gained a column without the
+    // sum-back would leave the panel's headline numbers reading one chapter's
+    // worth of work instead of the assignment's.
+    for (const a of await getUnitAssignments(testEnv, "pa", "f1", "", "")) {
+      const sum = (pick: (c: (typeof a.chapters)[number]) => number) =>
+        a.chapters.reduce((n, c) => n + pick(c), 0)
+      expect(a.cellsTotal).toBe(sum((c) => c.total))
+      expect(a.translated).toBe(sum((c) => c.translated))
+      expect(a.validated).toBe(sum((c) => c.validated))
+      expect(a.recorded).toBe(sum((c) => c.recorded))
+      expect(a.audioValidated).toBe(sum((c) => c.audioValidated))
+    }
+  })
+
+  it("orders chapters numerically, so GEN 10 follows GEN 2", async () => {
+    await seedUnit()
+    // Lexically "GEN 10" sorts between "GEN 1" and "GEN 2", and the caller
+    // takes chapters[0] as THE chapter to name on the row — so a lexical sort
+    // would point a reader at the wrong one.
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, canonical_ref)
+       VALUES ('pa','f1','g10','source','s','e-pa',1,'GEN 10:1')`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO assignment_cells (assignment_id, file_id, cell_id) VALUES ('as-anna','f1','g10')",
+    ).run()
+    const [anna] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "")
+    expect(anna.chapters.map((c) => c.key)).toEqual(["GEN 1", "GEN 2", "GEN 10"])
+  })
+
+  it("measures each chapter in the lane being shown", async () => {
+    await seedUnit()
+    // Same cells, two answers. g1 and g2 are both endorsed in Spanish; only g1
+    // is in the default lane. A chapter row that lost its lane predicate would
+    // report GEN 1 fully validated on the tab where it is half done.
+    const [def] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "")
+    const [es] = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "es")
+    expect(def.chapters[0]).toMatchObject({ key: "GEN 1", translated: 2, validated: 1 })
+    expect(es.chapters[0]).toMatchObject({ key: "GEN 1", translated: 2, validated: 2 })
+    // Audio has no lane to pick, so it reads the same from either tab.
+    expect(def.chapters[0].recorded).toBe(es.chapters[0].recorded)
+  })
+
+  it("drops a chapter the headings policy empties and keeps one that is merely untyped", async () => {
+    await seedUnit()
+    // GEN 3 is nothing but a heading; GEN 4 is a spreadsheet import the
+    // classifier could not label. Excluding structure must empty the first and
+    // leave the second — `NULL IN ('heading','paratext')` is NULL, and a
+    // NOT over it drops the row exactly as a false would, so without the
+    // COALESCE in the predicate GEN 4 disappears with GEN 3.
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, type, event_id, last_edit_at, canonical_ref) VALUES
+        ('pa','f1','g3h','source','Chapter 3','heading','e-pa',1,'GEN 3:0'),
+        ('pa','f1','g4u','source','untyped',NULL,'e-pa',1,'GEN 4:1')`,
+    ).run()
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO assignment_cells (assignment_id, file_id, cell_id) VALUES
+        ('as-anna','f1','g3h'), ('as-anna','f1','g4u')`,
+    ).run()
+
+    const counting = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "")
+    expect(counting[0].chapters.map((c) => c.key)).toEqual(["GEN 1", "GEN 2", "GEN 3", "GEN 4"])
+
+    await env.AQUILLA_PG.prepare(
+      `INSERT INTO project_settings (project_id, settings) VALUES ('pa', '{"countStructuralCells":false}')
+       ON CONFLICT (project_id) DO UPDATE SET settings = EXCLUDED.settings`,
+    ).run()
+    const excluding = await getUnitAssignments(testEnv, "pa", "f1", "GEN", "")
+    expect(excluding[0].chapters.map((c) => c.key)).toEqual(["GEN 1", "GEN 2", "GEN 4"])
+    expect(excluding[0].cellsTotal).toBe(4)
+  })
+
+  it("keeps each assignment's chapters to its own, across books", async () => {
+    await seedUnit()
+    // A file-grain unit holds both books. The GROUP BY carries the assignment,
+    // so bob's Exodus chapters must not land in anna's list or the panel would
+    // credit her with work she does not hold.
+    const rows = await getUnitAssignments(testEnv, "pa", "f1", "", "")
+    const byId = new Map(rows.map((r) => [r.assignmentId, r]))
+    expect(byId.get("as-anna")!.chapters.map((c) => c.key)).toEqual(["GEN 1", "GEN 2"])
+    expect(byId.get("as-bob")!.chapters.map((c) => c.key)).toEqual(["EXO 1"])
+  })
+})
+
 describe("GET /api/v2/projects/:projectId/assignments/unit", () => {
   it("returns the unit's assignments to a maintainer+ caller", async () => {
     await seedUnit()
@@ -257,7 +359,10 @@ describe("GET /api/v2/projects/:projectId/assignments/unit", () => {
     )
     expect(res.status).toBe(200)
     const body = (await res.json()) as {
-      assignments: Array<{ assignmentId: string; username: string; cellsTotal: number; validated: number }>
+      assignments: Array<{
+        assignmentId: string; username: string; cellsTotal: number; validated: number
+        chapters: Array<{ key: string }>
+      }>
     }
     expect(body.assignments).toHaveLength(1)
     expect(body.assignments[0]).toMatchObject({
@@ -266,6 +371,9 @@ describe("GET /api/v2/projects/:projectId/assignments/unit", () => {
       cellsTotal: 3,
       validated: 1,
     })
+    // AQU-1278: the per-chapter breakdown survives JSON serialisation — the
+    // inspector reads WHERE the outstanding work is from exactly this.
+    expect(body.assignments[0].chapters.map((c) => c.key)).toEqual(["GEN 1", "GEN 2"])
   })
 
   it("gates on the org's memberProgressViewMinRole, not a hard maintainer floor", async () => {

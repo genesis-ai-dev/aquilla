@@ -267,3 +267,13 @@ describe("the tile's own geometry", () => {
     expect(line.className).not.toContain("inset-x-0")
   })
 })
+
+describe("the badge above its neighbours", () => {
+  it("is lifted out of tree order, so the tile to its right cannot paint over it", () => {
+    // Positioned boxes at z-index auto paint in DOM order; the badge overhangs
+    // into the gap before the next tile, which is drawn later and covered the
+    // overhang. Sam: "badges are still clipping."
+    renderGrid([section("GEN 1", { validatedCount: 35 }), section("GEN 2")], { nearlyComplete: true })
+    expect(screen.getByTestId("plan-tile-badge-GEN 1").className).toContain("z-10")
+  })
+})

@@ -353,7 +353,14 @@ function PlanTile({
           // header and the pill use, not the bar-fill blue: the bar's hue is
           // tuned to be read as a fill at two alphas, and at full strength on
           // a fifteen-pixel dot it is the loudest thing on the panel.
-          className={`absolute -top-[6px] -end-[6px] flex h-[15px] min-w-[15px] items-center justify-center rounded-full px-[3px] text-[9.5px] leading-none font-bold text-white dark:text-[oklch(0.2_0.04_245)] ${PLAN_TONE.nearly_complete.dot}`}
+          //
+          // `z-10` IS THE OVERHANG'S OTHER HALF. Every tile is positioned, and
+          // positioned boxes at z-index auto paint in tree order — so the tile
+          // to the RIGHT, drawn later, painted over the slice of this badge
+          // that reaches into the gap, and every badge but the last column's
+          // came out shaved flat on one side. Lifting the badge out of that
+          // order is what lets it actually sit on top of its neighbours.
+          className={`absolute -top-[6px] -end-[6px] z-10 flex h-[15px] min-w-[15px] items-center justify-center rounded-full px-[3px] text-[9.5px] leading-none font-bold text-white dark:text-[oklch(0.2_0.04_245)] ${PLAN_TONE.nearly_complete.dot}`}
         >
           {worst}
         </span>

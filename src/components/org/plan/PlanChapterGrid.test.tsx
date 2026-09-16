@@ -244,3 +244,26 @@ describe("the legend", () => {
     expect(screen.queryByTestId("plan-grid-legend")).toBeNull()
   })
 })
+
+describe("the tile's own geometry", () => {
+  it("hangs the badge off the tile itself, not inside a clipped wrapper", () => {
+    // The badge overhangs the corner, so it must be a direct child of the
+    // button — anything with overflow:hidden between them would cut it off.
+    renderGrid([section("GEN 1", { validatedCount: 35 })], { nearlyComplete: true })
+    const tile = screen.getByTestId("plan-tile-GEN 1")
+    const badge = screen.getByTestId("plan-tile-badge-GEN 1")
+    expect(badge.parentElement).toBe(tile)
+    expect(tile.className).not.toContain("overflow-hidden")
+  })
+
+  it("insets the underline from the edges, so the corner radius never cuts it", () => {
+    renderGrid([section("GEN 1", { validatedCount: 35 })])
+    const line = screen.getByTestId("plan-tile-GEN 1")
+      .querySelector('[data-plan-underline="text"]')!.parentElement!
+    // Flush to the edges it was clipped by the radius: a curved left end and
+    // a hard cut mid-tile. Inset, with rounded ends, it reads as a small bar.
+    expect(line.className).toContain("inset-x-1")
+    expect(line.className).toContain("bottom-[3px]")
+    expect(line.className).not.toContain("inset-x-0")
+  })
+})

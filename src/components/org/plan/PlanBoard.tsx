@@ -119,7 +119,7 @@ function PlanStat({ value, label, tone, testId }: {
 export function PlanBoard({
   units, now, projectId, selectedId, onSelect, actions, emptyAction,
   status = "ready", onRetry, orderRef,
-  shortChaptersByUnit, assigneesByUnit, onOpenShortfall,
+  shortChaptersByUnit, assigneesByUnit, onOpenShortfall, laneLabel,
 }: {
   units: PlanUnit[]
   now: number
@@ -174,6 +174,14 @@ export function PlanBoard({
    * and ProjectOverview already owns both.
    */
   onOpenShortfall?: (unit: PlanUnit) => void
+  /**
+   * AQU-1278: the language whose numbers the board is showing, named beside
+   * the heading. The lane tabs that choose it live in the Progress card a
+   * screen above, so a reader standing at the board had no way to tell which
+   * language they were reading without scrolling up. Null on a project with
+   * one language, where there is nothing to tell apart.
+   */
+  laneLabel?: string | null
 }) {
   const t = useT()
   const listRef = useRef<HTMLDivElement | null>(null)
@@ -338,6 +346,12 @@ export function PlanBoard({
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="me-1 text-xs font-semibold text-muted-foreground">
             {t("org.projectOverview.plan.heading")}
+            {laneLabel && (
+              <span className="font-normal" data-testid="plan-lane-label">
+                {" \u00b7 "}
+                {laneLabel}
+              </span>
+            )}
           </h2>
           <PlanStat
             testId="plan-summary"

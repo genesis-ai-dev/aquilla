@@ -33,6 +33,7 @@ import { AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { PlanBar } from "./PlanBar"
 import { PlanStatusPill } from "./PlanStatusPill"
+import { PLAN_TONE } from "./plan-tone"
 import { usePlanRowNote, usePlanShortfallText } from "./use-plan-note"
 
 /** Whoever is on the hook for some slice of this unit. */
@@ -396,12 +397,18 @@ export function PlanRow({
         <span className="flex flex-col gap-0.5 md:text-end">
           <span
             data-testid={`plan-date-${unit.fileId}-${unit.sectionKey}`}
+            // The shortfall on line 1 is the LINK into the editor, and the
+            // mockup draws it in the board's azure so it reads as one; in the
+            // foreground colour it only admitted to being clickable on hover.
+            // Same rung the "Go to first…" link in the inspector uses.
             className={`text-[12.5px] whitespace-nowrap tabular-nums ${
               status === "overdue"
                 ? "font-semibold text-destructive"
-                : unit.targetDate || line1LeftToDo
-                  ? "text-foreground"
-                  : "text-muted-foreground"
+                : line1LeftToDo
+                  ? `font-medium ${PLAN_TONE.in_progress.text}`
+                  : unit.targetDate
+                    ? "text-foreground"
+                    : "text-muted-foreground"
             }`}
           >
             {unit.targetDate ? (

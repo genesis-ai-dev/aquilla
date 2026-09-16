@@ -1933,6 +1933,7 @@ export function ProjectOverview() {
                 shortChaptersByUnit={shortChaptersByUnit}
                 assigneesByUnit={assigneesByUnit}
                 onOpenShortfall={(unit) => { void openPlanShortfall(unit) }}
+                laneLabel={showLaneTabs ? planLanguageLabel : null}
                 emptyAction={
                   <Button
                     size="sm"

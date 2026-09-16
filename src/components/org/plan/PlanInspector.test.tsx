@@ -216,6 +216,14 @@ describe("progress and navigation", () => {
     expect(screen.queryByTestId("plan-audio-shared-note")).toBeNull()
   })
 
+  it("keeps the note off a text-only book, whatever the rest of the project records", () => {
+    // Per FILE, like the tiles. The project has audio elsewhere (showAudio),
+    // so the bar still draws — but under a bar reading 0/0% the note was
+    // explaining numbers that were not there.
+    renderInspector(unit({ audioCount: 0 }), true, true, null, { laneCount: 3 })
+    expect(screen.queryByTestId("plan-audio-shared-note")).toBeNull()
+  })
+
   it("renders whatever the assignment block is given as", () => {
     // A SLOT: the inspector leaves the hole and the component above fills it.
     renderInspector(unit(), true, false, null, {

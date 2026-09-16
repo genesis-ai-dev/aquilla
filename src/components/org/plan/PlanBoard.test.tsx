@@ -654,3 +654,21 @@ describe("what the third column says", () => {
     expect(dateCell()).not.toHaveTextContent("unassigned")
   })
 })
+
+describe("naming the lane", () => {
+  // The tabs that choose the lane live in the Progress card a screen above, so
+  // a reader standing at the board could not tell which language they were
+  // reading without scrolling up.
+  it("says which language the numbers belong to, beside the heading", () => {
+    render(
+      <PlanBoard units={BOOKS} now={NOW} projectId="p1" selectedId={null}
+        onSelect={vi.fn()} laneLabel="German" />,
+    )
+    expect(screen.getByTestId("plan-lane-label")).toHaveTextContent("German")
+  })
+
+  it("says nothing on a project with one language", () => {
+    renderBoard(BOOKS)
+    expect(screen.queryByTestId("plan-lane-label")).toBeNull()
+  })
+})

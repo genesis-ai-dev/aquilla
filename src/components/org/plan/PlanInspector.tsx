@@ -35,6 +35,7 @@ import { usePlanUnitSections, type PlanSection } from "@/hooks/usePlanUnitSectio
 import { PlanStatusPill } from "./PlanStatusPill"
 import { PlanBar } from "./PlanBar"
 import { PlanChapterGrid, PlanGridLegend, planSectionShortfall } from "./PlanChapterGrid"
+import { PLAN_TONE } from "./plan-tone"
 import { usePlanStatusNote } from "./use-plan-note"
 import { useSectionVerses, type SectionVersesState } from "./use-section-verses"
 import { shortVerses, verseChipLabel, verseChipSplit, verseChipsThatFit } from "./verse-chips"
@@ -322,7 +323,9 @@ export function PlanInspector({
                 the bar rather than beside it: the panel is barely three hundred
                 pixels wide and an inline note would squeeze the track past the
                 52px `PlanBar` refuses to go below. */}
-            {showAudio && (laneCount ?? 1) > 1 && (
+            {/* Per FILE, like the tiles: under an empty bar on a text-only book
+                the note explained numbers that were not there. */}
+            {hasAudio && (laneCount ?? 1) > 1 && (
               <p className="ps-8 text-[11px] text-muted-foreground" data-testid="plan-audio-shared-note">
                 {t("org.projectOverview.plan.audioSharedAcrossLanes")}
               </p>
@@ -613,6 +616,7 @@ function PlanChapterCard({
         )}
       </div>
       <PlanBar
+        label={t("org.projectOverview.plan.textBarLabel")}
         outer={planPct(section.filledCount, section.totalCount)}
         inner={planPct(section.validatedCount, section.totalCount)}
         tone="text"
@@ -624,6 +628,7 @@ function PlanChapterCard({
       />
       {hasAudio && (
         <PlanBar
+          label={t("org.projectOverview.plan.audioBarLabel")}
           outer={planPct(section.audioCount, section.totalCount)}
           inner={planPct(section.audioValidatedCount, section.totalCount)}
           tone="audio"
@@ -648,7 +653,9 @@ function PlanChapterCard({
               key={v.cellId}
               type="button"
               data-testid={`plan-verse-chip-${v.cellId}`}
-              className="h-6 w-[46px] shrink-0 rounded-full border border-primary/35 bg-primary/10 text-[11.5px] font-medium tabular-nums text-primary transition-colors hover:bg-primary/20"
+              // Text in the STATUS azure: `text-primary` is the pale accent
+              // tuned for button fills, and on a chip this small it washed out.
+              className={`h-6 w-[46px] shrink-0 rounded-full border border-primary/35 bg-primary/10 text-[11.5px] font-medium tabular-nums transition-colors hover:bg-primary/20 ${PLAN_TONE.nearly_complete.text}`}
               onClick={() => onOpenCell?.(v.cellId)}
             >
               {verseChipLabel(v.ref, section.key)}

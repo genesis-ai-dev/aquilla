@@ -23,6 +23,7 @@ import {
 import { planUnitShortfall, type PlanShortfall } from "@/lib/plan/plan-status"
 import type { PlanSection } from "@/hooks/usePlanUnitSections"
 import { hexToRgba, parseTrackHue } from "@/lib/timeline/track-colors"
+import { PLAN_TONE } from "./plan-tone"
 
 /**
  * The timeline's own hues, looked up by preset id exactly as `PlanBar` does, so
@@ -332,8 +333,8 @@ function PlanTile({
       onClick={() => onSelect(section.key)}
       // AQU-1278 gave the tile the mockup's proportions: a 30px row rather than
       // a square, a 6px radius, and a number big enough to read at a glance. It
-      // also stopped clipping itself — the badge has to overhang the corner, so
-      // `overflow-hidden` moved down to the underline's own wrapper below.
+      // does not clip itself: the badge has to overhang the corner, and the
+      // underline is inset far enough that it never needs cutting.
       className={`relative flex h-[30px] items-center justify-center rounded-[6px] pb-[3px] text-[11px] leading-none tabular-nums transition-colors ${
         wide ? "min-w-[30px] px-2" : ""
       } ${
@@ -346,43 +347,47 @@ function PlanTile({
       {showCount && !complete && (
         <span
           data-testid={`plan-tile-badge-${section.key}`}
-          // Overhanging the corner in the bar's own azure, white on filled, so
-          // it reads as a count ON the tile rather than a digit inside it. It
-          // sits OUTSIDE the clip below, which is why the button cannot clip.
-          className="absolute -top-[4px] -end-[5px] flex h-[15px] min-w-[15px] items-center justify-center rounded-full px-[3px] text-[9.5px] leading-none font-bold text-white"
-          style={{ backgroundColor: HUE.text }}
+          // HANGS OFF THE CORNER, most of it outside the tile, so the number
+          // underneath stays clear — sat mostly inside, it crowded a two-digit
+          // chapter. And it is the STATUS azure, the same rung the group
+          // header and the pill use, not the bar-fill blue: the bar's hue is
+          // tuned to be read as a fill at two alphas, and at full strength on
+          // a fifteen-pixel dot it is the loudest thing on the panel.
+          className={`absolute -top-[6px] -end-[6px] flex h-[15px] min-w-[15px] items-center justify-center rounded-full px-[3px] text-[9.5px] leading-none font-bold text-white dark:text-[oklch(0.2_0.04_245)] ${PLAN_TONE.nearly_complete.dot}`}
         >
           {worst}
         </span>
       )}
       {!complete && (
-        // The clip lives here rather than on the button: the underline is drawn
-        // to the tile's edges and has to be cut to its radius, while the badge
-        // above must NOT be. One `overflow-hidden` cannot do both.
+        // INSET, not flush. Drawn to the tile's edges the line was clipped by
+        // the corner radius — a curved left end, a hard cut mid-tile where the
+        // audio half went transparent — and read as a smear along the edge.
+        // Set in from the sides and the bottom with its own rounded ends and a
+        // gap between the halves, it reads as a small bar under the number,
+        // which is what it is. No clip needed now, so the button keeps
+        // `overflow-visible` for the badge above.
         <span
           aria-hidden
-          className="pointer-events-none absolute inset-0 overflow-hidden rounded-[6px]"
+          className="pointer-events-none absolute inset-x-1 bottom-[3px] flex h-[3px] gap-[2px] overflow-hidden rounded-[2px]"
         >
-          <span className="absolute inset-x-0 bottom-0 flex h-[3px]">
-            <span
-              data-plan-underline="text"
-              className="flex-1"
-              style={{
-                backgroundColor: textShort > 0
-                  ? hexToRgba(HUE.text, underlineAlpha(textShort, section.totalCount))
-                  : "transparent",
-              }}
-            />
-            <span
-              data-plan-underline="audio"
-              className="flex-1"
-              style={{
-                backgroundColor: audioShort > 0
-                  ? hexToRgba(HUE.audio, underlineAlpha(audioShort, section.totalCount))
-                  : "transparent",
-              }}
-            />
-          </span>
+          <span
+            data-plan-underline="text"
+            className="flex-1 rounded-[2px]"
+            style={{
+              backgroundColor: textShort > 0
+                ? hexToRgba(HUE.text, underlineAlpha(textShort, section.totalCount))
+                : "transparent",
+            }}
+          />
+          <span
+            data-plan-underline="audio"
+            className="flex-1 rounded-[2px]"
+            style={{
+              backgroundColor: audioShort > 0
+                ? hexToRgba(HUE.audio, underlineAlpha(audioShort, section.totalCount))
+                : "transparent",
+            }}
+          />
         </span>
       )}
     </button>

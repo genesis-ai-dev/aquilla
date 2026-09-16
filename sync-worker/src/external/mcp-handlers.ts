@@ -32,6 +32,7 @@ import { listOrgsForCredential } from './orgs-list'
 import { MAX_SEARCH_PROJECTS } from './search-reads'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
 import { COMMAND_CATALOG } from '../../../db/shared/command-catalog'
+import { AGENT_SKILLS, getSkill } from '../../../db/shared/agent-skills'
 import type { ApiCredentialContext } from '../../../db/shared/api-credentials'
 import type { ExternalEnv } from './types'
 
@@ -108,6 +109,7 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
     // The numbered golden path, so a weak agent doesn't have to reconstruct
     // the workflow from per-tool descriptions.
     quickstart: [
+      '0. Setting up a partner project? get_skill { name: "project-setup" } and follow it (one ProjectSetup command, one approval).',
       '1. get_identity_and_scope — confirm who you are, your mode (ask|act), and your org/project scope.',
       '2. list_projects — find a projectId. Managing a whole workspace? list_orgs first, then list_projects { orgId } per org.',
       '3. read_content with just projectId to list files; add fileId to read cells. search_project for full-text search in one project, search_projects { projectIds: [...] } across several, find_similar_cells for translation-memory precedents. list_memory for what the copilot has learned about the project (and read_cell_memory for what it is given on one cell).',
@@ -163,6 +165,18 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
         'one; omit kind for the index. EmitEvents is REST-only for now (POST ' +
         '.../changesets); every other agent-reachable kind is stageable over MCP.',
     },
+    // AQU-1294: skills — server-owned sequencing prose (L2, fetched on demand
+    // with get_skill). Same shared set the REST /skills routes and the in-app
+    // harness serve (db/shared/agent-skills.ts).
+    skills: {
+      index: AGENT_SKILLS.map((s) => ({ name: s.name, title: s.title, oneLiner: s.oneLiner })),
+      tool: 'get_skill',
+      note:
+        'A skill sequences EXISTING commands and tools; it adds no capability and stages ' +
+        'nothing on its own. Call get_skill { name } for the full body before starting the ' +
+        'workflow it covers. project-setup: intake template → one ProjectSetup command → one ' +
+        'approval → verification receipt.',
+    },
     projectSettings: {
       readTool: 'get_project_settings',
       patchTool: 'patch_settings',
@@ -175,7 +189,10 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
         'PROJECT_LEAD 500), every other key MAINTAINER 600. Policy keys governing agent ' +
         'oversight itself (agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, ' +
         'validationCount, validationCountAudio, allowSelfValidation, harmonize_min_role, ' +
-        'contributeToGlobalTm) are NEVER writable by an agent (permission_denied). ' +
+        'contributeToGlobalTm, cellEditingFloor, agentAuthorship) are writable in the ' +
+        'RESTRICTIVE direction ONLY (AQU-1282) — TIGHTENING oversight stages like any other ' +
+        'write, LOOSENING it returns permission_denied naming the key in details.loosening. ' +
+        'describe_command({ kind: "PatchSettings" }) has the per-key direction table. ' +
         'PatchSettings must be the sole command in its changeset, and — like every write — ' +
         'applies only at confirm_changeset. Prefer it over the deprecated whole-blob ' +
         'UpdateProjectSettings, which can clobber keys you never read.',
@@ -459,6 +476,28 @@ function describeCommandTool(args: Record<string, unknown>): McpToolResult {
     oneLiner: entry.oneLiner,
     paramsDoc: entry.paramsDoc,
   })
+}
+
+// ── get_skill ────────────────────────────────────────────────────────────────
+
+/** AQU-1294: one skill's full body, from the same shared set REST
+ *  GET /api/v1/external/skills/:name and the in-app harness serve. Static
+ *  prose, no role gate, no projectId — like describe_command. */
+function getSkillTool(args: Record<string, unknown>): McpToolResult {
+  const name = str(args, 'name')
+  if (!name) {
+    return ok({
+      skills: AGENT_SKILLS.map((s) => ({ name: s.name, title: s.title, oneLiner: s.oneLiner })),
+      note: 'Call get_skill({ name }) for one skill\'s full body.',
+    })
+  }
+  const skill = getSkill(name)
+  if (!skill) {
+    return fail('not_found', `unknown skill "${name}"`, {
+      details: { availableSkills: AGENT_SKILLS.map((s) => s.name) },
+    })
+  }
+  return ok({ name: skill.name, title: skill.title, oneLiner: skill.oneLiner, body: skill.body })
 }
 
 // ── delegated reads ──────────────────────────────────────────────────────────
@@ -1222,6 +1261,8 @@ export async function callTool(
     }
     case 'describe_command':
       return describeCommandTool(args)
+    case 'get_skill':
+      return getSkillTool(args)
     case 'search_project':
       return searchProject(env, token, args)
     case 'find_similar_cells':

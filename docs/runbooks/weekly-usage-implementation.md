@@ -81,7 +81,7 @@ every LLM producer is connected. Measured 2026-08 rates from the local
 | `sync-worker/src/tts.ts` | Audio seconds plus configured compute cost after synthesis | Shared workspace pool across workers; reserve before synthesis, settle duration/cost, handle missing duration without recording free work. |
 | `sync-worker/src/voice-convert.ts`, `diarization.ts` | Separate media processing paths | Audit whether Aquilla-funded processing consumes this allowance; avoid accidental unmetered paid paths. |
 | External-agent tokens | Ordinary identity/permission boundaries | Check owning workspace capability and same usage pool at every funded AI endpoint; external provider bills stay outside Aquilla's allowance. |
-| Workspace billing API / UI | Period and effective offer; `usagePercent` is null | Read authoritative settled plus reserved usage and exact reset time; do not fabricate zero usage when the store is unavailable. Hide internal units. |
+| Workspace billing API / UI | `usagePercent` and `usageResetsAt` from the same allowance/period admission uses; null for unmeasured workspaces, absent on ledger failure | Remaining: percentage in exhaustion errors, agent panel, onboarding; frontend handling of the `weekly_allowance` exhaustion reason. |
 
 `CostMeter` is optional development instrumentation (`COST_METER=1`), buffers
 writes, and drops failed batches. It cannot serve as a paid-access authority.

@@ -46,7 +46,8 @@ describe('workspace creation → persisted billing eligibility', () => {
     expect(response.headers.get('cache-control')).toBe('private, no-store')
     expect(await response.json()).toMatchObject({
       scope: 'team', eligibility: { reason: 'ready', offers: ['team', 'team_20x'] },
-      usagePercent: null, checkoutEnabled: false,
+      // An explicit Free workspace is measured from creation: zero, not null.
+      usagePercent: 0, checkoutEnabled: false,
     })
   })
   it('creates one personal workspace under concurrent first access', async () => {

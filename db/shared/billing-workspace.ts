@@ -25,8 +25,13 @@ export interface BillingWorkspace {
     usagePeriodStart: string
     usagePeriodEnd: string
   } | null
-  // The new metering consumer has not shipped. Never invent a percentage.
-  usagePercent: null
+  /** Whole percent of this week's allowance committed (settled plus reserved),
+   *  capped at 100 for display. null when the workspace has no measured
+   *  allowance (legacy, covered, unconfirmed) or the ledger is unavailable:
+   *  never an invented zero. */
+  usagePercent: number | null
+  /** Exact reset instant of the current weekly period, when measured. */
+  usageResetsAt?: string
   /** Explicit server capability; absent means unavailable. */
   portalEnabled?: boolean
   checkoutEnabled: false

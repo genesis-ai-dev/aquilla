@@ -4,7 +4,7 @@ import { env } from 'cloudflare:test'
 import { afterEach, expect, it, vi } from 'vitest'
 import { MICRO_UNITS_PER_UNIT, quoteProviderCost, readProviderCostCents } from '../../../db/shared/billing-cost'
 import { completedPayment } from './helpers/workspace-billing'
-import { reserveWorkspaceUsage, settleWorkspaceUsage, releaseWorkspaceUsage, readUsageTotals } from '../lib/billing/workspace-usage'
+import { reserveWorkspaceUsage, settleWorkspaceUsage, releaseWorkspaceUsage, readUsageTotals, readWorkspaceUsageSummary } from '../lib/billing/workspace-usage'
 import { readWorkspaceEntitlement } from '../lib/billing/workspace'
 import { weeklyUsagePeriod } from '../lib/billing/pricing-model'
 
@@ -154,4 +154,19 @@ it('lets a bounded request finish up to 5% over the week but starts nothing at 1
   await settleWorkspaceUsage(env.AQUILLA_PG, 1, 'last-step', 0.1)
   expect((await readUsageTotals(env.AQUILLA_PG, 1, period)).committed).toBe(48.4 * MICRO_UNITS_PER_UNIT)
   await reserveWorkspaceUsage(env.AQUILLA_PG, { ...input, requestId: 'reopened', maxRawCostCents: 0.5 }, now)
+})
+
+it('reports the same allowance and period admission uses, capped at 100 for display', async () => {
+  const { input, now, period } = await setup()
+  expect(await readWorkspaceUsageSummary(env.AQUILLA_PG, 1, now)).toEqual({ percent: 0, resetsAt: period.end })
+  await reserveWorkspaceUsage(env.AQUILLA_PG, { ...input, maxRawCostCents: 12 }, now)
+  // 48 of 50 units reserved: 96%. A settled overrun shows 100%, never more.
+  expect((await readWorkspaceUsageSummary(env.AQUILLA_PG, 1, now))?.percent).toBe(96)
+  await settleWorkspaceUsage(env.AQUILLA_PG, 1, input.requestId, 13)
+  expect((await readWorkspaceUsageSummary(env.AQUILLA_PG, 1, now))?.percent).toBe(100)
+  expect((await readUsageTotals(env.AQUILLA_PG, 1, period)).settled).toBe(52 * MICRO_UNITS_PER_UNIT)
+  // Legacy or unconfirmed workspaces have no measured allowance: null, not zero.
+  await env.AQUILLA_PG.prepare('UPDATE organizations SET billing_scope = NULL WHERE id = 1').run()
+  await env.AQUILLA_PG.prepare('DELETE FROM workspace_plan_entitlements WHERE org_id = 1').run()
+  expect(await readWorkspaceUsageSummary(env.AQUILLA_PG, 1, now)).toBeNull()
 })

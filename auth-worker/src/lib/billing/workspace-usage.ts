@@ -177,3 +177,23 @@ export async function listHeldUsage(db: AquillaDb, orgId: number, limit = 100) {
     .bind(orgId, limit).all<UsageRequest>()
   return rows.results
 }
+
+/** Customer-facing usage: the same allowance and period admission uses, so the
+ * percentage can never disagree with enforcement. Display caps at 100 while
+ * the ledger keeps the true overrun. Returns null rather than a fabricated
+ * zero for workspaces without a measured allowance.
+ */
+export async function readWorkspaceUsageSummary(db: AquillaDb, orgId: number, now = new Date()) {
+  const workspace = await readBillingWorkspace(db, orgId, now)
+  if (!workspace || !['ready', 'already_subscribed'].includes(workspace.eligibility.reason)) return null
+  if (workspace.entitlement && !workspace.entitlement.access) return null
+  const org = await db.prepare('SELECT created_at::text FROM organizations WHERE id = ?')
+    .bind(orgId).first<{ created_at: string }>()
+  if (!org) return null
+  const period = workspace.entitlement ? {
+    start: workspace.entitlement.usagePeriodStart, end: workspace.entitlement.usagePeriodEnd,
+  } : weeklyUsagePeriod(org.created_at, now.toISOString())
+  const allowance = weeklyAllowance(workspace.entitlement?.access?.offer ?? 'free') * MICRO_UNITS_PER_UNIT
+  const totals = await readUsageTotals(db, orgId, period)
+  return { percent: Math.min(100, Math.floor((totals.committed / allowance) * 100)), resetsAt: period.end }
+}

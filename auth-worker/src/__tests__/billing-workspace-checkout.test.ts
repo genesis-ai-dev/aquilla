@@ -188,7 +188,9 @@ it.each(manifest.bindings.map(b => [b.offer, b.interval] as const))(
       eligibility: { reason: 'already_subscribed', offers: [] },
       entitlement: { offer, billingInterval: interval, priceVersion: manifest.version, usagePeriodStart: anchor,
         usagePeriodEnd: new Date(payment.event.created * 1000 + 7 * 86400000).toISOString() },
-      checkoutEnabled: false, usagePercent: null })
+      // A fresh paid week is measured at zero, with its exact reset instant.
+      checkoutEnabled: false, usagePercent: 0,
+      usageResetsAt: new Date(payment.event.created * 1000 + 7 * 86400000).toISOString() })
     expect((await getWorkspace(1, 'bob')).status).toBe(403)
     expect((await app.request('/api/v2/orgs/me', { headers: authHeader(await jwtFor('bob')) }, env)).status).toBe(200)
     expect(await (await getWorkspace(2, 'bob')).json()).toMatchObject({ entitlement: null })

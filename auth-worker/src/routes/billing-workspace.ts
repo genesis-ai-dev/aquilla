@@ -12,6 +12,7 @@ import { authMiddleware, type AuthHonoEnv } from '../middleware/auth'
 import { getEffectiveOrgRole } from '../services/org-permissions'
 import { ROLE } from '../types'
 import { readBillingWorkspace } from '../lib/billing/workspace'
+import { readWorkspaceUsageSummary } from '../lib/billing/workspace-usage'
 
 const billingWorkspace = new Hono<AuthHonoEnv>()
 billingWorkspace.get('/orgs/:orgId/billing/workspace', authMiddleware, async c => {
@@ -27,7 +28,10 @@ billingWorkspace.get('/orgs/:orgId/billing/workspace', authMiddleware, async c =
   c.header('Cache-Control', 'private, no-store')
   const workspace = await readBillingWorkspace(c.env.AQUILLA_PG, orgId)
   if (!workspace) return c.json({ error: 'not_found' }, 404)
+  // Measured usage is additive: a ledger outage leaves it null, never zero.
+  const usage = await readWorkspaceUsageSummary(c.env.AQUILLA_PG, orgId).catch(() => null)
   return c.json({ ...workspace,
+    ...(usage ? { usagePercent: usage.percent, usageResetsAt: usage.resetsAt } : {}),
     ...(workspacePortalAvailable(c.env, c.req.url, workspace) ? { portalEnabled: true } : {}),
   })
 })

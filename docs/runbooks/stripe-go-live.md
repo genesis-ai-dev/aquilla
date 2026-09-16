@@ -2,6 +2,28 @@
 
 Updated: 2026-09-16. Tickets: AQU-837 (billing readiness), AQU-1091 (pricing and app UI).
 
+## Measured usage percentage — 2026-09-16
+
+- [x] The billing workspace API reports `usagePercent` (whole percent of the
+  current week's settled plus reserved usage against the same allowance and
+  period admission uses, capped at 100) and `usageResetsAt` (exact reset
+  instant). Explicit Free workspaces measure from creation; paid workspaces
+  from activation. Legacy, covered, and unconfirmed workspaces stay `null`,
+  and a ledger outage leaves the field absent rather than zero.
+- [x] The workspace billing card shows "N% of this week's AI allowance used"
+  with the reset time when measured, and keeps the previous period-only copy
+  otherwise. No credit counts or internal units are exposed.
+- [ ] Surface the same percentage in exhaustion errors, the agent panel, and
+  onboarding copy; wire the frontend `budget.exhausted` handling for the
+  `weekly_allowance` reason.
+
+Test impact: ledger suite adds a summary case (96% reserved, 100% capped
+overrun, null for legacy); the chat suite asserts the API percent after real
+settlement; checkout and workspace route expectations move from `null` to a
+measured 0 with the reset instant (115 + 15 pass). RTL adds the percentage
+copy case (24 pass). The summary component already had 16 pre-existing
+unkeyed-string lint errors on HEAD; this adds the new string in the same style.
+
 ## Autopilot cost-ledger integration — 2026-09-16
 
 - [x] Meter every contextual graph call (construe, summarize, draft, verifiers)

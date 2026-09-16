@@ -39,6 +39,11 @@ it('passes real authenticated chat output through cost settlement and blocks dup
   expect(await response.json()).toEqual(body)
   expect(response.headers.get('X-Billing-Usage-Status')).toBe('settled')
   expect((await f.totals()).settled).toBe(500_000)
+  // The billing API reports the same ledger: 0.5 of 50 units rounds down to 1%.
+  const workspace = await (await app.request('http://127.0.0.1/api/v2/orgs/1/billing/workspace',
+    { headers: authHeader(await jwtFor('alice')) }, f.settings)).json() as { usagePercent: number | null; usageResetsAt?: string }
+  expect(workspace.usagePercent).toBe(1)
+  expect(workspace.usageResetsAt).toBe((await readBillingWorkspace(env.AQUILLA_PG, 1))!.entitlement!.usagePeriodEnd)
   expect((await f.send()).status).toBe(409)
   expect(completions(fetch)).toBe(1)
 })

@@ -31,7 +31,7 @@ import { fileURLToPath } from "node:url"
 import type { Page } from "@playwright/test"
 import { extractMarkdownStrings } from "../../src/lib/parsers/markdown"
 import { readPersistedSession } from "./auth-state"
-import { createProjectServerSide } from "./frontier-api"
+import { createProjectServerSide, updateProjectSettings } from "./frontier-api"
 import { postIdempotentJson } from "./idempotent-request"
 import { Workspace } from "./page-objects/Workspace"
 
@@ -57,7 +57,7 @@ export interface SeededProject {
   cellIds: string[]
 }
 
-async function mintSyncToken(jwt: string, projectId: string, fileId: string): Promise<string> {
+export async function mintSyncToken(jwt: string, projectId: string, fileId: string): Promise<string> {
   const r = await fetch(`${FRONTIER_BASE}/api/v2/sync-token`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${jwt}` },
@@ -67,16 +67,50 @@ async function mintSyncToken(jwt: string, projectId: string, fileId: string): Pr
   return ((await r.json()) as { token: string }).token
 }
 
+export interface SeededFileEvent {
+  id: string
+  kind: string
+  author: string
+  payload: unknown
+}
+
+/** Read the real event log through the same JWT → sync-token boundary as the SPA. */
+export async function readSeededFileEvents(
+  jwt: string,
+  projectId: string,
+  fileId: string,
+): Promise<SeededFileEvent[]> {
+  const token = await mintSyncToken(jwt, projectId, fileId)
+  const response = await fetch(`${SYNC_BASE}/events?fileId=${encodeURIComponent(fileId)}&limit=200`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!response.ok) {
+    throw new Error(`event read failed: HTTP ${response.status} — ${await response.text()}`)
+  }
+  return ((await response.json()) as { events: SeededFileEvent[] }).events
+}
+
 /** Create a project and import a markdown fixture entirely server-side.
  * `jwt` comes from the fixture's session (the stack-namespaced sidecar is
  * written by ensureAuthState; pass `session.jwt` or re-read the sidecar). */
 export async function seedProjectWithFile(
   jwt: string,
-  opts: { name?: string; fixturePath?: string } = {},
+  opts: { name?: string; fixturePath?: string; steeringContext?: boolean } = {},
 ): Promise<SeededProject> {
   const projectId = randomUUID()
   const projectName = opts.name ?? `Seeded ${projectId.slice(0, 8)}`
   await createProjectServerSide(jwt, { id: projectId, name: projectName })
+  // A seeded project stands in for one a team has actually set up: autopilot
+  // refuses to start without both languages and an answered brief question
+  // (AQU-827). Pass `steeringContext: false` to seed the unconfigured project
+  // a spec covering that gate needs.
+  if (opts.steeringContext !== false) {
+    await updateProjectSettings(jwt, projectId, {
+      sourceLanguage: "en",
+      targetLanguage: "sw",
+      translationBrief: { parameters: { purpose: "Seeded fixture project" } },
+    })
+  }
 
   const fileId = randomUUID()
   const fixturePath = opts.fixturePath ?? DEFAULT_FIXTURE
@@ -133,6 +167,66 @@ export async function seedProjectWithFile(
   })
 
   return { projectId, projectName, fileId, fileName, cellIds: strings.map((s) => s.id) }
+}
+
+/** The projected-row fields specs assert on; the route returns more. */
+export interface ProjectedCellRow {
+  cellId: string
+  side: "source" | "target"
+  value: string
+  validated: boolean
+  aiDrafted: boolean
+  /** Chain head for this side/lane — the event id the projection last applied. */
+  eventId: string
+}
+
+/** Read a seeded file's cell rows straight from the sync-worker projection —
+ * the authoritative post-event state, not the DOM. Use this for provenance
+ * flags with no visible chrome (AQU-1041 removed the AI-draft tag from the
+ * cell header, but `aiDrafted` still crosses commit → projection → reads). */
+export async function readProjectedCells(
+  jwt: string,
+  seeded: Pick<SeededProject, "projectId" | "fileId">,
+  side?: "source" | "target",
+): Promise<ProjectedCellRow[]> {
+  const token = await mintSyncToken(jwt, seeded.projectId, seeded.fileId)
+  const url = new URL(
+    `${SYNC_BASE}/api/v1/projects/${seeded.projectId}/files/${seeded.fileId}/cells`,
+  )
+  if (side) url.searchParams.set("side", side)
+  const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+  if (!r.ok) throw new Error(`cells read failed: HTTP ${r.status} — ${await r.text()}`)
+  return ((await r.json()) as { cells: ProjectedCellRow[] }).cells
+}
+
+/** One event on a cell's chain as returned by the per-cell history route
+ * (sync-worker `cell-history-read-route.ts`), newest-first. */
+export interface CellHistoryEventRow {
+  id: string
+  parentId: string | null
+  kind: string
+  author: string
+  serverSeq: number
+  payload: unknown
+}
+
+/** Read a cell's full event log (newest-first) from
+ * `GET /api/v1/projects/:p/files/:f/cells/:c/history` — the audit truth the
+ * history drawer renders. Stale (bumped) commits are in here too: they never
+ * advanced the projection but are still logged. */
+export async function readCellHistory(
+  jwt: string,
+  seeded: Pick<SeededProject, "projectId" | "fileId">,
+  cellId: string,
+  limit = 200,
+): Promise<CellHistoryEventRow[]> {
+  const token = await mintSyncToken(jwt, seeded.projectId, seeded.fileId)
+  const url =
+    `${SYNC_BASE}/api/v1/projects/${seeded.projectId}/files/${seeded.fileId}` +
+    `/cells/${encodeURIComponent(cellId)}/history?limit=${limit}`
+  const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+  if (!r.ok) throw new Error(`cell history read failed: HTTP ${r.status} — ${await r.text()}`)
+  return ((await r.json()) as { events: CellHistoryEventRow[] }).events
 }
 
 /** Navigate an authed page straight into the seeded file's editor and wait

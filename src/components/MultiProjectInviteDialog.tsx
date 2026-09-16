@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react"
-import { Check, X } from "lucide-react"
+import { Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
 import { Spinner } from "@/components/ui/spinner"
@@ -123,7 +123,7 @@ export function MultiProjectInviteDialog({
         const jwt = session.jwt
         const results = await Promise.all(
           selectedIds.map((projectId) =>
-            createServerInvite(jwt, projectId, selections[projectId]!, undefined, email)
+            createServerInvite(jwt, projectId, selections[projectId], undefined, email)
           )
         )
         const errors: Record<string, string> = {}
@@ -344,7 +344,6 @@ export function MultiProjectInviteDialog({
 
           <div className="flex justify-end gap-2 pt-2 border-t">
             <Button variant="outline" onClick={handleClose} disabled={busy}>
-              <X className="me-1 h-4 w-4" />
               {done ? "Close" : "Cancel"}
             </Button>
             <Button onClick={handleInvite} disabled={!canSubmit}>

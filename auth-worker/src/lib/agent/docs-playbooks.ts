@@ -33,7 +33,7 @@ and applies before the next step reads the state it produced.
 
 3. Termbase seed. Same command, key 'terminology':
    propose_command({commands:[{kind:'PatchSettings', projectId, ifMatchVersion,
-     ops:[{key:'terminology', value:{concepts:[…]}}]}]})
+     ops:[{key:'terminology', value:[{id, sourceTerm, …}]}]}]})
    Gotcha: 'terminology' has its OWN floor — the org's termbaseEditMinRole
    (default PROJECT_LEAD 500), not 600. Seed from the source text and the
    person's decisions, never from general knowledge. See docs('terminology').

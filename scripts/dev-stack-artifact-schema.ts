@@ -155,6 +155,47 @@ export async function finalizeSourceBlobSchema(
   return ["made file_source_blobs.raw_source nullable"]
 }
 
+/** Mirror migrations 0080 + 0087 for long-lived local databases. The generic
+ * reconciler adds the `token_hash` columns and their unique indexes, but it
+ * never drops a column that has left schema.sql — so a container created
+ * before 0087 keeps the plaintext `token` column, and one created before 0080
+ * additionally keeps its old NOT NULL.
+ *
+ * Either shape breaks minting under the current routes, which no longer name
+ * `token` in their INSERT column lists at all: a leftover NOT NULL column with
+ * no default rejects the row outright. Both failure paths are deliberately
+ * silent to callers (password-reset request returns its generic 200,
+ * registration's verification mint is best-effort), so without this repair
+ * local reset/verification links quietly stop being minted, with nothing in
+ * the response to say why.
+ *
+ * Dropping the column subsumes the 0080 repair this function used to do, so
+ * it handles pre-0080 and pre-0087 databases in one step. */
+export async function finalizeAuthTokenSchema(
+  client: PgSchemaClient,
+  run: RunSchemaSql,
+): Promise<string[]> {
+  const patched: string[] = []
+  for (const table of ["password_reset_tokens", "email_verification_tokens"]) {
+    if (!(await tableExists(client, table))) continue
+    const { rows } = await client.query(
+      `SELECT 1
+         FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = $1
+          AND column_name = 'token'`,
+      [table],
+    )
+    if (rows.length === 0) continue
+    await run(
+      `ALTER TABLE ${table} DROP COLUMN token`,
+      `dropping the plaintext token column in ${table} (migration 0087)`,
+    )
+    patched.push(`dropped ${table}.token`)
+  }
+  return patched
+}
+
 /** Mirror migration 0065 for long-lived local databases. The local schema
  * reconciler adds columns but intentionally cannot infer replacements for
  * named CHECK constraints, so an older container otherwise rejects the

@@ -3,6 +3,7 @@ import "fake-indexeddb/auto"
 import {
   buildRawEvent,
   emitTargetCellCommit,
+  emitTargetCellCommits,
   emitSourceCellCommit,
   emitCellValidate,
   emitCellUnvalidate,
@@ -24,6 +25,7 @@ import { OUTBOX_SCHEMA_VERSION } from "./outbox-types"
 
 describe("events-emit", () => {
   beforeEach(async () => {
+    setCqrsOutboxBridge(null)
     await resetOutboxConnectionForTests()
     await new Promise<void>((resolve, reject) => {
       const d = indexedDB.deleteDatabase("aquilla-cqrs-outbox")
@@ -247,6 +249,95 @@ describe("events-emit", () => {
     })
   })
 
+  describe("emitTargetCellCommits", () => {
+    it("atomically enqueues distinct AI commits with their own chain metadata", async () => {
+      const provenance = {
+        model: "test-model",
+        provider: "custom" as const,
+        promptVersion: "v1",
+        exampleIds: ["example-1"],
+        generatedAt: 123,
+        mode: "batch" as const,
+        projectState: {
+          sourceLanguage: "en",
+          targetLanguage: "fr",
+          approvedExampleCount: 1,
+        },
+      }
+      const ids = await emitTargetCellCommits([
+        {
+          projectId: "p",
+          fileId: "f",
+          cellId: "c1",
+          parentId: "head-1",
+          sourceEventId: "source-1",
+          value: "bonjour",
+          author: "model",
+          aiSuggestion: true,
+          aiDraft: provenance,
+        },
+        {
+          projectId: "p",
+          fileId: "f",
+          cellId: "c2",
+          parentId: "head-2",
+          sourceEventId: "source-2",
+          value: "monde",
+          author: "model",
+          targetLang: "fr",
+          aiSuggestion: true,
+          aiDraft: provenance,
+        },
+      ])
+
+      expect(ids).toHaveLength(2)
+      expect(new Set(ids).size).toBe(2)
+      const records = await peekOutboxBatch(10)
+      expect(records).toHaveLength(2)
+      expect(records.map((record) => record.event.cellId)).toEqual(["c1", "c2"])
+      const first = records[0].event as unknown as OutboxRawEvent<"target.cell.commit">
+      const second = records[1].event as unknown as OutboxRawEvent<"target.cell.commit">
+      expect(first.parentId).toBe("head-1")
+      expect(first.payload.sourceEventId).toBe("source-1")
+      expect(first.payload.ai_suggestion).toBe(true)
+      expect(first.payload.ai_draft).toEqual(provenance)
+      expect("targetLang" in first.payload).toBe(false)
+      expect(second.parentId).toBe("head-2")
+      expect(second.payload.targetLang).toBe("fr")
+    })
+
+    it("writes nothing when one input fails the role gate", async () => {
+      setCqrsOutboxBridge({
+        projectId: "p",
+        activeFileId: "f",
+        username: "u",
+        roleLevel: ROLE.COMMENTER,
+      })
+
+      await expect(emitTargetCellCommits([
+        {
+          projectId: "p",
+          fileId: "f",
+          cellId: "c1",
+          parentId: "head-1",
+          value: "bonjour",
+          author: "model",
+          aiSuggestion: true,
+        },
+        {
+          projectId: "p",
+          fileId: "f",
+          cellId: "c2",
+          parentId: "head-2",
+          value: "monde",
+          author: "model",
+          aiSuggestion: true,
+        },
+      ])).rejects.toBeInstanceOf(InsufficientRoleError)
+      expect(await outboxPendingCount()).toBe(0)
+    })
+  })
+
   describe("emitSourceCellCommit", () => {
     it("enqueues a chain-mutating source.cell.commit with no sourceEventId pin", async () => {
       const id = await emitSourceCellCommit({
@@ -271,6 +362,28 @@ describe("events-emit", () => {
       expect(ev.payload.valueHtml).toBe("<p>fixed English line</p>")
       // Source rows carry no AD-9 staleness pin.
       expect((ev.payload as Record<string, unknown>).sourceEventId).toBeUndefined()
+    })
+
+    it("a transcription correction carries ONLY the transcript — never a value", async () => {
+      // AQU-646: for imported media the stored value is the audio FILENAME.
+      // A source edit on such a cell is a transcript correction; sending a
+      // value alongside would overwrite the filename with prose (or worse,
+      // the old bug: the filename with edits).
+      await emitSourceCellCommit({
+        projectId: "p",
+        fileId: "f",
+        cellId: "c",
+        parentId: "src-head-1",
+        transcription: "let the peace of Christ rule",
+        author: "lead",
+      })
+      const peek = await peekOutboxBatch(10)
+      const ev = peek[0].event as unknown as OutboxRawEvent<"source.cell.commit">
+      expect(ev.kind).toBe("source.cell.commit")
+      expect(ev.parentId).toBe("src-head-1")
+      expect(ev.payload.transcription).toBe("let the peace of Christ rule")
+      expect(ev.payload.value).toBeUndefined()
+      expect(ev.payload.valueHtml).toBeUndefined()
     })
 
     it("refuses to enqueue below the PROJECT_LEAD (500) floor — never reaches the outbox", async () => {

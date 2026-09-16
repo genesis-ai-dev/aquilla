@@ -3,6 +3,8 @@ import {
   type IdmlDiagnostic,
   type IdmlFormatMetadataV2,
 } from "@aquilla/idml-roundtrip"
+import { clearBiblicaApostropheGlue } from "@/lib/biblica/apostrophe-glue"
+import { sanitizeIdmlEditorHtml } from "@/lib/richtext/editor-content"
 import { plainTextFromProtectedHtml } from "./protected-html"
 
 export interface IdmlCompletionCell {
@@ -160,6 +162,23 @@ export function normalizeProtectedCompletion(
       validation.diagnostics,
     )
   }
+  // AQU-1174: a model asked to translate a slot holding only the publisher's
+  // apostrophe glue copies it through, gluing a stray `'` onto translated
+  // words. Clearing the slot keeps its span — and so the anchor sequence — but
+  // leaves the English typesetting out of the target text.
+  const withoutGlue = clearBiblicaApostropheGlue(
+    cell.metadata,
+    cell.originalHtml,
+    normalizedHtml,
+    metadata,
+  )
+  if (withoutGlue !== normalizedHtml) {
+    const cleared = validateIdmlTranslation(cell.originalHtml, withoutGlue, metadata)
+    if (cleared.valid) {
+      normalizedHtml = withoutGlue
+      validation = cleared
+    }
+  }
   const hasEditableText = metadata.editableSlotIndexes.some(
     (index) => (validation.slots[index] ?? "").trim().length > 0,
   )
@@ -195,7 +214,11 @@ export function stitchIdmlSlotTexts(
   }
 
   const container = document.createElement("div")
-  container.innerHTML = cell.originalHtml
+  // [Pen test] Input validation & injection (2026-09-02): sanitize before
+  // parsing — cell.originalHtml is stored source content and is not
+  // guaranteed to be the canonical protected shape until after this parse,
+  // so an unsanitized assignment here is a DOM XSS sink.
+  container.innerHTML = sanitizeIdmlEditorHtml(cell.originalHtml)
   const paragraph = container.firstElementChild
   if (!(paragraph instanceof HTMLParagraphElement) || container.children.length !== 1) {
     throw new IdmlCompletionError(
@@ -310,7 +333,10 @@ export function draftPlainTextFromBrokenIdml(brokenDraft: string): string {
     return unwrapped.trim()
   }
   const container = document.createElement("div")
-  container.innerHTML = unwrapped
+  // [Pen test] Input validation & injection (2026-09-02): brokenDraft is raw
+  // model output by definition (this function only runs on drafts that
+  // already failed anchor validation) — sanitize before parsing.
+  container.innerHTML = sanitizeIdmlEditorHtml(unwrapped)
   for (const lineBreak of container.querySelectorAll("br")) {
     lineBreak.replaceWith(document.createTextNode("\n"))
   }
@@ -331,7 +357,7 @@ export function tryDeterministicIdmlSlotStitch(
   }
   const plain = draftPlainTextFromBrokenIdml(brokenDraft)
   if (!plain) return undefined
-  const index = metadata.editableSlotIndexes[0]!
+  const index = metadata.editableSlotIndexes[0]
   try {
     return stitchIdmlSlotTexts(cell, new Map([[index, plain]]))
   } catch {
@@ -444,7 +470,9 @@ function repairEditableSlotCompletion(
   }
 
   const generatedContainer = document.createElement("div")
-  generatedContainer.innerHTML = unwrapIdmlCompletionOutput(generated)
+  // [Pen test] Input validation & injection (2026-09-02): `generated` is raw
+  // model output — sanitize before parsing, same as the other IDML sinks.
+  generatedContainer.innerHTML = sanitizeIdmlEditorHtml(unwrapIdmlCompletionOutput(generated))
   const translatedSlots = new Map<number, string>()
   for (const editableIndex of metadata.editableSlotIndexes) {
     const matches = generatedContainer.querySelectorAll<HTMLElement>(
@@ -463,7 +491,7 @@ function repairEditableSlotCompletion(
     && !generatedContainer.querySelector("[data-idml-version], [data-idml-slot], [data-idml-token]")
   ) {
     translatedSlots.set(
-      metadata.editableSlotIndexes[0]!,
+      metadata.editableSlotIndexes[0],
       textWithLineBreaks(generatedContainer),
     )
   }
@@ -475,7 +503,10 @@ function repairEditableSlotCompletion(
 
   const templateHtml = validTemplateHtml(cell, metadata)
   const templateContainer = document.createElement("div")
-  templateContainer.innerHTML = templateHtml
+  // [Pen test] Input validation & injection (2026-09-02): validTemplateHtml
+  // falls back to cell.originalHtml, which is not schema-validated — sanitize
+  // before parsing, defense-in-depth alongside the other IDML sinks.
+  templateContainer.innerHTML = sanitizeIdmlEditorHtml(templateHtml)
   const paragraph = templateContainer.firstElementChild
   if (!(paragraph instanceof HTMLParagraphElement) || templateContainer.children.length !== 1) {
     throw new IdmlCompletionError(

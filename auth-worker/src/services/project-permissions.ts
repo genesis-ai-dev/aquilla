@@ -30,6 +30,8 @@
 import type { Env } from "../types"
 import type { AuthUser, RoleResolution } from "../types"
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
+import { memoize } from "../lib/request-memo"
+import { orgPathContribution } from "../../../db/shared/project-roles"
 
 export const ROLE_NAMES: Record<number, string> = {
   100: "viewer",
@@ -101,22 +103,78 @@ interface PathContribution {
 }
 
 /**
- * Run a `.first()` and swallow the error to null. Used for the four
- * role-resolution paths so a missing / pending-migration table on one path
- * doesn't 500 a request the other paths could have answered. Errors are
- * logged so the underlying ops issue stays visible — silently swallowed
- * here, surfaced in worker logs.
+ * AQU-996: thrown when role resolution would DENY access but at least one
+ * membership-path query errored — the denial is unreliable (a real grant may
+ * be sitting behind the failed query). During the 2026-08-25 DB blip the old
+ * swallow-to-null behavior made a contributor's grant read as "no access":
+ * the sync-token mint answered 403, and the SPA outbox treats a mint 403 as
+ * permanent, quarantining her comment with a bogus permission error. Callers
+ * map this to a transient 5xx (the mint route answers 503) so clients retry.
  */
-async function safeFirst<T>(
+export class RoleLookupError extends Error {
+  constructor(message: string, cause: unknown) {
+    super(message, { cause })
+    this.name = "RoleLookupError"
+  }
+}
+
+/**
+ * Run a `.first()` and degrade the error to a no-row result, remembering that
+ * the path FAILED (vs. genuinely empty). Used for the role-resolution paths so
+ * a missing / pending-migration table on one path doesn't 500 a request the
+ * other paths could have answered. Errors are logged so the underlying ops
+ * issue stays visible; the caller escalates to RoleLookupError only when no
+ * path produced a grant (AQU-996).
+ */
+interface PathResult<T> {
+  row: T | null
+  failed: boolean
+  error?: unknown
+}
+
+async function pathFirst<T>(
   stmt: AquillaStatement,
   label: string,
-): Promise<T | null> {
+): Promise<PathResult<T>> {
   try {
-    return await stmt.first<T>()
+    return { row: await stmt.first<T>(), failed: false }
   } catch (err) {
     console.warn(`[resolveProjectRole] ${label} query failed:`, err)
-    return null
+    return { row: null, failed: true, error: err }
   }
+}
+
+export interface ProjectRow {
+  id: string
+  org_id: number | null
+  created_by: number
+  archived_at: string | null
+  is_active: boolean
+}
+
+/**
+ * The `projects` row as role resolution and sync-token minting need it,
+ * memoised per request (lib/request-memo.ts) so the two no longer read it
+ * separately.
+ */
+export function loadProjectRow(env: Env, projectId: string): Promise<ProjectRow | null> {
+  return memoize(env.requestMemo, `project:${projectId}`, () =>
+    env.AQUILLA_PG.prepare(
+      `SELECT id, org_id, created_by, archived_at, is_active FROM projects WHERE id = ?`,
+    )
+      .bind(projectId)
+      .first<ProjectRow>(),
+  )
+}
+
+/**
+ * Drop the memoised role for (project, user) so a re-resolve later in the
+ * SAME request sees a grant change this request just wrote. Only the
+ * member-removal route needs it today (it re-resolves the removed user to
+ * decide whether to eject their live sessions).
+ */
+export function forgetProjectRole(env: Env, projectId: string, userId: number): void {
+  env.requestMemo?.entries.delete(`role:${projectId}:${userId}`)
 }
 
 async function resolveProjectRoleInternal(
@@ -125,20 +183,23 @@ async function resolveProjectRoleInternal(
   projectId: string,
   opts: { includeArchived: boolean },
 ): Promise<ResolvedRole | null> {
-  const project = await env.AQUILLA_PG.prepare(
-    `SELECT id, org_id, created_by, archived_at FROM projects WHERE id = ?`,
-  )
-    .bind(projectId)
-    .first<{
-      id: string
-      org_id: number | null
-      created_by: number
-      archived_at: string | null
-    }>()
-
+  const project = await loadProjectRow(env, projectId)
   if (!project) return null
   if (!opts.includeArchived && project.archived_at) return null
 
+  // The grant paths don't depend on archived-ness, so both entry points share
+  // one memo slot per (project, user) within a request.
+  return memoize(env.requestMemo, `role:${projectId}:${user.id}`, () =>
+    resolveGrantPaths(env, user, projectId, project),
+  )
+}
+
+async function resolveGrantPaths(
+  env: Env,
+  user: AuthUser,
+  projectId: string,
+  project: ProjectRow,
+): Promise<ResolvedRole | null> {
   // All four path queries run in parallel — they're independent reads.
   // Each path is wrapped so a single missing/pending-migration table
   // (e.g. group_project_grants before 0007 has applied on a target env)
@@ -146,14 +207,14 @@ async function resolveProjectRoleInternal(
   // request. The user-visible failure mode is "you don't have group access
   // on this project" — accurate when the table truly is empty/absent.
   const [override, group, org] = await Promise.all([
-    safeFirst<{ role_level: number }>(
+    pathFirst<{ role_level: number }>(
       env.AQUILLA_PG.prepare(
         `SELECT role_level FROM project_members
          WHERE project_id = ? AND user_id = ?`,
       ).bind(projectId, user.id),
       "project_members",
     ),
-    safeFirst<{ role_level: number | null }>(
+    pathFirst<{ role_level: number | null }>(
       env.AQUILLA_PG.prepare(
         `SELECT MAX(gpg.role_level) AS role_level
          FROM group_project_grants gpg
@@ -164,24 +225,32 @@ async function resolveProjectRoleInternal(
       "group_project_grants",
     ),
     project.org_id != null
-      ? safeFirst<{ role_level: number }>(
+      ? pathFirst<{ role_level: number }>(
           env.AQUILLA_PG.prepare(
             `SELECT role_level FROM org_members
              WHERE org_id = ? AND user_id = ?`,
           ).bind(project.org_id, user.id),
           "org_members",
         )
-      : Promise.resolve(null),
+      : Promise.resolve<PathResult<{ role_level: number }>>({ row: null, failed: false }),
   ])
 
   const contributions: PathContribution[] = []
-  if (override) contributions.push({ source: "override", level: override.role_level })
-  if (group?.role_level != null)
-    contributions.push({ source: "group", level: group.role_level })
-  // AQU-435: the org path fires only at Maintainer+ — a sub-maintainer
-  // org_members row contributes nothing.
-  if (org && org.role_level >= ORG_WIDE_ACCESS_FLOOR)
-    contributions.push({ source: "org", level: org.role_level })
+  if (override.row)
+    contributions.push({ source: "override", level: override.row.role_level })
+  if (group.row?.role_level != null)
+    contributions.push({ source: "group", level: group.row.role_level })
+  // AQU-435 / AQU-1274: Maintainer+ is an access path on its own; below that
+  // the org role contributes only to stop a team attachment from silently
+  // demoting a higher org role. The rule lives in db/shared/project-roles.ts
+  // so this resolver and the Agent-API port cannot drift apart on it.
+  const orgContribution = orgPathContribution({
+    orgLevel: org.row?.role_level ?? null,
+    hasDirectGrant: override.row != null,
+    hasGroupGrant: group.row?.role_level != null,
+  })
+  if (orgContribution != null)
+    contributions.push({ source: "org", level: orgContribution })
   if (project.created_by === user.id)
     contributions.push({ source: "creator", level: 700 })
   // Platform operators (ADMIN_EMAILS allowlist) get owner-level on every
@@ -190,7 +259,20 @@ async function resolveProjectRoleInternal(
   if (isPlatformAdminEmail(env, user.email))
     contributions.push({ source: "platform", level: 700 })
 
-  if (contributions.length === 0) return null
+  if (contributions.length === 0) {
+    // AQU-996: with a grant found, a failed path can only affect attribution,
+    // so we proceed (this also preserves the pending-migration rationale
+    // above). With NO grant found and a failed path, "no access" cannot be
+    // distinguished from "grant unreadable" — refuse to deny.
+    const firstFailure = [override, group, org].find((p) => p.failed)
+    if (firstFailure) {
+      throw new RoleLookupError(
+        "role resolution query failed; denial would be unreliable",
+        firstFailure.error,
+      )
+    }
+    return null
+  }
 
   // Max-wins. On ties, declaration order (override > group > org > creator >
   // platform) wins attribution — see RoleResolution.source jsdoc.

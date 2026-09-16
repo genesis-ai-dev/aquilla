@@ -40,6 +40,7 @@ interface FileRowProps {
   /** Opens the Export dialog for this file. */
   onExport?: () => void
   onExportSource?: () => void
+  onDownloadOriginal?: () => void
   /** Opens Assign work scoped to this file. Hidden when the caller cannot assign. */
   onAssignWork?: () => void
   /** Opens the Segmentation dialog for this file. */
@@ -53,7 +54,7 @@ export function FileRow(props: FileRowProps) {
   const {
     file, active, expanded, progress, hasSuggestion, editing,
     onEditCommit, onEditCancel, onToggleExpand, onSelect, onShowDetails, onStartRename,
-    onMove, onExport, onExportSource, onAssignWork, onSegmentation, onDelete,
+    onMove, onExport, onExportSource, onDownloadOriginal, onAssignWork, onSegmentation, onDelete,
     onApplySuggestion,
   } = props
   const t = useT()
@@ -91,6 +92,7 @@ export function FileRow(props: FileRowProps) {
       onMove={onMove}
       onExport={onExport}
       onExportSource={onExportSource}
+      onDownloadOriginal={onDownloadOriginal}
       onAssignWork={onAssignWork}
       onSegmentation={onSegmentation}
       onDelete={onDelete}
@@ -137,7 +139,7 @@ export function FileRow(props: FileRowProps) {
                 onClick={(e) => { e.stopPropagation(); onToggleExpand() }}
                 aria-label={expanded ? t("nav.fileRow.collapse") : t("nav.fileRow.expand")}
               >
-                <ChevronRight className={cn("h-3 w-3 transition-transform", expanded && "rotate-90")} />
+                <ChevronRight className={cn("h-3 w-3", expanded && "rotate-90")} />
               </button>
             </AppTooltip>
           ) : (

@@ -1,7 +1,27 @@
-import { type Column } from "@tanstack/react-table"
+import * as React from "react"
+import { type Column, type SortingState } from "@tanstack/react-table"
 import { ArrowDown, ArrowUp } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+
+/**
+ * DataTable publishes its sorting state here so header chrome can subscribe
+ * to it. TanStack's `column` object is a stable instance; `getIsSorted()` is a
+ * method read the React Compiler cannot see, so fillHeight / virtualized
+ * headers would keep the mount-time arrow after the rows had already moved.
+ */
+const DataTableSortingContext = React.createContext<SortingState | null>(null)
+
+function sortedFromState(
+  sorting: SortingState | null,
+  columnId: string,
+  fallback: false | "asc" | "desc",
+): false | "asc" | "desc" {
+  if (!sorting) return fallback
+  const entry = sorting.find((item) => item.id === columnId)
+  if (!entry) return false
+  return entry.desc ? "desc" : "asc"
+}
 
 /**
  * Sortable column header — click toggles asc↔desc (sorting never clears;
@@ -28,6 +48,7 @@ export function DataTableColumnHeader<TData, TValue>({
   className,
   ...props
 }: DataTableColumnHeaderProps<TData, TValue>) {
+  const sorting = React.useContext(DataTableSortingContext)
   const alignEnd = className?.includes("justify-end")
   const rootClass = cn("flex items-center gap-1", alignEnd && "w-full justify-end", className)
 
@@ -39,7 +60,7 @@ export function DataTableColumnHeader<TData, TValue>({
     )
   }
 
-  const sorted = column.getIsSorted()
+  const sorted = sortedFromState(sorting, column.id, column.getIsSorted())
   // Preview the next click when unsorted (↓ for strings, ↑ for numbers).
   const direction = sorted || column.getNextSortingOrder()
   const SortIcon = direction === "desc" ? ArrowUp : ArrowDown
@@ -64,7 +85,7 @@ export function DataTableColumnHeader<TData, TValue>({
           // bg fills the padding and bleeds around the title like a ghost chip.
           // Label stays muted; only the sort arrow uses foreground contrast.
           "group/sort -mx-1.5 -my-0.5 inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-medium text-muted-foreground",
-          "hover:bg-muted/50",
+          "hover:bg-accent/40",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
         )}
         onClick={column.getToggleSortingHandler()}
@@ -87,3 +108,5 @@ export function DataTableColumnHeader<TData, TValue>({
     </div>
   )
 }
+
+export { DataTableSortingContext }

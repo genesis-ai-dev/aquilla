@@ -36,6 +36,29 @@
  * longer collides). The 10 that remain are genuine meaning splits.
  */
 export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
+  "importExport.dialog.characterPreviewHeading":
+    "Noun heading over the list of characters an audio export will produce — " +
+    "'the preview', a thing on screen. common.preview is the imperative button " +
+    "that plays a clip back and swaps to common.pause while it runs. A heading " +
+    "and a command are different parts of speech and most target languages " +
+    "write them differently; folding them together would make one of the two " +
+    "wrong wherever they diverge.",
+  "editor.timeline.textPaneTitle":
+    "Heading of the media lens's TEXT SECTION — the panel of cells beside the " +
+    "video, which a reader can collapse to a rail and bring back. editor.lens.text " +
+    "names the editor's Text LENS, a mode you switch into, and the two are on " +
+    "screen at the same time: the lens tab sits in the toolbar above a section " +
+    "heading that would read identically. A language that distinguishes a named " +
+    "region of a screen from a mode you enter needs both words, and tying the " +
+    "section heading to the mode's key would mean a later edit for one silently " +
+    "renamed the other.",
+  "importExport.dialog.audioSectionTitle":
+    "Title of the export dialog's .zip card, naming a KIND OF DELIVERABLE the " +
+    "user is about to download. nav.lens.audio names the editor's Audio lens — " +
+    "a mode you switch into — and its own context pins it as shared by every " +
+    "entry point that toggles that lens so the name can never drift. Reusing it " +
+    "here would tie a file-format label to a UI mode's name, and a later edit " +
+    "for one would silently change the other.",
   "nav.sidebarSection.more":
     "Expands a collapsed sidebar section. common.moreBreadcrumbs is screen-reader " +
     "text for a truncated breadcrumb path — 'more of this path' vs 'expand this " +
@@ -58,6 +81,12 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "as its siblings. editor.selection.validate is the imperative toolbar button " +
     "that performs the sign-off. Operation name vs command; they diverge wherever " +
     "operation names are nominalized.",
+  "audio.newVoice.kokoroLabel":
+    "Field label for the Kokoro speaker dropdown in the New voice modal — which " +
+    "built-in voice this engine should speak with. editor.navTitle.voice is the " +
+    "editor's own audio-lens tab label naming a workspace mode. A form-field " +
+    "label and a navigation tab are different UI roles that happen to share the " +
+    "word 'Voice' and diverge in most target languages.",
   "audio.newVoice.mmsLanguageLabel":
     "Names the spoken language the MMS engine should synthesize. common.language " +
     "labels the switcher that changes the language of the interface itself. Two " +
@@ -511,6 +540,14 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "rendering. Different case AND different fixed vocabularies (rule-" +
     "enforcement mode vs term lifecycle status) that happen to share one " +
     "English word.",
+  "org.teamDetail.addedColumn":
+    "Nominal table-column heading (and DateTooltip hover prefix) for the timestamp " +
+    "a project or person was added to a team, sibling of Name/Role. onboarding." +
+    "checklist.invite.addedPrefix is the past-tense VERB that starts the invite-step " +
+    "confirmation sentence 'Added {name} as contributor.' A date-column heading " +
+    "and a sentence-initial verb take different forms in many languages " +
+    "(nominalized date label vs. finite verb), so one shared string would be " +
+    "wrong for one of the two roles.",
   "org.teamDetail.detachButton":
     "Routine, reversible action in TeamDetail: unlinks a project from a team's " +
     "access-grant list with a single click, no confirmation dialog — the " +
@@ -755,9 +792,9 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "run-timeline chip (AgentRunView), sibling of the equally terse 'sql'/'docs'/" +
     "'read'/'examples'/'search' tool-kind labels on identical chips — the same class " +
     "of split already documented for agent.run.tool.search just below. " +
-    "autopilot.inspector.review.draftTitle is a capitalized panel/section TITLE " +
-    "heading a single AI-drafted cell proposal in the Autopilot review inspector. A " +
-    "lower-case technical chip label and a capitalized section heading take " +
+    "autopilot.graph.node.draft is the capitalized caption of the drafting STAGE " +
+    "in the Autopilot pipeline graph (and the review inspector's card title). A " +
+    "lower-case technical chip label and a capitalized stage caption take " +
     "different forms in most languages.",
   "agent.run.tool.search":
     "Lower-case, font-mono technical label naming which TOOL the agent called in one " +
@@ -797,6 +834,15 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "loanword or fixed phrase. autopilot.graph.node.summarize shows 'Brief' as " +
     "the caption of the summarize STAGE in the autopilot pipeline graph — a " +
     "process-step label, not the document, and free to translate as 'summary'.",
+  "org.projectOverview.plan.statusNotStarted":
+    "Status of a PLANNING UNIT on the project dashboard's plan board \u2014 a " +
+    "book, episode or document nobody has put any content into yet. " +
+    "autopilot.status.notStarted is a value of the run-status enum for a " +
+    "background PROCESS that has not run; terminology.livingMemory.section." +
+    "brief.statusNone is the authoring state of one document. All three are " +
+    "'not started' in English and routinely take different verbs, participles " +
+    "or genders elsewhere \u2014 a unit of planned work, a job that has not " +
+    "fired, and an unwritten document are three different subjects.",
   "terminology.livingMemory.section.brief.statusNone":
     "Hint on the Living Memory index saying the brief document has not been " +
     "begun — an authoring state of a document. autopilot.status.notStarted is a " +
@@ -806,10 +852,10 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
   "terminology.livingMemory.section.brief.statusDraft":
     "Hint on the Living Memory index saying the brief document is partially " +
     "filled in — a document maturity state ('a draft'). " +
-    "autopilot.inspector.review.draftTitle and autopilot.graph.node.draft label " +
-    "the autopilot DRAFTING step and its produced draft translations — the " +
-    "activity of machine-drafting text, a different sense languages split from " +
-    "'unfinished document'.",
+    "autopilot.graph.node.draft labels the autopilot DRAFTING step and its " +
+    "produced draft translations (the pipeline-graph caption and the review " +
+    "inspector's card title) — the activity of machine-drafting text, a " +
+    "different sense languages split from 'unfinished document'.",
   "terminology.livingMemory.section.brief.statusComplete":
     "Hint on the Living Memory index saying every brief field is filled in — " +
     "'complete' as document completeness. autopilot.status.complete is the " +
@@ -821,6 +867,12 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "Custom badge. org.projectOverview.laneDefaultFallback names the unnamed " +
     "target LANE shown when a project has no named lanes — a placeholder noun " +
     "('the default one'), a different grammatical role.",
+  "onboarding.preferences.fontSize.default":
+    "Option in the app-wide font-size select for the baseline UI scale (root " +
+    "unset, today's sizes). Distinct from terminology.livingMemory.prompt.defaultBadge " +
+    "(a status badge on a built-in prompt) and org.projectOverview.laneDefaultFallback " +
+    "(placeholder name of an unnamed workflow lane). A scale choice, a badge, and a " +
+    "lane noun take different words outside English.",
   "terminology.livingMemory.section.examples.title":
     "Index-row title for the validated-example-pairs section of Living Memory " +
     "— a plain plural noun heading. agent.run.tool.examples is the display " +

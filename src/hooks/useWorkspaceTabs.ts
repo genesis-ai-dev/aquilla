@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 
-const STORAGE_PREFIX = "codex:tabs:"
+const STORAGE_PREFIX = "aquilla:tabs:"
 
 export interface WorkspaceTab {
   id: string

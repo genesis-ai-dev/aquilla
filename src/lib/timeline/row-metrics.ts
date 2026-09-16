@@ -1,0 +1,197 @@
+// Row geometry for the timeline's vertical zoom: how tall a track row is, how
+// much air sits above and below its chips, and where each piece of chip
+// furniture stops fitting. (AQU-646 stage 3)
+//
+// Deliberately NOT in scale.ts, whose header declares it pure time<->pixel math
+// and which has no business owning Tailwind class strings. The two modules are
+// siblings, not layers: scale.ts answers "how wide is a second", this one
+// answers "how tall is a track".
+
+/** The compact band Sam asked for: a coloured stripe with no words in it. */
+export const ROW_H_MIN = 24
+/** Today's row, to the pixel — 10 pad + 46 chip + 10 pad. Anyone who never
+ *  touches the new control must land here and see no change at all. */
+export const ROW_H_DEFAULT = 66
+export const ROW_H_MAX = 160
+
+/** Today's `top-2.5`. */
+export const CHIP_PAD_MAX = 10
+/** Below this the air between two lanes stops reading as a gap and the rows
+ *  start to look like one striped block; at the compact end the chip is
+ *  supposed to nearly fill its row, but it must still not touch the border-b. */
+export const CHIP_PAD_MIN = 3
+
+/**
+ * The air above (and below) a chip in a row this tall.
+ *
+ * A straight ramp between the two anchors, the same shape as `chipRadiusPx` and
+ * for the same reason: the row height is driven by a stepper the user can hold
+ * down, so a threshold anywhere in here would make every chip jump. Constant
+ * padding was the first idea and it is wrong at both ends — 10px of air out of a
+ * 24px row leaves a 4px sliver, and 10px out of 160 leaves the tall rows looking
+ * under-padded next to their own chips.
+ *
+ * PINNED at the default: `chipPadPx(ROW_H_DEFAULT) === 10`, exactly, because
+ * this number and `chipHeightPx` between them have to reproduce the shipped
+ * 10-46-10 row to the pixel. See row-metrics.test.ts.
+ *
+ * Integral, like everything else here — a fractional pad puts the chip on a
+ * half pixel and blurs its top border.
+ */
+export function chipPadPx(rowH: number): number {
+  if (!Number.isFinite(rowH)) return CHIP_PAD_MAX
+  if (rowH >= ROW_H_DEFAULT) return CHIP_PAD_MAX
+  if (rowH <= ROW_H_MIN) return CHIP_PAD_MIN
+  const t = (rowH - ROW_H_MIN) / (ROW_H_DEFAULT - ROW_H_MIN)
+  return Math.round(CHIP_PAD_MIN + (CHIP_PAD_MAX - CHIP_PAD_MIN) * t)
+}
+
+/**
+ * The chip height that fills a row this tall. `chipHeightPx(ROW_H_DEFAULT)` is
+ * 46 — the value hard-coded at five chip sites before this module existed.
+ *
+ * Floored at 1px rather than 0: a zero-height chip is invisible, and an
+ * invisible chip on a timeline reads as lost data rather than as a zoom level.
+ * A non-finite row height falls back to the shipped row for the same reason
+ * `chipRadiusPx` answers 0 for one — never a NaN in a style attribute.
+ */
+export function chipHeightPx(rowH: number): number {
+  if (!Number.isFinite(rowH)) return ROW_H_DEFAULT - 2 * CHIP_PAD_MAX
+  return Math.max(1, Math.round(rowH) - 2 * chipPadPx(rowH))
+}
+
+/**
+ * The stored/stepped row height, made safe to render.
+ *
+ * INTEGERS ARE MANDATORY, which is what the `Math.round` is for and why it is
+ * not merely tidiness: every lane and every gutter label draws a 1px `border-b`,
+ * and a row on a half pixel makes the browser blend that border across two
+ * device pixels — four fuzzy grey lines stacked down the timeline. The same
+ * applies to the chips, which is why `chipPadPx` rounds too.
+ */
+export function clampRowHeight(n: number): number {
+  if (!Number.isFinite(n)) return ROW_H_DEFAULT
+  return Math.round(Math.min(ROW_H_MAX, Math.max(ROW_H_MIN, n)))
+}
+
+// The degradation gates. These mirror the WIDTH gates that already live in
+// TimelineCard (MIN_CARD_TEXT_PX, MIN_CARD_GRIP_PX, ...) — same idea on the
+// other axis: a chip drops what no longer fits instead of clipping it. They sit
+// here rather than beside their width counterparts because the height they are
+// compared against is produced here, and because three different components
+// (TimelineCard, TargetAudioLane, the slot buttons) test against the same
+// numbers.
+
+/** Below this the second line — timecode/meta — has nowhere to go. */
+export const MIN_CHIP_META_H_PX = 30
+/** Below this the label goes too and the chip is a bare coloured band. This is
+ *  the promise "compact band" makes: `chipHeightPx(ROW_H_MIN)` is under it. */
+export const MIN_CHIP_LABEL_H_PX = 22
+/** Below this the remove button is taller than the chip that owns it. */
+export const MIN_CHIP_REMOVE_H_PX = 26
+/** Below this the resize grips are a target smaller than the pointer. */
+export const MIN_CHIP_GRIP_H_PX = 18
+/** The pencil/mic circle at full size — the `h-7` it was hard-coded to. */
+export const SLOT_BUTTON_MAX_PX = 28
+/** ...and the smallest it is worth drawing. Below a 16px target the circle is
+ *  smaller than the pointer that has to hit it, and an icon inside it is a
+ *  smudge. */
+export const SLOT_BUTTON_MIN_PX = 16
+
+/**
+ * How big the "add a line here" / "record here" circle is on a row this tall.
+ *
+ * IT SHRINKS, IT DOES NOT VANISH. Stage 3 gated it to disappear below a 28px
+ * chip, reasoning that a fixed circle would overhang a short row and be
+ * clickable from the lane above — true, but the wrong repair, and Sam has now
+ * made the same correction twice (the gutter's mute button, then this): a
+ * control that no longer fits gets smaller, it does not get taken away. These
+ * are the only way to put a line in a silence, and a compact timeline is
+ * exactly when you can see all the silences at once.
+ *
+ * HEIGHT ONLY. IT TAKES NO ACCOUNT OF HOW WIDE ITS REGION IS (Sam, 2026-08-14).
+ * Row height is shared by every slot on the row, so scaling with it keeps the
+ * row internally consistent — the same control, at one size, all the way
+ * along. Region width is per-chip, so scaling with THAT drew a 20px button
+ * beside a 28px one and made a single control read as several. A narrow region
+ * is now simply overflowed: the circle keeps its size and shape and sits
+ * centred, sticking out either side. That is already safe — `MIN_SLOT_PX` is
+ * 5px deliberately, and TimelineSlotButton stops pointer events reaching the
+ * chip beneath — and it is what this function's comment claimed all along
+ * while the code did something else.
+ *
+ * Nothing changes at the default row: 46px of chip gives back exactly the 28px
+ * the button was hard-coded to before the vertical zoom existed.
+ */
+export function slotButtonPx(chipH: number): number {
+  if (!Number.isFinite(chipH)) return SLOT_BUTTON_MAX_PX
+  // -4 so the circle keeps a little air inside its row rather than reaching
+  // the chip's own edges, where it reads as a badge rather than a button.
+  return Math.max(SLOT_BUTTON_MIN_PX, Math.min(SLOT_BUTTON_MAX_PX, Math.floor(chipH) - 4))
+}
+
+/** The glyph inside it. Half the circle — at the full 28px that is the 14px
+ *  (`h-3.5`) the icons were written with, so the default is untouched. */
+export function slotIconPx(buttonPx: number): number {
+  return Math.max(8, Math.round(buttonPx / 2))
+}
+
+// The GUTTER's gates. Stage 3 taught the chips to shed furniture as their rows
+// shrank and left the labels beside them rendering at full size into a clip —
+// so at the compact end the names printed over each other and the mute buttons
+// straddled two rows (Sam, screenshot, 2026-08-13). These are compared against
+// the ROW height, not the chip height: a label fills its row rather than
+// floating inside it with padding, so there is no chip box to measure.
+
+/** Below this the sublabel ("original speech", "takes · generated") goes. Two
+ *  stacked lines need about 30px of type — a 12px name over a 10px sub with a
+ *  2px gap — and a row that gives them 34 has them touching its borders top and
+ *  bottom. The sub is the first thing to drop because it is the only decorative
+ *  line in the row: it names what the track already says it is. */
+export const MIN_LABEL_SUB_H_PX = 40
+
+/** Below this the speaker button renders compact. At full size it is a 24px box
+ *  (4px padding, a 14px glyph, 1px border each side), which in a 28px row
+ *  leaves 2px of air and in a 24px row leaves none at all — that is the button
+ *  straddling its neighbours in Sam's screenshot. It SHRINKS rather than
+ *  disappearing: muting a track is the one thing you reach for while zoomed
+ *  out to see many of them at once. */
+export const MIN_SPEAKER_FULL_H_PX = 34
+
+/**
+ * AQU-646 stage 4b: a FOLDER row's height. Folders are not tracks (Sam,
+ * 2026-08-24), and stage 4b makes that visible: a folder is a slim fixed
+ * heading — a triangle and a name — not a lane-height row, so collapsing a
+ * stack actually reclaims vertical space instead of trading three tall rows
+ * for one tall row.
+ *
+ * 28px holds everything a folder row contains: the 16px disclosure button, the
+ * 16px name line and the 22px ⋯ trigger, inside the 27px content box that
+ * border-box + border-b leaves. Folders have no speaker and (as of 4b) no
+ * sub-line, so nothing taller exists to fit.
+ */
+export const FOLDER_ROW_H_PX = 28
+
+/**
+ * Clamped so a folder NEVER stands taller than the tracks around it (Sam's
+ * ruling): the row-height dial goes down to 24px, and at that compression a
+ * fixed 28px heading would stick up above the rows it is meant to be less
+ * than. Everything just gets uniformly small instead. Independent of the dial
+ * in the other direction — a 160px dial still gets a 28px heading, which is
+ * the point.
+ */
+export function folderRowHPx(rowH: number): number {
+  return Math.min(FOLDER_ROW_H_PX, clampRowHeight(rowH))
+}
+
+// The row/chip box classes, in one place, so the 10-46-10 numbers are not
+// re-typed at nine sites (four row containers, five chip boxes).
+//
+// THE FALLBACKS ARE LOAD-BEARING. The custom properties are set on the
+// `tl-editor` root, but a TimelineCard rendered on its own — which is exactly
+// what TimelineCard.test.tsx and the lane tests do — has no such ancestor and
+// would resolve `var(--tl-chip-h)` to nothing. With the fallbacks it resolves to
+// today's 46px, so the whole swap needs no setup change in any existing test.
+
+export const TL_ROW_H_CLASS = "h-[var(--tl-row-h,66px)]"
+export const TL_CHIP_BOX_CLASS = "top-[var(--tl-chip-top,10px)] h-[var(--tl-chip-h,46px)]"

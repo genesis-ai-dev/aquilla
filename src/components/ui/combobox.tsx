@@ -10,6 +10,8 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { ChevronDownIcon, XIcon, CheckIcon, SearchIcon } from "lucide-react"
+import { Spinner } from "@/components/ui/spinner"
+import { useT } from "@/lib/i18n/I18nProvider"
 
 const Combobox = ComboboxPrimitive.Root
 
@@ -54,6 +56,7 @@ function ComboboxInput({
   showTrigger = true,
   showClear = false,
   showSearchIcon = false,
+  loading = false,
   // Pickers/filters — not contact or credential entry. Default off so
   // Chrome/Safari don't inject saved contacts into member/org search.
   autoComplete = "off",
@@ -62,9 +65,11 @@ function ComboboxInput({
   showTrigger?: boolean
   showClear?: boolean
   showSearchIcon?: boolean
+  loading?: boolean
 }) {
+  const t = useT()
   return (
-    <InputGroup className={cn("w-auto", className)}>
+    <InputGroup className={cn("w-auto", className)} aria-busy={loading || undefined}>
       {showSearchIcon && (
         <InputGroupAddon align="inline-start">
           <SearchIcon className="size-4 text-muted-foreground" />
@@ -76,6 +81,9 @@ function ComboboxInput({
         autoComplete={autoComplete}
       />
       <InputGroupAddon align="inline-end">
+        {loading && (
+          <Spinner className="size-4" aria-label={t("common.searching")} />
+        )}
         {showTrigger && (
           <InputGroupButton
             size="icon-xs"
@@ -155,7 +163,7 @@ function ComboboxItem({
     <ComboboxPrimitive.Item
       data-slot="combobox-item"
       className={cn(
-        "relative flex w-full cursor-default items-center gap-2 rounded-md py-1 ps-1.5 text-sm outline-hidden select-none data-highlighted:bg-accent data-highlighted:text-accent-foreground not-data-[variant=destructive]:data-highlighted:**:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "relative flex w-full cursor-default items-center gap-2 rounded-md py-1 ps-1.5 text-sm outline-hidden select-none data-highlighted:bg-accent/40 data-highlighted:text-accent-foreground not-data-[variant=destructive]:data-highlighted:**:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         showIndicator ? "pe-8" : "pe-1.5",
         className
       )}

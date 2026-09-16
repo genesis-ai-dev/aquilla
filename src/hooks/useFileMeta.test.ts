@@ -66,7 +66,7 @@ describe("useFileMeta (Phase 2b, localStorage-backed)", () => {
   })
 
   it("migrates legacy direction localStorage as a manual override", async () => {
-    window.localStorage.setItem("codex:file-meta:file-a:targetDir", "rtl")
+    window.localStorage.setItem("aquilla:file-meta:file-a:targetDir", "rtl")
     const { result } = renderHook(() => useFileMeta("file-a", "en", "en"))
     await waitFor(() => expect(result.current.targetDirectionMode).toBe("rtl"))
     expect(result.current.targetTextDirection).toBe("rtl")

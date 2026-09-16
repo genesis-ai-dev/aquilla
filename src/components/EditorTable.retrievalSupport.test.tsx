@@ -1,10 +1,10 @@
 /**
- * Retrieval-support summary — WHY: the line "{n} endorsements · support {p}%"
- * lives in a paragraph that is deliberately muted, and the two figures are the
- * only things in it a reviewer is reading for. Both carried
- * `font-medium text-foreground` to lift them out of that paragraph; keying the
- * sentence as one catalog string interpolated them as bare text, so the numbers
- * sank into the muted colour and the line lost its scannable content.
+ * Retrieval-support summary — WHY: the line "Cell estimate {p}% · local trend
+ * {p}%" lives in a paragraph that is deliberately muted, and the figures are
+ * the only things in it a reviewer is reading for. Both carry
+ * `font-medium text-foreground` to lift them out of that paragraph; an earlier
+ * i18n pass interpolated figures like these as bare text, so the numbers sank
+ * into the muted colour and the line lost its scannable content.
  */
 
 import { describe, it, expect, vi } from "vitest"
@@ -16,6 +16,11 @@ import { EditorActionsProvider } from "@/context/EditorActionsContext"
 import { CellStore } from "@/hooks/useActiveCellStore"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { CellRow } from "@/lib/sync/cells-read-types"
+
+// The ribbon is behind the health kill switch (lib/health/kill-switch.ts,
+// off by default while client memory spikes are investigated). These tests
+// cover the ribbon itself, so force the switch on.
+vi.mock("@/lib/health/kill-switch", () => ({ useHealthCalculationsEnabled: () => true }))
 
 vi.mock("@/hooks/useMicPermission", () => ({
   useMicPermission: () => ({ micDenied: true }),
@@ -119,7 +124,7 @@ function makeStore(): CellStore {
 }
 
 describe("EditorTable retrieval-support summary", () => {
-  it("keeps the endorsement count and the support percentage emphasised", async () => {
+  it("keeps the estimate and local-trend percentages emphasised", async () => {
     const qc = new QueryClient()
     render(
       <QueryClientProvider client={qc}>
@@ -149,19 +154,18 @@ describe("EditorTable retrieval-support summary", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Open cell details" }))
     fireEvent.click(await screen.findByRole("tab", { name: "Retrieval support" }))
 
-    // Assert the elements and their classes: "3 endorsements · support 72%"
-    // reads identically flattened, so a text-only assertion would have passed on
-    // the version that lost the emphasis.
-    const count = screen.getByText("3")
-    const percent = screen.getByText("72")
-    for (const figure of [count, percent]) {
+    // Assert the elements and their classes: "Cell estimate 72% · local trend
+    // 72%" reads identically flattened, so a text-only assertion would have
+    // passed on a version that lost the emphasis.
+    const figures = screen.getAllByText("72%")
+    expect(figures).toHaveLength(2)
+    for (const figure of figures) {
       expect(figure.tagName).toBe("SPAN")
       expect(figure).toHaveClass("font-medium")
       expect(figure).toHaveClass("text-foreground")
     }
-    // …inside one translated sentence, whose word order stays the translator's.
-    // The % sign stays in the catalog string so its glyph and position remain
-    // translatable, which is why it is not inside the emphasised span.
-    expect(count.parentElement?.textContent).toBe("3 endorsements · support 72%")
+    expect(figures[0].parentElement?.textContent).toBe(
+      "Cell estimate 72% · local trend 72%",
+    )
   })
 })

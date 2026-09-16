@@ -9,6 +9,16 @@ export interface ProgressCounts {
   validatedCount: number
   /** Counts (not percentages) meeting >=1, >=2, ... validator levels. */
   validationLevels: number[]
+  /**
+   * AQU-1098: source cells with a live take, and with a selected+approved one.
+   * OPTIONAL on purpose. The server always sends both, but the editor builds a
+   * local optimistic snapshot of this same shape from cells it holds in
+   * memory, and that snapshot has no knowledge of audio. Undefined says "not
+   * known here"; a fabricated 0 would say "none", which is a different and
+   * wrong claim.
+   */
+  audioCount?: number
+  audioValidatedCount?: number
 }
 
 export interface FileProgressResponse {
@@ -52,6 +62,7 @@ const PREFETCH_FRESH_MS = 30_000
 const EMPTY_STATE: FileProgressResourceState = { progress: null, loading: false, error: false, fromCache: false }
 
 interface ResourceRecord extends FileProgressResourceState {
+  storageKey: string
   projectId: string
   fileId: string
   /** AQU-538 target-language lane; '' = default lane (byte-identical to pre-lane behavior). */
@@ -71,6 +82,19 @@ interface ResourceRecord extends FileProgressResourceState {
 
 let dbPromise: Promise<IDBDatabase> | null = null
 const resources = new Map<string, ResourceRecord>()
+let activeOwnerKey: string | null | undefined
+
+export function setFileProgressCacheOwner(ownerKey: string | null): void {
+  if (activeOwnerKey === ownerKey) return
+  activeOwnerKey = ownerKey
+  // Resource records carry server responses and optimistic overlays in memory.
+  // A new owner must build a fresh set even when project/file ids coincide.
+  resources.clear()
+  // A queued job also closes over the prior account's token fetcher. Active
+  // work finishes into its captured storage key; work not started is dropped.
+  prefetchQueue.length = 0
+  queuedOrActivePrefetches.clear()
+}
 
 // AQU-538: the default lane ('') keeps the legacy key byte-for-byte so existing
 // IDB cache entries and in-memory resources are untouched; a non-default lane
@@ -78,7 +102,20 @@ const resources = new Map<string, ResourceRecord>()
 // lane tags) so caches, ETags, and pending overlays never cross lanes.
 const LANE_KEY_SEP = '\u0000'
 function key(projectId: string, fileId: string, lane = ''): string {
-  return lane ? `${projectId}:${fileId}${LANE_KEY_SEP}lane${LANE_KEY_SEP}${lane}` : `${projectId}:${fileId}`
+  const projectKey = lane ? `${projectId}:${fileId}${LANE_KEY_SEP}lane${LANE_KEY_SEP}${lane}` : `${projectId}:${fileId}`
+  if (activeOwnerKey === undefined) return projectKey
+  return scopedKey(activeOwnerKey, projectKey)
+}
+
+function scopedKey(ownerKey: string | null, legacyKey: string): string {
+  const owner = ownerKey === null
+    ? 'local'
+    : `account:${encodeURIComponent(ownerKey)}`
+  return `owner:${owner}:${legacyKey}`
+}
+
+function isScopedKey(storageKey: string): boolean {
+  return storageKey.startsWith('owner:local:') || storageKey.startsWith('owner:account:')
 }
 
 function resourceFor(projectId: string, fileId: string, lane = ''): ResourceRecord {
@@ -87,6 +124,7 @@ function resourceFor(projectId: string, fileId: string, lane = ''): ResourceReco
   if (!record) {
     record = {
       ...EMPTY_STATE,
+      storageKey: cacheKey,
       projectId,
       fileId,
       lane,
@@ -138,11 +176,40 @@ async function openDb(): Promise<IDBDatabase> {
   return dbPromise
 }
 
-async function readCache(projectId: string, fileId: string, lane = ''): Promise<ProgressCacheEntry | null> {
+/** Move pre-account progress snapshots into the first resolved owner scope. */
+export async function claimLegacyFileProgressCache(ownerKey: string | null): Promise<void> {
+  const db = await openDb()
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite')
+    const store = tx.objectStore(STORE)
+    const request = store.openCursor()
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error ?? new Error('legacy progress cache claim failed'))
+    tx.onabort = () => reject(tx.error ?? new Error('legacy progress cache claim aborted'))
+    request.onsuccess = () => {
+      const cursor = request.result
+      if (!cursor) return
+      const entry = cursor.value as ProgressCacheEntry
+      if (!isScopedKey(entry.key)) {
+        const targetKey = scopedKey(ownerKey, entry.key)
+        const existing = store.get(targetKey)
+        existing.onsuccess = () => {
+          if (existing.result === undefined) store.put({ ...entry, key: targetKey })
+          cursor.delete()
+          cursor.continue()
+        }
+        return
+      }
+      cursor.continue()
+    }
+  })
+}
+
+async function readCache(storageKey: string): Promise<ProgressCacheEntry | null> {
   try {
     const db = await openDb()
     return await new Promise((resolve, reject) => {
-      const request = db.transaction(STORE, 'readonly').objectStore(STORE).get(key(projectId, fileId, lane))
+      const request = db.transaction(STORE, 'readonly').objectStore(STORE).get(storageKey)
       request.onsuccess = () => resolve((request.result as ProgressCacheEntry | undefined) ?? null)
       request.onerror = () => reject(request.error ?? new Error('IDB read failed'))
     })
@@ -156,7 +223,7 @@ async function writeCache(record: ResourceRecord): Promise<void> {
   try {
     const db = await openDb()
     const entry: ProgressCacheEntry = {
-      key: key(record.projectId, record.fileId, record.lane),
+      key: record.storageKey,
       server: record.server,
       display: record.progress,
       etag: record.etag,
@@ -245,7 +312,7 @@ async function loadResource(
   record.inFlight = (async () => {
     if (!record.hydrated) {
       record.hydrated = true
-      const cached = await readCache(projectId, fileId, lane)
+      const cached = await readCache(record.storageKey)
       if (cached) {
         const pendingEventIds = await livePendingEventIds(cached.pendingEventIds)
         record.server = cached.server
@@ -440,6 +507,7 @@ export async function getFileSectionProgress(
 }
 
 export async function resetFileProgressResourceForTests(): Promise<void> {
+  activeOwnerKey = undefined
   resources.clear()
   prefetchQueue.length = 0
   queuedOrActivePrefetches.clear()

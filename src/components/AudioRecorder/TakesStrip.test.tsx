@@ -25,6 +25,15 @@ vi.mock("@/lib/audio/audio-attachments-bus", () => ({
   injectOptimisticAudioRemove: (...args: unknown[]) => injectOptimisticRemove(...args),
 }))
 
+// AQU-464: the strip resolves each take against the cell's text history. That
+// read is the hook's own concern (covered by src/lib/audio/text-drift.test.ts);
+// here we drive its RESULT so the strip's rendering is tested without a fetch.
+import type { RecordingTextDrift } from "@/lib/audio/text-drift"
+let driftResult = new Map<string, RecordingTextDrift>()
+vi.mock("@/hooks/useRecordingTextDrift", () => ({
+  useRecordingTextDrift: () => driftResult,
+}))
+
 import { TakesStrip } from "./TakesStrip"
 
 const session = { jwt: "jwt", username: "dir" } as never
@@ -39,7 +48,21 @@ beforeEach(() => {
   emitSelect.mockClear()
   emitRemove.mockClear()
   notify.mockClear()
+  driftResult = new Map()
 })
+
+function drift(audioId: string, over: Partial<RecordingTextDrift> = {}): RecordingTextDrift {
+  return {
+    audioId,
+    recordedAt: Date.parse("2026-06-30T10:00:00Z"),
+    textAtRecording: "In the beginning",
+    textAtRecordingEventId: "c1",
+    latestText: "At the first",
+    latestTextEventId: "c2",
+    drifted: true,
+    ...over,
+  }
+}
 
 describe("TakesStrip", () => {
   it("renders nothing when there are no takes", () => {
@@ -400,5 +423,118 @@ describe("TakesStrip — generated (TTS) takes (round 8c)", () => {
       />,
     )
     expect(screen.getAllByRole("button", { name: /Remove noise/ }).length).toBe(1) // recorded row only
+  })
+})
+
+// AQU-646: a recording is target content, so its removal has to be able to take
+// that content back. The strip is the only thing that knows a delete just
+// happened AND what is left, so it reports the last one; the workspace resets
+// the target row the recording justified, or a line whose work was deleted goes
+// on counting as finished on the server.
+describe("TakesStrip — reporting the last take", () => {
+  // Real ids: buildAudioId embeds its seed, and the imported SOURCE clip is
+  // seeded with the FILE id while takes are seeded with the CELL id. That
+  // distinction is the whole reason this can be counted at all.
+  const own = (n: string): AudioAttachmentOut => ({
+    ...take(`audio-c1-1700000000-${n}`, 1000),
+  })
+  const sourceClipTake = (): AudioAttachmentOut => ({
+    ...take("audio-f1-1690000000-shared", 1000),
+  })
+
+  beforeEach(() => {
+    emitRemove.mockClear()
+    injectOptimisticRemove.mockClear()
+  })
+
+  const deleteFirstTake = () => {
+    fireEvent.click(screen.getAllByRole("button", { name: "Delete take" })[0])
+  }
+
+  it("fires when the only take is deleted", async () => {
+    const onLastTakeRemoved = vi.fn()
+    render(
+      <TakesStrip
+        {...common}
+        takes={[own("a")]}
+        selectedAudioId={`audio-c1-1700000000-a`}
+        onLastTakeRemoved={onLastTakeRemoved}
+      />,
+    )
+    deleteFirstTake()
+    await waitFor(() => expect(onLastTakeRemoved).toHaveBeenCalledWith("c1"))
+  })
+
+  it("does NOT fire while another take survives", async () => {
+    const onLastTakeRemoved = vi.fn()
+    render(
+      <TakesStrip
+        {...common}
+        takes={[own("a"), own("b")]}
+        selectedAudioId={`audio-c1-1700000000-b`}
+        onLastTakeRemoved={onLastTakeRemoved}
+      />,
+    )
+    deleteFirstTake()
+    await waitFor(() => expect(emitRemove).toHaveBeenCalled())
+    expect(onLastTakeRemoved).not.toHaveBeenCalled()
+  })
+
+  it("does not count the shared imported source clip as a surviving take", async () => {
+    // It is seeded with the FILE id and belongs to every cell — treating it as
+    // this cell's recording would leave the target row counting forever.
+    const onLastTakeRemoved = vi.fn()
+    render(
+      <TakesStrip
+        {...common}
+        takes={[own("a"), sourceClipTake()]}
+        selectedAudioId={`audio-c1-1700000000-a`}
+        onLastTakeRemoved={onLastTakeRemoved}
+      />,
+    )
+    deleteFirstTake()
+    await waitFor(() => expect(onLastTakeRemoved).toHaveBeenCalledWith("c1"))
+  })
+
+  // AQU-464 — audio↔text drift.
+  describe("text drift", () => {
+    it("flags a take recorded against text that has since changed", async () => {
+      driftResult = new Map([["a", drift("a")]])
+      render(<TakesStrip {...common} takes={[take("a", 1000)]} selectedAudioId="a" />)
+
+      const badge = await screen.findByTestId("take-text-drift-a")
+      expect(badge.textContent).toContain("Text changed")
+      // The tooltip must quote the wording AS RECORDED — that is the whole
+      // point of the feature, not just "something changed".
+      expect(badge.getAttribute("title")).toContain("In the beginning")
+    })
+
+    it("leaves an undrifted take unmarked", () => {
+      driftResult = new Map([["a", drift("a", { drifted: false })]])
+      render(<TakesStrip {...common} takes={[take("a", 1000)]} selectedAudioId="a" />)
+
+      expect(screen.queryByTestId("take-text-drift-a")).toBeNull()
+    })
+
+    it("does not mark a take the resolver could not place", () => {
+      // Absent from the map means "cannot say" — never render that as a flag.
+      driftResult = new Map()
+      render(<TakesStrip {...common} takes={[take("a", 1000)]} selectedAudioId="a" />)
+
+      expect(screen.queryByTestId("take-text-drift-a")).toBeNull()
+    })
+
+    it("marks only the takes that drifted, not every take on the cell", () => {
+      driftResult = new Map([
+        ["a", drift("a")],
+        ["b", drift("b", { drifted: false })],
+      ])
+      render(
+        <TakesStrip {...common} takes={[take("a", 1000), take("b", 1000)]} selectedAudioId="b" />,
+      )
+
+      expect(screen.queryByTestId("take-text-drift-a")).toBeTruthy()
+      expect(screen.queryByTestId("take-text-drift-b")).toBeNull()
+    })
   })
 })

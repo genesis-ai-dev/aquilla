@@ -28,6 +28,7 @@ test("project settings renames the project and saves source language", async ({ 
   await expect(settingsLink).toBeVisible({ timeout: 10_000 })
   await settingsLink.click()
   await alice.waitForURL(new RegExp(`/project/${projectId}/settings`), { timeout: 10_000 })
+  await expect(alice.getByTestId("project-settings-dialog")).toBeVisible()
 
   // Index → General (name / languages live there).
   const generalLink = alice.getByRole("link", { name: /General/i })

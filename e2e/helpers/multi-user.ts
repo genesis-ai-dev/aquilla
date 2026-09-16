@@ -30,16 +30,14 @@ async function makeAuthedPage(
   const ownOrg = await getMyOrg(session.jwt)
   const ctx = await browser.newContext()
   // alice is a platform admin in the e2e stack (PLATFORM_ADMINS:alice in
-  // scripts/e2e-up.ts), so GET /api/v2/orgs returns *every* org in the tenancy
-  // (viaPlatformAdmin), not just her memberships. Once a second user's personal
-  // org exists (the bob/carol fixtures), her org list has >1 entry with no
-  // active selection, so the app defaults to the "All organizations" aggregate
-  // — which has no "+ New Project" button, hanging Dashboard.createProject()
-  // until the test times out. Seed her own org as active so she lands on a
-  // concrete org. Only alice needs this: bob/carol see multiple orgs only via
-  // genuine memberships, where the all-orgs default is the correct, realistic
-  // behavior (and orgs/members.smoke depends on it). The guard keeps this a
-  // one-time default that in-test org switches can still override.
+  // scripts/e2e-up.ts). GET /api/v2/orgs without query params is memberships
+  // only — the switcher loads the rest of the tenancy a page at a time. Seed
+  // her own org as active so she lands on a concrete org rather than the
+  // all-organizations aggregate (which has no "+ New Project" button).
+  // The guard keeps this a one-time default that in-test org switches can
+  // still override. Only alice needs this: bob/carol see multiple orgs only
+  // via genuine memberships, where the all-orgs default is the correct,
+  // realistic behavior (and orgs/members.smoke depends on it).
   if (username === "alice") {
     await ctx.addInitScript((orgId) => {
       // Always pin alice to her personal org — path-scoped `/orgs/:id` resume
@@ -57,14 +55,14 @@ async function makeAuthedPage(
   ])
   // AQU-244: the "Project setup" checklist auto-opens as a modal sheet on the
   // first workspace visit to any incomplete project, making the page inert.
-  // Its localStorage key is per-project (codex.setupAutoShown.<id>) so it
+  // Its localStorage key is per-project (aquilla.setupAutoShown.<id>) so it
   // can't be pre-seeded for projects a test creates later — patch getItem at
   // the context level so every project reads as already-shown. The checklist
   // feature itself stays reachable through its chip.
   await ctx.addInitScript(() => {
     const orig = Storage.prototype.getItem
     Storage.prototype.getItem = function (key: string) {
-      if (typeof key === "string" && key.startsWith("codex.setupAutoShown.")) return "1"
+      if (typeof key === "string" && key.startsWith("aquilla.setupAutoShown.")) return "1"
       return orig.call(this, key)
     }
   })

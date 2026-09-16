@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { type ColumnDef } from "@tanstack/react-table"
-import { AlertTriangle, FolderKanban } from "lucide-react"
+import { FolderKanban } from "lucide-react"
 import { AppShell } from "@/components/AppShell"
 import { LoadingOverlay } from "@/components/ui/loading-overlay"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -21,6 +21,8 @@ import {
   sectionTintClass,
 } from "./SectionVisibilityBadge"
 import { useOrgSettings, canEditRosterProgressFloor } from "@/hooks/useOrgSettings"
+import { UserError } from "@/lib/errors/user-error"
+import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { ROLE } from "@/lib/frontier/roles"
 import { RoleLabel } from "@/components/RoleLabel"
 import { OrgSetupChecklist } from "./OrgSetupChecklist"
@@ -43,8 +45,11 @@ import { cn } from "@/lib/utils"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { portfolioAttentionReasons, type ProjectAttentionReason } from "@/lib/project-status"
 import { DateTooltip } from "@/components/ui/date-tooltip"
+import { SignedOutWorkspace } from "./SignedOutWorkspace"
 
-const PROJECT_PREVIEW_LIMIT = 10
+/** Bounded pane height so LegendList can virtualize instead of growing with content. */
+const PROJECTS_PANEL_MAX_H =
+  "h-[clamp(14rem,calc(100dvh-22rem),28rem)]"
 
 type OverviewProjectRow = {
   project: PortfolioProjectRow
@@ -93,10 +98,9 @@ function OverviewLoadingTemplate() {
 }
 
 /**
- * Single-org Overview: admin-style operator home — rollup tiles, recently
- * updated projects, plus team workload / usage / credits. The first ten
- * projects are directly reachable here; the full directory also lives on
- * `/orgs/:id/projects`.
+ * Single-org Overview: admin-style operator home — rollup tiles, a
+ * continuous recently-updated project list, plus team workload / usage /
+ * credits. The full searchable directory also lives on `/orgs/:id/projects`.
  */
 export function OrgOverview() {
   const { t } = useI18n()
@@ -110,9 +114,12 @@ export function OrgOverview() {
   const canEditVisibility = canEditRosterProgressFloor(activeOrg?.role?.level)
   const memberProgressReady = orgSettings.hasFetched
   const memberProgressViewerRole = activeOrg?.role?.level ?? null
+  const assignmentRoleByProjectId = useMemo(
+    () => new Map(accessibleProjects.map((project) => [project.id, project.role.level])),
+    [accessibleProjects],
+  )
 
   const [pendingInvites, setPendingInvites] = useState<MyPendingInvite[]>([])
-  const [expandedProjectsOrgId, setExpandedProjectsOrgId] = useState<number | null>(null)
 
   useEffect(() => {
     if (!jwt) {
@@ -124,8 +131,13 @@ export function OrgOverview() {
       .then((list) => {
         if (!cancelled) setPendingInvites(list)
       })
-      .catch(() => {
-        if (!cancelled) setPendingInvites([])
+      .catch((err) => {
+        if (!cancelled) {
+          setPendingInvites([])
+          if (err instanceof UserError && err.category === "session-expired") {
+            void notifySessionExpiredIfCurrent(jwt)
+          }
+        }
       })
     return () => {
       cancelled = true
@@ -146,11 +158,6 @@ export function OrgOverview() {
         ),
     [portfolio.projects, portfolio.now],
   )
-  const projectsExpanded = expandedProjectsOrgId === activeOrgId
-  const visibleProjectRows = projectsExpanded
-    ? projectRows
-    : projectRows.slice(0, PROJECT_PREVIEW_LIMIT)
-
   const projectColumns = useMemo<ColumnDef<OverviewProjectRow>[]>(
     () => [
       {
@@ -158,20 +165,7 @@ export function OrgOverview() {
         enableSorting: false,
         header: t("common.project"),
         cell: ({ row }) => (
-          <span className="flex min-w-0 items-center gap-2 font-medium text-foreground">
-            <span className="truncate">{row.original.project.name}</span>
-            {row.original.reasons.length > 0 ? (
-              <span
-                role="img"
-                aria-label={t("org.overview.attentionAriaLabel", {
-                  reasons: row.original.reasons.map((reason) => reason.label).join(", "),
-                })}
-                className="shrink-0 text-amber-600 dark:text-amber-400"
-              >
-                <AlertTriangle className="size-3.5" aria-hidden />
-              </span>
-            ) : null}
-          </span>
+          <span className="truncate font-medium text-foreground">{row.original.project.name}</span>
         ),
       },
       {
@@ -210,24 +204,8 @@ export function OrgOverview() {
 
   if (!sessionLoading && !jwt) {
     return (
-      <AppShell
-        sidebar={<OrgSidebar />}
+      <SignedOutWorkspace
         header={<OrgBreadcrumb section="Overview" isProjectsLanding />}
-        statusBar={null}
-        main={
-          <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
-            <p className="text-lg font-medium">{t("org.orgHome.signedOut.heading")}</p>
-            <p className="max-w-xs text-sm text-muted-foreground">
-              {t("org.orgHome.signedOut.description")}
-            </p>
-            <Link
-              to={`/login?next=${encodeURIComponent("/")}`}
-              className={cn(buttonVariants())}
-            >
-              {t("auth.login.submitDefault")}
-            </Link>
-          </div>
-        }
       />
     )
   }
@@ -325,35 +303,31 @@ export function OrgOverview() {
               <Section
                 title={t("nav.projects")}
                 description={t("org.overview.projectsDescription")}
-                headerClassName={ADMIN_TABLE_SECTION_HEADER}
-                contentClassName={ADMIN_TABLE_SECTION_CONTENT}
-                action={
-                  projectRows.length > PROJECT_PREVIEW_LIMIT ? (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setExpandedProjectsOrgId(projectsExpanded ? null : activeOrgId)
-                      }
-                      aria-expanded={projectsExpanded}
-                      aria-controls="org-overview-projects-table"
-                      className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
-                    >
-                      {projectsExpanded
-                        ? t("org.projectOverview.showFewer")
-                        : t("org.overview.showAllProjects", { count: projectRows.length })}
-                    </button>
-                  ) : null
-                }
+                className={cn("flex min-w-0 flex-col overflow-hidden", PROJECTS_PANEL_MAX_H)}
+                headerClassName={cn(ADMIN_TABLE_SECTION_HEADER, "shrink-0")}
+                contentClassName={cn(
+                  ADMIN_TABLE_SECTION_CONTENT,
+                  "flex min-h-0 min-w-0 flex-1 flex-col",
+                )}
               >
-                <div id="org-overview-projects-table">
+                <div
+                  id="org-overview-projects-table"
+                  className="flex min-h-0 min-w-0 flex-1 flex-col"
+                >
                   <DataTable
                     columns={projectColumns}
-                    data={visibleProjectRows}
+                    data={projectRows}
                     getRowId={(r) => r.project.id}
                     onRowClick={(r) => navigate(`/projects/${r.project.id}`)}
                     testId="org-overview-projects-table"
-                    className={ADMIN_TABLE_CLASS}
+                    className={cn(
+                      ADMIN_TABLE_CLASS,
+                      // Keep the -mx-2 bleed inside the card so the
+                      // fillHeight scrollbar is not clipped at the edge.
+                      "mx-0",
+                    )}
                     dense
+                    fillHeight
                     emptyState={
                       <EmptyState
                         variant="inline"
@@ -383,6 +357,10 @@ export function OrgOverview() {
                     <WorkloadRollup
                       jwt={jwt}
                       orgId={activeOrgId}
+                      canUnassignProject={(projectId) =>
+                        (assignmentRoleByProjectId.get(projectId) ?? 0) >=
+                        orgSettings.assignmentMinRole
+                      }
                       action={
                         <SectionVisibilityBadge
                           minRole={orgSettings.memberProgressViewMinRole}

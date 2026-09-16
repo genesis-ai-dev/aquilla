@@ -26,11 +26,12 @@ import { Spinner } from "@/components/ui/spinner"
 import { isFieldInvalid } from "@/lib/forms/field-state"
 import { optionalString, requiredString } from "@/lib/forms/schemas"
 import { useSubmitError } from "@/lib/forms/submit-error"
-import { Page, PageHeader, EmptyState } from "@/components/ui/page"
+import { Page, PageHeader, EmptyState, TableEmptyState } from "@/components/ui/page"
 import { TeamWithAvatar } from "@/components/TeamWithAvatar"
 import { useActiveOrg } from "@/context/OrgContext"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { listTeams, createTeam, type TeamSummary } from "@/lib/frontier/teams"
+import { useTeamDirectory } from "@/hooks/useTeamDirectory"
+import { createTeam, type TeamDirectoryVisibility, type TeamSummary } from "@/lib/frontier/teams"
 import { orgPath } from "@/lib/navigation/org-paths"
 import { NAV_PAGE_ICONS } from "@/lib/navigation/page-icons"
 import { useI18n } from "@/lib/i18n/I18nProvider"
@@ -45,7 +46,7 @@ const createTeamSchema = z.object({
 // which preserves the org's historical "shows internal groups only" default
 // render. The FRO-158 guarantee (public teams are never silently dropped)
 // still holds — they remain reachable via "all"/"public".
-type Visibility = "all" | "internal" | "public"
+type Visibility = TeamDirectoryVisibility
 
 /**
  * Catalog keys, not display strings — resolved with `t()` at render time in
@@ -58,12 +59,6 @@ const VISIBILITY_OPTIONS: { value: Visibility; labelKey: MessageKey }[] = [
   { value: "internal", labelKey: "org.teamsList.visibilityInternalLabel" },
   { value: "public", labelKey: "org.teamsList.visibilityPublicLabel" },
 ]
-
-function filterByVisibility(teams: TeamSummary[], visibility: Visibility): TeamSummary[] {
-  if (visibility === "internal") return teams.filter((t) => t.isInternal)
-  if (visibility === "public") return teams.filter((t) => !t.isInternal)
-  return teams
-}
 
 function VisibilitySelect({
   value,
@@ -102,10 +97,9 @@ export function TeamsList() {
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
   const navigate = useNavigate()
-  const [teams, setTeams] = useState<TeamSummary[]>([])
-  const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
   const [visibility, setVisibility] = useState<Visibility>("internal")
+  const [teamQuery, setTeamQuery] = useState("")
   const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
 
   const createTeamForm = useForm({
@@ -131,6 +125,13 @@ export function TeamsList() {
   })
 
   const isAdmin = (activeOrg?.role.level ?? 0) >= 600
+  const directory = useTeamDirectory({
+    jwt,
+    enabled: Boolean(jwt) && activeOrgId != null,
+    orgId: activeOrgId,
+    query: teamQuery,
+    visibility,
+  })
 
   useEffect(() => {
     if (!creating) return
@@ -138,36 +139,8 @@ export function TeamsList() {
     clearSubmitError()
   }, [creating, createTeamForm, clearSubmitError])
 
-  useEffect(() => {
-    if (!jwt || activeOrgId == null) {
-      setTeams([])
-      setLoading(false)
-      return
-    }
-    let cancelled = false
-    setLoading(true)
-    listTeams(jwt, activeOrgId)
-      .then((list) => {
-        if (cancelled) return
-        // Set data + clear loading in one turn so the empty-state frame never
-        // flashes under org-teams-table (tests that wait only on the testId
-        // would otherwise race the header buttons).
-        setTeams(list)
-        setLoading(false)
-      })
-      .catch(() => {
-        if (cancelled) return
-        setTeams([])
-        setLoading(false)
-      })
-    return () => { cancelled = true }
-  }, [jwt, activeOrgId])
-
-  const visibleTeams = useMemo(
-    () => filterByVisibility(teams, visibility),
-    [teams, visibility],
-  )
-
+  const teams = directory.teams
+  const loading = directory.loading && directory.teams.length === 0
 
   const columns = useMemo<ColumnDef<TeamSummary>[]>(
     () => [
@@ -223,8 +196,9 @@ export function TeamsList() {
       header={<OrgBreadcrumb section="Teams" />}
       statusBar={null}
       main={
-        <Page size="wide">
+        <Page size="wide" fill>
           <PageHeader
+            className="shrink-0"
             title={t("editor.navTitle.teams")}
             description={t("org.teamsList.pageDescription")}
             inset={false}
@@ -321,23 +295,28 @@ export function TeamsList() {
               title={t("org.teamsList.selectOrgTitle")}
               description={t("org.teamsList.selectOrgDescription")}
             />
-          ) : loading ? (
-            <div className="h-48 animate-pulse rounded-lg border bg-card" />
           ) : (
-            <DataTable
+            <>
+              {directory.error ? (
+                <p className="shrink-0 text-sm text-destructive">{directory.error}</p>
+              ) : null}
+              <DataTable
               columns={columns}
-              data={visibleTeams}
+              data={teams}
+              loading={loading}
               getRowId={(t) => String(t.id)}
               onRowClick={(t) => {
                 if (activeOrgId != null) navigate(orgPath(activeOrgId, `/teams/${t.id}`))
               }}
               initialSorting={[{ id: "name", desc: false }]}
               searchPlaceholder="Search teams…"
-              globalFilterFn={(row, _columnId, filterValue) => {
-                const q = String(filterValue).trim().toLowerCase()
-                if (!q) return true
-                return row.original.name.toLowerCase().includes(q)
-              }}
+              searchValue={teamQuery}
+              onSearchChange={setTeamQuery}
+              searching={directory.searching}
+              hasMore={directory.hasMore}
+              onLoadMore={directory.loadMore}
+              loadingMore={directory.loadingMore}
+              loadMoreTestId="team-directory-load-more"
               toolbar={
                 <>
                   <VisibilitySelect value={visibility} onValueChange={setVisibility} />
@@ -351,35 +330,16 @@ export function TeamsList() {
                   ) : null}
                 </>
               }
-              emptyState={(table) => {
-                const search = String(table.getState().globalFilter ?? "").trim()
-                if (teams.length === 0) {
+              emptyState={() => {
+                const search = teamQuery.trim()
+                if (teams.length === 0 && !search && visibility !== "all") {
                   return (
-                    <EmptyState
-                      variant="inline"
-                      className="flex-none py-12"
-                      icon={NAV_PAGE_ICONS.teams}
-                      title={t("org.teamsList.noTeamsTitle")}
-                      description={
-                        isAdmin
-                          ? "Create a team to group members and grant project access together."
-                          : "An org admin can create teams to group members and grant project access together."
-                      }
-                    />
-                  )
-                }
-                if (visibleTeams.length === 0 && !search) {
-                  return (
-                    <EmptyState
-                      variant="inline"
-                      className="flex-none py-12"
+                    <TableEmptyState
                       icon={NAV_PAGE_ICONS.teams}
                       title={
                         visibility === "public"
                           ? "No public teams in this organization"
-                          : visibility === "internal"
-                            ? "No internal teams in this organization"
-                            : "No teams match your filters"
+                          : "No internal teams in this organization"
                       }
                       action={
                         <Button
@@ -392,6 +352,19 @@ export function TeamsList() {
                     />
                   )
                 }
+                if (teams.length === 0 && !search) {
+                  return (
+                    <TableEmptyState
+                      icon={NAV_PAGE_ICONS.teams}
+                      title={t("org.teamsList.noTeamsTitle")}
+                      description={
+                        isAdmin
+                          ? "Create a team to group members and grant project access together."
+                          : "An org admin can create teams to group members and grant project access together."
+                      }
+                    />
+                  )
+                }
                 return (
                   <div className="flex flex-col items-center gap-3 py-10">
                     <p className="text-center text-sm text-muted-foreground">
@@ -399,7 +372,7 @@ export function TeamsList() {
                     </p>
                     <Button
                       variant="outline"
-                      onClick={() => table.setGlobalFilter("")}
+                      onClick={() => setTeamQuery("")}
                     >
                       {t("common.clear")}
                     </Button>
@@ -409,7 +382,9 @@ export function TeamsList() {
               testId="org-teams-table"
               className={ADMIN_TABLE_PANEL_CLASS}
               dense
+              fillHeight
             />
+            </>
           )}
         </Page>
       }

@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
-import { Sparkles } from "lucide-react"
+import { useCallback, useEffect, useState, type ReactNode } from "react"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { formatNumber } from "@/lib/i18n/format"
 import {
@@ -9,8 +8,14 @@ import {
   type SegmentationSnapshot,
 } from "@/lib/contextual/segmentation-api"
 import { Button } from "@/components/ui/button"
+import {
+  Field,
+  FieldDescription,
+  FieldLabel,
+  FieldLegend,
+  FieldSet,
+} from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
@@ -23,12 +28,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { cn } from "@/lib/utils"
 
 /** The three ways a file can be divided. "ai" does not map to a stored
  *  strategy directly: it runs the model pass, which WRITES an explicit
  *  boundary list — so choosing it is an action, not a setting, and the dialog
  *  reports what it found rather than closing silently. */
 type Choice = "auto" | "fixed" | "ai"
+type EffectivePreview = SegmentationSnapshot["effective"]
 
 interface Props {
   projectId: string
@@ -41,7 +48,8 @@ interface Props {
 }
 
 /**
- * "Segmentation" dialog, opened from a sidebar file row's ⋯ / right-click menu.
+ * "Segmentation" dialog, opened from a sidebar file row's ⋯ / right-click
+ * menu or the editor File options ⋯ (beside Import).
  *
  * Shows how the file is currently divided into passages and lets a project
  * lead change it. The preview is server-computed through the same resolver the
@@ -62,6 +70,9 @@ export function FileSegmentationDialog({
   const [choice, setChoice] = useState<Choice>("auto")
   const [size, setSize] = useState("10")
   const [note, setNote] = useState("")
+  const [livePreview, setLivePreview] = useState<EffectivePreview | null>(null)
+  const [previewDirty, setPreviewDirty] = useState(false)
+  const [previewLoading, setPreviewLoading] = useState(false)
 
   const num = useCallback((value: number) => formatNumber(value, locale), [locale])
 
@@ -74,6 +85,8 @@ export function FileSegmentationDialog({
     setLoadError(null)
     setSaveError(null)
     setGenerated(null)
+    setLivePreview(null)
+    setPreviewDirty(false)
     fetchSegmentation(projectId, fileId)
       .then((next) => {
         if (cancelled) return
@@ -95,6 +108,41 @@ export function FileSegmentationDialog({
   const parsedSize = Number.parseInt(size, 10)
   const sizeValid =
     Number.isFinite(parsedSize) && parsedSize >= limits.minSize && parsedSize <= limits.maxSize
+
+  // Auto/fixed preview through the same server resolver the run uses — never
+  // a second client-side cut. AI cannot live-preview; that path writes first.
+  useEffect(() => {
+    if (!open || !fileId || !snapshot?.available || !previewDirty) return
+    if (choice === "ai") {
+      setLivePreview(null)
+      setPreviewLoading(false)
+      return
+    }
+    if (choice === "fixed" && !sizeValid) return
+    let cancelled = false
+    const delay = choice === "fixed" ? 280 : 0
+    setPreviewLoading(true)
+    const timer = window.setTimeout(() => {
+      fetchSegmentation(
+        projectId,
+        fileId,
+        choice === "fixed" ? { strategy: "fixed", fixedSize: parsedSize } : { strategy: "auto" },
+      )
+        .then((next) => {
+          if (!cancelled) setLivePreview(next.effective)
+        })
+        .catch(() => {
+          /* Keep the last preview; the stored snapshot is still on screen. */
+        })
+        .finally(() => {
+          if (!cancelled) setPreviewLoading(false)
+        })
+    }, delay)
+    return () => {
+      cancelled = true
+      window.clearTimeout(timer)
+    }
+  }, [open, fileId, projectId, snapshot?.available, previewDirty, choice, parsedSize, sizeValid])
   const canSubmit =
     canEdit && !saving && snapshot?.available === true && (choice !== "fixed" || sizeValid)
 
@@ -119,6 +167,8 @@ export function FileSegmentationDialog({
           notes: result.generated.notes,
         })
         setSnapshot(await fetchSegmentation(projectId, fileId))
+        setLivePreview(null)
+        setPreviewDirty(false)
         return
       }
       await saveSegmentation(projectId, fileId, {
@@ -141,25 +191,31 @@ export function FileSegmentationDialog({
   // Hoisted out of the JSX: an inline `choice === "fixed"` reads to the i18n
   // lint rule as a user-visible string literal.
   const showSizeInput = choice === "fixed"
-  const effective = snapshot?.effective
+  const showNoteInput = choice === "ai"
+  const effective = livePreview ?? snapshot?.effective
   const stored = snapshot?.segmentation
   const currentSource =
-    stored?.strategy === "fixed" && stored.fixedSize
-      ? t("segmentation.sourceFixed", { size: num(stored.fixedSize) })
-      : stored?.strategy === "explicit"
-        ? t("segmentation.sourceExplicit")
-        : t("segmentation.sourceAuto")
+    livePreview && choice === "fixed"
+      ? t("segmentation.sourceFixed", { size: num(parsedSize) })
+      : livePreview && choice === "auto"
+        ? t("segmentation.sourceAuto")
+        : stored?.strategy === "fixed" && stored.fixedSize
+          ? t("segmentation.sourceFixed", { size: num(stored.fixedSize) })
+          : stored?.strategy === "explicit"
+            ? t("segmentation.sourceExplicit")
+            : t("segmentation.sourceAuto")
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="truncate pe-8">{t("segmentation.title")}</DialogTitle>
+          {fileName ? (
+            <p className="truncate text-sm text-muted-foreground">{fileName}</p>
+          ) : null}
           <DialogDescription>{t("segmentation.description")}</DialogDescription>
         </DialogHeader>
-        <DialogBody className="space-y-5">
-          <p className="sr-only">{fileName}</p>
-
+        <DialogBody className="flex flex-col gap-5">
           {loading && (
             <div className="flex justify-center py-6"><Spinner /></div>
           )}
@@ -172,8 +228,8 @@ export function FileSegmentationDialog({
 
           {!loading && !loadError && snapshot?.available && effective && (
             <>
-              <section className="space-y-1">
-                <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              <section className="flex flex-col gap-1">
+                <h3 className="text-sm font-medium">
                   {t("segmentation.currentHeading")}
                 </h3>
                 <p className="text-sm">
@@ -183,7 +239,7 @@ export function FileSegmentationDialog({
                   })}
                 </p>
                 <p className="text-xs text-muted-foreground">{currentSource}</p>
-                {stored?.staleSince && (
+                {stored?.staleSince && !livePreview && (
                   <p className="text-xs text-amber-600 dark:text-amber-500">
                     {t("segmentation.staleWarning")}
                   </p>
@@ -191,24 +247,30 @@ export function FileSegmentationDialog({
               </section>
 
               {effective.spans.length > 0 && (
-                <section className="space-y-1">
-                  <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                <section className="flex flex-col gap-1.5">
+                  <h3 className="flex items-center gap-2 text-sm font-medium">
                     {t("common.preview")}
+                    {previewLoading ? <Spinner className="size-3.5" /> : null}
                   </h3>
-                  <ul className="max-h-40 overflow-y-auto rounded-md border border-border/60 text-[13px]">
+                  <ul className="max-h-40 overflow-y-auto rounded-lg border bg-muted/30 text-sm">
                     {effective.spans.map((span) => (
                       <li
                         key={`${span.startCellId}:${span.endCellId}`}
-                        className="flex items-baseline justify-between gap-3 border-b border-border/40 px-2 py-1 last:border-b-0"
+                        className="flex items-start justify-between gap-3 border-b border-border/50 px-2.5 py-1.5 last:border-b-0"
                       >
-                        <span className="min-w-0 truncate">{span.label || span.startCellId}</span>
-                        <span className="shrink-0 text-muted-foreground">
+                        <span className="flex min-w-0 flex-col gap-0.5">
+                          <span className="truncate">{span.label || span.startCellId}</span>
+                          {span.excerpt ? (
+                            <span className="truncate text-xs text-muted-foreground">{span.excerpt}</span>
+                          ) : null}
+                        </span>
+                        <span className="shrink-0 pt-0.5 text-xs text-muted-foreground tabular-nums">
                           {t("segmentation.previewSpanCells", { count: num(span.cellCount) })}
                         </span>
                       </li>
                     ))}
                     {effective.truncated && (
-                      <li className="px-2 py-1 text-muted-foreground">
+                      <li className="px-2.5 py-1.5 text-xs text-muted-foreground">
                         {t("segmentation.previewTruncated", {
                           count: num(effective.spanCount - effective.spans.length),
                         })}
@@ -218,45 +280,43 @@ export function FileSegmentationDialog({
                 </section>
               )}
 
-              <section className="space-y-2">
-                <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              <FieldSet className="min-w-0">
+                <FieldLegend variant="label" className="p-0">
                   {t("segmentation.strategyHeading")}
-                </h3>
+                </FieldLegend>
                 <RadioGroup
                   name="segmentation-strategy"
                   value={choice}
-                  onValueChange={(value) => setChoice(value as Choice)}
-                  className="flex flex-col gap-3"
+                  onValueChange={(value) => {
+                    setChoice(value as Choice)
+                    setPreviewDirty(true)
+                  }}
+                  className="flex flex-col gap-0.5"
                 >
-                  <label className="flex items-start gap-2 text-sm">
-                    <RadioGroupItem value="auto" className="mt-1" disabled={!canEdit} />
-                    <span>
-                      <span className="font-medium">{t("segmentation.autoLabel")}</span>
-                      <span className="block text-xs text-muted-foreground">
-                        {t("segmentation.autoHelp")}
-                      </span>
-                    </span>
-                  </label>
+                  <StrategyOption
+                    value="auto"
+                    selected={choice === "auto"}
+                    disabled={!canEdit}
+                    label={t("segmentation.autoLabel")}
+                    help={t("segmentation.autoHelp")}
+                  />
 
                   {/* The number input is a SIBLING of the option's label, not
                       a child: nesting one label inside another is invalid
                       markup, and it silently detaches the input from its own
                       label for screen readers and for label-based queries. */}
-                  <div className="space-y-2">
-                    <label className="flex items-start gap-2 text-sm">
-                      <RadioGroupItem value="fixed" className="mt-1" disabled={!canEdit} />
-                      <span className="min-w-0 flex-1">
-                        <span className="font-medium">{t("segmentation.fixedLabel")}</span>
-                        <span className="block text-xs text-muted-foreground">
-                          {t("segmentation.fixedHelp")}
-                        </span>
-                      </span>
-                    </label>
+                  <StrategyOption
+                    value="fixed"
+                    selected={choice === "fixed"}
+                    disabled={!canEdit}
+                    label={t("segmentation.fixedLabel")}
+                    help={t("segmentation.fixedHelp")}
+                  >
                     {showSizeInput && (
-                      <div className="space-y-1 ps-6">
-                        <Label htmlFor="segmentation-size" className="text-xs">
+                      <Field className="ps-8 pe-2 pb-1.5">
+                        <FieldLabel htmlFor="segmentation-size">
                           {t("segmentation.fixedInputLabel")}
-                        </Label>
+                        </FieldLabel>
                         <Input
                           id="segmentation-size"
                           type="number"
@@ -265,58 +325,55 @@ export function FileSegmentationDialog({
                           max={limits.maxSize}
                           value={size}
                           disabled={!canEdit}
-                          onChange={(e) => setSize(e.target.value)}
+                          onChange={(e) => {
+                            setSize(e.target.value)
+                            setPreviewDirty(true)
+                          }}
                           className="w-28"
                           aria-invalid={!sizeValid}
                         />
-                        <p className="text-xs text-muted-foreground">
+                        <FieldDescription>
                           {t("segmentation.fixedRange", {
                             min: num(limits.minSize),
                             max: num(limits.maxSize),
                           })}
-                        </p>
-                      </div>
+                        </FieldDescription>
+                      </Field>
                     )}
-                  </div>
+                  </StrategyOption>
 
-                  <div className="space-y-2">
-                    <label className="flex items-start gap-2 text-sm">
-                      <RadioGroupItem value="ai" className="mt-1" disabled={!canEdit} />
-                      <span className="min-w-0 flex-1">
-                        <span className="flex items-center gap-2 font-medium">
-                          <Sparkles className="h-3.5 w-3.5" aria-hidden />
-                          {t("segmentation.aiLabel")}
-                        </span>
-                        <span className="block text-xs text-muted-foreground">
-                          {t("segmentation.aiHelp")}
-                        </span>
-                        <span className="block text-xs text-muted-foreground">
-                          {t("segmentation.aiSlowHint")}
-                        </span>
-                      </span>
-                    </label>
-                    <div className="space-y-1 ps-6">
-                      <Label htmlFor="segmentation-note" className="text-xs">
-                        {t("segmentation.aiNoteLabel")}
-                      </Label>
-                      <Textarea
-                        id="segmentation-note"
-                        rows={2}
-                        value={note}
-                        disabled={!canEdit}
-                        placeholder={t("segmentation.aiNotePlaceholder")}
-                        onChange={(e) => setNote(e.target.value)}
-                      />
-                    </div>
-                  </div>
+                  <StrategyOption
+                    value="ai"
+                    selected={choice === "ai"}
+                    disabled={!canEdit}
+                    label={t("segmentation.aiLabel")}
+                    help={t("segmentation.aiHelp")}
+                    extraHelp={t("segmentation.aiSlowHint")}
+                  >
+                    {showNoteInput && (
+                      <Field className="ps-8 pe-2 pb-1.5">
+                        <FieldLabel htmlFor="segmentation-note">
+                          {t("segmentation.aiNoteLabel")}
+                        </FieldLabel>
+                        <Textarea
+                          id="segmentation-note"
+                          rows={2}
+                          value={note}
+                          disabled={!canEdit}
+                          placeholder={t("segmentation.aiNotePlaceholder")}
+                          onChange={(e) => setNote(e.target.value)}
+                        />
+                      </Field>
+                    )}
+                  </StrategyOption>
                 </RadioGroup>
-              </section>
+              </FieldSet>
 
               {!canEdit && (
                 <p className="text-xs text-muted-foreground">{t("segmentation.readOnly")}</p>
               )}
               {generated && (
-                <div className="space-y-1">
+                <div className="flex flex-col gap-1">
                   <p className="text-sm">
                     {t("segmentation.aiDone", { count: num(generated.passageCount) })}
                   </p>
@@ -345,5 +402,45 @@ export function FileSegmentationDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+function StrategyOption({
+  value,
+  selected,
+  disabled,
+  label,
+  help,
+  extraHelp,
+  children,
+}: {
+  value: Choice
+  selected: boolean
+  disabled: boolean
+  label: string
+  help: string
+  extraHelp?: string
+  children?: ReactNode
+}) {
+  return (
+    <div className="flex flex-col">
+      <label
+        className={cn(
+          "flex items-start gap-2.5 rounded-lg px-2 py-1.5 text-sm transition-colors",
+          selected ? "bg-muted/60" : "hover:bg-accent/40",
+          disabled && "opacity-50",
+        )}
+      >
+        <RadioGroupItem value={value} className="mt-0.5 shrink-0" disabled={disabled} />
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="font-medium leading-tight">{label}</span>
+          <span className="text-xs leading-relaxed text-muted-foreground">{help}</span>
+          {extraHelp ? (
+            <span className="text-xs leading-relaxed text-muted-foreground">{extraHelp}</span>
+          ) : null}
+        </span>
+      </label>
+      {children}
+    </div>
   )
 }

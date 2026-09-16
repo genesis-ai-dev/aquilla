@@ -109,7 +109,7 @@ export function RoleSelect({
           {resolved.map((o) => (
             <SelectItem key={o.level} value={String(o.level)} multiline>
               <span className="flex min-w-0 flex-col gap-0.5">
-                <RoleLabel name={o.name} className="font-medium" />
+                <RoleLabel name={o.name} plain className="font-medium" />
                 {o.description ? (
                   <span className="text-xs font-normal whitespace-normal text-muted-foreground normal-case">
                     {o.description}

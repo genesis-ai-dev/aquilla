@@ -38,7 +38,7 @@
 
 import { useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { AlertTriangle, ArrowRight, CheckCheck, Trash2 } from "lucide-react"
+import { AlertTriangle, ArrowRight, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -48,7 +48,8 @@ import { Spinner } from "@/components/ui/spinner"
 import { DiffText } from "./DiffText"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
-import { formatDateTime } from "@/lib/i18n/format"
+import { fmtShortCalendarDate } from "@/lib/format-date"
+import { DateTooltip } from "@/components/ui/date-tooltip"
 import {
   useUpstreamChangesReview,
   type ReviewItem,
@@ -263,7 +264,6 @@ export function UpstreamChangesPanel({
           <div className="flex items-center justify-between rounded border bg-muted/40 px-3 py-2">
             <span className="text-sm">{t("editor.selection.count", { count: selectedItems.length })}</span>
             <Button size="sm" onClick={() => void handleBulkRepin()}>
-              <CheckCheck className="me-1.5 h-4 w-4" />
               {t("importExport.linked.acceptAllButton", { count: selectedItems.length })}
             </Button>
           </div>
@@ -281,9 +281,11 @@ export function UpstreamChangesPanel({
             >
               <CollapsibleTrigger className="flex w-full items-center justify-between rounded border px-3 py-2 text-start text-sm font-medium hover:bg-muted/40">
                 <span>
-                  {t("importExport.linked.syncBatchHeading", {
-                    date: formatDateTime(group.serverTs, locale),
-                  })}
+                  <DateTooltip value={group.serverTs} label={t("org.orgProjectsDataTable.updatedColumn")}>
+                    {t("importExport.linked.syncBatchHeading", {
+                      date: fmtShortCalendarDate(group.serverTs, undefined, locale),
+                    })}
+                  </DateTooltip>
                 </span>
                 <Badge variant="outline">{t("common.cellCount", { count: group.cellCount })}</Badge>
               </CollapsibleTrigger>
@@ -363,7 +365,7 @@ export function UpstreamChangesPanel({
                             disabled={!canRepin || busy}
                             onClick={() => void handleRepinSingle(item)}
                           >
-                            {busy ? <Spinner className="h-3.5 w-3.5" /> : <CheckCheck className="me-1 h-3.5 w-3.5" />}
+                            {busy && <Spinner className="h-3.5 w-3.5" />}
                             {t("importExport.linked.acceptButton")}
                           </Button>
                         )}

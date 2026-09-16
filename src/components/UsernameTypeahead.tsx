@@ -109,8 +109,8 @@ export function UsernameTypeahead({
   const t = useT()
   const [open, setOpen] = useState(false)
   // Anchored below the input by default (`top`), flipped above (`bottom`)
-  // when the viewport can't fit the dropdown underneath — e.g. the add row
-  // at the bottom of the project overview Members card.
+  // when the viewport can't fit the dropdown underneath — e.g. an add-member
+  // row near the bottom of a settings pane.
   const [dropdownPosition, setDropdownPosition] = useState<{
     left: number
     width: number
@@ -421,7 +421,6 @@ export function UsernameTypeahead({
                     }
                     className="mt-1 inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
                   >
-                    <Check className="h-3 w-3" />{" "}
                     {t("workspace.typeahead.addUser", { username: exactFoundUser.username })}
                   </button>
                 </>

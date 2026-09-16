@@ -1,6 +1,7 @@
 import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
 import app from "../index"
+import { sha256Hex } from "../../../db/shared/api-credentials"
 
 // End-to-end coverage for the account-recovery path. The /reset-password PAGE
 // (AQU-270) and the SPA edge fallback already make the email link reachable;
@@ -19,14 +20,21 @@ function register(username: string, email: string, password: string): Promise<Re
   return reqJson("/api/v2/auth/register", { username, email, password })
 }
 
+/** Plant a reset token in the shape the route actually writes: digest only
+ *  (OPS-20/OPS-31). The plaintext is never stored, so a test that needs a
+ *  usable token has to hash it in the same way the handler will.
+ *
+ *  Until 2026-09-07 this helper seeded PLAINTEXT rows, which meant every test
+ *  below reached the verify/reset handlers through 0080's `token_hash IS NULL`
+ *  compatibility arm rather than the digest lookup that production uses. */
 async function seedToken(username: string, token: string, expiresAt: string): Promise<void> {
   const u = await env.AQUILLA_PG.prepare("SELECT id FROM users WHERE username = ?")
     .bind(username)
     .first<{ id: number }>()
   await env.AQUILLA_PG.prepare(
-    "INSERT INTO password_reset_tokens (user_id, token, expires_at) VALUES (?, ?, ?)",
+    "INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES (?, ?, ?)",
   )
-    .bind(u!.id, token, expiresAt)
+    .bind(u!.id, await sha256Hex(token), expiresAt)
     .run()
 }
 
@@ -142,6 +150,97 @@ describe("password reset — request (AQU-675: never creates an account)", () =>
       "SELECT COUNT(*) AS n FROM users",
     ).first<{ n: number }>()
     expect(Number(totalAfter!.n)).toBe(Number(totalBefore!.n))
+  })
+
+  // [Pen test] Auth & session mgmt (2026-08-24), OPS-20. The minted token is a
+  // 24-hour account-takeover credential; it must not be readable from the
+  // table, so a snapshot/replica/support query of password_reset_tokens is not
+  // a set of live takeover links.
+  // Since OPS-31 (migration 0087) the guarantee is structural: there is no
+  // column a plaintext reset token could be written to. Assert the schema as
+  // well as the value, so re-adding the column fails here rather than
+  // silently restoring a readable-credential table.
+  it("stores the reset token as a digest, with no plaintext column to leak (OPS-20/OPS-31)", async () => {
+    await register("ops20user", "ops20user@example.com", "old-password-1")
+    await reqJson("/api/v2/auth/password-reset/request", { email: "ops20user@example.com" })
+
+    const row = await env.AQUILLA_PG.prepare(
+      `SELECT t.token_hash FROM password_reset_tokens t
+       JOIN users u ON u.id = t.user_id WHERE u.username = 'ops20user'`,
+    ).first<{ token_hash: string | null }>()
+
+    expect(row).toBeTruthy()
+    expect(row!.token_hash).toMatch(/^[0-9a-f]{64}$/)
+
+    const plaintextColumn = await env.AQUILLA_PG.prepare(
+      `SELECT column_name FROM information_schema.columns
+        WHERE table_name = 'password_reset_tokens' AND column_name = 'token'`,
+    ).first<{ column_name: string }>()
+    expect(plaintextColumn).toBeNull()
+  })
+
+  // [Pen test] Auth & session mgmt (2026-09-07), OPS-31. The rollover test
+  // that used to sit here ("still accepts a pre-0080 plaintext token row")
+  // was deleted with the compatibility arm it covered: the 24-hour window
+  // closed on 2026-08-25, and migration 0087 dropped the column it read.
+  // Its replacement is the assertion below — a row with no digest match is
+  // rejected, which is now the only shape a plaintext row could take.
+  it("rejects a reset token that has no matching digest (post-OPS-31)", async () => {
+    await register("ops27user", "ops27user@example.com", "old-password-1")
+    await seedToken("ops27user", "the-real-token-1", soon())
+
+    const res = await reqJson("/api/v2/auth/password-reset/verify", {
+      token: "not-the-real-token-1",
+      username: "ops27user",
+    })
+    expect(res.status).toBe(400)
+  })
+
+  // [Pen test] Auth & session mgmt (2026-08-24), OPS-19. The whole handler
+  // used to sit inside one catch that returned
+  // `Failed to send reset email: ${err.message}` with a 500 — which (a)
+  // reflected raw internal error text to an unauthenticated caller, the same
+  // bug SEC-11 fixed in /register, and (b) meant any failure in the
+  // REGISTERED-ONLY work below the lookup produced a visibly different
+  // response from the generic 200 an unregistered address gets. That
+  // difference is a user-enumeration oracle — the exact one the 2026-07-20
+  // pass closed for email-send failures and left open for everything else on
+  // that branch.
+  //
+  // Simulated by making the token INSERT fail for the duration of the request
+  // (a CHECK the row can't satisfy), which is the first registered-only
+  // statement in the handler.
+  it("returns the generic response when the registered-only work fails (OPS-19)", async () => {
+    await register("ops19user", "ops19user@example.com", "old-password-1")
+
+    const unregistered = await reqJson("/api/v2/auth/password-reset/request", {
+      email: "ops19-nobody@example.com",
+    })
+    const generic = await unregistered.json()
+
+    await env.AQUILLA_PG.prepare(
+      "ALTER TABLE password_reset_tokens ADD CONSTRAINT ops19_break CHECK (false) NOT VALID",
+    ).run()
+    try {
+      const res = await reqJson("/api/v2/auth/password-reset/request", {
+        email: "ops19user@example.com",
+      })
+      // Indistinguishable from the unregistered-address response, in both
+      // status and body — no oracle, and no internal error text.
+      expect(res.status).toBe(unregistered.status)
+      expect(await res.json()).toEqual(generic)
+      // Proof the failure path was actually exercised rather than the
+      // constraint silently not biting: the mint really did fail.
+      const tok = await env.AQUILLA_PG.prepare(
+        `SELECT COUNT(*) AS n FROM password_reset_tokens t
+         JOIN users u ON u.id = t.user_id WHERE u.username = 'ops19user'`,
+      ).first<{ n: number }>()
+      expect(Number(tok!.n)).toBe(0)
+    } finally {
+      await env.AQUILLA_PG.prepare(
+        "ALTER TABLE password_reset_tokens DROP CONSTRAINT ops19_break",
+      ).run()
+    }
   })
 })
 

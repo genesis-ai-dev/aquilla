@@ -137,7 +137,7 @@ export class Dashboard {
     }
   }
 
-  /** PanelLeft control that opens the org sidebar sheet below the lg breakpoint (1024px). */
+  /** PanelLeft control that opens the sidebar sheet below the lg breakpoint (1024px). */
   openSidebarButton(): Locator {
     return this.page.getByRole("button", { name: "Open sidebar" })
   }

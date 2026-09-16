@@ -2,9 +2,10 @@
 //
 // Canonical UI: `/project/:id/settings/members` (MembersSection).
 //
-// This module keeps the pieces still embedded elsewhere:
-//   - MembersTab — org-side ProjectOverview Members card
-//   - InviteLinkTab / RevokeAllDialog — settings MembersSection + MembersTab
+// This module keeps the pieces still reused elsewhere:
+//   - InviteLinkTab / RevokeAllDialog — settings MembersSection
+//   - MembersTab — still the list/add/revoke building block (settings owns
+//     the product surface; overview no longer embeds it)
 
 import { useState, useCallback, useEffect, useMemo } from "react"
 import {
@@ -27,7 +28,6 @@ import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useProjectOrgId } from "@/hooks/useProjectOrgId"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
-import { useActiveOrgOptional } from "@/context/OrgContext"
 import { listOrgMembers, type OrgMember } from "@/lib/frontier/orgs"
 import { PermissionDeniedAlert } from "@/components/PermissionDeniedAlert"
 import { MemberMultiAddRow } from "@/components/MemberMultiAddRow"
@@ -43,7 +43,7 @@ import {
   roleDisplayText,
 } from "@/lib/frontier/roles"
 import { ConfirmActionDialog } from "@/components/ConfirmActionDialog"
-import { RoleLabel } from "@/components/RoleLabel"
+import { RoleLabel, RoleLevelLabel } from "@/components/RoleLabel"
 import { RoleSelect } from "@/components/RoleSelect"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { RichMessage } from "@/lib/i18n/RichMessage"
@@ -69,9 +69,9 @@ const DEFAULT_EXPIRY_DAYS = 7
 // ──────────────────────────────────────────────────────────────────────────
 // Members tab
 //
-// Exported (AQU-335) so the org-side ProjectOverview (/projects/:id) can
-// embed the same members add/change-role/revoke surface — one implementation,
-// two surfaces (overview card + settings MembersSection helpers).
+// List / add / change-role / revoke building block. The product surface is
+// Project Settings → Team members (MembersSection). Keep this export for
+// tests and any remaining embed; overview no longer mounts it.
 // ──────────────────────────────────────────────────────────────────────────
 
 export function MembersTab({
@@ -91,28 +91,46 @@ export function MembersTab({
   // AQU-672: source the org roster so the add-member field can suggest
   // colleagues instead of forcing an exact-username guess. Prefer the
   // PROJECT's own org (the active-org picker may be on "All organizations"
-  // or a different org entirely), falling back to the optional org context —
-  // this surface is also embedded on the org-side ProjectOverview and
-  // unit-rendered without a provider. A personal (org-less) project yields
-  // no suggestions and keeps working as plain free text.
-  const projectOrgId = useProjectOrgId(projectId)
-  const activeOrgId = useActiveOrgOptional()?.activeOrgId ?? null
-  const rosterOrgId = projectOrgId ?? activeOrgId
+  // or a different org entirely). A personal (org-less) project or a failed
+  // project lookup yields no suggestions and keeps working as plain free text.
+  const { orgId: projectOrgId, error: projectOrgError } = useProjectOrgId(projectId)
+  const rosterOrgId = projectOrgError ? null : projectOrgId
   const [orgMembers, setOrgMembers] = useState<OrgMember[]>([])
+  const [loadedRosterKey, setLoadedRosterKey] = useState<string | null>(null)
+  const [orgRosterError, setOrgRosterError] = useState<string | null>(null)
+  const rosterKey = session?.username && rosterOrgId != null
+    ? `${session.username}\u0000${rosterOrgId}`
+    : null
+  const visibleOrgMembers = loadedRosterKey === rosterKey ? orgMembers : []
   useEffect(() => {
     const jwt = session?.jwt
     if (!jwt || rosterOrgId == null) {
       // Bail without a state change when already empty so we don't force an
       // extra render (keeps this effect side-effect-free on org-less surfaces).
       setOrgMembers((prev) => (prev.length === 0 ? prev : []))
+      setLoadedRosterKey(null)
       return
     }
     let alive = true
+    setOrgMembers([])
+    setLoadedRosterKey(null)
+    setOrgRosterError(null)
     listOrgMembers(jwt, rosterOrgId)
-      .then((ms) => { if (alive) setOrgMembers(ms) })
-      .catch(() => { /* suggestions are best-effort; free text still works */ })
+      .then((ms) => {
+        if (alive) {
+          setOrgMembers(ms)
+          setLoadedRosterKey(rosterKey)
+        }
+      })
+      .catch((caught) => {
+        if (alive) {
+          setOrgMembers([])
+          setLoadedRosterKey(null)
+          setOrgRosterError(toUserFacingError(caught, "organization members").message)
+        }
+      })
     return () => { alive = false }
-  }, [session?.jwt, rosterOrgId])
+  }, [session?.jwt, rosterKey, rosterOrgId])
 
   // AQU-560: when the add is refused for lack of permission, surface the
   // enriched account-identity + switch-user alert instead of the bare message
@@ -157,12 +175,12 @@ export function MembersTab({
   )
   const eligibleOrgMembers = useMemo(
     () =>
-      orgMembers
+      visibleOrgMembers
         .filter((m) => !directGrantUserIds.has(m.userId))
         .sort((a, b) =>
           a.username.localeCompare(b.username, undefined, { sensitivity: "base" }),
         ),
-    [orgMembers, directGrantUserIds],
+    [visibleOrgMembers, directGrantUserIds],
   )
 
   const renderMemberRow = (m: ProjectMember) => {
@@ -182,7 +200,7 @@ export function MembersTab({
       >
         <UsernameWithAvatar username={m.username} />
         <SourceBadge source={m.role.source} />
-        <RoleLabel name={m.role.name} className="text-xs text-muted-foreground" />
+        <RoleLabel name={m.role.name} />
 
         {/* Secondary sources */}
         {m.secondarySources && m.secondarySources.length > 0 && (
@@ -249,8 +267,8 @@ export function MembersTab({
 
   // AQU-485: the project's org rosterViewMinRole policy hides the roster
   // from this caller. Render nothing — no "Roster hidden" copy, no empty
-  // list, no add-member form. The overview card and settings nav already
-  // omit this surface; this is defense if we still mount.
+  // list, no add-member form. Settings nav already omits this surface;
+  // this is defense if we still mount.
   if (rosterHidden) return null
 
   return (
@@ -268,6 +286,11 @@ export function MembersTab({
             {t("common.retry")}
           </button>
         </div>
+      )}
+      {(projectOrgError || orgRosterError) && (
+        <p role="alert" className="text-xs text-destructive">
+          {projectOrgError ?? orgRosterError}
+        </p>
       )}
 
       {/* Members list */}
@@ -347,7 +370,7 @@ export function MembersTab({
           onAdd={handleAddMany}
           excludedUserIds={[...directGrantUserIds]}
           suggestions={
-            orgMembers.length > 0
+            visibleOrgMembers.length > 0
               ? eligibleOrgMembers.map((m) => ({ id: m.userId, username: m.username }))
               : undefined
           }
@@ -831,7 +854,7 @@ function GrantPathRow({
         {source}
       </span>
       {/* Role LABEL only — numeric levels are internal (FRO-368). */}
-      <span className="text-muted-foreground">→ {humanRoleName(level)}</span>
+      <RoleLevelLabel level={level} />
       {removable ? (
         <span className="text-xs text-destructive/70">{t("org.membersPage.willBeRemoved")}</span>
       ) : (

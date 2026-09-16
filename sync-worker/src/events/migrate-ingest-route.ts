@@ -23,7 +23,12 @@
 // reachable by browser clients — only holders of SYNC_SECRET_KEY may call it.
 
 import { buildEventProjectionStmts, type PersistedEvent } from './event-projection'
-import { buildEventInsertStmt } from './event-insert'
+import {
+  allocateSeqRange,
+  buildBulkEventInsertStmt,
+  buildSettleSeqRangeStmt,
+  type SeqEventInsertRow,
+} from './event-insert'
 import type { EventKind } from './types'
 import { isAuthorizedAdminBearer } from '../lib/admin-auth'
 
@@ -115,13 +120,26 @@ export async function handleMigrateIngestRequest(
     return new Response('body must be { projectId, events[] }', { status: 400 })
   }
 
-  // serverTs is monotonic within the request; server_seq is assigned in SQL.
-  // clientTs carries the original legacy edit timestamp (preserves history
-  // ordering); it is NOT part of any deterministic id.
+  if (body.events.length === 0) {
+    return Response.json({ accepted: 0 })
+  }
+
+  // serverTs is monotonic within the request; server_seq comes from the
+  // pre-allocated block below. clientTs carries the original legacy edit
+  // timestamp (preserves history ordering); it is NOT part of any
+  // deterministic id.
   let serverTs = Date.now()
   const eventsOnly = body.eventsOnly === true
   const deferFileCounters = body.deferFileCounters === true
   const stmts: AquillaStatement[] = []
+  const eventsOnlyRows: SeqEventInsertRow[] = []
+
+  // AQU-1005 pass 1: validate + build every projection statement BEFORE taking
+  // an allocation. Projection statements don't depend on server_seq, so all of
+  // this route's 400s can be raised while the seq ledger is still untouched —
+  // a malformed body must not pin the project's advertised reader cursor on a
+  // pending allocation for the full PENDING_ALLOC_TTL_MS.
+  const prepared: { row: Omit<SeqEventInsertRow, 'serverSeq'>; projStmts: AquillaStatement[] }[] = []
 
   for (const e of body.events) {
     if (typeof e.id !== 'string' || typeof e.kind !== 'string' || typeof e.author !== 'string') {
@@ -145,11 +163,22 @@ export async function handleMigrateIngestRequest(
       serverTs: serverTs++,
     }
 
-    // server_seq comes from the shared per-project allocator (event-insert.ts);
-    // id-replays are skipped via ON CONFLICT (id) DO NOTHING (a replay still
-    // consumes a seq — gaps are harmless, server_seq is an ordering key).
-    stmts.push(
-      buildEventInsertStmt(db, {
+    const projStmts: AquillaStatement[] = []
+    if (!eventsOnly) {
+      try {
+        buildEventProjectionStmts(db, event, projStmts, { deferFileCounters })
+      } catch (err) {
+        // Unknown kind or malformed payload — surface the offending event so the
+        // CLI can pinpoint it rather than failing the whole batch opaquely.
+        return new Response(
+          `cannot project event ${event.id} (kind: ${event.kind}): ${String(err)}`,
+          { status: 400 },
+        )
+      }
+    }
+
+    prepared.push({
+      row: {
         id: event.id,
         schemaVersion,
         projectId: event.projectId,
@@ -161,21 +190,73 @@ export async function handleMigrateIngestRequest(
         payloadJson: JSON.stringify(event.payload),
         clientTs: event.clientTs,
         serverTs: event.serverTs,
-      }),
-    )
-    if (!eventsOnly) {
-      try {
-        buildEventProjectionStmts(db, event, stmts, { deferFileCounters })
-      } catch (err) {
-        // Unknown kind or malformed payload — surface the offending event so the
-        // CLI can pinpoint it rather than failing the whole batch opaquely.
-        return new Response(
-          `cannot project event ${event.id} (kind: ${event.kind}): ${String(err)}`,
-          { status: 400 },
-        )
-      }
+      },
+      projStmts,
+    })
+  }
+
+  // AQU-1005: allocate the whole batch's server_seqs in ONE autocommit counter
+  // bump BEFORE the write transactions. The old shape ran the bump CTE inside
+  // every event INSERT, so the first statement of each pipelined transaction
+  // took the project's seq-counter row lock and held it until COMMIT — live
+  // editors' single-event writes queued behind bulk ingest for the whole
+  // transaction (measured in minutes during the Aug 25–26 storms). With
+  // pre-allocation the lock is held for a single round trip. Replayed ids
+  // still consume their seq — gaps are harmless, seq is an ordering key.
+  // Replay pre-filter: ON CONFLICT (id) DO NOTHING already drops the events
+  // row for a retried id, but the projection statements built above would
+  // still run and overwrite the cell with the retry's payload. Drop replayed
+  // ids up front so a retried chunk is a true no-op.
+  const ids = prepared.map((p) => p.row.id)
+  const replayed = new Set<string>()
+  for (let i = 0; i < ids.length; i += 500) {
+    const slice = ids.slice(i, i + 500)
+    const found = await db
+      .prepare(`SELECT id FROM events WHERE project_id = ? AND id IN (${slice.map(() => '?').join(',')})`)
+      .bind(body.projectId, ...slice)
+      .all<{ id: string }>()
+    for (const r of found.results ?? []) replayed.add(r.id)
+  }
+  const fresh = replayed.size ? prepared.filter((p) => !replayed.has(p.row.id)) : prepared
+  if (fresh.length === 0) return Response.json({ accepted: 0, replayed: replayed.size })
+
+  let nextSeq: number
+  let seqBase: number
+  try {
+    seqBase = nextSeq = await allocateSeqRange(db, body.projectId, fresh.length)
+  } catch (err) {
+    console.error("[migrate-ingest] seq allocation failed:", err)
+    return Response.json({ error: "seq allocation failed" }, { status: 500 })
+  }
+
+  // Pass 2: stamp seqs from the pre-allocated block, in body order, and emit
+  // each event's insert ahead of its own projection statements (the ordering
+  // pass 1 preserved). Replayed ids were already dropped above.
+  for (const { row, projStmts } of fresh) {
+    const insertRow: SeqEventInsertRow = { ...row, serverSeq: nextSeq++ }
+    if (eventsOnly) {
+      // Firehose path: collapse into multi-row INSERTs below.
+      eventsOnlyRows.push(insertRow)
+    } else {
+      stmts.push(buildBulkEventInsertStmt(db, [insertRow]))
+      stmts.push(...projStmts)
     }
   }
+
+  // Firehose (eventsOnly) rows collapse into multi-row INSERTs — same rows,
+  // ~200x fewer statements. 200 rows × 12 cols = 2,400 binds per statement,
+  // far under Postgres' 65,535-param ceiling.
+  if (eventsOnly) {
+    const ROWS_PER_STMT = 200
+    for (let i = 0; i < eventsOnlyRows.length; i += ROWS_PER_STMT) {
+      stmts.push(buildBulkEventInsertStmt(db, eventsOnlyRows.slice(i, i + ROWS_PER_STMT)))
+    }
+  }
+
+  // Settle the allocation in the LAST batch chunk (stmts is split across
+  // multiple runBatch calls below) so the ledger row only clears once every
+  // event row has actually committed.
+  stmts.push(buildSettleSeqRangeStmt(db, body.projectId, seqBase))
 
   // Pipelined batch (postgres.js) collapses the per-statement Hyperdrive↔Neon
   // round-trips that dominated ingest (2 RTTs × thousands of stmts ≈ 21 stmts/s
@@ -194,8 +275,9 @@ export async function handleMigrateIngestRequest(
       await runBatch(stmts.slice(i, i + limit))
     }
   } catch (err) {
-    return Response.json({ error: `DB batch failed: ${String(err)}` }, { status: 500 })
+    console.error("[migrate-ingest] DB batch failed:", err)
+    return Response.json({ error: "DB batch failed" }, { status: 500 })
   }
 
-  return Response.json({ accepted: body.events.length })
+  return Response.json({ accepted: fresh.length, replayed: replayed.size })
 }

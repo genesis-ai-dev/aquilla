@@ -2,10 +2,19 @@
 // clip-zero anchored geometry, overlap-over-next rendering, z-order,
 // resize-as-trim commits.
 
-import { describe, it, expect, vi } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import { render, screen, fireEvent, act } from "@testing-library/react"
 import { expectTooltip, renderWithTooltips } from "@/test-utils/tooltip"
+const pauseAllTransports = vi.hoisted(() => vi.fn())
+vi.mock("@/lib/audio/transport-pause", () => ({ pauseAllTransports }))
+const toastAdd = vi.hoisted(() => vi.fn())
+vi.mock("@/components/ui/toast", async (importActual) => {
+  const actual = await importActual<typeof import("@/components/ui/toast")>()
+  return { ...actual, toast: { ...actual.toast, add: toastAdd } }
+})
+
 import { TargetAudioLane, type TargetAudioItem } from "./TargetAudioLane"
+import { chipRadiusPx } from "@/lib/timeline/scale"
 import type { CellData } from "@/hooks/useCells"
 
 const SOURCE_ID = "audio-f1-1690000000-shared.mp3"
@@ -30,6 +39,14 @@ function item(
     ...over,
   } as unknown as CellData
   return { cell, kind: "take", audioId: takeId }
+}
+
+/** The play button primes before it plays (2026-08-28) — it asks the engine
+ *  whether the clip CAN be previewed and reports why when it cannot — so a
+ *  click settles a microtask later. Every assertion after one has to wait. */
+const pressPlay = async () => {
+  fireEvent.click(screen.getByTestId("tl-target-c1-play"))
+  await act(async () => { await Promise.resolve() })
 }
 
 const base = {
@@ -78,6 +95,61 @@ describe("TargetAudioLane — overflow warnings", () => {
     render(<TargetAudioLane {...base} items={[first, second]} />)
     expect(screen.getByTestId("tl-target-c1")).toHaveAttribute("data-overflow", "overlap")
     expect(screen.getByTestId("tl-target-c2")).toHaveAttribute("data-overflow", "none")
+  })
+
+  // ── AQU-646 stage 6H rev 2 ─────────────────────────────────────────────────
+  //
+  // A PICKED COLOUR MUST NEVER SILENCE A WARNING. Arbitrary colours cannot be
+  // Tailwind classes, so they arrive as an inline style — and an inline style
+  // beats every class, including the state layers whose entire design is that
+  // they win by sitting later in the same `cn()`. Applied unconditionally, a
+  // picked colour would switch off this lane's alarm vocabulary for whoever
+  // chose one.
+  it("paints a picked colour at rest", () => {
+    render(<TargetAudioLane {...base} items={[item({}, 4000)]} color="0d9488" />)
+    const chip = screen.getByTestId("tl-target-c1")
+    expect(chip).toHaveAttribute("data-overflow", "none")
+    expect(chip.className).toContain("bg-[color:var(--tl-track-take)]")
+    expect(screen.getByTestId("tl-target-lane").style.getPropertyValue("--tl-track-hue")).toBe("#0d9488")
+  })
+
+  // AQU-646 stage 7 replaced rev 2's inline fill — which beat every class and
+  // therefore needed a gate withholding it in every warning state — with a
+  // custom property plus a literal class. The warning now wins the ordinary
+  // way, by sitting later in the same `cn()`, so there is no gate to get wrong.
+  it("still lets a warning repaint a coloured chip", () => {
+    const first = item({}, 12500) // [10, 22.5] — overruns into the next section
+    const second = item({ startTime: 20, endTime: 30 } as Partial<CellData>, 4000, "c2")
+    render(<TargetAudioLane {...base} items={[first, second]} color="0d9488" />)
+    const offender = screen.getByTestId("tl-target-c1")
+    expect(offender).toHaveAttribute("data-overflow", "overlap")
+    expect(offender.className).toContain("bg-red-100/80")
+    // …and no inline fill anywhere to have overridden it.
+    expect(offender.style.backgroundColor).toBe("")
+    // A chip on the same track that is behaving keeps its identity class.
+    expect(screen.getByTestId("tl-target-c2").className).toContain("bg-[color:var(--tl-track-take)]")
+  })
+
+  it("uses the lighter alpha for a generated voice", () => {
+    render(
+      <TargetAudioLane
+        {...base}
+        items={[{ ...item({}, 4000), kind: "generated" as const }]}
+        color="0d9488"
+      />,
+    )
+    expect(screen.getByTestId("tl-target-c1").className).toContain("bg-[color:var(--tl-track-gen)]")
+  })
+
+  it("draws a preset id and a picked hex through the same one mechanism", () => {
+    const { unmount } = render(<TargetAudioLane {...base} items={[item({}, 4000)]} color="green" />)
+    const preset = screen.getByTestId("tl-target-c1").className
+    unmount()
+    render(<TargetAudioLane {...base} items={[item({}, 4000)]} color="40c06e" />)
+    // Same classes, and the hue arrives the same way — stage 7 collapsed the
+    // two rendering paths rev 2 left behind into one.
+    expect(screen.getByTestId("tl-target-c1").className).toBe(preset)
+    expect(screen.getByTestId("tl-target-lane").style.getPropertyValue("--tl-track-hue")).toBe("#40c06e")
   })
 
   it("BLAME THE TRESPASSER: a chip slid back under the previous dub carries the warning; the in-bounds previous chip stays clean", () => {
@@ -162,12 +234,110 @@ describe("TargetAudioLane — overflow warnings", () => {
   })
 })
 
+describe("TargetAudioLane — the drag readout (Matt's QA, 2026-08-21)", () => {
+  // A dub-take drag used to show nothing at all: the tooltip is disabled
+  // mid-drag and the lane never had the timeline cards' readout bubble.
+
+  it("shows nothing at rest", () => {
+    render(<TargetAudioLane {...base} items={[item({}, 4000)]} onRetimeTarget={vi.fn()} />)
+    expect(screen.queryByTestId("tl-drag-chip")).not.toBeInTheDocument()
+  })
+
+  it("a move reads out the live span and the distance travelled, then goes away", () => {
+    render(<TargetAudioLane {...base} items={[item({}, 4000)]} onRetimeTarget={vi.fn()} />)
+    const chipEl = screen.getByTestId("tl-target-c1")
+    fireEvent.pointerDown(chipEl, { clientX: 400, pointerId: 1 })
+    fireEvent.pointerMove(window, { clientX: 320 }) // −2s → span [8, 12]
+    const readout = screen.getByTestId("tl-drag-chip")
+    expect(readout.textContent).toContain("00:08.000")
+    expect(readout.textContent).toContain("00:12.000")
+    expect(readout.textContent).toContain("(−2.00s)")
+    fireEvent.pointerUp(window, { clientX: 320 })
+    expect(screen.queryByTestId("tl-drag-chip")).not.toBeInTheDocument()
+  })
+
+  it("a trim reads out only the edge being pulled", () => {
+    render(<TargetAudioLane {...base} items={[item({}, 4000)]} onTrimTarget={vi.fn()} />)
+    const handle = screen.getByTestId("tl-target-c1-handle-l")
+    fireEvent.pointerDown(handle, { clientX: 400, pointerId: 1 })
+    fireEvent.pointerMove(window, { clientX: 440 }) // +1s → start 11, end still 14
+    const readout = screen.getByTestId("tl-drag-chip")
+    expect(readout.textContent).toContain("00:11.000")
+    expect(readout.textContent).toContain("(+1.00s)")
+    // The still edge is noise on a trim — only the moving one is read out.
+    expect(readout.textContent).not.toContain("00:14.000")
+    fireEvent.pointerUp(window, { clientX: 440 })
+  })
+
+  // ── AQU-646 stage 6F ───────────────────────────────────────────────────────
+  //
+  // Sam, 2026-08-27: the readout "should be at a higher up layer than it is,
+  // because currently it's partly hidden by the audio chips in a track above
+  // it." The lane's `isolate` — which is what keeps chips under the playhead —
+  // also caps this readout, while the rows that DON'T isolate leak their cards'
+  // positive z-index into the shared stacking context and paint over it. So the
+  // whole lane lifts for the duration of the gesture, driven by a flag on the
+  // chip itself so no drag state has to leave this component.
+  it("lifts the lane while a chip is being dragged, and puts it back after", () => {
+    render(<TargetAudioLane {...base} items={[item({}, 4000)]} onTrimTarget={vi.fn()} />)
+    const lane = screen.getByTestId("tl-target-lane")
+    // The rule that does the lifting is on the lane at rest…
+    expect(lane.className).toContain("has-[[data-tl-drag]]:z-40")
+    // …and nothing satisfies it until a drag is live.
+    expect(lane.querySelector("[data-tl-drag]")).toBeNull()
+
+    const handle = screen.getByTestId("tl-target-c1-handle-l")
+    fireEvent.pointerDown(handle, { clientX: 400, pointerId: 1 })
+    fireEvent.pointerMove(window, { clientX: 440 })
+    expect(screen.getByTestId("tl-target-c1")).toHaveAttribute("data-tl-drag")
+    expect(lane.querySelector("[data-tl-drag]")).not.toBeNull()
+
+    fireEvent.pointerUp(window, { clientX: 440 })
+    expect(screen.getByTestId("tl-target-c1")).not.toHaveAttribute("data-tl-drag")
+  })
+
+  // The same release path a cancelled gesture takes — a lane left permanently
+  // lifted would sit over the playhead for the rest of the session.
+  it("puts the lane back when the pointer is taken away mid-drag", () => {
+    render(<TargetAudioLane {...base} items={[item({}, 4000)]} onTrimTarget={vi.fn()} />)
+    const handle = screen.getByTestId("tl-target-c1-handle-l")
+    fireEvent.pointerDown(handle, { clientX: 400, pointerId: 1 })
+    fireEvent.pointerMove(window, { clientX: 440 })
+    expect(screen.getByTestId("tl-target-c1")).toHaveAttribute("data-tl-drag")
+    fireEvent.pointerCancel(window, { clientX: 440, pointerId: 1 })
+    expect(screen.getByTestId("tl-target-c1")).not.toHaveAttribute("data-tl-drag")
+  })
+})
+
 describe("TargetAudioLane — trimmed geometry (round 7)", () => {
   it("a head-trimmed chip draws from anchor + trimStart at the trimmed length", () => {
     render(<TargetAudioLane {...base} items={[item({}, 4000, "c1", { trimStartMs: 1000 })]} />)
     const chip = screen.getByTestId("tl-target-c1")
     expect(parseFloat(chip.style.left)).toBeCloseTo(11 * 40) // 10 + 1
     expect(parseFloat(chip.style.width)).toBeCloseTo(3 * 40) // 4 - 1
+  })
+
+  // AQU-646 stage 2, and a REGRESSION TEST FOR A LIVE BUG: before the guard, a
+  // right-press started a real move, so a right-drag across a take chip
+  // re-anchored it. See the twin in TimelineCard.test.tsx.
+  it("does not begin a drag on the secondary button", () => {
+    const onRetimeTarget = vi.fn()
+    render(<TargetAudioLane {...base} items={[item({}, 4000)]} onRetimeTarget={onRetimeTarget} />)
+    const chip = screen.getByTestId("tl-target-c1")
+    fireEvent.pointerDown(chip, { clientX: 400, pointerId: 1, button: 2 })
+    fireEvent.pointerMove(window, { clientX: 320 })
+    fireEvent.pointerUp(window, { clientX: 320 })
+    expect(onRetimeTarget).not.toHaveBeenCalled()
+  })
+
+  it("does not begin a drag on a macOS ctrl+click, which is button 0", () => {
+    const onRetimeTarget = vi.fn()
+    render(<TargetAudioLane {...base} items={[item({}, 4000)]} onRetimeTarget={onRetimeTarget} />)
+    const chip = screen.getByTestId("tl-target-c1")
+    fireEvent.pointerDown(chip, { clientX: 400, pointerId: 1, button: 0, ctrlKey: true })
+    fireEvent.pointerMove(window, { clientX: 320 })
+    fireEvent.pointerUp(window, { clientX: 320 })
+    expect(onRetimeTarget).not.toHaveBeenCalled()
   })
 
   it("END-based bounds: a chip can slide back into the previous section's space", () => {
@@ -310,10 +480,19 @@ describe("TargetAudioLane — trimmed geometry (round 7)", () => {
     expect(trims.trimStartMs).toBeUndefined() // back at the clip edge = cleared
   })
 
-  it("a chip persisted entirely before its verse collapses to a reachable sliver — and its innocent neighbour does not", () => {
+  it("a chip persisted entirely before its verse still meets its neighbour inside the audio", () => {
     // 2026-08-08: c2's whole clip sits inside c1's verse, so c2 is the
-    // trespasser and the one drawn short; before the at-fault rule the SLIVER
+    // trespasser and the one drawn short; before the at-fault rule the sliver
     // landed on c1, which had merely been arrived at.
+    //
+    // 2026-08-27: and until today c2 was drawn as a 10px stub parked at 20s —
+    // FOUR SECONDS PAST THE END OF ITS OWN AUDIO, which stops at 16. The cut
+    // came from the sections' facing borders, and nothing kept that answer
+    // inside the chips it was cutting. Note the sections here merely TOUCH:
+    // this needs no overlapping cues at all, only a next chip that ends before
+    // the previous section does. The pair now meets at 13, the midpoint of the
+    // audio they actually share, so both boxes hold real audio and stay
+    // disjoint — and c2 is more reachable than the sliver ever was.
     const first = item({}, 12000) // verse [10,20], clip [10,22] — runs long
     const second = item(
       { startTime: 20, endTime: 30, metadata: { target_start_ms: 10000 } } as Partial<CellData>,
@@ -323,12 +502,14 @@ describe("TargetAudioLane — trimmed geometry (round 7)", () => {
     render(<TargetAudioLane {...base} items={[first, second]} />)
     const c2 = screen.getByTestId("tl-target-c2")
     expect(c2).toHaveAttribute("data-truncated", "start")
-    expect(parseFloat(c2.style.width)).toBe(10) // the min-width sliver
-    expect(parseFloat(c2.style.left)).toBeCloseTo(20 * 40) // parked at its verse
-    // c1 is cut only at its own verse end, never down to a sliver.
+    expect(parseFloat(c2.style.left)).toBeCloseTo(13 * 40)
+    expect(parseFloat(c2.style.width)).toBeCloseTo(3 * 40)
+    // c1 is drawn short at the same point, so the two are back to back.
     const c1 = screen.getByTestId("tl-target-c1")
     expect(c1).toHaveAttribute("data-truncated", "end")
-    expect(parseFloat(c1.style.width)).toBeCloseTo(10 * 40)
+    expect(parseFloat(c1.style.left) + parseFloat(c1.style.width)).toBeCloseTo(13 * 40)
+    // NEITHER box may sit outside the audio it represents — the whole point.
+    expect(parseFloat(c2.style.left)).toBeLessThan(16 * 40)
   })
 
   it("moving a head-trimmed chip commits the ANCHOR, not the visual left", () => {
@@ -715,6 +896,39 @@ describe("TargetAudioLane — buried chips stay reachable (SUB-48)", () => {
     expect(screen.getByTestId("tl-target-c2-overflow-head")).toBeInTheDocument()
   })
 
+  it("two chips colliding in a GAP between their verses meet inside the gap — not at their distant borders", () => {
+    // 2026-08-27 (Sam's dual-overlap-across-a-gap round): verses [10,19] and
+    // [21,30]; c1's clip runs to 20.5, c2 is back-dragged to 19.5 — they truly
+    // overlap [19.5, 20.5], entirely inside the gap. The old per-border cuts
+    // painted them 2s APART at rest while both warned about an overlap, and no
+    // hover could ever show it, because each chip expanded alone against the
+    // other's distant cut. Now they meet »|« at 20, the overlap's midpoint.
+    render(
+      <TargetAudioLane
+        {...base}
+        items={[
+          item({ startTime: 10, endTime: 19 }, 10_500, "c1"), // [10, 20.5]
+          item(
+            { startTime: 21, endTime: 30, metadata: { target_start_ms: 19_500 } } as Partial<CellData>,
+            10_000,
+            "c2",
+          ), // [19.5, 29.5]
+        ]}
+      />,
+    )
+    const c1 = screen.getByTestId("tl-target-c1")
+    const c2 = screen.getByTestId("tl-target-c2")
+    expect(c1).toHaveAttribute("data-truncated", "end")
+    expect(c2).toHaveAttribute("data-truncated", "start")
+    expect(parseFloat(c1.style.left) + parseFloat(c1.style.width)).toBeCloseTo(20 * 40)
+    expect(parseFloat(c2.style.left)).toBeCloseTo(20 * 40)
+    // Hovering the tail offender extends its true edge ACROSS the resting
+    // neighbour's cut — the collision the red warns about is finally visible.
+    fireEvent.pointerEnter(c1)
+    expect(parseFloat(c1.style.left) + parseFloat(c1.style.width)).toBeCloseTo(20.5 * 40)
+    expect(parseFloat(c2.style.left)).toBeCloseTo(20 * 40)
+  })
+
   it("starting early with nobody underneath is not truncated", () => {
     render(
       <TargetAudioLane
@@ -946,7 +1160,7 @@ describe("TargetAudioLane — empty-slot record button (SUB-51)", () => {
     expect(onSeek).not.toHaveBeenCalled()
   })
 
-  it("is absent when read-only, unwired, or the section is too narrow to hit", () => {
+  it("is absent when read-only, unwired, or the section is a sliver", () => {
     const { rerender } = render(
       <TargetAudioLane {...base} items={[]} emptyCells={[emptyCell("c9")]} editable={false} onOpenRecording={vi.fn()} />,
     )
@@ -955,11 +1169,24 @@ describe("TargetAudioLane — empty-slot record button (SUB-51)", () => {
     rerender(<TargetAudioLane {...base} items={[]} emptyCells={[emptyCell("c9")]} />)
     expect(screen.queryByTestId("tl-target-empty-c9")).toBeNull()
 
-    // 0.5s at 40px/s = 20px — no room for a 28px button.
+    // 0.1s at 40px/s = 4px, under MIN_SLOT_PX.
     rerender(
-      <TargetAudioLane {...base} items={[]} emptyCells={[emptyCell("c9", 30, 30.5)]} onOpenRecording={vi.fn()} />,
+      <TargetAudioLane {...base} items={[]} emptyCells={[emptyCell("c9", 30, 30.1)]} onOpenRecording={vi.fn()} />,
     )
     expect(screen.queryByTestId("tl-target-empty-c9")).toBeNull()
+  })
+
+  // Round 9: this used to be suppressed. The floor was 24px in three separate
+  // copies, which meant that zooming out silently took the record button away
+  // from most sections — Sam read it as "the button doesn't show up on shorter
+  // sections". The rule is the 0.2-SECOND floor; the pixel gate only exists to
+  // stop offering a button over a sliver.
+  it("a 20px section still offers its button — the pixel floor is 5px, not 24px", () => {
+    // 0.5s at 40px/s.
+    render(
+      <TargetAudioLane {...base} items={[]} emptyCells={[emptyCell("c9", 30, 30.5)]} onOpenRecording={vi.fn()} />,
+    )
+    expect(screen.getByTestId("tl-target-empty-c9")).toBeInTheDocument()
   })
 
   it("uses a testid distinct from a real chip's, so a dub-free cell still has no chip", () => {
@@ -980,5 +1207,645 @@ describe("TargetAudioLane — empty-slot record button (SUB-51)", () => {
       />,
     )
     expect(screen.queryByTestId("tl-target-empty-c9")).toBeNull()
+  })
+})
+
+// Round 9: both kinds of record slot share ONE hot key, so an add-and-record
+// slot over a silence and an empty-section slot can never both be lit. See
+// TimelineSlotButton's header for the bug that forced this off CSS `:hover`.
+describe("TargetAudioLane — which record slot is hot", () => {
+  const emptyCell = (id: string, startTime = 30, endTime = 36): CellData =>
+    ({ id, fileId: "f1", original: "", translated: "", medium: "media", startTime, endTime }) as unknown as CellData
+  const both = {
+    ...base,
+    items: [],
+    emptyCells: [emptyCell("c9", 30, 34)],
+    emptySpans: [{ startSec: 1, endSec: 5 }],
+    onOpenRecording: vi.fn(),
+    onAddLineAndRecord: vi.fn(),
+  }
+  const lit = () => document.querySelectorAll('[data-hot="true"]').length
+
+  it("lights one slot at a time across BOTH kinds", () => {
+    render(<TargetAudioLane {...both} />)
+    fireEvent.pointerEnter(screen.getByTestId("tl-target-add-1"))
+    expect(screen.getByTestId("tl-target-add-1-record")).toHaveAttribute("data-hot", "true")
+    expect(lit()).toBe(1)
+
+    fireEvent.pointerEnter(screen.getByTestId("tl-target-empty-c9"))
+    expect(screen.getByTestId("tl-target-empty-c9-record")).toHaveAttribute("data-hot", "true")
+    expect(lit()).toBe(1)
+  })
+
+  it("scrolling the track forgets which was hot", () => {
+    const { rerender } = render(<TargetAudioLane {...both} />)
+    fireEvent.pointerEnter(screen.getByTestId("tl-target-empty-c9"))
+    expect(lit()).toBe(1)
+    rerender(<TargetAudioLane {...both} viewStartSec={12} viewEndSec={112} />)
+    expect(lit()).toBe(0)
+  })
+
+  it("leaving clears it", () => {
+    render(<TargetAudioLane {...both} />)
+    fireEvent.pointerEnter(screen.getByTestId("tl-target-add-1"))
+    fireEvent.pointerLeave(screen.getByTestId("tl-target-add-1"))
+    expect(lit()).toBe(0)
+  })
+})
+
+// Round 9b: the dub chip follows the same corner rule as every other chip, with
+// its own smaller cap (it was rounded-md, not rounded-lg).
+describe("TargetAudioLane — chip corners", () => {
+  it("a wide dub chip keeps its 6px corner; a narrow one sharpens", () => {
+    const { unmount } = render(<TargetAudioLane {...base} items={[item({}, 4000)]} />)
+    // 4s at 40px/s = 160px, well past where the full corner is affordable.
+    expect(parseFloat(screen.getByTestId("tl-target-c1").style.borderRadius)).toBe(6)
+    unmount()
+
+    // The same take at 4px/s = 16px wide. Same ramp, its own smaller cap.
+    render(<TargetAudioLane {...base} pxPerSec={4} items={[item({}, 4000)]} />)
+    const narrow = parseFloat(screen.getByTestId("tl-target-c1").style.borderRadius)
+    expect(narrow).toBeCloseTo(chipRadiusPx(16, 6), 3)
+    expect(narrow).toBeLessThan(6)
+  })
+})
+
+// ── AQU-646 stage 2: the track's colour, and the sparkle that makes close
+// tones safe ──────────────────────────────────────────────────────────────
+//
+// These two are one design, not two features. The palette's pairs are
+// deliberately near neighbours in hue — they say "same track", not "different
+// kind of clip" — which only works because the sparkle carries the
+// recorded/generated distinction the tones no longer can.
+
+describe("TargetAudioLane — the track's colour", () => {
+  const classesOf = (id = "c1") => screen.getByTestId(`tl-target-${id}`).className
+
+  const laneOf = () => screen.getByTestId("tl-target-lane")
+  const hueOf = () => laneOf().style.getPropertyValue("--tl-track-hue")
+
+  // AQU-646 stage 7: ONE HUE, THREE ALPHAS (Sam's own spec). The hue is set as
+  // inherited custom properties on the LANE, and the chips wear literal classes
+  // that read them — which is what keeps the warning states able to win.
+  //
+  // happy-dom does not resolve `var()`, so these assert the variable and the
+  // class, never a computed colour. That is also the honest thing to pin: the
+  // computed colour is the browser's job and the wiring is ours.
+  it("publishes the hue and its alphas on the lane, for everything inside to read", () => {
+    render(<TargetAudioLane {...base} color="cyan" items={[item({}, 4000)]} />)
+    const style = laneOf().style
+    expect(style.getPropertyValue("--tl-track-hue")).toBe("#00c3cd")
+    expect(style.getPropertyValue("--tl-track-take")).toBe("rgba(0, 195, 205, 0.67)")
+    expect(style.getPropertyValue("--tl-track-gen")).toBe("rgba(0, 195, 205, 0.33)")
+    // THE LANE PAINTS NOTHING (Sam, 2026-08-27). It briefly wore a wash of its own;
+    // that value went to the generated-voice chip instead, because a tinted
+    // lane competed with the clips sitting on it.
+    expect(laneOf().className).not.toContain("bg-[color:var(--tl-track")
+  })
+
+  it("draws a take at 67% and a generated voice at 33%", () => {
+    const { unmount } = render(<TargetAudioLane {...base} color="cyan" items={[item({}, 4000)]} />)
+    expect(classesOf()).toContain("bg-[color:var(--tl-track-take)]")
+    unmount()
+
+    const generated = { ...item({}, 4000), kind: "generated" as const }
+    render(<TargetAudioLane {...base} color="cyan" items={[generated]} />)
+    expect(classesOf()).toContain("bg-[color:var(--tl-track-gen)]")
+    // BOTH chips are washes now, so both read against the page rather than
+    // against the hue — ink chosen for the hue would be wrong at these alphas.
+    expect(classesOf()).toContain("text-foreground")
+    expect(classesOf()).not.toContain("--tl-track-ink")
+  })
+
+  it("defaults to green for a track nobody has coloured", () => {
+    render(<TargetAudioLane {...base} items={[item({}, 4000)]} />)
+    expect(hueOf()).toBe("#40c06e")
+  })
+
+  it("takes a picked hex as readily as a preset id", () => {
+    render(<TargetAudioLane {...base} color="123456" items={[item({}, 4000)]} />)
+    expect(hueOf()).toBe("#123456")
+  })
+
+  // Every value already on disk is a two-part pair from the retired two-axis
+  // palette. The first half wins; the second is dropped with the axis.
+  it("reads a legacy pair by its first half", () => {
+    render(<TargetAudioLane {...base} color="violet-magenta" items={[item({}, 4000)]} />)
+    expect(hueOf()).toBe("#865deb")
+  })
+
+  // The server validates `color` as a PATTERN, not an enum, so that a newer
+  // client's palette entry round-trips through an older one. This is the other
+  // half of that bargain: the old client draws the default rather than nothing.
+  it("falls back to the default for an id this build cannot name", () => {
+    render(<TargetAudioLane {...base} color="ultramarine-2" items={[item({}, 4000)]} />)
+    expect(hueOf()).toBe("#40c06e")
+  })
+
+  // THE ONE THAT MATTERS MOST. `cn` resolves last-wins per utility group, and
+  // the warning layers only beat the palette by sitting after it in the class
+  // list. A palette applied at the wrong position — or one that introduced a
+  // utility group the warnings do not also set — would leave a coloured track's
+  // overlaps looking exactly like a track at rest.
+  it("lets the at-fault red beat every palette entry", () => {
+    for (const color of [undefined, "cyan", "amber", "coral", "123456", "green-teal", "default"]) {
+      // c1 runs to 22.5, into c2's chip at 20 — the shape the overflow suite
+      // above already pins, so this case is testing the COLOUR and nothing else.
+      const first = item({}, 12500)
+      const second = item({ startTime: 20, endTime: 30 } as Partial<CellData>, 4000, "c2")
+      const { unmount } = render(<TargetAudioLane {...base} color={color} items={[first, second]} />)
+      const atFault = screen.getByTestId("tl-target-c1")
+      expect(atFault, `palette ${String(color)}`).toHaveAttribute("data-overflow", "overlap")
+      expect(atFault.className, `palette ${String(color)}`).toContain("bg-red-100/80")
+      unmount()
+    }
+  })
+
+  it("lets the selection ring survive every palette entry", () => {
+    for (const color of [undefined, "teal", "indigo", "fuchsia", "lime", "slate"]) {
+      const { unmount } = render(
+        <TargetAudioLane {...base} color={color} selectedId="c1" items={[item({}, 4000)]} />,
+      )
+      expect(classesOf(), `palette ${String(color)}`).toContain("ring-sky-500")
+      unmount()
+    }
+  })
+})
+
+describe("TargetAudioLane — the sparkle on generated chips", () => {
+  const generated = (over: Partial<CellData> = {}, durationMs = 4000) => ({
+    ...item(over, durationMs),
+    kind: "generated" as const,
+  })
+
+  it("marks a generated voice and leaves a recorded take unmarked", () => {
+    const { unmount } = render(<TargetAudioLane {...base} items={[generated()]} />)
+    expect(screen.getByTestId("tl-target-c1-generated")).toBeTruthy()
+    unmount()
+    // Recorded is the default; generated is the exception worth marking.
+    render(<TargetAudioLane {...base} items={[item({}, 4000)]} />)
+    expect(screen.queryByTestId("tl-target-c1-generated")).toBeNull()
+  })
+
+  // Sam, 2026-08-22: "we'd just move the sparkles over to the right so that it
+  // doesn't collide with the left trim handle." The handle is the leftmost 7px
+  // and is the control you reach for.
+  it("sits clear of the left trim handle, vertically centred", () => {
+    render(<TargetAudioLane {...base} items={[generated()]} />)
+    const glyph = screen.getByTestId("tl-target-c1-generated")
+    expect(glyph.className).toContain("left-2")
+    expect(glyph.className).toContain("top-1/2")
+    expect(glyph.className).toContain("-translate-y-1/2")
+  })
+
+  // They occupy the same pixels: the corner badge is 14px tall at top-1, so at
+  // any height where it renders it covers the vertical centre. A missing take
+  // is a STATE; "this one is synthetic" is an identity the colour still says.
+  it("gives way to the corner state badge", () => {
+    render(
+      <TargetAudioLane {...base} items={[generated()]} missingCellIds={new Set(["c1"])} />,
+    )
+    expect(screen.getByTestId("tl-target-c1-missing")).toBeTruthy()
+    expect(screen.queryByTestId("tl-target-c1-generated")).toBeNull()
+  })
+
+  it("is withheld from a chip too narrow to hold it", () => {
+    render(<TargetAudioLane {...base} pxPerSec={2} items={[generated()]} />)
+    expect(screen.queryByTestId("tl-target-c1-generated")).toBeNull()
+  })
+})
+
+// ── AQU-646 stage 5 ─────────────────────────────────────────────────────────
+//
+// Sam, 2026-08-26: "in the top left corner we should have a little play button
+// that plays just that clip… as it appears in the timeline line." The engine
+// itself is silent here — happy-dom has no AudioContext — which is exactly the
+// discipline the engine was built with: it hands back a handle either way, so
+// everything about the BUTTON is provable without a browser.
+describe("TargetAudioLane — the play button (stage 5)", () => {
+  /** The lane only hands a chip a preview when it can actually reach bytes,
+   *  which is why the rest of this file gets no play button and needs no
+   *  change — the same "absent means the feature isn't there" rule as `peaks`. */
+  const wired = {
+    ...base,
+    projectId: "p1",
+    fileId: "f1",
+    session: { jwt: "tok", username: "sam" } as never,
+  }
+
+  it("is absent on a lane that cannot reach audio at all", () => {
+    render(<TargetAudioLane {...base} items={[item({}, 4000)]} />)
+    expect(screen.queryByTestId("tl-target-c1-play")).toBeNull()
+  })
+
+  it("appears once the lane can reach the clip", () => {
+    render(<TargetAudioLane {...wired} items={[item({}, 4000)]} />)
+    expect(screen.getByTestId("tl-target-c1-play")).toBeInTheDocument()
+  })
+
+  // THE RULING THIS FEATURE WOULD OTHERWISE VIOLATE BY DEFAULT. The chip's own
+  // onClick seeks, so without `stopPropagation` pressing play would move the
+  // playhead — the one thing Sam said it must not do.
+  it("does not move the playhead", async () => {
+    const onSeek = vi.fn()
+    render(<TargetAudioLane {...wired} items={[item({}, 4000)]} onSeek={onSeek} />)
+    await pressPlay()
+    expect(onSeek).not.toHaveBeenCalled()
+  })
+
+  // …and the other half of the same guard: pressing it must not begin a drag.
+  it("does not begin a chip drag", () => {
+    const onRetimeTarget = vi.fn()
+    render(<TargetAudioLane {...wired} items={[item({}, 4000)]} onRetimeTarget={onRetimeTarget} />)
+    const play = screen.getByTestId("tl-target-c1-play")
+    fireEvent.pointerDown(play, { button: 0, clientX: 100 })
+    fireEvent.pointerMove(window, { clientX: 300 })
+    fireEvent.pointerUp(window, { clientX: 300 })
+    expect(onRetimeTarget).not.toHaveBeenCalled()
+  })
+
+  // The top-left corner is a single priority slot, and three of its four states
+  // mean the clip cannot play anyway.
+  it("yields the corner to a state glyph", () => {
+    render(<TargetAudioLane {...wired} items={[item({}, 4000)]} missingCellIds={new Set(["c1"])} />)
+    expect(screen.getByTestId("tl-target-c1-missing")).toBeInTheDocument()
+    expect(screen.queryByTestId("tl-target-c1-play")).toBeNull()
+  })
+
+  it("goes away on a chip too small to hold it", () => {
+    render(<TargetAudioLane {...wired} pxPerSec={4} items={[item({}, 4000)]} />)
+    expect(screen.queryByTestId("tl-target-c1-play")).toBeNull()
+  })
+
+  // Two corners want the width now, so the mic's threshold widens the same way
+  // it already does for a state glyph.
+  // ── It says why, instead of doing nothing (2026-08-28) ───────────────────
+  //
+  // A take nobody has measured that is over the byte ceiling is refused deep
+  // inside the decode path, so the button made no sound and offered no reason.
+  // Sam's ruling: explain it, and never fall through to the streaming engine —
+  // an unmeasured clip is exactly the kind whose seek kills playback.
+  const refusingPreview = (why: "too-long" | "too-large" | "unavailable") => {
+    const play = vi.fn()
+    return {
+      play,
+      factory: () => ({ prime: async () => why, play }),
+    }
+  }
+
+  it("explains a take it cannot preview, and does not try to play it", async () => {
+    const stub = refusingPreview("too-large")
+    render(<TargetAudioLane {...base} previewFactory={stub.factory as never} items={[item({}, 4000)]} />)
+    await pressPlay()
+    expect(stub.play).not.toHaveBeenCalled()
+    expect(toastAdd).toHaveBeenCalledWith(
+      expect.objectContaining({ title: expect.stringContaining("too big to preview") }),
+    )
+  })
+
+  it("says something different for a take that is merely too long", async () => {
+    const stub = refusingPreview("too-long")
+    render(<TargetAudioLane {...base} previewFactory={stub.factory as never} items={[item({}, 4000)]} />)
+    await pressPlay()
+    expect(toastAdd).toHaveBeenCalledWith(
+      expect.objectContaining({ title: expect.stringContaining("too long to preview") }),
+    )
+  })
+
+  // A silent handle fires `onEnded` SYNCHRONOUSLY and reports `isPlaying()`
+  // false. Storing it left a dead handle in the ref, after which every press
+  // took the stop branch and did nothing — the button wedged itself.
+  it("does not wedge itself on an engine that ends instantly", async () => {
+    const play = vi.fn(() => ({
+      stop: () => {},
+      isPlaying: () => false,
+      positionSec: () => null,
+      audible: false,
+    }))
+    const factory = () => ({ prime: async () => "ready" as const, play })
+    render(<TargetAudioLane {...base} previewFactory={factory as never} items={[item({}, 4000)]} />)
+    await pressPlay()
+    await pressPlay()
+    // The second press must be another attempt to PLAY, not a stop of a
+    // handle that was never sounding.
+    expect(play).toHaveBeenCalledTimes(2)
+  })
+
+  it("leaves room for the record button on a chip wide enough for both", () => {
+    render(
+      <TargetAudioLane {...wired} items={[item({}, 4000)]} onOpenRecording={() => {}} />,
+    )
+    expect(screen.getByTestId("tl-target-c1-play")).toBeInTheDocument()
+    expect(screen.getByTestId("tl-target-c1-record")).toBeInTheDocument()
+  })
+})
+
+// ── 2026-08-27 (Sam): the preview mini-playhead ─────────────────────────────
+//
+// "a white vertical line… not interactible, it just appears when the user
+// clicks the play button… moves along as the chip plays… disappears when
+// stopped or when it reaches the end." It rides the ENGINE's clock
+// (`positionSec`), which the real engine never advances under happy-dom — so
+// these tests hold the chip open with the lane's `previewFactory` seam and
+// script the position themselves.
+describe("TargetAudioLane — the preview mini-playhead (2026-08-27)", () => {
+  function stubPreview() {
+    let pos: number | null = null
+    let onEnded: (() => void) | undefined
+    const handle = {
+      stop: () => onEnded?.(),
+      isPlaying: () => true,
+      positionSec: () => pos,
+      audible: true,
+    }
+    const factory = () => ({
+      prime: async () => "ready" as const,
+      play: (_w: { startSec: number; endSec: number | null }, opts?: { onEnded?(): void }) => {
+        onEnded = opts?.onEnded
+        return handle
+      },
+    })
+    return { factory, setPos: (p: number | null) => { pos = p }, end: () => onEnded?.() }
+  }
+
+  let rafQ: FrameRequestCallback[] = []
+  beforeEach(() => {
+    rafQ = []
+    // A QUEUE, flushed by hand — a synchronous stub would recurse forever,
+    // since the tick schedules its successor (the stage-5 lesson).
+    vi.spyOn(globalThis, "requestAnimationFrame").mockImplementation((cb) => (rafQ.push(cb), rafQ.length))
+    vi.spyOn(globalThis, "cancelAnimationFrame").mockImplementation(() => {})
+  })
+  afterEach(() => vi.restoreAllMocks())
+  const frame = () => { const q = rafQ; rafQ = []; q.forEach((cb) => cb(0)) }
+
+  it("appears with the play press, rides the engine's clock, and leaves on stop", async () => {
+    const stub = stubPreview()
+    render(<TargetAudioLane {...base} previewFactory={stub.factory} items={[item({}, 4000)]} />)
+    expect(screen.queryByTestId("tl-target-c1-playline")).toBeNull()
+
+    await pressPlay()
+    const line = screen.getByTestId("tl-target-c1-playline")
+    // Not interactible, and invisible until the sound actually starts — a
+    // decode is in flight and a line stuck at x=0 would be a lie.
+    expect(line.className).toContain("pointer-events-none")
+    frame()
+    expect(line.style.opacity).toBe("0")
+
+    // Sound begins: clip-second 1 on a chip anchored at 10s → 40px in at 40px/s.
+    stub.setPos(1)
+    frame()
+    expect(line.style.opacity).toBe("1")
+    expect(line.style.left).toBe("40px")
+    stub.setPos(2.5)
+    frame()
+    expect(line.style.left).toBe("100px")
+
+    // The play button is a toggle; stopping unmounts the line outright.
+    await pressPlay()
+    expect(screen.queryByTestId("tl-target-c1-playline")).toBeNull()
+  })
+
+  it("disappears on its own when the clip reaches the end", async () => {
+    const stub = stubPreview()
+    render(<TargetAudioLane {...base} previewFactory={stub.factory} items={[item({}, 4000)]} />)
+    await pressPlay()
+    expect(screen.getByTestId("tl-target-c1-playline")).toBeInTheDocument()
+    act(() => stub.end())
+    expect(screen.queryByTestId("tl-target-c1-playline")).toBeNull()
+  })
+
+  it("maps a trimmed take through the anchor, not the visual left", async () => {
+    // trimStart 1s: the chip's box begins at clip-second 1, so position 1 is
+    // the LEFT EDGE, not 40px in.
+    const stub = stubPreview()
+    render(
+      <TargetAudioLane {...base} previewFactory={stub.factory} items={[item({}, 4000, "c1", { trimStartMs: 1000 })]} />,
+    )
+    await pressPlay()
+    stub.setPos(1)
+    frame()
+    expect(screen.getByTestId("tl-target-c1-playline").style.left).toBe("0px")
+    stub.setPos(1.5)
+    frame()
+    expect(screen.getByTestId("tl-target-c1-playline").style.left).toBe("20px")
+  })
+
+  // ── The progress fill (Sam, same round): the unplayed side drops to the
+  // hover rung and the chip re-fills behind the line — the SoundCloud pattern
+  // in the palette's own ladder.
+  it("dims the unplayed side on press and re-fills behind the playhead", async () => {
+    const stub = stubPreview()
+    render(<TargetAudioLane {...base} previewFactory={stub.factory} items={[item({}, 4000)]} />)
+    const chip = screen.getByTestId("tl-target-c1")
+    expect(chip.className).not.toContain("bg-[image:")
+
+    await pressPlay()
+    // The identity fill is muted and the split gradient takes the slot…
+    expect(chip.className).toContain("bg-transparent")
+    expect(chip.className).toContain("var(--tl-track-take)_var(--tl-play-x")
+    expect(chip.className).toContain("var(--tl-track-hover)_var(--tl-play-x")
+    // …split at 0 while the decode is still in flight (whole chip = "not yet"),
+    frame()
+    expect(chip.style.getPropertyValue("--tl-play-x")).toBe("0px")
+    // …then at the playhead once sound runs.
+    stub.setPos(2)
+    frame()
+    expect(chip.style.getPropertyValue("--tl-play-x")).toBe("80px")
+
+    await pressPlay()
+    expect(chip.className).not.toContain("bg-[image:")
+    expect(chip.style.getPropertyValue("--tl-play-x")).toBe("")
+  })
+
+  it("a generated voice re-fills to its own lighter rung", async () => {
+    const stub = stubPreview()
+    render(
+      <TargetAudioLane
+        {...base}
+        previewFactory={stub.factory}
+        items={[{ ...item({}, 4000), kind: "generated" }]}
+      />,
+    )
+    await pressPlay()
+    expect(screen.getByTestId("tl-target-c1").className).toContain("var(--tl-track-gen)_var(--tl-play-x")
+  })
+
+  it("never repaints a red at-fault chip — the warning still beats playback", async () => {
+    const stub = stubPreview()
+    render(
+      <TargetAudioLane
+        {...base}
+        previewFactory={stub.factory}
+        items={[
+          item({}, 12500), // [10, 22.5] — overruns into the next chip
+          item({ startTime: 20, endTime: 30 } as Partial<CellData>, 4000, "c2"),
+        ]}
+      />,
+    )
+    const offender = screen.getByTestId("tl-target-c1")
+    expect(offender).toHaveAttribute("data-overflow", "overlap")
+    await pressPlay()
+    expect(offender.className).not.toContain("bg-[image:")
+    expect(offender.className).toContain("bg-red-100/80")
+    // The line itself still rides — it is the warning-safe half of the feature.
+    expect(screen.getByTestId("tl-target-c1-playline")).toBeInTheDocument()
+  })
+})
+
+// The tape noises these once accompanied were removed on 2026-08-28 (Sam:
+// "it actually just sounds awful"). What the block pins outlived them: a trim
+// drag TAKES THE TRANSPORT, a click does not, and a body drag does not. That
+// pause was introduced to keep the grains from fighting the film; it stays on
+// its own merit, because starting to edit a take is a reason to stop playing
+// it, and removing it would be a behaviour change nobody asked for.
+describe("TargetAudioLane — a trim drag takes the transport", () => {
+  const wired = {
+    ...base,
+    projectId: "p1",
+    fileId: "f1",
+    session: { jwt: "tok", username: "sam" } as never,
+  }
+
+  // Sam ruled that dragging a handle pauses the transport and leaves it paused.
+  it("takes the transport once the drag is real", () => {
+    pauseAllTransports.mockClear()
+    render(<TargetAudioLane {...wired} items={[item({}, 4000)]} onTrimTarget={() => {}} />)
+    const handle = screen.getByTestId("tl-target-c1-handle-l")
+    fireEvent.pointerDown(handle, { button: 0, clientX: 100 })
+    fireEvent.pointerMove(window, { clientX: 140 })
+    expect(pauseAllTransports).toHaveBeenCalledTimes(1)
+    fireEvent.pointerUp(window, { clientX: 140 })
+  })
+
+  // ON THE THRESHOLD, NOT ON POINTERDOWN. A press that never becomes a drag
+  // stays exactly the click it always was — and a click has never stopped the
+  // film.
+  it("leaves the transport alone for a press that never becomes a drag", () => {
+    pauseAllTransports.mockClear()
+    render(<TargetAudioLane {...wired} items={[item({}, 4000)]} onTrimTarget={() => {}} />)
+    const handle = screen.getByTestId("tl-target-c1-handle-l")
+    fireEvent.pointerDown(handle, { button: 0, clientX: 100 })
+    fireEvent.pointerMove(window, { clientX: 102 })
+    fireEvent.pointerUp(window, { clientX: 102 })
+    expect(pauseAllTransports).not.toHaveBeenCalled()
+  })
+
+  // Only the handles: a body drag moves the chip without changing what it
+  // contains, so there is nothing to stop the film for.
+  it("leaves the transport alone when the chip BODY is dragged", () => {
+    pauseAllTransports.mockClear()
+    render(<TargetAudioLane {...wired} items={[item({}, 4000)]} onRetimeTarget={() => {}} />)
+    fireEvent.pointerDown(screen.getByTestId("tl-target-c1"), { button: 0, clientX: 100 })
+    fireEvent.pointerMove(window, { clientX: 160 })
+    fireEvent.pointerUp(window, { clientX: 160 })
+    expect(pauseAllTransports).not.toHaveBeenCalled()
+  })
+
+  it("a cancelled drag commits nothing", () => {
+    const onTrimTarget = vi.fn()
+    render(<TargetAudioLane {...wired} items={[item({}, 4000)]} onTrimTarget={onTrimTarget} />)
+    const handle = screen.getByTestId("tl-target-c1-handle-l")
+    fireEvent.pointerDown(handle, { button: 0, clientX: 100 })
+    fireEvent.pointerMove(window, { clientX: 140 })
+    fireEvent.pointerCancel(window, { clientX: 140 })
+    expect(onTrimTarget).not.toHaveBeenCalled()
+  })
+
+  // The drag still has to do its actual job.
+  it("still commits the trim on a real release", () => {
+    const onTrimTarget = vi.fn()
+    render(<TargetAudioLane {...wired} items={[item({}, 4000)]} onTrimTarget={onTrimTarget} />)
+    const handle = screen.getByTestId("tl-target-c1-handle-l")
+    fireEvent.pointerDown(handle, { button: 0, clientX: 100 })
+    fireEvent.pointerMove(window, { clientX: 140 })
+    fireEvent.pointerUp(window, { clientX: 140 })
+    expect(onTrimTarget).toHaveBeenCalledTimes(1)
+  })
+})
+
+// ── A take may not be trimmed clear of its own line (2026-08-27) ────────────
+//
+// Found by Sam. `proposeSpan`'s MOVE arm has enforced end-based bounds since
+// 2026-08-05 — a chip may slide back into the previous section's space, but it
+// must keep some audible contact with the line it performs. Neither TRIM arm
+// enforced any of it, so the clamp was escapable in two moves: drag the chip as
+// far as the move clamp allows, then pull the near handle past that limit. The
+// result persists, syncs and reaches export; only the next move gesture snaps
+// it back, so it is a state you can only stay in by not touching the chip.
+//
+// Section here is [10,20], so the grip is 0.05s: an audible START may sit at
+// 19.95 at the latest, an audible END at 10.05 at the earliest.
+describe("TargetAudioLane — the trim handles cannot leave the section", () => {
+  const trimsOf = (fn: ReturnType<typeof vi.fn>) =>
+    fn.mock.calls[0]![2] as { trimStartMs?: number; trimEndMs?: number }
+
+  it("the LEFT handle stops where the chip still touches its line", () => {
+    const onTrimTarget = vi.fn()
+    // Anchored at 19 — already at the far end of its section, where the move
+    // clamp would have left it. The chip is [19, 23].
+    render(
+      <TargetAudioLane
+        {...base}
+        items={[item({ metadata: { target_start_ms: 19_000 } }, 4000)]}
+        onTrimTarget={onTrimTarget}
+      />,
+    )
+    const handle = screen.getByTestId("tl-target-c1-handle-l")
+    fireEvent.pointerDown(handle, { clientX: 19 * 40, pointerId: 1 })
+    fireEvent.pointerMove(window, { clientX: 21 * 40 }) // +2s → 21, two seconds past the line
+    fireEvent.pointerUp(window, { clientX: 21 * 40 })
+
+    const trims = trimsOf(onTrimTarget)
+    // 19.95 − 19 = 950ms, not the 2000 the pointer asked for.
+    expect(trims.trimStartMs).toBe(950)
+    // The property, stated: the audible start still reaches into the section.
+    expect(19 + (trims.trimStartMs ?? 0) / 1000).toBeLessThanOrEqual(19.95)
+  })
+
+  it("the RIGHT handle stops where the chip still touches its line", () => {
+    const onTrimTarget = vi.fn()
+    // Anchored at 8 — slid back into the previous section's space, which the
+    // move clamp allows. The chip is [8, 12] and only its tail is in-section.
+    render(
+      <TargetAudioLane
+        {...base}
+        items={[item({ metadata: { target_start_ms: 8_000 } }, 4000)]}
+        onTrimTarget={onTrimTarget}
+      />,
+    )
+    const handle = screen.getByTestId("tl-target-c1-handle-r")
+    fireEvent.pointerDown(handle, { clientX: 12 * 40, pointerId: 1 })
+    fireEvent.pointerMove(window, { clientX: 9 * 40 }) // −3s → 9, clear of the line
+    fireEvent.pointerUp(window, { clientX: 9 * 40 })
+
+    const trims = trimsOf(onTrimTarget)
+    // 10.05 − 8 = 2050ms, not the 1000 the pointer asked for.
+    expect(trims.trimEndMs).toBe(2050)
+    expect(8 + (trims.trimEndMs ?? 0) / 1000).toBeGreaterThanOrEqual(10.05)
+  })
+
+  // The clamp is a bound, not a pin: a trim that stays in contact is untouched.
+  it("leaves an ordinary trim alone", () => {
+    const onTrimTarget = vi.fn()
+    render(<TargetAudioLane {...base} items={[item({}, 4000)]} onTrimTarget={onTrimTarget} />)
+    const handle = screen.getByTestId("tl-target-c1-handle-l")
+    fireEvent.pointerDown(handle, { clientX: 400, pointerId: 1 })
+    fireEvent.pointerMove(window, { clientX: 440 }) // +1s → 11, well inside [10,20]
+    fireEvent.pointerUp(window, { clientX: 440 })
+    expect(trimsOf(onTrimTarget).trimStartMs).toBe(1000)
+  })
+
+  // The move arm was rewritten in terms of the same two helpers the trim arms
+  // now use. "Provably identical" is the claim, so it gets an assertion.
+  it("the move clamp still stops at exactly the same place", () => {
+    const onRetimeTarget = vi.fn()
+    render(<TargetAudioLane {...base} items={[item({}, 4000)]} onRetimeTarget={onRetimeTarget} />)
+    const chip = screen.getByTestId("tl-target-c1")
+    fireEvent.pointerDown(chip, { clientX: 400, pointerId: 1 })
+    fireEvent.pointerMove(window, { clientX: 400 + 20 * 40 }) // shove it 20s right
+    fireEvent.pointerUp(window, { clientX: 400 + 20 * 40 })
+    const [, anchorSec] = onRetimeTarget.mock.calls[0] as [string, number]
+    expect(anchorSec).toBeCloseTo(19.95, 5)
   })
 })

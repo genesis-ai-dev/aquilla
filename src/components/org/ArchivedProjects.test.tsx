@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
+import { openRowMenu } from "@/test-utils/row-menu"
 import { ArchivedProjects } from "./ArchivedProjects"
 
 vi.mock("@/hooks/useFrontierSession", () => ({
@@ -15,9 +16,16 @@ vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
 const fetchArchivedProjects = vi.fn()
 const fetchOrgDeletedFiles = vi.fn()
 vi.mock("@/lib/sync/cloud-projects", () => ({
-  fetchArchivedProjects: (...a: unknown[]) => fetchArchivedProjects(...a),
-  fetchOrgDeletedFiles: (...a: unknown[]) => fetchOrgDeletedFiles(...a),
-  fetchAccessibleProjects: vi.fn(async () => []),
+  fetchArchivedProjectsResult: async (...a: unknown[]) => ({
+    ok: true as const,
+    projects: await fetchArchivedProjects(...a),
+  }),
+  projectsResultError: () => new Error("project load failed"),
+  fetchOrgDeletedFilesResult: async (...a: unknown[]) => ({
+    ok: true as const,
+    files: await fetchOrgDeletedFiles(...a),
+  }),
+  fetchAccessibleProjectsResult: vi.fn(async () => ({ ok: true as const, projects: [] })),
 }))
 
 const unarchiveProjectRemote = vi.fn()
@@ -55,6 +63,7 @@ describe("ArchivedProjects", () => {
     expect(
       await screen.findByRole("status", { name: "Loading archived projects" }),
     ).toHaveAttribute("aria-busy", "true")
+    expect(screen.getByPlaceholderText("Search archived projects…")).toBeInTheDocument()
   })
 
   it("lists archived projects in a table and restores on click", async () => {
@@ -78,7 +87,7 @@ describe("ArchivedProjects", () => {
     expect(screen.getByRole("tab", { name: "Projects" })).toBeInTheDocument()
     expect(screen.getByRole("tab", { name: "Recently deleted" })).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("button", { name: "More actions for Old Project" }))
+    await openRowMenu("More actions for Old Project")
     fireEvent.click(screen.getByRole("menuitem", { name: "Restore" }))
     await waitFor(() => expect(unarchiveProjectRemote).toHaveBeenCalledWith("old", "jwt"))
   })
@@ -153,7 +162,7 @@ describe("ArchivedProjects", () => {
     expect(screen.getByRole("columnheader", { name: /Project/i })).toBeInTheDocument()
     expect(screen.getByRole("columnheader", { name: /Deleted/i })).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("button", { name: "More actions for EXO.usfm" }))
+    await openRowMenu("More actions for EXO.usfm")
     fireEvent.click(screen.getByRole("menuitem", { name: "Restore" }))
     await waitFor(() =>
       expect(emitFileRestore).toHaveBeenCalledWith({
@@ -171,6 +180,16 @@ describe("ArchivedProjects", () => {
 
     expect(await screen.findByText("No recently deleted files.")).toBeInTheDocument()
     expect(screen.getByTestId("org-deleted-files-table")).toHaveClass("border", "bg-card")
+  })
+
+  it("does not let a successful files read hide a concurrent projects failure", async () => {
+    fetchArchivedProjects.mockRejectedValue(new Error("offline"))
+    fetchOrgDeletedFiles.mockResolvedValue([])
+    renderArchived("/orgs/1/archived/files")
+
+    expect(await screen.findByText("No recently deleted files.")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("tab", { name: "Projects" }))
+    expect(await screen.findByRole("alert")).toHaveTextContent("offline")
   })
 
   it("does not fetch deleted files until the recently deleted tab is opened", async () => {

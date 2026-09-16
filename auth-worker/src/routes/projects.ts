@@ -25,8 +25,7 @@
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
-import { authMiddleware, type AuthHonoEnv } from "../middleware/auth"
-import { JWTService } from "../auth/jwt"
+import { authMiddleware, optionalCaller, type AuthHonoEnv } from "../middleware/auth"
 import {
   INVITE_MIN_ROLE,
   LINK_ROLE_CAP,
@@ -40,7 +39,7 @@ import {
   ALL_ROLE_LEVELS,
   isCanonicalRoleLevel,
   isLinkRoleLevel,
-  LINK_ROLE_ALLOWED,
+  forgetProjectRole,
   ORG_WIDE_ACCESS_FLOOR,
   resolveProjectRole,
   resolveProjectRoleIncludingArchived,
@@ -50,11 +49,18 @@ import { getFileChapters, getMyAssignments, getProjectAssignmentRoster } from ".
 import {
   bumpOrgActivity,
   canViewRoster,
+  clampProjectDirectoryLimit,
+  decodeProjectDirectoryCursor,
+  DEFAULT_COMMENT_FLOORS,
   DEFAULT_TERMBASE_EDIT_MIN_ROLE,
+  DEFAULT_LANGUAGE_EDIT_MIN_ROLE,
+  encodeProjectDirectoryCursor,
+  getCommentFloors,
   getEffectiveOrgRole,
   getOrCreateUserOrg,
   getRosterViewMinRole,
   getTermbaseEditMinRole,
+  getLanguageEditMinRole,
   listEffectiveProjectMembers,
 } from "../services/org-permissions"
 import { isPlatformAdminEmail } from "../middleware/platform-admin"
@@ -75,25 +81,6 @@ import { createProjectShared } from "../../../db/shared/projects"
 
 const projects = new Hono<AuthHonoEnv>()
 
-/**
- * FRO-347 follow-up: best-effort caller identity for the (otherwise public)
- * invite-preview route. Unlike `authMiddleware`, a missing/invalid/expired
- * token is NOT an error here — it just means "treat this preview as
- * anonymous", since the route must stay reachable for signed-out visitors
- * following a share link. Mirrors `optionalCaller` in routes/invites.ts.
- */
-async function optionalCaller(env: Env, authHeader: string | null): Promise<AuthUser | null> {
-  if (!authHeader) return null
-  const jwtService = new JWTService(env)
-  const token = jwtService.extractTokenFromHeader(authHeader)
-  if (!token) return null
-  const payload = await jwtService.verifyToken(token)
-  if (!payload) return null
-  const now = Math.floor(Date.now() / 1000)
-  if (payload.exp < now) return null
-  return jwtService.getUserByUsername(payload.sub)
-}
-
 function roleNameFor(level: number): string {
   return ROLE_NAMES[level] ?? `level_${level}`
 }
@@ -103,8 +90,21 @@ interface FileProjection {
   name: string
   type: string
   cellCount: number
+  /** The files-table `role` column, forwarded raw. `type` above already folds
+   *  it in as a fallback, which is lossy: a `role: "audio-cues"` sibling has
+   *  `kind: "vtt"`, so `type` reads "vtt" like any other subtitle file and the
+   *  client cannot tell the two apart. The client's isAudioCueFile needs the
+   *  unfolded value, and this endpoint is the cold load — the only place a
+   *  freshly-opened browser learns a file exists. */
+  role?: string
+  /** The file this one hangs off (`files.anchor_file_id`): for an audio-cue
+   *  sibling, the text file whose timeline its cues annotate. The sibling is
+   *  hidden from every list, so without this it is unreachable. */
+  anchorFileId?: string
   bookCode?: string
   hasScriptureContent?: boolean
+  /** Sidebar folder. Read from files.meta, or recovered from a Biblica parserVersion. */
+  corpusMarker?: string
   /** Timeline-segment-model order lens, read from files.meta. Omitted when
    *  unset → client treats as 'sequence'. */
   orderedBy?: string
@@ -120,13 +120,39 @@ interface FileProjection {
   /** The file's audio timing mode (file.timing.set), read from files.meta.
    *  Omitted when unset → client falls back to the project-level default. */
   timingMode?: "dubbing" | "audioFirst"
+  /**
+   * What the audio-VTT import did about drift, read from
+   * `meta.aquillaImport.audioVtt.timebase`. Only ever present on an audio-cue
+   * sibling, and only when the import measured something.
+   *
+   * AQU-646 (2026-08-19): the measurement had been recorded since the timebase
+   * check shipped and NEVER SENT — the sync-worker's files-read route forwards
+   * it, but the project record's files come through here, so the project
+   * report showed "No record of a timing check" for episodes that were in fact
+   * corrected. Same class of bug as coreMediaUrl above, found the same way: a
+   * field the client mapped that no route ever produced.
+   */
+  audioVttTimebase?: { fromFps?: string; toFps?: string; scale: number }
+  /** Per-track deltas keyed by track id (file.track.set), read from files.meta
+   *  — NEVER the full track list, which the client derives. Omitted when unset
+   *  → client draws the three defaults. Shape is spelled out structurally
+   *  rather than imported from the client's tracks.ts: `kind` stays a bare
+   *  string here on purpose, so a kind persisted by a newer client survives the
+   *  round trip instead of being narrowed away. */
+  trackOverrides?: Record<string, { kind?: string; name?: string; order?: number; groupId?: string }>
 }
 
 /**
  * Pull file projections for the given project ids from codex-db, grouped by
  * project_id. Returns an empty map if the binding is absent (tests/dev).
  */
-async function loadFilesByProject(
+// Exported for its test alone. This projection has now lost two fields
+// silently — coreMediaUrl (found because the video pane was dead on every cold
+// load) and audioVttTimebase (found because the project report said "no timing
+// check" about corrected episodes) — and both had the same shape: the client
+// mapped a field no route ever produced, and nothing anywhere could notice.
+// A direct test over a seeded row is the thing that notices.
+export async function loadFilesByProject(
   env: AuthHonoEnv["Bindings"],
   projectIds: string[],
 ): Promise<Map<string, FileProjection[]>> {
@@ -135,7 +161,7 @@ async function loadFilesByProject(
 
   const placeholders = projectIds.map(() => "?").join(",")
   const rows = await env.AQUILLA_PG.prepare(
-    `SELECT id, project_id, name, kind, role, book_code, cell_count, meta
+    `SELECT id, project_id, name, kind, role, book_code, anchor_file_id, cell_count, meta
        FROM files
       WHERE project_id IN (${placeholders})
         AND deleted_at IS NULL
@@ -149,6 +175,7 @@ async function loadFilesByProject(
       kind: string | null
       role: string | null
       book_code: string | null
+      anchor_file_id: string | null
       cell_count: number | null
       meta: string | null
     }>()
@@ -162,14 +189,18 @@ async function loadFilesByProject(
     let sourceTextDirection: "ltr" | "rtl" | undefined
     let targetTextDirection: "ltr" | "rtl" | undefined
     let hasScriptureContent: boolean | undefined
+    let corpusMarker: string | undefined
     let coreMediaUrl: string | undefined
     let timingMode: "dubbing" | "audioFirst" | undefined
+    let audioVttTimebase: FileProjection["audioVttTimebase"]
+    let trackOverrides: FileProjection["trackOverrides"]
     if (f.meta) {
       try {
         const m = JSON.parse(f.meta) as {
           orderedBy?: string
           coreMediaUrl?: unknown
           timingMode?: unknown
+          trackOverrides?: unknown
           source_language?: string
           target_language?: string
           sourceLanguage?: string
@@ -178,7 +209,12 @@ async function loadFilesByProject(
           target_text_direction?: string
           sourceTextDirection?: string
           targetTextDirection?: string
-          aquillaImport?: { hasScriptureContent?: unknown }
+          aquillaImport?: {
+            hasScriptureContent?: unknown
+            audioVtt?: { timebase?: unknown }
+          }
+          corpusMarker?: unknown
+          parserVersion?: unknown
         }
         if (m.orderedBy) orderedBy = m.orderedBy
         sourceLanguage = normalizeLanguage(m.source_language ?? m.sourceLanguage)
@@ -186,8 +222,36 @@ async function loadFilesByProject(
         sourceTextDirection = normalizeTextDirection(m.source_text_direction ?? m.sourceTextDirection)
         targetTextDirection = normalizeTextDirection(m.target_text_direction ?? m.targetTextDirection)
         if (m.aquillaImport?.hasScriptureContent === true) hasScriptureContent = true
+        corpusMarker = resolveCorpusMarker(m.corpusMarker, m.parserVersion)
         if (typeof m.coreMediaUrl === "string" && m.coreMediaUrl.trim()) coreMediaUrl = m.coreMediaUrl
         if (m.timingMode === "dubbing" || m.timingMode === "audioFirst") timingMode = m.timingMode
+        // `scale` is the only required field: a drift measured from the words
+        // is exact even when neither frame rate could be named, so the labels
+        // are optional by design and a record without a finite scale is noise.
+        const tb = m.aquillaImport?.audioVtt?.timebase
+        if (tb && typeof tb === "object") {
+          const t = tb as { fromFps?: unknown; toFps?: unknown; scale?: unknown }
+          if (typeof t.scale === "number" && Number.isFinite(t.scale)) {
+            audioVttTimebase = {
+              ...(typeof t.fromFps === "string" ? { fromFps: t.fromFps } : {}),
+              ...(typeof t.toFps === "string" ? { toFps: t.toFps } : {}),
+              scale: t.scale,
+            }
+          }
+        }
+        // Shape-checked, not value-checked: an array is `typeof "object"` and
+        // would reach the client's merge as a map with numeric keys, and the
+        // delete projection can leave an empty map behind, which means the same
+        // thing as no key at all. Contents pass through untouched — the client's
+        // mergeTrackOverrides is the one validator.
+        if (
+          typeof m.trackOverrides === "object" &&
+          m.trackOverrides !== null &&
+          !Array.isArray(m.trackOverrides) &&
+          Object.keys(m.trackOverrides).length > 0
+        ) {
+          trackOverrides = m.trackOverrides as FileProjection["trackOverrides"]
+        }
       } catch {
         // malformed meta → leave orderedBy unset (client defaults to sequence)
       }
@@ -198,8 +262,11 @@ async function loadFilesByProject(
       // `file_type` collapsed into role + kind (0012); derive a compatible value.
       type: f.kind ?? f.role ?? "codex",
       cellCount: f.cell_count ?? 0,
+      ...(f.role ? { role: f.role } : {}),
+      ...(f.anchor_file_id ? { anchorFileId: f.anchor_file_id } : {}),
       ...(f.book_code ? { bookCode: f.book_code } : {}),
       ...(hasScriptureContent ? { hasScriptureContent: true } : {}),
+      ...(corpusMarker ? { corpusMarker } : {}),
       ...(orderedBy ? { orderedBy } : {}),
       ...(sourceLanguage ? { sourceLanguage } : {}),
       ...(targetLanguage ? { targetLanguage } : {}),
@@ -207,6 +274,8 @@ async function loadFilesByProject(
       ...(targetTextDirection ? { targetTextDirection } : {}),
       ...(coreMediaUrl ? { coreMediaUrl } : {}),
       ...(timingMode ? { timingMode } : {}),
+      ...(audioVttTimebase ? { audioVttTimebase } : {}),
+      ...(trackOverrides ? { trackOverrides } : {}),
     })
     byProject.set(f.project_id, list)
   }
@@ -215,6 +284,22 @@ async function loadFilesByProject(
 
 function normalizeTextDirection(value: string | undefined): "ltr" | "rtl" | undefined {
   return value === "ltr" || value === "rtl" ? value : undefined
+}
+
+const BIBLICA_PROFILE_FOLDERS: Readonly<Record<string, string>> = {
+  "builtin:biblica-study-notes": "Biblica Study Notes",
+  "builtin:biblica-treasure-hunt": "Treasure Hunt Bible",
+  "builtin:biblica-reach4life": "Reach 4 Life",
+  "builtin:biblica-ebl": "Equipping Biblical Leaders",
+}
+
+function resolveCorpusMarker(explicit: unknown, parserVersion: unknown): string | undefined {
+  if (typeof explicit === "string") {
+    const trimmed = explicit.trim()
+    if (trimmed) return trimmed
+  }
+  if (typeof parserVersion !== "string") return undefined
+  return BIBLICA_PROFILE_FOLDERS[parserVersion.split("@")[0]]
 }
 
 function normalizeLanguage(value: string | undefined): string | undefined {
@@ -295,9 +380,8 @@ projects.post(
         createdBy: user.id,
       })
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
       console.error("project create failed:", err)
-      return c.json({ error: `create failed: ${message}` }, 500)
+      return c.json({ error: "create failed" }, 500)
     }
 
     return c.json({
@@ -311,6 +395,15 @@ projects.post(
 
 // ──────────────────────────────────────────────────────────────────────────
 // GET /api/v2/projects — list caller's accessible projects + files
+//
+// Unparameterized (session boot / OrgContext): grants the caller actually
+// holds. Platform operators do NOT receive the rest of the tenancy here —
+// that dump made boot and every project table O(all projects).
+//
+// Picker mode (`q`, `limit`, and/or `cursor`): one page, name-keyset. Admins
+// page the catalog; everyone else pages their accessible set. `?orgId=` still
+// scopes to one org, and an admin listing that org still sees every project
+// in it (bounded to the org, not the tenancy).
 // ──────────────────────────────────────────────────────────────────────────
 
 projects.get("/", authMiddleware, async (c) => {
@@ -336,10 +429,20 @@ projects.get("/", authMiddleware, async (c) => {
     return c.json({ error: "invalid minRole" }, 400)
   }
 
-  // Platform operators see every project (the WHERE access predicate is
-  // bypassed below); their effective role is forced to 700/"platform" in the
-  // JS mapping, mirroring the resolver in project-permissions.ts.
+  const qRaw = (c.req.query("q") ?? "").trim()
+  const q = qRaw.toLowerCase()
+  const limitRaw = c.req.query("limit")
+  const cursorRaw = c.req.query("cursor")
+  const pickerMode = limitRaw != null || cursorRaw != null || qRaw !== ""
+  const cursor = cursorRaw ? decodeProjectDirectoryCursor(cursorRaw) : null
+  if (cursorRaw && !cursor) return c.json({ error: "invalid cursor" }, 400)
+  const pageLimit = pickerMode ? clampProjectDirectoryLimit(limitRaw) : null
+
+  // Platform operators see every project in an org-scoped list, or one page
+  // of the tenancy in picker mode. Unparameterized boot never bypasses.
   const isAdmin = isPlatformAdminEmail(c.env, user.email)
+  const adminBypass = isAdmin && (orgFilter !== null || pickerMode)
+  const minRoleBind = minRole !== null && !adminBypass ? minRole : null
 
   // AD-12 max-wins across direct + group + org + creator. Each path is
   // computed in the same query; role_level = MAX(coalesced levels). On a
@@ -351,13 +454,43 @@ projects.get("/", authMiddleware, async (c) => {
   // org_members row neither reveals a project nor contributes to its
   // resolved role. Mirrors resolveProjectRole.
   //
-  // Params (positional ?): 10 user.id binds + isAdmin + 2 orgFilter binds.
+  // Params (positional ?): 10 user.id binds + isAdmin + 2 orgFilter binds
+  // + optional minRole / q / cursor / limit.
   //   ?1-?4  : user.id for creator CASE expressions
   //   ?5-?7  : user.id for LEFT JOIN conditions (pm, om, gm)
   //   ?8     : isAdmin (1/0) — platform operators bypass the access check
   //   ?9-?11 : user.id for WHERE access check (created_by, pm, om)
-  //   ?12    : orgFilter (NULL or number) — IS NULL check (no-filter case)
-  //   ?13    : orgFilter (NULL or number) — equality check (filter case)
+  //   ?12-?13: orgFilter (IS NULL bypass + equality)
+  //   ?14-?15: minRole (IS NULL bypass + threshold)
+  // AQU-1274: the org path's contribution to max-wins, as SQL. Must stay
+  // equivalent to db/shared/project-roles.ts::orgPathContribution — this list
+  // endpoint is where `project.syncRole` comes from, so if it disagrees with
+  // the single-project resolver the SPA gates panels on the wrong role (which
+  // is how the Biblica ETT report surfaced). Maintainer+ contributes outright;
+  // below that the org role only stops a team attachment from demoting, so it
+  // contributes when a group grant exists and no explicit direct grant does.
+  // Contains no `?` placeholders, so positional binds are unaffected.
+  const orgContribSql = `CASE
+              WHEN om.role_level >= ${ORG_WIDE_ACCESS_FLOOR} THEN om.role_level
+              WHEN om.role_level IS NOT NULL
+                AND pm.role_level IS NULL
+                AND gg.max_grant IS NOT NULL THEN om.role_level
+              ELSE 0 END`
+
+  const extraWhere: string[] = []
+  const extraBinds: unknown[] = []
+  if (q) {
+    extraWhere.push("strpos(lower(p.name), ?) > 0")
+    extraBinds.push(q)
+  }
+  if (cursor) {
+    extraWhere.push("(lower(p.name) > ? OR (lower(p.name) = ? AND p.id > ?))")
+    extraBinds.push(cursor.name.toLowerCase(), cursor.name.toLowerCase(), cursor.id)
+  }
+  const extraWhereSql = extraWhere.length > 0 ? ` AND ${extraWhere.join(" AND ")}` : ""
+  const limitSql = pageLimit != null ? " LIMIT ?" : ""
+  if (pageLimit != null) extraBinds.push(pageLimit + 1)
+
   const rows = await c.env.AQUILLA_PG.prepare(
     `SELECT p.id, p.name, p.org_id, o.name AS org_name, p.archived_at, p.is_active,
             p.source_project_id,
@@ -372,21 +505,21 @@ projects.get("/", authMiddleware, async (c) => {
             GREATEST(
               COALESCE(pm.role_level, 0),
               COALESCE(gg.max_grant,  0),
-              CASE WHEN om.role_level >= ${ORG_WIDE_ACCESS_FLOOR} THEN om.role_level ELSE 0 END,
+              ${orgContribSql},
               CASE WHEN p.created_by = ? THEN 700 ELSE 0 END
             ) AS role_level,
             CASE
               WHEN pm.role_level IS NOT NULL
                 AND pm.role_level >= COALESCE(gg.max_grant, 0)
-                AND pm.role_level >= (CASE WHEN om.role_level >= ${ORG_WIDE_ACCESS_FLOOR} THEN om.role_level ELSE 0 END)
+                AND pm.role_level >= (${orgContribSql})
                 AND pm.role_level >= (CASE WHEN p.created_by = ? THEN 700 ELSE 0 END)
               THEN 'override'
               WHEN gg.max_grant IS NOT NULL
-                AND gg.max_grant >= (CASE WHEN om.role_level >= ${ORG_WIDE_ACCESS_FLOOR} THEN om.role_level ELSE 0 END)
+                AND gg.max_grant >= (${orgContribSql})
                 AND gg.max_grant >= (CASE WHEN p.created_by = ? THEN 700 ELSE 0 END)
               THEN 'group'
-              WHEN om.role_level >= ${ORG_WIDE_ACCESS_FLOOR}
-                AND om.role_level >= (CASE WHEN p.created_by = ? THEN 700 ELSE 0 END)
+              WHEN (${orgContribSql}) > 0
+                AND (${orgContribSql}) >= (CASE WHEN p.created_by = ? THEN 700 ELSE 0 END)
               THEN 'org'
               ELSE 'creator'
             END AS role_source
@@ -422,14 +555,26 @@ projects.get("/", authMiddleware, async (c) => {
           OR (p.org_id IS NOT NULL AND om.user_id = ? AND om.role_level >= ${ORG_WIDE_ACCESS_FLOOR})
         )
         AND (?::bigint IS NULL OR p.org_id = ?::bigint)
-      ORDER BY LOWER(p.name)`,
+        AND (?::int IS NULL OR GREATEST(
+              COALESCE(pm.role_level, 0),
+              COALESCE(gg.max_grant,  0),
+              ${orgContribSql},
+              CASE WHEN p.created_by = ? THEN 700 ELSE 0 END
+            ) >= ?)
+        ${extraWhereSql}
+      ORDER BY LOWER(p.name), p.id
+      ${limitSql}`,
   )
     .bind(
       user.id, user.id, user.id, user.id,  // ?1-?4: CASE-when-creator
       user.id, user.id, user.id,           // ?5-?7: pm.user_id, om.user_id, gm.user_id
-      isAdmin ? 1 : 0,                     // ?8: platform-operator bypass
+      adminBypass ? 1 : 0,                 // ?8: platform-operator bypass
       user.id, user.id, user.id,           // ?9-?11: WHERE: created_by, pm, om
       orgFilter, orgFilter,                // ?12-?13: org filter (IS NULL bypass + equality)
+      minRoleBind,                         // minRole IS NULL bypass
+      user.id,                             // GREATEST created_by in minRole clause
+      minRoleBind,                         // minRole threshold
+      ...extraBinds,
     )
     .all<{
       id: string
@@ -446,17 +591,18 @@ projects.get("/", authMiddleware, async (c) => {
       role_source: "creator" | "override" | "org" | "group"
     }>()
 
-  // AQU-321: apply minRole filter before loading files (avoid extra DB round-trip).
   const allRows = rows.results ?? []
-  const filteredRows = minRole !== null && !isAdmin
-    ? allRows.filter((r) => r.role_level >= minRole)
-    : allRows
+  const hasMore = pageLimit != null && allRows.length > pageLimit
+  const pageRows = hasMore ? allRows.slice(0, pageLimit) : allRows
+  const last = pageRows[pageRows.length - 1]
+  const nextCursor =
+    hasMore && last ? encodeProjectDirectoryCursor(last.id, last.name) : null
 
-  const projectIds = filteredRows.map((r) => r.id)
+  const projectIds = pageRows.map((r) => r.id)
   const filesByProject = await loadFilesByProject(c.env, projectIds)
 
   return c.json({
-    projects: filteredRows.map((row) => {
+    projects: pageRows.map((row) => {
       // Platform operators resolve as owner everywhere (resolveProjectRole's
       // "platform" path); a genuine 700-level grant keeps its attribution.
       const role =
@@ -490,6 +636,7 @@ projects.get("/", authMiddleware, async (c) => {
         files: filesByProject.get(row.id) ?? [],
       }
     }),
+    nextCursor,
   })
 })
 
@@ -547,11 +694,31 @@ projects.get("/:projectId", authMiddleware, async (c) => {
       ? await getTermbaseEditMinRole(c.env, row.org_id)
       : DEFAULT_TERMBASE_EDIT_MIN_ROLE
 
+  // AQU-1086: same deal for the org's language-edit floor — the Project
+  // Settings language fields and the Languages card gate on it, and the
+  // project-settings route re-resolves it on every language write.
+  const languageEditMinRole =
+    row.org_id != null
+      ? await getLanguageEditMinRole(c.env, row.org_id)
+      : DEFAULT_LANGUAGE_EDIT_MIN_ROLE
+
+  // AQU-1002: the org's comment floors ride along for the same reason — the
+  // comments drawer and Comments page gate their controls off the project
+  // record and have no org-settings read of their own. Advisory only:
+  // sync-worker re-resolves both floors on every comment write.
+  const commentFloors =
+    row.org_id != null
+      ? await getCommentFloors(c.env, row.org_id)
+      : DEFAULT_COMMENT_FLOORS
+
   return c.json({
     id: row.id,
     name: row.name,
     orgId: row.org_id,
     termbaseEditMinRole,
+    languageEditMinRole,
+    commentCreateMinRole: commentFloors.commentCreateMinRole,
+    commentResolveMinRole: commentFloors.commentResolveMinRole,
     archivedAt: row.archived_at,
     archivedBy: row.archived_by
       ? { id: row.archived_by, username: row.archived_by_username }
@@ -619,9 +786,8 @@ projects.patch(
         return c.json({ error: "not found" }, 404)
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
       console.error("project rename failed:", err)
-      return c.json({ error: `rename failed: ${message}` }, 500)
+      return c.json({ error: "rename failed" }, 500)
     }
 
     return c.json({ id: projectId, name })
@@ -652,9 +818,8 @@ projects.post("/:projectId/archive", authMiddleware, async (c) => {
       .bind(user.id, projectId)
       .run()
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
     console.error("project archive failed:", err)
-    return c.json({ error: `archive failed: ${message}` }, 500)
+    return c.json({ error: "archive failed" }, 500)
   }
 
   const row = await c.env.AQUILLA_PG.prepare(
@@ -698,9 +863,8 @@ projects.delete("/:projectId/archive", authMiddleware, async (c) => {
       .bind(projectId)
       .run()
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
     console.error("project restore failed:", err)
-    return c.json({ error: `restore failed: ${message}` }, 500)
+    return c.json({ error: "restore failed" }, 500)
   }
 
   c.executionCtx.waitUntil(notifySyncWorkerOfArchive(c.env, projectId, null, null))
@@ -848,12 +1012,30 @@ projects.get("/:projectId/files/:fileId/chapters", authMiddleware, async (c) => 
 })
 
 /**
+ * Parse `?minRole=` for the privileged-members bypass. Only a settings-write
+ * floor (Maintainer+) is accepted — a lower floor would leak the full roster
+ * to callers the org has hidden it from. Invalid / absent → unfiltered list
+ * under the normal AQU-485 roster gate.
+ */
+function parsePrivilegedMinRole(raw: string | undefined): number | null {
+  if (raw == null || raw === "") return null
+  const n = Number.parseInt(raw, 10)
+  if (!Number.isInteger(n) || n < ROLE.MAINTAINER || n > ROLE.OWNER) return null
+  return n
+}
+
+/**
  * AQU-485: additionally gated by the project's org rosterViewMinRole
  * (default MAINTAINER=600) when the project belongs to an org. Projects with
  * no org (org_id null — personal projects) have no org policy to check
  * against and are never gated here. A caller below the floor gets a distinct
  * 403 rather than the member list — the response must not leak the roster
  * or its size.
+ *
+ * Exception: `?minRole=` at Maintainer or Owner returns only members at that
+ * floor or above, even when the full roster is hidden. That is the GitHub
+ * "view admins" contract — a contributor still needs to see who can change
+ * settings, without learning who else is on the project.
  */
 projects.get("/:projectId/members", authMiddleware, async (c) => {
   const user = c.get("user")
@@ -868,19 +1050,24 @@ projects.get("/:projectId/members", authMiddleware, async (c) => {
     .first<{ created_by: number; org_id: number | null }>()
   if (!project) return c.json({ error: "project not found" }, 404)
 
-  if (project.org_id != null) {
+  const privilegedMinRole = parsePrivilegedMinRole(c.req.query("minRole"))
+
+  if (project.org_id != null && privilegedMinRole == null) {
     const rosterMinRole = await getRosterViewMinRole(c.env, project.org_id)
     if (!canViewRoster(role.level, rosterMinRole)) {
       return c.json({ error: "roster hidden by org policy", rosterHidden: true }, 403)
     }
   }
 
-  const members = await listEffectiveProjectMembers(
+  let members = await listEffectiveProjectMembers(
     c.env,
     projectId,
     project.org_id,
     project.created_by,
   )
+  if (privilegedMinRole != null) {
+    members = members.filter((m) => m.roleLevel >= privilegedMinRole)
+  }
 
   await bumpOrgActivity(c.env, user.id, project.org_id)
 
@@ -1146,6 +1333,9 @@ projects.delete("/:projectId/members/:userId", authMiddleware, async (c) => {
   )
     .bind(projectId, targetUserId)
     .run()
+  // The per-request memo may hold the pre-delete role (an owner removing
+  // their own direct row resolved it above as the caller).
+  forgetProjectRole(c.env, projectId, targetUserId)
 
   // AQU-346: when NO grant path survives the delete (AD-12: org / group /
   // creator paths are additive and unaffected by removing the direct row),
@@ -1198,9 +1388,8 @@ projects.delete("/:projectId/files/:fileId", authMiddleware, async (c) => {
         .bind(fileId, projectId)
         .run()
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
       console.error("delete file projection failed:", err)
-      return c.json({ error: `delete failed: ${message}` }, 500)
+      return c.json({ error: "delete failed" }, 500)
     }
   }
 
@@ -1646,9 +1835,5 @@ projects.delete("/:projectId/invites/:token", authMiddleware, async (c) => {
   const removed = typeof changes === "number" ? changes > 0 : true
   return c.json({ removed })
 })
-
-// Re-export the canonical link-role list so tests that imported it from the
-// old projects-invites module continue to work.
-export { LINK_ROLE_ALLOWED }
 
 export default projects

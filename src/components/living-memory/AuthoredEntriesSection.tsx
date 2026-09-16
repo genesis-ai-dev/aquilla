@@ -11,8 +11,8 @@
 
 import React, { useState } from "react"
 import { Plus, Pencil, Trash2, Lock } from "lucide-react"
-import { useI18n, useT } from "@/lib/i18n/I18nProvider"
-import { formatDate } from "@/lib/i18n/format"
+import { useT } from "@/lib/i18n/I18nProvider"
+import { DateTooltip } from "@/components/ui/date-tooltip"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Textarea } from "@/components/ui/textarea"
@@ -119,7 +119,6 @@ export function AuthoredEntriesSection({
   onUpdate,
   onDelete,
 }: AuthoredEntriesSectionProps) {
-  const { locale } = useI18n()
   const t = useT()
   const [adding, setAdding] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -220,7 +219,7 @@ export function AuthoredEntriesSection({
                   </div>
                 )}
                 <p className="text-[10px] text-muted-foreground/60 mt-1.5">
-                  {entry.author} · {formatDate(entry.createdAt, locale, {})}
+                  {entry.author} · <DateTooltip value={entry.createdAt} label={t("common.date.created")} />
                 </p>
               </CardContent>
             </Card>

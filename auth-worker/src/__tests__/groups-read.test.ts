@@ -84,6 +84,94 @@ describe("GET /api/v2/orgs/:orgId/groups", () => {
     expect(byName["West Africa"].viewerIsMember).toBe(true)
     expect(byName["East Africa"].viewerIsMember).toBe(false)
   })
+
+  it("pages and searches with limit/cursor/q instead of dumping every team", async () => {
+    await seedGroups()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO groups (id, org_id, name, created_by) VALUES (11, 1, 'East Africa', 1), (12, 1, 'Central Africa', 1)",
+    ).run()
+
+    const first = await app.request(
+      "/api/v2/orgs/1/groups?limit=1",
+      { headers: authHeader(await jwtFor("wendi")) },
+      env,
+    )
+    expect(first.status).toBe(200)
+    const firstBody = (await first.json()) as {
+      groups: Array<{ id: number; name: string }>
+      nextCursor: string | null
+    }
+    expect(firstBody.groups).toEqual([expect.objectContaining({ id: 12, name: "Central Africa" })])
+    expect(firstBody.nextCursor).toBeTruthy()
+
+    const second = await app.request(
+      `/api/v2/orgs/1/groups?limit=1&cursor=${encodeURIComponent(firstBody.nextCursor!)}`,
+      { headers: authHeader(await jwtFor("wendi")) },
+      env,
+    )
+    const secondBody = (await second.json()) as {
+      groups: Array<{ id: number; name: string }>
+      nextCursor: string | null
+    }
+    expect(secondBody.groups).toEqual([expect.objectContaining({ id: 11, name: "East Africa" })])
+    expect(secondBody.nextCursor).toBeTruthy()
+
+    const search = await app.request(
+      "/api/v2/orgs/1/groups?q=west",
+      { headers: authHeader(await jwtFor("wendi")) },
+      env,
+    )
+    const searchBody = (await search.json()) as { groups: Array<{ id: number; name: string }> }
+    expect(searchBody.groups).toEqual([expect.objectContaining({ id: 10, name: "West Africa" })])
+  })
+
+  it("filters picker pages by visibility=internal|public", async () => {
+    await seedGroups()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO groups (id, org_id, name, created_by, is_internal) VALUES (11, 1, 'East Africa', 1, false)",
+    ).run()
+
+    const internal = await app.request(
+      "/api/v2/orgs/1/groups?limit=40&visibility=internal",
+      { headers: authHeader(await jwtFor("wendi")) },
+      env,
+    )
+    const internalBody = (await internal.json()) as { groups: Array<{ name: string }> }
+    expect(internalBody.groups.map((g) => g.name)).toEqual(["West Africa"])
+
+    const pub = await app.request(
+      "/api/v2/orgs/1/groups?limit=40&visibility=public",
+      { headers: authHeader(await jwtFor("wendi")) },
+      env,
+    )
+    const pubBody = (await pub.json()) as { groups: Array<{ name: string }> }
+    expect(pubBody.groups.map((g) => g.name)).toEqual(["East Africa"])
+  })
+
+  it("AQU-789: picker pages still hide teams a non-maintainer is not on", async () => {
+    await seedGroups()
+    await env.AQUILLA_PG.prepare(
+      "INSERT INTO groups (id, org_id, name, created_by) VALUES (11, 1, 'East Africa', 1)",
+    ).run()
+    const res = await app.request(
+      "/api/v2/orgs/1/groups?limit=40",
+      { headers: authHeader(await jwtFor("anna")) },
+      env,
+    )
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { groups: Array<{ id: number }> }
+    expect(body.groups.map((g) => g.id)).toEqual([10])
+  })
+
+  it("400s an invalid cursor", async () => {
+    await seedGroups()
+    const res = await app.request(
+      "/api/v2/orgs/1/groups?limit=40&cursor=not-a-cursor",
+      { headers: authHeader(await jwtFor("wendi")) },
+      env,
+    )
+    expect(res.status).toBe(400)
+  })
 })
 
 describe("GET /api/v2/orgs/:orgId/groups/:groupId", () => {
@@ -91,11 +179,16 @@ describe("GET /api/v2/orgs/:orgId/groups/:groupId", () => {
     await seedGroups()
     const res = await app.request("/api/v2/orgs/1/groups/10", { headers: authHeader(await jwtFor("wendi")) }, env)
     expect(res.status).toBe(200)
-    const body = (await res.json()) as { id: number; name: string; description: string | null; members: Array<{ username: string; email: string | null }>; projects: Array<{ id: string; name: string; grantedRoleLevel: number }> }
+    const body = (await res.json()) as { id: number; name: string; description: string | null; members: Array<{ username: string; email: string | null; addedAt: string | null }>; projects: Array<{ id: string; name: string; grantedRoleLevel: number; grantedAt: string | null }> }
     expect(body.members.map((m) => m.username).sort()).toEqual(["anna", "wendi"])
     // Email comes from the users row (seedUser derives it from the username).
     expect(body.members.every((m) => typeof m.email === "string" && m.email.includes("@"))).toBe(true)
-    expect(body.projects).toEqual([{ id: "pa", name: "Bambara", grantedRoleLevel: 400 }])
+    expect(body.members.every((m) => typeof m.addedAt === "string" && !Number.isNaN(Date.parse(m.addedAt)))).toBe(true)
+    expect(body.projects).toHaveLength(1)
+    expect(body.projects[0]).toMatchObject({ id: "pa", name: "Bambara", grantedRoleLevel: 400 })
+    // granted_at DEFAULT now() on insert — always present for a live grant.
+    expect(body.projects[0].grantedAt).toBeTruthy()
+    expect(Number.isNaN(Date.parse(body.projects[0].grantedAt!))).toBe(false)
     // AQU-264: description must be present in the detail response (null when not set)
     expect(Object.keys(body)).toContain("description")
     expect(body.description).toBeNull()
@@ -159,5 +252,31 @@ describe("GET /api/v2/orgs/:orgId/groups/:groupId", () => {
     const res = await app.request("/api/v2/orgs/1/groups/10", { headers: authHeader(await jwtFor("wendi")) }, env)
     const body = (await res.json()) as { projects: Array<{ id: string }> }
     expect(body.projects.map((p) => p.id)).toEqual(["pa"]) // pb (org 2) excluded
+  })
+
+  it("returns grantedAt from the group_project_grants row", async () => {
+    await seedGroups()
+    await env.AQUILLA_PG.prepare(
+      "UPDATE group_project_grants SET granted_at = '2026-07-22T15:00:00Z' WHERE group_id = 10 AND project_id = 'pa'",
+    ).run()
+    const res = await app.request("/api/v2/orgs/1/groups/10", { headers: authHeader(await jwtFor("wendi")) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { projects: Array<{ id: string; grantedAt: string | null }> }
+    const pa = body.projects.find((p) => p.id === "pa")
+    expect(pa?.grantedAt).toBeTruthy()
+    expect(Date.parse(pa!.grantedAt!)).toBe(Date.parse("2026-07-22T15:00:00Z"))
+  })
+
+  it("returns addedAt from the group_members row", async () => {
+    await seedGroups()
+    await env.AQUILLA_PG.prepare(
+      "UPDATE group_members SET added_at = '2026-07-20T09:00:00Z' WHERE group_id = 10 AND user_id = 2",
+    ).run()
+    const res = await app.request("/api/v2/orgs/1/groups/10", { headers: authHeader(await jwtFor("wendi")) }, env)
+    expect(res.status).toBe(200)
+    const body = (await res.json()) as { members: Array<{ username: string; addedAt: string | null }> }
+    const anna = body.members.find((m) => m.username === "anna")
+    expect(anna?.addedAt).toBeTruthy()
+    expect(Date.parse(anna!.addedAt!)).toBe(Date.parse("2026-07-20T09:00:00Z"))
   })
 })

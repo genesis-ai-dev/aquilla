@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import {
-  Upload, Library, Globe, Table2, Languages, ArrowLeft, ArrowLeftRight, Tags, StickyNote, Database,
+  Upload, Library, Globe, Table2, Languages, ArrowLeft, ArrowLeftRight, StickyNote, Database,
   BookImage, BookA, BookOpen, Search, Cloud, CloudDownload,
   type LucideIcon,
 } from "lucide-react"
@@ -110,14 +110,13 @@ import {
   IMPORT_COLLISION_DUPLICATED,
 } from "@/lib/event-names"
 import { SpreadsheetImportPanel } from "@/components/import/SpreadsheetImportPanel"
-import { LabelImportPanel, type LabelImportResult } from "@/components/import/LabelImportPanel"
 import { PairedImportPanel } from "@/components/import/PairedImportPanel"
 import { DcsCatalogBrowser } from "@/components/dcs/DcsCatalogBrowser"
 import { importDcsResource } from "@/lib/dcs/import-dcs"
 import { DcsClient } from "@/lib/dcs/catalog"
 import type { DcsCatalogEntry, DcsCursor } from "@/lib/dcs/types"
 
-type Screen = "landing" | "upload" | "preview" | "ebible" | "helloao" | "obs" | "macula" | "tn" | "biblica" | "direction" | "result" | "collision" | "spreadsheet" | "labels" | "paired" | "sdbh" | "dcs" | "gdrive"
+type Screen = "landing" | "upload" | "preview" | "ebible" | "helloao" | "obs" | "macula" | "tn" | "biblica" | "direction" | "result" | "collision" | "spreadsheet" | "paired" | "sdbh" | "dcs" | "gdrive"
 
 interface ImportDialogProps {
   open: boolean
@@ -164,20 +163,6 @@ interface ImportDialogProps {
    */
   patchDcsCursor?: (cursor: DcsCursor) => Promise<boolean>
   /**
-   * AQU-314: project files for the Cell-labels panel's step-1 file picker.
-   * The panel fetches the selected file's source cells itself, so labels no
-   * longer depend on which file happens to be active in the editor.
-   */
-  projectFiles?: { id: string; name: string }[]
-  /** AQU-314: the workspace's active file — pre-selected in the picker. */
-  activeFileId?: string | null
-  /**
-   * AQU-314: called after a label apply run completes and the dialog closes.
-   * The host surfaces the result (applied/unmatched counts) as its transient
-   * status notice — the dialog itself is gone by then.
-   */
-  onLabelsImported?: (result: LabelImportResult) => void
-  /**
    * AQU-634: per-project USFM front-matter opt-out. When true, USFM imports
    * (upload, Paratext project, DCS/Door43) exclude book-name/title/TOC +
    * intro-block cells. Wired from the project's `importExcludeFrontMatter`
@@ -188,7 +173,7 @@ interface ImportDialogProps {
 
 /** localStorage key used to persist the per-project "skip direction prompt" choice. */
 function skipStorageKey(projectId: string) {
-  return `codex.importDirectionSkipped.${projectId}`
+  return `aquilla.importDirectionSkipped.${projectId}`
 }
 
 export function ImportDialog({
@@ -207,9 +192,6 @@ export function ImportDialog({
   sourceCells,
   existingFiles,
   patchDcsCursor,
-  projectFiles,
-  activeFileId,
-  onLabelsImported,
   excludeFrontMatter,
 }: ImportDialogProps) {
   const t = useT()
@@ -350,7 +332,7 @@ export function ImportDialog({
         setScreen("result")
         // Persist per-project so a re-show is possible (bonus scope).
         try {
-          const key = `codex.lastImportReport.${projectId}`
+          const key = `aquilla.lastImportReport.${projectId}`
           localStorage.setItem(
             key,
             JSON.stringify({ ts: Date.now(), skipped: skippedBooks, importedCount: refs.length }),
@@ -494,7 +476,6 @@ export function ImportDialog({
                   : screen === "tn" ? t("importExport.dialog.titleTn")
                   : screen === "biblica" ? t("importExport.landing.biblica.title")
                   : screen === "spreadsheet" ? t("importExport.dialog.titleSpreadsheet")
-                  : screen === "labels" ? t("importExport.landing.labels.title")
                   : screen === "paired" ? t("importExport.dialog.titlePaired")
                   : screen === "sdbh" ? t("importExport.landing.sdbh.title")
                   : t("importExport.landing.ebible.title")}
@@ -736,27 +717,6 @@ export function ImportDialog({
           />
         )}
 
-        {/* AQU-314: Cell labels / cast import via downloadable template */}
-        {screen === "labels" && projectFiles && projectFiles.length > 0 && (
-          <LabelImportPanel
-            projectId={projectId}
-            username={username}
-            files={projectFiles}
-            defaultFileId={activeFileId}
-            getToken={getToken}
-            onImported={(result) => {
-              onOpenChange(false)
-              onLabelsImported?.(result)
-            }}
-            onCancel={() => setScreen("landing")}
-          />
-        )}
-        {screen === "labels" && (!projectFiles || projectFiles.length === 0) && (
-          <div className="py-4 text-center text-sm text-muted-foreground">
-            {t("importExport.dialog.labelsNeedSourceFile")}
-          </div>
-        )}
-
         {/* AQU-315: Paired source+target import (translation memory) */}
         {screen === "paired" && sourceCells && sourceCells.length > 0 && (
           <PairedImportPanel
@@ -909,8 +869,6 @@ const SPECIALIZED_OPTIONS: ImportOption[] = [
     descriptionKey: "importExport.landing.macula.description" },
   { id: "paired", titleKey: "importExport.landing.paired.title", icon: ArrowLeftRight, badge: "beta",
     descriptionKey: "importExport.landing.paired.description" },
-  { id: "labels", titleKey: "importExport.landing.labels.title", icon: Tags, badge: "beta",
-    descriptionKey: "importExport.landing.labels.description" },
   { id: "tn", titleKey: "importExport.landing.tn.title", hintKey: "importExport.landing.tn.hint", icon: StickyNote, badge: "beta",
     descriptionKey: "importExport.landing.tn.description" },
   { id: "biblica", titleKey: "importExport.landing.biblica.title", hintKey: "importExport.landing.biblica.hint", icon: BookOpen, badge: "beta",
@@ -3576,6 +3534,40 @@ function MaculaPanel({ projectId, username, getToken, onImported }: MaculaPanelP
 // Biblica Study Bible Notes (IDML) panel
 // ---------------------------------------------------------------------------
 
+/**
+ * One tick-box option on the Biblica panel: the label doubles as the control's
+ * accessible name, and the hint under it says what ticking the box changes.
+ */
+function BiblicaOption({
+  label,
+  hint,
+  checked,
+  disabled,
+  onChange,
+}: {
+  label: string
+  hint: string
+  checked: boolean
+  disabled: boolean
+  onChange: (checked: boolean) => void
+}) {
+  return (
+    <label className="flex cursor-pointer items-start gap-2 rounded-md border border-border/60 px-3 py-2 text-sm">
+      <Checkbox
+        className="mt-0.5"
+        checked={checked}
+        disabled={disabled}
+        onCheckedChange={(next) => onChange(next === true)}
+        aria-label={label}
+      />
+      <span className="flex flex-col gap-0.5">
+        <span>{label}</span>
+        <span className="text-xs text-muted-foreground">{hint}</span>
+      </span>
+    </label>
+  )
+}
+
 interface BiblicaPanelProps {
   projectId: string
   username: string
@@ -3600,10 +3592,11 @@ function BiblicaPanel({
   const [file, setFile] = useState<File | null>(null)
   // Off by default: each InDesign line stays one cell unless the translator opts in.
   const [splitSentences, setSplitSentences] = useState(false)
-  // The three Biblica templates disagree about what a paragraph style means —
-  // a study Bible marks its notes, the other two mark scripture instead — and
-  // nothing in the package says which title it is, so the person importing it
-  // does. One edition at a time, hence a single value rather than two flags.
+  // The four Biblica templates disagree about what a paragraph style means — a
+  // study Bible marks its notes, the next two mark scripture instead, and an EBL
+  // guide has no scripture to mark — and nothing in the package says which title
+  // it is, so the person importing it does. One edition at a time, hence a single
+  // value rather than a flag per title.
   const [edition, setEdition] = useState<BiblicaEdition>("study-notes")
 
   async function handleImport() {
@@ -3645,6 +3638,8 @@ function BiblicaPanel({
           ? t("importExport.biblica.descriptionTreasureHunt")
           : edition === "reach4life"
           ? t("importExport.biblica.descriptionReach4Life")
+          : edition === "ebl"
+          ? t("importExport.biblica.descriptionEbl")
           : t("importExport.biblica.description")}
       </p>
       <div className="flex flex-col gap-2">
@@ -3653,6 +3648,7 @@ function BiblicaPanel({
             ? file.name
             : edition === "treasure-hunt" ? t("importExport.biblica.chooseFileTreasureHunt")
             : edition === "reach4life" ? t("importExport.biblica.chooseFileReach4Life")
+            : edition === "ebl" ? t("importExport.biblica.chooseFileEbl")
             : t("importExport.biblica.chooseFile")}
           <input
             type="file"
@@ -3671,52 +3667,50 @@ function BiblicaPanel({
             {file.name} — {(file.size / 1024 / 1024).toFixed(2)} MB
           </p>
         )}
-        <label className="flex cursor-pointer items-start gap-2 rounded-md border border-border/60 px-3 py-2 text-sm">
-          <Checkbox
-            className="mt-0.5"
-            checked={edition === "treasure-hunt"}
-            disabled={importing}
-            onCheckedChange={(checked) => chooseEdition("treasure-hunt", checked === true)}
-            aria-label={t("importExport.biblica.treasureHuntLabel")}
-          />
-          <span className="flex flex-col gap-0.5">
-            <span>{t("importExport.biblica.treasureHuntLabel")}</span>
-            <span className="text-xs text-muted-foreground">
-              {t("importExport.biblica.treasureHuntHint")}
-            </span>
-          </span>
-        </label>
-        <label className="flex cursor-pointer items-start gap-2 rounded-md border border-border/60 px-3 py-2 text-sm">
-          <Checkbox
-            className="mt-0.5"
-            checked={edition === "reach4life"}
-            disabled={importing}
-            onCheckedChange={(checked) => chooseEdition("reach4life", checked === true)}
-            aria-label={t("importExport.biblica.reach4lifeLabel")}
-          />
-          <span className="flex flex-col gap-0.5">
-            <span>{t("importExport.biblica.reach4lifeLabel")}</span>
-            <span className="text-xs text-muted-foreground">
-              {t("importExport.biblica.reach4lifeHint")}
-            </span>
-          </span>
-        </label>
-        <label className="flex cursor-pointer items-start gap-2 rounded-md border border-border/60 px-3 py-2 text-sm">
-          <Checkbox
-            className="mt-0.5"
-            checked={splitSentences}
-            disabled={importing}
-            onCheckedChange={(checked) => setSplitSentences(checked === true)}
-            aria-label={t("importExport.biblica.splitSentencesLabel")}
-          />
-          <span className="flex flex-col gap-0.5">
-            <span>{t("importExport.biblica.splitSentencesLabel")}</span>
-            <span className="text-xs text-muted-foreground">
-              {t("importExport.biblica.splitSentencesHint")}
-            </span>
-          </span>
-        </label>
+        {/* How finely to cut the text, which every edition answers the same way. */}
+        <BiblicaOption
+          label={t("importExport.biblica.splitSentencesLabel")}
+          hint={t("importExport.biblica.splitSentencesHint")}
+          checked={splitSentences}
+          disabled={importing}
+          onChange={setSplitSentences}
+        />
       </div>
+      {/* Which template to read the package with — a different question, and the
+          three answers are alternatives, so they are grouped away from the cut
+          setting above rather than sitting in one undifferentiated list. */}
+      <fieldset className="flex flex-col gap-2 border-t border-border/60 pt-4">
+        <legend className="sr-only">{t("importExport.biblica.editionQuestion")}</legend>
+        <div className="flex flex-col gap-0.5">
+          <span aria-hidden className="text-sm font-medium">
+            {t("importExport.biblica.editionQuestion")}
+          </span>
+          <span className="text-xs text-muted-foreground">
+            {t("importExport.biblica.editionQuestionHint")}
+          </span>
+        </div>
+        <BiblicaOption
+          label={t("importExport.biblica.treasureHuntLabel")}
+          hint={t("importExport.biblica.treasureHuntHint")}
+          checked={edition === "treasure-hunt"}
+          disabled={importing}
+          onChange={(checked) => chooseEdition("treasure-hunt", checked)}
+        />
+        <BiblicaOption
+          label={t("importExport.biblica.reach4lifeLabel")}
+          hint={t("importExport.biblica.reach4lifeHint")}
+          checked={edition === "reach4life"}
+          disabled={importing}
+          onChange={(checked) => chooseEdition("reach4life", checked)}
+        />
+        <BiblicaOption
+          label={t("importExport.biblica.eblLabel")}
+          hint={t("importExport.biblica.eblHint")}
+          checked={edition === "ebl"}
+          disabled={importing}
+          onChange={(checked) => chooseEdition("ebl", checked)}
+        />
+      </fieldset>
       {progress && (
         <div className="text-xs text-muted-foreground">
           {progress.phase === "parse" && (

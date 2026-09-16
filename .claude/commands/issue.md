@@ -40,14 +40,32 @@ Arguments: $ARGUMENTS
 Parse `$ARGUMENTS`:
 
 - **`AQU-###`** → operate on that specific issue. `get_issue` to read its current status.
+  If it has no milestone, set one (its Road to V1 area — `list_milestones` the project)
+  before working it.
 - **`next`** (or empty) → `list_issues` filtered to project + status `Todo` (the agent-ready
   queue — **never `Triage`/`Backlog`**), pick the highest-priority / lowest-numbered one, and
   operate on it.
 - **`debug "<desc>"`** or **`improve "<desc>"`** → this is *new* work not yet tracked.
-  Create the issue first (`save_issue` into the project, team, priority from your judgment) and
-  set the status by readiness: if it's fully specified and agent-ready, **`Todo`**; if it needs a
-  human decision/review first (HITL), **`Triage`** (`086173c5-…`) — then hand off rather than
-  working it. Once created and agent-ready, proceed as if the user passed that `AQU-###`.
+  Create the issue first (`save_issue` into the project, team, priority from your judgment)
+  **from the team's issue template** — pass `template`: **`Bug Report`** for `debug`,
+  **`Feature Request`** for a new user-facing capability, **`Task`** otherwise. The template
+  applies the category label itself; author the description using the template's exact
+  section headings (a passed `description` replaces the template body — fill its sections,
+  don't invent your own). Create with status **`Triage`** (`086173c5-…`) — **every new issue
+  is born in `Triage`, never `Todo`**, no matter how agent-ready it looks. ⚠️ The templates
+  embed status `Todo`; an explicitly passed `state` overrides that — confirm the create
+  response actually says `Triage`, and re-save if not. Leave it **unassigned**: the team's
+  rotation auto-assigns at create time — if the response shows an assignee, clear it with a
+  follow-up `assignee: null` save. Set a **milestone** (`milestone` on `save_issue`):
+  Prototype Debugging's milestones are the Road to V1 areas — `list_milestones` the project
+  for the live list; every issue in the project carries exactly one. Then:
+  - **Interactive session** (a human just typed this command): the invocation *is* the
+    triage decision — if the issue is fully specified and agent-ready, promote it to `Todo`
+    and proceed as if the user passed that `AQU-###`; if it needs a human decision/review
+    first (HITL), leave it in `Triage` and hand off rather than working it.
+  - **Unattended run** (scheduled routine, swarm agent, or any session where no human typed
+    this command): leave it in `Triage` and stop — a human promotes it via `/triage`. Never
+    self-promote an issue you created.
 - **`--deploy`** → after marking `Fixed`, deploy for dev validation and advance to
   `Dev Verification Needed` (see Step 3). Without it, stop at `Fixed` and tell the user.
 - **`--no-verify`** → skip the dev-stack verification gate (only if the user insists).
@@ -62,7 +80,9 @@ If the issue is in `Backlog` or `Todo`:
   `origin/main` on this issue's suggested branch (`get_issue` → `gitBranchName`) and work
   there. Never pile this ticket onto another ticket's branch/working copy (see AGENTS.md →
   "One ticket = one branch = one worktree").
-- Assign it to the user (`assignee: "me"`).
+- **Keep the existing assignee** — whoever held the issue in `Todo` keeps it through
+  `Fixed` and beyond; never reassign it to yourself/the runner. Only if it's unassigned,
+  claim it (`assignee: "me"`).
 - Move it to **`Dispatched`** (work has begun).
 - Restate the issue's acceptance/repro in one line so the goal is explicit.
 - **Flag spec impact (note only, don't edit yet).** Skim the relevant spec file(s) in

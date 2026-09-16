@@ -88,7 +88,7 @@ describe("useSetupChecklist — dismiss persistence", () => {
 
 describe("useSetupChecklist — AQU-694 mid-setup persistence", () => {
   beforeEach(() => {
-    localStorage.removeItem("codex.setupInProgress.p1")
+    localStorage.removeItem("aquilla.setupInProgress.p1")
   })
 
   // wasInProgress is deliberately a mount-time snapshot of localStorage (it is
@@ -100,7 +100,7 @@ describe("useSetupChecklist — AQU-694 mid-setup persistence", () => {
     const initial = mkProject("p1")
     await createProject(initial)
     // A prior session was mid-setup: the flag is already persisted before mount.
-    localStorage.setItem("codex.setupInProgress.p1", "1")
+    localStorage.setItem("aquilla.setupInProgress.p1", "1")
     const { result } = renderHook(() => useSetupChecklist(initial), { wrapper })
     expect(result.current.wasInProgress).toBe(true)
   })

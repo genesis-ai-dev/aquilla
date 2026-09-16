@@ -8,14 +8,20 @@ vi.mock("@/hooks/useFrontierSession", () => ({ useFrontierSession: () => ({ sess
 const listMyOrgs = vi.fn()
 vi.mock("@/lib/frontier/orgs", () => ({ listMyOrgs: (...a: unknown[]) => listMyOrgs(...a) }))
 vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
-vi.mock("@/lib/sync/cloud-projects", () => ({ fetchAccessibleProjects: vi.fn(async () => []) }))
-const listTeams = vi.fn()
-const createTeam = vi.fn()
-vi.mock("@/lib/frontier/teams", () => ({
-  listTeams: (...a: unknown[]) => listTeams(...a),
-  getTeam: vi.fn(),
-  createTeam: (...a: unknown[]) => createTeam(...a),
+vi.mock("@/lib/sync/cloud-projects", () => ({
+  fetchAccessibleProjectsResult: vi.fn(async () => ({ ok: true as const, projects: [] })),
 }))
+const listTeamsPage = vi.fn()
+const createTeam = vi.fn()
+vi.mock("@/lib/frontier/teams", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/frontier/teams")>()
+  return {
+    ...actual,
+    listTeamsPage: (...a: unknown[]) => listTeamsPage(...a),
+    getTeam: vi.fn(),
+    createTeam: (...a: unknown[]) => createTeam(...a),
+  }
+})
 
 const makeTeam = (overrides: Partial<{ id: number; name: string; memberCount: number; projectCount: number; viewerIsMember: boolean; isInternal: boolean }> = {}) => ({
   id: 10,
@@ -27,39 +33,78 @@ const makeTeam = (overrides: Partial<{ id: number; name: string; memberCount: nu
   ...overrides,
 })
 
+function mockDirectory(allTeams: ReturnType<typeof makeTeam>[]) {
+  listTeamsPage.mockImplementation(async (
+    _jwt: string,
+    _orgId: number,
+    opts: { q?: string; visibility?: string } = {},
+  ) => {
+    let groups = allTeams
+    if (opts.visibility === "internal") groups = groups.filter((t) => t.isInternal)
+    if (opts.visibility === "public") groups = groups.filter((t) => !t.isInternal)
+    const q = (opts.q ?? "").trim().toLowerCase()
+    if (q) groups = groups.filter((t) => t.name.toLowerCase().includes(q))
+    return { groups, nextCursor: null }
+  })
+}
+
 beforeEach(() => {
   localStorage.clear()
-  listTeams.mockReset()
+  listTeamsPage.mockReset()
   createTeam.mockReset()
-  listTeams.mockResolvedValue([])
+  mockDirectory([])
   listMyOrgs.mockResolvedValue([{ id: 7, name: "Come and See", role: { level: 700, name: "owner" } }])
 })
 afterEach(() => {
-  listTeams.mockReset()
-  createTeam.mockReset()
+  // Keep promise-returning defaults alive until Testing Library has unmounted
+  // effects from the rendered tree. beforeEach performs the full reset.
+  listTeamsPage.mockClear()
+  createTeam.mockClear()
 })
 
 describe("TeamsList", () => {
   it("lists the active org's teams", async () => {
-    listTeams.mockResolvedValue([makeTeam()])
+    mockDirectory([makeTeam()])
     render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("West Africa")).toBeInTheDocument())
-    expect(listTeams).toHaveBeenCalledWith("jwt", 7)
+    expect(listTeamsPage).toHaveBeenCalledWith(
+      "jwt",
+      7,
+      expect.objectContaining({ visibility: "internal" }),
+    )
   })
   it("shows an empty state when there are no teams", async () => {
-    listTeams.mockResolvedValue([])
+    mockDirectory([])
     render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
-    await waitFor(() => expect(screen.getByText(/no teams/i)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/no internal teams/i)).toBeInTheDocument())
+  })
+  it("keeps rows visible and shows an in-field spinner while search is in flight", async () => {
+    mockDirectory([makeTeam()])
+    render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText("West Africa")).toBeInTheDocument())
+    fireEvent.change(screen.getByPlaceholderText("Search teams…"), { target: { value: "zzz" } })
+    expect(screen.getByText("West Africa")).toBeInTheDocument()
+    expect(screen.getByRole("status", { name: /searching/i })).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText(/no teams match/i)).toBeInTheDocument())
+  })
+  it("renders the load-more sentinel when another page remains", async () => {
+    listTeamsPage.mockResolvedValue({
+      groups: [makeTeam()],
+      nextCursor: "10:West%20Africa",
+    })
+    render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText("West Africa")).toBeInTheDocument())
+    expect(screen.getByTestId("team-directory-load-more")).toBeInTheDocument()
   })
 })
 
 describe("TeamsList admin create", () => {
   it("shows New team for an org admin and creates a team", async () => {
     listMyOrgs.mockResolvedValue([{ id: 1, name: "CAS", role: { level: 700, name: "owner" } }])
-    listTeams.mockResolvedValue([])
+    mockDirectory([])
     createTeam.mockResolvedValue({ id: 99, name: "West Africa", description: null })
     render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
-    await waitFor(() => expect(screen.getByText(/no teams in this org yet/i)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/no internal teams/i)).toBeInTheDocument())
     await waitFor(() => expect(screen.getByRole("button", { name: /new team/i })).toBeInTheDocument())
     await act(async () => { screen.getByRole("button", { name: /new team/i }).click() })
     await act(async () => { fireEvent.change(screen.getByPlaceholderText(/team name/i), { target: { value: "West Africa" } }) })
@@ -69,9 +114,9 @@ describe("TeamsList admin create", () => {
 
   it("hides New team for a non-admin", async () => {
     listMyOrgs.mockResolvedValue([{ id: 1, name: "CAS", role: { level: 100, name: "viewer" } }])
-    listTeams.mockResolvedValue([])
+    mockDirectory([])
     render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
-    await waitFor(() => expect(screen.getByText(/no teams/i)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText(/no internal teams/i)).toBeInTheDocument())
     expect(screen.queryByRole("button", { name: /new team/i })).toBeNull()
   })
 })
@@ -104,7 +149,7 @@ describe("TeamsList — AQU-333: internal/public visibility select", () => {
   }
 
   it("renders the visibility select and defaults to Internal only", async () => {
-    listTeams.mockResolvedValue([internalTeam, publicTeam])
+    mockDirectory([internalTeam, publicTeam])
     render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("Internal Team")).toBeInTheDocument())
     const trigger = screen.getByRole("combobox", { name: /filter teams by visibility/i })
@@ -115,7 +160,7 @@ describe("TeamsList — AQU-333: internal/public visibility select", () => {
   })
 
   it("AQU-158 guard: public teams stay reachable via All and Public only", async () => {
-    listTeams.mockResolvedValue([internalTeam, publicTeam])
+    mockDirectory([internalTeam, publicTeam])
     render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("Internal Team")).toBeInTheDocument())
     // All → both internal and public appear.
@@ -129,7 +174,7 @@ describe("TeamsList — AQU-333: internal/public visibility select", () => {
   })
 
   it("empty state when a filter excludes everything, with Clear to reset", async () => {
-    listTeams.mockResolvedValue([internalTeam])
+    mockDirectory([internalTeam])
     render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("Internal Team")).toBeInTheDocument())
     await pickVisibility(/public only/i)
@@ -145,15 +190,17 @@ describe("TeamsList — AQU-333: internal/public visibility select", () => {
   it("filter composes with search (Public only + a search term)", async () => {
     const publicAlpha = makeTeam({ id: 3, name: "Public Alpha", isInternal: false })
     const publicBeta = makeTeam({ id: 4, name: "Public Beta", isInternal: false })
-    listTeams.mockResolvedValue([internalTeam, publicAlpha, publicBeta])
+    mockDirectory([internalTeam, publicAlpha, publicBeta])
     render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("Internal Team")).toBeInTheDocument())
     await pickVisibility(/public only/i)
     await waitFor(() => expect(screen.queryByText("Internal Team")).toBeNull())
     fireEvent.change(screen.getByPlaceholderText("Search teams…"), { target: { value: "Alpha" } })
     await waitFor(() => expect(screen.getByText("Public Alpha")).toBeInTheDocument())
-    expect(screen.queryByText("Public Beta")).toBeNull()
-    expect(screen.queryByText("Internal Team")).toBeNull()
+    await waitFor(() => {
+      expect(screen.queryByText("Public Beta")).toBeNull()
+      expect(screen.queryByText("Internal Team")).toBeNull()
+    })
   })
 })
 
@@ -182,25 +229,27 @@ describe("TeamsList — AQU-166: search + sort", () => {
   }
 
   it("default sort is Name A–Z (case-insensitive)", async () => {
-    listTeams.mockResolvedValue(teams)
+    mockDirectory(teams)
     render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("Alpha")).toBeInTheDocument())
     expect(teamNamesInOrder()).toEqual(["Alpha", "beta", "Gamma"])
   })
 
   it("search narrows list by name (case-insensitive substring)", async () => {
-    listTeams.mockResolvedValue(teams)
+    mockDirectory(teams)
     render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("Alpha")).toBeInTheDocument())
     // "lph" matches "Alpha" only
     fireEvent.change(screen.getByPlaceholderText("Search teams…"), { target: { value: "lph" } })
-    await waitFor(() => expect(screen.getByText("Alpha")).toBeInTheDocument())
-    expect(screen.queryByText("beta")).toBeNull()
-    expect(screen.queryByText("Gamma")).toBeNull()
+    await waitFor(() => {
+      expect(screen.getByText("Alpha")).toBeInTheDocument()
+      expect(screen.queryByText("beta")).toBeNull()
+      expect(screen.queryByText("Gamma")).toBeNull()
+    })
   })
 
   it("sort by Members (most first) reorders correctly", async () => {
-    listTeams.mockResolvedValue(teams)
+    mockDirectory(teams)
     render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("Alpha")).toBeInTheDocument())
     await sortByColumn(/^Members$/i, "descending")
@@ -208,7 +257,7 @@ describe("TeamsList — AQU-166: search + sort", () => {
   })
 
   it("sort by Projects (most first) reorders correctly", async () => {
-    listTeams.mockResolvedValue(teams)
+    mockDirectory(teams)
     render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("Alpha")).toBeInTheDocument())
     await sortByColumn(/^Projects$/i, "descending")
@@ -216,7 +265,7 @@ describe("TeamsList — AQU-166: search + sort", () => {
   })
 
   it("no-results state shows message and Clear resets search", async () => {
-    listTeams.mockResolvedValue(teams)
+    mockDirectory(teams)
     render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
     await waitFor(() => expect(screen.getByText("Alpha")).toBeInTheDocument())
     fireEvent.change(screen.getByPlaceholderText("Search teams…"), { target: { value: "zzz" } })
@@ -228,8 +277,10 @@ describe("TeamsList — AQU-166: search + sort", () => {
   })
 
   it("empty-org state shows 'No teams in this org yet.' with search still available", async () => {
-    listTeams.mockResolvedValue([])
+    mockDirectory([])
     render(<MemoryRouter><OrgProvider><TeamsList /></OrgProvider></MemoryRouter>)
+    await waitFor(() => expect(screen.getByText(/no internal teams/i)).toBeInTheDocument())
+    fireEvent.click(screen.getByRole("button", { name: /clear/i }))
     await waitFor(
       () => {
         expect(screen.getByText(/no teams in this org yet/i)).toBeInTheDocument()

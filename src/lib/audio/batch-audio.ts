@@ -139,6 +139,28 @@ export interface TranscribeAllArgs {
   targetLanguage?: string
   /** @deprecated single-language callers; used as targetLanguage fallback. */
   language?: string
+  /** AQU-928: run every cell that HAS audio, not just the ones missing a
+   *  transcript. For an explicitly chosen scope — the sections the user
+   *  selected on the timeline — "already transcribed" is not a reason to do
+   *  nothing; re-running is exactly what the per-cell Transcribe button does.
+   *  In-flight cells are still skipped. Never set for transcribe-all, which
+   *  is a fill-in-the-gaps pass over the whole file. */
+  force?: boolean
+  /**
+   * How far along, for callers that report it themselves. Fires once with
+   * `done === 0` BEFORE any work starts, so a caller can put its total on
+   * screen while the first cell is still waiting on the Whisper model — which
+   * on a cold run is most of the wait. Not fired at all when nothing needs
+   * transcribing, so a caller can tell "no work" from "no progress yet".
+   */
+  onProgress?: (done: number, total: number) => void
+}
+
+/** AQU-928: is there any audio on this cell to run ASR over? The first gate of
+ *  `needsTranscription`, split out because a forced (user-selected) run needs
+ *  this half of the predicate without the "is it missing" half. */
+export function canTranscribeCell(c: CellData): c is CellData & { selectedAudioId: string } {
+  return Boolean(c.selectedAudioId)
 }
 
 /**
@@ -147,7 +169,7 @@ export interface TranscribeAllArgs {
  * for that recording. Shared by runTranscribeAll and the workspace menu count.
  */
 export function needsTranscription(c: CellData): boolean {
-  if (!c.selectedAudioId) return false
+  if (!canTranscribeCell(c)) return false
   // SUB-29: the source-vs-take split is attachment PROVENANCE, not cell
   // medium — a dub take recorded onto a media section follows the take rule.
   if (isSourceSegmentSelected(c)) return !c.transcription?.trim()
@@ -174,7 +196,10 @@ export async function runTranscribeAll(args: TranscribeAllArgs): Promise<void> {
   const targetLang = args.targetLanguage ?? args.language
 
   const targets = cells.filter((c) => {
-    if (!needsTranscription(c)) return false
+    // AQU-928: a forced run keeps only the "has audio" half of the gate — the
+    // caller already decided WHICH cells; re-transcribing one that has a
+    // transcript is the point.
+    if (args.force ? !canTranscribeCell(c) : !needsTranscription(c)) return false
     // Skip cells already being transcribed.
     const st = getTranscribeStatus(c.selectedAudioId!)
     if (st.kind === "loading" || st.kind === "transcribing") return false
@@ -184,6 +209,8 @@ export async function runTranscribeAll(args: TranscribeAllArgs): Promise<void> {
   if (targets.length === 0) return
 
   _transcribeCancelFlag = false
+  args.onProgress?.(0, targets.length)
+  let completed = 0
 
   await runBatch(
     targets,
@@ -200,7 +227,11 @@ export async function runTranscribeAll(args: TranscribeAllArgs): Promise<void> {
     {
       kind: "transcribe",
       isCancelled: () => _transcribeCancelFlag,
-      onItemDone: () => { /* per-cell badge handles its own state */ },
+      onItemDone: () => {
+        // The per-cell badge handles its own state; this is for whoever is
+        // watching the whole batch rather than one line.
+        args.onProgress?.(++completed, targets.length)
+      },
     },
   )
 }
@@ -214,12 +245,45 @@ export interface SynthAllArgs {
   project: ProjectRecord
   session: FrontierSession | null
   username: string
+  /**
+   * AQU-646 stage 3f: turn one source cell into the units of work it implies.
+   *
+   * Returns EMPTY for a cell that needs nothing, and MORE THAN ONE when a
+   * subtitle is performed by several heard lines — each of which gets the whole
+   * line (Sam's ruling), because skipping the second is how a dub ends up
+   * half-silent with nothing on screen saying so.
+   *
+   * Absent ⇒ each cell speaks its own text onto itself.
+   */
+  resolveTargets?: (cell: CellData) => SynthTarget[]
 }
 
 /** AQU-646: a cell needs synthesis when it has translated text but no
  *  generated voice yet. Shared by runSynthAll and the workspace menu count. */
 export function needsSynthesis(c: CellData): boolean {
   return Boolean(c.translated?.trim()) && !c.selectedGeneratedVoiceAudioId
+}
+
+/**
+ * One unit of work for a bulk synth run: the words, and the cell they go on.
+ * AQU-646 stage 3f.
+ *
+ * THE TWO ARE NOT ALWAYS THE SAME CELL. On a file with an audio-cue sibling the
+ * translation lives on the subtitle and the audio belongs on the heard lines
+ * that perform it — so "synthesize everything" over the file's own cells wrote
+ * every generated voice somewhere the timeline cannot draw it, 650 times.
+ *
+ * Sam's ruling (2026-08-25): a subtitle performed by two heard lines generates
+ * onto BOTH, each speaking the whole line, so nothing is silently skipped. The
+ * caller trims. That is why this is a LIST rather than a redirect.
+ */
+export interface SynthTarget {
+  /** The cell the take attaches to — a cue, or the source cell itself. */
+  cell: CellData
+  /** The words, from wherever they actually live. */
+  text: string
+  /** Whose cast assignment picks the voice — see `generateCellVoice`. */
+  voiceCellId?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -420,10 +484,20 @@ export async function runSynthAll(args: SynthAllArgs): Promise<void> {
   const { cells, project, session, username } = args
 
   // Target: cells with translated text but no generated voice audio.
-  const targets = cells.filter((c) => {
-    if (!needsSynthesis(c)) return false
-    // Skip cells already being synthesized.
-    const st = getTtsStatus(ttsStatusKey(c.id))
+  //
+  // `resolveTargets` (stage 3f) is how a caller says "the words and the home
+  // are different cells" — see `SynthTarget`. Absent ⇒ each cell speaks its own
+  // text onto itself, which is every arrangement without audio cues and is
+  // byte-for-byte what this did before.
+  const targets: SynthTarget[] = (
+    args.resolveTargets
+      ? cells.flatMap((c) => args.resolveTargets!(c))
+      : cells.filter(needsSynthesis).map((c) => ({ cell: c, text: c.translated!.trim() }))
+  ).filter((t) => {
+    if (!t.text.trim()) return false
+    // Skip cells already being synthesized. Keyed on the cell the take lands
+    // on, which is what `generateCellVoice` sets the badge for.
+    const st = getTtsStatus(ttsStatusKey(t.cell.id))
     if (st.kind === "loading" || st.kind === "synthesizing") return false
     return true
   })
@@ -434,7 +508,15 @@ export async function runSynthAll(args: SynthAllArgs): Promise<void> {
 
   await runBatch(
     targets,
-    (cell) => generateCellVoice({ project, cell, session, username }),
+    (t) =>
+      generateCellVoice({
+        project,
+        cell: t.cell,
+        session,
+        username,
+        text: t.text,
+        voiceCellId: t.voiceCellId,
+      }),
     {
       kind: "synth",
       isCancelled: () => _synthCancelFlag,

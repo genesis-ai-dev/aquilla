@@ -7,6 +7,7 @@
 //   POST /:projectId/contextual/steering                  direction / refresh_span / note
 //   GET  /:projectId/contextual/drafts?fileId=            staged drafts (VIEWER)
 //   GET  /:projectId/contextual/segmentation?fileId=      strategy + preview (VIEWER)
+//        optional &strategy=auto|fixed&fixedSize=N        dry-run preview, no write
 //   PUT  /:projectId/contextual/segmentation?fileId=      set the strategy (PROJECT_LEAD)
 //   POST /:projectId/contextual/segmentation/generate     AI re-segmentation (PROJECT_LEAD)
 //   POST /:projectId/contextual/drafts/:draftId/review    {action: applied|rejected}
@@ -80,7 +81,7 @@ import {
 } from "../../../db/shared/contextual-runs"
 import { getSceneBrief, listSceneBriefsByRun } from "../../../db/shared/scene-briefs"
 import { isRegisteredTargetLane, loadProjectContext } from "../lib/contextual/project-context"
-import { computeContextReadiness, type ContextReadiness } from "../lib/contextual/readiness"
+import { computeContextReadiness, computeStartBlockers, type ContextReadiness } from "../lib/contextual/readiness"
 import {
   runOneTick,
   makeLlmCall,
@@ -92,8 +93,15 @@ import {
   persistContextualProgressFrame,
   MAX_WAVE_CONCURRENCY,
   type ContextualProgressFrame,
+  type SegmentationPreviewQuery,
 } from "../lib/contextual/tick"
+import { friendlyScriptureLabel } from "../../../shared/span-label"
 import { decorateActivityLabels, loadCellDisplayIndex } from "../lib/contextual/activity-labels"
+import {
+  getCachedContextualRead,
+  getCachedContextualReadiness,
+  invalidateContextualReads,
+} from "../lib/contextual/read-cache"
 import type { LlmCall } from "../lib/contextual/types"
 
 const contextual = new Hono<AuthHonoEnv>()
@@ -137,7 +145,7 @@ async function appendActivitySafely(
   }
 }
 
-async function publishRunStateOutsideTick(
+export async function publishRunStateOutsideTick(
   env: Env,
   db: AquillaDb,
   projectId: string,
@@ -423,7 +431,7 @@ async function selfTickLoop(
 
 /** Kick the loop in the background. Hono throws on `c.executionCtx` when there
  *  is none (vitest) — fall back to a floating promise, tracked in _test. */
-function kickLoop(
+export function kickLoop(
   c: Context<AuthHonoEnv>,
   projectId: string,
   runId: string,
@@ -561,6 +569,24 @@ contextual.post(
         "validation_failed",
         "That target-language lane is not registered on this project.",
         400,
+      )
+      return c.json(err, status)
+    }
+
+    // Minimum steering context (AQU-827). Checked before the budget/credit
+    // guards because it is a precondition, not a spend decision: a project
+    // missing its languages or any brief cannot be steered, and the run would
+    // bill for fluent output nobody asked for. Covers BOTH scopes — the
+    // file-scoped pill and the project-wide start land on this route.
+    const startBlockers = computeStartBlockers(
+      await loadProjectContext(c.env.AQUILLA_PG, projectId),
+    )
+    if (startBlockers.length > 0) {
+      const { body: err, status } = errorJson(
+        "context_required",
+        "Autopilot needs the project's source and target languages and a translation brief before it can start.",
+        400,
+        { missing: startBlockers },
       )
       return c.json(err, status)
     }
@@ -732,23 +758,35 @@ contextual.post(
   },
 )
 
-// GET /:projectId/contextual/overview — project-wide autopilot rollup for the
-// PM surface (VIEWER: read-only observability, not a control).
-contextual.get("/:projectId/contextual/overview", authMiddleware, async (c) => {
-  const projectId = c.req.param("projectId") ?? ""
-  const gate = await requireRole(c, projectId, ROLE.VIEWER)
-  if (!gate.ok) return gate.res
-  const summary = await getProjectAutopilotSummary(c.env.AQUILLA_PG, projectId)
+/**
+ * Serve a poll endpoint from the isolate read cache (lib/contextual/read-cache).
+ * Runs AFTER the role gate — the cached body is project-scoped, never
+ * user-scoped, so the gate is the only per-user work on a hit. A matching
+ * `If-None-Match` answers 304 with no body; the SPA transport retains the
+ * last body per URL and replays it. `no-store` keeps the browser's own HTTP
+ * cache out of the loop so the conditional round-trip is explicit.
+ */
+async function cachedPollJson(
+  c: Context<AuthHonoEnv>,
+  projectId: string,
+  scope: string,
+  compute: () => Promise<unknown>,
+): Promise<Response> {
+  const cached = await getCachedContextualRead(projectId, scope, compute)
+  c.header("ETag", cached.etag)
+  c.header("Cache-Control", "no-store")
+  if (c.req.header("If-None-Match") === cached.etag) return c.body(null, 304)
+  return c.body(cached.body, 200, { "Content-Type": "application/json" })
+}
 
-  // What autopilot actually KNOWS about this project. A run with no brief, no
-  // key terms and no validated examples still produces confident output — the
-  // most expensive kind, because nothing looks wrong until a consultant reads
-  // it, and the progress numbers say "staged" either way. Reporting the gaps
-  // is the only way a PM finds out before spending the run.
-  let readiness: ContextReadiness | null = null
-  try {
-    const context = await loadProjectContext(c.env.AQUILLA_PG, projectId)
-    const counts = await c.env.AQUILLA_PG
+/** Readiness cell counts: a full-project `cells` self-join. Off the poll hot
+ *  path — cached per project for CONTEXTUAL_READINESS_TTL_MS. */
+async function readinessCellCounts(
+  db: AquillaDb,
+  projectId: string,
+): Promise<{ validated: number; untranslated: number }> {
+  return getCachedContextualReadiness(projectId, async () => {
+    const counts = await db
       .prepare(
         `SELECT COUNT(*) FILTER (WHERE t.validated = 1 AND COALESCE(t.value,'') <> '') AS validated,
                 COUNT(*) FILTER (WHERE COALESCE(t.value,'') = '') AS untranslated
@@ -760,16 +798,42 @@ contextual.get("/:projectId/contextual/overview", authMiddleware, async (c) => {
       )
       .bind(projectId)
       .first<{ validated: number; untranslated: number }>()
-    readiness = computeContextReadiness({
-      context,
-      validatedExamples: Number(counts?.validated ?? 0),
-      untranslatedCells: Number(counts?.untranslated ?? 0),
-    })
-  } catch {
-    // Readiness is advisory — never fail the rollup over it.
-  }
+    return {
+      validated: Number(counts?.validated ?? 0),
+      untranslated: Number(counts?.untranslated ?? 0),
+    }
+  })
+}
 
-  return c.json({ available: true, ...summary, ...(readiness ? { readiness } : {}) })
+// GET /:projectId/contextual/overview — project-wide autopilot rollup for the
+// PM surface (VIEWER: read-only observability, not a control).
+contextual.get("/:projectId/contextual/overview", authMiddleware, async (c) => {
+  const projectId = c.req.param("projectId") ?? ""
+  const gate = await requireRole(c, projectId, ROLE.VIEWER)
+  if (!gate.ok) return gate.res
+  return cachedPollJson(c, projectId, "overview", async () => {
+    const summary = await getProjectAutopilotSummary(c.env.AQUILLA_PG, projectId)
+
+    // What autopilot actually KNOWS about this project. A run with no brief, no
+    // key terms and no validated examples still produces confident output — the
+    // most expensive kind, because nothing looks wrong until a consultant reads
+    // it, and the progress numbers say "staged" either way. Reporting the gaps
+    // is the only way a PM finds out before spending the run.
+    let readiness: ContextReadiness | null = null
+    try {
+      const context = await loadProjectContext(c.env.AQUILLA_PG, projectId)
+      const counts = await readinessCellCounts(c.env.AQUILLA_PG, projectId)
+      readiness = computeContextReadiness({
+        context,
+        validatedExamples: counts.validated,
+        untranslatedCells: counts.untranslated,
+      })
+    } catch {
+      // Readiness is advisory — never fail the rollup over it.
+    }
+
+    return { available: true, ...summary, ...(readiness ? { readiness } : {}) }
+  })
 })
 
 /** Snapshot shape the pill hydrates from (mirrors run-store's expectations). */
@@ -858,29 +922,31 @@ contextual.get("/:projectId/contextual/runs", authMiddleware, async (c) => {
     })
   }
   const targetLang = c.req.query("targetLang") ?? ""
-  const active = await getActiveRun(c.env.AQUILLA_PG, projectId, fileId, targetLang)
-  const latest = active
-    ? null
-    : (await listRuns(c.env.AQUILLA_PG, projectId, { fileId, targetLang, limit: 1 })).runs[0] ?? null
-  const run = active ?? latest
-  const steering = run
-    ? await readUnconsumedSteering(c.env.AQUILLA_PG, { projectId, fileId, runId: run.id })
-    : []
-  const [draftCounts, runDraftCounts] = await Promise.all([
-    countDrafts(c.env.AQUILLA_PG, projectId, fileId, targetLang),
-    run
-      ? countDraftsByRun(c.env.AQUILLA_PG, projectId, run.id)
-      : Promise.resolve({ proposed: 0, applied: 0, rejected: 0, superseded: 0 }),
-  ])
-  const activeDirections = steering.filter((s) => s.kind === "direction").map((s) => s.body)
-  return c.json({
-    available: true,
-    run: run
-      ? runSnapshot(run, { activeDirections, proposedDrafts: runDraftCounts.proposed })
-      : null,
-    // Kept at the top level too for consumers that never look inside `run`.
-    activeDirections,
-    draftCounts,
+  return cachedPollJson(c, projectId, `runs?fileId=${fileId}&targetLang=${targetLang}`, async () => {
+    const active = await getActiveRun(c.env.AQUILLA_PG, projectId, fileId, targetLang)
+    const latest = active
+      ? null
+      : (await listRuns(c.env.AQUILLA_PG, projectId, { fileId, targetLang, limit: 1 })).runs[0] ?? null
+    const run = active ?? latest
+    const steering = run
+      ? await readUnconsumedSteering(c.env.AQUILLA_PG, { projectId, fileId, runId: run.id })
+      : []
+    const [draftCounts, runDraftCounts] = await Promise.all([
+      countDrafts(c.env.AQUILLA_PG, projectId, fileId, targetLang),
+      run
+        ? countDraftsByRun(c.env.AQUILLA_PG, projectId, run.id)
+        : Promise.resolve({ proposed: 0, applied: 0, rejected: 0, superseded: 0 }),
+    ])
+    const activeDirections = steering.filter((s) => s.kind === "direction").map((s) => s.body)
+    return {
+      available: true,
+      run: run
+        ? runSnapshot(run, { activeDirections, proposedDrafts: runDraftCounts.proposed })
+        : null,
+      // Kept at the top level too for consumers that never look inside `run`.
+      activeDirections,
+      draftCounts,
+    }
   })
 })
 
@@ -931,45 +997,49 @@ contextual.get("/:projectId/contextual/runs/:runId/activity", authMiddleware, as
     const { body, status } = errorJson("validation_failed", "draftBeforeCreatedAt is invalid", 400)
     return c.json(body, status)
   }
-  const [activity, briefRows, draftPage, runDraftCounts] = await Promise.all([
-    listContextualRunEvents(c.env.AQUILLA_PG, { projectId, runId, limit: evidenceLimit }),
-    listSceneBriefsByRun(c.env.AQUILLA_PG, projectId, runId, evidenceLimit + 1),
-    listDraftPageByRun(c.env.AQUILLA_PG, projectId, runId, {
-      limit: draftLimit,
-      ...(draftStatus ? { status: draftStatus } : {}),
-      ...(draftBeforeCreatedAt && draftBeforeId
-        ? { before: { createdAt: draftBeforeCreatedAt, draftId: draftBeforeId } }
-        : {}),
-    }),
-    countDraftsByRun(c.env.AQUILLA_PG, projectId, runId),
-  ])
-  const briefsTruncated = briefRows.length > evidenceLimit
-  const truncatedCollections = {
-    events: activity.truncated,
-    sceneBriefs: briefsTruncated,
-    drafts: draftPage.truncated,
-  }
-  const sceneBriefs = briefsTruncated ? briefRows.slice(-evidenceLimit) : briefRows
-  let labelled = {
-    events: activity.events,
-    sceneBriefs,
-    drafts: draftPage.drafts,
-  }
-  try {
-    const cells = await loadCellDisplayIndex(c.env.AQUILLA_PG, projectId, run.fileId)
-    labelled = decorateActivityLabels(labelled, cells)
-  } catch (err) {
-    console.warn(`[contextual] activity label lookup failed for run ${runId}:`, err)
-  }
-  return c.json({
-    run: runSnapshot(run, { proposedDrafts: runDraftCounts.proposed }),
-    events: labelled.events,
-    sceneBriefs: labelled.sceneBriefs,
-    drafts: labelled.drafts,
-    draftCounts: runDraftCounts,
-    draftNextCursor: draftPage.nextCursor,
-    truncated: Object.values(truncatedCollections).some(Boolean),
-    truncatedCollections,
+  const scope = `activity:${runId}?draftStatus=${draftStatus ?? ""}&draftLimit=${draftLimit}` +
+    `&draftBeforeCreatedAt=${draftBeforeCreatedAt ?? ""}&draftBeforeId=${draftBeforeId ?? ""}`
+  return cachedPollJson(c, projectId, scope, async () => {
+    const [activity, briefRows, draftPage, runDraftCounts] = await Promise.all([
+      listContextualRunEvents(c.env.AQUILLA_PG, { projectId, runId, limit: evidenceLimit }),
+      listSceneBriefsByRun(c.env.AQUILLA_PG, projectId, runId, evidenceLimit + 1),
+      listDraftPageByRun(c.env.AQUILLA_PG, projectId, runId, {
+        limit: draftLimit,
+        ...(draftStatus ? { status: draftStatus } : {}),
+        ...(draftBeforeCreatedAt && draftBeforeId
+          ? { before: { createdAt: draftBeforeCreatedAt, draftId: draftBeforeId } }
+          : {}),
+      }),
+      countDraftsByRun(c.env.AQUILLA_PG, projectId, runId),
+    ])
+    const briefsTruncated = briefRows.length > evidenceLimit
+    const truncatedCollections = {
+      events: activity.truncated,
+      sceneBriefs: briefsTruncated,
+      drafts: draftPage.truncated,
+    }
+    const sceneBriefs = briefsTruncated ? briefRows.slice(-evidenceLimit) : briefRows
+    let labelled = {
+      events: activity.events,
+      sceneBriefs,
+      drafts: draftPage.drafts,
+    }
+    try {
+      const cells = await loadCellDisplayIndex(c.env.AQUILLA_PG, projectId, run.fileId)
+      labelled = decorateActivityLabels(labelled, cells)
+    } catch (err) {
+      console.warn(`[contextual] activity label lookup failed for run ${runId}:`, err)
+    }
+    return {
+      run: runSnapshot(run, { proposedDrafts: runDraftCounts.proposed }),
+      events: labelled.events,
+      sceneBriefs: labelled.sceneBriefs,
+      drafts: labelled.drafts,
+      draftCounts: runDraftCounts,
+      draftNextCursor: draftPage.nextCursor,
+      truncated: Object.values(truncatedCollections).some(Boolean),
+      truncatedCollections,
+    }
   })
 })
 
@@ -1095,6 +1165,9 @@ contextual.post(
         kickLoop(c, projectId, target.id)
       }
     }
+    // Steering changes `activeDirections`/activity without a frame unless it
+    // wakes a parked run — invalidate unconditionally.
+    invalidateContextualReads(projectId)
     return c.json({ steering: result.entry, ...(woken ? { wokeRunId: woken } : {}) }, 201)
   },
 )
@@ -1192,6 +1265,8 @@ contextual.post(
         outcome: result.draft.status === "applied" ? "applied" : "rejected",
       },
     })
+    // No live frame carries a review decision — drop the cached polls by hand.
+    invalidateContextualReads(projectId)
     return c.json({ draft: result.draft })
   },
 )
@@ -1211,6 +1286,27 @@ contextual.post(
 /** Preview spans returned inline. A long book segments into a few hundred;
  *  the count is always exact, the list is a sample. */
 const SEGMENTATION_PREVIEW_LIMIT = 60
+
+function parseSegmentationPreviewQuery(
+  strategy: string | undefined,
+  fixedSizeRaw: string | undefined,
+): SegmentationPreviewQuery | { error: string } | undefined {
+  if (!strategy) return undefined
+  if (strategy !== "auto" && strategy !== "fixed") {
+    return { error: "strategy must be auto or fixed" }
+  }
+  if (strategy === "auto") return { strategy: "auto" }
+  const fixedSize = Number.parseInt(fixedSizeRaw ?? "", 10)
+  if (!Number.isFinite(fixedSize) || fixedSize < MIN_SEGMENT_SIZE || fixedSize > MAX_SEGMENT_SIZE) {
+    return { error: `fixedSize must be between ${MIN_SEGMENT_SIZE} and ${MAX_SEGMENT_SIZE}` }
+  }
+  return { strategy: "fixed", fixedSize }
+}
+
+function spanExcerpt(startCellId: string, pairs: { cellId: string; source: string }[]): string {
+  const source = pairs.find((pair) => pair.cellId === startCellId)?.source ?? ""
+  return source.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 120)
+}
 
 const segmentationBoundarySchema = z.object({
   startCellId: z.string().min(1),
@@ -1239,22 +1335,30 @@ contextual.get("/:projectId/contextual/segmentation", authMiddleware, async (c) 
     return c.json(body, status)
   }
 
+  const preview = parseSegmentationPreviewQuery(c.req.query("strategy"), c.req.query("fixedSize"))
+  if (preview && "error" in preview) {
+    const { body, status } = errorJson("validation_failed", preview.error, 400)
+    return c.json(body, status)
+  }
+
   const db = c.env.AQUILLA_PG
   const [segmentation, pairs] = await Promise.all([
     getFileSegmentation(db, projectId, fileId),
     selectCellPairs(db, projectId, { fileId }),
   ])
-  const seeds = await resolveSpanSeeds(db, projectId, fileId, pairs)
+  const seeds = await resolveSpanSeeds(db, projectId, fileId, pairs, preview)
   const order = new Map(pairs.map((p, i) => [p.cellId, i]))
   const spans = seeds.map((seed) => {
     const start = order.get(seed.startCellId)
     const end = order.get(seed.endCellId)
+    const rawLabel = spanLabel(seed, pairs)
     return {
       startCellId: seed.startCellId,
       endCellId: seed.endCellId,
       seedSource: seed.seedSource,
       cellCount: start === undefined || end === undefined ? 0 : end - start + 1,
-      label: spanLabel(seed, pairs),
+      label: rawLabel ? friendlyScriptureLabel(rawLabel) : rawLabel,
+      excerpt: spanExcerpt(seed.startCellId, pairs),
     }
   })
 

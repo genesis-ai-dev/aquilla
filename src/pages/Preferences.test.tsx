@@ -4,8 +4,9 @@ import userEvent from "@testing-library/user-event"
 import { MemoryRouter, Route, Routes } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { ThemeModeProvider } from "@/branding/ThemeMode"
+import { FontSizeProvider, FONT_SIZE_STORAGE_KEY } from "@/branding/FontSize"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
-import { Preferences } from "./Preferences"
+import { Preferences, PreferencesDialog } from "./Preferences"
 
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "jwt", username: "wendi", createdAt: "x" }, loading: false }),
@@ -26,6 +27,7 @@ afterEach(() => {
   vi.clearAllMocks()
   window.localStorage.clear()
   document.documentElement.classList.remove("dark")
+  document.documentElement.style.removeProperty("font-size")
 })
 
 function renderAt(path: string) {
@@ -33,12 +35,14 @@ function renderAt(path: string) {
     <MemoryRouter initialEntries={[path]}>
       <I18nProvider>
         <ThemeModeProvider>
-          <OrgProvider>
-            <Routes>
-              <Route path="/preferences" element={<Preferences />} />
-              <Route path="/preferences/:section" element={<Preferences />} />
-            </Routes>
-          </OrgProvider>
+          <FontSizeProvider>
+            <OrgProvider>
+              <Routes>
+                <Route path="/preferences" element={<Preferences />} />
+                <Route path="/preferences/:section" element={<Preferences />} />
+              </Routes>
+            </OrgProvider>
+          </FontSizeProvider>
         </ThemeModeProvider>
       </I18nProvider>
     </MemoryRouter>,
@@ -51,6 +55,7 @@ describe("Preferences", () => {
     expect(screen.getByRole("heading", { name: "Preferences" })).toBeInTheDocument()
     expect(screen.getByText("General")).toBeInTheDocument()
     expect(screen.getByRole("combobox", { name: "Theme" })).toBeInTheDocument()
+    expect(screen.getByRole("combobox", { name: "App font size" })).toBeInTheDocument()
     expect(screen.getByRole("combobox", { name: "UI language" })).toBeInTheDocument()
     expect(screen.getByRole("switch", { name: "Share usage data" })).toBeInTheDocument()
     expect(screen.queryByRole("link", { name: /Appearance/ })).not.toBeInTheDocument()
@@ -118,7 +123,7 @@ describe("Preferences", () => {
 
     await userEvent.click(trigger)
     await userEvent.click(await screen.findByRole("option", { name: "Dark" }))
-    expect(window.localStorage.getItem("codex-theme")).toBe("dark")
+    expect(window.localStorage.getItem("aquilla-theme")).toBe("dark")
     expect(document.documentElement).toHaveClass("dark")
   })
 
@@ -141,5 +146,84 @@ describe("Preferences", () => {
     // looking for their language will not scan for the word "Burmese".
     await userEvent.click(trigger)
     expect(await screen.findByRole("option", { name: /မြန်မာ/ })).toBeInTheDocument()
+  })
+
+  it("shows Default app font size for a fresh user and scales the root immediately", async () => {
+    renderAt("/preferences")
+    const trigger = screen.getByRole("combobox", { name: "App font size" })
+    expect(trigger).toHaveTextContent("Default")
+    expect(document.documentElement.style.fontSize).toBe("")
+
+    await userEvent.click(trigger)
+    await userEvent.click(await screen.findByRole("option", { name: "Large" }))
+    expect(window.localStorage.getItem(FONT_SIZE_STORAGE_KEY)).toBe("large")
+    expect(document.documentElement.style.fontSize).toBe("18px")
+
+    await userEvent.click(screen.getByRole("combobox", { name: "App font size" }))
+    await userEvent.click(await screen.findByRole("option", { name: "Default" }))
+    expect(window.localStorage.getItem(FONT_SIZE_STORAGE_KEY)).toBe("default")
+    expect(document.documentElement.style.fontSize).toBe("")
+  })
+
+  it("applies Small and Extra Large root sizes from the General card", async () => {
+    renderAt("/preferences")
+    const trigger = screen.getByRole("combobox", { name: "App font size" })
+
+    await userEvent.click(trigger)
+    await userEvent.click(await screen.findByRole("option", { name: "Small" }))
+    expect(document.documentElement.style.fontSize).toBe("14px")
+
+    await userEvent.click(screen.getByRole("combobox", { name: "App font size" }))
+    await userEvent.click(await screen.findByRole("option", { name: "Extra Large" }))
+    expect(window.localStorage.getItem(FONT_SIZE_STORAGE_KEY)).toBe("extra-large")
+    expect(document.documentElement.style.fontSize).toBe("20px")
+  })
+})
+
+describe("PreferencesDialog", () => {
+  it("renders the shared preferences UI in a route-backed modal and closes to its origin", async () => {
+    const backgroundLocation = {
+      pathname: "/project/p1/editor",
+      search: "",
+      hash: "",
+      state: null,
+      key: "editor",
+    }
+    render(
+      <MemoryRouter
+        initialIndex={1}
+        initialEntries={[
+          backgroundLocation,
+          {
+            pathname: "/preferences",
+            state: { backgroundLocation, preferencesModalDepth: 1 },
+          },
+        ]}
+      >
+        <I18nProvider>
+          <ThemeModeProvider>
+            <FontSizeProvider>
+              <OrgProvider>
+                <Routes>
+                  <Route path="/project/:id/editor" element={<div data-testid="editor-background" />} />
+                  <Route path="/preferences" element={<PreferencesDialog />} />
+                  <Route path="/preferences/:section" element={<PreferencesDialog />} />
+                </Routes>
+              </OrgProvider>
+            </FontSizeProvider>
+          </ThemeModeProvider>
+        </I18nProvider>
+      </MemoryRouter>,
+    )
+
+    const dialog = screen.getByTestId("preferences-dialog")
+    expect(dialog).toBeInTheDocument()
+    expect(screen.getByRole("heading", { level: 1, name: "Preferences" })).toBeInTheDocument()
+    expect(screen.getByRole("combobox", { name: "Theme" })).toBeInTheDocument()
+    expect(screen.getByRole("combobox", { name: "App font size" })).toHaveTextContent("Default")
+
+    await userEvent.click(screen.getByRole("button", { name: /close/i }))
+    expect(screen.getByTestId("editor-background")).toBeInTheDocument()
+    expect(screen.queryByTestId("preferences-dialog")).not.toBeInTheDocument()
   })
 })

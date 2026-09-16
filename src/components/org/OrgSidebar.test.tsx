@@ -2,15 +2,7 @@ import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import { render, screen, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
-import { markProjectOpened } from "@/lib/frontier/opened-shared-store"
 import { OrgSidebar } from "./OrgSidebar"
-
-// AQU-474: project-only invitees (direct project_members grant, no org
-// membership) have no org-scoped nav surface to reach their shared project.
-// AQU-417: the sidebar no longer lists each shared project inline (that
-// scattered the same list under every org). It now shows ONE "Shared with you"
-// link to the dedicated /shared page, and stays hidden when there's nothing to
-// share. These tests pin that single-entry behavior + the reachability guard.
 
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "jwt", username: "wendi", createdAt: "x" }, loading: false }),
@@ -18,12 +10,17 @@ vi.mock("@/hooks/useFrontierSession", () => ({
 vi.mock("./OrgSwitcher", () => ({ OrgSwitcher: () => null }))
 vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
 vi.mock("@/components/HelpMenu", () => ({ HelpMenu: () => null }))
-vi.mock("@/hooks/usePlatformAdmin", () => ({ usePlatformAdmin: () => ({ isAdmin: false, loading: false }) }))
+const platformAdmin = vi.hoisted(() => ({ isAdmin: false }))
+vi.mock("@/hooks/usePlatformAdmin", () => ({
+  usePlatformAdmin: () => ({ isAdmin: platformAdmin.isAdmin, loading: false }),
+}))
 
-const rosterSettings = vi.hoisted(() => ({ canViewRoster: true }))
+const rosterSettings = vi.hoisted(() => ({ canViewRoster: true, canEgress: true }))
 vi.mock("@/hooks/useOrgSettings", () => ({
   useOrgSettings: () => ({
     canViewRoster: rosterSettings.canViewRoster,
+    canEgress: rosterSettings.canEgress,
+    egressMinRole: 700,
     hasFetched: true,
     rosterViewMinRole: 600,
     canViewMemberProgress: true,
@@ -40,6 +37,7 @@ vi.mock("@/hooks/useOrgSettings", () => ({
     version: 1,
     allowSelfAssignment: false,
     termbaseEditMinRole: 500,
+    languageEditMinRole: 600,
     refresh: vi.fn(async () => null),
     patch: vi.fn(async () => ({ kind: "ok" as const })),
     requestPromotion: vi.fn(async () => ({ kind: "blocked" as const })),
@@ -54,6 +52,10 @@ vi.mock("@/lib/frontier/orgs", () => ({
 const fetchAccessibleProjects = vi.fn()
 vi.mock("@/lib/sync/cloud-projects", () => ({
   fetchAccessibleProjects: (...a: unknown[]) => fetchAccessibleProjects(...a),
+  fetchAccessibleProjectsResult: async (...a: unknown[]) => ({
+    ok: true as const,
+    projects: await fetchAccessibleProjects(...a),
+  }),
 }))
 
 function renderSidebar(path = "/") {
@@ -71,82 +73,59 @@ beforeEach(() => {
   listMyOrgs.mockReset()
   fetchAccessibleProjects.mockReset()
   rosterSettings.canViewRoster = true
+  rosterSettings.canEgress = true
+  platformAdmin.isAdmin = false
 })
 afterEach(() => vi.clearAllMocks())
 
-describe("OrgSidebar shared-projects nav (AQU-474 / AQU-417)", () => {
-  it("shows a single 'Shared with you' link to /shared when the user has cross-org grants", async () => {
-    // No org membership at all — the canonical project-only-invitee scenario.
+describe("OrgSidebar — shared grants live on /orgs/all, not a peer nav item", () => {
+  it("does not render a Shared with you link when the user has cross-org grants", async () => {
     listMyOrgs.mockResolvedValue([])
     fetchAccessibleProjects.mockResolvedValue([
       { id: "p1", name: "Genesis Draft", gitlabProjectId: null, orgId: 99, role: { level: 400, name: "contributor", source: "override" } },
     ])
 
-    renderSidebar()
+    renderSidebar("/orgs/all")
 
-    // AQU-417: one dedicated entry point — not the project listed inline.
-    const link = await screen.findByRole("link", { name: "Shared with you" })
-    expect(link).toHaveAttribute("href", "/shared")
-    // The individual shared project now lives on the /shared page, not the nav.
+    const overview = await screen.findByRole("link", { name: "Overview" })
+    expect(overview).toHaveAttribute("href", "/orgs/all")
+    expect(screen.queryByRole("link", { name: "Shared with you" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Genesis Draft" })).not.toBeInTheDocument()
   })
 
-  it("does not render the section when all accessible projects are within the user's active org", async () => {
+  it("does not render Shared with you when all accessible projects are in the user's org", async () => {
     listMyOrgs.mockResolvedValue([{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }])
     fetchAccessibleProjects.mockResolvedValue([
       { id: "p1", name: "In-org project", gitlabProjectId: null, orgId: 1, role: { level: 700, name: "owner", source: "org" } },
     ])
 
-    renderSidebar()
-
-    // Let the projects fetch settle before asserting absence.
-    await waitFor(() => expect(fetchAccessibleProjects).toHaveBeenCalled())
-    expect(screen.queryByText("Shared with you")).not.toBeInTheDocument()
-  })
-
-  it("does not render the section when there are no accessible projects", async () => {
-    listMyOrgs.mockResolvedValue([{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }])
-    fetchAccessibleProjects.mockResolvedValue([])
-
-    renderSidebar()
+    renderSidebar("/orgs/1")
 
     await waitFor(() => expect(fetchAccessibleProjects).toHaveBeenCalled())
     expect(screen.queryByText("Shared with you")).not.toBeInTheDocument()
   })
 })
 
-// AQU-790: in a guest org (`/orgs/:guestId`) the caller has project-level
-// access only. The sidebar hides every member-scoped action (Teams, Assigned,
-// Members, Archived, Settings) so nothing links into an org they can't operate
-// on — while Projects (the guest overview) and "Shared with you" stay.
 describe("OrgSidebar in a guest org (AQU-790)", () => {
-  function renderGuestSidebar() {
-    return render(
-      <MemoryRouter initialEntries={["/orgs/2"]}>
-        <OrgProvider>
-          <OrgSidebar />
-        </OrgProvider>
-      </MemoryRouter>,
-    )
-  }
-
-  it("hides member-only nav but keeps Projects and Shared with you", async () => {
-    // Caller owns org 1 (would normally show admin nav) but is a guest in org 2,
-    // with another cross-org grant (org 3) so the global "Shared with you" entry
-    // — which excludes the currently-active org's own projects — still shows.
+  it("hides member-only nav and keeps Projects for this guest org", async () => {
     listMyOrgs.mockResolvedValue([{ id: 1, name: "Acme", role: { level: 700, name: "owner" } }])
     fetchAccessibleProjects.mockResolvedValue([
       { id: "pg", name: "Shared Proj", orgId: 2, orgName: "Guest Org", role: { level: 100, name: "viewer", source: "override" } },
       { id: "ph", name: "Other Shared", orgId: 3, orgName: "Other Guest", role: { level: 100, name: "viewer", source: "override" } },
     ])
 
-    renderGuestSidebar()
+    render(
+      <MemoryRouter initialEntries={["/orgs/2"]}>
+        <OrgProvider>
+          <OrgSidebar />
+        </OrgProvider>
+      </MemoryRouter>,
+    )
 
-    // Guest overview + shared entry remain reachable.
-    await screen.findByRole("link", { name: "Shared with you" })
-    expect(screen.getByRole("link", { name: "Projects" })).toHaveAttribute("href", "/orgs/2")
-    // Member-only actions are gone (they previously linked into the owned org).
-    // Guest keeps "Projects" (not Overview) — only member orgs and all-orgs use Overview.
+    await waitFor(() =>
+      expect(screen.getByRole("link", { name: "Projects" })).toHaveAttribute("href", "/orgs/2/projects"),
+    )
+    expect(screen.queryByRole("link", { name: "Shared with you" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Overview" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Members" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument()
@@ -171,52 +150,72 @@ describe("OrgSidebar all-organizations scope", () => {
     expect(overview).toHaveAttribute("data-tour", "nav-overview")
     expect(screen.queryByRole("link", { name: "Projects" })).not.toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "Teams" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Data egress" })).not.toBeInTheDocument()
   })
 })
 
-// AQU-696: the nav entry itself carries the "New" badge while any shared
-// project remains unopened, so the signal is visible from every page — not
-// just once you're already on /shared or /projects.
-describe("OrgSidebar 'New' badge on the Shared-with-you entry (AQU-696)", () => {
-  const shared = (id: string, name: string, grantedAt: string | null) => ({
-    id,
-    name,
-    gitlabProjectId: null,
-    orgId: 99,
-    role: { level: 400, name: "contributor", source: "override" },
-    grantedAt,
+describe("OrgSidebar Data egress entry (AQU-907)", () => {
+  it("shows the org-scoped link when the egress policy admits the caller", async () => {
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "Acme", role: { level: 700, name: "owner" } }])
+    fetchAccessibleProjects.mockResolvedValue([])
+
+    renderSidebar("/orgs/1")
+
+    expect(await screen.findByRole("link", { name: "Data egress" })).toHaveAttribute("href", "/orgs/1/egress")
   })
 
-  it("shows the badge while at least one shared project is unopened, and clears once ALL are opened", async () => {
-    listMyOrgs.mockResolvedValue([])
-    fetchAccessibleProjects.mockResolvedValue([
-      shared("p1", "Genesis Draft", "2026-07-20T00:00:00Z"),
-      shared("p2", "Exodus Draft", "2026-07-21T00:00:00Z"),
+  it("shows the entry to a below-admin role the owner opened the surface to", async () => {
+    // egressMinRole is org policy, not the admin block: a contributor (400)
+    // in an org whose owner set the floor at 400 gets the entry even though
+    // Archived/Settings stay hidden.
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "Acme", role: { level: 400, name: "contributor" } }])
+    fetchAccessibleProjects.mockResolvedValue([])
+
+    renderSidebar("/orgs/1")
+
+    expect(await screen.findByRole("link", { name: "Data egress" })).toHaveAttribute("href", "/orgs/1/egress")
+    expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument()
+  })
+
+  it("hides the entry when the egress policy excludes the caller", async () => {
+    // Default policy is owner-only — a maintainer without an opened floor
+    // has no entry.
+    rosterSettings.canEgress = false
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "Acme", role: { level: 600, name: "maintainer" } }])
+    fetchAccessibleProjects.mockResolvedValue([])
+
+    renderSidebar("/orgs/1")
+
+    await screen.findByRole("link", { name: "Teams" })
+    expect(screen.queryByRole("link", { name: "Data egress" })).not.toBeInTheDocument()
+  })
+})
+
+describe("OrgSidebar platform-admin separator", () => {
+  it("omits the separator between Overview and Admin on all organizations", async () => {
+    platformAdmin.isAdmin = true
+    listMyOrgs.mockResolvedValue([
+      { id: 1, name: "Acme", role: { level: 700, name: "owner" } },
+      { id: 2, name: "Beta", role: { level: 700, name: "owner" } },
     ])
+    fetchAccessibleProjects.mockResolvedValue([])
 
-    // One of two opened after its grant — the badge must stay lit.
-    markProjectOpened("wendi", "p1")
-    const first = renderSidebar()
-    expect(await screen.findByTestId("new-shared-nav-badge")).toBeInTheDocument()
-    first.unmount()
+    renderSidebar("/orgs/all")
 
-    // Both opened — the badge clears (sidebar remounts on navigation, so a
-    // fresh render models "returning to the list").
-    markProjectOpened("wendi", "p2")
-    renderSidebar()
-    await screen.findByRole("link", { name: /Shared with you/ })
-    expect(screen.queryByTestId("new-shared-nav-badge")).not.toBeInTheDocument()
+    expect(await screen.findByRole("link", { name: "Admin" })).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Overview" })).toBeInTheDocument()
+    expect(screen.queryByTestId("platform-admin-nav-separator")).not.toBeInTheDocument()
   })
 
-  it("shows no badge when grant times are unavailable (degradation: never mark everything New)", async () => {
-    listMyOrgs.mockResolvedValue([])
-    fetchAccessibleProjects.mockResolvedValue([shared("p1", "Genesis Draft", null)])
+  it("keeps the separator before Admin in a member org", async () => {
+    platformAdmin.isAdmin = true
+    listMyOrgs.mockResolvedValue([{ id: 1, name: "Acme", role: { level: 700, name: "owner" } }])
+    fetchAccessibleProjects.mockResolvedValue([])
 
-    renderSidebar()
+    renderSidebar("/orgs/1")
 
-    const link = await screen.findByRole("link", { name: "Shared with you" })
-    expect(link).toBeInTheDocument()
-    expect(screen.queryByTestId("new-shared-nav-badge")).not.toBeInTheDocument()
+    expect(await screen.findByRole("link", { name: "Admin" })).toBeInTheDocument()
+    expect(screen.getByTestId("platform-admin-nav-separator")).toBeInTheDocument()
   })
 })
 

@@ -23,6 +23,19 @@ import type { CellRow } from "./cells-read-types"
 const DB_NAME = "aquilla-cells-cache"
 const DB_VERSION = 2
 const STORE = "cells"
+export const CELLS_CACHE_WRITE_DEBOUNCE_MS = 500
+
+// The database is shared by every account on this browser origin. Prefixing
+// keys with the hydrated account prevents a newly-active identity from ever
+// painting another account's rows while its authoritative fetch is in flight.
+// `undefined` preserves the legacy key shape in focused tests and before the
+// app has made its first session decision; the app sets this before rendering
+// account-scoped routes.
+let activeOwnerKey: string | null | undefined
+
+export function setCellsCacheOwner(ownerKey: string | null): void {
+  activeOwnerKey = ownerKey
+}
 
 export interface CellsCacheEntry {
   /** Composite key: `${projectId}:${fileId}`. */
@@ -48,8 +61,40 @@ export interface CellsCacheEntry {
 
 let dbPromise: Promise<IDBDatabase> | null = null
 
+interface PendingCellsCacheWrite {
+  entryKey: string
+  projectId: string
+  fileId: string
+  rows: CellRow[]
+  maxServerSeq?: number
+  projectEpoch?: number
+  timer: ReturnType<typeof setTimeout> | null
+}
+
+interface InFlightCellsCacheWrite {
+  projectId: string
+  fileId: string
+  promise: Promise<void>
+}
+
+const pendingWrites = new Map<string, PendingCellsCacheWrite>()
+const inFlightWrites = new Map<string, InFlightCellsCacheWrite>()
+
 function cacheKey(projectId: string, fileId: string): string {
-  return `${projectId}:${fileId}`
+  const legacy = `${projectId}:${fileId}`
+  if (activeOwnerKey === undefined) return legacy
+  return scopedCacheKey(activeOwnerKey, legacy)
+}
+
+function scopedCacheKey(ownerKey: string | null, legacyKey: string): string {
+  const owner = ownerKey === null
+    ? "local"
+    : `account:${encodeURIComponent(ownerKey)}`
+  return `owner:${owner}:${legacyKey}`
+}
+
+function isScopedCacheKey(storageKey: string): boolean {
+  return storageKey.startsWith("owner:local:") || storageKey.startsWith("owner:account:")
 }
 
 async function openDb(): Promise<IDBDatabase> {
@@ -78,6 +123,14 @@ async function openDb(): Promise<IDBDatabase> {
 
 /** Closes the singleton connection (tests only). */
 export async function resetCellsCacheConnectionForTests(): Promise<void> {
+  activeOwnerKey = undefined
+  for (const pending of pendingWrites.values()) {
+    if (pending.timer !== null) clearTimeout(pending.timer)
+  }
+  pendingWrites.clear()
+  const writes = [...inFlightWrites.values()].map(({ promise }) => promise)
+  await Promise.allSettled(writes)
+  inFlightWrites.clear()
   if (!dbPromise) return
   try {
     const db = await dbPromise
@@ -88,16 +141,52 @@ export async function resetCellsCacheConnectionForTests(): Promise<void> {
   dbPromise = null
 }
 
+/**
+ * One-time upgrade bridge for pre-account cache keys. The first resolved data
+ * owner receives the legacy snapshots, preserving warm/offline file opens
+ * without leaving an unscoped copy another account could later claim.
+ */
+export async function claimLegacyCellsCache(ownerKey: string | null): Promise<void> {
+  const db = await openDb()
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE, "readwrite")
+    const store = tx.objectStore(STORE)
+    const request = store.openCursor()
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error ?? new Error("legacy cells cache claim failed"))
+    tx.onabort = () => reject(tx.error ?? new Error("legacy cells cache claim aborted"))
+    request.onsuccess = () => {
+      const cursor = request.result
+      if (!cursor) return
+      const entry = cursor.value as CellsCacheEntry
+      if (!isScopedCacheKey(entry.key)) {
+        const targetKey = scopedCacheKey(ownerKey, entry.key)
+        const existing = store.get(targetKey)
+        existing.onsuccess = () => {
+          // A scoped write can race the one-time upgrade. Keep that newer,
+          // explicitly-owned snapshot and only discard the obsolete legacy key.
+          if (existing.result === undefined) store.put({ ...entry, key: targetKey })
+          cursor.delete()
+          cursor.continue()
+        }
+        return
+      }
+      cursor.continue()
+    }
+  })
+}
+
 export async function readCellsCache(
   projectId: string,
   fileId: string,
 ): Promise<CellsCacheEntry | null> {
+  const entryKey = cacheKey(projectId, fileId)
   try {
     const db = await openDb()
     return await new Promise<CellsCacheEntry | null>((resolve, reject) => {
       const tx = db.transaction(STORE, "readonly")
       const store = tx.objectStore(STORE)
-      const req = store.get(cacheKey(projectId, fileId))
+      const req = store.get(entryKey)
       req.onsuccess = () => resolve((req.result as CellsCacheEntry | undefined) ?? null)
       req.onerror = () => reject(req.error ?? new Error("IDB get failed"))
     })
@@ -113,30 +202,161 @@ export async function writeCellsCache(
   maxServerSeq?: number,
   projectEpoch?: number,
 ): Promise<void> {
+  // Capture the identity namespace before the first await. An IndexedDB open
+  // can settle after an account switch; recomputing then would write the old
+  // request's rows into the newly-active account's key.
+  const entryKey = cacheKey(projectId, fileId)
   try {
-    const db = await openDb()
-    let maxLastEditAt = 0
-    for (const r of rows) {
-      if (r.lastEditAt > maxLastEditAt) maxLastEditAt = r.lastEditAt
-    }
-    const entry: CellsCacheEntry = {
-      key: cacheKey(projectId, fileId),
+    await putCellsCacheEntry({
+      entryKey,
+      projectId,
+      fileId,
       rows,
-      maxLastEditAt,
-      cachedAt: Date.now(),
-      ...(maxServerSeq !== undefined ? { maxServerSeq } : {}),
-      ...(projectEpoch !== undefined && projectEpoch !== null ? { projectEpoch } : {}),
-    }
-    await new Promise<void>((resolve, reject) => {
-      const tx = db.transaction(STORE, "readwrite")
-      tx.objectStore(STORE).put(entry)
-      tx.oncomplete = () => resolve()
-      tx.onerror = () => reject(tx.error ?? new Error("IDB put failed"))
-      tx.onabort = () => reject(tx.error ?? new Error("IDB put aborted"))
+      maxServerSeq,
+      projectEpoch,
+      timer: null,
     })
   } catch {
     /* cache write is best-effort; a failed write must not break the load */
   }
+}
+
+async function putCellsCacheEntry(
+  pending: PendingCellsCacheWrite,
+): Promise<void> {
+  const db = await openDb()
+  let maxLastEditAt = 0
+  for (const row of pending.rows) {
+    if (row.lastEditAt > maxLastEditAt) maxLastEditAt = row.lastEditAt
+  }
+  const entry: CellsCacheEntry = {
+    key: pending.entryKey,
+    rows: pending.rows,
+    maxLastEditAt,
+    cachedAt: Date.now(),
+    ...(pending.maxServerSeq !== undefined
+      ? { maxServerSeq: pending.maxServerSeq }
+      : {}),
+    ...(pending.projectEpoch !== undefined && pending.projectEpoch !== null
+      ? { projectEpoch: pending.projectEpoch }
+      : {}),
+  }
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE, "readwrite")
+    tx.objectStore(STORE).put(entry)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error ?? new Error("IDB put failed"))
+    tx.onabort = () => reject(tx.error ?? new Error("IDB put aborted"))
+  })
+}
+
+/**
+ * Queue a full cache snapshot for a trailing write. Repeated writes for the
+ * same owner/project/file replace the whole pending tuple, including its
+ * cursor. A lower or absent cursor can be intentional, so fields are never
+ * merged independently.
+ */
+export function scheduleCellsCacheWrite(
+  projectId: string,
+  fileId: string,
+  rows: CellRow[],
+  maxServerSeq?: number,
+  projectEpoch?: number,
+): void {
+  // Capture the owner-scoped key now. The active account can change before
+  // the timer fires, and old rows must never land in the new account's key.
+  const entryKey = cacheKey(projectId, fileId)
+  const previous = pendingWrites.get(entryKey)
+  if (previous?.timer != null) {
+    clearTimeout(previous.timer)
+  }
+
+  const pending: PendingCellsCacheWrite = {
+    entryKey,
+    projectId,
+    fileId,
+    // useCells mutates its rows array in place. Keep the row objects, which
+    // callers replace immutably, but detach the queued list from later edits.
+    rows: rows.slice(),
+    maxServerSeq,
+    projectEpoch,
+    timer: null,
+  }
+  pending.timer = setTimeout(() => {
+    pending.timer = null
+    void flushCellsCacheWriteKeys([entryKey])
+  }, CELLS_CACHE_WRITE_DEBOUNCE_MS)
+  pendingWrites.set(entryKey, pending)
+}
+
+async function writePendingSnapshot(
+  pending: PendingCellsCacheWrite,
+): Promise<void> {
+  const previous = inFlightWrites.get(pending.entryKey)?.promise
+  const promise = (previous ?? Promise.resolve())
+    .catch(() => undefined)
+    .then(() => putCellsCacheEntry(pending))
+  inFlightWrites.set(pending.entryKey, {
+    projectId: pending.projectId,
+    fileId: pending.fileId,
+    promise,
+  })
+  try {
+    await promise
+  } catch {
+    // The cache is best effort. A later pending snapshot still drains below.
+  } finally {
+    if (inFlightWrites.get(pending.entryKey)?.promise === promise) {
+      inFlightWrites.delete(pending.entryKey)
+    }
+  }
+}
+
+async function flushCellsCacheWriteKeys(
+  entryKeys: Iterable<string>,
+): Promise<void> {
+  await Promise.all([...entryKeys].map(async (entryKey) => {
+    while (true) {
+      const pending = pendingWrites.get(entryKey)
+      if (pending) {
+        if (pending.timer !== null) clearTimeout(pending.timer)
+        pendingWrites.delete(entryKey)
+        await writePendingSnapshot(pending)
+        continue
+      }
+      const inFlight = inFlightWrites.get(entryKey)?.promise
+      if (inFlight) await inFlight.catch(() => undefined)
+      if (!pendingWrites.has(entryKey)) return
+    }
+  }))
+}
+
+/** Flush one file's queued snapshots, or every file when called without ids. */
+export async function flushCellsCacheWrites(
+  projectId?: string,
+  fileId?: string,
+): Promise<void> {
+  const flushAll = projectId === undefined && fileId === undefined
+  if (!flushAll && (projectId === undefined || fileId === undefined)) return
+
+  const entryKeys = new Set<string>()
+  for (const [entryKey, pending] of pendingWrites) {
+    if (
+      flushAll
+      || (pending.projectId === projectId && pending.fileId === fileId)
+    ) {
+      entryKeys.add(entryKey)
+    }
+  }
+  for (const [entryKey, inFlight] of inFlightWrites) {
+    if (
+      flushAll
+      || (inFlight.projectId === projectId && inFlight.fileId === fileId)
+    ) {
+      entryKeys.add(entryKey)
+    }
+  }
+  await flushCellsCacheWriteKeys(entryKeys)
 }
 
 /**
@@ -150,7 +370,9 @@ export async function writeCellsCache(
  * re-walking the merged set here yields the same order a full server read
  * would have returned.
  */
-function walkAnchorChain(rows: CellRow[]): CellRow[] {
+/** Exported for CellStore.resortSourceOrderByChain (AQU-1068), which needs the
+ *  same walk after a collaborator's insert arrives through a targeted read. */
+export function walkAnchorChain(rows: CellRow[]): CellRow[] {
   if (rows.length === 0) return []
 
   const byAnchor = new Map<string, CellRow[]>()

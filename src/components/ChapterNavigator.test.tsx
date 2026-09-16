@@ -65,8 +65,10 @@ describe("MilestoneNavigator", () => {
     expect(trigger).toHaveTextContent("Verses 1–25")
     expect(trigger).toHaveClass("min-w-8")
     expect(trigger).toHaveClass("justify-center")
-    expect(trigger).toHaveClass("px-2.5")
-    expect(trigger).toHaveClass("gap-2")
+    expect(trigger).toHaveClass("px-2")
+    expect(trigger).toHaveClass("gap-1")
+    expect(trigger).toHaveClass("xl:ps-2.5")
+    expect(trigger).toHaveClass("xl:pe-2")
     expect(trigger).toHaveClass("shrink")
     expect(trigger).toHaveClass("data-[icon-only]:shrink-0")
     expect(trigger).toHaveClass("xl:w-56")
@@ -82,7 +84,11 @@ describe("MilestoneNavigator", () => {
     expect(screen.getByText("Verses 1–25")).toHaveClass("leading-none")
     expect(screen.getByText("Verses 1–25")).toHaveClass("hidden")
     expect(screen.getByText("Verses 1–25")).toHaveClass("xl:inline")
-    expect(screen.getByRole("button", { name: "Previous chapter" })).toBeDisabled()
+    const previous = screen.getByRole("button", { name: "Previous chapter" })
+    expect(previous).toBeDisabled()
+    expect(previous).toHaveClass("disabled:opacity-100")
+    expect(previous).toHaveClass("disabled:[&>svg]:opacity-30")
+    expect(screen.getByRole("button", { name: "Next chapter" })).toHaveClass("disabled:opacity-100")
   })
 
   it("shows the full book name and restores fixed width from xl up", () => {
@@ -236,6 +242,29 @@ describe("MilestoneNavigator", () => {
     expect(onSelect).toHaveBeenCalledWith("story:u363", "story:u363:range:c102")
   })
 
+  it("pages a whole milestone at a time when split view is on", () => {
+    const onSelect = vi.fn()
+    render(
+      <MilestoneNavigator
+        items={stories}
+        activeKey="story:u44d21"
+        activeSubsectionKey="story:u44d21:range:c1"
+        onSelect={onSelect}
+        pageByMilestone
+      />,
+    )
+
+    // The trigger names the division, not a 50-cell slice inside it.
+    expect(screen.getByRole("combobox", { name: /Current story: Story u44d21\. Choose story/ }))
+      .toBeInTheDocument()
+    expect(screen.queryByRole("combobox", { name: /cells 1–1/ })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Next story" }))
+    expect(onSelect).toHaveBeenCalledWith("story:u363")
+    expect(onSelect).not.toHaveBeenCalledWith("story:u44d21", expect.anything())
+    expect(onSelect).not.toHaveBeenCalledWith("story:u363", expect.anything())
+  })
+
   it("expands a split milestone in place instead of navigating to it", () => {
     const onSelect = vi.fn()
     render(
@@ -251,11 +280,18 @@ describe("MilestoneNavigator", () => {
     // Only the active story's ranges are listed until another one is opened.
     expect(screen.queryByRole("option", { name: /Cells 1–1 / })).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("option", { name: /Story u44d21 / }))
+    const collapsed = screen.getByRole("option", { name: /Story u44d21 / })
+    const collapsedChevron = collapsed.querySelector("svg.lucide-chevron-right")
+    expect(collapsedChevron).toBeTruthy()
+    expect(collapsedChevron).not.toHaveClass("rotate-90")
+
+    fireEvent.click(collapsed)
     expect(onSelect).not.toHaveBeenCalled()
     expect(pickerSearch("story")).toBeInTheDocument()
     expect(screen.getByRole("option", { name: /Cells 1–1 / })).toBeInTheDocument()
     expect(screen.queryByRole("option", { name: /Cells 51–100 / })).not.toBeInTheDocument()
+    expect(screen.getByRole("option", { name: /Story u44d21 / }).querySelector("svg.lucide-chevron-right"))
+      .toHaveClass("rotate-90")
 
     fireEvent.click(screen.getByRole("option", { name: /Cells 1–1 / }))
     expect(onSelect).toHaveBeenCalledWith("story:u44d21", "story:u44d21:range:c1")
@@ -322,6 +358,60 @@ describe("MilestoneNavigator", () => {
     expect(options.length).toBeLessThan(manyChapters.length)
     expect(screen.getByRole("option", { name: /Genesis 1 / })).toBeInTheDocument()
     expect(screen.queryByRole("option", { name: /Genesis 1189 / })).not.toBeInTheDocument()
+  })
+
+  it("virtualizes expanded nested cell ranges instead of mounting every range", () => {
+    const ranges = Array.from({ length: 400 }, (_, index) => {
+      const start = index * 50 + 1
+      const end = start + 49
+      return {
+        key: `story:big:range:${index}`,
+        label: `${start}–${end}`,
+        firstCellId: `c${index}`,
+        translated: 0,
+        validated: 0,
+        total: 50,
+      }
+    })
+    const items: MilestoneNavigationItem[] = [
+      {
+        key: "story:big",
+        kind: "story",
+        label: "Story big",
+        shortLabel: "1",
+        description: "20000 cells",
+        translated: 0,
+        validated: 0,
+        total: 20_000,
+        subsections: ranges,
+      },
+      ...Array.from({ length: 200 }, (_, index) => ({
+        key: `story:${index}`,
+        kind: "story" as const,
+        label: `Story ${index}`,
+        shortLabel: `${index}`,
+        description: "1 cell",
+        translated: 0,
+        validated: 0,
+        total: 1,
+      })),
+    ]
+    render(
+      <MilestoneNavigator
+        items={items}
+        activeKey="story:big"
+        activeSubsectionKey="story:big:range:0"
+        onSelect={() => {}}
+      />,
+    )
+    openPicker(/Current story: Story big/)
+
+    const options = screen.getAllByRole("option")
+    expect(options.length).toBeGreaterThan(0)
+    expect(options.length).toBeLessThan(ranges.length)
+    expect(screen.getByRole("option", { name: /Story big / })).toBeInTheDocument()
+    expect(screen.getByRole("option", { name: /Cells 1–50 / })).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: /Cells 19951–20000 / })).not.toBeInTheDocument()
   })
 
   it("keeps Combobox keyboard navigation: ArrowDown then Enter selects the next chapter", () => {

@@ -1,3 +1,5 @@
+import { AUTH_BASE } from "@/lib/frontier/auth"
+import { buildConnectionInstructions } from "@/lib/sync/agent-connect"
 // Personal API tokens section for the Preferences page (AQU-533 §1 "Token
 // UI"). Lets a signed-in user mint, list, and revoke `aqk_…` personal-access
 // tokens for the external Agent API.
@@ -9,12 +11,12 @@
 // remains the authority and re-checks everything.
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react"
-import { Copy } from "lucide-react"
+import { Copy, ShieldAlert } from "lucide-react"
 import { buildAgentInstructions } from "@/lib/sync/agent-instructions"
-import { useI18n, useT } from "@/lib/i18n/I18nProvider"
-import { formatDate } from "@/lib/i18n/format"
+import { useT } from "@/lib/i18n/I18nProvider"
 import { syncWorkerHttpOrigin } from "@/lib/sync/sync-worker-url"
-import { Badge } from "@/components/ui/badge"
+import { CredentialRow } from "./CredentialRow"
+import { scopeLabel } from "./credential-scope"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -26,6 +28,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import {
@@ -40,8 +43,14 @@ import { Spinner } from "@/components/ui/spinner"
 import { SettingsGroup, SettingsRow } from "@/components/ui/page"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { listMyOrgs, type OrgSummary } from "@/lib/frontier/orgs"
-import { fetchAccessibleProjects, type CloudProjectSummary } from "@/lib/sync/cloud-projects"
+import {
+  fetchAccessibleProjectsResult,
+  projectsResultError,
+  type CloudProjectSummary,
+} from "@/lib/sync/cloud-projects"
 import { ROLE } from "@/lib/frontier/roles"
+import { toUserFacingError, UserError } from "@/lib/errors/user-error"
+import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import {
   listCredentials,
   mintCredential,
@@ -53,6 +62,11 @@ import {
 
 /** MessageKey, without importing from the generated catalog — see LeftDock.tsx. */
 type TokenMessageKey = Parameters<ReturnType<typeof useT>>[0]
+
+/** ~15s of polling at 2.5s, which comfortably covers the agent's 5s poll
+ * interval plus a slow mint, without becoming a background refresher. */
+const AWAIT_GRANT_ATTEMPTS = 6
+const AWAIT_GRANT_INTERVAL_MS = 2500
 
 const EXPIRY_PRESETS = [
   { id: "30d", labelKey: "common.thirtyDays", days: 30 },
@@ -67,78 +81,109 @@ function expiryToIso(preset: ExpiryPresetId): string | undefined {
   return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString()
 }
 
-function fmtDate(iso: string, locale: string): string {
-  return formatDate(iso, locale, { month: "short", day: "numeric", year: "numeric" })
-}
-
-/** Resolve a credential's org/project scope into a friendly label. Falls back
- * to the raw id when the org/project isn't in the caller's current lists
- * (e.g. access was later revoked). */
-function scopeLabel(
-  t: ReturnType<typeof useT>,
-  cred: ApiCredential,
-  orgs: OrgSummary[],
-  projects: CloudProjectSummary[],
-): string {
-  if (cred.projectId) {
-    const p = projects.find((p) => p.id === cred.projectId)
-    return p ? p.name : t("onboarding.apiTokens.scope.projectFallback", { id: cred.projectId })
-  }
-  if (cred.orgId) {
-    const o = orgs.find((o) => String(o.id) === cred.orgId)
-    return o ? (o.name ?? t("onboarding.apiTokens.scope.orgFallback", { id: o.id })) : t("onboarding.apiTokens.scope.orgFallback", { id: cred.orgId })
-  }
-  return t("onboarding.apiTokens.scope.unscoped")
-}
-
-/** Fetches the caller's orgs + accessible projects once, for scope filtering
- * in the mint dialog and name resolution in the list. Swallows errors —
- * scope names just fall back to raw ids if this fails. */
+/** Fetches the caller's orgs + accessible projects for scope filtering and
+ * name resolution. Failures stay explicit so an unavailable directory cannot
+ * masquerade as an account with no scope choices. */
 function useOrgsAndProjects(jwt: string | null): {
   orgs: OrgSummary[]
   projects: CloudProjectSummary[]
+  isLoading: boolean
+  error: string | null
+  retry: () => void
 } {
   const [orgs, setOrgs] = useState<OrgSummary[]>([])
   const [projects, setProjects] = useState<CloudProjectSummary[]>([])
+  const [isLoading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
     if (!jwt) {
       setOrgs([])
       setProjects([])
+      setLoading(false)
+      setError(null)
       return
     }
     let cancelled = false
-    Promise.all([listMyOrgs(jwt), fetchAccessibleProjects(jwt)])
-      .then(([o, p]) => {
+    setLoading(true)
+    setError(null)
+    Promise.all([listMyOrgs(jwt), fetchAccessibleProjectsResult(jwt)])
+      .then(([o, result]) => {
         if (cancelled) return
+        if (!result.ok) {
+          if (result.reason === "unauthenticated") void notifySessionExpiredIfCurrent(jwt)
+          throw projectsResultError(result)
+        }
         setOrgs(o)
-        setProjects(p)
+        setProjects(result.projects)
+        setError(null)
       })
-      .catch(() => {
+      .catch((error) => {
         if (cancelled) return
+        if (error instanceof UserError && error.category === "session-expired") {
+          void notifySessionExpiredIfCurrent(jwt)
+        }
         setOrgs([])
         setProjects([])
+        setError(toUserFacingError(error, "token scopes").message)
       })
+      .finally(() => { if (!cancelled) setLoading(false) })
     return () => {
       cancelled = true
     }
-  }, [jwt])
+  }, [jwt, refreshKey])
 
-  return { orgs, projects }
+  return { orgs, projects, isLoading, error, retry: () => setRefreshKey((key) => key + 1) }
 }
 
 export function ApiTokensSection() {
   const t = useT()
   const { session } = useFrontierSession()
   const jwt = session?.jwt ?? null
-  const { orgs, projects } = useOrgsAndProjects(jwt)
+  const {
+    orgs,
+    projects,
+    isLoading: scopesLoading,
+    error: scopesError,
+    retry: retryScopes,
+  } = useOrgsAndProjects(jwt)
   const [credentials, setCredentials] = useState<ApiCredential[] | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
   const [mintResult, setMintResult] = useState<MintCredentialResult | null>(null)
   const [revokeTarget, setRevokeTarget] = useState<ApiCredential | null>(null)
+  const [connectionCopied, setConnectionCopied] = useState(false)
+  const [connectionCopyError, setConnectionCopyError] = useState(false)
+  const connectionInstructions = buildConnectionInstructions(AUTH_BASE, syncWorkerHttpOrigin())
   const [instructionsFor, setInstructionsFor] = useState<ApiCredential | null>(null)
+  // Arriving from /connect-agent, the credential does not exist yet: it is
+  // minted on the agent's NEXT poll of the token endpoint, up to `interval`
+  // seconds after approval. A single fetch on mount is therefore reliably too
+  // early. Refetch a few times, then stop — this is a startup race, not a
+  // surface that needs live updates.
+  // Read once from the URL rather than through the router: this is a one-shot
+  // arrival signal, and the section is rendered in tests without a Router.
+  const [attemptsLeft, setAttemptsLeft] = useState(() =>
+    new URLSearchParams(window.location.search).get("awaiting") === "1" ? AWAIT_GRANT_ATTEMPTS : 0,
+  )
+  const knownCount = credentials?.length ?? null
+  useEffect(() => {
+    if (attemptsLeft <= 0) return
+    const timer = setTimeout(() => {
+      setAttemptsLeft((n) => n - 1)
+      setRefreshKey((k) => k + 1)
+    }, AWAIT_GRANT_INTERVAL_MS)
+    return () => clearTimeout(timer)
+  }, [attemptsLeft, knownCount])
+  // The new token is the newest row; stop polling as soon as one shows up.
+  const firstCount = useRef<number | null>(null)
+  useEffect(() => {
+    if (knownCount == null) return
+    if (firstCount.current == null) firstCount.current = knownCount
+    else if (knownCount > firstCount.current) setAttemptsLeft(0)
+  }, [knownCount])
 
   useEffect(() => {
     if (!jwt) {
@@ -171,6 +216,17 @@ export function ApiTokensSection() {
 
   return (
     <div className="space-y-2">
+      <SettingsGroup><SettingsRow label={t("onboarding.connect.setup")} block>
+        <div className="flex flex-col gap-3">
+          <p className="text-sm text-muted-foreground">{t("onboarding.connect.setupBody")}</p>
+          <Button variant="outline" onClick={async () => {
+            try { await navigator.clipboard.writeText(connectionInstructions); setConnectionCopied(true); setConnectionCopyError(false) }
+            catch { setConnectionCopyError(true) }
+          }}>{connectionCopied ? t("nav.version.copiedLabel") : t("onboarding.connect.copy")}</Button>
+          {connectionCopyError && <><p role="alert">{t("onboarding.connect.copyError")}</p>
+            <pre className="max-h-72 overflow-auto whitespace-pre-wrap text-xs">{connectionInstructions}</pre></>}
+        </div>
+      </SettingsRow></SettingsGroup>
       <div className="flex items-center justify-between gap-4 pl-4">
         <p className="font-heading text-base font-medium tracking-tight text-foreground">
           {t("onboarding.apiTokens.heading")}
@@ -179,12 +235,21 @@ export function ApiTokensSection() {
           jwt={jwt}
           orgs={orgs}
           projects={projects}
+          disabled={scopesLoading || scopesError != null}
           onMinted={(result) => {
             setMintResult(result)
             refresh()
           }}
         />
       </div>
+      {scopesError && (
+        <div className="flex items-center gap-2 px-4 text-xs text-destructive" role="alert">
+          <span>{scopesError}</span>
+          <Button type="button" size="xs" variant="ghost" onClick={retryScopes}>
+            {t("common.retry")}
+          </Button>
+        </div>
+      )}
       <SettingsGroup>
         <SettingsRow label={t("onboarding.apiTokens.yourTokensLabel")} block>
           {loading && !credentials ? (
@@ -244,63 +309,6 @@ export function ApiTokensSection() {
         />
       )}
     </div>
-  )
-}
-
-function CredentialRow({
-  credential,
-  orgs,
-  projects,
-  onRevoke,
-  onShowInstructions,
-}: {
-  credential: ApiCredential
-  orgs: OrgSummary[]
-  projects: CloudProjectSummary[]
-  onRevoke: () => void
-  onShowInstructions: () => void
-}) {
-  const t = useT()
-  const { locale } = useI18n()
-  const revoked = Boolean(credential.revokedAt)
-  const expired =
-    !revoked && Boolean(credential.expiresAt) && new Date(credential.expiresAt!).getTime() < Date.now()
-
-  return (
-    <li className="flex items-start justify-between gap-3 rounded-xl border px-3 py-2.5">
-      <div className="min-w-0 space-y-1">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <code className="text-xs font-mono">{credential.tokenPrefix}…</code>
-          <Badge variant={credential.mode === "act" ? "default" : "secondary"}>
-            {credential.mode}
-          </Badge>
-          {revoked && <Badge variant="destructive">{t("onboarding.apiTokens.revokedBadge")}</Badge>}
-          {expired && <Badge variant="outline">{t("onboarding.apiTokens.expiredBadge")}</Badge>}
-        </div>
-        <p className="text-xs text-muted-foreground">
-          {credential.name} · {scopeLabel(t, credential, orgs, projects)}
-        </p>
-        <p className="text-[11px] text-muted-foreground">
-          {credential.expiresAt ? t("common.expiresOn", { date: fmtDate(credential.expiresAt, locale) }) : t("common.noExpiry")}
-          {credential.lastUsedAt ? ` · ${t("onboarding.apiTokens.lastUsedOn", { date: fmtDate(credential.lastUsedAt, locale) })}` : ""}
-        </p>
-      </div>
-      {!revoked && (
-        <div className="flex shrink-0 items-center gap-1">
-          <Button size="sm" variant="ghost" onClick={onShowInstructions}>
-            {t("onboarding.apiTokens.agentSetupButton")}
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="text-muted-foreground hover:text-destructive"
-            onClick={onRevoke}
-          >
-            {t("common.revoke")}
-          </Button>
-        </div>
-      )}
-    </li>
   )
 }
 
@@ -424,6 +432,15 @@ function ShowOnceTokenDialog({
               {copied ? t("nav.version.copiedLabel") : t("common.copy")}
             </Button>
           </div>
+          <div className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs" role="alert">
+            <p className="flex gap-1.5">
+              <ShieldAlert className="mt-px size-3.5 shrink-0 text-destructive" aria-hidden />
+              <span>{t("onboarding.apiTokens.exposureWarning", { mode: result.credential.mode })}</span>
+            </p>
+            <p className="mt-1.5 ps-5 text-muted-foreground">
+              {t("onboarding.apiTokens.exposureConnectHint")}
+            </p>
+          </div>
           <p className="text-xs text-muted-foreground">
             {t("onboarding.apiTokens.agentHandoffHint", { mode: result.credential.mode })}
           </p>
@@ -505,11 +522,13 @@ function MintTokenDialog({
   jwt,
   orgs,
   projects,
+  disabled,
   onMinted,
 }: {
   jwt: string
   orgs: OrgSummary[]
   projects: CloudProjectSummary[]
+  disabled: boolean
   onMinted: (result: MintCredentialResult) => void
 }) {
   const t = useT()
@@ -519,6 +538,7 @@ function MintTokenDialog({
   const [orgId, setOrgId] = useState("")
   const [projectId, setProjectId] = useState("")
   const [expiry, setExpiry] = useState<ExpiryPresetId>("90d")
+  const [pii, setPii] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // Re-entrancy guard: `busy` state only disables the submit button after a
@@ -543,6 +563,13 @@ function MintTokenDialog({
   // Act mode requires a project scope where the caller is >= MAINTAINER —
   // disabled (not just server-rejected) until that's true, per spec §1.
   const canAct = selectedProject != null && selectedProject.role.level >= ROLE.MAINTAINER
+  // AQU-1180: exposing translator names to an agent is a decision about other
+  // people's safety, so it takes an OWNER of the scope — mirrors the server's
+  // permission_denied rule rather than letting the user discover it on submit.
+  const selectedOrg = orgOptions.find((o) => String(o.id) === orgId) ?? null
+  const canPii =
+    (selectedProject != null && selectedProject.role.level >= ROLE.OWNER) ||
+    (selectedProject == null && selectedOrg != null && selectedOrg.role.level >= ROLE.OWNER)
 
   useEffect(() => {
     if (open) return
@@ -551,6 +578,7 @@ function MintTokenDialog({
     setOrgId("")
     setProjectId("")
     setExpiry("90d")
+    setPii(false)
     setError(null)
     setBusy(false)
   }, [open])
@@ -564,6 +592,12 @@ function MintTokenDialog({
   useEffect(() => {
     if (mode === "act" && !canAct) setMode("ask")
   }, [mode, canAct])
+
+  // Never leave the identity opt-in checked after the scope that authorized it
+  // is changed out from under it — the safe state has to be the sticky one.
+  useEffect(() => {
+    if (!canPii) setPii(false)
+  }, [canPii])
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -584,6 +618,7 @@ function MintTokenDialog({
         orgId: orgId || undefined,
         projectId: projectId || undefined,
         expiresAt: expiryToIso(expiry),
+        pii: pii || undefined,
       })
       onMinted(result)
       setOpen(false)
@@ -597,7 +632,9 @@ function MintTokenDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button size="sm" />}>{t("onboarding.apiTokens.newTokenTrigger")}</DialogTrigger>
+      <DialogTrigger render={<Button size="sm" disabled={disabled} />}>
+        {t("onboarding.apiTokens.newTokenTrigger")}
+      </DialogTrigger>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{t("onboarding.apiTokens.newTokenDialogHeading")}</DialogTitle>
@@ -696,6 +733,27 @@ function MintTokenDialog({
                   </SelectGroup>
                 </SelectContent>
               </Select>
+            </Field>
+
+            <Field>
+              <div className={`flex items-start gap-2.5 text-sm ${!canPii ? "opacity-50" : ""}`}>
+                <Checkbox
+                  id="token-pii"
+                  data-testid="token-pii"
+                  checked={pii}
+                  onCheckedChange={(checked) => setPii(checked === true)}
+                  disabled={!canPii}
+                  className="mt-0.5"
+                />
+                <label htmlFor="token-pii">
+                  <strong>{t("onboarding.apiTokens.piiLabel")}</strong>
+                  <FieldDescription>
+                    {canPii
+                      ? t("onboarding.apiTokens.piiDescription")
+                      : t("onboarding.apiTokens.piiRequiresOwner")}
+                  </FieldDescription>
+                </label>
+              </div>
             </Field>
 
             {error && <FieldError role="alert">{error}</FieldError>}

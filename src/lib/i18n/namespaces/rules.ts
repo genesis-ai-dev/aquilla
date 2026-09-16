@@ -31,7 +31,10 @@ export const rules = defineNamespace({
     // ── Infraction messages (rule-engine reason codes → predicate text) ────
     "rules.infraction.withRuleName": '"{ruleName}": {message}',
     "rules.infraction.targetForbids": "target contains forbidden pattern",
-    "rules.infraction.sourceRequiresTarget": "source matches pattern but target does not",
+    "rules.infraction.sourceRequiresTarget":
+      "This term is in the source, but the translation doesn't use a required rendering",
+    "rules.infraction.sourceRequiresTargetCount":
+      "This term doesn't add up: {sourceCount} in the source, {targetCount} in the translation",
     "rules.infraction.sourceTargetMatch": "pattern found in source but missing in target",
     "rules.infraction.builtin.emptyTarget": "Source has content but the translation is empty",
     "rules.infraction.builtin.targetEqualsSource": "Translation is identical to the source",
@@ -108,6 +111,7 @@ export const rules = defineNamespace({
     // ── Check-file findings drawer (CheckFindingsDrawer, CheckFileButton) ──
     "rules.checkDrawer.title": "File check",
     "rules.checkDrawer.closeAriaLabel": "Close file check",
+    "rules.checkDrawer.retryAriaLabel": "Re-run file check",
     "rules.checkDrawer.emptyPrompt": "Run a check to see results for the open file.",
     "rules.checkDrawer.checkedSummary": "Checked {summary} · {time}",
     "rules.checkDrawer.checkedNoIssues": "Checked {summary} — no issues found.",
@@ -153,6 +157,10 @@ export const rules = defineNamespace({
     "rules.surface.createOrgRuleDialog.title": "Create org rule",
     "rules.surface.createOrgRuleDialog.description": "Create an org-scoped translation rule.",
     "rules.surface.usageTooltip": "LLM usage on this project",
+    "rules.surface.laneFilterAriaLabel": "Filter rules by lane",
+    "rules.surface.laneFilter.all": "All rules",
+    "rules.surface.laneFilter.projectWide": "Project-wide",
+    "rules.surface.laneFilterNoMatches": "No rules match this filter.",
     "rules.surface.orgRulesCardTitle": "Org Rules ({count})",
     "rules.surface.addOrgRuleButton": "Add Org Rule",
     // "Read-only" permission badge → common.readOnly (identical text)
@@ -242,6 +250,9 @@ export const rules = defineNamespace({
     "rules.editor.mode.required": "Required",
     "rules.editor.mode.match": "Must match",
     "rules.editor.sideLabel": "Side",
+    "rules.editor.laneLabel": "Applies to",
+    "rules.editor.lane.allLanes": "All lanes",
+    "rules.editor.lane.defaultLane": "Default lane",
     "rules.editor.severityLabel": "Severity",
     "rules.editor.sourcePatternLabel": "Source pattern — when source contains this…",
     "rules.editor.targetPatternLabel": "…target must contain this pattern",
@@ -273,7 +284,7 @@ export const rules = defineNamespace({
     "rules.editor.createRuleButton": "Create rule",
 
     // ── RuleImportDialog ("Import from doc" — LLM-extracted rule drafts) ───
-    "rules.importDialog.noRulesFound": "No verifiable rules found in the document. Try a style guide or glossary.",
+    "rules.importDialog.noRulesFound": "No verifiable rules found in the document. Try a style guide or terminology.",
     "rules.importDialog.extractionFailed": "Extraction failed",
     "rules.importDialog.unsupportedFileType": "Unsupported file type. Drop a .txt, .md, .pdf, or .docx file.",
     "rules.importDialog.binaryFileTooLarge": "File too large ({size} MB). Maximum is 2 MB for PDF/DOCX.",
@@ -292,7 +303,7 @@ export const rules = defineNamespace({
     }),
     "rules.importDialog.title": "Import rules from document",
     "rules.importDialog.description":
-      "Drop a style guide, glossary, or translation guidelines document and the LLM will extract structured rules you can review and accept. Supports plain text and Markdown (max 200 KB) or PDF/DOCX (max 2 MB).",
+      "Drop a style guide, terminology, or translation guidelines document and the LLM will extract structured rules you can review and accept. Supports plain text and Markdown (max 200 KB) or PDF/DOCX (max 2 MB).",
     "rules.importDialog.dropZoneText": "Drop a {txt}, {md}, {pdf}, or {docx} file here",
     "rules.importDialog.browseButton": "Browse file",
     "rules.importDialog.pasteZoneLabel": "Or paste document text:",
@@ -411,12 +422,24 @@ export const rules = defineNamespace({
       "rules.checkDrawer.closeAriaLabel": {
         description: "Accessible label for the check-file findings drawer's close button.",
       },
+      "rules.checkDrawer.retryAriaLabel": {
+        description:
+          "Accessible label (and tooltip) for the check-file findings drawer's retry button, to the left of close. Re-runs the open-file check without dismissing the drawer.",
+      },
       "rules.infraction.withRuleName": {
         description:
           "Compact single-line rendering of a rule violation where the rule name isn't shown separately (e.g. an agent proposal's lint badge): the rule's own name (never translated) followed by the localized predicate.",
         placeholders: {
           ruleName: "The user's own rule name — verbatim, never translated.",
           message: "The already-localized predicate sentence (see rules.infraction.* reason keys).",
+        },
+      },
+      "rules.infraction.sourceRequiresTargetCount": {
+        description:
+          "Blot/Issues explanation when source and translation instance counts don't match (too few or extra renderings). {sourceCount} and {targetCount} are instance counts, shown as digits.",
+        placeholders: {
+          sourceCount: "How many times the source term appears in the source cell.",
+          targetCount: "How many required renderings appear in the translation.",
         },
       },
       "rules.infraction.builtin.placeholderIntegrity": {
@@ -547,6 +570,10 @@ export const rules = defineNamespace({
           fixes: "How many autofixes have been applied on this project.",
           calls: "How many LLM calls the project has made (rule suggestion, harmonization, etc).",
         },
+      },
+      "rules.surface.laneFilterAriaLabel": {
+        description:
+          "Accessible label for the lane-filter dropdown on the Project Rules card (multi-lane projects). Filters the listed rules by target-language lane.",
       },
       "rules.surface.orgRulesCardTitle": {
         description: "Card heading for the org-scoped rules list.",

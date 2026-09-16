@@ -17,6 +17,7 @@
 import type { CellData } from "@/hooks/useCells"
 import type { CodexCellAttachment } from "@/lib/codex-editor/types"
 import { audioIdSeededWith } from "./upload"
+import { isDefaultTrackSlot } from "@/lib/timeline/track-slots"
 
 export interface TrackAudioRef {
   audioId: string
@@ -62,6 +63,37 @@ export function sourceClipAudioForCell(cell: CellData): TrackAudioRef | null {
  */
 export function activeTargetForCell(cell: CellData): TargetAudioRef | null {
   if (cell.medium !== "media") return null
+  return resolveTargetAudio(cell)
+}
+
+/**
+ * The same resolution WITHOUT the medium gate. (AQU-646)
+ *
+ * A subtitle file timed against footage carries takes on TEXT cells — there are
+ * no media cells to hang them on — so the Target track has to be able to find
+ * them. Deliberately a separate export rather than relaxing the gate above: on
+ * a MIXED dubbing file that would put a dub chip and a hover mic on every
+ * subtitle cue in the file, which is not what that arrangement means.
+ */
+export function resolveTargetAudio(cell: CellData, slot?: string): TargetAudioRef | null {
+  // AQU-646 stage 3: an ADDED target track, which stores every take — recorded
+  // and generated alike — in one slot of its own. Whether a take is synthetic
+  // comes off the attachment (`voiceId`, set by all three TTS paths) rather
+  // than from which slot it sits in, which is what lets one slot carry both.
+  //
+  // NO SEEDING GUARD HERE, and that is not an omission. The guard below exists
+  // only to keep the shared imported SOURCE clip — which also lives in the
+  // recording slot, seeded with the fileId — from being mistaken for a dub.
+  // Import writes the two legacy slots and nothing else (the import route
+  // allow-lists them), so a track slot can never hold that clip.
+  if (slot != null && !isDefaultTrackSlot(slot)) {
+    const picked = cell.selectedBySlot?.[slot]
+    if (!picked) return null
+    const att = liveAttachment(cell, picked)
+    if (!att) return null
+    return { audioId: picked, url: att.url, kind: att.voiceId ? "generated" : "take" }
+  }
+
   const sel = cell.selectedAudioId
   if (sel && audioIdSeededWith(sel, cell.id)) {
     const att = liveAttachment(cell, sel)

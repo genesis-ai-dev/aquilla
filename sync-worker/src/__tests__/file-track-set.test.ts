@@ -1,0 +1,321 @@
+// Handler-level tests for file.track.set (stage 1: first-class timeline
+// tracks), driven through dispatchEvent so the role floor, the dispatcher
+// wiring and handleFileTrackSet's validation are all exercised together.
+//
+// The projection SQL itself is covered in timeline-events.test.ts. What lives
+// here is the asymmetry: the LIVE path is strict, because it is the only place
+// a new shape can enter files.meta, while the rebuild projection case accepts
+// anything it already accepted once.
+
+import { describe, it, expect } from 'vitest'
+import { dispatchEvent } from '../events/dispatch'
+import { authorize, type AuthorizedEvent } from '../events/authorize'
+import { makeTestToken } from './helpers/auth'
+import type { RawEvent } from '../events/types'
+
+const SECRET = 'test-secret'
+
+/** Valid patches use this; the rejection table below swaps in its own. */
+const VALID_PATCH = { name: 'Captions' }
+
+async function authorizeTrackSet(
+  payload: unknown,
+  role = 600,
+): Promise<AuthorizedEvent<'file.track.set'>> {
+  const result = await authorizeTrackSetRaw(payload, role)
+  if (!result.ok) {
+    throw new Error(`authorize unexpectedly failed: ${result.reason}`)
+  }
+  return result.event
+}
+
+async function authorizeTrackSetRaw(payload: unknown, role: number) {
+  const token = await makeTestToken(SECRET, { projectId: 'proj-a', fileId: 'file-x', role })
+  const raw = {
+    id: 'evt-00000000-0000-7000-0000-000000000001',
+    schemaVersion: 1,
+    kind: 'file.track.set',
+    projectId: 'proj-a',
+    fileId: 'file-x',
+    parentId: null,
+    author: 'alice',
+    payload,
+    clientTs: 1000,
+  } as unknown as RawEvent<'file.track.set'>
+  return await authorize(token, raw, SECRET)
+}
+
+function makeNoOpD1(): AquillaDb {
+  function makePrepared() {
+    const stmt = {
+      bind(..._args: unknown[]) { return this },
+      async first() { return null },
+      async all() { return { results: [], success: true, meta: {} } },
+      async run() { return { success: true, meta: {} } },
+      raw: async () => [],
+    } as unknown as AquillaStatement
+    return stmt
+  }
+  return {
+    prepare: makePrepared,
+    async batch(ss: AquillaStatement[]) {
+      return ss.map(() => ({ success: true, results: [], meta: {} }))
+    },
+    dump: async () => new ArrayBuffer(0),
+    exec: async () => ({ count: 0, duration: 0 }),
+  } as unknown as AquillaDb
+}
+
+function dispatch(authed: AuthorizedEvent<'file.track.set'>) {
+  return dispatchEvent(makeNoOpD1(), authed, 9999, { serverSeq: 1, updateProjection: true })
+}
+
+/**
+ * A refusal is a RETURNED 400 outcome, never a throw: nothing between the
+ * handler and the worker's fetch handler catches, so a throw would 500 the
+ * whole POST and lose every other event in the batch (see DispatchOutcome in
+ * events/handlers/types.ts). The messages are what the client shows in its
+ * outbox inspector, hence the per-case regex.
+ */
+function expectRejected(outcome: ReturnType<typeof dispatch>, message: RegExp) {
+  expect(outcome.ok).toBe(false)
+  if (outcome.ok) throw new Error('unreachable')
+  expect(outcome.status).toBe(400)
+  expect(outcome.reason).toMatch(message)
+}
+
+describe('file.track.set — role floor', () => {
+  it('accepts a maintainer (600)', async () => {
+    const result = await authorizeTrackSetRaw({ trackId: 'source-subtitles', patch: VALID_PATCH }, 600)
+    expect(result.ok).toBe(true)
+  })
+
+  it('rejects a contributor (400) — track structure is file structure', async () => {
+    const result = await authorizeTrackSetRaw({ trackId: 'source-subtitles', patch: VALID_PATCH }, 400)
+    expect(result.ok).toBe(false)
+    if (result.ok) throw new Error('unreachable')
+    expect(result.status).toBe(403)
+  })
+})
+
+describe('file.track.set — accepted writes', () => {
+  it('routes an upsert to the handler: events INSERT + files UPDATE', async () => {
+    const authed = await authorizeTrackSet({
+      trackId: '9f1c3a7e-2b40-4d55-8e0a-6c1d2f3a4b5c',
+      patch: { kind: 'target-audio', name: 'Spanish VO', order: 3, groupId: 'dubs' },
+    })
+    const outcome = dispatch(authed)
+    expect(outcome.ok).toBe(true)
+    if (!outcome.ok) throw new Error('unreachable')
+    expect(outcome.result.stmts.length).toBe(2)
+    expect(outcome.result.dirtyTables).toContain('events')
+    expect(outcome.result.dirtyTables).toContain('files')
+  })
+
+  it('routes a delete (patch: null) the same way', async () => {
+    const authed = await authorizeTrackSet({ trackId: 'source-audio', patch: null })
+    const outcome = dispatch(authed)
+    expect(outcome.ok).toBe(true)
+    if (!outcome.ok) throw new Error('unreachable')
+    expect(outcome.result.stmts.length).toBe(2)
+  })
+
+  it('accepts a field-clearing patch', async () => {
+    const authed = await authorizeTrackSet({
+      trackId: 'source-subtitles',
+      patch: { name: null, order: null, groupId: null },
+    })
+    expect(dispatch(authed).ok).toBe(true)
+  })
+
+  // Order is a SORT KEY, not an index: stage 3 slots a new track between two
+  // existing ones (0.5) or ahead of the first (-1) without rewriting anything
+  // else. Both shapes must stay accepted forever.
+  it('accepts a negative order', async () => {
+    const authed = await authorizeTrackSet({ trackId: 'source-subtitles', patch: { order: -1 } })
+    expect(dispatch(authed).ok).toBe(true)
+  })
+
+  it('accepts a fractional order', async () => {
+    const authed = await authorizeTrackSet({ trackId: 'source-subtitles', patch: { order: 0.5 } })
+    expect(dispatch(authed).ok).toBe(true)
+  })
+
+  it('accepts a 120-character name (the cap itself is legal)', async () => {
+    const authed = await authorizeTrackSet({ trackId: 'source-subtitles', patch: { name: 'x'.repeat(120) } })
+    expect(dispatch(authed).ok).toBe(true)
+  })
+
+  // ── Stage 2: the kinds a USER makes, and the two fields they need ────────
+  it('accepts the folder kind', async () => {
+    const authed = await authorizeTrackSet({ trackId: 'grp-1', patch: { kind: 'folder', name: 'Dubs' } })
+    expect(dispatch(authed).ok).toBe(true)
+  })
+
+  it('accepts an added audio track with its alignment', async () => {
+    const authed = await authorizeTrackSet({
+      trackId: 'trk-1',
+      patch: { kind: 'audio', name: 'Spanish VO', sourceTrackId: 'source-subtitles', color: 'teal' },
+    })
+    expect(dispatch(authed).ok).toBe(true)
+  })
+
+  // THE PALETTE IS NOT ENUMERATED HERE, ON PURPOSE. A newer client ships new
+  // palette ids, and during any rollout the client is newer than the worker;
+  // rejecting an id this build cannot name would refuse writes from clients
+  // that are merely ahead. An old READER falls back to the default pair, so
+  // nothing is lost by letting the value through. This case is what pins that
+  // decision — if someone later swaps the pattern for a Set, it fails.
+  it('accepts a palette id this build has never heard of', async () => {
+    const authed = await authorizeTrackSet({ trackId: 'trk-1', patch: { color: 'ultramarine-2' } })
+    expect(dispatch(authed).ok).toBe(true)
+  })
+
+  it('accepts clearing a colour back to the default pair', async () => {
+    const authed = await authorizeTrackSet({ trackId: 'trk-1', patch: { color: null } })
+    expect(dispatch(authed).ok).toBe(true)
+  })
+
+  // A colour is presentation, not identity — unlike kind and sourceTrackId it
+  // is legal on a derived row, because the derived target-audio row is the one
+  // every existing project is looking at and the first anybody will recolour.
+  it('accepts a colour on a default track', async () => {
+    const authed = await authorizeTrackSet({ trackId: 'target-audio', patch: { color: 'rose' } })
+    expect(dispatch(authed).ok).toBe(true)
+  })
+
+  // THIS IS THE CASE THAT PINS THE SET SPLIT. DEFAULT_TRACK_IDS used to be a
+  // literal alias of TRACK_KINDS, which was correct while every kind was
+  // derived. Stage 2 added kinds a USER makes, and re-aliasing them would
+  // reserve the string 'folder' as a track id — so a track that happened to be
+  // handed that id could never have its kind set, for no reason at all, since
+  // nothing DERIVES a folder and there is no row for the delta to collide
+  // with. If someone collapses the two sets again, this fails.
+  it("treats 'folder' as an ordinary track id, not a reserved one", async () => {
+    const authed = await authorizeTrackSet({ trackId: 'folder', patch: { kind: 'audio' } })
+    expect(dispatch(authed).ok).toBe(true)
+  })
+})
+
+describe('file.track.set — rejected writes', () => {
+  it('rejects when fileId is absent', async () => {
+    // The perimeter (authorize) refuses a fileId-less event before dispatch
+    // ever sees one, so clear the field on the already-authorized envelope to
+    // reach the handler's own guard — the last line of defence for in-process
+    // callers that skip the route.
+    const authed = await authorizeTrackSet({ trackId: 'source-subtitles', patch: VALID_PATCH })
+    delete (authed.event as { fileId?: string }).fileId
+    expectRejected(dispatch(authed), /missing fileId/)
+  })
+
+  const badPayloads: Array<[string, unknown, RegExp]> = [
+    ['a non-string trackId', { trackId: 42, patch: VALID_PATCH }, /unusable trackId/],
+    ['an empty trackId', { trackId: '', patch: VALID_PATCH }, /unusable trackId/],
+    ['a trackId with punctuation', { trackId: 'sub titles!', patch: VALID_PATCH }, /unusable trackId/],
+    ['a trackId over 64 chars', { trackId: 'a'.repeat(65), patch: VALID_PATCH }, /unusable trackId/],
+    ['an undefined patch', { trackId: 'source-subtitles' }, /non-object patch/],
+    ['a string patch', { trackId: 'source-subtitles', patch: 'name' }, /non-object patch/],
+    ['an array patch', { trackId: 'source-subtitles', patch: [] }, /non-object patch/],
+    ['an empty patch', { trackId: 'source-subtitles', patch: {} }, /empty patch/],
+    [
+      'an unknown patch key',
+      { trackId: 'source-subtitles', patch: { name: 'Captions', colour: 'sky' } },
+      /unknown patch key: colour/,
+    ],
+    [
+      'an unknown kind',
+      { trackId: 'custom-1', patch: { kind: 'video' } },
+      /unknown track kind/,
+    ],
+    // The stage-2 rename ('subtitles' -> 'source-subtitles') was free only
+    // because the kind was dormant and nothing had ever persisted the old
+    // word. This case is what keeps it that way: if the retired spelling
+    // could still get in, files.meta would start carrying a kind the client's
+    // merge drops on sight, and the row would be invisible with no way to
+    // tell it from a bug.
+    [
+      'the retired "subtitles" kind',
+      { trackId: 'custom-1', patch: { kind: 'subtitles' } },
+      /unknown track kind/,
+    ],
+    // kind is identity — there is nothing to fall back to, so null is not a
+    // way to spell "clear it".
+    ['a null kind', { trackId: 'custom-1', patch: { kind: null } }, /unknown track kind/],
+    // A default track's kind is derived from its id; an override could only
+    // ever contradict it.
+    [
+      'a kind on a default track',
+      { trackId: 'source-subtitles', patch: { kind: 'source-subtitles' } },
+      /sets kind on default track source-subtitles/,
+    ],
+    ['a non-string name', { trackId: 'source-subtitles', patch: { name: 7 } }, /unusable track name/],
+    // Clearing a rename is name: null, never "".
+    ['an empty name', { trackId: 'source-subtitles', patch: { name: '' } }, /unusable track name/],
+    ['a whitespace-only name', { trackId: 'source-subtitles', patch: { name: '   ' } }, /unusable track name/],
+    [
+      'a name over 120 chars',
+      { trackId: 'source-subtitles', patch: { name: 'x'.repeat(121) } },
+      /unusable track name/,
+    ],
+    ['a non-number order', { trackId: 'source-subtitles', patch: { order: '2' } }, /non-finite track order/],
+    ['a NaN order', { trackId: 'source-subtitles', patch: { order: Number.NaN } }, /non-finite track order/],
+    [
+      'an infinite order',
+      { trackId: 'source-subtitles', patch: { order: Number.POSITIVE_INFINITY } },
+      /non-finite track order/,
+    ],
+    [
+      'a negatively infinite order',
+      { trackId: 'source-subtitles', patch: { order: Number.NEGATIVE_INFINITY } },
+      /non-finite track order/,
+    ],
+    ['a non-string groupId', { trackId: 'source-subtitles', patch: { groupId: 3 } }, /unusable groupId/],
+    [
+      'a groupId with punctuation',
+      { trackId: 'source-subtitles', patch: { groupId: 'dubs/es' } },
+      /unusable groupId/,
+    ],
+    [
+      'a groupId over 64 chars',
+      { trackId: 'source-subtitles', patch: { groupId: 'g'.repeat(65) } },
+      /unusable groupId/,
+    ],
+    // ── Stage 2 ───────────────────────────────────────────────────────────
+    [
+      'a track put inside itself',
+      { trackId: 'trk-1', patch: { groupId: 'trk-1' } },
+      /puts track trk-1 inside itself/,
+    ],
+    ['a non-string color', { trackId: 'trk-1', patch: { color: 3 } }, /unusable track color/],
+    ['an empty color', { trackId: 'trk-1', patch: { color: '' } }, /unusable track color/],
+    // The pattern is deliberately loose (any lowercase id) but not unbounded:
+    // the value is echoed into files.meta, and meta is read on every file
+    // listing.
+    ['an UPPERCASE color', { trackId: 'trk-1', patch: { color: 'Teal' } }, /unusable track color/],
+    ['a color over 32 chars', { trackId: 'trk-1', patch: { color: 'c'.repeat(33) } }, /unusable track color/],
+    [
+      'a non-string sourceTrackId',
+      { trackId: 'trk-1', patch: { sourceTrackId: 9 } },
+      /unusable sourceTrackId/,
+    ],
+    [
+      'a track aligned to itself',
+      { trackId: 'trk-1', patch: { sourceTrackId: 'trk-1' } },
+      /aligns track trk-1 to itself/,
+    ],
+    // Same rule as `kind`, and for the same reason: a derived row's alignment
+    // comes from the file's own cells, so an override could only be a lie.
+    [
+      'a sourceTrackId on a default track',
+      { trackId: 'target-audio', patch: { sourceTrackId: 'source-subtitles' } },
+      /sets sourceTrackId on default track target-audio/,
+    ],
+  ]
+
+  for (const [label, payload, message] of badPayloads) {
+    it(`rejects ${label}`, async () => {
+      const authed = await authorizeTrackSet(payload)
+      expectRejected(dispatch(authed), message)
+    })
+  }
+})

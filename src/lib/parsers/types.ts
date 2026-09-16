@@ -10,11 +10,31 @@ export type {
   ExportCellFields,
 } from "./core-types"
 import type { MessageKey } from "@/lib/i18n/messages/en"
+import type { PersistedTrackOverrides } from "@/lib/timeline/tracks"
+import type { CameraState } from "@/lib/sync/cells-read-types"
 
-export type FileType = "md" | "docx" | "pptx" | "idml" | "xlsx" | "txt" | "html" | "epub" | "json" | "po" | "properties" | "vtt" | "srt" | "sbv" | "usfm" | "ebible" | "helloao" | "xliff" | "tmx" | "csv" | "tsv" | "audio" | "video" | "obs" | "sdbh" | "custom"
+/**
+ * AQU-997: `"codex"` and `"source"` were reaching the client from the wire long
+ * before they were admitted here — `files.fileType` is the server's
+ * `kind ?? role`, so a migrated Codex notebook arrives as `"codex"` and a row
+ * with no `kind` falls back to its `role`, `"source"`. `cloud-projects.ts`
+ * widens both in with `f.type as FileType`, which is exactly why the gap went
+ * unnoticed: nothing type-errored, the values simply failed every predicate
+ * that tests membership of a literal set.
+ */
+export type FileType = "md" | "docx" | "pptx" | "idml" | "xlsx" | "txt" | "html" | "epub" | "json" | "po" | "properties" | "vtt" | "srt" | "sbv" | "usfm" | "ebible" | "helloao" | "xliff" | "tmx" | "csv" | "tsv" | "audio" | "video" | "obs" | "sdbh" | "codex" | "source" | "custom"
 
-/** File types whose parsers produce scripture-style sections (globalReferences populated, section labels meaningful). */
-export const SCRIPTURE_FILE_TYPES: ReadonlySet<FileType> = new Set(["usfm", "ebible", "helloao"])
+/** File types whose parsers produce scripture-style sections (globalReferences
+ *  populated, section labels meaningful).
+ *
+ *  AQU-997: `"codex"` — Aquilla's native Scripture notebook format, what every
+ *  book of a migrated Codex project is stored as — belongs here for the same
+ *  reason `"usfm"` does: its cells are verses, addressed canonically. Its
+ *  absence is what hid the Parallel Bibles panel (and its collapsed edge tab,
+ *  and file-tree expandability) for a project whose books are all codex files.
+ *  `"source"` is deliberately NOT here: it is the generic `role` fallback for
+ *  a row carrying no `kind`, not a Scripture format. */
+export const SCRIPTURE_FILE_TYPES: ReadonlySet<FileType> = new Set(["usfm", "ebible", "helloao", "codex"])
 export function fileTypeHasSections(type: FileType): boolean {
   return SCRIPTURE_FILE_TYPES.has(type)
 }
@@ -78,7 +98,11 @@ export interface TranslationRule {
   description: string
   severity: "major" | "minor"
   source: "algorithmic" | "llm" | "user"
-  scope: "project" | "org"
+  scope: "project" | "org" | "lane"
+  /** For lane-scoped rules (AQU-609): the target-language lane this rule
+   *  applies to. `''` is the project-default lane (matching the cells/lanes
+   *  convention from AQU-538). Only meaningful when `scope === "lane"`. */
+  lane?: string
   check: RuleCheck
   enabled: boolean
   createdAt: string
@@ -89,8 +113,8 @@ export interface TranslationRule {
 }
 
 export type RuleCheck =
-  | { type: "source-requires-target"; sourcePattern: string; targetPattern: string }
-  | { type: "target-forbids"; targetPattern: string }
+  | { type: "source-requires-target"; sourcePattern: string; targetPattern: string; caseSensitive?: boolean }
+  | { type: "target-forbids"; targetPattern: string; caseSensitive?: boolean }
   | { type: "source-target-match"; pattern: string }
   | { type: "builtin"; checkId: BuiltinCheckId }
 
@@ -155,6 +179,8 @@ export interface RuleInfraction {
    * joined) and `count` (how many) — both are RAW content lifted from the
    * cell (via `InfractionSpan.matchedText`) and must never be routed through
    * `t()`, only interpolated as a variable.
+   * `source-requires-target`: `sourceCount` and `targetCount` (instance
+   * counts as decimal strings).
    */
   reasonParams?: Record<string, string>
   /** Triggering text spans. Empty when the violation has no identifiable
@@ -251,6 +277,12 @@ export interface Voice {
    * plain TTS, no conversion.
    */
   referenceAudioId?: string
+  /**
+   * When the clone reference was lifted from a line take, `${cellId}:${slot}`
+   * of that take. The Reference audio tab is filled only when `referenceAudioId`
+   * is set *without* this key (a recorded or uploaded clip).
+   */
+  referenceTakeKey?: string
 }
 
 export interface ProjectTtsSettings {
@@ -276,6 +308,46 @@ export interface ProjectTtsSettings {
    * files. Absent for projects that never opened the Studio.
    */
   castAssignments?: Record<string, string>
+  /**
+   * Character disagreements a person has settled. (AQU-646, 2026-08-18)
+   *
+   * Keyed `"<textCellId> <cueCellId>"` — the link the decision is about.
+   *
+   * WHY THIS EXISTS AT ALL. The two character sheets are keyed to opposite
+   * sides of the script and sometimes contradict each other. Resolving one
+   * writes the winning value to BOTH cells, so no screen is left showing an
+   * overruled name — which means the cells afterwards cannot tell you there was
+   * ever an argument, or what the losing answer said. This remembers both, so a
+   * decision can be re-read and reversed weeks later.
+   *
+   * Per axis, because one line can disagree about the speaker AND the shot.
+   *
+   * Stored here rather than as an event kind on purpose: a new kind means two
+   * exhaustive test maps plus a sync-worker path `tsc -b` does not check, and
+   * this is a note about a judgement, not a change to the script.
+   */
+  characterResolutions?: Record<string, CharacterResolution>
+}
+
+export interface CharacterResolutionChoice<T> {
+  /** Which sheet was believed. */
+  chose: "subtitle" | "audio"
+  /** What the other one said — kept because once both cells agree it exists
+   *  nowhere else, and it is the whole basis for reconsidering. */
+  rejected: T
+}
+
+export interface CharacterResolution {
+  name?: CharacterResolutionChoice<string>
+  /**
+   * AQU-646: `group` joined the three values on 2026-08-20. Records written
+   * before that hold `"mixed"` where a fresh import now produces `"group"` —
+   * benign, because the self-healing rule in `character-agreement.ts` ignores
+   * a record whose rejected value no longer matches the cell.
+   */
+  camera?: CharacterResolutionChoice<CameraState>
+  /** When it was settled, for ordering the resolved list. */
+  at: number
 }
 
 export interface CellTtsSettings {
@@ -331,6 +403,29 @@ export interface ProjectRecord {
    * every terminology write, so this is an affordance value, not authority.
    */
   termbaseEditMinRole?: number | null
+  /**
+   * AQU-1086: the org's effective `languageEditMinRole` — the minimum role
+   * allowed to change this project's source/target language and its extra
+   * target lanes. Sent by the single-project endpoint so the Project Settings
+   * language fields and the Languages card share one floor without a second
+   * org-settings fetch. Absent (older server / local-only project) ⇒ the
+   * MAINTAINER default in `src/lib/sync/role-policy.ts`. The server
+   * re-resolves it on every language write, so this is an affordance value,
+   * not authority.
+   */
+  languageEditMinRole?: number | null
+  /**
+   * AQU-1002: the org's effective comment floors — the minimum role to open a
+   * thread (`commentCreateMinRole`) and to resolve/reopen a thread somebody
+   * else opened (`commentResolveMinRole`). Sent by the single-project endpoint
+   * so the comments drawer and Comments page can gate their controls honestly
+   * without an org-settings fetch of their own. Absent (older server /
+   * local-only project) ⇒ the defaults in `src/lib/sync/role-policy.ts`.
+   * sync-worker re-resolves both on every comment write, so these are
+   * affordance values, not authority.
+   */
+  commentCreateMinRole?: number | null
+  commentResolveMinRole?: number | null
   sourceLanguage: string
   targetLanguage: string
   /**
@@ -367,6 +462,26 @@ export interface ProjectRecord {
   syncSettings?: ProjectSyncSettings
   suggestionsDismissedAt?: string  // ISO timestamp; suggestion banner is hidden after this is set.
   setupChecklistDismissed?: boolean
+  /** AQU-1068: who is OFFERED the add and remove actions here? Absent (and
+   *  "none") means nobody, whatever their rank. This is a product rule, read
+   *  by the editor's affordances rather than enforced at the sync perimeter —
+   *  see ProjectWideSettings.cellEditingFloor for the full rationale, and
+   *  `resolveCellEditingFloor` for the mapping.
+   *
+   *  Structurally the same union as `CellEditingTier` in
+   *  `@/lib/sync/project-settings`, spelled out rather than imported to keep
+   *  this module out of a type cycle with that one. Narrowing it below that
+   *  union does not merely drift — `useProject`'s `assign()` copies the synced
+   *  value straight into this field, so a rung missing here is a compile
+   *  error, which is what keeps the two honest. */
+  cellEditingFloor?: "none" | "commenter" | "reviewer" | "contributor" | "project_lead" | "maintainer"
+  /** AQU-646 stage 2: may this project's timelines be restructured — tracks
+   *  added, deleted, foldered, recoloured? Off unless turned on; a SECOND gate
+   *  on top of the maintainer floor, so with it off the write is refused even
+   *  to an owner. Rename and drag-to-reorder are NOT gated on it. See
+   *  ProjectWideSettings.allowTrackEditing for why switching it off is allowed
+   *  to strand tracks that are already there. */
+  allowTrackEditing?: boolean
   /**
    * AQU-701: set when the user explicitly skips the voice & transcription setup
    * step ("we don't use voice or transcription"). Marks that step complete in
@@ -374,6 +489,12 @@ export interface ProjectRecord {
    * nagged as "not set up". Cleared when they opt back in from the step.
    */
   aiSetupSkipped?: boolean
+  /**
+   * Device-local: the user has picked how drafts run on this project
+   * (Frontier hosted, a project API key, or a personal override). The
+   * sparkle Set up AI dialog shows once until this is true.
+   */
+  aiProviderChosen?: boolean
   /** ISO timestamp set when the user dismisses the "your project is still using
    * default AI instructions" nudge, OR when they actually customize the system
    * prompt. Either way, we stop nagging. */
@@ -384,6 +505,15 @@ export interface ProjectRecord {
    * projects without this field fall back to registry defaults.
    */
   experimentalFlags?: Record<string, boolean>
+  /**
+   * AQU-1246: project-wide opt-in to the experimental Autopilot surface.
+   * Absent/false → no Autopilot UI renders anywhere for this project. Synced
+   * (see ProjectWideSettings.autopilotEnabled) rather than device-local, and
+   * writable only at project_lead(500)+ — server-enforced in auth-worker.
+   * Read through `isAutopilotVisible`, never directly, so the legacy
+   * device-local grandfather is honoured with it.
+   */
+  autopilotEnabled?: boolean
   /** AD-14 decay tunables. Absent → use DECAY_DEFAULTS. */
   decaySettings?: DecaySettings
   /** Required distinct validators for a text cell to count as "fully validated". Clamped [1, 15]. Default 1. Mirrors desktop manifest. */
@@ -436,6 +566,17 @@ export interface ProjectRecord {
    * ProjectWideSettings.audioTimingMode by useProject's overlaySettings.
    */
   audioTimingMode?: AudioTimingMode
+  /**
+   * AQU-646: is the timeline locked against chip dragging? Overlaid from
+   * ProjectWideSettings.timingLocked by useProject's overlaySettings.
+   *
+   * ABSENT MEANS LOCKED — see `resolveTimingLocked` in lib/sync/project-settings
+   * for why this one setting inverts the file's usual convention. Read it
+   * through that resolver rather than testing this field directly, so a project
+   * whose settings have not arrived yet errs toward frozen rather than
+   * briefly handing everyone the handles.
+   */
+  timingLocked?: boolean
   /** When and how to fetch audio bytes from the storage backend. Default: "lazy". */
   audioMediaStrategy?: AudioMediaStrategy
   /** Soft-delete marker. When present the project is in Trash; the Dashboard
@@ -567,6 +708,49 @@ export interface FileReference {
    * default applies (see `resolveFileTimingMode`).
    */
   timingMode?: AudioTimingMode | null
+  /**
+   * What the audio-VTT import did about drift, for an audio-cue sibling:
+   * `scale` 1.001 means the cues were stretched to match the reference, and the
+   * fps labels are present only when both rates could actually be named. Read
+   * from `meta.aquillaImport.audioVtt.timebase`; absent on every other file.
+   * The project report turns this into "corrected" / "aligned" / "not
+   * measurable" so an episode's timing can be signed off rather than assumed.
+   */
+  audioVttTimebase?: { fromFps?: string; toFps?: string; scale: number } | null
+  /**
+   * Persisted per-track DELTAS keyed by track id — renames, reorders, groups,
+   * and the entries that bring user-added tracks into existence. Stored in
+   * files.meta JSON (set via the `file.track.set` event). Absent ⇒ the pure
+   * derived defaults.
+   *
+   * This is NEVER the full track list, which is exactly why the field is not
+   * called `tracks`. Consume it ONLY through `mergeTrackOverrides` (via
+   * `deriveTracksForFile`) — that is the one place that knows which deltas are
+   * applicable and which belong to a build newer than this one.
+   */
+  trackOverrides?: PersistedTrackOverrides | null
+  /**
+   * AQU-656: true when this file has an original import blob. Set on
+   * document imports that uploaded source bytes; absent/false otherwise
+   * (audio/video, Codex-migrated, pre-sidecar).
+   */
+  hasOriginalSource?: boolean
+  /**
+   * The files-table `role` column. `"source"` for every ordinary import — the
+   * value that matters is `"audio-cues"` (see `AUDIO_CUES_ROLE`), which marks a
+   * hidden timeline-only sibling. Deliberately NOT folded into `type`: the
+   * sibling's `type` is "vtt" like any other subtitle import, so `role` is the
+   * only thing that tells them apart. Absent on files whose server row predates
+   * the column, or that were never sent a role.
+   */
+  role?: string
+  /**
+   * The file this one annotates (`files.anchor_file_id`) — for an audio-cue
+   * sibling, the text file whose timeline carries its cues. The sibling appears
+   * in no file list, so this is the only route back to it. Absent on ordinary
+   * files.
+   */
+  anchorFileId?: string
 }
 
 /** Which key is authoritative for ordering a file's segments. */
@@ -578,15 +762,73 @@ export function fileOrderedBy(file: Pick<FileReference, "orderedBy">): OrderedBy
 }
 
 /**
- * Resolve a file's audio timing mode: the file's own choice, else the
- * project-level value (the legacy Project Settings field, kept as a read-only
- * fallback so pre-existing projects keep the mode they had chosen), else
- * Original timing. Mixed-mode projects are allowed by design.
+ * True for the formats whose cues arrive already timed against someone else's
+ * video. The canonical predicate — "is this a subtitle import?" gets ONE answer
+ * across the app, because the hand-rolled `vtt || srt` check this replaces
+ * (ProjectWorkspace) missed `sbv`, which imports to exactly the same timed cues
+ * as the other two.
+ *
+ * Takes a plain `type` string rather than a `FileType`, because half the
+ * callers hold one: the export dialog carries `activeFileType?: string | null`
+ * and kept its own `vtt || srt` copy — missing `sbv` all over again — purely
+ * because this signature would not accept it (2026-08-20). A predicate that
+ * compares three literals has no business demanding a narrower input than the
+ * places that need to ask.
+ */
+export function isSubtitleImportFile(
+  file: { type?: string | null } | null | undefined,
+): boolean {
+  return file?.type === "vtt" || file?.type === "srt" || file?.type === "sbv"
+}
+
+/**
+ * `role` of the audio-cue sibling: a file holding ONLY the cues of an episode's
+ * audio VTT (~550 near-verbatim transcript lines timing the film's own
+ * soundtrack), paired to its text file through `anchorFileId`.
+ *
+ * Why a whole separate file instead of extra cells on the text file: `medium`
+ * is the app's ONLY cell→surface discriminator, and audio cues are text. Put
+ * them in the text file and those 550 rows land in the dialogue table, in
+ * `files.cell_count`, in the validation percentages, in every export, and in
+ * project search — none of which has a lever to exclude them. A sibling
+ * isolates all of it at once, and the pieces that must see the cues (the
+ * timeline's Source-audio row) reach it explicitly by id.
+ */
+export const AUDIO_CUES_ROLE = "audio-cues"
+
+/**
+ * True for that sibling. The canonical predicate — every surface that lists,
+ * counts, searches, or exports project files has to hide it, so "is this an
+ * audio-cue file?" gets ONE answer, exactly like `isSubtitleImportFile`.
+ */
+export function isAudioCueFile(file: Pick<FileReference, "role"> | null | undefined): boolean {
+  return file?.role === AUDIO_CUES_ROLE
+}
+
+/**
+ * Resolve a file's audio timing mode: Original timing for every subtitle import
+ * (see below), else the file's own choice, else the project-level value (the
+ * legacy Project Settings field, kept as a read-only fallback so pre-existing
+ * projects keep the mode they had chosen), else Original timing. Mixed-mode
+ * projects are allowed by design.
  */
 export function resolveFileTimingMode(
-  file: Pick<FileReference, "timingMode"> | null | undefined,
+  file: Pick<FileReference, "timingMode" | "type"> | null | undefined,
   project: Pick<ProjectRecord, "audioTimingMode"> | null | undefined,
 ): AudioTimingMode {
+  // AQU-646: Free timing does not exist for subtitle imports — their cues are
+  // already timed to a video, so laying them end to end has nothing to fit.
+  // Withdrawing it at RESOLUTION rather than from the picker is the whole
+  // point: hiding the control would have left three ways back in. (a) The
+  // file's own stored `timingMode`, written before the mode was withdrawn.
+  // (b) Inheritance from the LEGACY project-level `audioTimingMode` below — a
+  // VTT nobody has ever touched still resolves to Free timing off a project
+  // setting made back when the control lived in Project Settings. (c) A
+  // `file.timing.set` from an OLDER client that still offers the mode; the
+  // server deliberately keeps accepting it, since rejecting it would break
+  // those clients for no gain. A stray "audioFirst" on a subtitle file is
+  // simply inert from here on — nothing migrates it away.
+  if (isSubtitleImportFile(file)) return "dubbing"
   if (file?.timingMode === "audioFirst" || file?.timingMode === "dubbing") return file.timingMode
   // Only "audioFirst" opts out of the original behaviour — anything else,
   // including a value the settings blob happens to carry (the server accepts
@@ -735,6 +977,14 @@ export interface CommentThread {
    * `null` = unknown baseline (legacy thread or git-imported) → never stale.
    */
   createdForTranslated: string | null
+  /**
+   * AQU-1000: username of whoever started the thread, matching the server's
+   * `comments.author_id`. Resolve carries a higher role floor on a thread you
+   * did not write, so the UI needs the identity — not just the display label
+   * on `messages[0].author` — to decide whether to offer the control.
+   * `undefined` for git-imported / legacy threads that never carried one.
+   */
+  authorId?: string
   messages: CommentMessage[]
 }
 

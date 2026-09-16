@@ -19,6 +19,18 @@
 //   4. (If it mutates the projection) a handler in handlers/.
 // TypeScript's exhaustiveness check enforces (1)–(3).
 
+/** Mirrors `RenderingStatus` in src/lib/terminology/types.ts. */
+export type TermRenderingStatusPayload = 'preferred' | 'admitted' | 'forbidden'
+
+/** Mirrors `TermRendering` in src/lib/terminology/types.ts. */
+export interface TermRenderingPayload {
+  rendering: string
+  status: TermRenderingStatusPayload
+}
+
+/** Mirrors `Concept['status']` in src/lib/terminology/types.ts. */
+export type ConceptStatusPayload = 'active' | 'draft' | 'deprecated'
+
 export type EventKind =
   // Source-side cell events (importer / admin only).
   | 'source.cell.create'
@@ -50,6 +62,12 @@ export type EventKind =
   | 'cell.audio.select'
   | 'cell.audio.remove'
   | 'cell.audio.rename'
+  // Set a clip's playback trim window. Its own event because `attach` USED to
+  // own the trim columns, and every re-attach that wasn't about trimming (word
+  // timings, a duration heal) wiped them: "no opinion" and "cleared" were both
+  // expressed as an absent field. See the payload doc below.
+  | 'cell.audio.trim'
+  | 'cell.audio.place'
   // Backfill a measured duration onto a take that predates duration capture.
   // Fills only a NULL duration_ms — never selects, never touches url/slot/
   // trims (a re-attach would re-select the clip and plain-assign trims).
@@ -75,6 +93,25 @@ export type EventKind =
   | 'comment.edit'
   | 'comment.delete'
   | 'comment.resolve'
+  // Terminology concepts (non-chain-mutating; project-level).
+  //
+  // Concepts USED to live in the project_settings JSON blob, where every add
+  // PATCHed the whole `terminology` array rebuilt from the writer's stale
+  // snapshot — two people adding terms in the same minute silently destroyed
+  // each other's entries (observed live, 2026-09-04 demo: five attendees added
+  // terms, one survived). On the event log each write names ONE concept, so a
+  // concurrent add can no longer overwrite an array it never read.
+  //
+  // Project-level like `assignment.*`: the envelope carries `__project__` as
+  // fileId for auth/routing, and the concept id rides the payload.
+  | 'term.create'
+  | 'term.update'
+  | 'term.delete'
+  // Review-queue transitions. Separate kinds (rather than a `term.update` with
+  // a status field) so the audit log distinguishes "someone edited this term"
+  // from "someone approved it" — the approval trail is the point.
+  | 'term.approve'
+  | 'term.reject'
   // Back-translations (non-chain-mutating; contributor-level).
   // Does NOT move cells.event_id; does NOT affect validations or endorsements.
   | 'cell.backtranslation.set'
@@ -106,6 +143,29 @@ export type EventKind =
   // with is per-file too. Non-chain-mutating; maintainer floor (structural,
   // same clearance as project settings).
   | 'file.timing.set'
+  // Sidebar folder / corpus group for a file, stored in files.meta JSON.
+  // Non-chain-mutating; contributor-level — same class as file.rename (label
+  // cleanup), not track structure. Null clears the file back to Ungrouped.
+  | 'file.corpus.set'
+  // Stage 1 (first-class timeline tracks): one track's presentation overrides
+  // — rename, reorder, group, or the whole record of a user-added track —
+  // stored in files.meta JSON under `trackOverrides`. Non-chain-mutating;
+  // maintainer floor (track structure is file structure).
+  //
+  // DORMANT on arrival: the write path ships complete and tested, but nothing
+  // emits this kind until stage 3 puts renaming and adding tracks in the UI.
+  // Shipping the pipeline first means stage 3 is a UI change, not a migration.
+  | 'file.track.set'
+  // Stage 4: one edge between a SUBTITLE cell and an AUDIO CUE, the two cue
+  // lists an episode ships with. Many-to-many — a sentence the subtitles keep
+  // whole may be performed as two heard lines, and one heard line may cover
+  // several subtitle rows — so clusters are whatever the edges connect and
+  // there is no group object. Non-chain-mutating; contributor-level.
+  //
+  // Written in bulk ONCE by the auto-linker at audio-VTT import, and after
+  // that only by hand. Deliberately never recomputed: recomputing would
+  // silently undo every manual correction on the next import.
+  | 'cell.link.set'
   // AQU-476: live source links — mirror engine. Server-emitted only (the
   // mirror sync engine in link-sync.ts; never a client outbox kind). Mirror
   // events replicate an ordering the UPSTREAM already arbitrated, so they
@@ -179,11 +239,13 @@ export interface EventPayloads {
     cameraState?: string
   }
   'source.cell.commit': {
-    value: string
+    value?: string
     valueHtml?: string
-    /** AQU-847: corrected source text for a MEDIA section. An imported media
-     *  cell's `value` is the import filename, so the user's edit lands here —
-     *  the field `effectiveSourceText` (and therefore export + AI) reads. */
+    /** AQU-847 / AQU-646: corrected source text for a MEDIA section. An
+     *  imported media cell's `value` is the import filename, so the user's
+     *  edit lands here — the field `effectiveSourceText` (and therefore export
+     *  and AI) reads. The stored `value` is left untouched; the chain head
+     *  still advances, so targets go stale. */
     transcription?: string
   }
   'source.cell.delete': Record<string, never>
@@ -344,14 +406,23 @@ export interface EventPayloads {
   'cell.audio.attach': {
     audioId: string
     url: string
-    slot: 'recording' | 'generatedVoice'
+    /** Open string (AQU-646): extra target tracks use the track id as the slot. */
+    slot: string
     mimeType?: string
     voiceId?: string
     referenceAudioId?: string
     durationMs?: number
     /** AQU-646 round 8: the take's PERMANENT display name ("Take 3"). */
     label?: string
-    /** Non-destructive playback trim window into the clip, in ms. */
+    /**
+     * Non-destructive playback trim window into the clip, in ms — the clip's
+     * BIRTH values only. The projection COALESCEs these, so an attach may SET a
+     * window but can never clear one; changing or clearing a window afterwards
+     * is `cell.audio.trim`. That asymmetry is load-bearing: a re-attach that
+     * has nothing to do with trimming (word timings, a duration heal) sends no
+     * trim fields, and those used to be plain-assigned as NULL — silently
+     * wiping the window a second after it was written.
+     */
     trimStartMs?: number
     trimEndMs?: number
     timings?: { word: string; t0: number; t1: number; start: number; end: number }[]
@@ -367,13 +438,77 @@ export interface EventPayloads {
   }
   'cell.audio.select': {
     audioId: string
-    slot: 'recording' | 'generatedVoice'
+    /** Open string (AQU-646): extra target tracks use the track id as the slot. */
+    slot: string
   }
   // AQU-646 round 8: rename a take — label only, deliberately NOT a
   // re-attach (which would also re-select the clip). null clears.
   'cell.audio.rename': {
     audioId: string
     label: string | null
+  }
+  /**
+   * The clip's COMPLETE playback trim window — both ends, always stated, with
+   * `null` meaning "back to the clip edge". Required-and-nullable rather than
+   * optional on purpose: an absent field is what made "I have no opinion"
+   * indistinguishable from "clear it", and the projection could only guess.
+   * Sets nothing else — not selection, slot, url, duration or timings.
+   */
+  'cell.audio.trim': {
+    audioId: string
+    trimStartMs: number | null
+    trimEndMs: number | null
+  }
+  /**
+   * AQU-646 stage 3: where THIS take sits against the line it performs, as an
+   * offset in ms from the line's own start. May be negative (a take that leads
+   * its line) and `0` is a real value.
+   *
+   * ITS OWN KIND, NEVER RIDING ATTACH. The anchor used to live on the CELL
+   * (`cell.lane.retime`'s `targetOffsetMs` → `cells.metadata`), which was exact
+   * while a line could hold one dub; with extra target tracks two takes share a
+   * line and would share one anchor, so dragging one chip would move the other.
+   * Absence has to keep meaning exactly one thing — 'never placed by hand' —
+   * which is why this cannot be a field on attach, where absence would also
+   * mean 'this attach had no opinion'.
+   *
+   * `null` CLEARS the placement back to the line's start. Required-and-nullable
+   * for the reason `cell.audio.trim` is: an optional field made 'no opinion'
+   * and 'clear it' indistinguishable and cost every take its trim window once
+   * already.
+   */
+  'cell.audio.place': {
+    audioId: string
+    targetOffsetMs: number | null
+  }
+  /**
+   * Stage 4: link or unlink ONE subtitle cell and ONE audio cue.
+   *
+   * The subtitle side rides the ENVELOPE (`fileId`/`cellId`), the audio cue
+   * rides the payload — the same split `comment.*` uses, so per-file auth and
+   * routing work without a second lookup.
+   *
+   * `linked` IS REQUIRED AND BOOLEAN. Unlinking is a tombstone (`linked: 0`),
+   * never a deleted row and never an absent field: an absent field meaning
+   * "unlinked" is the exact shape that cost us every take's trim window in
+   * stage 4.5, where "clear this" and "no opinion" became indistinguishable.
+   *
+   * The endpoints are the projection's primary key, so re-delivering an event
+   * is a no-op and a replay of the whole log lands in the same place.
+   */
+  'cell.link.set': {
+    /** Only `text-audio` today. The pocket bin adds its own edge type later
+     *  over this same table, which is why the discriminator exists now. */
+    kind: 'text-audio'
+    toFileId: string
+    toCellId: string
+    linked: boolean
+    /** `auto` = the import-time linker, `manual` = a person. Kept so a later
+     *  round can offer "reset the ones nobody has touched" without guessing. */
+    origin: 'auto' | 'manual'
+    /** The linker's score, null for a hand edit. Diagnostic only — nothing
+     *  reads it to make a decision. */
+    confidence: number | null
   }
   // Measured duration for a take that predates duration capture. Fills only
   // a NULL duration_ms; a repeat delivery or a race with a real re-attach is
@@ -422,6 +557,11 @@ export interface EventPayloads {
     /** Versioned normalized-import summary persisted under files.meta. */
     importManifest?: Record<string, unknown>
     /**
+     * Sidebar folder for the file — "OT"/"NT" for scripture, or a named
+     * collection such as "Treasure Hunt Bible". Stored in files.meta.
+     */
+    corpusMarker?: string
+    /**
      * Internal re-import fold snapshot. The specialized re-import route uses
      * this to make event-log rebuilds reproduce the live merged file metadata
      * exactly. Normal genesis imports omit it.
@@ -429,10 +569,14 @@ export interface EventPayloads {
     projectionMeta?: Record<string, unknown>
   }
   // Rename a file's display label. Non-chain-mutating; parentId omitted.
-  // (Corpus/grouping marker is not server-backed yet — name only.)
   'file.rename': {
     /** New display name for the file in the project sidebar. */
     name: string
+  }
+  // Set/clear the file's sidebar corpus group, stored in files.meta JSON;
+  // null clears it (Ungrouped). Contributor-level, like file.rename.
+  'file.corpus.set': {
+    corpusMarker: string | null
   }
   // Soft-delete a file. Non-chain-mutating; parentId omitted.
   // Stamps `files.deleted_at`; cells and audio are retained (R2 wipe deferred).
@@ -462,6 +606,42 @@ export interface EventPayloads {
   'comment.resolve': {
     commentId: string // top-level only; server noops on a reply id
     resolved: boolean
+  }
+
+  // ── Terminology concepts (non-chain-mutating, project-level) ───────────
+  // `conceptId` is client-generated (uuid) and is the projection's primary
+  // key, so a replayed/duplicated create is an idempotent upsert rather than a
+  // second concept.
+  'term.create': {
+    conceptId: string
+    sourceTerm: string
+    renderings: TermRenderingPayload[]
+    /** 'draft' = suggested, awaiting review; 'active' = enforced immediately. */
+    status: ConceptStatusPayload
+    notes?: string
+    caseSensitive?: boolean
+  }
+  // Partial patch. Only the keys present are written — absent keys keep their
+  // projected value, so two people editing DIFFERENT fields of the same
+  // concept both survive. `renderings` is the one exception: it is replaced
+  // wholesale, because a rendering list has no stable per-item id to merge on.
+  'term.update': {
+    conceptId: string
+    sourceTerm?: string
+    renderings?: TermRenderingPayload[]
+    notes?: string
+    caseSensitive?: boolean
+  }
+  'term.delete': {
+    conceptId: string // soft-delete: stamps deleted_at
+  }
+  'term.approve': {
+    conceptId: string // draft -> active
+  }
+  'term.reject': {
+    conceptId: string
+    /** 'deprecate' keeps the row for the record; 'delete' soft-deletes it. */
+    mode: 'delete' | 'deprecate'
   }
 
   // ── Back-translations (non-chain-mutating) ─────────────────────────────
@@ -548,11 +728,27 @@ export interface EventPayloads {
      */
     castName: string | null
     /**
-     * AQU-439: Optional camera-angle override ("on" | "mixed" | "off").
+     * AQU-439: Optional camera-angle override.
      * When present, the projection also updates cells.camera_state.
      * Null clears the column; omitting this field (undefined) is a no-op.
+     *
+     * AQU-646 (2026-08-20): `group` joined the three original values. The
+     * client's character sheets have always distinguished a group shot from a
+     * mixed one; both importers used to fold it into `mixed`, so a corrected
+     * sheet could never say `Group` again. The column is plain TEXT with no
+     * constraint, so nothing here needed a migration.
      */
-    cameraState?: 'on' | 'mixed' | 'off' | null
+    cameraState?: 'on' | 'mixed' | 'off' | 'group' | null
+    /**
+     * AQU-646: the client's own line number for this row, out of her character
+     * sheet's `Line #` column. The projection merges it into cells.metadata as
+     * { line_number: value }, beside cast_name and under the same per-key
+     * discipline. A string: it identifies a line in her production's numbering
+     * rather than counting anything, and values need not be integers.
+     *
+     * Omitted when her sheet had no such column. Null clears it.
+     */
+    lineNumber?: string | null
   }
 
   // ── Timeline editor (non-chain-mutating) ────────────────────────────────
@@ -569,6 +765,10 @@ export interface EventPayloads {
   'cell.lane.retime': {
     subtitleStartMs?: number | null
     subtitleEndMs?: number | null
+    // Round 8: the dub anchor RELATIVE to the cell's own start, so a take moves
+    // with its line. May be negative. targetStartMs is the legacy absolute form
+    // — still projected so historical events replay, never written any more.
+    targetOffsetMs?: number | null
     targetStartMs?: number | null
   }
   // Set/clear a file's core video URL (timeline preview master clock), stored
@@ -581,6 +781,36 @@ export interface EventPayloads {
   // ProjectWideSettings.audioTimingMode, else "dubbing").
   'file.timing.set': {
     timingMode: 'dubbing' | 'audioFirst' | null
+  }
+  // Stage 1: ONE track's presentation delta, merged per-field into
+  // files.meta.trackOverrides[trackId]. `patch: null` deletes the entry —
+  // dropping a user-added track, or resetting a default back to pure
+  // defaults. Inside a patch, null means "clear THAT override" and an absent
+  // key means "leave it alone"; `kind` has no null form because a track's
+  // kind is its identity. The patch is FLAT on purpose — the projection
+  // strips nulls recursively (see buildFileTrackSetStmt). No emitter until
+  // stage 3.
+  //
+  // Stage 2 adds the two ADDED kinds ('folder' / 'audio'), plus `color` (a
+  // palette id, never colour values) and `sourceTrackId` (which track's cells
+  // an added track lines up with, set once at creation). Both new fields have a
+  // null form — clearing a colour is how you go back to the default pair.
+  //
+  // WHICH OPERATION AN EVENT OF THIS KIND PERFORMS IS DECIDED BY ITS PATCH, and
+  // that is why authorize.ts inspects the keys: a rename and a reorder are
+  // maintainer work, while creating, deleting, foldering and recolouring are
+  // additionally gated on the project's allowTrackEditing setting. One kind,
+  // two authority levels — see track-editing-authority.ts.
+  'file.track.set': {
+    trackId: string
+    patch: {
+      kind?: 'source-subtitles' | 'source-audio' | 'target-subtitles' | 'target-audio' | 'folder' | 'audio'
+      name?: string | null
+      order?: number | null
+      groupId?: string | null
+      color?: string | null
+      sourceTrackId?: string | null
+    } | null
   }
 
   // ── AQU-476: live source links — mirror engine (server-emitted) ────────

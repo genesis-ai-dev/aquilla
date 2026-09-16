@@ -1,8 +1,8 @@
 /**
  * AQU-243: Product tour persistence logic.
  *
- * Persistence key: `codex:productTourDone` (localStorage "1").
- * Auto-start condition: onboarding wizard completed (`codex:onboardingComplete`)
+ * Persistence key: `aquilla:productTourDone` (localStorage "1").
+ * Auto-start condition: onboarding wizard completed (`aquilla:productTourEligible`)
  * AND tour not yet done. This fires once per browser profile, user-wide (not
  * per-project like AQU-244's setup checklist flag).
  *
@@ -10,8 +10,12 @@
  * tests without a render cycle.
  */
 
-const TOUR_DONE_KEY = "codex:productTourDone"
-const ONBOARDING_DONE_KEY = "codex:onboardingComplete"
+import {
+  ONBOARDING_COMPLETE_KEY,
+  PRODUCT_TOUR_ELIGIBLE_KEY,
+} from "@/lib/onboarding/completion"
+
+const TOUR_DONE_KEY = "aquilla:productTourDone"
 
 export function wasProductTourDone(): boolean {
   try {
@@ -46,7 +50,11 @@ export function resetProductTour(): void {
  */
 export function shouldAutoStartTour(): boolean {
   try {
-    const onboardingDone = localStorage.getItem(ONBOARDING_DONE_KEY) === "true"
+    // The old local-only key remains a backward-compatible eligibility signal
+    // for profiles that completed onboarding before the dedicated key existed.
+    const onboardingDone =
+      localStorage.getItem(PRODUCT_TOUR_ELIGIBLE_KEY) === "true" ||
+      localStorage.getItem(ONBOARDING_COMPLETE_KEY) === "true"
     return onboardingDone && !wasProductTourDone()
   } catch {
     return false

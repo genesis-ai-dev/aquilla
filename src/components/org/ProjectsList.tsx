@@ -187,7 +187,7 @@ function ProjectRow({
         </span>
 
         {/* Role */}
-        <RoleLabel name={p.role.name} className="shrink-0 justify-self-start text-xs text-muted-foreground" />
+        <RoleLabel name={p.role.name} className="shrink-0 justify-self-start" />
       </button>
     </li>
   )
@@ -259,9 +259,9 @@ export function ProjectsList() {
         } else {
           setProjects([])
           setUnreachable(result.reason === "unreachable")
-          // AQU-293: 401/403 from the projects fetch means the session is no
-          // longer valid — raise the global session-expired banner.
-          if (result.reason === "unauthorized") void notifySessionExpiredIfCurrent(jwt)
+          // Only 401 means the credential was rejected. A 403 is a genuine
+          // authorization decision and re-authenticating will not change it.
+          if (result.reason === "unauthenticated") void notifySessionExpiredIfCurrent(jwt)
         }
       })
       .finally(() => { if (!cancelled) setLoading(false) })

@@ -15,7 +15,8 @@
 import { X } from "lucide-react"
 import { useMemberActivity } from "@/hooks/useMemberActivity"
 import { useI18n } from "@/lib/i18n/I18nProvider"
-import { formatDateTime } from "@/lib/i18n/format"
+import { DateTooltip } from "@/components/ui/date-tooltip"
+import { fmtShortCalendarDate } from "@/lib/format-date"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 import type { TFunction } from "@/lib/i18n/I18nProvider"
 import type { MemberActivityEvent } from "@/lib/sync/member-activity-read-types"
@@ -45,11 +46,6 @@ const KIND_LABEL_KEYS: Record<string, MessageKey> = {
 function kindLabel(t: TFunction, kind: string): string {
   const key = KIND_LABEL_KEYS[kind]
   return key ? t(key) : kind
-}
-
-function formatTimestamp(ms: number | null, locale: string): string {
-  if (ms == null) return "—"
-  return formatDateTime(ms, locale)
 }
 
 export interface MemberActivityPanelProps {
@@ -108,12 +104,25 @@ export function MemberActivityPanel({ projectId, username, getToken, onClose }: 
                 {fileRollup.map((f) => (
                   <li key={f.fileId} className="flex items-center justify-between gap-2 text-xs">
                     <span className="truncate font-medium">{f.fileName}</span>
-                    <span className="shrink-0 tabular-nums text-muted-foreground">
-                      {t("org.memberActivityPanel.fileRollupSummary", {
-                        cells: f.cellsTouched,
-                        words: f.wordCount,
-                        timestamp: formatTimestamp(f.lastActivityAt, locale),
-                      })}
+                    <span className="shrink-0 text-muted-foreground">
+                      {f.lastActivityAt != null ? (
+                        <DateTooltip
+                          value={f.lastActivityAt}
+                          label={t("org.overviewLaneTable.lastActivityColumn")}
+                        >
+                          {t("org.memberActivityPanel.fileRollupSummary", {
+                            cells: f.cellsTouched,
+                            words: f.wordCount,
+                            timestamp: fmtShortCalendarDate(f.lastActivityAt, undefined, locale),
+                          })}
+                        </DateTooltip>
+                      ) : (
+                        t("org.memberActivityPanel.fileRollupSummary", {
+                          cells: f.cellsTouched,
+                          words: f.wordCount,
+                          timestamp: "—",
+                        })
+                      )}
                     </span>
                   </li>
                 ))}
@@ -132,8 +141,8 @@ export function MemberActivityPanel({ projectId, username, getToken, onClose }: 
                 {events.map((e: MemberActivityEvent) => (
                   <li key={e.id} className="flex items-center justify-between gap-2 text-xs">
                     <span className="truncate">{kindLabel(t, e.kind)}</span>
-                    <span className="shrink-0 tabular-nums text-muted-foreground">
-                      {formatTimestamp(e.serverTs, locale)}
+                    <span className="shrink-0 text-muted-foreground">
+                      <DateTooltip value={e.serverTs} />
                     </span>
                   </li>
                 ))}

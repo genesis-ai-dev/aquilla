@@ -300,3 +300,64 @@ describe("useRules — addRule under sequential multi-accept commit (AQU-455)", 
     )
   })
 })
+
+// AQU-609: lane-scoped evaluation. WHY: the workspace's single useRules
+// instance feeds every evaluation surface (editor checks, health, drafting,
+// agent dock); if the lane argument failed to drop other lanes' rules, a
+// French-only constraint would flag Spanish drafts as violations everywhere
+// downstream at once.
+describe("useRules — lane scoping (AQU-609)", () => {
+  function laneRule(id: string, lane: string) {
+    return {
+      id,
+      name: id,
+      description: "",
+      severity: "minor" as const,
+      source: "user" as const,
+      scope: "lane" as const,
+      lane,
+      check: { type: "target-forbids" as const, targetPattern: "x" },
+      enabled: true,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    }
+  }
+
+  it("with a lane, merged rules drop other lanes' rules but keep userRules complete", () => {
+    const project = {
+      ...baseProject(),
+      rules: [laneRule("fr-rule", "fr"), laneRule("es-rule", "es")],
+    }
+    const { result } = renderHook(() =>
+      useRules(project, noop, undefined, [], undefined, "fr"),
+    )
+    const ids = result.current.rules.map((r) => r.id)
+    expect(ids).toContain("fr-rule")
+    expect(ids).not.toContain("es-rule")
+    // Management list stays complete — you can still see/edit every lane's rules.
+    expect(result.current.userRules.map((r) => r.id)).toEqual(["fr-rule", "es-rule"])
+  })
+
+  it("without a lane argument, nothing is filtered (management surfaces)", () => {
+    const project = {
+      ...baseProject(),
+      rules: [laneRule("fr-rule", "fr"), laneRule("es-rule", "es")],
+    }
+    const { result } = renderHook(() => useRules(project, noop))
+    const ids = result.current.rules.map((r) => r.id)
+    expect(ids).toContain("fr-rule")
+    expect(ids).toContain("es-rule")
+  })
+})
+
+describe("rules identity (AQU-1104)", () => {
+  it("keeps the same rules array across re-renders when the project has no rules", () => {
+    // A fresh `[]` fallback per render gave `rules` a new identity every
+    // workspace render, which re-ran every downstream memo (useHealth's
+    // checkRules pass among them) on projects that had never added a rule.
+    const project = { ...baseProject(), rules: undefined }
+    const { result, rerender } = renderHook(() => useRules(project, noop))
+    const first = result.current.rules
+    rerender()
+    expect(result.current.rules).toBe(first)
+  })
+})

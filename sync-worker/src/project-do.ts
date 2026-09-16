@@ -27,7 +27,11 @@ import {
   applyFocusRenew,
   applyPresenceUpdate,
   parseProjectDoClientMessage,
+  PresenceDraftThrottle,
+  presenceSnapshot,
   PROJECT_DO_DEFAULT_LEASE_MS,
+  resolveConnId,
+  stripPresenceDraft,
   sweepExpiredLeases,
   unpackBroadcastBody,
   type LockState,
@@ -55,8 +59,26 @@ const MEMBER_REMOVED_DENY_MS = 16 * 60 * 1000
 /** App-specific WS close code for "your membership was revoked". */
 export const MEMBER_REMOVED_CLOSE_CODE = 4403
 
+/**
+ * [Pen test 2026-08-24] App-specific WS close code for "your sync token
+ * expired". A connection's `role` is cached at handshake time and never
+ * re-checked for the socket's lifetime — a mid-session role downgrade (short
+ * of full removal, which /__member-removed already handles) previously had
+ * no path to take effect until the client happened to reconnect on its own.
+ * Forcing a close at the token's own expiry (≤ SYNC_TOKEN_TTL_SECONDS) bounds
+ * that staleness window and makes the reconnect fetch a fresh token/role via
+ * ws-reconciler's connect(), which already re-authenticates from scratch.
+ */
+export const TOKEN_EXPIRED_CLOSE_CODE = 4401
+
 interface ConnectionState {
   ws: WebSocket
+  /**
+   * Per-socket presence key. Sent by the client as `?connId=` (generated per
+   * socket session in ws-reconciler.ts); older clients omit it and get a
+   * server-generated id — they still work, they just can't self-filter by it.
+   */
+  connId: string
   userId: string
   /** Numeric user id from verified token claims; null in ALLOW_UNAUTHENTICATED dev. */
   numericUserId: number | null
@@ -68,6 +90,12 @@ interface ConnectionState {
    * Commenter hold every cell's edit lock and lock out Contributors.
    */
   role: number | null
+  /**
+   * [Pen test 2026-08-24] Verified token's `exp` claim in epoch ms; null in
+   * ALLOW_UNAUTHENTICATED dev (no token to expire). The lease sweep closes
+   * the socket once this passes, forcing a reconnect with a fresh token.
+   */
+  tokenExpiresAt: number | null
 }
 
 interface DOEnv {
@@ -109,6 +137,8 @@ export class ProjectSync extends DurableObject<DOEnv> {
   private presence = new Map<string, PresenceState>()
   private locks = new Map<string, LockState>()
   private sweepTimer: ReturnType<typeof setInterval> | null = null
+  /** Per-user rate limit for `presence.draft` frames (in-memory, like all DO state). */
+  private draftThrottle = new PresenceDraftThrottle((frame) => this.broadcastToAll(frame))
   /**
    * AQU-346: numeric userIds whose membership was revoked, mapped to the
    * deny-until timestamp. Blocks reconnects with still-valid (≤15 min)
@@ -175,7 +205,8 @@ export class ProjectSync extends DurableObject<DOEnv> {
         const result = await this.linkSyncInFlight
         return Response.json(result)
       } catch (err) {
-        return new Response(`mirror sync failed: ${String(err)}`, { status: 500 })
+        console.error("[project-do] mirror sync failed:", err)
+        return new Response("mirror sync failed", { status: 500 })
       }
     }
 
@@ -311,6 +342,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
     let userId: string
     let numericUserId: number | null = null
     let role: number | null = null
+    let tokenExpiresAt: number | null = null
     if (!bypassAuth) {
       const token = url.searchParams.get("token")
       const auth = await verifyTokenForProject(token, projectId, this.env.SYNC_SECRET_KEY)
@@ -330,9 +362,12 @@ export class ProjectSync extends DurableObject<DOEnv> {
       userId = auth.claims.username ?? `user:${auth.claims.userId}`
       numericUserId = auth.claims.userId
       role = auth.claims.role
+      tokenExpiresAt = auth.claims.exp * 1000
     } else {
       userId = url.searchParams.get("user") ?? "anon"
     }
+
+    const connId = resolveConnId(url.searchParams.get("connId"), this.connections)
 
     const pair = new WebSocketPair()
     const client = pair[0]
@@ -340,16 +375,15 @@ export class ProjectSync extends DurableObject<DOEnv> {
 
     server.accept()
 
-    const conn: ConnectionState = { ws: server, userId, numericUserId, role }
+    const conn: ConnectionState = { ws: server, connId, userId, numericUserId, role, tokenExpiresAt }
     this.connections.set(server, conn)
-    this.presence.set(userId, { userId, ts: Date.now() })
+    const joined: PresenceState = { connId, userId, ts: Date.now() }
+    this.presence.set(connId, joined)
     this.startLeaseSweep()
-    // Snapshot of current roster so the new client sees existing peers.
-    this.sendTo(server, {
-      t: "presence",
-      users: Array.from(this.presence.values()),
-    })
-    this.broadcastPresence()
+    // Snapshot of current roster (drafts stripped) so the new client sees
+    // existing peers; everyone else learns about the newcomer via a diff.
+    this.sendTo(server, presenceSnapshot(this.presence))
+    this.broadcastToAll({ t: "presence.diff", user: stripPresenceDraft(joined) })
 
     server.addEventListener("message", (ev) => {
       const raw = typeof ev.data === "string" ? ev.data : ""
@@ -382,13 +416,6 @@ export class ProjectSync extends DurableObject<DOEnv> {
     }
   }
 
-  private broadcastPresence(): void {
-    this.broadcastToAll({
-      t: "presence",
-      users: Array.from(this.presence.values()),
-    })
-  }
-
   // ── Inbound handling ───────────────────────────────────────────────────
 
   private handleClientMessage(conn: ConnectionState, raw: string): void {
@@ -402,7 +429,7 @@ export class ProjectSync extends DurableObject<DOEnv> {
       // out of a cell indefinitely. Mirrors the write-drop policy already
       // applied to actual content writes (see shouldBeReadOnly callers).
       if (shouldBeReadOnly(conn.role)) return
-      const result = applyFocusClaim(this.locks, this.presence, conn.userId, msg, now)
+      const result = applyFocusClaim(this.locks, this.presence, conn, msg, now)
       this.locks = result.locks
       this.presence = result.presence
       for (const m of result.emit) this.broadcastToAll(m)
@@ -411,21 +438,24 @@ export class ProjectSync extends DurableObject<DOEnv> {
     }
     if (msg.t === "focus.renew") {
       if (shouldBeReadOnly(conn.role)) return
-      const result = applyFocusRenew(this.locks, this.presence, conn.userId, msg, now)
+      const result = applyFocusRenew(this.locks, this.presence, conn, msg, now)
       this.locks = result.locks
       return
     }
     if (msg.t === "focus.release") {
-      const result = applyFocusRelease(this.locks, this.presence, conn.userId, msg, now)
+      const result = applyFocusRelease(this.locks, this.presence, conn, msg, now)
       this.locks = result.locks
       this.presence = result.presence
       for (const m of result.emit) this.broadcastToAll(m)
       return
     }
     if (msg.t === "presence.update") {
-      const result = applyPresenceUpdate(this.presence, conn.userId, msg, now)
+      const result = applyPresenceUpdate(this.presence, conn, msg, now)
       this.presence = result.presence
-      for (const m of result.emit) this.broadcastToAll(m)
+      for (const m of result.emit) {
+        if (m.t === "presence.draft") this.draftThrottle.push(m)
+        else this.broadcastToAll(m)
+      }
       return
     }
     if (msg.t === "outbox.event") {
@@ -460,9 +490,10 @@ export class ProjectSync extends DurableObject<DOEnv> {
       if (state.userId === conn.userId) remaining++
     }
     const now = Date.now()
-    const result = applyDisconnect(this.locks, this.presence, conn.userId, now, remaining)
+    const result = applyDisconnect(this.locks, this.presence, conn, now, remaining)
     this.locks = result.locks
     this.presence = result.presence
+    this.draftThrottle.clear(conn.connId)
     for (const m of result.emit) this.broadcastToAll(m)
     if (this.connections.size === 0) this.stopLeaseSweep()
   }
@@ -475,8 +506,31 @@ export class ProjectSync extends DurableObject<DOEnv> {
       this.locks = result.locks
       this.presence = result.presence
       for (const m of result.emit) this.broadcastToAll(m)
-      if (result.emit.length > 0) this.broadcastPresence()
+      this.sweepExpiredConnections(now)
     }, LEASE_SWEEP_INTERVAL_MS)
+  }
+
+  /**
+   * [Pen test 2026-08-24] A connection's role is resolved once at handshake
+   * and cached for the socket's life (see ConnectionState.role) — closing at
+   * the token's own expiry re-runs that resolution on reconnect instead of
+   * letting a stale role (e.g. after a mid-session downgrade) ride an
+   * indefinitely-open socket. Bounded by LEASE_SWEEP_INTERVAL_MS, well under
+   * the sync-token TTL.
+   */
+  private sweepExpiredConnections(now: number): void {
+    for (const [ws, conn] of [...this.connections]) {
+      if (conn.tokenExpiresAt === null || conn.tokenExpiresAt > now) continue
+      try {
+        ws.close(TOKEN_EXPIRED_CLOSE_CODE, "sync token expired")
+      } catch {
+        /* swallow */
+      }
+      // Server-initiated close doesn't reliably fire our own close listener —
+      // clean up presence/locks explicitly (idempotent; see the
+      // connections.has guard in handleConnectionClose).
+      this.handleConnectionClose(conn)
+    }
   }
 
   private stopLeaseSweep(): void {

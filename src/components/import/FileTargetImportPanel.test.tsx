@@ -224,6 +224,35 @@ describe("FileTargetImportPanel — optimistic bulk import", () => {
     expect(rollback.every((p) => p.value === "")).toBe(true)
   })
 
+  // AQU-1142: a translated WebVTT delivered by a subtitling partner must
+  // populate the open file's target column. Cues match cells positionally
+  // (cue N → cell N) because VTT-sourced cells don't carry canonical refs,
+  // and the review screen labels rows by timecode rather than an internal id.
+  it("AQU-1142: routes a .vtt drop into the review step, matched positionally, with timecode labels", async () => {
+    const VTT_FIXTURE = [
+      "WEBVTT",
+      "",
+      "00:00:01.000 --> 00:00:04.000",
+      "First cue translated",
+      "",
+      "00:00:05.000 --> 00:00:08.000",
+      "Second&nbsp;cue translated",
+    ].join("\n")
+    renderPanel()
+    await selectFile(makeFile(VTT_FIXTURE, "episode.vtt"))
+    // Went straight to review — not the "unsupported file type" error path.
+    expect(await screen.findByText(/review matches/i)).toBeInTheDocument()
+    expect(screen.getByText(/2 matched/i)).toBeInTheDocument()
+    // Positional matching triggers the order-match warning.
+    expect(screen.getByText(/matched .* in order/i)).toBeInTheDocument()
+    // Rows are labelled by the cue's timecode, never by an internal UUID.
+    expect(screen.getByText(/00:00:01\.000\s*-->\s*00:00:04\.000/)).toBeInTheDocument()
+    expect(screen.getByText(/00:00:05\.000\s*-->\s*00:00:08\.000/)).toBeInTheDocument()
+    // &nbsp; must be decoded before it can reach a target cell.
+    expect(screen.getByText("Second cue translated")).toBeInTheDocument()
+    expect(screen.queryByText(/&nbsp;/)).not.toBeInTheDocument()
+  })
+
   // WHY: while a slow enqueue is in flight the Import button must be disabled so
   // a second click can't re-optimistic-patch and re-enqueue the same cells.
   it("disables the Import button while an enqueue is in flight (no double-submit)", async () => {

@@ -34,10 +34,15 @@
     <script>
       (function () {
         try {
-          var stored = localStorage.getItem("codex-theme");
+          var stored = localStorage.getItem("aquilla-theme");
           var prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
           var dark = stored === "dark" || ((stored === "system" || !stored) && prefersDark);
           if (dark) document.documentElement.classList.add("dark");
+          // AQU-1169: Linear Preferences map. Default is omitted so the root
+          // stays unset (today's 16px). Keep in lockstep with FONT_SIZE_ROOT_PX.
+          var fontSize = localStorage.getItem("aquilla-font-size");
+          var px = { small: "14px", large: "18px", "extra-large": "20px" }[fontSize];
+          if (px) document.documentElement.style.fontSize = px;
         } catch (e) {}
       })();
     </script>

@@ -5,6 +5,7 @@
 // browser resolves instead of spinning "Loading..." forever.
 
 import type { FileType, ProjectRecord } from "@/lib/parsers/types"
+import type { PersistedTrackOverrides } from "@/lib/timeline/tracks"
 import { FRONTIER_API_URL } from "./sync-token"
 import { fetchProjectState, type ProjectStateResponse } from "./archive"
 import { UserError } from "@/lib/errors/user-error"
@@ -14,8 +15,17 @@ export interface CloudFileSummary {
   name: string
   type: string
   cellCount: number
+  /** The files-table `role`, unfolded. `type` above collapses kind ?? role, so
+   *  an audio-cue sibling (role "audio-cues", kind "vtt") is indistinguishable
+   *  from a real subtitle import through `type` alone. */
+  role?: string | null
+  /** The file this one hangs off: for an audio-cue sibling, the text file whose
+   *  timeline its cues annotate. */
+  anchorFileId?: string | null
   bookCode?: string | null
   hasScriptureContent?: boolean
+  /** Sidebar folder. Absent when the file is ungrouped. */
+  corpusMarker?: string | null
   sourceLanguage?: string | null
   targetLanguage?: string | null
   /** Timeline-segment-model order lens ('time' | 'sequence'); absent ⇒ sequence. */
@@ -24,8 +34,13 @@ export interface CloudFileSummary {
   targetTextDirection?: "ltr" | "rtl" | null
   /** Timeline editor: core video URL for the preview; absent/null ⇒ no video. */
   coreMediaUrl?: string | null
+  audioVttTimebase?: { fromFps?: string; toFps?: string; scale: number } | null
   /** The file's audio timing mode; absent ⇒ the project default applies. */
   timingMode?: "dubbing" | "audioFirst" | null
+  /** Per-track deltas keyed by track id; absent ⇒ the file draws the three
+   *  default tracks. NEVER the full track list — consume only through
+   *  mergeTrackOverrides. */
+  trackOverrides?: PersistedTrackOverrides | null
 }
 
 export interface CloudProjectSummary {
@@ -40,6 +55,15 @@ export interface CloudProjectSummary {
   /** AQU-822: the org's effective termbase-edit floor. Returned by the
    *  single-project endpoint; absent on the list endpoint / older servers. */
   termbaseEditMinRole?: number | null
+  /** AQU-1086: the org's effective language-edit floor. Returned by the
+   *  single-project endpoint; absent on the list endpoint / older servers. */
+  languageEditMinRole?: number | null
+  /** AQU-1002: the org's effective comment floors — the minimum role to open a
+   *  thread, and to resolve/reopen a thread someone else opened. Returned by
+   *  the single-project endpoint; absent on the list endpoint / older servers,
+   *  where callers fall back to the pre-AQU-1002 defaults. */
+  commentCreateMinRole?: number | null
+  commentResolveMinRole?: number | null
   /** Present on the single-project endpoint; list endpoint filters archived rows. */
   archivedAt?: string | null
   /** Present on the single-project endpoint; used to show "archived by X" in Trash. */
@@ -126,7 +150,14 @@ export async function createCloudProject(
  */
 export type ProjectsResult =
   | { ok: true; projects: CloudProjectSummary[] }
-  | { ok: false; reason: "unreachable" | "unauthorized" | "error"; status?: number }
+  | { ok: false; reason: "unreachable" | "unauthenticated" | "forbidden" | "error"; status?: number }
+
+export function projectsResultError(result: Exclude<ProjectsResult, { ok: true }>): Error {
+  if (result.reason === "unauthenticated") return new UserError(401, "", "project")
+  if (result.reason === "forbidden") return new UserError(403, "", "project")
+  if (result.reason === "unreachable") return new TypeError("Failed to fetch")
+  return new UserError(result.status ?? 500, "", "project")
+}
 
 /**
  * GET /api/v2/projects — returns a discriminated result so callers can
@@ -150,7 +181,7 @@ export async function fetchAccessibleProjectsResult(
       headers: { Authorization: `Bearer ${jwt}` },
     })
     if (!res.ok) {
-      const reason = res.status === 401 || res.status === 403 ? "unauthorized" : "error"
+      const reason = res.status === 401 ? "unauthenticated" : res.status === 403 ? "forbidden" : "error"
       return { ok: false, reason, status: res.status }
     }
     const body = (await res.json()) as { projects?: CloudProjectSummary[] }
@@ -159,6 +190,53 @@ export async function fetchAccessibleProjectsResult(
     // Network error — server unreachable.
     return { ok: false, reason: "unreachable" }
   }
+}
+
+/** First page size for project tables and pickers (matches auth-worker default). */
+export const PROJECT_DIRECTORY_PAGE_SIZE = 40
+
+export interface ProjectDirectoryPage {
+  projects: CloudProjectSummary[]
+  nextCursor: string | null
+}
+
+/**
+ * Paged GET /api/v2/projects. Pass `limit` so the catalog loads a page at a
+ * time instead of dumping every accessible (or, for platform admins, every)
+ * project into the client.
+ */
+export async function listProjectsPage(
+  jwt: string,
+  opts: {
+    q?: string
+    limit?: number
+    cursor?: string | null
+    orgId?: number
+    minRole?: number
+    archived?: boolean
+    signal?: AbortSignal
+  } = {},
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<ProjectDirectoryPage> {
+  const params = new URLSearchParams()
+  const q = opts.q?.trim()
+  if (q) params.set("q", q)
+  params.set("limit", String(opts.limit ?? PROJECT_DIRECTORY_PAGE_SIZE))
+  if (opts.cursor) params.set("cursor", opts.cursor)
+  if (opts.orgId != null) params.set("orgId", String(opts.orgId))
+  if (opts.minRole != null) params.set("minRole", String(opts.minRole))
+  if (opts.archived) params.set("archived", "true")
+  const res = await fetch(`${apiUrl}/api/v2/projects?${params}`, {
+    method: "GET",
+    headers: { Authorization: `Bearer ${jwt}` },
+    signal: opts.signal,
+  })
+  if (!res.ok) {
+    const body = await res.text().catch(() => "")
+    throw new UserError(res.status, body, "project")
+  }
+  const body = (await res.json()) as { projects?: CloudProjectSummary[]; nextCursor?: string | null }
+  return { projects: body.projects ?? [], nextCursor: body.nextCursor ?? null }
 }
 
 /**
@@ -192,16 +270,28 @@ export async function fetchArchivedProjects(
   orgId: number,
   apiUrl: string = FRONTIER_API_URL,
 ): Promise<CloudProjectSummary[]> {
+  const result = await fetchArchivedProjectsResult(jwt, orgId, apiUrl)
+  return result.ok ? result.projects : []
+}
+
+export async function fetchArchivedProjectsResult(
+  jwt: string,
+  orgId: number,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<ProjectsResult> {
   try {
     const res = await fetch(`${apiUrl}/api/v2/projects?orgId=${orgId}&archived=true`, {
       method: "GET",
       headers: { Authorization: `Bearer ${jwt}` },
     })
-    if (!res.ok) return []
+    if (!res.ok) {
+      const reason = res.status === 401 ? "unauthenticated" : res.status === 403 ? "forbidden" : "error"
+      return { ok: false, reason, status: res.status }
+    }
     const body = (await res.json()) as { projects?: CloudProjectSummary[] }
-    return body.projects ?? []
+    return { ok: true, projects: body.projects ?? [] }
   } catch {
-    return []
+    return { ok: false, reason: "unreachable" }
   }
 }
 
@@ -215,26 +305,43 @@ export interface OrgDeletedFile {
   deletedAt: number
 }
 
+export type DeletedFilesResult =
+  | { ok: true; files: OrgDeletedFile[] }
+  | { ok: false; reason: "unreachable" | "unauthenticated" | "forbidden" | "error"; status?: number }
+
 /**
  * GET /api/v2/orgs/:orgId/deleted-files — soft-deleted files across projects
  * the caller can see. Powers the Archived page's Recently deleted tab.
- * Returns [] on any error so the tab can still render an empty state.
+ * @deprecated Prefer {@link fetchOrgDeletedFilesResult}; this compatibility
+ * wrapper cannot distinguish an empty deleted-files list from a failed read.
  */
 export async function fetchOrgDeletedFiles(
   jwt: string,
   orgId: number,
   apiUrl: string = FRONTIER_API_URL,
 ): Promise<OrgDeletedFile[]> {
+  const result = await fetchOrgDeletedFilesResult(jwt, orgId, apiUrl)
+  return result.ok ? result.files : []
+}
+
+export async function fetchOrgDeletedFilesResult(
+  jwt: string,
+  orgId: number,
+  apiUrl: string = FRONTIER_API_URL,
+): Promise<DeletedFilesResult> {
   try {
     const res = await fetch(`${apiUrl}/api/v2/orgs/${orgId}/deleted-files`, {
       method: "GET",
       headers: { Authorization: `Bearer ${jwt}` },
     })
-    if (!res.ok) return []
+    if (!res.ok) {
+      const reason = res.status === 401 ? "unauthenticated" : res.status === 403 ? "forbidden" : "error"
+      return { ok: false, reason, status: res.status }
+    }
     const body = (await res.json()) as { files?: OrgDeletedFile[] }
-    return body.files ?? []
+    return { ok: true, files: body.files ?? [] }
   } catch {
-    return []
+    return { ok: false, reason: "unreachable" }
   }
 }
 
@@ -327,15 +434,29 @@ export function minimalProjectRecord(summary: CloudProjectSummary): ProjectRecor
       type: f.type as FileType,
       createdAt: now,
       cellCount: f.cellCount,
+      // Both halves of the hidden-sibling pairing. Dropping either here means a
+      // cold-loaded browser sees the audio-cue file as an ordinary VTT: listed
+      // in the sidebar, searched, exported — everything the sibling exists to
+      // avoid. `type` cannot stand in for `role` (it is kind ?? role).
+      ...(f.role ? { role: f.role } : {}),
+      ...(f.anchorFileId ? { anchorFileId: f.anchorFileId } : {}),
       ...(f.bookCode ? { bookCode: f.bookCode } : {}),
       ...(f.hasScriptureContent ? { hasScriptureContent: true } : {}),
+      ...(f.corpusMarker?.trim() ? { corpusMarker: f.corpusMarker.trim() } : {}),
       ...(f.sourceLanguage ? { sourceLanguage: f.sourceLanguage } : {}),
       ...(f.targetLanguage ? { targetLanguage: f.targetLanguage } : {}),
       ...(f.orderedBy === "time" || f.orderedBy === "sequence" ? { orderedBy: f.orderedBy } : {}),
       ...(f.sourceTextDirection === "ltr" || f.sourceTextDirection === "rtl" ? { sourceTextDirection: f.sourceTextDirection } : {}),
       ...(f.targetTextDirection === "ltr" || f.targetTextDirection === "rtl" ? { targetTextDirection: f.targetTextDirection } : {}),
       ...(f.coreMediaUrl ? { coreMediaUrl: f.coreMediaUrl } : {}),
+      ...(f.audioVttTimebase ? { audioVttTimebase: f.audioVttTimebase } : {}),
       ...(f.timingMode === "dubbing" || f.timingMode === "audioFirst" ? { timingMode: f.timingMode } : {}),
+      // Shape-checked despite the declared type — this is raw JSON off the
+      // wire. Entries pass through unread: mergeTrackOverrides is the only
+      // validator, and narrowing here would drop a kind a newer client wrote.
+      ...(f.trackOverrides && typeof f.trackOverrides === "object" && !Array.isArray(f.trackOverrides)
+        ? { trackOverrides: f.trackOverrides }
+        : {}),
     })),
     members: [],
     syncRole: {
@@ -362,6 +483,18 @@ export function minimalProjectRecord(summary: CloudProjectSummary): ProjectRecor
   // callers read as the PROJECT_LEAD default.
   if (summary.termbaseEditMinRole !== undefined) {
     record.termbaseEditMinRole = summary.termbaseEditMinRole
+  }
+  // AQU-1086: same for the org's language-edit floor.
+  if (summary.languageEditMinRole !== undefined) {
+    record.languageEditMinRole = summary.languageEditMinRole
+  }
+  // AQU-1002: same treatment for the comment floors — absent leaves them
+  // undefined, which the comment surfaces read as the stock defaults.
+  if (summary.commentCreateMinRole !== undefined) {
+    record.commentCreateMinRole = summary.commentCreateMinRole
+  }
+  if (summary.commentResolveMinRole !== undefined) {
+    record.commentResolveMinRole = summary.commentResolveMinRole
   }
   // AQU-476/478: propagate link mode/consumes/gate/cursor when present.
   if (summary.sourceLinkMode !== undefined) record.sourceLinkMode = summary.sourceLinkMode
@@ -447,7 +580,7 @@ export async function resolveCloudProject(
  */
 export type ResolveProjectResult =
   | { ok: true; project: ProjectStateResponse | CloudProjectSummary }
-  | { ok: false; reason: "not-found" | "forbidden" | "unreachable" }
+  | { ok: false; reason: "not-found" | "forbidden" | "unauthenticated" | "unreachable" }
 
 /**
  * Like {@link resolveCloudProject} but returns a discriminated result
@@ -469,12 +602,20 @@ export async function resolveCloudProjectResult(
       const project = (await directRes.json()) as ProjectStateResponse
       return { ok: true, project }
     }
+    if (directRes.status === 401) {
+      return { ok: false, reason: "unauthenticated" }
+    }
     if (directRes.status === 404 || directRes.status === 403) {
       // Might be an older deployment that hasn't landed GET /:id — fall back
       // to the list endpoint before concluding "not found".
       const listResult = await fetchAccessibleProjectsResult(jwt, undefined, apiUrl)
       if (!listResult.ok) {
-        // List endpoint also failed → server is down.
+        if (listResult.reason === "unauthenticated") {
+          return { ok: false, reason: "unauthenticated" }
+        }
+        if (listResult.reason === "forbidden") {
+          return { ok: false, reason: "forbidden" }
+        }
         return { ok: false, reason: "unreachable" }
       }
       const found = listResult.projects.find((p) => p.id === projectId)

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { ROLE } from "@/lib/frontier/roles"
+import { resolveLanguageEditFloor } from "@/lib/sync/role-policy"
 import {
   fetchOrgSettings,
   patchOrgSettings,
@@ -13,6 +14,49 @@ import {
 } from "@/lib/sync/org-settings"
 import type { TranslationRule, PromotionRequest } from "@/lib/parsers/types"
 import type { OrgProviderKeys } from "@/lib/sync/org-settings"
+
+// ─── Cross-instance sync ───────────────────────────────────────────────────
+// Several surfaces mount their own useOrgSettings for the SAME org at the same
+// time: ProjectWorkspace (rule evaluation → health → editor underlines),
+// RulesSection / Living Memory (management), settings dialogs. Each
+// instance fetched once on mount and nothing else ever invalidated it, so an
+// org rule created or promoted on the rules page never reached the
+// already-mounted editor until a full reload — org rules looked "not applied"
+// while project rules (which share the parent's project state) applied at once.
+//
+// Every CONFIRMED write now fans out to the sibling instances of that org.
+// Kept cheap on purpose: only server responses (ok / conflict) are broadcast,
+// never the optimistic write; the writer is excluded; receivers drop anything
+// not newer than what they hold (the server bumps `version` on every write).
+// Net cost of a write is one extra render per sibling, and nothing at all on
+// the per-keystroke path.
+type OrgSettingsListener = (next: OrgSettingsResponse) => void
+const orgSettingsListeners = new Map<number, Set<OrgSettingsListener>>()
+
+function subscribeOrgSettings(orgId: number, listener: OrgSettingsListener): () => void {
+  let set = orgSettingsListeners.get(orgId)
+  if (!set) {
+    set = new Set()
+    orgSettingsListeners.set(orgId, set)
+  }
+  set.add(listener)
+  return () => {
+    set.delete(listener)
+    if (set.size === 0) orgSettingsListeners.delete(orgId)
+  }
+}
+
+function broadcastOrgSettings(
+  orgId: number,
+  next: OrgSettingsResponse,
+  except: OrgSettingsListener,
+): void {
+  const set = orgSettingsListeners.get(orgId)
+  if (!set) return
+  for (const listener of set) {
+    if (listener !== except) listener(next)
+  }
+}
 
 // Floor aligned with the server's SETTINGS_WRITE_MIN_ROLE = ROLE.MAINTAINER (600)
 // in auth-worker/src/routes/org-settings.ts. Lowering this to PROJECT_LEAD (500)
@@ -52,6 +96,8 @@ const DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE = ROLE.MAINTAINER
 // behavior), not a role-ladder floor.
 const ASSIGNMENT_AUTHORITY_WRITE_MIN_ROLE = ROLE.OWNER
 const DEFAULT_ALLOW_SELF_ASSIGNMENT = false
+const DEFAULT_ASSIGNMENT_MIN_ROLE = ROLE.PROJECT_LEAD
+const VALID_ROLE_LEVELS = new Set<number>(Object.values(ROLE))
 
 // AQU-822: termbaseEditMinRole is the same OWNER-only permission-policy key
 // shape as the floors above, but it gates a WRITE (managing a project's
@@ -62,6 +108,36 @@ const DEFAULT_ALLOW_SELF_ASSIGNMENT = false
 // default) — all three must agree.
 const TERMBASE_FLOOR_WRITE_MIN_ROLE = ROLE.OWNER
 const DEFAULT_TERMBASE_EDIT_MIN_ROLE = ROLE.PROJECT_LEAD
+
+// AQU-1086: languageEditMinRole is the second write-gating permission-policy
+// key (who may change a project's source/target language and its extra target
+// lanes). Same OWNER-only write gate; its default is MAINTAINER — today's
+// behaviour — so an org opts IN to project-lead language editing. See
+// DEFAULT_LANGUAGE_EDIT_MIN_ROLE in src/lib/sync/role-policy.ts (the client
+// gate) and in auth-worker/src/services/org-permissions.ts (the server
+// default) — all three must agree.
+const LANGUAGE_FLOOR_WRITE_MIN_ROLE = ROLE.OWNER
+const EMPTY_RULES: TranslationRule[] = []
+
+// AQU-1002: the two comment floors are the same OWNER-only permission-policy
+// shape again. Their defaults are the pre-AQU-1002 static floors, so an org
+// that never touches them behaves exactly as before: COMMENTER (200) to open a
+// thread, CONTRIBUTOR (400) to resolve one somebody else opened (AQU-999's
+// hardened default). Must agree with DEFAULT_COMMENT_FLOORS in both
+// src/lib/sync/role-policy.ts and sync-worker/src/events/comment-floors.ts.
+const COMMENT_FLOOR_WRITE_MIN_ROLE = ROLE.OWNER
+const DEFAULT_COMMENT_CREATE_MIN_ROLE = ROLE.COMMENTER
+const DEFAULT_COMMENT_RESOLVE_MIN_ROLE = ROLE.CONTRIBUTOR
+
+// AQU-907: egressMinRole gates the org-wide Data egress surface (bulk zip of
+// everything the org has). Same OWNER-only write gate as the floors above.
+// Default is OWNER — the surface hands out the org's entire corpus in one
+// action, so nobody below owner sees it until an owner explicitly opens it
+// up in Settings → Security. The underlying per-project export routes keep
+// their own server-enforced floors (exportMinRole, default MAINTAINER)
+// regardless of this value.
+const EGRESS_FLOOR_WRITE_MIN_ROLE = ROLE.OWNER
+const DEFAULT_EGRESS_MIN_ROLE = ROLE.OWNER
 
 export interface UseOrgSettings {
   /** Current org settings (rules, etc). Always defined (empty when unloaded). */
@@ -147,6 +223,11 @@ export interface UseOrgSettings {
    */
   allowSelfAssignment: boolean
   /**
+   * AQU-1037: effective floor for assigning work to anyone, including
+   * file/chapter/target-lane assignments and AI changeset routing.
+   */
+  assignmentMinRole: number
+  /**
    * AQU-822: effective termbase-edit floor — the minimum role allowed to
    * manage a project's termbase in this org. Explicit org setting, or
    * PROJECT_LEAD (500) when unset. Server-enforced per write; the terminology
@@ -155,6 +236,36 @@ export interface UseOrgSettings {
    * Settings surface rather than for project-level gating.
    */
   termbaseEditMinRole: number
+  /**
+   * AQU-1086: the org's effective `languageEditMinRole` — the minimum role
+   * allowed to change a project's languages. The per-project gate reads the
+   * same floor off the project record (`ProjectRecord.languageEditMinRole`),
+   * so this is here for the org Settings UI.
+   */
+  languageEditMinRole: number
+  /**
+   * AQU-907: True when the caller may use the org-wide Data egress surface.
+   * Owners always may (700 meets every valid floor, so they never wait for
+   * the fetch); everyone else needs hasFetched && role >= egressMinRole —
+   * a disclosure gate like canViewRoster, with no pre-fetch escape hatch,
+   * so the surface never flashes open for a below-floor caller.
+   */
+  canEgress: boolean
+  /** Effective egress floor: explicit org setting, or the OWNER default when unset. */
+  egressMinRole: number
+  /**
+   * AQU-1002: effective floor to OPEN a comment thread or post a reply.
+   * Explicit org setting, or COMMENTER (200) when unset. Server-enforced on
+   * both write paths; see `resolveCommentFloors` in
+   * `sync-worker/src/events/comment-floors.ts`.
+   */
+  commentCreateMinRole: number
+  /**
+   * AQU-1002: effective floor to resolve/reopen a thread somebody ELSE opened.
+   * Explicit org setting, or CONTRIBUTOR (400) when unset. A thread's author
+   * always keeps the static COMMENTER floor on their own thread regardless.
+   */
+  commentResolveMinRole: number
   /** Force a re-GET. */
   refresh: () => Promise<OrgSettingsResponse | null>
   /** Patch org settings (adds/replaces top-level keys). Blocked if !canEdit —
@@ -193,6 +304,21 @@ export function useOrgSettings(
 
   const aliveRef = useRef(true)
   useEffect(() => () => { aliveRef.current = false }, [])
+
+  // Receiver side of the cross-instance sync (see the registry above): adopt a
+  // sibling's confirmed server response only when it is newer than ours.
+  const adoptFromSibling = useCallback((next: OrgSettingsResponse) => {
+    if (!aliveRef.current) return
+    const current = serverRef.current
+    if (current && current.version >= next.version) return
+    writeServer(next)
+    setHasFetched(true)
+  }, [writeServer])
+
+  useEffect(() => {
+    if (!orgId) return
+    return subscribeOrgSettings(orgId, adoptFromSibling)
+  }, [orgId, adoptFromSibling])
 
   // Serialize writes to avoid version conflicts.
   const writeChainRef = useRef<Promise<unknown>>(Promise.resolve())
@@ -259,11 +385,47 @@ export function useOrgSettings(
     return DEFAULT_TERMBASE_EDIT_MIN_ROLE
   })()
 
+  // AQU-1086: effective language-edit floor — explicit org setting, or the
+  // MAINTAINER default when unset / out of the role ladder.
+  const languageEditMinRole = resolveLanguageEditFloor(
+    typeof server?.settings?.languageEditMinRole === "number"
+      ? (server.settings.languageEditMinRole as number)
+      : null,
+  )
+
+  // AQU-907: effective egress floor — explicit org setting, or the OWNER
+  // default when unset / out of the role ladder.
+  const egressMinRole = (() => {
+    const raw = server?.settings?.egressMinRole
+    if (typeof raw === "number" && Number.isFinite(raw) && raw >= 100 && raw <= 700) return raw
+    return DEFAULT_EGRESS_MIN_ROLE
+  })()
+
+  // AQU-1002: effective comment floors — explicit org settings, or the
+  // pre-AQU-1002 static floors when unset / out of the role ladder.
+  const commentCreateMinRole = (() => {
+    const raw = server?.settings?.commentCreateMinRole
+    if (typeof raw === "number" && Number.isFinite(raw) && raw >= 100 && raw <= 700) return raw
+    return DEFAULT_COMMENT_CREATE_MIN_ROLE
+  })()
+
+  const commentResolveMinRole = (() => {
+    const raw = server?.settings?.commentResolveMinRole
+    if (typeof raw === "number" && Number.isFinite(raw) && raw >= 100 && raw <= 700) return raw
+    return DEFAULT_COMMENT_RESOLVE_MIN_ROLE
+  })()
+
   // AQU-496: effective self-assignment authority — explicit org setting, or
   // false (leads-only) when unset.
   const allowSelfAssignment = server?.settings?.allowSelfAssignment === true
     ? true
     : DEFAULT_ALLOW_SELF_ASSIGNMENT
+
+  const assignmentMinRole = (() => {
+    const raw = server?.settings?.assignmentMinRole
+    if (typeof raw === "number" && VALID_ROLE_LEVELS.has(raw)) return raw
+    return DEFAULT_ASSIGNMENT_MIN_ROLE
+  })()
 
   // The effective role to check: project-resolved (AD-12 max-wins) when
   // available, falling back to org role for non-project contexts.
@@ -283,6 +445,15 @@ export function useOrgSettings(
     hasFetched &&
     effectiveRoleLevel != null &&
     effectiveRoleLevel >= memberProgressViewMinRole
+
+  // AQU-907: owners pass unconditionally (every valid floor is <= OWNER), so
+  // the primary persona never waits on the settings fetch; below-owner roles
+  // are disclosure-gated like the roster — closed until the fetch proves the
+  // org opened the surface to them.
+  const canEgress =
+    effectiveRoleLevel != null &&
+    (effectiveRoleLevel >= ROLE.OWNER ||
+      (hasFetched && effectiveRoleLevel >= egressMinRole))
 
   const patch = useCallback(
     async (partial: OrgWideSettings): Promise<OrgPatchResult | { kind: "blocked" }> => {
@@ -305,9 +476,13 @@ export function useOrgSettings(
 
         const result = await patchOrgSettings(jwt, orgId, merged, baseVersion)
 
-        if (result.kind === "ok") writeServer(result.value)
-        else if (result.kind === "conflict") writeServer(result.latest)
-        else {
+        if (result.kind === "ok") {
+          writeServer(result.value)
+          broadcastOrgSettings(orgId, result.value, adoptFromSibling)
+        } else if (result.kind === "conflict") {
+          writeServer(result.latest)
+          broadcastOrgSettings(orgId, result.latest, adoptFromSibling)
+        } else {
           // Forbidden (role check failed at the API layer) or error: roll back
           // the optimistic write to the pre-write snapshot, then re-fetch truth.
           // Without this the rejected value lingered until an unrelated refresh
@@ -318,7 +493,7 @@ export function useOrgSettings(
         return result
       })
     },
-    [orgId, jwt, canEdit, runSerialized, writeServer, refresh, t],
+    [orgId, jwt, canEdit, runSerialized, writeServer, refresh, adoptFromSibling, t],
   )
 
   const canRequestPromotion =
@@ -337,7 +512,9 @@ export function useOrgSettings(
   )
 
   const settings = server?.settings ?? {}
-  const orgRules: TranslationRule[] = settings.rules ?? []
+  // AQU-1104: a stable empty array. `orgRules` feeds useRules' merged list,
+  // and a fresh `[]` per render re-ran every rules consumer on every render.
+  const orgRules: TranslationRule[] = settings.rules ?? EMPTY_RULES
   const promotionRequests: PromotionRequest[] = (settings.promotionRequests as PromotionRequest[] | undefined) ?? []
   // AQU-433: org-level provider keys; default to empty object when unset.
   const orgProviderKeys: OrgProviderKeys = settings.orgProviderKeys ?? {}
@@ -375,7 +552,13 @@ export function useOrgSettings(
     canViewMemberProgress,
     memberProgressViewMinRole,
     allowSelfAssignment,
+    assignmentMinRole,
     termbaseEditMinRole,
+    languageEditMinRole,
+    canEgress,
+    egressMinRole,
+    commentCreateMinRole,
+    commentResolveMinRole,
     refresh,
     patch,
     requestPromotion,
@@ -409,4 +592,33 @@ export function canEditAssignmentAuthority(callerRoleLevel: number | null | unde
  */
 export function canEditTermbaseFloor(callerRoleLevel: number | null | undefined): boolean {
   return (callerRoleLevel ?? 0) >= TERMBASE_FLOOR_WRITE_MIN_ROLE
+}
+
+/**
+ * AQU-1086: True when `callerRoleLevel` is allowed to CHANGE the
+ * languageEditMinRole floor (OWNER-only, same rationale as the helpers above —
+ * a maintainer must not be able to hand out project-language editing on their
+ * own authority).
+ */
+export function canEditLanguageFloor(callerRoleLevel: number | null | undefined): boolean {
+  return (callerRoleLevel ?? 0) >= LANGUAGE_FLOOR_WRITE_MIN_ROLE
+}
+
+/**
+ * AQU-907: True when `callerRoleLevel` is allowed to CHANGE the egressMinRole
+ * floor (OWNER-only, same rationale as the helpers above — a maintainer must
+ * not be able to open the org-wide bulk export to more roles on their own
+ * authority).
+ */
+export function canEditEgressFloor(callerRoleLevel: number | null | undefined): boolean {
+  return (callerRoleLevel ?? 0) >= EGRESS_FLOOR_WRITE_MIN_ROLE
+}
+
+/**
+ * AQU-1002: True when `callerRoleLevel` is allowed to CHANGE either comment
+ * floor (OWNER-only, same rationale again — who may settle other people's
+ * discussion threads is an org policy, not a maintainer's call).
+ */
+export function canEditCommentFloors(callerRoleLevel: number | null | undefined): boolean {
+  return (callerRoleLevel ?? 0) >= COMMENT_FLOOR_WRITE_MIN_ROLE
 }

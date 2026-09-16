@@ -1,12 +1,10 @@
 import { useEffect, useState } from "react"
-import { useQueryClient } from "@tanstack/react-query"
 import { Link, useLocation } from "react-router-dom"
 import { ChevronDown, LogIn, LogOut, UserPlus, Check, Settings2 } from "lucide-react"
 import { useAccounts } from "@/hooks/useAccounts"
 import { hydrateSessionEmails, logout as revokeServerSide } from "@/lib/frontier/auth"
-import { clearSession, listAllSessionJwts, removeSession, sessionKey } from "@/lib/frontier/session-store"
-import { clearAllLocalData } from "@/lib/store/project-index"
-import { outboxPendingCount } from "@/lib/sync/outbox"
+import { listAllSessionJwts, sessionKey } from "@/lib/frontier/session-store"
+import { outboxPendingCount, outboxRecordCountAllOwners } from "@/lib/sync/outbox"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog"
@@ -25,6 +23,7 @@ import { FrontierForgotPasswordForm } from "./git-import/FrontierForgotPasswordF
 import { cn } from "@/lib/utils"
 import { InitialsAvatar } from "@/components/InitialsAvatar"
 import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { useT } from "@/lib/i18n/I18nProvider"
 
 type AuthMode = "login" | "signup" | "forgot"
@@ -102,8 +101,7 @@ export function AccountSwitcher({
   compact = false,
 }: { variant?: "sidebar" | "header"; compact?: boolean } = {}) {
   const t = useT()
-  const { active, sessions, activate } = useAccounts()
-  const qc = useQueryClient()
+  const { active, sessions, activate, remove, removeAll } = useAccounts()
   const location = useLocation()
   const [open, setOpen] = useState(false)
   const [loginOpen, setLoginOpen] = useState(false)
@@ -123,7 +121,9 @@ export function AccountSwitcher({
 
   async function handleLogout(scope: LogoutScope) {
     setOpen(false)
-    const count = await outboxPendingCount()
+    const count = scope === "all"
+      ? await outboxRecordCountAllOwners()
+      : await outboxPendingCount()
     if (count > 0) {
       setPendingLogout({ count, scope })
       return
@@ -140,16 +140,11 @@ export function AccountSwitcher({
     if (scope === "all") {
       const jwts = await listAllSessionJwts()
       await Promise.all(jwts.map((jwt) => revokeServerSide(jwt)))
-      await clearSession()
+      await removeAll()
     } else if (active) {
       await revokeServerSide(active.jwt)
-      await removeSession(sessionKey(active))
+      await remove(sessionKey(active))
     }
-    await clearAllLocalData()
-    // Wipe in-memory query cache so the UI reflects the new auth state —
-    // a still-signed-in account that was just promoted, or none at all —
-    // rather than rendering the logged-out account's cached data.
-    qc.clear()
   }
 
   if (!active) {
@@ -232,8 +227,8 @@ export function AccountSwitcher({
                 isHeader
                   ? "h-9 rounded-xl bg-card px-2 transition-shadow"
                   : compact
-                    ? "h-8 w-8 justify-center rounded-md p-0 hover:bg-accent"
-                    : "w-full rounded-md px-1.5 py-1.5 hover:bg-accent",
+                    ? "h-8 w-8 justify-center rounded-md p-0 hover:bg-accent/40"
+                    : "w-full rounded-md px-1.5 py-1.5 hover:bg-accent/40",
               )}
               aria-label={t("nav.account.menuLabel", { username: active.username })}
               data-account-switcher-surface={variant}
@@ -298,22 +293,14 @@ export function AccountSwitcher({
   )
 }
 
-/** Non-prod environment label derived from the Vite mode at build time. */
-const ENV_HINT: string | null = (() => {
-  const mode = import.meta.env.MODE as string | undefined
-  if (!mode || mode === "production") return null
-  if (mode === "development") return "dev"
-  return mode
-})()
-
-interface EntrySummary {
+export interface EntrySummary {
   key: string
   username: string
   email?: string
   active: boolean
 }
 
-function AccountMenuEntry({
+export function AccountMenuEntry({
   summary,
   onSelect,
 }: {
@@ -330,15 +317,9 @@ function AccountMenuEntry({
     >
       <InitialsAvatar name={summary.username} size="xs" shape="square" menuSafe />
       <div className="flex min-w-0 flex-col gap-0.5">
-        <div className="flex min-w-0 items-baseline gap-2">
-          <span className="truncate font-medium">{summary.username}</span>
-          {summary.email && (
-            <span className="min-w-0 truncate text-xs text-muted-foreground">{summary.email}</span>
-          )}
-        </div>
-        {ENV_HINT && (
-          <span className="truncate text-xs text-amber-600 dark:text-amber-500">{ENV_HINT}</span>
-        )}
+        <AppTooltip content={summary.email} side="right" align="start">
+          <span className="w-fit min-w-0 break-words font-medium">{summary.username}</span>
+        </AppTooltip>
       </div>
       {summary.active && <Check className="size-4 shrink-0 opacity-60" />}
     </DropdownMenuItem>

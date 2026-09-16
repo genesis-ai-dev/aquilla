@@ -6,7 +6,57 @@ import { Select as SelectPrimitive } from "@base-ui/react/select"
 import { cn } from "@/lib/utils"
 import { ChevronDownIcon, CheckIcon, ChevronUpIcon } from "lucide-react"
 
-const Select = SelectPrimitive.Root
+/** True when the popup is a dropdown (`data-side` is not `none`), not an overlay on the trigger. */
+const SelectDropdownContext = React.createContext<{
+  dropdown: boolean
+  setDropdown: (dropdown: boolean) => void
+}>({
+  dropdown: false,
+  setDropdown: () => {},
+})
+
+function Select<Value, Multiple extends boolean | undefined = false>(
+  props: SelectPrimitive.Root.Props<Value, Multiple>,
+) {
+  const [dropdown, setDropdown] = React.useState(false)
+  const value = React.useMemo(
+    () => ({ dropdown, setDropdown }),
+    [dropdown],
+  )
+  return (
+    <SelectDropdownContext.Provider value={value}>
+      <SelectPrimitive.Root {...props} />
+    </SelectDropdownContext.Provider>
+  )
+}
+
+function useDropdownPositionerRef(setDropdown: (dropdown: boolean) => void) {
+  const observerRef = React.useRef<MutationObserver | null>(null)
+  return React.useCallback(
+    (node: HTMLDivElement | null) => {
+      observerRef.current?.disconnect()
+      observerRef.current = null
+      if (!node) {
+        setDropdown(false)
+        return
+      }
+      const report = () => {
+        const side = node.getAttribute("data-side")
+        setDropdown(
+          node.hasAttribute("data-open") && side != null && side !== "none",
+        )
+      }
+      report()
+      const observer = new MutationObserver(report)
+      observer.observe(node, {
+        attributes: true,
+        attributeFilter: ["data-open", "data-side"],
+      })
+      observerRef.current = observer
+    },
+    [setDropdown],
+  )
+}
 
 function SelectGroup({ className, ...props }: SelectPrimitive.Group.Props) {
   return (
@@ -36,15 +86,20 @@ function SelectTrigger({
 }: SelectPrimitive.Trigger.Props & {
   size?: "sm" | "default"
 }) {
+  const { dropdown } = React.useContext(SelectDropdownContext)
   return (
     <SelectPrimitive.Trigger
       data-slot="select-trigger"
       data-size={size}
       className={cn(
-        "flex w-fit! items-center justify-between gap-1.5 rounded-lg border border-input bg-transparent py-2 pe-2 ps-2.5 text-sm whitespace-nowrap transition-colors outline-none select-none focus-visible:border-ring disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 data-placeholder:text-muted-foreground data-[size=default]:h-8 data-[size=sm]:h-7 data-[size=sm]:rounded-[min(var(--radius-md),10px)] *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-1.5 dark:bg-input/30 dark:hover:bg-input/50 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "flex w-fit! items-center justify-between gap-1.5 rounded-lg border border-input bg-transparent py-2 pe-2 ps-2.5 text-sm text-foreground whitespace-nowrap outline-none select-none hover:bg-accent/40 focus-visible:border-ring disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 data-placeholder:text-muted-foreground data-[size=default]:h-8 data-[size=sm]:h-7 data-[size=sm]:rounded-[min(var(--radius-md),10px)] *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-1.5 dark:bg-input/30 dark:hover:bg-accent/40 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "aria-expanded:border-input data-popup-open:border-input aria-expanded:focus-visible:border-input data-popup-open:focus-visible:border-input",
+        "data-dropdown:bg-accent/40 hover:data-dropdown:bg-accent/40 dark:hover:data-dropdown:bg-accent/40",
+        "group-has-[[data-slot=field-label]:hover]/field:not-aria-expanded:hover:bg-transparent group-has-[[data-slot=field-label]:hover]/field:not-aria-expanded:dark:hover:bg-input/30",
         className
       )}
       {...props}
+      data-dropdown={dropdown ? "" : undefined}
     >
       {children}
       <SelectPrimitive.Icon
@@ -70,9 +125,12 @@ function SelectContent({
     SelectPrimitive.Positioner.Props,
     "align" | "alignOffset" | "side" | "sideOffset" | "alignItemWithTrigger"
   >) {
+  const { setDropdown } = React.useContext(SelectDropdownContext)
+  const positionerRef = useDropdownPositionerRef(setDropdown)
   return (
     <SelectPrimitive.Portal>
       <SelectPrimitive.Positioner
+        ref={positionerRef}
         side={side}
         sideOffset={sideOffset}
         align={align}
@@ -115,16 +173,19 @@ function SelectItem({
   className,
   children,
   multiline = false,
+  leading,
   ...props
 }: SelectPrimitive.Item.Props & {
   /** Allow wrapped secondary copy under the primary label (e.g. RoleSelect). */
   multiline?: boolean
+  /** Extra control outside ItemText (e.g. a preview button). Not shown on the trigger. */
+  leading?: React.ReactNode
 }) {
   return (
     <SelectPrimitive.Item
       data-slot="select-item"
       className={cn(
-        "relative flex w-full cursor-default gap-1.5 rounded-md py-1 pe-8 ps-1.5 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground not-data-[variant=destructive]:focus:**:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 *:[span]:last:flex *:[span]:last:gap-2",
+        "relative flex w-full cursor-default gap-1.5 rounded-md py-1 pe-8 ps-1.5 text-sm outline-hidden select-none focus:bg-accent/40 focus:text-accent-foreground not-data-[variant=destructive]:focus:**:text-accent-foreground data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 *:[span]:last:flex *:[span]:last:gap-2",
         multiline ? "items-start py-1.5" : "items-center",
         multiline
           ? "*:[span]:last:items-start"
@@ -133,6 +194,7 @@ function SelectItem({
       )}
       {...props}
     >
+      {leading}
       <SelectPrimitive.ItemText
         data-slot="select-item-text"
         className={cn(

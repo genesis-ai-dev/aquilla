@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react"
-import { Check, ChevronDown } from "lucide-react"
+import { CheckCircle2, ChevronDown, Circle } from "lucide-react"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { cn } from "@/lib/utils"
 
 interface ChecklistItemProps {
   title: string
@@ -19,6 +21,9 @@ interface ChecklistItemProps {
  * Left as a controlled-on-mount component on purpose: parents do not need
  * to hold open state per item, and we still respond to external completion
  * (e.g. another collaborator finishing the step).
+ *
+ * Visual language matches SettingsRow / SettingsGroup: a divide-y list row,
+ * not a standalone tinted card. Completion is a status icon, not a wash.
  */
 export function ChecklistItem({
   title,
@@ -38,54 +43,57 @@ export function ChecklistItem({
   }, [complete])
 
   return (
-    <div
-      className={
-        "rounded-lg border transition-colors " +
-        (complete ? "border-emerald-200/70 bg-emerald-50/40 dark:border-emerald-900/40 dark:bg-emerald-950/20" : "bg-card")
-      }
-    >
-      <button
-        className="flex w-full items-start gap-3 rounded-lg p-3 text-start text-sm hover:bg-accent/40"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-      >
-        <CompletionDot complete={complete} />
-        <div className="min-w-0 flex-1">
-          <div className="font-medium leading-tight">{title}</div>
-          {description && (
-            <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
-              {description}
-            </p>
-          )}
-        </div>
-        <ChevronDown
-          className={
-            "mt-0.5 h-4 w-4 shrink-0 text-muted-foreground transition-transform " +
-            (open ? "rotate-0" : "-rotate-90")
-          }
-        />
-      </button>
-      {open && (
-        <div className="border-t px-3 pb-3 pt-3">
-          {children}
-        </div>
-      )}
-    </div>
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger asChild>
+        <button
+          type="button"
+          aria-expanded={open}
+          className="flex w-full items-start gap-3 px-4 py-3 text-start hover:bg-muted/40"
+        >
+          <CompletionIcon complete={complete} />
+          <div className="min-w-0 flex-1 space-y-1">
+            <div
+              className={cn(
+                "text-sm font-medium leading-snug",
+                complete && "text-muted-foreground",
+              )}
+            >
+              {title}
+            </div>
+            {description && (
+              <p className="line-clamp-2 text-xs text-muted-foreground">
+                {description}
+              </p>
+            )}
+          </div>
+          <ChevronDown
+            className={cn(
+              "mt-0.5 size-4 shrink-0 text-muted-foreground",
+              open ? "rotate-0" : "-rotate-90",
+            )}
+          />
+        </button>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="px-4 pb-4">
+        {children}
+      </CollapsibleContent>
+    </Collapsible>
   )
 }
 
-function CompletionDot({ complete }: { complete: boolean }) {
+function CompletionIcon({ complete }: { complete: boolean }) {
+  if (complete) {
+    return (
+      <CheckCircle2
+        className="mt-0.5 size-4 shrink-0 text-green-600 dark:text-green-400"
+        aria-hidden
+      />
+    )
+  }
   return (
-    <div
-      className={
-        "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-lg " +
-        (complete
-          ? "bg-emerald-500 text-white"
-          : "border-2 border-muted-foreground/25 bg-background")
-      }
+    <Circle
+      className="mt-0.5 size-4 shrink-0 text-muted-foreground/40"
       aria-hidden
-    >
-      {complete && <Check className="h-3 w-3" strokeWidth={3} />}
-    </div>
+    />
   )
 }

@@ -5,7 +5,7 @@ import {
   setAnalyticsEnabled,
 } from "./analytics-consent"
 
-const STORAGE_KEY = "codex:analyticsEnabled"
+const STORAGE_KEY = "aquilla:analyticsEnabled"
 
 afterEach(() => {
   localStorage.clear()

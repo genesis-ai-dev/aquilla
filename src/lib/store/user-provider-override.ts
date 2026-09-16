@@ -1,14 +1,20 @@
 /**
- * Per-user, per-device override for the AI completion provider. Stored in
+ * Per-user, per-device default for the AI completion provider. Stored in
  * localStorage because it's a personal credential that must not sync across
- * devices or projects. When set, this beats `project.completionSettings`
- * at request time inside `completion-service.complete()`.
+ * devices. Used when a project has no custom provider of its own; a project
+ * API key / custom endpoint beats this at request time in `complete()`.
  *
  * This is the *advanced* path: surfaced only in user Settings, never in the
  * onboarding wizard. The happy path is "sign in to Frontier — done."
  */
 
-const KEY = "codex:userProviderOverride"
+import { useSyncExternalStore } from "react"
+import {
+  ownerScopedLocalStorageKey,
+  subscribeClientLocalStorageOwner,
+} from "@/lib/frontier/client-local-storage"
+
+const KEY = "aquilla:userProviderOverride"
 
 export interface UserProviderOverride {
   /** OpenAI-compatible base URL (e.g. "https://openrouter.ai/api/v1"). */
@@ -19,29 +25,87 @@ export interface UserProviderOverride {
   apiKey?: string
 }
 
+function storageKey(): string {
+  return ownerScopedLocalStorageKey(KEY)
+}
+
+let snapshotKey: string | null = null
+let snapshotRaw: string | null = null
+let snapshot: UserProviderOverride | null = null
+
 export function getUserProviderOverride(): UserProviderOverride | null {
   if (typeof localStorage === "undefined") return null
   try {
-    const raw = localStorage.getItem(KEY)
-    if (!raw) return null
+    const key = storageKey()
+    const raw = localStorage.getItem(key)
+    if (key === snapshotKey && raw === snapshotRaw) return snapshot
+    snapshotKey = key
+    snapshotRaw = raw
+    if (!raw) {
+      snapshot = null
+      return null
+    }
     const parsed = JSON.parse(raw) as Partial<UserProviderOverride>
-    if (!parsed?.endpoint || typeof parsed.endpoint !== "string") return null
-    return {
+    if (!parsed?.endpoint || typeof parsed.endpoint !== "string") {
+      snapshot = null
+      return null
+    }
+    snapshot = {
       endpoint: parsed.endpoint,
       model: typeof parsed.model === "string" ? parsed.model : undefined,
       apiKey: typeof parsed.apiKey === "string" ? parsed.apiKey : undefined,
     }
+    return snapshot
   } catch {
+    snapshotKey = null
+    snapshotRaw = null
+    snapshot = null
     return null
   }
 }
 
 export function setUserProviderOverride(override: UserProviderOverride): void {
   if (typeof localStorage === "undefined") return
-  localStorage.setItem(KEY, JSON.stringify(override))
+  localStorage.setItem(storageKey(), JSON.stringify(override))
+  notify()
 }
 
 export function clearUserProviderOverride(): void {
   if (typeof localStorage === "undefined") return
-  localStorage.removeItem(KEY)
+  localStorage.removeItem(storageKey())
+  notify()
+}
+
+const listeners = new Set<() => void>()
+
+function notify(): void {
+  for (const listener of listeners) listener()
+}
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener)
+  return () => {
+    listeners.delete(listener)
+  }
+}
+
+/** Hook: the personal override, live after saves in Preferences. */
+export function useUserProviderOverride(): UserProviderOverride | null {
+  return useSyncExternalStore(
+    (listener) => {
+      const onStorage = (e: StorageEvent) => {
+        if (e.key === storageKey()) listener()
+      }
+      if (typeof window !== "undefined") window.addEventListener("storage", onStorage)
+      const off = subscribe(listener)
+      const offOwner = subscribeClientLocalStorageOwner(listener)
+      return () => {
+        if (typeof window !== "undefined") window.removeEventListener("storage", onStorage)
+        off()
+        offOwner()
+      }
+    },
+    getUserProviderOverride,
+    () => null,
+  )
 }

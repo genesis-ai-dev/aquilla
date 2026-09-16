@@ -17,10 +17,10 @@
 // (409) and role-floor (403) handling is therefore identical to every other
 // shared-settings field on this page; `sharedConflict` in the parent already
 // renders the "Settings changed elsewhere" banner when the hook detects one.
-import { useState } from "react"
+import { useState, type ReactNode } from "react"
 import { Archive, ArchiveRestore, Plus, Globe } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
+import { LanguageComboboxInput } from "@/components/LanguageComboboxInput"
 import { Badge } from "@/components/ui/badge"
 import { FieldLabel } from "@/components/ui/field"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -46,8 +46,8 @@ export interface LanguagesSectionProps {
   canEdit: boolean
   /** Human-readable reason write controls are disabled (offline / role), or
    *  null when `canEdit` is true. Mirrors `sharedDisabledTooltip` in
-   *  ProjectSettings.tsx. */
-  disabledTooltip: string | null
+   *  ProjectSettings.tsx — a string or the compact PermissionLockHint. */
+  disabledTooltip: ReactNode
   /** The shared-settings patch function (ProjectSettings.tsx's `patchShared`,
    *  i.e. `useProjectSettings(...).patch`). Optimistic-conflict / role /
    *  offline handling all live in that hook already — this component only
@@ -112,9 +112,16 @@ export function LanguagesSection({
   const active = activeLanes(targetLanes, archivedLanes)
   const archived = archivedRegisteredLanes(targetLanes, archivedLanes)
 
-  async function handleAdd() {
+  // AQU-988: mirror validateNewLane's dedupe set (default lane + every
+  // registered lane, active or archived) so the dropdown never offers a
+  // language that "add" would immediately reject as a duplicate.
+  const excludeFromSuggestions = [defaultTargetLanguage, ...targetLanes]
+
+  // `candidate` lets the Enter-on-a-suggestion path (AQU-1116) add the match
+  // straight away — `setNewLane` has not landed in state yet at that point.
+  async function handleAdd(candidate: string = newLane) {
     if (!canEdit) return
-    const trimmed = normalizeLane(newLane)
+    const trimmed = normalizeLane(candidate)
     // Dedupe against every registered lane (active + archived) so a tag can't
     // be re-added while an archived copy still holds its cell data.
     const validationError = validateNewLane(trimmed, defaultTargetLanguage, targetLanes, t)
@@ -293,13 +300,24 @@ export function LanguagesSection({
           <div className="flex items-end gap-2">
             <div className="flex-1">
               <FieldLabel htmlFor="add-target-lang">{t("projectSettings.languages.addLaneLabel")}</FieldLabel>
-              <Input
+              <LanguageComboboxInput
                 id="add-target-lang"
                 data-testid="add-target-lang-input"
                 value={newLane}
-                onChange={(e) => {
-                  setNewLane(e.target.value)
+                // Suggestions skip lanes that already exist, so the list can
+                // never offer a value the duplicate check would then reject.
+                exclude={excludeFromSuggestions}
+                onValueChange={(next) => {
+                  setNewLane(next)
                   setAddError(null)
+                }}
+                // AQU-1116: Enter on the highlighted match adds that lane, the
+                // same as Enter on free text adds what was typed. Clicking a
+                // row still only fills the field.
+                onEnterSelect={(name) => {
+                  setNewLane(name)
+                  setAddError(null)
+                  void handleAdd(name)
                 }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
@@ -322,9 +340,6 @@ export function LanguagesSection({
           </div>
         </DisabledFieldTooltip>
         {addError && <p className="text-xs text-destructive">{addError}</p>}
-        {!canEdit && disabledTooltip && (
-          <p className="text-xs text-muted-foreground">{disabledTooltip}</p>
-        )}
       </CardContent>
     </Card>
   )

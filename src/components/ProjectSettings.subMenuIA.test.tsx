@@ -167,7 +167,7 @@ vi.mock("@/hooks/useProjectMembers", () => ({
 }))
 
 vi.mock("@/hooks/useProjectOrgId", () => ({
-  useProjectOrgId: () => null,
+  useProjectOrgId: () => ({ orgId: null, isLoading: false, error: null }),
 }))
 
 const rosterSettings = vi.hoisted(() => ({ canViewRoster: true }))
@@ -190,6 +190,7 @@ vi.mock("@/hooks/useOrgSettings", () => ({
     memberProgressViewMinRole: 600,
     allowSelfAssignment: false,
     termbaseEditMinRole: 500,
+    languageEditMinRole: 600,
     refresh: vi.fn(async () => null),
     patch: vi.fn(async () => ({ kind: "ok" as const, value: { orgId: 1, settings: {}, version: 2, updatedAt: null, updatedBy: null } })),
     requestPromotion: vi.fn(async () => ({ kind: "blocked" as const })),
@@ -310,6 +311,11 @@ describe("ProjectSettings — sub-menu IA (AQU-501)", () => {
     // The Quality hub still renders with Validation & health alone.
     expect(screen.queryByText("Rules")).toBeNull()
     expect(screen.queryByText("Living Memory")).toBeNull()
+
+    // Index hints show the current value, capitalized — not the raw enum
+    // ("reviewer", "lazy") dumped before opening the pane.
+    expect(screen.getByText("Reviewer")).toBeTruthy()
+    expect(screen.getByText("Lazy (default)")).toBeTruthy()
 
     // ...not the controls themselves. Project Title (General) and AI
     // Instructions (AI & completion) must NOT both be in the document at once

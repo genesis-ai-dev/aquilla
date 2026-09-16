@@ -46,6 +46,7 @@ describe("HelpMenu", () => {
       expect(screen.getByText("Take the tour")).toBeInTheDocument()
     })
     const tour = screen.getByRole("menuitem", { name: /take the tour/i })
+    expect(tour.className).toMatch(/focus:bg-accent\/40/)
     const homepage = screen.getByRole("menuitem", { name: /homepage/i })
     // Tour leads the menu so the expand affordance points at the primary action.
     expect(tour.compareDocumentPosition(homepage) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
@@ -56,5 +57,17 @@ describe("HelpMenu", () => {
     expect(screen.getByText("Contact support")).toBeInTheDocument()
     // Report moved out of its own dock button and into this menu.
     expect(screen.getByText("Report")).toBeInTheDocument()
+  })
+
+  it("opens the compact question-mark menu start-aligned", async () => {
+    render(
+      <MemoryRouter>
+        <HelpMenu compact />
+      </MemoryRouter>,
+    )
+    fireEvent.click(screen.getByRole("button", { name: /help & community/i }))
+    const homepage = await screen.findByRole("menuitem", { name: /homepage/i })
+    expect(homepage.closest("[data-side]")).toHaveAttribute("data-side", "top")
+    expect(homepage.closest("[data-align]")).toHaveAttribute("data-align", "start")
   })
 })

@@ -1,6 +1,7 @@
 import type { ComponentType, ReactNode } from "react"
 import {
   Archive,
+  CalendarClock,
   CircleDashed,
   Clock,
   type LucideIcon,
@@ -12,6 +13,7 @@ import {
   type ProjectAttentionKind,
   type ProjectAttentionReason,
 } from "@/lib/project-status"
+import { fmtLabeledDeadlineDate } from "@/lib/format-date"
 
 type StatusIcon = LucideIcon | ComponentType<{ className?: string }>
 type StatusTone = "success" | "danger" | "warning" | "muted"
@@ -74,21 +76,13 @@ const KIND_CONFIG: Record<
   { icon: StatusIcon; tone: StatusTone; label: string }
 > = {
   overdue: { icon: TrendLineDownIcon, tone: "danger", label: PROJECT_STATUS_LABEL.overdue },
+  // Amber, not red: the project's own deadline is still intact. Red here
+  // would recreate in colour the confusion the separate label just removed.
+  "behind-plan": { icon: CalendarClock, tone: "warning", label: PROJECT_STATUS_LABEL.behindPlan },
   soon: { icon: Clock, tone: "warning", label: PROJECT_STATUS_LABEL.soon },
   stalled: { icon: CircleDashed, tone: "muted", label: PROJECT_STATUS_LABEL.stalled },
   "on-track": { icon: TrendLineIcon, tone: "success", label: PROJECT_STATUS_LABEL.onTrack },
   archived: { icon: Archive, tone: "muted", label: PROJECT_STATUS_LABEL.archived },
-}
-
-function formatDeadlineDate(value: string): string {
-  const parsed = Date.parse(value)
-  if (!Number.isFinite(parsed)) return value
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    timeZone: "UTC",
-  }).format(new Date(parsed))
 }
 
 /** Tooltip body matching the org projects table deadline hover — date only. */
@@ -97,7 +91,7 @@ export function deadlineStatusTooltip(
   deadlineAt: string | null | undefined,
 ): ReactNode {
   if (!deadlineAt) return null
-  return `Due ${formatDeadlineDate(deadlineAt)}`
+  return fmtLabeledDeadlineDate(deadlineAt, "Due")
 }
 
 /** Linear-style status: tinted icon orb + label (no pill). */

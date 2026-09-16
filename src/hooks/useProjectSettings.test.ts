@@ -1,7 +1,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import { renderHook, waitFor, act } from "@testing-library/react"
 import { createElement, StrictMode, type ReactNode } from "react"
-import { useProjectSettings, describePatchFailure, type PatchOutcome } from "./useProjectSettings"
+import {
+  useProjectSettings,
+  describePatchFailure,
+  broadcastProjectSettingsUpdated,
+  type PatchOutcome,
+} from "./useProjectSettings"
 import * as restClient from "@/lib/sync/project-settings"
 
 vi.mock("@/hooks/useFrontierSession", () => ({
@@ -350,6 +355,160 @@ describe("useProjectSettings — write path", () => {
     })
   })
 
+  // AQU-1086: the project-language keys are the second org-configurable scope.
+  // Its default is MAINTAINER, so with no org setting nothing below changes.
+  describe("language-only carve-out (AQU-1086)", () => {
+    it("lets a project lead change languages when the org floor is 500", async () => {
+      mockSettingsFetch({
+        version: 1, updatedAt: "x", updatedBy: null,
+        settings: { sourceLanguage: "en" },
+      })
+      const patchSpy = vi.spyOn(restClient, "patchProjectSettings").mockResolvedValue({
+        kind: "ok",
+        value: { version: 2, updatedAt: "y", updatedBy: null, settings: { targetLanguage: "de" } },
+      })
+      const { result } = renderHook(() =>
+        useProjectSettings("p1", 500, { languageEditMinRole: 500 }),
+      )
+      await waitFor(() => expect(result.current.hasFetched).toBe(true))
+      expect(result.current.canEditLanguages).toBe(true)
+      // The hook-wide floor is untouched — everything else stays locked.
+      expect(result.current.canEdit).toBe(false)
+      let got!: PatchOutcome
+      await act(async () => {
+        got = await result.current.patch({ targetLanguage: "de" })
+      })
+      expect(got.kind).toBe("ok")
+      expect(patchSpy).toHaveBeenCalled()
+    })
+
+    it("covers the extra-lane keys so the two cards agree", async () => {
+      mockSettingsFetch({
+        version: 1, updatedAt: "x", updatedBy: null,
+        settings: { sourceLanguage: "en" },
+      })
+      const patchSpy = vi.spyOn(restClient, "patchProjectSettings").mockResolvedValue({
+        kind: "ok",
+        value: { version: 2, updatedAt: "y", updatedBy: null, settings: { targetLanes: ["sw"] } },
+      })
+      const { result } = renderHook(() =>
+        useProjectSettings("p1", 500, { languageEditMinRole: 500 }),
+      )
+      await waitFor(() => expect(result.current.hasFetched).toBe(true))
+      let got!: PatchOutcome
+      await act(async () => {
+        got = await result.current.patch({ targetLanes: ["sw"], archivedLanes: [] })
+      })
+      expect(got.kind).toBe("ok")
+      expect(patchSpy).toHaveBeenCalled()
+    })
+
+    it("still blocks a project lead's language write at the default floor (600)", async () => {
+      mockSettingsFetch(null)
+      const patchSpy = vi.spyOn(restClient, "patchProjectSettings")
+      const { result } = renderHook(() => useProjectSettings("p1", 500))
+      await waitFor(() => expect(result.current.hasFetched).toBe(true))
+      expect(result.current.canEditLanguages).toBe(false)
+      expect(result.current.languageEditFloor).toBe(600)
+      let got!: PatchOutcome
+      await act(async () => {
+        got = await result.current.patch({ targetLanguage: "de" })
+      })
+      expect(got.kind).toBe("blocked")
+      if (got.kind === "blocked") expect(got.reason).toBe("role")
+      expect(patchSpy).not.toHaveBeenCalled()
+    })
+
+    it("does NOT widen any other key when the floor is lowered", async () => {
+      mockSettingsFetch(null)
+      const patchSpy = vi.spyOn(restClient, "patchProjectSettings")
+      const { result } = renderHook(() =>
+        useProjectSettings("p1", 500, { languageEditMinRole: 500 }),
+      )
+      await waitFor(() => expect(result.current.settings.sourceLanguage).toBe("en"))
+      let otherKey!: PatchOutcome
+      let mixedCall!: PatchOutcome
+      await act(async () => {
+        otherKey = await result.current.patch({ validationCount: 3 })
+        // Bundling a language key with another key is NOT language-only — it
+        // keeps the maintainer floor.
+        mixedCall = await result.current.patch({ targetLanguage: "de", validationCount: 3 })
+      })
+      expect(otherKey.kind).toBe("blocked")
+      expect(mixedCall.kind).toBe("blocked")
+      expect(patchSpy).not.toHaveBeenCalled()
+    })
+
+    it("clamps an out-of-ladder org floor back to the maintainer default", async () => {
+      mockSettingsFetch(null)
+      const { result } = renderHook(() =>
+        useProjectSettings("p1", 500, { languageEditMinRole: 42 }),
+      )
+      await waitFor(() => expect(result.current.hasFetched).toBe(true))
+      expect(result.current.languageEditFloor).toBe(600)
+      expect(result.current.canEditLanguages).toBe(false)
+    })
+  })
+
+  // AQU-1246: the Autopilot opt-in is the second sub-maintainer carve-out —
+  // a lead decides whether their own project tries the experiment. This
+  // mirrors auth-worker's carve-out, which stays authoritative; the client
+  // copy exists to stop a guaranteed-403 and to keep AQU-255 intact (never
+  // apply a below-floor patch locally).
+  describe("autopilotEnabled-only carve-out (AQU-1246)", () => {
+    it("lets a project lead (500) opt the project in", async () => {
+      mockSettingsFetch({
+        version: 1, updatedAt: "x", updatedBy: null,
+        settings: { sourceLanguage: "en" },
+      })
+      const patchSpy = vi.spyOn(restClient, "patchProjectSettings").mockResolvedValue({
+        kind: "ok",
+        value: { version: 2, updatedAt: "y", updatedBy: null, settings: { autopilotEnabled: true } },
+      })
+      const { result } = renderHook(() => useProjectSettings("p1", 500))
+      await waitFor(() => expect(result.current.hasFetched).toBe(true))
+      let got!: PatchOutcome
+      await act(async () => {
+        got = await result.current.patch({ autopilotEnabled: true })
+      })
+      expect(got.kind).toBe("ok")
+      expect(patchSpy).toHaveBeenCalled()
+    })
+
+    it("blocks a contributor (400) — and writes nothing locally", async () => {
+      const idbMod = await import("@/lib/store/project-index")
+      vi.mocked(idbMod.patchProject).mockClear()
+      mockSettingsFetch(null)
+      const patchSpy = vi.spyOn(restClient, "patchProjectSettings")
+      const { result } = renderHook(() => useProjectSettings("p1", 400))
+      await waitFor(() => expect(result.current.hasFetched).toBe(true))
+      let got!: PatchOutcome
+      await act(async () => {
+        got = await result.current.patch({ autopilotEnabled: true })
+      })
+      expect(got.kind).toBe("blocked")
+      if (got.kind === "blocked") expect(got.reason).toBe("role")
+      expect(patchSpy).not.toHaveBeenCalled()
+      expect(idbMod.patchProject).not.toHaveBeenCalled()
+    })
+
+    it("does NOT widen any other key — a lead bundling another key stays blocked", async () => {
+      mockSettingsFetch(null)
+      const patchSpy = vi.spyOn(restClient, "patchProjectSettings")
+      const { result } = renderHook(() => useProjectSettings("p1", 500))
+      await waitFor(() => expect(result.current.settings.sourceLanguage).toBe("en"))
+      let otherKey!: PatchOutcome
+      let bundled!: PatchOutcome
+      await act(async () => {
+        otherKey = await result.current.patch({ sourceLanguage: "fr" })
+        bundled = await result.current.patch({ autopilotEnabled: true, sourceLanguage: "fr" })
+      })
+      expect(otherKey.kind).toBe("blocked")
+      expect(bundled.kind).toBe("blocked")
+      expect(patchSpy).not.toHaveBeenCalled()
+    })
+  })
+
   it("unsynced project (roleLevel === null) writes locally with no server call", async () => {
     const idbMod = await import("@/lib/store/project-index")
     vi.mocked(idbMod.patchProject).mockClear()
@@ -655,5 +814,126 @@ describe("describePatchFailure", () => {
   it("includes the server message on error", () => {
     const msg = describePatchFailure({ kind: "error", message: "boom" })
     expect(msg).toMatch(/boom/)
+  })
+})
+
+// AQU-979: `/project/:id/settings` renders as a route-modal OVER the still-
+// mounted ProjectWorkspace (App.tsx `backgroundLocation` routes), so the dialog
+// and the workspace hold two independent useProjectSettings instances. Before
+// this fix the dialog's patch updated only its own state; the workspace's
+// instance kept the pre-save sourceLanguage/targetLanguage — and since
+// useProject.overlaySettings is the ONLY thing that puts those keys on the
+// ProjectRecord (minimalProjectRecord hard-codes them to ""), useCompletion ran
+// the next AI generation against the stale language until a manual page reload.
+// The server round-trip that used to be the only convergence path
+// (auth-worker → sync-worker notify → DO frame → workspace relay) is documented
+// as best-effort at three layers, so the writer now broadcasts locally too.
+describe("useProjectSettings — same-tab propagation after a write (AQU-979)", () => {
+  it("makes a sibling instance pick up a language change with no page reload", async () => {
+    const fetchSpy = vi.spyOn(restClient, "fetchProjectSettingsResult").mockResolvedValue({
+      ok: true,
+      value: {
+        version: 1, updatedAt: "x", updatedBy: null,
+        settings: { sourceLanguage: "en", targetLanguage: "swh" },
+      },
+    })
+    vi.spyOn(restClient, "patchProjectSettings").mockResolvedValue({
+      kind: "ok",
+      value: {
+        version: 2, updatedAt: "y", updatedBy: null,
+        settings: { sourceLanguage: "zh", targetLanguage: "zh-Hant-x-test" },
+      },
+    })
+
+    // The workspace underneath the modal…
+    const { result: workspace } = renderHook(() => useProjectSettings("p1", 700))
+    // …and the settings dialog on top of it.
+    const { result: dialog } = renderHook(() => useProjectSettings("p1", 700))
+    await waitFor(() => expect(workspace.current.settings.targetLanguage).toBe("swh"))
+    await waitFor(() => expect(dialog.current.hasFetched).toBe(true))
+
+    // From here on, every GET answers with the saved languages.
+    fetchSpy.mockResolvedValue({
+      ok: true,
+      value: {
+        version: 2, updatedAt: "y", updatedBy: null,
+        settings: { sourceLanguage: "zh", targetLanguage: "zh-Hant-x-test" },
+      },
+    })
+
+    await act(async () => {
+      await dialog.current.patch({ sourceLanguage: "zh", targetLanguage: "zh-Hant-x-test" })
+    })
+
+    // No reload, no tab focus, no DO frame — the workspace instance converges.
+    await waitFor(() => {
+      expect(workspace.current.settings.sourceLanguage).toBe("zh")
+      expect(workspace.current.settings.targetLanguage).toBe("zh-Hant-x-test")
+    })
+  })
+
+  it("does not re-GET on the writing instance's own broadcast", async () => {
+    const fetchSpy = vi.spyOn(restClient, "fetchProjectSettingsResult").mockResolvedValue({
+      ok: true,
+      value: {
+        version: 1, updatedAt: "x", updatedBy: null,
+        settings: { sourceLanguage: "en", targetLanguage: "swh" },
+      },
+    })
+    vi.spyOn(restClient, "patchProjectSettings").mockResolvedValue({
+      kind: "ok",
+      value: {
+        version: 2, updatedAt: "y", updatedBy: null,
+        settings: { sourceLanguage: "zh", targetLanguage: "swh" },
+      },
+    })
+
+    const { result } = renderHook(() => useProjectSettings("p1", 700))
+    await waitFor(() => expect(result.current.hasFetched).toBe(true))
+    // Mount fetch + the pre-write probe inside patch(); nothing beyond that.
+    const before = fetchSpy.mock.calls.length
+
+    await act(async () => {
+      await result.current.patch({ sourceLanguage: "zh" })
+    })
+
+    // The probe is the only extra GET — the writer skips its own broadcast.
+    expect(fetchSpy.mock.calls.length).toBe(before + 1)
+    expect(result.current.settings.sourceLanguage).toBe("zh")
+  })
+
+  it("still refreshes every instance for a REMOTE write (the DO relay, no origin)", async () => {
+    const fetchSpy = mockSettingsFetch({
+      version: 1, updatedAt: "x", updatedBy: null,
+      settings: { targetLanguage: "swh" },
+    })
+    const { result } = renderHook(() => useProjectSettings("p1", 700))
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1))
+
+    fetchSpy.mockResolvedValue({
+      ok: true,
+      value: {
+        version: 2, updatedAt: "y", updatedBy: { id: 2, username: "joy" },
+        settings: { targetLanguage: "zh-Hant-x-test" },
+      },
+    })
+    act(() => {
+      broadcastProjectSettingsUpdated({ projectId: "p1", version: 2 })
+    })
+    await waitFor(() => expect(result.current.settings.targetLanguage).toBe("zh-Hant-x-test"))
+  })
+
+  it("ignores a broadcast for a different project", async () => {
+    const fetchSpy = mockSettingsFetch({
+      version: 1, updatedAt: "x", updatedBy: null, settings: { targetLanguage: "swh" },
+    })
+    renderHook(() => useProjectSettings("p1", 700))
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledTimes(1))
+    act(() => {
+      broadcastProjectSettingsUpdated({ projectId: "p2", version: 9 })
+    })
+    // Give any errant refresh a chance to fire before asserting it did not.
+    await new Promise((r) => setTimeout(r, 0))
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
   })
 })

@@ -22,10 +22,17 @@ import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
 import { OrgCreateDialog } from "./OrgCreateDialog"
 import { LaneChips } from "./LaneChips"
 import { ProjectMetricHeader } from "./ProjectMetricHeader"
-import { displayLanes } from "./project-lanes"
+import { displayLanes, resolveDefaultLaneLabel } from "./project-lanes"
 import { ProjectStatusFilter } from "./ProjectStatusFilter"
 import { OrgProjectsDataTable } from "./OrgProjectsDataTable"
 import type { StatusFilter } from "@/hooks/useOrgPortfolio"
+import { useProjectDirectory } from "@/hooks/useProjectDirectory"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+  partitionSharedProjects,
+  toSharedPortfolioRow,
+} from "@/lib/frontier/shared-projects"
+import { isProjectNew, readProjectOpenedAt } from "@/lib/frontier/opened-shared-store"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Page, PageHeader, Section, StatTile, STAT_TILE_GRID, EmptyState } from "@/components/ui/page"
@@ -38,12 +45,14 @@ import {
 } from "@/components/admin/shared"
 import { AppTooltip } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import { FolderPlus, Search, Building2, Sparkles, CircleCheck, Mic, AlertTriangle } from "lucide-react"
+import { Search, Building2, Sparkles, CircleCheck, Mic, AlertTriangle } from "lucide-react"
 import { useI18n } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
+import { SignedOutWorkspace } from "./SignedOutWorkspace"
 
+/** Bounded pane height so LegendList can virtualize instead of growing with content. */
 const PANEL_MAX_H =
-  "max-h-[clamp(14rem,calc(100dvh-22rem),28rem)]"
+  "h-[clamp(14rem,calc(100dvh-22rem),28rem)]"
 
 function DashboardRowTemplate() {
   return (
@@ -196,6 +205,8 @@ const PROJECT_LENS_VALUES: ProjectLens[] = ["recent", "attention", "least-transl
 export type PortfolioProjectRow = PortfolioProject & {
   orgId?: number
   orgName?: string | null
+  origin?: "member" | "shared"
+  isNew?: boolean
 }
 
 type OrgPortfolioSummary = {
@@ -262,7 +273,7 @@ function useOrgSummaryColumns(): ColumnDef<OrgPortfolioSummary>[] {
         ),
         meta: { className: "w-[8.5rem] whitespace-nowrap" },
         cell: ({ row }) => (
-          <span className="text-sm text-foreground">{roleLabel(row.original.org)}</span>
+          <RoleLabel name={row.original.org.role.name} />
         ),
       },
       {
@@ -476,7 +487,7 @@ export function ProjectTable({
                   <LaneChips
                     projectId={p.id}
                     lanes={displayLanes(p)}
-                    defaultLaneLabel={defaultLaneLabelByProjectId?.get(p.id) ?? ""}
+                    defaultLaneLabel={resolveDefaultLaneLabel(p, defaultLaneLabelByProjectId?.get(p.id))}
                     maxVisible={2}
                     className="w-full"
                   />
@@ -553,7 +564,21 @@ export function OrgHome() {
   // real org there is nothing to create a project in, so the offer is the org.
   const [orgCreateOpen, setOrgCreateOpen] = useState(false)
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
+  const [originFilter, setOriginFilter] = useState<"all" | "member" | "shared">("all")
+  const [projectQuery, setProjectQuery] = useState("")
   const projectLens = readProjectLens()
+  const directoryOrgIds = useMemo(() => orgs.map((org) => org.id), [orgs])
+  const orgById = useMemo(() => new Map(orgs.map((org) => [org.id, org])), [orgs])
+  const pmByProjectId = useMemo(
+    () => new Map(accessibleProjects.map((project) => [project.id, project.pm ?? null])),
+    [accessibleProjects],
+  )
+  const directory = useProjectDirectory({
+    jwt,
+    enabled: Boolean(jwt) && !orgLoading && directoryOrgIds.length > 0,
+    query: projectQuery,
+    orgIds: directoryOrgIds,
+  })
 
   useEffect(() => {
     if (!jwt) {
@@ -603,7 +628,13 @@ export function OrgHome() {
     let cancelled = false
     listMyPendingInvites(jwt)
       .then((list) => { if (!cancelled) setPendingInvites(list) })
-      .catch(() => { if (!cancelled) setPendingInvites([]) })
+      .catch((err) => {
+        if (cancelled) return
+        setPendingInvites([])
+        if (err instanceof UserError && err.category === "session-expired") {
+          void notifySessionExpiredIfCurrent(jwt)
+        }
+      })
     return () => { cancelled = true }
   }, [jwt])
 
@@ -611,24 +642,8 @@ export function OrgHome() {
   // Never show zero-stat fake-empty cards for unauthenticated visitors.
   if (!sessionLoading && !jwt) {
     return (
-      <AppShell
-        sidebar={<OrgSidebar />}
+      <SignedOutWorkspace
         header={<OrgBreadcrumb section="Overview" isProjectsLanding />}
-        statusBar={null}
-        main={
-          <div className="flex h-full flex-col items-center justify-center gap-4 p-6 text-center">
-            <p className="text-lg font-medium">{t("org.orgHome.signedOut.heading")}</p>
-            <p className="text-sm text-muted-foreground max-w-xs">
-              {t("org.orgHome.signedOut.description")}
-            </p>
-            <Link
-              to={`/login?next=${encodeURIComponent("/")}`}
-              className={cn(buttonVariants())}
-            >
-              {t("auth.login.submitDefault")}
-            </Link>
-          </div>
-        }
       />
     )
   }
@@ -647,24 +662,22 @@ export function OrgHome() {
     )
   }
 
-  // AQU-864: `/orgs/all` has something to aggregate only at 2+ memberships.
-  // Below that it used to render the all-orgs dashboard with nothing in
-  // scope — 0/0/0 stats and no way forward. Send the caller to the surface
-  // that does list what they can reach instead of stranding them.
+  // AQU-864: `/orgs/all` has something to aggregate at 2+ memberships, a
+  // single membership plus foreign-org grants, or project-level access with
+  // no membership. Below that it used to render the all-orgs dashboard with
+  // nothing in scope — 0/0/0 stats and no way forward. Send the caller to
+  // the surface that does list what they can reach instead of stranding them.
   if (isAllOrgsRoute) {
     const landing = resolveAllOrgsLanding({ orgs, accessibleProjects, orgsError, accessibleProjectsError })
     if (landing.kind === "org") {
       return <Navigate to={orgHomePath(landing.orgId)} replace />
-    }
-    if (landing.kind === "shared") {
-      return <Navigate to="/shared" replace />
     }
     if (landing.kind === "error") {
       // An org-list failure leaves `orgs` empty just like a genuine zero.
       // Say so and offer a retry rather than painting a fake-empty workspace.
       // AQU-882: retry must re-issue the project-directory fetch too — the
       // resolver reads `accessibleProjects`, so refreshing orgs alone could
-      // land a project-only user on "empty" instead of /shared.
+      // land a project-only user on "empty" instead of the shared table.
       return (
         <AppShell
           sidebar={<OrgSidebar />}
@@ -746,12 +759,47 @@ export function OrgHome() {
   const attentionCount = projects.filter((p) => portfolioAttentionReasons(p, now).length > 0).length
 
   // AQU-507: the portfolio feed (which backs these rows) has no PM dimension;
-  // merge it in from the accessible-projects feed when available — here we rely
-  // only on portfolio rows (all-orgs table).
-  const projectsWithPm: PortfolioProjectRow[] = projects
+  // merge it in from the accessible-projects feed when available.
+  const projectsWithPm: PortfolioProjectRow[] = directory.projects.map((project) => ({
+    ...project,
+    orgId: project.orgId,
+    orgName: (project.orgId != null ? orgById.get(project.orgId)?.name : null) ?? "Workspace",
+    origin: "member" as const,
+    pm: pmByProjectId.has(project.id) ? pmByProjectId.get(project.id) ?? null : project.pm,
+  }))
+  const username = session?.username ?? null
+  const sharedWithMe = partitionSharedProjects(
+    accessibleProjects,
+    orgs,
+    null,
+    "all-orgs",
+  ).sharedWithMe
+  const memberIds = new Set(projectsWithPm.map((p) => p.id))
+  const queryNorm = projectQuery.trim().toLowerCase()
+  const sharedRows: PortfolioProjectRow[] = sharedWithMe
+    .filter((p) => !memberIds.has(p.id))
+    .map((p) => ({
+      ...toSharedPortfolioRow(p),
+      isNew: username
+        ? isProjectNew(p.grantedAt, readProjectOpenedAt(username, p.id))
+        : false,
+    }))
+    .filter((row) =>
+      queryNorm === ""
+        ? true
+        : `${row.name} ${row.orgName ?? ""} ${row.pm?.username ?? ""}`.toLowerCase().includes(queryNorm),
+    )
+  const tableProjects: PortfolioProjectRow[] = [...projectsWithPm, ...sharedRows]
+  const hasNewSharedProjects = sharedRows.some((p) => p.isNew)
+  // Hide org-rollup chrome when there is nothing to roll up — a project-only
+  // invitee still gets the same projects table, just without fake 0/0/0 stats.
+  const showOrgRollup = orgs.length > 0
   // AQU-538 §3.2: the '' (default) lane chip is labeled with the project's
-  // target language — portfolio alone doesn't join file languages; empty map
-  // falls back to generic "Default" labels.
+  // target language. This all-orgs view has no per-file language hints to join,
+  // so the map stays empty — AQU-606: `resolveDefaultLaneLabel` reads the
+  // project-level `targetLanguage` off the row itself, so the chip still shows
+  // the real language and only a genuinely untargeted project falls back to the
+  // neutral placeholder.
   const defaultLaneLabelByProjectId = new Map<string, string>()
 
   const orgSummaries: OrgPortfolioSummary[] = orgs
@@ -774,9 +822,13 @@ export function OrgHome() {
     navigate(orgHomePath(orgId))
   }
 
-  // Filter bar — narrows the listed projects only; the rollup strip above
-  // continues to reflect the full portfolio. Search/sort live in the DataTable.
-  const filteredProjects = projectsWithPm.filter((p) => {
+  // Filter bar — origin tabs (All / Shared / Org) plus status select. The
+  // rollup strip above continues to reflect the member-org portfolio (shared
+  // grants stay out of avg translated / stalled / overdue). Search/sort live
+  // in the DataTable.
+  const filteredProjects = tableProjects.filter((p) => {
+    if (originFilter === "shared" && p.origin !== "shared") return false
+    if (originFilter === "member" && p.origin === "shared") return false
     switch (statusFilter) {
       case "stalled":
         return activityStatus(p, now) === "stalled"
@@ -837,6 +889,7 @@ export function OrgHome() {
                 </Section>
               )}
 
+              {showOrgRollup && (
               <div className={STAT_TILE_GRID}>
                 <StatTile label={t("org.orgHome.organizations")} value={orgs.length} />
                 <StatTile label={t("nav.projects")} value={projects.length} />
@@ -853,12 +906,17 @@ export function OrgHome() {
                   className={attentionCount > 0 ? "border-amber-500/40" : undefined}
                 />
               </div>
+              )}
 
               <div className="flex flex-col gap-6">
                 <Section
                   data-testid="projects-panel"
                   title={t("nav.projects")}
-                  description={t("org.orgHome.projectsPanel.sectionDescription")}
+                  description={
+                    showOrgRollup
+                      ? t("org.orgHome.projectsPanel.sectionDescription")
+                      : t("org.sharedProjectsPage.unscopedDescription")
+                  }
                   headerClassName={cn(ADMIN_TABLE_SECTION_HEADER, "shrink-0")}
                   contentClassName={cn(
                     ADMIN_TABLE_SECTION_CONTENT,
@@ -888,18 +946,7 @@ export function OrgHome() {
                       }
                     />
                   ) : null}
-                  {projects.length === 0 ? (
-                    // Suppress the plain empty state while the directory
-                    // error above is explaining the blank panel.
-                    accessibleProjectsError ? null : (
-                    <EmptyState
-                      variant="inline"
-                      className="py-6"
-                      icon={FolderPlus}
-                      title={t("org.orgHome.projectsPanel.emptyTitle")}
-                    />
-                    )
-                  ) : (
+                    {accessibleProjectsError && tableProjects.length === 0 ? null : (
                     <div
                       data-testid="projects-scroll"
                       className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
@@ -912,27 +959,77 @@ export function OrgHome() {
                         testId="project-table"
                         defaultLaneLabelByProjectId={defaultLaneLabelByProjectId}
                         initialLens={statusFilter === "attention" ? "attention" : projectLens}
+                        searchValue={projectQuery}
+                        onSearchChange={setProjectQuery}
+                        searching={directory.searching}
+                        hasMore={originFilter !== "shared" && directory.hasMore}
+                        onLoadMore={directory.loadMore}
+                        loadingMore={directory.loadingMore}
+                        loading={directory.loading && directory.projects.length === 0}
+                        loadingLabel={t("org.projectsList.loadingLabel")}
                         toolbarLeading={
-                          <ProjectStatusFilter
-                            value={statusFilter}
-                            onValueChange={setStatusFilter}
-                            className="bg-background"
-                          />
+                          <div className="flex flex-wrap items-center gap-2">
+                            {sharedRows.length > 0 && (
+                              <Tabs
+                                value={originFilter}
+                                onValueChange={(next) => {
+                                  if (next === "all" || next === "member" || next === "shared") {
+                                    setOriginFilter(next)
+                                  }
+                                }}
+                                className="gap-0"
+                              >
+                                <TabsList aria-label={t("org.orgHome.originFilter.aria")}>
+                                  <TabsTrigger value="all">
+                                    {t("org.orgHome.statusFilter.all")}
+                                  </TabsTrigger>
+                                  <TabsTrigger
+                                    value="shared"
+                                    data-testid="shared-filter-chip"
+                                    attentionDot={hasNewSharedProjects ? "amber" : undefined}
+                                    aria-label={
+                                      hasNewSharedProjects
+                                        ? `${t("org.orgHome.statusFilter.shared")} ${t("org.guestOrgHome.newBadge")}`
+                                        : undefined
+                                    }
+                                  >
+                                    {t("org.orgHome.statusFilter.shared")}
+                                    {hasNewSharedProjects && (
+                                      <span className="sr-only" data-testid="new-shared-nav-badge">
+                                        {t("org.guestOrgHome.newBadge")}
+                                      </span>
+                                    )}
+                                  </TabsTrigger>
+                                  {showOrgRollup && (
+                                    <TabsTrigger value="member">{t("common.org")}</TabsTrigger>
+                                  )}
+                                </TabsList>
+                              </Tabs>
+                            )}
+                            <ProjectStatusFilter
+                              value={statusFilter}
+                              onValueChange={setStatusFilter}
+                              className="bg-background"
+                            />
+                          </div>
                         }
                         emptyTitle={
                           statusFilter === "stalled"
-                            ? "No stalled projects."
+                            ? t("org.orgHome.emptyTitle.stalled")
                             : statusFilter === "attention"
-                              ? "No projects need attention."
+                              ? t("org.orgHome.emptyTitle.attention")
                               : statusFilter === "overdue"
-                                ? "No overdue projects."
-                                : "No projects yet."
+                                ? t("org.orgHome.emptyTitle.overdue")
+                                : originFilter === "shared"
+                                  ? t("org.sharedProjectsPage.emptyUnscopedTitle")
+                                  : t("org.orgHome.projectsPanel.emptyTitle")
                         }
                       />
                     </div>
-                  )}
+                    )}
                 </Section>
 
+                {showOrgRollup && (
                 <Section
                   data-testid="organizations-panel"
                   title={t("org.orgHome.organizations")}
@@ -946,7 +1043,7 @@ export function OrgHome() {
                 >
                   <div
                     data-testid="organizations-scroll"
-                    className="min-h-0 min-w-0 overflow-x-auto overflow-y-auto overscroll-contain"
+                    className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
                   >
                     {orgSummaries.length === 0 ? (
                       <EmptyState
@@ -976,6 +1073,7 @@ export function OrgHome() {
                           "mx-0",
                         )}
                         dense
+                        fillHeight
                         emptyState={
                           <EmptyState
                             variant="inline"
@@ -988,6 +1086,7 @@ export function OrgHome() {
                     )}
                   </div>
                 </Section>
+                )}
               </div>
             </div>
           )}

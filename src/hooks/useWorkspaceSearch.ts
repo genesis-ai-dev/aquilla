@@ -10,7 +10,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { fetchProjectSearch, fetchParallelPassages } from "@/lib/sync/search-read"
 import type { ParallelPassageResult, SearchResult } from "@/lib/sync/search-read-types"
 import type { MatchField } from "@/lib/search/workspace-index"
-import type { FileReference } from "@/lib/parsers/types"
+import { isAudioCueFile, type FileReference } from "@/lib/parsers/types"
 
 export type { WorkspaceSearchResult } from "@/lib/search/workspace-index"
 import type { WorkspaceSearchResult } from "@/lib/search/workspace-index"
@@ -22,9 +22,11 @@ export interface UseWorkspaceSearchOptions {
    *  the project works for project-scoped reads, but we keep the signature
    *  consistent with the rest of the migrated hooks). */
   getToken?: (fileId: string) => Promise<string | null>
-  /** Files in the project. Used solely to (a) provide a stable fallback
-   *  fileId for token minting and (b) resolve fileName -> human label on
-   *  matched results. */
+  /** Files in the project. Used to (a) provide a stable fallback fileId for
+   *  token minting, (b) resolve fileName -> human label on matched results and
+   *  (c) recognise the audio-cue siblings so their hits can be dropped — which
+   *  is why this wants the UNFILTERED list, siblings included (see the call
+   *  site in ProjectWorkspace). */
   files?: FileReference[]
   enabled?: boolean
 }
@@ -57,6 +59,23 @@ function makeResult(row: SearchResult, files: FileReference[] | undefined): Work
     snippet: row.snippet,
     rank: row.rank,
   }
+}
+
+/**
+ * AQU-646 stage 2: the audio-cue siblings' cells are ordinary rows in
+ * `cells.value`, so the server's FTS index holds every one of an episode's
+ * ~550 transcript lines and will happily match them. They are cue data for one
+ * timeline row, not part of the project's text: a hit in one names a file the
+ * user cannot open, cannot translate and has never been told exists. Dropped
+ * here — at the only place that turns server rows into results — rather than
+ * in each of the search UIs.
+ */
+function audioCueFileIds(files: FileReference[] | undefined): ReadonlySet<string> {
+  const ids = new Set<string>()
+  for (const f of files ?? []) {
+    if (isAudioCueFile(f)) ids.add(f.id)
+  }
+  return ids
 }
 
 function makePassageResult(
@@ -167,7 +186,10 @@ export function useWorkspaceSearch(
         token,
       )
       if (generationRef.current !== gen) return
-      const mapped = rows.map((r) => makeResult(r, filesRef.current))
+      const hidden = audioCueFileIds(filesRef.current)
+      const mapped = rows
+        .filter((r) => !hidden.has(r.fileId))
+        .map((r) => makeResult(r, filesRef.current))
       const filtered = opts.fileId
         ? mapped.filter((r) => r.fileId === opts.fileId)
         : mapped
@@ -227,7 +249,13 @@ export function useWorkspaceSearch(
           tokenGetter,
         )
         if (generationRef.current !== gen) return
-        const mapped = rows.map((r) => makePassageResult(r, filesRef.current))
+        // Cross-project, so `files` only knows the current one — but that is
+        // the only project whose siblings this client has fetched, and the
+        // only one whose transcripts could be recognised anyway.
+        const hidden = audioCueFileIds(filesRef.current)
+        const mapped = rows
+          .filter((r) => !hidden.has(r.fileId))
+          .map((r) => makePassageResult(r, filesRef.current))
         setResults(mapped)
         setReady(true)
         setLoading(false)

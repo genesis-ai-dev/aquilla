@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest"
-import { listTeams, getTeam, createTeam, updateTeam, deleteTeam, addTeamMember, removeTeamMember, attachProject, changeProjectRole, detachProject } from "./teams"
+import { listTeams, listTeamsPage, getTeam, createTeam, updateTeam, deleteTeam, addTeamMember, removeTeamMember, attachProject, changeProjectRole, detachProject } from "./teams"
 
 const originalFetch = global.fetch
 afterEach(() => { global.fetch = originalFetch; vi.restoreAllMocks() })
@@ -15,15 +15,36 @@ describe("teams API", () => {
     expect(url).toMatch(/\/api\/v2\/orgs\/1\/groups$/)
     expect(teams[0]).toMatchObject({ id: 10, name: "West Africa", memberCount: 2 })
   })
+  it("listTeamsPage sends q/limit/cursor/visibility and returns nextCursor", async () => {
+    let url = ""
+    global.fetch = vi.fn(async (input) => {
+      url = typeof input === "string" ? input : (input as Request).url
+      return new Response(JSON.stringify({ groups: [{ id: 10, name: "West Africa" }], nextCursor: "10:West%20Africa" }), { status: 200 })
+    }) as unknown as typeof fetch
+    const page = await listTeamsPage("jwt", 1, {
+      q: "west",
+      limit: 40,
+      cursor: "9:Alpha",
+      visibility: "internal",
+    })
+    expect(url).toMatch(/\/api\/v2\/orgs\/1\/groups\?/)
+    expect(url).toMatch(/q=west/)
+    expect(url).toMatch(/limit=40/)
+    expect(url).toMatch(/cursor=9%3AAlpha/)
+    expect(url).toMatch(/visibility=internal/)
+    expect(page.groups[0]).toMatchObject({ id: 10, name: "West Africa" })
+    expect(page.nextCursor).toBe("10:West%20Africa")
+  })
   it("getTeam GETs the detail endpoint", async () => {
     let url = ""
     global.fetch = vi.fn(async (input) => {
       url = typeof input === "string" ? input : (input as Request).url
-      return new Response(JSON.stringify({ id: 10, name: "West Africa", members: [{ userId: 1, username: "wendi", roleLevel: 700 }], projects: [{ id: "pa", name: "Bambara", grantedRoleLevel: 400 }] }), { status: 200 })
+      return new Response(JSON.stringify({ id: 10, name: "West Africa", members: [{ userId: 1, username: "wendi", roleLevel: 700, addedAt: "2026-07-20T09:00:00.000Z" }], projects: [{ id: "pa", name: "Bambara", grantedRoleLevel: 400, grantedAt: "2026-07-22T15:00:00.000Z" }] }), { status: 200 })
     }) as unknown as typeof fetch
     const detail = await getTeam("jwt", 1, 10)
     expect(url).toMatch(/\/api\/v2\/orgs\/1\/groups\/10$/)
-    expect(detail.projects).toEqual([{ id: "pa", name: "Bambara", grantedRoleLevel: 400 }])
+    expect(detail.members).toEqual([{ userId: 1, username: "wendi", roleLevel: 700, addedAt: "2026-07-20T09:00:00.000Z" }])
+    expect(detail.projects).toEqual([{ id: "pa", name: "Bambara", grantedRoleLevel: 400, grantedAt: "2026-07-22T15:00:00.000Z" }])
   })
 })
 

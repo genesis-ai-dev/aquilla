@@ -114,6 +114,13 @@
     --secondary-foreground: oklch(0.30 0.01 264);
     --muted: oklch(0.955 0.002 264);
     --muted-foreground: oklch(0.48 0.008 264);
+    /* The timeline's folder heading band. Its own token because it must differ
+       from --background in BOTH themes, and --muted does not: in dark that one
+       is defined to exactly --surface, so a band painted with it disappeared
+       into the page (2026-08-27). Light steps DOWN from a near-white ground,
+       dark steps UP from a mid grey-blue one — a heading is "slightly apart
+       from the page" either way, not "always darker". */
+    --tl-folder-band: oklch(0.945 0.003 264);
     /* Neutral hover/selection overlay — no blue tint on the chrome. */
     --accent: oklch(0.94 0.003 264);
     --accent-foreground: oklch(0.27 0.008 264);
@@ -156,6 +163,10 @@
     --secondary-foreground: oklch(0.88 0.010 250);
     --muted: oklch(0.30 0.012 250);
     --muted-foreground: oklch(0.66 0.014 250);
+    /* See the light block. --background here is var(--surface) = 0.30, so this
+       must sit clear of it; 0.355 reads as a band without becoming a second
+       surface. */
+    --tl-folder-band: oklch(0.355 0.014 250);
     --accent: oklch(0.38 0.04 248);
     --accent-foreground: oklch(0.82 0.09 245);
     --destructive: oklch(0.62 0.15 25);
@@ -344,58 +355,42 @@ textarea,
   opacity: 0.6;
 }
 
-/* Terminology-origin infractions: small "T" glyph superscript after the span. */
+/* Managed terminology uses one quiet, marker-like treatment. Target terms add
+   this class only when their editor display preference calls for it. */
+.terminology-highlight,
 .violation-blot-term {
-  position: relative;
-}
-.violation-blot-term::after {
-  content: "T";
-  position: absolute;
-  top: -0.55em;
-  right: -0.45em;
-  font-size: 0.55em;
-  font-weight: 700;
-  line-height: 1;
-  color: var(--color-violet-500, oklch(0.627 0.265 303.9));
-  pointer-events: none;
-  user-select: none;
+  margin-inline: -0.08em;
+  padding-inline: 0.08em;
+  border-radius: 0.22em;
+  background-image: linear-gradient(
+    100deg,
+    transparent 0%,
+    color-mix(in oklch, var(--primary) 12%, transparent) 8%,
+    color-mix(in oklch, var(--primary) 12%, transparent) 92%,
+    transparent 100%
+  );
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
 }
 
-/* Terminology chip decorations — term-chip-host is position:relative so the
-   absolutely-positioned chip does NOT push lines apart (no line-height change). */
+/* Keep the old superscript marker removed. The background marks a managed
+   term, while the existing severity underline marks a terminology violation. */
+.violation-blot-term::after {
+  content: none;
+}
+
+/* Prevent a managed source term containing a violation span from getting a
+   darker double highlight. The outer term wrapper owns the smudge. */
+.terminology-highlight :is(.terminology-highlight, .violation-blot-term) {
+  margin-inline: 0;
+  padding-inline: 0;
+  background-image: none;
+}
+
+/* The entire highlighted term is now the lookup target. */
 .term-chip-host {
   position: relative;
-  /* Do not collapse inline context — ensure chip has an anchor */
   display: inline;
-}
-
-.term-chip {
-  position: absolute;
-  top: -0.45em;
-  right: -0.35em;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  pointer-events: auto;
-  /* Prevent chip from affecting flow */
-  display: inline-block;
-  vertical-align: baseline;
-  line-height: 0;
-  z-index: 10;
-}
-
-/* Status tints */
-.term-chip-preferred {
-  background-color: var(--color-emerald-500, oklch(0.696 0.17 162));
-  box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-emerald-500, oklch(0.696 0.17 162)) 40%, transparent);
-}
-.term-chip-admitted {
-  background-color: var(--color-muted-foreground, oklch(0.55 0 0));
-  opacity: 0.6;
-}
-.term-chip-forbidden {
-  background-color: var(--color-red-500, oklch(0.637 0.237 25.331));
-  box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-red-500, oklch(0.637 0.237 25.331)) 40%, transparent);
 }
 
 .usfm-footnote-marker {
@@ -514,3 +509,25 @@ textarea,
   80% { box-shadow: inset 0 0 0 2px var(--color-primary, oklch(0.65 0.2 250));
         background-color: color-mix(in oklch, var(--color-primary, oklch(0.65 0.2 250)) 8%, transparent); }
 }
+
+/* AQU-646 round 8: clicking a silence on the source band scrolls the table to
+   the line before it and pulses BOTH lines around the gap, so the eye lands on
+   the actual silence rather than somewhere in a list with several in view.
+   Its own animation rather than reusing the search flash: that one runs 1.8s,
+   which is a search result announcing itself, and re-adding a class the node
+   already carries does not restart a CSS animation. Two short beats read as
+   "here, and here" — the gap is the space between them. */
+.codex-gap-pulse {
+  animation: codex-gap-pulse 0.28s ease-out 2;
+  border-radius: 4px;
+}
+@keyframes codex-gap-pulse {
+  0%, 100% { box-shadow: inset 0 0 0 0 transparent; background-color: transparent; }
+  50% { box-shadow: inset 0 0 0 2px var(--color-primary, oklch(0.65 0.2 250));
+        background-color: color-mix(in oklch, var(--color-primary, oklch(0.65 0.2 250)) 14%, transparent); }
+}
+
+/* Display-only IDML emphasis. Applied at render from data-idml-character-style
+   — never persisted, never editable. Bold and italic only. */
+.idml-style-bold { font-weight: 700; }
+.idml-style-italic { font-style: italic; }

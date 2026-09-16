@@ -32,6 +32,9 @@
 //
 // Flags:
 //   --no-sync     skip sync-worker (rare; some flows need only auth)
+//   --no-mock-llm skip scripts/mock-openrouter.ts and do not inject
+//                 OPENROUTER_API_KEY=mock. Hosted chat then 500s with
+//                 OPENROUTER_API_KEY is not configured (AQU-1158 local repro).
 //   --no-sandbox  skip the agent-worker sandbox service. Without this flag,
 //                 an explicitly configured endpoint is used first; otherwise
 //                 a local container is auto-started when Docker is available.
@@ -61,6 +64,7 @@ import {
 } from "./lib/spawn-worker"
 import {
   finalizeArtifactBindingSchema,
+  finalizeAuthTokenSchema,
   finalizeChangesetSchema,
   finalizeSourceBlobSchema,
   prepareArtifactBindingSchema,
@@ -124,6 +128,8 @@ const MANAGE_PG_CONTAINER = !EXTERNAL_PG_URL
 
 const args = process.argv.slice(2)
 const WITHOUT_SYNC = args.includes("--no-sync")
+const WITHOUT_MOCK_LLM =
+  args.includes("--no-mock-llm") || process.env.DEV_STACK_NO_MOCK_LLM === "1"
 // --no-sandbox forces the agent-worker to be skipped even when Docker is up.
 const WITHOUT_SANDBOX = args.includes("--no-sandbox")
 const VERBOSE = args.includes("--verbose") || process.env.DEV_STACK_VERBOSE === "1"
@@ -431,6 +437,7 @@ async function reconcilePgSchema(
 
   patched.push(...await finalizeSourceBlobSchema(client, run))
   patched.push(...await finalizeChangesetSchema(client, run))
+  patched.push(...await finalizeAuthTokenSchema(client, run))
 
   if (tables.has("artifact_bindings")) {
     patched.push(...await finalizeArtifactBindingSchema(client, run))
@@ -593,7 +600,10 @@ async function main(): Promise<void> {
   // Without a real OpenRouter key, boot the scripted mock so the agent and
   // chat paths work end-to-end (deterministic model, zero cost). A real key
   // in auth-worker/.dev.vars wins — no mock, no overrides.
-  const useMockLlm = !identityHasRealOpenRouterKey()
+  const useMockLlm = !WITHOUT_MOCK_LLM && !identityHasRealOpenRouterKey()
+  if (WITHOUT_MOCK_LLM) {
+    console.log("[dev-stack] mock OpenRouter skipped (--no-mock-llm)")
+  }
   if (useMockLlm) {
     await freePort(MOCK_LLM_PORT)
     console.log(`[dev-stack] starting mock OpenRouter on :${MOCK_LLM_PORT}… (no real OPENROUTER_API_KEY in auth-worker/.dev.vars)`)
@@ -731,6 +741,26 @@ async function main(): Promise<void> {
     cleanup.push(() => sync!.kill())
   }
 
+  // Sample file + a few playable takes in `dev-project`. Identity's
+  // `/__dev__/seed` still owns only users/orgs/projects; cells and audio
+  // land through the same HTTP import/attach path the UI uses. Best-effort:
+  // an empty editor is still a usable stack if this fails.
+  if (!WITHOUT_SYNC) {
+    process.env.I18N_SHOTS_IDENTITY_BASE = `http://127.0.0.1:${IDENTITY_PORT}`
+    process.env.I18N_SHOTS_SYNC_BASE = `http://127.0.0.1:${SYNC_PORT}`
+    try {
+      const { seedDevWorkspaceContent } = await import("./i18n-shots/seed.ts")
+      const seeded = await seedDevWorkspaceContent()
+      console.log(
+        `[dev-stack] seeded ${seeded.fileName} (${seeded.cellIds.length} cells) into dev-project`,
+      )
+    } catch (err) {
+      console.warn(
+        `[dev-stack] sample content seed failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
+      )
+    }
+  }
+
   // Write `.env.development.local` AFTER the Workers are reachable so a
   // pre-existing file from a previous crashed run doesn't leak local
   // ports to a Vite-only `pnpm dev:vite` invocation.
@@ -806,7 +836,9 @@ async function main(): Promise<void> {
     `         chat     -> http://127.0.0.1:${IDENTITY_PORT}/chat/  (served by identity worker)`,
     useMockLlm
       ? `         llm      -> http://127.0.0.1:${MOCK_LLM_PORT}/  (scripted mock — set OPENROUTER_API_KEY in auth-worker/.dev.vars for a real model)`
-      : `         llm      -> OpenRouter (real key from auth-worker/.dev.vars)`,
+      : WITHOUT_MOCK_LLM
+        ? `         llm      -> skipped (--no-mock-llm; hosted chat 500s without OPENROUTER_API_KEY)`
+        : `         llm      -> OpenRouter (real key from auth-worker/.dev.vars)`,
     `         state    -> ${path.relative(REPO_ROOT, PERSIST_DIR)}/  (delete to reset local Wrangler state)`,
     "[dev-stack] press Ctrl+C to stop",
     "",

@@ -53,9 +53,12 @@ export function audioObjectKey(
  * Rejects any id that could act as a path separator once interpolated into
  * `audioObjectKey`'s template. The handlers in this file get `projectId`/
  * `fileId` from `[^/]+` URL segments, which are inherently safe — but
- * `tts.ts` and `voice-convert.ts` take these same ids from a JSON/form body
- * and pass them straight through, so a caller could otherwise smuggle `/`
- * (or `..`) into the resulting R2 key.
+ * `tts.ts`, `voice-convert.ts`, and `diarization.ts` take ids (projectId/
+ * fileId, and — [Pen test] API security & data exposure, 2026-08-27 —
+ * voice-convert's `sourceAudioId` / diarization's `audioObject`) from a
+ * JSON/form body and pass them straight through, so a caller could otherwise
+ * smuggle `/` (or `..`) into the resulting R2 key. Every such call site now
+ * validates with this function before building a key.
  */
 export function isPathSafeId(id: string): boolean {
   if (id.length === 0 || id === "." || id === "..") return false
@@ -68,6 +71,38 @@ export function isPathSafeId(id: string): boolean {
 
 const AUDIO_PATH_RE = /^\/audio\/([^/]+)\/([^/]+)\/([^/]+)$/
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+// [Pen test] Input validation & injection (2026-08-26): this endpoint stored
+// whatever `Content-Type` the uploading client sent and served it back
+// verbatim with no `X-Content-Type-Options`, unlike the artifact/knowledge-base
+// content routes (see BROWSER_RENDERABLE_CONTENT_TYPES in
+// sync-worker/src/external/artifacts-route.ts and OPS-8). A CONTRIBUTOR-scoped
+// caller could PUT bytes declared `text/html` at an audioId of their choosing,
+// then hand the resulting first-party api.aquilla.app URL to anyone (the GET
+// route accepts the sync-token as `?t=`, so the link needs no victim session)
+// and have it render as active content. Mirror the same deny-list fix here.
+const BROWSER_RENDERABLE_CONTENT_TYPES = new Set([
+  "text/html",
+  "application/xhtml+xml",
+  "image/svg+xml",
+  "application/xml",
+  "text/xml",
+  "application/javascript",
+  "text/javascript",
+  "application/x-javascript",
+])
+
+/** Content-Type safe to store/echo back for an audio object. Falls back to a
+ *  generic, non-executable type for anything on the deny-list above — audio
+ *  playback (`<audio src>`) doesn't care about the exact declared subtype, so
+ *  this costs no real functionality while closing the render-as-HTML vector. */
+export function safeAudioContentType(raw: string | null | undefined): string {
+  const normalized = (raw ?? "").split(";")[0].trim().toLowerCase()
+  if (!normalized || BROWSER_RENDERABLE_CONTENT_TYPES.has(normalized)) {
+    return "application/octet-stream"
+  }
+  return raw as string
+}
 
 /** Parsed single byte-range. `suffix` = last-N-bytes form (`bytes=-N`). */
 type ParsedRange = { offset: number; length?: number } | { suffix: number }
@@ -257,7 +292,7 @@ export async function handleAudioRequest(
     if (body.byteLength > MAX_AUDIO_BYTES) {
       return tooLarge()
     }
-    const contentType = request.headers.get("Content-Type") || "application/octet-stream"
+    const contentType = safeAudioContentType(request.headers.get("Content-Type"))
     const digest = artifactId ? await crypto.subtle.digest("SHA-256", body) : null
     const sha256 = digest
       ? Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("")
@@ -323,10 +358,8 @@ export async function handleAudioRequest(
         ])
       } catch (error) {
         if (!existing) await env.SNAPSHOTS.delete(key).catch(() => {})
-        return withAudioCors(new Response(
-          `audio artifact metadata write failed: ${error instanceof Error ? error.message : String(error)}`,
-          { status: 500 },
-        ))
+        console.error("[audio] artifact metadata write failed:", error)
+        return withAudioCors(new Response("audio artifact metadata write failed", { status: 500 }))
       }
     }
     return withAudioCors(
@@ -360,8 +393,9 @@ export async function handleAudioRequest(
   if (!obj) {
     return withAudioCors(new Response("not found", { status: 404 }))
   }
-  const contentType =
-    obj.httpMetadata?.contentType || "application/octet-stream"
+  // Re-sanitize on read too (not just on write) so an object stored before
+  // this fix, or written by another path, can't serve a dangerous type.
+  const contentType = safeAudioContentType(obj.httpMetadata?.contentType)
   // Audio objects are addressed by audioId, which is a stable UUIDv7-based
   // identifier that never changes for a given recording. A new recording
   // always gets a new audioId, so the bytes are truly immutable.
@@ -369,6 +403,7 @@ export async function handleAudioRequest(
   // browser is safe to cache the full 1-year TTL (CACHE-5).
   const headers: Record<string, string> = {
     "Content-Type": contentType,
+    "X-Content-Type-Options": "nosniff",
     "Cache-Control": "private, max-age=31536000, immutable",
     "Accept-Ranges": "bytes",
   }

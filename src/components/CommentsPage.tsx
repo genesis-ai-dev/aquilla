@@ -8,16 +8,16 @@
 import { useMemo, useState, useRef, useEffect } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import {
-  ArrowLeft, MessageCircle, CheckCircle, ChevronDown, ChevronRight,
-  AlertCircle, Search, SlidersHorizontal, ArrowUpRight,
-  MoreHorizontal, Pencil, Trash2,
+  MessageCircle, CheckCircle, ChevronDown, ChevronRight,
+  AlertCircle, Search, Settings2, ArrowUpRight,
+  MoreHorizontal, Pencil, Trash2, RefreshCw,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
-import { Checkbox } from "@/components/ui/checkbox"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
+import { EmptyState } from "@/components/ui/empty"
 import { Badge } from "@/components/ui/badge"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
@@ -34,11 +34,21 @@ import { buildFileScopedTokenFetcher } from "@/lib/sync/cqrs-bridge"
 import { useProject } from "@/hooks/useProject"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import { renderCommentHtml } from "@/lib/comments/comment-helpers"
+import {
+  canMutateComment,
+  commentFloorsFrom,
+  DEFAULT_COMMENT_FLOORS,
+  type CommentFloors,
+} from "@/lib/sync/role-policy"
+import { denialMessage } from "@/lib/permissions/denial"
+import { ROLE, resolveRoleName } from "@/lib/frontier/roles"
 import DOMPurify from "dompurify"
 import { useUserSearch, type UserSearchResult } from "@/hooks/useUserSearch"
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import {
   Popover,
   PopoverContent,
+  PopoverTitle,
   PopoverTrigger,
 } from "@/components/ui/popover"
 import {
@@ -58,13 +68,20 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useT, useI18n } from "@/lib/i18n/I18nProvider"
-import { formatDateTime } from "@/lib/i18n/format"
 import type { TFunction } from "@/lib/i18n/I18nProvider"
-import { translate } from "@/lib/i18n/translate"
-
-// ── Types ─────────────────────────────────────────────────────────────────
-
-export type SortOrder = "recent-activity" | "creation" | "unresolved-first"
+import { DateTooltip } from "@/components/ui/date-tooltip"
+import { Separator } from "@/components/ui/separator"
+import { Switch } from "@/components/ui/switch"
+import {
+  type FilterState,
+  type SortOrder,
+  DEFAULT_FILTER,
+  applyFilters,
+  applySorting,
+  countActiveFilters,
+  headerBadgeCount,
+  resolveFileName,
+} from "./comments-page-filters"
 
 function sortItems(t: TFunction): { value: SortOrder; label: string }[] {
   return [
@@ -72,140 +89,6 @@ function sortItems(t: TFunction): { value: SortOrder; label: string }[] {
     { value: "recent-activity", label: t("comments.sort.recentActivity") },
     { value: "creation", label: t("comments.sort.newest") },
   ]
-}
-
-export interface FilterState {
-  fileId: string    // "" = all
-  authorId: string  // "" = all
-  participant: string // "" = all
-  showResolved: boolean
-  search: string    // client-side substring search over body
-  sort: SortOrder
-}
-
-export const DEFAULT_FILTER: FilterState = {
-  fileId: "",
-  authorId: "",
-  participant: "",
-  showResolved: false,
-  search: "",
-  sort: "unresolved-first",
-}
-
-// ── Pure filter/sort helpers (testable) ───────────────────────────────────
-
-export function applyFilters(
-  roots: CommentRecord[],
-  repliesByParent: Map<string, CommentRecord[]>,
-  filter: FilterState,
-): CommentRecord[] {
-  return roots.filter((root) => {
-    // show-resolved toggle
-    if (!filter.showResolved && root.resolved) return false
-
-    // file filter
-    if (filter.fileId && root.fileId !== filter.fileId) return false
-
-    // author filter — matches root author
-    if (filter.authorId && root.authorId !== filter.authorId) return false
-
-    // participant filter — root author OR any reply author
-    if (filter.participant) {
-      const replies = repliesByParent.get(root.commentId) ?? []
-      const allAuthors = [root.authorId, ...replies.map((r) => r.authorId)]
-      if (!allAuthors.includes(filter.participant)) return false
-    }
-
-    // body search — substring over root body + replies
-    if (filter.search.trim()) {
-      const needle = filter.search.trim().toLowerCase()
-      const haystack = [
-        root.body,
-        ...(repliesByParent.get(root.commentId) ?? []).map((r) => r.body),
-      ]
-        .join(" ")
-        .toLowerCase()
-      // SWARM-TODO: wire true FTS5 endpoint when available (pass ?q= to sync-worker)
-      if (!haystack.includes(needle)) return false
-    }
-
-    return true
-  })
-}
-
-export function applySorting(roots: CommentRecord[], sort: SortOrder): CommentRecord[] {
-  const copy = [...roots]
-  if (sort === "unresolved-first") {
-    copy.sort((a, b) => {
-      if (a.resolved !== b.resolved) return a.resolved ? 1 : -1
-      return b.createdAt - a.createdAt
-    })
-  } else if (sort === "creation") {
-    copy.sort((a, b) => b.createdAt - a.createdAt)
-  } else if (sort === "recent-activity") {
-    copy.sort((a, b) => b.updatedAt - a.updatedAt)
-  }
-  return copy
-}
-
-/**
- * Count how many list-narrowing filters are active. `sort` is excluded (it is
- * always set and never narrows the list); `search` is trimmed so a
- * whitespace-only query — which `applyFilters` ignores — doesn't read as active.
- */
-export function countActiveFilters(filter: FilterState): number {
-  return [
-    filter.fileId,
-    filter.authorId,
-    filter.participant,
-    filter.showResolved ? "1" : "",
-    filter.search.trim(),
-  ].filter(Boolean).length
-}
-
-/**
- * AQU-650: the header count badge. When any filter is active it reflects what
- * the user is actually looking at — the number of visible threads (top-level
- * comments) in the filtered list below, including 0 when nothing matches. With
- * no filters active it shows the project total comment count, exactly as before.
- */
-export function headerBadgeCount(
-  totalComments: number,
-  visibleThreadCount: number,
-  activeFilterCount: number,
-): number {
-  return activeFilterCount > 0 ? visibleThreadCount : totalComments
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────
-
-function formatTs(ms: number, locale: string): string {
-  try {
-    return formatDateTime(ms, locale, {
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    })
-  } catch {
-    return String(ms)
-  }
-}
-
-/**
- * Resolve a fileId to a display name, or return a tombstone if not found.
- * `t` is optional so this pure helper stays callable from tests without a
- * provider; callers that render UI always pass the real translator.
- */
-export function resolveFileName(
-  fileId: string | null | undefined,
-  fileMap: Map<string, string>,
-  t: TFunction = (key, vars) => translate(undefined, key, vars),
-): { name: string; exists: boolean } {
-  if (!fileId) return { name: t("comments.file.unknown"), exists: false }
-  const name = fileMap.get(fileId)
-  if (name !== undefined) return { name, exists: true }
-  return { name: t("comments.file.deleted"), exists: false }
 }
 
 function scopeLabel(comment: CommentRecord, fileMap: Map<string, string>, t: TFunction): string {
@@ -354,7 +237,7 @@ interface CommentBubbleProps {
 }
 
 function CommentBubble({ comment, currentUsername, onEdit, onDelete }: CommentBubbleProps) {
-  const { t, locale } = useI18n()
+  const { t } = useI18n()
   const isDeleted = comment.deletedAt !== null
   const isOwn = !!currentUsername && comment.authorId === currentUsername
   const canMutate = isOwn && !isDeleted
@@ -367,7 +250,7 @@ function CommentBubble({ comment, currentUsername, onEdit, onDelete }: CommentBu
           size="xs"
           nameClassName="text-xs font-medium text-foreground"
         />
-        <span>{formatTs(comment.createdAt, locale)}</span>
+        <DateTooltip value={comment.createdAt} label={t("common.date.posted")} />
         {comment.updatedAt !== comment.createdAt && (
           <span className="italic">{t("comments.bubble.edited")}</span>
         )}
@@ -434,6 +317,16 @@ interface ThreadProps {
   root: CommentRecord
   replies: CommentRecord[]
   currentUsername?: string
+  /**
+   * AQU-1000: the reader's project role, or null for a local / git-imported
+   * project with no sync role. Drives the per-thread resolve gate below.
+   */
+  roleLevel?: number | null
+  /**
+   * AQU-1002: the org's configurable comment floors, read off the project
+   * record. Omitted ⇒ the stock defaults, i.e. pre-AQU-1002 behaviour.
+   */
+  floors?: CommentFloors
   fileMap: Map<string, string>
   onResolve: (commentId: string, resolved: boolean) => void
   onEdit: (commentId: string, body: string) => Promise<void>
@@ -442,9 +335,25 @@ interface ThreadProps {
 }
 
 function CommentThreadCard({
-  root, replies, currentUsername, fileMap, onResolve, onEdit, onDelete, onNavigate,
+  root, replies, currentUsername, roleLevel = null, floors = DEFAULT_COMMENT_FLOORS,
+  fileMap, onResolve, onEdit, onDelete, onNavigate,
 }: ThreadProps) {
   const t = useT()
+  // AQU-1000: this page offered Resolve / Reopen to every reader, including
+  // roles the server refuses. `useComments.resolveThread` flips `resolved`
+  // optimistically, so the refusal showed up as a thread that closed and then
+  // sprang back open. Decide before offering, and explain a refusal.
+  const isOwnThread = !!currentUsername && root.authorId === currentUsername
+  const canResolve = canMutateComment("comment.resolve", roleLevel, isOwnThread, floors)
+  const resolveDenialReason = canResolve
+    ? null
+    : canMutateComment("comment.resolve", roleLevel, true, floors)
+      // Role clears the self floor but not the foreign one. AQU-1002: name the
+      // org's configured floor, so the sentence matches the real refusal.
+      ? t("comments.resolve.foreignDenied", {
+          minRole: resolveRoleName(t, floors.resolveMinRole, { plural: true }),
+        })
+      : denialMessage(t, ROLE.COMMENTER, roleLevel)
   const [open, setOpen] = useState(!root.resolved)
   const [replyText, setReplyText] = useState("")
 
@@ -574,13 +483,31 @@ function CommentThreadCard({
                   </AppTooltip>
                 )
               })()}
-              <Button
-                variant="ghost"
-                className="h-6 px-2 text-xs"
-                onClick={() => onResolve(root.commentId, !root.resolved)}
-              >
-                {root.resolved ? t("comments.reopen") : t("comments.resolve")}
-              </Button>
+              {canResolve ? (
+                <Button
+                  variant="ghost"
+                  className="h-6 px-2 text-xs"
+                  data-testid="thread-resolve"
+                  onClick={() => onResolve(root.commentId, !root.resolved)}
+                >
+                  {root.resolved ? t("comments.reopen") : t("comments.resolve")}
+                </Button>
+              ) : (
+                // Disabled, not absent: the reader can see the action exists and
+                // why it is closed to them (09-design-and-ux.md → "Never disable
+                // silently"). `aria-disabled` keeps it focusable so the tooltip
+                // is reachable without a mouse.
+                <AppTooltip content={resolveDenialReason ?? ""}>
+                  <Button
+                    variant="ghost"
+                    className="h-6 px-2 text-xs cursor-not-allowed opacity-50"
+                    data-testid="thread-resolve"
+                    aria-disabled
+                  >
+                    {root.resolved ? t("comments.reopen") : t("comments.resolve")}
+                  </Button>
+                </AppTooltip>
+              )}
               <CollapsibleTrigger asChild>
                 <Button size="icon" variant="ghost" className="h-6 w-6">
                   {open ? (
@@ -670,164 +597,225 @@ interface FilterControlsProps {
   onChange: (next: FilterState) => void
   fileOptions: { id: string; name: string }[]
   authorOptions: { id: string; label: string }[]
+  isRefreshing: boolean
+  onRefresh: () => void
 }
 
-function FilterControls({ filter, onChange, fileOptions, authorOptions }: FilterControlsProps) {
+const filterLabelClass = "font-normal text-muted-foreground"
+/** Matches FieldGroup `gap-3` so select popups sit the same distance from their trigger. */
+const FILTER_MENU_GAP_PX = 12
+
+/** Base UI treats "" as no value (`data-placeholder`), which mutes the trigger. */
+const ALL_SELECT_VALUE = "__all__"
+
+function toSelectValue(value: string) {
+  return value === "" ? ALL_SELECT_VALUE : value
+}
+
+function fromSelectValue(value: string | null) {
+  return value == null || value === ALL_SELECT_VALUE ? "" : value
+}
+
+function FilterSelectRow({
+  id,
+  label,
+  items,
+  value,
+  onValueChange,
+  side = "bottom",
+}: {
+  id: string
+  label: string
+  items: { value: string; label: string }[]
+  value: string
+  onValueChange: (value: string) => void
+  side?: "top" | "bottom"
+}) {
+  const selectItems = items.map((item) => ({
+    ...item,
+    value: toSelectValue(item.value),
+  }))
+  return (
+    <Field orientation="horizontal" className="items-center justify-between gap-3">
+      <FieldLabel htmlFor={id} className={filterLabelClass}>
+        {label}
+      </FieldLabel>
+      <Select
+        items={selectItems}
+        value={toSelectValue(value)}
+        onValueChange={(next) => onValueChange(fromSelectValue(next))}
+      >
+        <SelectTrigger id={id} size="sm" aria-label={label}>
+          <SelectValue className="truncate" />
+        </SelectTrigger>
+        <SelectContent
+          align="end"
+          side={side}
+          alignItemWithTrigger={false}
+          sideOffset={FILTER_MENU_GAP_PX}
+        >
+          <SelectGroup>
+            {selectItems.map((item) => (
+              <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
+            ))}
+          </SelectGroup>
+        </SelectContent>
+      </Select>
+    </Field>
+  )
+}
+
+function FilterControls({
+  filter,
+  onChange,
+  fileOptions,
+  authorOptions,
+  isRefreshing,
+  onRefresh,
+}: FilterControlsProps) {
   const t = useT()
-  const [expanded, setExpanded] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
   const sortItemsList = sortItems(t)
   const allFilesLabel = t("comments.filter.allFiles")
   const anyoneLabel = t("comments.filter.anyone")
+  const showResolvedLabel = t("comments.filter.showResolved")
+  const activeFilterCount = countActiveFilters(filter)
+  const canReset = activeFilterCount > 0 || filter.sort !== DEFAULT_FILTER.sort
+  const hasFiles = fileOptions.length > 0
+  const hasAuthors = authorOptions.length > 0
 
   return (
-    <div className="space-y-2">
-      {/* Search bar + expand toggle */}
-      <div className="flex items-center gap-2">
-        <InputGroup className="h-8 flex-1">
-          <InputGroupAddon>
-            <Search />
-          </InputGroupAddon>
-          <InputGroupInput
-            className="text-sm"
-            placeholder={t("comments.filter.searchPlaceholder")}
-            value={filter.search}
-            onChange={(e) => onChange({ ...filter, search: e.target.value })}
-          />
-        </InputGroup>
-        <Button
-          variant={expanded ? "secondary" : "outline"}
-          className="h-8 gap-1.5 text-xs"
-          onClick={() => setExpanded((v) => !v)}
+    <div className="flex items-center gap-2">
+      <InputGroup className="h-8 flex-1 bg-card">
+        <InputGroupAddon>
+          <Search />
+        </InputGroupAddon>
+        <InputGroupInput
+          className="text-sm"
+          placeholder={t("comments.filter.searchPlaceholder")}
+          value={filter.search}
+          onChange={(e) => onChange({ ...filter, search: e.target.value })}
+        />
+      </InputGroup>
+      <Popover open={menuOpen} onOpenChange={setMenuOpen}>
+        <AppTooltip
+          content={t("comments.filter.filtersButton")}
+          side="bottom"
+          disabled={menuOpen}
         >
-          <SlidersHorizontal className="h-3.5 w-3.5" />
-          {t("comments.filter.filtersButton")}
-        </Button>
-      </div>
-
-      {expanded && (
-        <div className="flex flex-wrap items-center gap-3 rounded-md border px-3 py-2 text-xs bg-muted/20">
-          {/* Sort picker */}
-          <label className="flex items-center gap-1.5">
-            <span className="text-muted-foreground whitespace-nowrap">{t("comments.filter.sortLabel")}</span>
-            <Select
+          <PopoverTrigger
+            render={
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="bg-card"
+                aria-label={t("comments.filter.filtersButton")}
+                aria-pressed={activeFilterCount > 0}
+              >
+                <Settings2 />
+              </Button>
+            }
+          />
+        </AppTooltip>
+        <PopoverContent
+          align="end"
+          side="bottom"
+          sideOffset={4}
+          className="w-72 gap-0 p-0"
+          data-testid="comments-filters-popover"
+        >
+          <PopoverTitle className="sr-only">{t("comments.filter.filtersButton")}</PopoverTitle>
+          <FieldGroup className="gap-3 p-2.5">
+            <FilterSelectRow
+              id="comments-filter-sort"
+              label={t("comments.filter.sortLabel")}
               items={sortItemsList}
               value={filter.sort}
-              onValueChange={(v) => onChange({ ...filter, sort: v as SortOrder })}
-            >
-              <SelectTrigger size="sm" className="text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  {sortItemsList.map((it) => (
-                    <SelectItem key={it.value} value={it.value}>{it.label}</SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </label>
-
-          {/* Show resolved toggle */}
-          <label className="flex items-center gap-1.5 select-none">
-            <Checkbox
-              checked={filter.showResolved}
-              onCheckedChange={(checked) => onChange({ ...filter, showResolved: checked })}
-              className="size-3.5"
+              onValueChange={(value) => onChange({ ...filter, sort: value as SortOrder })}
+              side={!hasFiles && !hasAuthors ? "top" : "bottom"}
             />
-            <span>{t("comments.filter.showResolved")}</span>
-          </label>
-
-          {/* File filter */}
-          {fileOptions.length > 0 && (
-            <label className="flex items-center gap-1.5">
-              <span className="text-muted-foreground whitespace-nowrap">{t("common.file")}</span>
-              <Select
+            <Field orientation="horizontal">
+              <FieldLabel htmlFor="comments-filter-show-resolved" className={filterLabelClass}>
+                {showResolvedLabel}
+              </FieldLabel>
+              <Switch
+                id="comments-filter-show-resolved"
+                checked={filter.showResolved}
+                onCheckedChange={(checked) => onChange({ ...filter, showResolved: checked })}
+                aria-label={showResolvedLabel}
+              />
+            </Field>
+            {hasFiles && (
+              <FilterSelectRow
+                id="comments-filter-file"
+                label={t("common.file")}
                 items={[
                   { value: "", label: allFilesLabel },
-                  ...fileOptions.map((f) => ({ value: f.id, label: f.name })),
+                  ...fileOptions.map((file) => ({ value: file.id, label: file.name })),
                 ]}
                 value={filter.fileId}
-                onValueChange={(v) => onChange({ ...filter, fileId: v ?? "" })}
-              >
-                <SelectTrigger size="sm" className="text-xs">
-                  <SelectValue className="truncate" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value="">{allFilesLabel}</SelectItem>
-                    {fileOptions.map((f) => (
-                      <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </label>
-          )}
-
-          {/* Author filter */}
-          {authorOptions.length > 0 && (
-            <label className="flex items-center gap-1.5">
-              <span className="text-muted-foreground whitespace-nowrap">{t("comments.filter.authorLabel")}</span>
-              <Select
+                onValueChange={(value) => onChange({ ...filter, fileId: value })}
+                side={!hasAuthors ? "top" : "bottom"}
+              />
+            )}
+            {hasAuthors && (
+              <FilterSelectRow
+                id="comments-filter-author"
+                label={t("comments.filter.authorLabel")}
                 items={[
                   { value: "", label: anyoneLabel },
-                  ...authorOptions.map((a) => ({ value: a.id, label: a.label })),
+                  ...authorOptions.map((author) => ({ value: author.id, label: author.label })),
                 ]}
                 value={filter.authorId}
-                onValueChange={(v) => onChange({ ...filter, authorId: v ?? "" })}
-              >
-                <SelectTrigger size="sm" className="text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value="">{anyoneLabel}</SelectItem>
-                    {authorOptions.map((a) => (
-                      <SelectItem key={a.id} value={a.id}>{a.label}</SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </label>
-          )}
-
-          {/* Participant filter */}
-          {authorOptions.length > 0 && (
-            <label className="flex items-center gap-1.5">
-              <span className="text-muted-foreground whitespace-nowrap">{t("comments.filter.participantLabel")}</span>
-              <Select
+                onValueChange={(value) => onChange({ ...filter, authorId: value })}
+              />
+            )}
+            {hasAuthors && (
+              <FilterSelectRow
+                id="comments-filter-participant"
+                label={t("comments.filter.participantLabel")}
                 items={[
                   { value: "", label: anyoneLabel },
-                  ...authorOptions.map((a) => ({ value: a.id, label: a.label })),
+                  ...authorOptions.map((author) => ({ value: author.id, label: author.label })),
                 ]}
                 value={filter.participant}
-                onValueChange={(v) => onChange({ ...filter, participant: v ?? "" })}
-              >
-                <SelectTrigger size="sm" className="text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value="">{anyoneLabel}</SelectItem>
-                    {authorOptions.map((a) => (
-                      <SelectItem key={a.id} value={a.id}>{a.label}</SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </label>
+                onValueChange={(value) => onChange({ ...filter, participant: value })}
+                side="top"
+              />
+            )}
+          </FieldGroup>
+          {canReset && (
+            <>
+              <Separator />
+              <div className="flex justify-end p-2.5">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="text-foreground"
+                  onClick={() => onChange(DEFAULT_FILTER)}
+                >
+                  {t("common.reset")}
+                </Button>
+              </div>
+            </>
           )}
-
-          {/* Reset */}
-          <Button
-            variant="ghost"
-            className="h-6 px-2 text-xs text-muted-foreground"
-            onClick={() => onChange(DEFAULT_FILTER)}
-          >
-            {t("common.reset")}
-          </Button>
-        </div>
-      )}
+        </PopoverContent>
+      </Popover>
+      <AppTooltip content={t("common.refresh")} side="bottom" align="end">
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="bg-card"
+          onClick={onRefresh}
+          disabled={isRefreshing}
+          aria-label={t("common.refresh")}
+        >
+          {isRefreshing ? <Spinner /> : <RefreshCw />}
+        </Button>
+      </AppTooltip>
     </div>
   )
 }
@@ -945,12 +933,6 @@ export function CommentsPage({ project: workspaceProject }: CommentsPageProps = 
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 p-8">
-      <div className="flex items-center justify-between">
-        <Button variant="ghost" size="sm" onClick={() => navigate(`/project/${projectId}/editor`)}>
-          <ArrowLeft className="me-2 h-4 w-4" /> {t("comments.backToProject")}
-        </Button>
-      </div>
-
       <div className="flex items-center gap-2">
         <MessageCircle className="h-5 w-5 text-muted-foreground" />
         <h1 className="text-xl font-semibold">
@@ -970,10 +952,6 @@ export function CommentsPage({ project: workspaceProject }: CommentsPageProps = 
               : t("comments.filterCount.one", { count: activeFilterCount })}
           </Badge>
         )}
-        <div className="flex-1" />
-        <Button variant="outline" onClick={refresh} disabled={isLoading}>
-          {isLoading ? <Spinner className="size-3.5" /> : t("common.refresh")}
-        </Button>
       </div>
 
       <FilterControls
@@ -981,6 +959,8 @@ export function CommentsPage({ project: workspaceProject }: CommentsPageProps = 
         onChange={setFilter}
         fileOptions={fileOptions}
         authorOptions={authorOptions}
+        isRefreshing={isLoading}
+        onRefresh={refresh}
       />
 
       {isError && (
@@ -999,27 +979,25 @@ export function CommentsPage({ project: workspaceProject }: CommentsPageProps = 
       )}
 
       {!isLoading && !isError && roots.length === 0 && (
-        <Card>
-          <CardContent className="flex flex-col items-center gap-3 py-12 text-center">
-            <MessageCircle className="h-10 w-10 text-muted-foreground" />
-            <div className="text-lg font-medium">{t("comments.empty.title")}</div>
-            <p className="max-w-md text-sm text-muted-foreground">
-              {t("comments.empty.body")}
-            </p>
-          </CardContent>
-        </Card>
+        <EmptyState
+          icon={MessageCircle}
+          title={t("comments.empty.title")}
+          description={t("comments.empty.body")}
+        />
       )}
 
       {roots.length > 0 && displayedRoots.length === 0 && (
-        <Card>
-          <CardContent className="flex flex-col items-center gap-3 py-8 text-center">
-            <Search className="h-8 w-8 text-muted-foreground" />
-            <div className="text-base font-medium">{t("comments.noMatch.title")}</div>
-            <Button variant="outline" onClick={() => setFilter(DEFAULT_FILTER)}>
+        <EmptyState
+          icon={MessageCircle}
+          title={activeFilterCount > 0
+            ? t("comments.noMatch.title")
+            : t("comments.empty.noneVisible")}
+          action={activeFilterCount > 0 ? (
+            <Button type="button" variant="outline" onClick={() => setFilter(DEFAULT_FILTER)}>
               {t("comments.noMatch.clear")}
             </Button>
-          </CardContent>
-        </Card>
+          ) : undefined}
+        />
       )}
 
       {displayedRoots.length > 0 && (
@@ -1030,6 +1008,8 @@ export function CommentsPage({ project: workspaceProject }: CommentsPageProps = 
               root={root}
               replies={repliesByParent.get(root.commentId) ?? []}
               currentUsername={session?.username}
+              roleLevel={project?.syncRole?.level ?? null}
+              floors={commentFloorsFrom(project)}
               fileMap={fileMap}
               onResolve={resolveThread}
               onEdit={editComment}

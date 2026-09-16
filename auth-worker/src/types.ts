@@ -1,5 +1,7 @@
 // Shared types for the aquilla-identity worker.
 //
+import type { RequestMemo } from "./lib/request-memo"
+//
 // A single Postgres database (Neon) owns everything codex-web touches —
 // identity, orgs, projects, members, invites, plus the file/cell projections
 // the sync worker writes. Schema lives in `db/postgres/schema.sql`.
@@ -30,6 +32,10 @@ export interface Env {
    *  same database. NOT a binding itself. */
   AQUILLA_PG: AquillaDb
 
+  /** Per-request read memo, attached by index.ts's fetch wrapper. Absent on
+   *  direct service calls (unit tests, cron). See lib/request-memo.ts. */
+  requestMemo?: RequestMemo
+
   /** Postgres (Neon) via Hyperdrive — the sole datastore. index.ts builds
    *  AQUILLA_PG from this; required (the worker fails fast when absent). */
   HYPERDRIVE?: Hyperdrive
@@ -45,6 +51,12 @@ export interface Env {
   SECRET_KEY: string
   ALGORITHM: string
   ACCESS_TOKEN_EXPIRE_MINUTES: string
+
+  /** [Pen test] Auth & session mgmt (2026-09-14): absolute cap, in days, on a
+   *  session's total age (from `sst`/original login), independent of how many
+   *  times it's been refreshed past its half-life. Defaults to 90 — see
+   *  middleware/auth.ts's `resolveSession`. */
+  MAX_SESSION_AGE_DAYS?: string
 
   // Sync-token signing, and — until ADMIN_SECRET is provisioned on both
   // workers — admin auth to aquilla-sync-worker. Shared between identity and
@@ -320,6 +332,11 @@ export interface JWTPayload {
    *  0073). Optional — tokens minted before this field existed have none
    *  and simply aren't individually revocable. */
   jti?: string
+  /** Session start time (seconds): when the user actually logged in, carried
+   *  forward unchanged across every sliding refresh (AQU-995) while `iat`
+   *  tracks the current token. Optional — tokens minted before this field
+   *  existed have none, and refresh falls back to their `iat`. */
+  sst?: number
   [k: string]: unknown
 }
 

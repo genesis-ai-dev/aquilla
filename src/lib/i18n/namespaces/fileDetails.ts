@@ -17,8 +17,10 @@ export const fileDetails = defineNamespace({
     "fileDetails.progress": "Progress",
     "fileDetails.progressValue": "{translated}% translated · {validated}% validated",
     "fileDetails.rename": "Rename",
+    "fileDetails.renameDialogTitle": "Rename file",
     "fileDetails.moveToCorpus": "Move to corpus…",
     "fileDetails.exportSource": "Export source (.SFM)",
+    "fileDetails.downloadOriginal": "Download original",
     "fileDetails.exportDisabledType": "Only USFM files support round-trip source export.",
     "fileDetails.exportDisabledPolicy":
       "Source export is disabled by your organization's export policy.",
@@ -129,6 +131,10 @@ export const fileDetails = defineNamespace({
           "in the sidebar. Imperative verb.",
         maxLength: 24,
       },
+      "fileDetails.renameDialogTitle": {
+        description:
+          "Title of the dialog opened from the chapter-row File options menu to rename the current file.",
+      },
       "fileDetails.moveToCorpus": {
         description:
           "Action button that opens a dialog to move the file into a different corpus " +
@@ -140,6 +146,12 @@ export const fileDetails = defineNamespace({
           "Action button that downloads the file back in its source format. '.SFM' is " +
           "a file extension — keep it verbatim.",
         maxLength: 30,
+      },
+      "fileDetails.downloadOriginal": {
+        description:
+          "Sidebar and overview action that downloads the exact original file that was imported, " +
+          "without injecting translations. Imperative verb plus noun.",
+        maxLength: 28,
       },
       "fileDetails.exportDisabledType": {
         description:

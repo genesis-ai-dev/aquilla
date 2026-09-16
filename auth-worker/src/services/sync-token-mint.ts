@@ -11,7 +11,7 @@
 
 import { sign } from "hono/jwt"
 import type { AuthUser, Env, RoleResolution, SyncTokenClaims } from "../types"
-import { resolveProjectRole } from "./project-permissions"
+import { loadProjectRow, resolveProjectRole, RoleLookupError } from "./project-permissions"
 
 /** 15-minute lifetime — matches docs/SYNC.md. */
 export const SYNC_TOKEN_TTL_SECONDS = 15 * 60
@@ -55,13 +55,19 @@ export function isPathSafeId(id: string): boolean {
 export type SyncTokenMintFailure =
   /** SYNC_SECRET_KEY unset — deployment config, not a caller problem. */
   | "not_configured"
-  /** No projects row — the route may branch to auto-register on this. */
+  /** No projects row. AQU-299 / SEC-9: callers answer 403, identically to
+   *  "no_access" — minting a token never creates a project. */
   | "project_not_found"
   | "project_archived"
   /** AQU-285: is_active = false blocks new write-capable mints. */
   | "project_frozen"
   /** Project exists but AD-12 resolution found no role for the user. */
   | "no_access"
+  /** AQU-996: a role-resolution query FAILED and no grant was found — the
+   *  denial would be unreliable (DB blip, not a missing grant). Callers must
+   *  answer with a transient 5xx, never a permission 403: the SPA outbox
+   *  quarantines events on mint 403 as permanently forbidden. */
+  | "role_lookup_failed"
   /** projectId/fileId contains R2-key-unsafe characters (see isPathSafeId). */
   | "unsafe_id"
 
@@ -70,8 +76,9 @@ export type SyncTokenMintResult =
   | { ok: false; reason: SyncTokenMintFailure }
 
 /**
- * Sign a sync token for an ALREADY-RESOLVED role (the route's auto-register
- * path supplies the creator/OWNER resolution itself). Loads the user's
+ * Sign a sync token for an ALREADY-RESOLVED role — the signing half of
+ * mintSyncTokenForUser, split out so a caller that has resolved the role by
+ * another route can reuse it without re-resolving. Loads the user's
  * lane/file scopes (AQU-553) — the claim is omitted entirely when unscoped so
  * an absent claim keeps meaning "no restriction" on the sync-worker side.
  */
@@ -133,18 +140,23 @@ export async function mintSyncTokenForUser(
     return { ok: false, reason: "unsafe_id" }
   }
 
-  const project = await env.AQUILLA_PG.prepare(
-    `SELECT id, archived_at, is_active FROM projects WHERE id = ?`,
-  )
-    .bind(projectId)
-    .first<{ id: string; archived_at: string | null; is_active: boolean }>()
+  // Memoised per request — resolveProjectRole below reuses this same row.
+  const project = await loadProjectRow(env, projectId)
 
   if (!project) return { ok: false, reason: "project_not_found" }
   if (project.archived_at) return { ok: false, reason: "project_archived" }
   // AQU-285: is_active is a BOOLEAN NOT NULL DEFAULT TRUE column (migration 0033).
   if (!project.is_active) return { ok: false, reason: "project_frozen" }
 
-  const resolved = await resolveProjectRole(env, user, projectId)
+  let resolved: RoleResolution | null
+  try {
+    resolved = await resolveProjectRole(env, user, projectId)
+  } catch (err) {
+    if (err instanceof RoleLookupError) {
+      return { ok: false, reason: "role_lookup_failed" }
+    }
+    throw err
+  }
   if (!resolved) return { ok: false, reason: "no_access" }
 
   const signed = await signSyncTokenWithRole(env, user, projectId, fileId, resolved)

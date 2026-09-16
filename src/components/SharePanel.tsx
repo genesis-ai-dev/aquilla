@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback, useMemo } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { Copy, AlertCircle, Trash2 } from "lucide-react"
-import { useI18n } from "@/lib/i18n/I18nProvider"
-import { formatDate } from "@/lib/i18n/format"
+import { useI18n, useT } from "@/lib/i18n/I18nProvider"
+import { fmtShortCalendarDate } from "@/lib/format-date"
+import { DateTooltip } from "@/components/ui/date-tooltip"
 import { RichMessage } from "@/lib/i18n/RichMessage"
 import { Button } from "@/components/ui/button"
 import { AppTooltip } from "@/components/ui/tooltip"
@@ -29,9 +30,10 @@ import { INVITE_SENT } from "@/lib/event-names"
 import { useFrontierSession } from "@/hooks/useFrontierSession"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { useProjectOrgId } from "@/hooks/useProjectOrgId"
-import { useActiveOrgOptional } from "@/context/OrgContext"
 import { listOrgMembers, type OrgMember } from "@/lib/frontier/orgs"
 import { partitionMembers } from "@/lib/frontier/members"
+import { notifySessionExpiredIfCurrent } from "@/lib/frontier/session-expiry"
+import { toUserFacingError } from "@/lib/errors/user-error"
 import {
   MembersPanel,
   type MembersPanelMember,
@@ -46,7 +48,6 @@ import {
 } from "@/lib/frontier/roles"
 import { RoleLabel } from "@/components/RoleLabel"
 import { RoleSelect } from "@/components/RoleSelect"
-import { useT } from "@/lib/i18n/I18nProvider"
 import type { MessageKey } from "@/lib/i18n/messages/en"
 
 interface SharePanelProps {
@@ -133,24 +134,44 @@ function MembersTab({ projectId }: { projectId: string }) {
   // members minus those who already hold a project-level grant
   // (direct/team/creator); org-access-only members stay eligible so they can
   // be given an explicit project role. The roster comes from the PROJECT's
-  // own org (the active-org picker may be on "All organizations"), falling
-  // back to the optional org context. Best-effort — the typeahead degrades
-  // to search + free text without it.
-  const projectOrgId = useProjectOrgId(projectId)
-  const activeOrgId = useActiveOrgOptional()?.activeOrgId ?? null
-  const rosterOrgId = projectOrgId ?? activeOrgId
+  // own org (the active-org picker may be on "All organizations"). Personal
+  // projects and failed lookups intentionally degrade to search + free text;
+  // falling back to the selected org can expose the wrong colleague roster.
+  const { orgId: projectOrgId, error: projectOrgError } = useProjectOrgId(projectId)
+  const rosterOrgId = projectOrgError ? null : projectOrgId
   const [orgMembers, setOrgMembers] = useState<OrgMember[] | null>(null)
+  const [loadedRosterKey, setLoadedRosterKey] = useState<string | null>(null)
+  const [suggestionsError, setSuggestionsError] = useState<string | null>(null)
+  const rosterKey = callerUsername && rosterOrgId != null
+    ? `${callerUsername}\u0000${rosterOrgId}`
+    : null
+  const visibleOrgMembers = loadedRosterKey === rosterKey ? orgMembers : null
   useEffect(() => {
     if (!jwt || rosterOrgId == null) {
       setOrgMembers(null)
+      setLoadedRosterKey(null)
       return
     }
     let alive = true
+    setOrgMembers(null)
+    setLoadedRosterKey(null)
+    setSuggestionsError(null)
     listOrgMembers(jwt, rosterOrgId)
-      .then((ms) => { if (alive) setOrgMembers(ms) })
-      .catch(() => { /* suggestions are best-effort; search still works */ })
+      .then((ms) => {
+        if (alive) {
+          setOrgMembers(ms)
+          setLoadedRosterKey(rosterKey)
+        }
+      })
+      .catch((caught) => {
+        if (alive) {
+          setOrgMembers(null)
+          setLoadedRosterKey(null)
+          setSuggestionsError(toUserFacingError(caught, "organization members").message)
+        }
+      })
     return () => { alive = false }
-  }, [jwt, rosterOrgId])
+  }, [jwt, rosterKey, rosterOrgId])
 
   const projectGrantUserIds = useMemo(
     () => new Set(partitionMembers(members).projectMembers.map((m) => m.userId)),
@@ -158,12 +179,12 @@ function MembersTab({ projectId }: { projectId: string }) {
   )
   const suggestions = useMemo(
     () =>
-      orgMembers == null
+      visibleOrgMembers == null
         ? undefined
-        : orgMembers
+        : visibleOrgMembers
             .filter((m) => !projectGrantUserIds.has(m.userId))
             .map((m) => ({ id: m.userId, username: m.username })),
-    [orgMembers, projectGrantUserIds],
+    [visibleOrgMembers, projectGrantUserIds],
   )
 
   // AQU-285 (F-A4): derive callerMaxRole from the caller's own effective role
@@ -200,32 +221,59 @@ function MembersTab({ projectId }: { projectId: string }) {
   ])
   const [scopeFiles, setScopeFiles] = useState<Array<{ id: string; name: string }>>([])
   const [scopesByUser, setScopesByUser] = useState<Record<number, MemberScopeValue[]>>({})
+  const [scopeOptionsError, setScopeOptionsError] = useState<string | null>(null)
+  const [memberScopesError, setMemberScopesError] = useState<string | null>(null)
+  const [scopeOptionsReady, setScopeOptionsReady] = useState(false)
+  const [memberScopesReady, setMemberScopesReady] = useState(false)
+  const [loadedScopeOptionsKey, setLoadedScopeOptionsKey] = useState<string | null>(null)
+  const [loadedMemberScopesKey, setLoadedMemberScopesKey] = useState<string | null>(null)
+  const scopeLoadRequestRef = useRef(0)
+  const currentScopeKey = callerUsername ? `${callerUsername}\u0000${projectId}` : null
 
   // Lanes + files come from the project's settings/record — fetched once per
   // (project, caller) as soon as the caller can manage scopes. Failure to
   // load settings just leaves the "Default" lane placeholder in place.
   useEffect(() => {
+    setScopeOptionsReady(false)
+    setLoadedScopeOptionsKey(null)
+    setScopeOptionsError(null)
+    setScopeLanes([{ value: "", label: "Default" }])
+    setScopeFiles([])
     if (!canManageScopes || !jwt) return
     let alive = true
     void (async () => {
-      const [settingsRes, projectRes] = await Promise.all([
-        fetchProjectSettings(jwt, projectId),
-        resolveCloudProjectResult(projectId, jwt),
-      ])
-      if (!alive) return
-      const defaultLabel = settingsRes?.settings.targetLanguage || "Default"
-      setScopeLanes([
-        { value: "", label: defaultLabel },
-        ...(settingsRes?.settings.targetLanes ?? []).map((t) => ({ value: t, label: t })),
-      ])
-      if (projectRes.ok) {
+      try {
+        const [settingsRes, projectRes] = await Promise.all([
+          fetchProjectSettings(jwt, projectId),
+          resolveCloudProjectResult(projectId, jwt),
+        ])
+        if (!alive) return
+        const defaultLabel = settingsRes?.settings.targetLanguage || "Default"
+        setScopeLanes([
+          { value: "", label: defaultLabel },
+          ...(settingsRes?.settings.targetLanes ?? []).map((t) => ({ value: t, label: t })),
+        ])
+        if (!projectRes.ok) {
+          if (projectRes.reason === "unauthenticated") void notifySessionExpiredIfCurrent(jwt)
+          throw new Error("Could not load project scope details.")
+        }
         setScopeFiles(
           (projectRes.project.files ?? []).map((f) => ({ id: f.id, name: f.name })),
         )
+        setScopeOptionsReady(true)
+        setLoadedScopeOptionsKey(currentScopeKey)
+      } catch (caught) {
+        if (alive) {
+          setScopeLanes([{ value: "", label: "Default" }])
+          setScopeFiles([])
+          setScopeOptionsReady(false)
+          setLoadedScopeOptionsKey(null)
+          setScopeOptionsError(toUserFacingError(caught, "project scopes").message)
+        }
       }
     })()
     return () => { alive = false }
-  }, [canManageScopes, jwt, projectId])
+  }, [canManageScopes, currentScopeKey, jwt, projectId])
 
   // Members below project_lead are the only scopable rows (leads+ must stay
   // unscoped). Recomputed whenever the roster changes.
@@ -235,22 +283,38 @@ function MembersTab({ projectId }: { projectId: string }) {
   )
 
   const loadScopes = useCallback(async () => {
+    const requestId = ++scopeLoadRequestRef.current
+    setMemberScopesReady(false)
+    setLoadedMemberScopesKey(null)
+    setMemberScopesError(null)
+    setScopesByUser({})
     if (!canManageScopes || !jwt || scopableUserIds.length === 0) {
-      setScopesByUser({})
+      setMemberScopesReady(true)
+      setLoadedMemberScopesKey(currentScopeKey)
       return
     }
-    // Tolerate individual failures as unscoped — one member's fetch failing
-    // shouldn't block the rest of the roster from rendering scope state.
-    const entries = await Promise.all(
+    const results = await Promise.allSettled(
       scopableUserIds.map(async (userId) => {
         const scopes = await fetchMemberScopes(jwt, projectId, userId)
         return [userId, scopes ?? []] as const
       }),
     )
+    if (scopeLoadRequestRef.current !== requestId) return
+    const failure = results.find((result): result is PromiseRejectedResult => result.status === "rejected")
+    if (failure) {
+      setMemberScopesError(toUserFacingError(failure.reason, "member scopes").message)
+      return
+    }
+    const entries = results.map((result) => (result as PromiseFulfilledResult<readonly [number, MemberScopeValue[]]>).value)
     setScopesByUser(Object.fromEntries(entries))
-  }, [canManageScopes, jwt, projectId, scopableUserIds])
+    setMemberScopesReady(true)
+    setLoadedMemberScopesKey(currentScopeKey)
+  }, [canManageScopes, currentScopeKey, jwt, projectId, scopableUserIds])
 
-  useEffect(() => { void loadScopes() }, [loadScopes])
+  useEffect(() => {
+    void loadScopes()
+    return () => { scopeLoadRequestRef.current += 1 }
+  }, [loadScopes])
 
   const handleSaveScopes = useCallback(async (userId: number, scopes: MemberScopeValue[]) => {
     if (!jwt) throw new Error("Sign in to manage scopes.")
@@ -258,13 +322,24 @@ function MembersTab({ projectId }: { projectId: string }) {
     setScopesByUser((prev) => ({ ...prev, [userId]: saved }))
   }, [jwt, projectId])
 
-  const scopeConfig: MembersPanelScopeConfig | undefined = canManageScopes
+  const scopeConfig: MembersPanelScopeConfig | undefined = canManageScopes &&
+    scopeOptionsReady && memberScopesReady &&
+    loadedScopeOptionsKey === currentScopeKey && loadedMemberScopesKey === currentScopeKey
     ? { lanes: scopeLanes, files: scopeFiles, scopesByUser, onSave: handleSaveScopes }
     : undefined
+  const scopeError = scopeOptionsError ?? memberScopesError
+  const supplementalErrors = Array.from(
+    new Set([projectOrgError, suggestionsError, scopeError].filter((message): message is string => Boolean(message))),
+  )
 
   return (
     <div>
       {error && <p className="mb-2 text-xs text-destructive">{error}</p>}
+      {supplementalErrors.map((message) => (
+        <p key={message} role="alert" className="mb-2 text-xs text-destructive">
+          {message}
+        </p>
+      ))}
       {isLoading && members.length === 0 ? (
         <div className="flex items-center text-muted-foreground">
           <Spinner className="size-3.5" />
@@ -564,11 +639,15 @@ function ActiveInvitesList({ projectId, jwt, version, onRevoked }: ActiveInvites
     }
   }
 
-  function formatExpiry(expiresAt: string | null): string {
+  function formatExpiry(expiresAt: string | null) {
     if (!expiresAt) return t("common.noExpiry")
-    return t("common.expiresOn", {
-      date: formatDate(expiresAt, locale, { month: "short", day: "numeric", year: "numeric" }),
-    })
+    return (
+      <DateTooltip value={expiresAt} label={t("common.date.expires")}>
+        {t("common.expiresOn", {
+          date: fmtShortCalendarDate(expiresAt, undefined, locale),
+        })}
+      </DateTooltip>
+    )
   }
 
   if (loading && !invites) {

@@ -1,14 +1,14 @@
 /**
  * VoiceLibraryPanel.test.tsx — the simplified Voices SELECTOR.
  *
- * Confirms the panel is a pure selector: search + voice rows + narrator badge,
+ * Confirms the panel is a pure selector: search + voice rows + narrator star,
  * plus a single "New voice" entry point that opens the unified modal (which
  * carries both TTS + Clone tabs, exercised in its own test) seeded with the
  * project's configured engine — not hardcoded Gemini.
  */
 
 import { describe, it, expect, vi } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, within } from "@testing-library/react"
 import { VoiceLibraryPanel } from "./VoiceLibraryPanel"
 import { renderWithTooltips, expectTooltip } from "@/test-utils/tooltip"
 import type { NewVoiceModalProps } from "@/components/voice/NewVoiceModal"
@@ -52,19 +52,14 @@ function setup(settingsOver: Partial<ProjectTtsSettings> = {}) {
 }
 
 describe("VoiceLibraryPanel (selector)", () => {
-  it("renders search, rows, narrator badge, and a single New voice button", async () => {
+  it("renders search, rows, narrator star, and a single New voice button", async () => {
     setup()
     expect(screen.getByRole("heading", { name: "Voices" })).toBeTruthy()
     expect(screen.getByPlaceholderText("Search voices…")).toBeTruthy()
     expect(screen.getByText("Mary")).toBeTruthy()
     expect(screen.getByText(/1\/2 voiced/)).toBeTruthy()
-    // The narrator (default) row carries the narrator badge, whose tooltip
-    // explains what "narrator" means. Scoped to the tooltip trigger because the
-    // default voice is itself *named* "Narrator", so the text alone is ambiguous.
-    await expectTooltip(
-      screen.getByText("Narrator", { selector: "[data-base-ui-tooltip-trigger]" }),
-      /lines without an explicit speaker/,
-    )
+    // The narrator (default) row carries a star whose tooltip is just "Narrator".
+    await expectTooltip(screen.getByTestId("voice-narrator-star"), "Narrator")
     expect(screen.getByRole("button", { name: /New voice/ })).toBeTruthy()
   })
 
@@ -133,6 +128,35 @@ describe("VoiceLibraryPanel (selector)", () => {
     )
     expect(screen.getByText("Kokoro")).toBeTruthy()
   })
+
+  it("opens Edit / Make narrator / Delete from the ⋯ menu", () => {
+    setup()
+    const maryRow = screen.getByText("Mary").closest("[role='button']")
+    expect(maryRow).toBeInstanceOf(HTMLElement)
+    fireEvent.click(within(maryRow as HTMLElement).getByRole("button", { name: /More voice actions/ }))
+    expect(screen.getByRole("menuitem", { name: /^Edit$/ })).toBeTruthy()
+    expect(screen.getByRole("menuitem", { name: /^Make narrator$/ })).toBeTruthy()
+    expect(screen.getByRole("menuitem", { name: /^Delete$/ })).toBeTruthy()
+  })
+
+  it("opens the same items from a right-click on the row", () => {
+    setup()
+    fireEvent.contextMenu(screen.getByText("Mary"))
+    expect(screen.getByRole("menuitem", { name: /^Edit$/ })).toBeTruthy()
+    expect(screen.getByRole("menuitem", { name: /^Make narrator$/ })).toBeTruthy()
+    expect(screen.getByRole("menuitem", { name: /^Delete$/ })).toBeTruthy()
+  })
+
+  it("places the selected check to the left of the ⋯ menu trigger", () => {
+    setup()
+    const maryRow = screen.getByText("Mary").closest("[role='button']")
+    expect(maryRow).toBeTruthy()
+    const check = maryRow!.querySelector("[data-testid='voice-row-selected']")
+    const more = screen.getAllByRole("button", { name: /More voice actions/ }).find((btn) => maryRow!.contains(btn))
+    expect(check).toBeTruthy()
+    expect(more).toBeTruthy()
+    expect(check!.compareDocumentPosition(more!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
 })
 
 // AQU-365: viewer/below-floor character-CRUD gating. Character writes flow
@@ -187,5 +211,31 @@ describe("VoiceLibraryPanel — AQU-365 role gating", () => {
     setupWithRole(null)
     const button = screen.getByRole("button", { name: /New voice/ }) as HTMLButtonElement
     expect(button.disabled).toBe(false)
+  })
+})
+
+describe("VoiceLibraryPanel — settings sync (AQU-1001)", () => {
+  it("shows a voice that lands on settings after the initial seed", () => {
+    const onSettingsChange = vi.fn()
+    const narrator = makeVoice()
+    const settings: ProjectTtsSettings = { provider: "gemini", voices: [narrator], defaultVoiceId: narrator.id }
+    const { rerender } = render(
+      <VoiceLibraryPanel
+        projectId="dev-project"
+        settings={settings}
+        onSettingsChange={onSettingsChange}
+      />,
+    )
+    expect(screen.queryByText("Keean")).toBeNull()
+
+    const cloned: Voice = { id: "v-clone", name: "Keean", color: "#0d9488", referenceAudioId: "ref.webm" }
+    rerender(
+      <VoiceLibraryPanel
+        projectId="dev-project"
+        settings={{ ...settings, voices: [narrator, cloned] }}
+        onSettingsChange={onSettingsChange}
+      />,
+    )
+    expect(screen.getByText("Keean")).toBeTruthy()
   })
 })

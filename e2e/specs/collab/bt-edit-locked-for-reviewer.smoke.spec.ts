@@ -1,4 +1,5 @@
 import { test, expect } from "../../helpers/multi-user"
+import { applyUserProviderOverride } from "../../helpers/mock-llm-server"
 import { Dashboard } from "../../helpers/page-objects/Dashboard"
 import { Workspace } from "../../helpers/page-objects/Workspace"
 import { ensureAuthState } from "../../helpers/auth"
@@ -85,18 +86,12 @@ test("BT Edit is locked with Contributor+ tooltip for reviewer", async ({ alice,
   await dash.createProject({ name, source: "en", target: "fr" })
   await dash.openProject(name)
 
-  // Point alice's per-device LLM override at the mock server so "Read it back
-  // with AI" hits a real (mock) endpoint. complete() applies this override on
+  // Point alice's per-device LLM override at the mock server so "Generate
+  // back-translation" hits a real (mock) endpoint. complete() applies this override on
   // top of project settings.
   const llmBase = process.env.VITE_LLM_BASE_URL ?? ""
   expect(llmBase).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/)
-  await alice.evaluate(({ endpoint }) => {
-    localStorage.setItem("codex:userProviderOverride", JSON.stringify({
-      endpoint,
-      model: "mock-model",
-      apiKey: "",
-    }))
-  }, { endpoint: `${llmBase}/v1` })
+  await applyUserProviderOverride(alice, alice.username, `${llmBase}/v1`)
   await alice.reload()
   const ws = new Workspace(alice)
   await ws.importFile(SAMPLE_MD)
@@ -123,7 +118,9 @@ test("BT Edit is locked with Contributor+ tooltip for reviewer", async ({ alice,
   await expect(aliceBtTab.first()).toBeVisible({ timeout: 5_000 })
   await aliceBtTab.first().click()
   const aliceBtPanel = alice.getByRole("tabpanel", { name: /back-translation/i })
-  const generateBtn = aliceBtPanel.getByRole("button", { name: /read it back|reading it back/i })
+  const generateBtn = aliceBtPanel.getByRole("button", {
+    name: /generate back-translation|generating back-translation/i,
+  })
   await expect(generateBtn).toBeVisible({ timeout: 8_000 })
   await generateBtn.click()
   // Mock LLM's default response — proves generation completed. The
@@ -177,5 +174,5 @@ test("BT Edit is locked with Contributor+ tooltip for reviewer", async ({ alice,
 
   // Reviewer must NOT see the generate affordance — generation persists a BT,
   // which is a Contributor+ write.
-  await expect(btPanel.getByRole("button", { name: /read it back/i })).toHaveCount(0)
+  await expect(btPanel.getByRole("button", { name: /generate back-translation/i })).toHaveCount(0)
 })

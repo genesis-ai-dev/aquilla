@@ -213,11 +213,21 @@ export function useFocusLock(
         if (msg.cellId !== cur) return
         setHeldBy((c) => (c && c.userId === msg.by.userId ? null : c))
         if (msg.by.userId === currentUserId) {
-          setIsHeld(false)
+          // AQU-1154: our own release() nulls claimedCellRef before it sends,
+          // so a self-release that still matches the claimed cell means the
+          // DO dropped the lease from under us (lease sweep, or a socket flap
+          // it treated as a disconnect) while the user is still in the cell.
+          // focus.renew on a gone lease is a silent server no-op, so re-claim
+          // instead of stopping renewal and stranding the editor unlocked.
           if (claimedCellRef.current === cur) {
+            if (reconciler) {
+              reconciler.send({ t: "focus.claim", cellId: cur, leaseMs })
+              return
+            }
             claimedCellRef.current = null
             stopRenewal()
           }
+          setIsHeld(false)
         }
         return
       }
@@ -241,7 +251,7 @@ export function useFocusLock(
         return
       }
     },
-    [currentUserId, stopRenewal],
+    [currentUserId, stopRenewal, reconciler, leaseMs],
   )
 
   return [{ isHeld, heldBy, claim, release }, feedFrame]

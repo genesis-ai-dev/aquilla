@@ -44,7 +44,7 @@ interface FileMetaState {
 }
 
 function storageKey(fileId: string, key: string): string {
-  return `codex:file-meta:${fileId}:${key}`
+  return `aquilla:file-meta:${fileId}:${key}`
 }
 
 function readBool(fileId: string | null, key: string, fallback: boolean): boolean {

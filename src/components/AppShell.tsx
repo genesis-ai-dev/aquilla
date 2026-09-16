@@ -25,10 +25,10 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable"
 
-/** Tailwind `lg` — below this, org chrome (not the editor dock) moves into a sheet. */
+/** Tailwind `lg` — below this, org chrome and the editor dock move into a sheet. */
 const LG_MIN_WIDTH_QUERY = "(min-width: 1024px)"
 
-function useIsLgUp(): boolean {
+export function useIsLgUp(): boolean {
   return useSyncExternalStore(
     (onStoreChange) => {
       const mq = window.matchMedia(LG_MIN_WIDTH_QUERY)
@@ -61,7 +61,7 @@ const DOCK_DEFAULT_WIDTH = 256
 /** Collapsed rail (40) + aside `ps-2` inset (8) when railCollapsed. */
 const DOCK_COLLAPSED_WIDTH = 48
 
-const VIDEO_STORAGE_KEY = "codex:video-height"
+const VIDEO_STORAGE_KEY = "aquilla:video-height"
 const VIDEO_DEFAULT_HEIGHT = 320
 const VIDEO_MIN_HEIGHT = 120
 
@@ -198,9 +198,10 @@ export function AppShell({
   const [dockWidth] = useState(() => readStoredDockWidth(dockStorageKey))
   const [videoHeight] = useState(() => readStoredVideoHeight())
   const lgUp = useIsLgUp()
-  // Org chrome (`sidebar`, not the editor `leftDock`) hides in-flow below lg
-  // (1024px) and opens from a PanelLeft control beside the breadcrumbs.
-  const mobileNav = !useDockResize && Boolean(sidebar) && !lgUp
+  // Below lg (1024px), both org chrome and the editor dock hide in-flow and
+  // open from a PanelLeft control beside the breadcrumbs.
+  const mobileNav = Boolean(dockContent) && !lgUp
+  const chromeCollapsed = Boolean(railCollapsed) && !mobileNav
   const [navOpen, setNavOpen] = useState(false)
   const openSidebarLabel = i18n?.t("nav.shell.openSidebar") ?? "Open sidebar"
   const navigationLabel = i18n?.t("nav.shell.navigation") ?? "Navigation"
@@ -215,7 +216,7 @@ export function AppShell({
 
   // Keep the resizable dock panel in sync with tab collapse/expand.
   useEffect(() => {
-    if (!useDockResize) return
+    if (!useDockResize || mobileNav) return
     const panel = dockPanelRef.current
     if (!panel) return
     if (railCollapsed) {
@@ -223,7 +224,7 @@ export function AppShell({
     } else {
       panel.resize(readStoredDockWidth(dockStorageKey))
     }
-  }, [railCollapsed, useDockResize, dockStorageKey, dockPanelRef])
+  }, [railCollapsed, useDockResize, dockStorageKey, dockPanelRef, mobileNav])
 
   // Status / playback sit at the bottom of the MAIN column (not under `aside`)
   // so the transport/volume share the editor's right edge when drawers/sidebars
@@ -288,17 +289,21 @@ export function AppShell({
         // Collapsed rail: mirror the floating main card's 8px left inset (m-2
         // below) so the centered icon column reads as centered in the visible
         // chrome band instead of being pulled toward the screen edge.
-        railCollapsed && "ps-2",
+        chromeCollapsed && "ps-2",
       )}
     >
       {(resolvedLogo || logoAccessory) && (
         <div
+          data-slot="app-shell-sidebar-chrome"
           className={cn(
             // Align every chrome child on the same vertical midline — no fixed
             // height; natural content size with items-center.
             "flex shrink-0 items-center pt-2",
-            railCollapsed
-              ? "flex-col items-center justify-center gap-1 px-2"
+            // Collapsed rail is 40px after the aside's ps-2. Extra px-2 here
+            // squeezed the clock + arrows to ~24px and overflow-hidden clipped
+            // them. Match LeftDock's w-10 icon column instead.
+            chromeCollapsed
+              ? "w-10 flex-col items-center gap-1"
               : "justify-between px-2",
           )}
         >
@@ -309,12 +314,13 @@ export function AppShell({
           <div
             className={cn(
               "flex items-center gap-1.5",
-              railCollapsed && "flex-col",
+              chromeCollapsed && "flex-col gap-1",
             )}
           >
-            <BetaBadge />
-            <NavHistoryControls />
-            {logoAccessory ? (
+            {/* Text chip — hide in the 40px icon rail so it can't clip. */}
+            {!chromeCollapsed && <BetaBadge />}
+            <NavHistoryControls orientation={chromeCollapsed ? "vertical" : "horizontal"} />
+            {logoAccessory && !mobileNav ? (
               <div className="flex shrink-0 items-center">{logoAccessory}</div>
             ) : null}
           </div>
@@ -335,7 +341,6 @@ export function AppShell({
           <HelpMenu compact showTour={!useDockResize} />
           {i18n && (
             <LanguageSwitcher
-              className="h-6 shrink-0 rounded-md border border-border/50 bg-transparent px-1 text-xs"
               ariaLabel={i18n.t("language.switcher.chrome")}
             />
           )}
@@ -403,7 +408,7 @@ export function AppShell({
   // the editor shell on both edges.
   return (
     <div className="flex h-screen min-w-0 overflow-hidden bg-sidebar">
-      {useDockResize ? (
+      {useDockResize && !mobileNav ? (
         <ResizablePanelGroup orientation="horizontal" className="h-full w-full">
           <ResizablePanel
             id="shell-dock"
@@ -434,7 +439,12 @@ export function AppShell({
               <SheetContent
                 side="left"
                 showCloseButton={false}
-                className="gap-0 bg-sidebar p-0 data-[side=left]:w-56 data-[side=left]:sm:max-w-56"
+                className={cn(
+                  "gap-0 bg-sidebar p-0",
+                  useDockResize
+                    ? "data-[side=left]:w-64 data-[side=left]:sm:max-w-64"
+                    : "data-[side=left]:w-56 data-[side=left]:sm:max-w-56",
+                )}
               >
                 <SheetHeader className="sr-only">
                   <SheetTitle>{navigationLabel}</SheetTitle>

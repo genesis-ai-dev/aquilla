@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
+import type { Page } from "@playwright/test"
 
 export interface MockLLMRequest {
   url: string
@@ -16,6 +17,7 @@ export interface MockLLMRequest {
 // way — see src/lib/completion/paragraph-protocol.ts). Mirrors the parser's
 // own TAG_RE so this generic echo stays in lockstep with the real protocol.
 const REQUEST_TAG_RE = /<c\s+id="([^"]+)">([\s\S]*?)<\/c>/g
+const REQUEST_BATCH_TAG_RE = /<v(\d+)>([\s\S]*?)<\/v\1>/g
 
 interface MockChatBody {
   stream?: boolean
@@ -99,8 +101,20 @@ export class MockLLMServer {
         while ((tagMatch = REQUEST_TAG_RE.exec(combinedContent)) !== null) {
           requestTags.push({ id: tagMatch[1], text: tagMatch[2] })
         }
+        // Batch completion puts the live package in the final user message.
+        // Parse only that message so any numbered few-shot examples earlier
+        // in the prompt cannot be mistaken for cells in the requested batch.
+        const liveBatchContent = parsed?.messages?.at(-1)?.content ?? ""
+        const batchTags: { index: string; text: string }[] = []
+        REQUEST_BATCH_TAG_RE.lastIndex = 0
+        let batchMatch: RegExpExecArray | null
+        while ((batchMatch = REQUEST_BATCH_TAG_RE.exec(liveBatchContent)) !== null) {
+          batchTags.push({ index: batchMatch[1], text: batchMatch[2] })
+        }
         const responseText = requestTags.length
           ? requestTags.map(({ id: cellId, text }) => `<c id="${cellId}">[DRAFT] ${text}</c>`).join("\n")
+          : batchTags.length
+            ? batchTags.map(({ index, text }) => `<v${index}>[DRAFT] ${text}</v${index}>`).join("\n")
           : this._nextResponse
 
         // Custom-provider clients (the AI completion path under test) always
@@ -145,4 +159,33 @@ export class MockLLMServer {
     res.writeHead(404)
     res.end("Not found")
   }
+}
+
+/**
+ * Point a signed-in user's per-device AI provider override at an
+ * OpenAI-compatible endpoint (usually a MockLLMServer / the stack-level mock
+ * behind VITE_LLM_BASE_URL).
+ *
+ * The app reads the override through the account-scoped localStorage key
+ * minted by ownerScopedLocalStorageKey() (src/lib/frontier/client-local-storage.ts).
+ * The raw legacy `aquilla:userProviderOverride` key is claimed once during
+ * the first owner resolution on a device and ignored on every later boot, so
+ * specs must write the owner-scoped key directly. Reload the page afterwards
+ * so React state (useCompletion's isConfigured) picks the override up.
+ */
+export async function applyUserProviderOverride(
+  page: Page,
+  username: string,
+  endpoint: string,
+  override: { model?: string; apiKey?: string } = {},
+): Promise<void> {
+  await page.evaluate(({ username, endpoint, model, apiKey }) => {
+    const key = `owner:account:${encodeURIComponent(username)}:aquilla:userProviderOverride`
+    localStorage.setItem(key, JSON.stringify({ endpoint, model, apiKey }))
+  }, {
+    username,
+    endpoint,
+    model: override.model ?? "mock-model",
+    apiKey: override.apiKey ?? "",
+  })
 }

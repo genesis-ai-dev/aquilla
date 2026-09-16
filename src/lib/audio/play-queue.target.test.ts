@@ -5,11 +5,20 @@
 // EXCLUSIVE on seek), keep, arm ahead of a moved chip, or fall silent.
 
 import { describe, expect, it } from "vitest"
-import { planEarlyDub, planTargetOverlay } from "./play-queue"
+import { overlayKey, planEarlyDub, planTargetOverlay } from "./play-queue"
+import { RECORDING_SLOT, slotAudible } from "@/lib/timeline/track-slots"
 import type { CellData } from "@/hooks/useCells"
 
 const NONE: ReadonlySet<string> = new Set()
-const sounding = (...ids: string[]): ReadonlySet<string> => new Set(ids)
+/**
+ * The "already sounding" set.
+ *
+ * AQU-646 stage 3: the pool is keyed by (cell, SLOT), because two takes on one
+ * line — on different tracks — are the point of multi-track and must both
+ * sound. These cases are all about the DEFAULT track, so they name its slot.
+ */
+const sounding = (...ids: string[]): ReadonlySet<string> =>
+  new Set(ids.map((id) => overlayKey(id, RECORDING_SLOT)))
 
 const CLIP = "frontier-audio://clip-1.mp3"
 const SOURCE_ID = "audio-f1-1690000000-shared.mp3"
@@ -279,5 +288,107 @@ describe("planEarlyDub — a later section's backward-slid dub (end-based bounds
     delete bare.startTime
     delete bare.endTime
     expect(planEarlyDub([bare, movedDubCell(10, 20, 8000, 6000)], 0, NONE)).toBeNull()
+  })
+})
+
+// ── AQU-646 stage 3: two tracks sounding on ONE line ───────────────────────
+//
+// This is the behaviour the whole slot change exists for, and it had three
+// separate things silently preventing it. `planTargetOverlay` is one of them —
+// its already-sounding guard was keyed by cell, so the second track's take was
+// suppressed as a duplicate of the first.
+
+describe("planTargetOverlay — per track", () => {
+  const TRACK = "019fd21a-a5a4-75d1-b8c4-3b60072a4fc2"
+
+  /** One line carrying a take on the default row AND on an added track. */
+  const twoTrackCell = (startTime: number, endTime: number): CellData => {
+    const id = `c${++nextId}`
+    const takeId = `audio-${id}-1700000000-take.webm`
+    const trackTakeId = `audio-${id}-1700000001-trk.webm`
+    return {
+      ...base(), id, startTime, endTime,
+      selectedAudioId: takeId,
+      selectedBySlot: { recording: takeId, [TRACK]: trackTakeId },
+      attachments: {
+        [takeId]: { type: "audio", url: CLIP, durationMs: 4000 },
+        [trackTakeId]: { type: "audio", url: "frontier-audio://trk.webm", durationMs: 4000 },
+        [SOURCE_ID]: { type: "audio", url: CLIP },
+      },
+    } as CellData
+  }
+
+  it("fires each track's OWN take from the same line", () => {
+    const cells = [twoTrackCell(0, 10)]
+    const a = planTargetOverlay(cells, 0, NONE, "advance", 0)
+    const b = planTargetOverlay(cells, 0, NONE, "advance", 0, { slot: TRACK })
+    expect(a.kind).toBe("fire")
+    expect(b.kind).toBe("fire")
+    expect(a.kind === "fire" && b.kind === "fire" && a.audioId).not.toBe(
+      b.kind === "fire" ? b.audioId : null,
+    )
+    expect(b.kind === "fire" && b.slot).toBe(TRACK)
+  })
+
+  // THE SUPPRESSION THIS FIXES. The default row's take already ringing must not
+  // read as "this line is covered" for the other track.
+  it("does not let one track's sounding take suppress another's", () => {
+    const cells = [twoTrackCell(0, 10)]
+    const already = sounding(cells[0].id) // the default row is ringing
+    expect(planTargetOverlay(cells, 0, already, "advance", 0).kind).toBe("keep")
+    expect(planTargetOverlay(cells, 0, already, "advance", 0, { slot: TRACK }).kind).toBe("fire")
+  })
+
+  it("…and still refuses to re-fire the SAME track's ringing take", () => {
+    const cells = [twoTrackCell(0, 10)]
+    const already = new Set([overlayKey(cells[0].id, TRACK)])
+    expect(planTargetOverlay(cells, 0, already, "advance", 0, { slot: TRACK }).kind).toBe("keep")
+  })
+
+  // An added track's takes stand alone — there is no shared source clip in its
+  // slot, so requiring one (the default row's rule) would silence every one.
+  it("needs no source clip on an added track", () => {
+    const id = `c${++nextId}`
+    const trackTakeId = `audio-${id}-1700000002-trk.webm`
+    const cells = [
+      {
+        ...base(), id, startTime: 0, endTime: 10,
+        selectedBySlot: { [TRACK]: trackTakeId },
+        attachments: { [trackTakeId]: { type: "audio", url: "frontier-audio://trk.webm", durationMs: 4000 } },
+      } as CellData,
+    ]
+    expect(planTargetOverlay(cells, 0, NONE, "advance", 0, { slot: TRACK }).kind).toBe("fire")
+    // …while the default row, with no take of its own, has nothing to sound.
+    expect(planTargetOverlay(cells, 0, NONE, "advance", 0).kind).toBe("keep")
+  })
+})
+
+describe("slotAudible — one mute per track", () => {
+  const TRACK = "019fd21a-a5a4-75d1-b8c4-3b60072a4fc2"
+
+  it("answers the default row from `target`, as it always has", () => {
+    expect(slotAudible({ target: true }, RECORDING_SLOT)).toBe(true)
+    expect(slotAudible({ target: false }, RECORDING_SLOT)).toBe(false)
+    // …and a generated voice is the same track, so the same flag.
+    expect(slotAudible({ target: false }, "generatedVoice")).toBe(false)
+  })
+
+  // ABSENT MEANS AUDIBLE. A brand-new track is heard without anybody opting in,
+  // and the flag can only be there because someone switched it off.
+  it("treats an added track with no flag as audible", () => {
+    expect(slotAudible({ target: true }, TRACK)).toBe(true)
+    expect(slotAudible({ target: true, bySlot: {} }, TRACK)).toBe(true)
+  })
+
+  it("silences exactly the track that was muted", () => {
+    const state = { target: true, bySlot: { [TRACK]: false } }
+    expect(slotAudible(state, TRACK)).toBe(false)
+    expect(slotAudible(state, RECORDING_SLOT)).toBe(true)
+  })
+
+  it("…and muting the default row leaves an added track sounding", () => {
+    const state = { target: false, bySlot: { [TRACK]: true } }
+    expect(slotAudible(state, RECORDING_SLOT)).toBe(false)
+    expect(slotAudible(state, TRACK)).toBe(true)
   })
 })

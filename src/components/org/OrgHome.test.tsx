@@ -18,7 +18,7 @@ function projectsRollupStat() {
 }
 
 function renderMemberShell(path: string) {
-  return render(
+  return renderWithTooltips(
     <MemoryRouter initialEntries={[path]}>
       <OrgProvider>
         <Routes>
@@ -85,13 +85,31 @@ vi.mock("@/lib/frontier/portfolio", async (importActual) => {
       targetLanguage: null,
     },
   ]
+  const getPortfolio = vi.fn(async () => projects)
+  const getPortfolios = vi.fn(async () => [{ orgId: 1, projects }])
   return {
     ...actual,
-    getPortfolio: vi.fn(async () => projects),
-    // AQU-883: the all-orgs dashboard fans out through getPortfolios; tests
-    // that exercise that scope override this (default matches the member
-    // overview fixture so overview assertions stay hermetic).
-    getPortfolios: vi.fn(async () => [{ orgId: 1, projects }]),
+    getPortfolio,
+    getPortfolios,
+    getPortfolioPage: vi.fn(async (_jwt: string, _orgId: number, opts?: { q?: string }) => {
+      const list = await getPortfolio()
+      const q = opts?.q?.trim().toLowerCase() ?? ""
+      return {
+        projects: q ? list.filter((p) => p.name.toLowerCase().includes(q)) : list,
+        nextCursor: null,
+      }
+    }),
+    getPortfoliosPage: vi.fn(async (_jwt: string, _orgIds: number[], opts?: { q?: string }) => {
+      const portfolios = await getPortfolios()
+      const list = portfolios.flatMap(({ orgId, projects: rows }) =>
+        rows.map((project) => ({ ...project, orgId })),
+      )
+      const q = opts?.q?.trim().toLowerCase() ?? ""
+      return {
+        projects: q ? list.filter((p) => p.name.toLowerCase().includes(q)) : list,
+        nextCursor: null,
+      }
+    }),
   }
 })
 
@@ -99,15 +117,19 @@ vi.mock("@/lib/frontier/portfolio", async (importActual) => {
 // portfolio-focused assertions below are unaffected.
 vi.mock("@/lib/sync/assignments", () => ({ getWorkload: vi.fn(async () => []) }))
 
-// AQU-335/AQU-416: accessible-projects feed for the "Shared with you" section
-// (and OrgProvider's guest-org derivation). Default empty — the shared-section
-// test overrides it with a foreign-org grant.
+// AQU-335/AQU-416: accessible-projects feed for foreign-org grants (and
+// OrgProvider's guest-org derivation). Default empty — the all-orgs Shared
+// origin test overrides it with a foreign-org grant.
 const fetchAccessibleProjectsMock = vi.fn(async (): Promise<unknown[]> => [])
 vi.mock("@/lib/sync/cloud-projects", async (importActual) => {
   const actual = await importActual<typeof import("@/lib/sync/cloud-projects")>()
   return {
     ...actual,
     fetchAccessibleProjects: () => fetchAccessibleProjectsMock(),
+    fetchAccessibleProjectsResult: async () => ({
+      ok: true as const,
+      projects: await fetchAccessibleProjectsMock(),
+    }),
   }
 })
 
@@ -134,14 +156,20 @@ const defaultOrgSettingsMock = (): OrgSettingsMock => ({
   orgProviderKeys: {},
   canExport: true,
   exportMinRole: null,
+  canEgress: false,
+  egressMinRole: 700,
   canViewRoster: true,
   rosterViewMinRole: 600,
   canViewMemberProgress: true,
   memberProgressViewMinRole: 600,
   // AQU-496: default leads-only (matches the server's safe default).
   allowSelfAssignment: false,
+  assignmentMinRole: 500,
   // AQU-822: default termbase-edit floor (project_lead), as the server resolves it.
   termbaseEditMinRole: 500,
+  languageEditMinRole: 600,
+  commentCreateMinRole: 200,
+  commentResolveMinRole: 400,
   refresh: vi.fn(async () => null),
   patch: vi.fn(async () => ({ kind: "ok" as const, value: { orgId: 1, settings: {}, version: 2, updatedAt: null, updatedBy: null } })),
   requestPromotion: vi.fn(async () => ({ kind: "blocked" as const })),
@@ -163,7 +191,7 @@ beforeEach(async () => {
   vi.mocked(listMyOrgs).mockResolvedValue([{ id: 1, name: "Come and See", role: { level: 700, name: "owner" } }])
   const { getWorkload } = await import("@/lib/sync/assignments")
   vi.mocked(getWorkload).mockResolvedValue([])
-  const { getPortfolio } = await import("@/lib/frontier/portfolio")
+  const { getPortfolio, getPortfolioPage, getPortfolios, getPortfoliosPage } = await import("@/lib/frontier/portfolio")
   vi.mocked(getPortfolio).mockImplementation(async () => {
     const now = Date.now()
     return [
@@ -198,6 +226,26 @@ beforeEach(async () => {
         targetLanguage: null,
       },
     ]
+  })
+  vi.mocked(getPortfolios).mockImplementation(async () => [{ orgId: 1, projects: await getPortfolio("jwt", 1) }])
+  vi.mocked(getPortfolioPage).mockImplementation(async (_jwt, _orgId, opts) => {
+    const list = await getPortfolio("jwt", 1)
+    const q = opts?.q?.trim().toLowerCase() ?? ""
+    return {
+      projects: q ? list.filter((p) => p.name.toLowerCase().includes(q)) : list,
+      nextCursor: null,
+    }
+  })
+  vi.mocked(getPortfoliosPage).mockImplementation(async (_jwt, orgIds, opts) => {
+    const portfolios = await getPortfolios("jwt", orgIds)
+    const list = portfolios.flatMap(({ orgId, projects: rows }) =>
+      rows.map((project) => ({ ...project, orgId })),
+    )
+    const q = opts?.q?.trim().toLowerCase() ?? ""
+    return {
+      projects: q ? list.filter((p) => p.name.toLowerCase().includes(q)) : list,
+      nextCursor: null,
+    }
   })
   // Reset to the default (no invites); the pending-invites test overrides this.
   // restoreAllMocks does not reset vi.fn implementations, so without this a
@@ -274,6 +322,8 @@ describe("ProjectTable", () => {
           projects={[project]}
           now={Date.now()}
           showOrg
+          // AQU-606: this map is only the per-file *hint*; the project's own
+          // targetLanguage ("French") takes precedence for the '' lane chip.
           defaultLaneLabelByProjectId={new Map([[project.id, "conversational Spanish"]])}
         />
       </MemoryRouter>,
@@ -324,14 +374,10 @@ describe("ProjectTable", () => {
     expect(languages).toHaveClass("min-w-0", "overflow-hidden")
     expect(languageChip.parentElement).toHaveClass("w-full", "min-w-0", "max-w-full")
     expect(languageChip).toHaveClass("min-w-0", "max-w-full", "overflow-hidden")
-    expect(within(languageChip).getByText("conversational Spanish")).toHaveClass(
-      "min-w-0",
-      "flex-1",
-      "truncate",
-    )
-    expect(languageChip).toHaveAccessibleName("conversational Spanish: 40% translated")
-    // The truncated label's full text stays recoverable on hover.
-    await expectTooltip(languageChip, "conversational Spanish — 40% translated")
+    expect(within(languageChip).getByText("French")).toHaveClass("min-w-0", "flex-1", "truncate")
+    expect(languageChip).toHaveAccessibleName("French: 40% translated")
+    // The (potentially truncated) label's full text stays recoverable on hover.
+    await expectTooltip(languageChip, "French — 40% translated")
     expect(screen.getByText("Language")).toBeInTheDocument()
     expect(screen.getByTestId("project-table-translated-header")).toHaveAttribute("aria-label", "Translated")
     expect(screen.getByTestId("project-table-validated-header")).toHaveAttribute("aria-label", "Validated")
@@ -342,6 +388,37 @@ describe("ProjectTable", () => {
     expect(screen.queryByText("Role")).not.toBeInTheDocument()
     expect(screen.queryByText("Updated", { exact: true })).not.toBeInTheDocument()
     expect(screen.queryByText(/Updated /)).not.toBeInTheDocument()
+  })
+
+  it("labels the default lane from the project's target language with no per-file hint (AQU-606)", async () => {
+    // The all-orgs table passes an empty hint map, and a lanes-migrated project
+    // carries no per-file targetLanguage — the chip used to read "Default".
+    renderWithTooltips(
+      <MemoryRouter>
+        <ProjectTable projects={[project]} now={Date.now()} showOrg />
+      </MemoryRouter>,
+    )
+
+    const chip = screen.getByTestId(`lane-chip-${project.id}-`)
+    expect(chip).toHaveTextContent("French")
+    expect(chip).not.toHaveTextContent("Default")
+    // A long target language still truncates but stays recoverable on hover.
+    expect(within(chip).getByText("French")).toHaveClass("min-w-0", "flex-1", "truncate")
+    await expectTooltip(chip, "French — 40% translated")
+  })
+
+  it("falls back to the neutral placeholder when no target language is set (AQU-606)", () => {
+    render(
+      <MemoryRouter>
+        <ProjectTable
+          projects={[{ ...project, id: "untargeted", targetLanguage: null }]}
+          now={Date.now()}
+          showOrg
+        />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByTestId("lane-chip-untargeted-")).toHaveTextContent("Default")
   })
 
   it("omits the redundant organization column in a single-organization view", () => {
@@ -374,11 +451,16 @@ describe("ProjectTable", () => {
 
 describe("OrgOverview / OrgProjects", () => {
   it("never paints a false-empty projects page while the current portfolio is unresolved", async () => {
-    const { getPortfolio } = await import("@/lib/frontier/portfolio")
+    const { getPortfolio, getPortfolioPage } = await import("@/lib/frontier/portfolio")
     let resolvePortfolio!: (projects: PortfolioProject[]) => void
-    vi.mocked(getPortfolio).mockImplementation(
-      () => new Promise((resolve) => { resolvePortfolio = resolve }),
-    )
+    const pending = new Promise<PortfolioProject[]>((resolve) => {
+      resolvePortfolio = resolve
+    })
+    vi.mocked(getPortfolio).mockImplementation(() => pending)
+    vi.mocked(getPortfolioPage).mockImplementation(async () => ({
+      projects: await pending,
+      nextCursor: null,
+    }))
 
     const container = document.createElement("div")
     document.body.appendChild(container)
@@ -402,19 +484,28 @@ describe("OrgOverview / OrgProjects", () => {
     )
 
     try {
-      await waitFor(() => expect(screen.getByTestId("org-projects-loading")).toBeInTheDocument())
-      expect(screen.getByText("Loading projects…")).toBeInTheDocument()
-      expect(screen.getByTestId("org-projects-loading-template")).toBeInTheDocument()
+      await waitFor(() =>
+        expect(screen.getByRole("status", { name: "Loading projects" })).toBeInTheDocument(),
+      )
+      expect(screen.getByPlaceholderText("Search projects…")).toBeInTheDocument()
       expect(document.querySelector('[data-slot="app-shell-header"]')).not.toBeNull()
       expect(screen.queryByTestId("loading-neutral-template")).not.toBeInTheDocument()
       await act(async () => { await Promise.resolve() })
-      expect(addedText.join("\n")).not.toContain("Your organization is ready")
+      // Description is unique to the resolved zero-projects empty state; the
+      // title ("No projects yet") is also the loading-table placeholder.
+      expect(addedText.join("\n")).not.toContain("Create a project to start translating.")
 
       // Keep subsequent refetches empty so the empty-state isn't replaced by default mock data.
       vi.mocked(getPortfolio).mockResolvedValue([])
+      vi.mocked(getPortfolioPage).mockResolvedValue({ projects: [], nextCursor: null })
       await act(async () => { resolvePortfolio([]) })
-      await waitFor(() => expect(screen.queryByTestId("org-projects-loading")).not.toBeInTheDocument())
-      expect(screen.getByText("Your organization is ready")).toBeInTheDocument()
+      await waitFor(() =>
+        expect(screen.queryByRole("status", { name: "Loading projects" })).not.toBeInTheDocument(),
+      )
+      expect(screen.getByText("No projects yet")).toBeInTheDocument()
+      expect(screen.getByText("Create a project to start translating.")).toBeInTheDocument()
+      expect(screen.queryByRole("button", { name: "Invite your team" })).not.toBeInTheDocument()
+      expect(screen.getByPlaceholderText("Search projects…")).toBeInTheDocument()
     } finally {
       observer.disconnect()
       view.unmount()
@@ -545,6 +636,13 @@ describe("OrgOverview / OrgProjects", () => {
     expect(screen.queryByTestId("pending-invitations")).not.toBeInTheDocument()
   })
 
+  it("keeps the overview projects scrollbar inside the card", async () => {
+    renderMemberOverview()
+    const table = await screen.findByTestId("org-overview-projects-table")
+    expect(table).toHaveClass("mx-0")
+    expect(table).not.toHaveClass("-mx-2")
+  })
+
   it("shows the project count in the rollup strip", async () => {
     renderMemberOverview()
     await waitFor(() => expect(screen.getByText("Avg translated")).toBeInTheDocument())
@@ -560,7 +658,7 @@ describe("OrgOverview / OrgProjects", () => {
     expect(screen.getAllByText("Overdue").length).toBeGreaterThan(0)
   })
 
-  it("shows every project directly in recent-update order and marks attention projects", async () => {
+  it("shows every project directly in recent-update order", async () => {
     renderMemberOverview()
 
     const table = await screen.findByTestId("org-overview-projects-table")
@@ -569,15 +667,12 @@ describe("OrgOverview / OrgProjects", () => {
 
     expect(staleProject.compareDocumentPosition(recentProject) & Node.DOCUMENT_POSITION_PRECEDING)
       .toBeTruthy()
-    expect(within(staleProject.closest("tr")!).getByRole("img", {
-      name: "Needs attention: Overdue, Stalled",
-    })).toHaveClass("text-amber-600")
-    expect(within(recentProject.closest("tr")!).queryByRole("img", { name: /needs attention/i }))
+    expect(within(staleProject.closest("tr")!).queryByRole("img", { name: /needs attention/i }))
       .not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /view projects/i })).not.toBeInTheDocument()
   })
 
-  it("shows the ten most recently updated projects first and expands the rest inline", async () => {
+  it("shows every project in a continuous list, with no show-more pager", async () => {
     const { getPortfolio } = await import("@/lib/frontier/portfolio")
     const now = Date.now()
     vi.mocked(getPortfolio).mockResolvedValue(
@@ -603,19 +698,10 @@ describe("OrgOverview / OrgProjects", () => {
     const table = await screen.findByTestId("org-overview-projects-table")
     expect(within(table).getByText("Project 01")).toBeInTheDocument()
     expect(within(table).getByText("Project 10")).toBeInTheDocument()
-    expect(within(table).queryByText("Project 11")).not.toBeInTheDocument()
-
-    const showAll = screen.getByRole("button", { name: "Show all 12" })
-    expect(showAll).toHaveAttribute("aria-expanded", "false")
-    fireEvent.click(showAll)
-
     expect(within(table).getByText("Project 11")).toBeInTheDocument()
     expect(within(table).getByText("Project 12")).toBeInTheDocument()
-    const showFewer = screen.getByRole("button", { name: "Show fewer" })
-    expect(showFewer).toHaveAttribute("aria-expanded", "true")
-
-    fireEvent.click(showFewer)
-    expect(within(table).queryByText("Project 11")).not.toBeInTheDocument()
+    expect(within(table).queryByRole("button", { name: /show \d+ more/i })).not.toBeInTheDocument()
+    expect(within(table).queryByRole("button", { name: /show fewer/i })).not.toBeInTheDocument()
   })
 
   it("shows the audio rollup card and per-project audio % on the projects table", async () => {
@@ -668,21 +754,24 @@ describe("OrgOverview / OrgProjects", () => {
       target: { value: "testament" },
     })
 
-    expect(screen.queryByText("Legacy Translation")).not.toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.queryByText("Legacy Translation")).not.toBeInTheDocument()
+    })
     expect(screen.getByText("New Testament")).toBeInTheDocument()
   })
 
-  it("filters to stalled projects via the status select", async () => {
+  it("filters to stalled projects via the Sort by menu's Status submenu", async () => {
     renderMemberProjects()
     await waitFor(() => expect(screen.getByText("New Testament")).toBeInTheDocument())
 
-    fireEvent.click(screen.getByRole("combobox", { name: /project status filter/i }))
-    const option = await screen.findByRole("option", { name: "Stalled" })
-    fireEvent.pointerMove(option)
-    fireEvent.mouseMove(option)
-    fireEvent.keyDown(document.activeElement ?? option, { key: "Enter" })
+    // AQU-1044: on the Projects page the status filter lives in the combined
+    // Sort by menu (ProjectSortMenu), one submenu per dimension.
+    fireEvent.click(screen.getByTestId("project-sort-menu"))
+    fireEvent.click(await screen.findByRole("menuitem", { name: /^status/i }))
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: "Stalled" }))
+    fireEvent.pointerDown(document.body, { button: 0 })
     await waitFor(() => {
-      expect(screen.queryByRole("listbox")).toBeNull()
+      expect(screen.queryAllByRole("menu")).toHaveLength(0)
     })
 
     // Legacy Translation is 30 days stale; New Testament was just edited.
@@ -690,17 +779,16 @@ describe("OrgOverview / OrgProjects", () => {
     expect(screen.queryByText("New Testament")).not.toBeInTheDocument()
   })
 
-  it("filters to projects that need attention via the status select", async () => {
+  it("filters to projects that need attention via the Sort by menu's Status submenu", async () => {
     renderMemberProjects()
     await waitFor(() => expect(screen.getByText("New Testament")).toBeInTheDocument())
 
-    fireEvent.click(screen.getByRole("combobox", { name: /project status filter/i }))
-    const option = await screen.findByRole("option", { name: "Needs attention" })
-    fireEvent.pointerMove(option)
-    fireEvent.mouseMove(option)
-    fireEvent.keyDown(document.activeElement ?? option, { key: "Enter" })
+    fireEvent.click(screen.getByTestId("project-sort-menu"))
+    fireEvent.click(await screen.findByRole("menuitem", { name: /^status/i }))
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: "Needs attention" }))
+    fireEvent.pointerDown(document.body, { button: 0 })
     await waitFor(() => {
-      expect(screen.queryByRole("listbox")).toBeNull()
+      expect(screen.queryAllByRole("menu")).toHaveLength(0)
     })
 
     // Legacy Translation is overdue + stalled; New Testament is healthy.
@@ -722,18 +810,16 @@ describe("OrgOverview / OrgProjects", () => {
     expect(screen.getByText("No projects match your search.")).toBeInTheDocument()
   })
 
-  // AQU-417: cross-org grants are no longer listed on the org dashboard — they
-  // were scattered under every org's project list. They now live on the
-  // dedicated /shared page (SharedProjectsPage), reached via the sidebar. The
-  // dashboard must NOT render the "Shared with you" section anymore, even when
-  // the caller holds a foreign-org grant. (The /shared page's own test pins the
-  // client-side <Link> to /projects/:id that AQU-416 originally guarded.)
-  it("does not render a Shared with you section on the org overview (moved to /shared, AQU-417)", async () => {
+  // AQU-417: cross-org grants are no longer listed on a single org's
+  // dashboard — they were scattered under every org's project list. They
+  // now live on `/orgs/all` as Shared-origin rows. The org overview must
+  // NOT render a Shared with you section, even when the caller holds a
+  // foreign-org grant.
+  it("does not render a Shared with you section on the org overview (moved to /orgs/all)", async () => {
     fetchAccessibleProjectsMock.mockResolvedValue([
       // In the caller's own org (id 1) — surfaces via the normal portfolio.
       { id: "own-1", name: "Legacy Translation", orgId: 1, role: { level: 700, name: "owner", source: "creator" }, files: [] },
-      // Foreign-org grant (viewer via invite) — previously in the dashboard's
-      // shared section; now collected on /shared instead.
+      // Foreign-org grant (viewer via invite) — collected on /orgs/all, not here.
       { id: "p503", name: "Guest Gospel", orgId: 503, orgName: "Host Org", role: { level: 100, name: "viewer", source: "override" }, files: [] },
     ])
 
@@ -743,6 +829,20 @@ describe("OrgOverview / OrgProjects", () => {
     await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
     expect(screen.queryByTestId("shared-with-you")).not.toBeInTheDocument()
     expect(screen.queryByText("Guest Gospel")).not.toBeInTheDocument()
+  })
+
+  it("does not list foreign-org grants on a single org's Projects table (AQU-417)", async () => {
+    fetchAccessibleProjectsMock.mockResolvedValue([
+      { id: "own-1", name: "Legacy Translation", orgId: 1, role: { level: 700, name: "owner", source: "creator" }, files: [] },
+      { id: "p503", name: "Guest Gospel", orgId: 503, orgName: "Host Org", role: { level: 100, name: "viewer", source: "override" }, files: [] },
+    ])
+
+    renderMemberProjects()
+
+    await waitFor(() => expect(screen.getByText("Legacy Translation")).toBeInTheDocument())
+    expect(screen.queryByText("Guest Gospel")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("shared-filter-chip")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("project-shared-badge")).not.toBeInTheDocument()
   })
 })
 
@@ -890,11 +990,19 @@ describe("OrgHome — project-directory load failure (AQU-883)", () => {
     { id: 2, name: "Side Org", role: { level: 700, name: "owner" } },
   ]
 
-  async function renderAllOrgs() {
+  async function renderAllOrgs(
+    portfolios: Array<{ orgId: number; projects: unknown[] }> = [],
+  ) {
     const { listMyOrgs } = await import("@/lib/frontier/orgs")
     vi.mocked(listMyOrgs).mockResolvedValue(twoOrgs)
-    const { getPortfolios } = await import("@/lib/frontier/portfolio")
-    vi.mocked(getPortfolios).mockResolvedValue([])
+    const { getPortfolios, getPortfoliosPage } = await import("@/lib/frontier/portfolio")
+    vi.mocked(getPortfolios).mockResolvedValue(portfolios as never)
+    vi.mocked(getPortfoliosPage).mockImplementation(async () => {
+      const list = (portfolios as Array<{ orgId: number; projects: Array<{ name: string }> }>).flatMap(
+        ({ orgId, projects: rows }) => rows.map((project) => ({ ...project, orgId })),
+      )
+      return { projects: list, nextCursor: null } as never
+    })
     return render(
       <MemoryRouter initialEntries={["/orgs/all"]}>
         <OrgProvider><OrgHome /></OrgProvider>
@@ -938,5 +1046,68 @@ describe("OrgHome — project-directory load failure (AQU-883)", () => {
     await waitFor(() => expect(screen.getByText("Come and See")).toBeInTheDocument())
     expect(screen.queryByTestId("project-directory-error")).not.toBeInTheDocument()
     expect(screen.getByText("No projects yet")).toBeInTheDocument()
+  })
+
+  it("lists foreign-org grants in the projects table as a Shared origin, without mixing them into org rollup tiles", async () => {
+    fetchAccessibleProjectsMock.mockResolvedValue([
+      {
+        id: "p503",
+        name: "Guest Gospel",
+        orgId: 503,
+        orgName: "Host Org",
+        role: { level: 100, name: "viewer", source: "override" },
+        grantedAt: "2026-07-20T00:00:00Z",
+        files: [],
+      },
+    ])
+    await renderAllOrgs([
+      { orgId: 1, projects: [{
+        id: "own-1",
+        name: "Legacy Translation",
+        totalCells: 200,
+        validatedCells: 20,
+        filledCells: 20,
+        aiDraftedCells: 0,
+        lastEditAt: Date.now(),
+        audioCells: 0,
+        validatedAudioCells: 0,
+        recordedMs: 0,
+        deadlineAt: null,
+      }] },
+      { orgId: 2, projects: [] },
+    ])
+
+    expect(await screen.findByText("Guest Gospel")).toBeInTheDocument()
+    expect(screen.getByText("Legacy Translation")).toBeInTheDocument()
+    expect(screen.getByTestId("project-shared-badge")).toBeInTheDocument()
+    // Soft fill — secondary/muted match the table surface in this theme.
+    expect(screen.getByTestId("project-shared-badge")).toHaveClass("bg-foreground/10")
+    expect(screen.getByTestId("project-shared-badge")).toHaveClass("text-muted-foreground")
+    expect(screen.getByText("Host Org")).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "All" })).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "Org" })).toBeInTheDocument()
+    expect(screen.getByTestId("shared-filter-chip")).toBeInTheDocument()
+    const originTabs = within(screen.getByRole("tablist")).getAllByRole("tab")
+    expect(originTabs.map((tab) => tab.textContent)).toEqual(["All", "SharedNew", "Org"])
+    expect(screen.getByTestId("new-shared-nav-badge")).toBeInTheDocument()
+    expect(screen.getByTestId("organizations-panel")).toBeInTheDocument()
+    // Member rollup only — mixing the 0%-of-N shared stub would make this 2
+    // projects and 5% avg translated.
+    expect(within(projectsRollupStat()).getByText("1")).toBeInTheDocument()
+    const avgTile = screen.getByText("Avg translated").parentElement?.parentElement
+    expect(avgTile).toBeTruthy()
+    expect(within(avgTile!).getByText("10%")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId("shared-filter-chip"))
+    await waitFor(() => {
+      expect(screen.queryByText("Legacy Translation")).not.toBeInTheDocument()
+    })
+    expect(screen.getByText("Guest Gospel")).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("tab", { name: "Org" }))
+    await waitFor(() => {
+      expect(screen.queryByText("Guest Gospel")).not.toBeInTheDocument()
+    })
+    expect(screen.getByText("Legacy Translation")).toBeInTheDocument()
   })
 })

@@ -42,6 +42,11 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
     'comment.edit': { commentId: 'cmt-1', body: 'updated' },
     'comment.delete': { commentId: 'cmt-1' },
     'comment.resolve': { commentId: 'cmt-1', resolved: true },
+    'term.create': { conceptId: 'cpt-1', sourceTerm: 'grace', renderings: [], status: 'draft' },
+    'term.update': { conceptId: 'cpt-1', sourceTerm: 'grace' },
+    'term.delete': { conceptId: 'cpt-1' },
+    'term.approve': { conceptId: 'cpt-1' },
+    'term.reject': { conceptId: 'cpt-1', mode: 'delete' },
     'assignment.create': { assignmentId: 'as-1', scopeKind: 'books', scope: [{ fileId: 'file-x' }], scopeLabel: 'Genesis', assigneeUserId: 2 },
     'assignment.reassign': { assignmentId: 'as-1', assigneeUserId: 3 },
     'assignment.unassign': { assignmentId: 'as-1' },
@@ -49,10 +54,22 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
     'cast.assign': { castName: 'Narrator' },
     'cell.retime': { startMs: 0, endMs: 1000 },
     'cell.audio.rename': { audioId: 'audio-1.wav', label: 'Take 3' },
+    'cell.audio.trim': { audioId: 'audio-1.wav', trimStartMs: 250, trimEndMs: 3000 },
+    'cell.audio.place': { audioId: 'audio-1.wav', targetOffsetMs: -250 },
+    'cell.link.set': {
+      kind: 'text-audio',
+      toFileId: 'file-audio-cues',
+      toCellId: 'cue-1',
+      linked: true,
+      origin: 'auto',
+      confidence: 0.92,
+    },
     'cell.audio.measure': { audioId: 'audio-1.wav', durationMs: 1000 },
     'cell.lane.retime': { subtitleStartMs: 0, subtitleEndMs: 1000 },
     'file.video.set': { coreMediaUrl: 'https://cdn/v.mp4' },
     'file.timing.set': { timingMode: 'audioFirst' },
+    'file.corpus.set': { corpusMarker: 'Treasure Hunt Bible' },
+    'file.track.set': { trackId: 'source-subtitles', patch: { name: 'Captions' } },
     'source.cell.mirror': {
       value: 'x',
       upstream: { projectId: 'proj-up', cellId: 'cell-1', eventId: 'evt-up-1', seq: 1, side: 'source', contentHash: 'abc' },
@@ -72,7 +89,7 @@ async function makeAuthorized<K extends EventKind>(kind: K, role = 500) {
     kind,
     projectId: 'proj-a',
     fileId: 'file-x',
-    cellId: kind === 'file.create' || kind === 'file.rename' || kind === 'file.delete' || kind === 'file.restore' ? undefined : 'cell-1',
+    cellId: kind === 'file.create' || kind === 'file.rename' || kind === 'file.delete' || kind === 'file.restore' || kind === 'file.corpus.set' ? undefined : 'cell-1',
     parentId: null,
     author: 'alice',
     payload: payloads[kind],
@@ -114,7 +131,7 @@ function makeNoOpD1(): AquillaDb {
 describe('dispatchEvent', () => {
   it('target.cell.create routes to the cell handler, returns events INSERT + cells UPSERT', async () => {
     const authed = await makeAuthorized('target.cell.create', 400)
-    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: true })
+    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { serverSeq: 1, updateProjection: true })
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) throw new Error('unreachable')
     // 1 events INSERT + 1 chain-claim INSERT (AD-2 atomic arbitration)
@@ -128,7 +145,7 @@ describe('dispatchEvent', () => {
 
   it('cell.validate routes to the cell handler with validator UPSERT + validated recompute + endorsement_count recompute', async () => {
     const authed = await makeAuthorized('cell.validate', 300)
-    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: true })
+    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { serverSeq: 2, updateProjection: true })
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) throw new Error('unreachable')
     // 1 events INSERT + 1 validator UPSERT + 1 ai_drafted clear (AQU-292)
@@ -141,7 +158,7 @@ describe('dispatchEvent', () => {
 
   it('updateProjection=false produces only the events INSERT (AD-2 stale sibling)', async () => {
     const authed = await makeAuthorized('target.cell.commit', 400)
-    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: false })
+    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { serverSeq: 3, updateProjection: false })
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) throw new Error('unreachable')
     expect(outcome.result.stmts.length).toBe(1)
@@ -150,7 +167,7 @@ describe('dispatchEvent', () => {
 
   it('file.create routes to the file handler', async () => {
     const authed = await makeAuthorized('file.create', 500)
-    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: true })
+    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { serverSeq: 4, updateProjection: true })
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) throw new Error('unreachable')
     expect(outcome.result.stmts.length).toBe(2) // events INSERT + files UPSERT
@@ -160,7 +177,7 @@ describe('dispatchEvent', () => {
   it('file.rename routes to the file handler, returns events INSERT + files UPDATE', async () => {
     // CONTRIBUTOR (400) — label cleanup is normal editing flow, not structural.
     const authed = await makeAuthorized('file.rename', 400)
-    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: true })
+    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { serverSeq: 5, updateProjection: true })
     expect(outcome.ok).toBe(true)
     if (!outcome.ok) throw new Error('unreachable')
     expect(outcome.result.stmts.length).toBe(2) // events INSERT + files UPDATE
@@ -170,7 +187,7 @@ describe('dispatchEvent', () => {
 
   it('source.* kinds route to the cell handler (with side=source projection)', async () => {
     const authed = await makeAuthorized('source.cell.create', 500)
-    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { updateProjection: true })
+    const outcome = dispatchEvent(makeNoOpD1(), authed, 9999, { serverSeq: 6, updateProjection: true })
     expect(outcome.ok).toBe(true)
   })
 })

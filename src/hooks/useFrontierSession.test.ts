@@ -19,7 +19,7 @@ vi.mock("@/lib/posthog", () => ({
 }))
 
 vi.mock("@/hooks/useAccounts", () => ({
-  useAccounts: () => ({ active: null, loading: false }),
+  useAccounts: () => ({ active: null, loading: false, adopt: vi.fn(async () => {}) }),
 }))
 
 vi.mock("@/lib/frontier/session-store", () => ({
@@ -105,7 +105,7 @@ describe("useFrontierSession — distinct id hashing", () => {
 
   it("register with analytics opted out: email not passed as person property", async () => {
     // Analytics defaults to ON, so withholding email requires an explicit opt-out
-    localStorage.setItem("codex:analyticsEnabled", "false")
+    localStorage.setItem("aquilla:analyticsEnabled", "false")
     const username = "bob"
     const email = "bob@example.com"
     vi.mocked(mockRegister).mockResolvedValue({ username, jwt: "tok", createdAt: "x" } as never)
@@ -121,7 +121,7 @@ describe("useFrontierSession — distinct id hashing", () => {
   })
 
   it("register with consent: email passed as person property", async () => {
-    localStorage.setItem("codex:analyticsEnabled", "true")
+    localStorage.setItem("aquilla:analyticsEnabled", "true")
     const username = "alice"
     const email = "alice@example.com"
     vi.mocked(mockRegister).mockResolvedValue({ username, jwt: "tok", createdAt: "x" } as never)

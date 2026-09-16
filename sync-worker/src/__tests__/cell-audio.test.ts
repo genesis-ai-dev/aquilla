@@ -140,7 +140,16 @@ describe("cell-audio projection", () => {
     }
   })
 
-  it("attach: trims stay a plain overwrite so dragging to the clip edge still CLEARS them", () => {
+  // 2026-08-14: this test used to assert the OPPOSITE — that trims stayed a
+  // plain overwrite "so dragging to the clip edge still CLEARS them". That
+  // exemption was the last instance of the very bug the test above describes,
+  // and it cost three takes in a row: an attach carrying only word timings
+  // (the transcription's, ~800ms after a take is saved) nulled the trim window
+  // the save had just written, and the take was left anchored a few hundred ms
+  // early with nothing to undo the shift. Clearing now belongs to
+  // cell.audio.trim, which states both ends and can therefore mean NULL out
+  // loud — see audio-trim-projection.test.ts.
+  it("attach: trims are COALESCEd too — an attach may SET a window, never wipe one", () => {
     const { db, recorded } = makeRecordingDb()
     buildEventProjectionStmts(
       db,
@@ -152,10 +161,8 @@ describe("cell-audio projection", () => {
       [],
     )
     const sql = recorded.find((s) => s.sql.includes("INSERT INTO cell_audio"))!.sql
-    expect(sql).toContain("trim_start_ms = excluded.trim_start_ms")
-    expect(sql).toContain("trim_end_ms = excluded.trim_end_ms")
-    expect(sql).not.toContain("COALESCE(excluded.trim_start_ms")
-    expect(sql).not.toContain("COALESCE(excluded.trim_end_ms")
+    expect(sql).toContain("trim_start_ms = COALESCE(excluded.trim_start_ms, cell_audio.trim_start_ms)")
+    expect(sql).toContain("trim_end_ms = COALESCE(excluded.trim_end_ms, cell_audio.trim_end_ms)")
   })
 
   it("select: deselects siblings then selects the target", () => {
@@ -186,6 +193,56 @@ describe("cell-audio projection", () => {
     expect(stmts).toHaveLength(1)
     expect(recorded[0].sql).toContain("SET deleted = 1, selected = 0")
     expect(recorded[0].args).toEqual(["p1", "f1", "c1", "audio-z.wav"])
+  })
+
+  // ── AQU-646 stage 3: cell.audio.place ────────────────────────────────────
+  //
+  // Where ONE take sits against the line it performs. Its own kind rather than
+  // a field on attach, because absence has to keep meaning exactly one thing.
+
+  it("place: writes the offset onto that take and nothing else", () => {
+    const { db, recorded } = makeRecordingDb()
+    const stmts: AquillaStatement[] = []
+    const touches = buildEventProjectionStmts(
+      db,
+      makeEvent("cell.audio.place", { audioId: "audio-z.wav", targetOffsetMs: -250 }),
+      stmts,
+    )
+    expect(touches).toEqual(["cell_audio"])
+    expect(stmts).toHaveLength(1)
+    expect(recorded[0].sql).toContain("SET target_offset_ms = ?")
+    // Addressed by audio_id alone — it is part of the primary key, so naming
+    // the take names the row and a slot term could only disagree with itself.
+    expect(recorded[0].args).toEqual([-250, "p1", "f1", "c1", "audio-z.wav"])
+    // It touches nothing else: not selection, not trims, not the cell.
+    expect(recorded[0].sql).not.toContain("selected")
+    expect(recorded[0].sql).not.toContain("trim_")
+    expect(recorded[0].sql).not.toContain("UPDATE cells")
+  })
+
+  // `?? null`, never `|| null`. Zero is a take placed exactly on its line's
+  // start — the commonest placement there is — and `||` would store it as
+  // "never placed by hand".
+  it("place: an offset of exactly 0 is stored as 0, not as NULL", () => {
+    const { db, recorded } = makeRecordingDb()
+    const stmts: AquillaStatement[] = []
+    buildEventProjectionStmts(
+      db,
+      makeEvent("cell.audio.place", { audioId: "audio-z.wav", targetOffsetMs: 0 }),
+      stmts,
+    )
+    expect(recorded[0].args[0]).toBe(0)
+  })
+
+  it("place: null CLEARS the placement back to the line's start", () => {
+    const { db, recorded } = makeRecordingDb()
+    const stmts: AquillaStatement[] = []
+    buildEventProjectionStmts(
+      db,
+      makeEvent("cell.audio.place", { audioId: "audio-z.wav", targetOffsetMs: null }),
+      stmts,
+    )
+    expect(recorded[0].args[0]).toBeNull()
   })
 
   // AQU-646: transcription rides cell.audio.attach (contributor floor) instead
@@ -322,5 +379,61 @@ describe("GET /api/v1/projects/:p/files/:f/audio-attachments", () => {
     // c2's only clip is unselected → both selections null.
     expect(body.cells.c2.selectedAudioId).toBeNull()
     expect(body.cells.c2.selectedGeneratedVoiceAudioId).toBeNull()
+  })
+
+  // ── AQU-646 stage 3: a selection on an ADDED target track ────────────────
+  //
+  // THIS ROUTE IS THE ONLY PLACE SUCH A SELECTION COULD BE LOST, and before
+  // `selectedBySlot` it was: the two named pointers are an if/else over two
+  // literals with no fallthrough, so a row selected in a third slot arrived
+  // inside `attachments` with its slot intact and was pointed at by nothing.
+  it("reports the selection in EVERY slot, not only the two well-known ones", async () => {
+    const TRK = "019fd21a-a5a4-75d1-b8c4-3b60072a4fc2"
+    const rows: AudioRow[] = [
+      {
+        cell_id: "c1", audio_id: "rec1.webm", slot: "recording", url: "frontier-audio://rec1.webm",
+        mime_type: "audio/webm", voice_id: null, reference_audio_id: null, duration_ms: 1000,
+        timings_json: null, selected: 1, created_ts: 1,
+      },
+      {
+        cell_id: "c1", audio_id: "trk1.webm", slot: TRK, url: "frontier-audio://trk1.webm",
+        mime_type: "audio/webm", voice_id: null, reference_audio_id: null, duration_ms: 900,
+        timings_json: null, selected: 1, created_ts: 2,
+      },
+      {
+        cell_id: "c1", audio_id: "trk0.webm", slot: TRK, url: "frontier-audio://trk0.webm",
+        mime_type: "audio/webm", voice_id: null, reference_audio_id: null, duration_ms: 800,
+        timings_json: null, selected: 0, created_ts: 3,
+      },
+    ]
+    const token = await makeTestToken(SECRET, { projectId: "p1", fileId: "f1" })
+    const res = (await readReq({ AQUILLA_PG: makeReadDb(rows), SYNC_SECRET_KEY: SECRET }, token))!
+    const body = (await res.json()) as {
+      cells: Record<string, {
+        selectedBySlot: Record<string, string>
+        selectedAudioId: string | null
+        selectedGeneratedVoiceAudioId: string | null
+      }>
+    }
+    expect(body.cells.c1.selectedBySlot).toEqual({ recording: "rec1.webm", [TRK]: "trk1.webm" })
+    // …and the two named pointers stay EXACTLY what they were. They are pure
+    // projections of the map now, which is what stops the two shapes drifting —
+    // a third slot must never leak into either of them.
+    expect(body.cells.c1.selectedAudioId).toBe("rec1.webm")
+    expect(body.cells.c1.selectedGeneratedVoiceAudioId).toBeNull()
+  })
+
+  it("leaves selectedBySlot empty when nothing on the cell is selected", async () => {
+    const rows: AudioRow[] = [
+      {
+        cell_id: "c9", audio_id: "a.webm", slot: "recording", url: "frontier-audio://a.webm",
+        mime_type: null, voice_id: null, reference_audio_id: null, duration_ms: null,
+        timings_json: null, selected: 0, created_ts: 1,
+      },
+    ]
+    const token = await makeTestToken(SECRET, { projectId: "p1", fileId: "f1" })
+    const res = (await readReq({ AQUILLA_PG: makeReadDb(rows), SYNC_SECRET_KEY: SECRET }, token))!
+    const body = (await res.json()) as { cells: Record<string, { selectedBySlot: Record<string, string> }> }
+    expect(body.cells.c9.selectedBySlot).toEqual({})
   })
 })

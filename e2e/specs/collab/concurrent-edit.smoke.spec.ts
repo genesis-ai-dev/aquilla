@@ -38,6 +38,11 @@ test("alice edits cell 0; bob sees the new text in his open editor within 15s", 
   await createProjectServerSide(aliceSession.jwt, { id: projectId, name: projectName })
   await addProjectMember(aliceSession.jwt, projectId, "bob", ROLE.CONTRIBUTOR)
 
+  // AQU-1220: exercise cold import setup on a slower renderer. The dialog
+  // loads lazily; readiness must not depend on rendering between two probes.
+  const renderer = await alice.context().newCDPSession(alice)
+  await renderer.send("Emulation.setCPUThrottlingRate", { rate: 4 })
+
   // 2. Alice navigates to the project, imports the sample file, opens it.
   await alice.goto(`/project/${projectId}/editor`)
   // Server-side-created projects have no source/target language, so the import
@@ -45,11 +50,16 @@ test("alice edits cell 0; bob sees the new text in his open editor within 15s", 
   // step (ImportDialog.tsx `needsDirection`). Pre-seed the per-project skip key
   // (skipStorageKey) so importFile() completes unprompted.
   await alice.evaluate((id) => {
-    localStorage.setItem(`codex.importDirectionSkipped.${id}`, "true")
+    localStorage.setItem(`aquilla.importDirectionSkipped.${id}`, "true")
   }, projectId)
 
   const aliceWs = new Workspace(alice)
-  await aliceWs.importFile(SAMPLE_MD)
+  try {
+    await aliceWs.importFile(SAMPLE_MD)
+  } finally {
+    await renderer.send("Emulation.setCPUThrottlingRate", { rate: 1 })
+    await renderer.detach()
+  }
   await aliceWs.openFileBySubstring("sample")
   await aliceWs.waitForEditor()
 

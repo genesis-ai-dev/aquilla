@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, vi } from "vitest"
 import { makeIdml } from "../../../packages/idml-roundtrip/src/test-helpers/idml-fixture"
 import type { CodexNotebookFile } from "../codex-editor/types"
 import { assessIdmlPair } from "./idml"
@@ -321,6 +321,62 @@ describe("mapFilePairToEvents", () => {
     const head = targetCommitEventId(OPTS.projectId, fileId, "cue1", 2)
     expect(validates[0].author).toBe("reviewer1")
     expect(validates[0].payload).toMatchObject({ editEventId: head })
+  })
+
+  it("falls back to fallbackAuthor for cell.validate when the validator has no username (AQU-TBD, project 65)", () => {
+    // Reproduces the shape from `the-chosen/portuguese_pt`: validator entries
+    // whose username never got recorded. sync-worker's migrate-ingest route
+    // rejects the whole chunk on `undefined` author, so this must never
+    // surface as a bare `undefined`.
+    const input = fixture()
+    const headEdit = input.target!.cells[1].metadata.edits![2]
+    headEdit.validatedBy = [
+      { username: undefined as unknown as string, creationTimestamp: 400, updatedTimestamp: 400, isDeleted: false },
+    ]
+    const ev = mapFilePairToEvents(input, OPTS)
+    const validates = ev.filter((e) => e.kind === "cell.validate")
+    expect(validates).toHaveLength(1)
+    expect(validates[0].author).toBe(OPTS.fallbackAuthor)
+    expect(typeof validates[0].id).toBe("string")
+    expect(validates[0].id.length).toBeGreaterThan(0)
+  })
+
+  it("keeps ids unique across two validators on the same cell that both lack a username", () => {
+    const input = fixture()
+    const headEdit = input.target!.cells[1].metadata.edits![2]
+    headEdit.validatedBy = [
+      { username: "" as unknown as string, creationTimestamp: 400, updatedTimestamp: 400, isDeleted: false },
+      { username: "" as unknown as string, creationTimestamp: 450, updatedTimestamp: 450, isDeleted: false },
+    ]
+    const ev = mapFilePairToEvents(input, OPTS)
+    const validates = ev.filter((e) => e.kind === "cell.validate")
+    expect(validates).toHaveLength(2)
+    expect(validates[0].id).not.toBe(validates[1].id)
+    expect(validates[0].author).toBe(OPTS.fallbackAuthor)
+    expect(validates[1].author).toBe(OPTS.fallbackAuthor)
+  })
+
+  it("skips (and warns once) a validation with no username and no creationTimestamp", () => {
+    const input = fixture()
+    const headEdit = input.target!.cells[1].metadata.edits![2]
+    headEdit.validatedBy = [
+      { username: undefined as unknown as string, creationTimestamp: undefined as unknown as number, updatedTimestamp: 0, isDeleted: false },
+    ]
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const ev = mapFilePairToEvents(input, OPTS)
+    const validates = ev.filter((e) => e.kind === "cell.validate")
+    expect(validates).toHaveLength(0)
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    warnSpy.mockRestore()
+  })
+
+  it("does not change mapping output for a normal validation with a username (byte-identical to fixture baseline)", () => {
+    const before = mapFilePairToEvents(fixture(), OPTS)
+    const after = mapFilePairToEvents(fixture(), OPTS)
+    expect(after).toEqual(before)
+    const validates = after.filter((e) => e.kind === "cell.validate")
+    expect(validates).toHaveLength(1)
+    expect(validates[0].author).toBe("reviewer1")
   })
 
   it("emits startMs/endMs from legacy timecodes (seconds→ms), keeping cellLabel OUT of canonicalRef", () => {

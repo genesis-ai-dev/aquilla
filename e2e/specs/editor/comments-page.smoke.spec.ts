@@ -47,11 +47,8 @@ test("comments page empty state, filters, search, and resolved surface session",
 
   const uniqueText = `unique-search-token-${Date.now()}`
   await test.step("post a comment then Filters expand, collapse, and sort", async () => {
-    const row = ws.cellRow(0)
-    await row.scrollIntoViewIfNeeded()
-    await row.hover()
-    const addCommentBtn = row.locator('button[aria-label="Add comment"]')
-    await expect(addCommentBtn).toBeVisible({ timeout: 5_000 })
+    // AQU-200: comments live behind the rail's ⋯ overflow.
+    const addCommentBtn = await ws.openRowAction(ws.cellRow(0), "Add comment")
     await addCommentBtn.click()
 
     const drawer = alice.locator('[data-testid="comments-drawer"]')
@@ -73,10 +70,7 @@ test("comments page empty state, filters, search, and resolved surface session",
     const filtersBtn = alice.getByRole("button", { name: /^Filters$/i })
     await expect(filtersBtn).toBeVisible({ timeout: 10_000 })
 
-    const sortTrigger = alice
-      .locator("label")
-      .filter({ has: alice.locator("span", { hasText: /^Sort$/ }) })
-      .getByRole("combobox")
+    const sortTrigger = alice.getByRole("combobox", { name: /^Sort$/i })
     await expect(sortTrigger).not.toBeVisible()
 
     await filtersBtn.click()
@@ -124,7 +118,13 @@ test("comments page empty state, filters, search, and resolved surface session",
     await alice.goto(`/project/${projectId}/editor/file/${seeded.fileId}`)
     await ws.waitForEditor()
 
-    await alice.locator("aside").getByRole("button", { name: /^Comments$/ }).click()
+    // The sidebar item carries an open-thread count badge once the worker's
+    // counts aggregate lands, so its accessible name is "Comments 1" here
+    // (this session posted one thread). Accept the badge rather than racing it.
+    await alice
+      .locator("aside")
+      .getByRole("button", { name: /^Comments(?: \d+)?$/ })
+      .click()
     await alice.waitForURL(/\/project\/[^/]+\/comments/, { timeout: 10_000 })
     await expect(
       alice.locator("h1").filter({ hasText: /Comments/i }),
@@ -146,11 +146,8 @@ test("comments page empty state, filters, search, and resolved surface session",
 
   await test.step("Show resolved checkbox reveals resolved threads", async () => {
     // Cell 0 already has an open comment from earlier steps — use a fresh cell.
-    const row = ws.cellRow(2)
-    await row.scrollIntoViewIfNeeded()
-    await row.hover()
-    const addCommentBtn = row.locator('button[aria-label="Add comment"]')
-    await expect(addCommentBtn).toBeVisible({ timeout: 5_000 })
+    // AQU-200: comments live behind the rail's ⋯ overflow.
+    const addCommentBtn = await ws.openRowAction(ws.cellRow(2), "Add comment")
     await addCommentBtn.click()
 
     const commentText = `resolved-comment-${Date.now()}`
@@ -172,15 +169,12 @@ test("comments page empty state, filters, search, and resolved surface session",
     await alice.goto(`/project/${projectId}/comments`)
     await alice.getByRole("button", { name: /^Filters$/i }).click()
 
-    const showResolvedCheckbox = alice
-      .locator("label")
-      .filter({ hasText: /Show resolved/i })
-      .getByRole("checkbox")
-    await expect(showResolvedCheckbox).toBeVisible({ timeout: 5_000 })
-    await expect(showResolvedCheckbox).not.toBeChecked()
+    const showResolvedSwitch = alice.getByRole("switch", { name: /Show resolved/i })
+    await expect(showResolvedSwitch).toBeVisible({ timeout: 5_000 })
+    await expect(showResolvedSwitch).not.toBeChecked()
 
     const reopenBtn = alice.getByRole("button", { name: /^Reopen$/i }).first()
-    await showResolvedCheckbox.check()
+    await showResolvedSwitch.click()
     await expect(async () => {
       await alice.getByRole("button", { name: /^Refresh$/i }).click()
       await expect(reopenBtn).toBeVisible({ timeout: 1_000 })
@@ -192,10 +186,12 @@ test("comments page empty state, filters, search, and resolved surface session",
     }
     await expect(alice.getByText(commentText)).toBeVisible({ timeout: 5_000 })
 
-    await showResolvedCheckbox.uncheck()
+    await alice.getByRole("button", { name: /^Filters$/i }).click()
+    await expect(showResolvedSwitch).toBeVisible({ timeout: 5_000 })
+    await showResolvedSwitch.click()
     await expect(reopenBtn).not.toBeVisible({ timeout: 5_000 })
 
-    await showResolvedCheckbox.check()
+    await showResolvedSwitch.click()
     await expect(reopenBtn).toBeVisible({ timeout: 5_000 })
   })
 })

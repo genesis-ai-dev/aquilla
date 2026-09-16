@@ -19,8 +19,14 @@ const orgContext = vi.hoisted(() => ({
   activeOrg: null as { id: number; name: string } | null,
   activeOrgId: null as number | null,
   isAllOrgs: false,
-  orgs: [] as { id: number; name: string }[],
-  accessibleProjects: [] as { id: string }[],
+  orgs: [] as { id: number; name: string; role?: { level: number; name: string } }[],
+  accessibleProjects: [] as Array<{
+    id: string
+    name?: string
+    orgId?: number | null
+    orgName?: string | null
+    role?: { level: number; name: string; source: string }
+  }>,
   accessibleProjectsLoading: false,
   accessibleProjectsError: null as string | null,
   isLoading: false,
@@ -61,6 +67,8 @@ vi.mock("@/lib/frontier/portfolio", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/frontier/portfolio")>()),
   getPortfolio: vi.fn(async () => []),
   getPortfolios: vi.fn(async () => []),
+  getPortfolioPage: vi.fn(async () => ({ projects: [], nextCursor: null })),
+  getPortfoliosPage: vi.fn(async () => ({ projects: [], nextCursor: null })),
 }))
 
 function LocationProbe() {
@@ -74,7 +82,6 @@ function renderAllOrgs() {
       <Routes>
         <Route path="/orgs/all" element={<OrgHome />} />
         <Route path="/orgs/:orgId" element={<div>ORG HOME</div>} />
-        <Route path="/shared" element={<div>SHARED WITH YOU</div>} />
       </Routes>
       <LocationProbe />
     </MemoryRouter>,
@@ -95,25 +102,52 @@ beforeEach(() => {
 })
 
 describe("OrgHome — /orgs/all landing (AQU-864)", () => {
-  it("routes a caller with project access but no org membership to Shared with you", () => {
+  it("renders the all-orgs table for a caller with project access but no org membership", async () => {
     orgContext.orgs = []
-    orgContext.accessibleProjects = [{ id: "p1" }, { id: "p2" }]
+    orgContext.accessibleProjects = [
+      { id: "p1", name: "Guest Gospel", orgId: 503, orgName: "Host Org", role: { level: 100, name: "viewer", source: "override" } },
+      { id: "p2", name: "Other Shared", orgId: 777, orgName: "Other Org", role: { level: 100, name: "viewer", source: "override" } },
+    ]
 
     renderAllOrgs()
 
-    expect(screen.getByTestId("location")).toHaveTextContent("/shared")
-    expect(screen.getByText("SHARED WITH YOU")).toBeInTheDocument()
+    expect(screen.getByTestId("location")).toHaveTextContent("/orgs/all")
+    expect(await screen.findByTestId("project-table")).toBeInTheDocument()
+    expect(screen.getByText("Guest Gospel")).toBeInTheDocument()
+    expect(screen.getByText("Other Shared")).toBeInTheDocument()
+    expect(screen.getByTestId("shared-filter-chip")).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "All" })).toBeInTheDocument()
+    expect(screen.queryByRole("tab", { name: "Org" })).not.toBeInTheDocument()
+    expect(screen.queryByTestId("organizations-panel")).not.toBeInTheDocument()
+    expect(screen.queryByText("Avg translated")).not.toBeInTheDocument()
     expect(screen.queryByText(/your organization is ready/i)).not.toBeInTheDocument()
   })
 
-  it("routes a single-membership caller to that org's home", () => {
-    orgContext.orgs = [{ id: 7, name: "Biblica ETT" }]
-    orgContext.accessibleProjects = [{ id: "p1" }]
+  it("routes a single-membership caller with no foreign grants to that org's home", () => {
+    orgContext.orgs = [{ id: 7, name: "Biblica ETT", role: { level: 700, name: "owner" } }]
+    orgContext.accessibleProjects = [{ id: "p1", orgId: 7 }]
 
     renderAllOrgs()
 
     expect(screen.getByTestId("location")).toHaveTextContent("/orgs/7")
     expect(screen.getByText("ORG HOME")).toBeInTheDocument()
+  })
+
+  it("keeps a single-membership caller on /orgs/all when they also have a foreign-org grant", async () => {
+    orgContext.orgs = [{ id: 7, name: "Biblica ETT", role: { level: 700, name: "owner" } }]
+    orgContext.accessibleProjects = [
+      { id: "p1", name: "In-org", orgId: 7, role: { level: 700, name: "owner", source: "org" } },
+      { id: "p2", name: "Guest Gospel", orgId: 503, orgName: "Host Org", role: { level: 100, name: "viewer", source: "override" } },
+    ]
+
+    renderAllOrgs()
+
+    expect(screen.getByTestId("location")).toHaveTextContent("/orgs/all")
+    expect(await screen.findByTestId("project-table")).toBeInTheDocument()
+    expect(screen.getByText("Guest Gospel")).toBeInTheDocument()
+    expect(screen.getByTestId("shared-filter-chip")).toBeInTheDocument()
+    expect(screen.getByRole("tab", { name: "Org" })).toBeInTheDocument()
+    expect(screen.queryByText("ORG HOME")).not.toBeInTheDocument()
   })
 
   it("shows an error with a retry when the org list failed to load", () => {

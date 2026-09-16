@@ -16,6 +16,21 @@ import type { ProjectRecord } from "@/lib/parsers/types"
 import type { CellRow } from "@/lib/sync/cells-read-types"
 import { ROLE } from "@/lib/frontier/roles"
 
+/**
+ * AQU-1068 item 5: the pencil became an entry in the source cell's ONE menu
+ * (Ryder's note, relayed 2026-09-05). Reaching it is two clicks now — open the
+ * menu, then pick the entry — so these helpers say that once instead of at
+ * every call site. What each test asserts about the affordance is unchanged.
+ */
+const openCellMenu = async () => {
+  const trigger = (await screen.findAllByRole("button", { name: "Cell actions" }))[0]
+  fireEvent.click(trigger)
+  return screen.findByTestId("cell-menu-edit-source")
+}
+/** The entry, or null when this person is not offered one at all. */
+const sourceEntry = () => screen.queryByTestId("cell-menu-edit-source")
+void sourceEntry
+
 // AQU-847 needs the pencil visible: the source-edit affordance is gated on a
 // resolved (unlinked) DCS cursor, and the un-mocked hook leaves it loading.
 vi.mock("@/hooks/useDcsUpstreamCursor", () => ({
@@ -150,7 +165,7 @@ describe("EditorTable — correcting a media section's transcript (AQU-847)", ()
     renderTable(makeStore([
       mediaRow("m3", { startMs: 0, endMs: 5_000, transcription: "in the beginning was the word" }),
     ]))
-    fireEvent.click(await screen.findByRole("button", { name: "Edit source text" }))
+    fireEvent.click(await openCellMenu())
     const editor = await screen.findByRole("textbox", { name: "Edit source text" })
     expect(editor.textContent).toBe("in the beginning was the word")
     expect(editor.textContent).not.toContain("episode.mp3")

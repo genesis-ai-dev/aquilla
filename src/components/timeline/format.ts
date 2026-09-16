@@ -1,5 +1,7 @@
 // Display helpers for the timeline editor (pure).
 
+import { formatVttTime } from "@/lib/video/vtt-generator"
+
 /** `m:ss` (or `m:ss.t` with tenths). Guards NaN/negatives to 0. */
 export function fmtClock(sec: number, withTenths = false): string {
   if (!Number.isFinite(sec) || sec < 0) sec = 0
@@ -9,6 +11,13 @@ export function fmtClock(sec: number, withTenths = false): string {
   if (!withTenths) return base
   const tenths = Math.floor((sec - Math.floor(sec)) * 10)
   return `${base}.${tenths}`
+}
+
+/** SUB-11: millisecond clock for the live drag readout — `formatVttTime`
+ * (HH:MM:SS.mmm) with a zero hours field trimmed for width. */
+export function fmtDragTime(sec: number): string {
+  const t = formatVttTime(Math.max(0, sec))
+  return t.startsWith("00:") ? t.slice(3) : t
 }
 
 // Candidate tick spacings (seconds). The ruler picks the smallest that keeps

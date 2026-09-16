@@ -13,6 +13,67 @@ export const org = defineNamespace({
     "org.breadcrumb.allOrganizations": "All organizations",
     "org.breadcrumb.organizationFallback": "Organization",
 
+    // -- OrgDataEgress: maintainer/owner multi-project archive --
+    "org.egress.title": "Data egress",
+    "org.egress.description": "Everything your organization has stored — review it, filter it, and take it with you as one zip archive.",
+    "org.egress.selectOrgDescription": "Data egress is managed within a single organization.",
+    "org.egress.roleRequired":
+      "Data egress is available to organization owners, and to other roles when an owner enables them in Settings.",
+    "org.egress.exportCount": plural({ one: "Export {count} file", other: "Export {count} files" }),
+    "org.egress.loading": "Loading organization files",
+    "org.egress.loadFailed": "Couldn’t load files",
+    "org.egress.portfolioUnavailable": "Portfolio stats are unavailable — lane, audio, and last-edit columns may be incomplete.",
+    "org.egress.policyRestricted": "Export restricted by org policy",
+    "org.egress.selectAll": "Select all files",
+    "org.egress.selectFile": "Select {file}",
+    "org.egress.column.lanes": "Lanes",
+    "org.egress.column.lastEdit": "Last edit",
+    "org.egress.filterPlaceholder": "Filter files…",
+    "org.egress.selectedCount": "{selected} of {total} selected",
+    "org.egress.options.title": "Export options",
+    "org.egress.options.textMode": "Text export mode",
+    "org.egress.options.text.original.label": "Original format (round-trip)",
+    "org.egress.options.text.original.description": "Each file in the format it was imported as; formats without a round-trip exporter use the conversion format below.",
+    "org.egress.options.text.convert.label": "Convert to…",
+    "org.egress.options.text.convert.description": "Every file re-serialized to one uniform format.",
+    "org.egress.options.text.none.label": "Text off",
+    "org.egress.options.text.none.description": "No text entries in the export.",
+    "org.egress.options.conversionFormat": "Conversion format",
+    "org.egress.options.targetLanes": "Target lanes",
+    "org.egress.options.lane": "Lane {lane}",
+    "org.egress.options.includeSources": "Include original source documents",
+    "org.egress.options.includeSourcesDescription": "The raw files you uploaded, exactly as stored.",
+    "org.egress.options.audioMode": "Audio export mode",
+    "org.egress.options.audio.none.description": "No audio in the export.",
+    "org.egress.options.audio.separate.label": "Every clip separately",
+    "org.egress.options.audio.separate.description": "One audio file per cell recording.",
+    "org.egress.options.audio.file.label": "One clip per file",
+    "org.egress.options.audio.file.description": "All of a file’s recordings joined in document order.",
+    "org.egress.options.audio.voice.label": "One clip per voice",
+    "org.egress.options.audio.voice.description": "Each voice’s recordings joined together, no gaps.",
+    "org.egress.options.audio.timeline.label": "Voice timeline stems (silence while others speak)",
+    "org.egress.options.audio.timeline.description": "One aligned track per voice; all tracks share the file’s timeline.",
+    "org.egress.options.useCache": "Reuse cached exports for unchanged projects",
+    "org.egress.options.empty": "These options would export nothing — pick a lane, an audio mode, or source documents.",
+    "org.egress.options.estimate": "{fileCount} · {cellCount}",
+    "org.egress.options.estimateAudio": " · ~{minutes} min recorded audio",
+    "org.egress.results.preparing": "Preparing",
+    "org.egress.results.preparingExport": "Preparing export…",
+    "org.egress.results.exportingText": "Exporting text",
+    "org.egress.results.exportingAudio": "Exporting audio",
+    "org.egress.results.packaging": "Packaging",
+    "org.egress.results.finishing": "Finishing",
+    "org.egress.results.projectStatus": "{phase} — {project} ({current} of {total}){cached}",
+    "org.egress.results.phaseStatus": "{phase}…",
+    "org.egress.results.cachedSuffix": " (cached)",
+    "org.egress.results.progress": "Export progress",
+    "org.egress.results.failed": "Export failed: {message}",
+    "org.egress.results.complete": "Export complete — your download has started.",
+    "org.egress.results.cached": "cached",
+    "org.egress.results.entryCount": plural({ one: "{count} entry", other: "{count} entries" }),
+    "org.egress.results.skipped": "Skipped {scope}: {reason}",
+    "org.egress.results.noteLine": "Note: {file}: {note}",
+
     // -- OrgSwitcher: sidebar dropdown that swaps the active org --
     "org.switcher.workspaceFallback": "Workspace",
     "org.switcher.triggerAriaLabel": "Organization switcher: {org}",
@@ -28,6 +89,7 @@ export const org = defineNamespace({
     "org.switcher.retryOrganizationsAriaLabel": "Retry loading organizations",
     "org.switcher.retrySharedOrganizationsAriaLabel": "Retry loading shared organizations",
     "org.switcher.couldNotLoadSharedOrganizations": "Couldn’t load shared organizations",
+    "org.switcher.searchFailed": "Couldn’t search organizations",
 
     // -- LaneChips: per-lane progress chips on an OrgHome project row --
     "org.laneChips.tooltip": "{label} — {pct} translated",
@@ -84,17 +146,21 @@ export const org = defineNamespace({
     "org.orgHome.projectsPanel.clearFilterAria": "Clear project filter",
     "org.orgHome.projectsPanel.statusLabel": "Status",
     "org.orgHome.projectsPanel.statusFilterAria": "Project status filter",
+    "org.orgHome.originFilter.aria": "Filter projects by origin",
     "org.orgHome.projectsPanel.sortByLabel": "Sort by",
     "org.orgHome.projectsPanel.sortAria": "Project sort",
     "org.orgHome.projectsPanel.sortProjectsAria": "Sort projects",
     "org.orgHome.projectsPanel.noMatchingProjects": "No matching projects.",
 
     "org.orgHome.statusFilter.all": "All",
+    "org.orgHome.statusFilter.shared": "Shared",
 
     "org.orgHome.emptyTitle.stalled": "No stalled projects.",
     "org.orgHome.emptyTitle.attention": "No projects need attention.",
     "org.orgHome.emptyTitle.overdue": "No overdue projects.",
 
+    // Invite-cohort copy; the Projects table no longer uses these. Invite lives
+    // on Overview via OrgSetupChecklist.
     "org.orgHome.readyTitle": "Your organization is ready",
     "org.orgHome.readyDescription":
       "Start a translation project, or bring your team in first — Aquilla is built for people working together.",
@@ -130,7 +196,7 @@ export const org = defineNamespace({
     "org.orgHome.table.sourceTargetLanguageAria": "Source and target language",
     "org.orgHome.table.audioPctAria": "{pct}% audio",
 
-    // -- GuestOrgHome: overview for a project-only guest viewing an org they don't belong to --
+    // -- Guest org projects page: same table as a member org, guest copy --
     "org.guestOrgHome.orgFallbackWithId": "Org #{id}",
     "org.guestOrgHome.description":
       "Projects in {orgName} shared with you. You’re a guest here — you have access to these projects, but not to the organization itself.",
@@ -374,7 +440,9 @@ export const org = defineNamespace({
       "Percentage of cells that have at least one audio recording attached. This is coverage, not validation — see 'Audio Validated' for review status.",
     "org.projectOverview.audioValidated": "Audio Validated",
     "org.projectOverview.audioValidatedTooltip":
-      "Not tracked yet — the server does not record whether a validation applies to text or audio content (see AQU-490).",
+      "Share of every cell whose selected recording has been validated. Counted against every cell, the same way as Validated, so it agrees with the Plan below.",
+    "org.projectOverview.audioValidatedOfRecorded":
+      "Of the audio actually recorded, {percent}% is validated.",
     "org.projectOverview.crossLaneTooltip": "Cross-language stat — not broken down per language.",
     "org.projectOverview.cellsSuffix": "cells",
     "org.projectOverview.laneDefaultFallback": "Default",
@@ -382,10 +450,23 @@ export const org = defineNamespace({
     "org.projectOverview.filesHeadingTruncated": "Files (top {cap} of {total})",
     "org.projectOverview.filesHeadingCount": "Files ({count})",
     "org.projectOverview.filesListAria": "File list",
+    "org.projectOverview.fileListActionsAria": "File list actions",
     "org.projectOverview.copyCsvTooltip": "Copy the file list below as CSV",
     "org.projectOverview.copyCsv": "Copy CSV",
+    "org.projectOverview.copyCsvCopied": "CSV copied to clipboard",
     "org.projectOverview.downloadCsvTooltip": "Download the file list below as a .csv file",
     "org.projectOverview.downloadCsv": "Download CSV",
+    "org.projectOverview.downloadOriginals": "Download all originals",
+    "org.projectOverview.downloadOriginalsTooltip":
+      "Download every original imported source file as a zip",
+    "org.projectOverview.downloadOriginalAria": "Download original {fileName}",
+    "org.projectOverview.importedOriginalsHeading": "Imported originals",
+    "org.projectOverview.importedOriginalsListAria": "Imported original files",
+    "org.projectOverview.importedOriginalsShowMore": plural({
+      one: "Show {count} more",
+      other: "Show {count} more",
+    }),
+    "org.projectOverview.importedOriginalsShowAll": "Show all ({count})",
     "org.projectOverview.copyCsvFailed": "Couldn't copy to clipboard.",
     "org.projectOverview.filterFilesPlaceholder": "Filter files by name…",
     "org.projectOverview.filterFilesAria": "Filter files by name",
@@ -428,7 +509,6 @@ export const org = defineNamespace({
     "org.projectOverview.openAssignmentsStat": "{count} open · {percent}",
     "org.projectOverview.viewActivityAria": "View activity for {username}",
     "org.projectOverview.hide": "Hide",
-    "org.projectOverview.membersVisibilityDescription": "Who can see the member roster on this project.",
     "org.projectOverview.noFilesToExport": "This project has no files to export yet.",
     "org.projectOverview.archiveForbidden": "Only owners can archive a project.",
     "org.projectOverview.restoreForbidden": "Only owners can restore a project.",
@@ -497,6 +577,17 @@ export const org = defineNamespace({
     "org.exportSettings.roleOptionMaintainer": "{role} ({level}) — default",
     "org.exportSettings.roleOptionOwner": "{role} ({level}) — most restrictive",
     "org.exportSettings.saveFailedFallback": "Couldn't save the export permission.",
+
+    // -- OrgSettingsSecurity › EgressAccessSection: who may use Data egress (AQU-907) --
+    "org.egressSettings.whoCanEgressLabel": "Who can use Data egress",
+    "org.egressSettings.whoCanEgressDescription":
+      "Minimum role that can open the organization-wide Data egress page and " +
+      "download everything as one archive. Owners always can; each project's " +
+      "export permission still applies to what ends up in the archive.",
+    "org.egressSettings.ownersOnlyPolicyNote": "Only org owners can change who can use Data egress.",
+    "org.egressSettings.roleOptionViewer": "{role} ({level}) — anyone with project access",
+    "org.egressSettings.roleOptionOwner": "{role} ({level}) — default",
+    "org.egressSettings.saveFailedFallback": "Couldn't save the egress permission.",
 
     // -- AddLanguagePopover: "+ Language" quick action on an OrgHome project row --
     "org.addLanguagePopover.triggerLabel": "Language",
@@ -967,7 +1058,8 @@ export const org = defineNamespace({
     // see the call site for the full mapping). Only genuinely new strings: --
     "org.orgHome.pendingInvitations.description":
       "Invites sent to your email that you have not accepted yet.",
-    "org.orgHome.projectsPanel.sectionDescription": "Projects across every organization you belong to.",
+    "org.orgHome.projectsPanel.sectionDescription":
+      "Projects across organizations you belong to, plus any shared with you.",
     // Distinct from org.orgHome.noProjectsYet ("No projects yet.", with a
     // period) — this is the DataTable's own inline empty-state title, which
     // the source renders without one.
@@ -989,10 +1081,11 @@ export const org = defineNamespace({
     "org.overview.allClearTitle": "All clear",
     "org.overview.allClearDescription":
       "No active project is overdue, due soon, or stalled right now.",
-    "org.overview.projectsDescription":
-      "Most recently updated first. Yellow warnings mark projects that need attention.",
-    "org.overview.attentionAriaLabel": "Needs attention: {reasons}",
-    "org.overview.showAllProjects": "Show all {count}",
+    "org.overview.projectsDescription": "Most recently updated first.",
+    "org.overview.showMoreProjects": plural({
+      one: "Show {count} more",
+      other: "Show {count} more",
+    }),
     "org.overview.emptyDescription": "Create a project to start translating.",
 
     // -- OrgProjectsDataTable: shared portfolio projects DataTable (page/embedded) --
@@ -1010,6 +1103,15 @@ export const org = defineNamespace({
     // "Assign work" menu item → dialog.assign.title (identical text)
     // "Add member" menu item → org.teamDetail.addMemberButton (identical text)
     "org.orgProjectsDataTable.noSearchMatch": "No projects match your search.",
+    // AQU-1097: the plan rollup. Never says "books" — a unit is a book, an
+    // episode or a document depending on the project.
+    "org.orgProjectsDataTable.unitsColumn": "Done",
+    "org.orgProjectsDataTable.unitsDoneValue": "{done} of {total}",
+    "org.orgProjectsDataTable.unitsDoneAria": "{done} of {total} units marked done",
+    "org.orgProjectsDataTable.unitsOverdueTooltip": plural({
+      one: "{count} unit is past its target date",
+      other: "{count} units are past their target date",
+    }),
     // "Clear" → common.clear (identical text)
 
     // -- OrgProjectsPage: single-org projects list page --
@@ -1019,9 +1121,37 @@ export const org = defineNamespace({
     // "Projects" page title → nav.projects (identical text)
     "org.orgProjectsPage.pageDescription":
       "Open a project to edit, or start a new translation workspace.",
-    // "Your organization is ready" → org.orgHome.readyTitle (identical text)
-    // readyDescription → org.orgHome.readyDescription (identical text)
-    // "Invite your team" → org.orgHome.inviteYourTeam (identical text)
+    // AQU-1044: the toolbar's four narrowing dimensions (Status, PM, Role,
+    // Updated) live in one combined "Sort by" menu (ProjectSortMenu), one
+    // submenu per dimension. Reused keys:
+    // "Sort by" trigger → org.orgHome.projectsPanel.sortByLabel (identical text)
+    // "Status" submenu → org.orgHome.projectsPanel.statusLabel (identical text)
+    // "PM" submenu → org.orgProjectsDataTable.pmColumn (identical text)
+    // "Role" submenu → common.roleLabel (identical text)
+    // "Updated" submenu → org.orgProjectsDataTable.updatedColumn (identical text)
+    // Status options → org.orgHome.statusFilter.all/stalled/overdue,
+    //   org.overview.needsAttentionHeading (same keys as ProjectStatusFilter)
+    // AQU-1040: designated-PM options. The PM names themselves are usernames,
+    // not strings.
+    "org.orgProjectsPage.pmFilter.all": "All PMs",
+    // AQU-1027: identity option pinned above the named PMs. PM designation
+    // (projects.pm_user_id) is a different thing from the file assignments
+    // behind "Assigned to me", so this is the only surface that exposes it.
+    "org.orgProjectsPage.pmFilter.mine": "Managed by me",
+    "org.orgProjectsPage.pmFilter.mineEmptyTitle": "You don’t manage any projects here.",
+    // AQU-1042: viewer-role options. The role option labels come from
+    // common.role.* (same keys as RoleLabel).
+    "org.orgProjectsPage.roleFilter.all": "All roles",
+    // AQU-1043: last-edit recency options. Fixed windows, not free-form
+    // dates; "any time" is the default.
+    "org.orgProjectsPage.updatedFilter.any": "Updated any time",
+    "org.orgProjectsPage.updatedFilter.lastDays": "Updated in last {days} days",
+    // "Unassigned" PM option → org.projectOverview.unassigned (identical text)
+    // "(you)" marker on the PM column's own row → editor.validation.you
+    // Filtered-to-nothing empty title → org.orgHome.projectsPanel.noMatchingProjects
+    // Zero-projects empty title → org.orgHome.projectsPanel.emptyTitle
+    // Zero-projects empty description → org.overview.emptyDescription
+    // Invite-a-teammate lives on Overview (OrgSetupChecklist), not this table.
 
     // -- OrgSwitcher: sidebar org-switcher combobox dropdown --
     // "Organizations" group label → org.orgHome.organizations (identical text)
@@ -1029,12 +1159,16 @@ export const org = defineNamespace({
     // "Retry loading shared organizations" aria-label → org.switcher.retrySharedOrganizationsAriaLabel (identical text)
     // "Retry" → common.retry (identical text)
     "org.switcher.guestOrganizationsGroupLabel": "Guest organizations",
+    // Role chip on guest-org rows in the switcher (not a ladder role).
+    "org.switcher.guestRole": "Guest",
+    // Platform-admin chip on viaPlatformAdmin rows → org.orgSidebar.admin (identical text)
     // "All projects" → org.switcher.allProjects (identical text)
     // "Retry loading organizations" aria-label → org.switcher.retryOrganizationsAriaLabel (identical text)
     // "Couldn't load organizations" → org.routeGate.errorTitle (identical text)
     // "Find an organization…" placeholder → org.switcher.searchPlaceholder (identical text)
     // "Find an organization" aria-label → org.switcher.searchAriaLabel (identical text)
     // "No organizations found." → org.switcher.noOrganizationsFound (identical text)
+    // "Couldn't search organizations" → org.switcher.searchFailed (identical text)
     // "Create" → org.switcher.create (identical text)
 
     // -- OverviewLaneTable: per-project lane table (AQU-538 §3.3) --
@@ -1048,6 +1182,88 @@ export const org = defineNamespace({
     // "Project settings" aria-label → editor.navTitle.projectSettings (identical text)
     "org.projectOverview.archiveDialogTitle": "Archive project",
     "org.projectOverview.filterProgressByLanguageAriaLabel": "Filter progress by language",
+    // ── AQU-1092…1098: the plan board ──────────────────────────────────
+    // Copy is deliberately unit-agnostic. A planning unit is a Bible book in
+    // one project, a dub episode in another, a document in a third — so
+    // nothing here may say "books".
+    "org.projectOverview.plan.heading": "Plan",
+    "org.projectOverview.plan.regionAria": "Planning units, grouped by status",
+    "org.projectOverview.plan.summaryDoneLabel": "of {total} done",
+    "org.projectOverview.plan.summaryOverdueLabel": plural({ one: "overdue", other: "overdue" }),
+    "org.projectOverview.plan.summaryInProgressLabel": plural({ one: "in progress", other: "in progress" }),
+    "org.projectOverview.plan.emptyTitle": "Nothing to plan yet",
+    "org.projectOverview.plan.loading": "Loading the plan\u2026",
+    "org.projectOverview.plan.saveFailed": "That change could not be saved, so it has been undone. Try again.",
+    "org.projectOverview.plan.errorTitle": "The plan could not be loaded",
+    "org.projectOverview.plan.error": "Something went wrong reading this project's plan. Nothing has been lost \u2014 try again.",
+    "org.projectOverview.plan.importSource": "Import source",
+    "org.projectOverview.plan.empty":
+      "Import a source and its books, episodes or documents appear here as rows you can give target dates and mark done.",
+    "org.projectOverview.plan.keyboardHint": "Arrow keys move between units \u00b7 Esc closes",
+    "org.projectOverview.plan.cellCount": plural({ one: "{count} cell", other: "{count} cells" }),
+    "org.projectOverview.plan.textBarsAria": "Text {translated}% translated, {validated}% validated",
+    "org.projectOverview.plan.audioBarsAria": "Audio {recorded}% recorded, {validated}% validated",
+    "org.projectOverview.plan.statusDone": "Done",
+    "org.projectOverview.plan.statusOverdue": "Overdue",
+    "org.projectOverview.plan.statusSoon": "Due soon",
+    "org.projectOverview.plan.statusInProgress": "In progress",
+    "org.projectOverview.plan.statusNotStarted": "Not started",
+    "org.projectOverview.plan.groupHintOverdue": "past target, not marked done",
+    "org.projectOverview.plan.groupHintSoon": "target within a week",
+    "org.projectOverview.plan.groupHintInProgress": "active, comfortably ahead",
+    "org.projectOverview.plan.groupHintNotStarted": "no content yet",
+    "org.projectOverview.plan.groupHintDone": "marked complete by a manager",
+    // The inspector docked beside the board.
+    "org.projectOverview.plan.inspectorAria": "Details for {unit}",
+    "org.projectOverview.plan.previousUnit": "Previous unit",
+    "org.projectOverview.plan.nextUnit": "Next unit",
+    "org.projectOverview.plan.targetDate": "Target date",
+    "org.projectOverview.plan.noTarget": "No target",
+    "org.projectOverview.plan.noTargetSet": "No target date set",
+    "org.projectOverview.plan.targetVisibleHint": "Visible to everyone on the project.",
+    "org.projectOverview.plan.targetMaintainerOnly": "Only maintainers can set target dates.",
+    "org.projectOverview.plan.completion": "Completion",
+    "org.projectOverview.plan.markDone": "Mark done",
+    "org.projectOverview.plan.markDoneHint": "Undoable.",
+    "org.projectOverview.plan.markDoneAnyway": "Mark done anyway",
+    "org.projectOverview.plan.unmarkDone": "Un-mark",
+    "org.projectOverview.plan.notMarkedDone": "Not marked done.",
+    "org.projectOverview.plan.aMaintainer": "a maintainer",
+    "org.projectOverview.plan.markedDoneBy": "Marked done {date} by {user}",
+    "org.projectOverview.plan.doneBelowFullNudge":
+      "Validated is at {validated}%. Marking done records your judgment, not the numbers \u2014 the bars stay visible beside the mark.",
+    "org.projectOverview.plan.progress": "Progress",
+    "org.projectOverview.plan.lastActivity": "Last activity {when}.",
+    "org.projectOverview.plan.noActivity": "No activity yet.",
+    "org.projectOverview.plan.resizeInspector": "Resize the details panel",
+    "org.projectOverview.plan.textBarLabel": "TXT",
+    "org.projectOverview.plan.audioBarLabel": "AUD",
+    "org.projectOverview.plan.noTargetShort": "\u2014",
+    "org.projectOverview.plan.daysLate": plural({ one: "{count} day late", other: "{count} days late" }),
+    "org.projectOverview.plan.markedOn": "marked {date}",
+    "org.projectOverview.plan.daysUntil": plural({ one: "in {count} day", other: "in {count} days" }),
+    "org.projectOverview.plan.noTargetDate": "no target date",
+    // AQU-1096: the list controls. Neutral throughout — the orphaned
+    // filterFiles* keys say "files", which this surface never does.
+    "org.projectOverview.plan.filterPlaceholder": "Filter by name\u2026",
+    "org.projectOverview.plan.filterAria": "Filter the plan by name",
+    "org.projectOverview.plan.clearFilter": "Clear the plan filter",
+    "org.projectOverview.plan.noMatchTitle": "Nothing matches",
+    "org.projectOverview.plan.noMatch": "No unit matches the filters you have set. Clear them to see the whole plan again.",
+    "org.projectOverview.plan.showingCount": "Showing {shown} of {total}.",
+    // AQU-1255: the card draws the first few rows and stops. The count lives
+    // in the label so the button says what it opens, to a reader and a screen
+    // reader alike.
+    "org.projectOverview.plan.showAll": "Show all {count}",
+    "org.projectOverview.plan.showFewer": "Show fewer",
+    "org.projectOverview.plan.viewStatus": "By status",
+    "org.projectOverview.plan.viewOrder": "In order",
+    "org.projectOverview.plan.needsDate": "Needs a date",
+    "org.projectOverview.plan.needsDateTooltip": "Show only the units nobody has given a target date yet.",
+    "org.projectOverview.plan.chapters": "Progress by chapter",
+    "org.projectOverview.plan.sections": "Progress by section",
+    "org.projectOverview.plan.chapterCount": plural({ one: "{count} chapter", other: "{count} chapters" }),
+    "org.projectOverview.plan.sectionCount": plural({ one: "{count} section", other: "{count} sections" }),
 
     // -- TeamDetail: single team's page. Most call-site strings here reuse
     // existing org.teamDetail.* / org.teamForm.* / common.* keys already
@@ -1061,6 +1277,7 @@ export const org = defineNamespace({
     "org.teamDetail.sectionsAriaLabel": "Team sections",
     "org.teamDetail.projectsTabDescription":
       "Projects this team can access, and the role granted to members.",
+    "org.teamDetail.addedColumn": "Added",
     "org.teamDetail.attachProjectDialogTitle": "Attach project to '{name}'",
     "org.teamDetail.attachProjectDialogDescription": "Grant this team access at a chosen role.",
     "org.teamDetail.selectProjectPlaceholder": "Select a project…",
@@ -1084,18 +1301,77 @@ export const org = defineNamespace({
         "Organizations, teams, members and invitations — the permanent chrome above a project: the org switcher, breadcrumb trail, member and team management, invite flows and permission surfaces. Most of these strings sit in a narrow header or sidebar that is on screen on every route, so they compete for horizontal space with the project's own content.",
     },
     keys: {
-      "org.overview.attentionAriaLabel": {
+      "org.overview.showMoreProjects": {
         description:
-          "Accessible name for the yellow warning icon beside a project on the single-organization Overview.",
+          "Last-row control on the single-organization Overview's project table that expands the ten-project preview to reveal the remaining projects inline. Count is how many rows are still hidden, not the org total.",
+        placeholders: { count: "Number of projects not currently shown." },
+      },
+      "org.egress.exportCount": {
+        description: "Primary action on Data egress, showing how many selected files will be exported.",
+        placeholders: { count: "Number of selected files; also selects the plural form." },
+      },
+      "org.egress.selectFile": {
+        description: "Accessible name for one file-row selection checkbox.",
+        placeholders: { file: "File name — not translated." },
+      },
+      "org.egress.selectedCount": {
+        description: "Selection summary above the organization file inventory.",
         placeholders: {
-          reasons:
-            "Comma-separated localized attention reasons for the project, such as Overdue and Stalled.",
+          selected: "Number of selected files.",
+          total: "Total number of files in the organization inventory.",
         },
       },
-      "org.overview.showAllProjects": {
+      "org.egress.options.lane": {
+        description: "Accessible name for one target-lane checkbox in export options.",
+        placeholders: { lane: "Target lane display label — not translated." },
+      },
+      "org.egress.options.estimate": {
+        description: "Compact file-and-cell estimate at the bottom of Data egress options.",
+        placeholders: {
+          fileCount: "Already-localized file count, such as '2 files'.",
+          cellCount: "Already-localized cell count, such as '40 cells'.",
+        },
+      },
+      "org.egress.options.estimateAudio": {
+        description: "Optional audio-duration suffix appended to the Data egress estimate.",
+        placeholders: { minutes: "Rounded number of recorded-audio minutes." },
+      },
+      "org.egress.results.projectStatus": {
+        description: "Live export progress line for one project in a multi-project organization export.",
+        placeholders: {
+          phase: "Localized current export phase.",
+          project: "Project name — not translated.",
+          current: "One-based current project number.",
+          total: "Total number of projects being exported.",
+          cached: "Localized cached suffix, or an empty string.",
+        },
+      },
+      "org.egress.results.phaseStatus": {
+        description: "Live organization-level packaging status after all individual projects finish.",
+        placeholders: { phase: "Localized current export phase." },
+      },
+      "org.egress.results.failed": {
+        description: "Terminal Data egress error message.",
+        placeholders: { message: "Verbatim technical failure reason." },
+      },
+      "org.egress.results.entryCount": {
+        description: "Number of archive entries produced for one project.",
+        placeholders: { count: "Number of produced archive entries; also selects the plural form." },
+      },
+      "org.egress.results.skipped": {
+        description: "Transparency line naming one skipped export scope and its reason.",
+        placeholders: {
+          scope: "File, lane, source, or audio scope identifier — not translated.",
+          reason: "Verbatim skip reason from the export engine or server.",
+        },
+      },
+      "org.egress.results.noteLine": {
         description:
-          "Button that expands the single-organization Overview's ten-project preview to reveal every project inline.",
-        placeholders: { count: "Total number of accessible projects in the organization." },
+          "Transparency line under a project's export results carrying one file's caveat — e.g. that a source document is not the byte-exact original upload. Only the leading word is translatable copy.",
+        placeholders: {
+          file: "File name — not translated.",
+          note: "Verbatim caveat from the export engine.",
+        },
       },
       "org.switcher.triggerAriaLabel": {
         description:
@@ -1116,6 +1392,10 @@ export const org = defineNamespace({
       "org.switcher.retrySharedOrganizationsAriaLabel": {
         description:
           "Accessible name for the retry control shown when loading the project directory that backs shared/guest organizations failed. Used both when it replaces the whole switcher (no member orgs) and on the inline retry row inside the open dropdown (member orgs still shown).",
+      },
+      "org.switcher.searchFailed": {
+        description:
+          "Empty-state copy in the org switcher when a server-side organization search failed. Distinct from the member-list load failure, which replaces the whole switcher with a retry affordance.",
       },
       "org.laneChips.tooltip": {
         description:
@@ -1186,7 +1466,18 @@ export const org = defineNamespace({
       },
       "org.orgHome.projectsPanel.statusFilterAria": {
         description:
-          "Accessible name for the project status filter control (the All / Stalled / Overdue / Needs attention segmented tabs) on OrgHome.",
+          "Accessible name for the project status filter control (All / Stalled / Overdue / Needs attention) on OrgHome.",
+      },
+      "org.orgProjectsPage.updatedFilter.lastDays": {
+        description:
+          "Option label for one of the fixed recency windows in the Updated submenu of the org Projects page's combined Sort by menu.",
+        placeholders: {
+          days: "Length of the recency window in days — one of the fixed buckets 7, 30 or 90.",
+        },
+      },
+      "org.orgHome.originFilter.aria": {
+        description:
+          "Accessible name for the All / Shared / Org tabs that filter the all-orgs projects table by whether a project comes from an organization the caller belongs to or was shared with them. The Org tab is omitted when the caller has no organization memberships.",
       },
       "org.orgHome.projectsPanel.sortProjectsAria": {
         description: "Accessible name for the 'Sort by' project-lens select control on OrgHome.",
@@ -1204,16 +1495,16 @@ export const org = defineNamespace({
       },
       "org.guestOrgHome.orgFallbackWithId": {
         description:
-          "Heading fallback on GuestOrgHome when the guest org's name hasn't loaded yet but its id is known.",
+          "Heading fallback on the guest-org projects page when the org's name hasn't loaded yet but its id is known.",
         placeholders: { id: "Numeric id of the guest organization." },
       },
       "org.guestOrgHome.description": {
         description:
-          "Subheading on GuestOrgHome explaining the caller's guest access: they can see this org's shared projects but aren't a member of the organization itself.",
+          "Subheading on the guest-org projects page explaining the caller's guest access: they can see this org's shared projects but aren't a member of the organization itself.",
         placeholders: { orgName: "Display name of the guest organization — not translated." },
       },
       "org.guestOrgHome.emptyTitle": {
-        description: "Empty-state title on GuestOrgHome when no projects in the guest org are shared with the caller.",
+        description: "Empty-state title on the guest-org projects page when no projects in the guest org are shared with the caller.",
         placeholders: { orgName: "Display name of the guest organization — not translated." },
       },
       "org.membersPage.removeDirectAccessTooltip": {
@@ -1396,6 +1687,14 @@ export const org = defineNamespace({
       "org.projectOverview.sortFilesByAria": {
         description: "Accessible name for the dropdown that chooses the sort order of the per-file breakdown list.",
       },
+      "org.projectOverview.fileListActionsAria": {
+        description:
+          "Accessible name for the icon-only overflow (⋯) button beside the file-list filter/sort controls. Distinct from org.projectOverview.moreActionsAria, which names the project-header overflow.",
+      },
+      "org.projectOverview.copyCsvCopied": {
+        description:
+          "Success toast shown after Copy CSV writes the filtered file list to the clipboard. The menu item itself stays labeled Copy CSV.",
+      },
       "org.projectOverview.filesListAria": {
         description:
           "Accessible name for the list element wrapping the per-file breakdown rows, distinguishing it from other lists on the page for screen-reader navigation.",
@@ -1445,6 +1744,37 @@ export const org = defineNamespace({
           total: "Total number of cells in this file.",
           words: "Total word count in this file.",
         },
+      },
+      "org.projectOverview.downloadOriginalAria": {
+        description:
+          "Accessible name for the icon-only button on a project-overview imported-originals row that downloads the exact original imported file.",
+        placeholders: { fileName: "The file's display name — not translated." },
+      },
+      "org.projectOverview.downloadOriginals": {
+        description:
+          "Button on the project-overview imported-originals card that downloads every stored original as a zip. Distinct from Download CSV, which is the plan progress table.",
+      },
+      "org.projectOverview.downloadOriginalsTooltip": {
+        description:
+          "Tooltip on Download all originals explaining that the zip contains the raw imported source files, not a translation-injected export.",
+      },
+      "org.projectOverview.importedOriginalsHeading": {
+        description:
+          "Heading of the project-overview card that lists imported source files a PM can download as originals. Distinct from the Plan board, which is progress, not assets.",
+      },
+      "org.projectOverview.importedOriginalsListAria": {
+        description:
+          "Accessible name for the list of imported original files on the project overview, distinguishing it from the plan and team lists.",
+      },
+      "org.projectOverview.importedOriginalsShowMore": {
+        description:
+          "Text button under the imported-originals list on the project overview, which starts capped at five rows. Reveals the next batch of rows; count is the batch size, not how many are still hidden. Sits beside org.projectOverview.importedOriginalsShowAll and is hidden once fewer than a full batch remains.",
+        placeholders: { count: "Number of additional rows the next batch reveals (always five)." },
+      },
+      "org.projectOverview.importedOriginalsShowAll": {
+        description:
+          "Text button under the capped imported-originals list on the project overview that reveals every remaining row at once. Count is the total number of files that have a stored original, not how many are still hidden. Replaced by org.projectOverview.showFewer once everything is visible.",
+        placeholders: { count: "Total number of imported original files in the list." },
       },
       "org.projectOverview.moreFilesShowAll": {
         description: "Link below the per-file breakdown list that reveals the files hidden past the display cap.",
@@ -1597,6 +1927,40 @@ export const org = defineNamespace({
         description:
           "Error shown under the export-permission dropdown when saving the new setting failed and the server gave no explanation of its own — the setting is unchanged and the reader can simply try again. A complete sentence in the product's voice.",
       },
+      "org.egressSettings.whoCanEgressLabel": {
+        description:
+          "Label for the dropdown that sets the lowest organization role allowed to open the Data egress page (the organization-wide bulk download), and also the name read aloud for that dropdown by screen readers. A question-shaped noun phrase with no question mark — it names the choice rather than asking one. 'Data egress' is the page's own title (org.egress.title) and must match it.",
+      },
+      "org.egressSettings.whoCanEgressDescription": {
+        description:
+          "Explanatory paragraph under the Data-egress permission dropdown, addressed to the administrator making the choice. Two statements: owners always have access regardless of the chosen floor, and each project's separate export permission still filters what the archive can contain.",
+      },
+      "org.egressSettings.ownersOnlyPolicyNote": {
+        description:
+          "Sentence explaining that the Data-egress permission dropdown is not editable by this reader, because changing it is reserved for owners of the organization. Shown as quiet helper text under the dropdown and again as an error when a save is refused for the same reason. A complete sentence stating a rule, not an instruction to the reader.",
+      },
+      "org.egressSettings.roleOptionViewer": {
+        description:
+          "The lowest entry in the Data-egress permission dropdown. Same shape as org.exportSettings.roleOptionPlain, with a note after the dash saying that choosing it lets everyone with project access use Data egress — the most permissive setting.",
+        placeholders: {
+          role: "The role's already-translated display name, resolved from common.role.* — do not translate it again here.",
+          level:
+            "The role's numeric level (100–700), a fixed permission code shared with the server. Keep it in Western digits and do not localize the numerals.",
+        },
+      },
+      "org.egressSettings.roleOptionOwner": {
+        description:
+          "The highest entry in the Data-egress permission dropdown. Same shape as org.exportSettings.roleOptionPlain, with a one-word note after the dash marking it as the value in force unless somebody changes it — for this setting the owner level is the default, unlike the export dropdown where maintainer is.",
+        placeholders: {
+          role: "The role's already-translated display name, resolved from common.role.* — do not translate it again here.",
+          level:
+            "The role's numeric level (100–700), a fixed permission code shared with the server. Keep it in Western digits and do not localize the numerals.",
+        },
+      },
+      "org.egressSettings.saveFailedFallback": {
+        description:
+          "Error shown under the Data-egress permission dropdown when saving the new setting failed and the server gave no explanation of its own — the setting is unchanged and the reader can simply try again. A complete sentence in the product's voice.",
+      },
       "org.addLanguagePopover.triggerAriaLabel": {
         description:
           "Accessible name for the icon-only '+ Language' trigger button on an OrgHome project row that opens the add-language popover.",
@@ -1736,6 +2100,28 @@ export const org = defineNamespace({
           "(project row: Assign work / Add member; archived-file row: Restore) — shared by " +
           "the org projects data table and the Archived projects/files tables.",
         placeholders: { name: "The project's or file's name — not translated." },
+      },
+      "org.orgProjectsDataTable.unitsColumn": {
+        description:
+          "Column header on the org projects table: how many of a project's planning " +
+          "units a manager has marked finished. Deliberately neutral — a unit is a Bible " +
+          "book, a dub episode or a document depending on the project, so this must never " +
+          "say 'Books'.",
+        maxLength: 12,
+      },
+      "org.orgProjectsDataTable.unitsDoneValue": {
+        description: "Cell value for the Done column, e.g. '5 of 66'.",
+        placeholders: { done: "Units marked done — a number.", total: "Units in the project — a number." },
+      },
+      "org.orgProjectsDataTable.unitsDoneAria": {
+        description: "Screen-reader label for the Done column cell.",
+        placeholders: { done: "Units marked done — a number.", total: "Units in the project — a number." },
+      },
+      "org.orgProjectsDataTable.unitsOverdueTooltip": {
+        description:
+          "Tooltip on the red badge beside the Done count: how many units are past their " +
+          "target date without a Done mark.",
+        placeholders: { count: "Overdue units — a number." },
       },
       "org.sharedProjectsPage.scopedDescription": {
         description:
@@ -1961,6 +2347,273 @@ export const org = defineNamespace({
         description:
           "Accessible name for the segmented All/per-lane tabs that filter the Progress card's stats by target language, shown only when the project has more than one lane.",
       },
+      "org.projectOverview.audioValidatedOfRecorded": {
+        description:
+          "Second sentence of the Audio Validated tooltip, appended after org.projectOverview.audioValidatedTooltip. Gives the other ratio a reviewer usually wants: validated audio measured against the audio that exists rather than against every cell. A separate sentence, and a separate key, so it can be ordered independently.",
+        placeholders: {
+          percent: "Validated audio as a percentage of the audio actually recorded \u2014 a whole number, no % sign.",
+        },
+      },
+      "org.projectOverview.plan.heading": {
+        description: "Heading of the project dashboard's plan table. Neutral on purpose: rows are Bible books, dub episodes or documents depending on the project, so this must never say 'Books'.",
+        maxLength: 16,
+      },
+      "org.projectOverview.plan.regionAria": {
+        description: "Screen-reader name for the plan list region, which arrow keys navigate.",
+      },
+      "org.projectOverview.plan.summaryDoneLabel": {
+        description:
+          "Summary pill above the plan table. The count of finished units is rendered as a bold numeral IMMEDIATELY BEFORE this text, so the phrase continues from it: \"2\" + \"of 66 done\".",
+        placeholders: { total: "Units in the project — a number." },
+      },
+      "org.projectOverview.plan.summaryOverdueLabel": {
+        description:
+          "Summary pill. The count is rendered as a bold numeral immediately before this text: \"1\" + \"overdue\". The plural form is selected by that count even though it does not appear in the string.",
+      },
+      "org.projectOverview.plan.summaryInProgressLabel": {
+        description:
+          "Summary pill. The count is rendered as a bold numeral immediately before this text: \"28\" + \"in progress\". Counts units that are started or due soon but not finished.",
+      },
+      "org.projectOverview.plan.emptyTitle": {
+        description: "Heading of the empty state, when a project has no plannable files yet.",
+      },
+      "org.projectOverview.plan.errorTitle": {
+        description:
+          "Heading shown when the plan read fails. Deliberately distinct from the empty state, which would tell a manager their project has no work in it.",
+      },
+      "org.projectOverview.plan.importSource": {
+        description:
+          "Button in the plan's empty state. Opens the editor, which is where importing a source happens.",
+      },
+      "org.projectOverview.plan.empty": {
+        description: "Shown when a project has no plannable files yet.",
+      },
+      "org.projectOverview.plan.keyboardHint": {
+        description: "Hint shown while a unit is selected, describing keyboard navigation.",
+      },
+      "org.projectOverview.plan.cellCount": {
+        description: "Secondary line under a unit's name: how many cells it contains.",
+        placeholders: { count: "Cells in the unit — a number." },
+      },
+      "org.projectOverview.plan.textBarsAria": {
+        description: "Screen-reader label for the two stacked text-progress bars on a plan row.",
+        placeholders: { translated: "Percent translated — a number.", validated: "Percent validated — a number." },
+      },
+      "org.projectOverview.plan.audioBarsAria": {
+        description: "Screen-reader label for the two stacked audio-progress bars on a plan row.",
+        placeholders: { recorded: "Percent recorded — a number.", validated: "Percent validated — a number." },
+      },
+      "org.projectOverview.plan.statusDone": {
+        description: "Status of a unit a manager has explicitly marked finished. Can read Done even when its bars are below 100%.",
+        maxLength: 14,
+      },
+      "org.projectOverview.plan.statusOverdue": {
+        description: "Status of a unit past its target date with no Done mark.",
+        maxLength: 14,
+      },
+      "org.projectOverview.plan.statusSoon": {
+        description: "Status of a unit whose target date is within a week.",
+        maxLength: 14,
+      },
+      "org.projectOverview.plan.statusInProgress": {
+        description: "Status of a unit with content that is comfortably ahead of its target.",
+        maxLength: 14,
+      },
+      "org.projectOverview.plan.statusNotStarted": {
+        description: "Status of a unit with no translated text and no recorded audio yet.",
+        maxLength: 14,
+      },
+      "org.projectOverview.plan.groupHintOverdue": {
+        description: "Right-aligned hint on the Overdue group header, explaining what puts a unit there.",
+      },
+      "org.projectOverview.plan.groupHintSoon": {
+        description: "Hint on the Due soon group header.",
+      },
+      "org.projectOverview.plan.groupHintInProgress": {
+        description: "Hint on the In progress group header.",
+      },
+      "org.projectOverview.plan.groupHintNotStarted": {
+        description: "Hint on the Not started group header.",
+      },
+      "org.projectOverview.plan.groupHintDone": {
+        description: "Hint on the Done group header, stressing that the mark is a human judgment.",
+      },
+      "org.projectOverview.plan.inspectorAria": {
+        description: "Screen-reader name for the detail panel docked beside the plan.",
+        placeholders: { unit: "The unit's name — a book name, episode or document title. Not translated." },
+      },
+      "org.projectOverview.plan.previousUnit": {
+        description: "Tooltip on the up arrow that steps to the previous unit.",
+        maxLength: 20,
+      },
+      "org.projectOverview.plan.nextUnit": {
+        description: "Tooltip on the down arrow that steps to the next unit.",
+        maxLength: 20,
+      },
+      "org.projectOverview.plan.targetDate": {
+        description: "Label for the date a manager plans this unit to be finished by.",
+        maxLength: 18,
+      },
+      "org.projectOverview.plan.noTarget": {
+        description: "Placeholder in the target-date picker when none is set.",
+        maxLength: 16,
+      },
+      "org.projectOverview.plan.noTargetSet": {
+        description: "Shown instead of a date picker to someone who cannot set dates.",
+        maxLength: 28,
+      },
+      "org.projectOverview.plan.targetVisibleHint": {
+        description: "Hint under the target-date picker: the date is not private to the person setting it.",
+      },
+      "org.projectOverview.plan.targetMaintainerOnly": {
+        description: "Explains to a non-maintainer why no date control is offered.",
+      },
+      "org.projectOverview.plan.completion": {
+        description: "Section label above the Mark done control.",
+        maxLength: 16,
+      },
+      "org.projectOverview.plan.markDone": {
+        description: "Button marking a unit finished. An explicit human judgment, not derived from percentages.",
+        maxLength: 14,
+      },
+      "org.projectOverview.plan.markDoneHint": {
+        description: "Reassurance beside Mark done that the action can be reversed.",
+        maxLength: 14,
+      },
+      "org.projectOverview.plan.markDoneAnyway": {
+        description: "Confirms marking a unit done although its validated percentage is below 100.",
+        maxLength: 22,
+      },
+      "org.projectOverview.plan.unmarkDone": {
+        description: "Button reversing a Done mark.",
+        maxLength: 14,
+      },
+      "org.projectOverview.plan.notMarkedDone": {
+        description: "Shown to a non-maintainer when a unit has no Done mark.",
+        maxLength: 24,
+      },
+      "org.projectOverview.plan.aMaintainer": {
+        description: "Fallback for who marked a unit done when the username is unknown.",
+        maxLength: 18,
+      },
+      "org.projectOverview.plan.markedDoneBy": {
+        description: "Provenance line: when a unit was marked done and by whom.",
+        placeholders: { date: "ISO date, e.g. 2026-09-02.", user: "Username — not translated." },
+      },
+      "org.projectOverview.plan.doneBelowFullNudge": {
+        description: "Shown when marking a unit done whose validated share is under 100%. Informative, not blocking — the mark is a judgment the numbers cannot make.",
+        placeholders: { validated: "Percent validated — a number." },
+      },
+      "org.projectOverview.plan.progress": {
+        description: "Section label above the four progress bars.",
+        maxLength: 16,
+      },
+      "org.projectOverview.plan.lastActivity": {
+        description: "When this unit was last edited.",
+        placeholders: { when: "How long ago the unit was last edited \u2014 already-formatted relative time." },
+      },
+      "org.projectOverview.plan.resizeInspector": {
+        description:
+          "Accessible name for the drag handle on the left edge of the docked details panel.",
+      },
+      "org.projectOverview.plan.noActivity": {
+        description: "Shown when a unit has never been edited.",
+        maxLength: 24,
+      },
+      "org.projectOverview.plan.textBarLabel": {
+        description:
+          "Three-letter label beside a plan row's text-progress bars. Abbreviated because it " +
+          "repeats on every row; keep it very short.",
+        maxLength: 4,
+      },
+      "org.projectOverview.plan.audioBarLabel": {
+        description:
+          "Three-letter label beside a plan row's audio-progress bars. Abbreviated because it " +
+          "repeats on every row; keep it very short.",
+        maxLength: 4,
+      },
+      "org.projectOverview.plan.noTargetShort": {
+        description:
+          "Placeholder in a plan row's date column when the unit has no target date. An em " +
+          "dash; translate only if the language uses a different absent-value mark.",
+        maxLength: 3,
+      },
+      "org.projectOverview.plan.daysLate": {
+        description:
+          "Under an overdue unit's target date: how far past it the unit is, counted from the " +
+          "end of the target day everywhere on Earth.",
+        placeholders: { count: "Whole days late — a number." },
+      },
+      "org.projectOverview.plan.markedOn": {
+        description: "Under a finished unit's date: when a manager marked it done.",
+        placeholders: { date: "A short calendar date, already formatted." },
+      },
+      "org.projectOverview.plan.daysUntil": {
+        description: "Note beside a Due soon unit: how long until its target date.",
+        placeholders: { count: "Days remaining — a number." },
+      },
+      "org.projectOverview.plan.noTargetDate": {
+        description: "Note beside a started unit that nobody has given a target date.",
+      },
+      "org.projectOverview.plan.filterPlaceholder": {
+        description:
+          "Placeholder in the plan's filter box. Ends in an ellipsis; the matching aria-label does not. Matches a unit's displayed name and its book code.",
+        maxLength: 24,
+      },
+      "org.projectOverview.plan.filterAria": {
+        description:
+          "Accessible name for the plan's filter box. Says what typing here does; unlike the visible placeholder it must NOT end in an ellipsis.",
+      },
+      "org.projectOverview.plan.showingCount": {
+        description:
+          "Footer line under a filtered plan, saying how much of it is on screen. The summary pills above always count the WHOLE project, so this is the only place the filtered figure appears.",
+        placeholders: {
+          shown: "Units passing the filter \u2014 a number.",
+          total: "Units in the project \u2014 a number.",
+        },
+      },
+      "org.projectOverview.plan.showAll": {
+        description:
+          "Button below a truncated plan list that draws every remaining row in place. The count is the total number of rows the list would draw right now (after any filter), not the project total.",
+        placeholders: {
+          count: "Rows the list would draw once expanded — a number.",
+        },
+        maxLength: 18,
+      },
+      "org.projectOverview.plan.showFewer": {
+        description:
+          "Button at the bottom of a fully expanded plan list that collapses it back to the first few rows. Paired with 'Show all'.",
+        maxLength: 16,
+      },
+      "org.projectOverview.plan.viewStatus": {
+        description:
+          "Button that arranges the plan grouped by status (the default). Paired with 'In order'.",
+        maxLength: 14,
+      },
+      "org.projectOverview.plan.viewOrder": {
+        description:
+          "Button that arranges the plan as one flat list in canonical order \u2014 Bible book order, or file order. Paired with 'By status'.",
+        maxLength: 14,
+      },
+      "org.projectOverview.plan.needsDate": {
+        description:
+          "Toggle that narrows the plan to units with no target date and no Done mark \u2014 a planner's to-do list.",
+        maxLength: 16,
+      },
+      "org.projectOverview.plan.chapters": {
+        description: "Inspector heading over the per-chapter breakdown of a Bible book.",
+      },
+      "org.projectOverview.plan.sections": {
+        description: "Inspector heading over the per-section breakdown of a non-Scripture unit.",
+      },
+      "org.projectOverview.plan.chapterCount": {
+        description: "Part of the inspector subtitle, e.g. \"1,007 cells \u00b7 21 chapters \u00b7 Tok Pisin\".",
+        placeholders: { count: "Chapters in the unit — a number." },
+      },
+      "org.projectOverview.plan.sectionCount": {
+        description: "Part of the inspector subtitle for a non-Scripture unit.",
+        placeholders: { count: "Sections in the unit — a number." },
+      },
       "org.memberActivityPanel.fileRollupSummary": {
         description:
           "Compact numeric summary beside a file's name in the per-member file-worked-on rollup: how many cells and words this member touched in the file, and when they last touched it. Not pluralized on purpose — English always reads 'cells'/'words' here regardless of count, matching the source's existing behavior.",
@@ -1985,6 +2638,11 @@ export const org = defineNamespace({
       },
       "org.teamDetail.sectionsAriaLabel": {
         description: "Accessible name for the Projects/Members/Overview tab list on TeamDetail.",
+      },
+      "org.teamDetail.addedColumn": {
+        description:
+          "Sortable column heading on TeamDetail's projects and members tables for when the project or person was added to the team. Also the DateTooltip hover prefix on that cell (short calendar date visible, labeled datetime on hover).",
+        maxLength: 16,
       },
     },
   },

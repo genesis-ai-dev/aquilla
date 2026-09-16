@@ -1,4 +1,4 @@
-import { defineNamespace } from "./types"
+import { defineNamespace, plural } from "./types"
 
 export const audio = defineNamespace({
   keys: {
@@ -17,14 +17,26 @@ export const audio = defineNamespace({
     "audio.newVoice.engineLabel": "Engine",
     "audio.newVoice.describeLabel": "Describe the voice",
     "audio.newVoice.describePlaceholder": "e.g. a warm older man, calm and clear",
-    "audio.newVoice.kokoroLabel": "Kokoro voice id",
+    "audio.newVoice.kokoroLabel": "Voice",
     "audio.newVoice.kokoroPlaceholder": "e.g. af_bella",
+    "audio.newVoice.kokoroGroupAmerican": "American English",
+    "audio.newVoice.kokoroGroupBritish": "British English",
+    "audio.newVoice.kokoroGenderFemale": "Female",
+    "audio.newVoice.kokoroGenderMale": "Male",
+    "audio.newVoice.kokoroEnglishOnlyHint":
+      "On-device Kokoro speaks English. Pick an American or British voice, or switch this line to OmniVoice, Gemini, or MMS.",
+    "audio.newVoice.kokoroPlaySample": "Play {name} sample",
+    "audio.newVoice.kokoroStopSample": "Stop {name} sample",
     "audio.newVoice.mmsLanguageLabel": "Language",
     "audio.newVoice.singleVoiceHint":
       "{engine} uses a single neural voice. Use the Clone tab to make it sound like a specific person.",
     "audio.newVoice.referenceLabel": "Reference audio",
+    "audio.newVoice.tabFromLine": "From a line",
+    "audio.newVoice.referenceSourceGroupLabel": "Reference clip source",
     "audio.newVoice.referenceDescription":
-      "A short clip is enough — we generate a base voice and clone it to match.",
+      "A short clip is enough (5–15s of one clear speaker) — we generate a base voice and clone it to match.",
+    "audio.newVoice.fromLineEmpty":
+      "No line audio yet. Record or generate a take first, or use Reference audio.",
     "audio.newVoice.reuseTakeSummary": "Or reuse audio from a line",
     "audio.newVoice.takeRecorded": "Recorded",
     "audio.newVoice.takeGenerated": "AI-generated",
@@ -123,8 +135,111 @@ export const audio = defineNamespace({
     "audio.recordingModal.generateTtsButton": "Generate TTS",
     "audio.recordingModal.ttsTooltip": "Generate this line's voice with the project's engine",
     "audio.recordingModal.ttsNeedsTranslation": "Translate this line first to generate voice",
+    "audio.recordingModal.ttsNoLinkedLine": "No subtitle is linked to this heard line, so there are no words to speak. Pair it with a subtitle first.",
     "audio.recordingModal.ttsDoneTooltip": "Voice generated — it plays on the Target track",
+    // AQU-646: leaving the recorder with a take that was never attached.
+    "audio.recordingModal.unsavedTakeTitle": "Keep this take?",
+    "audio.recordingModal.unsavedTakeBody":
+      "You recorded a take and haven't saved it yet. Leaving this line without saving throws it away.",
+    "audio.recordingModal.discardTake": "Throw it away",
+    "audio.recordingModal.saveTake": "Save take",
+    // AQU-646 stage 4c: what the button says when generation failed, while it
+    // is downloading a local voice model, and while it is synthesizing.
+    "audio.recordingModal.ttsFailedButton": "TTS failed",
+    "audio.recordingModal.ttsFailedTooltip": "Generation failed: {error}",
+    "audio.recordingModal.ttsDownloadingPct": "Downloading {percent}%",
     "audio.recordingModal.cancelCountdown": "Cancel countdown",
+
+    // AudioRecordingModal, AQU-646 rebuild — the film panel beside the
+    // recorder, the two-row header, the per-phase notices, and the utility
+    // strip along the bottom (takes / recording format / recorder settings).
+    // Keys above with near-identical wording belong to the pre-rebuild layout
+    // and are still translated; these are the strings the dialog renders now.
+    "audio.recordingModal.collapseFilmTooltip": "Hide the film and use the narrow recorder",
+    "audio.recordingModal.collapseFilmAriaLabel": "Hide the film",
+    "audio.recordingModal.collapseFilmButton": "Collapse video",
+    "audio.recordingModal.expandFilmTooltip": "Show the film for this line beside the recorder",
+    "audio.recordingModal.expandFilmAriaLabel": "Show the film",
+    "audio.recordingModal.prevLineTooltip": "Previous line (⌥←)",
+    "audio.recordingModal.nextLineTooltip": "Next line (⌥→)",
+    "audio.recordingModal.veryShortWindowTitle":
+      "This section is very short — you can still record, but there is barely room for anything.",
+    "audio.recordingModal.lineCounter": "{index} / {total}",
+    "audio.recordingModal.lineCounterWindow": "{index} / {total} · window {seconds}s",
+    "audio.recordingModal.lineCounterVeryShort":
+      "{index} / {total} · window {seconds}s · very short",
+    "audio.tts.voicedSeveral": plural({
+      one: "Voiced {count} heard line",
+      other: "Voiced {count} heard lines",
+    }),
+    "audio.tts.voicedSeveralDetail":
+      "This subtitle is performed by several heard lines, so each one was given the whole subtitle. Trim them to fit.",
+    "audio.tts.mixedCharacters": plural({
+      one: "{count} heard line had more than one character",
+      other: "{count} heard lines had more than one character",
+    }),
+    "audio.tts.mixedCharactersDetail":
+      "Each was voiced as the character on its first line. Check them if the wrong voice would matter.",
+    "audio.tts.siblingFailed": plural({
+      one: "{count} heard line could not be voiced",
+      other: "{count} heard lines could not be voiced",
+    }),
+    "audio.tts.siblingFailedDetail":
+      "The clip you played was saved. Delete it and press the button again to retry the rest.",
+    "audio.recordingModal.cueReferenceLabel": "This cue:",
+    "audio.recordingModal.ttsSharedNotice": plural({
+      one: "{count} heard line performs this subtitle. A generated voice speaks the whole subtitle onto this one, and leaves the others silent.",
+      other: "{count} heard lines perform this subtitle. A generated voice speaks the whole subtitle onto this one, and leaves the others silent.",
+    }),
+    "audio.recordingModal.maxDuration": "max {minutes}m",
+    "audio.recordingModal.overrunNotice": "Past the window — this will overrun the cue.",
+    "audio.recordingModal.nearLimitNotice":
+      "Recording is {warnMinutes} minutes — it stops automatically at {hardStopMinutes}.",
+    "audio.recordingModal.capturedNotice": "Captured — review, then keep or retake.",
+    "audio.recordingModal.noTimedWindow": "This line has no timed window.",
+    "audio.recordingModal.generateButton": "Generate",
+    "audio.recordingModal.uploadTooltip": "Attach an audio file as a take",
+    "audio.recordingModal.uploadButton": "Upload",
+    "audio.recordingModal.takesLabel": "Takes",
+    "audio.recordingModal.formatLockedTooltip":
+      "This take is already captured — the format applies to the next one.",
+    "audio.recordingModal.formatWavTooltip":
+      "Recording at full WAV quality — about three times the file size. Click to record " +
+      "compressed instead.",
+    "audio.recordingModal.formatCompressedTooltip":
+      "Recording compressed — much smaller files, slightly less detail. Click to record at " +
+      "full WAV quality.",
+    "audio.recordingModal.formatWavAriaLabel": "Recording format: WAV — click to record compressed",
+    "audio.recordingModal.formatCompressedAriaLabel":
+      "Recording format: compressed — click to record in WAV",
+    "audio.recordingModal.settingsAriaLabel": "Recorder settings",
+    "audio.recordingModal.autoAdvanceTitle": "Move on after saving a recording",
+    "audio.recordingModal.autoAdvanceOnDescription":
+      "Saved recordings jump to the next line. Uploaded files stay here.",
+    "audio.recordingModal.autoAdvanceOffDescription":
+      "Saved recordings stay on this line, and so do uploaded files.",
+    "audio.recordingModal.countdownTitle": "Countdown",
+    "audio.recordingModal.countdownOnDescription": "Counts 3-2-1 before recording",
+    "audio.recordingModal.countdownOffDescription": "Starts recording straight away",
+    "audio.recordingModal.beepTitle": "Countdown beep",
+    "audio.recordingModal.beepOnDescription": "3-2-1 tones before recording",
+    "audio.recordingModal.beepOffDescription": "Silent countdown",
+    "audio.recordingModal.beepNotApplicableDescription": "No countdown to beep",
+    "audio.recordingModal.noTakesYet": "No takes yet — record one and it lands here.",
+
+    // RecordingVideoSurface — the film panel inside that dialog, and the
+    // headphones-only control that lets its sound out.
+    "audio.recordingModal.filmAriaLabel": "Film for the line being recorded",
+    "audio.recordingModal.filmAudibleTooltip":
+      "The film is playing out loud. Unless you are on headphones it is going into your take " +
+      "— click to mute it.",
+    "audio.recordingModal.filmMutedTooltip":
+      "The film is muted. Unmuting is for headphones only — the mic records with echo " +
+      "cancellation off, so on speakers the film goes into your take.",
+    "audio.recordingModal.filmMuteAriaLabel": "Mute the film",
+    "audio.recordingModal.filmUnmuteAriaLabel": "Unmute the film (headphones only)",
+    "audio.recordingModal.filmAudibleWarning":
+      "The film is not muted. Use headphones — on speakers it will be recorded into your take.",
 
     // TakesStrip — per-cell recorded-take management row.
     "audio.takesStrip.heading": "Takes ({count})",
@@ -136,6 +251,10 @@ export const audio = defineNamespace({
     "audio.takesStrip.syncFailedTooltip":
       "Couldn't save to the server — this take is still on this device. Retry to send it again.",
     "audio.takesStrip.syncFailedRetry": "Not saved — retry",
+    "audio.takesStrip.textDriftBadge": "Text changed",
+    "audio.takesStrip.textDriftTooltip":
+      "Recorded {date}, when this line read: “{text}”. The text has changed since — " +
+      "re-record to match, or keep this take if you are reviewing the older wording.",
     "audio.takesStrip.playTakeTooltip": "Play take",
     "audio.takesStrip.removeNoiseTooltip": "Remove noise (adds a cleaned take)",
     "audio.takesStrip.revertTooltip": "Revert to the original recording",
@@ -151,7 +270,7 @@ export const audio = defineNamespace({
       "Narrator — lines without an explicit speaker use this voice.",
     "audio.library.moreActionsLabel": "More voice actions",
     "audio.library.moreTooltip": "More",
-    "audio.library.setNarrator": "Set as narrator",
+    "audio.library.setNarrator": "Make narrator",
     "audio.library.voicedStats": "{voiced}/{assigned} voiced",
     "audio.library.noLinesYet": "no lines yet",
     "audio.library.cloneEngineLabel": "Clone",
@@ -169,6 +288,11 @@ export const audio = defineNamespace({
     "audio.clone.stopRecordingButton": "Stop ({seconds}s)",
     "audio.clone.recordButton": "Record reference",
     "audio.clone.uploadButton": "Upload audio",
+    "audio.clone.dropzoneTitle": "Add a reference clip",
+    "audio.clone.dropzoneHint":
+      "A short clip is enough (5–15s of one clear speaker) — we generate a base voice and clone it to match.",
+    "audio.clone.dropzoneDrop": "Drop to use as the reference",
+    "audio.clone.errorNotAudio": "That file isn't audio. Use a short recording.",
     "audio.clone.errorNoContext": "No project context for upload.",
     "audio.clone.errorTooLarge": "Reference clip too large (max 8 MB). Use a few seconds.",
     "audio.clone.previewTooltip": "Preview reference clip",
@@ -222,6 +346,7 @@ export const audio = defineNamespace({
     "audio.castGutter.namedTooltip": "{castName} — voiced by {voiceName}",
     "audio.castGutter.defaultTooltip": "{voiceName} — default (no one cast yet)",
     "audio.castGutter.chooseCharacterAriaLabel": "{tooltip}. Choose a character",
+    "audio.castGutter.noCharacter": "No character",
 
     // useCellAudio — errors surfaced while loading/streaming a cell's audio.
     "audio.error.noAttachment": "No audio attachment on this cell",
@@ -252,10 +377,17 @@ export const audio = defineNamespace({
     "audio.aiError.modelNotAvailableTitle": "Model not available",
     "audio.aiError.tooLargeTitle": "Too much text for this model",
     "audio.aiError.geminiKeyRequiredTitle": "Gemini API key required",
+    "audio.aiError.openRouterKeyRequiredTitle": "OpenRouter API key required",
+    "audio.aiError.geminiFailedTitle": "Gemini TTS failed",
+    "audio.aiError.omnivoiceNotConfiguredTitle": "OmniVoice isn't configured",
+    "audio.aiError.omnivoiceFailedTitle": "OmniVoice TTS failed",
+    "audio.aiError.seedVcNotConfiguredTitle": "Voice cloning isn't configured",
+    "audio.aiError.seedVcFailedTitle": "Voice cloning failed",
     "audio.aiError.signInRequiredTitle": "Sign in required",
     "audio.aiError.gitProjectUnsupportedTitle": "Not yet supported on git projects",
     "audio.aiError.nothingToReadTitle": "Nothing to read aloud",
     "audio.aiError.translationNotConfiguredTitle": "Translation not configured",
+    "audio.aiError.ttsNotConfiguredTitle": "Voice generation isn't set up",
     "audio.aiError.translationFailedTitle": "Translation failed",
     "audio.aiError.networkTitle": "Network error",
     "audio.aiError.modelLoadFailedTitle": "Couldn't load model",
@@ -335,15 +467,19 @@ export const audio = defineNamespace({
       },
       "audio.newVoice.engineLabel": {
         description:
-          "Form label above the row of TTS engine choice cards (e.g. OmniVoice, " +
-          "Gemini, Kokoro, MMS) — 'engine' means which speech-synthesis backend " +
-          "generates this voice's audio.",
+          "Form label above the row of TTS engine choice cards. On the TTS tab " +
+          "this is all four engines (OmniVoice, Gemini, Kokoro, MMS). On the Clone " +
+          "tab it is only the cloud engines that can clone a reference clip " +
+          "(OmniVoice, Gemini) — on-device engines are omitted, not shown disabled. " +
+          "'Engine' means which speech-synthesis backend generates this voice's audio.",
       },
       "audio.newVoice.describeLabel": {
         description:
-          "Label for a free-text field, shown only when the Gemini engine is " +
-          "selected, where the user describes in plain words how the voice should " +
-          "sound (e.g. tone, age, mood). Gemini turns this description into a voice.",
+          "Label for a free-text field, shown when the Gemini engine is selected " +
+          "(TTS tab or Clone tab). The user describes in plain words how the voice " +
+          "should sound (tone, age, mood). On a clone this describes the base take " +
+          "that is then re-voiced to match the reference clip — it is not the cloned " +
+          "identity.",
       },
       "audio.newVoice.describePlaceholder": {
         description:
@@ -352,15 +488,53 @@ export const audio = defineNamespace({
       },
       "audio.newVoice.kokoroLabel": {
         description:
-          "Label for a text field, shown only when the Kokoro engine is selected, " +
-          "where the user enters Kokoro's own voice identifier code. 'Kokoro' is the " +
-          "engine's proper name — do not translate it.",
+          "Label for the voice-picker dropdown shown only when the Kokoro engine is " +
+          "selected. Lists Kokoro's built-in American and British speakers. 'Kokoro' " +
+          "is the engine's proper name — do not translate it if it appears nearby.",
       },
       "audio.newVoice.kokoroPlaceholder": {
         description:
           "Placeholder example inside the empty Kokoro voice-id field, showing the " +
           "format of a real id. The example code itself ('af_bella') is data, not " +
           "prose — keep it as-is; only 'e.g.' needs translating.",
+      },
+      "audio.newVoice.kokoroGroupAmerican": {
+        description:
+          "Section heading inside the Kokoro voice dropdown for American English speakers.",
+      },
+      "audio.newVoice.kokoroGroupBritish": {
+        description:
+          "Section heading inside the Kokoro voice dropdown for British English speakers.",
+      },
+      "audio.newVoice.kokoroGenderFemale": {
+        description:
+          "Short gender tag next to a female Kokoro speaker's name in the dropdown.",
+      },
+      "audio.newVoice.kokoroGenderMale": {
+        description:
+          "Short gender tag next to a male Kokoro speaker's name in the dropdown.",
+      },
+      "audio.newVoice.kokoroEnglishOnlyHint": {
+        description:
+          "Helper under the Kokoro voice dropdown when the project's target language " +
+          "is not English. Tells the user Kokoro only speaks English and names the " +
+          "other engines that can speak other languages. 'Kokoro', 'OmniVoice', " +
+          "'Gemini', and 'MMS' are engine names — do not translate them.",
+      },
+      "audio.newVoice.kokoroPlaySample": {
+        description:
+          "Accessible name of the play button that previews a Kokoro speaker. " +
+          "{name} is the speaker's given name (Heart, Bella, George).",
+        placeholders: {
+          name: "The Kokoro speaker's given name, e.g. Heart or Bella.",
+        },
+      },
+      "audio.newVoice.kokoroStopSample": {
+        description:
+          "Accessible name of the same button while that speaker's sample is playing.",
+        placeholders: {
+          name: "The Kokoro speaker's given name, e.g. Heart or Bella.",
+        },
       },
       "audio.newVoice.mmsLanguageLabel": {
         description:
@@ -383,41 +557,58 @@ export const audio = defineNamespace({
       },
       "audio.newVoice.referenceLabel": {
         description:
-          "Form label above the reference-clip recorder/uploader shown on the Clone " +
-          "tab. 'Reference audio' is the short clip the cloned voice will be made to " +
-          "sound like.",
+          "Tab label (and formerly the field label) for recording or uploading a " +
+          "fresh reference clip on the Clone tab. Paired with audio.newVoice.tabFromLine. " +
+          "'Reference audio' is the short clip the cloned voice will be made to sound like.",
+        maxLength: 22,
+      },
+      "audio.newVoice.tabFromLine": {
+        description:
+          "Tab label on the Clone tab for picking an existing take from a project " +
+          "line as the clone reference, instead of recording or uploading a new clip. " +
+          "Paired with audio.newVoice.referenceLabel.",
+        maxLength: 18,
+      },
+      "audio.newVoice.referenceSourceGroupLabel": {
+        description:
+          "Accessible group label (not visible text) for the Reference audio / From a " +
+          "line tab pair, read by screen readers to announce what the two tabs are " +
+          "choosing between.",
       },
       "audio.newVoice.referenceDescription": {
         description:
-          "One-line helper text under the reference-clip control on the Clone tab, " +
-          "explaining that a short clip is sufficient.",
+          "Same wording as audio.clone.dropzoneHint. Kept so existing translations " +
+          "do not go missing; the live UI reads dropzoneHint inside the dashed zone.",
+      },
+      "audio.newVoice.fromLineEmpty": {
+        description:
+          "Empty-state copy on the From a line tab when this file has no recorded or " +
+          "generated takes to reuse as a clone reference.",
       },
       "audio.newVoice.reuseTakeSummary": {
         description:
-          "Collapsed `<summary>` label for a disclosure panel on the Clone tab that, " +
-          "when opened, lists audio already recorded or generated elsewhere in the " +
-          "project so the user can reuse one as the clone reference instead of " +
-          "recording fresh.",
+          "Unused in the current UI (the Clone tab now uses audio.newVoice.tabFromLine). " +
+          "Kept so existing translations do not go missing. Was the collapsed summary " +
+          "label for reusing a line's audio as the clone reference.",
       },
       "audio.newVoice.takeRecorded": {
         description:
-          "Small badge on a listed take (inside the 'reuse audio from a line' " +
-          "panel) meaning this particular clip was captured by a human with a " +
-          "microphone, as opposed to generated by TTS. Paired with " +
-          "audio.newVoice.takeGenerated.",
+          "Unused in the current UI (From a line now uses a checkmark for the " +
+          "chosen take, not a Recorded badge). Kept so existing translations do " +
+          "not go missing.",
         maxLength: 16,
       },
       "audio.newVoice.takeGenerated": {
         description:
-          "Small badge on a listed take meaning this particular clip was produced " +
-          "by AI text-to-speech generation rather than recorded by a human.",
+          "Accessible name and tooltip for a sparkle icon on a listed take meaning " +
+          "this clip was produced by AI text-to-speech rather than recorded.",
         maxLength: 16,
       },
       "audio.newVoice.liftingTake": {
         description:
-          "Transient status text shown while a reused take (see " +
-          "audio.newVoice.reuseTakeSummary) is being copied over to become this " +
-          "voice's clone reference. 'Lifting' = copying that clip into place.",
+          "Accessible name on the in-row spinner shown while a reused take " +
+          "(From a line tab) is being copied into this voice's clone reference. " +
+          "Replaces the checkmark until the copy finishes.",
       },
       "audio.newVoice.errorNoProjectContext": {
         description:
@@ -878,11 +1069,132 @@ export const audio = defineNamespace({
           "engine' means the text-to-speech service configured for this project, so " +
           "the user knows no choice is being asked of them here.",
       },
+      "audio.tts.voicedSeveral": {
+        description:
+          "Toast title after one press of a line's voice button generated more " +
+          "than one clip, which happens when the subtitle is performed by " +
+          "several heard lines (about 8% of lines). Only one clip can be played " +
+          "back, so without this the rest are invisible work. The count is how " +
+          "many were actually written, not how many were attempted.",
+        placeholders: { count: "How many clips were generated. Always 2 or more." },
+      },
+      "audio.tts.voicedSeveralDetail": {
+        description:
+          "Toast body for the above: why there is more than one clip, and what " +
+          "to do about it — each clip says the whole subtitle rather than just " +
+          "its own line's share, so they need trimming.",
+      },
+      "audio.tts.mixedCharacters": {
+        description:
+          "Toast title after a bulk voice generation, when a heard line was " +
+          "performed by subtitle lines with DIFFERENT characters assigned. " +
+          "Measured on the client's own episode: 96 heard lines cover two or " +
+          "more subtitles, of which 5 disagree about the character. The run " +
+          "generates in the first line's character (Sam's ruling) and reports " +
+          "the rest here rather than silently choosing.",
+        placeholders: { count: "How many heard lines had disagreeing characters." },
+      },
+      "audio.tts.mixedCharactersDetail": {
+        description:
+          "Toast body for the above: which character was used, and that it is " +
+          "worth a look rather than an error.",
+      },
+      "audio.tts.siblingFailed": {
+        description:
+          "Error toast after one press of a line's voice button, when the " +
+          "subtitle is performed by several heard lines and some of the extra " +
+          "clips failed to generate. The primary clip succeeded (the user just " +
+          "heard it), so without this the failure is invisible and those lines " +
+          "stay silent in the dub.",
+        placeholders: { count: "How many heard lines failed." },
+      },
+      "audio.tts.siblingFailedDetail": {
+        description:
+          "Toast body for the above: reassures that the clip they heard is " +
+          "safe, and names the only recovery path — the button becomes a replay " +
+          "button once the first clip lands, so retrying means removing it.",
+      },
+      "audio.recordingModal.ttsSharedNotice": {
+        description:
+          "Notice in the recorder, shown AFTER a voice has been generated, and " +
+          "only when the subtitle being performed is split across several " +
+          "heard lines (about 8% of lines). It explains what the generation " +
+          "just did: the synthesized clip says the whole subtitle rather than " +
+          "only this line's share, and the other heard lines performing the " +
+          "same subtitle got no audio from it — so it reads as a to-do, naming " +
+          "what is still silent. Always at least 2, so the plural is safe.",
+        placeholders: { count: "How many heard lines perform this subtitle. Always 2 or more." },
+      },
+      "audio.recordingModal.ttsNoLinkedLine": {
+        description:
+          "Tooltip on the recorder's disabled Generate-voice button when this " +
+          "heard line is not paired with any subtitle, so there are no words " +
+          "to speak. Distinct from the untranslated case, which is a different " +
+          "problem with a different fix.",
+      },
       "audio.recordingModal.ttsNeedsTranslation": {
         description:
           "Tooltip for the synthesize button while it is disabled because the line " +
           "has no translated text yet — there is nothing for a voice to read. " +
           "Phrased as the action that unblocks it.",
+      },
+      "audio.recordingModal.unsavedTakeTitle": {
+        description:
+          "Heading of the confirmation shown when someone tries to leave the " +
+          "recorder while a take they just recorded has not been saved. Asked " +
+          "as a question because both answers are reasonable.",
+      },
+      "audio.recordingModal.unsavedTakeBody": {
+        description:
+          "Body of that confirmation. States plainly that the recording is not " +
+          "stored yet and what leaving would cost, because nothing on screen " +
+          "otherwise distinguishes a saved take from an unsaved one. Says " +
+          "LEAVING THIS LINE rather than closing: the same confirmation now " +
+          "also covers the previous/next arrows, which step to another line " +
+          "without closing the recorder (2026-08-27).",
+      },
+      "audio.recordingModal.discardTake": {
+        description:
+          "The button that leaves the recorder WITHOUT keeping the take. " +
+          "Worded concretely rather than as 'Discard' so it cannot be misread " +
+          "as merely dismissing the question.",
+      },
+      "audio.recordingModal.saveTake": {
+        description:
+          "The button that keeps the take, on that same confirmation. Matches " +
+          "the recorder's own Save control, which is what it triggers.",
+      },
+      "audio.recordingModal.ttsFailedButton": {
+        description:
+          "Visible label of the recorder's voice button after generation " +
+          "failed. Two words on purpose: the button is about half the panel " +
+          "wide, and the actual reason is written out in full on the line " +
+          "beneath it, so this only has to say THAT it failed. 'TTS' is the " +
+          "industry abbreviation for text-to-speech; keep it if it is " +
+          "recognised in the target language, otherwise use the local short " +
+          "form.",
+        maxLength: 16,
+      },
+      "audio.recordingModal.ttsFailedTooltip": {
+        description:
+          "Hover text on that failed button, carrying the verbatim technical " +
+          "error. The user-facing explanation is the line beneath the button, " +
+          "not this — this exists so the raw text can be read and passed on to " +
+          "support without it being the first thing anyone sees.",
+        placeholders: {
+          error:
+            "The underlying error message, usually untranslated technical text " +
+            "from the browser or the voice server.",
+        },
+      },
+      "audio.recordingModal.ttsDownloadingPct": {
+        description:
+          "Label on the recorder's voice button while a local voice model is " +
+          "downloading, so a wait of tens of seconds does not read as a hang. " +
+          "Only local engines (Kokoro, MMS) report progress. Keep it short — " +
+          "the button is about half the panel wide.",
+        placeholders: { percent: "Whole-number download progress, 0 to 100, without the % sign." },
+        maxLength: 18,
       },
       "audio.recordingModal.ttsDoneTooltip": {
         description:
@@ -896,6 +1208,147 @@ export const audio = defineNamespace({
           "Button shown only during the 3-2-1 countdown that aborts it before " +
           "recording starts, returning to the idle state.",
         maxLength: 20,
+      },
+      "audio.recordingModal.collapseFilmAriaLabel": {
+        description:
+          "Screen-reader name of the small button in the top-right corner of the " +
+          "film panel that hides the film, leaving the narrow recorder column on " +
+          "its own. Its visible caption is the shorter " +
+          "audio.recordingModal.collapseFilmButton; this is the fuller phrase " +
+          "assistive tech reads instead.",
+      },
+      "audio.recordingModal.expandFilmAriaLabel": {
+        description:
+          "Screen-reader name of the button in the recorder's header that brings " +
+          "the film back beside the recorder after it was hidden. Only offered " +
+          "when this line actually has a film. Its visible caption is the single " +
+          "word 'Video'.",
+      },
+      "audio.recordingModal.lineCounter": {
+        description:
+          "Position readout under the line's name in the recording dialog's " +
+          "header, when the line has no timed window: which line of the file is " +
+          "being recorded, out of how many. Rendered in a narrow fixed-width " +
+          "strip between the previous/next arrows, so it must stay very short.",
+        placeholders: {
+          index: "1-based position of the line being recorded.",
+          total: "How many lines are in this recording run altogether.",
+        },
+      },
+      "audio.recordingModal.lineCounterWindow": {
+        description:
+          "The same position readout as audio.recordingModal.lineCounter, with " +
+          "the length of this line's timed window appended after a middle dot. " +
+          "The 'window' is how many seconds the finished recording is meant to " +
+          "fit into. The trailing 's' is the abbreviation for seconds.",
+        placeholders: {
+          index: "1-based position of the line being recorded.",
+          total: "How many lines are in this recording run altogether.",
+          seconds:
+            "Length of the line's timed window in seconds, to two decimal places.",
+        },
+      },
+      "audio.recordingModal.lineCounterVeryShort": {
+        description:
+          "The same readout as audio.recordingModal.lineCounterWindow, with a " +
+          "third part warning that the window is so short there is barely room to " +
+          "say anything. Shown in amber. Recording is still allowed — this is a " +
+          "caution, never a refusal.",
+        placeholders: {
+          index: "1-based position of the line being recorded.",
+          total: "How many lines are in this recording run altogether.",
+          seconds:
+            "Length of the line's timed window in seconds, to two decimal places.",
+        },
+      },
+      "audio.recordingModal.maxDuration": {
+        description:
+          "Tiny readout in the corner of the live recording meter naming the " +
+          "longest this take may run before it is stopped automatically. The " +
+          "trailing 'm' is the abbreviation for minutes. Abbreviated hard: it " +
+          "shares one narrow row with the running clock.",
+        placeholders: {
+          minutes: "Whole minutes at which recording stops by itself.",
+        },
+        maxLength: 12,
+      },
+      "audio.recordingModal.nearLimitNotice": {
+        description:
+          "Amber warning under the meter once a take has been running a long " +
+          "time, telling the performer how long it has been and when it will be " +
+          "cut off. Both numbers are whole minutes and the second one has no unit " +
+          "word of its own — it borrows 'minutes' from the first clause.",
+        placeholders: {
+          warnMinutes: "How many minutes the take has been running.",
+          hardStopMinutes:
+            "How many minutes in total the recorder allows before stopping by itself.",
+        },
+      },
+      "audio.recordingModal.formatWavAriaLabel": {
+        description:
+          "Screen-reader name of the recording-format toggle while it is set to " +
+          "WAV, stating the current setting and what pressing it would do. WAV is " +
+          "the uncompressed, larger, higher-quality file format; 'compressed' is " +
+          "the smaller alternative. The visible caption is just the word 'WAV'.",
+      },
+      "audio.recordingModal.formatCompressedAriaLabel": {
+        description:
+          "Screen-reader name of the same toggle while it is set to the " +
+          "compressed format, stating the current setting and what pressing it " +
+          "would do. The visible caption is the single word 'COMPRESSED'.",
+      },
+      "audio.recordingModal.settingsAriaLabel": {
+        description:
+          "Screen-reader name of the gear button at the end of the recorder's " +
+          "bottom strip. It opens a small menu holding three preferences: whether " +
+          "to move on to the next line after each save, whether a 3-2-1 countdown " +
+          "runs before each take, and whether that countdown beeps.",
+      },
+      "audio.recordingModal.countdownTitle": {
+        description:
+          "Name of the preference in the recorder's gear menu that decides " +
+          "whether a 3-2-1 countdown runs before each take. The noun for the " +
+          "count-in itself, not an instruction.",
+        maxLength: 24,
+      },
+      "audio.recordingModal.countdownOnDescription": {
+        description:
+          "One-line description under that preference while the countdown is ON: " +
+          "pressing Record counts three, two, one and then starts capturing.",
+        maxLength: 40,
+      },
+      "audio.recordingModal.countdownOffDescription": {
+        description:
+          "One-line description under the same preference while the countdown is " +
+          "OFF: pressing Record begins capturing immediately, with no count-in.",
+        maxLength: 40,
+      },
+      "audio.recordingModal.beepNotApplicableDescription": {
+        description:
+          "One-line description under the 'Countdown beep' preference while the " +
+          "countdown itself has been turned off, which is why the beep control is " +
+          "greyed out and cannot be pressed: there is no countdown left for it to " +
+          "sound during. States the reason, does not instruct.",
+        maxLength: 40,
+      },
+      "audio.recordingModal.filmAriaLabel": {
+        description:
+          "Screen-reader name of the video element showing the film for the line " +
+          "being recorded. The film is reference only — the performer watches it " +
+          "to time their delivery — so this names what the picture is, not " +
+          "something to operate.",
+      },
+      "audio.recordingModal.filmMuteAriaLabel": {
+        description:
+          "Screen-reader name of the button under the film while its sound is " +
+          "playing: pressing it silences the film. Imperative.",
+      },
+      "audio.recordingModal.filmUnmuteAriaLabel": {
+        description:
+          "Screen-reader name of the same button while the film is silent: " +
+          "pressing it lets the film's sound out. The parenthetical is a warning, " +
+          "not a condition of the button — on speakers the film would be recorded " +
+          "into the take, so this is only safe on headphones.",
       },
       "audio.takesStrip.heading": {
         description:
@@ -951,6 +1404,27 @@ export const audio = defineNamespace({
           "Label on the small red button shown on a take that failed to save to the " +
           "server; pressing it queues the save again. Very short — it sits inline on " +
           "a compact take row.",
+      },
+      "audio.takesStrip.textDriftBadge": {
+        description:
+          "Very short label on an amber badge marking a take that was recorded " +
+          "against an OLDER version of this line's text — the wording has been " +
+          "edited since the recording was made, so the audio and the text no longer " +
+          "agree. Not an error: the take is fine, it just speaks the old wording. " +
+          "Sits inline on a compact take row beside the take's name.",
+        maxLength: 16,
+      },
+      "audio.takesStrip.textDriftTooltip": {
+        description:
+          "Hover title on that badge. Gives the date the take was recorded and " +
+          "quotes the line's wording AS IT READ THEN, then says the text has since " +
+          "changed and names the two reasonable responses. Deliberately not a " +
+          "warning — reviewing audio against its own older wording is a normal " +
+          "workflow, so the tone is informative.",
+        placeholders: {
+          date: "Date the recording was made, already formatted for the user's locale.",
+          text: "The line's text as it read at the moment of recording, quoted verbatim.",
+        },
       },
       "audio.takesStrip.playTakeTooltip": {
         description:
@@ -1099,6 +1573,27 @@ export const audio = defineNamespace({
           "Button that opens a file picker to upload an existing audio file as the " +
           "reference clip, shown when no clip is attached yet.",
         maxLength: 20,
+      },
+      "audio.clone.dropzoneTitle": {
+        description:
+          "Heading inside the empty dashed dropzone on the Clone tab's Reference " +
+          "audio panel, inviting the user to attach a clip.",
+      },
+      "audio.clone.dropzoneHint": {
+        description:
+          "Subtitle under audio.clone.dropzoneTitle. Tells the user a 5–15 second " +
+          "clip of one speaker is enough, and that we generate a base voice then " +
+          "clone it to match. Record, upload, and drag-and-drop are the zone itself.",
+      },
+      "audio.clone.dropzoneDrop": {
+        description:
+          "Temporary subtitle shown while an audio file is dragged over the " +
+          "reference dropzone, replacing audio.clone.dropzoneHint.",
+      },
+      "audio.clone.errorNotAudio": {
+        description:
+          "Inline error when a dropped or picked file is not audio (e.g. an image " +
+          "or document), telling the user to use a short recording instead.",
       },
       "audio.clone.errorNoContext": {
         description:
@@ -1324,6 +1819,41 @@ export const audio = defineNamespace({
           "Popover heading when a Gemini-voice TTS request fails because no Gemini " +
           "API key is configured for the project.",
       },
+      "audio.aiError.openRouterKeyRequiredTitle": {
+        description:
+          "Red-line / popover heading when text generation (the sparkle / draft " +
+          "path) fails because the hosted chat proxy has no OPENROUTER_API_KEY. " +
+          "Must never be worded as a Gemini or voice-engine problem — this is a " +
+          "text-generation credential, and the body tells the user to paste their " +
+          "own OpenRouter key under Custom provider (BYOK, not Aquilla usage).",
+      },
+      "audio.aiError.geminiFailedTitle": {
+        description:
+          "Popover heading when Gemini TTS ran (a key was present) but the request " +
+          "failed or returned no audio. Distinct from geminiKeyRequiredTitle — the " +
+          "engine is named so it is not confused with an OmniVoice failure.",
+      },
+      "audio.aiError.omnivoiceNotConfiguredTitle": {
+        description:
+          "Popover heading when hosted OmniVoice TTS is not wired on this server " +
+          "(typical for local pnpm dev: missing OMNIVOICE_URL / OMNIVOICE_TOKEN). " +
+          "Must not be read as a Gemini-key problem.",
+      },
+      "audio.aiError.omnivoiceFailedTitle": {
+        description:
+          "Popover heading when OmniVoice TTS was configured but the synthesize " +
+          "call itself failed (Modal/upstream error).",
+      },
+      "audio.aiError.seedVcNotConfiguredTitle": {
+        description:
+          "Popover heading when a non-OmniVoice clone voice needs Seed-VC conversion " +
+          "and the sync-worker has no SEED_VC_URL / SEED_VC_TOKEN. Distinct from " +
+          "omnivoiceNotConfiguredTitle — OmniVoice clones skip this step.",
+      },
+      "audio.aiError.seedVcFailedTitle": {
+        description:
+          "Popover heading when Seed-VC voice conversion ran but failed after TTS.",
+      },
       "audio.aiError.signInRequiredTitle": {
         description:
           "Popover heading when an AI feature (TTS, transcription, drafting) needs " +
@@ -1343,6 +1873,14 @@ export const audio = defineNamespace({
         description:
           "Popover heading when generating voice for an untranslated cell needs " +
           "on-the-fly translation, but the project has no completion provider set up.",
+      },
+      "audio.aiError.ttsNotConfiguredTitle": {
+        description:
+          "Popover heading when the voice service itself was never configured, " +
+          "so generating audio cannot work at all until someone sets it up. " +
+          "Distinct from a server being temporarily down: retrying will never " +
+          "help, which is why it is worded as a state ('isn't set up') rather " +
+          "than as a failure that just happened.",
       },
       "audio.aiError.translationFailedTitle": {
         description:

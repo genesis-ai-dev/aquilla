@@ -15,18 +15,30 @@
 
 import type { SourceCellRef, EBibleMatchedCell } from "./import"
 import { parseUsfmLossless } from "./parsers/usfm-lossless"
+import { parseCueRange, extractVttStrings } from "./parsers/subtitle"
 
 /** Cell descriptor for file-scoped matching — SourceCellRef plus the source
  *  text, which the review table shows so the user can eyeball alignment. */
 export interface FileTargetCellRef extends SourceCellRef {
   original: string
+  /** Cue timing in milliseconds, for cells imported from a subtitle/timeline
+   *  source (CellSummary.startTime / .endTime). Present on both sides →
+   *  positional matching aligns by timecode overlap (AQU-1143). */
+  startMs?: number
+  endMs?: number
 }
 
 /** One incoming translation row, from USFM or a mapped spreadsheet. */
 export interface TargetRow {
-  /** Canonical ref when the format carries one (USFM, ref-mapped sheets). */
+  /** Canonical ref when the format carries one (USFM, ref-mapped sheets), or
+   *  a display label such as a VTT cue's timecode range. */
   ref?: string
   text: string
+  /** Cue timing in milliseconds, when the incoming format carries one. Absent
+   *  timings can still be recovered from a `ref` that is a cue timecode range
+   *  — see `rowTimingMs`. */
+  startMs?: number
+  endMs?: number
 }
 
 export interface FileTargetMatchedCell extends EBibleMatchedCell {
@@ -39,6 +51,10 @@ export interface FileTargetMatchResult {
   orphans: { ref: string; text: string }[]
   /** Cells in the file no incoming row covered. */
   unmatchedSourceCount: number
+  /** Which policy a ref-less (positional) match actually used, so the review
+   *  screen doesn't warn about raw-order alignment when it aligned by
+   *  timecode. Absent for ref matching. */
+  alignedBy?: "order" | "overlap"
 }
 
 function toMatchedCell(cell: FileTargetCellRef, text: string, ref: string): FileTargetMatchedCell {
@@ -97,10 +113,40 @@ export function matchTargetRowsByRef(
   }
 }
 
-/** Match rows to cells positionally: data row N → file cell N. Empty rows
- *  keep their slot (so alignment holds) but produce no commit. Rows beyond
- *  the file's cell count become orphans. */
-export function matchTargetRowsByOrder(
+/** How far apart two cue ranges may sit and still be considered the same cue.
+ *  Only consulted when the ranges do not overlap at all: a cue shorter than
+ *  the deliverables' frame-grid drift can slide clear of its counterpart, and
+ *  a half-second window recovers it without ever reaching a neighbouring cue
+ *  (partner subtitle cues are ~0.4s and up, separated by real gaps). */
+const CUE_MATCH_TOLERANCE_MS = 500
+
+/** Cue timing for an incoming row, in ms. Explicit `startMs`/`endMs` win; a
+ *  row whose `ref` is a cue timecode range (`00:01:03.208 --> 00:01:03.667`,
+ *  which is how the VTT target import labels its rows) carries its timings
+ *  there, so recover them rather than requiring every caller to restate them. */
+function rowTimingMs(row: TargetRow): { startMs: number; endMs: number } | null {
+  if (row.startMs !== undefined && row.endMs !== undefined) {
+    return { startMs: row.startMs, endMs: row.endMs }
+  }
+  const range = row.ref ? parseCueRange(row.ref) : null
+  if (!range) return null
+  return { startMs: Math.round(range.start * 1000), endMs: Math.round(range.end * 1000) }
+}
+
+function cellTimingMs(cell: FileTargetCellRef): { startMs: number; endMs: number } | null {
+  if (cell.startMs === undefined || cell.endMs === undefined) return null
+  return { startMs: cell.startMs, endMs: cell.endMs }
+}
+
+/** Raw positional matching: data row N → file cell N. Empty rows keep their
+ *  slot (so alignment holds) but produce no commit. Rows beyond the file's
+ *  cell count become orphans.
+ *
+ *  Review-label priority: the incoming row's `ref` wins (a caller-supplied
+ *  label like a VTT cue timecode is the whole point of that field), then the
+ *  matched cell's canonical ref, then a bare `Row N`. Spreadsheet+order rows
+ *  carry no ref, so this reduces to the previous canonicalRef-first behavior. */
+function matchRowsPositionally(
   rows: TargetRow[],
   cells: FileTargetCellRef[],
 ): FileTargetMatchResult {
@@ -117,14 +163,176 @@ export function matchTargetRowsByOrder(
       continue
     }
     matchedCount++
-    matched.push(toMatchedCell(cell, row.text, cell.canonicalRef ?? `Row ${i + 1}`))
+    matched.push(toMatchedCell(cell, row.text, row.ref ?? cell.canonicalRef ?? `Row ${i + 1}`))
   }
 
   return {
     matched,
     orphans,
     unmatchedSourceCount: cells.length - matchedCount,
+    alignedBy: "order",
   }
+}
+
+/** AQU-1143 — align incoming cues to cells by best time-range overlap.
+ *
+ *  Raw order matching assumes the incoming file shares the source's cue grid
+ *  exactly; partner deliverables for the same episode often don't, and a
+ *  single inserted or deleted cue then shifts every later translation onto
+ *  the wrong cell — invisible unless a reviewer eyeballs ~500 rows. Overlap
+ *  matching is immune to that: each cue is placed by *when* it plays, so an
+ *  edit stays local to the cue that moved.
+ *
+ *  Assignment is globally greedy — every candidate pair within tolerance is
+ *  ranked by overlap (largest first, then smallest gap) and taken in that
+ *  order, each row and cell used at most once. That is what makes an inserted
+ *  extra cue fall out as an orphan rather than displacing the real
+ *  translation: the true counterpart's overlap is larger, so it is assigned
+ *  first and the interloper finds its cell already taken.
+ *
+ *  A row that reaches no cell within tolerance becomes an orphan; a cell no
+ *  row reached counts as uncovered. Neither is ever a wrong-cell commit. */
+export function matchTargetRowsByOverlap(
+  rows: TargetRow[],
+  cells: FileTargetCellRef[],
+): FileTargetMatchResult {
+  // Rows carrying no text can't commit anything, and must not hold a cell
+  // hostage — a blank incoming cue never clears an existing translation.
+  const timedRows = rows
+    .map((row, index) => ({ row, index, timing: rowTimingMs(row) }))
+    .filter((r) => r.row.text.trim().length > 0)
+
+  const timedCells = cells
+    .map((cell, index) => ({ cell, index, timing: cellTimingMs(cell) }))
+    .filter((c): c is { cell: FileTargetCellRef; index: number; timing: { startMs: number; endMs: number } } =>
+      c.timing !== null,
+    )
+    // Start-ordered so a row can stop scanning at the first cell that begins
+    // beyond its reach. Incoming cues are NOT reliably time-ordered (real
+    // partner files carry out-of-order timestamps), so each row rescans from
+    // the front rather than advancing a shared pointer — quadratic in
+    // principle, but on the ~500-cue episode files this exists for that is a
+    // few hundred thousand integer comparisons.
+    .sort((a, b) => a.timing.startMs - b.timing.startMs || a.index - b.index)
+
+  type Candidate = { rowAt: number; cellAt: number; overlap: number; gap: number }
+  const candidates: Candidate[] = []
+
+  for (let r = 0; r < timedRows.length; r++) {
+    const timing = timedRows[r].timing
+    if (!timing) continue
+    for (let c = 0; c < timedCells.length; c++) {
+      const cellTiming = timedCells[c].timing
+      // Cells are start-sorted: once one begins after this row's reach, so
+      // does every cell after it.
+      if (cellTiming.startMs > timing.endMs + CUE_MATCH_TOLERANCE_MS) break
+      if (cellTiming.endMs < timing.startMs - CUE_MATCH_TOLERANCE_MS) continue
+      const overlap =
+        Math.min(timing.endMs, cellTiming.endMs) - Math.max(timing.startMs, cellTiming.startMs)
+      // Disjoint ranges have a negative "overlap" — that magnitude is the gap
+      // between them, which tolerance is measured against.
+      const gap = overlap < 0 ? -overlap : 0
+      if (overlap <= 0 && gap > CUE_MATCH_TOLERANCE_MS) continue
+      candidates.push({ rowAt: r, cellAt: c, overlap: Math.max(overlap, 0), gap })
+    }
+  }
+
+  candidates.sort(
+    (a, b) =>
+      b.overlap - a.overlap ||
+      a.gap - b.gap ||
+      // Deterministic on exact ties (identical grids): keep document order.
+      timedRows[a.rowAt].index - timedRows[b.rowAt].index ||
+      timedCells[a.cellAt].index - timedCells[b.cellAt].index,
+  )
+
+  const cellForRow = new Map<number, number>()
+  const takenCells = new Set<number>()
+  for (const candidate of candidates) {
+    if (cellForRow.has(candidate.rowAt) || takenCells.has(candidate.cellAt)) continue
+    cellForRow.set(candidate.rowAt, candidate.cellAt)
+    takenCells.add(candidate.cellAt)
+  }
+
+  const matched: FileTargetMatchedCell[] = []
+  const orphans: { ref: string; text: string }[] = []
+
+  // Emit in incoming-file order so the review list reads like the user's file.
+  for (let r = 0; r < timedRows.length; r++) {
+    const { row, index } = timedRows[r]
+    const cellAt = cellForRow.get(r)
+    if (cellAt === undefined) {
+      orphans.push({ ref: row.ref ?? `Row ${index + 1}`, text: row.text })
+      continue
+    }
+    const cell = timedCells[cellAt].cell
+    // The cue's timecode is the only meaningful label a VTT row has — a
+    // cue-sourced cell's `canonicalRef` is an opaque group id.
+    matched.push(toMatchedCell(cell, row.text, row.ref ?? cell.canonicalRef ?? `Row ${index + 1}`))
+  }
+
+  return {
+    matched,
+    orphans,
+    unmatchedSourceCount: cells.length - matched.length,
+    alignedBy: "overlap",
+  }
+}
+
+/** Positional matching for formats that carry no canonical refs.
+ *
+ *  When the file's cells AND every non-empty incoming row carry cue timings,
+ *  rows are aligned by timecode overlap (`matchTargetRowsByOverlap`), which
+ *  survives an inserted, deleted, or shifted cue. Otherwise — no timings on
+ *  either side, e.g. a spreadsheet with no ref column, or a partially timed
+ *  file — it falls back to raw order, row N → cell N, exactly as before.
+ *
+ *  The result's `alignedBy` says which ran, so the review screen only warns
+ *  about order alignment when order alignment is what happened. */
+export function matchTargetRowsByOrder(
+  rows: TargetRow[],
+  cells: FileTargetCellRef[],
+): FileTargetMatchResult {
+  const nonEmptyRows = rows.filter((row) => row.text.trim().length > 0)
+  const canMatchByOverlap =
+    cells.length > 0 &&
+    nonEmptyRows.length > 0 &&
+    cells.every((cell) => cellTimingMs(cell) !== null) &&
+    nonEmptyRows.every((row) => rowTimingMs(row) !== null)
+
+  return canMatchByOverlap
+    ? matchTargetRowsByOverlap(rows, cells)
+    : matchRowsPositionally(rows, cells)
+}
+
+/** Decode HTML entities commonly emitted by subtitle authoring tools
+ *  (`&nbsp;`, `&amp;`, `&lt;`, `&gt;`, `&quot;`, `&apos;` and the numeric
+ *  `&#160;`) so they don't show up literally in the target column.
+ *  Deliberately narrow: only entities observed in real partner VTTs are
+ *  decoded — the rest would risk mangling text that meant `&` literally. */
+function decodeSubtitleEntities(text: string): string {
+  return text
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&#160;/g, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&apos;/gi, "'")
+}
+
+/** Extract target rows from a WebVTT file: one row per cue, in cue order.
+ *  The cue's timestamp range becomes the row's `ref` so the review screen
+ *  labels rows by timecode (never an internal UUID). Matching aligns by
+ *  timecode overlap when both sides carry timings (AQU-1143), falling back
+ *  to cue N → cell N otherwise — see `matchTargetRowsByOrder`. Entity-decoded
+ *  so `&nbsp;` and similar don't appear literally in the imported translation. */
+export function vttToTargetRows(raw: string): TargetRow[] {
+  const cues = extractVttStrings(raw)
+  return cues.map((cue) => ({
+    ref: cue.context,
+    text: decodeSubtitleEntities(cue.original).trim(),
+  }))
 }
 
 /** Extract target rows from a USFM file: verse bodies + heading/title/intro

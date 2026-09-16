@@ -19,7 +19,7 @@
 // (projectId, fileId). Reading the project-scoped reference clip is gated by the
 // verified projectId claim.
 
-import { audioObjectKey, isPathSafeId, r2KeyPrefix } from "./audio"
+import { audioObjectKey, isPathSafeId, r2KeyPrefix, safeAudioContentType } from "./audio"
 import { verifyTokenForFile, verifyTokenForProject, WRITE_ROLE_LEVEL } from "./auth"
 
 export interface VoiceConvertEnv {
@@ -65,6 +65,13 @@ export async function handleVoiceReferenceRequest(
 
   const projectId = decodeURIComponent(match[1])
   const referenceAudioId = decodeURIComponent(match[2])
+  // [Pen test] Input validation & injection (2026-09-02): both segments are
+  // decoded *after* the `[^/]+` path match, so a %2f/%2e%2e%2f-encoded value
+  // can smuggle a "/" or ".." into the decoded id and land directly in the R2
+  // key below — same class of bug as the /audio route's isPathSafeId fix.
+  if (!isPathSafeId(projectId) || !isPathSafeId(referenceAudioId)) {
+    return new Response("invalid projectId or referenceAudioId", { status: 400 })
+  }
 
   const header = request.headers.get("Authorization") ?? ""
   const token = header.startsWith("Bearer ") ? header.slice("Bearer ".length) : null
@@ -83,7 +90,10 @@ export async function handleVoiceReferenceRequest(
       return new Response("insufficient role", { status: 403 })
     }
     const body = await request.arrayBuffer()
-    const contentType = request.headers.get("Content-Type") || "application/octet-stream"
+    // [Pen test] Input validation & injection (2026-08-26): same deny-list fix
+    // as /audio — this route stored the client-declared Content-Type verbatim
+    // and served it back unsanitized.
+    const contentType = safeAudioContentType(request.headers.get("Content-Type"))
     await env.SNAPSHOTS.put(key, body, { httpMetadata: { contentType } })
     return Response.json({ ok: true, referenceAudioId, bytes: body.byteLength })
   }
@@ -95,7 +105,8 @@ export async function handleVoiceReferenceRequest(
   return new Response(buf, {
     status: 200,
     headers: {
-      "Content-Type": obj.httpMetadata?.contentType || "application/octet-stream",
+      "Content-Type": safeAudioContentType(obj.httpMetadata?.contentType),
+      "X-Content-Type-Options": "nosniff",
       "Content-Length": String(buf.byteLength),
       "Cache-Control": "private, max-age=0, must-revalidate",
     },
@@ -145,11 +156,11 @@ export async function handleVoiceConvertRequest(
   if (!projectId || !fileId || !referenceAudioId) {
     return new Response("missing projectId, fileId, or referenceAudioId", { status: 400 })
   }
-  // projectId/fileId are form fields (unlike /audio, whose ids are URL-path
-  // segments matched by `[^/]+`) and land directly in an R2 key below, so
-  // reject anything that could act as a path separator there.
-  if (!isPathSafeId(projectId) || !isPathSafeId(fileId)) {
-    return new Response("invalid projectId or fileId", { status: 400 })
+  // projectId/fileId/referenceAudioId are form fields (unlike /audio, whose
+  // ids are URL-path segments matched by `[^/]+`) and land directly in an R2
+  // key below, so reject anything that could act as a path separator there.
+  if (!isPathSafeId(projectId) || !isPathSafeId(fileId) || !isPathSafeId(referenceAudioId)) {
+    return new Response("invalid projectId, fileId, or referenceAudioId", { status: 400 })
   }
 
   // Auth: sync-token scoped to this (projectId, fileId), same as /audio.
@@ -178,6 +189,12 @@ export async function handleVoiceConvertRequest(
     sourceBytes = await blob.arrayBuffer()
     sourceType = blob.type || sourceType
   } else if (typeof sourceAudioId === "string" && sourceAudioId) {
+    // sourceAudioId is a form field (unlike /audio's URL-path ids) and lands
+    // directly in an R2 key via audioObjectKey — see audio.ts's isPathSafeId
+    // doc comment, which names this exact call site.
+    if (!isPathSafeId(sourceAudioId)) {
+      return new Response("invalid sourceAudioId", { status: 400 })
+    }
     const obj = await env.SNAPSHOTS.get(audioObjectKey(env, projectId, fileId, sourceAudioId))
     if (!obj) return new Response("source audio not found", { status: 404 })
     sourceBytes = await obj.arrayBuffer()
@@ -207,7 +224,8 @@ export async function handleVoiceConvertRequest(
       body: modalForm,
     })
   } catch (err) {
-    return new Response(`voice conversion upstream unreachable: ${String(err)}`, { status: 502 })
+    console.error("[voice-convert] upstream unreachable:", err)
+    return new Response("voice conversion upstream unreachable", { status: 502 })
   }
   if (!modalRes.ok) {
     const detail = await modalRes.text().catch(() => "")

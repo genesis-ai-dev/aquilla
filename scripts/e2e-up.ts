@@ -344,8 +344,50 @@ function hasLocalPsql(): boolean {
  * failed DROP (held connections) or a partial schema apply returns 0 and the
  * suite silently runs against a stale schema.
  */
-function resetE2ePostgres(): void {
-  const schemaSql = readFileSync(path.join(REPO_ROOT, "db/postgres/schema.sql"))
+/**
+ * The reset applies the schema through `docker exec` (a unix socket inside the
+ * container) while the workers reach Postgres over TCP at localhost:5432. Those
+ * are only the same database if exactly one Postgres owns that port. Two Docker
+ * runtimes side by side (Colima + Docker Desktop) each publish their own
+ * `aquilla-dev-pg` on 5432, so the reset lands in one and every worker query
+ * hits the other — which surfaces as baffling "relation ... does not exist"
+ * 500s against a database that provably has the table.
+ *
+ * So: stamp a fresh token into the database we just reset, then read it back
+ * over the exact URL the workers use. A mismatch means they are different
+ * servers, and we say so instead of letting the suite fail 200 specs deep.
+ */
+async function verifyE2ePostgresReachable(token: string): Promise<void> {
+  const { default: postgres } = await import("postgres")
+  const sql = postgres(E2E_PG_URL, { max: 1 })
+  try {
+    const rows = await sql`SELECT token FROM e2e_reset_sentinel`
+    if (rows[0]?.token === token) return
+    throw new Error(`sentinel mismatch (got ${JSON.stringify(rows[0]?.token)})`)
+  } catch (e) {
+    console.error(
+      `${TAG}[e2e-up] ${E2E_PG_DB} was reset, but ${E2E_PG_URL} does not show the reset: ${String(e)}\n` +
+        "  The schema reset and the workers are talking to DIFFERENT Postgres servers.\n" +
+        "  Most likely two Docker runtimes are both publishing port 5432 (e.g. Colima\n" +
+        "  and Docker Desktop each running an 'aquilla-dev-pg'). Check with\n" +
+        "    lsof -nP -iTCP:5432 -sTCP:LISTEN\n" +
+        "    docker context ls\n" +
+        "  and stop the container in the runtime your `docker` CLI is NOT pointed at.",
+    )
+    process.exit(1)
+  } finally {
+    await sql.end({ timeout: 5 })
+  }
+}
+
+function resetE2ePostgres(): string {
+  const token = `${Date.now()}-${Math.random().toString(36).slice(2)}`
+  const schemaSql = Buffer.concat([
+    readFileSync(path.join(REPO_ROOT, "db/postgres/schema.sql")),
+    Buffer.from(
+      `\nCREATE TABLE e2e_reset_sentinel (token text);\nINSERT INTO e2e_reset_sentinel VALUES ('${token}');\n`,
+    ),
+  ])
 
   ensureColimaStarted()
   ensureDockerPgContainerStarted()
@@ -371,7 +413,7 @@ function resetE2ePostgres(): void {
       console.error(`${TAG}[e2e-up] schema apply failed:`, psqlResult.stderr?.toString())
       process.exit(1)
     }
-    return
+    return token
   }
 
   // Docker-less fallback: use a local psql (e.g. Homebrew Postgres on :5432).
@@ -407,6 +449,7 @@ function resetE2ePostgres(): void {
     console.error(`${TAG}[e2e-up] schema apply failed:`, psqlResult.stderr?.toString())
     process.exit(1)
   }
+  return token
 }
 
 async function main(): Promise<void> {
@@ -471,7 +514,7 @@ async function main(): Promise<void> {
   //    and sync queries, so we apply db/postgres/schema.sql here instead of
   //    wrangler d1 migrations apply.
   console.log(`${TAG}[boot 2/8] resetting ${E2E_PG_DB} postgres schema…`)
-  resetE2ePostgres()
+  await verifyE2ePostgresReachable(resetE2ePostgres())
 
   // 3. Boot identity (auth-worker). WRANGLER_HYPERDRIVE_LOCAL_CONNECTION_STRING_HYPERDRIVE
   // redirects Hyperdrive to the local Docker Postgres (aquilla_e2e) so all auth
@@ -525,6 +568,7 @@ async function main(): Promise<void> {
     extraArgs: [
       "--persist-to", PERSIST_DIR,
       "--var", "WRANGLER_LOCAL:1",
+      "--var", `BASE_URL:http://127.0.0.1:${VITE_PORT}`,
       "--var", "ADMIN_REQUIRE_ELEVATION:false",
       "--var", "ADMIN_EMAILS:alice@example.test",
       "--var", `OPENROUTER_BASE_URL:http://127.0.0.1:${OPENROUTER_MOCK_PORT}/api/v1`,

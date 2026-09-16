@@ -24,10 +24,31 @@ export const ROLE = {
 
 /** Minimum role level required to emit each event kind. Mirrors the server. */
 const REQUIRED_ROLE: Record<string, number> = {
-  "source.cell.create": ROLE.PROJECT_LEAD,
+  // AQU-1068: create/delete/reorder sit at COMMENTER because this table is
+  // the LOWEST reachable floor, not the operative one. Reorder is in the set
+  // because it is the chain bookkeeping RIDING every add and remove
+  // (handleAddLine/handleRemoveLine batch it in), and a floor that refused it
+  // silently killed the whole batch.
+  //
+  // The project's `cellEditingFloor` decides who is actually offered these
+  // actions, and since 2026-09-09 it decides it HERE — in the client's
+  // affordances (cell-editing-gate.ts and its callers) rather than at the
+  // server perimeter, which now enforces only one rule: a delete needs
+  // MAINTAINER unless the cell is one a person added by hand. This table's own
+  // rule applies unchanged: only block what is PROVABLY insufficient, and no
+  // rank at or above the tier's lowest rung is — the tier decides, and this
+  // table cannot see it.
+  //
+  // LOWERED FROM CONTRIBUTOR (Matthew's review, approved by Sam 2026-09-08)
+  // in lock-step with the server, when the tier list grew Commenter and
+  // Reviewer rungs. Leaving it at CONTRIBUTOR here would have been the worse
+  // half of a drift: the server would admit a commenter's insert and this
+  // mirror would refuse to enqueue it, so the button would do nothing at all
+  // and never even produce the 403 that explains why.
+  "source.cell.create": ROLE.COMMENTER,
   "source.cell.commit": ROLE.PROJECT_LEAD,
-  "source.cell.delete": ROLE.PROJECT_LEAD,
-  "source.cell.reorder": ROLE.PROJECT_LEAD,
+  "source.cell.delete": ROLE.COMMENTER,
+  "source.cell.reorder": ROLE.COMMENTER,
 
   "target.cell.create": ROLE.CONTRIBUTOR,
   "target.cell.commit": ROLE.CONTRIBUTOR,
@@ -44,13 +65,31 @@ const REQUIRED_ROLE: Record<string, number> = {
   "cell.audio.select": ROLE.CONTRIBUTOR,
   "cell.audio.remove": ROLE.CONTRIBUTOR,
   "cell.audio.rename": ROLE.CONTRIBUTOR,
+  "cell.audio.trim": ROLE.CONTRIBUTOR,
+  "cell.audio.place": ROLE.CONTRIBUTOR,
+  // AQU-646: project lead, not contributor. The pairings are settled during
+  // setup and handed off; a contributor re-cutting one silently moves which
+  // line a recording belongs to, for everyone.
+  "cell.link.set": ROLE.PROJECT_LEAD,
   "cell.audio.measure": ROLE.CONTRIBUTOR,
 
   "file.create": ROLE.PROJECT_LEAD,
   "file.rename": ROLE.CONTRIBUTOR,
+  "file.corpus.set": ROLE.CONTRIBUTOR,
   "file.delete": ROLE.PROJECT_LEAD,
   "file.restore": ROLE.PROJECT_LEAD,
 
+  // These are the SELF floors — the bar to touch your own comment. Acting on
+  // someone else's carries a second, higher floor; see FOREIGN_COMMENT_ROLE.
+  // Terminology: CONTRIBUTOR buys a SUGGESTION (`term.create` status 'draft').
+  // Every binding write additionally needs the org's `termbaseEditMinRole`,
+  // which only the server can resolve — this client table is the optimistic
+  // floor, and the server is the authority (sync-worker termbase-authority.ts).
+  "term.create": ROLE.CONTRIBUTOR,
+  "term.update": ROLE.CONTRIBUTOR,
+  "term.delete": ROLE.CONTRIBUTOR,
+  "term.approve": ROLE.CONTRIBUTOR,
+  "term.reject": ROLE.CONTRIBUTOR,
   "comment.create": ROLE.COMMENTER,
   "comment.edit": ROLE.COMMENTER,
   "comment.delete": ROLE.COMMENTER,
@@ -65,9 +104,33 @@ const REQUIRED_ROLE: Record<string, number> = {
   // Timeline editor (mirrors server).
   "cell.retime": ROLE.CONTRIBUTOR,
   "cell.lane.retime": ROLE.CONTRIBUTOR,
-  "file.video.set": ROLE.CONTRIBUTOR,
+  // AQU-646: the linked film is what the whole team times, records and reviews
+  // against — project setup, not an edit.
+  "file.video.set": ROLE.PROJECT_LEAD,
+  // AQU-646: MISSING FROM THIS MIRROR until 2026-08-18, which is why the
+  // character-import button appeared for everyone — `canPerform` fails open on
+  // a kind it has never heard of, so the UI's own gate always said yes and the
+  // server's 403 was the only thing stopping anyone.
+  //
+  // AQU-646 (Sam, 2026-08-20): RAISED AGAIN, to MAINTAINER. Characters are one
+  //   person's job here — the client's producer owns the sheets, and she holds
+  //   maintainer. Nobody below her reconciles the two sheets against each other,
+  //   so the resolve drawer this event also backs has an audience of one and does
+  //   not need a lower floor to stay reachable.
+  // 
+  //   KNOWN CONSEQUENCE, accepted deliberately: `cast.assign` also carries the
+  //   older CSV label round-trip (AQU-438 — download a template, fill in a
+  //   `cast_name` column, re-upload), which has no UI role gate of its own. That
+  //   flow now needs maintainer too. It surfaces as the panel's inline error rather
+  //   than a crash, because the client mirror throws before anything reaches the
+  //   durable outbox.
+  "cast.assign": ROLE.MAINTAINER,
   // Structural — keeps the clearance the setting had in Project Settings.
   "file.timing.set": ROLE.MAINTAINER,
+  // Track structure IS file structure: a rename or reorder relayouts the
+  // timeline for everyone who opens the file, so it sits with file.timing.set
+  // rather than with the contributor-level file.rename / file.video.set.
+  "file.track.set": ROLE.MAINTAINER,
 
   // AQU-478: repin ("accept upstream change as-is") — same authority bar
   // as validating (spec §12). Bulk repin is gated higher (project_lead 500)
@@ -102,41 +165,189 @@ export function canPerform(kind: string, roleLevel: number | null | undefined): 
 }
 
 /**
+ * AQU-1000 — CLIENT MIRROR of the server's foreign-comment floors.
+ *
+ * `REQUIRED_ROLE` above is only half the comment policy. Every comment
+ * mutation carries a SECOND floor that applies when the target comment was
+ * written by somebody else: the server re-checks `author_id` against the
+ * caller's username at the `/events` perimeter (`sync-worker/src/events/
+ * route.ts`) and again on the external Agent API emit path
+ * (`sync-worker/src/external/emit-events-engine.ts`), and 403s below this bar.
+ *
+ * The client mirrored only the static table, so the UI offered Resolve /
+ * Close-with-reply / Reopen on threads the server was always going to refuse.
+ * Because `useComments.resolveThread` flips `resolved` optimistically, the
+ * thread visibly closed and then sprang back open — a promise the system
+ * never intended to keep. Mirroring the foreign floor is what lets the UI
+ * decide honestly, per thread, before it offers the control.
+ *
+ * `comment.resolve` sits at CONTRIBUTOR because closing a thread is
+ * bookkeeping, not a rewrite of anyone's words: the body is untouched and the
+ * act is reversible by reopening. `comment.edit` / `comment.delete` mutate
+ * what another person actually said, so they stay at MAINTAINER.
+ *
+ * DEPENDENCY: the CONTRIBUTOR floor for foreign resolve is AQU-999's change
+ * to the server (both write paths). Until that lands, the server still
+ * enforces MAINTAINER here and a contributor's foreign resolve is refused —
+ * so keep these two in lock-step, exactly as the mirror's header demands.
+ */
+/**
+ * AQU-1002: CLIENT MIRROR of sync-worker/src/events/comment-floors.ts.
+ *
+ * The org-configurable half of comment policy. `createMinRole` is the bar to
+ * open a thread or reply; `resolveMinRole` is the bar to resolve/reopen a
+ * thread somebody ELSE opened (a thread's author always keeps the static
+ * COMMENTER floor on their own thread, whatever the org sets).
+ *
+ * Same lock-step obligation as the tables above: the server re-resolves these
+ * from `org_settings` on every write, so drift costs a redundant 403 rather
+ * than a security hole — but it defeats the point, so update both together.
+ */
+export interface CommentFloors {
+  createMinRole: number
+  resolveMinRole: number
+}
+
+/** Floors in force when the org has expressed no preference. Matches the
+ *  server's DEFAULT_COMMENT_FLOORS exactly: the pre-AQU-1002 behaviour. */
+export const DEFAULT_COMMENT_FLOORS: CommentFloors = {
+  createMinRole: ROLE.COMMENTER,
+  resolveMinRole: ROLE.CONTRIBUTOR,
+}
+
+/**
+ * AQU-1002: read the floors off a project record, defaulting each
+ * independently. The single-project endpoint sends them; the list endpoint and
+ * older servers do not, and a local/git-imported project has no org at all —
+ * every one of those cases falls back to the stock defaults, which is the
+ * behaviour that shipped before this setting existed.
+ *
+ * Out-of-ladder values are ignored rather than clamped, matching the server's
+ * `coerceFloor`: a misconfigured floor is a no-op, never a lockout.
+ */
+export function commentFloorsFrom(project: {
+  commentCreateMinRole?: number | null
+  commentResolveMinRole?: number | null
+} | null | undefined): CommentFloors {
+  const pick = (raw: number | null | undefined, fallback: number): number => {
+    if (typeof raw !== "number" || !Number.isFinite(raw)) return fallback
+    if (raw < ROLE.VIEWER || raw > ROLE.OWNER) return fallback
+    return raw
+  }
+  return {
+    createMinRole: pick(project?.commentCreateMinRole, DEFAULT_COMMENT_FLOORS.createMinRole),
+    resolveMinRole: pick(project?.commentResolveMinRole, DEFAULT_COMMENT_FLOORS.resolveMinRole),
+  }
+}
+
+export const FOREIGN_COMMENT_ROLE: Record<string, number> = {
+  "comment.resolve": ROLE.CONTRIBUTOR,
+  "comment.edit": ROLE.MAINTAINER,
+  "comment.delete": ROLE.MAINTAINER,
+}
+
+/**
+ * Minimum role to act on a comment kind that somebody ELSE authored, or null
+ * when the kind carries no foreign floor (fail-open, as `requiredRoleFor`).
+ */
+export function foreignRoleFor(kind: string): number | null {
+  return FOREIGN_COMMENT_ROLE[kind] ?? null
+}
+
+/**
+ * AQU-1000: the floor that actually applies to `kind` for this caller on this
+ * comment — the self floor when they wrote it, the (higher) foreign floor when
+ * they did not. Returns null when nothing is provably required, matching
+ * `requiredRoleFor`'s fail-open contract.
+ *
+ * `isOwnComment` is deliberately a caller-supplied boolean rather than a pair
+ * of usernames: the drawer compares a thread's root author, the Comments page
+ * compares a record's `authorId`, and both already hold the session username.
+ */
+export function effectiveCommentRoleFor(
+  kind: string,
+  isOwnComment: boolean,
+  floors: CommentFloors = DEFAULT_COMMENT_FLOORS,
+): number | null {
+  const self = requiredRoleFor(kind)
+
+  // AQU-1002: the org's configurable floors take part as RAISES on top of the
+  // static table, never as reductions below it — `Math.max` throughout. The
+  // client gate's rule is unchanged: only ever refuse what the server would
+  // provably refuse, so a floor the client hasn't loaded yet can only make the
+  // UI more permissive, never wrongly closed.
+  if (kind === 'comment.create') {
+    return self == null ? floors.createMinRole : Math.max(self, floors.createMinRole)
+  }
+
+  if (isOwnComment) return self
+
+  // Resolving somebody else's thread is the configurable one; edit/delete keep
+  // their static FOREIGN_COMMENT_ROLE maintainer floor.
+  const foreign =
+    kind === 'comment.resolve' ? floors.resolveMinRole : foreignRoleFor(kind)
+  if (foreign == null) return self
+  if (self == null) return foreign
+  return Math.max(self, foreign)
+}
+
+/**
+ * AQU-1000: whether `roleLevel` may perform `kind` on a comment, accounting
+ * for who wrote it.
+ *
+ * Fail-open on an unknown role (null = a local / git-imported project with no
+ * sync role), same contract as `canPerform` — we only ever return false when a
+ * 403 is certain, because the server remains the security boundary. The point
+ * here is honesty in the UI, not enforcement.
+ */
+export function canMutateComment(
+  kind: string,
+  roleLevel: number | null | undefined,
+  isOwnComment: boolean,
+  floors: CommentFloors = DEFAULT_COMMENT_FLOORS,
+): boolean {
+  if (roleLevel == null) return true
+  const required = effectiveCommentRoleFor(kind, isOwnComment, floors)
+  if (required == null) return true
+  return roleLevel >= required
+}
+
+/**
  * AQU-496: whether the assign-work UI (AssignModal / AssignWork) should be
  * offered at all, given the caller's role and the org's `allowSelfAssignment`
  * setting. Mirrors the self-assign carve-out enforced server-side in
  * `sync-worker/src/events/authorize.ts` — UX gate only, never the security
  * boundary; the server re-checks independently on every `assignment.create`.
  *
- * Leads/maintainers (>= PROJECT_LEAD) can always open it, regardless of the
- * setting. Below that, a member (CONTRIBUTOR+) can open it ONLY when the org
- * has opted into `allowSelfAssignment` — and even then, `canSubmitAssignment`
- * below still restricts what they can submit to themselves only.
+ * A caller at the org's assignmentMinRole can open it for any assignee.
+ * Below that floor, CONTRIBUTOR+ can open it only when the org has opted into
+ * allowSelfAssignment, and canSubmitAssignment restricts them to themselves.
  */
 export function canOpenAssignUi(
   roleLevel: number | null | undefined,
   allowSelfAssignment: boolean,
+  assignmentMinRole: number = ROLE.PROJECT_LEAD,
 ): boolean {
   if (roleLevel == null) return false
-  if (roleLevel >= ROLE.PROJECT_LEAD) return true
+  if (roleLevel >= assignmentMinRole) return true
   return allowSelfAssignment && roleLevel >= ROLE.CONTRIBUTOR
 }
 
 /**
  * AQU-496: whether `roleLevel` may submit `assignment.create` assigning
- * `assigneeUserId`. Leads/maintainers may assign anyone. Below-lead callers
- * may ONLY self-assign (assigneeUserId === callerUserId), and only when
- * `allowSelfAssignment` is on — mirrors the server's `isSelfAssignCreate`
- * check in `sync-worker/src/events/authorize.ts`.
+ * `assigneeUserId`. Callers at assignmentMinRole may assign anyone.
+ * Below-floor callers may only self-assign (assigneeUserId === callerUserId),
+ * and only when allowSelfAssignment is on.
  */
 export function canSubmitAssignment(
   roleLevel: number | null | undefined,
   allowSelfAssignment: boolean,
   callerUserId: number | null | undefined,
   assigneeUserId: number,
+  assignmentMinRole: number = ROLE.PROJECT_LEAD,
 ): boolean {
   if (roleLevel == null) return false
-  if (roleLevel >= ROLE.PROJECT_LEAD) return true
+  if (roleLevel >= assignmentMinRole) return true
   if (!allowSelfAssignment || roleLevel < ROLE.CONTRIBUTOR) return false
   return callerUserId != null && callerUserId === assigneeUserId
 }
@@ -157,4 +368,30 @@ export function canSubmitAssignment(
  */
 export function canSwitchLanes(roleLevel: number | null | undefined): boolean {
   return roleLevel != null && roleLevel >= ROLE.MAINTAINER
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// AQU-1086: the org-configurable project-language edit floor.
+//
+// CLIENT MIRROR of auth-worker's DEFAULT_LANGUAGE_EDIT_MIN_ROLE /
+// getLanguageEditMinRoleForProject (services/org-permissions.ts). The server
+// re-resolves the floor on every language write, so this is an affordance
+// value used to disable controls — never authority.
+//
+// The default is MAINTAINER, i.e. the behaviour before this issue: an org opts
+// in to project-lead language editing by lowering `languageEditMinRole` on
+// Org Settings → Security. Deliberately different from the termbase floor
+// (glossary-view.ts), which defaults to PROJECT_LEAD.
+// ──────────────────────────────────────────────────────────────────────────
+
+/** Floor for editing a project's languages when the org hasn't configured one. */
+export const DEFAULT_LANGUAGE_EDIT_MIN_ROLE = ROLE.MAINTAINER
+
+/** Clamp an org-configured language floor to the role ladder, else the default. */
+export function resolveLanguageEditFloor(minRole?: number | null): number {
+  if (typeof minRole !== "number" || !Number.isFinite(minRole)) {
+    return DEFAULT_LANGUAGE_EDIT_MIN_ROLE
+  }
+  if (minRole < 100 || minRole > 700) return DEFAULT_LANGUAGE_EDIT_MIN_ROLE
+  return minRole
 }

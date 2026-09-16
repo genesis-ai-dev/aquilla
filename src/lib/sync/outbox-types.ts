@@ -15,6 +15,9 @@
  *    pin onto the source row's `event_id` as observed at commit time.
  */
 
+import type { CameraState } from "@/lib/sync/cells-read-types"
+import type { TermRendering } from "@/lib/terminology/types"
+
 // ── Kind union (must mirror sync-worker/src/events/types.ts) ──────────────
 
 export type OutboxEventKind =
@@ -39,13 +42,19 @@ export type OutboxEventKind =
   | "cell.audio.select"
   | "cell.audio.remove"
   | "cell.audio.rename"
+  | "cell.audio.trim"
+  | "cell.audio.place"
   | "cell.audio.measure"
+  // Stage 4: one edge between a subtitle cell and an audio cue
+  // (contributor-level; non-chain-mutating).
+  | "cell.link.set"
   // Back-translation (contributor-level; non-chain-mutating).
   | "cell.backtranslation.set"
   // File lifecycle.
   | "file.create"
   // File label rename (contributor-level; non-chain-mutating).
   | "file.rename"
+  | "file.corpus.set"
   // Soft-delete a file (project_lead+; non-chain-mutating).
   | "file.delete"
   // Restore a soft-deleted file (project_lead+; non-chain-mutating).
@@ -55,6 +64,20 @@ export type OutboxEventKind =
   | "comment.edit"
   | "comment.delete"
   | "comment.resolve"
+  // Terminology concepts (project-level, non-chain-mutating). Carry the
+  // `__project__` sentinel fileId like comment.*; the concept id is in the
+  // payload. AQU-1006 follow-up — see sync-worker/src/events/types.ts for why
+  // these exist (the settings blob lost concurrent adds).
+  //
+  // TWO authority levels, enforced server-side by termbase-authority.ts:
+  // `term.create` with status 'draft' is a SUGGESTION any contributor may
+  // make; every other term write BINDS (it changes what the rule engine
+  // enforces for everyone) and needs the org's `termbaseEditMinRole`.
+  | "term.create"
+  | "term.update"
+  | "term.delete"
+  | "term.approve"
+  | "term.reject"
   // Assignments (project-level, non-chain-mutating; project-lead+). Carry a
   // fileId on the envelope for auth/routing like comment.*; scope is in the payload.
   | "assignment.create"
@@ -70,6 +93,11 @@ export type OutboxEventKind =
   // Timeline editor: set/clear a file's core video URL (stored in files.meta).
   | "file.video.set"
   | "file.timing.set"
+  // Stage 1 (first-class timeline tracks): one track's presentation overrides
+  // — rename, reorder, group — also in files.meta. DORMANT on arrival: the
+  // pipeline ships complete, but nothing emits this kind until stage 3 puts
+  // renaming and adding tracks in the UI.
+  | "file.track.set"
   // AQU-478: "accept upstream change as-is" (repin). Non-chain-mutating —
   // updates ONLY the target row's source_event_id; validated/endorsement
   // state and value are untouched. Guarded server-side by
@@ -127,11 +155,13 @@ export interface OutboxEventPayloads {
     cameraState?: string
   }
   "source.cell.commit": {
-    value: string
+    value?: string
     valueHtml?: string
-    /** AQU-847: corrected source text for a MEDIA section. An imported media
-     *  cell's `value` is the import filename, so the user's edit lands here —
-     *  the field `effectiveSourceText` (and therefore export + AI) reads. */
+    /** AQU-847 / AQU-646: corrected source text for a MEDIA section. An
+     *  imported media cell's `value` is the import filename, so the user's
+     *  edit lands here — the field `effectiveSourceText` (and therefore export
+     *  and AI) reads. The stored `value` is left untouched; the chain head
+     *  still advances, so targets go stale. */
     transcription?: string
   }
   "source.cell.delete": Record<string, never>
@@ -256,7 +286,10 @@ export interface OutboxEventPayloads {
   "cell.audio.attach": {
     audioId: string
     url: string
-    slot: "recording" | "generatedVoice"
+    /** AQU-646: an OPEN string. `cell_audio.slot` is unconstrained TEXT, and an
+     *  extra target-audio track addresses its takes by its own track id. The
+     *  two well-known values are "recording" and "generatedVoice". */
+    slot: string
     mimeType?: string
     voiceId?: string
     referenceAudioId?: string
@@ -273,7 +306,9 @@ export interface OutboxEventPayloads {
   }
   "cell.audio.select": {
     audioId: string
-    slot: "recording" | "generatedVoice"
+    /** Scopes the sibling-deselect only; it is never written onto the row, so
+     *  select cannot move a clip between slots. Open string — see attach. */
+    slot: string
   }
   "cell.audio.remove": {
     audioId: string
@@ -283,12 +318,62 @@ export interface OutboxEventPayloads {
     audioId: string
     label: string | null
   }
+  /**
+   * The clip's COMPLETE playback trim window — both ends always stated, null
+   * meaning "back to the clip edge". Required-and-nullable rather than
+   * optional: an absent field is exactly what made "no opinion" and "clear it"
+   * indistinguishable, so a re-attach carrying word timings wiped the window a
+   * take had just been given. Sets nothing else.
+   */
+  "cell.audio.trim": {
+    audioId: string
+    trimStartMs: number | null
+    trimEndMs: number | null
+  }
+  /**
+   * AQU-646 stage 3: where THIS take sits against the line it performs, as an
+   * offset in ms from the line's own start. May be negative (a take that leads
+   * its line) and `0` is a real value.
+   *
+   * ITS OWN KIND, NEVER RIDING ATTACH. The anchor used to live on the CELL
+   * (`cell.lane.retime`'s `targetOffsetMs` → `cells.metadata`), which was exact
+   * while a line could hold one dub; with extra target tracks two takes share a
+   * line and would share one anchor, so dragging one chip would move the other.
+   * Absence has to keep meaning exactly one thing — "never placed by hand" —
+   * which is why this cannot be a field on attach, where absence would also
+   * mean "this attach had no opinion".
+   *
+   * `null` CLEARS the placement back to the line's start. Required-and-nullable
+   * for the reason `cell.audio.trim` is: an optional field made "no opinion"
+   * and "clear it" indistinguishable and cost every take its trim window once
+   * already.
+   */
+  "cell.audio.place": {
+    audioId: string
+    targetOffsetMs: number | null
+  }
   // Duration backfill for takes that predate duration capture. The server
   // fills only a NULL duration_ms — never selection/url/slot/trims — so
   // measuring an arbitrary take can never change which take is active.
   "cell.audio.measure": {
     audioId: string
     durationMs: number
+  }
+  /**
+   * Stage 4: link or unlink ONE subtitle cell and ONE audio cue. The subtitle
+   * side rides the envelope (fileId/cellId), the cue rides the payload.
+   *
+   * `linked` is required and boolean — an unlink is a stated `false`, never an
+   * absent field. Same rule as the trim window above, and for the same reason:
+   * absence must never be the way something is expressed.
+   */
+  "cell.link.set": {
+    kind: "text-audio"
+    toFileId: string
+    toCellId: string
+    linked: boolean
+    origin: "auto" | "manual"
+    confidence: number | null
   }
 
   /**
@@ -315,12 +400,15 @@ export interface OutboxEventPayloads {
     targetTextDirection?: "ltr" | "rtl"
     /** Timeline-segment-model order lens: 'time' | 'sequence'. */
     orderedBy?: string
+    corpusMarker?: string
   }
   // Rename a file's display label. Non-chain-mutating (parentId omitted).
-  // Mirrors sync-worker/src/events/types.ts. (Corpus/grouping marker is not
-  // server-backed yet — name only.)
   "file.rename": {
     name: string
+  }
+  // Set/clear the file's sidebar corpus group. Null clears it (Ungrouped).
+  "file.corpus.set": {
+    corpusMarker: string | null
   }
   // Soft-delete a file (project_lead+). Stamps `files.deleted_at`; cells and
   // audio are retained (R2 wipe deferred). Non-chain-mutating (parentId omitted).
@@ -351,6 +439,37 @@ export interface OutboxEventPayloads {
   "comment.resolve": {
     commentId: string // top-level only; server noops on a reply id
     resolved: boolean
+  }
+
+  // ── Terminology concepts (project-level, non-chain-mutating) ────────────
+  "term.create": {
+    conceptId: string // client-generated uuid; the projection's primary key
+    sourceTerm: string
+    renderings: TermRendering[]
+    /** 'draft' = suggested, compiles to no rules; 'active' = enforced now. */
+    status: "active" | "draft" | "deprecated"
+    notes?: string
+    caseSensitive?: boolean
+  }
+  // Partial patch: only the keys present are written, so two people editing
+  // different fields of one concept both survive. `renderings` is replaced
+  // wholesale when present (a rendering has no stable id to merge on).
+  "term.update": {
+    conceptId: string
+    sourceTerm?: string
+    renderings?: TermRendering[]
+    notes?: string
+    caseSensitive?: boolean
+  }
+  "term.delete": {
+    conceptId: string // soft-delete: stamps deleted_at
+  }
+  "term.approve": {
+    conceptId: string // draft -> active
+  }
+  "term.reject": {
+    conceptId: string
+    mode: "delete" | "deprecate"
   }
 
   // ── Assignments (project-level, non-chain-mutating) ──────────────────────
@@ -388,7 +507,14 @@ export interface OutboxEventPayloads {
      * AQU-439: Optional camera-angle override. When present, the projection
      * also updates cells.camera_state. Omitted when no angle was supplied.
      */
-    cameraState?: "on" | "mixed" | "off" | null
+    cameraState?: CameraState | null
+    /**
+     * AQU-646: the client's own line number for this row, from her character
+     * sheet's `Line #` column. The projection merges it into cells.metadata as
+     * { line_number: value } beside cast_name. Omitted when her sheet had no
+     * such column.
+     */
+    lineNumber?: string | null
   }
 
   // Timeline editor: retime a cell (move/stretch). cellId is on the envelope.
@@ -398,10 +524,14 @@ export interface OutboxEventPayloads {
   }
   // AQU-646 round 6: per-LANE presentation timing (subtitle span / target-audio
   // start) merged into source-side metadata. number sets, null clears,
-  // undefined = untouched. Absolute file ms.
+  // undefined = untouched. Absolute file ms, EXCEPT targetOffsetMs.
   "cell.lane.retime": {
     subtitleStartMs?: number | null
     subtitleEndMs?: number | null
+    /** Round 8: dub anchor RELATIVE to the cell's own start. May be negative. */
+    targetOffsetMs?: number | null
+    /** Legacy absolute dub anchor. Still projected so historical events replay
+     *  unchanged, but nothing writes it any more. */
     targetStartMs?: number | null
   }
   // The file's audio timing mode (Original vs Free); null clears back to the
@@ -409,6 +539,34 @@ export interface OutboxEventPayloads {
   // it replaces in Project Settings.
   "file.timing.set": {
     timingMode: "dubbing" | "audioFirst" | null
+  }
+  // Stage 1: ONE track's presentation delta, merged per-field into
+  // files.meta.trackOverrides[trackId]. `patch: null` deletes the entry —
+  // dropping a user-added track, or resetting a default back to pure
+  // defaults. Inside a patch, null means "clear THAT override" and an absent
+  // key means "leave it alone"; `kind` has no null form because a track's
+  // kind is its identity. The patch is FLAT on purpose — the projection
+  // strips nulls recursively. Maintainer floor, like file.timing.set.
+  //
+  // The kind union is spelled out here rather than imported from
+  // @/lib/timeline/tracks: this module is the wire mirror of
+  // sync-worker/src/events/types.ts and stays free of app imports, so drift
+  // shows up against the server, not against a local re-export.
+  //
+  // Stage 2 adds the two ADDED kinds ("folder" / "audio"), plus `color` (a
+  // palette id, never colour values) and `sourceTrackId` (which track's cells
+  // an added track lines up with, set once at creation). Both new fields have a
+  // null form — clearing a colour is how you go back to the default pair.
+  "file.track.set": {
+    trackId: string
+    patch: {
+      kind?: "source-subtitles" | "source-audio" | "target-subtitles" | "target-audio" | "folder" | "audio"
+      name?: string | null
+      order?: number | null
+      groupId?: string | null
+      color?: string | null
+      sourceTrackId?: string | null
+    } | null
   }
   // Timeline editor: set/clear a file's core video URL (timeline preview).
   "file.video.set": {

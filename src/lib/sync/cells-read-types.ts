@@ -22,6 +22,15 @@ export interface FileSummary {
   name: string
   /** e.g. "codex", "source", "vtt". Matches the FileType enum on the client. */
   fileType: string
+  /** The raw `role`/`kind` columns behind `fileType` (which is `kind ?? role`,
+   *  and so cannot distinguish an audio-cue sibling — role "audio-cues", kind
+   *  "vtt" — from a plain subtitle import). The route has always sent both;
+   *  declaring them is what lets a consumer of this shape, notably the Trash
+   *  listing, filter the hidden siblings out. */
+  role?: string | null
+  kind?: string | null
+  /** The text file an audio-cue sibling annotates. Null on ordinary files. */
+  anchorFileId?: string | null
   sourceLanguage: string | null
   targetLanguage: string | null
   sourceTextDirection?: "ltr" | "rtl" | null
@@ -36,6 +45,8 @@ export interface FileSummary {
   lastEditAt: number | null
   /** AQU-272: epoch-ms when this file was soft-deleted, or null when active. */
   deletedAt?: number | null
+  /** AQU-656: original import blob exists. Absent on older sync-workers. */
+  hasOriginalSource?: boolean
 }
 
 /**
@@ -103,8 +114,21 @@ export interface CellRow {
 /** Primary content kind of a segment. */
 export type SegmentMedium = "text" | "media"
 
-/** Camera state for a media segment (Wendi's lip-sync constraint). */
-export type CameraState = "on" | "mixed" | "off"
+/**
+ * Camera state for a media segment (Wendi's lip-sync constraint).
+ *
+ * `group` is the fourth value and the newest (AQU-646, 2026-08-20). The client
+ * spreadsheets have always used it — a shot with several people in frame — and
+ * both importers used to fold it into `mixed` on the way in, which meant it
+ * could never come back out of an export. Sam, on seeing that in a real
+ * corrected workbook: "If those are separate camera labels, then they need to
+ * remain separate camera labels throughout the project."
+ *
+ * The column behind this is plain TEXT with no constraint, so widening the
+ * union needed no migration — the value was always storable, just never
+ * produced.
+ */
+export type CameraState = "on" | "mixed" | "off" | "group"
 
 /** Pagination response shape. */
 export interface CellsPage {

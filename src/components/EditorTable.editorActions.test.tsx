@@ -9,13 +9,15 @@
  * truthy) rather than throwing a type error.
  */
 
-import { describe, it, expect, vi } from "vitest"
+import { describe, it, expect, vi, afterEach } from "vitest"
 import { createHash } from "node:crypto"
 import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import type { ReactNode } from "react"
 import { EditorTable } from "./EditorTable"
 import { EditorActionsProvider, type EditorActionsContextValue } from "@/context/EditorActionsContext"
+import { setTtsStatus, ttsStatusKey } from "@/lib/audio/tts"
+import { MemoryRouter } from "react-router-dom"
 import { CellStore } from "@/hooks/useActiveCellStore"
 import type { ProjectRecord } from "@/lib/parsers/types"
 import type { CellRow } from "@/lib/sync/cells-read-types"
@@ -202,6 +204,10 @@ function renderTable(
 ) {
   const qc = new QueryClient()
   return render(
+    // AQU-646 stage 4c: the synth badge's recovery action navigates to voice
+    // setup, so it calls `useNavigate()` and cannot mount outside a router.
+    // Harmless for every case that never renders the badge.
+    <MemoryRouter>
     <QueryClientProvider client={qc}>
       <EditorActionsProvider value={actions}>
         <EditorTable
@@ -223,15 +229,76 @@ function renderTable(
           targetTextDirection="ltr"
         />
       </EditorActionsProvider>
-    </QueryClientProvider>,
+    </QueryClientProvider>
+    </MemoryRouter>,
   )
 }
 
 describe("EditorTable — EditorActionsContext wiring", () => {
+  /**
+   * AQU-200: the rail keeps only AI-generate as a direct button; comments,
+   * history, record, play, TTS and footnote now live behind a single `⋯`.
+   * These tests are about the WIRING of those actions, not their placement, so
+   * they open the overflow first and assert the same behaviour as before.
+   * The popup portals to the document body, so query it off `screen`, not the
+   * row — at most one row's overflow is ever open.
+   */
+  async function openRailOverflow(row?: HTMLElement) {
+    const scope = row ? within(row) : screen
+    fireEvent.click(await scope.findByRole("button", { name: "More actions" }))
+  }
+
+  // ── AQU-200 regression guard ───────────────────────────────────────────────
+  //
+  // The rail grew to six-plus buttons plus a chevron and read as noise. The
+  // rule that keeps it calm: at most AI-generate stays a direct button (the
+  // row's other always-visible action, validate, lives in the left gutter),
+  // and everything else is reachable through exactly ONE `⋯`. A future feature
+  // that wants a rail button has to earn one of those two slots or go in the
+  // overflow — this test is what says so.
+  it("AQU-200: a focused row shows the AI-generate group and one ⋯ — no button per action", async () => {
+    renderTable({ onOpenComments: vi.fn(), onOpenHistory: vi.fn(), onOpenRecording: vi.fn() })
+
+    const row = (await screen.findByText("bonjour")).closest("[data-grid-row]") as HTMLElement
+    const rail = row.querySelector('[data-slot="cell-action-rail"]') as HTMLElement
+    expect(rail).not.toBeNull()
+
+    const directLabels = within(rail)
+      .getAllByRole("button")
+      .map((b) => b.getAttribute("aria-label") ?? "")
+
+    // ONE overflow trigger for the whole rail — not one per action group.
+    expect(directLabels.filter((l) => l === "More actions")).toHaveLength(1)
+
+    // The lower-frequency actions are NOT direct buttons any more. This is the
+    // half that regresses if someone promotes "just one" back onto the rail.
+    // The mic renders under its denied label in this fixture (no getUserMedia
+    // in happy-dom) — same button, same slot, just a different tooltip.
+    const MIC = "Microphone access blocked — click for help"
+    const collapsed = ["Add comment", "Edit history", MIC, "Upload audio file", "Add footnote"]
+    for (const label of collapsed) {
+      expect(directLabels).not.toContain(label)
+    }
+
+    // What's left is the AI-generate group (sparkle + regenerate) plus the two
+    // pieces of rail chrome — four at the absolute most, against the nine-odd
+    // buttons this rail used to grow to.
+    expect(directLabels.length).toBeLessThanOrEqual(4)
+    expect(directLabels).toContain("Open cell details")
+
+    // …and every collapsed action that this row's gates allow is still
+    // reachable, through that one ⋯.
+    await openRailOverflow(rail)
+    for (const label of ["Add comment", "Edit history", MIC]) {
+      expect(screen.getByRole("button", { name: label })).toBeInTheDocument()
+    }
+  })
+
   it("clicking the row's comment affordance calls the context's onOpenComments with the cell id", async () => {
     const onOpenComments = vi.fn()
     renderTable({ onOpenComments })
 
+    await openRailOverflow()
     const button = await screen.findByRole("button", { name: "Add comment" })
     fireEvent.click(button)
 
@@ -242,8 +309,10 @@ describe("EditorTable — EditorActionsContext wiring", () => {
   it("does not render the comment affordance when onOpenComments is absent from context", async () => {
     renderTable({})
 
-    // A moment for the row to mount before asserting absence.
+    // Open the overflow first, or this would pass merely because the action is
+    // collapsed — the assertion is about the context gate, not the `⋯`.
     await screen.findByText("bonjour")
+    await openRailOverflow()
     expect(screen.queryByRole("button", { name: "Add comment" })).not.toBeInTheDocument()
   })
 
@@ -251,6 +320,7 @@ describe("EditorTable — EditorActionsContext wiring", () => {
     const onOpenHistory = vi.fn()
     renderTable({ onOpenHistory })
 
+    await openRailOverflow()
     const button = await screen.findByRole("button", { name: "Edit history" })
     fireEvent.click(button)
 
@@ -261,8 +331,10 @@ describe("EditorTable — EditorActionsContext wiring", () => {
   it("does not render the history affordance when onOpenHistory is absent from context", async () => {
     renderTable({})
 
-    // A moment for the row to mount before asserting absence.
+    // Open the overflow first, or this would pass merely because the action is
+    // collapsed — the assertion is about the context gate, not the `⋯`.
     await screen.findByText("bonjour")
+    await openRailOverflow()
     expect(screen.queryByRole("button", { name: "Edit history" })).not.toBeInTheDocument()
   })
 
@@ -506,13 +578,17 @@ describe("EditorTable — EditorActionsContext wiring", () => {
   it("raises and unclamps the row while microphone-permission help is open", async () => {
     renderTable({ onOpenRecording: vi.fn() })
 
+    await openRailOverflow()
     const micButton = await screen.findByRole("button", {
       name: "Microphone access blocked — click for help",
     })
     fireEvent.click(micButton)
 
-    expect(screen.getByRole("tooltip", { name: /microphone blocked/i })).toBeInTheDocument()
-    expect(micButton.closest("[data-grid-row]")).toHaveClass("z-30", "overflow-visible")
+    expect(screen.getByText("Microphone blocked")).toBeInTheDocument()
+    // AQU-200: the mic now lives in the overflow popup, which portals out of
+    // the row — so reach the row through its content, not through the button.
+    const row = screen.getByText("bonjour").closest("[data-grid-row]")
+    expect(row).toHaveClass("z-30", "overflow-visible")
   })
   // ── 2026-08-07 (wire b): a plain row click points the timeline at the cell ──
 
@@ -535,8 +611,83 @@ describe("EditorTable — EditorActionsContext wiring", () => {
   it("clicking an interactive control inside the row does not activate the timeline", async () => {
     const onMediaRowActivate = vi.fn()
     renderTable({ onOpenComments: vi.fn(), onMediaRowActivate })
+    await openRailOverflow()
     const button = await screen.findByRole("button", { name: "Add comment" })
     fireEvent.click(button)
     expect(onMediaRowActivate).not.toHaveBeenCalled()
+  })
+})
+
+// ── AQU-646 stage 4c ─────────────────────────────────────────────────────────
+//
+// The row's synth badge — the one carrying the popover with "Open audio setup",
+// which is the richest failure surface in the app — watched the WRONG CELL on
+// every file with an audio-cue sibling.
+//
+// Stage 3f moved the voice button beside it to the heard line that performs the
+// subtitle, because that is where the audio belongs. The badge stayed on the
+// row's own id, so the button wrote its failure to `synth:<cue>` while the
+// badge listened on `synth:<subtitle>` and the two never met. On the dubbing
+// workflow — every episode The Chosen ships — a voice failure was therefore
+// invisible in the table.
+describe("EditorTable — the synth badge watches where the audio lives (stage 4c)", () => {
+  const CUE_ID = "cue-for-cell-1"
+  afterEach(() => {
+    setTtsStatus(ttsStatusKey(CUE_ID), { kind: "idle" })
+    setTtsStatus(ttsStatusKey("cell-1"), { kind: "idle" })
+  })
+
+  /** The arrangement that broke: this row's audio lives on a cue in the sibling
+   *  file, which is what `audioHomeFor` reports. */
+  const cueHome: Partial<EditorActionsContextValue> = {
+    audioHomeFor: () => [{ id: CUE_ID, fileId: "f1-cues" } as never],
+    // Not under test — it is the affordance these cases wait on to know the
+    // row has settled, and it only renders when its callback exists.
+    onOpenComments: () => {},
+  }
+
+  it("lights up for a failure filed under the cue that performs the line", async () => {
+    setTtsStatus(ttsStatusKey(CUE_ID), {
+      kind: "error",
+      message: "voice/tts failed (503): TTS not configured",
+    })
+    renderTable(cueHome)
+    // Before the fix this badge never appeared, however loudly the generation
+    // had failed — the failure was filed one cell away from the only thing
+    // watching for it.
+    expect(await screen.findByTestId("synth-status-error")).toBeInTheDocument()
+  })
+
+  // …AND STILL FOR ONE FILED UNDER THE ROW ITSELF, which is the half an
+  // adversarial review caught me getting wrong. Stage 3f moved only the rail's
+  // voice button to the cue; three producers still write under the row's own
+  // cell — the audio lens's CellVoicePanel, a voice dropped from the dock, and
+  // "Voice together" — and none of them has an error surface of its own. A
+  // badge pointed only at the cue trades one blind spot for three.
+  it("lights up for a failure filed under the row's own cell too", async () => {
+    setTtsStatus(ttsStatusKey("cell-1"), {
+      kind: "error",
+      message: "voice/tts failed (503): TTS not configured",
+    })
+    renderTable(cueHome)
+    expect(await screen.findByTestId("synth-status-error")).toBeInTheDocument()
+  })
+
+  // A run in flight outranks a stale failure on the other key — otherwise the
+  // badge announces the outcome of something that is still running.
+  it("shows a run in progress rather than the failure it may be replacing", async () => {
+    setTtsStatus(ttsStatusKey("cell-1"), { kind: "error", message: "voice/tts failed (503): x" })
+    setTtsStatus(ttsStatusKey(CUE_ID), { kind: "synthesizing" })
+    renderTable(cueHome)
+    expect(await screen.findByTestId("synth-status-busy")).toBeInTheDocument()
+    expect(screen.queryByTestId("synth-status-error")).toBeNull()
+  })
+
+  // …and the ordinary arrangement is untouched: with no cue sibling the audio
+  // home IS the row, so the badge reads exactly the key it always did.
+  it("still reads the row's own cell on a file with no cues", async () => {
+    setTtsStatus(ttsStatusKey("cell-1"), { kind: "error", message: "voice/tts failed (503): x" })
+    renderTable({ onOpenComments: () => {} })
+    expect(await screen.findByTestId("synth-status-error")).toBeInTheDocument()
   })
 })

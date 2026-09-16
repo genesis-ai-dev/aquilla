@@ -94,9 +94,11 @@ describe("BlockingLoadingOverlay (AQU-737)", () => {
     expect(container.contains(status)).toBe(false)
     expect(status.parentElement).toBe(document.body)
     // Fixed full-viewport layer with NO pointer-events-none: the layer itself
-    // must swallow clicks aimed at controls beneath it.
+    // must swallow clicks aimed at controls beneath it. Loading is shown by
+    // the spinner pill, not a wait cursor.
     expect(status).toHaveClass("fixed", "inset-0")
     expect(status.className).not.toContain("pointer-events-none")
+    expect(status.className).not.toContain("cursor-wait")
   })
 
   it("shows the shared spinner pill with the label", () => {

@@ -2,16 +2,17 @@
 // voices, pick which one is active, set the narrator. Making a voice is a single
 // "New voice" button → NewVoiceModal, which carries both ways to make one
 // (TTS / Clone) behind tabs, seeded with the project's configured engine.
+// Cloning from a source cell's audio controls is hosted at the workspace root
+// (CloneVoiceModalHost) so the modal does not depend on this panel being mounted.
 //
 // Click a row to select it (the active voice — the assign target). Drag a row
-// onto a line to assign it. The row's ⋯ menu edits / sets-narrator / deletes.
+// onto a line to assign it. The row's ⋯ menu (and a right-click) edits /
+// makes-narrator / deletes.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from "react"
 import { Check, MoreHorizontal, Pencil, Plus, Search, Star, Trash2 } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { VoiceAvatar } from "@/components/voice/VoiceAvatar"
 import { cn } from "@/lib/utils"
 import {
@@ -19,9 +20,25 @@ import {
   InputGroupAddon,
   InputGroupInput,
 } from "@/components/ui/input-group"
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
+  MenuGroup,
+  MenuItem,
+  MenuSeparator,
+  createMenuHandle,
+} from "@/components/ui/menu-parts"
 import type { ProjectTtsSettings, TtsProvider, Voice } from "@/lib/parsers/types"
 import type { CellData } from "@/hooks/useCells"
-import { PRESET_VOICES } from "@/lib/audio/voices"
+import { PRESET_VOICES, upsertVoice } from "@/lib/audio/voices"
 import { providerInfo, resolveTtsProvider } from "@/lib/audio/tts-providers"
 import { NewVoiceModal } from "@/components/voice/NewVoiceModal"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -50,9 +67,6 @@ interface Props {
   castStats?: Map<string, CastMemberStats>
   /** All cells, so cloning can reuse a take from a line. */
   cells?: CellData[]
-  /** The per-cell "clone from this take" seed (opens the clone workflow). */
-  seedCellId?: string | null
-  seedSignal?: number
   /**
    * AQU-365: the caller's resolved project role level (project.syncRole?.level),
    * or null/undefined for local projects with no live role (fail-open — same
@@ -68,12 +82,10 @@ type Editing =
   | { kind: "closed" }
   | { kind: "create" }
   | { kind: "edit"; voice: Voice }
-  | { kind: "clone"; seedCellId: string | null }
 
 export function VoiceLibraryPanel({
   targetLanguage, settings, onSettingsChange, projectId, fileId, session,
-  selectedVoiceId, onSelectVoice, castStats, cells, seedCellId, seedSignal,
-  roleLevel,
+  selectedVoiceId, onSelectVoice, castStats, cells, roleLevel,
 }: Props) {
   const t = useT()
   const [voices, setVoices] = useState<Voice[]>([])
@@ -90,10 +102,25 @@ export function VoiceLibraryPanel({
   const canEditVoices = roleLevel == null || roleLevel >= ROLE.MAINTAINER
   const voiceDenialReason = !canEditVoices ? denialMessage(t, ROLE.MAINTAINER, roleLevel) : null
 
-  // Seed the local library once per project.
+  // Keep the roster in sync with persisted settings so a voice created from
+  // the in-cell Clone host (which writes through tts.saveTts) appears here
+  // without a remount. First visit to a project still falls back to presets
+  // when nothing has been saved yet.
   useEffect(() => {
-    if (!projectId || seededRef.current === projectId) return
-    const seed = settings?.voices && settings.voices.length > 0 ? settings.voices : [...PRESET_VOICES]
+    if (!projectId) return
+    const projectChanged = seededRef.current !== projectId
+    const stored = settings?.voices
+    if (stored && stored.length > 0) {
+      setVoices(stored)
+      setDefaultVoiceId(settings?.defaultVoiceId ?? stored[0]?.id)
+      if (projectChanged) {
+        setLocalSelectedId(settings?.defaultVoiceId ?? stored[0]?.id ?? "")
+        seededRef.current = projectId
+      }
+      return
+    }
+    if (!projectChanged) return
+    const seed = [...PRESET_VOICES]
     const seedDefault = settings?.defaultVoiceId ?? seed[0]?.id
     setVoices(seed)
     setDefaultVoiceId(seedDefault)
@@ -124,12 +151,10 @@ export function VoiceLibraryPanel({
   // "setState during render" warning.)
   const saveVoice = useCallback((voice: Voice) => {
     if (!canEditVoices) return
-    const exists = voices.some((v) => v.id === voice.id)
-    const next = exists ? voices.map((v) => (v.id === voice.id ? voice : v)) : [...voices, voice]
-    const nextDefault = defaultVoiceId ?? next[0]?.id
-    setVoices(next)
-    setDefaultVoiceId(nextDefault)
-    void onSettingsChange({ voices: next, defaultVoiceId: nextDefault })
+    const next = upsertVoice(voices, voice, defaultVoiceId)
+    setVoices(next.voices)
+    setDefaultVoiceId(next.defaultVoiceId)
+    void onSettingsChange({ voices: next.voices, defaultVoiceId: next.defaultVoiceId })
     select(voice.id)
   }, [voices, defaultVoiceId, onSettingsChange, select, canEditVoices])
 
@@ -142,12 +167,6 @@ export function VoiceLibraryPanel({
   }, [voices, defaultVoiceId, selectedId, writeBack, select, canEditVoices])
 
   const makeDefault = useCallback((voice: Voice) => writeBack(voices, voice.id), [voices, writeBack])
-
-  // The per-cell "clone from this take" opens the clone workflow seeded.
-  useEffect(() => {
-    if (!seedSignal) return
-    setEditing({ kind: "clone", seedCellId: seedCellId ?? null })
-  }, [seedSignal, seedCellId])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -240,16 +259,52 @@ export function VoiceLibraryPanel({
           onSave={saveVoice}
           onDelete={editing.kind === "edit" && canEditVoices ? () => deleteVoice(editing.voice) : undefined}
           onMakeDefault={editing.kind === "edit" && canEditVoices ? () => makeDefault(editing.voice) : undefined}
-          initialMode={editing.kind === "clone" ? "clone" : "tts"}
-          seedCellId={editing.kind === "clone" ? editing.seedCellId : null}
+          initialMode="tts"
         />
       )}
     </div>
   )
 }
 
+function VoiceActionMenu({
+  isDefault, canDelete, onEdit, onMakeDefault, onDelete,
+}: {
+  isDefault: boolean
+  canDelete: boolean
+  onEdit: () => void
+  onMakeDefault: () => void
+  onDelete: () => void
+}) {
+  const t = useT()
+  return (
+    <>
+      <MenuGroup>
+        <MenuItem onClick={onEdit}>
+          <Pencil /> {t("common.edit")}
+        </MenuItem>
+        {!isDefault && (
+          <MenuItem onClick={onMakeDefault}>
+            <Star /> {t("audio.newVoice.makeNarratorButton")}
+          </MenuItem>
+        )}
+      </MenuGroup>
+      {canDelete && (
+        <>
+          <MenuSeparator />
+          <MenuGroup>
+            <MenuItem variant="destructive" onClick={onDelete}>
+              <Trash2 /> {t("common.delete")}
+            </MenuItem>
+          </MenuGroup>
+        </>
+      )}
+    </>
+  )
+}
+
 /** A single selectable voice row: avatar · name · meta · narrator star ·
- *  selected check · hover ⋯ menu. Click selects; drag assigns onto a line. */
+ *  selected check · hover ⋯ menu. Click selects; drag assigns onto a line.
+ *  Right-click (and the ⋯ button) open the same items as a file-tab row. */
 function VoiceRow({
   voice, projectProvider, active, isDefault, stats, canEdit, onSelect, onEdit, onMakeDefault, onDelete,
 }: {
@@ -270,30 +325,24 @@ function VoiceRow({
   onDelete: () => void
 }) {
   const t = useT()
+  const actionsMenu = useMemo(() => createMenuHandle(), [])
   // Same resolution the synth path uses (CellTtsButton, generateAndAttachCellVoice):
   // a voice's own provider wins; an absent one falls back to the project's
   // configured engine — never a hardcoded "Gemini".
   const engineLabel = voice.referenceAudioId
     ? t("audio.library.cloneEngineLabel")
     : providerInfo(voice.provider ?? projectProvider).shortTitle
-  const [menuOpen, setMenuOpen] = useState(false)
-  return (
-    <AppTooltip content={t("audio.library.rowHint")}>
-      <div
-        role="button"
-        tabIndex={0}
-        draggable
-        onDragStart={(e) => {
-          e.dataTransfer.setData(VOICE_ASSIGN_MIME, voice.id)
-          e.dataTransfer.effectAllowed = "copy"
-        }}
-        onClick={onSelect}
-        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect() } }}
-        className={cn(
-          "group flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-start text-sm transition-colors",
-          active ? "bg-primary/10" : "hover:bg-accent/50",
-        )}
-      >
+  const actions = (
+    <VoiceActionMenu
+      isDefault={isDefault}
+      canDelete={!voice.builtIn}
+      onEdit={onEdit}
+      onMakeDefault={onMakeDefault}
+      onDelete={onDelete}
+    />
+  )
+  const body = (
+    <>
       <VoiceAvatar voice={voice} size={28} />
       <span className="min-w-0 flex-1">
         <span className="block truncate font-medium leading-tight">{voice.name}</span>
@@ -308,77 +357,66 @@ function VoiceRow({
         </span>
       </span>
       {isDefault && (
-        <AppTooltip content={t("audio.library.narratorHint")}>
-          <Badge
-            variant="secondary"
-            className="shrink-0 gap-1 text-[9px]"
+        <AppTooltip content={t("audio.narrator")}>
+          <span
+            aria-label={t("audio.narrator")}
+            data-testid="voice-narrator-star"
+            className="inline-flex shrink-0 text-muted-foreground"
           >
-            <Star data-icon="inline-start" /> {t("audio.narrator")}
-          </Badge>
+            <Star className="h-3.5 w-3.5 fill-current" />
+          </span>
         </AppTooltip>
       )}
-      {/* AQU-365: the ⋯ menu is character CRUD (edit/set-narrator/delete) —
-          hidden below the maintainer floor. Selecting/dragging a voice to
-          assign it to a line stays available (a separate, lower-floor
-          concern this ticket doesn't touch). */}
+      {active && <Check data-testid="voice-row-selected" className="h-4 w-4 shrink-0 text-primary" />}
       {canEdit && (
-        <Popover open={menuOpen} onOpenChange={setMenuOpen}>
-          <AppTooltip content={t("audio.library.moreTooltip")}>
-            <PopoverTrigger
-              render={
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-xs"
-                  onClick={(e) => e.stopPropagation()}
-                  aria-label={t("audio.library.moreActionsLabel")}
-                  className="shrink-0 opacity-0 transition-opacity focus:opacity-100 group-hover:opacity-100 data-[popup-open]:opacity-100"
-                >
-                  <MoreHorizontal />
-                </Button>
-              }
-            />
-          </AppTooltip>
-          <PopoverContent align="end" side="bottom" className="w-44 p-1" onClick={(e) => e.stopPropagation()}>
-            <MenuItem icon={Pencil} label={t("common.edit")} onClick={() => { setMenuOpen(false); onEdit() }} />
-            {!isDefault && (
-              <MenuItem icon={Star} label={t("audio.library.setNarrator")} onClick={() => { setMenuOpen(false); onMakeDefault() }} />
-            )}
-            {!voice.builtIn && (
-              <MenuItem
-                icon={Trash2}
-                label={t("common.delete")}
-                destructive
-                onClick={() => { setMenuOpen(false); onDelete() }}
-              />
-            )}
-          </PopoverContent>
-        </Popover>
+        <DropdownMenuTrigger
+          handle={actionsMenu}
+          className="shrink-0 rounded-md p-1 text-muted-foreground opacity-0 transition-colors group-hover:opacity-100 hover:text-foreground focus-visible:opacity-100 aria-expanded:opacity-100 aria-expanded:text-foreground"
+          onClick={(e) => e.stopPropagation()}
+          aria-label={t("audio.library.moreActionsLabel")}
+        >
+          <MoreHorizontal className="h-3.5 w-3.5" />
+        </DropdownMenuTrigger>
       )}
-      {active && <Check className="h-4 w-4 shrink-0 text-primary" />}
-      </div>
-    </AppTooltip>
+    </>
   )
-}
+  const rowClass = cn(
+    "group flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-start text-sm transition-colors",
+    active ? "bg-primary/10" : "hover:bg-accent/50",
+  )
+  const rowProps = {
+    role: "button" as const,
+    tabIndex: 0,
+    draggable: true,
+    onDragStart: (e: DragEvent) => {
+      e.dataTransfer.setData(VOICE_ASSIGN_MIME, voice.id)
+      e.dataTransfer.effectAllowed = "copy"
+    },
+    onClick: onSelect,
+    onKeyDown: (e: KeyboardEvent) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect() }
+    },
+    className: rowClass,
+  }
 
-function MenuItem({
-  icon: Icon, label, onClick, destructive,
-}: {
-  icon: typeof Pencil
-  label: string
-  onClick: () => void
-  destructive?: boolean
-}) {
+  if (!canEdit) {
+    return <div {...rowProps}>{body}</div>
+  }
+
   return (
-    <Button
-      type="button"
-      variant={destructive ? "destructive" : "ghost"}
-      onClick={onClick}
-      className="w-full justify-start"
-    >
-      <Icon data-icon="inline-start" />
-      {label}
-    </Button>
+    <>
+      <ContextMenu>
+        <ContextMenuTrigger render={<div {...rowProps} />}>
+          {body}
+        </ContextMenuTrigger>
+        <ContextMenuContent className="w-44">{actions}</ContextMenuContent>
+      </ContextMenu>
+      <DropdownMenu handle={actionsMenu}>
+        <DropdownMenuContent align="end" className="w-44">
+          {actions}
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </>
   )
 }
 

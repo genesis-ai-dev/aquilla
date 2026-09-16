@@ -38,8 +38,12 @@ export class SyncTokenError extends Error {
   }
 }
 
-/** Optional bootstrap payload so the server can auto-register an unknown
- *  projectId on the caller's first /sync-token request. */
+/** Legacy bootstrap payload. AQU-299 / SEC-9: the server no longer
+ *  auto-registers an unknown projectId from it — POST /api/v2/projects
+ *  (createCloudProject, called on create and throwing on failure) is the only
+ *  project-creation path, and /sync-token 403s anything unregistered. Still
+ *  sent by the workspace and accepted-but-ignored server-side; remove once no
+ *  deployed client sends it. */
 export interface ProjectBootstrap {
   projectName?: string
   gitlabProjectId?: number
@@ -107,13 +111,21 @@ export interface SyncTokenCallbacks {
    * archived. Callers use this to drive local tombstone reconciliation. */
   onForbidden?: () => void
   /**
-   * Fires when the session JWT is rejected with 401 — i.e. the stored token is
-   * stale or was invalidated by a backend migration (e.g. Postgres switch).
-   * The caller should clear the cached session so the user is directed to
-   * re-authenticate rather than silently failing on every file open.
-   * AQU-159: without this hook the 401 was swallowed, leaving the user stuck.
+   * Fires when the session JWT is rejected with 401, passing the JWT the
+   * failed mint actually used. AQU-159: without this hook the 401 was
+   * swallowed, leaving the user stuck silently failing on every file open.
+   *
+   * AQU-994: callers must NOT respond by logging the user out (clearing the
+   * session store, revoking the token server-side). A single 401 is not proof
+   * the credential is dead — the 2026-08-25 incident force-logged active
+   * editors out when a Postgres blip was misreported as 401. Raise the
+   * session-expired banner instead, via
+   * `notifySessionExpiredIfCurrent(failedJwt)` (lib/frontier/session-expiry),
+   * which also drops stragglers from a credential re-login already replaced.
+   * This credential scoping also preserves unrelated stored accounts and
+   * offline work while the rejected account is reauthenticated.
    */
-  onUnauthorized?: () => void
+  onUnauthorized?: (failedJwt: string) => void
 }
 
 /** Result of a token mint that preserves the failure HTTP status. The outbox
@@ -171,12 +183,13 @@ export function makeSyncTokenMinter(
         if (err.status === 403) {
           callbacks.onForbidden?.()
         } else if (err.status === 401) {
-          // Session JWT is stale or was invalidated (e.g. after Postgres migration).
-          // Evict the in-memory sync token cache so the next call re-fetches,
-          // and notify the caller so it can clear the persisted session and
-          // redirect to login — AQU-159.
+          // Session JWT was rejected. Evict the in-memory sync token cache so
+          // the next call re-fetches, and notify the caller with the JWT that
+          // failed so it can raise the session-expired signal (AQU-159) —
+          // without destroying the session on what may be a transient
+          // misreported 401 (AQU-994) or clearing unrelated accounts.
           cached = null
-          callbacks.onUnauthorized?.()
+          callbacks.onUnauthorized?.(jwt)
         }
       }
       // Most common paths: 401 (stale jwt), 403 (no project access), 5xx (transient).

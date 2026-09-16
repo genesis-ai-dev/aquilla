@@ -173,7 +173,8 @@ hand-rolled client), not just Claude products.
 | `search_project` | Full-text search over source/target cells. |
 | `read_content` | List a project's files, or read one file's cells (with `since`/`limit`/`cursor`). |
 | `read_history` | Append-only event history for one cell. |
-| `prepare_translations` | Stage a changeset (see §3): a `SetTranslation` batch via `translations`, and/or `CreateProject` / `UpdateProjectSettings` / `LinkMedia` commands via `commands` (Agent API v1.1 — §4.1 below). |
+| `export_file` | Export one file in its delivered format — the original artifact with current translations substituted in (AQU-858, §4.2). Returns the text inline plus its fidelity fields; binary or >512KB results are refused with the REST URL to fetch instead. |
+| `prepare_translations` | Stage a changeset (see §3): a `SetTranslation` batch via `translations`, and/or `CreateOrg` / `CreateProject` / `UpdateProjectSettings` / `LinkMedia` commands via `commands` (Agent API v1.1 + AQU-1221 — §4.1 below). |
 | `get_changeset` | Fetch a changeset's status/summary/digest/receipt/approvalUrl. |
 | `confirm_changeset` | Commit a prepared changeset (ask or act). |
 | `discard_changeset` | Discard a staged/stale/expired changeset. |
@@ -187,8 +188,10 @@ first rather than trusting a stale copy of this table.
 There is **no MCP tool for artifact upload or `PlanImport`** — uploading an artifact (source or
 audio) and staging an import changeset are REST-only (§4 below); an MCP-based agent must shell
 out to REST for those two steps, or a REST-capable host must do them on its behalf.
-`run_checks`, jobs, and export tools from the design doc's §4 table are **not yet available** at
-all (no command layer support). See `docs/swarm/AGENT-API-TRACES.md` for the open list.
+`run_checks` and jobs from the design doc's §4 table are **not yet available** at all (no
+command layer support). Export ships as the single synchronous `export_file` tool rather than
+the design doc's job-shaped `prepare_export` / `get_export` pair — see §4.2. See
+`docs/swarm/AGENT-API-TRACES.md` for the open list.
 
 ## 3. The ask-mode loop, narrated agent-side
 
@@ -227,11 +230,39 @@ documented convention.
 Act-mode credentials skip steps 2–3 entirely: `confirm_changeset` / `POST .../commit` applies
 immediately.
 
-Polling: an agent may call `get_changeset` between steps 2 and 4 to observe `status` transition
-from `staged` to `committed` once a human has approved *and* the agent has re-called confirm —
-approval alone does not commit; the agent's own confirm call is still required. A changeset may
-also transiently read `committing` — the mid-apply state a commit sets before flipping to
-`committed` (§4.1 "commit idempotency" below); treat it the same as `staged` and poll again.
+**Waiting for the human (AQU-1177).** Between steps 2 and 4, prefer `wait_for_changeset` (MCP)
+or `GET .../changesets/:id/wait?timeoutMs=` (REST) over a `get_changeset` poll loop: the server
+holds the request until something actually happens, so the agent learns about an approval within
+about a second instead of on its next poll, and spends one rate-limit slot per call rather than
+one per poll. It returns when **either**
+
+- a human approval is recorded (`approved: true` — call confirm now; the confirmation's own
+  15-minute TTL is already running), **or**
+- the status leaves `staged` (a rejection shows as `discarded`; also `committed`, `expired`,
+  `stale`, `superseded`).
+
+`timeoutMs` defaults to 25 s and is capped at 60 s; `0` means "check now, don't block". A budget
+that runs out returns `timedOut: true` with the current changeset — a normal outcome, not an
+error: just call again.
+
+Note the arm that a naive poll gets wrong: **approval does not change the changeset's status.**
+The approve route mints a `changeset_confirmations` row and leaves the changeset `staged` until
+the agent commits it, so code watching only for `status !== 'staged'` will sleep straight through
+the event it is waiting for. `wait_for_changeset` checks both arms.
+
+Polling remains available: `get_changeset` observes the same `status`, which transitions to
+`committed` once a human has approved *and* the agent has re-called confirm — approval alone does
+not commit; the agent's own confirm call is still required. A changeset may also transiently read
+`committing` — the mid-apply state a commit sets before flipping to `committed` (§4.1 "commit
+idempotency" below); treat it the same as `staged` and poll again.
+
+**Finding your plans again.** `list_changesets` (MCP) or `GET .../changesets?status=&limit=&cursor=`
+(REST) lists the changesets **the calling credential staged**, newest first — what is still
+awaiting a human, what expired unattended, what already committed — so an agent that lost its
+`changesetId` (crash, new session, context trimmed) can pick the work back up instead of
+re-preparing it. Scoping is per credential, matching the per-item rule on `GET .../changesets/:id`:
+a PAT never sees a sibling agent's plans, and a PAT scoped to another project gets
+`403 scope_denied`.
 
 **`CreateProject` is ask-mode only, by construction.** `prepare` **forces every `CreateProject`
 changeset to ask-mode**, whatever the credential's or request's mode — an org-scoped `act`
@@ -267,12 +298,15 @@ CONTRIBUTOR=400, PROJECT_LEAD=500, MAINTAINER=600).
 | `GET /api/v1/external/projects/:projectId/files?limit=&cursor=` | `aqk_` | VIEWER | List files. |
 | `GET /api/v1/external/projects/:projectId/files/:fileId/cells?since=&limit=&cursor=` | `aqk_` | VIEWER | Read a file's cells; supports delta reads via `since`. |
 | `GET /api/v1/external/projects/:projectId/cells/:cellId/history?limit=&cursor=` | `aqk_` | VIEWER | Append-only event history for one cell (not fileId-scoped, unlike the internal route). |
+| `GET /api/v1/external/projects/:projectId/files/:fileId/export?lane=` | `aqk_` | MAINTAINER (org `exportMinRole`) | Round-trip export of one file — §4.2. Returns the file bytes with `Content-Disposition`, `X-Export-Mode`, and `X-Usfm-Lossy-Verse-Count`. |
 | `POST /api/v1/external/projects/:projectId/artifacts` | `aqk_` | CONTRIBUTOR | Body = raw bytes; headers `x-artifact-name` (required), `content-type`, `x-artifact-kind` (`source` default, or `audio` — §4.1). Returns `{ artifactId, sha256, sizeBytes }`. Max 25MB. |
 | `GET /api/v1/external/projects/:projectId/artifacts/:artifactId` | `aqk_` | VIEWER | Metadata. |
 | `GET /api/v1/external/projects/:projectId/artifacts/:artifactId/content` | `aqk_` | VIEWER | Raw bytes. |
 | `GET /api/v1/external/projects/:projectId/artifacts/:artifactId/inspect` | `aqk_` | VIEWER | Lightweight format sniff (first 64KB): `usfm`, `xliff`, `tmx`, `json`, `csv`, `tsv`, `plaintext`. Audio artifacts return size + content type only — no duration/waveform sniffing. |
 | `POST /api/v1/external/projects/:projectId/changesets` | `aqk_` | Per command kind — see §4.1 | Prepare (stage) a changeset. Body `{ commands: [...], id?, autonomyMode? }`. |
+| `GET /api/v1/external/projects/:projectId/changesets` | `aqk_` | VIEWER + credential scope | List the changesets this credential staged, newest first. Query `status`, `limit` (≤100), `cursor`. Returns `{ changesets, nextCursor }`. |
 | `GET /api/v1/external/projects/:projectId/changesets/:id` | `aqk_` | — (must be the staging credential) | Fetch status/summary/digest/receipt + `approvalUrl`. |
+| `GET /api/v1/external/projects/:projectId/changesets/:id/wait` | `aqk_` | — (must be the staging credential) | Long-poll until approved or no longer `staged`. Query `timeoutMs` (default 25 000, max 60 000, `0` = don't block). Returns `{ changeset, approved, timedOut, waitedMs }`. |
 | `POST /api/v1/external/projects/:projectId/changesets/:id/commit` | `aqk_` | — (must be the staging credential) | Commit (ask requires a consumed confirmation; act auto-confirms). Idempotent on `committed` **and safe to retry from `committing`** (§4.1). |
 | `POST /api/v1/external/projects/:projectId/changesets/:id/discard` | `aqk_` | — (must be the staging credential) | Discard a staged/stale/expired changeset. Cannot discard `committed` **or `committing`** (a mid-apply plan must not be stranded). |
 
@@ -280,7 +314,8 @@ CONTRIBUTOR=400, PROJECT_LEAD=500, MAINTAINER=600).
 
 Every command below shares the one `POST .../changesets` → `.../commit` pipeline. `SetTranslation`
 and `PlanImport` are unchanged from v1; `CreateProject`, `UpdateProjectSettings`, and `LinkMedia`
-are new in v1.1 (`sync-worker/src/external/{commands,prepare,commit}.ts`).
+are new in v1.1, and `CreateOrg` was added by AQU-1221
+(`sync-worker/src/external/{commands,prepare,commit}.ts`).
 
 - **`SetTranslation`** (`{ kind: "SetTranslation", fileId, cellId, value, valueHtml? }`) compiles
   to `target.cell.commit`, requires **CONTRIBUTOR** at commit time (routed through the same
@@ -295,7 +330,12 @@ are new in v1.1 (`sync-worker/src/external/{commands,prepare,commit}.ts`).
 - **`CreateProject`** (`{ kind: "CreateProject", name, projectId?, orgId? }`) — **receipt-only**:
   applies a plain row write via `db/shared/projects.ts` (creates the `projects` row plus an owner
   (700) `project_members` row for the caller), not an event. Must be the **sole command** in its
-  changeset. `projectId` is optional; when omitted, the **definitive** new project id is the
+  changeset. **`name` must be a real name, not a placeholder** (AQU-1140): derive it from what is
+  being imported — the source folder or file name, the publication/curriculum title, the language
+  pair — or ask the human. Content-free names (`default`, `untitled`, `new project`, `unnamed`,
+  `project`, …, matched case- and separator-insensitively and ignoring a trailing number) are
+  rejected with `validation_failed`; the name is what humans see in the workspace from then on.
+  Surrounding whitespace is trimmed before the row is written. `projectId` is optional; when omitted, the **definitive** new project id is the
   changeset's URL project id (the `:projectId` segment of `POST .../projects/:projectId/
   changesets` — yes, even though that project doesn't exist yet). Either way the definitive id is
   pinned into the plan at prepare time, so a crash-and-retry commit re-applies the same id rather
@@ -306,6 +346,35 @@ are new in v1.1 (`sync-worker/src/external/{commands,prepare,commit}.ts`).
   needs no org-role check at all. If the chosen project id is claimed by another caller between
   prepare and commit, commit returns **`409 conflict`** (not `plan_stale` — this is a genuine
   race, distinguished from the credential's own crash-retry, which is idempotent success).
+- **`CreateOrg`** (`{ kind: "CreateOrg", name }`) — **receipt-only** (AQU-1221): applies a plain
+  row write via `db/shared/orgs.ts` (creates the `organizations` row plus an owner (700)
+  `org_members` row for the caller, in one atomic statement), not an event. Must be the **sole
+  command** in its changeset. This is the command that unblocks setting up a new partner
+  workspace end to end: previously the catalog had nothing org-level, so an agent stalled until a
+  human created the org shell by hand. Feed the receipt's `orgId` to a follow-up `CreateProject`
+  to populate the new org.
+  **`name` is the only accepted field.** Any other key is `400 validation_failed` naming it — in
+  particular tier / billing / entitlement fields (`plan`, `tier`, `addonPacks`,
+  `stripeCustomerId`, `complimentaryWords`, `hardCapWords`, …): a new org is always created on
+  the default tier (no `org_billing` row = plan `none`), and there is no path to plan or billing
+  state through this surface. There is likewise **no owner field** — ownership is resolved
+  server-side from the credential's minting user, so an agent can neither point ownership
+  elsewhere nor make itself a member.
+  **Scope gate:** the credential must be **unscoped**. An org-scoped credential (`403
+  scope_denied`) is confined to the org it names, and a project-scoped one to its project;
+  creating a new tenant is outside either scope by definition. Re-checked live at commit.
+  **Always ask-mode:** like `CreateProject`, prepare FORCES the changeset to ask-mode regardless
+  of the credential's or request's mode, so every agent-initiated org creation passes a human
+  approval at the `approvalUrl`. The approval page states the org name and its incoming owner in
+  plain language.
+  **Rate limit:** at most **5 staged org creations per credential per 15 minutes**; beyond that,
+  `429 rate_limited`. Much tighter than the generic per-route throttle — a runaway loop here
+  would litter a real person's org switcher and approval queue with junk tenants.
+  **Filing project id:** the `:projectId` in the URL is a placeholder only. No project is created,
+  and the receipt carries `orgId` instead of `projectId`. `organizations.id` is a generated
+  identity column, so unlike `CreateProject` no id is pinned at prepare; a crash-retry instead
+  absorbs the org it already created (same creator, same planned name, within the changeset's own
+  lifetime) rather than minting a second one.
 - **`UpdateProjectSettings`** (`{ kind: "UpdateProjectSettings", projectId, settings,
   ifMatchVersion }`) — **receipt-only**: applies a version-guarded write via the same shared
   module auth-worker's internal settings route uses (first-write insert vs `version + 1` update;
@@ -354,6 +423,45 @@ accepts a changeset in **either** `staged` or `committing`: a `committing` chang
 duplicate rather than creating a second file/event/project. Callers never need to distinguish a
 fresh commit from a crash-retry; the same request works for both.
 
+### 4.2 Export — getting the deliverable back out (AQU-858)
+
+Imports run end-to-end from a PAT; exports now do too, so an agent can drive the whole
+"messy files in → clean deliverable out" loop (the driver being USFM handed back to Paratext)
+without a human clicking Export in the SPA.
+
+```
+GET /api/v1/external/projects/:projectId/files/:fileId/export?lane=es
+```
+
+MCP equivalent: `export_file { projectId, fileId, lane? }`.
+
+The export reconstructs the **original artifact preserved at import time** with the current
+translations substituted in; untranslated segments keep their source text so the output stays
+valid. It is a thin wrapper over the same internal route the in-app Export dialog uses
+(`sync-worker/src/events/export-route.ts`), so fidelity and the role gate cannot drift between
+the two callers.
+
+Three things to check on the way out:
+
+| Signal | Meaning |
+| --- | --- |
+| `X-Export-Mode` absent (MCP: `exportMode: "round-trip"`) | Translations were substituted. This is the real deliverable. |
+| `X-Export-Mode: raw-original` / `raw-sidecar` | The format has no server-side target serializer yet, so you are getting the preserved **original** bytes with **no translations in them**. Do not deliver it as a translation. |
+| `X-Usfm-Lossy-Verse-Count` > 0 | USFM only: that many verses had intra-verse markers (footnotes, poetry, character markers) that the plain-text substitution dropped. `0` = clean round trip. |
+
+Gates and refusals:
+
+- **Role floor is the org's `exportMinRole`, MAINTAINER (600) by default** — export is gated
+  *above* reading (AQU-253). A VIEWER/CONTRIBUTOR credential that can read the project gets
+  `permission_denied`, and retrying will not change that. An org may raise or lower the floor.
+- A file with **no preserved source artifact** returns `not_found` — it must be re-imported
+  before it can be exported.
+- **Binary results** (docx/pptx/idml side-cars) come back as raw bytes over REST. `export_file`
+  cannot carry them (MCP is JSON-RPC text) and returns `validation_failed` naming the REST URL
+  — the same asymmetry as the REST-only artifact upload on the import side. Anything over
+  512 KB is refused the same way rather than truncated.
+- `lane` selects one target-language lane (AQU-538); omit it for the default lane.
+
 ## 5. Error contract
 
 Every external endpoint (identity's `/api/v2/credentials`, `/api/v2/changesets/*`, and every
@@ -375,7 +483,7 @@ routes mirror the same shape and codes by convention.)
 | `validation_failed` | 400 | Malformed request, bad command shape, oversize/wrong-content-type artifact, expired changeset, wrong changeset status for the action, a `CreateProject`/`UpdateProjectSettings`/`LinkMedia` not staged as the sole (or only-LinkMedia) command in its changeset, etc. | Fix the request per `details`/`message`; do not retry unchanged. |
 | `conflict` | 409 | `CreateProject` only: the chosen project id was claimed by a different caller between `prepare` and `commit` — a genuine race, distinct from your own crash-retry (which is idempotent success, not a conflict). | Don't retry with the same id. Choose a different `projectId` (or omit it and let the next changeset's URL id pick a fresh one) and re-`prepare`. |
 | `job_failed` | 500 | Unexpected server-side failure (misconfiguration, unhandled exception, partial apply on `PlanImport`). | Safe to retry once; if it persists, treat as a bug — check `details.receipt` for a `PlanImport` partial-apply accounting. |
-| `rate_limited` | 429 | Reserved in the error contract; **not currently enforced anywhere in code** — no rate limiter exists in v1. | N/A today; documented for forward compatibility. |
+| `rate_limited` | 429 | Too many requests from this credential in the trailing 15 minutes — enforced per credential on every external route (`db/shared/rate-limit.ts`, wired in across the 2026-07-30, 2026-08-20, and 2026-08-27 pen-test passes). `CreateOrg` carries its own, much tighter cap: 5 staged org creations per credential per 15 minutes (AQU-1221). | Back off and retry later; don't tighten a polling loop in response to a 429. |
 | `not_found` | 404 | Resource (changeset, artifact, project, credential) doesn't exist or isn't visible to this credential. | Don't retry with the same id. |
 
 MCP tool errors use the identical code set inside the tool result (`isError: true`, JSON text
@@ -442,16 +550,20 @@ discarded plans" is **not yet implemented** — treat it as aspirational, not sh
 | --- | --- | --- |
 | Max artifact upload size | 25 MB | `MAX_ARTIFACT_BYTES`, `sync-worker/src/external/artifacts-route.ts` |
 | Max cells per `PlanImport` | 5,000 | `PLAN_IMPORT_MAX_CELLS`, `sync-worker/src/external/commands.ts` |
-| Changeset TTL (staged → auto-expires) | 1 hour | `CHANGESET_TTL_MS`, `sync-worker/src/external/prepare.ts` |
+| Changeset TTL, act mode (staged → auto-expires) | 1 hour | `CHANGESET_TTL_MS`, `sync-worker/src/external/stage.ts` |
+| Changeset TTL, ask mode (staged → auto-expires) | 24 hours — an ask-mode plan waits on a *human*, so the deadline is raised rather than the clock paused (AQU-1177); `expiresAt` always means exactly what it says | `CHANGESET_ASK_TTL_MS`, `sync-worker/src/external/stage.ts` |
+| `wait_for_changeset` long-poll budget | 25 s default, 60 s max | `WAIT_DEFAULT_TIMEOUT_MS` / `WAIT_MAX_TIMEOUT_MS`, `sync-worker/src/external/changeset-wait.ts` |
+| Changeset list page size | 25 default, 100 max | `EXTERNAL_LIST_DEFAULT_LIMIT` / `EXTERNAL_LIST_MAX_LIMIT`, `sync-worker/src/external/store.ts` |
 | Ask-mode confirmation TTL | 15 minutes | `CONFIRMATION_TTL_MS`, `auth-worker/src/routes/changeset-approvals.ts` |
 | Internal sync-token lifetime (implementation detail, not caller-facing) | 300 seconds | `INTERNAL_TOKEN_TTL_SECONDS`, `sync-worker/src/external/token-bridge.ts` |
 | Max commands per `SetTranslation` changeset | none enforced | `validateCommands` has no hard cap; `get_capabilities.limits.maxCommandsPerChangeset` reports `null` for this reason |
 | `PlanImport` commit chunk size to the `/events` perimeter | 100 events/POST | `PLAN_IMPORT_CHUNK`, `sync-worker/src/external/commit.ts` (implementation detail — large imports are chunked internally, not something a caller sets) |
 | Artifact inspect sniff window | 64 KB | `INSPECT_SNIFF_BYTES`, `sync-worker/src/external/artifacts-route.ts` |
 | Cell history page cap | 200 rows | `HISTORY_MAX_LIMIT`, `sync-worker/src/external/read-routes.ts` |
+| Max inline export via MCP `export_file` | 512 KB | `MCP_EXPORT_MAX_BYTES`, `sync-worker/src/external/mcp-handlers.ts`. Larger (or binary) exports are refused with the REST URL — never truncated. REST itself has no cap. |
 | Accepted `audio`-kind artifact content types | `audio/wav`, `audio/mpeg`, `audio/mp4`, `audio/x-m4a`, `audio/ogg` | `AUDIO_CONTENT_TYPES`, `sync-worker/src/external/artifacts-route.ts`. Same 25 MB cap as any artifact — audio gets no separate limit. |
 | Credential `name` length | 1–200 chars | `createSchema`, `auth-worker/src/routes/credentials.ts` |
-| Rate limiting | **not implemented** | `rate_limited` is a reserved error code with no enforcement in code today |
+| Rate limiting | 300 req/15 min/credential on reads and lifecycle ops, 120/15 min on heavy R2 egress-or-ingress ops (upload, artifact content, file export) | `db/shared/rate-limit.ts`; every external route is now covered — see §8 |
 
 ## 8. What's not yet available
 
@@ -462,14 +574,18 @@ Documented explicitly so you don't go looking for it:
   no async job queue, polling endpoint, or job id in any response. (The `committing` status and
   prepare-time id ledger added in v1.1 exist partly to make room for an eventual async commit
   mode — see the v1.1 design doc §6 — but nothing in this wave adopts it.)
-- **Export** (`prepare_export`, `get_export`) — not implemented.
+- **Export as an async job** (`prepare_export` / `get_export`, the design doc's job-shaped
+  pair) — not implemented. Single-file export IS available synchronously: `export_file` (MCP)
+  and `GET .../files/:fileId/export` (REST) — see §4.2. Still missing on the export side: a
+  whole-project bundle (the in-app zip export has no external route), target-format writers
+  beyond the round-trip of the imported original, and any transform/delivery step that pushes
+  the result somewhere (AQU-858 tracks the remainder).
 - **OAuth 2.1 / MCP connector-directory listing** — auth is PAT-only (`aqk_` bearer).
 - **Presigned upload/download URLs** — artifact bytes are worker-proxied (streamed through the
   Worker), not signed-URL, despite the design doc's D10 decision to use signed URLs.
 - **Server-side import parsing** (`preview_import`) — `PlanImport` requires already-parsed
   `cells[]`; the server only sniffs format on `/inspect`, it does not parse USFM/XLIFF/JSON into
   cells.
-- **Rate limiting** — the `rate_limited` error code exists in the contract but nothing enforces it.
 - **Manifest-in-R2 for large imports** — large `PlanImport`s must be split into ≤5,000-cell
   changesets; there is no digest-referenced manifest object.
 

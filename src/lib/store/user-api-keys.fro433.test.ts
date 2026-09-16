@@ -8,15 +8,21 @@
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest"
 import { resolveApiKey, setUserApiKey } from "./user-api-keys"
+import {
+  resetClientLocalStorageOwnerForTests,
+  setClientLocalStorageOwner,
+} from "@/lib/frontier/client-local-storage"
 
 // localStorage is available in happy-dom/jsdom test environments.
 beforeEach(() => {
   // Clear any lingering user keys.
   localStorage.clear()
+  resetClientLocalStorageOwnerForTests()
 })
 
 afterEach(() => {
   localStorage.clear()
+  resetClientLocalStorageOwnerForTests()
 })
 
 describe("resolveApiKey — three-tier precedence (AQU-433)", () => {
@@ -68,5 +74,17 @@ describe("resolveApiKey — three-tier precedence (AQU-433)", () => {
   it("ignores whitespace-only org key (returns undefined)", () => {
     const result = resolveApiKey("gemini-tts", undefined, "   ")
     expect(result).toBeUndefined()
+  })
+
+  it("never resolves another signed-in account's browser-local key", () => {
+    setClientLocalStorageOwner("alice")
+    setUserApiKey("completion", "alice-key")
+
+    setClientLocalStorageOwner("bob")
+    expect(resolveApiKey("completion", undefined, undefined)).toBeUndefined()
+    setUserApiKey("completion", "bob-key")
+
+    setClientLocalStorageOwner("alice")
+    expect(resolveApiKey("completion", undefined, undefined)).toBe("alice-key")
   })
 })

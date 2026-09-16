@@ -7,9 +7,15 @@ import {
   useReactTable,
   type ColumnDef,
   type FilterFn,
+  type Row,
   type SortingState,
   type Table as TanStackTable,
 } from "@tanstack/react-table"
+import {
+  parseColWidthPx,
+  useVirtualColumnWidths,
+  VirtualizedDataTableBody,
+} from "@/components/ui/data-table-virtual"
 
 import {
   InputGroup,
@@ -36,10 +42,33 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import { DataTableColumnHeader } from "@/components/ui/data-table-column-header"
+import {
+  DataTableColumnHeader,
+  DataTableSortingContext,
+} from "@/components/ui/data-table-column-header"
+import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import { MoreHorizontal, Search } from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
+
+const SKELETON_ROW_COUNT = 8
+const SKELETON_WIDTHS = [
+  "w-[72%]",
+  "w-[48%]",
+  "w-[60%]",
+  "w-[40%]",
+  "w-[55%]",
+  "w-[35%]",
+  "w-[64%]",
+  "w-[44%]",
+] as const
+
+/** Idle search chrome. Loading disables the field but must not swap in
+ *  InputGroup's muted `has-disabled:bg-input/*` / opacity — that flash is
+ *  the only difference between page-load and ready. */
+const TABLE_SEARCH_GROUP_CLASS =
+  "max-w-xs bg-card has-disabled:bg-card has-disabled:opacity-100 dark:has-disabled:bg-input/30"
+const TABLE_SEARCH_INPUT_CLASS = "disabled:opacity-100"
 
 function columnMetaClass(meta: unknown) {
   const m = meta as { align?: "right"; className?: string; hidden?: boolean } | undefined
@@ -82,6 +111,160 @@ function hiddenColumnVisibility<TData, TValue>(
   return visibility
 }
 
+function DataTableColGroup<TData>({
+  table,
+  widths,
+}: {
+  table: TanStackTable<TData>
+  widths?: number[] | null
+}) {
+  if (widths && widths.length > 0) {
+    return (
+      <colgroup>
+        {widths.map((width, i) => (
+          <col key={i} style={{ width }} />
+        ))}
+      </colgroup>
+    )
+  }
+  return (
+    <colgroup>
+      {table.getVisibleLeafColumns().map((col) => (
+        <col
+          key={col.id}
+          className={cn(
+            col.id === "expand" && "w-8",
+            columnMetaClass(col.columnDef.meta),
+          )}
+        />
+      ))}
+    </colgroup>
+  )
+}
+
+function DataTableHeaderTable<TData>({
+  table,
+  sorting,
+  dense,
+  tableClassName,
+  sticky,
+}: {
+  table: TanStackTable<TData>
+  /** Reactive sort so the compiler cannot freeze this header against a stable `table`. */
+  sorting: SortingState
+  dense: boolean
+  tableClassName?: string
+  sticky?: boolean
+}) {
+  const widths = useVirtualColumnWidths()
+  return (
+    <table
+      data-slot="table"
+      data-sorting={sorting.map((item) => `${item.id}:${item.desc ? "desc" : "asc"}`).join(",")}
+      className={cn(
+        "w-full caption-bottom text-sm",
+        widths && "table-fixed",
+        tableClassName,
+      )}
+    >
+      <DataTableColGroup table={table} widths={widths} />
+      <TableHeader>
+        {table.getHeaderGroups().map((headerGroup) => (
+          <TableRow key={headerGroup.id} className="hover:bg-transparent">
+            {headerGroup.headers.map((header) => {
+              if (!header.column.getIsVisible()) return null
+              return (
+                <TableHead
+                  key={header.id}
+                  className={cn(
+                    dense ? "h-9 py-1.5" : "h-11",
+                    header.column.id === "expand" ? "w-8" : undefined,
+                    columnMetaClass(header.column.columnDef.meta),
+                    sticky && "bg-card",
+                  )}
+                >
+                  {header.isPlaceholder
+                    ? null
+                    : flexRender(header.column.columnDef.header, header.getContext())}
+                </TableHead>
+              )
+            })}
+          </TableRow>
+        ))}
+      </TableHeader>
+    </table>
+  )
+}
+
+function DataTableVirtualRowTable<TData>({
+  table,
+  tableClassName,
+  children,
+}: {
+  table: TanStackTable<TData>
+  tableClassName?: string
+  children: React.ReactNode
+}) {
+  const widths = useVirtualColumnWidths()
+  return (
+    <table
+      data-slot="table"
+      className={cn(
+        "w-full caption-bottom text-sm",
+        widths && "table-fixed",
+        tableClassName,
+      )}
+    >
+      <DataTableColGroup table={table} widths={widths} />
+      <tbody data-slot="table-body">{children}</tbody>
+    </table>
+  )
+}
+
+function dataTableRowCells<TData>(row: Row<TData>, dense: boolean) {
+  return row.getVisibleCells().map((cell) => (
+    <TableCell
+      key={cell.id}
+      className={cn(
+        dense ? "py-1.5" : "py-2.5",
+        "overflow-hidden",
+        columnMetaClass(cell.column.columnDef.meta),
+      )}
+    >
+      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+    </TableCell>
+  ))
+}
+
+function dataTableRowProps<TData>(
+  row: Row<TData>,
+  {
+    rowClassName,
+    onRowClick,
+    getRowAttributes,
+    hasMenu,
+  }: {
+    rowClassName?: string | ((row: TData) => string | undefined)
+    onRowClick?: (row: TData) => void
+    getRowAttributes?: (
+      row: TData,
+    ) => Record<string, string | number | undefined | null> | undefined
+    hasMenu: boolean
+  },
+) {
+  return {
+    "data-state": row.getIsSelected() && "selected",
+    ...getRowAttributes?.(row.original),
+    className: cn(
+      hasMenu && "group",
+      typeof rowClassName === "function"
+        ? rowClassName(row.original)
+        : rowClassName,
+    ),
+    onClick: onRowClick ? () => onRowClick(row.original) : undefined,
+  } as const
+}
+
 /**
  * Docs-aligned data table shell — see
  * https://ui.shadcn.com/docs/components/base/data-table
@@ -99,6 +282,18 @@ interface DataTableProps<TData, TValue> {
   initialSorting?: SortingState
   /** When set, renders a search input that drives TanStack `globalFilter`. */
   searchPlaceholder?: string
+  /**
+   * Controlled search. When set with `onSearchChange`, the field does not
+   * filter rows locally — the parent fetches a server page (async combobox /
+   * infinite-scroll tables).
+   */
+  searchValue?: string
+  onSearchChange?: (value: string) => void
+  /**
+   * In-field spinner while an async search is pending (debounce or fetch).
+   * Independent of `loading`, which skeletonizes the table body.
+   */
+  searching?: boolean
   globalFilterFn?: FilterFn<TData>
   /** Extra controls in the toolbar row (counts, lens filters, etc.). */
   toolbar?: React.ReactNode | ((table: TanStackTable<TData>) => React.ReactNode)
@@ -124,6 +319,13 @@ interface DataTableProps<TData, TValue> {
   /** Shown when there are no rows to display (empty data or search/filter miss). */
   emptyState?: React.ReactNode | ((table: TanStackTable<TData>) => React.ReactNode)
   /**
+   * Keep search/toolbar chrome and skeletonize the table body. Search stays
+   * visible (disabled) so the toolbar does not jump when rows arrive.
+   */
+  loading?: boolean
+  /** Accessible status label while `loading` is true. */
+  loadingLabel?: string
+  /**
    * Compact row/header padding for portfolio-style lists (ReUI DataGrid `dense`).
    * Off = comfortable row height (`py-2.5` / `h-11`); on = tight (`py-1.5` / `h-9`).
    */
@@ -134,9 +336,22 @@ interface DataTableProps<TData, TValue> {
   tableClassName?: string
   /**
    * Fill a flex parent and scroll only the table body — keeps search/toolbar
-   * pinned above while rows scroll (in-card portfolio panels).
+   * pinned above while rows scroll (in-card portfolio panels). When rows are
+   * present, the body is a LegendList so large directories stay cheap to paint.
    */
   fillHeight?: boolean
+  /**
+   * Optional last body row (e.g. "Show N more"). Renders as a single colSpan
+   * cell so it sits in the table instead of as a detached header/footer control.
+   * Hidden while loading or when there are no rows.
+   */
+  footer?: React.ReactNode
+  /** Infinite-scroll sentinel at the end of the body. */
+  hasMore?: boolean
+  onLoadMore?: () => void
+  loadingMore?: boolean
+  /** `data-testid` on the infinite-scroll sentinel. */
+  loadMoreTestId?: string
 }
 
 function DataTable<TData, TValue>({
@@ -145,6 +360,9 @@ function DataTable<TData, TValue>({
   getRowId,
   initialSorting,
   searchPlaceholder,
+  searchValue,
+  onSearchChange,
+  searching = false,
   globalFilterFn,
   toolbar,
   testId,
@@ -154,10 +372,17 @@ function DataTable<TData, TValue>({
   renderRowMenuItems,
   renderSubRow,
   emptyState,
+  loading = false,
+  loadingLabel,
   dense = false,
   className,
   tableClassName,
   fillHeight = false,
+  footer,
+  hasMore = false,
+  onLoadMore,
+  loadingMore = false,
+  loadMoreTestId = "project-directory-load-more",
 }: DataTableProps<TData, TValue>) {
   const t = useT()
   const [sorting, setSorting] = React.useState<SortingState>(
@@ -190,33 +415,129 @@ function DataTable<TData, TValue>({
 
   const toolbarNode = typeof toolbar === "function" ? toolbar(table) : toolbar
   const emptyStateNode = typeof emptyState === "function" ? emptyState(table) : emptyState
-  const hasRows = table.getRowModel().rows.length > 0
+  const tableRows = table.getRowModel().rows
+  const hasRows = tableRows.length > 0
+  const showEmpty = !loading && !hasRows && emptyStateNode
+  const statusLabel = loadingLabel ?? t("common.loadingSpinner")
+  const visibleColumnCount = table.getVisibleLeafColumns().length
+  const virtualize = fillHeight && hasRows && !loading && !showEmpty
+  const columnWidthHints = React.useMemo(
+    () =>
+      table.getVisibleLeafColumns().map((col) =>
+        col.id === "expand" ? 32 : parseColWidthPx(columnMetaClass(col.columnDef.meta)),
+      ),
+    // `columns` / visibility, not `table` — useReactTable returns a new object
+    // every render and would rebuild the ResizeObserver loop.
+    [visibleColumnCount, columns, columnVisibility],
+  )
+
+  const virtualExtraData = React.useMemo(
+    () => ({
+      sorting,
+      dense,
+      renderSubRow,
+      renderRowMenuItems,
+      loadingMore,
+      hasMore,
+    }),
+    [sorting, dense, renderSubRow, renderRowMenuItems, loadingMore, hasMore],
+  )
+
+  const renderVirtualRow = React.useCallback(
+    (row: Row<TData>) => {
+      const sub = renderSubRow?.(row.original)
+      const menuItems = renderRowMenuItems?.(row.original) ?? null
+      const cells = dataTableRowCells(row, dense)
+      const rowProps = dataTableRowProps(row, {
+        rowClassName,
+        onRowClick,
+        getRowAttributes,
+        hasMenu: Boolean(menuItems),
+      })
+      return (
+        <DataTableVirtualRowTable table={table} tableClassName={tableClassName}>
+          {menuItems ? (
+            <DataTableRowMenu rowProps={rowProps} items={menuItems}>
+              {cells}
+            </DataTableRowMenu>
+          ) : (
+            <TableRow {...rowProps}>{cells}</TableRow>
+          )}
+          {sub}
+        </DataTableVirtualRowTable>
+      )
+    },
+    [
+      table,
+      tableClassName,
+      dense,
+      renderSubRow,
+      renderRowMenuItems,
+      rowClassName,
+      onRowClick,
+      getRowAttributes,
+    ],
+  )
+
+  const loadMoreFooter =
+    (footer || hasMore || loadingMore) && hasRows && !loading ? (
+      <div
+        role="status"
+        data-testid={loadMoreTestId}
+        className={cn(
+          "flex items-center justify-center gap-2 text-xs text-muted-foreground",
+          dense ? "py-1.5" : "py-2.5",
+        )}
+      >
+        {footer}
+        {(hasMore || loadingMore) && onLoadMore ? (
+          loadingMore ? (
+            <>
+              <Spinner className="size-3" />
+              {t("common.loadingSpinner")}
+            </>
+          ) : null
+        ) : null}
+      </div>
+    ) : null
 
   return (
-    <div
-      className={cn(
-        "flex w-full min-w-0 flex-col",
-        fillHeight && "min-h-0 flex-1",
-        dense ? "gap-2.5" : "gap-3",
-      )}
-    >
+    <DataTableSortingContext.Provider value={sorting}>
+      <div
+        className={cn(
+          "flex w-full min-w-0 flex-col",
+          fillHeight && "min-h-0 flex-1",
+          dense ? "gap-2.5" : "gap-3",
+        )}
+      >
       {(searchPlaceholder || toolbarNode) && (
         <div className="flex shrink-0 flex-wrap items-center gap-3">
           {searchPlaceholder ? (
-            <InputGroup className="max-w-xs bg-card">
+            <InputGroup className={TABLE_SEARCH_GROUP_CLASS} aria-busy={searching || undefined}>
               <InputGroupAddon>
                 <Search />
               </InputGroupAddon>
               <InputGroupInput
+                className={TABLE_SEARCH_INPUT_CLASS}
                 placeholder={searchPlaceholder}
-                value={globalFilter}
-                onChange={(event) => setGlobalFilter(event.target.value)}
+                value={onSearchChange ? (searchValue ?? "") : globalFilter}
+                onChange={(event) => {
+                  const next = event.target.value
+                  if (onSearchChange) onSearchChange(next)
+                  else setGlobalFilter(next)
+                }}
                 aria-label={searchPlaceholder}
                 autoComplete="off"
                 autoCorrect="off"
                 autoCapitalize="none"
                 spellCheck={false}
+                disabled={loading && !onSearchChange}
               />
+              {searching ? (
+                <InputGroupAddon align="inline-end">
+                  <Spinner className="size-4" aria-label={t("common.searching")} />
+                </InputGroupAddon>
+              ) : null}
             </InputGroup>
           ) : null}
           {toolbarNode}
@@ -227,16 +548,44 @@ function DataTable<TData, TValue>({
           "rounded-md border",
           className,
           // After `className` so fillHeight scroll wins over admin
-          // `overflow-visible` chrome. overflow-auto keeps sticky headers
-          // and lets wide columns scroll horizontally in the same port.
+          // `overflow-visible` / `-mx-2` chrome. mx-0 keeps the native
+          // scrollbar inside the card instead of clipping it to a sliver.
+          // Virtualized lists must not use overflow-hidden here — that
+          // clips LegendList's 0.75rem track. The bounded Section already
+          // contains the pane. overflow-auto keeps sticky headers and
+          // lets wide columns scroll horizontally in the same port.
           fillHeight
-            ? "min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain [&_thead]:sticky [&_thead]:top-0 [&_thead]:z-10 [&_thead]:bg-card"
+            ? virtualize
+              ? "mx-0 flex min-h-0 min-w-0 flex-1 flex-col"
+              : "mx-0 min-h-0 min-w-0 flex-1 overflow-auto overscroll-contain [&_thead]:sticky [&_thead]:top-0 [&_thead]:z-10 [&_thead]:bg-card"
             : "overflow-hidden",
         )}
         data-testid={testId}
+        {...(loading
+          ? { role: "status" as const, "aria-busy": true as const, "aria-label": statusLabel }
+          : {})}
       >
-        {!hasRows && emptyStateNode ? (
+        {showEmpty ? (
           emptyStateNode
+        ) : virtualize ? (
+          <VirtualizedDataTableBody
+            rows={tableRows}
+            extraData={virtualExtraData}
+            estimatedItemSize={dense ? 36 : 44}
+            columnWidthHints={columnWidthHints}
+            header={
+              <DataTableHeaderTable
+                table={table}
+                sorting={sorting}
+                dense={dense}
+                tableClassName={tableClassName}
+                sticky
+              />
+            }
+            renderRow={renderVirtualRow}
+            onEndReached={hasMore && onLoadMore && !loadingMore ? onLoadMore : undefined}
+            footer={loadMoreFooter}
+          />
         ) : (
           <Table className={tableClassName}>
             <TableHeader>
@@ -264,32 +613,35 @@ function DataTable<TData, TValue>({
               ))}
             </TableHeader>
             <TableBody>
-              {hasRows ? (
-                table.getRowModel().rows.map((row) => {
+              {loading ? (
+                Array.from({ length: SKELETON_ROW_COUNT }, (_, row) => (
+                  <TableRow key={`skeleton-${row}`} className="hover:bg-transparent">
+                    {Array.from({ length: visibleColumnCount }, (_, col) => (
+                      <TableCell
+                        key={col}
+                        className={dense ? "py-1.5" : "py-2.5"}
+                      >
+                        <Skeleton
+                          className={cn(
+                            "h-4 max-w-full",
+                            SKELETON_WIDTHS[(row + col) % SKELETON_WIDTHS.length],
+                          )}
+                        />
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))
+              ) : hasRows ? (
+                tableRows.map((row) => {
                   const sub = renderSubRow?.(row.original)
                   const menuItems = renderRowMenuItems?.(row.original) ?? null
-                  const cells = row.getVisibleCells().map((cell) => (
-                    <TableCell
-                      key={cell.id}
-                      className={cn(
-                        dense ? "py-1.5" : "py-2.5",
-                        columnMetaClass(cell.column.columnDef.meta),
-                      )}
-                    >
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </TableCell>
-                  ))
-                  const rowProps = {
-                    "data-state": row.getIsSelected() && "selected",
-                    ...getRowAttributes?.(row.original),
-                    className: cn(
-                      menuItems && "group",
-                      typeof rowClassName === "function"
-                        ? rowClassName(row.original)
-                        : rowClassName,
-                    ),
-                    onClick: onRowClick ? () => onRowClick(row.original) : undefined,
-                  } as const
+                  const cells = dataTableRowCells(row, dense)
+                  const rowProps = dataTableRowProps(row, {
+                    rowClassName,
+                    onRowClick,
+                    getRowAttributes,
+                    hasMenu: Boolean(menuItems),
+                  })
                   return (
                     <React.Fragment key={row.id}>
                       {menuItems ? (
@@ -305,15 +657,75 @@ function DataTable<TData, TValue>({
                 })
               ) : (
                 <TableRow>
-                  <TableCell colSpan={table.getVisibleLeafColumns().length} className="h-24 text-center">
+                  <TableCell colSpan={visibleColumnCount} className="h-24 text-center">
                     {t("workspace.dataTable.noResults")}
                   </TableCell>
                 </TableRow>
               )}
+              {(footer || hasMore || loadingMore) && hasRows && !loading ? (
+                <TableRow className="hover:bg-transparent">
+                  <TableCell
+                    colSpan={visibleColumnCount}
+                    className={dense ? "py-1.5" : "py-2.5"}
+                  >
+                    {footer}
+                    {(hasMore || loadingMore) && onLoadMore ? (
+                      <LoadMoreSentinel
+                        disabled={!hasMore || loadingMore}
+                        loading={loadingMore}
+                        onVisible={onLoadMore}
+                        testId={loadMoreTestId}
+                      />
+                    ) : null}
+                  </TableCell>
+                </TableRow>
+              ) : null}
             </TableBody>
           </Table>
         )}
       </div>
+      </div>
+      </DataTableSortingContext.Provider>
+  )
+}
+
+function LoadMoreSentinel({
+  disabled,
+  loading,
+  onVisible,
+  testId,
+}: {
+  disabled: boolean
+  loading: boolean
+  onVisible: () => void
+  testId: string
+}) {
+  const t = useT()
+  const ref = React.useRef<HTMLDivElement>(null)
+  React.useEffect(() => {
+    if (disabled) return
+    const el = ref.current
+    if (!el) return
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) onVisible()
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [disabled, onVisible])
+
+  return (
+    <div
+      ref={ref}
+      role="status"
+      data-testid={testId}
+      className="flex items-center justify-center gap-2 text-xs text-muted-foreground"
+    >
+      {loading ? (
+        <>
+          <Spinner className="size-3" />
+          {t("common.loadingSpinner")}
+        </>
+      ) : null}
     </div>
   )
 }
@@ -395,7 +807,7 @@ function DataTableRowActionsButton({
         // Rows are often clickable; this press belongs to the menu, not the row.
         onClick={(event) => event.stopPropagation()}
         className={cn(
-          "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+          "text-muted-foreground hover:bg-accent/40 hover:text-foreground",
           // Snap hover/active paint (no muddy transparent→accent fade). Keep
           // transform so the shared Button active translate still works.
           "transition-transform",
@@ -427,5 +839,60 @@ function DataTableRowActionsButton({
   )
 }
 
-export { DataTable, DataTableColumnHeader, DataTableRowActionsButton }
+/**
+ * Search + bordered panel skeleton for pages that don't yet have column defs
+ * (org context still resolving). Matches DataTable toolbar geometry so the
+ * search field does not jump when the real table mounts.
+ */
+function DataTablePanelSkeleton({
+  searchPlaceholder,
+  loadingLabel,
+  className,
+  toolbar,
+}: {
+  searchPlaceholder?: string
+  loadingLabel: string
+  className?: string
+  toolbar?: React.ReactNode
+}) {
+  return (
+    <div className="flex w-full min-w-0 flex-col gap-2.5">
+      {(searchPlaceholder || toolbar) && (
+        <div className="flex shrink-0 flex-wrap items-center gap-3">
+          {searchPlaceholder ? (
+            <InputGroup className={TABLE_SEARCH_GROUP_CLASS}>
+              <InputGroupAddon>
+                <Search />
+              </InputGroupAddon>
+              <InputGroupInput
+                className={TABLE_SEARCH_INPUT_CLASS}
+                placeholder={searchPlaceholder}
+                aria-label={searchPlaceholder}
+                disabled
+              />
+            </InputGroup>
+          ) : null}
+          {toolbar}
+        </div>
+      )}
+      <div
+        role="status"
+        aria-busy="true"
+        aria-label={loadingLabel}
+        className={cn("overflow-hidden rounded-md border", className)}
+      >
+        <div className="space-y-2 p-2">
+          {Array.from({ length: SKELETON_ROW_COUNT }, (_, i) => (
+            <Skeleton
+              key={i}
+              className={cn("h-9 max-w-full", SKELETON_WIDTHS[i % SKELETON_WIDTHS.length])}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export { DataTable, DataTableColumnHeader, DataTableRowActionsButton, DataTablePanelSkeleton }
 export type { DataTableProps }

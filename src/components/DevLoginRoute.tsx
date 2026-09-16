@@ -10,22 +10,27 @@
 // WRANGLER_LOCAL isn't set in prod auth-worker.
 
 import { useEffect, useState } from "react"
-import { useNavigate } from "react-router-dom"
+import { useNavigate, useSearchParams } from "react-router-dom"
 import { devLogin } from "@/lib/frontier/auth"
+import { useAccounts } from "@/hooks/useAccounts"
 
 export function DevLoginRoute() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const as = searchParams.get("as")?.trim() || "dev"
   const [error, setError] = useState<string | null>(null)
+  const { adopt, loading } = useAccounts()
 
   useEffect(() => {
     if (!import.meta.env.DEV) {
       setError("dev login is disabled in production builds")
       return
     }
+    if (loading) return
     let cancelled = false
     void (async () => {
       try {
-        const session = await devLogin()
+        const session = await devLogin(as)
         if (cancelled) return
         if (!session) {
           setError(
@@ -33,8 +38,13 @@ export function DevLoginRoute() {
           )
           return
         }
-        // Seeded project id is hardcoded in auth-worker/src/routes/dev-seed.ts.
-        navigate("/project/dev-project/editor", { replace: true })
+        await adopt(session)
+        if (cancelled) return
+        const dest =
+          as === "carol"
+            ? "/project/dev-project/settings/general"
+            : "/project/dev-project/editor"
+        navigate(dest, { replace: true })
       } catch (e) {
         if (cancelled) return
         setError(e instanceof Error ? e.message : String(e))
@@ -43,7 +53,7 @@ export function DevLoginRoute() {
     return () => {
       cancelled = true
     }
-  }, [navigate])
+  }, [adopt, as, loading, navigate])
 
   return (
     <div className="flex h-screen items-center justify-center p-6">
@@ -54,7 +64,7 @@ export function DevLoginRoute() {
             {error}
           </p>
         ) : (
-          <p className="text-sm text-muted-foreground">Signing in as dev…</p>
+          <p className="text-sm text-muted-foreground">Signing in as {as}…</p>
         )}
       </div>
     </div>

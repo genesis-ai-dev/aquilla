@@ -8,13 +8,18 @@
 // mergeCellsDelta re-walks the merged set with mirrored semantics (eventId
 // sibling tiebreak, orphans at the tail by eventId).
 
-import { describe, it, expect, beforeEach } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { CellRow } from "./cells-read-types"
 import {
   mergeCellsDelta,
   readCellsCache,
   writeCellsCache,
   resetCellsCacheConnectionForTests,
+  setCellsCacheOwner,
+  claimLegacyCellsCache,
+  CELLS_CACHE_WRITE_DEBOUNCE_MS,
+  flushCellsCacheWrites,
+  scheduleCellsCacheWrite,
 } from "./cells-cache"
 
 function row(
@@ -96,6 +101,60 @@ describe("mergeCellsDelta", () => {
       row("b", "source", { anchorCellId: "x" }),
     ])
     expect(merged.map((r) => r.cellId)).toEqual(["a", "x", "b"])
+  })
+
+  // AQU-646 round 8: inserting a line BEFORE the first cue. The pair of tests
+  // matters more than either one — the first pins the bug so it cannot come
+  // back quietly, the second proves the fix.
+  it("WITHOUT re-pointing the old head, a head insert lands at the TAIL", () => {
+    // Two rows now claim a null anchor. They bucket under the same key and
+    // tiebreak by eventId, and a fresh uuidv7 always sorts last — so the whole
+    // original chain is emitted first and the new row is appended after it.
+    const cached = chain("source", "a", "b")
+    const merged = mergeCellsDelta(cached, ["x"], [
+      row("x", "source", { anchorCellId: null, eventId: "e-zzz-newer" }),
+    ])
+    expect(merged.map((r) => r.cellId)).toEqual(["a", "b", "x"])
+  })
+
+  it("re-pointing the old head puts the new line FIRST, where it belongs", () => {
+    const cached = chain("source", "a", "b")
+    const merged = mergeCellsDelta(cached, ["x", "a"], [
+      row("x", "source", { anchorCellId: null, eventId: "e-zzz-newer" }),
+      row("a", "source", { anchorCellId: "x", eventId: "e-a2" }),
+    ])
+    expect(merged.map((r) => r.cellId)).toEqual(["x", "a", "b"])
+    // ...and the file is back to exactly one row with no cell before it.
+    expect(merged.filter((r) => r.anchorCellId == null)).toHaveLength(1)
+  })
+
+  // Round 4: the SAME bug one position along. The head fix only re-pointed the
+  // old head, so a MID-FILE insert left the successor still anchored to the
+  // cell before it — two siblings on one anchor. Invisible in the table
+  // (time-sorted) and invisible until the file is exported, which reads chain
+  // order.
+  it("WITHOUT re-pointing the successor, a mid-file insert lands at the TAIL", () => {
+    const cached = chain("source", "a", "b", "c")
+    // x inserted between a and b, but b still points at a.
+    const merged = mergeCellsDelta(cached, ["x"], [
+      row("x", "source", { anchorCellId: "a", eventId: "e-zzz-newer" }),
+    ])
+    // b (lower event id) is emitted first AND drags its whole subtree — the
+    // rest of the file — before x gets a turn.
+    expect(merged.map((r) => r.cellId)).toEqual(["a", "b", "c", "x"])
+  })
+
+  it("re-pointing the successor puts the new line where the clock says", () => {
+    const cached = chain("source", "a", "b", "c")
+    const merged = mergeCellsDelta(cached, ["x", "b"], [
+      row("x", "source", { anchorCellId: "a", eventId: "e-zzz-newer" }),
+      row("b", "source", { anchorCellId: "x", eventId: "e-b2" }),
+    ])
+    expect(merged.map((r) => r.cellId)).toEqual(["a", "x", "b", "c"])
+    // Still exactly one head, and no cell claims an anchor twice.
+    expect(merged.filter((r) => r.anchorCellId == null)).toHaveLength(1)
+    const anchors = merged.map((r) => r.anchorCellId).filter(Boolean)
+    expect(new Set(anchors).size).toBe(anchors.length)
   })
 
   it("replaces a changed row in place without disturbing order (validate flip)", () => {
@@ -180,6 +239,49 @@ describe("cells cache maxServerSeq cursor", () => {
     expect(entry?.rows).toHaveLength(1)
   })
 
+  it("never returns another account's cached rows for the same project and file", async () => {
+    setCellsCacheOwner("alice")
+    await writeCellsCache("shared-id", "same-file", [row("alice-row", "source")], 1)
+
+    setCellsCacheOwner("bob")
+    expect(await readCellsCache("shared-id", "same-file")).toBeNull()
+    await writeCellsCache("shared-id", "same-file", [row("bob-row", "source")], 2)
+
+    setCellsCacheOwner("alice")
+    expect((await readCellsCache("shared-id", "same-file"))?.rows[0].cellId).toBe("alice-row")
+  })
+
+  it("does not collide local-only data with an account literally named local", async () => {
+    setCellsCacheOwner(null)
+    await writeCellsCache("collision", "file", [row("local-only-row", "source")], 1)
+
+    setCellsCacheOwner("local")
+    expect(await readCellsCache("collision", "file")).toBeNull()
+  })
+
+  it("moves a pre-account snapshot into the first resolved owner scope", async () => {
+    await writeCellsCache("legacy-project", "legacy-file", [row("legacy-row", "source")], 1)
+    setCellsCacheOwner("alice")
+    expect(await readCellsCache("legacy-project", "legacy-file")).toBeNull()
+
+    await claimLegacyCellsCache("alice")
+    expect((await readCellsCache("legacy-project", "legacy-file"))?.rows[0].cellId).toBe("legacy-row")
+
+    setCellsCacheOwner("bob")
+    expect(await readCellsCache("legacy-project", "legacy-file")).toBeNull()
+  })
+
+  it("does not overwrite a newer scoped snapshot while removing its legacy copy", async () => {
+    await writeCellsCache("upgrade-project", "upgrade-file", [row("legacy-row", "source")], 1)
+    setCellsCacheOwner("alice")
+    await writeCellsCache("upgrade-project", "upgrade-file", [row("scoped-row", "source")], 2)
+
+    await claimLegacyCellsCache("alice")
+    const claimed = await readCellsCache("upgrade-project", "upgrade-file")
+    expect(claimed?.rows[0].cellId).toBe("scoped-row")
+    expect(claimed?.maxServerSeq).toBe(2)
+  })
+
   it("omits maxServerSeq when the server did not provide one (pre-M2-1 fallback)", async () => {
     await writeCellsCache("p1", "f-noseq", [row("a", "source")])
     const entry = await readCellsCache("p1", "f-noseq")
@@ -200,5 +302,152 @@ describe("cells cache maxServerSeq cursor", () => {
     await writeCellsCache("p1", "f-noepoch", [row("a", "source")], 42)
     const entry = await readCellsCache("p1", "f-noepoch")
     expect(entry?.projectEpoch).toBeUndefined()
+  })
+})
+
+describe("queued cells cache writes", () => {
+  beforeEach(async () => {
+    vi.useRealTimers()
+    await resetCellsCacheConnectionForTests()
+    vi.useFakeTimers()
+  })
+
+  afterEach(async () => {
+    vi.useRealTimers()
+    await resetCellsCacheConnectionForTests()
+    vi.restoreAllMocks()
+  })
+
+  it("keeps only the latest tuple pending before the delay", async () => {
+    const put = vi.spyOn(IDBObjectStore.prototype, "put")
+
+    for (let seq = 1; seq <= 10; seq++) {
+      scheduleCellsCacheWrite(
+        "queued-project",
+        "queued-file",
+        [row(`row-${seq}`, "source")],
+        seq === 10 ? undefined : seq,
+        seq === 10 ? undefined : 1_000 + seq,
+      )
+    }
+
+    expect(put).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(CELLS_CACHE_WRITE_DEBOUNCE_MS - 1)
+    expect(put).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    await vi.runAllTimersAsync()
+    expect(put).toHaveBeenCalledTimes(1)
+    // fake-indexeddb completes transactions through timers of its own.
+    vi.useRealTimers()
+    await flushCellsCacheWrites("queued-project", "queued-file")
+
+    expect(put).toHaveBeenCalledTimes(1)
+    const entry = await readCellsCache("queued-project", "queued-file")
+    expect(entry?.rows[0].cellId).toBe("row-10")
+    expect(entry?.maxServerSeq).toBeUndefined()
+    expect(entry?.projectEpoch).toBeUndefined()
+  })
+
+  it("restarts the trailing delay when a newer snapshot arrives", async () => {
+    const put = vi.spyOn(IDBObjectStore.prototype, "put")
+    scheduleCellsCacheWrite(
+      "trailing-project",
+      "trailing-file",
+      [row("first", "source")],
+      1,
+    )
+    await vi.advanceTimersByTimeAsync(CELLS_CACHE_WRITE_DEBOUNCE_MS - 1)
+    scheduleCellsCacheWrite(
+      "trailing-project",
+      "trailing-file",
+      [row("second", "source")],
+      2,
+    )
+
+    await vi.advanceTimersByTimeAsync(CELLS_CACHE_WRITE_DEBOUNCE_MS - 1)
+    expect(put).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    await vi.runAllTimersAsync()
+    expect(put).toHaveBeenCalledTimes(1)
+    vi.useRealTimers()
+    await flushCellsCacheWrites("trailing-project", "trailing-file")
+
+    expect(put).toHaveBeenCalledTimes(1)
+    const entry = await readCellsCache("trailing-project", "trailing-file")
+    expect(entry?.rows[0].cellId).toBe("second")
+    expect(entry?.maxServerSeq).toBe(2)
+  })
+
+  it("flushes one file without draining another file", async () => {
+    scheduleCellsCacheWrite(
+      "flush-project",
+      "file-a",
+      [row("a", "source")],
+      1,
+    )
+    scheduleCellsCacheWrite(
+      "flush-project",
+      "file-b",
+      [row("b", "source")],
+      2,
+    )
+
+    vi.useRealTimers()
+    await flushCellsCacheWrites("flush-project", "file-a")
+    expect((await readCellsCache("flush-project", "file-a"))?.rows[0].cellId)
+      .toBe("a")
+    expect(await readCellsCache("flush-project", "file-b")).toBeNull()
+
+    await flushCellsCacheWrites()
+    expect((await readCellsCache("flush-project", "file-b"))?.rows[0].cellId)
+      .toBe("b")
+  })
+
+  it("captures the owner key and detaches the queued rows array", async () => {
+    setCellsCacheOwner("queued-alice")
+    const rows = [row("alice-original", "source")]
+    scheduleCellsCacheWrite("owner-project", "owner-file", rows, 7)
+    rows[0] = row("mutated-after-schedule", "source")
+
+    setCellsCacheOwner("queued-bob")
+    vi.useRealTimers()
+    await flushCellsCacheWrites("owner-project", "owner-file")
+    expect(await readCellsCache("owner-project", "owner-file")).toBeNull()
+
+    setCellsCacheOwner("queued-alice")
+    const entry = await readCellsCache("owner-project", "owner-file")
+    expect(entry?.rows[0].cellId).toBe("alice-original")
+    expect(entry?.maxServerSeq).toBe(7)
+  })
+
+  it("recovers from a rejected write and accepts the next snapshot", async () => {
+    vi.spyOn(IDBObjectStore.prototype, "put")
+      .mockImplementationOnce(() => {
+        throw new Error("synthetic IDB failure")
+      })
+    scheduleCellsCacheWrite(
+      "retry-project",
+      "retry-file",
+      [row("rejected", "source")],
+      1,
+    )
+
+    vi.useRealTimers()
+    await expect(
+      flushCellsCacheWrites("retry-project", "retry-file"),
+    ).resolves.toBeUndefined()
+    expect(await readCellsCache("retry-project", "retry-file")).toBeNull()
+
+    scheduleCellsCacheWrite(
+      "retry-project",
+      "retry-file",
+      [row("accepted", "source")],
+      2,
+    )
+    await flushCellsCacheWrites("retry-project", "retry-file")
+
+    const entry = await readCellsCache("retry-project", "retry-file")
+    expect(entry?.rows[0].cellId).toBe("accepted")
+    expect(entry?.maxServerSeq).toBe(2)
   })
 })

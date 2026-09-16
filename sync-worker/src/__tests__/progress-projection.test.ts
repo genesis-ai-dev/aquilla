@@ -7,6 +7,7 @@ import {
   sectionsProgressRecomputeStmt,
 } from '../events/progress-projection'
 import {
+  counts,
   handleProgressReadRequest,
   type FileProgressResponse,
   type SectionProgressDetailResponse,
@@ -138,7 +139,7 @@ describe('GET file progress', () => {
       headers: { Authorization: `Bearer ${token}` },
     }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
     expect(response.status).toBe(200)
-    expect(response.headers.get('ETag')).toBe('"progress:file-progress:7:v2:p:s2"')
+    expect(response.headers.get('ETag')).toBe('"progress:file-progress:7:v2:p:s3"')
     const body = await response.json() as FileProgressResponse
     expect(body.file).toMatchObject({ totalCount: 3, filledCount: 2, validatedCount: 1 })
     expect(body.sections.map((section) => section.key)).toEqual(['GEN 1', 'GEN 2'])
@@ -197,18 +198,18 @@ describe('GET file progress', () => {
     const fallback = (await handleProgressReadRequest(new Request(url, {
       headers: { Authorization: `Bearer ${token}` },
     }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
-    expect(fallback.headers.get('ETag')).toBe('"progress:file-progress:7:v2:f:s2"')
+    expect(fallback.headers.get('ETag')).toBe('"progress:file-progress:7:v2:f:s3"')
     expect((await fallback.json() as FileProgressResponse).source).toBe('file-counter-fallback')
 
     await db.batch(fullProgressRecomputeStmts(db, PROJECT, FILE, 100))
     const projected = (await handleProgressReadRequest(new Request(url, {
       headers: {
         Authorization: `Bearer ${token}`,
-        'If-None-Match': '"progress:file-progress:7:v2:f:s2"',
+        'If-None-Match': '"progress:file-progress:7:v2:f:s3"',
       },
     }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
     expect(projected.status).toBe(200)
-    expect(projected.headers.get('ETag')).toBe('"progress:file-progress:7:v2:p:s2"')
+    expect(projected.headers.get('ETag')).toBe('"progress:file-progress:7:v2:p:s3"')
     expect((await projected.json() as FileProgressResponse).sections).toHaveLength(2)
   })
 
@@ -389,8 +390,20 @@ describe('structural aggregates (AQU-1083)', () => {
     endorsement_count: endorsements, word_count: value ? 1 : 0,
   })
 
+  /** A live take. `selected + approved` is what the projection calls validated. */
+  const take = (cellId: string, approved: boolean) => ({
+    project_id: P, file_id: F, cell_id: cellId, audio_id: `a-${cellId}`,
+    slot: 'take', url: `local://${cellId}.webm`, selected: 1, deleted: 0,
+    approved: approved ? 1 : 0, event_id: `au-${cellId}`, created_ts: 3,
+  })
+
   /** GEN 1: two verses (one filled at 2 endorsements, one empty) plus a chapter
-   *  heading and a book title — one filled at 3 endorsements, one empty. */
+   *  heading and a book title — one filled at 3 endorsements, one empty.
+   *
+   *  Two of the four are RECORDED, one content and one structural, and the
+   *  structural one is signed off while the content one is not — so every
+   *  audio number below differs from every other and a subtraction that took
+   *  the wrong column could not pass by coincidence. */
   async function fixture() {
     return makeTestDb({
       files: [{ id: F, project_id: P, name: 'GEN', event_id: 'f-evt' }],
@@ -400,13 +413,16 @@ describe('structural aggregates (AQU-1083)', () => {
         src('h1', 'GEN 1:h:1', 'heading'), tgt('h1', 'titulo', 3),
         src('h2', 'GEN 1:h:2', 'paratext'), tgt('h2', '', 0),
       ],
+      cell_audio: [take('v1', false), take('h1', true)],
     })
   }
 
   const read = async (db: AquillaDb, scope: string) =>
     db.prepare(
       `SELECT total_count, filled_count, validator_histogram,
-              structural_count, structural_filled_count, structural_validator_histogram
+              structural_count, structural_filled_count, structural_validator_histogram,
+              audio_count, audio_validated_count,
+              structural_audio_count, structural_audio_validated_count
          FROM file_section_progress
         WHERE project_id = ? AND file_id = ? AND scope = ? AND target_lang = ''`,
     ).bind(P, F, scope).first<Record<string, unknown>>()
@@ -462,6 +478,44 @@ describe('structural aggregates (AQU-1083)', () => {
     expect(row?.validator_histogram).toEqual({ '0': 2, '2': 1, '3': 1 })
     // Structural only: one empty heading at 0, one filled title at 3.
     expect(row?.structural_validator_histogram).toEqual({ '0': 1, '3': 1 })
+  })
+
+  // AQU-1278. The text counters got a structural twin in 0092 and the audio
+  // pair did not, so a policy that excluded headings shrank the denominator and
+  // left the recordings alone — a book whose headings were voiced came back
+  // with more audio than it had cells. These two record the missing share.
+  it('records the structural share of the audio pair on the file rollup', async () => {
+    const { db } = await fixture()
+    await fileProgressRecomputeStmt(db, P, F, 10).run()
+    const row = await read(db, 'file')
+    // Raw totals still count every take, the same way total_count still counts
+    // every cell: the policy is a subtraction on read, never a reprojection.
+    expect(Number(row?.audio_count)).toBe(2)
+    expect(Number(row?.audio_validated_count)).toBe(1)
+    // …and the heading's take is recorded separately so a reader can drop it.
+    expect(Number(row?.structural_audio_count)).toBe(1)
+    expect(Number(row?.structural_audio_validated_count)).toBe(1)
+  })
+
+  it('records the structural audio share per section and per book', async () => {
+    const { db } = await fixture()
+    await sectionsProgressRecomputeStmt(db, P, F, 10).run()
+    const scoped = async (scope: string, key: string) =>
+      db.prepare(
+        `SELECT audio_count, audio_validated_count,
+                structural_audio_count, structural_audio_validated_count
+           FROM file_section_progress
+          WHERE project_id = ? AND scope = ? AND section_key = ? AND target_lang = ''`,
+      ).bind(P, scope, key).first<Record<string, unknown>>()
+    // The book branch is a POSITIONAL UNION arm with no column aliases, so it
+    // is the one that silently shifts if the new columns land anywhere but the
+    // tail of every branch. Asserting both scopes is what catches that.
+    for (const row of [await scoped('section', 'GEN 1'), await scoped('book', 'GEN')]) {
+      expect(Number(row?.audio_count)).toBe(2)
+      expect(Number(row?.audio_validated_count)).toBe(1)
+      expect(Number(row?.structural_audio_count)).toBe(1)
+      expect(Number(row?.structural_audio_validated_count)).toBe(1)
+    }
   })
 
   it('records it per section too', async () => {
@@ -544,6 +598,18 @@ describe('GET file progress under the structural policy (AQU-1083)', () => {
         src('v1', 'GEN 1:1', 'verse'), tgt('v1', ''),
         src('v2', 'GEN 1:2', 'verse'), tgt('v2', ''),
       ],
+      // AQU-1278: the book is being dubbed, and whoever recorded it read the
+      // title out too. Both verses and one of the two front-matter cells carry
+      // a live take, so excluding structure must take the audio down to 2 —
+      // not leave it at 3 over a denominator of 2.
+      cell_audio: [
+        { project_id: P, file_id: F, cell_id: 't1', audio_id: 'a-t1', slot: 'take',
+          url: 'local://t1.webm', selected: 1, deleted: 0, approved: 1, event_id: 'au-t1', created_ts: 3 },
+        { project_id: P, file_id: F, cell_id: 'v1', audio_id: 'a-v1', slot: 'take',
+          url: 'local://v1.webm', selected: 1, deleted: 0, approved: 0, event_id: 'au-v1', created_ts: 3 },
+        { project_id: P, file_id: F, cell_id: 'v2', audio_id: 'a-v2', slot: 'take',
+          url: 'local://v2.webm', selected: 1, deleted: 0, approved: 0, event_id: 'au-v2', created_ts: 3 },
+      ],
     })
     await db.db.batch(fullProgressRecomputeStmts(db.db, P, F, 100))
     return db.db
@@ -571,6 +637,37 @@ describe('GET file progress under the structural policy (AQU-1083)', () => {
     // Not just the denominator: the translated title has to leave the numerator
     // too, or excluding headings makes the percentage climb.
     expect(body.file).toMatchObject({ totalCount: 2, filledCount: 0 })
+  })
+
+  // AQU-1278. Sam: "when headings are recorded and the org excludes headings
+  // from progress, exclude the recorded headings from the count of recordings
+  // — they don't count towards or against anything."
+  it('counts a recorded heading while the policy counts headings', async () => {
+    const { body } = await get(await fixture(undefined))
+    expect(body.file).toMatchObject({ totalCount: 4, audioCount: 3, audioValidatedCount: 1 })
+  })
+
+  it('drops the recorded heading from the audio when the project opts out', async () => {
+    const { body } = await get(await fixture(false))
+    // Three takes, one of them on the title. Excluding structure takes the
+    // denominator to 2, so leaving audio at 3 would read 150% recorded — the
+    // bar clamps, the number does not, and the row calls it nearly complete
+    // for having been over-recorded. The title's sign-off leaves with it.
+    expect(body.file).toMatchObject({ totalCount: 2, audioCount: 2, audioValidatedCount: 0 })
+  })
+
+  it('never reports negative audio on a row the backfill has not reached', async () => {
+    // 0094 defaults both columns to 0, so a row written before it applied still
+    // reports its recorded headings against a shrunken denominator. That is the
+    // pre-0094 reading and it is allowed; going NEGATIVE is not.
+    expect(counts(
+      { scope: 'file', section_key: '', total_count: 2, filled_count: 0,
+        validator_histogram: null, structural_count: 2, revision: 1,
+        audio_count: 0, audio_validated_count: 0,
+        structural_audio_count: 3, structural_audio_validated_count: 3 },
+      1,
+      false,
+    )).toMatchObject({ totalCount: 0, audioCount: 0, audioValidatedCount: 0 })
   })
 
   it('drops a section the exclusion empties rather than showing it at 0%', async () => {

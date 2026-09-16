@@ -77,6 +77,14 @@ function toUnit(row: PlanUnitRow, validationCount: number, countStructural: bool
       structural_filled_count: row.structural_filled_count,
       structural_validator_histogram: row.structural_validator_histogram ?? null,
       revision: row.revision,
+      // AQU-1278: audio goes THROUGH `counts()` now rather than around it.
+      // These four used to be copied straight off the row below, which meant
+      // the headings policy reached the cells and not the recordings — and a
+      // book whose headings were voiced read over 100% audio on this board.
+      audio_count: row.audio_count,
+      audio_validated_count: row.audio_validated_count,
+      structural_audio_count: row.structural_audio_count,
+      structural_audio_validated_count: row.structural_audio_validated_count,
     },
     validationCount,
     countStructural,
@@ -90,8 +98,8 @@ function toUnit(row: PlanUnitRow, validationCount: number, countStructural: bool
     totalCount: c.totalCount,
     filledCount: c.filledCount,
     validatedCount: c.validatedCount,
-    audioCount: Number(row.audio_count) || 0,
-    audioValidatedCount: Number(row.audio_validated_count) || 0,
+    audioCount: c.audioCount,
+    audioValidatedCount: c.audioValidatedCount,
     lastEditAt: row.last_edit_at == null ? null : Number(row.last_edit_at),
     targetDate: row.target_date ?? null,
     doneAt: row.done_at == null ? null : Number(row.done_at),

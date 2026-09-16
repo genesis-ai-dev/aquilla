@@ -271,3 +271,54 @@ describe("the ETag samples every clock that can change the board", () => {
     expect((await after.json() as PlanResponse).units[0].audioCount).toBe(5)
   })
 })
+
+// AQU-1278. The board is the surface the 110% was visible on: a dubbed book
+// whose chapter headings were read aloud, in a project that does not count
+// headings. Audio used to be copied straight off the row here, around `counts()`
+// rather than through it, so the policy reached the cells and not the takes.
+describe("the headings policy reaches the audio numbers too", () => {
+  /** A 12-cell book: 10 verses and 2 headings, every one of them recorded. */
+  async function dubbedBook(countStructural: boolean | undefined) {
+    const { db } = await makeTestDb({
+      organizations: [{ id: 1, name: "Org", owner_user_id: 1 }],
+      projects: [{ id: P, name: "Plan", org_id: 1 }],
+      org_settings: [{ org_id: 1, settings: "{}", version: 1 }],
+      project_settings: [{
+        project_id: P,
+        settings: JSON.stringify(
+          countStructural === undefined ? {} : { countStructuralCells: countStructural },
+        ),
+        version: 1,
+        updated_at: TS,
+      }],
+      files: [file("f1", { book_code: "MRK" })],
+      file_section_progress: [
+        progress("f1", "book", "MRK", {
+          total_count: 12, filled_count: 12,
+          validator_histogram: JSON.stringify({ "1": 12 }),
+          structural_count: 2, structural_filled_count: 2,
+          structural_validator_histogram: JSON.stringify({ "1": 2 }),
+          audio_count: 12, audio_validated_count: 12,
+          structural_audio_count: 2, structural_audio_validated_count: 2,
+        }),
+      ],
+    })
+    const body = (await (await get(db)).json()) as PlanResponse
+    return body.units.find((u) => u.sectionKey === "MRK")!
+  }
+
+  it("counts recorded headings while the project counts headings", async () => {
+    expect(await dubbedBook(undefined)).toMatchObject({
+      totalCount: 12, audioCount: 12, audioValidatedCount: 12,
+    })
+  })
+
+  it("takes recorded headings out with the headings when the project opts out", async () => {
+    // 10 and 10, never 10 and 12. The bar clamps at 100% either way, so the
+    // symptom a reader sees is the READOUT beside it — "110/0%" — and a row
+    // that calls itself nearly complete for having been over-recorded.
+    expect(await dubbedBook(false)).toMatchObject({
+      totalCount: 10, audioCount: 10, audioValidatedCount: 10,
+    })
+  })
+})

@@ -95,6 +95,10 @@ export interface PlanUnitRow {
   structural_validator_histogram: Record<string, number> | string
   audio_count: number
   audio_validated_count: number
+  // AQU-1278: and the structural share of those two, so the board subtracts
+  // recorded headings exactly as it subtracts the headings themselves.
+  structural_audio_count: number
+  structural_audio_validated_count: number
   last_edit_at: number | null
   revision: number
   target_date: string | null
@@ -137,6 +141,8 @@ export function readPlanUnitsSql(extraScope = ""): string {
             COALESCE(pl.structural_validator_histogram, '{}'::jsonb) AS structural_validator_histogram,
             COALESCE(pd.audio_count, 0) AS audio_count,
             COALESCE(pd.audio_validated_count, 0) AS audio_validated_count,
+            COALESCE(pd.structural_audio_count, 0) AS structural_audio_count,
+            COALESCE(pd.structural_audio_validated_count, 0) AS structural_audio_validated_count,
             COALESCE(pl.last_edit_at, pd.last_edit_at) AS last_edit_at,
             GREATEST(COALESCE(pl.revision, 0), COALESCE(pd.revision, 0)) AS revision,
             -- The projection stamps this on every recompute. A backfill can

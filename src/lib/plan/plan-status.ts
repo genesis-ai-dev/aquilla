@@ -154,13 +154,15 @@ const atLeastZero = (n: number): number => (n > 0 ? n : 0)
 /**
  * What this unit still needs.
  *
- * EVERY TERM IS CLAMPED, and the audio one is why. The projection counts takes
- * on structural cells, and there is no `structural_audio_count` column to
- * subtract — so when the AQU-1083 policy excludes headings, the read subtracts
- * them from `totalCount` but not from `audioCount`, and a book whose headings
- * were voiced comes back with MORE audio than cells. Unclamped, `total − audio`
- * goes negative, sails under any threshold, and the unit is declared nearly
- * complete precisely because someone recorded its headings.
+ * EVERY TERM IS CLAMPED, and the audio one still is even though the hole it was
+ * dug for is filled. Migration 0094 gave the projection a
+ * `structural_audio_count`, so a policy that excludes headings now subtracts
+ * them from `audioCount` as well as from `totalCount` and the two move
+ * together. What the clamp defends is the gap before that lands: a row the
+ * backfill has not reached reports its recorded headings and a shrunken
+ * denominator, and unclamped `total − audio` would go negative, sail under any
+ * threshold, and declare the unit nearly complete precisely because someone
+ * recorded its headings. It costs one comparison; keep it.
  *
  * `hasAudio` comes from `audioFileIds`, not from the unit — see that function.
  */

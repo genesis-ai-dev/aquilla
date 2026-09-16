@@ -20,10 +20,15 @@ interface ProgressRow {
   structural_filled_count?: number | string | null
   structural_validator_histogram?: Record<string, number> | string | null
   revision: number | string | bigint
-  // AQU-1098: written by the projection since 0088. Absent on the synthetic
-  // rows plan-route builds, which carry their own audio numbers.
+  // AQU-1098: written by the projection since 0088. Optional for the same
+  // reason the structural trio is — a caller may build a row by hand.
   audio_count?: number | string | null
   audio_validated_count?: number | string | null
+  // AQU-1278: the structural share of the audio pair (0094), subtracted by the
+  // same policy that subtracts the text one. Absent on a row the backfill has
+  // not reached yet, which reads as nothing to subtract — today's behaviour.
+  structural_audio_count?: number | string | null
+  structural_audio_validated_count?: number | string | null
 }
 
 export interface ProgressCounts {
@@ -124,6 +129,13 @@ export function counts(
   })
   const structuralTotal = countStructural ? 0 : Number(row.structural_count) || 0
   const structuralFilled = countStructural ? 0 : Number(row.structural_filled_count) || 0
+  // AQU-1278: recorded headings leave the audio numbers with the headings
+  // themselves. Before this the policy shrank the denominator and left the
+  // numerator alone, so a book whose chapter headings were voiced reported
+  // more audio than it had cells.
+  const structuralAudio = countStructural ? 0 : Number(row.structural_audio_count) || 0
+  const structuralAudioValidated =
+    countStructural ? 0 : Number(row.structural_audio_validated_count) || 0
   return {
     // Clamped at zero: an un-backfilled row has structural counts of 0, but a
     // partially backfilled one must never report a negative denominator.
@@ -131,8 +143,11 @@ export function counts(
     filledCount: Math.max(0, (Number(row.filled_count) || 0) - structuralFilled),
     validatedCount: validationLevels[Math.min(levelCap, validationCount) - 1] ?? 0,
     validationLevels,
-    audioCount: Number(row.audio_count) || 0,
-    audioValidatedCount: Number(row.audio_validated_count) || 0,
+    audioCount: Math.max(0, (Number(row.audio_count) || 0) - structuralAudio),
+    audioValidatedCount: Math.max(
+      0,
+      (Number(row.audio_validated_count) || 0) - structuralAudioValidated,
+    ),
   }
 }
 
@@ -292,7 +307,8 @@ export async function handleProgressReadRequest(
       .prepare(
         `SELECT scope, section_key, total_count, filled_count, validator_histogram,
                 structural_count, structural_filled_count, structural_validator_histogram,
-                revision, audio_count, audio_validated_count
+                revision, audio_count, audio_validated_count,
+                structural_audio_count, structural_audio_validated_count
            FROM file_section_progress
           WHERE project_id = ? AND file_id = ? AND target_lang = ?`,
       )
@@ -338,6 +354,7 @@ export async function handleProgressReadRequest(
       // `files` carries no audio rollup — the projection is the only source,
       // and this branch runs only before it has been backfilled.
       audio_count: 0, audio_validated_count: 0,
+      structural_audio_count: 0, structural_audio_validated_count: 0,
     }]
     source = 'file-counter-fallback'
   }
@@ -349,13 +366,15 @@ export async function handleProgressReadRequest(
   // sequence. Include the source so clients cannot retain an empty fallback
   // through a false 304 after projection rows appear.
   const laneTag = lane ? `:lane:${encodeURIComponent(lane)}` : ''
-  // `s2` marks the response SHAPE (audio counts added, AQU-1098). Without it
-  // a client holding a pre-audio cached body would 304 and keep it forever:
-  // the shape changed without the revision moving. The structural policy is
-  // part of the key for the same reason: flipping it changes every number
-  // without moving the revision either.
+  // `s3` marks the response SHAPE. Without it a client holding a cached body
+  // from an older shape would 304 and keep it forever: the shape changed
+  // without the revision moving. The structural policy is part of the key for
+  // the same reason — flipping it changes every number without moving the
+  // revision either. s2 = audio counts added (AQU-1098); s3 = recorded
+  // headings left those counts (AQU-1278), which the 0094 backfill applies to
+  // existing rows without touching a single event sequence.
   const structuralTag = countStructural ? '' : ':nostruct'
-  const etag = `"progress:${fileId}:${revision}:v${validationCount}:${source === 'projection' ? 'p' : 'f'}:s2${structuralTag}${laneTag}"`
+  const etag = `"progress:${fileId}:${revision}:v${validationCount}:${source === 'projection' ? 'p' : 'f'}:s3${structuralTag}${laneTag}"`
   if (request.headers.get('If-None-Match') === etag) {
     return new Response(null, { status: 304, headers: { ETag: etag, 'Cache-Control': 'private, no-cache' } })
   }

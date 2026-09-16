@@ -590,6 +590,12 @@ CREATE TABLE file_section_progress (
     structural_count               INTEGER NOT NULL DEFAULT 0 CHECK (structural_count >= 0),
     structural_filled_count        INTEGER NOT NULL DEFAULT 0 CHECK (structural_filled_count >= 0),
     structural_validator_histogram JSONB   NOT NULL DEFAULT '{}'::jsonb,
+    -- AQU-1278: and the structural share of the audio pair (0094), so the same
+    -- reader subtracts headings from the RECORDINGS too. Without these a book
+    -- whose headings were voiced reports more audio than cells the moment the
+    -- policy shrinks its denominator.
+    structural_audio_count           INTEGER NOT NULL DEFAULT 0 CHECK (structural_audio_count >= 0),
+    structural_audio_validated_count INTEGER NOT NULL DEFAULT 0 CHECK (structural_audio_validated_count >= 0),
     revision            BIGINT NOT NULL DEFAULT 0,
     updated_at          BIGINT NOT NULL,
     PRIMARY KEY (project_id, file_id, scope, section_key, target_lang),

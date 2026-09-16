@@ -180,9 +180,10 @@ export const AUDIO_BOOKS: Book[] = [
     untranslated: 0, shortText: 0, shortAudio: 0, shortIn: [],
     expect: "nearly_complete",
     note: "Every verse AND every heading recorded, with the org excluding headings " +
-      "from progress. Audio therefore EXCEEDS the denominator. Unclamped this reads " +
-      "a negative shortfall and qualifies for being over-recorded; it must read " +
-      "'Nothing left'.",
+      "from progress. The recorded headings must leave the audio numbers with the " +
+      "headings themselves, so the AUD bar reads exactly 100% and the row says " +
+      "'Nothing left' — never more audio than cells. Drop the structural-audio " +
+      "subtraction and this is the book that goes over 100%.",
   },
 ]
 
@@ -318,19 +319,20 @@ export interface FixtureCounts {
 /**
  * What the projection should produce for one book.
  *
- * Structural cells are subtracted from the text counts because that is what
- * `counts(row, n, false)` does — but NOT from `audioCount`, because there is no
- * `structural_audio_count` column to subtract. That asymmetry is the whole
- * reason the shortfall terms are clamped, and MRK exists to prove it.
+ * Structural cells leave EVERY count, audio included — the policy subtracts
+ * `structural_audio_count` from the recordings exactly as it subtracts
+ * `structural_count` from the cells (AQU-1278, migration 0094). Before that
+ * column existed the denominator shrank and the numerator did not, and MRK —
+ * whose headings are all recorded — came back with more audio than cells.
+ * MRK still earns its place: it is what fails if the subtraction is dropped.
  */
 export function expectedCounts(b: Book): FixtureCounts {
-  const cells = cellsFor(b)
-  const content = cells.filter((c) => !isStructural(c.type))
+  const content = cellsFor(b).filter((c) => !isStructural(c.type))
   return {
     totalCount: content.length,
     filledCount: content.filter((c) => c.target !== "").length,
     validatedCount: content.filter((c) => c.validated && c.target !== "").length,
-    audioCount: cells.filter((c) => c.recorded).length,
+    audioCount: content.filter((c) => c.recorded).length,
     audioValidatedCount: 0,
   }
 }

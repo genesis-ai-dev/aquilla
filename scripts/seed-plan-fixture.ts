@@ -99,7 +99,14 @@ async function seed(db: AquillaDb): Promise<void> {
   // "count structural cells" on in project settings and every book's total
   // should rise by its chapter count while nothing disappears.
   await db.prepare(
-    "INSERT INTO project_settings (project_id, settings, updated_by) VALUES (?, ?, ?)",
+    // VERSION 1, NOT THE COLUMN DEFAULT OF 0. `useProjectSettings` treats a
+    // server row at version 0 as "never written" and keeps the client's local
+    // settings instead, so a fixture seeded at 0 reaches the UI with no target
+    // language at all: the inspector's meta line loses "German", the lane
+    // table says "Default", and the multi-lane audio note never fires. Real
+    // projects are never at 0 — the settings route stamps a version on every
+    // write — so this is the fixture matching production, not a workaround.
+    "INSERT INTO project_settings (project_id, settings, version, updated_by) VALUES (?, ?, 1, ?)",
   ).bind(PROJECT_ID, JSON.stringify({
     sourceLanguage: "English",
     targetLanguage: "German",
@@ -258,6 +265,8 @@ interface BookRow {
   audio_validated_count: number
   structural_count: number
   structural_filled_count: number
+  structural_audio_count: number
+  structural_audio_validated_count: number
   validated_count: number
   structural_validated_count: number
 }
@@ -265,16 +274,17 @@ interface BookRow {
 /**
  * Check the projection against the fixture's own arithmetic, book by book.
  *
- * The counts the plan board reads are the raw row minus its structural share
- * (AQU-1083's policy applied as a subtraction), except `audio_count`, which has
- * no structural column to subtract — the asymmetry that makes the shortfall
- * clamp load-bearing. Validated is counted from the histogram the same way
- * `counts()` does: buckets at or above the project's validation count.
+ * The counts the plan board reads are the raw row minus its structural share —
+ * AQU-1083's policy applied as a subtraction, and since 0094 that includes the
+ * AUDIO pair, so a recorded heading leaves the recordings exactly as the
+ * heading leaves the cells. Validated is counted from the histogram the same
+ * way `counts()` does: buckets at or above the project's validation count.
  */
 async function verify(db: AquillaDb): Promise<boolean> {
   const rows = (await db.prepare(
     `SELECT p.section_key, p.total_count, p.filled_count, p.audio_count,
             p.audio_validated_count, p.structural_count, p.structural_filled_count,
+            p.structural_audio_count, p.structural_audio_validated_count,
             COALESCE((SELECT SUM(value::int) FROM jsonb_each_text(p.validator_histogram)
                        WHERE key::int >= ?), 0)::int AS validated_count,
             COALESCE((SELECT SUM(value::int) FROM jsonb_each_text(p.structural_validator_histogram)
@@ -299,8 +309,9 @@ async function verify(db: AquillaDb): Promise<boolean> {
       totalCount: Number(r.total_count) - Number(r.structural_count),
       filledCount: Number(r.filled_count) - Number(r.structural_filled_count),
       validatedCount: Number(r.validated_count) - Number(r.structural_validated_count),
-      audioCount: Number(r.audio_count),
-      audioValidatedCount: Number(r.audio_validated_count),
+      audioCount: Number(r.audio_count) - Number(r.structural_audio_count),
+      audioValidatedCount:
+        Number(r.audio_validated_count) - Number(r.structural_audio_validated_count),
     }
     const want = expectedCounts(b)
     const diffs = (Object.keys(want) as Array<keyof typeof want>)

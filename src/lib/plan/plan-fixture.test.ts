@@ -126,11 +126,14 @@ describe("AQU-1278 fixture", () => {
     expect(planUnitStatus(jon, NOW, audioFiles)).toBe("overdue")
   })
 
-  it("clamps Mark, whose headings were recorded, to nothing left", () => {
+  it("ignores Mark's recorded headings, so audio equals the denominator exactly", () => {
     const mrk = units.find((u) => u.sectionKey === "MRK")!
-    // Audio genuinely exceeds the denominator: takes are counted on structural
-    // cells and the headings policy subtracts those cells from the total.
-    expect(mrk.audioCount).toBeGreaterThan(mrk.totalCount)
+    // Every verse AND every heading is recorded, with the org excluding
+    // headings. AQU-1278: the recorded headings leave the audio numbers with
+    // the headings themselves, so this lands ON the denominator rather than
+    // over it. Equality is the assertion — `toBeLessThanOrEqual` would pass
+    // just as well on a book that was never recorded at all.
+    expect(mrk.audioCount).toBe(mrk.totalCount)
     const s = planUnitShortfall(mrk, true)
     expect(s.toRecord).toBe(0)
     expect(s.worst).toBe(0)

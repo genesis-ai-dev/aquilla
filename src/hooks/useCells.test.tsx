@@ -185,6 +185,49 @@ vi.mock("@/lib/sync/outbox", async (importOriginal) => {
   }
 })
 
+// Tauri offline read-branch seams. Every existing (online) test above relies
+// on `offlineTestState.isTauri` defaulting to false, which makes
+// `resolveOfflineStore` (useCells.ts) return null unconditionally — so the
+// HTTP mocks above are exercised exactly as before. Only the dedicated
+// "Tauri offline branch" describe block below flips it.
+const offlineTestState: {
+  isTauri: boolean
+  ready: boolean
+  rows: CellRow[]
+} = { isTauri: false, ready: false, rows: [] }
+// `subscribeToOfflineFileCells` callers registered via the mock below — a
+// test "fires" one by calling it directly, standing in for the real
+// LiveStore reactivity this seam replaces.
+let offlineSubscribers: Array<() => void> = []
+
+vi.mock("@/lib/offline/is-tauri", () => ({
+  isTauriRuntime: () => offlineTestState.isTauri,
+}))
+
+vi.mock("@/context/OfflineStoreContext", () => ({
+  // The mocked offline-reads functions below never actually dereference this
+  // value — any truthy placeholder proves "the store finished booting".
+  useOfflineStore: () => ({ store: offlineTestState.isTauri ? ({} as object) : null, loading: false, error: null }),
+}))
+
+vi.mock("@/lib/offline/offline-reads", () => ({
+  isProjectOfflineReady: () => offlineTestState.ready,
+  resolveOfflineStore: (store: unknown, _projectId: string) =>
+    store && offlineTestState.isTauri && offlineTestState.ready ? store : null,
+  readOfflineFileCells: (
+    _store: unknown,
+    _projectId: string,
+    _fileId: string,
+    opts?: { side?: "source" | "target" },
+  ) => (opts?.side ? offlineTestState.rows.filter((r) => r.side === opts.side) : offlineTestState.rows),
+  subscribeToOfflineFileCells: (_store: unknown, _projectId: string, _fileId: string, onChange: () => void) => {
+    offlineSubscribers.push(onChange)
+    return () => {
+      offlineSubscribers = offlineSubscribers.filter((fn) => fn !== onChange)
+    }
+  },
+}))
+
 import { useCells } from "./useCells"
 import type { CellAuditStats } from "./useCellsAuditStats"
 
@@ -222,6 +265,10 @@ beforeEach(() => {
   delete streamMeta.projectEpoch
   vtt.calls = 0
   peekOutboxBatchCallCount = 0
+  offlineTestState.isTauri = false
+  offlineTestState.ready = false
+  offlineTestState.rows = []
+  offlineSubscribers = []
 })
 
 describe("useCells (Phase 2a, D1-backed)", () => {
@@ -1664,5 +1711,137 @@ describe("FRO-IMPORT-OPT: outbox subscription debounce", () => {
     // The entire burst of 20 notifications must have triggered exactly ONE
     // peekOutboxBatch call (not 20).
     expect(peekOutboxBatchCallCount).toBe(1)
+  })
+})
+
+describe("useCells (Tauri offline read branch)", () => {
+  it("reads from LiveStore instead of HTTP when offline-ready, mapping degraded CellRow fields via buildCellData's defaults", async () => {
+    offlineTestState.isTauri = true
+    offlineTestState.ready = true
+    offlineTestState.rows = [
+      makeRow({ cellId: "c1", side: "source", value: "Source 1", canonicalRef: "GEN 1:1", sequenceIndex: 0 }),
+      makeRow({ cellId: "c1", side: "target", value: "Target 1", validated: true, sequenceIndex: 0 }),
+    ]
+
+    const { result } = renderHook(() =>
+      useCells({ projectId: "proj-offline", fileId: "file-offline", getToken, enabled: true }),
+    )
+
+    await waitFor(() => expect(result.current.cells).toHaveLength(1))
+    expect(result.current.cells[0]).toMatchObject({
+      id: "c1",
+      original: "Source 1",
+      translated: "Target 1",
+      status: "validated",
+    })
+    // The offline branch never touches the HTTP read path.
+    expect(fetchAllMock).not.toHaveBeenCalled()
+    expect(fetchDeltaMock).not.toHaveBeenCalled()
+    expect(fetchByIdsMock).not.toHaveBeenCalled()
+  })
+
+  it("falls through to the unchanged HTTP path when Tauri but the project isn't offline-ready", async () => {
+    offlineTestState.isTauri = true
+    offlineTestState.ready = false // e.g. still "downloading", or never requested for offline use
+    fetchAllMock.mockResolvedValueOnce([
+      makeRow({ cellId: "c1", side: "source", value: "src" }),
+      makeRow({ cellId: "c1", side: "target", value: "tgt" }),
+    ])
+
+    const { result } = renderHook(() =>
+      useCells({ projectId: "proj-not-ready", fileId: "file-offline", getToken, enabled: true }),
+    )
+
+    await waitFor(() => expect(result.current.cells).toHaveLength(1))
+    expect(result.current.cells[0].translated).toBe("tgt")
+    expect(fetchAllMock).toHaveBeenCalled()
+  })
+
+  it("re-reads and updates cells when subscribeToOfflineFileCells fires, without any HTTP call", async () => {
+    offlineTestState.isTauri = true
+    offlineTestState.ready = true
+    offlineTestState.rows = [
+      makeRow({ cellId: "c1", side: "source", value: "src", sequenceIndex: 0 }),
+      makeRow({ cellId: "c1", side: "target", value: "v1", sequenceIndex: 0 }),
+    ]
+
+    const { result } = renderHook(() =>
+      useCells({ projectId: "proj-offline", fileId: "file-offline", getToken, enabled: true }),
+    )
+    await waitFor(() => expect(result.current.cells).toHaveLength(1))
+    expect(result.current.cells[0].translated).toBe("v1")
+    expect(offlineSubscribers.length).toBeGreaterThan(0)
+
+    // Simulate the Phase 3 sync adapter materializing a remote commit into
+    // LiveStore, then firing the subscription this hook registered.
+    offlineTestState.rows = [
+      makeRow({ cellId: "c1", side: "source", value: "src", sequenceIndex: 0 }),
+      makeRow({ cellId: "c1", side: "target", value: "v2 (remote)", sequenceIndex: 0 }),
+    ]
+    act(() => {
+      for (const fn of offlineSubscribers) fn()
+    })
+
+    await waitFor(() => expect(result.current.cells[0].translated).toBe("v2 (remote)"))
+    expect(fetchAllMock).not.toHaveBeenCalled()
+    expect(fetchDeltaMock).not.toHaveBeenCalled()
+  })
+
+  it("revalidateCell reads the one cellId from LiveStore synchronously, without fetchCellsByIds", async () => {
+    offlineTestState.isTauri = true
+    offlineTestState.ready = true
+    offlineTestState.rows = [
+      makeRow({ cellId: "c1", side: "source", value: "src", sequenceIndex: 0 }),
+      makeRow({ cellId: "c1", side: "target", value: "old", sequenceIndex: 0 }),
+      makeRow({ cellId: "c2", side: "source", value: "src2", sequenceIndex: 1 }),
+      makeRow({ cellId: "c2", side: "target", value: "untouched", sequenceIndex: 1 }),
+    ]
+
+    const { result } = renderHook(() =>
+      useCells({ projectId: "proj-offline", fileId: "file-offline", getToken, enabled: true }),
+    )
+    await waitFor(() => expect(result.current.cells).toHaveLength(2))
+
+    // A targeted change lands in LiveStore for c1 only.
+    offlineTestState.rows = offlineTestState.rows.map((r) =>
+      r.cellId === "c1" && r.side === "target" ? { ...r, value: "new" } : r,
+    )
+    act(() => { result.current.revalidateCell("c1") })
+
+    await waitFor(() => expect(result.current.cells.find((c) => c.id === "c1")?.translated).toBe("new"))
+    // c2 is untouched and keeps its position/value — revalidateCell must not
+    // have re-read (and thus reordered) the whole file.
+    expect(result.current.cells.map((c) => c.id)).toEqual(["c1", "c2"])
+    expect(result.current.cells.find((c) => c.id === "c2")?.translated).toBe("untouched")
+    expect(fetchByIdsMock).not.toHaveBeenCalled()
+  })
+
+  it("keeps an in-flight optimistic edit visible when the offline branch re-reads a stale (pre-flush) snapshot", async () => {
+    // Mirrors the online FRO-247 "disappearing prediction" guard: an
+    // optimistic edit lands locally before the write-side's outbox event has
+    // materialized into LiveStore, so a subscribe-triggered re-read must not
+    // clobber it with the stale value still sitting in the table.
+    offlineTestState.isTauri = true
+    offlineTestState.ready = true
+    offlineTestState.rows = [
+      makeRow({ cellId: "c1", side: "source", value: "src", sequenceIndex: 0 }),
+      makeRow({ cellId: "c1", side: "target", value: "old", sequenceIndex: 0 }),
+    ]
+
+    const { result } = renderHook(() =>
+      useCells({ projectId: "proj-offline", fileId: "file-offline", getToken, enabled: true }),
+    )
+    await waitFor(() => expect(result.current.cells).toHaveLength(1))
+
+    act(() => { result.current.applyOptimisticTargetEdit("c1", { value: "predicted" }) })
+    expect(result.current.cells[0].translated).toBe("predicted")
+
+    // The sync adapter fires the subscription for an unrelated reason while
+    // LiveStore's own row still shows the pre-edit value (not yet flushed).
+    act(() => {
+      for (const fn of offlineSubscribers) fn()
+    })
+
+    expect(result.current.cells[0].translated).toBe("predicted")
   })
 })

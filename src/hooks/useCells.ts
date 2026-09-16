@@ -23,6 +23,8 @@ import { formatVttTime } from "@/lib/video/vtt-generator"
 import { decodeHtmlEntities } from "@/lib/html-entities"
 import type { AiDraftProvenance } from "@/lib/sync/outbox-types"
 import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate"
+import { useOfflineStore } from "@/context/OfflineStoreContext"
+import { readOfflineFileCells, resolveOfflineStore, subscribeToOfflineFileCells } from "@/lib/offline/offline-reads"
 
 // AQU-538 (slice 2): one source, N target lanes; `''` is the default lane.
 // SWARM-TODO(AQU-538): slice 1 adds `targetLang` to `CellRow` in
@@ -562,6 +564,11 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   // the empty-state UI as if the file genuinely has no cells.
   const tokenRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const tokenAttemptsRef = useRef(0)
+  // Tauri offline read branch (see resolveOfflineStore above). `store` is
+  // null outside Tauri, before boot completes, or on boot failure — every
+  // one of those falls straight through to the unchanged HTTP path below.
+  const { store: offlineStore } = useOfflineStore()
+  const offlineStoreRef = useRef(offlineStore)
 
   statsRef.current = auditStats
   laneRef.current = lane
@@ -571,6 +578,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   projectRef.current = projectId
   fileRef.current = fileId
   enabledRef.current = enabled
+  offlineStoreRef.current = offlineStore
 
   const rebuildFromCache = useCallback(() => {
     // AD-3 v1 thin client: the view is exactly the Postgres projection. Pending
@@ -755,6 +763,43 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
     if (soft && inFlightRef.current) return
     const gen = ++generationRef.current
     inFlightRef.current = true
+
+    // Tauri offline branch: an offline-ready project's cells live in the
+    // local LiveStore `cells` table (kept live-synced by the Phase 3 sync
+    // adapter), so a read is a synchronous local SQLite query — none of the
+    // IDB cache / `?since=` delta / paginated-stream machinery below applies
+    // (there is no network latency to hide behind a cache, and no server
+    // watermark to track). `resolveOfflineStore` returns null for every web
+    // request and for a Tauri request whose project isn't fully downloaded,
+    // so this is a pure no-op for the unchanged HTTP path.
+    //
+    // Still routes through `clearConfirmedShadows` / `mergeProtectedRows` —
+    // the same guards the online soft-refetch path uses — because a local
+    // optimistic edit (applyOptimisticTargetEdit) can still be ahead of
+    // whatever's currently materialized in the `cells` table (e.g. its
+    // outbox event hasn't flushed into LiveStore yet), and a plain overwrite
+    // here would reproduce the "disappearing prediction" bug those guards
+    // exist to prevent.
+    const offlineStore = resolveOfflineStore(offlineStoreRef.current, projectId)
+    if (offlineStore) {
+      try {
+        const startSeq = writeSeqRef.current
+        const rows = readOfflineFileCells(offlineStore, projectId, fileId)
+        if (generationRef.current !== gen) return
+        clearConfirmedShadows(rows, startSeq)
+        const { rows: kept } = mergeProtectedRows(rows, startSeq)
+        rowsRef.current = kept
+        maxServerSeqRef.current = null
+        projectEpochRef.current = null
+        rebuildFromCache()
+        setIsError(false)
+        setIsLoading(false)
+      } finally {
+        if (generationRef.current === gen) inFlightRef.current = false
+      }
+      return
+    }
+
     let usedCache = false
     if (!soft) {
       // Try the IDB cache before showing a skeleton. A hit paints cached rows
@@ -1036,6 +1081,22 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, fileId, enabled, lane])
 
+  // Tauri offline reactivity: doFetch()/revalidate() only re-read the local
+  // `cells` table when something calls them (mount, focus regain, a known
+  // local write). The Phase 3 sync adapter can also write into that table on
+  // its own — an incoming remote commit, or this device's own queued write
+  // finally materializing — with nothing else in this hook to notice. This
+  // subscription is what closes that gap for an offline-ready project:
+  // resolveOfflineStore is re-checked on every relevant dep change (a project
+  // is not offline-ready until Phase 5's download flow marks it so, and
+  // there's no reachable UI for that yet, so mid-session ready flips aren't
+  // covered here).
+  useEffect(() => {
+    const readyStore = resolveOfflineStore(offlineStore, projectId)
+    if (!enabled || !readyStore || !projectId || !fileId) return
+    return subscribeToOfflineFileCells(readyStore, projectId, fileId, () => { void doFetch(true) })
+  }, [projectId, fileId, enabled, offlineStore, doFetch])
+
   // Re-derive when stats / username / threshold change without refetching.
   useEffect(() => {
     rebuildFromCache()
@@ -1193,8 +1254,43 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
     const projectId = projectRef.current
     const fileId = fileRef.current
     const enabled = enabledRef.current
+    if (!enabled || !projectId || !fileId) return
+
+    // Tauri offline branch: no server round-trip to coalesce (see doFetch's
+    // offline branch above for why) — a LiveStore read for this one cellId
+    // is synchronous, so this skips fetchCellsByIds and the in-flight/retry
+    // bookkeeping built around its async network call entirely.
+    const offlineStore = resolveOfflineStore(offlineStoreRef.current, projectId)
+    if (offlineStore) {
+      const startSeq = writeSeqRef.current
+      const rows = readOfflineFileCells(offlineStore, projectId, fileId).filter((r) => r.cellId === cellId)
+      clearConfirmedShadows(rows, startSeq)
+      // Replace this cellId's rows in place — mirrors the online write-back
+      // below (see its comment) so a targeted refetch can't teleport the row
+      // to the tail of the file.
+      const keyOf = (r: CellRow): string => (r.side === "target" ? `target|${laneOf(r)}` : "source")
+      const byKey = new Map(rows.map((r) => [keyOf(r), r]))
+      const next: CellRow[] = []
+      for (const r of rowsRef.current) {
+        if (r.cellId !== cellId) {
+          next.push(r)
+          continue
+        }
+        const k = keyOf(r)
+        const repl = byKey.get(k)
+        if (repl) {
+          next.push(repl)
+          byKey.delete(k)
+        }
+      }
+      for (const r of byKey.values()) next.push(r)
+      rowsRef.current = next
+      rebuildFromCache()
+      return
+    }
+
     const getToken = tokenFetcherRef.current
-    if (!enabled || !projectId || !fileId || !getToken) return
+    if (!getToken) return
     if (cellFetchInFlightRef.current.has(cellId)) return
     cellFetchInFlightRef.current.add(cellId)
     const gen = generationRef.current

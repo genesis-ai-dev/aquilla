@@ -6,10 +6,15 @@ import { makePersistedAdapter } from "@livestore/adapter-web"
 import { createStorePromise, type Adapter, type Store } from "@livestore/livestore"
 import { unstable_batchedUpdates as batchUpdates } from "react-dom"
 import { schema } from "./schema"
+import { isTauriRuntime } from "./is-tauri"
 
 const STORE_ID = "aquilla-offline"
 
-export const isTauriRuntime = (): boolean => typeof window !== "undefined" && "__TAURI__" in window
+// Re-exported for backward compatibility — existing importers (e.g.
+// OfflineStoreContext.tsx) pull isTauriRuntime from here. New callers outside
+// src/lib/offline/ that only need the runtime check (no LiveStore boot)
+// should import it from ./is-tauri directly to avoid the heavier bundle.
+export { isTauriRuntime }
 
 /** Injection seam for tests — production boots the real worker + shared worker pair. */
 export type CreateOfflineAdapter = () => Adapter | Promise<Adapter>

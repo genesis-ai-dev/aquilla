@@ -1,6 +1,6 @@
 // AQU-1278: screenshots of the live plan board against the seeded fixture, so
-// the build can be held next to the approved mockup. Needs `pnpm dev` up on
-// the default ports and `scripts/seed-plan-fixture.ts` run.
+// the build can be held next to the approved mockup. Needs `pnpm dev` up on the
+// default ports and `scripts/seed-plan-fixture.ts` run.
 //
 //   node scripts/browser-verify/aqu-1278-plan-shot.mjs [outDir]
 import { chromium } from "@playwright/test"
@@ -38,7 +38,7 @@ async function main() {
   const board = page.locator('[data-testid="plan-board"]').first()
   await board.waitFor({ timeout: 60_000 })
   // Let the rows' progress prefetch settle so the "where" line has data.
-  await page.waitForTimeout(4000)
+  await page.waitForTimeout(5000)
 
   const shot = async (name, opts = {}) => {
     await page.screenshot({ path: join(OUT, `${name}.png`), fullPage: opts.fullPage ?? false })
@@ -48,14 +48,6 @@ async function main() {
   await board.scrollIntoViewIfNeeded()
   await shot("01-board-top")
   await shot("02-board-full", { fullPage: true })
-
-  // AQU-1255 caps the list at five rows; everything below needs the rest.
-  const showAll = page.locator('[data-testid="plan-show-all"]')
-  if (await showAll.count()) {
-    await showAll.click()
-    await page.waitForTimeout(3000)
-    await shot("02b-board-all", { fullPage: true })
-  }
 
   const clickRow = async (name) => {
     const row = board.getByText(name, { exact: true }).first()
@@ -67,14 +59,17 @@ async function main() {
   await clickRow("Genesis")
   await shot("03-genesis-inspector", { fullPage: true })
 
-  // Chapter 12 tile in the grid, if the grid rendered one.
-  const tile12 = page.locator('[data-testid^="plan-tile-"]').filter({ hasText: /^12$/ }).first()
+  // The chapter card: click chapter 12, which the fixture leaves two short.
+  const tile12 = page.locator('[data-testid="plan-tile-GEN 12"]')
   if (await tile12.count()) {
+    await tile12.scrollIntoViewIfNeeded()
     await tile12.click()
     await page.waitForTimeout(2500)
     await shot("04-genesis-chapter-12", { fullPage: true })
+    const card = page.locator('[data-testid="plan-chapter-detail"]')
+    if (await card.count()) console.log(`  chapter card: ${(await card.innerText()).replace(/\n/g, " | ")}`)
   } else {
-    console.log("  (no plan-tile-* testid found — chapter click skipped)")
+    console.log("  (plan-tile-GEN 12 not found — chapter click skipped)")
   }
 
   await clickRow("Deuteronomy")
@@ -83,14 +78,11 @@ async function main() {
   await clickRow("Leviticus")
   await shot("06-leviticus-inspector", { fullPage: true })
 
-  await clickRow("Exodus")
-  await shot("07-exodus-inspector", { fullPage: true })
+  await clickRow("Mark")
+  await shot("07-mark-inspector", { fullPage: true })
 
-  // Dump every data-testid under the board + inspector so the scan can name
-  // what exists rather than guess.
-  const ids = await page.$$eval("[data-testid]", (els) =>
-    [...new Set(els.map((e) => e.getAttribute("data-testid").replace(/[0-9a-f-]{20,}|\d+/g, "#")))].sort())
-  console.log("testids:", ids.filter((i) => /plan|inspector|assign|tile|chapter/i.test(i)).join(", "))
+  await clickRow("Titus")
+  await shot("08-titus-inspector", { fullPage: true })
 
   if (errors.length) console.log("page errors:\n  " + errors.slice(0, 10).join("\n  "))
   await browser.close()

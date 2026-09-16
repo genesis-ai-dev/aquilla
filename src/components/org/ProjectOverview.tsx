@@ -852,7 +852,12 @@ export function ProjectOverview() {
     for (const unit of planUnits) {
       const unitId = planUnitId(unit)
       const rows = planUnitAssignments.get(unitAssignmentsKey(unitId, planLane))
-      if (!rows || rows.length === 0) continue
+      // AQU-1278: an EMPTY array is an answer and belongs in the map. Absent
+      // means nobody has asked — there is no project-wide assignee read, so a
+      // unit only learns its people when a manager opens it — and the row says
+      // "unassigned" for the one and nothing for the other. Skipping the empty
+      // case here collapsed the two into "absent" and the line never appeared.
+      if (!rows) continue
       const byUser = new Map<number, { userId: number; username: string | null }>()
       for (const row of rows) {
         if (!byUser.has(row.assigneeUserId)) {

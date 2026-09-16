@@ -1365,6 +1365,8 @@ export const org = defineNamespace({
     // verses outnumber the chips one row can hold.
     "org.projectOverview.plan.moreShortVerses": plural({ one: "{count} more cell", other: "{count} more cells" }),
     "org.projectOverview.plan.gridEmptyMedia": "This file's sections are time ranges, which nobody plans by.",
+    // …and its sibling for a document, which has no sections at all.
+    "org.projectOverview.plan.gridEmptyDocument": "This file has no chapters or sections to plan by.",
     // AQU-1278: the tile beneath the chapter grid for a book's USFM front
     // matter — cells with no chapter number, filed before chapter 1.
     "org.projectOverview.plan.frontMatter": "front matter",
@@ -2877,6 +2879,10 @@ export const org = defineNamespace({
       "org.projectOverview.plan.gridEmptyMedia": {
         description:
           "Stands in for the chapter grid on a file whose sections are time ranges rather than chapters — a dubbed episode, say. It says why there is no grid, because an empty frame reads as a load that failed.",
+      },
+      "org.projectOverview.plan.gridEmptyDocument": {
+        description:
+          "Stands in for the chapter grid on a file that has no chapters or sections at all — a Word document, a slide deck, a plain-text or Markdown file, an InDesign layout. The sibling of gridEmptyMedia, whose 'time ranges' wording is wrong for these.",
       },
       "org.projectOverview.plan.frontMatter": {
         description:

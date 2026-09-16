@@ -345,10 +345,26 @@ describe("the chapter grid (AQU-1278)", () => {
     // Every section of a dubbed episode is a five-minute time bucket, and
     // `sectionBelongsToUnit` rejects all of them — so the list arrives empty.
     const getToken = withSections([section("t:0"), section("t:1")])
-    renderInspector(unit({ sectionKey: "", fileName: "Day 12.mp3" }), true, false, getToken)
+    renderInspector(
+      // `fileKind` rides the wire on every unit; the inspector reads it to pick
+      // the sentence. The plan-status type does not declare it, so it is added
+      // the way the real objects carry it.
+      { ...unit({ sectionKey: "", fileName: "Day 12.mp3" }), fileKind: "vtt" } as never,
+      true, false, getToken,
+    )
     await waitFor(() => expect(screen.getByTestId("plan-grid-empty")).toBeInTheDocument())
     expect(screen.getByTestId("plan-grid-empty")).toHaveTextContent("time ranges")
     expect(screen.queryByTestId("plan-chapter-grid")).toBeNull()
+  })
+
+  it("tells a document it has no sections, not that they are time ranges", async () => {
+    const getToken = withSections([])
+    renderInspector(
+      { ...unit({ sectionKey: "", fileName: "northern-route.docx" }), fileKind: "docx" } as never,
+      true, false, getToken,
+    )
+    await waitFor(() => expect(screen.getByTestId("plan-grid-empty")).toBeInTheDocument())
+    expect(screen.getByTestId("plan-grid-empty")).toHaveTextContent("no chapters or sections")
   })
 
   it("keeps the grid out of a panel that was never able to read the breakdown", () => {

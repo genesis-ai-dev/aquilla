@@ -107,10 +107,18 @@ function tileFacts(section: PlanSection, hasAudio: boolean): TileFacts {
 }
 
 export function PlanChapterGrid({
-  sections, showAudio, nearlyComplete, selectedKey, onSelect,
+  sections, showAudio, nearlyComplete, selectedKey, onSelect, mediaFile = false,
 }: {
   /** Already narrowed to this unit by `usePlanUnitSections`. */
   sections: readonly PlanSection[]
+  /**
+   * AQU-1278: is the unit a media file? It decides which sentence explains an
+   * empty grid. A subtitle file HAS sections — five-minute time buckets nobody
+   * plans by — where a Word document simply has none, and telling a reader
+   * their memo's "sections are time ranges" was the first thing the document
+   * fixture showed up.
+   */
+  mediaFile?: boolean
   /** Whether this project records audio at all; the right half is drawn only then. */
   showAudio: boolean
   /**
@@ -136,7 +144,9 @@ export function PlanChapterGrid({
   if (sections.length === 0) {
     return (
       <p data-testid="plan-grid-empty" className="text-[11.5px] leading-relaxed text-muted-foreground">
-        {t("org.projectOverview.plan.gridEmptyMedia")}
+        {t(mediaFile
+          ? "org.projectOverview.plan.gridEmptyMedia"
+          : "org.projectOverview.plan.gridEmptyDocument")}
       </p>
     )
   }

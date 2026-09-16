@@ -29,7 +29,7 @@ import {
   planPct, planShortfallParts, planUnitIsNearlyComplete, planUnitLabel, planUnitNote,
   planUnitShortfall, planUnitStatus, type PlanUnit,
 } from "@/lib/plan/plan-status"
-import { classifyPlanSection, numberedBookCodes } from "@/lib/plan/plan-section"
+import { classifyPlanSection, isMediaFileKind, numberedBookCodes } from "@/lib/plan/plan-section"
 import type { PlanUnitPatch } from "@/lib/sync/plan"
 import { usePlanUnitSections, type PlanSection } from "@/hooks/usePlanUnitSections"
 import { PlanStatusPill } from "./PlanStatusPill"
@@ -347,6 +347,7 @@ export function PlanInspector({
               sections={sections}
               showAudio={hasAudio}
               nearlyComplete={nearlyComplete}
+              mediaFile={isMediaFileKind((unit as { fileKind?: string | null }).fileKind)}
               selectedKey={openSectionKey}
               onSelect={(key) =>
                 setOpenSectionKey((open) => {

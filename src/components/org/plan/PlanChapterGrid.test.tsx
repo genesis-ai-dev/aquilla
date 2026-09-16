@@ -29,10 +29,12 @@ function renderGrid(sections: PlanSection[], over: {
   showAudio?: boolean
   nearlyComplete?: boolean
   selectedKey?: string | null
+  mediaFile?: boolean
 } = {}) {
   const onSelect = vi.fn()
   render(
     <PlanChapterGrid
+      mediaFile={over.mediaFile}
       sections={sections}
       showAudio={over.showAudio ?? false}
       nearlyComplete={over.nearlyComplete ?? false}
@@ -140,9 +142,18 @@ describe("laying the tiles out", () => {
   it("says why there is no grid rather than drawing an empty frame", () => {
     // A media file's sections are all five-minute time buckets, every one of
     // which `sectionBelongsToUnit` rejects — so the list arrives empty.
-    renderGrid([])
+    renderGrid([], { mediaFile: true })
     expect(screen.getByTestId("plan-grid-empty")).toHaveTextContent("time ranges")
     expect(screen.queryByTestId("plan-chapter-grid")).toBeNull()
+  })
+
+  it("gives a document its own reason, which is not about time ranges", () => {
+    // A Word file has no sections at all. Telling its reader that the
+    // sections are time ranges was the first thing the document fixture showed.
+    renderGrid([])
+    const empty = screen.getByTestId("plan-grid-empty")
+    expect(empty).toHaveTextContent("no chapters or sections")
+    expect(empty).not.toHaveTextContent("time ranges")
   })
 
   it("hands the key back when a tile is chosen", () => {

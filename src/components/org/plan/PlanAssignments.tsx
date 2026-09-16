@@ -36,7 +36,7 @@ import { AssignModal } from "@/components/AssignModal"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { fmtDeadlineDate } from "@/lib/format-date"
 import { formatList } from "@/lib/i18n/format"
-import { numberedBookCodes, planSectionLabel } from "@/lib/plan/plan-section"
+import { isTimeBucketKey, numberedBookCodes, planSectionLabel } from "@/lib/plan/plan-section"
 import { planPct, planUnitShortfall, type PlanShortfall } from "@/lib/plan/plan-status"
 import type { UnitAssignment, UnitAssignmentChapter } from "@/lib/sync/assignments"
 import type { FileReference, FileType } from "@/lib/parsers/types"
@@ -289,6 +289,11 @@ function PlanAssignmentRow({
   // decides whether audio counts sign-off, and it flips when AQU-490 lands.
   const numbered = numberedBookCodes((a.chapters ?? []).map((c) => c.key))
   const shortChapters = (a.chapters ?? [])
+    // ONLY REAL CHAPTERS get named. A subtitle file's "chapters" are five-minute
+    // time buckets and a document's is one empty key — "· ch. t:000000300000"
+    // would be the read's internals leaking onto the panel. Such a unit has no
+    // grid either; the shortfall alone is the whole of what can be said.
+    .filter((c) => c.key !== "" && !isTimeBucketKey(c.key))
     .filter((c) => chapterShortfall(c, showAudio).worst > 0)
     .map((c) => planSectionLabel(c.key, numbered))
 

@@ -622,6 +622,23 @@ describe("the chapter card", () => {
     expect(screen.getByTestId("plan-verse-chip-c9")).toBeInTheDocument()
   })
 
+  it("draws EVERY short verse in one scrolling row, with no count chip", async () => {
+    // Sam, 2026-09-16: the row scrolls instead of folding the rest into "+N".
+    // Every verse is reachable, and the header already says how many are
+    // left. Twelve is more than any panel width holds; all twelve render.
+    const verses = Array.from({ length: 12 }, (_, i) =>
+      verse(`c${i + 1}`, `GEN 12:${i + 1}`, { validated: false }))
+    await openChapter(
+      unit({ sectionKey: "GEN", totalCount: 100, filledCount: 100, validatedCount: 88 }),
+      [section("GEN 12", { totalCount: 20, filledCount: 20, validatedCount: 8 })],
+      verses,
+    )
+    const row = screen.getByTestId("plan-chapter-verses")
+    expect(row.children).toHaveLength(12)
+    expect(row.className).toContain("overflow-x-auto")
+    expect(screen.queryByTestId("plan-verse-more")).toBeNull()
+  })
+
   it("draws no chip row for a chapter short on audio alone", async () => {
     // The verse detail carries `filled` and `validated` and nothing about
     // audio, so there is no per-cell answer to give.

@@ -39,7 +39,7 @@ import { PlanChapterGrid, PlanGridLegend, planSectionShortfall } from "./PlanCha
 import { PLAN_TONE } from "./plan-tone"
 import { usePlanShortfallText, usePlanStatusNote } from "./use-plan-note"
 import { useSectionVerses, type SectionVersesState } from "./use-section-verses"
-import { shortVerses, verseChipLabel, verseChipSplit, verseChipsThatFit } from "./verse-chips"
+import { shortVerses, verseChipLabel } from "./verse-chips"
 
 /**
  * Mounted with a `key` per unit by its caller, so stepping to another unit
@@ -598,7 +598,6 @@ function PlanChapterCard({
 }) {
   const t = useT()
   const rowRef = useRef<HTMLDivElement>(null)
-  const capacity = useChipRowCapacity(rowRef)
 
   const shortfall = planSectionShortfall(section, hasAudio)
   // Which queue this chapter is in, and therefore which verses the chips list.
@@ -624,7 +623,7 @@ function PlanChapterCard({
   const short = verses?.status === "ready" && chipLead
     ? shortVerses(verses.verses, chipLead)
     : []
-  const { shown, overflow } = verseChipSplit(short.length, capacity)
+  const fade = useScrollFade(rowRef, short.length)
 
   return (
     <div
@@ -668,16 +667,25 @@ function PlanChapterCard({
           readout={`${section.totalCount}/${section.audioCount}`}
         />
       )}
-      {/* ONE ROW, NEVER TWO. Fixed-width chips and a measured capacity, so the
-          card's height never depends on how badly a chapter is doing. What
-          does not fit folds into a count rather than wrapping. */}
+      {/* ONE ROW, NEVER TWO — and it SCROLLS. Sam, 2026-09-16: every verse
+          reachable, the card's height never depending on how badly a chapter
+          is doing, and no "+N" chip, because the header above already says
+          how many are left and a count that cannot be clicked was the least
+          useful thing the row could end on. Fixed-width chips, so the strip
+          reads as a set rather than a sentence.
+          The scrollbar is hidden (the app's global rule would otherwise pin a
+          12px track under the chips); the cut-off chip at the edge plus the
+          fade are the affordance. `overscroll-x-contain` keeps a trackpad
+          swipe past the last chip from turning into the browser's back
+          gesture. */}
       {short.length > 0 && (
         <div
           ref={rowRef}
-          className="flex gap-1 overflow-hidden whitespace-nowrap pt-0.5"
+          className="flex gap-1 overflow-x-auto overscroll-x-contain whitespace-nowrap py-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          style={{ maskImage: fadeMask(fade), WebkitMaskImage: fadeMask(fade) }}
           data-testid="plan-chapter-verses"
         >
-          {short.slice(0, shown).map((v) => (
+          {short.map((v) => (
             <button
               key={v.cellId}
               type="button"
@@ -690,41 +698,80 @@ function PlanChapterCard({
               {verseChipLabel(v.ref, section.key)}
             </button>
           ))}
-          {overflow > 0 && (
-            <span
-              data-testid="plan-verse-more"
-              aria-label={t("org.projectOverview.plan.moreShortVerses", { count: overflow })}
-              className="flex h-6 w-[46px] shrink-0 items-center justify-center rounded-full bg-muted text-[11.5px] font-medium tabular-nums text-muted-foreground"
-            >
-              +{overflow}
-            </span>
-          )}
         </div>
       )}
     </div>
   )
 }
 
+/** Which edges of the chip strip have chips beyond them, in LOGICAL terms. */
+interface ScrollFade {
+  start: boolean
+  end: boolean
+  /** Whether the strip lays out right-to-left, which decides which physical edge each fade goes on. */
+  rtl: boolean
+}
+
 /**
- * How many fixed-width chips the verse row can hold.
+ * Which edges of the chip strip have more chips beyond them.
  *
- * Starts at Infinity so the row draws every chip until something is measured:
- * starting at zero would flash a bare "+7" on every open, and under happy-dom —
- * which has no ResizeObserver and reports every width as zero — the chips would
- * never render at all and could never be asserted on. The arithmetic itself is
- * tested directly in `verse-chips.test.ts`, where a width can be supplied.
+ * The strip scrolls sideways, and macOS hides a scrollbar until it moves — so
+ * the only sign that chips continue is the one cut off at the edge, and the
+ * fade is what turns that from "broken" into "more". Answers are logical
+ * (`start`/`end`) because `scrollLeft` runs NEGATIVE in a right-to-left strip,
+ * and a fade painted on the wrong physical side would point away from the
+ * content it exists to point at; `Math.abs` is what makes one measurement
+ * serve both directions.
+ *
+ * Re-measured on scroll, on resize, and WHENEVER THE CHIP COUNT CHANGES. That
+ * last dependency is the lesson of the rule this replaces: the row mounts
+ * after the verses load, so an effect keyed on the ref alone measured nothing,
+ * kept its "unbounded" default, and drew seven chips in a six-chip row.
  */
-function useChipRowCapacity(ref: RefObject<HTMLElement | null>): number {
-  const [capacity, setCapacity] = useState(Number.POSITIVE_INFINITY)
+function useScrollFade(ref: RefObject<HTMLElement | null>, chipCount: number): ScrollFade {
+  const [fade, setFade] = useState<ScrollFade>({ start: false, end: false, rtl: false })
   useLayoutEffect(() => {
     const row = ref.current
     if (!row) return
-    const measure = () => setCapacity(verseChipsThatFit(row.clientWidth))
+    const measure = () => {
+      const scrolled = Math.abs(row.scrollLeft)
+      const next: ScrollFade = {
+        start: scrolled > 1,
+        end: scrolled + row.clientWidth < row.scrollWidth - 1,
+        rtl: getComputedStyle(row).direction === "rtl",
+      }
+      setFade((prev) =>
+        prev.start === next.start && prev.end === next.end && prev.rtl === next.rtl ? prev : next,
+      )
+    }
     measure()
-    if (typeof ResizeObserver === "undefined") return // happy-dom
-    const observer = new ResizeObserver(measure)
-    observer.observe(row)
-    return () => observer.disconnect()
-  }, [ref])
-  return capacity
+    row.addEventListener("scroll", measure, { passive: true })
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure) // happy-dom
+    observer?.observe(row)
+    return () => {
+      row.removeEventListener("scroll", measure)
+      observer?.disconnect()
+    }
+  }, [ref, chipCount])
+  return fade
+}
+
+/** How far the fade reaches in from an edge: a little over half a chip. */
+const FADE_PX = "28px"
+
+/**
+ * The mask that fades whichever edges have more behind them, or nothing when
+ * every chip is in view. A mask rather than an overlay because the card sits
+ * on a translucent wash over the panel, and an overlay would have to know the
+ * exact composite colour to fade into; a mask fades to whatever is there.
+ */
+function fadeMask(f: ScrollFade): string | undefined {
+  const left = f.rtl ? f.end : f.start
+  const right = f.rtl ? f.start : f.end
+  if (!left && !right) return undefined
+  return `linear-gradient(to right, ${
+    left ? `transparent, black ${FADE_PX}` : "black"
+  }, ${
+    right ? `black calc(100% - ${FADE_PX}), transparent` : "black"
+  })`
 }

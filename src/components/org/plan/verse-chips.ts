@@ -4,57 +4,14 @@
 // bars — which say how many, never which. A chip per outstanding verse turns the
 // answer into somewhere to click.
 //
-// THE ROW NEVER WRAPS. Sam's rule (2026-09-16): "as many as fit in one row,
-// depending entirely on if the pills fit — I do not want any wrapping." A
-// second row would push the planning controls below the fold on a short panel
-// and make a card whose height depends on how badly a chapter is doing. So the
-// chips are a FIXED WIDTH and the count is arithmetic over the row's measured
-// width, exactly as `PlanRow` fits its avatar strip.
-//
-// Pure and free of React so the overflow rule can be tested directly: happy-dom
-// reports every width as zero, so a component test can never exercise it.
-
-/**
- * One chip's width in pixels, and the gap between two.
- *
- * A verse label is "12:4" — four or five characters at 11px in the app's
- * tabular numerals, plus the chip's own padding. Fixed rather than measured
- * because the fit has to be decided BEFORE anything is rendered, and because a
- * row of chips that are all the same width reads as a set where a ragged one
- * reads as a sentence. "150:26" is the widest a real reference gets and still
- * fits; a longer one truncates rather than widening the row.
- */
-export const VERSE_CHIP_PX = 46
-export const VERSE_CHIP_GAP_PX = 4
-
-/** How many chips fit across `available` pixels, gaps included. */
-export function verseChipsThatFit(available: number): number {
-  if (!Number.isFinite(available)) return Number.POSITIVE_INFINITY
-  if (available < VERSE_CHIP_PX) return 0
-  return 1 + Math.floor((available - VERSE_CHIP_PX) / (VERSE_CHIP_PX + VERSE_CHIP_GAP_PX))
-}
-
-/**
- * Split the short verses into the chips this row can draw and the number it has
- * to fold into a "+N".
- *
- * THE COUNT CHIP IS RESERVED FIRST AND DROPPED LAST, the same rule the board's
- * avatar strip follows and for the same reason: a reader who counts two chips
- * and believes two cells are left has been misled by the panel rather than
- * informed by it. When only one slot survives it holds "+7", not one arbitrary
- * verse — a single verse out of seven is the least useful thing the row could
- * say with its last slot.
- */
-export function verseChipSplit(
-  total: number,
-  capacity: number,
-): { shown: number; overflow: number } {
-  if (total <= 0) return { shown: 0, overflow: 0 }
-  if (capacity >= total) return { shown: total, overflow: 0 }
-  // Everything below here needs a count chip, so one slot is spoken for.
-  const shown = Math.max(0, Math.min(total, capacity - 1))
-  return { shown, overflow: total - shown }
-}
+// THE ROW NEVER WRAPS; IT SCROLLS. Sam's first rule (2026-09-16) was "as many as
+// fit in one row, I do not want any wrapping", and the row folded the rest into
+// a "+N" chip. His second, the same day, was to let the row scroll instead:
+// every verse reachable, the card's height still fixed, and no count chip,
+// because the card's own header already says how many are left. So this
+// module no longer decides how many chips fit — it only decides which verses
+// are short and what each chip says. The chips are still a fixed width, so
+// the strip reads as a set where a ragged one reads as a sentence.
 
 /** A verse as the chapter detail returns it. */
 export interface ShortVerse {

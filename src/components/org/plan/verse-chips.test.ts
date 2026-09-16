@@ -1,61 +1,11 @@
-// AQU-1278. The overflow rule is tested HERE rather than through the component
-// because happy-dom reports every width as zero and has no ResizeObserver, so a
-// rendered chapter card can only ever exercise the unmeasured path.
+// AQU-1278. Which verses a chapter card lists, and what each chip says. How
+// many chips FIT is no longer anybody's question: the row scrolls.
 
 import { describe, expect, it } from "vitest"
-import {
-  VERSE_CHIP_GAP_PX,
-  VERSE_CHIP_PX,
-  shortVerses,
-  verseChipLabel,
-  verseChipSplit,
-  verseChipsThatFit,
-} from "./verse-chips"
+import { shortVerses, verseChipLabel } from "./verse-chips"
 
 const verse = (cellId: string, ref: string, over: Partial<{ filled: boolean; validated: boolean }> = {}) =>
   ({ cellId, ref, filled: true, validated: true, ...over })
-
-describe("how many chips fit", () => {
-  it("fits one chip in its own width, and none below it", () => {
-    expect(verseChipsThatFit(VERSE_CHIP_PX)).toBe(1)
-    expect(verseChipsThatFit(VERSE_CHIP_PX - 1)).toBe(0)
-  })
-
-  it("charges every chip after the first for its gap as well", () => {
-    expect(verseChipsThatFit(VERSE_CHIP_PX * 3 + VERSE_CHIP_GAP_PX * 2)).toBe(3)
-    // One pixel short of the third chip is two chips, not two and a bit.
-    expect(verseChipsThatFit(VERSE_CHIP_PX * 3 + VERSE_CHIP_GAP_PX * 2 - 1)).toBe(2)
-  })
-
-  it("takes an unmeasured row as unbounded", () => {
-    // The row starts at Infinity so it draws every chip until a measurement
-    // lands. Starting at zero would flash a bare "+7" on every open.
-    expect(verseChipsThatFit(Number.POSITIVE_INFINITY)).toBe(Number.POSITIVE_INFINITY)
-  })
-})
-
-describe("splitting the chips from the count", () => {
-  it("draws them all when they fit", () => {
-    expect(verseChipSplit(3, 5)).toEqual({ shown: 3, overflow: 0 })
-    expect(verseChipSplit(3, 3)).toEqual({ shown: 3, overflow: 0 })
-  })
-
-  it("reserves a slot for the count the moment one is needed", () => {
-    // Four verses into three slots is TWO chips and a "+2", never three chips
-    // and a hidden fourth — the row must never understate how much is left.
-    expect(verseChipSplit(4, 3)).toEqual({ shown: 2, overflow: 2 })
-  })
-
-  it("spends its last slot on the count, not on one arbitrary verse", () => {
-    // A single verse out of seven is the least useful thing a last slot could
-    // say. The same rule the board's avatar strip follows.
-    expect(verseChipSplit(7, 1)).toEqual({ shown: 0, overflow: 7 })
-  })
-
-  it("draws nothing for nothing", () => {
-    expect(verseChipSplit(0, 5)).toEqual({ shown: 0, overflow: 0 })
-  })
-})
 
 describe("which verses are short", () => {
   const verses = [

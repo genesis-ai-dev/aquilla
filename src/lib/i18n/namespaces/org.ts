@@ -1363,7 +1363,6 @@ export const org = defineNamespace({
     "org.projectOverview.plan.chapterTakesUnrecorded": plural({ one: "{count} take not yet recorded", other: "{count} takes not yet recorded" }),
     // The overflow chip at the end of the verse row, when the outstanding
     // verses outnumber the chips one row can hold.
-    "org.projectOverview.plan.moreShortVerses": plural({ one: "{count} more cell", other: "{count} more cells" }),
     // …and its sibling for a document, which has no sections at all.
     // AQU-1278: the tile beneath the chapter grid for a book's USFM front
     // matter — cells with no chapter number, filed before chapter 1.
@@ -2868,11 +2867,6 @@ export const org = defineNamespace({
         description:
           "Beside the chapter card's heading (see chapterCellsUntranslated), for a file that carries recordings: how many cells have no take against them. A 'take' is one recorded clip for one cell.",
         placeholders: { count: "Cells with no recording — a number; it also selects the plural form." },
-      },
-      "org.projectOverview.plan.moreShortVerses": {
-        description:
-          "Accessible name of the overflow chip closing the chapter card's row of verse links, when more cells are outstanding than one row of chips can hold. The chip itself shows only \"+7\"; this is what a screen reader announces, so it must say what the seven are.",
-        placeholders: { count: "Outstanding cells the row could not show — a number; it also selects the plural form." },
       },
       "org.projectOverview.plan.frontMatter": {
         description:

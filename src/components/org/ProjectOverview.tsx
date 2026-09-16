@@ -1044,6 +1044,11 @@ export function ProjectOverview() {
       lane={planLane}
       languageLabel={planLanguageLabel}
       laneCount={planLaneCount}
+      // The SAME set the board judges by. Audio expectation is a fact about a
+      // file, so a text-only book inside a dubbed file must read the same way
+      // in this panel as it does in the row that opened it — without this the
+      // two sit six inches apart disagreeing about one unit.
+      audioFiles={planAudioFiles}
       assignments={
         <PlanAssignments
           assignments={selectedUnitAssignments}

@@ -1336,6 +1336,7 @@ export const org = defineNamespace({
     // reads as a load that failed.
     "org.projectOverview.plan.gridEmptyMedia": "This file's sections are time ranges, which nobody plans by.",
     "org.projectOverview.plan.tileAria": "Chapter {chapter}: {short} cells short",
+    "org.projectOverview.plan.tileAriaSection": "{section}: {short} cells short",
     // Audio hangs off the file, not off a target language, so every lane reads
     // the same recordings — a manager comparing two lanes' audio bars and
     // finding them identical is seeing the truth, not a stuck filter.
@@ -2797,6 +2798,14 @@ export const org = defineNamespace({
         placeholders: {
           chapter: "The chapter number — a number, not translated.",
           short: "Outstanding cells in that chapter — a number.",
+        },
+      },
+      "org.projectOverview.plan.tileAriaSection": {
+        description:
+          "Accessible name of a tile that is NOT a numbered chapter — USFM front matter, a one-chapter book, or a document's own section name. Those cannot sit on the numbered grid and must not be announced as \"Chapter Scene 4\", so they name themselves instead.",
+        placeholders: {
+          section: "The section's own key, e.g. a book code or a scene name. Not translated.",
+          short: "Outstanding cells in that section — a number.",
         },
       },
       "org.projectOverview.plan.audioSharedAcrossLanes": {

@@ -305,7 +305,14 @@ function PlanTile({
   const t = useT()
   const { textShort, audioShort, worst } = tileFacts(section, showAudio)
   const complete = worst === 0
-  const aria = t("org.projectOverview.plan.tileAria", { chapter: ariaSubject, short: worst })
+  // A numbered chapter names itself as one; anything off the numbered grid —
+  // front matter, a one-chapter book, a document's own section — names itself
+  // by its key instead. Announcing "Chapter Scene 4" would invent a chapter
+  // that does not exist, to the one reader who cannot see that it is not on the
+  // grid with the others.
+  const aria = wide
+    ? t("org.projectOverview.plan.tileAriaSection", { section: ariaSubject, short: worst })
+    : t("org.projectOverview.plan.tileAria", { chapter: ariaSubject, short: worst })
 
   return (
     <button

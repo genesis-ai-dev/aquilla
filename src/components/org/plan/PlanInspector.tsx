@@ -26,7 +26,8 @@ import { fmtDeadlineDate } from "@/lib/format-date"
 import { formatRelativeTime } from "@/lib/i18n/format"
 import { isKnownBookCode } from "@/lib/file-labeling/bible-book-names"
 import {
-  planPct, planUnitLabel, planUnitShortfall, planUnitStatus, type PlanUnit,
+  planPct, planUnitIsNearlyComplete, planUnitLabel, planUnitShortfall, planUnitStatus,
+  type PlanUnit,
 } from "@/lib/plan/plan-status"
 import type { PlanUnitPatch } from "@/lib/sync/plan"
 import { usePlanUnitSections } from "@/hooks/usePlanUnitSections"
@@ -43,10 +44,17 @@ import { usePlanStatusNote } from "./use-plan-note"
  */
 export function PlanInspector({
   unit, now, canPlan, showAudio, projectId, getToken, lane, languageLabel, laneCount,
-  assignments, onPatch, onClose, onStep, onGoToFirstOpen,
+  assignments, audioFiles, onPatch, onClose, onStep, onGoToFirstOpen,
 }: {
   unit: PlanUnit
   now: number
+  /**
+   * Which FILES carry recordings, from `audioFileIds` over the WHOLE board.
+   * Audio expectation is a fact about a file, not about one book inside it, so
+   * this panel must judge it the same way the row above it does or the two will
+   * disagree about the same unit. Absent, the unit's own count stands in.
+   */
+  audioFiles?: ReadonlySet<string>
   /** MAINTAINER+: may set target dates and mark units done. */
   canPlan: boolean
   showAudio: boolean
@@ -93,21 +101,28 @@ export function PlanInspector({
   const { locale } = useI18n()
   const [confirmingDone, setConfirmingDone] = useState(false)
   const [busy, setBusy] = useState(false)
-  const status = planUnitStatus(unit, now)
-  const note = usePlanStatusNote(unit, now)
+  const status = planUnitStatus(unit, now, audioFiles)
+  const note = usePlanStatusNote(unit, now, audioFiles)
   const validatedPct = planPct(unit.validatedCount, unit.totalCount)
   const { sections, loading, error } = usePlanUnitSections({ projectId, unit, getToken, lane })
 
-  // AQU-1278. `planUnitStatus` without the board's `audioFileIds` set falls back
-  // to this unit's own recordings, and the pill directly above already reads
-  // that way — so the badges, the link and the pill in this panel agree with one
-  // another. THEY CAN STILL DISAGREE WITH THE BOARD, which judges audio per
-  // FILE: a text-only book inside a file that carries recordings is short by
-  // every take out there, and the board knows it while this panel does not.
-  // Passing the set down is a prop this component was not given; flagged.
-  const hasAudio = unit.audioCount > 0
+  // AQU-1278. `audioFiles` comes from the board, which computes it over every
+  // unit: whether audio is EXPECTED is a fact about the FILE, not about this
+  // one book. Judging it here from `unit.audioCount` alone would put a
+  // text-only book inside a dubbed file at "nothing left" in this panel while
+  // the board — counting the recordings it is missing — still calls it In
+  // progress, and the two would sit six inches apart saying different things.
+  //
+  // Absent (a lone inspector in a test, say) the vocabulary falls back to the
+  // unit's own count, which is the right answer when there is no wider list to
+  // consult.
+  const hasAudio = audioFiles ? audioFiles.has(unit.fileId) : unit.audioCount > 0
   const shortfall = planUnitShortfall(unit, hasAudio)
-  const nearlyComplete = status === "nearly_complete"
+  // Not `status === "nearly_complete"`: a unit that is ALSO overdue is filed
+  // under Overdue, and it is precisely the row that needs its shortfall said
+  // out loud. `planUnitIsNearlyComplete` asks the same question with the date
+  // stripped, so the row and this panel cannot drift apart.
+  const nearlyComplete = planUnitIsNearlyComplete(unit, now, audioFiles)
 
   // A book breaks into chapters; anything else breaks into sections. The unit
   // itself decides, the same way the board refuses to call every row a book.

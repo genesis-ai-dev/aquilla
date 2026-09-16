@@ -21,6 +21,7 @@ import { useT, useI18n } from "@/lib/i18n/I18nProvider"
 import { fmtDeadlineDate } from "@/lib/format-date"
 import {
   planPct,
+  planUnitIsNearlyComplete,
   planUnitLabel,
   planUnitShortfall,
   planUnitStatus,
@@ -147,30 +148,6 @@ function useAssigneeChipCapacity(
   return capacity
 }
 
-/**
- * Does this unit qualify as nearly complete ON ITS WORK ALONE?
- *
- * Deliberately not `status === "nearly_complete"`. A unit that is both late and
- * nearly finished is filed under Overdue, because a blown date outranks a short
- * queue (see `PLAN_GROUP_ORDER`) — and that row is precisely the one that needs
- * the shortfall said out loud, since "23 days late, nothing left" and "23 days
- * late, three hundred cells to go" are the same row today and two very
- * different phone calls.
- *
- * Asked by stripping the date and re-asking the vocabulary rather than by
- * re-deriving the rule here: the six-percent threshold, the empty-file guard
- * and the not-started guard all stay in plan-status.ts, so a change to any of
- * them reaches this row for free. A unit a manager has MARKED DONE still
- * answers "done" — it keeps its "marked on" note and never grows a shortfall.
- */
-function isNearlyComplete(
-  unit: PlanUnit,
-  now: number,
-  audioFiles: ReadonlySet<string> | undefined,
-): boolean {
-  return planUnitStatus({ ...unit, targetDate: null }, now, audioFiles) === "nearly_complete"
-}
-
 export function PlanRow({
   unit,
   now,
@@ -217,7 +194,7 @@ export function PlanRow({
 
   const hasAudio = audioFiles ? audioFiles.has(unit.fileId) : unit.audioCount > 0
   const shortfall = planUnitShortfall(unit, hasAudio)
-  const nearly = isNearlyComplete(unit, now, audioFiles)
+  const nearly = planUnitIsNearlyComplete(unit, now, audioFiles)
   const shortfallText = usePlanShortfallText(shortfall)
   // Null from the renderer means nothing is outstanding, which on a unit nobody
   // has marked done is itself the news — see `nothingLeft` in the catalog.

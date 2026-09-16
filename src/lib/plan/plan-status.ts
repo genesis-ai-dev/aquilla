@@ -259,6 +259,29 @@ export function planUnitStatus(
 }
 
 /**
+ * Is this unit a few cells from finished — whatever group it was filed under?
+ *
+ * The status and this question are deliberately not the same thing. A unit that
+ * is both nearly finished AND past its date is filed under Overdue, because a
+ * blown date outranks a short queue; but its row still has to say "3 cells to
+ * validate" rather than going quiet, or the one book a manager could close
+ * today is the one the board says least about.
+ *
+ * So the date is stripped and the vocabulary asked again. That keeps the 6%/7
+ * threshold, the empty-file guard and the not-started guard in exactly one
+ * place — the alternative is every caller re-deriving the rule, which is how
+ * the row and the inspector came to disagree before this existed.
+ */
+export function planUnitIsNearlyComplete(
+  u: PlanUnit,
+  now: number,
+  audioFiles?: ReadonlySet<string>,
+): boolean {
+  if (u.doneAt != null) return false
+  return planUnitStatus({ ...u, targetDate: null }, now, audioFiles) === "nearly_complete"
+}
+
+/**
  * Within a group the soonest deadline is the most urgent, so target date
  * ascending; undated units sort last (they carry no claim about when), then
  * by label so the order is stable between renders.

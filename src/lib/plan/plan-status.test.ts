@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest"
 import {
+  planUnitIsNearlyComplete,
   planUnitStatus,
   planUnitLabel,
   planUnitId,
@@ -184,6 +185,34 @@ describe("nearly complete (AQU-1278)", () => {
     // It stays findable: there is nothing to list on the second line, which is
     // what renders as "Nothing left" beside the Overdue pill.
     expect(planShortfallParts(planUnitShortfall(late, false))).toEqual([])
+  })
+
+  it("still reports an overdue unit as nearly complete, so its row can say so", () => {
+    // The status and the question are deliberately different. A unit filed
+    // under Overdue because its date blew is often the ONE a manager could
+    // close today, and its row has to say "3 cells to validate" rather than go
+    // quiet — "23 days late, nothing left" and "23 days late, 300 cells to go"
+    // are the same row today and two very different phone calls.
+    //
+    // This predicate is the single place that asks it. The row and the
+    // inspector both call it; before it existed they each stripped the date and
+    // re-asked the vocabulary themselves, which is how two surfaces come to
+    // disagree about one unit.
+    const late = shortBy(1000, 3, { targetDate: "2026-08-01" })
+    expect(planUnitStatus(late, NOW)).toBe("overdue")
+    expect(planUnitIsNearlyComplete(late, NOW)).toBe(true)
+
+    // A unit someone has MARKED DONE is finished, not nearly finished: it keeps
+    // its "marked on" note and must never grow a shortfall line.
+    const done = shortBy(1000, 3, { doneAt: Date.parse("2026-08-20T00:00:00Z") })
+    expect(planUnitIsNearlyComplete(done, NOW)).toBe(false)
+
+    // And it carries the same audio grain as the status, so a text-only book in
+    // a dubbed file answers the same here as it does in the group.
+    const inDubbedFile = counts(100, 100, 100, 0, 0)
+    const audioFiles = new Set([inDubbedFile.fileId])
+    expect(planUnitIsNearlyComplete(inDubbedFile, NOW, audioFiles)).toBe(false)
+    expect(planUnitIsNearlyComplete(inDubbedFile, NOW, new Set<string>())).toBe(true)
   })
 
   it("pins AUDIO_JUDGED_ON_RECORDED true — flip it for AQU-490 and THIS test fails first", () => {

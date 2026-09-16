@@ -1236,7 +1236,6 @@ export const org = defineNamespace({
     "org.projectOverview.plan.targetDate": "Target date",
     "org.projectOverview.plan.noTarget": "No target",
     "org.projectOverview.plan.noTargetSet": "No target date set",
-    "org.projectOverview.plan.targetVisibleHint": "Visible to everyone on the project.",
     "org.projectOverview.plan.targetMaintainerOnly": "Only maintainers can set target dates.",
     "org.projectOverview.plan.completion": "Completion",
     "org.projectOverview.plan.markDone": "Mark done",
@@ -1326,8 +1325,12 @@ export const org = defineNamespace({
     "org.projectOverview.plan.viewOrder": "In order",
     "org.projectOverview.plan.needsDate": "Needs a date",
     "org.projectOverview.plan.needsDateTooltip": "Show only the units nobody has given a target date yet.",
-    "org.projectOverview.plan.chapters": "Progress by chapter",
-    "org.projectOverview.plan.sections": "Progress by section",
+    // AQU-1278: the heading is just the noun. "Progress by chapter" described
+    // the old stack of per-chapter bars; the grid beneath it now says how it
+    // measures, and the legend sits on this very line saying what the colours
+    // mean, so the words only have to name what is below them.
+    "org.projectOverview.plan.chapters": "Chapters",
+    "org.projectOverview.plan.sections": "Sections",
     "org.projectOverview.plan.chapterCount": plural({ one: "{count} chapter", other: "{count} chapters" }),
     "org.projectOverview.plan.sectionCount": plural({ one: "{count} section", other: "{count} sections" }),
     // ── AQU-1278: the chapter grid ─────────────────────────────────────
@@ -1351,6 +1354,16 @@ export const org = defineNamespace({
     // A media file's sections are time ranges, not chapters, so the grid has
     // nothing to draw. It says why rather than rendering an empty frame, which
     // reads as a load that failed.
+    // AQU-1278: the chapter card under the grid, opened by clicking a tile.
+    // The title names the chapter the way the reader just clicked it; the line
+    // beside it says what is outstanding in the medium that leads.
+    "org.projectOverview.plan.chapterTitle": "Chapter {chapter}",
+    "org.projectOverview.plan.chapterCellsUntranslated": plural({ one: "{count} cell not yet translated", other: "{count} cells not yet translated" }),
+    "org.projectOverview.plan.chapterCellsUnvalidated": plural({ one: "{count} cell not yet validated", other: "{count} cells not yet validated" }),
+    "org.projectOverview.plan.chapterTakesUnrecorded": plural({ one: "{count} take not yet recorded", other: "{count} takes not yet recorded" }),
+    // The overflow chip at the end of the verse row, when the outstanding
+    // verses outnumber the chips one row can hold.
+    "org.projectOverview.plan.moreShortVerses": plural({ one: "{count} more cell", other: "{count} more cells" }),
     "org.projectOverview.plan.gridEmptyMedia": "This file's sections are time ranges, which nobody plans by.",
     // AQU-1278: the tile beneath the chapter grid for a book's USFM front
     // matter — cells with no chapter number, filed before chapter 1.
@@ -1368,6 +1381,9 @@ export const org = defineNamespace({
     "org.projectOverview.plan.assignmentScope": "{scope} \u00b7 {count} cells",
     "org.projectOverview.plan.assignmentDue": "due {date}",
     "org.projectOverview.plan.assignmentNoDeadline": "no deadline",
+    // AQU-1278: the tail of a person's shortfall line — "2 to validate · ch. 12".
+    // Abbreviated because it follows a count on a line three hundred pixels wide.
+    "org.projectOverview.plan.shortfallInChapters": "ch. {list}",
     "org.projectOverview.plan.unassignedChapters": plural({ one: "{count} chapter is not assigned", other: "{count} chapters are not assigned" }),
     "org.projectOverview.plan.everyChapterAssigned": "Every chapter is assigned.",
     "org.projectOverview.plan.moreAssignees": "{count} more",
@@ -2586,9 +2602,6 @@ export const org = defineNamespace({
         description: "Shown instead of a date picker to someone who cannot set dates.",
         maxLength: 28,
       },
-      "org.projectOverview.plan.targetVisibleHint": {
-        description: "Hint under the target-date picker: the date is not private to the person setting it.",
-      },
       "org.projectOverview.plan.targetMaintainerOnly": {
         description: "Explains to a non-maintainer why no date control is offered.",
       },
@@ -2795,10 +2808,12 @@ export const org = defineNamespace({
         maxLength: 16,
       },
       "org.projectOverview.plan.chapters": {
-        description: "Inspector heading over the per-chapter breakdown of a Bible book.",
+        description: "Inspector heading over the grid of chapter tiles for a Bible book. A plural noun naming what is below it, not a sentence — the colour legend shares this line and the grid says how it measures.",
+        maxLength: 16,
       },
       "org.projectOverview.plan.sections": {
-        description: "Inspector heading over the per-section breakdown of a non-Scripture unit.",
+        description: "Inspector heading over the grid of section tiles for a non-Scripture unit — an episode's scenes, a document's headings. The counterpart of the chapters heading; see it.",
+        maxLength: 16,
       },
       "org.projectOverview.plan.chapterCount": {
         description: "Part of the inspector subtitle, e.g. \"1,007 cells \u00b7 21 chapters \u00b7 Tok Pisin\".",
@@ -2832,6 +2847,32 @@ export const org = defineNamespace({
       "org.projectOverview.plan.gridLegendAudioShort": {
         description:
           "Legend label under the chapter grid, beside the swatch for a chapter whose text is done but whose recordings are not. Read as one of three fragments in a row.",
+      },
+      "org.projectOverview.plan.chapterTitle": {
+        description:
+          "Heading of the chapter card that opens under the inspector's grid when a reader clicks a tile. A section with no chapter number of its own — a document's \"Scene 4\" — uses its own name instead and never reaches this string.",
+        placeholders: { chapter: "The chapter number — a number, not translated." },
+        maxLength: 18,
+      },
+      "org.projectOverview.plan.chapterCellsUntranslated": {
+        description:
+          "Beside the chapter card's heading: how many cells in this chapter still have no target text. Shown when translation is the outstanding work; its two siblings cover validation and recording. Reads as a fact about the chapter, not as an instruction.",
+        placeholders: { count: "Cells with no target text — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.chapterCellsUnvalidated": {
+        description:
+          "Beside the chapter card's heading (see chapterCellsUntranslated): how many translated cells nobody has validated yet.",
+        placeholders: { count: "Translated cells awaiting validation — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.chapterTakesUnrecorded": {
+        description:
+          "Beside the chapter card's heading (see chapterCellsUntranslated), for a file that carries recordings: how many cells have no take against them. A 'take' is one recorded clip for one cell.",
+        placeholders: { count: "Cells with no recording — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.moreShortVerses": {
+        description:
+          "Accessible name of the overflow chip closing the chapter card's row of verse links, when more cells are outstanding than one row of chips can hold. The chip itself shows only \"+7\"; this is what a screen reader announces, so it must say what the seven are.",
+        placeholders: { count: "Outstanding cells the row could not show — a number; it also selects the plural form." },
       },
       "org.projectOverview.plan.gridEmptyMedia": {
         description:
@@ -2886,6 +2927,14 @@ export const org = defineNamespace({
       "org.projectOverview.plan.assignmentNoDeadline": {
         description:
           "Fills the same slot as the due date on an assignment nobody has dated, so the row keeps its shape. Lower case for the same reason.",
+      },
+      "org.projectOverview.plan.shortfallInChapters": {
+        description:
+          "Tail of one person's line in the inspector's Assigned to section, naming which chapters their outstanding work is in — \"2 to validate \u00b7 ch. 12\". Abbreviate 'chapter' the way a reader of this language would in a list: the panel is narrow and the count in front of it has already been shortened for the same reason.",
+        placeholders: {
+          list: "The chapter numbers, already joined into one list by the caller — e.g. '12 and 40'. Not translated.",
+        },
+        maxLength: 12,
       },
       "org.projectOverview.plan.unassignedChapters": {
         description:

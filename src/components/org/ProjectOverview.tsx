@@ -1117,6 +1117,14 @@ export function ProjectOverview() {
       onClose={() => setSelectedPlanUnitId(null)}
       onStep={stepPlanUnit}
       onGoToFirstOpen={(kind) => { void openPlanShortfall(selectedPlanUnit, kind) }}
+      // AQU-1278: a verse chip in the chapter card. Unlike the link above it
+      // this needs no search — the chapter detail already told the inspector
+      // which cell — so it is a straight navigation, with the lane pinned and
+      // the flash on, exactly as `openPlanShortfall` ends.
+      onOpenCell={(cellId) => {
+        if (!id) return
+        openWorkspace(editorCellHref(id, selectedPlanUnit.fileId, cellId, planLane, true))
+      }}
     />
   ) : null
 

@@ -174,7 +174,7 @@ export function PlanChapterGrid({
   return (
     <div className="flex flex-col gap-2">
       {highest > 0 && (
-        <div data-testid="plan-chapter-grid" className={`grid gap-[3px] ${columns}`}>
+        <div data-testid="plan-chapter-grid" className={`grid gap-1 ${columns}`}>
           {squares.map((chapter) => {
             const section = byChapter.get(chapter)
             // The gap. It holds the square open so chapter 12 stays under
@@ -185,7 +185,7 @@ export function PlanChapterGrid({
                   key={`gap-${chapter}`}
                   data-testid={`plan-tile-gap-${chapter}`}
                   aria-hidden
-                  className="aspect-square"
+                  className="h-[30px]"
                 />
               )
             }
@@ -213,7 +213,7 @@ export function PlanChapterGrid({
           4", "Act 2"), which keep the names they were given. A one-chapter
           book no longer lands here — it is chapter 1, on the grid, per Sam. */}
       {extras.length > 0 && (
-        <div data-testid="plan-chapter-extras" className="flex flex-wrap gap-[3px]">
+        <div data-testid="plan-chapter-extras" className="flex flex-wrap gap-1">
           {extras.map(({ section, frontMatter }) => {
             const label = frontMatter
               ? t("org.projectOverview.plan.frontMatter")
@@ -235,36 +235,50 @@ export function PlanChapterGrid({
         </div>
       )}
 
-      <div
-        data-testid="plan-grid-legend"
-        className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-muted-foreground"
-      >
-        <span className="flex items-center gap-1">
-          <span aria-hidden className="h-2.5 w-2.5 rounded-[2px] bg-muted" />
-          {t("org.projectOverview.plan.gridLegendComplete")}
-        </span>
+    </div>
+  )
+}
+
+/**
+ * What the tile colours mean, in words.
+ *
+ * AQU-1278 lifted it out of the grid so the inspector can set it on the
+ * CHAPTERS heading line, right-aligned, where the mockup has it — under the
+ * grid it competed with the summary line directly beneath for the same glance.
+ * A component export, so the file keeps its fast-refresh guarantee.
+ */
+export function PlanGridLegend({ showAudio }: { showAudio: boolean }) {
+  const t = useT()
+  return (
+    <div
+      data-testid="plan-grid-legend"
+      className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-muted-foreground"
+    >
+      <span className="flex items-center gap-1">
+        <span aria-hidden className="h-2.5 w-2.5 rounded-[2px] bg-muted" />
+        {t("org.projectOverview.plan.gridLegendComplete")}
+      </span>
+      <span className="flex items-center gap-1">
+        <span
+          aria-hidden
+          className="h-2.5 w-2.5 rounded-[2px]"
+          style={{ backgroundColor: hexToRgba(HUE.text, LEGEND_ALPHA) }}
+        />
+        {t("org.projectOverview.plan.gridLegendTextShort")}
+      </span>
+      {/* Named only where the grid can draw it. On a text-only project the
+          audio half of every underline is transparent, and a legend entry for
+          a colour that is nowhere on screen is a question, not an answer. */}
+      {showAudio && (
         <span className="flex items-center gap-1">
           <span
             aria-hidden
             className="h-2.5 w-2.5 rounded-[2px]"
-            style={{ backgroundColor: hexToRgba(HUE.text, LEGEND_ALPHA) }}
+            style={{ backgroundColor: hexToRgba(HUE.audio, LEGEND_ALPHA) }}
           />
-          {t("org.projectOverview.plan.gridLegendTextShort")}
+          {t("org.projectOverview.plan.gridLegendAudioShort")}
         </span>
-        {/* Named only where the grid can draw it. On a text-only project the
-            audio half of every underline is transparent, and a legend entry for
-            a colour that is nowhere on screen is a question, not an answer. */}
-        {showAudio && (
-          <span className="flex items-center gap-1">
-            <span
-              aria-hidden
-              className="h-2.5 w-2.5 rounded-[2px]"
-              style={{ backgroundColor: hexToRgba(HUE.audio, LEGEND_ALPHA) }}
-            />
-            {t("org.projectOverview.plan.gridLegendAudioShort")}
-          </span>
-        )}
-      </div>
+      )}
     </div>
   )
 }
@@ -316,43 +330,59 @@ function PlanTile({
       aria-label={aria}
       title={aria}
       onClick={() => onSelect(section.key)}
-      className={`relative flex items-center justify-center overflow-hidden rounded-[3px] pb-[3px] text-[10px] leading-none font-medium tabular-nums transition-colors ${
-        wide ? "h-6 px-1.5" : "aspect-square"
+      // AQU-1278 gave the tile the mockup's proportions: a 30px row rather than
+      // a square, a 6px radius, and a number big enough to read at a glance. It
+      // also stopped clipping itself — the badge has to overhang the corner, so
+      // `overflow-hidden` moved down to the underline's own wrapper below.
+      className={`relative flex h-[30px] items-center justify-center rounded-[6px] pb-[3px] text-[11px] leading-none tabular-nums transition-colors ${
+        wide ? "min-w-[30px] px-2" : ""
       } ${
         complete
-          ? "bg-muted text-muted-foreground hover:bg-muted/70"
-          : "bg-muted-foreground/20 text-foreground hover:bg-muted-foreground/30"
+          ? "bg-muted font-normal text-muted-foreground hover:bg-muted/70"
+          : "bg-muted-foreground/20 font-bold text-foreground hover:bg-muted-foreground/30"
       } ${selected ? "ring-2 ring-primary" : ""}`}
     >
       {label}
       {showCount && !complete && (
         <span
           data-testid={`plan-tile-badge-${section.key}`}
-          className="absolute end-[1px] top-[1px] rounded-[2px] bg-card/85 px-[1.5px] text-[7.5px] leading-[1.35] font-semibold text-foreground"
+          // Overhanging the corner in the bar's own azure, white on filled, so
+          // it reads as a count ON the tile rather than a digit inside it. It
+          // sits OUTSIDE the clip below, which is why the button cannot clip.
+          className="absolute -top-[4px] -end-[5px] flex h-[15px] min-w-[15px] items-center justify-center rounded-full px-[3px] text-[9.5px] leading-none font-bold text-white"
+          style={{ backgroundColor: HUE.text }}
         >
           {worst}
         </span>
       )}
       {!complete && (
-        <span aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 flex h-[3px]">
-          <span
-            data-plan-underline="text"
-            className="flex-1"
-            style={{
-              backgroundColor: textShort > 0
-                ? hexToRgba(HUE.text, underlineAlpha(textShort, section.totalCount))
-                : "transparent",
-            }}
-          />
-          <span
-            data-plan-underline="audio"
-            className="flex-1"
-            style={{
-              backgroundColor: audioShort > 0
-                ? hexToRgba(HUE.audio, underlineAlpha(audioShort, section.totalCount))
-                : "transparent",
-            }}
-          />
+        // The clip lives here rather than on the button: the underline is drawn
+        // to the tile's edges and has to be cut to its radius, while the badge
+        // above must NOT be. One `overflow-hidden` cannot do both.
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-0 overflow-hidden rounded-[6px]"
+        >
+          <span className="absolute inset-x-0 bottom-0 flex h-[3px]">
+            <span
+              data-plan-underline="text"
+              className="flex-1"
+              style={{
+                backgroundColor: textShort > 0
+                  ? hexToRgba(HUE.text, underlineAlpha(textShort, section.totalCount))
+                  : "transparent",
+              }}
+            />
+            <span
+              data-plan-underline="audio"
+              className="flex-1"
+              style={{
+                backgroundColor: audioShort > 0
+                  ? hexToRgba(HUE.audio, underlineAlpha(audioShort, section.totalCount))
+                  : "transparent",
+              }}
+            />
+          </span>
         </span>
       )}
     </button>

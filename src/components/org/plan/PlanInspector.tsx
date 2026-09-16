@@ -16,25 +16,28 @@
 // are the things you touch once and read never, and they were pushing the
 // shortfall below the fold on a short panel.
 
-import { useEffect, useState, type ReactNode } from "react"
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react"
 import { useT, useI18n } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { DatePicker, deadlineStringToDate, dateToDeadlineString } from "@/components/ui/date-picker"
-import { X, ChevronUp, ChevronDown } from "lucide-react"
+import { X, ChevronUp, ChevronDown, ArrowRight } from "lucide-react"
 import { fmtDeadlineDate } from "@/lib/format-date"
 import { formatRelativeTime } from "@/lib/i18n/format"
 import { isKnownBookCode } from "@/lib/file-labeling/bible-book-names"
 import {
-  planPct, planUnitIsNearlyComplete, planUnitLabel, planUnitShortfall, planUnitStatus,
-  type PlanUnit,
+  planPct, planShortfallParts, planUnitIsNearlyComplete, planUnitLabel, planUnitNote,
+  planUnitShortfall, planUnitStatus, type PlanUnit,
 } from "@/lib/plan/plan-status"
+import { classifyPlanSection, numberedBookCodes } from "@/lib/plan/plan-section"
 import type { PlanUnitPatch } from "@/lib/sync/plan"
-import { usePlanUnitSections } from "@/hooks/usePlanUnitSections"
+import { usePlanUnitSections, type PlanSection } from "@/hooks/usePlanUnitSections"
 import { PlanStatusPill } from "./PlanStatusPill"
 import { PlanBar } from "./PlanBar"
-import { PlanChapterGrid, planSectionShortfall } from "./PlanChapterGrid"
+import { PlanChapterGrid, PlanGridLegend, planSectionShortfall } from "./PlanChapterGrid"
 import { usePlanStatusNote } from "./use-plan-note"
+import { useSectionVerses, type SectionVersesState } from "./use-section-verses"
+import { shortVerses, verseChipLabel, verseChipSplit, verseChipsThatFit } from "./verse-chips"
 
 /**
  * Mounted with a `key` per unit by its caller, so stepping to another unit
@@ -44,7 +47,7 @@ import { usePlanStatusNote } from "./use-plan-note"
  */
 export function PlanInspector({
   unit, now, canPlan, showAudio, projectId, getToken, lane, languageLabel, laneCount,
-  assignments, audioFiles, onPatch, onClose, onStep, onGoToFirstOpen,
+  assignments, audioFiles, onPatch, onClose, onStep, onGoToFirstOpen, onOpenCell,
 }: {
   unit: PlanUnit
   now: number
@@ -96,6 +99,14 @@ export function PlanInspector({
    * callback carries. Absent, no link renders — nothing to navigate to.
    */
   onGoToFirstOpen?: (kind: "untranslated" | "unvalidated") => void
+  /**
+   * AQU-1278: open the editor at ONE cell, from a verse chip in the chapter
+   * card. Same division of labour as `onGoToFirstOpen` — this panel knows which
+   * cell was clicked and nothing about where the editor lives. Absent, the
+   * chips still draw (they say which verses are short, which is worth
+   * something on its own) and simply do nothing when pressed.
+   */
+  onOpenCell?: (cellId: string) => void
 }) {
   const t = useT()
   const { locale } = useI18n()
@@ -103,6 +114,10 @@ export function PlanInspector({
   const [busy, setBusy] = useState(false)
   const status = planUnitStatus(unit, now, audioFiles)
   const note = usePlanStatusNote(unit, now, audioFiles)
+  // AQU-1278: which note this IS, so the status line can drop the one the
+  // Target date section below already answers. Masked rather than skipped —
+  // `usePlanStatusNote` is a hook and cannot be called conditionally.
+  const noteKind = planUnitNote(unit, now, audioFiles)?.kind ?? null
   const validatedPct = planPct(unit.validatedCount, unit.totalCount)
   const { sections, loading, error } = usePlanUnitSections({ projectId, unit, getToken, lane })
 
@@ -138,6 +153,22 @@ export function PlanInspector({
   // grid is the summary, and a reader asks for one chapter at a time.
   const [openSectionKey, setOpenSectionKey] = useState<string | null>(null)
   const openSection = sections.find((s) => s.key === openSectionKey) ?? null
+
+  // AQU-1278: that chapter's verses, fetched on the click that opened it and
+  // never before — `cells.canonical_ref` is unindexed, so each of these is a
+  // full-file scan and a grid that prefetched its fifty tiles would be fifty.
+  const sectionVerses = useSectionVerses({ projectId, fileId: unit.fileId, getToken, lane })
+  const openSectionTitle = (() => {
+    if (!openSection) return ""
+    const numbered = numberedBookCodes(sections.map((s) => s.key))
+    const kind = classifyPlanSection(openSection.key, numbered)
+    // A numbered chapter — and a one-chapter book, which IS chapter 1 — names
+    // itself that way. Front matter and a document's own sections keep the
+    // names they have; "Chapter Scene 4" would invent one that does not exist.
+    return kind.kind === "chapter"
+      ? t("org.projectOverview.plan.chapterTitle", { chapter: kind.n })
+      : openSection.key
+  })()
   const shortChapters = sections.filter(
     // `hasAudio`, not `showAudio`. showAudio is a PROJECT-wide question — does
     // this project track audio at all, and therefore should an audio bar be
@@ -238,7 +269,19 @@ export function PlanInspector({
         )}
         <div className="flex flex-wrap items-center gap-2.5">
           <PlanStatusPill status={status} now={now} />
-          {note && (
+          {/* AQU-1278: LAST ACTIVITY sits beside the pill, where the mockup has
+              it — the two together are the one-line answer to "how is this
+              going". It used to hang under the bars, and the slot here carried
+              "no target date" instead: four words the Target date section two
+              inches below says for itself, on every undated unit, forever. */}
+          <span className="text-[11.5px] text-muted-foreground" data-testid="plan-last-activity">
+            {unit.lastEditAt
+              ? t("org.projectOverview.plan.lastActivity", {
+                  when: formatRelativeTime(unit.lastEditAt, locale, now),
+                })
+              : t("org.projectOverview.plan.noActivity")}
+          </span>
+          {note && noteKind !== "no_target" && (
             <span className="text-[11.5px] text-muted-foreground" data-testid="plan-inspector-note">
               {note}
             </span>
@@ -285,116 +328,110 @@ export function PlanInspector({
               </p>
             )}
           </div>
-          <p className="text-[11.5px] text-muted-foreground" data-testid="plan-last-activity">
-            {unit.lastEditAt
-              ? t("org.projectOverview.plan.lastActivity", {
-                  when: formatRelativeTime(unit.lastEditAt, locale, now),
-                })
-              : t("org.projectOverview.plan.noActivity")}
-          </p>
         </div>
-
-        {/* AQU-1278: who has been given which slice of this unit. Filled from
-            above — see the `assignments` prop. */}
-        {assignments}
 
         {/* Chapters / sections — AQU-1098, regridded by AQU-1278 */}
         {showBreakdown && (
           <div className="flex flex-col gap-2" data-testid="plan-sections">
-            <Label>{t(sectionsHeadingKey as never)}</Label>
+            {/* The legend belongs UP HERE, not under the grid: beneath it, it
+                competed with the summary line directly below for the same
+                glance, and the summary is the one that changes. */}
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Label>{t(sectionsHeadingKey as never)}</Label>
+              <PlanGridLegend showAudio={hasAudio} />
+            </div>
             <PlanChapterGrid
               sections={sections}
               showAudio={hasAudio}
               nearlyComplete={nearlyComplete}
               selectedKey={openSectionKey}
-              onSelect={(key) => setOpenSectionKey((open) => (open === key ? null : key))}
+              onSelect={(key) =>
+                setOpenSectionKey((open) => {
+                  if (open === key) return null
+                  // The fetch rides the click that opens the chapter, not the
+                  // render that follows it — see `useSectionVerses`.
+                  sectionVerses.load(key)
+                  return key
+                })
+              }
             />
 
             {sections.length > 0 && (
               <div
-                className="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5 text-[11.5px]"
+                className="flex flex-wrap items-center justify-between gap-x-2.5 gap-y-1 text-[11.5px]"
                 data-testid="plan-grid-summary"
               >
-                {/* Dropped at zero rather than reading "0 chapters short": the
-                    complete line beside it already says exactly that, in the
-                    direction a reader wants it. */}
-                {shortChapters > 0 && (
+                {/* ONE of the two, never both. "3 chapters short" and "47 of 50
+                    complete" are the same fact counted from opposite ends, and
+                    a line carrying both made a reader do the subtraction to
+                    check they agreed. What is left wins while anything is left;
+                    the complete line takes over when nothing is, where it is
+                    the more direct way to say the book is finished. */}
+                {shortChapters > 0 ? (
                   <span className="font-medium text-foreground">
                     {t("org.projectOverview.plan.chaptersShort", { count: shortChapters })}
                   </span>
+                ) : (
+                  <span className="text-muted-foreground">
+                    {t("org.projectOverview.plan.chaptersComplete", {
+                      done: sections.length,
+                      total: sections.length,
+                    })}
+                  </span>
                 )}
-                <span className="text-muted-foreground">
-                  {t("org.projectOverview.plan.chaptersComplete", {
-                    done: sections.length - shortChapters,
-                    total: sections.length,
-                  })}
-                </span>
-              </div>
-            )}
 
-            {/* NEARLY COMPLETE ONLY — and so are the grid's count badges. A unit
-                with ninety chapters to go gets no link, on the grounds that
-                "first outstanding cell" is not a useful place to stand when
-                nearly everything is outstanding; you open the file, not a cell.
-                THIS IS FLAGGED FOR RE-CONFIRMATION AT BUILD REVIEW: it is the
-                one rule in AQU-1278 that withholds something from the majority
-                of units, and if the answer changes it changes here and in the
-                `nearlyComplete` prop passed to the grid, nowhere else. */}
-            {nearlyComplete && openKind != null && onGoToFirstOpen && (
-              <div>
-                <Button
-                  variant="link"
-                  size="sm"
-                  className="h-auto p-0 text-[12px]"
-                  data-testid="plan-go-to-first-open"
-                  onClick={() => onGoToFirstOpen(openKind)}
-                >
-                  {t(openKind === "untranslated"
-                    ? "org.projectOverview.plan.goToFirstUntranslated"
-                    : "org.projectOverview.plan.goToFirstUnvalidated")}
-                </Button>
+                {/* NEARLY COMPLETE ONLY — and so are the grid's count badges. A
+                    unit with ninety chapters to go gets no link, on the grounds
+                    that "first outstanding cell" is not a useful place to stand
+                    when nearly everything is outstanding; you open the file,
+                    not a cell. THIS IS FLAGGED FOR RE-CONFIRMATION AT BUILD
+                    REVIEW: it is the one rule in AQU-1278 that withholds
+                    something from the majority of units, and if the answer
+                    changes it changes here and in the `nearlyComplete` prop
+                    passed to the grid, nowhere else.
+                    It shares the summary's line, right-aligned, because the
+                    two belong together: how much is left, and the way to it. */}
+                {nearlyComplete && openKind != null && onGoToFirstOpen && (
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className="h-auto gap-1 p-0 text-[12px]"
+                    data-testid="plan-go-to-first-open"
+                    onClick={() => onGoToFirstOpen(openKind)}
+                  >
+                    {t(openKind === "untranslated"
+                      ? "org.projectOverview.plan.goToFirstUntranslated"
+                      : "org.projectOverview.plan.goToFirstUnvalidated")}
+                    <ArrowRight className="h-3 w-3" aria-hidden />
+                  </Button>
+                )}
               </div>
             )}
 
             {/* One chapter, opened from the grid: the same nested bars the unit
                 itself draws, so the part is measured exactly like the whole. */}
             {openSection && (
-              <div
-                className="flex flex-col gap-1.5 rounded-md border bg-muted/40 px-2.5 py-2"
-                data-testid="plan-chapter-detail"
-              >
-                <span className="text-[11px] font-semibold tracking-wide text-muted-foreground">
-                  {openSection.key}
-                </span>
-                <PlanBar
-                  outer={planPct(openSection.filledCount, openSection.totalCount)}
-                  inner={planPct(openSection.validatedCount, openSection.totalCount)}
-                  tone="text"
-                  aria={t("org.projectOverview.plan.textBarsAria", {
-                    translated: planPct(openSection.filledCount, openSection.totalCount),
-                    validated: planPct(openSection.validatedCount, openSection.totalCount),
-                  })}
-                />
-                {showAudio && (
-                  <PlanBar
-                    outer={planPct(openSection.audioCount, openSection.totalCount)}
-                    inner={planPct(openSection.audioValidatedCount, openSection.totalCount)}
-                    tone="audio"
-                    aria={t("org.projectOverview.plan.audioBarsAria", {
-                      recorded: planPct(openSection.audioCount, openSection.totalCount),
-                      validated: planPct(openSection.audioValidatedCount, openSection.totalCount),
-                    })}
-                  />
-                )}
-              </div>
+              <PlanChapterCard
+                section={openSection}
+                title={openSectionTitle}
+                hasAudio={hasAudio}
+                verses={sectionVerses.get(openSection.key)}
+                onOpenCell={onOpenCell}
+              />
             )}
           </div>
         )}
 
-        {/* The planning controls, last and behind a divider. Everything above
-            answers "how is this going"; these two are where a manager changes
-            the plan, which is a rarer errand than reading it. */}
+        {/* Everything above answers "how is this going". Below the divider is
+            where a manager CHANGES something: who is on it, when it is due,
+            and whether it is done. AQU-1278 moved "Assigned to" down here from
+            between Progress and Chapters — it was pushing the chapter grid, the
+            thing this panel exists for, below the fold on a short window. */}
         <div className="flex flex-col gap-5 border-t pt-5">
+          {/* AQU-1278: who has been given which slice of this unit. Filled from
+              above — see the `assignments` prop. */}
+          {assignments}
+
           {/* Target date */}
           <div className="flex flex-col gap-2">
             <Label htmlFor={`plan-target-${unit.fileId}${unit.sectionKey}`}>
@@ -418,9 +455,6 @@ export function PlanInspector({
                     </Button>
                   )}
                 </div>
-                <p className="text-[11.5px] text-muted-foreground">
-                  {t("org.projectOverview.plan.targetVisibleHint")}
-                </p>
               </>
             ) : (
               <>
@@ -508,4 +542,153 @@ export function PlanInspector({
       </div>
     </aside>
   )
+}
+
+/**
+ * One chapter, opened from the grid: the same nested bars the unit itself
+ * draws — so the part is measured exactly like the whole — plus a chip per
+ * outstanding verse, which is the only place on this panel that turns "three
+ * cells short" into somewhere to click.
+ *
+ * The bars read in COUNTS here rather than percentages. At chapter grain
+ * "20/18" is two cells a manager can go and fix, where "100/90%" is those two
+ * cells rounded into a shrug.
+ */
+function PlanChapterCard({
+  section, title, hasAudio, verses, onOpenCell,
+}: {
+  section: PlanSection
+  /** "Chapter 12", or a named section's own label. */
+  title: string
+  hasAudio: boolean
+  verses: SectionVersesState | undefined
+  onOpenCell?: (cellId: string) => void
+}) {
+  const t = useT()
+  const rowRef = useRef<HTMLDivElement>(null)
+  const capacity = useChipRowCapacity(rowRef)
+
+  const shortfall = planSectionShortfall(section, hasAudio)
+  // Which queue this chapter is in, and therefore which verses the chips list.
+  // `planShortfallParts` has already ordered the terms worst-first with
+  // translation ahead of validation, so its first term IS the lead.
+  const lead = planShortfallParts(shortfall)[0]
+  const outstandingLabel = lead
+    ? t(
+        (lead.kind === "translate"
+          ? "org.projectOverview.plan.chapterCellsUntranslated"
+          : lead.kind === "validate"
+            ? "org.projectOverview.plan.chapterCellsUnvalidated"
+            : "org.projectOverview.plan.chapterTakesUnrecorded") as never,
+        { count: lead.count },
+      )
+    : null
+
+  // Chips only exist for the two TEXT queues: the verse detail carries `filled`
+  // and `validated` and nothing about audio, so a chapter short on takes alone
+  // has no per-cell answer to give and says so by showing no chips at all.
+  const chipLead: "untranslated" | "unvalidated" | null =
+    lead?.kind === "translate" ? "untranslated" : lead?.kind === "validate" ? "unvalidated" : null
+  const short = verses?.status === "ready" && chipLead
+    ? shortVerses(verses.verses, chipLead)
+    : []
+  const { shown, overflow } = verseChipSplit(short.length, capacity)
+
+  return (
+    <div
+      className="flex flex-col gap-1.5 rounded-md border bg-muted/40 px-2.5 py-2"
+      data-testid="plan-chapter-detail"
+    >
+      <div className="flex items-baseline justify-between gap-2">
+        <span className="text-[12.5px] font-semibold" data-testid="plan-chapter-detail-title">
+          {title}
+        </span>
+        {outstandingLabel && (
+          <span
+            className="text-[11px] text-muted-foreground"
+            data-testid="plan-chapter-detail-left"
+          >
+            {outstandingLabel}
+          </span>
+        )}
+      </div>
+      <PlanBar
+        outer={planPct(section.filledCount, section.totalCount)}
+        inner={planPct(section.validatedCount, section.totalCount)}
+        tone="text"
+        aria={t("org.projectOverview.plan.textBarsAria", {
+          translated: planPct(section.filledCount, section.totalCount),
+          validated: planPct(section.validatedCount, section.totalCount),
+        })}
+        readout={`${section.totalCount}/${section.validatedCount}`}
+      />
+      {hasAudio && (
+        <PlanBar
+          outer={planPct(section.audioCount, section.totalCount)}
+          inner={planPct(section.audioValidatedCount, section.totalCount)}
+          tone="audio"
+          aria={t("org.projectOverview.plan.audioBarsAria", {
+            recorded: planPct(section.audioCount, section.totalCount),
+            validated: planPct(section.audioValidatedCount, section.totalCount),
+          })}
+          readout={`${section.totalCount}/${section.audioCount}`}
+        />
+      )}
+      {/* ONE ROW, NEVER TWO. Fixed-width chips and a measured capacity, so the
+          card's height never depends on how badly a chapter is doing. What
+          does not fit folds into a count rather than wrapping. */}
+      {short.length > 0 && (
+        <div
+          ref={rowRef}
+          className="flex gap-1 overflow-hidden whitespace-nowrap pt-0.5"
+          data-testid="plan-chapter-verses"
+        >
+          {short.slice(0, shown).map((v) => (
+            <button
+              key={v.cellId}
+              type="button"
+              data-testid={`plan-verse-chip-${v.cellId}`}
+              className="h-6 w-[46px] shrink-0 rounded-full border border-primary/35 bg-primary/10 text-[11.5px] font-medium tabular-nums text-primary transition-colors hover:bg-primary/20"
+              onClick={() => onOpenCell?.(v.cellId)}
+            >
+              {verseChipLabel(v.ref, section.key)}
+            </button>
+          ))}
+          {overflow > 0 && (
+            <span
+              data-testid="plan-verse-more"
+              aria-label={t("org.projectOverview.plan.moreShortVerses", { count: overflow })}
+              className="flex h-6 w-[46px] shrink-0 items-center justify-center rounded-full bg-muted text-[11.5px] font-medium tabular-nums text-muted-foreground"
+            >
+              +{overflow}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * How many fixed-width chips the verse row can hold.
+ *
+ * Starts at Infinity so the row draws every chip until something is measured:
+ * starting at zero would flash a bare "+7" on every open, and under happy-dom —
+ * which has no ResizeObserver and reports every width as zero — the chips would
+ * never render at all and could never be asserted on. The arithmetic itself is
+ * tested directly in `verse-chips.test.ts`, where a width can be supplied.
+ */
+function useChipRowCapacity(ref: RefObject<HTMLElement | null>): number {
+  const [capacity, setCapacity] = useState(Number.POSITIVE_INFINITY)
+  useLayoutEffect(() => {
+    const row = ref.current
+    if (!row) return
+    const measure = () => setCapacity(verseChipsThatFit(row.clientWidth))
+    measure()
+    if (typeof ResizeObserver === "undefined") return // happy-dom
+    const observer = new ResizeObserver(measure)
+    observer.observe(row)
+    return () => observer.disconnect()
+  }, [ref])
+  return capacity
 }

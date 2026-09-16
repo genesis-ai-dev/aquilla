@@ -92,19 +92,27 @@ const SHORTFALL_BRIEF_KEY: Record<PlanShortfallPart["kind"], string> = {
  * making the same point in colour. Returning that string from here would force
  * the row's arrangement on every caller.
  */
-export function usePlanShortfallRenderer(): (shortfall: PlanShortfall) => string | null {
+export function usePlanShortfallRenderer(): (
+  shortfall: PlanShortfall,
+  /**
+   * "auto" — the default — takes the brief wording only when two terms share
+   * the line. "brief" forces it, for a caller who knows something ELSE will
+   * share it: the inspector's assignment rows append the chapter the work is
+   * in, so "2 cells to validate · ch. 12" is the same one-noun-too-many the
+   * brief forms exist to avoid, on a panel a third the board's width.
+   */
+  mode?: "auto" | "brief",
+) => string | null {
   const t = useT()
-  return (shortfall) => {
+  return (shortfall, mode = "auto") => {
     // `planShortfallParts` has already dropped the zero terms, ordered what is
     // left worst-first, and capped it at two. The pair is a key of its own so a
     // language that joins clauses with something other than a middot can.
     //
-    // TWO TERMS TAKE THE BRIEF WORDING, one takes the full. The choice is made
-    // from the part count rather than handed in, because it is a fact about
-    // the line rather than about the caller: a lone "6 to validate" has
-    // nothing beside it to say what six of anything are.
+    // The noun survives only on a line carrying ONE fragment and nothing else,
+    // where there is room for it and no context to borrow from.
     const parts = planShortfallParts(shortfall)
-    const keys = parts.length > 1 ? SHORTFALL_BRIEF_KEY : SHORTFALL_KEY
+    const keys = mode === "brief" || parts.length > 1 ? SHORTFALL_BRIEF_KEY : SHORTFALL_KEY
     const [first, second] = parts.map((part) =>
       t(keys[part.kind] as never, { count: part.count }),
     )

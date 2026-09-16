@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, within } from "@testing-library/react"
-import { PlanChapterGrid, planTileChapter } from "./PlanChapterGrid"
+import { PlanChapterGrid, PlanGridLegend, planTileChapter } from "./PlanChapterGrid"
 import { classifyPlanSection, numberedBookCodes } from "@/lib/plan/plan-section"
 import type { PlanSection } from "@/hooks/usePlanUnitSections"
 import { hexToRgba, parseTrackHue } from "@/lib/timeline/track-colors"
@@ -220,9 +220,12 @@ describe("what a tile says it is short of", () => {
   })
 })
 
+// AQU-1278 lifted the legend out of the grid so the inspector can set it on
+// the CHAPTERS heading line, right-aligned, where the mockup has it — under
+// the grid it competed with the summary line for the same glance.
 describe("the legend", () => {
   it("names all three swatches where a project records audio", () => {
-    renderGrid([section("GEN 1")], { showAudio: true })
+    render(<PlanGridLegend showAudio />)
     const legend = screen.getByTestId("plan-grid-legend")
     expect(legend).toHaveTextContent("all complete")
     expect(legend).toHaveTextContent("text short")
@@ -232,7 +235,12 @@ describe("the legend", () => {
   it("drops the audio swatch on a text-only project", () => {
     // A legend entry for a colour that is nowhere on screen is a question, not
     // an answer.
-    renderGrid([section("GEN 1")], { showAudio: false })
+    render(<PlanGridLegend showAudio={false} />)
     expect(screen.getByTestId("plan-grid-legend")).not.toHaveTextContent("audio short")
+  })
+
+  it("is not drawn inside the grid any more", () => {
+    renderGrid([section("GEN 1")], { showAudio: true })
+    expect(screen.queryByTestId("plan-grid-legend")).toBeNull()
   })
 })

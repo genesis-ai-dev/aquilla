@@ -19,6 +19,7 @@
 // exactly its alpha; stacked, the inner would composite to a third value that
 // belongs to no ladder.
 
+import type { ReactNode } from "react"
 import { hexToRgba, parseTrackHue } from "@/lib/timeline/track-colors"
 
 export type PlanBarTone = "text" | "audio"
@@ -37,7 +38,7 @@ const HUE: Record<PlanBarTone, string> = {
  */
 const ALPHA = { done: 0.33, validated: 0.67 } as const
 
-export function PlanBar({ label, outer, inner, tone, aria }: {
+export function PlanBar({ label, outer, inner, tone, aria, readout }: {
   /** Omitted where the caller supplies its own leading gutter (a chapter number). */
   label?: string
   /** Percentage 0–100 of the containing measure. */
@@ -46,6 +47,16 @@ export function PlanBar({ label, outer, inner, tone, aria }: {
   inner: number
   tone: PlanBarTone
   aria: string
+  /**
+   * AQU-1278: what to print in the readout slot, instead of "outer/inner%".
+   *
+   * A unit reads in PERCENTAGES and a person or a chapter reads in CELLS. At
+   * those grains "940/938" is a fact a manager can act on — two cells left —
+   * where "99/99%" is those two cells rounded out of existence. The slot keeps
+   * its fixed width either way, so a column of bars stays aligned whichever
+   * kind of number is in it.
+   */
+  readout?: ReactNode
 }) {
   const hue = HUE[tone]
   const validated = Math.max(0, Math.min(inner, outer))
@@ -79,9 +90,13 @@ export function PlanBar({ label, outer, inner, tone, aria }: {
         )}
       </span>
       <span className="w-[60px] shrink-0 text-end text-[11px] tabular-nums text-muted-foreground">
-        {outer}
-        <span className="px-px opacity-40">/</span>
-        {inner}%
+        {readout ?? (
+          <>
+            {outer}
+            <span className="px-px opacity-40">/</span>
+            {inner}%
+          </>
+        )}
       </span>
     </span>
   )

@@ -10,11 +10,10 @@
 //
 // What differs is the READOUT: a unit reads in percentages, a person reads in
 // CELLS. At this grain "940/938" is a fact a manager can act on — twelve cells
-// left — where "99/99%" is those twelve cells rounded into invisibility. The
-// counts therefore sit BESIDE each bar rather than inside it, because PlanBar's
-// own readout is hard-coded to "outer/inner%" and PlanBar belongs to the board;
-// `AssignmentBar` at the foot of this file is the one place that changes on the
-// day it takes a readout node instead.
+// left — where "99/99%" is those twelve cells rounded into invisibility. That
+// used to need a wrapper here, because PlanBar's readout was hard-coded to
+// "outer/inner%"; AQU-1278 gave PlanBar a `readout` slot and the wrapper
+// collapsed into passing one.
 //
 // EVERY LANE IS LISTED, and that is a product decision, not an oversight. An
 // assignment is pinned to one target-language lane (AQU-538 §3.5), but the
@@ -28,6 +27,7 @@
 // looking at.
 
 import { useMemo, useState } from "react"
+import { Plus } from "lucide-react"
 import { useT, useI18n } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
@@ -35,16 +35,44 @@ import { UsernameWithAvatar } from "@/components/UsernameWithAvatar"
 import { AssignModal } from "@/components/AssignModal"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { fmtDeadlineDate } from "@/lib/format-date"
+import { formatList } from "@/lib/i18n/format"
+import { numberedBookCodes, planSectionLabel } from "@/lib/plan/plan-section"
 import { planPct, planUnitShortfall, type PlanShortfall } from "@/lib/plan/plan-status"
-import type { UnitAssignment } from "@/lib/sync/assignments"
+import type { UnitAssignment, UnitAssignmentChapter } from "@/lib/sync/assignments"
 import type { FileReference, FileType } from "@/lib/parsers/types"
 import { SectionVisibilityGate } from "../SectionVisibilityBadge"
 import { laneChipLabel } from "../project-lanes"
 import { PlanBar } from "./PlanBar"
+import { PLAN_TONE } from "./plan-tone"
 import { usePlanShortfallRenderer } from "./use-plan-note"
 
 /** AssignModal takes the editor's cell selection; a PM surface has none. */
 const EMPTY_SELECTION: ReadonlySet<string> = new Set()
+
+/**
+ * How many short chapters a person's line names before it stops.
+ *
+ * Two, not the row's three: this line already carries the shortfall itself and
+ * lives in a panel a third the width of the board, so it has room for a hint
+ * about where — not for a list. The rest are on the grid above in colour.
+ */
+const CHAPTERS_NAMED = 2
+
+/** One chapter of one assignment, judged by the unit rule. See `assignmentShortfall`. */
+function chapterShortfall(c: UnitAssignmentChapter, hasAudio: boolean): PlanShortfall {
+  return planUnitShortfall(
+    {
+      fileId: "", fileName: "", sectionKey: c.key,
+      totalCount: c.total,
+      filledCount: c.translated,
+      validatedCount: c.validated,
+      audioCount: c.recorded,
+      audioValidatedCount: c.audioValidated,
+      lastEditAt: null, targetDate: null, doneAt: null, doneBy: null,
+    },
+    hasAudio,
+  )
+}
 
 /**
  * What ONE PERSON still owes on this unit.
@@ -182,6 +210,7 @@ export function PlanAssignments({
               data-testid="plan-assign-open"
               onClick={() => setAssignOpen(true)}
             >
+              <Plus className="h-3 w-3" aria-hidden />
               {t("org.projectOverview.plan.assign")}
             </Button>
           )}
@@ -251,9 +280,39 @@ function PlanAssignmentRow({
   // outstanding, which this surface — unlike the row, which has a chapter grid
   // saying it in colour — has to put into words.
   const renderShortfall = usePlanShortfallRenderer()
+
+  // AQU-1278: and WHERE it is. The per-unit read now returns each assignment's
+  // chapters with their own counts, so "2 to validate" can finish the sentence
+  // — "· ch. 12". Which chapters are short is decided by `planUnitShortfall`,
+  // the same function that judged the person and the book, rather than by a
+  // second rule on the server: that one owns the zero clamp and the flag that
+  // decides whether audio counts sign-off, and it flips when AQU-490 lands.
+  const numbered = numberedBookCodes((a.chapters ?? []).map((c) => c.key))
+  const shortChapters = (a.chapters ?? [])
+    .filter((c) => chapterShortfall(c, showAudio).worst > 0)
+    .map((c) => planSectionLabel(c.key, numbered))
+
+  // Brief whenever the chapter tail will share the line; full when the
+  // shortfall stands alone and has the room.
+  const shortfallText = renderShortfall(
+    assignmentShortfall(a, showAudio),
+    shortChapters.length > 0 ? "brief" : "auto",
+  )
+  const outstanding = shortfallText !== null
+
   const left =
-    renderShortfall(assignmentShortfall(a, showAudio)) ??
-    t("org.projectOverview.plan.nothingLeft")
+    shortfallText === null
+      ? t("org.projectOverview.plan.nothingLeft")
+      : shortChapters.length > 0
+        ? t("org.projectOverview.plan.shortfallPair", {
+            first: shortfallText,
+            second: t("org.projectOverview.plan.shortfallInChapters", {
+              list: formatList(shortChapters.slice(0, CHAPTERS_NAMED), locale, {
+                type: "conjunction",
+              }),
+            }),
+          })
+        : shortfallText
 
   const meta = [
     t("org.projectOverview.plan.assignmentScope", {
@@ -268,28 +327,44 @@ function PlanAssignmentRow({
   ].join(" · ")
 
   return (
-    <li
-      className="flex flex-col gap-1 rounded-md border bg-muted/30 px-2.5 py-2"
-      data-testid={`plan-assignment-${a.assignmentId}`}
-    >
+    // FLAT, not a card. A bordered box per person turned a list of three into
+    // three panels stacked inside a panel, and the border was drawing a line
+    // around information that is already grouped by the heading above it.
+    <li className="flex flex-col gap-1" data-testid={`plan-assignment-${a.assignmentId}`}>
       <div className="flex min-w-0 items-center justify-between gap-2">
-        <UsernameWithAvatar username={name} size="xs" nameClassName="text-[13px]" />
-        {/* The chip only appears on the rows that need explaining, so a
-            single-lane project never grows a column of identical tags. */}
-        {otherLane && (
-          <span
-            data-testid="plan-assignment-lane"
-            className="shrink-0 rounded border bg-card px-1.5 py-0.5 text-[10.5px] font-medium text-muted-foreground"
-          >
-            {laneChipLabel(a.targetLang, defaultLaneLabel, t("org.projectOverview.laneDefaultFallback"))}
-          </span>
-        )}
+        <span className="flex min-w-0 items-center gap-2">
+          <UsernameWithAvatar username={name} size="xs" nameClassName="text-[13px]" />
+          {/* The chip only appears on the rows that need explaining, so a
+              single-lane project never grows a column of identical tags. */}
+          {otherLane && (
+            <span
+              data-testid="plan-assignment-lane"
+              className="shrink-0 rounded border bg-card px-1.5 py-0.5 text-[10.5px] font-medium text-muted-foreground"
+            >
+              {laneChipLabel(a.targetLang, defaultLaneLabel, t("org.projectOverview.laneDefaultFallback"))}
+            </span>
+          )}
+        </span>
+        {/* WHAT THIS PERSON STILL OWES, on the name's own line and in the
+            board's azure — it is the one fact on the row that asks for an
+            action, and under the bars it read as a footnote to them. "Nothing
+            left" stays grey: it asks for nothing. */}
+        <span
+          className={`shrink-0 text-[11px] tabular-nums ${
+            outstanding ? PLAN_TONE.nearly_complete.text : "text-muted-foreground"
+          }`}
+          data-testid={`plan-assignment-left-${a.assignmentId}`}
+        >
+          {left}
+        </span>
       </div>
 
       <p className="text-[11.5px] text-muted-foreground">{meta}</p>
 
-      <div className="flex flex-col gap-[3px]">
-        <AssignmentBar
+      {/* Indented under the avatar (20px) plus its gap (8px), so the bars line
+          up with the name rather than with the face beside it. */}
+      <div className="flex flex-col gap-[3px] ps-7">
+        <PlanBar
           label={t("org.projectOverview.plan.textBarLabel")}
           outer={planPct(a.translated, a.cellsTotal)}
           inner={planPct(a.validated, a.cellsTotal)}
@@ -298,11 +373,14 @@ function PlanAssignmentRow({
             translated: planPct(a.translated, a.cellsTotal),
             validated: planPct(a.validated, a.cellsTotal),
           })}
-          counts={`${a.translated}/${a.validated}`}
-          testId={`plan-assignment-text-${a.assignmentId}`}
+          readout={
+            <span data-testid={`plan-assignment-text-${a.assignmentId}`}>
+              {a.translated}/{a.validated}
+            </span>
+          }
         />
         {showAudio && (
-          <AssignmentBar
+          <PlanBar
             label={t("org.projectOverview.plan.audioBarLabel")}
             outer={planPct(a.recorded, a.cellsTotal)}
             inner={planPct(a.audioValidated, a.cellsTotal)}
@@ -311,60 +389,15 @@ function PlanAssignmentRow({
               recorded: planPct(a.recorded, a.cellsTotal),
               validated: planPct(a.audioValidated, a.cellsTotal),
             })}
-            counts={`${a.recorded}/${a.audioValidated}`}
-            testId={`plan-assignment-audio-${a.assignmentId}`}
+            readout={
+              <span data-testid={`plan-assignment-audio-${a.assignmentId}`}>
+                {a.recorded}/{a.audioValidated}
+              </span>
+            }
           />
         )}
       </div>
-
-      <p
-        className="text-end text-[11px] text-muted-foreground"
-        data-testid={`plan-assignment-left-${a.assignmentId}`}
-      >
-        {left}
-      </p>
     </li>
-  )
-}
-
-/**
- * One bar of a person's progress: the unit's own PlanBar, with the cell counts
- * beside it.
- *
- * The counts sit OUTSIDE PlanBar because PlanBar's readout is hard-coded to
- * "outer/inner%" and PlanBar belongs to the board, not to this section. The day
- * it takes a `readout` node, this wrapper collapses into passing one — which is
- * exactly why the wrapper exists rather than a second bar implementation.
- */
-function AssignmentBar({
-  label,
-  outer,
-  inner,
-  tone,
-  aria,
-  counts,
-  testId,
-}: {
-  label: string
-  outer: number
-  inner: number
-  tone: "text" | "audio"
-  aria: string
-  counts: string
-  testId: string
-}) {
-  return (
-    <span className="flex min-w-0 items-center gap-2">
-      <span className="min-w-0 flex-1">
-        <PlanBar label={label} outer={outer} inner={inner} tone={tone} aria={aria} />
-      </span>
-      <span
-        className="w-[62px] shrink-0 text-end text-[11px] tabular-nums text-muted-foreground"
-        data-testid={testId}
-      >
-        {counts}
-      </span>
-    </span>
   )
 }
 

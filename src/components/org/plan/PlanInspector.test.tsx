@@ -10,8 +10,12 @@ import type { PlanUnit } from "@/lib/plan/plan-status"
 // bars) rendered in no test at all. Mocking the progress read exercises it.
 vi.mock("@/lib/progress/file-progress-resource", () => ({
   getFileProgress: vi.fn(),
+  // AQU-1278: the chapter card's verse chips read this, on the click that
+  // opens a chapter and never before.
+  getFileSectionProgress: vi.fn(),
 }))
-const { getFileProgress } = await import("@/lib/progress/file-progress-resource")
+const { getFileProgress, getFileSectionProgress } =
+  await import("@/lib/progress/file-progress-resource")
 
 const NOW = Date.parse("2026-09-02T09:00:00Z")
 
@@ -26,6 +30,9 @@ const doneSection = (key: string) =>
 
 beforeEach(() => {
   vi.mocked(getFileProgress).mockReset()
+  // Default to a chapter with no verses, so every test that clicks a tile for
+  // some other reason keeps working without knowing this exists.
+  vi.mocked(getFileSectionProgress).mockReset().mockResolvedValue({ verses: [] } as never)
 })
 
 function unit(over: Partial<PlanUnit> = {}): PlanUnit {
@@ -48,6 +55,7 @@ const nearlyDone = (over: Partial<PlanUnit> = {}): PlanUnit =>
 
 type InspectorExtras = {
   onGoToFirstOpen?: (kind: "untranslated" | "unvalidated") => void
+  onOpenCell?: (cellId: string) => void
   laneCount?: number
   assignments?: ReactNode
 }
@@ -250,7 +258,7 @@ describe("the chapter grid (AQU-1278)", () => {
     ])
     // And nothing from a book this unit does not own.
     expect(screen.queryByTestId("plan-tile-EXO 1")).toBeNull()
-    expect(screen.getByText("Progress by chapter")).toBeInTheDocument()
+    expect(screen.getByText("Chapters")).toBeInTheDocument()
   })
 
   it("keeps a section that is not chapter-shaped off the numbered grid", async () => {
@@ -267,7 +275,7 @@ describe("the chapter grid (AQU-1278)", () => {
     // The one real chapter in the file is still on the grid, at square one.
     const grid = screen.getByTestId("plan-chapter-grid")
     expect([...grid.children].map((c) => c.getAttribute("data-testid"))).toEqual(["plan-tile-MRK 1"])
-    expect(screen.getByText("Progress by section")).toBeInTheDocument()
+    expect(screen.getByText("Sections")).toBeInTheDocument()
   })
 
   it("puts a one-chapter book on the grid as chapter 1", async () => {
@@ -343,13 +351,25 @@ describe("the chapter grid (AQU-1278)", () => {
     expect(screen.queryByTestId("plan-grid-empty")).toBeNull()
   })
 
-  it("summarises how much of the unit is left, in chapters", async () => {
+  it("says how much of the unit is left, and only that", async () => {
+    // AQU-1278: ONE of the two counts, never both. "1 chapter short" and "2 of
+    // 3 complete" are the same fact from opposite ends, and a line carrying
+    // both made a reader subtract to check they agreed.
     const getToken = withSections([section("GEN 1"), doneSection("GEN 2"), doneSection("GEN 3")])
     renderInspector(unit({ sectionKey: "GEN", fileName: "Whole Bible" }), true, false, getToken)
     await waitFor(() => expect(screen.getByTestId("plan-grid-summary")).toBeInTheDocument())
     const summary = screen.getByTestId("plan-grid-summary")
     expect(summary).toHaveTextContent("1 chapter short")
-    expect(summary).toHaveTextContent("2 of 3 complete")
+    expect(summary).not.toHaveTextContent("complete")
+  })
+
+  it("switches to the complete count once nothing is short", async () => {
+    const getToken = withSections([doneSection("GEN 1"), doneSection("GEN 2")])
+    renderInspector(unit({ sectionKey: "GEN", fileName: "Whole Bible" }), true, false, getToken)
+    await waitFor(() => expect(screen.getByTestId("plan-grid-summary")).toBeInTheDocument())
+    const summary = screen.getByTestId("plan-grid-summary")
+    expect(summary).toHaveTextContent("2 of 2 complete")
+    expect(summary).not.toHaveTextContent("short")
   })
 
   it("counts the chapters it found into the header meta line", async () => {
@@ -361,7 +381,13 @@ describe("the chapter grid (AQU-1278)", () => {
 
   it("opens one chapter's own bars when its tile is chosen", async () => {
     const getToken = withSections([section("GEN 1", { audioCount: 20, audioValidatedCount: 5 })])
-    renderInspector(unit({ sectionKey: "GEN", fileName: "Whole Bible" }), true, true, getToken)
+    // The unit carries recordings too. AQU-1278 put the card on the same
+    // per-FILE audio gate the grid above it already used, so a card drawing an
+    // audio bar under a unit whose file has none would be the panel
+    // contradicting itself two inches apart.
+    renderInspector(
+      unit({ sectionKey: "GEN", fileName: "Whole Bible", audioCount: 20 }), true, true, getToken,
+    )
     await waitFor(() => expect(screen.getByTestId("plan-tile-GEN 1")).toBeInTheDocument())
     expect(screen.queryByTestId("plan-chapter-detail")).toBeNull()
 
@@ -429,5 +455,136 @@ describe("the link into the editor (AQU-1278)", () => {
     await waitFor(() => expect(screen.getByTestId("plan-chapter-grid")).toBeInTheDocument())
     expect(goLinks()).toHaveLength(0)
     expect(screen.queryByTestId("plan-go-to-first-open")).toBeNull()
+  })
+})
+
+// AQU-1278: the chapter card. Sam, on the build: "everything that is different
+// here is for the worse" — the card showed a raw section key and two bars in
+// percentages where the mockup has a title, a count, and a chip per verse.
+describe("the chapter card", () => {
+  const verse = (cellId: string, ref: string, over: Partial<{ filled: boolean; validated: boolean }> = {}) =>
+    ({ cellId, ref, filled: true, validated: true, ...over })
+
+  const openChapter = async (
+    u: PlanUnit,
+    sections: ReturnType<typeof section>[],
+    verses: ReturnType<typeof verse>[],
+    extras: InspectorExtras = {},
+  ) => {
+    vi.mocked(getFileSectionProgress).mockResolvedValue({ verses } as never)
+    renderInspector(u, true, false, withSections(sections), extras)
+    await waitFor(() => expect(screen.getByTestId(`plan-tile-${sections[0].key}`)).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId(`plan-tile-${sections[0].key}`))
+    await waitFor(() => expect(screen.getByTestId("plan-chapter-detail")).toBeInTheDocument())
+  }
+
+  it("reads the chapter's verses only once its tile is clicked", async () => {
+    vi.mocked(getFileSectionProgress).mockResolvedValue({ verses: [] } as never)
+    renderInspector(nearlyDone({ sectionKey: "GEN" }), true, false, withSections([section("GEN 12")]))
+    await waitFor(() => expect(screen.getByTestId("plan-tile-GEN 12")).toBeInTheDocument())
+    // `cells.canonical_ref` is unindexed, so each of these is a full-file scan.
+    // A grid that prefetched its fifty tiles would be fifty of them.
+    expect(getFileSectionProgress).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByTestId("plan-tile-GEN 12"))
+    await waitFor(() => expect(getFileSectionProgress).toHaveBeenCalledTimes(1))
+    expect(vi.mocked(getFileSectionProgress).mock.calls[0].slice(0, 3))
+      .toEqual(["p1", "f1", "GEN 12"])
+  })
+
+  it("titles itself as a chapter and says what is outstanding in it", async () => {
+    await openChapter(
+      nearlyDone({ sectionKey: "GEN" }),
+      [section("GEN 12", { totalCount: 20, filledCount: 20, validatedCount: 18 })],
+      [],
+    )
+    const detail = screen.getByTestId("plan-chapter-detail")
+    // Not the raw "GEN 12" the build showed.
+    expect(within(detail).getByTestId("plan-chapter-detail-title")).toHaveTextContent("Chapter 12")
+    expect(within(detail).getByTestId("plan-chapter-detail-left"))
+      .toHaveTextContent("2 cells not yet validated")
+  })
+
+  it("reads its bars in cells, not percentages", async () => {
+    await openChapter(
+      nearlyDone({ sectionKey: "GEN" }),
+      [section("GEN 12", { totalCount: 20, filledCount: 20, validatedCount: 18 })],
+      [],
+    )
+    // "100/90%" rounds the two outstanding cells out of existence; "20/18" is
+    // the thing a manager can act on.
+    expect(screen.getByTestId("plan-chapter-detail")).toHaveTextContent("20/18")
+  })
+
+  it("draws a chip per short verse, in canonical order, and opens the cell", async () => {
+    const onOpenCell = vi.fn()
+    await openChapter(
+      nearlyDone({ sectionKey: "GEN" }),
+      [section("GEN 12", { totalCount: 20, filledCount: 20, validatedCount: 18 })],
+      [
+        verse("c1", "GEN 12:1"),
+        verse("c4", "GEN 12:4", { validated: false }),
+        verse("c5", "GEN 12:5", { validated: false }),
+      ],
+      { onOpenCell },
+    )
+    const row = screen.getByTestId("plan-chapter-verses")
+    expect([...row.children].map((c) => c.textContent)).toEqual(["12:4", "12:5"])
+
+    fireEvent.click(screen.getByTestId("plan-verse-chip-c4"))
+    expect(onOpenCell).toHaveBeenCalledWith("c4")
+  })
+
+  it("lists the unwritten verses when translation is what leads", async () => {
+    // A cell nobody has written cannot be validated, so pointing at an
+    // unvalidated one would send a reader to do the other job first.
+    await openChapter(
+      unit({ sectionKey: "GEN", totalCount: 100, filledCount: 98, validatedCount: 98 }),
+      [section("GEN 12", { totalCount: 20, filledCount: 18, validatedCount: 18 })],
+      [
+        verse("c1", "GEN 12:1"),
+        verse("c2", "GEN 12:2", { filled: false, validated: false }),
+        verse("c3", "GEN 12:3", { validated: false }),
+      ],
+    )
+    const row = screen.getByTestId("plan-chapter-verses")
+    expect([...row.children].map((c) => c.textContent)).toEqual(["12:2"])
+  })
+
+  it("draws chips on a chapter of a unit that is nowhere near done", async () => {
+    // Sam chose this over gating them the way the badges and the link are
+    // gated: a chip says which verse, and that is worth the same on a book at
+    // sixty percent as on one at ninety-nine.
+    await openChapter(
+      unit({ sectionKey: "GEN", totalCount: 1000, filledCount: 600, validatedCount: 400 }),
+      [section("GEN 12", { totalCount: 20, filledCount: 20, validatedCount: 19 })],
+      [verse("c9", "GEN 12:9", { validated: false })],
+    )
+    expect(screen.getByTestId("plan-verse-chip-c9")).toBeInTheDocument()
+  })
+
+  it("draws no chip row for a chapter short on audio alone", async () => {
+    // The verse detail carries `filled` and `validated` and nothing about
+    // audio, so there is no per-cell answer to give.
+    await openChapter(
+      nearlyDone({ sectionKey: "GEN", audioCount: 90 }),
+      [section("GEN 12", {
+        totalCount: 20, filledCount: 20, validatedCount: 20,
+        audioCount: 18, audioValidatedCount: 18,
+      })],
+      [verse("c1", "GEN 12:1")],
+    )
+    expect(screen.getByTestId("plan-chapter-detail-left"))
+      .toHaveTextContent("2 takes not yet recorded")
+    expect(screen.queryByTestId("plan-chapter-verses")).toBeNull()
+  })
+
+  it("names a one-chapter book's card as chapter 1", async () => {
+    await openChapter(
+      nearlyDone({ sectionKey: "TIT" }),
+      [section("TIT", { totalCount: 15, filledCount: 15, validatedCount: 13 })],
+      [],
+    )
+    expect(screen.getByTestId("plan-chapter-detail-title")).toHaveTextContent("Chapter 1")
   })
 })

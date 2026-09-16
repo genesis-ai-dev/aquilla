@@ -227,3 +227,63 @@ describe("the Assign affordance", () => {
     expect(modal).toHaveAttribute("data-lane", "es")
   })
 })
+
+// AQU-1278: the per-unit read now returns each assignment's chapters with their
+// own counts, so a person's line can finish its sentence — "2 to validate ·
+// ch. 12" — instead of leaving a manager to find the chapter on the grid.
+describe("where a person's outstanding work is", () => {
+  const chapter = (key: string, over: Partial<{ total: number; translated: number; validated: number }> = {}) =>
+    ({ key, total: 10, translated: 10, validated: 10, recorded: 0, audioValidated: 0, ...over })
+
+  it("names the chapter the outstanding cells are in", () => {
+    renderSection({
+      assignments: [assignment({
+        cellsTotal: 20, translated: 20, validated: 18,
+        chapters: [chapter("GEN 11"), chapter("GEN 12", { validated: 8 })],
+      })],
+    })
+    expect(screen.getByTestId("plan-assignment-left-a1"))
+      .toHaveTextContent("2 to validate · ch. 12")
+  })
+
+  it("joins two short chapters with a conjunction", () => {
+    renderSection({
+      assignments: [assignment({
+        cellsTotal: 20, translated: 20, validated: 17,
+        chapters: [chapter("GEN 12", { validated: 8 }), chapter("GEN 40", { validated: 9 })],
+      })],
+    })
+    expect(screen.getByTestId("plan-assignment-left-a1")).toHaveTextContent("ch. 12 and 40")
+  })
+
+  it("says nothing about where when every chapter is clear", () => {
+    renderSection({
+      assignments: [assignment({
+        cellsTotal: 20, translated: 20, validated: 20, chapters: [chapter("GEN 11")],
+      })],
+    })
+    const left = screen.getByTestId("plan-assignment-left-a1")
+    expect(left).toHaveTextContent("Nothing left")
+    expect(left).not.toHaveTextContent("ch.")
+  })
+
+  it("falls back to the bare shortfall when the worker sent no chapters", () => {
+    // `chapters` is optional on the wire: the client and the workers deploy
+    // separately, so a page talking to an older worker drops one line of
+    // detail rather than crashing on `.map`.
+    renderSection({ assignments: [assignment({ translated: 950, validated: 948 })] })
+    const left = screen.getByTestId("plan-assignment-left-a1")
+    expect(left).toHaveTextContent("2 cells to validate")
+    expect(left).not.toHaveTextContent("ch.")
+  })
+
+  it("names a one-chapter book's chapter as 1, not as its book code", () => {
+    renderSection({
+      assignments: [assignment({
+        scopeLabel: "Titus", cellsTotal: 10, translated: 10, validated: 8,
+        chapters: [chapter("TIT", { validated: 8 })],
+      })],
+    })
+    expect(screen.getByTestId("plan-assignment-left-a1")).toHaveTextContent("ch. 1")
+  })
+})

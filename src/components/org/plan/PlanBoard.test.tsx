@@ -584,3 +584,73 @@ describe("the order ref the inspector navigates by", () => {
     expect(orderRef.current.length).toBe(12)
   })
 })
+
+// ── AQU-1278: the third column, after Sam's review of the build ─────────────
+
+describe("what the third column says", () => {
+  const withProps = (units: PlanUnit[], props: Partial<React.ComponentProps<typeof PlanBoard>> = {}) =>
+    render(
+      <PlanBoard units={units} now={NOW} projectId="p1" selectedId={null}
+        onSelect={vi.fn()} {...props} />,
+    )
+
+  const dateCell = () => screen.getByTestId("plan-date-f1-").parentElement!
+
+  it("drops the noun when two shortfall terms share the line", () => {
+    // 300 cells, 294 written, 286 validated: six to translate and eight to
+    // validate, fourteen short against a threshold of eighteen. In full this
+    // read "6 cells to translate · 8 cells to validate", which wrapped the row.
+    withProps([unit({ totalCount: 300, filledCount: 294, validatedCount: 286 })])
+    expect(dateCell()).toHaveTextContent("6 to translate · 8 to validate")
+  })
+
+  it("keeps the noun when the line carries one term", () => {
+    withProps([nearlyDone()])
+    expect(dateCell()).toHaveTextContent("4 cells to validate")
+  })
+
+  it("joins the short chapters with a conjunction", () => {
+    withProps([nearlyDone()], { shortChaptersByUnit: new Map([["f1:", ["12", "40"]]]) })
+    expect(dateCell()).toHaveTextContent("chapters 12 and 40")
+  })
+
+  it("names three chapters and counts the rest, with one 'and' between them", () => {
+    withProps([nearlyDone()], {
+      shortChaptersByUnit: new Map([["f1:", ["4", "9", "17", "22", "28"]]]),
+    })
+    // "4, 9, 17 and 2 more" — the conjunction belongs to the remainder here, so
+    // the named list keeps the plain join or the line reads "…, and 17 and 2 more".
+    expect(dateCell()).toHaveTextContent("4, 9, 17 and 2 more")
+  })
+
+  it("says a finished unit is not marked done, rather than that it has no date", () => {
+    withProps([unit({ filledCount: 100, validatedCount: 100, lastEditAt: NOW - 3600_000 })])
+    const cell = dateCell()
+    expect(cell).toHaveTextContent("Nothing left")
+    expect(cell).toHaveTextContent("not marked done")
+    expect(cell).not.toHaveTextContent("no target date")
+  })
+
+  it("marks a unit nobody holds as unassigned, once its assignments are known", () => {
+    withProps([unit({ filledCount: 40, lastEditAt: NOW - 3600_000 })], {
+      assigneesByUnit: new Map([["f1:", []]]),
+    })
+    expect(dateCell()).toHaveTextContent("unassigned")
+  })
+
+  it("stays silent about a unit whose assignments nobody has read yet", () => {
+    // `undefined` is "not asked" and `[]` is "asked, nobody" — there is no
+    // project-wide assignee read, so the board only learns a unit's people
+    // when a manager opens it. Printing "unassigned" for the first would send
+    // someone to staff a book that already has two people on it.
+    withProps([unit({ filledCount: 40, lastEditAt: NOW - 3600_000 })], {
+      assigneesByUnit: new Map(),
+    })
+    expect(dateCell()).not.toHaveTextContent("unassigned")
+  })
+
+  it("does not call a nearly-complete unit unassigned, where the line says what is left", () => {
+    withProps([nearlyDone()], { assigneesByUnit: new Map([["f1:", []]]) })
+    expect(dateCell()).not.toHaveTextContent("unassigned")
+  })
+})

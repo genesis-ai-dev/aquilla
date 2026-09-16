@@ -238,6 +238,11 @@ export function PlanRow({
     line2 = note
       ? t("org.projectOverview.plan.shortfallPair", { first: leftToDo, second: note })
       : leftToDo
+  } else if (line1LeftToDo && shortfallText === null) {
+    // AQU-1278. Line 1 already says "Nothing left"; the question a reader has
+    // in front of a finished book is why it is not in Done. "no target date",
+    // which this used to inherit, answers a question nobody asked.
+    line2 = t("org.projectOverview.plan.nothingLeftUndone")
   } else if (line1LeftToDo && shortfallText !== null && chapterList.length > 0) {
     // Named up to three, then counted. A nearly-complete Psalms can be short in
     // forty chapters, and forty numbers joined into one line is not a sentence
@@ -249,10 +254,29 @@ export function PlanRow({
     // conjunction are locale business, and Intl already owns them.
     const named = chapterList.slice(0, WHERE_CHAPTERS_NAMED)
     const rest = chapterList.length - named.length
-    const list = formatList(named, locale)
+    // CONJUNCTION when the list is complete — "12 and 40" — and the plain unit
+    // join when it is not, because `shortfallWhereMore` supplies its own "and"
+    // for the remainder and two of them read as "4, 9, and 17 and 4 more".
+    const list = formatList(named, locale, rest > 0 ? undefined : { type: "conjunction" })
     line2 = rest > 0
       ? t("org.projectOverview.plan.shortfallWhereMore", { count: rest, list })
       : t("org.projectOverview.plan.shortfallWhere", { count: chapterList.length, list })
+  }
+
+  // AQU-1278: and when the line is still just the note, say whether anybody is
+  // on this unit at all.
+  //
+  // ONLY FOR A UNIT WHOSE ASSIGNMENTS ARE KNOWN. `undefined` means nobody has
+  // asked yet — there is no project-wide assignee read, so the board learns a
+  // unit's assignments when a manager opens it — and an empty array means the
+  // question was asked and the answer was nobody. Printing "unassigned" for
+  // the first would tell a manager to staff a book that already has two people
+  // on it, which is worse than saying nothing.
+  if (assignees !== undefined && assignees.length === 0 && leftToDo === null) {
+    const unassigned = t("org.projectOverview.plan.unassignedRow")
+    line2 = line2
+      ? t("org.projectOverview.plan.shortfallPair", { first: unassigned, second: line2 })
+      : unassigned
   }
 
   // Where the click lands, said in words for a screen reader. Only the two text
@@ -372,7 +396,7 @@ export function PlanRow({
         <span className="flex flex-col gap-0.5 md:text-end">
           <span
             data-testid={`plan-date-${unit.fileId}-${unit.sectionKey}`}
-            className={`text-[12.5px] tabular-nums ${
+            className={`text-[12.5px] whitespace-nowrap tabular-nums ${
               status === "overdue"
                 ? "font-semibold text-destructive"
                 : unit.targetDate || line1LeftToDo
@@ -417,7 +441,12 @@ export function PlanRow({
               (leftToDo ?? t("org.projectOverview.plan.noTargetShort"))
             )}
           </span>
-          <span className="text-[11.5px] text-muted-foreground">
+          {/* AQU-1278: neither line may wrap. The third column is the
+              narrowest on the board, and a shortfall that broke over two lines
+              took the whole row's height with it — sixty-six rows of which is
+              a different page. Line 1 is short enough to hold; line 2 gives way
+              with an ellipsis rather than reflowing. */}
+          <span className="truncate text-[11.5px] text-muted-foreground">
             {line2 ?? "—"}
           </span>
         </span>

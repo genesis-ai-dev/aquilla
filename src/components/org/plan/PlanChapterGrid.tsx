@@ -15,7 +15,11 @@
 // survives a greyscale print and a colour-blind reader.
 
 import { useT } from "@/lib/i18n/I18nProvider"
-import { isKnownBookCode } from "@/lib/file-labeling/bible-book-names"
+import {
+  classifyPlanSection,
+  numberedBookCodes,
+  planChapterNumber,
+} from "@/lib/plan/plan-section"
 import { planUnitShortfall, type PlanShortfall } from "@/lib/plan/plan-status"
 import type { PlanSection } from "@/hooks/usePlanUnitSections"
 import { hexToRgba, parseTrackHue } from "@/lib/timeline/track-colors"
@@ -47,34 +51,11 @@ function underlineAlpha(short: number, total: number): number {
 const LEGEND_ALPHA = 0.75
 
 /**
- * The chapter number a section key carries, or null when it is not a chapter at
- * all.
- *
- * TWO TRAPS LIVE IN THIS FUNCTION, and both of them put a tile in the wrong
- * square rather than failing loudly.
- *
- * The first is `usePlanUnitSections`' own `sectionLabel`, which is looser on
- * purpose — it only has to produce something to print, so it reads "Scene 4" as
- * "4". A grid POSITIONS by this number, so borrowing that rule would sit scene
- * four in chapter four's square and leave a document file looking like a book
- * with holes in it.
- *
- * The second is subtler: "Act 2" passes any book-code test you write, because
- * ACT is Acts. A section key is machine-made from `canonical_ref` and a USFM
- * book code is upper case in every one of them; a human-written section name in
- * a document is not. Requiring the prefix to be upper case AS WELL AS a known
- * code is what separates "ACT 2" (Acts, chapter two) from "Act 2" (the second
- * act of something), and there is no other signal in the key that can.
+ * @deprecated AQU-1278 moved this to `@/lib/plan/plan-section`, where the
+ * board's row and the inspector's chapter card read it too. Kept as a
+ * re-export so existing importers keep working.
  */
-export function planTileChapter(key: string): number | null {
-  const match = /^(\S+)\s+(\d+)$/.exec(key)
-  if (!match) return null
-  const [, prefix, chapter] = match
-  if (prefix !== prefix.toUpperCase()) return null
-  if (!isKnownBookCode(prefix)) return null
-  const n = Number(chapter)
-  return Number.isInteger(n) && n > 0 ? n : null
-}
+export const planTileChapter = planChapterNumber
 
 /**
  * One chapter's outstanding work, measured by the unit rule.
@@ -164,17 +145,23 @@ export function PlanChapterGrid({
   // out of the response entirely — so chapters are not contiguous. Indexed by
   // position, a single missing chapter shifts every later tile by one square and
   // the grid lies about every chapter after it, silently and plausibly.
+  //
+  // AQU-1278: a BARE book code goes on the grid as chapter 1 when it is a
+  // one-chapter book, and into the extras row as front matter when the same
+  // book also has numbered chapters. `classifyPlanSection` decides which, over
+  // the whole key list — the key alone cannot tell "TIT" from Genesis's "GEN".
+  const numbered = numberedBookCodes(sections.map((s) => s.key))
   const byChapter = new Map<number, PlanSection>()
-  const extras: PlanSection[] = []
+  const extras: Array<{ section: PlanSection; frontMatter: boolean }> = []
   let highest = 0
   for (const section of sections) {
-    const chapter = planTileChapter(section.key)
-    if (chapter == null) {
-      extras.push(section)
+    const kind = classifyPlanSection(section.key, numbered)
+    if (kind.kind !== "chapter") {
+      extras.push({ section, frontMatter: kind.kind === "frontMatter" })
       continue
     }
-    byChapter.set(chapter, section)
-    if (chapter > highest) highest = chapter
+    byChapter.set(kind.n, section)
+    if (kind.n > highest) highest = kind.n
   }
 
   // Ten across fits the panel at a comfortable tile size and makes the decades
@@ -218,27 +205,33 @@ export function PlanChapterGrid({
         </div>
       )}
 
-      {/* Everything a numbered grid cannot hold, in its own row beneath it,
-          each labelled with the key it actually has. Three shapes end up here:
-          USFM front matter, which comes back as a bare book code ("GEN"); a
-          one-chapter book, whose section key IS its book code ("TIT"); and a
-          document file's own section names ("Scene 4", "Act 2"). Putting them
-          in the grid would mean inventing a chapter number for each. */}
+      {/* Everything a numbered grid cannot hold, in its own row beneath it.
+          Two shapes end up here now: USFM FRONT MATTER, a bare book code
+          sitting beside that book's real chapters, which gets the word rather
+          than the code because "GEN" under a grid of numbers reads as a
+          thirteenth chapter; and a document file's own section names ("Scene
+          4", "Act 2"), which keep the names they were given. A one-chapter
+          book no longer lands here — it is chapter 1, on the grid, per Sam. */}
       {extras.length > 0 && (
         <div data-testid="plan-chapter-extras" className="flex flex-wrap gap-[3px]">
-          {extras.map((section) => (
-            <PlanTile
-              key={section.key}
-              section={section}
-              label={section.key}
-              ariaSubject={section.key}
-              wide
-              showAudio={showAudio}
-              showCount={nearlyComplete}
-              selected={selectedKey === section.key}
-              onSelect={onSelect}
-            />
-          ))}
+          {extras.map(({ section, frontMatter }) => {
+            const label = frontMatter
+              ? t("org.projectOverview.plan.frontMatter")
+              : section.key
+            return (
+              <PlanTile
+                key={section.key}
+                section={section}
+                label={label}
+                ariaSubject={label}
+                wide
+                showAudio={showAudio}
+                showCount={nearlyComplete}
+                selected={selectedKey === section.key}
+                onSelect={onSelect}
+              />
+            )
+          })}
         </div>
       )}
 

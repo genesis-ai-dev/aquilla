@@ -61,6 +61,23 @@ const SHORTFALL_KEY: Record<PlanShortfallPart["kind"], string> = {
 }
 
 /**
+ * AQU-1278: the same four without their nouns, for a line carrying two terms.
+ *
+ * "6 cells to translate · 8 cells to validate" is two hundred pixels of a
+ * column that starts at a hundred and seventy, so it wraps and takes the row's
+ * height with it. It also says "cells" twice about the same cells. Dropping the
+ * noun is only safe WITH a second term beside it — alone, "6 to validate" has
+ * nothing to say what six of anything are — which is why this is chosen by the
+ * number of parts and not by a caller's flag.
+ */
+const SHORTFALL_BRIEF_KEY: Record<PlanShortfallPart["kind"], string> = {
+  translate: "org.projectOverview.plan.shortfallTranslateBrief",
+  validate: "org.projectOverview.plan.shortfallValidateBrief",
+  record: "org.projectOverview.plan.shortfallRecordBrief",
+  audio_validate: "org.projectOverview.plan.shortfallAudioValidateBrief",
+}
+
+/**
  * AQU-1278: what a unit still needs, as one string — "6 cells to translate ·
  * 34 cells to validate".
  *
@@ -81,8 +98,15 @@ export function usePlanShortfallRenderer(): (shortfall: PlanShortfall) => string
     // `planShortfallParts` has already dropped the zero terms, ordered what is
     // left worst-first, and capped it at two. The pair is a key of its own so a
     // language that joins clauses with something other than a middot can.
-    const [first, second] = planShortfallParts(shortfall).map((part) =>
-      t(SHORTFALL_KEY[part.kind] as never, { count: part.count }),
+    //
+    // TWO TERMS TAKE THE BRIEF WORDING, one takes the full. The choice is made
+    // from the part count rather than handed in, because it is a fact about
+    // the line rather than about the caller: a lone "6 to validate" has
+    // nothing beside it to say what six of anything are.
+    const parts = planShortfallParts(shortfall)
+    const keys = parts.length > 1 ? SHORTFALL_BRIEF_KEY : SHORTFALL_KEY
+    const [first, second] = parts.map((part) =>
+      t(keys[part.kind] as never, { count: part.count }),
     )
     if (!first) return null
     if (!second) return first

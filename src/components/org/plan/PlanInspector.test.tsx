@@ -270,15 +270,31 @@ describe("the chapter grid (AQU-1278)", () => {
     expect(screen.getByText("Progress by section")).toBeInTheDocument()
   })
 
-  it("keeps a one-chapter book, whose section key IS its book code, off the grid too", async () => {
-    // A bare book code carries no chapter number to be placed by — the same
-    // shape USFM front matter comes back as.
+  it("puts a one-chapter book on the grid as chapter 1", async () => {
+    // AQU-1278. It used to land in the extras row wearing its book code, so
+    // the board's where-line read "chapter TIT". Sam: "if it's a single
+    // chapter it still is just a chapter, so you just put a little one there."
+    // Genesis's front matter shares the key shape and does NOT get this — the
+    // test above it proves the separation.
     const getToken = withSections([section("TIT")])
     renderInspector(unit({ sectionKey: "TIT", fileName: "Whole Bible" }), true, false, getToken)
     await waitFor(() => expect(screen.getByTestId("plan-tile-TIT")).toBeInTheDocument())
-    expect(within(screen.getByTestId("plan-chapter-extras")).getByTestId("plan-tile-TIT"))
-      .toBeInTheDocument()
-    expect(screen.queryByTestId("plan-chapter-grid")).toBeNull()
+    const grid = screen.getByTestId("plan-chapter-grid")
+    expect([...grid.children].map((c) => c.getAttribute("data-testid"))).toEqual(["plan-tile-TIT"])
+    expect(screen.getByTestId("plan-tile-TIT")).toHaveTextContent("1")
+    expect(screen.queryByTestId("plan-chapter-extras")).toBeNull()
+  })
+
+  it("keeps a book's front matter off the numbered grid, named as what it is", async () => {
+    // The same bare-code shape, but GEN 1 is in the unit too, so square one is
+    // already spoken for and this is front matter.
+    const getToken = withSections([section("GEN"), section("GEN 1")])
+    renderInspector(unit({ sectionKey: "GEN", fileName: "Whole Bible" }), true, false, getToken)
+    await waitFor(() => expect(screen.getByTestId("plan-chapter-extras")).toBeInTheDocument())
+    expect(within(screen.getByTestId("plan-chapter-extras")).getByTestId("plan-tile-GEN"))
+      .toHaveTextContent("front matter")
+    const grid = screen.getByTestId("plan-chapter-grid")
+    expect([...grid.children].map((c) => c.getAttribute("data-testid"))).toEqual(["plan-tile-GEN 1"])
   })
 
   it("counts a chapter's outstanding cells into its tile, for a screen reader too", async () => {

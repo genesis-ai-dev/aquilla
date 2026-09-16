@@ -1276,12 +1276,33 @@ export const org = defineNamespace({
     // zero on every project alive. The words exist so the flip is a constant,
     // not a copy round.
     "org.projectOverview.plan.shortfallAudioValidate": plural({ one: "{count} take to validate", other: "{count} takes to validate" }),
+    // AQU-1278: the SHORT forms, used when two terms share one line. In full
+    // they read "6 cells to translate \u00b7 8 cells to validate", which wraps in
+    // the narrowest column on the board and takes the row's height with it \u2014
+    // and the second noun is the same word as the first, so the line spends
+    // its width saying "cells" twice. The noun survives in the single-term
+    // case, where there is room and no context to borrow from.
+    "org.projectOverview.plan.shortfallTranslateBrief": plural({ one: "{count} to translate", other: "{count} to translate" }),
+    "org.projectOverview.plan.shortfallValidateBrief": plural({ one: "{count} to validate", other: "{count} to validate" }),
+    "org.projectOverview.plan.shortfallRecordBrief": plural({ one: "{count} to record", other: "{count} to record" }),
+    // "to sign off" rather than a second "to validate": the brief forms drop
+    // the noun that told them apart, and two identical English strings in one
+    // catalog are a collision a translator cannot resolve from context.
+    "org.projectOverview.plan.shortfallAudioValidateBrief": plural({ one: "{count} to sign off", other: "{count} to sign off" }),
     "org.projectOverview.plan.shortfallPair": "{first} \u00b7 {second}",
     // A unit with nothing outstanding that nobody has marked done: it stays in
     // Overdue where its blown date belongs, and this line is how the row
     // admits the work itself is finished. Without it that row looks identical
     // to one with three hundred cells to go.
     "org.projectOverview.plan.nothingLeft": "Nothing left",
+    // AQU-1278: the second line under that one, on a unit with NO target date.
+    // It used to read "no target date", which is true and useless — the reader
+    // is looking at a finished book and wants to know why it is not in Done.
+    "org.projectOverview.plan.nothingLeftUndone": "not marked done",
+    // AQU-1278: prefixes a row's second line when the unit's assignments have
+    // been read and there are none. Only ever shown for a unit whose
+    // assignments ARE known, so it says "nobody", never "nobody yet loaded".
+    "org.projectOverview.plan.unassignedRow": "unassigned",
     // Where the outstanding cells actually are. The plural agrees with how
     // many chapters are in the list, which the caller passes alongside — it is
     // not in the string, the same arrangement the summary pills use.
@@ -1331,6 +1352,9 @@ export const org = defineNamespace({
     // nothing to draw. It says why rather than rendering an empty frame, which
     // reads as a load that failed.
     "org.projectOverview.plan.gridEmptyMedia": "This file's sections are time ranges, which nobody plans by.",
+    // AQU-1278: the tile beneath the chapter grid for a book's USFM front
+    // matter — cells with no chapter number, filed before chapter 1.
+    "org.projectOverview.plan.frontMatter": "front matter",
     "org.projectOverview.plan.tileAria": "Chapter {chapter}: {short} cells short",
     "org.projectOverview.plan.tileAriaSection": "{section}: {short} cells short",
     // Audio hangs off the file, not off a target language, so every lane reads
@@ -2675,6 +2699,26 @@ export const org = defineNamespace({
           "One term of the shortfall line (see shortfallTranslate): recorded takes nobody has signed off. Not rendered anywhere today — audio is judged on what has been recorded until the recording-review UI exists (AQU-490), so this count is zero on every project. Translate it anyway; it appears the day that lands.",
         placeholders: { count: "Recorded takes still awaiting sign-off — a number; it also selects the plural form." },
       },
+      "org.projectOverview.plan.shortfallTranslateBrief": {
+        description:
+          "The short form of shortfallTranslate, used when TWO shortfall terms share one line on a plan row — \"6 to translate · 8 to validate\". The noun is dropped because the full pair wraps in the narrowest column on the board, and because both terms count the same thing, so saying it twice buys nothing. Keep it as short as the language allows.",
+        placeholders: { count: "Cells with no target text yet — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.shortfallValidateBrief": {
+        description:
+          "The short form of shortfallValidate (see shortfallTranslateBrief): translated cells nobody has validated yet, worded for a line that already carries another term.",
+        placeholders: { count: "Translated cells still awaiting validation — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.shortfallRecordBrief": {
+        description:
+          "The short form of shortfallRecord (see shortfallTranslateBrief): cells with no take recorded against them, worded for a line that already carries another term.",
+        placeholders: { count: "Cells with no recording yet — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.shortfallAudioValidateBrief": {
+        description:
+          "The short form of shortfallAudioValidate (see shortfallTranslateBrief): recorded takes nobody has signed off. Worded 'sign off' rather than 'validate' so it cannot collide with the validate term beside it once both have dropped their nouns. Not rendered today — audio is judged on what has been recorded until AQU-490 ships.",
+        placeholders: { count: "Recorded takes still awaiting sign-off — a number; it also selects the plural form." },
+      },
       "org.projectOverview.plan.shortfallPair": {
         description:
           "Joins the two terms of a shortfall line — \"6 cells to translate · 34 cells to validate\". A key of its own so a language that separates clauses with a different mark, or without spaces around it, can say so. Do not reorder the two: the first is deliberately the worse of the pair.",
@@ -2686,6 +2730,16 @@ export const org = defineNamespace({
       "org.projectOverview.plan.nothingLeft": {
         description:
           "Replaces the shortfall line on a unit with no outstanding work in it. Such a unit can still sit under Overdue — a blown target date outranks a finished one — and this is how its row admits the work itself is done.",
+      },
+      "org.projectOverview.plan.nothingLeftUndone": {
+        description:
+          "Second line of a plan row whose first line reads 'Nothing left' and which has no target date: every cell is done but no manager has marked the unit complete. A lower-case fragment sitting under the line above, not a sentence.",
+        maxLength: 20,
+      },
+      "org.projectOverview.plan.unassignedRow": {
+        description:
+          "Prefixes a plan row's second line when nobody holds an assignment covering that unit — \"unassigned · 3 hours ago\". A lower-case fragment before a separator, never a standalone label.",
+        maxLength: 14,
       },
       "org.projectOverview.plan.shortfallWhere": {
         description:
@@ -2782,6 +2836,11 @@ export const org = defineNamespace({
       "org.projectOverview.plan.gridEmptyMedia": {
         description:
           "Stands in for the chapter grid on a file whose sections are time ranges rather than chapters — a dubbed episode, say. It says why there is no grid, because an empty frame reads as a load that failed.",
+      },
+      "org.projectOverview.plan.frontMatter": {
+        description:
+          "Label on the tile beneath the inspector's chapter grid for a Bible book's USFM front matter — a book title, running headers, an introduction: cells that belong to the book but to no chapter. Lower case, because it sits in a row of small tiles among chapter numbers.",
+        maxLength: 14,
       },
       "org.projectOverview.plan.tileAria": {
         description:

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest"
 import { render, screen, fireEvent, within } from "@testing-library/react"
 import { PlanChapterGrid, planTileChapter } from "./PlanChapterGrid"
+import { classifyPlanSection, numberedBookCodes } from "@/lib/plan/plan-section"
 import type { PlanSection } from "@/hooks/usePlanUnitSections"
 import { hexToRgba, parseTrackHue } from "@/lib/timeline/track-colors"
 
@@ -54,10 +55,28 @@ describe("which keys are chapters", () => {
     expect(planTileChapter("1CO 12")).toBe(12)
   })
 
-  it("refuses a bare book code, which carries no chapter to be placed by", () => {
-    // USFM front matter, and a one-chapter book whose section key IS its code.
+  it("refuses a bare book code, which carries no chapter number of its own", () => {
+    // The PARSER refuses it — there is no number in the string to read. Which
+    // square it belongs in is `classifyPlanSection`'s answer, below, and it
+    // depends on what the rest of the unit's keys claim.
     expect(planTileChapter("GEN")).toBeNull()
     expect(planTileChapter("TIT")).toBeNull()
+  })
+
+  // AQU-1278. Sam, on a one-chapter book showing up as "chapter TIT": "if it's
+  // a single chapter it still is just a chapter, so you just put a little one
+  // there." The identical key shape is ALSO Genesis's front matter, and only
+  // the other keys in the unit separate the two.
+  it("makes a lone book code chapter 1, and the same code beside real chapters front matter", () => {
+    expect(classifyPlanSection("TIT", numberedBookCodes(["TIT"])))
+      .toEqual({ kind: "chapter", n: 1 })
+    expect(classifyPlanSection("GEN", numberedBookCodes(["GEN", "GEN 1", "GEN 2"])))
+      .toEqual({ kind: "frontMatter" })
+  })
+
+  it("leaves a document's own section names as sections", () => {
+    expect(classifyPlanSection("Scene 4", numberedBookCodes(["Scene 4"])))
+      .toEqual({ kind: "section" })
   })
 
   it("refuses a document's own section names", () => {
@@ -100,12 +119,22 @@ describe("laying the tiles out", () => {
     expect(screen.getByTestId("plan-chapter-grid").className).toContain("grid-cols-12")
   })
 
-  it("puts everything unnumbered in its own row, labelled with its own key", () => {
-    renderGrid([section("GEN 1"), section("TIT"), section("Scene 4")])
+  it("puts front matter and a named section in their own row, and nothing else", () => {
+    // "GEN" beside GEN 1 is front matter and takes the WORD, because a bare
+    // code under a grid of numbers reads as one more chapter. "Scene 4" keeps
+    // the name it was given.
+    renderGrid([section("GEN 1"), section("GEN"), section("Scene 4")])
     const extras = screen.getByTestId("plan-chapter-extras")
-    expect(within(extras).getByTestId("plan-tile-TIT")).toHaveTextContent("TIT")
+    expect(within(extras).getByTestId("plan-tile-GEN")).toHaveTextContent("front matter")
     expect(within(extras).getByTestId("plan-tile-Scene 4")).toHaveTextContent("Scene 4")
     expect(testids(screen.getByTestId("plan-chapter-grid"))).toEqual(["plan-tile-GEN 1"])
+  })
+
+  it("puts a one-chapter book on the grid as chapter 1, with no extras row", () => {
+    renderGrid([section("TIT")])
+    expect(testids(screen.getByTestId("plan-chapter-grid"))).toEqual(["plan-tile-TIT"])
+    expect(screen.getByTestId("plan-tile-TIT")).toHaveTextContent("1")
+    expect(screen.queryByTestId("plan-chapter-extras")).toBeNull()
   })
 
   it("says why there is no grid rather than drawing an empty frame", () => {

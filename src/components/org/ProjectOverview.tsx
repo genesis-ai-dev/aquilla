@@ -37,7 +37,12 @@ import { downloadBlob } from "@/lib/export/export-service"
 import { PlanBoard } from "./plan/PlanBoard"
 import { PlanInspector } from "./plan/PlanInspector"
 import { PlanAssignments, type PlanAssignTarget } from "./plan/PlanAssignments"
-import { planSectionShortfall, planTileChapter } from "./plan/PlanChapterGrid"
+import { planSectionShortfall } from "./plan/PlanChapterGrid"
+import {
+  classifyPlanSection,
+  numberedBookCodes,
+  planSectionLabel,
+} from "@/lib/plan/plan-section"
 import { RightSidebarPanel } from "@/components/RightSidebarPanel"
 import { useIsLgUp } from "@/components/AppShell"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
@@ -342,17 +347,6 @@ function unitAssignmentsKey(unitId: string, lane: string): string {
   return `${unitId}\u0000${lane}`
 }
 
-/**
- * The chapter's own label for a progress section key — "GEN 12" → "12".
- *
- * `planTileChapter` is the shared parser (it is careful about "Act 2", which
- * looks like a book code and is not — see its note); anything it refuses keeps
- * its whole key, which is what a non-scripture section has instead of a number.
- */
-function sectionChapterLabel(key: string): string {
-  const chapter = planTileChapter(key)
-  return chapter == null ? key : String(chapter)
-}
 
 // ── Main component ────────────────────────────────────────────────────────────
 
@@ -694,12 +688,20 @@ export function ProjectOverview() {
    * than silenced with a lint suppression.
    */
   const planFileKey = useMemo(
-    () => Array.from(new Set(
-      planUnits
+    () => Array.from(new Set([
+      ...planUnits
         .filter((u) => planUnitIsNearlyComplete(u, tableNow, planAudioFiles))
         .map((u) => u.fileId),
-    )).sort().join("\u0000"),
-    [planUnits, tableNow, planAudioFiles],
+      // AQU-1278: plus whichever file the OPEN unit belongs to, nearly complete
+      // or not. The inspector's "N chapters are not assigned" counts the unit's
+      // chapters against what its assignments cover, and without its sections
+      // loaded that line never appears on a book in mid-flight — which is the
+      // book a manager is most likely to be staffing. It reads through the same
+      // freshness-gated resource the inspector's own hook uses, so a unit
+      // already on screen costs no extra request.
+      ...(selectedPlanUnit ? [selectedPlanUnit.fileId] : []),
+    ])).sort().join("\u0000"),
+    [planUnits, tableNow, planAudioFiles, selectedPlanUnit],
   )
 
   useEffect(() => {
@@ -733,9 +735,14 @@ export function ProjectOverview() {
         try {
           const body = await getFileProgress(id, fileId, () => getPlanToken(), planLane)
           if (cancelled) return
+          // AQU-1278: labelled through the shared classifier, over the whole
+          // file's keys — a bare book code is chapter 1 for a one-chapter book
+          // and front matter beside real chapters, and only the other keys say
+          // which. The grid upstairs reaches the same answer the same way.
+          const numbered = numberedBookCodes(body.sections.map((s) => s.key))
           const rows: PlanSection[] = body.sections.map((section) => ({
             key: section.key,
-            label: sectionChapterLabel(section.key),
+            label: planSectionLabel(section.key, numbered),
             totalCount: section.totalCount,
             filledCount: section.filledCount,
             validatedCount: section.validatedCount,
@@ -768,10 +775,17 @@ export function ProjectOverview() {
       const sections = planFileSections.get(unit.fileId)
       if (!sections) continue
       const hasAudio = planAudioFiles.has(unit.fileId)
-      const short = sections
+      const mine = sections.filter((s) => sectionBelongsToUnit(s.key, unit.sectionKey))
+      const numbered = numberedBookCodes(mine.map((s) => s.key))
+      const short = mine
         .filter(
           (section) =>
-            sectionBelongsToUnit(section.key, unit.sectionKey) &&
+            // AQU-1278: front matter is left OUT of this line. The row says
+            // "chapters 12 and 40", and a book title filed before chapter 1 is
+            // not a chapter — naming it here would send a reader looking for a
+            // numbered tile that does not exist. The grid still shows it, in
+            // its own row, labelled as what it is.
+            classifyPlanSection(section.key, numbered).kind !== "frontMatter" &&
             planSectionShortfall(section, hasAudio).worst > 0,
         )
         .map((section) => section.label)
@@ -872,17 +886,35 @@ export function ProjectOverview() {
    * something indefensible — see `PlanAssignmentsProps.unassignedChapters`.
    */
   const unassignedChapterCount = useMemo(() => {
-    if (!selectedPlanUnit || selectedUnitAssignments.length > 0) return undefined
+    if (!selectedPlanUnit) return undefined
     const sections = planFileSections.get(selectedPlanUnit.fileId)
     if (!sections) return undefined
-    const own = sections.filter((section) =>
+    const mine = sections.filter((section) =>
       sectionBelongsToUnit(section.key, selectedPlanUnit.sectionKey),
-    ).length
+    )
+    const numbered = numberedBookCodes(mine.map((s) => s.key))
+    // Front matter is not a chapter, so it cannot be an unassigned one — a
+    // Genesis every chapter of which is spoken for would otherwise report one
+    // stray chapter nobody can be given.
+    const own = mine.filter(
+      (s) => classifyPlanSection(s.key, numbered).kind !== "frontMatter",
+    )
     // A media file's sections are time ranges, which nobody plans by, and a unit
     // with no chapters at all must not report ZERO — zero is the value that
     // renders "Every chapter is assigned.", which would be the exact opposite
     // of what an unassigned unit means.
-    return own > 0 ? own : undefined
+    if (own.length === 0) return undefined
+    // AQU-1278: with per-assignment chapter coverage on the wire, the answer no
+    // longer collapses the moment somebody is assigned. Subtract the union of
+    // what every assignment covers and what remains is genuinely unheld. An
+    // older worker sends no `chapters` at all, and then there is nothing
+    // honest to count — say nothing rather than guess.
+    if (selectedUnitAssignments.length === 0) return own.length
+    if (selectedUnitAssignments.some((a) => a.chapters === undefined)) return undefined
+    const covered = new Set(
+      selectedUnitAssignments.flatMap((a) => (a.chapters ?? []).map((c) => c.key)),
+    )
+    return own.filter((s) => !covered.has(s.key)).length
   }, [selectedPlanUnit, selectedUnitAssignments, planFileSections])
 
   /**
@@ -918,9 +950,10 @@ export function ProjectOverview() {
           // The board can be clicked before the section sweep above has reached
           // this file. One read, through the same freshness-gated resource.
           const body = await getFileProgress(id, unit.fileId, () => getPlanToken(), planLane)
+          const numbered = numberedBookCodes(body.sections.map((s) => s.key))
           sections = body.sections.map((section) => ({
             key: section.key,
-            label: sectionChapterLabel(section.key),
+            label: planSectionLabel(section.key, numbered),
             totalCount: section.totalCount,
             filledCount: section.filledCount,
             validatedCount: section.validatedCount,

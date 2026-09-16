@@ -108,10 +108,21 @@ describe("a person's progress reads in cells", () => {
     renderSection({ assignments: [assignment()] })
     expect(screen.getByTestId("plan-assignment-text-a1")).toHaveTextContent("940/938")
     // Translation leads validation: a cell nobody has written cannot be
-    // validated, so the ten untranslated cells are named first.
+    // validated, so the ten untranslated cells are named first. AQU-1278: two
+    // terms on one line drop the noun — this panel is three hundred pixels
+    // wide, and both halves count the same cells, so "cells" twice is width
+    // spent saying nothing.
     expect(screen.getByTestId("plan-assignment-left-a1")).toHaveTextContent(
-      "10 cells to translate · 2 cells to validate",
+      "10 to translate · 2 to validate",
     )
+  })
+
+  it("keeps the noun when only one term is left to say", () => {
+    // Nothing to translate, so the line carries one term and has the room —
+    // and "2 to validate" alone has nothing beside it to say two of what.
+    renderSection({ assignments: [assignment({ translated: 950, validated: 948 })] })
+    expect(screen.getByTestId("plan-assignment-left-a1"))
+      .toHaveTextContent("2 cells to validate")
   })
 
   it("adds the audio pair only for a file that carries recordings", () => {

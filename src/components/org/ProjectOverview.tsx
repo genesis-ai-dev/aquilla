@@ -45,6 +45,7 @@ import { planHasAudio } from "@/lib/plan/plan-status"
 import { useProjectPlan } from "@/hooks/useProjectPlan"
 import {
   audioFileIds,
+  planUnitIsNearlyComplete,
   planUnitId,
   planUnitLabel,
   planUnitShortfall,
@@ -674,7 +675,16 @@ export function ProjectOverview() {
   const [planAssignmentsNonce, setPlanAssignmentsNonce] = useState(0)
 
   /**
-   * The files the board's rows belong to, as ONE string.
+   * The files whose sections the board actually needs, as ONE string.
+   *
+   * ONLY the files that own a NEARLY-COMPLETE unit. Chapter grain exists on the
+   * board for exactly one line — "chapters 12 and 40" under a row's shortfall —
+   * and that line only renders on a nearly-complete row. Reading every file in
+   * the project would have a fifty-document project fetching fifty files'
+   * sections on arrival to draw nothing at all, before anyone had scrolled to
+   * the plan. On the whole-Bible case that motivated this, the set is one file
+   * either way. The inspector's own chapter read is separate and fires on
+   * selection.
    *
    * The dependency below is this key rather than the unit list, and that is
    * load-bearing: `planUnits` is re-minted by every plan read, including the
@@ -684,8 +694,12 @@ export function ProjectOverview() {
    * than silenced with a lint suppression.
    */
   const planFileKey = useMemo(
-    () => Array.from(new Set(planUnits.map((u) => u.fileId))).sort().join("\u0000"),
-    [planUnits],
+    () => Array.from(new Set(
+      planUnits
+        .filter((u) => planUnitIsNearlyComplete(u, tableNow, planAudioFiles))
+        .map((u) => u.fileId),
+    )).sort().join("\u0000"),
+    [planUnits, tableNow, planAudioFiles],
   )
 
   useEffect(() => {

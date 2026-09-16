@@ -672,3 +672,14 @@ describe("naming the lane", () => {
     expect(screen.queryByTestId("plan-lane-label")).toBeNull()
   })
 })
+
+describe("the selected row", () => {
+  it("takes the hover shade, so an empty bar track still shows against it", () => {
+    // A bar's empty track is bg-muted; a selected row painted the same colour
+    // swallowed every 0% bar into its background.
+    renderBoard([unit({ fileId: "f1", filledCount: 40 })], "f1:")
+    const row = screen.getByTestId("plan-row-f1-")
+    expect(row.className).toContain("bg-muted/60")
+    expect(row.className).not.toMatch(/(^|\s)bg-muted(\s|$)/)
+  })
+})

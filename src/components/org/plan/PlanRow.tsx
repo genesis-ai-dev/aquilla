@@ -319,7 +319,12 @@ export function PlanRow({
         // on the board reflows. The bars lose width they were only stretching
         // into; the date column gained a second line with words in it.
         className={`grid w-full grid-cols-1 items-center gap-2 px-[17px] py-3 text-start transition-colors hover:bg-muted/60 md:grid-cols-[minmax(150px,1fr)_minmax(200px,1.6fr)_minmax(170px,0.9fr)] md:gap-4 ${
-          selected ? "bg-muted shadow-[inset_3px_0_0_var(--color-primary)]" : ""
+          // THE HOVER SHADE, NOT THE FULL MUTED. A bar's empty track is
+          // `bg-muted`, so a selected row painted the same colour swallowed
+          // every 0% bar into its background — an unrecorded book read as
+          // having no audio bar at all. The row already goes to muted/60 on
+          // hover, and that is exactly enough contrast for a track to survive.
+          selected ? "bg-muted/60 shadow-[inset_3px_0_0_var(--color-primary)]" : ""
         }`}
       >
         <span ref={nameCellRef} className="flex min-w-0 flex-col gap-0.5">

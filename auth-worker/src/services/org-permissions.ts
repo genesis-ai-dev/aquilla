@@ -2146,5 +2146,6 @@ export async function getCommentFloors(env: Env, orgId: number): Promise<Comment
 /** Defaults for a project with no org to consult (personal / not attached). */
 export const DEFAULT_COMMENT_FLOORS: CommentFloors = {
   commentCreateMinRole: DEFAULT_COMMENT_CREATE_MIN_ROLE,
-  commentResolveMinRole: DEFAULT_COMMENT_RESOLVE_MIN_ROLE,}
+  commentResolveMinRole: DEFAULT_COMMENT_RESOLVE_MIN_ROLE,
+}
 

@@ -229,13 +229,18 @@ projectSettings.on(
       // touches anything else — even alongside a permitted key — falls through
       // to the maintainer 403, so widening one of these can never widen access
       // to AI config, health, languages, or the rest.
+      // terminologyOnly/languageOnly are deliberately NOT guarded by
+      // `changed.length > 0` — a no-op write (nothing changed) satisfies both
+      // vacuously, and checking terminology first below preserves the
+      // pre-AQU-1086 behaviour for that case exactly (a read-modify-write
+      // client always echoes every key it didn't touch).
       const terminologyOnly = changed.every((key) => key === TERMINOLOGY_KEY)
-      const countStructuralOnly = changed.length > 0
-        && changed.every((key) => key === COUNT_STRUCTURAL_KEY)
       const languageOnly = changed.every((key) => LANGUAGE_KEYS.has(key))
       const autopilotOnly = changed.length > 0
         && changed.every((key) => key === AUTOPILOT_KEY)
-      if (!terminologyOnly && !countStructuralOnly && !languageOnly && !autopilotOnly) {
+      const countStructuralOnly = changed.length > 0
+        && changed.every((key) => key === COUNT_STRUCTURAL_KEY)
+      if (!terminologyOnly && !languageOnly && !autopilotOnly && !countStructuralOnly) {
         return c.json(
           { error: `role >= maintainer (${SETTINGS_WRITE_MIN_ROLE}) required` },
           403,
@@ -247,15 +252,6 @@ projectSettings.on(
           return c.json(
             {
               error: `role >= ${termbaseFloor} required to manage this project's termbase (org termbaseEditMinRole)`,
-            },
-            403,
-          )
-        }
-      } else if (countStructuralOnly) {
-        if (role.level < COUNT_STRUCTURAL_MIN_ROLE) {
-          return c.json(
-            {
-              error: `role >= project lead (${COUNT_STRUCTURAL_MIN_ROLE}) required to change whether headings count toward progress`,
             },
             403,
           )
@@ -279,6 +275,15 @@ projectSettings.on(
         if (role.level < AUTOPILOT_WRITE_MIN_ROLE) {
           return c.json(
             { error: `role >= project_lead (${AUTOPILOT_WRITE_MIN_ROLE}) required to change the Autopilot opt-in` },
+            403,
+          )
+        }
+      } else if (countStructuralOnly) {
+        if (role.level < COUNT_STRUCTURAL_MIN_ROLE) {
+          return c.json(
+            {
+              error: `role >= project lead (${COUNT_STRUCTURAL_MIN_ROLE}) required to change whether headings count toward progress`,
+            },
             403,
           )
         }

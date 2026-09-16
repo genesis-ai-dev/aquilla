@@ -492,7 +492,7 @@ describe("keyboard navigation", () => {
   })
 })
 
-// ── AQU-1255: the card draws the first five rows and stops ──────────────────
+// ── every row is drawn; the cap AQU-1255 added is gone ─────────────────────
 
 /**
  * `n` in-progress units in one unfolded group. Names are zero-padded because
@@ -505,136 +505,49 @@ function manyUnits(n: number, over: Partial<PlanUnit> = {}): PlanUnit[] {
   })
 }
 
-describe("truncating a long plan", () => {
-  it("draws only the first five rows and a Show all button naming the total", () => {
-    // The bug this pins: a full-Bible project drew 66 rows with two progress
-    // bars each, burying everything below the plan.
+describe("a long plan", () => {
+  it("draws every row, with no Show all button to press", () => {
+    // AQU-1255 drew the first five and hid the rest behind "Show all 12". Sam,
+    // 2026-09-16: a manager opening the plan wants the plan. Folding a group
+    // is the way to see less, because a fold names what it is hiding.
     renderBoard(manyUnits(12))
-    expect(rowCount()).toBe(5)
-    expect(screen.getByTestId("plan-show-all")).toHaveTextContent("Show all 12")
-  })
-
-  it("draws every row and no button at all when there are five or fewer", () => {
-    renderBoard(manyUnits(5))
-    expect(rowCount()).toBe(5)
+    expect(rowCount()).toBe(12)
     expect(screen.queryByTestId("plan-show-all")).toBeNull()
   })
 
-  it("expands in place and collapses again", () => {
-    renderBoard(manyUnits(12))
-    fireEvent.click(screen.getByTestId("plan-show-all"))
-    expect(rowCount()).toBe(12)
-    expect(screen.getByTestId("plan-show-all")).toHaveTextContent("Show fewer")
-    fireEvent.click(screen.getByTestId("plan-show-all"))
-    expect(rowCount()).toBe(5)
-  })
-
-  it("is a real button that announces what it opens", () => {
-    renderBoard(manyUnits(12))
-    const button = screen.getByRole("button", { name: "Show all 12" })
-    expect(button).toHaveAttribute("aria-expanded", "false")
-    fireEvent.click(button)
-    expect(screen.getByRole("button", { name: "Show fewer" })).toHaveAttribute("aria-expanded", "true")
-  })
-
-  it("caps the WHOLE list, not each group, and keeps every group's real count", () => {
-    // Overdue (3) then In progress (4): five rows across the boundary, and the
-    // In progress header still says 4 even though only 2 of them are drawn.
+  it("still hides a folded group's rows, and only those", () => {
     renderBoard([
       ...manyUnits(3, { targetDate: "2026-08-01" }).map((u, i) => ({ ...u, sectionKey: `O${i}` })),
       ...manyUnits(4).map((u, i) => ({ ...u, sectionKey: `P${i}` })),
     ])
-    expect(rowCount()).toBe(5)
-    expect(within(screen.getByTestId("plan-group-overdue")).getAllByTestId(/^plan-row-/).length).toBe(3)
-    const inProgress = screen.getByTestId("plan-group-in_progress")
-    expect(within(inProgress).getAllByTestId(/^plan-row-/).length).toBe(2)
-    expect(within(inProgress).getByText("4")).toBeInTheDocument()
-  })
-
-  it("spends the cap through the new group in display order, not around it", () => {
-    // AQU-1278 inserted a fourth group into the middle of the sequence, and the
-    // budget is spent in DISPLAY order: 2 overdue, then 2 nearly complete,
-    // leaving one row for In progress — whose header still says 3, because a
-    // count that shrank to match the rows drawn would hide the work.
-    renderBoard([
-      ...manyUnits(2, { targetDate: "2026-08-01" }).map((u, i) => ({ ...u, sectionKey: `O${i}` })),
-      ...manyUnits(2, { filledCount: 100, validatedCount: 97 })
-        .map((u, i) => ({ ...u, sectionKey: `N${i}` })),
-      ...manyUnits(3).map((u, i) => ({ ...u, sectionKey: `P${i}` })),
-    ])
-    expect(rowCount()).toBe(5)
-    expect(within(screen.getByTestId("plan-group-overdue")).getAllByTestId(/^plan-row-/).length).toBe(2)
-    const nearly = screen.getByTestId("plan-group-nearly_complete")
-    expect(within(nearly).getAllByTestId(/^plan-row-/).length).toBe(2)
-    const inProgress = screen.getByTestId("plan-group-in_progress")
-    expect(within(inProgress).getAllByTestId(/^plan-row-/).length).toBe(1)
-    expect(within(inProgress).getByText("3")).toBeInTheDocument()
-  })
-
-  it("lets a folded group's rows go to the groups below it", () => {
-    // A fold draws no rows, so it must not spend the cap either.
-    renderBoard([
-      ...manyUnits(6, { targetDate: "2026-08-01" }).map((u, i) => ({ ...u, sectionKey: `O${i}` })),
-      ...manyUnits(4).map((u, i) => ({ ...u, sectionKey: `P${i}` })),
-    ])
-    expect(within(screen.getByTestId("plan-group-in_progress")).queryAllByTestId(/^plan-row-/).length).toBe(0)
+    expect(rowCount()).toBe(7)
     fireEvent.click(screen.getByTestId("plan-fold-overdue"))
     expect(rowCount()).toBe(4)
-    expect(within(screen.getByTestId("plan-group-in_progress")).getAllByTestId(/^plan-row-/).length).toBe(4)
+    // The header keeps its own honest count while its rows are away.
+    expect(screen.getByTestId("plan-group-overdue")).toHaveTextContent("3")
   })
 
-  it("applies to the matches under a filter, and leaves the Showing note counting matches", () => {
-    renderBoard([...manyUnits(8), ...manyUnits(4).map((u, i) => ({ ...u, sectionKey: `Z${i}`, fileName: `Other ${i}` }))])
-    fireEvent.change(screen.getByTestId("plan-filter"), { target: { value: "s0" } })
-    expect(rowCount()).toBe(5)
-    expect(screen.getByTestId("plan-show-all")).toHaveTextContent("Show all 8")
-    expect(screen.getByTestId("plan-filter-note")).toHaveTextContent("Showing 8 of 12.")
-  })
-
-  it("drops the button when a filter narrows the list below the cap", () => {
-    renderBoard([...manyUnits(8), unit({ fileId: "z", fileName: "Zephaniah", filledCount: 40 })])
-    fireEvent.change(screen.getByTestId("plan-filter"), { target: { value: "zeph" } })
-    expect(rowCount()).toBe(1)
-    expect(screen.queryByTestId("plan-show-all")).toBeNull()
-  })
-
-  it("stays expanded across a filter change and a view switch", () => {
+  it("draws every match under a filter", () => {
     renderBoard(manyUnits(12))
-    fireEvent.click(screen.getByTestId("plan-show-all"))
-    fireEvent.change(screen.getByTestId("plan-filter"), { target: { value: "s" } })
-    expect(rowCount()).toBe(12)
-    fireEvent.click(screen.getByTestId("plan-view-order"))
-    expect(rowCount()).toBe(12)
+    // The filter matches the unit LABEL, which for a sub-file unit is its
+    // section key — "S01"…"S12", not the file name beside it.
+    fireEvent.change(screen.getByTestId("plan-filter"), { target: { value: "S0" } })
+    expect(rowCount()).toBe(9) // S01…S09
+    expect(screen.getByTestId("plan-filter-note")).toHaveTextContent("Showing 9 of 12.")
   })
 
-  it("caps the In order arrangement too", () => {
+  it("draws every row in the In order arrangement too", () => {
     renderBoard(manyUnits(12))
     fireEvent.click(screen.getByTestId("plan-view-order"))
-    expect(within(screen.getByTestId("plan-order-list")).getAllByTestId(/^plan-row-/).length).toBe(5)
-    expect(screen.getByTestId("plan-show-all")).toHaveTextContent("Show all 12")
+    expect(screen.getByTestId("plan-order-list").querySelectorAll("li")).toHaveLength(12)
   })
 
-  it("does not remember being expanded across a remount — a reload starts at five", () => {
-    const { unmount } = render(
-      <PlanBoard units={manyUnits(12)} now={NOW} projectId="p1" selectedId={null} onSelect={vi.fn()} />,
-    )
-    fireEvent.click(screen.getByTestId("plan-show-all"))
-    expect(rowCount()).toBe(12)
-    unmount()
-    render(<PlanBoard units={manyUnits(12)} now={NOW} projectId="p1" selectedId={null} onSelect={vi.fn()} />)
-    expect(rowCount()).toBe(5)
-  })
-
-  it("walks only the drawn rows with the arrow keys, and everything after Show all", () => {
-    const onSelect = vi.fn()
-    render(
-      <PlanBoard units={manyUnits(12)} now={NOW} projectId="p1" selectedId="b:S05" onSelect={onSelect} />,
-    )
-    const region = () => screen.getByRole("region", { name: /Planning units/ })
-    fireEvent.keyDown(region(), { key: "ArrowDown" })
-    expect(onSelect).toHaveBeenLastCalledWith("b:S05") // clamped at the fifth row
-    fireEvent.click(screen.getByTestId("plan-show-all"))
-    fireEvent.keyDown(region(), { key: "ArrowDown" })
+  it("lets the arrow keys walk past where the cap used to stop", () => {
+    // Selection is a controlled prop, so one keypress from a known row is the
+    // whole assertion: standing on the fifth row, ArrowDown reaches the sixth.
+    // Under AQU-1255 the ordered list ended at five and this clamped to itself.
+    const { onSelect } = renderBoard(manyUnits(12), "b:S05")
+    fireEvent.keyDown(screen.getByRole("region", { name: /Planning units/ }), { key: "ArrowDown" })
     expect(onSelect).toHaveBeenLastCalledWith("b:S06")
   })
 })
@@ -660,16 +573,14 @@ describe("the order ref the inspector navigates by", () => {
       selectedId={null} onSelect={vi.fn()} />)
   })
 
-  it("stops at the cap, so the inspector's chevrons cannot step onto a hidden row", () => {
-    // AQU-1255. The inspector walks this ref; a truncated list must hand it
-    // the five drawn rows, and Show all must hand it the whole plan.
+  it("hands over every row of a long plan", () => {
+    // The inspector walks this ref. It used to stop at AQU-1255's five drawn
+    // rows; with the cap gone it is the whole plan, every time.
     const orderRef = { current: [] as PlanUnit[] }
     render(
       <PlanBoard units={manyUnits(12)} now={NOW} projectId="p1" orderRef={orderRef}
         selectedId={null} onSelect={vi.fn()} />,
     )
-    expect(orderRef.current.length).toBe(5)
-    fireEvent.click(screen.getByTestId("plan-show-all"))
     expect(orderRef.current.length).toBe(12)
   })
 })

@@ -51,16 +51,6 @@ import { PLAN_TONE } from "./plan-tone"
 import { PlanRow } from "./PlanRow"
 
 /**
- * AQU-1255: how many unit rows the card draws before it stops and offers
- * "Show all". A full-Bible project renders 60–100+ rows, each with two
- * progress bars, which buries everything below the plan and forces a manager
- * who only wants the headline numbers to scroll past the whole thing. Five
- * keeps the glance value — what is overdue, what is in flight — and leaves
- * the card roughly one screen tall with its header and controls.
- */
-const PLAN_ROW_CAP = 5
-
-/**
  * The line of small print on the right of each group header. It exists because
  * a group whose membership nobody can predict reads as a bug — and AQU-1278's
  * group is the one that most needs it, since "nearly" is a rule rather than a
@@ -87,10 +77,21 @@ const GROUP_HINT_KEY: Record<PlanUnitStatus, string> = {
 function PlanStat({ value, label, tone, testId }: {
   value: number
   label: string
-  tone?: "late"
+  /**
+   * AQU-1278: the status this figure counts, which colours the pill from the
+   * SAME table the group headers and the inspector's pill read
+   * (`plan-tone.ts`). Grey for a pill that counts no single status — "5 of 66
+   * done" spans the whole board — and grey was every pill's colour before this,
+   * which made the strip a row of identical lozenges with the one number a
+   * manager acts on hidden among them.
+   *
+   * Overdue's tone IS the destructive pair this used to hard-code, so that pill
+   * does not move; it just stops being a special case.
+   */
+  tone?: PlanUnitStatus
   testId: string
 }) {
-  const late = tone === "late"
+  const toned = tone ? PLAN_TONE[tone] : null
   return (
     // Laid out as inline text, NOT as a flex row: flex would put the numeral
     // and the label in separate boxes with only a `gap` between them, which
@@ -100,12 +101,12 @@ function PlanStat({ value, label, tone, testId }: {
     <span
       data-testid={testId}
       className={`whitespace-nowrap rounded-full px-[11px] py-1 text-[12.5px] ${
-        late ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground"
+        toned ? `${toned.bg} ${toned.text}` : "bg-muted text-muted-foreground"
       }`}
     >
       <b
         className={`me-0.5 text-sm font-semibold tabular-nums ${
-          late ? "text-destructive" : "text-foreground"
+          toned ? toned.text : "text-foreground"
         }`}
       >
         {value}
@@ -182,11 +183,6 @@ export function PlanBoard({
   // data is missing.
   const [query, setQuery] = useState("")
   const [needsDateOnly, setNeedsDateOnly] = useState(false)
-  // AQU-1255. Ephemeral for the same reason the filter is: nothing about how
-  // much of the list you opened last week should decide what a reload draws.
-  // But once pressed it holds across filtering and re-arranging — re-hiding
-  // the rows because the reader typed a letter would be a trap.
-  const [showAll, setShowAll] = useState(false)
   // Arrangement is a working style, so it persists globally; folds belong to
   // the project whose groups they hide. See `plan-view.ts`.
   const [view, setView] = useState<PlanViewMode>(() => loadPlanView())
@@ -248,49 +244,18 @@ export function PlanBoard({
    */
 
   /**
-   * Every row the current narrowing and arrangement would draw, in drawn
-   * order — before the AQU-1255 cap. Anything filtered out or folded away is
-   * already gone, so a folded group consumes none of the cap.
+   * Every row on screen, in drawn order — which is also exactly what the arrow
+   * keys walk. Anything filtered out or folded away is already gone.
+   *
+   * AQU-1255 used to cap this at the first five and offer a Show all button.
+   * Sam removed it (2026-09-16): a manager opening the plan wants the plan, and
+   * the per-group folds — which persist per project — are the honest way to see
+   * less, because a fold says what it is hiding and a truncation does not.
    */
-  const eligible = useMemo(() => {
+  const ordered = useMemo(() => {
     if (view === "order") return visible
     return groups.flatMap((g) => (collapsed.has(g.status) ? [] : g.units))
   }, [view, visible, groups, collapsed])
-
-  // The cap only exists once there is something to hide behind it: a list of
-  // five or fewer draws in full and offers no button at all.
-  const capped = !showAll && eligible.length > PLAN_ROW_CAP
-
-  /**
-   * The rows the arrows walk: exactly what is on screen, in the order it is
-   * drawn. Stepping onto a row nobody can see would move the inspector for no
-   * visible reason — so a truncated list stops at the fifth row, and Show all
-   * hands the arrows the whole plan.
-   */
-  const ordered = useMemo(
-    () => (capped ? eligible.slice(0, PLAN_ROW_CAP) : eligible),
-    [capped, eligible],
-  )
-
-  /**
-   * Per-group slices for the By status arrangement: the cap is spent across
-   * groups in display order, so a later group can show its header and its
-   * (full, honest) count with no rows beneath it until Show all.
-   */
-  const groupRows = useMemo(() => {
-    const rows: PlanUnit[][] = []
-    let budget = capped ? PLAN_ROW_CAP : Number.POSITIVE_INFINITY
-    for (const group of groups) {
-      if (collapsed.has(group.status)) {
-        rows.push([])
-        continue
-      }
-      const take = group.units.slice(0, budget)
-      budget -= take.length
-      rows.push(take)
-    }
-    return rows
-  }, [groups, collapsed, capped])
 
   useEffect(() => {
     if (orderRef) orderRef.current = ordered
@@ -383,7 +348,7 @@ export function PlanBoard({
             <PlanStat
               testId="plan-summary-overdue"
               value={summary.overdue}
-              tone="late"
+              tone="overdue"
               label={t("org.projectOverview.plan.summaryOverdueLabel", { count: summary.overdue })}
             />
           )}
@@ -397,6 +362,7 @@ export function PlanBoard({
             <PlanStat
               testId="plan-summary-nearly-complete"
               value={summary.nearlyComplete}
+              tone="nearly_complete"
               label={t("org.projectOverview.plan.summaryNearlyCompleteLabel", {
                 count: summary.nearlyComplete,
               })}
@@ -406,6 +372,7 @@ export function PlanBoard({
             <PlanStat
               testId="plan-summary-in-progress"
               value={summary.inFlight}
+              tone="in_progress"
               label={t("org.projectOverview.plan.summaryInProgressLabel", { count: summary.inFlight })}
             />
           )}
@@ -559,7 +526,7 @@ export function PlanBoard({
               {ordered.map(renderRow)}
             </ul>
           ) : (
-            groups.map((group, i) => {
+            groups.map((group) => {
               const tone = PLAN_TONE[group.status]
               const folded = collapsed.has(group.status)
               return (
@@ -595,35 +562,12 @@ export function PlanBoard({
                       </span>
                     </button>
                   </h3>
-                  {/* The header and its count render even when the cap left
-                      this group no rows — a heading with "12" and nothing
-                      under it reads as "there is more here", which is what
-                      the Show all button is for. */}
-                  {!folded && groupRows[i].length > 0 && (
-                    <ul className="divide-y">{groupRows[i].map(renderRow)}</ul>
+                  {!folded && group.units.length > 0 && (
+                    <ul className="divide-y">{group.units.map(renderRow)}</ul>
                   )}
                 </section>
               )
             })
-          )}
-          {/* AQU-1255. A real button, so Tab reaches it and Enter/Space work,
-              and its label carries the count — "Show all" alone tells a
-              screen-reader user nothing about what they are opening. */}
-          {eligible.length > PLAN_ROW_CAP && (
-            <div className="border-t px-[17px] py-2">
-              <Button
-                type="button"
-                variant="ghost"
-                size="xs"
-                data-testid="plan-show-all"
-                aria-expanded={!capped}
-                onClick={() => setShowAll((v) => !v)}
-              >
-                {capped
-                  ? t("org.projectOverview.plan.showAll", { count: eligible.length })
-                  : t("org.projectOverview.plan.showFewer")}
-              </Button>
-            </div>
           )}
           {filtering && (
             <p className="border-t bg-muted px-[17px] py-2 text-[11.5px] text-muted-foreground"

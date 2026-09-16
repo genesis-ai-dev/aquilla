@@ -12,6 +12,7 @@ type ErrorCode =
   | "not_found"
   | "permission_denied"
   | "validation_failed"
+  | "context_required"
   | "invalid_state"
   | "not_projected"
   | "run_exists"

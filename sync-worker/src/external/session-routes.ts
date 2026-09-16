@@ -41,6 +41,11 @@ import type { ExternalEnv, StoredChangeset } from './types'
 import { verifyTokenForProject, type SyncTokenClaims } from '../auth'
 import type { ApiCredentialContext } from '../../../db/shared/api-credentials'
 import { resolveProjectRoleShared } from '../../../db/shared/project-roles'
+import {
+  DEFAULT_ASSIGNMENT_MIN_ROLE,
+  resolveAssignmentAuthority,
+} from '../events/assignment-authority'
+import { commandsContainAssignmentEvents } from './commands'
 
 /** Fixed credential_id sentinel for session-staged changesets (precedent:
  *  auth-worker agent-artifacts' SESSION_UPLOAD_SENTINEL — plain TEXT columns,
@@ -67,6 +72,10 @@ export function sessionPrincipal(claims: SyncTokenClaims): ApiCredentialContext 
     mode: 'ask',
     orgId: null,
     projectId: null,
+    // AQU-1180: this principal is a signed-in human in their own browser, who
+    // already sees their teammates' names throughout the SPA. The scrub exists
+    // to keep identity out of third-party AI consoles, not out of the app.
+    pii: true,
   }
 }
 
@@ -125,13 +134,19 @@ async function handleList(
     limit = Math.min(LIST_CHANGESETS_MAX, Math.floor(limit))
   }
 
-  // One live role read serves the whole page — the per-row rule is the
-  // changeset's own floor (authority.ts), which reads only stored commands.
+  // One live role read serves the whole page. Assignment plans additionally
+  // resolve the org floor once for the page, then reuse it for every row.
   const role = await resolveProjectRoleShared(db, { id: cred.userId }, projectId)
   if (!role) return errorResponse('permission_denied', 'no project membership')
 
-  const rows = (await listChangesetsForProject(db, projectId, { status })).filter((cs) =>
-    visibleAtRole(cs, role.level, cred.userId),
+  const projectChangesets = await listChangesetsForProject(db, projectId, { status })
+  const assignmentMinRole = projectChangesets.some((cs) =>
+    commandsContainAssignmentEvents(cs.commands),
+  )
+    ? (await resolveAssignmentAuthority(db, projectId)).minRole
+    : DEFAULT_ASSIGNMENT_MIN_ROLE
+  const rows = projectChangesets.filter((cs) =>
+    visibleAtRole(cs, role.level, cred.userId, assignmentMinRole),
   )
   const ranked = rankForInbox(rows)
   // Default view surfaces SURFACED_CAP staged plans; the remainder is reported

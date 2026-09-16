@@ -177,7 +177,7 @@ export class Workspace {
       )
     }
     const skipChecklist = this.page.getByRole("button", { name: /Skip for now/i })
-    if (await skipChecklist.isVisible({ timeout: 1_500 }).catch(() => false)) {
+    if (await skipChecklist.isVisible()) {
       await skipChecklist.click()
       await expect(skipChecklist).toBeHidden({ timeout: 5_000 })
     }
@@ -260,52 +260,31 @@ export class Workspace {
 
   private async openImportDialog(): Promise<void> {
     const uploadCard = this.uploadFilesCard()
-    if (await uploadCard.isVisible({ timeout: 250 }).catch(() => false)) return
+    const importButton = this.page
+      .getByRole("button", { name: /^Import(?: a file)?$/i })
+      .filter({ visible: true })
+      .first()
+    const moreButton = this.page.getByRole("banner")
+      .getByRole("button", { name: /^More$/i })
 
-    // Header controls can be replaced while project data hydrates. Retry the
-    // opener, but first check whether the previous click already opened the
-    // dialog so we never click through its overlay.
-    for (let attempt = 0; attempt < 2; attempt++) {
-      if (await uploadCard.isVisible({ timeout: 250 }).catch(() => false)) return
+    // Wait for cold project hydration before choosing the available surface.
+    // An already-open dialog is also valid (for example, setup opened it).
+    await expect(uploadCard.or(importButton).or(moreButton).first())
+      .toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
+    // These immediate probes only select between the ready UI branches.
+    if (await uploadCard.isVisible()) return
 
-      // Import is a visible header button beside the ⋯ overflow menu.
-      const banner = this.page.getByRole("banner")
-      const importBtn = banner.getByRole("button", { name: /^Import$/i })
-      if (await importBtn.isVisible({ timeout: 1_000 }).catch(() => false)) {
-        await importBtn.click()
-      } else {
-        const moreActionsBtn = banner.getByRole("button", { name: /^More$/i })
-        if (await moreActionsBtn.isVisible({ timeout: 1_000 }).catch(() => false)) {
-          await moreActionsBtn.click()
-          const importItem = this.page
-            .getByRole("menuitem", { name: /^Import$/i })
-            .filter({ visible: true })
-            .last()
-          await expect(importItem).toBeVisible({ timeout: 5_000 })
-          try {
-            await importItem.click({ timeout: 2_000 })
-          } catch (error) {
-            if (!(await uploadCard.isVisible({ timeout: 500 }).catch(() => false))) {
-              throw error
-            }
-            return
-          }
-        } else {
-          // A fully hydrated project with no files uses the editor empty-state
-          // CTA ("Import a file") instead of the header Import button.
-          const directImportBtn = this.page
-            .getByRole("button", { name: /^Import(?: a file)?$/i })
-            .filter({ visible: true })
-            .first()
-          await expect(directImportBtn).toBeVisible({ timeout: 10_000 })
-          await directImportBtn.click()
-        }
-      }
-
-      if (await uploadCard.isVisible({ timeout: 3_000 }).catch(() => false)) return
+    if (await importButton.isVisible()) {
+      await importButton.click()
+    } else {
+      await moreButton.click()
+      await this.page.getByRole("menuitem", { name: /^Import$/i })
+        .filter({ visible: true }).last().click()
     }
 
-    throw new Error("Import dialog did not open")
+    // ImportDialog is lazy-loaded. isVisible() does not wait;
+    // retrying clicks races the module load and can hit a modal overlay.
+    await expect(uploadCard).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
   }
 
   /** Click a file row in the sidebar, identified by a substring of its name.
@@ -328,12 +307,20 @@ export class Workspace {
     ).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
   }
 
-  /** Hover the first cell until the action rail reveals, then click Translate with AI. */
-  async clickSparkleOnFirstCell(): Promise<void> {
+  /** First-cell sparkle: Translate with AI, or Set up AI before the chooser. */
+  private firstCellSparkle(): { row: Locator; sparkle: Locator } {
     const row = this.page.locator("[data-cell-id]").first()
     const sparkle = row
-      .locator("[data-tooltip*='Translate with AI'] button, button[aria-label*='Translate with AI']")
+      .locator(
+        "[data-tooltip*='Translate with AI'] button, [data-tooltip*='Set up AI'] button, " +
+          "button[aria-label*='Translate with AI'], button[aria-label*='Set up AI']",
+      )
       .first()
+    return { row, sparkle }
+  }
+
+  private async revealAndClickSparkle(): Promise<string> {
+    const { row, sparkle } = this.firstCellSparkle()
     await sparkle.scrollIntoViewIfNeeded()
     await row.hover()
     await expect(row.locator('[data-slot="cell-action-rail"]')).toHaveAttribute(
@@ -343,11 +330,59 @@ export class Workspace {
     )
     await expect(sparkle).toBeVisible()
     await expect(sparkle).toBeEnabled({ timeout: 15_000 })
+    const label = (await sparkle.getAttribute("aria-label")) ?? ""
     await row.hover()
     // The unrevealed rail wrapper intercepts Playwright's hit-test even after
     // data-revealed=true if idle-hide races the click. force skips that check;
     // the button is already asserted visible and enabled.
     await sparkle.click({ force: true })
+    return label
+  }
+
+  /** Open the per-project Set up AI chooser from the first cell's sparkle. */
+  async openAiSetupFromFirstCell(): Promise<Locator> {
+    await this.revealAndClickSparkle()
+    const dialog = this.page.getByRole("dialog", { name: /Set up AI/i })
+    await expect(dialog).toBeVisible({ timeout: 10_000 })
+    return dialog
+  }
+
+  async confirmAiSetup(): Promise<void> {
+    const dialog = this.page.getByRole("dialog", { name: /Set up AI/i })
+    await dialog.getByRole("button", { name: /^Continue$/i }).click()
+    await expect(dialog).toBeHidden()
+  }
+
+  /** Hover the first cell until the action rail reveals, then click sparkle.
+   *  If this project still needs the Set up AI chooser, Continue with the
+   *  default selection and click sparkle again to draft. */
+  async clickSparkleOnFirstCell(): Promise<void> {
+    const label = await this.revealAndClickSparkle()
+    if (!label.includes("Set up AI")) return
+    await this.confirmAiSetup()
+    await this.revealAndClickSparkle()
+  }
+
+  /**
+   * AQU-200: the rail keeps only the AI-generate group as direct buttons —
+   * comments, history, record, play, TTS and footnote live behind a single
+   * `⋯`. Reveal the row's rail, open that overflow, and return the named
+   * action. The popup is portalled to the body, so the returned locator is
+   * page-scoped, NOT row-scoped: only one row's overflow is ever open.
+   */
+  async openRowAction(row: Locator, ariaLabel: string): Promise<Locator> {
+    await row.scrollIntoViewIfNeeded()
+    await row.hover()
+    const rail = row.locator('[data-slot="cell-action-rail"]')
+    await expect(rail).toHaveAttribute("data-revealed", "true", { timeout: 5_000 })
+    const overflow = rail.locator('[data-slot="cell-action-rail-overflow"]')
+    await expect(overflow).toBeVisible({ timeout: 5_000 })
+    // force for the same reason as the sparkle above: the unrevealed rail
+    // wrapper can still intercept the hit-test if idle-hide races the click.
+    await overflow.click({ force: true })
+    const action = this.page.locator(`button[aria-label="${ariaLabel}"]`).first()
+    await expect(action).toBeVisible({ timeout: 5_000 })
+    return action
   }
 
   async waitForEditor(expectedCellId?: string): Promise<void> {
@@ -386,7 +421,7 @@ export class Workspace {
 
     const target = this.editableTarget(index)
     let activatedFromReadView = false
-    if (!(await target.isVisible({ timeout: 250 }).catch(() => false))) {
+    if (!(await target.isVisible())) {
       const readView = this.targetReadView(index)
       await expect(readView).toBeVisible({ timeout: EDITOR_READY_TIMEOUT_MS })
       await readView.click()
@@ -889,6 +924,37 @@ export class Workspace {
     await this.page.getByRole("menuitem", { name: /^Export$/i }).click()
   }
 
+  /** AQU-656: download the exact imported blob (not translation-injected USFM). */
+  async clickDownloadOriginal(): Promise<void> {
+    await this.openFileOverflowMenu()
+    await this.page.getByRole("menuitem", { name: /^Download original$/i }).click()
+  }
+
+  /** Translation-injected USFM round-trip from the file options overflow. */
+  async clickExportSource(): Promise<void> {
+    await this.openFileOverflowMenu()
+    await this.page.getByRole("menuitem", { name: /Export source/i }).click()
+  }
+
+  /** First editor row whose source column contains `sourceSubstring`. */
+  async cellIndexWithSource(sourceSubstring: string): Promise<number> {
+    const rows = this.page.locator("[data-cell-id]")
+    await expect.poll(async () => {
+      const n = await rows.count()
+      for (let i = 0; i < n; i++) {
+        const text = await rows.nth(i).locator('[data-cell-type="source"]').innerText()
+        if (text.includes(sourceSubstring)) return i
+      }
+      return -1
+    }, { timeout: EDITOR_READY_TIMEOUT_MS }).not.toBe(-1)
+    const n = await rows.count()
+    for (let i = 0; i < n; i++) {
+      const text = await rows.nth(i).locator('[data-cell-type="source"]').innerText()
+      if (text.includes(sourceSubstring)) return i
+    }
+    throw new Error(`No cell whose source contains "${sourceSubstring}"`)
+  }
+
   /**
    * Expand the ExportDialog's "Export to another format" section (collapsed
    * by default when the file has a native round-trip download). No-op when
@@ -955,19 +1021,17 @@ export class Workspace {
     return this.cellRow(index).locator('[data-slot="cell-action-rail"]')
   }
 
-  /** Open the per-cell "Edit history" drawer from the row's action rail. The
-   * rail springs out on row hover (data-revealed) — same reveal handshake as
-   * clickSparkleOnFirstCell. */
+  /** Open the per-cell history drawer through the action rail's overflow. */
   async openHistoryDrawer(index: number): Promise<void> {
     const row = this.cellRow(index)
     await row.scrollIntoViewIfNeeded()
     await row.hover()
     await expect(this.actionRail(index)).toHaveAttribute("data-revealed", "true", { timeout: 5_000 })
-    const button = row.getByRole("button", { name: "Edit history" }).first()
+    await this.actionRail(index).getByRole("button", { name: "More actions" }).click()
+    // The overflow renders in a portal outside the cell row.
+    const button = this.page.getByRole("button", { name: "Edit history", exact: true })
     await expect(button).toBeVisible()
-    // The unrevealed rail wrapper can intercept the hit-test if idle-hide
-    // races the click; the button is already asserted visible.
-    await button.click({ force: true })
+    await button.click()
     await expect(this.page.getByRole("heading", { name: /^Edit history/ })).toBeVisible()
   }
 

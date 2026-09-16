@@ -21,6 +21,7 @@ import type { Env, Variables, AuthUser } from "../types"
 import { authMiddleware } from "../middleware/auth"
 import { resolveProjectRole } from "../services/project-permissions"
 import { runAiGuard } from "../lib/ai-budget"
+import { countRecentRateLimitEvents, recordRateLimitEvent } from "../../../db/shared/rate-limit"
 import { getPlatformSettingsCached, type PlatformSettings } from "../lib/platform-settings"
 import { creditGuard, recordCredit } from "../lib/credits"
 import { countWords } from "../lib/billing/plans"
@@ -38,6 +39,21 @@ import {
 const chat = new Hono<{ Bindings: Env; Variables: Variables }>()
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+// [Pen test] API security & data exposure (2026-09-03): every spend guard on
+// this route (runAiGuard's daily budget, creditGuard, wordGuard) defaults to
+// log-only in every deployed environment (none of AI_BUDGET_ENFORCE /
+// CREDIT_ENFORCE set true in wrangler.toml) — over-cap requests are logged
+// but never blocked. With open self-registration (throttled only 15/15min
+// per IP), that left this proxy to the shared OPENROUTER_API_KEY with no
+// volumetric control at all: a burst of requests just sails through. This
+// doesn't touch the enforce/budget semantics (a deliberate per-org opt-in
+// product decision) — it adds the missing floor: a per-user sliding-window
+// cap wide enough that no real interactive session (suggest-per-cell, a few
+// dozen cells in a sitting) ever gets close, tight enough to blunt a
+// scripted flood. Same primitive/window as the external Agent API's
+// per-credential throttles (db/shared/rate-limit.ts).
+const CHAT_MAX_PER_USER_PER_WINDOW = 300
 
 /** Mirrors the agent route so local/dev/test can use the same scripted or
  * self-hosted OpenAI-compatible upstream as every other AI surface. The dev
@@ -151,6 +167,19 @@ chat.post(
     const user = c.get("user")
     const ab = isDefaultRequest(request.model) ? pickAbArm(settings, model) : null
     if (ab) model = ab.model
+
+    // Volumetric floor: unlike the guards below, this actually blocks (see
+    // comment at CHAT_MAX_PER_USER_PER_WINDOW).
+    const rateLimitIdentifier = `user:${user.id}`
+    const recentChatCalls = await countRecentRateLimitEvents(
+      c.env.AQUILLA_PG,
+      "chat_completions",
+      rateLimitIdentifier,
+    )
+    if (recentChatCalls >= CHAT_MAX_PER_USER_PER_WINDOW) {
+      return c.json({ error: "rate_limited", message: "Too many chat requests, slow down." }, 429)
+    }
+    await recordRateLimitEvent(c.env.AQUILLA_PG, "chat_completions", rateLimitIdentifier)
 
     // AI guard: model allowlist + per-user/global daily budget (AQU-265).
     const guard = await runAiGuard(model, user.id, c.env.AQUILLA_PG, c.env)

@@ -155,6 +155,29 @@ describe("GET /api/v1/projects/:projectId/files", () => {
     expect(body.file.name).toBe("Genesis")
   })
 
+  it("sets hasOriginalSource from file_source_blobs (AQU-656)", async () => {
+    const { db } = await makeTestDb({
+      files: [
+        { id: "with-blob", project_id: "proj-a", name: "GEN.usfm", event_id: "e1" },
+        { id: "no-blob", project_id: "proj-a", name: "EXO.usfm", event_id: "e2" },
+      ],
+      file_source_blobs: [
+        { file_id: "with-blob", project_id: "proj-a", format: "usfm", raw_source: "\\id GEN\n" },
+      ],
+    })
+    const token = await makeTestToken(SECRET, { projectId: "proj-a", fileId: "any" })
+    const res = (await handleFilesReadRequest(new Request(
+      "https://w/api/v1/projects/proj-a/files",
+      { headers: { Authorization: `Bearer ${token}` } },
+    ), envWith(db)))!
+    const body = (await res.json()) as {
+      files: Array<{ fileId: string; hasOriginalSource: boolean }>
+    }
+    const byId = Object.fromEntries(body.files.map((f) => [f.fileId, f.hasOriginalSource]))
+    expect(byId["with-blob"]).toBe(true)
+    expect(byId["no-blob"]).toBe(false)
+  })
+
   it("maps meta.trackOverrides through untouched, unknown kinds included", async () => {
     // The route forwards the stored deltas verbatim — the client's
     // mergeTrackOverrides is the only validator. A kind this build cannot draw

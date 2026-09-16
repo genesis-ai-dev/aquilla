@@ -1721,3 +1721,54 @@ wired into customer routes yet. Product-level payment/retention integration
 requires its own boundary tests before launch. Stripe UI verification confirmed
 all new prices' IDs, USD amounts, month/year interval count 1, licensed usage,
 and sandbox mode. No automated sandbox payment was run.
+
+
+### 2026-09-16 dev integration checkpoint
+
+- [x] Resolve the eight conflicts from integrating `origin/dev` at
+  `85e376fdfbb70901f6f11b8a3214636a277eb085` into the AQU-837 checkout.
+  Preserve the import-classification checkpoint `c17a59d6b`, Stripe event
+  coverage, billing schema, and dev's agent authorization and activity tables.
+- [x] Preserve both billing and agent-connect E2E impact rules. Migration
+  tracking uses complete filenames, so overlapping numeric prefixes do not
+  require renaming already-applied migrations.
+- [x] Restore `context_required` to the contextual route error-code type.
+  Existing route tests exercise the exact missing-context response.
+- [x] Update the shared history smoke helper for dev's **More actions**
+  overflow. Existing concurrent-edit assertions still require convergence,
+  preservation of both edits, and promotion of the bumped edit.
+- [x] Pass the production build, worker TypeScript check, 42 billing UI/impact/
+  determinism tests, 33 contextual-route tests, and tracked-file secret scan.
+- [x] Run all 210 real-Postgres billing tests: 209 initially pass; the one
+  failure mixes wall-clock Checkout activation with a recorded Stripe timeline.
+  Fix the fixture clock and rerun all nine lifecycle tests successfully. The
+  other 201 tests pass in the initial run.
+- [ ] Resolve the session-expiry banner dismissal failure before release.
+  The corrected smoke run passes 72 of 73 tests, including the
+  collaboration/history journey, but exposes
+  `session-expired-banner.smoke.spec.ts:121`: the banner remains visible after
+  **Dismiss**. It passed in the first run. The signal can be raised by another
+  rejected request after dismissal; the exact triggering request still needs
+  investigation. No assertion is weakened, and the smoke gate is not green.
+
+The initial full smoke run passed 72 of 73 tests. Its sole failure was the
+obsolete direct edit-history selector, now corrected. No live Stripe action,
+push, or deployment occurs in this integration checkpoint.
+
+Verification commands for this checkpoint:
+
+- `npm run build`
+- `pnpm --dir auth-worker exec tsc --noEmit`
+- `npx vitest run src/pages/settings/OrgSettingsBilling.test.tsx scripts/e2e-impact.test.ts scripts/e2e-determinism.test.ts --maxWorkers=2`
+- `pnpm --dir auth-worker exec vitest run src/__tests__/contextual-routes.test.ts --maxWorkers=1`
+- `pnpm --dir auth-worker exec vitest run --config vitest.webhook-postgres.config.ts`
+- `pnpm --dir auth-worker exec vitest run --config vitest.webhook-postgres.config.ts src/__tests__/billing-native-lifecycle.test.ts`
+- `npm run test:e2e:smoke` (initial run and post-helper-fix run)
+- `pnpm scan:secrets` and `git diff --cached --check`
+
+Test impact: the production contracts remain unchanged. The Stripe fixture
+producer and lifecycle/entitlement readers now share one deterministic test
+clock. The shared browser page object follows the current action overflow,
+while the existing collaboration journey still verifies Postgres-backed
+history across two browser contexts. The contextual error-code union now
+matches the response already asserted by the route integration tests.

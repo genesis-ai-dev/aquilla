@@ -7,6 +7,10 @@
 SECRET_KEY="dev-frontier-secret"
 ALGORITHM="HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES="43200"
+# [Pen test] Auth & session mgmt (2026-09-14): absolute session-age ceiling in
+# days, independent of the sliding refresh (POST /auth/refresh) — defaults to
+# 90 when unset. See middleware/auth.ts's resolveSession.
+# MAX_SESSION_AGE_DAYS="90"
 
 # Signs short-lived sync-token JWTs handed to codex-sync-worker. MUST match
 # the codex-sync-worker SYNC_SECRET_KEY value (distinct from SECRET_KEY so a
@@ -157,3 +161,6 @@ MONDAY_REDIRECT_URI="http://localhost:5173/oauth/callback"
 # OPENROUTER_BASE_URL. Never enable for live providers.
 # Reserves 1 raw cent per local test request; settles reported cost, never an estimate.
 # BILLING_CHAT_USAGE_REHEARSAL="false"
+# Stripe keys
+#STRIPE_SECRET_KEY=sk_live_1234.... (Or sk_test_ for sandbox key)
+#STRIPE_PUBLISHABLE_KEY=pk_live_1234....

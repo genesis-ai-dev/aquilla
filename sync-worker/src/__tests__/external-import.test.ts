@@ -29,6 +29,7 @@ import {
 } from '../external/artifacts-route'
 import { handleExternalChangesetsRequest } from '../external/changesets-route'
 import { handleEventsWriteRequest } from '../events/route'
+import { handleExportSourceRequest } from '../events/export-route'
 import { mintApiToken } from '../../../db/shared/api-credentials'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
 import { makeTestToken } from './helpers/auth'
@@ -726,6 +727,126 @@ describe('PlanImport — commit', () => {
     expect(res.status).toBe(400)
     expect((await res.json() as { error: { code: string } }).error.code).toBe('validation_failed')
   })
+
+  // AQU-1120: the Agent API wrote the artifact + binding but never the
+  // `file_source_blobs` side-car the export route resolves original bytes
+  // through, so an agent-imported file 404'd on export.
+  it('writes the file_source_blobs side-car so an agent-imported file exports', async () => {
+    const token = await credToken(tdb, { credentialId: CRED_LEAD, userId: 1, username: 'lead' })
+    const original = '\\id GEN\n\\c 1\n\\v 1 In the beginning\n'
+    const up = (await handleExternalArtifactsRequest(
+      uploadReq(token, 'Genesis.usfm', new TextEncoder().encode(original)),
+      env,
+    ))!
+    const artifactId = ((await up.json()) as { artifactId: string }).artifactId
+
+    const prepRes = (await handleExternalChangesetsRequest(
+      prepareReq(token, {
+        kind: 'PlanImport',
+        fileName: 'Genesis.usfm',
+        fileType: 'usfm',
+        artifactId,
+        cells: [{ content: 'In the beginning', canonicalRef: 'GEN 1:1', type: 'verse' }],
+      }),
+      env,
+    ))!
+    const prep = (await prepRes.json()) as { changeset: { id: string } }
+    const commitRes = (await handleExternalChangesetsRequest(commitReq(token, prep.changeset.id), env))!
+    const commit = (await commitRes.json()) as { receipt: { fileId: string } }
+    const fileId = commit.receipt.fileId
+
+    // The side-car points at the artifact's existing R2 object — no byte copy.
+    const artifacts = await tdb.rows<{ id: string; r2_key: string; size_bytes: number | string }>('artifacts')
+    const blobs = await tdb.rows<{
+      file_id: string
+      project_id: string
+      format: string
+      raw_source: string | null
+      r2_key: string | null
+      size_bytes: number | string | null
+    }>('file_source_blobs')
+    expect(blobs).toHaveLength(1)
+    expect(blobs[0]).toMatchObject({
+      file_id: fileId,
+      project_id: PROJECT,
+      format: 'usfm',
+      raw_source: null,
+      r2_key: artifacts[0].r2_key,
+    })
+    expect(Number(blobs[0].size_bytes)).toBe(new TextEncoder().encode(original).byteLength)
+
+    // End of the regression: export now serves the round-tripped source instead
+    // of 404 "no source blob recorded for this file".
+    const exportToken = await makeTestToken(SECRET, { projectId: PROJECT, fileId, role: 600 })
+    const exportRes = (await handleExportSourceRequest(
+      new Request(`https://w/api/v1/projects/${PROJECT}/files/${fileId}/source`, {
+        headers: { Authorization: `Bearer ${exportToken}` },
+      }),
+      env,
+    ))!
+    expect(exportRes.status).toBe(200)
+    expect(await exportRes.text()).toContain('\\v 1 ')
+  })
+
+  it('records an unknown fileType as custom-original so the original bytes still export', async () => {
+    const token = await credToken(tdb, { credentialId: CRED_LEAD, userId: 1, username: 'lead' })
+    const original = 'unit-1\nunit-2\n'
+    const up = (await handleExternalArtifactsRequest(
+      uploadReq(token, 'notes.weird', new TextEncoder().encode(original)),
+      env,
+    ))!
+    const artifactId = ((await up.json()) as { artifactId: string }).artifactId
+
+    const prepRes = (await handleExternalChangesetsRequest(
+      prepareReq(token, {
+        kind: 'PlanImport',
+        fileName: 'notes.weird',
+        fileType: 'weird-in-house-format',
+        artifactId,
+        cells: [{ content: 'unit-1' }],
+      }),
+      env,
+    ))!
+    const prep = (await prepRes.json()) as { changeset: { id: string } }
+    const commitRes = (await handleExternalChangesetsRequest(commitReq(token, prep.changeset.id), env))!
+    const { receipt } = (await commitRes.json()) as { receipt: { fileId: string } }
+
+    const blobs = await tdb.rows<{ format: string }>('file_source_blobs')
+    expect(blobs).toHaveLength(1)
+    expect(blobs[0].format).toBe('custom-original')
+
+    const exportToken = await makeTestToken(SECRET, {
+      projectId: PROJECT,
+      fileId: receipt.fileId,
+      role: 600,
+    })
+    const exportRes = (await handleExportSourceRequest(
+      new Request(`https://w/api/v1/projects/${PROJECT}/files/${receipt.fileId}/source`, {
+        headers: { Authorization: `Bearer ${exportToken}` },
+      }),
+      env,
+    ))!
+    expect(exportRes.status).toBe(200)
+    expect(exportRes.headers.get('X-Export-Mode')).toBe('raw-original')
+    expect(await exportRes.text()).toBe(original)
+  })
+
+  it('leaves no side-car when the plan links no source artifact', async () => {
+    const token = await credToken(tdb, { credentialId: CRED_LEAD, userId: 1, username: 'lead' })
+    const prepRes = (await handleExternalChangesetsRequest(
+      prepareReq(token, {
+        kind: 'PlanImport',
+        fileName: 'NoArtifact.usfm',
+        fileType: 'usfm',
+        cells: [{ content: 'x' }],
+      }),
+      env,
+    ))!
+    const prep = (await prepRes.json()) as { changeset: { id: string } }
+    const commitRes = (await handleExternalChangesetsRequest(commitReq(token, prep.changeset.id), env))!
+    expect(commitRes.status).toBe(200)
+    expect(await tdb.rows('file_source_blobs')).toHaveLength(0)
+  })
 })
 
 // ── PlanImport commit replay: crash-retry idempotency (W1-B §4/§9) ───────────
@@ -777,6 +898,10 @@ describe('PlanImport — commit replay (crash-retry idempotency)', () => {
       userId: 1,
       username: 'lead',
       role: 500,
+      // What mintInternalSyncToken actually stamps on the external path. The
+      // simulation needs it: AQU-1068 gates source.cell.* on the project's
+      // cellEditingFloor and exempts this surface by exactly this claim.
+      src: 'external',
     })
     const fileEvent: RawEvent<'file.create'> = {
       id: planned.fileEventId,

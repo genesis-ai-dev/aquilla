@@ -5,6 +5,15 @@ import { OrgProvider } from "@/context/OrgContext"
 import { ProjectsList } from "./ProjectsList"
 
 const navigate = vi.fn()
+// AQU-1277: OrgSidebar's useOrgSettings fetches /api/v2/orgs/:id/settings.
+// fetchOrgSettings swallows its own failures and returns null, so unmocked it
+// silently hit production identity while the tests still passed. null is what
+// these tests already observed, so behaviour here is unchanged.
+vi.mock("@/lib/sync/org-settings", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/org-settings")>()),
+  fetchOrgSettings: vi.fn(async () => null),
+}))
+
 vi.mock("react-router-dom", async (importActual) => {
   const actual = await importActual<typeof import("react-router-dom")>()
   return { ...actual, useNavigate: () => navigate }

@@ -11,6 +11,23 @@ import type { OrgBilling } from "@/lib/sync/billing"
 vi.mock("@/pages/settings/OrgSettingsShell", () => ({
   OrgSettingsShell: ({ children }: { children: React.ReactNode }) => children,
 }))
+// AQU-1277: OrgSidebar's useOrgSettings fetches /api/v2/orgs/:id/settings.
+// fetchOrgSettings swallows its own failures and returns null, so unmocked it
+// silently hit production identity while the tests still passed. null is what
+// these tests already observed, so behaviour here is unchanged.
+// AQU-1277: OrgProvider loads the project directory via
+// fetchAccessibleProjectsResult, which catches its own network errors. Unmocked
+// it reached production identity for real while the tests stayed green.
+vi.mock("@/lib/sync/cloud-projects", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/cloud-projects")>()),
+  fetchAccessibleProjectsResult: vi.fn(async () => ({ ok: true as const, projects: [] })),
+}))
+
+vi.mock("@/lib/sync/org-settings", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/org-settings")>()),
+  fetchOrgSettings: vi.fn(async () => null),
+}))
+
 vi.mock("@/components/AccountSwitcher", () => ({ AccountSwitcher: () => null }))
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "jwt", username: "wendi", createdAt: "x" }, loading: false }),

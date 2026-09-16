@@ -28,7 +28,7 @@ import {
   type StructureCommand,
   type UpdateProjectSettingsCommand,
 } from './commands'
-import { changedPolicyKeys, commitPatchSettings } from './commands-patch-settings'
+import { loosenedPolicyKeys, commitPatchSettings } from './commands-patch-settings'
 import {
   commitMembership,
   isMembershipCommand,
@@ -1385,12 +1385,12 @@ async function commitUpdateProjectSettings(
   const expectedVersion = cs.plannedIds?.updateProjectSettings?.version ?? cmd.ifMatchVersion
   const live = await loadProjectSettings(db, projectId)
   if (live.version === expectedVersion) {
-    const changedPolicy = changedPolicyKeys(cmd.settings, live.settings)
-    if (changedPolicy.length > 0) {
+    const loosened = loosenedPolicyKeys(cmd.settings, live.settings)
+    if (loosened.length > 0) {
       return errorResponse(
         'permission_denied',
-        'policy settings keys are never writable through the agent surface',
-        { policyKeys: changedPolicy },
+        'policy settings keys are writable through the agent surface only in the restrictive direction',
+        { policyKeys: loosened.map((d) => d.key), policyDenials: loosened },
       )
     }
   }

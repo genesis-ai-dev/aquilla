@@ -33,6 +33,7 @@ import {
   patchProjectSettingsShared,
 } from '../../../db/shared/projects'
 import { validateSettingsKeyValue } from '../../../db/shared/project-settings-keys'
+import { evaluatePolicyWrite, type PolicyDenial } from './policy-direction'
 import { ROLE } from '../events/role-policy'
 
 /** One top-level settings key replace. `value` is any JSON value (null stores
@@ -49,11 +50,12 @@ export interface PatchSettingsCommand {
   ifMatchVersion: number
 }
 
-/** Settings keys that govern the agent-oversight machinery itself. NEVER
- *  writable through any agent surface (permission_denied always) — an agent
- *  must not be able to loosen the gates that review its own work. Enforced for
- *  PatchSettings ops AND (as a changed-value guard) for the deprecated
- *  UpdateProjectSettings whole-blob replace. */
+/** Settings keys that govern the agent-oversight machinery itself. Writable
+ *  through the agent surface ONLY in the restrictive direction (AQU-1282) — an
+ *  agent may propose tightening its own oversight, never loosening it. The
+ *  per-key direction lives in `policy-direction.ts`; both PatchSettings ops and
+ *  (as a changed-value guard) the deprecated UpdateProjectSettings whole-blob
+ *  replace run the same check. */
 export const POLICY_SETTINGS_KEYS: readonly string[] = [
   'agentMemoryAutonomy',
   'validationRoleFloor',
@@ -161,14 +163,15 @@ export function validatePatchSettingsCommand(
     // AQU-1224: a key the settings schema doesn't carry is a TYPO, not a new
     // setting — reject it here so nothing reaches the human approval queue,
     // and name the key so the caller can correct it (describe_command lists
-    // the legal ones). Policy keys skip the VALUE check so they always resolve
-    // to the permission_denied prepare emits for them, never a type complaint.
-    if (!POLICY_KEY_SET.has(op.key)) {
-      const problem = validateSettingsKeyValue(op.key, op.value)
-      if (problem) {
-        issues.push({ index, message: `PatchSettings.ops[${opIndex}]: ${problem}` })
-        return null
-      }
+    // the legal ones). AQU-1282: policy keys are type-checked here like every
+    // other key now that they are writable in the restrictive direction — a
+    // mistyped policy value is a typo and should read as one, with the
+    // direction check itself left to prepare/commit, which can see the live
+    // blob this op would be moving away from.
+    const problem = validateSettingsKeyValue(op.key, op.value)
+    if (problem) {
+      issues.push({ index, message: `PatchSettings.ops[${opIndex}]: ${problem}` })
+      return null
     }
     // A duplicate key is a caller bug (later would silently clobber earlier),
     // unlike SetTranslation's loop-generated cell batches — reject, don't warn.
@@ -206,6 +209,23 @@ export function changedPolicyKeys(
 ): string[] {
   const normalized = normalizeSettings(candidate)
   return POLICY_SETTINGS_KEYS.filter((key) => !deepEqualJson(normalized[key], current[key]))
+}
+
+/** AQU-1282: of the policy keys a whole-blob replace would CHANGE, the ones it
+ *  would LOOSEN. A blob that only tightens is admitted, same as the equivalent
+ *  PatchSettings ops — the whole-blob path is the deprecated spelling of the
+ *  same write and must not be the stricter of the two. */
+export function loosenedPolicyKeys(
+  candidate: Record<string, unknown>,
+  current: Record<string, unknown>,
+): PolicyDenial[] {
+  const normalized = normalizeSettings(candidate)
+  const denials: PolicyDenial[] = []
+  for (const key of changedPolicyKeys(candidate, current)) {
+    const verdict = evaluatePolicyWrite(key, normalized[key], current[key])
+    if (!verdict.ok) denials.push({ key, reason: verdict.reason })
+  }
+  return denials
 }
 
 /** Compact, truncated preview of a single settings value for the approval page.
@@ -292,14 +312,26 @@ function requiredRoleForOps(
   return floor
 }
 
-/** Ops naming a POLICY key → the permission_denied response, else null. */
-function policyOpDenial(ops: readonly PatchSettingsOp[]): Response | null {
-  const policyOps = ops.filter((op) => POLICY_KEY_SET.has(op.key))
-  if (policyOps.length === 0) return null
+/** AQU-1282: ops naming a POLICY key are admitted when they move that key
+ *  toward MORE oversight and refused when they loosen it. Compared against the
+ *  LIVE blob, so the same op can be legal on one project and refused on
+ *  another — which is the point: the direction is a property of the move, not
+ *  of the value. Returns the permission_denied response, or null to proceed. */
+function policyOpDenial(
+  ops: readonly PatchSettingsOp[],
+  current: Record<string, unknown>,
+): Response | null {
+  const denials: PolicyDenial[] = []
+  for (const op of ops) {
+    if (!POLICY_KEY_SET.has(op.key)) continue
+    const verdict = evaluatePolicyWrite(op.key, op.value, current[op.key])
+    if (!verdict.ok) denials.push({ key: op.key, reason: verdict.reason })
+  }
+  if (denials.length === 0) return null
   return errorResponse(
     'permission_denied',
-    'policy settings keys are never writable through the agent surface',
-    { policyKeys: policyOps.map((op) => op.key) },
+    'policy settings keys are writable through the agent surface only in the restrictive direction',
+    { policyKeys: denials.map((d) => d.key), policyDenials: denials },
   )
 }
 
@@ -321,9 +353,6 @@ export async function preparePatchSettings(
     return errorResponse('validation_failed', 'PatchSettings.projectId must match the changeset project')
   }
 
-  const denial = policyOpDenial(cmd.ops)
-  if (denial) return denial
-
   const [termbaseFloor, languageFloor] = await Promise.all([
     resolveTermbaseEditMinRole(db, urlProjectId),
     resolveLanguageEditMinRole(db, urlProjectId),
@@ -337,6 +366,13 @@ export async function preparePatchSettings(
   }
 
   const current = await loadProjectSettings(db, urlProjectId)
+
+  // AQU-1282: the policy-direction check needs the live blob to know which way
+  // each op moves, so it lands after the settings read rather than before the
+  // floors as the old blanket refusal did.
+  const denial = policyOpDenial(cmd.ops, current.settings)
+  if (denial) return denial
+
   if (current.version !== cmd.ifMatchVersion) {
     return errorResponse('plan_stale', 'settings version changed since prepare', {
       expected: cmd.ifMatchVersion,
@@ -394,9 +430,6 @@ export async function commitPatchSettings(
     return toErrorResponse(err)
   }
 
-  const denial = policyOpDenial(cmd.ops)
-  if (denial) return denial
-
   const [termbaseFloor, languageFloor] = await Promise.all([
     resolveTermbaseEditMinRole(db, projectId),
     resolveLanguageEditMinRole(db, projectId),
@@ -408,6 +441,14 @@ export async function commitPatchSettings(
       requiredRole,
     })
   }
+
+  // AQU-1282: re-run the direction check against the LIVE blob, BEFORE the
+  // gates. A policy value that moved while the changeset sat in the approval
+  // queue can turn a tightening proposal into a loosening one — the human
+  // approved the op, not the direction it would end up travelling.
+  const live = await loadProjectSettings(db, projectId)
+  const denial = policyOpDenial(cmd.ops, live.settings)
+  if (denial) return denial
 
   const gate = await receiptOnlyGates(db, cs)
   if (gate instanceof Response) return gate

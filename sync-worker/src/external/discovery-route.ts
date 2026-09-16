@@ -179,7 +179,7 @@ function apiMap(): Record<string, unknown> {
         '3. Commit as usual (ask mode: a human approves at the approvalUrl first). `ifMatchVersion` is re-checked at commit — a racing writer surfaces as plan_stale, so re-read and re-prepare.',
       ],
       rules:
-        'PatchSettings must be the SOLE command in its changeset. Floors: `terminology` needs the org termbase-edit floor (default PROJECT_LEAD 500); every other key needs MAINTAINER 600. The policy keys that govern agent oversight itself — agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, validationCount, validationCountAudio, allowSelfValidation, harmonize_min_role, contributeToGlobalTm — are NEVER writable through any agent surface (permission_denied), and UpdateProjectSettings is likewise rejected if its blob would change one.',
+        'PatchSettings must be the SOLE command in its changeset. Floors: `terminology` needs the org termbase-edit floor (default PROJECT_LEAD 500); every other key needs MAINTAINER 600. The policy keys that govern agent oversight itself — agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, validationCount, validationCountAudio, allowSelfValidation, harmonize_min_role, contributeToGlobalTm, cellEditingFloor, agentAuthorship — are writable ONLY in the restrictive direction (AQU-1282): a write that moves one toward MORE oversight is staged like any other, a write that loosens it returns permission_denied naming the key. UpdateProjectSettings is held to the same rule — its blob may tighten a policy key but never loosen one.',
     },
     multiLanguage: {
       note:

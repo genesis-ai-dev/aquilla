@@ -11,9 +11,11 @@
 // It mirrors `ProjectWideSettings` in src/lib/sync/project-settings.ts — the
 // SPA's view of the same blob — plus two keys that live only server-side:
 // the `healthSettings`/`decaySettings` alias pair normalizeSettings() keeps in
-// step (db/shared/projects.ts) and the policy keys that are never agent-
-// writable but must still be RECOGNISED here, so naming one earns the
-// `permission_denied` it deserves rather than being mistaken for a typo.
+// step (db/shared/projects.ts) and the policy keys, which an agent may write
+// only in the RESTRICTIVE direction (AQU-1282, enforced by sync-worker's
+// policy-direction.ts against the live blob). Their VALUES are type-checked
+// here like every other key's; whether a given write tightens or loosens is a
+// question only the live blob can answer, so it is not asked here.
 //
 // Adding a settings key? Add it here too, or agents cannot write it.
 
@@ -96,9 +98,16 @@ export const PROJECT_SETTINGS_KEY_SPECS: Readonly<Record<string, SettingsKeySpec
   harmonize_min_role: { kind: 'enum', values: ['project_lead', 'maintainer'] },
   agentMemoryAutonomy: { kind: 'enum', values: ['human', 'agent-low-risk'] },
   contributeToGlobalTm: { kind: 'boolean' },
-  // AQU-1180: drops author fields from agent-facing reads. Recognised so an
-  // agent naming it gets permission_denied rather than "unknown key".
+  // AQU-1180: drops author fields from agent-facing reads. A POLICY key, so an
+  // agent may only set it (unset → "none"), never clear it.
   agentAuthorship: { kind: 'enum', values: ['none'] },
+  // AQU-1068 / AQU-1282: who may add and remove cells. A POLICY key listed here
+  // so its value is type-checked like any other; the direction rule in
+  // sync-worker's policy-direction.ts is what keeps an agent from lowering it.
+  cellEditingFloor: {
+    kind: 'enum',
+    values: ['none', 'commenter', 'reviewer', 'contributor', 'project_lead', 'maintainer'],
+  },
 
   // Capability switches
   allowLineCreation: { kind: 'boolean' },

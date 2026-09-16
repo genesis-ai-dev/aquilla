@@ -175,7 +175,9 @@ function getCapabilities(cred: ApiCredentialContext): McpToolResult {
         'PROJECT_LEAD 500), every other key MAINTAINER 600. Policy keys governing agent ' +
         'oversight itself (agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, ' +
         'validationCount, validationCountAudio, allowSelfValidation, harmonize_min_role, ' +
-        'contributeToGlobalTm) are NEVER writable by an agent (permission_denied). ' +
+        'contributeToGlobalTm, cellEditingFloor, agentAuthorship) are writable ONLY in the ' +
+        'restrictive direction (AQU-1282) — an agent may tighten its own oversight, never ' +
+        'loosen it; a loosening op returns permission_denied naming the key. ' +
         'PatchSettings must be the sole command in its changeset, and — like every write — ' +
         'applies only at confirm_changeset. Prefer it over the deprecated whole-blob ' +
         'UpdateProjectSettings, which can clobber keys you never read.',

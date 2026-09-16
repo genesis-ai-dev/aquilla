@@ -289,15 +289,155 @@ describe('PatchSettings — settings-key validation (AQU-1224)', () => {
   })
 })
 
-describe('PatchSettings — policy-key denial', () => {
-  it.each(POLICY_SETTINGS_KEYS.map((k) => [k]))('rejects %s even for an owner', async (key) => {
+describe('PatchSettings — policy keys, restrictive direction only (AQU-1282)', () => {
+  /** The loosening write for each policy key, against the seeded blob (which
+   *  carries validationCount: 3 and leaves the rest of them unset). Every one
+   *  must still earn permission_denied, for an owner as much as anyone.
+   *  Direction ranking itself is unit-tested in policy-direction.test.ts; this
+   *  is the end-to-end proof that the route enforces it. */
+  const LOOSENING: Record<string, unknown> = {
+    contributeToGlobalTm: true,
+    agentAuthorship: null,
+    allowSelfValidation: true,
+    agentMemoryAutonomy: 'agent-low-risk',
+    validationRoleFloor: 'reviewer',
+    harmonize_min_role: 'project_lead',
+    validationCount: 2,
+    validationCountAudio: 1,
+    validationNamedUsers: [],
+    cellEditingFloor: 'contributor',
+  }
+
+  /** The tightening write for each key, against the same seeded blob. */
+  const TIGHTENING: Record<string, unknown> = {
+    contributeToGlobalTm: false,
+    agentAuthorship: 'none',
+    allowSelfValidation: false,
+    agentMemoryAutonomy: 'human',
+    validationRoleFloor: 'maintainer',
+    harmonize_min_role: 'maintainer',
+    validationCount: 9,
+    validationCountAudio: 4,
+    validationNamedUsers: ['ana'],
+    cellEditingFloor: 'none',
+  }
+
+  it('the direction tables cover every policy key', () => {
+    expect(Object.keys(LOOSENING).sort()).toEqual([...POLICY_SETTINGS_KEYS].sort())
+    expect(Object.keys(TIGHTENING).sort()).toEqual([...POLICY_SETTINGS_KEYS].sort())
+  })
+
+  it.each(POLICY_SETTINGS_KEYS.map((k) => [k]))(
+    'refuses the LOOSENING write to %s even for an owner',
+    async (key) => {
+      const env = makeEnv(tdb.db)
+      const owner = await memberToken(tdb, 700)
+      // Tighten first so there is something to loosen back from, then try it.
+      const tightened = await prepare(env, owner.token, patchCmd([{ key, value: TIGHTENING[key] }]))
+      expect(tightened.res.status).toBe(200)
+      await commit(env, owner.token, tightened.body.changeset.id)
+
+      const { res, body } = await prepare(env, owner.token, patchCmd([{ key, value: LOOSENING[key] }], 2))
+      expect(res.status).toBe(403)
+      expect(body.error.code).toBe('permission_denied')
+      expect(body.error.details.policyKeys).toEqual([key])
+      // Nothing reaches the human approval queue — only the tightening one did.
+      expect(await tdb.rows('changesets')).toHaveLength(1)
+    },
+  )
+
+  it.each(POLICY_SETTINGS_KEYS.map((k) => [k]))(
+    'admits the TIGHTENING write to %s and stores it',
+    async (key) => {
+      const env = makeEnv(tdb.db)
+      const owner = await memberToken(tdb, 700)
+      const { res, body } = await prepare(env, owner.token, patchCmd([{ key, value: TIGHTENING[key] }]))
+      expect(res.status).toBe(200)
+      expect(body.summary.command).toBe('PatchSettings')
+
+      const { res: commitRes } = await commit(env, owner.token, body.changeset.id)
+      expect(commitRes.status).toBe(200)
+
+      const rows = await tdb.rows<{ settings: string }>('project_settings')
+      expect(JSON.parse(rows[0].settings)[key]).toEqual(TIGHTENING[key])
+    },
+  )
+
+  it('a policy key still needs MAINTAINER: a project_lead is refused either direction', async () => {
     const env = makeEnv(tdb.db)
-    const owner = await memberToken(tdb, 700)
-    const { res, body } = await prepare(env, owner.token, patchCmd([{ key, value: 1 }]))
+    const lead = await memberToken(tdb, 500)
+    const { res, body } = await prepare(env, lead.token, patchCmd([
+      { key: 'contributeToGlobalTm', value: false },
+    ]))
     expect(res.status).toBe(403)
     expect(body.error.code).toBe('permission_denied')
-    expect(body.error.details.policyKeys).toEqual([key])
+    expect(body.error.details.requiredRole).toBe(600)
+  })
+
+  it('a mistyped policy value is a typo (validation_failed), not a direction refusal', async () => {
+    const env = makeEnv(tdb.db)
+    const owner = await memberToken(tdb, 700)
+    const { res, body } = await prepare(env, owner.token, patchCmd([
+      { key: 'contributeToGlobalTm', value: 1 },
+    ]))
+    expect(res.status).toBe(400)
+    expect(body.error.code).toBe('validation_failed')
+  })
+
+  it('AQU-1282 repro: an agent sets contributeToGlobalTm=false AND agentAuthorship="none" in one changeset, no human in the app', async () => {
+    const env = makeEnv(tdb.db)
+    const owner = await memberToken(tdb, 700)
+    const { res, body } = await prepare(env, owner.token, patchCmd([
+      { key: 'contributeToGlobalTm', value: false },
+      { key: 'agentAuthorship', value: 'none' },
+    ]))
+    expect(res.status).toBe(200)
+
+    const { res: commitRes } = await commit(env, owner.token, body.changeset.id)
+    expect(commitRes.status).toBe(200)
+
+    const stored = JSON.parse((await tdb.rows<{ settings: string }>('project_settings'))[0].settings)
+    expect(stored.contributeToGlobalTm).toBe(false)
+    expect(stored.agentAuthorship).toBe('none')
+    // ...and the keys nobody named are byte-identical.
+    expect(stored.targetLanguage).toBe('fr')
+    expect(stored.validationCount).toBe(3)
+  })
+
+  it('a batch that mixes a tightening and a loosening op is refused whole, naming only the loosening key', async () => {
+    const env = makeEnv(tdb.db)
+    const owner = await memberToken(tdb, 700)
+    const { res, body } = await prepare(env, owner.token, patchCmd([
+      { key: 'contributeToGlobalTm', value: false },
+      { key: 'validationCount', value: 2 },
+    ]))
+    expect(res.status).toBe(403)
+    expect(body.error.code).toBe('permission_denied')
+    expect(body.error.details.policyKeys).toEqual(['validationCount'])
     expect(await tdb.rows('changesets')).toHaveLength(0)
+  })
+
+  it('a policy value that LOOSENS between prepare and commit is caught at commit, approval not consumed', async () => {
+    const env = makeEnv(tdb.db)
+    const owner = await memberToken(tdb, 700)
+    // Stage a raise of validationCount 3 → 9.
+    const { res, body } = await prepare(env, owner.token, patchCmd([{ key: 'validationCount', value: 9 }]))
+    expect(res.status).toBe(200)
+
+    // A human raises it further, to 12, under the same pinned version — the
+    // staged op is now a LOWERING, which the human never approved.
+    await tdb.pg.query(
+      `UPDATE project_settings SET settings = $1 WHERE project_id = $2`,
+      [JSON.stringify({ targetLanguage: 'fr', terminology: { concepts: [] }, validationCount: 12 }), PROJECT],
+    )
+
+    const { res: commitRes, body: committed } = await commit(env, owner.token, body.changeset.id)
+    expect(commitRes.status).toBe(403)
+    expect(committed.error.code).toBe('permission_denied')
+    expect(committed.error.details.policyKeys).toEqual(['validationCount'])
+    // The raise a person made stands.
+    const stored = JSON.parse((await tdb.rows<{ settings: string }>('project_settings'))[0].settings)
+    expect(stored.validationCount).toBe(12)
   })
 })
 

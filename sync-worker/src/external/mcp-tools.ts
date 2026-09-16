@@ -137,8 +137,11 @@ export const MCP_TOOLS: McpToolDef[] = [
       'every other key needs MAINTAINER 600. The policy keys that govern agent oversight ' +
       'itself (agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, ' +
       'validationCount, validationCountAudio, allowSelfValidation, harmonize_min_role, ' +
-      'contributeToGlobalTm) are NEVER writable through any agent surface — an op naming one ' +
-      'returns permission_denied. PatchSettings must be the SOLE command in its changeset. ' +
+      'contributeToGlobalTm, cellEditingFloor, agentAuthorship) are writable ONLY in the ' +
+      'restrictive direction (AQU-1282): an op that moves one toward MORE oversight is ' +
+      'staged like any other, one that loosens it returns permission_denied naming the key. ' +
+      'The direction is judged against the LIVE value, so read the settings first. ' +
+      'PatchSettings must be the SOLE command in its changeset. ' +
       'Returns { changesetId, summary, digest, mode, approvalUrl? } exactly like ' +
       'prepare_translations — nothing is applied until confirm_changeset (ask mode: a human ' +
       'approves at the approvalUrl first).',

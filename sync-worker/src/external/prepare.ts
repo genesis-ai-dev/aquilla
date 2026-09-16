@@ -31,7 +31,7 @@ import {
 } from './commands'
 import { isOrgMemberCommand, type OrgMemberCommand } from './commands-org-members'
 import { prepareOrgMember } from './org-members-engine'
-import { changedPolicyKeys, preparePatchSettings, previewSettingValue } from './commands-patch-settings'
+import { loosenedPolicyKeys, preparePatchSettings, previewSettingValue } from './commands-patch-settings'
 import { assertWithinBatchCap, requestDrafts } from './commands-draft-cells'
 import { completionBatchSizeFromSettings } from '../../../db/shared/completion-batch'
 import {
@@ -1091,15 +1091,16 @@ async function prepareUpdateProjectSettings(
     })
   }
 
-  // AQU-926 policy guard: the whole-blob replace may not CHANGE any policy
-  // key's stored value (deep-equal pass-through stays valid, so read-modify-
-  // write callers keep working). Re-checked at commit against the live blob.
-  const changedPolicy = changedPolicyKeys(cmd.settings, current.settings)
-  if (changedPolicy.length > 0) {
+  // AQU-926 policy guard, AQU-1282 direction: the whole-blob replace may move a
+  // policy key only toward MORE oversight (deep-equal pass-through stays valid,
+  // so read-modify-write callers keep working). Re-checked at commit against
+  // the live blob.
+  const loosened = loosenedPolicyKeys(cmd.settings, current.settings)
+  if (loosened.length > 0) {
     return errorResponse(
       'permission_denied',
-      'policy settings keys are never writable through the agent surface',
-      { policyKeys: changedPolicy },
+      'policy settings keys are writable through the agent surface only in the restrictive direction',
+      { policyKeys: loosened.map((d) => d.key), policyDenials: loosened },
     )
   }
 

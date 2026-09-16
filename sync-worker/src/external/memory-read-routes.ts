@@ -38,6 +38,12 @@ import {
   type MemoryProvenance,
   type MemoryStatus,
 } from "../../../db/shared/agent-memory"
+import {
+  briefFilledSectionCount,
+  isBriefL1Stale,
+  readBriefFromSettings,
+} from "../../../db/shared/brief"
+import { loadProjectSettings } from "../../../db/shared/projects"
 import { externalError } from "./errors"
 import { authenticateAndScope, checkReadRateLimit, type ExternalReadsEnv } from "./read-auth"
 import { paginate, parsePageParams } from "./pagination"
@@ -142,11 +148,67 @@ interface ExternalMemoryEntry {
   inRetrieval: boolean
 }
 
+/** The brief block reports what the copilot's prompt actually injects: the
+ *  rendered L1 summary of `settings.translationBrief` — the same value
+ *  prompt-preview's `parts.brief` is built from (AQU-1282). The older
+ *  free-text `project_briefs` row is surfaced separately as `legacyBrief`
+ *  when it has content, so a caller is never told "no brief" while one of the
+ *  two stores still holds text. */
 interface ExternalBrief {
+  /** `translationBrief.l1Summary`, or "" when the brief has no rendered
+   *  summary yet — in which case the copilot prompt carries no brief block. */
   content: string
+  /** The brief record's own version (not the settings version). */
   version: number
   updatedAt: string | null
   updatedBy: string | null
+  source: "translationBrief"
+  /** content !== "" — whether the next draft's prompt will carry the brief. */
+  reachesCopilot: boolean
+  /** Filled interview sections. Sections without an L1 do NOT reach the copilot. */
+  sections: number
+  /** The sections moved after the L1 was rendered (or no L1 exists) —
+   *  RegenerateBriefSummary fixes it. */
+  l1Stale: boolean
+}
+
+interface LegacyBrief {
+  content: string
+  version: number
+}
+
+async function loadExternalBrief(
+  db: AquillaDb,
+  projectId: string,
+  pseudonymize: (name: string | null) => Promise<string | null>,
+): Promise<{ brief: ExternalBrief; legacyBrief: LegacyBrief | null }> {
+  const { settings } = await loadProjectSettings(db, projectId)
+  const record = readBriefFromSettings(settings)
+  const legacy = await getBrief(db, projectId)
+  const brief: ExternalBrief = record
+    ? {
+        content: record.l1Summary ?? "",
+        version: record.version,
+        updatedAt: record.updatedAt || null,
+        updatedBy: await pseudonymize(record.updatedBy || null),
+        source: "translationBrief",
+        reachesCopilot: (record.l1Summary ?? "") !== "",
+        sections: briefFilledSectionCount(record),
+        l1Stale: isBriefL1Stale(record),
+      }
+    : {
+        content: "",
+        version: 0,
+        updatedAt: null,
+        updatedBy: null,
+        source: "translationBrief",
+        reachesCopilot: false,
+        sections: 0,
+        l1Stale: true,
+      }
+  const legacyBrief: LegacyBrief | null =
+    legacy.content !== "" ? { content: legacy.content, version: legacy.version } : null
+  return { brief, legacyBrief }
 }
 
 /** Keep the run/session ids (they identify an agent run, which is what a
@@ -254,7 +316,7 @@ async function handleMemoryList(
   const page = paginate(filtered, offset, limit)
 
   const pseudonymize = createPseudonymizer(env.SYNC_SECRET_KEY as string, projectId)
-  const brief = await getBrief(db, projectId)
+  const { brief, legacyBrief } = await loadExternalBrief(db, projectId, pseudonymize)
   const data: ExternalMemoryEntry[] = await Promise.all(
     page.data.map(async (m) =>
       toExternalEntry(
@@ -266,15 +328,9 @@ async function handleMemoryList(
     ),
   )
 
-  const briefOut: ExternalBrief = {
-    content: brief.content,
-    version: brief.version,
-    updatedAt: brief.updatedAt,
-    updatedBy: await pseudonymize(brief.updatedBy),
-  }
-
   return Response.json({
-    brief: briefOut,
+    brief,
+    ...(legacyBrief ? { legacyBrief } : {}),
     data,
     nextCursor: page.nextCursor,
     retrieval: {
@@ -288,6 +344,8 @@ async function handleMemoryList(
         'kind is derived from the path prefix: examples/ -> example, decisions/ -> decision, notes/ -> note, observations/ -> observation. Filter with ?kind= or ?status=.',
       identities:
         "createdBy/reviewedBy/brief.updatedBy are per-project pseudonyms, not usernames — stable within this project, uncorrelatable across projects.",
+      brief:
+        "brief.content is the rendered L1 summary of settings.translationBrief — the exact text the copilot prompt injects (prompt-preview parts.brief). Empty content means the brief does not reach the AI yet: write sections with SetBrief (which auto-renders) or run RegenerateBriefSummary. legacyBrief (when present) is the older free-text project brief, still injected by the in-app agent's memory context but not by the drafting prompt.",
       perCell:
         "GET /api/v1/external/projects/:projectId/files/:fileId/cells/:cellId/memory returns what retrieval would inject for one cell's draft.",
     },
@@ -342,16 +400,12 @@ async function handleCellMemory(
   const overflow = memory.memoryIndex.length - shown.length
 
   const pseudonymize = createPseudonymizer(env.SYNC_SECRET_KEY as string, projectId)
-  const brief = await getBrief(db, projectId)
+  const { brief, legacyBrief } = await loadExternalBrief(db, projectId, pseudonymize)
 
   return Response.json({
     cell: { fileId, cellId },
-    brief: {
-      content: memory.brief,
-      version: brief.version,
-      updatedAt: brief.updatedAt,
-      updatedBy: await pseudonymize(brief.updatedBy),
-    } satisfies ExternalBrief,
+    brief,
+    ...(legacyBrief ? { legacyBrief } : {}),
     // Index entries only — path + first line + human-edited marker — because
     // that is literally what the prompt carries. Full text is fetched
     // just-in-time by the copilot's read_memory tool, and by an agent from the

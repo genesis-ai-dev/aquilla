@@ -4,7 +4,7 @@
 // section ids at prepare (nothing staged), the settings version pin, and the
 // supersede path when a human filled the same sections first.
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 // commit.ts → events/route.ts → broadcast.ts → partyserver (cloudflare:*).
 vi.mock('partyserver', () => ({
@@ -14,18 +14,43 @@ vi.mock('partyserver', () => ({
 }))
 
 import { handleExternalChangesetsRequest } from '../external/changesets-route'
+import { buildPromptPreview } from '../external/prompt-preview'
 import { BRIEF_FIELD_MAX_CHARS, BRIEF_NOTES_MAX_CHARS } from '../external/commands-set-brief'
 import { BRIEF_SETTINGS_KEY, type TranslationBriefRecord } from '../../../db/shared/brief'
 import { mintApiToken } from '../../../db/shared/api-credentials'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
 
 const SECRET = 'test-secret'
+const AUTH_URL = 'https://identity.test'
 const PROJECT = 'proj-brief'
 const ORG_ID = 88
 
-function makeEnv(db: AquillaDb) {
-  return { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET, BASE_URL: 'https://aquilla.app' }
+/** No AUTH_WORKER_URL by default: the L1 auto-render (AQU-1282) reports
+ *  not_configured and the sections write behaves exactly as before. */
+function makeEnv(db: AquillaDb, opts: { configured?: boolean } = {}) {
+  return {
+    AQUILLA_PG: db,
+    SYNC_SECRET_KEY: SECRET,
+    BASE_URL: 'https://aquilla.app',
+    ...(opts.configured ? { AUTH_WORKER_URL: AUTH_URL } : {}),
+  }
 }
+
+/** Stub the auth-worker brief-summary bridge; records every call. */
+function stubBridge(reply: (body: Record<string, unknown>) => Response) {
+  const calls: { url: string; body: Record<string, unknown>; auth: string | null }[] = []
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+    const parsed = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>
+    calls.push({ url, body: parsed, auth: new Headers(init?.headers).get('Authorization') })
+    return reply(parsed)
+  }))
+  return calls
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
 
 let nextUserId = 800
 let nextCred = 0
@@ -110,6 +135,11 @@ beforeEach(async () => {
   tdb = await makeTestDb({
     organizations: [{ id: ORG_ID, name: 'Org', owner_user_id: 1 }],
     projects: [{ id: PROJECT, name: 'P', created_by: 99, org_id: ORG_ID }],
+    files: [{ project_id: PROJECT, id: 'file-1', name: 'f.usfm', created_at: 1, updated_at: 1 }],
+    cells: [{
+      project_id: PROJECT, file_id: 'file-1', cell_id: 'c1', side: 'source',
+      value: 'In the beginning', event_id: 'src-evt-1', last_edit_at: 1,
+    }],
     project_settings: [{
       project_id: PROJECT,
       settings: JSON.stringify({ targetLanguage: 'fr' }),
@@ -140,6 +170,12 @@ describe('SetBrief — writing the brief', () => {
     expect(commitRes.status).toBe(200)
     expect(committed.receipt.command).toBe('SetBrief')
     expect(committed.receipt.version).toBe(2)
+    // No drafting backend in this env: the receipt SAYS the L1 did not render
+    // rather than leaving the caller to discover an invisible brief later.
+    expect(committed.receipt.briefSummary).toEqual({
+      rendered: false,
+      reason: expect.stringContaining('not_configured'),
+    })
 
     const brief = (await storedBrief(tdb))!
     expect(brief.parameters).toEqual({ purpose: 'Church planting', audience: 'Rural youth, 15–25' })
@@ -208,6 +244,64 @@ describe('SetBrief — writing the brief', () => {
     const { res: commitRes } = await commit(env, maintainer.token, body.changeset.id)
     expect(commitRes.status).toBe(200)
     expect((await storedBrief(tdb))!.freeformNotes).toBe('Notes only.')
+  })
+})
+
+describe('SetBrief — L1 auto-render on commit (AQU-1282)', () => {
+  it('renders the L1 after the sections land, so the brief reaches the copilot with no in-app step', async () => {
+    const env = makeEnv(tdb.db, { configured: true })
+    const maintainer = await memberToken(tdb, 600)
+    const calls = stubBridge(() => Response.json({ summary: 'Translate for rural youth; warm register.', model: 'test/brief-model' }))
+
+    const { body } = await prepare(env, maintainer.token, setBrief({
+      parameters: { purpose: 'Church planting', audience: 'Rural youth, 15–25' },
+    }))
+    // Prepare stages only — no render yet.
+    expect(calls).toHaveLength(0)
+
+    const { res: commitRes, body: committed } = await commit(env, maintainer.token, body.changeset.id)
+    expect(commitRes.status).toBe(200)
+    expect(committed.receipt.briefSummary).toEqual({ rendered: true, chars: 41, model: 'test/brief-model' })
+    // Two guarded writes (sections, then L1): the receipt reports the version
+    // to pin NEXT, not the intermediate one.
+    expect(committed.receipt.version).toBe(3)
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0].url).toBe(`${AUTH_URL}/api/v1/ai/agent/internal/brief-summary`)
+    expect(calls[0].auth).toBe(`Bearer ${SECRET}`)
+    expect(calls[0].body.l2Markdown).toContain('### Purpose / skopos\nChurch planting')
+
+    const brief = (await storedBrief(tdb))!
+    expect(brief.parameters).toEqual({ purpose: 'Church planting', audience: 'Rural youth, 15–25' })
+    expect(brief.l1Summary).toBe('Translate for rural youth; warm register.')
+    expect(brief.l1ModelId).toBe('test/brief-model')
+    expect(brief.l1GeneratedAt! >= brief.updatedAt).toBe(true)
+
+    // ACCEPTANCE: prompt-preview's brief part is non-empty straight after the commit.
+    const preview = await buildPromptPreview(tdb.db, { projectId: PROJECT, cellId: 'c1', targetLang: '' })
+    expect(preview.ok && preview.body.parts.brief).toContain('Translate for rural youth; warm register.')
+  })
+
+  it('a failed render never fails the commit — the sections land and the receipt says why', async () => {
+    const env = makeEnv(tdb.db, { configured: true })
+    const maintainer = await memberToken(tdb, 600)
+    await seedSettings(tdb, { targetLanguage: 'fr', [BRIEF_SETTINGS_KEY]: seededBrief() })
+    stubBridge(() =>
+      Response.json({ error: 'credit_cap_exceeded', reason: 'agentDaily', message: 'cap' }, { status: 429 }),
+    )
+
+    const { body } = await prepare(env, maintainer.token, setBrief({ parameters: { audience: 'Diaspora readers' } }))
+    const { res: commitRes, body: committed } = await commit(env, maintainer.token, body.changeset.id)
+    expect(commitRes.status).toBe(200)
+    expect(committed.receipt.version).toBe(2)
+    expect(committed.receipt.briefSummary.rendered).toBe(false)
+    expect(committed.receipt.briefSummary.reason).toMatch(/rate_limited/)
+
+    const brief = (await storedBrief(tdb))!
+    expect(brief.parameters.audience).toBe('Diaspora readers')
+    // The old L1 is carried over (stale), not cleared.
+    expect(brief.l1Summary).toBe('A meaning-based liturgical translation.')
+    expect(brief.l1GeneratedAt).toBe('2026-09-01T00:00:00.000Z')
   })
 })
 

@@ -366,7 +366,12 @@ export function PlanInspector({
                   <Button
                     variant="link"
                     size="sm"
-                    className="h-auto gap-1 p-0 text-[12px]"
+                    // The link variant paints itself `text-primary`, which is a
+                    // lighter blue than the shortfall sharing this line — two
+                    // blues an inch apart, reading as two different kinds of
+                    // thing when they are one sentence. Both take the plan's
+                    // own nearly-complete rung instead.
+                    className={`h-auto gap-1 p-0 text-[12px] ${PLAN_TONE.nearly_complete.text}`}
                     data-testid="plan-go-to-first-open"
                     onClick={() => onGoToFirstOpen(openKind)}
                   >

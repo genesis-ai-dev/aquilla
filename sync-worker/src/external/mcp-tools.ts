@@ -137,8 +137,12 @@ export const MCP_TOOLS: McpToolDef[] = [
       'every other key needs MAINTAINER 600. The policy keys that govern agent oversight ' +
       'itself (agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, ' +
       'validationCount, validationCountAudio, allowSelfValidation, harmonize_min_role, ' +
-      'contributeToGlobalTm) are NEVER writable through any agent surface — an op naming one ' +
-      'returns permission_denied. PatchSettings must be the SOLE command in its changeset. ' +
+      'contributeToGlobalTm, cellEditingFloor, agentAuthorship) are writable in the ' +
+      'RESTRICTIVE direction ONLY (AQU-1282): an op that TIGHTENS oversight stages like any ' +
+      'other write (still ask-mode, still human-approved), and one that would LOOSEN it ' +
+      'returns permission_denied naming the key in details.loosening. Call ' +
+      'describe_command({ kind: "PatchSettings" }) for the per-key direction table. ' +
+      'PatchSettings must be the SOLE command in its changeset. ' +
       'Returns { changesetId, summary, digest, mode, approvalUrl? } exactly like ' +
       'prepare_translations — nothing is applied until confirm_changeset (ask mode: a human ' +
       'approves at the approvalUrl first).',
@@ -186,6 +190,30 @@ export const MCP_TOOLS: McpToolDef[] = [
         kind: {
           type: 'string',
           description: 'Command kind to document. Omit for the index of all command kinds.',
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'get_skill',
+    description:
+      'Fetch an agent skill — a server-owned playbook that sequences existing commands and ' +
+      'tools for one workflow, so the ordering lives here and not in your chat history. Args: ' +
+      'name (optional). Omit name for the index ({ name, title, oneLiner }); pass one (e.g. ' +
+      '"project-setup") for its full Markdown body. Read project-setup BEFORE standing up a ' +
+      'partner project: it covers the intake template (GET /api/v1/external/setup-template + ' +
+      'POST .../setup-template/parse), the four fields you must never guess, the markup ' +
+      'refusal, the single ProjectSetup command, and the verification receipt. A skill stages ' +
+      'nothing on its own. An unknown name returns a not_found tool error listing the valid ' +
+      'ones. Static documentation — no projectId. (REST: GET /api/v1/external/skills and ' +
+      'GET /api/v1/external/skills/:name.)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: {
+          type: 'string',
+          description: 'Skill name (e.g. "project-setup"). Omit for the index of all skills.',
         },
       },
       additionalProperties: false,
@@ -796,7 +824,9 @@ export const MCP_TOOLS: McpToolDef[] = [
         },
         excludeFrontMatter: {
           type: 'boolean',
-          description: 'USFM only: drop book-name/title/TOC front matter cells.',
+          description:
+            'USFM only: drop book-name/title/TOC/introduction front matter cells. Defaults to the ' +
+            "project's importExcludeFrontMatter setting (the response echoes the effective value).",
         },
       },
       required: ['projectId', 'artifactId'],
@@ -840,7 +870,9 @@ export const MCP_TOOLS: McpToolDef[] = [
         },
         excludeFrontMatter: {
           type: 'boolean',
-          description: 'USFM only: drop book-name/title/TOC front matter cells.',
+          description:
+            'USFM only: drop book-name/title/TOC/introduction front matter cells. Defaults to the ' +
+            "project's importExcludeFrontMatter setting (the response echoes the effective value).",
         },
         changesetId: { type: 'string', description: 'Optional client-supplied UUIDv7 for idempotency.' },
       },

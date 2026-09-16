@@ -58,10 +58,20 @@ import {
   type ProjectLifecycleCommand,
 } from './commands-project-lifecycle'
 import {
+  PROJECT_SETUP_REQUIRED_ROLE,
+  validateProjectSetupCommand,
+  type ProjectSetupCommand,
+} from './commands-project-setup'
+import {
   SET_BRIEF_REQUIRED_ROLE,
   validateSetBriefCommand,
   type SetBriefCommand,
 } from './commands-set-brief'
+import {
+  REGENERATE_BRIEF_REQUIRED_ROLE,
+  validateRegenerateBriefSummaryCommand,
+  type RegenerateBriefSummaryCommand,
+} from './commands-regenerate-brief'
 import {
   isOrgMemberCommand,
   validateOrgMemberCommand,
@@ -115,6 +125,7 @@ export type {
   UnarchiveProjectCommand,
 } from './commands-project-lifecycle'
 export type { SetBriefCommand } from './commands-set-brief'
+export type { RegenerateBriefSummaryCommand } from './commands-regenerate-brief'
 export type {
   AddOrgMemberCommand,
   OrgMemberCommand,
@@ -276,6 +287,8 @@ export type Command =
   | RenameFileCommand
   | ProjectLifecycleCommand
   | SetBriefCommand
+  | RegenerateBriefSummaryCommand
+  | ProjectSetupCommand
   | OrgMemberCommand
   | StructureCommand
 
@@ -792,6 +805,16 @@ export function validateCommands(raw: unknown): ValidateCommandsResult {
       if (cmd) commands.push(cmd)
       return
     }
+    if (c.kind === 'RegenerateBriefSummary') {
+      const cmd = validateRegenerateBriefSummaryCommand(c, index, issues)
+      if (cmd) commands.push(cmd)
+      return
+    }
+    if (c.kind === 'ProjectSetup') {
+      const cmd = validateProjectSetupCommand(c, index, issues)
+      if (cmd) commands.push(cmd)
+      return
+    }
     if (isOrgMemberCommand(c as { kind: string })) {
       const cmd = validateOrgMemberCommand(c, index, issues)
       if (cmd) commands.push(cmd)
@@ -883,6 +906,17 @@ export function requiredRoleForCommand(
   // floor (the same one PatchSettings applies to the translationBrief key).
   if (c.kind === 'SetBrief') {
     return SET_BRIEF_REQUIRED_ROLE
+  }
+  // RegenerateBriefSummary (AQU-1282) rewrites the L1 half of the same key.
+  if (c.kind === 'RegenerateBriefSummary') {
+    return REGENERATE_BRIEF_REQUIRED_ROLE
+  }
+  // AQU-1294 ProjectSetup: a composite plan taking its own prepare/commit path,
+  // where the floor is re-resolved live as the MAX of the blocks it carries
+  // (incl. the org termbase/language floors). MAINTAINER is the honest static
+  // value for index filtering — it is every constituent command's own floor.
+  if (c.kind === 'ProjectSetup') {
+    return PROJECT_SETUP_REQUIRED_ROLE
   }
   // EmitEvents: max REQUIRED_ROLE across the batch's event kinds — the same
   // floors its compiled events hit at the /events perimeter (dynamic bumps,

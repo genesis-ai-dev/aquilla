@@ -303,6 +303,27 @@ describe('SetBrief — L1 auto-render on commit (AQU-1282)', () => {
     expect(brief.l1Summary).toBe('A meaning-based liturgical translation.')
     expect(brief.l1GeneratedAt).toBe('2026-09-01T00:00:00.000Z')
   })
+
+  // PR 667's QA walk ran against an identity worker a deploy behind, so every
+  // auto-render 404'd. The sections must still land, and the receipt must say
+  // WHICH worker is behind rather than "render failed (404)" — the operator's
+  // next move is a deploy, not a retry.
+  it('an identity worker without the renderer (404) still commits the sections and names the deploy', async () => {
+    const env = makeEnv(tdb.db, { configured: true })
+    const maintainer = await memberToken(tdb, 600)
+    await seedSettings(tdb, { targetLanguage: 'fr', [BRIEF_SETTINGS_KEY]: seededBrief() })
+    stubBridge(() => Response.json({ error: 'Not found' }, { status: 404 }))
+
+    const { body } = await prepare(env, maintainer.token, setBrief({ parameters: { audience: 'Diaspora readers' } }))
+    const { res: commitRes, body: committed } = await commit(env, maintainer.token, body.changeset.id)
+    expect(commitRes.status).toBe(200)
+    expect(committed.receipt.briefSummary.rendered).toBe(false)
+    expect(committed.receipt.briefSummary.reason).toMatch(/auth-worker is behind sync-worker/i)
+
+    const brief = (await storedBrief(tdb))!
+    expect(brief.parameters.audience).toBe('Diaspora readers')
+    expect(brief.l1Summary).toBe('A meaning-based liturgical translation.')
+  })
 })
 
 describe('SetBrief — role floor', () => {

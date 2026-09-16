@@ -62,6 +62,22 @@ export async function renderBriefSummary(
     if (res.status === 403) {
       return { ok: false, code: 'permission_denied', message: body.message ?? 'brief summary render is not permitted for this user' }
     }
+    // A 404 is the identity worker ANSWERING and not knowing this route — i.e.
+    // auth-worker is older than sync-worker. Worker deploys are manual and
+    // per-surface (.github/workflows/deploy-workers.yml), and PR previews point
+    // at the shared development backend, so "sync has the command, auth does not
+    // have the renderer" is a real, recurring state. Name it instead of letting
+    // it read as a transient render failure nobody can act on.
+    if (res.status === 404) {
+      return {
+        ok: false,
+        code: 'not_configured',
+        message:
+          'the identity worker has no brief-summary renderer at ' +
+          '/api/v1/ai/agent/internal/brief-summary — auth-worker is behind sync-worker; ' +
+          'deploy auth-worker (docs/DEPLOYMENT-ENVIRONMENTS.md). Brief sections are unaffected',
+      }
+    }
     return { ok: false, code: 'job_failed', message: body.message ?? `brief summary render failed (${res.status})` }
   }
 

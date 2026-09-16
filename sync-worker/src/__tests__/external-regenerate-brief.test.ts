@@ -282,6 +282,29 @@ describe('RegenerateBriefSummary — a failed render never burns the approval', 
     expect((await storedBrief(tdb))!.l1Summary).toBe('old summary')
   })
 
+  // The state PR 667's QA walk actually hit: sync-worker carries the command,
+  // the identity worker deployed next to it does not yet carry the renderer
+  // (deploys are manual and per-surface, and PR previews point at the shared
+  // development backend). It must not read as a transient render failure —
+  // nobody can retry their way out of a worker that is a deploy behind.
+  it('identity worker has no renderer (404) → names the deploy, approval intact', async () => {
+    const env = makeEnv(tdb.db)
+    const maintainer = await memberToken(tdb, 600)
+    await seedSettings(tdb, { targetLanguage: 'fr', [BRIEF_SETTINGS_KEY]: staleBrief() })
+    stubBridge(() => Response.json({ error: 'Not found' }, { status: 404 }))
+
+    const { body: prep } = await prepare(env, maintainer.token, regen())
+    const { res, body } = await commit(env, maintainer.token, prep.changeset.id)
+    expect(res.status).toBe(500)
+    expect(body.error.code).toBe('job_failed')
+    expect(body.error.message).toMatch(/auth-worker is behind sync-worker/i)
+    expect(body.error.message).toMatch(/deploy auth-worker/i)
+    // The brief is untouched and the approval is still spendable on a retry.
+    expect((await storedBrief(tdb))!.l1Summary).toBe('old summary')
+    const cs = await tdb.rows<{ status: string }>('changesets')
+    expect(cs[0].status).toBe('staged')
+  })
+
   it('backend not configured in this environment → job_failed (never a throw)', async () => {
     const env = makeEnv(tdb.db, { configured: false })
     const maintainer = await memberToken(tdb, 600)

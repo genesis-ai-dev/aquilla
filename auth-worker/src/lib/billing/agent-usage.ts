@@ -1,5 +1,6 @@
 import type { Env } from '../../types'
-import { chatUsageRehearsalAllowed, METERED_MAX_OUTPUT_TOKENS, providerRefOf, settleChatUsage, holdChatUsage } from './chat-usage'
+import { METERED_MAX_OUTPUT_TOKENS, providerRefOf, settleChatUsage, holdChatUsage } from './chat-usage'
+import { weeklyUsageActive, weeklyUsageMode } from './usage-mode'
 import { boundRequestCostCents, readRateCard } from './rate-card'
 import { reserveWorkspaceUsage } from './workspace-usage'
 
@@ -43,12 +44,10 @@ export class AgentUsageMeter {
   }
 }
 
-export function agentUsageEnabled(env: Env) { return env.BILLING_CHAT_USAGE_REHEARSAL === 'true' }
-export function agentUsageAllowed(env: Env, requestUrl: string) { return chatUsageRehearsalAllowed(env, requestUrl) }
-/** Background work has no request URL; the provider URL carries the loopback gate. */
-export function backgroundUsageAllowed(env: Env) {
-  return Boolean(env.OPENROUTER_BASE_URL) && chatUsageRehearsalAllowed(env, env.OPENROUTER_BASE_URL!)
-}
+export function agentUsageEnabled(env: Env) { return weeklyUsageMode(env) !== 'off' }
+export function agentUsageAllowed(env: Env, requestUrl: string) { return weeklyUsageActive(env, requestUrl) === 'on' }
+/** Background work has no request URL; the provider URL carries the rehearsal gate. */
+export function backgroundUsageAllowed(env: Env) { return weeklyUsageActive(env) === 'on' }
 /** Shape shared with the draft tool: reserve now, settle or hold after. */
 export type PaidCallAdmit = (input: { model: string; promptChars: number; maxOutputTokens?: number }) => Promise<
   { ok: true; settle: (body: unknown) => Promise<unknown>; hold: (body: unknown) => Promise<unknown> }

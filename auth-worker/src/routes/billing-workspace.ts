@@ -3,7 +3,7 @@ import { changeSelectionSchema, reviewWorkspaceChange } from '../lib/billing/wor
 import { Hono } from 'hono'
 import { reconcileWorkspaceCheckoutRehearsal, startWorkspaceCheckoutRehearsal, workspaceCheckoutInput, workspaceCheckoutRehearsalEnabled, WorkspaceCheckoutConflict } from '../lib/billing/workspace-checkout'
 import { z } from 'zod'
-import { chatUsageRehearsalAllowed } from '../lib/billing/chat-usage'
+import { weeklyUsageActive } from '../lib/billing/usage-mode'
 import { heldUsageSummary, reconcileHeldUsage } from '../lib/billing/usage-reconcile'
 import { readBillingOffers, unavailableOffers } from '../lib/billing/catalog'
 import { paidOffers } from '../lib/billing/catalog-view'
@@ -103,7 +103,7 @@ for (const action of ['reconcile', 'expire'] as const) {
  * one from the provider's generation record. Never releases usage.
  */
 function usageRehearsalEnabled(env: AuthHonoEnv['Bindings'], url: string) {
-  return env.BILLING_CHAT_USAGE_REHEARSAL === 'true' && chatUsageRehearsalAllowed(env, url)
+  return weeklyUsageActive(env, url) === 'on'
 }
 billingWorkspace.get('/orgs/:orgId/billing/usage-rehearsal/held', authMiddleware, async c => {
   if (!usageRehearsalEnabled(c.env, c.req.url)) return c.json({ error: 'usage_rehearsal_unavailable' }, 503)

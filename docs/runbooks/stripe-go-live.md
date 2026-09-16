@@ -2,6 +2,29 @@
 
 Updated: 2026-09-16. Tickets: AQU-837 (billing readiness), AQU-1091 (pricing and app UI).
 
+## Enforcement mode and legacy guard retirement — 2026-09-16
+
+- [x] One policy module (`lib/billing/usage-mode.ts`) decides metering for
+  every producer: `off` (default), `rehearsal` (`BILLING_CHAT_USAGE_REHEARSAL`,
+  wrangler-local with loopback request and provider only, fails closed
+  elsewhere), and `enforce` (`BILLING_WEEKLY_USAGE_ENFORCE=true`, any provider).
+- [x] A metered call retires the legacy ledgers for itself: chat, import
+  classification, agent runs, and autopilot starts skip `creditGuard`,
+  `wordGuard`, `recordCredit`, and `recordWords` when the weekly ledger admits
+  them. Unmetered calls (mode off, segmentation generation, indexing, Monday)
+  keep the legacy guards until they are connected.
+- [ ] Enabling `enforce` in a deployed environment is a launch decision: it
+  requires the production catalog, migrations 0097 and 0098 applied, and the
+  reconcile sweep. Delete the legacy guard code and admin credits panel only
+  after enforcement is live and no producer still depends on them.
+
+Test impact: new `billing-usage-mode.test.ts` (two unit tests covering off,
+rehearsal gates, and enforce precedence); the chat suite adds an enforce-mode
+case against a live provider URL proving the legacy tables stay empty for a
+metered call and still fill when metering is off. All metered producer suites
+(33) and off-mode suites for chat, classify, agent, autopilot, and workspace
+(83) pass. Worker lint and type checks pass.
+
 ## Measured usage percentage — 2026-09-16
 
 - [x] The billing workspace API reports `usagePercent` (whole percent of the
@@ -59,8 +82,8 @@ contextual route and tick suites pass (49). Worker lint and type checks pass.
 - [x] Provider errors, transport failures, and missing cost hold the step's
   reservation (with its generation id when known) for reconciliation. Unpriced
   models end the run with `model_price_unavailable`; unowned projects get 403.
-- [ ] Legacy per-run credit/word guards and the per-run cost cap still run
-  beside the weekly ledger until every producer is connected.
+- [x] Legacy per-run credit/word guards are skipped for metered runs (see the
+  enforcement-mode checkpoint); the per-run cost cap remains as a safety ceiling.
 
 Test impact: new `billing-agent-usage.test.ts` (five real-Postgres route tests:
 settled turns with provider refs, nested drafting steps, exhaustion before the
@@ -80,8 +103,8 @@ modules join the billing impact mapping.
 - [x] Admission rule per the 2026-09-16 decisions: nothing starts at or past
   100% of the weekly allowance; a bounded request may end up to 5% over.
   Settlement records the true cost; customers only ever see 100%.
-- [ ] The loopback rehearsal gate still applies; deployed enforcement waits on
-  the remaining producers and the legacy ledger retirement.
+- [x] The loopback rehearsal gate is now one of three modes; `enforce` opens
+  any provider behind an explicit flag (enforcement-mode checkpoint).
 
 Test impact: new `billing-rate-card.test.ts` (four unit tests: bound math,
 unknown model, cache TTL, malformed cards) and an overage case in the ledger

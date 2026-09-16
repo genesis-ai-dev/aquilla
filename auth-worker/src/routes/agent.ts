@@ -527,24 +527,25 @@ agent.post("/run", authMiddleware, zValidator("json", runRequestSchema), async (
   } catch {
     /* best-effort — degrade to org 0 (no-org) so we still record */
   }
-  const creditCheck = await creditGuard(c.env.AQUILLA_PG, c.env, orgId, "agent")
-  if (!creditCheck.ok) {
-    return c.json(
-      { error: "credit_cap_exceeded", reason: creditCheck.reason, message: "Agent credit cap reached. Contact your org admin." },
-      429,
-    )
-  }
-  const agentWordCheck = await wordGuard(c.env.AQUILLA_PG, orgId)
-  if (!agentWordCheck.ok) {
-    return c.json(wordCapBody(agentWordCheck.reason), 429)
-  }
-  // AQU-837 weekly allowance (local scripted-provider rehearsal only). Enforced
-  // usage never funds an unowned project from org 0.
+  // AQU-837 weekly allowance. Enforced usage never funds an unowned project
+  // from org 0, and once it meters a run the legacy guards are retired for it.
   let usage: AgentUsageMeter | undefined
   if (agentUsageEnabled(c.env)) {
     if (!agentUsageAllowed(c.env, c.req.url)) return c.json({ error: "usage_rehearsal_unavailable" }, 503)
     if (orgId <= 0) return c.json({ error: "forbidden", message: "This project has no billing workspace" }, 403)
     usage = new AgentUsageMeter(c.env, { orgId, userId: user.id, projectId: body.projectId })
+  } else {
+    const creditCheck = await creditGuard(c.env.AQUILLA_PG, c.env, orgId, "agent")
+    if (!creditCheck.ok) {
+      return c.json(
+        { error: "credit_cap_exceeded", reason: creditCheck.reason, message: "Agent credit cap reached. Contact your org admin." },
+        429,
+      )
+    }
+    const agentWordCheck = await wordGuard(c.env.AQUILLA_PG, orgId)
+    if (!agentWordCheck.ok) {
+      return c.json(wordCapBody(agentWordCheck.reason), 429)
+    }
   }
 
   // Session-native conversation (v2): load the stored convo — including tool
@@ -1151,6 +1152,7 @@ async function runAgentLoop({ env, body, storedConvo, storedUntrusted, user, rol
 
   // Record agent cost in org credit ledger (graceful-degrade — never throws).
   // costCents is the sum of OpenRouter usage.cost×100 across all iterations.
+  if (usage) return
   await recordCredit(env.AQUILLA_PG, orgId, user.id, "agent", costCents, 1)
   await recordWords(
     env.AQUILLA_PG,

@@ -627,20 +627,22 @@ contextual.post(
     } catch {
       /* best-effort — degrade to org 0 */
     }
-    const credit = await creditGuard(c.env.AQUILLA_PG, c.env, orgId, "agent")
-    if (!credit.ok) {
-      const { body: err, status } = errorJson(
-        "credit_cap_exceeded",
-        "Agent credit cap reached. Contact your org admin.",
-        429,
-        { reason: credit.reason },
-      )
-      return c.json(err, status)
-    }
-    const words = await wordGuard(c.env.AQUILLA_PG, orgId)
-    if (!words.ok) return c.json(wordCapBody(words.reason), 429)
-    // AQU-837: enforced usage never funds an unowned project from org 0.
-    if (agentUsageEnabled(c.env)) {
+    // AQU-837: enforced usage never funds an unowned project from org 0, and
+    // retires the legacy guards for runs it meters.
+    if (!agentUsageEnabled(c.env)) {
+      const credit = await creditGuard(c.env.AQUILLA_PG, c.env, orgId, "agent")
+      if (!credit.ok) {
+        const { body: err, status } = errorJson(
+          "credit_cap_exceeded",
+          "Agent credit cap reached. Contact your org admin.",
+          429,
+          { reason: credit.reason },
+        )
+        return c.json(err, status)
+      }
+      const words = await wordGuard(c.env.AQUILLA_PG, orgId)
+      if (!words.ok) return c.json(wordCapBody(words.reason), 429)
+    } else {
       if (!agentUsageAllowed(c.env, c.req.url)) {
         const { body: err, status } = errorJson("usage_rehearsal_unavailable", "Usage rehearsal is local-only.", 503)
         return c.json(err, status)

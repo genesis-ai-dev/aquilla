@@ -10,7 +10,8 @@ import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
 import { z } from "zod"
 import type { Env, Variables } from "../types"
-import { admitChatUsage, chatUsageRehearsalAllowed, settleChatUsage, type ChatUsage } from "../lib/billing/chat-usage"
+import { admitChatUsage, settleChatUsage, type ChatUsage } from "../lib/billing/chat-usage"
+import { weeklyUsageActive } from "../lib/billing/usage-mode"
 import { authMiddleware } from "../middleware/auth"
 import { runAiGuard } from "../lib/ai-budget"
 import { creditGuard, recordCredit } from "../lib/credits"
@@ -141,10 +142,9 @@ imports.post(
     // Same local scripted-provider rehearsal gate as chat: one non-streaming
     // provider call reserved before the request and settled from reported cost.
     let usage: ChatUsage | undefined
-    if (c.env.BILLING_CHAT_USAGE_REHEARSAL === "true") {
-      if (!chatUsageRehearsalAllowed(c.env, c.req.url)) {
-        return c.json({ error: "usage_rehearsal_unavailable" }, 503)
-      }
+    const weekly = weeklyUsageActive(c.env, c.req.url)
+    if (weekly === "unavailable") return c.json({ error: "usage_rehearsal_unavailable" }, 503)
+    if (weekly === "on") {
       // Enforced usage never funds an unowned project from org 0.
       if (orgId <= 0) return c.json({ error: "forbidden" }, 403)
       const suppliedId = c.req.header("Idempotency-Key")
@@ -153,16 +153,19 @@ imports.post(
       }
       usage = { orgId, requestId: suppliedId ?? crypto.randomUUID() }
     }
-    const credits = await creditGuard(c.env.AQUILLA_PG, c.env, orgId, "llm")
-    if (!credits.ok) {
-      return c.json({
-        error: "credit_cap_exceeded",
-        reason: credits.reason,
-        message: "LLM credit cap reached. Contact your org admin.",
-      }, 429)
+    // Legacy credit/word guards are retired once the weekly ledger meters this call.
+    if (!usage) {
+      const credits = await creditGuard(c.env.AQUILLA_PG, c.env, orgId, "llm")
+      if (!credits.ok) {
+        return c.json({
+          error: "credit_cap_exceeded",
+          reason: credits.reason,
+          message: "LLM credit cap reached. Contact your org admin.",
+        }, 429)
+      }
+      const words = await wordGuard(c.env.AQUILLA_PG, orgId)
+      if (!words.ok) return c.json(wordCapBody(words.reason), 429)
     }
-    const words = await wordGuard(c.env.AQUILLA_PG, orgId)
-    if (!words.ok) return c.json(wordCapBody(words.reason), 429)
 
     if (usage) {
       try {
@@ -231,8 +234,10 @@ imports.post(
       const cost = typeof data.usage?.cost === "number" && data.usage.cost > 0
         ? data.usage.cost * 100
         : 1
-      await recordCredit(c.env.AQUILLA_PG, orgId, user.id, "llm", cost, 1)
-      await recordWords(c.env.AQUILLA_PG, orgId, user.id, "llm", countWords(input.sample))
+      if (!usage) {
+        await recordCredit(c.env.AQUILLA_PG, orgId, user.id, "llm", cost, 1)
+        await recordWords(c.env.AQUILLA_PG, orgId, user.id, "llm", countWords(input.sample))
+      }
       return c.json({ classification: classification.data })
     } catch (error) {
       console.error("Import classification failed:", error)

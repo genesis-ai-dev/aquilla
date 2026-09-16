@@ -2,27 +2,16 @@ import type { Env } from '../../types'
 import { readProviderCostCents } from '../../../../db/shared/billing-cost'
 import { recordUsageProviderRef, reserveWorkspaceUsage, settleWorkspaceUsage, validProviderRef } from './workspace-usage'
 import { boundRequestCostCents, readRateCard } from './rate-card'
+import { weeklyUsageActive } from './usage-mode'
 
 /** Server-enforced output cap while metering; clients cannot raise it. */
 export const METERED_MAX_OUTPUT_TOKENS = 4096
 
 export interface ChatUsage { orgId: number; requestId: string }
-const loopback = (url: string) => {
-  const parsed = new URL(url)
-  return ['http:', 'https:'].includes(parsed.protocol)
-    && ['127.0.0.1', 'localhost', '[::1]'].includes(parsed.hostname)
-    && !parsed.username && !parsed.password
-}
 
-/** This integration still targets the local scripted provider: the live rate
- * card and reservation bound are in place, but deployed enforcement waits on
- * the remaining producers and the legacy ledger retirement.
- */
+/** Kept for callers; see `usage-mode.ts` for the off/rehearsal/enforce policy. */
 export function chatUsageRehearsalAllowed(env: Env, requestUrl: string) {
-  try {
-    return env.WRANGLER_LOCAL === '1' && loopback(requestUrl)
-      && Boolean(env.OPENROUTER_BASE_URL && loopback(env.OPENROUTER_BASE_URL))
-  } catch { return false }
+  return weeklyUsageActive(env, requestUrl) === 'on'
 }
 export async function admitChatUsage(env: Env, input: {
   orgId: number; userId: number; projectId: string; requestId: string

@@ -134,3 +134,19 @@ it('settles before delivering DONE when the client stops without draining transp
   await reader.cancel()
   expect((await f.totals()).reserved).toBe(0)
 })
+
+it('enforce mode meters a live provider URL and retires the legacy ledgers for the call', async () => {
+  const f = await setup()
+  vi.stubGlobal('fetch', upstream(JSON.stringify({ choices: [], usage: { cost: 0.001 } })))
+  const enforce = { BILLING_CHAT_USAGE_REHEARSAL: undefined, BILLING_WEEKLY_USAGE_ENFORCE: 'true', OPENROUTER_BASE_URL: 'https://openrouter.ai/api/v1' }
+  const response = await f.send({}, enforce)
+  expect(response.status).toBe(200)
+  expect(response.headers.get('X-Billing-Usage-Status')).toBe('settled')
+  expect((await f.totals()).settled).toBe(400_000)
+  const legacy = await env.AQUILLA_PG.prepare('SELECT (SELECT count(*) FROM org_credit_usage_daily) AS credits, (SELECT count(*) FROM org_word_usage_daily) AS words').first<{ credits: number; words: number }>()
+  expect(legacy).toEqual({ credits: 0, words: 0 })
+  // Off: the same request records only the legacy ledgers.
+  expect((await f.send({}, { BILLING_CHAT_USAGE_REHEARSAL: undefined }, crypto.randomUUID())).status).toBe(200)
+  expect((await f.totals()).settled).toBe(400_000)
+  expect((await env.AQUILLA_PG.prepare('SELECT count(*) AS n FROM org_credit_usage_daily').first<{ n: number }>())?.n).toBe(1)
+})

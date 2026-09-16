@@ -83,6 +83,10 @@ every LLM producer is connected. Measured 2026-08 rates from the local
 | External-agent tokens | Ordinary identity/permission boundaries | Check owning workspace capability and same usage pool at every funded AI endpoint; external provider bills stay outside Aquilla's allowance. |
 | Workspace billing API / UI | `usagePercent` and `usageResetsAt` from the same allowance/period admission uses; null for unmeasured workspaces, absent on ledger failure | Remaining: percentage in exhaustion errors, agent panel, onboarding; frontend handling of the `weekly_allowance` exhaustion reason. |
 
+`usage-mode.ts` is the single switch: `off`, `rehearsal` (local only), or
+`enforce` (any provider). A metered call skips the legacy credit and word
+guards and ledgers; unmetered producers keep them until connected.
+
 `CostMeter` is optional development instrumentation (`COST_METER=1`), buffers
 writes, and drops failed batches. It cannot serve as a paid-access authority.
 The existing word guard is log-only, and the credit guards use rolling daily

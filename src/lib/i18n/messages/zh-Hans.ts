@@ -3477,8 +3477,6 @@ export const zh_Hans: Catalog = {
   "projectSettings.shared.nameHint": "会显示在整个工作区与项目清单中。",
   "projectSettings.timeline.lockLabel": "锁定时间安排，避免被拖动更动",
   "projectSettings.timeline.lockHint": "默认为打开，且对所有人都打开 — 包括项目负责人。这些时间来自客户自己的文件，一旦有人拖动某个区块，就等于为整个团队移动了那一行，事后也无从比对。打开期间，所有导入的行与提示行都不会有拖动控点；在这里添加的行仍然可以移动，录音也仍然可以照常对到各自的行上。只有维护者可以关闭它，而只要一关闭，时间轴就会一直标示出这一点。",
-  "projectSettings.timeline.addLinesLabel": "允许他人在时间轴的空档中添加行",
-  "projectSettings.timeline.addLinesHint": "默认为关闭。打开后，时间轴上每一段没有任何行涵盖的空档上方都会出现一支铅笔，旁边还有一个麦克风，可以创建一行并直接开始录音。若文件已有导入的音频提示行，就绝不会提供这个选项 — 那些提示行已经指明了各行的位置。无论是否打开，都可以删除他人添加的空白行，因此把它关回去绝不会留下孤立的行。",
   "projectSettings.field.temperature": "温度",
   "projectSettings.field.healthPenalty": "健康度扣分",
   "projectSettings.field.examplesRetrieved": "检索到的范例数",

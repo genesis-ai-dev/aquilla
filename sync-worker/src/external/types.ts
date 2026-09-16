@@ -2,6 +2,7 @@
 
 import type { EventsRouteEnv } from '../events/route'
 import type { Command } from './commands'
+import type { PatchSettingsOp } from './commands-patch-settings'
 import type { CellPrecondition } from './preconditions'
 
 /** Environment for the external API — a superset of the /events perimeter env
@@ -13,11 +14,23 @@ export type ExternalEnv = EventsRouteEnv & {
   SNAPSHOTS?: R2Bucket
   /** Optional R2 key prefix for PR/staging isolation (mirrors audio.ts). */
   R2_KEY_PREFIX?: string
+  /** Identity-worker base URL — the DraftCells command (AQU-1186) calls its
+   *  internal drafting endpoint with the SYNC_SECRET_KEY shared secret, the
+   *  same server-to-server pattern as monday-notify.ts. */
+  AUTH_WORKER_URL?: string
 }
 
 /** A skipped / warned item — nothing is ever silently dropped (§3). */
 export interface ChangesetWarning {
-  code: 'missing_cell' | 'duplicate_command' | 'stale_pin' | 'rejected' | 'duplicate_file'
+  code:
+    | 'missing_cell'
+    | 'duplicate_command'
+    | 'stale_pin'
+    | 'rejected'
+    | 'duplicate_file'
+    /** ProjectSetup (AQU-1294): a plan step whose end-state already existed, so
+     *  it is skipped rather than applied. A healthy outcome, not a problem. */
+    | 'superseded_step'
   fileId: string
   cellId: string
   message: string
@@ -30,6 +43,26 @@ export interface ChangesetWarning {
  *  callers can never claim it via headers. */
 export type ProvenanceChannel = 'mcp' | 'rest' | 'app'
 
+/** Command kinds that apply a plain row write instead of events, and so carry a
+ *  provenance-stamp receipt (ReceiptOnlyReceipt) rather than an event-id list.
+ *  The summary names the kind so the human on /approve/:id sees WHICH lifecycle
+ *  op they are approving instead of an empty "No changes summarized." box. */
+export type ReceiptOnlyCommandKind =
+  | 'CreateProject'
+  | 'CreateOrg'
+  | 'UpdateProjectSettings'
+  | 'PatchSettings'
+  | 'SetBrief'
+  | 'RegenerateBriefSummary'
+  | 'AddOrgMember'
+  | 'SetOrgRole'
+  | 'RemoveOrgMember'
+  | 'RenameProject'
+  | 'ArchiveProject'
+  | 'UnarchiveProject'
+  | 'Membership'
+  | 'ProjectSetup'
+
 /** Per-kind effect line for an EmitEvents changeset. `testimony` marks
  *  validation kinds (cell.validate / cell.unvalidate) so review UIs render
  *  per-item confirmation and bulk auto-apply excludes them. */
@@ -37,6 +70,29 @@ export interface EmitEventsSummaryEntry {
   kind: string
   count: number
   testimony: boolean
+  /** Plain-language effect line for the approval page (AQU-1179) — what the
+   *  change does to the project, in a sentence a non-developer can consent to.
+   *  Computed server-side (emitKindEffectLabel) so every reviewing surface says
+   *  the same thing; absent on changesets staged before AQU-1179, where the UI
+   *  falls back to `kind × count`. */
+  label?: string
+}
+
+/** One staged validation/unvalidation, named cell by cell (AQU-1184 guardrail
+ *  2). A count alone ("3 cell.validate") is not an approvable plan: endorsing
+ *  a translation is testimony, so the approver has to see WHICH cells and
+ *  WHAT text they are putting their name to. Server-computed at prepare from
+ *  the live projection — never from anything the agent supplied. */
+export interface TestimonySummaryEntry {
+  kind: 'cell.validate' | 'cell.unvalidate'
+  fileId: string
+  cellId: string
+  /** Target-language lane (absent = the default lane). */
+  laneId?: string
+  /** The lane's current target text, truncated for display. */
+  text: string
+  /** True when `text` was cut at TESTIMONY_TEXT_MAX. */
+  truncated: boolean
 }
 
 /** Effect line for a cell-structure changeset (AQU-1234). Every count is
@@ -70,28 +126,23 @@ export interface ChangesetSummary {
   /** LinkMedia: number of cells an audio artifact is attached to. */
   mediaLinked?: number
   /** Receipt-only (CreateProject / CreateOrg / UpdateProjectSettings /
-   *  PatchSettings / SetBrief / AddExample / AddDecision / RetireExample /
+   *  PatchSettings / SetBrief / Membership / AddOrgMember / SetOrgRole /
+   *  RemoveOrgMember / RenameProject / ArchiveProject / UnarchiveProject)
+   *  plus the memory commands (AddExample / AddDecision / RetireExample /
    *  AddNote): the command kind, so the human on /approve/:id sees WHICH
    *  lifecycle op they're approving instead of an empty "No changes
    *  summarized." box (design §2 / blind-approval fix). */
-  command?:
-    | 'CreateProject'
-    | 'CreateOrg'
-    | 'UpdateProjectSettings'
-    | 'PatchSettings'
-    | 'SetBrief'
-    | 'AddOrgMember'
-    | 'SetOrgRole'
-    | 'RemoveOrgMember'
-    | 'AddExample'
-    | 'AddDecision'
-    | 'RetireExample'
-    | 'AddNote'
+  command?: ReceiptOnlyCommandKind | 'AddExample' | 'AddDecision' | 'RetireExample' | 'AddNote'
   /** AQU-1228 memory commands: the memory path being written or retired, plus
    *  a one-line preview, so the human on /approve/:id sees the actual effect. */
   memoryWrites?: { path: string; action: 'add' | 'retire'; preview: string }[]
-  /** CreateProject: the project name being created. */
+  /** CreateProject: the project name being created. RenameProject: the new
+   *  name. ArchiveProject / UnarchiveProject: the project's current name, so
+   *  the approval box names what is being trashed or restored. */
   projectName?: string
+  /** RenameProject: the name being replaced, so the approval box reads as a
+   *  before → after rather than a bare new label. */
+  previousProjectName?: string
   /** CreateProject: the definitive new project id. */
   newProjectId?: string
   /** CreateProject: the target org id as a string, or 'personal' for org-less.
@@ -128,6 +179,24 @@ export interface ChangesetSummary {
   settingsChanges?: Record<string, string>
   /** EmitEvents: per-kind effect lines (kind, count, testimony flag). */
   events?: EmitEventsSummaryEntry[]
+  /** AQU-1183 cell-field commands — one flat counter per effect, so the
+   *  approval page's number/string filter renders each as its own line. Only
+   *  the non-zero ones are set. */
+  sourceEdits?: number
+  transcriptionsSet?: number
+  cellsRetimed?: number
+  timingModesSet?: number
+  trackOverridesSet?: number
+  /** AQU-1185 Membership: one plain-language line per membership change ("Add
+   *  alice to proj-a as contributor (400)"), rendered as its own list on the
+   *  approval page. A human approving a role grant must be able to read who,
+   *  what role, and which project without decoding the command JSON. */
+  membershipChanges?: string[]
+  /** EmitEvents (AQU-1184): every staged cell.validate / cell.unvalidate,
+   *  named individually with the cell's current text. Rendered as its own
+   *  section on the approval page (an array, so the page's flat
+   *  number/string fact filter ignores it — the page reads it explicitly). */
+  testimony?: TestimonySummaryEntry[]
   /** InsertCell / DeleteCell / SplitCell: the one structural effect line. */
   structure?: StructureSummaryEntry
   warnings: ChangesetWarning[]
@@ -222,6 +291,9 @@ export interface PlannedEventIds {
   /** SetBrief (receipt-only): the settings version pinned at prepare — the
    *  brief lives in the settings blob, so it takes the same version guard. */
   setBrief?: { version: number }
+  /** RegenerateBriefSummary (receipt-only, AQU-1282): the settings version
+   *  pinned at prepare — same guard as setBrief. */
+  regenerateBriefSummary?: { version: number }
   /** AQU-1235 org membership (receipt-only): the resolved target org + user
    *  (pinned at prepare so commit writes the SAME identity the human approved,
    *  never a re-resolution of the username), plus the role the target held at
@@ -242,7 +314,17 @@ export interface PlannedEventIds {
    *  id plus any payload ids minted at prepare (comment.create's commentId /
    *  assignment.create's assignmentId when the caller omitted them), so a
    *  crash-retry re-posts IDENTICAL ids and payloads. */
-  emitEvents?: { eventId: string; commentId?: string; assignmentId?: string }[]
+  emitEvents?: { eventId: string; commentId?: string; assignmentId?: string; conceptId?: string }[]
+  /** AQU-1183 cell-field commands: the compiled event id per normalized
+   *  target, in the SAME order planCellFields emits them. Commit re-runs that
+   *  pure normalizer over the stored commands, so the two line up
+   *  index-for-index and a crash-retry re-posts IDENTICAL ids. */
+  cellFields?: PlannedCellFieldIds
+  /** AQU-1185 Membership: the resolved target user id per command, in command
+   *  order. Pinned at prepare so the commit writes the PERSON the human
+   *  approved — a username that has since been reassigned to another account
+   *  is drift (plan_stale), not a target. */
+  membership?: { username: string; userId: string }[]
   /** LinkMedia: one entry per attach command — the target (fileId, cellId), the
    *  audio artifact id, and the minted cell.audio.attach + cell.audio.select
    *  event ids. A crash-and-retry re-posts these IDENTICAL ids, so the /events
@@ -257,6 +339,74 @@ export interface PlannedEventIds {
   /** InsertCell / DeleteCell / SplitCell: the whole structural plan — minted
    *  event ids, pinned parent heads, and the prepare-time cut text. */
   structure?: StructurePlan
+  /** ProjectSetup (AQU-1294): the ordered step ledger the commit walks, plus
+   *  the settings version the plan was prepared against. Each step carries its
+   *  own status, which commit persists back into this ledger after EVERY step
+   *  — so a retry commit resumes at the failed step instead of re-applying the
+   *  ones that already landed. */
+  projectSetup?: ProjectSetupPlan
+}
+
+/** Status of one ProjectSetup step. `superseded` is a HEALTHY skip: the step's
+ *  end-state already existed at prepare (or at commit), so there is nothing to
+ *  apply. `failed` is what a retry resumes at. */
+export type ProjectSetupStepStatus = 'pending' | 'applied' | 'superseded' | 'failed'
+
+/** One expansion step of a ProjectSetup plan, in the fixed server-owned order:
+ *  settings → policy → brief → members → imports (array order). */
+export type ProjectSetupStep =
+  | { index: number; kind: 'settings'; status: ProjectSetupStepStatus; ops: PatchSettingsOp[] }
+  | { index: number; kind: 'policy'; status: ProjectSetupStepStatus; ops: PatchSettingsOp[] }
+  | { index: number; kind: 'brief'; status: ProjectSetupStepStatus }
+  | {
+      index: number
+      kind: 'members'
+      status: ProjectSetupStepStatus
+      /** Resolved at prepare so commit writes the PEOPLE the human approved. */
+      pinned: { username: string; userId: string; role: number }[]
+    }
+  | {
+      index: number
+      kind: 'import'
+      status: ProjectSetupStepStatus
+      artifactId: string
+      fileName: string
+      fileType: string
+      resultIndex?: number
+      sourceLanguage?: string
+      targetLanguage?: string
+      /** Cell count from the prepare-time parse. Commit re-parses the (immutable)
+       *  artifact and fails the step if the count moved — the approver approved
+       *  a file of this size. */
+      cellCount: number
+      /** This import's own minted id ledger (a composite plan holds one per
+       *  import, so it cannot live at PlannedEventIds.planImport). */
+      planned: NonNullable<PlannedEventIds['planImport']>
+      /** Set once the step applies, so a resumed commit does not re-import. */
+      fileId?: string
+    }
+
+export interface ProjectSetupPlan {
+  /** The live settings version at prepare. The commit does NOT guard on it —
+   *  the server reads the live version immediately before each settings write
+   *  (plan_stale never surfaces from inside a plan) — it is the receipt's
+   *  before-value and the approval page's pin. */
+  settingsVersion: number
+  steps: ProjectSetupStep[]
+}
+
+/** Prepare-time event ids for a cell-field changeset (AQU-1183). Lists, not
+ *  cellKey-keyed objects: cellKey's NUL separator is not a legal jsonb key. */
+export interface PlannedCellFieldIds {
+  /** One source.cell.commit per cell (SetSource and SetTranscription on the
+   *  same cell merge into ONE event — see commands-cell-fields.ts). */
+  sourceCommits?: { fileId: string; cellId: string; eventId: string }[]
+  /** One cell.retime per cell. */
+  retimes?: { fileId: string; cellId: string; eventId: string }[]
+  /** One file.timing.set per file. */
+  timingModes?: { fileId: string; eventId: string }[]
+  /** One file.track.set per (file, track). */
+  trackOverrides?: { fileId: string; trackId: string; eventId: string }[]
 }
 
 /** Execution receipt recorded on commit. */
@@ -270,6 +420,19 @@ export interface ChangesetReceipt {
   fileId?: string
 }
 
+/** AQU-1185: one applied membership change, recorded on the receipt so the
+ *  audit trail is self-contained — the changeset row already carries the
+ *  credential id, and this says exactly what that credential did to whom. */
+export interface MembershipReceiptEntry {
+  kind: 'InviteMember' | 'SetRole' | 'RemoveMember'
+  userId: string
+  username: string
+  /** The role granted (absent for RemoveMember). */
+  role?: number
+  /** The target's direct role before the write; null when they had no row. */
+  previousRole: number | null
+}
+
 /** W2-A receipt for the receipt-only project-lifecycle commands (spec §2 D8).
  *  These apply a plain row write, not events, so the event-shaped
  *  ChangesetReceipt does not fit — the receipt is a provenance stamp instead. */
@@ -277,25 +440,20 @@ export interface ReceiptOnlyReceipt {
   credentialId: string
   channel: ProvenanceChannel
   changesetId: string
-  command:
-    | 'CreateProject'
-    | 'CreateOrg'
-    | 'UpdateProjectSettings'
-    | 'PatchSettings'
-    | 'SetBrief'
-    | 'AddOrgMember'
-    | 'SetOrgRole'
-    | 'RemoveOrgMember'
+  command: ReceiptOnlyCommandKind
   appliedAt: string
   /** CreateProject: the created project id. UpdateProjectSettings /
-   *  PatchSettings / SetBrief: the updated project id. Org membership: the
-   *  project the plan was filed under (the write itself is org-level). Absent
-   *  for CreateOrg — it creates no project, and the changeset's own project id
-   *  is a filing placeholder that never resolves to a row. */
+   *  PatchSettings / SetBrief / Membership / RenameProject / ArchiveProject /
+   *  UnarchiveProject: the project id it wrote. Org membership: the project
+   *  the plan was filed under (the write itself is org-level). Absent for
+   *  CreateOrg — it creates no project, and the changeset's own project id is
+   *  a filing placeholder that never resolves to a row. */
   projectId?: string
   /** UpdateProjectSettings / PatchSettings / SetBrief: the new settings version
    *  after the write. */
   version?: number
+  /** Membership: every applied change, in command order. */
+  membership?: MembershipReceiptEntry[]
   /** CreateOrg: the created org id (AQU-1221). AQU-1235: the org the
    *  membership change landed in. */
   orgId?: number
@@ -305,6 +463,47 @@ export interface ReceiptOnlyReceipt {
   previousRole?: number
   /** AQU-1235: the org role written (absent for a removal). */
   role?: number
+  /** RegenerateBriefSummary (AQU-1282): length of the rendered L1 summary. */
+  briefSummaryChars?: number
+  /** RegenerateBriefSummary (AQU-1282): the model that rendered it. */
+  l1ModelId?: string
+  /** SetBrief (AQU-1282): outcome of the best-effort L1 auto-render that runs
+   *  after the sections commit. `rendered:false` never fails the commit — the
+   *  sections landed; RegenerateBriefSummary re-runs the render on demand. */
+  briefSummary?:
+    | { rendered: true; chars: number; model: string }
+    | { rendered: false; reason: string }
+}
+
+/** AQU-1294 ProjectSetup receipt: a ReceiptOnlyReceipt (it is a row write, not
+ *  events) plus the plan's step ledger and the server-computed VERIFICATION —
+ *  the facts an operator would otherwise have to re-query five endpoints for.
+ *
+ *  On a mid-plan failure this receipt is written while the row stays
+ *  `committing`, so the retry commit reads `completedSteps` / `failedStep` and
+ *  resumes where it stopped. */
+export interface ProjectSetupReceipt extends ReceiptOnlyReceipt {
+  command: 'ProjectSetup'
+  completedSteps: { index: number; kind: ProjectSetupStep['kind']; status: ProjectSetupStepStatus }[]
+  /** null on a fully applied plan. */
+  failedStep: { index: number; kind: ProjectSetupStep['kind']; error: string } | null
+  /** Present only once every step is applied or superseded. */
+  verification?: ProjectSetupVerification
+}
+
+/** Spec §2.4 — computed server-side after the last step. */
+export interface ProjectSetupVerification {
+  /** The settings version after the plan's last settings/brief write. */
+  settingsVersion: number
+  /** The plan's usernames with their LIVE effective roles. */
+  members: { username: string; role: number }[]
+  files: { fileId: string; name: string; cellCount: number; cellsWithMarkup: number }[]
+  /** prompt-preview's `parts.brief` is non-empty on the first source cell of
+   *  the first created file (no files: the brief's L1 summary is non-empty). */
+  briefReachesCopilot: boolean
+  /** Policy keys the plan asked for that the server refused at commit because
+   *  they would have LOOSENED against the live blob. */
+  policyKeysNotApplied: string[]
 }
 
 /** AQU-1228 receipt for the Living Memory write commands. Also receipt-only (a

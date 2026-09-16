@@ -24,6 +24,7 @@ import { handleProjectSettingsChangedRequest } from "./project-settings-notify"
 import { handleContextualActivityRequest } from "./contextual-activity-notify"
 import { handleCellsAuditReadRequest } from "./events/cells-audit-read-route"
 import { handleCellHistoryReadRequest } from "./events/cell-history-read-route"
+import { handleRemovedCellsReadRequest } from "./events/removed-cells-read-route"
 import { handleMemberActivityReadRequest } from "./events/member-activity-read-route"
 import { handleCellsReadRequest } from "./events/cells-read-route"
 import { handleCellConfidenceRequest } from "./events/cell-confidence-route"
@@ -79,6 +80,8 @@ import { handleExternalQualityRequest } from "./external/quality-routes"
 import { handleExternalMcpRequest } from "./external/mcp-route"
 import { handleExternalDiscoveryRequest } from "./external/discovery-route"
 import { handleExternalCommandsDocRequest } from "./external/commands-doc-route"
+import { handleExternalSetupTemplateRequest } from "./external/setup-template-route"
+import { handleExternalSkillsRequest } from "./external/skills-route"
 export { ProjectSync } from "./project-do"
 // Inert legacy DO class — kept exported so deploys don't trip the
 // "script does not export class 'FileSync'" guard. See file-sync-legacy.ts.
@@ -356,6 +359,8 @@ const worker = {
     if (cellLinksReadResponse) return withCors(cellLinksReadResponse, request)
     const cellHistoryResponse = await handleCellHistoryReadRequest(request, env)
     if (cellHistoryResponse) return withCors(cellHistoryResponse, request)
+    const removedCellsResponse = await handleRemovedCellsReadRequest(request, env)
+    if (removedCellsResponse) return withCors(removedCellsResponse, request)
     const memberActivityResponse = await handleMemberActivityReadRequest(request, env)
     if (memberActivityResponse) return withCors(memberActivityResponse, request)
     const staleSourceResponse = await handleStaleSourceRequest(request, env)
@@ -474,6 +479,13 @@ const worker = {
     // AQU-533 (W2-B): Agent API source-artifact upload / inspect.
     const externalArtifactsResponse = await handleExternalArtifactsRequest(request, env)
     if (externalArtifactsResponse) return withCors(externalArtifactsResponse, request)
+
+    // AQU-1294: partner intake template + agent skills. Static text / pure
+    // transforms, unauthenticated like the command docs below.
+    const externalSetupTemplateResponse = await handleExternalSetupTemplateRequest(request)
+    if (externalSetupTemplateResponse) return withCors(externalSetupTemplateResponse, request)
+    const externalSkillsResponse = handleExternalSkillsRequest(request)
+    if (externalSkillsResponse) return withCors(externalSkillsResponse, request)
 
     // Static command documentation (the REST half of describe_command).
     // Unauthenticated like the discovery root, and mounted with it so both sit

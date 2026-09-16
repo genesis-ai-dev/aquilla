@@ -31,6 +31,23 @@ const useProject = vi.fn()
 const refresh = vi.fn()
 vi.mock("@/hooks/useProject", () => ({ useProject: (...a: unknown[]) => useProject(...a) }))
 
+// AQU-1277: the PM picker calls useProjectMembers, which fetches
+// /api/v2/projects/:id/members. Unmocked that reached production identity for
+// real. None of these tests assert on the roster, so an empty one is enough.
+vi.mock("@/hooks/useProjectMembers", () => ({
+  useProjectMembers: () => ({
+    members: [],
+    isLoading: false,
+    error: null,
+    rosterHidden: false,
+    refresh: vi.fn(async () => {}),
+    add: vi.fn(async () => null),
+    addMany: vi.fn(async () => []),
+    remove: vi.fn(async () => {}),
+    changeRole: vi.fn(async () => null),
+  }),
+}))
+
 const archiveProjectRemote = vi.fn()
 const unarchiveProjectRemote = vi.fn()
 vi.mock("@/lib/sync/archive", () => ({
@@ -183,8 +200,11 @@ const defaultOrgSettingsMock = (): OrgSettingsMock => ({
   memberProgressViewMinRole: 600,
   // AQU-496: default leads-only (matches the server's safe default).
   allowSelfAssignment: false,
+  // AQU-1037: assignment authority defaults to project_lead.
+  assignmentMinRole: 500,
   // AQU-822: default termbase-edit floor (project_lead), as the server resolves it.
   termbaseEditMinRole: 500,
+  languageEditMinRole: 600,
   commentCreateMinRole: 200,
   commentResolveMinRole: 400,
   refresh: vi.fn(async () => null),

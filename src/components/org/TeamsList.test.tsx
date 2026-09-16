@@ -4,6 +4,15 @@ import { MemoryRouter } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { TeamsList } from "./TeamsList"
 
+// AQU-1277: OrgSidebar's useOrgSettings fetches /api/v2/orgs/:id/settings.
+// fetchOrgSettings swallows its own failures and returns null, so unmocked it
+// silently hit production identity while the tests still passed. null is what
+// these tests already observed, so behaviour here is unchanged.
+vi.mock("@/lib/sync/org-settings", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/org-settings")>()),
+  fetchOrgSettings: vi.fn(async () => null),
+}))
+
 vi.mock("@/hooks/useFrontierSession", () => ({ useFrontierSession: () => ({ session: { jwt: "jwt", username: "anna", createdAt: "x" }, loading: false }) }))
 const listMyOrgs = vi.fn()
 vi.mock("@/lib/frontier/orgs", () => ({ listMyOrgs: (...a: unknown[]) => listMyOrgs(...a) }))

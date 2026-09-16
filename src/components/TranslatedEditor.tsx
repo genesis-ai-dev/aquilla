@@ -563,6 +563,11 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   const presenceDraftDeferredRef = useRef(false)
   const lastTypingEndedAtBoundaryRef = useRef(false)
   const lastCommittedRef = useRef<string>(initialPlain)
+  // Formatting-only edits (bold, underline, a link) leave the plain text
+  // identical, so a text-only dirty check drops them on blur and the user
+  // watches their formatting vanish. Track the serialized HTML alongside the
+  // text and commit when EITHER moved.
+  const lastCommittedHtmlRef = useRef<string | null>(null)
   // Latest typed-but-not-yet-committed snapshot. Held so the unmount cleanup
   // can flush it (navigate-away / reload during the idle window must not drop
   // the edit into the void — the commit has to reach the outbox to survive).
@@ -590,6 +595,16 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     setIdmlError(message)
     onIdmlValidationErrorRef.current?.(message)
   }, [])
+
+  /**
+   * The editor's own serialized HTML, by the same serializer a commit uses —
+   * but WITHOUT validation or error reporting, so seeding the committed
+   * baseline can never surface a diagnostic on mount.
+   */
+  const canonicalHtml = useCallback((editorInstance: TiptapEditor): string | null => {
+    if (!idmlContext) return editorInstance.getHTML()
+    return serializeIdmlEditorDocument(editorInstance.state.doc)
+  }, [idmlContext])
 
   const snapshotEditor = useCallback((editorInstance: TiptapEditor): TranslatedEditorCommit | null => {
     if (!idmlContext) return { value: editorInstance.getText(), valueHtml: editorInstance.getHTML() }
@@ -1203,8 +1218,9 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       pendingCommitRef.current = snapshot
       idleTimerRef.current = setTimeout(() => {
         pendingCommitRef.current = null
-        if (text === lastCommittedRef.current) return
+        if (text === lastCommittedRef.current && html === lastCommittedHtmlRef.current) return
         lastCommittedRef.current = text
+        lastCommittedHtmlRef.current = html
         onCommitRef.current({ value: text, valueHtml: html })
       }, COMMIT_IDLE_MS)
       // AQU-664: publish the live buffer on a much shorter debounce so the
@@ -1312,8 +1328,11 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
         aiDraftedRef.current &&
         initialPlainRef.current !== lastHydratedPlainRef.current &&
         text !== initialPlainRef.current
-      if (!hasUnabsorbedDraft && text !== lastCommittedRef.current) {
+      const changed =
+        text !== lastCommittedRef.current || html !== lastCommittedHtmlRef.current
+      if (!hasUnabsorbedDraft && changed) {
         lastCommittedRef.current = text
+        lastCommittedHtmlRef.current = html
         onCommitRef.current({ value: text, valueHtml: html })
       }
       onBlur?.()
@@ -1353,8 +1372,9 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     pendingCommitRef.current = null
     if (!snapshot) return
     const { value: text, valueHtml: html } = snapshot
-    if (text !== lastCommittedRef.current) {
+    if (text !== lastCommittedRef.current || html !== lastCommittedHtmlRef.current) {
       lastCommittedRef.current = text
+      lastCommittedHtmlRef.current = html
       onCommitRef.current({ value: text, valueHtml: html })
     }
   }
@@ -1456,6 +1476,7 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
   useEffect(() => {
     if (!editor) return
     lastCommittedRef.current = editor.getText()
+    lastCommittedHtmlRef.current = canonicalHtml(editor)
     lastHydratedPlainRef.current = initialPlain
     lastHydratedContentRef.current = initialContent
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1500,7 +1521,8 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
     pendingCommitRef.current = null
     if (wasFocused) editor.commands.focus("end")
     lastCommittedRef.current = editor.getText()
-  }, [editor, initialContent, initialPlain, aiDrafted, idmlContext])
+    lastCommittedHtmlRef.current = canonicalHtml(editor)
+  }, [editor, initialContent, initialPlain, aiDrafted, idmlContext, canonicalHtml])
 
   useEffect(() => {
     if (!editor || editor.isDestroyed) return
@@ -1594,8 +1616,13 @@ export const TranslatedEditor = forwardRef<TranslatedEditorHandle, TranslatedEdi
       }
       const pending = pendingCommitRef.current
       pendingCommitRef.current = null
-      if (pending && pending.value !== lastCommittedRef.current) {
+      if (
+        pending
+        && (pending.value !== lastCommittedRef.current
+          || pending.valueHtml !== lastCommittedHtmlRef.current)
+      ) {
         lastCommittedRef.current = pending.value
+        lastCommittedHtmlRef.current = pending.valueHtml
         onCommitRef.current(pending)
       }
     }

@@ -11,6 +11,7 @@
 //   GET /api/v1/external/projects/:projectId/files?limit=&cursor=
 //   GET /api/v1/external/projects/:projectId/files/:fileId/cells?since=&limit=&cursor=
 //   GET /api/v1/external/projects/:projectId/cells/:cellId/history?limit=&cursor=
+//   GET /api/v1/external/projects/:projectId/settings          — settings + live version
 //   GET /api/v1/external/projects/:projectId/cells/:cellId/prompt-preview?targetLang=&fileId=
 //
 // /me, /orgs and /projects are the REST cold-start set (mirrors of the MCP
@@ -64,7 +65,9 @@ import { assertOrgInCredentialScope, handleExternalOrgReadRequest } from "./org-
 import { handleExternalCrossProjectSearch, handleExternalSearch } from "./search-reads"
 import { handleFilesReadRequest } from "../events/files-read-route"
 import { handleCellsReadRequest } from "../events/cells-read-route"
+import { loadProjectSettings } from "../../../db/shared/projects"
 import { paginate, parsePageParams } from "./pagination"
+import { recordAgentRead, resolveAuthorshipPolicy, scrubAuthorField } from "./pii"
 import { handleExternalSimilarRequest } from "./similar-route"
 import { handlePromptPreview } from "./prompt-preview"
 import { loadProjectDetail } from "./project-detail"
@@ -87,6 +90,7 @@ const SEARCH_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/search$/
 const FILE_CELLS_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/files\/([^/]+)\/cells$/
 const FILES_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/files$/
 const CELL_HISTORY_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/cells\/([^/]+)\/history$/
+const SETTINGS_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/settings$/
 const PROMPT_PREVIEW_RE = /^\/api\/v1\/external\/projects\/([^/]+)\/cells\/([^/]+)\/prompt-preview$/
 
 // ---------------------------------------------------------------------------
@@ -102,8 +106,12 @@ async function handleExternalMe(request: Request, env: ExternalReadsEnv): Promis
   if (limited) return limited
   const cred = authed.credential
   return Response.json({
-    userId: cred.userId,
-    username: cred.username,
+    // AQU-1180: identity is opt-in. By default /me answers "which token am I
+    // and what may I do", never "who is the human behind it" — an agent needs
+    // the former to work and the latter never leaves this worker unless an
+    // OWNER minted the credential with `pii` on. The scope ids (org/project)
+    // stay: they are the credential's own reach, not a person.
+    ...(cred.pii === true ? { userId: cred.userId, username: cred.username } : {}),
     mode: cred.mode,
     orgId: cred.orgId,
     projectId: cred.projectId,
@@ -257,8 +265,28 @@ async function handleExternalFileCells(
     changedCellIds?: string[]
     maxServerSeq?: number | null
   }
+
+  // AQU-1180: the internal cells route serves the SPA, where showing "last
+  // edited by Anna" is the whole point — so the scrub happens HERE, at the
+  // agent boundary, rather than in the shared serializer.
+  const policy = await resolveAuthorshipPolicy(env.AQUILLA_PG, authed.ctx.credential, projectId)
+  const cells = await scrubAuthorField(
+    body.cells ?? [],
+    "lastEditor",
+    policy,
+    env.SYNC_SECRET_KEY,
+    projectId,
+  )
+  await recordAgentRead(env.AQUILLA_PG, {
+    credentialId: authed.ctx.credential.credentialId,
+    projectId,
+    resource: "cells",
+    resourceId: fileId,
+    rowCount: cells.length,
+  })
+
   return Response.json({
-    data: body.cells ?? [],
+    data: cells,
     nextCursor: body.nextCursor ?? null,
     ...(body.resync ? { resync: true } : {}),
     ...(body.delta ? { delta: true, changedCellIds: body.changedCellIds ?? [] } : {}),
@@ -347,8 +375,53 @@ async function handleExternalCellHistory(
     .bind(projectId, cellId, fetchLimit)
     .all<EventRowRaw>()
 
-  const events = result.results.map(mapHistoryRow)
-  return Response.json(paginate(events, offset, limit))
+  const page = paginate(result.results.map(mapHistoryRow), offset, limit)
+
+  // AQU-1180: history is the densest identity surface on the API — one author
+  // per event, ordered in time. Scrub the page the caller actually receives
+  // (the fetch over-reads by `offset` rows that are then sliced away).
+  const policy = await resolveAuthorshipPolicy(env.AQUILLA_PG, authed.ctx.credential, projectId)
+  const data = await scrubAuthorField(page.data, "author", policy, env.SYNC_SECRET_KEY, projectId)
+  await recordAgentRead(env.AQUILLA_PG, {
+    credentialId: authed.ctx.credential.credentialId,
+    projectId,
+    resource: "history",
+    resourceId: cellId,
+    rowCount: data.length,
+  })
+  return Response.json({ ...page, data })
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/v1/external/projects/:projectId/settings — the read that makes
+// PatchSettings' `ifMatchVersion` usable at all (AQU-1176). Without it an
+// agent had to guess the version and blind-overwrite settings it had never
+// seen. Same auth/scope/throttle contract as every other project read.
+// ---------------------------------------------------------------------------
+
+async function handleExternalProjectSettings(
+  request: Request,
+  env: ExternalReadsEnv,
+  projectId: string,
+): Promise<Response> {
+  const authed = await authenticateAndScope(request, env, projectId)
+  if (!authed.ok) return authed.response
+  if (env.AQUILLA_PG) {
+    const limited = await checkReadRateLimit(env.AQUILLA_PG, authed.ctx.credential.credentialId)
+    if (limited) return limited
+  }
+
+  const current = await loadProjectSettings(env.AQUILLA_PG as AquillaDb, projectId)
+  // `updatedBy` (the last writer's user id) is deliberately NOT echoed: this
+  // is an agent-facing surface and the id identifies a human translator. The
+  // blob + version are all `ifMatchVersion` needs. A project with no settings
+  // row yet reads as `{}` at version 0 — patch against 0 to create it.
+  return Response.json({
+    projectId: current.projectId,
+    settings: current.settings,
+    version: current.version,
+    updatedAt: current.updatedAt,
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -428,6 +501,9 @@ export async function handleExternalReadRequest(
   if (match) {
     return handleExternalCellHistory(request, env, decodeURIComponent(match[1]), decodeURIComponent(match[2]))
   }
+
+  match = url.pathname.match(SETTINGS_RE)
+  if (match) return handleExternalProjectSettings(request, env, decodeURIComponent(match[1]))
 
   // Last of the /projects/* family: its regex is the least specific, so every
   // deeper project route above must get first refusal.

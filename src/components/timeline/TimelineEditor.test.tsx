@@ -1621,7 +1621,7 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
       return render(
         <TimelineEditor
           fileId="fzoom" coreMediaUrl={VIDEO} editable cells={cells}
-          canAddLine allowLineCreation onAddLine={async () => null} onRetimeSubtitle={() => {}}
+          canAddLine onAddLine={async () => null} onRetimeSubtitle={() => {}}
         />,
       )
     }
@@ -1650,11 +1650,14 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
       expect(screen.getByTestId("tl-add-line-20")).toBeInTheDocument()
     })
 
-    // The project setting, off unless turned on (Sam, 2026-08-14). Adding
-    // lines was built speculatively — no client asked for it — and its mic over
-    // an empty stretch could mint a subtitle line and record a take matching no
-    // audio cue. Clearance alone must not be enough to surface it.
-    it("offers nothing without the project setting, however much clearance you have", () => {
+    // AQU-1068: `canAddLine` IS the project's answer now, not merely a
+    // clearance sitting beside one. It arrives already folded — the tier AND
+    // the caller's rank — so false here is the off state, whatever rank the
+    // viewer holds. (It used to be two props; the mic over an empty stretch
+    // could mint a subtitle line and record a take matching no audio cue, so
+    // clearance alone was never allowed to surface it. One authority now keeps
+    // that true without the two being able to drift apart.)
+    it("offers nothing when the project has not admitted this user", () => {
       setVideoDurationSec(VIDEO, 120)
       localStorage.setItem("aquilla:timelineZoom:fzoom", String(ZOOM_MAX))
       render(
@@ -1664,11 +1667,77 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
             cell({ id: "a", original: "A", medium: "text", startTime: 10, endTime: 20 }),
             cell({ id: "b", original: "B", medium: "text", startTime: 20.3, endTime: 30 }),
           ]}
-          canAddLine onAddLine={async () => null} onRetimeSubtitle={() => {}}
+          canAddLine={false} onAddLine={async () => null} onRetimeSubtitle={() => {}}
         />,
       )
       expect(screen.queryByTestId("tl-add-line-20")).not.toBeInTheDocument()
       expect(screen.queryByTestId(/^tl-target-add-20/)).not.toBeInTheDocument()
+    })
+
+    // AQU-1068: FREE timing has no gaps to insert into — buildProgramme lays
+    // takes end to end on their own clock, so a "silence" on the file clock is
+    // not a place a cell can go. Gap inserts on a Free-mode cue sheet still
+    // exist; they live on the text table, against the SOURCE clock, which is
+    // the one that stays real whichever mode the timeline is showing.
+    it("offers nothing in Free timing, however much clearance you have", () => {
+      setVideoDurationSec(VIDEO, 120)
+      localStorage.setItem("aquilla:timelineZoom:fzoom", String(ZOOM_MAX))
+      render(
+        <TimelineEditor
+          fileId="fzoom" coreMediaUrl={VIDEO} editable
+          cells={[
+            cell({ id: "a", original: "A", medium: "text", startTime: 10, endTime: 20 }),
+            cell({ id: "b", original: "B", medium: "text", startTime: 20.3, endTime: 30 }),
+          ]}
+          canAddLine timingMode="audioFirst"
+          onAddLine={async () => null} onRetimeSubtitle={() => {}}
+        />,
+      )
+      expect(screen.queryByTestId("tl-add-line-20")).not.toBeInTheDocument()
+      expect(screen.queryByTestId(/^tl-target-add-20/)).not.toBeInTheDocument()
+    })
+
+    it("still offers them in Original timing — the default", () => {
+      // The guard above must not have taken the affordance away wholesale.
+      setVideoDurationSec(VIDEO, 120)
+      localStorage.setItem("aquilla:timelineZoom:fzoom", String(ZOOM_MAX))
+      render(
+        <TimelineEditor
+          fileId="fzoom" coreMediaUrl={VIDEO} editable
+          cells={[
+            cell({ id: "a", original: "A", medium: "text", startTime: 10, endTime: 20 }),
+            cell({ id: "b", original: "B", medium: "text", startTime: 20.3, endTime: 30 }),
+          ]}
+          canAddLine timingMode="dubbing"
+          onAddLine={async () => null} onRetimeSubtitle={() => {}}
+        />,
+      )
+      expect(screen.getByTestId("tl-add-line-20")).toBeInTheDocument()
+    })
+
+    // AQU-1068 round 4: the pencils do not depend on a film being linked. A
+    // timed VTT with no video has the same silences, and the text table
+    // already offers inserts into them, so gating the region derivation on
+    // `coreMediaUrl` made the two surfaces disagree about the same file. With
+    // no footage the regions span the cells' own extent — the gaps between
+    // cues still surface, and no tail is invented past the last cue.
+    it("offers the ways in on a timed file with no footage linked", () => {
+      localStorage.setItem("aquilla:timelineZoom:fzoom", String(ZOOM_MAX))
+      render(
+        <TimelineEditor
+          fileId="fzoom" coreMediaUrl={null} editable
+          cells={[
+            cell({ id: "a", original: "A", medium: "text", startTime: 10, endTime: 20 }),
+            cell({ id: "b", original: "B", medium: "text", startTime: 20.3, endTime: 30 }),
+          ]}
+          canAddLine onAddLine={async () => null} onRetimeSubtitle={() => {}}
+        />,
+      )
+      // The same silence every test above uses, and the head gap before 10s.
+      expect(screen.getByTestId("tl-add-line-20")).toBeInTheDocument()
+      expect(screen.getByTestId("tl-add-line-0")).toBeInTheDocument()
+      // No footage length → no region past the last cue to draw a slot in.
+      expect(screen.queryByTestId("tl-add-line-30")).not.toBeInTheDocument()
     })
 
     // THE SETTING IS THE SINGLE AUTHORITY (Sam, 2026-08-21). Stage 4 used to
@@ -1686,7 +1755,7 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
             cell({ id: "a", original: "A", medium: "text", startTime: 10, endTime: 20 }),
             cell({ id: "b", original: "B", medium: "text", startTime: 20.3, endTime: 30 }),
           ]}
-          canAddLine allowLineCreation onAddLine={async () => null} onRetimeSubtitle={() => {}}
+          canAddLine onAddLine={async () => null} onRetimeSubtitle={() => {}}
           hasAudioCueTrack
         />,
       )

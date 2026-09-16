@@ -34,9 +34,45 @@ export function describeCommand(kind: string): CommandCatalogEntry | null
 v1 entries: SetTranslation (prepared, 400) · LinkMedia (prepared, 400) · PlanImport (structural,
 500) · CreateProject (structural, 600-org) · UpdateProjectSettings (structural, 600 — oneLiner
 says "deprecated: prefer PatchSettings") · **PatchSettings** (structural, 500) ·
-**EmitEvents** (structural, 200 — floor is per inner event kind; testimony kinds flagged).
+**EmitEvents** (structural, 200 — floor is per inner event kind; testimony kinds flagged) ·
+**InviteMember / SetRole / RemoveMember** (governance, 600 — always ask-mode; see §2).
 AQU-1228 adds the Living Memory writes: **AddExample** / **AddDecision** / **AddNote**
 (structural, 400) and **RetireExample** (structural, 500).
+
+### Membership — InviteMember / SetRole / RemoveMember (AQU-1185)
+
+```ts
+{ kind: 'InviteMember', projectId: string, username: string, role: number }
+{ kind: 'SetRole',      projectId: string, username: string, role: number }
+{ kind: 'RemoveMember', projectId: string, username: string }
+```
+
+Receipt-only (a `project_members` row write, not events). Membership kinds batch with each
+other — max 25, one command per person — but never with another kind. Prepare **forces
+ask-mode** regardless of the credential's mode: every membership change a machine proposes
+passes a human at `/approve/:id`, which lists one plain-language line per change.
+
+Gates, enforced identically at prepare and at commit against the caller's **live** role:
+
+| Rule | Denial `details.code` |
+| --- | --- |
+| caller's effective project role ≥ MAINTAINER (600) | (`requiredRole: 600`) |
+| cannot grant a role above your own | `role_above_caller` |
+| cannot act on yourself (covers self-elevation) | `self_target` |
+| below OWNER, cannot touch anyone whose **effective** role ≥ yours | `target_outranks_caller` |
+| InviteMember on an existing direct member | `already_member` (409) |
+| SetRole / RemoveMember with no direct member row | `not_a_direct_member` (409) |
+
+The target cap reads the target's **effective** (max-wins) role, not the direct
+`project_members.role_level` the UI compares against — so a project OWNER who holds the
+project through the org or creator path, and therefore has no direct row, cannot be removed
+by a MAINTAINER's agent.
+
+Drift at commit is all-or-nothing: a plan whose end-state a human already applied is
+`superseded`, any other movement is `stale`, and nothing is written either way. Target user
+ids are pinned at prepare, so a username reassigned between prepare and commit is drift
+rather than a new target. The committed receipt carries the credential id plus every applied
+change (`kind`, `userId`, `username`, `role`, `previousRole`) as the audit record.
 
 ## 2. New commands (owner: sync-worker stream)
 
@@ -53,10 +89,30 @@ AQU-1228 adds the Living Memory writes: **AddExample** / **AddDecision** / **Add
   `patchProjectSettingsShared` in `db/shared/projects.ts`). One op per key — a duplicate key is
   `validation_failed` (a settings op is authored intent, not a loop batch; last-wins would hide a bug).
 - Per-key floors: `terminology` → org `termbaseEditMinRole` (read `org_settings`, default 500);
-  everything else 600 (MAINTAINER).
-- **POLICY_SETTINGS_KEYS** (exported const) always rejected with `permission_denied`:
-  `agentMemoryAutonomy`, `validationRoleFloor`, `validationNamedUsers`, `validationCount`,
-  `validationCountAudio`, `allowSelfValidation`, `harmonize_min_role`, `contributeToGlobalTm`.
+  `sourceLanguage` / `targetLanguage` / `targetLanes` / `archivedLanes` → org
+  `languageEditMinRole` (read `org_settings`, default 600 — AQU-1086); everything else 600
+  (MAINTAINER). A batch takes the MAX floor across its ops, so lowering one floor never widens
+  another key. Both org floors are resolved at prepare **and** re-resolved at commit; the
+  catalog's static floor advertises each key's *default*, so an org that lowers
+  `languageEditMinRole` makes the catalog conservative rather than permissive.
+- **POLICY_SETTINGS_KEYS** (exported const) — `agentMemoryAutonomy`, `validationRoleFloor`,
+  `validationNamedUsers`, `validationCount`, `validationCountAudio`, `allowSelfValidation`,
+  `harmonize_min_role`, `contributeToGlobalTm`, `cellEditingFloor` (AQU-1068),
+  `agentAuthorship` (AQU-1180 — the switch that hides translator identity from agents) —
+  are writable in the **restrictive direction only** (AQU-1282). A write that TIGHTENS
+  oversight stages like any other (still ask-mode, still human-approved); one that would
+  LOOSEN it is `permission_denied` with `details.loosening: [{ key, current, proposed,
+  reason }]`. The direction is computed by `policyWriteDirection` / `loosensPolicy`
+  (`db/shared/policy-direction.ts`, which also exports `POLICY_DIRECTION_TABLE` — the
+  per-key table `describe_command PatchSettings` renders) against the LIVE blob at prepare
+  **and again** at commit, so a human loosening a key mid-flight cannot let a stale plan
+  apply as a loosening write. An unset key reads as its documented default, and a no-op
+  write (proposed already equals live) counts as tightening.
+  - Note on `validationNamedUsers`: the list is an ALLOWLIST of who may validate, so
+    *adding* a name admits someone new (loosening) and *dropping* one excludes them
+    (tightening); empty → named is tightening. This inverts the direction stated in
+    AQU-1282's table, which the enforcing code (`sync-worker/src/events/route.ts`)
+    contradicts.
 - `UpdateProjectSettings` (deprecated, kept): now rejects when any POLICY key's value would
   CHANGE vs the live blob (equal pass-through stays valid — existing round-trip callers keep
   working).
@@ -87,12 +143,66 @@ AQU-1228 adds the Living Memory writes: **AddExample** / **AddDecision** / **Add
   `comment.create`, `comment.edit`, `comment.delete`, `comment.resolve`,
   `cell.waive`, `cell.unwaive`, `cell.validate`†, `cell.unvalidate`†,
   `cell.backtranslation.set`, `target.cell.repin`, `file.rename`, `file.delete`, `file.restore`,
-  `assignment.create`, `assignment.reassign`, `assignment.unassign`.
+  `assignment.create`, `assignment.reassign`, `assignment.unassign`,
+  `term.create`, `term.update`, `term.delete`, `term.approve`, `term.reject`.
   († testimony: allowed to stage, but the summary marks them `testimony: true` so review UIs
   render per-item confirmation; they are excluded from any future bulk auto-apply.)
-- Explicitly NOT in v1: `target.cell.commit` (use SetTranslation), `source.cell.*`,
-  `cell.audio.*` (use LinkMedia), reorders/retimes/mirrors, `file.timing.set`, `file.create`.
-- Summary gains `events: { kind, count, testimony }[]` alongside existing fields.
+- **Terminology (AQU-1179).** Project-level: no `fileId`/`cellId` on the envelope (rejected if
+  supplied — the engine routes them under the project sentinel), concept id rides the payload.
+  The static floor is CONTRIBUTOR, but prepare mirrors `termbase-authority.ts`'s conditional
+  raise: every BINDING write — `term.create` with `status: 'active'`, and every update / delete /
+  approve / reject — is checked against the org's `termbaseEditMinRole` (default 500), so a plan
+  the caller could never commit is denied rather than staged. `status: 'draft'` on create is a
+  suggestion and stays at CONTRIBUTOR. `term.update` may not carry `status` (approve/reject are
+  their own kinds, so the audit trail keeps "edited" apart from "made binding"); a `term.create`
+  naming a live concept is rejected rather than upserted over it; a `term.approve` of a non-draft
+  is rejected rather than applied as a projection no-op.
+- Explicitly NOT allowlisted: `target.cell.commit` (use SetTranslation), `source.cell.*`,
+  `cell.audio.*` (use LinkMedia), reorders/retimes/mirrors, `file.timing.set`, `file.create`,
+  cell structure (split/merge/insert/delete), membership, and project lifecycle. Rules and Living
+  Memory have no event kinds at all — rules live in the settings blob (PatchSettings), memory
+  behind auth-worker's agent-memory API — so they cannot come through this door until they are
+  event-sourced.
+- Summary gains `events: { kind, count, testimony, label }[]` alongside existing fields. `label`
+  is a server-computed plain-language effect line ("Approve a glossary term — enforced for
+  everyone on the project"); the approval page renders it, falling back to `kind × count` for
+  changesets staged before it existed. Adding a kind to the allowlist means adding its phrasing
+  to `emitKindEffectLabel` — a reviewer approves the effect, not the event name.
+
+### RenameFile — file label management (AQU-1182)
+
+- Params `{ fileId, name }`; batchable within a RenameFile-only changeset; floor CONTRIBUTOR
+  400 (`REQUIRED_ROLE['file.rename']` — the UI's own floor for the same action).
+- **Sugar over EmitEvents, by construction.** Prepare desugars the batch into the equivalent
+  `file.rename` `EmitEvents` command and delegates to that engine; nothing here compiles an
+  event of its own. Consequence to know: the stored plan (and the changeset a caller reads
+  back) holds `file.rename` events, not a `RenameFile` entry.
+- `name` is trimmed, 1–256 chars; whitespace-only is rejected. File delete is NOT given a named
+  command — soft-delete/trash semantics are in flux (AQU-272), so it stays behind the raw
+  `EmitEvents` door where the caller opts into current semantics explicitly.
+
+### Project lifecycle — RenameProject / ArchiveProject / UnarchiveProject (AQU-1182)
+
+- Receipt-only row writes in the `CreateProject` family (D8) — no events, receipt is a
+  provenance stamp. Each is the **sole command** in its changeset and its `projectId` must equal
+  the changeset's project.
+- Floors mirror auth-worker `routes/projects.ts` exactly: `RenameProject` MAINTAINER 600
+  (`PATCH /:projectId`), `ArchiveProject` / `UnarchiveProject` OWNER 700
+  (`POST` / `DELETE /:projectId/archive`). Re-resolved live at prepare AND commit.
+- **Forced ask-mode** at prepare for all three, regardless of credential/request mode
+  (CreateProject's precedent) — every agent-initiated project-lifecycle change passes through
+  `/approve/:id`. `RenameFile` is not forced: it is a CONTRIBUTOR-floor label edit and follows
+  the normal autonomy ladder like `SetTranslation`.
+- Role resolution uses `resolveProjectRoleIncludingArchivedShared`: the ordinary shared
+  resolver returns null for every archived project, which would make `UnarchiveProject`
+  unreachable. Same twin auth-worker's archive endpoints use; ordinary authority is untouched.
+- End-state check (deterministic, exact): already-archived / not-archived / already-named-that
+  is `validation_failed` at prepare and `plan_stale` + `details.status: "superseded"` at
+  commit. A crash-retry (`status = 'committing'`) skips it and re-applies idempotently; the
+  archive write keeps `AND archived_at IS NULL` so a retry cannot re-stamp a newer timestamp.
+- Archive/unarchive best-effort notify the `ProjectSync` DO (`archive-broadcast.ts`), matching
+  the UI path; a failed broadcast never fails an applied commit.
+- Project DELETE is never exposed on any agent surface: archive is recoverable, delete is not.
 
 ### Living Memory writes (AQU-1228) — AddExample / AddDecision / AddNote / RetireExample
 

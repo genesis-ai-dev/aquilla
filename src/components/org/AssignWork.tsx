@@ -63,6 +63,8 @@ export interface AssignWorkProps {
   /** Caller authority used by the optional self-assignment carve-out. */
   roleLevel?: number
   allowSelfAssignment?: boolean
+  /** Org-configured floor for assigning work to anyone. */
+  assignmentMinRole?: number
   /** Caller identity used to guarantee below-lead assignments target self. */
   callerUserId?: number | null
   /** Called after a successful assign so the parent can refresh rollups. */
@@ -75,6 +77,7 @@ export interface AssignWorkProps {
 }
 
 const DEFAULT_ROLE_LEVEL = 500
+const DEFAULT_ASSIGNMENT_MIN_ROLE = 500
 
 export function AssignWork({
   projectId,
@@ -83,12 +86,13 @@ export function AssignWork({
   author,
   roleLevel = DEFAULT_ROLE_LEVEL,
   allowSelfAssignment = false,
+  assignmentMinRole = DEFAULT_ASSIGNMENT_MIN_ROLE,
   callerUserId = null,
   onAssigned,
   targetLang = "",
 }: AssignWorkProps) {
   const t = useT()
-  const isSelfAssignMode = roleLevel < DEFAULT_ROLE_LEVEL
+  const isSelfAssignMode = roleLevel < assignmentMinRole
   const [open, setOpen] = useState(false)
   const [members, setMembers] = useState<ProjectMember[]>([])
   const [assigneeId, setAssigneeId] = useState<number | "">(
@@ -137,6 +141,14 @@ export function AssignWork({
     () => partitionMembers(members).projectMembers,
     [members],
   )
+  const effectiveCallerUserId =
+    callerUserId ?? members.find((member) => member.username === author)?.userId ?? null
+
+  useEffect(() => {
+    if (isSelfAssignMode && effectiveCallerUserId != null) {
+      setAssigneeId(effectiveCallerUserId)
+    }
+  }, [isSelfAssignMode, effectiveCallerUserId])
 
   // Load the selected file's chapters for the picker; clear the checked
   // chapters when the file changes so stale chapters can't leak across books.
@@ -181,7 +193,13 @@ export function AssignWork({
       setError(t("dialog.assign.error.notProjectMember"))
       return
     }
-    if (!canSubmitAssignment(roleLevel, allowSelfAssignment, callerUserId, Number(assigneeId))) {
+    if (!canSubmitAssignment(
+      roleLevel,
+      allowSelfAssignment,
+      effectiveCallerUserId,
+      Number(assigneeId),
+      assignmentMinRole,
+    )) {
       setError(t("dialog.assign.error.selfOnly"))
       return
     }
@@ -240,7 +258,7 @@ export function AssignWork({
               items={
                 isSelfAssignMode
                   ? members
-                      .filter((m) => m.userId === callerUserId)
+                      .filter((m) => m.userId === effectiveCallerUserId)
                       .map((m) => ({ value: String(m.userId), label: t("dialog.assign.assigneeSelfSuffix", { username: m.username }) }))
                   : [
                       { value: "", label: t("dialog.assign.selectMemberPlaceholder") },
@@ -259,7 +277,7 @@ export function AssignWork({
                 <SelectGroup>
                   {isSelfAssignMode ? (
                     members
-                      .filter((m) => m.userId === callerUserId)
+                      .filter((m) => m.userId === effectiveCallerUserId)
                       .map((m) => (
                         <SelectItem key={m.userId} value={String(m.userId)}>
                           <UsernameWithAvatar

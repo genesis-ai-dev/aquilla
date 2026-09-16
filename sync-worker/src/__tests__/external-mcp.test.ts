@@ -195,7 +195,7 @@ describe('MCP transport', () => {
 })
 
 describe('MCP tools/list', () => {
-  it('returns all 23 tools each with an input schema', async () => {
+  it('returns all 28 tools each with an input schema', async () => {
     const env = makeEnv(tdb.db)
     const token = await credToken(tdb)
     const res = await rpc(env, token, { jsonrpc: '2.0', id: 2, method: 'tools/list' })
@@ -205,15 +205,19 @@ describe('MCP tools/list', () => {
       [
         'confirm_changeset', 'describe_command', 'discard_changeset', 'export_file',
         'find_similar_cells', 'get_capabilities', 'get_changeset', 'get_identity_and_scope',
-        'get_project', 'get_prompt_preview', 'list_memory', 'list_orgs', 'list_projects',
-        'prepare_import', 'prepare_translations', 'preview_import', 'read_cell_memory',
-        'read_content', 'read_history',
+        'get_project', 'get_project_settings', 'get_prompt_preview',
+        // AQU-1294 skills.
+        'get_skill',
+        'list_changesets',
+        'list_memory', 'list_orgs', 'list_projects', 'patch_settings', 'prepare_import',
+        'prepare_translations', 'preview_import', 'read_cell_memory', 'read_content',
+        'read_history',
         // AQU-1231 quality reads.
         'read_quality', 'read_term_consistency',
-        'search_project', 'search_projects',
+        'search_project', 'search_projects', 'wait_for_changeset',
       ].sort(),
     )
-    expect(body.result.tools).toHaveLength(23)
+    expect(body.result.tools).toHaveLength(28)
     for (const tool of body.result.tools) {
       expect(typeof tool.description).toBe('string')
       expect(tool.description.length).toBeGreaterThan(20)
@@ -234,9 +238,13 @@ describe('MCP tools/call — reads', () => {
     })
     const { payload, isError } = toolPayload(((await res.json()) as any).result)
     expect(isError).toBe(false)
+    // AQU-1180: the MCP adapter and REST /me must agree about what a token is
+    // allowed to learn — scope and autonomy yes, the human behind it no.
     expect(payload).toMatchObject({
-      userId: '1', username: 'alice', mode: 'act', orgId: null, projectId: PROJECT, credentialId: CRED_1,
+      mode: 'act', orgId: null, projectId: PROJECT, credentialId: CRED_1,
     })
+    expect(payload).not.toHaveProperty('userId')
+    expect(payload).not.toHaveProperty('username')
   })
 
   it('get_capabilities publishes real limits and error codes', async () => {
@@ -250,6 +258,8 @@ describe('MCP tools/call — reads', () => {
     const p = payload as any
     expect(p.credentialMode).toBe('act')
     // All six domain command kinds are now reported (Agent API v1.1 + AQU-1221).
+    // This field is frozen — newer kinds land in commands.index and the
+    // legacy five-kind list moved to commandKindsLegacy (see command-catalog.test).
     expect(p.commandKinds).toEqual(
       ['SetTranslation', 'PlanImport', 'CreateOrg', 'CreateProject', 'UpdateProjectSettings', 'LinkMedia'],
     )
@@ -445,6 +455,240 @@ describe('MCP tools/call — reads', () => {
   })
 })
 
+// AQU-1176: settings became readable over MCP, PatchSettings got a real tool,
+// and describe_command stopped being a capabilities promise with no
+// implementation behind it.
+describe('MCP tools/call — settings + command discovery', () => {
+  /** Give the seeded user MAINTAINER (600) — the floor PatchSettings needs for
+   *  a non-terminology key. */
+  async function promoteToMaintainer() {
+    await tdb.pg.query(`UPDATE project_members SET role_level = 600 WHERE project_id = $1 AND user_id = 1`, [
+      PROJECT,
+    ])
+  }
+
+  async function seedSettings(settings: Record<string, unknown>, version: number) {
+    await tdb.pg.query(
+      `INSERT INTO project_settings (project_id, settings, version, updated_by, updated_at)
+       VALUES ($1, $2, $3, 1, '2026-01-01T00:00:00.000Z')`,
+      [PROJECT, JSON.stringify(settings), version],
+    )
+  }
+
+  it('get_project_settings returns the blob and its live version', async () => {
+    await seedSettings({ targetLanguage: 'fr', brief: 'Keep it plain.' }, 4)
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb)
+    const res = await rpc(env, token, {
+      jsonrpc: '2.0', id: 40, method: 'tools/call',
+      params: { name: 'get_project_settings', arguments: { projectId: PROJECT } },
+    })
+    const { payload, isError } = toolPayload(((await res.json()) as any).result)
+    expect(isError).toBe(false)
+    expect((payload as any).version).toBe(4)
+    expect((payload as any).settings.targetLanguage).toBe('fr')
+  })
+
+  it('get_project_settings on a project outside the credential scope is denied', async () => {
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb)
+    const res = await rpc(env, token, {
+      jsonrpc: '2.0', id: 41, method: 'tools/call',
+      params: { name: 'get_project_settings', arguments: { projectId: 'some-other-project' } },
+    })
+    const { payload, isError } = toolPayload(((await res.json()) as any).result)
+    expect(isError).toBe(true)
+    expect(['scope_denied', 'not_found']).toContain((payload as any).error.code)
+  })
+
+  it('describe_command returns a real parameter doc for PatchSettings, SetTranslation and LinkMedia', async () => {
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb)
+    for (const kind of ['PatchSettings', 'SetTranslation', 'LinkMedia']) {
+      const res = await rpc(env, token, {
+        jsonrpc: '2.0', id: 42, method: 'tools/call',
+        params: { name: 'describe_command', arguments: { kind } },
+      })
+      const { payload, isError } = toolPayload(((await res.json()) as any).result)
+      expect(isError, kind).toBe(false)
+      expect((payload as any).kind).toBe(kind)
+      expect((payload as any).paramsDoc, kind).toContain('Params:')
+      expect(typeof (payload as any).minRoleLevel).toBe('number')
+    }
+  })
+
+  it('describe_command omits kind and returns the index of every command', async () => {
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb)
+    const res = await rpc(env, token, {
+      jsonrpc: '2.0', id: 43, method: 'tools/call',
+      params: { name: 'describe_command', arguments: {} },
+    })
+    const { payload, isError } = toolPayload(((await res.json()) as any).result)
+    expect(isError).toBe(false)
+    expect(Array.isArray((payload as any).commands)).toBe(true)
+    expect((payload as any).commands.length).toBeGreaterThan(0)
+    expect((payload as any).commands[0]).toHaveProperty('kind')
+  })
+
+  it('describe_command names the valid kinds for an unknown one', async () => {
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb)
+    const res = await rpc(env, token, {
+      jsonrpc: '2.0', id: 43, method: 'tools/call',
+      params: { name: 'describe_command', arguments: { kind: 'MakeCoffee' } },
+    })
+    const { payload, isError } = toolPayload(((await res.json()) as any).result)
+    expect(isError).toBe(true)
+    expect((payload as any).error.code).toBe('not_found')
+    expect((payload as any).error.details.availableKinds).toContain('PatchSettings')
+  })
+
+  it('every command get_capabilities advertises is describable (no dangling promises)', async () => {
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb)
+    const capRes = await rpc(env, token, {
+      jsonrpc: '2.0', id: 44, method: 'tools/call',
+      params: { name: 'get_capabilities', arguments: {} },
+    })
+    const caps = toolPayload(((await capRes.json()) as any).result).payload as any
+    expect(caps.commands.index.length).toBeGreaterThan(0)
+    for (const entry of caps.commands.index) {
+      const res = await rpc(env, token, {
+        jsonrpc: '2.0', id: 45, method: 'tools/call',
+        params: { name: 'describe_command', arguments: { kind: entry.kind } },
+      })
+      const { isError } = toolPayload(((await res.json()) as any).result)
+      expect(isError, entry.kind).toBe(false)
+    }
+  })
+
+  it('patch_settings stages a single-key change and commit leaves the other keys byte-identical', async () => {
+    await promoteToMaintainer()
+    await seedSettings({ targetLanguage: 'fr', targetLanes: ['fr'], systemPrompt: 'old' }, 1)
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb)
+
+    const stageRes = await rpc(env, token, {
+      jsonrpc: '2.0', id: 46, method: 'tools/call',
+      params: {
+        name: 'patch_settings',
+        arguments: {
+          projectId: PROJECT,
+          ops: [{ key: 'systemPrompt', value: 'new' }],
+          ifMatchVersion: 1,
+        },
+      },
+    })
+    const staged = toolPayload(((await stageRes.json()) as any).result)
+    expect(staged.isError).toBe(false)
+    const { changesetId, digest } = staged.payload as { changesetId: string; digest: string }
+
+    const commitRes = await rpc(env, token, {
+      jsonrpc: '2.0', id: 47, method: 'tools/call',
+      params: { name: 'confirm_changeset', arguments: { projectId: PROJECT, changesetId, digest } },
+    })
+    expect(toolPayload(((await commitRes.json()) as any).result).isError).toBe(false)
+
+    const rows = await tdb.rows<{ settings: string; version: number }>('project_settings')
+    const stored = JSON.parse(rows[0].settings)
+    expect(stored.systemPrompt).toBe('new')
+    expect(stored.targetLanguage).toBe('fr')
+    expect(stored.targetLanes).toEqual(['fr'])
+    expect(rows[0].version).toBe(2)
+  })
+
+  it('patch_settings with a stale ifMatchVersion is rejected and applies nothing', async () => {
+    await promoteToMaintainer()
+    await seedSettings({ systemPrompt: 'old' }, 1)
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb)
+    const res = await rpc(env, token, {
+      jsonrpc: '2.0', id: 48, method: 'tools/call',
+      params: {
+        name: 'patch_settings',
+        arguments: { projectId: PROJECT, ops: [{ key: 'systemPrompt', value: 'new' }], ifMatchVersion: 99 },
+      },
+    })
+    const { payload, isError } = toolPayload(((await res.json()) as any).result)
+    expect(isError).toBe(true)
+    expect((payload as any).error.code).toBe('plan_stale')
+    const rows = await tdb.rows<{ settings: string }>('project_settings')
+    expect(JSON.parse(rows[0].settings).systemPrompt).toBe('old')
+  })
+
+  it('patch_settings rejects a LOOSENING policy write at prepare (agent cannot loosen its own gates)', async () => {
+    await promoteToMaintainer()
+    await seedSettings({ systemPrompt: 'old', validationCount: 3 }, 1)
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb)
+    const res = await rpc(env, token, {
+      jsonrpc: '2.0', id: 49, method: 'tools/call',
+      params: {
+        name: 'patch_settings',
+        arguments: {
+          projectId: PROJECT,
+          ops: [{ key: 'validationCount', value: 1 }],
+          ifMatchVersion: 1,
+        },
+      },
+    })
+    const { payload, isError } = toolPayload(((await res.json()) as any).result)
+    expect(isError).toBe(true)
+    expect((payload as any).error.code).toBe('permission_denied')
+    expect((payload as any).error.details.loosening[0].key).toBe('validationCount')
+  })
+
+  it('patch_settings accepts a TIGHTENING policy write and confirm lands it (AQU-1282 §1)', async () => {
+    await promoteToMaintainer()
+    await seedSettings({ systemPrompt: 'old', validationCount: 3 }, 1)
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb)
+    const stageRes = await rpc(env, token, {
+      jsonrpc: '2.0', id: 52, method: 'tools/call',
+      params: {
+        name: 'patch_settings',
+        arguments: {
+          projectId: PROJECT,
+          ops: [{ key: 'validationCount', value: 5 }],
+          ifMatchVersion: 1,
+        },
+      },
+    })
+    const staged = toolPayload(((await stageRes.json()) as any).result)
+    expect(staged.isError, JSON.stringify(staged.payload)).toBe(false)
+    const { changesetId, digest } = staged.payload as { changesetId: string; digest: string }
+
+    const commitRes = await rpc(env, token, {
+      jsonrpc: '2.0', id: 53, method: 'tools/call',
+      params: { name: 'confirm_changeset', arguments: { projectId: PROJECT, changesetId, digest } },
+    })
+    expect(toolPayload(((await commitRes.json()) as any).result).isError).toBe(false)
+
+    const rows = await tdb.rows<{ settings: string; version: number }>('project_settings')
+    expect(JSON.parse(rows[0].settings).validationCount).toBe(5)
+    expect(rows[0].version).toBe(2)
+  })
+
+  it('patch_settings requires ops and a numeric ifMatchVersion', async () => {
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb)
+    const noOps = await rpc(env, token, {
+      jsonrpc: '2.0', id: 50, method: 'tools/call',
+      params: { name: 'patch_settings', arguments: { projectId: PROJECT, ops: [], ifMatchVersion: 1 } },
+    })
+    expect(toolPayload(((await noOps.json()) as any).result).isError).toBe(true)
+
+    const noVersion = await rpc(env, token, {
+      jsonrpc: '2.0', id: 51, method: 'tools/call',
+      params: { name: 'patch_settings', arguments: { projectId: PROJECT, ops: [{ key: 'systemPrompt', value: 'x' }] } },
+    })
+    const { payload, isError } = toolPayload(((await noVersion.json()) as any).result)
+    expect(isError).toBe(true)
+    expect((payload as any).error.message).toContain('get_project_settings')
+  })
+})
+
 describe('MCP tools/call — changesets', () => {
   it('prepare_translations -> confirm_changeset (act mode) lands events', async () => {
     const env = makeEnv(tdb.db)
@@ -572,6 +816,82 @@ describe('MCP tools/call — changesets', () => {
     })
     const discarded = toolPayload(((await discardRes.json()) as any).result).payload as any
     expect(discarded.status).toBe('discarded')
+  })
+
+  // AQU-1177: the changeset lifecycle is reachable over MCP, not only REST.
+  // The rules themselves (credential scoping, status filtering, the two-armed
+  // settle predicate) are covered at the REST layer in
+  // external-changeset-lifecycle.test.ts — these assert the MCP dispatch.
+  it('list_changesets pages this credential\'s plans with a status filter', async () => {
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb)
+
+    const ids: string[] = []
+    for (const value of ['one', 'two']) {
+      const res = await rpc(env, token, {
+        jsonrpc: '2.0', id: 21, method: 'tools/call',
+        params: {
+          name: 'prepare_translations',
+          arguments: { projectId: PROJECT, translations: [{ cellId: 'cell-1', fileId: FILE, value }] },
+        },
+      })
+      ids.push((toolPayload(((await res.json()) as any).result).payload as any).changesetId)
+    }
+
+    const listRes = await rpc(env, token, {
+      jsonrpc: '2.0', id: 22, method: 'tools/call',
+      params: { name: 'list_changesets', arguments: { projectId: PROJECT, status: 'staged', limit: 1 } },
+    })
+    const listed = toolPayload(((await listRes.json()) as any).result)
+    expect(listed.isError).toBe(false)
+    const page = listed.payload as any
+    expect(page.changesets).toHaveLength(1)
+    expect(page.changesets[0].changesetId).toBe(ids[1]) // newest first
+    expect(page.changesets[0].status).toBe('staged')
+    expect(page.changesets[0].approvalUrl).toBe(`https://aquilla.app/approve/${ids[1]}`)
+    expect(page.nextCursor).toBeTruthy()
+
+    const page2 = toolPayload(
+      ((await (
+        await rpc(env, token, {
+          jsonrpc: '2.0', id: 23, method: 'tools/call',
+          params: {
+            name: 'list_changesets',
+            arguments: { projectId: PROJECT, status: 'staged', limit: 1, cursor: page.nextCursor },
+          },
+        })
+      ).json()) as any).result,
+    ).payload as any
+    expect(page2.changesets[0].changesetId).toBe(ids[0])
+    expect(page2.nextCursor).toBeNull()
+  })
+
+  it('wait_for_changeset reports a pending plan as timedOut rather than an error', async () => {
+    const env = makeEnv(tdb.db)
+    const token = await credToken(tdb, { userId: 1, username: 'alice', mode: 'ask' })
+    const prepRes = await rpc(env, token, {
+      jsonrpc: '2.0', id: 24, method: 'tools/call',
+      params: {
+        name: 'prepare_translations',
+        arguments: { projectId: PROJECT, translations: [{ cellId: 'cell-1', fileId: FILE, value: 'x' }] },
+      },
+    })
+    const prepPayload = toolPayload(((await prepRes.json()) as any).result).payload as any
+
+    const waitRes = await rpc(env, token, {
+      jsonrpc: '2.0', id: 25, method: 'tools/call',
+      params: {
+        name: 'wait_for_changeset',
+        arguments: { projectId: PROJECT, changesetId: prepPayload.changesetId, timeoutMs: 0 },
+      },
+    })
+    const waited = toolPayload(((await waitRes.json()) as any).result)
+    // Nobody approved yet — a normal outcome, so NOT an MCP error result.
+    expect(waited.isError).toBe(false)
+    const payload = waited.payload as any
+    expect(payload.timedOut).toBe(true)
+    expect(payload.approved).toBe(false)
+    expect(payload.status).toBe('staged')
   })
 })
 

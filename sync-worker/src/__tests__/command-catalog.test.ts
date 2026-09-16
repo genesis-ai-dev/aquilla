@@ -63,7 +63,21 @@ describe('command catalog — invariants', () => {
       UpdateProjectSettings: { kind: 'UpdateProjectSettings', projectId: 'p', settings: {}, ifMatchVersion: 0 },
       PatchSettings: { kind: 'PatchSettings', projectId: 'p', ops: [{ key: 'systemPrompt', value: 'x' }], ifMatchVersion: 0 },
       EmitEvents: { kind: 'EmitEvents', events: [{ kind: 'comment.create', payload: { body: 'hi' } }] },
+      DraftCells: { kind: 'DraftCells', fileId: 'f', cellIds: ['c'] },
+      SetSource: { kind: 'SetSource', fileId: 'f', cellId: 'c', value: 'v' },
+      SetTranscription: { kind: 'SetTranscription', fileId: 'f', cellId: 'c', transcription: 't' },
+      SetTiming: { kind: 'SetTiming', fileId: 'f', cellId: 'c', startMs: 0, endMs: 1 },
+      SetTrackOverride: { kind: 'SetTrackOverride', fileId: 'f', trackId: 'target-audio', patch: { name: 'n' } },
+      InviteMember: { kind: 'InviteMember', projectId: 'p', username: 'ana', role: 400 },
+      SetRole: { kind: 'SetRole', projectId: 'p', username: 'ana', role: 400 },
+      RemoveMember: { kind: 'RemoveMember', projectId: 'p', username: 'ana' },
+      RenameFile: { kind: 'RenameFile', fileId: 'f', name: 'New label' },
+      RenameProject: { kind: 'RenameProject', projectId: 'p', name: 'New name' },
+      ArchiveProject: { kind: 'ArchiveProject', projectId: 'p' },
+      UnarchiveProject: { kind: 'UnarchiveProject', projectId: 'p' },
       SetBrief: { kind: 'SetBrief', projectId: 'p', parameters: { audience: 'Rural youth' }, ifMatchVersion: 0 },
+      RegenerateBriefSummary: { kind: 'RegenerateBriefSummary', projectId: 'p', ifMatchVersion: 0 },
+      ProjectSetup: { kind: 'ProjectSetup', projectId: 'p', settings: { targetLanguage: 'fr' } },
       AddOrgMember: { kind: 'AddOrgMember', orgId: 1, username: 'u', role: 400 },
       SetOrgRole: { kind: 'SetOrgRole', orgId: 1, username: 'u', role: 400 },
       RemoveOrgMember: { kind: 'RemoveOrgMember', orgId: 1, username: 'u' },
@@ -136,6 +150,19 @@ describe('command catalog — invariants', () => {
     // The caps the validator actually enforces, not prose approximations.
     expect(entry.paramsDoc).toContain(String(BRIEF_FIELD_MAX_CHARS))
     expect(entry.paramsDoc).toContain(String(BRIEF_NOTES_MAX_CHARS))
+  })
+
+  it('describe_command("RegenerateBriefSummary") names the floor, the pin, and the failure codes (AQU-1282)', () => {
+    const entry = describeCommand('RegenerateBriefSummary')!
+    expect(entry.minRoleLevel).toBe(ROLE.MAINTAINER)
+    expect(entry.agentReachable).toBe(true)
+    for (const needle of ['ifMatchVersion', 'l1Summary', 'nothing to summarize', 'rate_limited', 'briefSummaryChars']) {
+      expect(entry.paramsDoc).toContain(needle)
+    }
+    // SetBrief's doc no longer claims the L1 is merely "carried over".
+    const setBriefDoc = describeCommand('SetBrief')!.paramsDoc
+    expect(setBriefDoc).toContain('RegenerateBriefSummary')
+    expect(setBriefDoc).not.toContain('carried over, not cleared')
   })
 
   it("documents every field CreateProject actually accepts (AQU-1223)", () => {

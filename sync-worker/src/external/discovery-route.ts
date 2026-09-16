@@ -13,6 +13,9 @@
 // instead of burning tokens guessing. It exposes no data (static text only),
 // so it is deliberately unauthenticated.
 
+import { matchUiOnly, uiOnlyHint, uiOnlySection } from './ui-only'
+import { AGENT_SKILLS } from '../../../db/shared/agent-skills'
+
 const EXTERNAL_ROOT = '/api/v1/external'
 
 /** Where the map points callers for prose docs.
@@ -55,6 +58,7 @@ function apiMap(): Record<string, unknown> {
         'A separate host serves /api/v2/credentials (minting, browser session required) and the human approval pages. In production: this host is https://api.aquilla.app/sync, identity is https://api.aquilla.app/identity. Agents normally never call the identity host.',
     },
     quickstart: [
+      `0. Setting up a partner project? GET ${EXTERNAL_ROOT}/skills/project-setup and follow it (one ProjectSetup command, one approval).`,
       `1. GET ${EXTERNAL_ROOT}/me — confirm your token works; learn your mode (ask|act) and scope.`,
       `2. GET ${EXTERNAL_ROOT}/projects — find a projectId you can access.`,
       `3. GET ${EXTERNAL_ROOT}/projects/:projectId/files — list files; then .../files/:fileId/cells to read content.`,
@@ -64,7 +68,7 @@ function apiMap(): Record<string, unknown> {
       `5. POST ${EXTERNAL_ROOT}/projects/:projectId/changesets/:id/commit — applies it (act mode). In ask mode this returns 428 confirmation_required: show the approvalUrl to a human, wait for their approval, then call commit again.`,
     ],
     endpoints: {
-      'GET /api/v1/external/me': 'Who am I: userId, username, mode, scope. Start here.',
+      'GET /api/v1/external/me': 'Which token am I: credentialId, autonomy mode, scope. Start here. Human identity (userId/username) is returned ONLY for a credential minted with pii enabled — see privacy below.',
       'GET /api/v1/external/orgs': 'List the organizations this credential covers (up to 100): { id, name, role, role_source }. See "orgScopedReads".',
       'GET /api/v1/external/orgs/:orgId/projects': 'List one org’s projects. An org outside the credential’s scope returns scope_denied.',
       'GET /api/v1/external/projects': 'List accessible projects (up to 100). Optional ?orgId= narrows to one org.',
@@ -73,12 +77,17 @@ function apiMap(): Record<string, unknown> {
       'GET /api/v1/external/commands': 'Index of every command kind you can stage. No auth needed.',
       'GET /api/v1/external/commands/:kind': 'One command kind’s full parameter doc, gotchas, and example (MCP: the describe_command tool). No auth needed.',
       'GET /api/v1/external/docs': 'This API map rendered as Markdown prose. No auth needed.',
+      'GET /api/v1/external/skills': 'Index of agent skills — L2 playbooks that sequence existing commands (MCP: the get_skill tool). No auth needed.',
+      'GET /api/v1/external/skills/:name': 'One skill’s full Markdown body. Start with project-setup when standing up a partner project. No auth needed.',
+      'GET /api/v1/external/setup-template': 'The partner intake form as Markdown (to email a partner) plus the JSON schema of the ProjectSetup body it produces. No auth needed.',
+      'POST /api/v1/external/setup-template/parse': 'Body { markdown } (the filled intake form) → { setup, warnings, nextStep }: a ProjectSetup body minus kind/projectId, every blank named, required: true on the four never-guess fields. Pure transform; no auth needed.',
       'GET /api/v1/external/projects/:projectId/files': 'List a project’s files.',
       'GET /api/v1/external/projects/:projectId/files/:fileId/cells': 'Read a file’s cells (source + target). Supports since/limit/cursor, and lane=<tag> to filter targets to one target-language lane (see multiLanguage).',
       'GET /api/v1/external/projects/:projectId/files/:fileId/export': 'Export a file in its delivered format (round-trip: the original artifact with current translations substituted in). Optional lane=<tag>. See "exporting" below.',
       'GET /api/v1/external/projects/:projectId/search?q=': 'Full-text search cells. Optional side=source|target.',
       'GET /api/v1/external/projects/:projectId/similar?cellId=': 'Translation memory: source cells most LIKE this one, each with its current target and a score in [0,1]. Pass cellId (the query cell is excluded) or text=<free text>, not both. Optional limit (default 10, max 50). LEXICAL ONLY — scored by term overlap, NOT by meaning: it will not find a paraphrase that shares no words. Use search when you know the words you want; use this when you have a line and want prior renderings of similar lines.',
       'GET /api/v1/external/projects/:projectId/cells/:cellId/history': 'Append-only event history for one cell.',
+      'GET /api/v1/external/projects/:projectId/settings': 'Project settings blob + its live version: { projectId, settings, version, updatedAt }. Read this before staging a PatchSettings command — `version` is the ifMatchVersion that command requires. No settings row yet reads as {} at version 0.',
       'GET /api/v1/external/projects/:projectId/cells/:cellId/prompt-preview': 'The prompt the project copilot would actually send for this cell — assembled messages plus labeled parts (base instructions, brief, rules block, injected terms, retrieved examples, discourse context). Optional targetLang=<lane>, fileId=<id>. Use it to verify a PatchSettings prompt/terminology change instead of guessing.',
       'GET /api/v1/external/projects/:projectId/memory': 'Living Memory: the project brief plus every memory entry (examples, decisions, notes, observations) with its status — the same rows the in-app Memory page shows. Filter with ?status=proposed|approved|rejected|archived and ?kind=example|decision|note|observation|other. Each entry carries inRetrieval: whether the copilot is actually being given it.',
       'GET /api/v1/external/projects/:projectId/files/:fileId/cells/:cellId/memory': 'What the copilot’s retrieval would inject for that cell’s draft: the brief plus the capped approved-memory index. Retrieval is project-scoped today (no per-cell narrowing) — the response says so in retrieval.scope.',
@@ -87,11 +96,33 @@ function apiMap(): Record<string, unknown> {
       'POST /api/v1/external/projects/:projectId/artifacts': 'Upload raw bytes (max 25MB). Headers: x-artifact-name (required), content-type, x-artifact-kind (source|audio).',
       'GET /api/v1/external/projects/:projectId/artifacts/:artifactId': 'Artifact metadata (/content for bytes, /inspect for a format sniff).',
       'POST /api/v1/external/projects/:projectId/artifacts/:artifactId/parse': 'Parse a source artifact with the built-in importers. Default = preview { fileName, fileType, totalCells, sampleCells, warnings }; body { "stage": true } also stages a PlanImport changeset linking the artifact. See "importing" below.',
-      'POST /api/v1/external/projects/:projectId/changesets': 'Prepare (stage) a changeset. Body { commands: [...], id?, autonomyMode? }. Command kinds: SetTranslation, PlanImport, CreateOrg, CreateProject, UpdateProjectSettings, LinkMedia, PatchSettings, EmitEvents, InsertCell, DeleteCell, SplitCell. CreateOrg needs an unscoped credential and takes only { name }; the :projectId in the path is just the changeset\u2019s filing id (no project is created) and its receipt carries orgId.',
+      'POST /api/v1/external/projects/:projectId/changesets': 'Prepare (stage) a changeset. Body { commands: [...], id?, autonomyMode? }. Command kinds: SetTranslation, PlanImport, LinkMedia, RenameFile, EmitEvents, PatchSettings, UpdateProjectSettings, CreateProject, CreateOrg, RenameProject, ArchiveProject, UnarchiveProject, InsertCell, DeleteCell, SplitCell, SetSource, SetTranscription, SetTiming, SetTrackOverride — call describe_command (MCP) or see docs/COMMAND-REGISTRY.md for per-kind params, floors, and sole-command rules. See "settings" below for the PatchSettings shape. CreateOrg needs an unscoped credential and takes only { name }; the :projectId in the path is just the changeset’s filing id (no project is created) and its receipt carries orgId.',
       'GET /api/v1/external/projects/:projectId/changesets/:id': 'Changeset status/summary/digest/receipt/approvalUrl.',
       'POST /api/v1/external/projects/:projectId/changesets/:id/commit': 'Commit a prepared changeset. Idempotent; safe to retry.',
       'POST /api/v1/external/projects/:projectId/changesets/:id/discard': 'Discard a staged changeset.',
       'POST /api/v1/external/mcp': 'MCP server (JSON-RPC 2.0, streamable HTTP, same bearer token). Tools mirror the REST surface — see "mcp" below.',
+    },
+    privacy: {
+      note:
+        'Translator identity is not agent-readable by default (AQU-1180). Everything this API returns ends up in whatever AI console holds the token, so author fields are pseudonymous unless a human deliberately opted in.',
+      authorFields:
+        'Cell reads carry lastEditor and history events carry author. By default both are a stable per-project opaque id (e.g. "u_3f9ab21c"): you can tell that two edits came from the SAME person, and nothing else. The ids are per-project — the same translator is a different id in another project, so do not correlate across projects. Machine authors ("importer", "system", "agent") pass through under their real names.',
+      pii: 'A credential minted with pii enabled returns real usernames, and GET /me additionally returns userId + username. Only an OWNER of the credential\'s org/project can mint one, and it is off unless they asked for it.',
+      agentAuthorship:
+        'A project may set agentAuthorship: "none", in which case lastEditor and author are ABSENT from the payload entirely (the key is missing, not null) regardless of the token. Do not treat a missing author as a data error; the project has opted out of authorship exposure. An agent may SET this to "none" (tightening — AQU-1282), and may never clear it.',
+      auditing: 'Every read call is recorded against the calling credential (which project, which file or cell, how many rows).',
+    },
+    // AQU-1178: what is deliberately NOT here, so an agent stops guessing at
+    // endpoints that will never exist. Same list the MCP get_capabilities tool
+    // publishes and the 404 hints quote (sync-worker/src/external/ui-only.ts).
+    uiOnly: uiOnlySection(),
+    // AQU-1294: skills — server-owned sequencing prose. Same shared set the MCP
+    // get_skill tool and the in-app harness serve (db/shared/agent-skills.ts).
+    skills: {
+      index: AGENT_SKILLS.map((s) => ({ name: s.name, title: s.title, oneLiner: s.oneLiner })),
+      endpoint: `GET ${EXTERNAL_ROOT}/skills/:name`,
+      note:
+        'A skill sequences EXISTING commands and routes; it adds no capability and stages nothing on its own. project-setup: intake template → one ProjectSetup command → one approval → verification receipt.',
     },
     orgScopedReads: {
       note:
@@ -153,11 +184,22 @@ function apiMap(): Record<string, unknown> {
       notes:
         'A file with no preserved source artifact returns not_found — it must be re-imported before it can be exported. Binary results (docx/pptx/idml side-cars) come back as raw bytes over REST; the MCP export_file tool cannot carry them (JSON-RPC is text) and fails with validation_failed naming this URL instead.',
     },
+    settings: {
+      note:
+        'Project settings are read with GET .../projects/:projectId/settings and changed with the PatchSettings command — a FIELD-SCOPED write: keys you do not name are left byte-identical, so you can never clobber settings you have not read. Prefer it over UpdateProjectSettings (deprecated whole-blob replace).',
+      workflow: [
+        `1. GET ${EXTERNAL_ROOT}/projects/:projectId/settings → { projectId, settings, version, updatedAt }.`,
+        `2. POST ${EXTERNAL_ROOT}/projects/:projectId/changesets with { "commands": [{ "kind": "PatchSettings", "projectId": "...", "ops": [{ "key": "targetLanes", "value": ["es", "pt"] }], "ifMatchVersion": <that version> }] } — one op per key (duplicates rejected); top-level keys only; each op replaces its key's value wholesale. JSON cannot carry undefined, so write null rather than deleting a key.`,
+        '3. Commit as usual (ask mode: a human approves at the approvalUrl first). `ifMatchVersion` is re-checked at commit — a racing writer surfaces as plan_stale, so re-read and re-prepare.',
+      ],
+      rules:
+        'PatchSettings must be the SOLE command in its changeset. Floors: `terminology` needs the org termbase-edit floor (default PROJECT_LEAD 500); every other key needs MAINTAINER 600. The policy keys that govern agent oversight itself — agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, validationCount, validationCountAudio, allowSelfValidation, harmonize_min_role, contributeToGlobalTm, cellEditingFloor, agentAuthorship — are writable in the RESTRICTIVE direction ONLY (AQU-1282): a write that TIGHTENS oversight stages like any other, a write that would LOOSEN it returns permission_denied naming the key in details.loosening, and the direction is re-checked against live settings at commit. GET /api/v1/external/commands/PatchSettings has the per-key direction table. UpdateProjectSettings (deprecated whole-blob replace) is still rejected outright if its blob would change any policy key.',
+    },
     multiLanguage: {
       note:
         'A project can hold MULTIPLE target languages at once via target-language lanes. A lane is a language tag (e.g. "es", "pt") registered in the project settings array settings.targetLanes; every cell keeps one shared source plus one independent target per lane. Omitting the lane everywhere uses the default lane — single-language callers need no changes. Preconditions/drift are lane-scoped: edits to the same cell in different lanes never invalidate each other\'s changesets.',
       workflow: [
-        `1. Register the lanes once: stage { "kind": "UpdateProjectSettings", "projectId": "...", "settings": { ...existing settings, "targetLanes": ["es", "pt"] }, "ifMatchVersion": <live version> } (the write replaces the whole settings blob — merge, don't overwrite).`,
+        `1. Register the lanes once: GET .../settings for the live version, then stage { "kind": "PatchSettings", "projectId": "...", "ops": [{ "key": "targetLanes", "value": ["es", "pt"] }], "ifMatchVersion": <that version> } — field-scoped, so the rest of the settings blob is untouched (see "settings" above).`,
         '2. Write per lane: add "laneId": "es" (or "pt") to each SetTranslation command. An unregistered laneId is rejected at prepare with validation_failed.',
         `3. Read per lane: GET .../files/:fileId/cells?lane=es returns source cells plus only that lane's target cells; omit lane for all lanes (each target row carries its targetLang).`,
         '4. Importing a file can seed several lanes at once: each PlanImport cell takes "variants": [{ "laneId": "es", "content": "..." }, { "laneId": "pt", "content": "..." }].',
@@ -238,13 +280,22 @@ function docsMarkdown(): string {
 /** JSON body for unmatched /api/v1/external/* paths — same error envelope as
  *  every other external error, plus enough of a hint to self-correct. */
 function externalNotFound(pathname: string): Response {
+  // AQU-1178: a probe at a deliberately browser-only surface is not a typo —
+  // saying "no such route" invites another guess, so name the exclusion, the
+  // reason, and where a human does it instead.
+  const uiOnly = matchUiOnly(pathname)
+  const hint = uiOnly
+    ? uiOnlyHint(uiOnly, EXTERNAL_ROOT)
+    : `GET ${EXTERNAL_ROOT} returns the full API map (endpoints, auth, quickstart, and a uiOnly list of intentional exclusions). Common fixes: project routes live under ${EXTERNAL_ROOT}/projects/:projectId/..., and in production this worker is mounted at https://api.aquilla.app/sync — the /sync prefix is part of the URL.`
+
   return Response.json(
     {
       error: {
         code: 'not_found',
         message: `no external API route matches ${pathname}`,
         details: {
-          hint: `GET ${EXTERNAL_ROOT} returns the full API map (endpoints, auth, quickstart). Common fixes: project routes live under ${EXTERNAL_ROOT}/projects/:projectId/..., and in production this worker is mounted at https://api.aquilla.app/sync — the /sync prefix is part of the URL.`,
+          hint,
+          ...(uiOnly ? { uiOnly: uiOnly.id } : {}),
           docs: DOCS_URL,
         },
       },

@@ -64,7 +64,7 @@ function overlaySettings(record: ProjectRecord, settings: ProjectWideSettings): 
   assign("validationRoleFloor", settings.validationRoleFloor)
   assign("validationNamedUsers", settings.validationNamedUsers)
   assign("allowSelfValidation", settings.allowSelfValidation)
-  assign("allowLineCreation", settings.allowLineCreation)
+  assign("cellEditingFloor", settings.cellEditingFloor)
   // AQU-646 stage 2: the second gate on track editing. Must reach the workspace
   // or the add-track button and the colour menu would be invisible everywhere,
   // since they render only when this is on.
@@ -293,7 +293,13 @@ export function useProject(projectId: string, options?: UseProjectOptions) {
   const projectSettings = useProjectSettings(
     !enabled || options?.includeSettings === false ? null : projectId,
     roleLevel,
-    { termbaseEditMinRole: project?.termbaseEditMinRole },
+    {
+      termbaseEditMinRole: project?.termbaseEditMinRole,
+      // AQU-1086: the org's language-edit floor rides along on the project
+      // record too, so a language-only patch can be permitted below the
+      // maintainer settings floor without any extra fetch here.
+      languageEditMinRole: project?.languageEditMinRole,
+    },
   )
   const { settings: syncedSettings, patch: patchSettings, hasFetched: settingsFetched } = projectSettings
   const overlaid = useMemo(

@@ -1,0 +1,18 @@
+-- Migration 0092: let a browser-consent grant carry an ORG scope, not just a
+-- project one.
+--
+-- The device flow (AQU-1205) could only ever mint a project-scoped credential:
+-- `agent_authorizations` had `requested_project_id` (what the agent asked for)
+-- and `project_id` (what the human approved), and nothing else. The API-tokens
+-- page has offered org scope since 0054, so the two ways of creating the same
+-- `api_credentials` row disagreed about what scopes exist.
+--
+-- `org_id` is the scope the HUMAN approved, mirroring `project_id`. There is
+-- deliberately no `requested_org_id`: an agent still requests a project or
+-- nothing, and a requested project stays pinned — the human may only approve
+-- that project or deny (auth-worker/src/routes/agent-connect.ts). Org scope is
+-- therefore offered only when the agent pinned nothing.
+--
+-- Nullable and additive: existing pending rows keep working unchanged, and a
+-- grant carries at most one of org_id / project_id.
+ALTER TABLE agent_authorizations ADD COLUMN IF NOT EXISTS org_id TEXT;

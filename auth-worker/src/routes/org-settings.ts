@@ -49,6 +49,14 @@
 // MAINTAINER — see DEFAULT_TERMBASE_EDIT_MIN_ROLE in
 // services/org-permissions.ts. Enforced by the terminology-scoped carve-out
 // in routes/project-settings.ts; this route only stores/validates it.
+//
+// AQU-1086: languageEditMinRole (who may change a project's source/target
+// language and its extra target lanes) is the second write-gating role-ladder
+// policy key, on the same OWNER-only write gate. Unlike termbaseEditMinRole
+// its default is MAINTAINER (600) — today's behaviour — so an org opts in by
+// lowering it to PROJECT_LEAD. See DEFAULT_LANGUAGE_EDIT_MIN_ROLE in
+// services/org-permissions.ts and the language-scoped carve-out in
+// routes/project-settings.ts; this route only stores/validates it.
 
 import { Hono } from "hono"
 import { zValidator } from "@hono/zod-validator"
@@ -81,9 +89,15 @@ const PERMISSION_POLICY_KEYS: Record<string, string> = {
   rosterViewMinRole: "rosterViewMinRole",
   memberProgressViewMinRole: "memberProgressViewMinRole",
   allowSelfAssignment: "allowSelfAssignment",
+  // AQU-1037: who may assign file/chapter work or route an AI changeset.
+  // Role-ladder valued; defaults to PROJECT_LEAD in each enforcement worker.
+  assignmentMinRole: "assignmentMinRole",
   // AQU-822: who may manage a project's termbase. Role-ladder valued,
   // OWNER-only on write like the rest of this table.
   termbaseEditMinRole: "termbaseEditMinRole",
+  // AQU-1086: who may change a project's source/target language and its extra
+  // target lanes. Role-ladder valued, OWNER-only on write like the rest.
+  languageEditMinRole: "languageEditMinRole",
   // AQU-907: who may use the org-wide Data egress surface. Role-ladder
   // valued, OWNER-only on write like the rest of this table.
   egressMinRole: "egressMinRole",

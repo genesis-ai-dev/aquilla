@@ -3,7 +3,9 @@ import {
   matchTargetRowsByRef,
   matchTargetRowsByOrder,
   usfmToTargetRows,
+  vttToTargetRows,
   type FileTargetCellRef,
+  type TargetRow,
 } from "./import-file-target"
 
 function cell(overrides: Partial<FileTargetCellRef> & { cellId: string }): FileTargetCellRef {
@@ -111,6 +113,143 @@ describe("matchTargetRowsByOrder", () => {
   })
 })
 
+// AQU-1143 — cue files align by timecode overlap, not raw row order.
+describe("matchTargetRowsByOrder — cue timecode overlap", () => {
+  /** Cue N runs [N s, N s + 800 ms), the shape of a real subtitle grid. */
+  function cueCell(n: number, overrides: Partial<FileTargetCellRef> = {}): FileTargetCellRef {
+    return cell({
+      cellId: `c${n}`,
+      startMs: n * 1000,
+      endMs: n * 1000 + 800,
+      original: `source cue ${n}`,
+      ...overrides,
+    })
+  }
+  /** Incoming row carrying explicit cue timings. */
+  function cueRow(startMs: number, endMs: number, text: string): TargetRow {
+    return { ref: `cue ${startMs}`, startMs, endMs, text }
+  }
+
+  const cells = [cueCell(1), cueCell(2), cueCell(3), cueCell(4)]
+
+  it("survives a cue deleted mid-file — later cues keep their own cells", () => {
+    // Target is the source grid minus cue 2. Under raw order matching, "three"
+    // would land on cell c2 and "four" on c3 — every row after the deletion
+    // silently wrong.
+    const result = matchTargetRowsByOrder(
+      [
+        cueRow(1000, 1800, "one"),
+        cueRow(3000, 3800, "three"),
+        cueRow(4000, 4800, "four"),
+      ],
+      cells,
+    )
+    expect(result.alignedBy).toBe("overlap")
+    expect(result.matched.map((m) => [m.cellId, m.incomingText])).toEqual([
+      ["c1", "one"],
+      ["c3", "three"],
+      ["c4", "four"],
+    ])
+    // The deleted cue's slot shows up as an uncovered cell, not a bad commit.
+    expect(result.unmatchedSourceCount).toBe(1)
+    expect(result.orphans).toHaveLength(0)
+  })
+
+  it("an inserted extra cue becomes an orphan and displaces nothing", () => {
+    const result = matchTargetRowsByOrder(
+      [
+        cueRow(1000, 1800, "one"),
+        cueRow(1850, 1950, "inserted"),
+        cueRow(2000, 2800, "two"),
+        cueRow(3000, 3800, "three"),
+      ],
+      cells,
+    )
+    expect(result.matched.map((m) => [m.cellId, m.incomingText])).toEqual([
+      ["c1", "one"],
+      ["c2", "two"],
+      ["c3", "three"],
+    ])
+    expect(result.orphans.map((o) => o.text)).toEqual(["inserted"])
+  })
+
+  it("sub-second drift still matches the counterpart cue", () => {
+    const result = matchTargetRowsByOrder(
+      [cueRow(1300, 2100, "one"), cueRow(2300, 3100, "two")],
+      cells,
+    )
+    expect(result.matched.map((m) => [m.cellId, m.incomingText])).toEqual([
+      ["c1", "one"],
+      ["c2", "two"],
+    ])
+  })
+
+  it("a cue beyond tolerance of every cell is an orphan, never a wrong-cell commit", () => {
+    const result = matchTargetRowsByOrder([cueRow(60000, 60800, "way out")], cells)
+    expect(result.matched).toHaveLength(0)
+    expect(result.orphans).toEqual([{ ref: "cue 60000", text: "way out" }])
+    expect(result.unmatchedSourceCount).toBe(4)
+  })
+
+  it("recovers timings from a VTT cue timecode label when none are passed", () => {
+    // The VTT target import labels each row with its cue range; that label is
+    // enough to align by, so callers need not restate the timings.
+    const result = matchTargetRowsByOrder(
+      [
+        { ref: "00:00:03.000 --> 00:00:03.800", text: "three" },
+        { ref: "00:00:01.000 --> 00:00:01.800", text: "one" },
+      ],
+      cells,
+    )
+    expect(result.alignedBy).toBe("overlap")
+    expect(result.matched.map((m) => [m.cellId, m.incomingText])).toEqual([
+      ["c3", "three"],
+      ["c1", "one"],
+    ])
+    // Rows are listed in the incoming file's order, labelled by timecode.
+    expect(result.matched[0].ref).toBe("00:00:03.000 --> 00:00:03.800")
+  })
+
+  it("an empty incoming cue commits nothing and frees no cell for its neighbour", () => {
+    const result = matchTargetRowsByOrder(
+      [cueRow(1000, 1800, "one"), cueRow(2000, 2800, "   "), cueRow(3000, 3800, "three")],
+      cells,
+    )
+    expect(result.matched.map((m) => m.cellId)).toEqual(["c1", "c3"])
+    expect(result.unmatchedSourceCount).toBe(2)
+  })
+
+  it("falls back to raw order when the file's cells carry no timings", () => {
+    const untimed = [cell({ cellId: "u1" }), cell({ cellId: "u2" })]
+    const result = matchTargetRowsByOrder(
+      [cueRow(1000, 1800, "one"), cueRow(2000, 2800, "two")],
+      untimed,
+    )
+    expect(result.alignedBy).toBe("order")
+    expect(result.matched.map((m) => m.cellId)).toEqual(["u1", "u2"])
+  })
+
+  it("falls back to raw order when an incoming row carries no timing", () => {
+    const result = matchTargetRowsByOrder(
+      [cueRow(1000, 1800, "one"), { text: "no timing here" }],
+      cells,
+    )
+    expect(result.alignedBy).toBe("order")
+    expect(result.matched.map((m) => m.cellId)).toEqual(["c1", "c2"])
+  })
+
+  it("spreadsheet order matching is untouched — no timings on either side", () => {
+    const untimed = [cell({ cellId: "s1" }), cell({ cellId: "s2" }), cell({ cellId: "s3" })]
+    const result = matchTargetRowsByOrder(
+      [{ text: "one" }, { text: "" }, { text: "three" }],
+      untimed,
+    )
+    expect(result.alignedBy).toBe("order")
+    expect(result.matched.map((m) => m.cellId)).toEqual(["s1", "s3"])
+    expect(result.unmatchedSourceCount).toBe(1)
+  })
+})
+
 describe("usfmToTargetRows", () => {
   it("extracts verses and headings with the same refs the source import produces", () => {
     const usfm = [
@@ -149,5 +288,98 @@ describe("usfmToTargetRows", () => {
     // aligned with source cells imported under the same setting.
     expect(refs.some((r) => r?.includes(":s"))).toBe(true)
     expect(refs).toContain("MAT 1:1")
+  })
+})
+
+// AQU-1142: WebVTT subtitle target import. Cues carry timestamps, not canonical
+// refs — matching is positional (cue N → cell N) and the row's `ref` field
+// carries the timestamp so the review screen labels rows by timecode.
+describe("vttToTargetRows", () => {
+  it("returns one row per cue, ref = timestamp, text = cue body", () => {
+    const vtt = [
+      "WEBVTT",
+      "",
+      "00:00:01.000 --> 00:00:04.000",
+      "Hello world",
+      "",
+      "00:00:05.000 --> 00:00:08.000",
+      "Second cue",
+    ].join("\n")
+    expect(vttToTargetRows(vtt)).toEqual([
+      { ref: "00:00:01.000 --> 00:00:04.000", text: "Hello world" },
+      { ref: "00:00:05.000 --> 00:00:08.000", text: "Second cue" },
+    ])
+  })
+
+  it("joins multi-line cues into a single row so cell N still lands on cue N", () => {
+    const vtt = [
+      "WEBVTT",
+      "",
+      "00:00:01.000 --> 00:00:04.000",
+      "Line one",
+      "Line two",
+    ].join("\n")
+    const rows = vttToTargetRows(vtt)
+    expect(rows).toHaveLength(1)
+    expect(rows[0].text).toBe("Line one\nLine two")
+  })
+
+  it("decodes &nbsp; and other common entities so they don't show up literally in the target column", () => {
+    // Partner sample (TheChosen_101_tpi.vtt) carries &nbsp; between short line
+    // continuations — showing that raw in the editor is a visible defect.
+    const vtt = [
+      "WEBVTT",
+      "",
+      "00:00:01.000 --> 00:00:04.000",
+      "Hello&nbsp;world &amp; friends",
+    ].join("\n")
+    expect(vttToTargetRows(vtt)[0].text).toBe("Hello world & friends")
+  })
+
+  it("skips WEBVTT header, numeric cue identifiers, and NOTE blocks", () => {
+    // The parser must never leak protocol lines into the translation. Every
+    // non-cue line here would land in the target column if the guard failed.
+    const vtt = [
+      "WEBVTT",
+      "Kind: captions",
+      "Language: en",
+      "",
+      "NOTE This block is a comment",
+      "and continues across lines.",
+      "",
+      "1",
+      "00:00:01.000 --> 00:00:04.000",
+      "Real translation",
+    ].join("\n")
+    const rows = vttToTargetRows(vtt)
+    expect(rows).toHaveLength(1)
+    expect(rows[0].text).toBe("Real translation")
+  })
+
+  it("preserves cue order even when the file's timestamps run out of order (partner sample)", () => {
+    // TheChosen_101_tpi.vtt has out-of-order timestamps at a handful of cues;
+    // positional matching means we care about the order rows arrive in, not
+    // whether their timestamps monotonically increase.
+    const vtt = [
+      "WEBVTT",
+      "",
+      "00:00:10.000 --> 00:00:12.000",
+      "cue 1",
+      "",
+      "00:00:05.000 --> 00:00:08.000",
+      "cue 2 (earlier timestamp)",
+      "",
+      "00:00:15.000 --> 00:00:18.000",
+      "cue 3",
+    ].join("\n")
+    expect(vttToTargetRows(vtt).map((r) => r.text)).toEqual([
+      "cue 1",
+      "cue 2 (earlier timestamp)",
+      "cue 3",
+    ])
+  })
+
+  it("returns an empty array for a header-only file so the panel can show its no-cues error", () => {
+    expect(vttToTargetRows("WEBVTT\n")).toEqual([])
   })
 })

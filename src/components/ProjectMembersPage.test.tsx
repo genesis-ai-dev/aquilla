@@ -134,6 +134,11 @@ vi.mock("@/lib/frontier/members", async (importOriginal) => {
         { source: "override", level: 600, name: "maintainer", removable: true },
       ],
     }),
+    // AQU-1277: the add-member field validates the typed username through
+    // lookupUser (GET /api/v2/users/lookup). Unmocked it reached production
+    // identity. These tests add members through the mocked useProjectMembers
+    // hook and never assert on the lookup, so "not found" is enough.
+    lookupUser: vi.fn().mockResolvedValue(null),
   }
 })
 

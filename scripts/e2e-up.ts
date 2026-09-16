@@ -568,6 +568,7 @@ async function main(): Promise<void> {
     extraArgs: [
       "--persist-to", PERSIST_DIR,
       "--var", "WRANGLER_LOCAL:1",
+      "--var", `BASE_URL:http://127.0.0.1:${VITE_PORT}`,
       "--var", "ADMIN_REQUIRE_ELEVATION:false",
       "--var", "ADMIN_EMAILS:alice@example.test",
       "--var", `OPENROUTER_BASE_URL:http://127.0.0.1:${OPENROUTER_MOCK_PORT}/api/v1`,

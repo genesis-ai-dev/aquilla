@@ -205,7 +205,8 @@ export class ProjectSync extends DurableObject<DOEnv> {
         const result = await this.linkSyncInFlight
         return Response.json(result)
       } catch (err) {
-        return new Response(`mirror sync failed: ${String(err)}`, { status: 500 })
+        console.error("[project-do] mirror sync failed:", err)
+        return new Response("mirror sync failed", { status: 500 })
       }
     }
 

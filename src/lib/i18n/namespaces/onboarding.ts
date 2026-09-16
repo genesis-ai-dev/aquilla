@@ -17,6 +17,42 @@ import { defineNamespace, plural } from "./types"
  */
 export const onboarding = defineNamespace({
   keys: {
+    "onboarding.connect.title": "Connect your agent",
+    "onboarding.connect.description": "Approve access to one Aquilla project. Your agent receives its credential directly.",
+    "onboarding.connect.approved": "Access approved. Return to your agent to finish connecting. You can revoke access at any time.",
+    "onboarding.connect.denied": "Access denied. Your agent receives no credential.",
+    "onboarding.connect.manage": "Manage agent access",
+    "onboarding.connect.account": "Signed in as {username}",
+    "onboarding.connect.code": "Connection code",
+    "onboarding.connect.review": "Review request",
+    "onboarding.connect.agent": "Agent name: {name}",
+    "onboarding.connect.unverified": "This name is supplied by the agent and is not verified. Only approve a request you just started.",
+    "onboarding.connect.ask": "Read project data and stage changes. Applying changes requires your separate approval.",
+    "onboarding.connect.act": "Read project data and apply changes immediately, without further approval.",
+    "onboarding.connect.expiry": "Access expires after 30 days. You can revoke it from API tokens at any time.",
+    "onboarding.connect.project": "Project",
+    "onboarding.connect.choose": "Choose a project",
+    "onboarding.connect.noProjects": "You do not have the required access to an available project.",
+    "onboarding.connect.modeChanged":
+      "The agent asked for {requested} mode. It will get the mode you pick here.",
+    "onboarding.connect.pinned":
+      "The agent asked for this specific project, so it can't be changed here. Deny the request if it isn't the one you want.",
+    "onboarding.connect.scope": "Access to",
+    "onboarding.connect.scopeProject": "One project",
+    "onboarding.connect.scopeOrg": "A whole organization",
+    "onboarding.connect.scopeHint":
+      "Organization access covers every project in it, including ones added later. Only organizations and projects where you hold the required role are listed.",
+    "onboarding.connect.chooseOrg": "Choose an organization",
+    "onboarding.connect.noOrgs": "You do not have the required access to an available organization.",
+    "onboarding.connect.confirm": "I started this request and the code {code} matches the code shown by my agent.",
+    "onboarding.connect.approve": "Authorize agent",
+    "onboarding.connect.deny": "Deny access",
+    "onboarding.connect.error": "Unable to complete this request. It may have expired, already been used, or your access may have changed. Check your connection and try again.",
+    "onboarding.connect.setup": "Connect an AI agent",
+    "onboarding.connect.setupBody": "Copy these instructions to your agent. Approve its request in Aquilla without sharing a token or setting an environment variable.",
+    "onboarding.connect.copy": "Copy connection instructions",
+    "onboarding.connect.copyError": "Could not copy. Select and copy the instructions below.",
+
     // — Shared small words reused across this namespace's own surfaces ———————
     "onboarding.common.continue": "Continue",
     "onboarding.common.skipForNow": "Skip for now",
@@ -359,6 +395,13 @@ export const onboarding = defineNamespace({
     "onboarding.preferences.appearance.groupLabel": "Theme",
     "onboarding.preferences.appearance.themeDescription":
       "Follow your system appearance or choose a theme for this device.",
+    "onboarding.preferences.fontSize.groupLabel": "App font size",
+    "onboarding.preferences.fontSize.rowDescription":
+      "The overall size of menus, sidebars, settings, and editor cell text. A file's View settings can override the cell size; reset there to follow this size again.",
+    "onboarding.preferences.fontSize.small": "Small",
+    "onboarding.preferences.fontSize.default": "Default",
+    "onboarding.preferences.fontSize.large": "Large",
+    "onboarding.preferences.fontSize.extraLarge": "Extra Large",
 
     // — LanguageSection — group label reuses `language.label` (identical text)
     "onboarding.preferences.language.rowDescription":
@@ -433,6 +476,9 @@ export const onboarding = defineNamespace({
     "onboarding.apiTokens.expiredBadge": "Expired",
     // "Expires {date}" row text reuses `common.expiresOn` (identical text)
     "onboarding.apiTokens.lastUsedOn": "Last used {date}",
+    "onboarding.apiTokens.createdOn": "Created {date}",
+    "onboarding.apiTokens.scope.orgBadge": "Whole org: {name}",
+    "onboarding.apiTokens.scope.projectBadge": "Project: {name}",
     "onboarding.apiTokens.agentSetupButton": "Agent setup",
     // "Revoke" button reuses `common.revoke` (identical text)
     "onboarding.apiTokens.revokeDialogTitle": "Revoke token?",
@@ -444,6 +490,13 @@ export const onboarding = defineNamespace({
     "onboarding.apiTokens.newTokenDialogTitle": "Your new API token",
     "onboarding.apiTokens.showOnceWarning":
       "Copy this now — you will not see it again. If you lose it, revoke this token and mint a new one.",
+    // Pasting a token into a chat window is the most common way these leak:
+    // the transcript, and often the vendor's logs, keep it for the token's
+    // whole 30-day life. Say so at the one moment the plaintext is on screen.
+    "onboarding.apiTokens.exposureWarning":
+      "Anyone holding this token has your {mode}-mode access to this scope until it expires or you revoke it. Put it straight into a credential store or a private file. Don't paste it into a chat, a terminal command, or anything an agent prints — it stays in those transcripts and logs.",
+    "onboarding.apiTokens.exposureConnectHint":
+      "Connecting an agent? \"Connect an AI agent\" above is safer: the agent gets its own credential directly and the token never passes through you.",
     "onboarding.apiTokens.agentHandoffHint":
       "Handing this to an agent? Copy the token wrapped in a ready-to-paste prompt that sends the agent to the API's self-describing endpoint to learn what it can do, and spells out this token's {mode} mode.",
     "onboarding.apiTokens.copyAgentInstructions": "Copy agent instructions",
@@ -467,6 +520,13 @@ export const onboarding = defineNamespace({
     "onboarding.apiTokens.orgHint": "Only orgs where you're at least a contributor are listed.",
     "onboarding.apiTokens.projectPlaceholder": "No project (org-wide)",
     "onboarding.apiTokens.expiryLabel": "Expiry",
+    // AQU-1180 — the mint screen has to say in plain words what turning this on
+    // exposes, because the people exposed are not the person clicking.
+    "onboarding.apiTokens.piiLabel": "Show translator names to the agent",
+    "onboarding.apiTokens.piiDescription":
+      "Off by default: the agent sees a stable anonymous id per person instead of a name, so it can tell edits apart without knowing who made them. Turn this on and every name it reads is sent to whichever AI service you paste the token into, and kept in that service's logs. Only an owner of the selected organization or project can turn it on.",
+    "onboarding.apiTokens.piiRequiresOwner":
+      "Select an organization or project you own to enable this.",
     "onboarding.apiTokens.nameRequired": "Give this token a name.",
     "onboarding.apiTokens.mintFailed": "Failed to mint token.",
     "onboarding.apiTokens.mintingButton": "Minting…",
@@ -622,6 +682,30 @@ export const onboarding = defineNamespace({
       "onboarding.apiTokens.lastUsedOn": {
         description: "Last-used date shown on a token's row in the personal API tokens list.",
         placeholders: { date: "The date the token was last used, already locale-formatted." },
+      },
+      "onboarding.apiTokens.createdOn": {
+        description: "Creation date shown on a token's row in the personal API tokens list.",
+        placeholders: { date: "The date the token was created, already locale-formatted." },
+      },
+      "onboarding.apiTokens.scope.orgBadge": {
+        description:
+          "Scope chip on a token's row for a token scoped to an entire organization. Rendered next to a building icon.",
+        placeholders: { name: "The organization's name, or its raw id when the name can't be resolved." },
+      },
+      "onboarding.apiTokens.scope.projectBadge": {
+        description:
+          "Scope chip on a token's row for a token scoped to a single project. Rendered next to a folder icon.",
+        placeholders: { name: "The project's name, or its raw id when the name can't be resolved." },
+      },
+      "onboarding.apiTokens.exposureWarning": {
+        description:
+          "Security warning shown beside the plaintext token immediately after minting it, explaining that the token is a live credential and must not be pasted into chats or logs.",
+        placeholders: { mode: "The token's access mode, 'ask' or 'act'. Not translated — a literal API value." },
+      },
+      "onboarding.connect.modeChanged": {
+        description:
+          "Note under the mode picker on the agent-consent page, shown only when the human picked a different mode than the agent requested.",
+        placeholders: { requested: "The mode the agent asked for, 'ask' or 'act'. Not translated — a literal API value." },
       },
       "onboarding.apiTokens.revokeWarning": {
         description:

@@ -8,9 +8,16 @@
  * Key schema: `aq.file-view-prefs.v1`
  *
  * AQU-251: per-file font size control.
+ * AQU-1170: untouched files follow the app-wide font-size scale; an explicit
+ * per-file size keeps absolute priority.
  */
 
 import { useSyncExternalStore } from "react"
+import {
+  scaledDefaultCellFontSizePx,
+  useOptionalFontSizeScale,
+  type FontSizeScale,
+} from "@/branding/FontSize"
 
 const STORAGE_KEY = "aq.file-view-prefs.v1"
 
@@ -18,15 +25,16 @@ export interface FileViewPrefs {
   /** Legacy single editor font size in px. Superseded by the per-side sizes
    *  below; kept as a read fallback so pre-split prefs keep working. */
   fontSize?: number
-  /** Source column font size in px (default: 14). */
+  /** Source column font size in px. Absent means follow the app font size. */
   sourceFontSize?: number
-  /** Target column font size in px (default: 14). */
+  /** Target column font size in px. Absent means follow the app font size. */
   targetFontSize?: number
 }
 
+export type FileFontSizeSide = "source" | "target"
+
 type PrefMap = Record<string, FileViewPrefs>
 
-const DEFAULT_FONT_SIZE = 14
 export const MIN_FONT_SIZE = 11
 export const MAX_FONT_SIZE = 22
 export const FONT_SIZE_STEP = 1
@@ -84,7 +92,8 @@ export function setFileViewPref(fileId: string, patch: FileViewPrefs): void {
   for (const key of Object.keys(next) as (keyof FileViewPrefs)[]) {
     if (next[key] === undefined) delete next[key]
   }
-  map[fileId] = next
+  if (Object.keys(next).length === 0) delete map[fileId]
+  else map[fileId] = next
   save(map)
   snapshotCache.set(fileId, Object.keys(next).length ? next : EMPTY)
   notify()
@@ -111,18 +120,71 @@ export interface ResolvedFontSizes {
 
 /**
  * Resolve per-side font sizes from raw prefs. Each side falls back to the
- * legacy single `fontSize` (pre-split prefs), then to DEFAULT_FONT_SIZE —
- * so a file sized before the source/target split keeps its size on both sides.
+ * legacy single `fontSize` (pre-split prefs), then to the app-scale default
+ * (14px at Default) — so a file sized before the source/target split keeps
+ * its size on both sides, and an untouched file tracks the app font size.
  */
-export function resolveFontSizes(prefs: FileViewPrefs): ResolvedFontSizes {
+export function resolveFontSizes(
+  prefs: FileViewPrefs,
+  appScale: FontSizeScale = "default",
+): ResolvedFontSizes {
+  const fallback = scaledDefaultCellFontSizePx(appScale)
   return {
-    source: prefs.sourceFontSize ?? prefs.fontSize ?? DEFAULT_FONT_SIZE,
-    target: prefs.targetFontSize ?? prefs.fontSize ?? DEFAULT_FONT_SIZE,
+    source: prefs.sourceFontSize ?? prefs.fontSize ?? fallback,
+    target: prefs.targetFontSize ?? prefs.fontSize ?? fallback,
   }
 }
 
-/** Resolved source/target font sizes for a file (DEFAULT_FONT_SIZE when unset). */
+/** Resolved source/target font sizes for a file (app-scale default when unset). */
 export function useFileFontSizes(fileId: string | null | undefined): ResolvedFontSizes {
   const prefs = useFileViewPref(fileId)
-  return resolveFontSizes(prefs)
+  const appScale = useOptionalFontSizeScale()
+  return resolveFontSizes(prefs, appScale)
+}
+
+/** True when this column has a stored px and no longer tracks the app font size. */
+export function isExplicitFileFontSize(
+  prefs: FileViewPrefs,
+  side: FileFontSizeSide,
+): boolean {
+  if (side === "source") return prefs.sourceFontSize != null || prefs.fontSize != null
+  return prefs.targetFontSize != null || prefs.fontSize != null
+}
+
+export function useFileFontSizeExplicit(
+  fileId: string | null | undefined,
+): { source: boolean; target: boolean } {
+  const prefs = useFileViewPref(fileId)
+  return {
+    source: isExplicitFileFontSize(prefs, "source"),
+    target: isExplicitFileFontSize(prefs, "target"),
+  }
+}
+
+/**
+ * Drop a column's stored size so it follows the app font size again.
+ * A legacy shared `fontSize` is kept on the other column as a per-side value.
+ */
+export function clearFileFontSize(fileId: string, side: FileFontSizeSide): void {
+  const prefs = getFileViewPref(fileId)
+  if (!isExplicitFileFontSize(prefs, side)) return
+
+  if (side === "source") {
+    const keepTarget =
+      prefs.targetFontSize == null && prefs.fontSize != null ? prefs.fontSize : undefined
+    setFileViewPref(fileId, {
+      sourceFontSize: undefined,
+      fontSize: undefined,
+      ...(keepTarget != null ? { targetFontSize: keepTarget } : {}),
+    })
+    return
+  }
+
+  const keepSource =
+    prefs.sourceFontSize == null && prefs.fontSize != null ? prefs.fontSize : undefined
+  setFileViewPref(fileId, {
+    targetFontSize: undefined,
+    fontSize: undefined,
+    ...(keepSource != null ? { sourceFontSize: keepSource } : {}),
+  })
 }

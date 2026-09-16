@@ -941,6 +941,97 @@ describe("TimelineEditor", () => {
     )
     expect(onSeekToTime).toHaveBeenCalledWith(10)
   })
+
+  // ── AQU-1117: "Play from this cue" is a different command from a cue ──
+  //
+  // The button was wired onto the row-click path, so it inherited the
+  // "cue, paused" contract and the press read as dead: the frame moved, the
+  // film did not. The two now leave here as two callbacks, which is what keeps
+  // one from silently acquiring the other's behaviour again.
+
+  it("a play request sends the cue's second as PLAY, not as a bare cue", () => {
+    const onSeekToTime = vi.fn()
+    const onPlayFromTime = vi.fn()
+    const { rerender } = render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
+        onRetimeSubtitle={() => {}}
+        onSeekToTime={onSeekToTime} onPlayFromTime={onPlayFromTime}
+        activateRequest={null}
+      />,
+    )
+    rerender(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
+        onRetimeSubtitle={() => {}}
+        onSeekToTime={onSeekToTime} onPlayFromTime={onPlayFromTime}
+        activateRequest={{ cellId: "m2", nonce: 1, play: true }}
+      />,
+    )
+    // Same destination as a cue — the button's whole job is that second.
+    expect(onPlayFromTime).toHaveBeenCalledWith(10)
+    expect(onSeekToTime).not.toHaveBeenCalled()
+    // And it still centres and selects, exactly like a row click.
+    expect(screen.getByTestId("tl-detail")).toHaveAttribute("data-cell-id", "m2")
+  })
+
+  it("a row click carries no play intent — it still only cues", () => {
+    const onSeekToTime = vi.fn()
+    const onPlayFromTime = vi.fn()
+    const { rerender } = render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
+        onRetimeSubtitle={() => {}}
+        onSeekToTime={onSeekToTime} onPlayFromTime={onPlayFromTime}
+        activateRequest={null}
+      />,
+    )
+    rerender(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
+        onRetimeSubtitle={() => {}}
+        onSeekToTime={onSeekToTime} onPlayFromTime={onPlayFromTime}
+        activateRequest={{ cellId: "m2", nonce: 1 }}
+      />,
+    )
+    expect(onSeekToTime).toHaveBeenCalledWith(10)
+    expect(onPlayFromTime).not.toHaveBeenCalled()
+  })
+
+  it("a clean chip click only cues, play command or none", () => {
+    const onSeekToTime = vi.fn()
+    const onPlayFromTime = vi.fn()
+    render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
+        onRetimeSubtitle={() => {}}
+        onSeekToTime={onSeekToTime} onPlayFromTime={onPlayFromTime}
+      />,
+    )
+    fireEvent.click(screen.getByTestId("tl-card-m2"))
+    expect(onSeekToTime).toHaveBeenCalledWith(10)
+    expect(onPlayFromTime).not.toHaveBeenCalled()
+  })
+
+  it("falls back to cueing when no play command is wired", () => {
+    // The film-less arrangements leave onPlayFromTime unwired (AQU-1118), and
+    // there the press must still land on the line rather than doing nothing.
+    const onSeekToTime = vi.fn()
+    const { rerender } = render(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
+        onRetimeSubtitle={() => {}} onSeekToTime={onSeekToTime} activateRequest={null}
+      />,
+    )
+    rerender(
+      <TimelineEditor
+        fileId="f1" coreMediaUrl={null} editable cells={mediaCells}
+        onRetimeSubtitle={() => {}} onSeekToTime={onSeekToTime}
+        activateRequest={{ cellId: "m2", nonce: 1, play: true }}
+      />,
+    )
+    expect(onSeekToTime).toHaveBeenCalledWith(10)
+  })
 })
 
 // ── SUB-53: audio-first ─────────────────────────────────────────────────────
@@ -1530,7 +1621,7 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
       return render(
         <TimelineEditor
           fileId="fzoom" coreMediaUrl={VIDEO} editable cells={cells}
-          canAddLine allowLineCreation onAddLine={async () => null} onRetimeSubtitle={() => {}}
+          canAddLine onAddLine={async () => null} onRetimeSubtitle={() => {}}
         />,
       )
     }
@@ -1559,11 +1650,14 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
       expect(screen.getByTestId("tl-add-line-20")).toBeInTheDocument()
     })
 
-    // The project setting, off unless turned on (Sam, 2026-08-14). Adding
-    // lines was built speculatively — no client asked for it — and its mic over
-    // an empty stretch could mint a subtitle line and record a take matching no
-    // audio cue. Clearance alone must not be enough to surface it.
-    it("offers nothing without the project setting, however much clearance you have", () => {
+    // AQU-1068: `canAddLine` IS the project's answer now, not merely a
+    // clearance sitting beside one. It arrives already folded — the tier AND
+    // the caller's rank — so false here is the off state, whatever rank the
+    // viewer holds. (It used to be two props; the mic over an empty stretch
+    // could mint a subtitle line and record a take matching no audio cue, so
+    // clearance alone was never allowed to surface it. One authority now keeps
+    // that true without the two being able to drift apart.)
+    it("offers nothing when the project has not admitted this user", () => {
       setVideoDurationSec(VIDEO, 120)
       localStorage.setItem("aquilla:timelineZoom:fzoom", String(ZOOM_MAX))
       render(
@@ -1573,11 +1667,77 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
             cell({ id: "a", original: "A", medium: "text", startTime: 10, endTime: 20 }),
             cell({ id: "b", original: "B", medium: "text", startTime: 20.3, endTime: 30 }),
           ]}
-          canAddLine onAddLine={async () => null} onRetimeSubtitle={() => {}}
+          canAddLine={false} onAddLine={async () => null} onRetimeSubtitle={() => {}}
         />,
       )
       expect(screen.queryByTestId("tl-add-line-20")).not.toBeInTheDocument()
       expect(screen.queryByTestId(/^tl-target-add-20/)).not.toBeInTheDocument()
+    })
+
+    // AQU-1068: FREE timing has no gaps to insert into — buildProgramme lays
+    // takes end to end on their own clock, so a "silence" on the file clock is
+    // not a place a cell can go. Gap inserts on a Free-mode cue sheet still
+    // exist; they live on the text table, against the SOURCE clock, which is
+    // the one that stays real whichever mode the timeline is showing.
+    it("offers nothing in Free timing, however much clearance you have", () => {
+      setVideoDurationSec(VIDEO, 120)
+      localStorage.setItem("aquilla:timelineZoom:fzoom", String(ZOOM_MAX))
+      render(
+        <TimelineEditor
+          fileId="fzoom" coreMediaUrl={VIDEO} editable
+          cells={[
+            cell({ id: "a", original: "A", medium: "text", startTime: 10, endTime: 20 }),
+            cell({ id: "b", original: "B", medium: "text", startTime: 20.3, endTime: 30 }),
+          ]}
+          canAddLine timingMode="audioFirst"
+          onAddLine={async () => null} onRetimeSubtitle={() => {}}
+        />,
+      )
+      expect(screen.queryByTestId("tl-add-line-20")).not.toBeInTheDocument()
+      expect(screen.queryByTestId(/^tl-target-add-20/)).not.toBeInTheDocument()
+    })
+
+    it("still offers them in Original timing — the default", () => {
+      // The guard above must not have taken the affordance away wholesale.
+      setVideoDurationSec(VIDEO, 120)
+      localStorage.setItem("aquilla:timelineZoom:fzoom", String(ZOOM_MAX))
+      render(
+        <TimelineEditor
+          fileId="fzoom" coreMediaUrl={VIDEO} editable
+          cells={[
+            cell({ id: "a", original: "A", medium: "text", startTime: 10, endTime: 20 }),
+            cell({ id: "b", original: "B", medium: "text", startTime: 20.3, endTime: 30 }),
+          ]}
+          canAddLine timingMode="dubbing"
+          onAddLine={async () => null} onRetimeSubtitle={() => {}}
+        />,
+      )
+      expect(screen.getByTestId("tl-add-line-20")).toBeInTheDocument()
+    })
+
+    // AQU-1068 round 4: the pencils do not depend on a film being linked. A
+    // timed VTT with no video has the same silences, and the text table
+    // already offers inserts into them, so gating the region derivation on
+    // `coreMediaUrl` made the two surfaces disagree about the same file. With
+    // no footage the regions span the cells' own extent — the gaps between
+    // cues still surface, and no tail is invented past the last cue.
+    it("offers the ways in on a timed file with no footage linked", () => {
+      localStorage.setItem("aquilla:timelineZoom:fzoom", String(ZOOM_MAX))
+      render(
+        <TimelineEditor
+          fileId="fzoom" coreMediaUrl={null} editable
+          cells={[
+            cell({ id: "a", original: "A", medium: "text", startTime: 10, endTime: 20 }),
+            cell({ id: "b", original: "B", medium: "text", startTime: 20.3, endTime: 30 }),
+          ]}
+          canAddLine onAddLine={async () => null} onRetimeSubtitle={() => {}}
+        />,
+      )
+      // The same silence every test above uses, and the head gap before 10s.
+      expect(screen.getByTestId("tl-add-line-20")).toBeInTheDocument()
+      expect(screen.getByTestId("tl-add-line-0")).toBeInTheDocument()
+      // No footage length → no region past the last cue to draw a slot in.
+      expect(screen.queryByTestId("tl-add-line-30")).not.toBeInTheDocument()
     })
 
     // THE SETTING IS THE SINGLE AUTHORITY (Sam, 2026-08-21). Stage 4 used to
@@ -1595,7 +1755,7 @@ describe("TimelineEditor — the Source-audio row (the audio VTT's cues)", () =>
             cell({ id: "a", original: "A", medium: "text", startTime: 10, endTime: 20 }),
             cell({ id: "b", original: "B", medium: "text", startTime: 20.3, endTime: 30 }),
           ]}
-          canAddLine allowLineCreation onAddLine={async () => null} onRetimeSubtitle={() => {}}
+          canAddLine onAddLine={async () => null} onRetimeSubtitle={() => {}}
           hasAudioCueTrack
         />,
       )

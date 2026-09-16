@@ -47,7 +47,8 @@ import {
 import { cn } from "@/lib/utils"
 import { deriveLanes } from "@/lib/timeline/lanes"
 import { deriveSourceRegions, EMPTY_SOURCE_REGIONS } from "@/lib/timeline/source-regions"
-import { isLineEmpty, isUserAddedLine } from "@/lib/timeline/user-lines"
+import { isUserAddedLine } from "@/lib/timeline/user-lines"
+import { isImportedRow } from "@/lib/cell-editing-gate"
 import { Spinner } from "@/components/ui/spinner"
 import { OverflowMenu, type OverflowMenuItem } from "@/components/OverflowMenu"
 import { SourceRegionLane } from "./SourceRegionLane"
@@ -221,20 +222,25 @@ export interface TimelineEditorProps {
    * to the new cell's id, or null if it could not be made.
    */
   onAddLine?(startSec: number, endSec: number, opts?: { thenRecord?: boolean }): Promise<string | null>
-  /** Whether this user may create cells at all (source.* is PROJECT_LEAD+). */
-  /** MAY they — the `source.cell.create` clearance. Deliberately separate from
-   *  `allowLineCreation` below: this one also governs taking a line back, and
-   *  policy must not be able to strand a line somebody already made. */
+  /**
+   * May this user add and remove cells here at all?
+   *
+   * AQU-1068 collapsed the old MAY/SHOULD pair into one answer. There used to
+   * be a second `allowLineCreation` prop carrying the project's policy, kept
+   * separate so that switching policy off could not strand a line somebody had
+   * already made. The tier that replaced it governs adds and removes together
+   * — "that setting is enabling lines being added or removed" — so a single
+   * authority is now the thing that keeps the surfaces agreeing.
+   */
   canAddLine?: boolean
   /**
-   * SHOULD they — the project's `allowLineCreation` setting, off by default.
+   * May they remove an IMPORTED cell, not just a line added here?
    *
-   * Adding lines was built speculatively and is underdeveloped, so it stays
-   * hidden until a project turns it on. Removal of an empty added line is NOT
-   * gated on this, which is what makes the off state recoverable rather than
-   * frozen.
+   * The second gate, maintainer-only, whatever tier the project runs. An
+   * imported line is the client's own work; the confirmation dialog upstream
+   * is what makes taking one back safe.
    */
-  allowLineCreation?: boolean
+  canRemoveImportedCells?: boolean
   /** Take back a line someone added, while it is still empty. */
   onRemoveLine?(cellId: string): void
   /** False disables the control — `file.video.set` needs contributor access,
@@ -339,6 +345,20 @@ export interface TimelineEditorProps {
    *  whether to jump the live queue or cue a paused one). */
   onSeekToTime?(sec: number): void
   /**
+   * AQU-1117: the same destination, but "start playing there" rather than "cue
+   * there, paused". Only "Play from this cue" sends it; ruler clicks, chip
+   * clicks and text-table row clicks keep their cue-only contract.
+   *
+   * A SIBLING CALLBACK, NOT A FLAG ON `onSeekToTime` — the rule immediately
+   * below still holds. It is also why the intent travels down here at all
+   * rather than the press site simply calling play: the second is computed here
+   * (`layout.seekSecFor`), and a play issued before this call has landed starts
+   * the film wherever it was last paused and jumps afterwards. One call, one
+   * destination, one intent. Falls back to `onSeekToTime` when unwired, so an
+   * arrangement with no play command still cues.
+   */
+  onPlayFromTime?(sec: number): void
+  /**
    * AQU-646 stage 5: the playhead is being dragged / has been released.
    *
    * BRACKETING, NOT A FLAG ON `onSeekToTime`. A scrub says three different
@@ -365,8 +385,10 @@ export interface TimelineEditorProps {
    *  (activateRequest, the mount trace) stays silent to avoid echo loops. */
   onChipActivated?(cellId: string): void
   /** 2026-08-07 (wire b): a text-table row click, as a nonce'd request —
-   *  selects the chip and centers/cues exactly like a chip click. */
-  activateRequest?: { cellId: string; nonce: number } | null
+   *  selects the chip and centers/cues exactly like a chip click.
+   *  AQU-1117: `play` marks the one sender that means "and roll from there"
+   *  ("Play from this cue"); absent/false keeps the row-click cue-only rule. */
+  activateRequest?: { cellId: string; nonce: number; play?: boolean } | null
   /** SUB-53: which job this FILE is for (pre-merge round: per-file, resolved
    *  via resolveFileTimingMode). "dubbing" (the default) draws the track
    *  against the imported recording's clock; "audioFirst" lays the verses out
@@ -986,7 +1008,7 @@ export function TimelineEditor({
   onRequestLinkVideo,
   onAddLine,
   canAddLine,
-  allowLineCreation = false,
+  canRemoveImportedCells = false,
   onRemoveLine,
   canLinkVideo = true,
   onRequestImportAudioVtt,
@@ -1011,6 +1033,7 @@ export function TimelineEditor({
   hasAudioCueTrack = false,
   audioCues,
   onSeekToTime,
+  onPlayFromTime,
   onScrubStart,
   onScrubEnd,
   onOpenRecording,
@@ -1737,9 +1760,15 @@ export function TimelineEditor({
   // ask "is there a stretch of film here with no line on it": the pencil in the
   // Subtitles row and the mic in the Target audio row. Both are questions about
   // the TEXT, which is why this still sweeps `cells` and not the audio cues.
+  //
+  // Gated on "no media cells", NOT on footage: a timed VTT with no video
+  // linked has the same silences, and the text table already offers inserts
+  // into them, so hiding the pencils here made the two surfaces disagree
+  // (AQU-1068 round 4). With no footage the duration is null and the regions
+  // span the cells' own extent — head and between-cue gaps, no invented tail.
   const sourceRegions = useMemo(
-    () => (subtitleFileWithFootage ? deriveSourceRegions(cells, videoDurationSec) : EMPTY_SOURCE_REGIONS),
-    [subtitleFileWithFootage, cells, videoDurationSec],
+    () => (dialogue.length === 0 ? deriveSourceRegions(cells, videoDurationSec) : EMPTY_SOURCE_REGIONS),
+    [dialogue, cells, videoDurationSec],
   )
   // The Source-audio row's own map, from the hidden sibling's cues. Same sweep,
   // a different set of boundaries: the audio VTT transcribes the film's
@@ -1801,12 +1830,21 @@ export function TimelineEditor({
   // no take yet is a different affordance, comes from `emptyCells`, and stays.
   const addableSpans = useMemo(
     () =>
-      !allowLineCreation || !canAddLine
+      // AQU-1068: no add affordance in FREE timing. Free lays takes end to end
+      // on their own clock (buildProgramme), so a "silence" here is not a place
+      // a cell can go — there are no gaps by construction. Gap inserts on a
+      // Free-mode cue sheet still exist; they live on the text table, against
+      // the SOURCE clock, which is the one that stays real in either mode.
+      //
+      // It also retires a latent mismatch: these slots are positioned in raw
+      // file-clock seconds (TimelineLane) while audioFirst cards are placed on
+      // the programme clock, so the two disagreed about where a second was.
+      !canAddLine || audioFirst
         ? []
         : sourceRegions.regions
             .filter((r) => r.kind === "gap" && r.endSec - r.startSec >= MIN_ADDABLE_SPAN_SEC)
             .map((r) => ({ startSec: r.startSec, endSec: r.endSec })),
-    [sourceRegions, allowLineCreation, canAddLine],
+    [sourceRegions, canAddLine, audioFirst],
   )
   // Round 5: the Target-audio track's chips — one per section with dub audio.
   // AQU-646: in the VTT-plus-footage arrangement the takes hang off TEXT cells
@@ -2926,6 +2964,15 @@ export function TimelineEditor({
   }
 
   function seekTo(sec: number) {
+    sendSeek(sec, onSeekToTime)
+  }
+
+  /** AQU-1117: seek AND roll. Same landing rules; a different command out. */
+  function playFromTime(sec: number) {
+    sendSeek(sec, onPlayFromTime ?? onSeekToTime)
+  }
+
+  function sendSeek(sec: number, send: ((sec: number) => void) | undefined) {
     // A deliberate seek must land exactly where it was aimed: the timeline is
     // an editor, and at rest the head has to agree with the chip edge under it.
     setCompensating(false)
@@ -2935,7 +2982,7 @@ export function TimelineEditor({
     // seek for the pane before deciding what the queue can do with it, because
     // the queue legitimately drops some seeks (no session, a gap no section
     // owns) and the picture must move regardless.
-    onSeekToTime?.(Math.max(0, sec))
+    send?.(Math.max(0, sec))
     setFollow(true)
   }
 
@@ -2953,7 +3000,7 @@ export function TimelineEditor({
   // Center the track on a clip and cue playback (paused) at its start —
   // identical to a clean card click. Reads the live clientWidth (viewportPx
   // state can still be 0 pre-measurement). Untimed cells: no timecode, no-op.
-  function centerAndCue(cellId: string) {
+  function centerAndCue(cellId: string, opts?: { play?: boolean }) {
     // Searches the AUDIO CUES too. A cue is a legitimate destination now — the
     // pairing drawer navigates to one — and looking only in `cells` meant every
     // such request found nothing and silently returned, so the track never
@@ -2963,7 +3010,8 @@ export function TimelineEditor({
     if (at == null) return
     const viewport = scrollRef.current?.clientWidth ?? 0
     scrollTrackTo(Math.max(0, secToPx(at, pxPerSec) - viewport / 2))
-    seekTo(at)
+    if (opts?.play) playFromTime(at)
+    else seekTo(at)
   }
 
   // AQU-646 round 3: consume the text→media trace once on mount (the seed
@@ -2982,7 +3030,7 @@ export function TimelineEditor({
     setSelectedId(activateRequest.cellId)
     // AQU-928: a row click is a plain selection, so it replaces the batch scope.
     setExtraIds([])
-    centerAndCue(activateRequest.cellId)
+    centerAndCue(activateRequest.cellId, { play: activateRequest.play })
     // eslint-disable-next-line react-hooks/exhaustive-deps -- consumed per nonce
   }, [activateRequest?.nonce])
 
@@ -3286,16 +3334,19 @@ export function TimelineEditor({
             // exactly as it was.
             emptySpans={addableSpans}
             onAddLine={canAddLine && onAddLine ? (s, e) => void onAddLine(s, e) : undefined}
-            // Only a line someone added here, and only while it is still
-            // empty — deleting a cell with takes or comments on it would
-            // leave every one of them behind.
-            // TAKING A LINE BACK IS NEVER GATED ON POLICY (Sam, 2026-08-14).
-            // Only on clearance and on the cell qualifying — still user-added,
-            // still empty. Turning `allowLineCreation` off, or importing an
-            // audio VTT, must not strand a line somebody already made with no
-            // way to clear it up; an off state you cannot recover from is worse
-            // than the feature it hides.
-            canRemove={canAddLine ? (c) => isUserAddedLine(c) && isLineEmpty(c) : undefined}
+            // Only a line someone added here.
+            // AQU-1068 widened this: a MAINTAINER may take back any cell,
+            // imported ones included, and the confirmation dialog upstream is
+            // what makes that safe. Below that rank only a line added here can
+            // go — but a line added here can ALWAYS go, however full it is.
+            // The same shared predicate the text table asks, so the two
+            // surfaces can never disagree about what is removable; see
+            // `isImportedRow` for the emptiness clause that used to live here.
+            canRemove={
+              canAddLine
+                ? (c) => canRemoveImportedCells || !isImportedRow(c)
+                : undefined
+            }
             onRemove={onRemoveLine}
             // Only THIS subtitle row takes part in linking. The target-subtitles
             // row below draws the same cells, and giving both an overlay would

@@ -373,7 +373,7 @@ export function placeClips(
     const n = Math.min(clip.pcm.length, total - offset)
     for (let i = 0; i < n; i += 1) {
       const at = offset + i
-      const sample = track[at]! + quantisePcm16(clip.pcm[i]!)
+      const sample = track[at] + quantisePcm16(clip.pcm[i])
       // Saturating add: two loud takes over one another must not wrap round to
       // the opposite sign, which is heard as a click rather than as loudness.
       track[at] = sample > 32767 ? 32767 : sample < -32768 ? -32768 : sample

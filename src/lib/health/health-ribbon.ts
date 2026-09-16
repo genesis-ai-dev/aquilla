@@ -207,6 +207,10 @@ export function preTranslationEvidence(
   sourceText: string,
   examples: Array<{ matchedTokens: string[] }>,
 ): PreTranslationEvidence | null {
+  // The empty-examples check comes FIRST (AQU-1068): most cells have no
+  // examples, and tokenizing before the check made every no-example call pay
+  // the full tokenize cost just to return null — 31k verses' worth per sweep
+  // on a whole-Bible file.
   if (examples.length === 0) return null
   const cached = evidenceCache.get(examples)
   if (cached && cached.sourceText === sourceText) return cached.result

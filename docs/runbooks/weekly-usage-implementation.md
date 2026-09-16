@@ -23,6 +23,17 @@ capacity requires a new explicit policy/version, not hidden repricing.
 Missing provider cost is unresolved, not zero or an invented flat charge.
 Percentage-only presentation does not remove the need for an explicit unit.
 
+## Launch decisions — 2026-09-16
+
+See the pricing model's decision list. Implementation consequences: the
+reservation bound is `prompt tokens × live input price + output cap × live output
+price` from OpenRouter's model list, cached server-side and refused when missing;
+the agent may finish an in-progress step up to 5% over the weekly allowance;
+audio rails stay unmetered for now; the credit and word guards are removed once
+every LLM producer is connected. Measured 2026-08 rates from the local
+`agent_cost_meter` ledger: Luna ≈ 0.07¢ per autopilot call, DeepSeek v4 flash
+≈ 0.03¢; Sonnet and Opus were never measured.
+
 ## Implemented foundation
 
 - `db/shared/billing-cost.ts` defines the common conversion and strict provider

@@ -1,6 +1,6 @@
 # Aquilla pricing model
 
-Updated: 2026-09-14
+Updated: 2026-09-16
 
 This document defines Aquilla’s target pricing model for Stripe, in-app billing, sales, and aquilla-marketing. It supersedes earlier Field pricing descriptions for new implementation. It describes the intended offer, not current implementation status. Unresolved launch decisions appear at the end.
 
@@ -45,6 +45,24 @@ The initial version `2026-09-cost-v1` uses the existing base conversion: one
 internal unit is one marked-up cent, at 4× raw provider cost. Preserve the approved
 weekly counts. Pro's 50 units therefore cover 12.5 raw provider cents per week;
 validate realistic workload capacity before enabling paid enforcement.
+
+Decisions 2026-09-16 (Ryder):
+
+- Rate card: OpenRouter's live per-model prices are the source of truth for the
+  pre-call reservation bound. The server fetches and caches them; no repo-maintained
+  price table. A model missing from the live card is refused, never estimated.
+  Settlement always uses the provider-reported cost of the actual request.
+- Markup: keep 4× and the approved allowance counts for launch. Customers see only
+  percentage of the weekly allowance used and their plan. If measured margins are
+  healthy, raise allowances later by an explicit policy version.
+- Model choice: users cannot pick the model. Routing stays server-owned.
+- Audio rails (TTS, diarization, voice conversion): not metered against the weekly
+  allowance at launch. Revisit once usage patterns are visible.
+- Agent overage: a run may finish its current step up to 5% over the weekly
+  allowance; no new step starts past 100%. The customer-facing percentage caps
+  at 100%; the ledger records the true overrun.
+- Legacy ledgers: retire the credit and word guards once the weekly ledger covers
+  every producer. The weekly ledger becomes the only usage authority.
 
 Record raw cost and its rate version together. Do not retroactively reprice
 consumed usage when configuration changes. Keep fractional usage internally,
@@ -157,7 +175,7 @@ Keep Enterprise’s custom quote and rollout action. Preserve the existing cover
 2. Confirm guest-reviewer actions and whether the Team collaborator limit includes its owner.
 3. Specify Team versus Enterprise onboarding and support commitments.
 4. Verify the approved native lifecycle policies across remaining real sandbox cases and finalize existing-customer migration.
-5. Verify provider-cost metering and feature permissions across all producers and consumers, and validate realistic workload capacity before enabling enforcement.
+5. Verify provider-cost metering and feature permissions across all producers and consumers. Allowance counts and 4× are approved for launch (2026-09-16); capacity is revisited from measured margins, not before launch.
 
 Implement and test the complete pricing path: Stripe catalog → billing API → in-app/marketing display → checkout → webhook → workspace allowance and permissions. Include weekly resets independent of billing renewals, recurring quantities, personal/team isolation, and usage-preserving plan changes.
 

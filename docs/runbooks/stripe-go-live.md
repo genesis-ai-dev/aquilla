@@ -1,6 +1,25 @@
 # Stripe launch and covered-access playbook
 
-Updated: 2026-09-14. Tickets: AQU-837 (billing readiness), AQU-1091 (pricing and app UI).
+Updated: 2026-09-16. Tickets: AQU-837 (billing readiness), AQU-1091 (pricing and app UI).
+
+## Import-classification cost-ledger integration — 2026-09-16
+
+- [x] Connect `POST /api/v1/import/classify` to the same local scripted-provider
+  rehearsal gate, reservation, and settlement as chat. Project-lead authority
+  and legacy guards run first; unowned projects (org 0) are rejected, never funded.
+- [x] Settle reported provider cost before validating the recipe: a charged
+  malformed or unsafe recipe still consumes allowance. Upstream errors and
+  missing cost keep the reservation held for reconciliation.
+- [x] Same-key retries return 409 without another provider call; a new key
+  reserves again. Manual import and the legacy credit/word ledgers are unchanged.
+- [ ] Remaining producers: agent runs and nested drafting, contextual background
+  work, import sandbox conversion, knowledge indexing, Monday analysis, and
+  speech in sync-worker. The three open chat items above still apply here.
+
+Test impact: new `billing-import-usage.test.ts` (five real-Postgres route tests)
+runs under the same webhook-postgres config; the existing classify suite (mocked
+provider, rehearsal off) is unchanged. `scripts/lib/e2e-impact.ts` now maps the
+classify route to the billing journey. No UI or browser behavior changes.
 
 ## Chat cost-ledger integration — 2026-09-14
 

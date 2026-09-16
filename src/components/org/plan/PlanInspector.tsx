@@ -347,7 +347,12 @@ export function PlanInspector({
                 per-chapter count. */}
             {nearlyComplete && (
               <div
-                className="flex flex-wrap items-center justify-between gap-x-2.5 gap-y-1 ps-8 text-[11.5px]"
+                // FLUSH LEFT, where the bars' LABELS start and not where their
+                // tracks do. The `ps-8` above belongs to the audio note, which
+                // explains the bar it sits under; this line is about the unit,
+                // so it lines up with the section rather than hanging off a
+                // bar (Sam, 2026-09-16).
+                className="flex flex-wrap items-center justify-between gap-x-2.5 gap-y-1 text-[11.5px]"
                 data-testid="plan-unit-shortfall"
               >
                 <span className={shortfallText ? `font-medium ${PLAN_TONE.nearly_complete.text}` : "text-muted-foreground"}>

@@ -9,10 +9,29 @@ interface UsageRequest {
   period_start: string; period_end: string; reserved_micro_units: number
   state: 'reserved' | 'settled' | 'released'
   raw_micro_cents: number | null; settled_micro_units: number | null
+  provider_ref: string | null; created_at: string
 }
 const columns = `org_id, request_id, user_id, project_id, rail, rate_version,
   multiplier, period_start::text, period_end::text, reserved_micro_units,
-  state, raw_micro_cents, settled_micro_units`
+  state, raw_micro_cents, settled_micro_units, provider_ref, created_at::text`
+
+export function validProviderRef(ref: unknown): ref is string {
+  return typeof ref === 'string' && ref.trim().length > 0 && ref.length <= 200 && ref.trim() === ref
+}
+/** A stored reference identifies the provider's generation record. Once set it
+ * cannot change: a different id means the request would be billed for someone
+ * else's work, so reject instead of overwriting.
+ */
+async function attachProviderRef(tx: AquillaDb, request: UsageRequest, providerRef: string | undefined) {
+  if (providerRef === undefined) return
+  if (!validProviderRef(providerRef)) throw new Error('Invalid usage provider reference')
+  if (request.provider_ref !== null) {
+    if (request.provider_ref !== providerRef) throw new Error('Usage provider reference conflict')
+    return
+  }
+  await tx.prepare('UPDATE workspace_usage_requests SET provider_ref = ? WHERE org_id = ? AND request_id = ?')
+    .bind(providerRef, request.org_id, request.request_id).run()
+}
 
 function readRequest(db: AquillaDb, orgId: number, requestId: string) {
   return db.prepare(`SELECT ${columns} FROM workspace_usage_requests
@@ -94,10 +113,11 @@ export async function reserveWorkspaceUsage(db: AquillaDb, input: {
  * an overrun. Subsequent admission sees the actual total and stops further work.
  * Unknown spend must keep its reservation until authoritative reconciliation.
  */
-export async function settleWorkspaceUsage(db: AquillaDb, orgId: number, requestId: string, rawCostCents: number) {
+export async function settleWorkspaceUsage(db: AquillaDb, orgId: number, requestId: string, rawCostCents: number, providerRef?: string) {
   return locked(db, orgId, async tx => {
     const request = await readRequest(tx, orgId, requestId)
     if (!request) throw new Error('Usage reservation not found')
+    await attachProviderRef(tx, request, providerRef)
     const quote = quoteProviderCost(rawCostCents, request.rail)
     if (quote.rateVersion !== request.rate_version || quote.multiplier !== request.multiplier) {
       throw new Error('Usage rate version mismatch')
@@ -128,4 +148,25 @@ export async function releaseWorkspaceUsage(db: AquillaDb, orgId: number, reques
       WHERE org_id = ? AND request_id = ?`).bind(orgId, requestId).run()
     return true
   })
+}
+
+/** Record which provider generation a held reservation belongs to, so it can be
+ * reconciled later from the provider's own record. This never settles usage.
+ */
+export async function recordUsageProviderRef(db: AquillaDb, orgId: number, requestId: string, providerRef: string) {
+  return locked(db, orgId, async tx => {
+    const request = await readRequest(tx, orgId, requestId)
+    if (!request) throw new Error('Usage reservation not found')
+    await attachProviderRef(tx, request, providerRef)
+  })
+}
+export function readUsageRequest(db: AquillaDb, orgId: number, requestId: string) {
+  return readRequest(db, orgId, requestId)
+}
+/** Reservations still awaiting settlement, oldest first. */
+export async function listHeldUsage(db: AquillaDb, orgId: number, limit = 100) {
+  const rows = await db.prepare(`SELECT ${columns} FROM workspace_usage_requests
+    WHERE org_id = ? AND state = 'reserved' ORDER BY created_at ASC LIMIT ?`)
+    .bind(orgId, limit).all<UsageRequest>()
+  return rows.results
 }

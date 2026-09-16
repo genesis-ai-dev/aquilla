@@ -1703,6 +1703,8 @@ CREATE TABLE IF NOT EXISTS workspace_usage_requests (
   settled_micro_units BIGINT CHECK (settled_micro_units >= 0 AND settled_micro_units <= 9007199254740991),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   resolved_at TIMESTAMPTZ,
+  -- Provider generation id for reconciling held reservations (never settles alone).
+  provider_ref TEXT CHECK (length(provider_ref) BETWEEN 1 AND 200),
   PRIMARY KEY (org_id, request_id),
   CHECK ((state = 'reserved' AND raw_micro_cents IS NULL AND settled_micro_units IS NULL AND resolved_at IS NULL)
     OR (state = 'settled' AND raw_micro_cents IS NOT NULL AND settled_micro_units = raw_micro_cents * multiplier AND resolved_at IS NOT NULL)
@@ -1710,3 +1712,5 @@ CREATE TABLE IF NOT EXISTS workspace_usage_requests (
 );
 CREATE INDEX IF NOT EXISTS idx_workspace_usage_period
   ON workspace_usage_requests(org_id, period_start, period_end);
+CREATE INDEX IF NOT EXISTS idx_workspace_usage_held
+  ON workspace_usage_requests(org_id, created_at) WHERE state = 'reserved';

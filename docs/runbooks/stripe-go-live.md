@@ -2,6 +2,31 @@
 
 Updated: 2026-09-16. Tickets: AQU-837 (billing readiness), AQU-1091 (pricing and app UI).
 
+## Held-usage reconciliation — 2026-09-16
+
+- [x] Persist the provider generation id (`provider_ref`) on usage requests.
+  Chat records it from JSON `id` or the first SSE chunk `id`, including on
+  missing cost, truncated streams, and client cancellation; import
+  classification inherits it. A reference never settles or releases usage.
+- [x] Reject a conflicting reference instead of rebinding a request to a
+  different generation. Migration `0098_workspace_usage_provider_ref.sql` is
+  prepared, not deployed, and replays without losing held usage.
+- [x] Add local-only maintainer endpoints under the chat rehearsal gate:
+  `GET /orgs/:orgId/billing/usage-rehearsal/held` lists held reservations and
+  `POST .../usage-rehearsal/reconcile` settles one from the provider's
+  generation record (`{ data: { id, total_cost } }`). Provider errors, id
+  mismatch, malformed cost, or a missing reference keep the reservation held.
+- [ ] Reconcile against the real OpenRouter generation endpoint once the live
+  provider gate opens; automate a sweep of held requests older than a bounded
+  age instead of manual maintainer calls.
+
+Test impact: new `billing-usage-reconcile.test.ts` (six real-Postgres route
+tests) covers held JSON and stream requests, exactly-once settlement, unreferenced
+and unavailable records, reference conflicts, gate/role/404 handling, and
+migration replay. Chat (13), import (5), ledger (16), portal/checkout (115), and
+impact/determinism (24) suites pass; worker lint and secret scan pass. The
+migration joins the billing impact list. No UI or browser behavior changes.
+
 ## Import-classification cost-ledger integration — 2026-09-16
 
 - [x] Connect `POST /api/v1/import/classify` to the same local scripted-provider
@@ -43,8 +68,9 @@ classify route to the billing journey. No UI or browser behavior changes.
   not a validated upper bound or estimated bill for a real provider.
 - [ ] Validate server-owned real-provider cost bounds and model routing before
   enabling actual funded-provider enforcement. Do not silently remove the gate.
-- [ ] Persist provider generation references and verify reconciliation of held
-  requests after interrupted delivery or persistence failure.
+- [x] Persist provider generation references and verify reconciliation of held
+  requests after interrupted delivery or persistence failure. See the
+  held-usage reconciliation checkpoint above; live-provider sweep still pending.
 - [ ] Connect agent, background/contextual work, imports, and speech to the same
   ledger; complete capability checks and authoritative usage percentages.
 

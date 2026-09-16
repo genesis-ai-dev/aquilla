@@ -27,6 +27,9 @@ Percentage-only presentation does not remove the need for an explicit unit.
 
 - `db/shared/billing-cost.ts` defines the common conversion and strict provider
   cost parser. Agent, chat, and speech use the same multiplier.
+- Migration `0098_workspace_usage_provider_ref.sql` adds the provider generation
+  reference used to reconcile held reservations; `usage-reconcile.ts` settles a
+  held request only from the provider's own generation record.
 - Migration `0097_workspace_usage_requests.sql` adds exact-period reservations,
   raw settled cost, rate snapshots, and terminal-state constraints. It is prepared,
   not deployed. Freshly fetched main `c1aad5636` ends at migration 0089;

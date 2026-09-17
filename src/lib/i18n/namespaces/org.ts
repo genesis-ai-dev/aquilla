@@ -2611,7 +2611,7 @@ export const org = defineNamespace({
         maxLength: 20,
       },
       "org.projectOverview.plan.openFile": {
-        description: "Tooltip on the detail panel's title, which opens the unit's file in the editor.",
+        description: "Tooltip on the detail panel's title and on a chapter card's title; each opens what it names in the editor.",
         maxLength: 30,
       },
       "org.projectOverview.plan.targetDate": {

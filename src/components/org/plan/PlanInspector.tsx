@@ -608,9 +608,15 @@ export function PlanInspector({
  * outstanding verse, which is the only place on this panel that turns "three
  * cells short" into somewhere to click.
  *
- * The bars read in COUNTS here rather than percentages. At chapter grain
- * "20 | 18" is two cells a manager can go and fix, where "100% | 90%" is those two
- * cells rounded into a shrug.
+ * The bars read in percentages like every other bar on the board, with the
+ * counts one hover away (Sam, 2026-09-17). The card's header still says
+ * "2 cells not yet validated" in print.
+ *
+ * THE TITLE OPENS THE CHAPTER (Sam, 2026-09-17): "Chapter 17" is a link to the
+ * chapter's first cell, the way the panel's own title opens the book. The
+ * verses the chips are drawn from arrive in canonical order, so the first of
+ * them IS the chapter's first cell and no second request is needed; until
+ * they arrive, or if they never do, the title is plain text.
  */
 function PlanChapterCard({
   section, title, hasAudio, verses, onOpenCell,
@@ -651,6 +657,7 @@ function PlanChapterCard({
     ? shortVerses(verses.verses, chipLead)
     : []
   const fade = useScrollFade(rowRef, short.length)
+  const firstCellId = verses?.status === "ready" ? verses.verses[0]?.cellId ?? null : null
 
   return (
     <div
@@ -658,8 +665,19 @@ function PlanChapterCard({
       data-testid="plan-chapter-detail"
     >
       <div className="flex items-baseline justify-between gap-2">
-        <span className="text-[12.5px] font-semibold" data-testid="plan-chapter-detail-title">
-          {title}
+        <span className="min-w-0 text-[12.5px] font-semibold" data-testid="plan-chapter-detail-title">
+          {firstCellId && onOpenCell ? (
+            <AppTooltip content={t("org.projectOverview.plan.openFile")}>
+              <button
+                type="button"
+                data-testid="plan-chapter-open"
+                onClick={() => onOpenCell(firstCellId)}
+                className="block max-w-full truncate rounded-sm text-start decoration-dotted underline-offset-4 hover:underline focus-visible:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+              >
+                {title}
+              </button>
+            </AppTooltip>
+          ) : title}
         </span>
         {outstandingLabel && (
           <span

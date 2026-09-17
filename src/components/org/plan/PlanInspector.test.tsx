@@ -651,6 +651,33 @@ describe("the chapter card", () => {
     expect(onOpenCell).toHaveBeenCalledWith("c4")
   })
 
+  it("opens the chapter's FIRST cell from its title, short or not", async () => {
+    // c1 is finished and draws no chip; it is still where "Chapter 12" goes.
+    const onOpenCell = vi.fn()
+    await openChapter(
+      nearlyDone({ sectionKey: "GEN" }),
+      [section("GEN 12", { totalCount: 20, filledCount: 20, validatedCount: 18 })],
+      [verse("c1", "GEN 12:1"), verse("c4", "GEN 12:4", { validated: false })],
+      { onOpenCell },
+    )
+    const title = screen.getByTestId("plan-chapter-open")
+    expect(screen.getByTestId("plan-chapter-detail-title")).toContainElement(title)
+    expect(title).toHaveTextContent("Chapter 12")
+    fireEvent.click(title)
+    expect(onOpenCell).toHaveBeenCalledWith("c1")
+  })
+
+  it("keeps the chapter title plain until its verses are known", async () => {
+    await openChapter(
+      nearlyDone({ sectionKey: "GEN" }),
+      [section("GEN 12", { totalCount: 20, filledCount: 20, validatedCount: 18 })],
+      [],
+      { onOpenCell: vi.fn() },
+    )
+    expect(screen.getByTestId("plan-chapter-detail-title")).toHaveTextContent("Chapter 12")
+    expect(screen.queryByTestId("plan-chapter-open")).toBeNull()
+  })
+
   it("lists the unwritten verses when translation is what leads", async () => {
     // A cell nobody has written cannot be validated, so pointing at an
     // unvalidated one would send a reader to do the other job first.

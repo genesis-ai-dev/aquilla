@@ -1515,3 +1515,145 @@ describe("sweepStrandedContextualRuns", () => {
     expect(sweep.adopted).toBe(0)
   })
 })
+
+// ── Trust gate wake paths (AQU-1300) ───────────────────────────────────────
+//
+// WHY at the route level: the budget lives on the run row, but the four things
+// that BUY budget are spread across three files — the action route, the review
+// route, the steering route, and the decision lifecycle. Each one has to grant
+// before it resumes, or the run wakes with nothing to spend and parks again on
+// its very next span edge. That failure is invisible in any single unit: the
+// call succeeds, the status flips to running, and the user simply watches
+// nothing happen. It is only observable end to end, which is here.
+
+describe("trust gate — continuing a parked run", () => {
+  /** Two more chapters, so a default-allowance run parks with work left over
+   *  instead of finishing the seeded file outright. */
+  async function seedMoreChapters(): Promise<void> {
+    for (const [cellId, ref, text] of [
+      ["c3", "MRK 2:1", "And again he entered"],
+      ["c4", "MRK 3:1", "He went into the synagogue"],
+    ] as const) {
+      await env.AQUILLA_PG.prepare(
+        `INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at)
+         VALUES (?, ?, ?, 'source', ?, ?, ?, 0)`,
+      )
+        .bind(PROJECT, FILE, cellId, text, ref, `ev-${cellId}`)
+        .run()
+    }
+  }
+
+  async function settle(): Promise<void> {
+    if (_test.lastLoop) await _test.lastLoop
+    _test.lastLoop = null
+  }
+
+  it("a plain start drafts one passage and parks awaiting input", async () => {
+    const { contrib } = await seedWorld()
+    await seedMoreChapters()
+    const runId = await startRun(contrib)
+
+    const run = await getRun(env.AQUILLA_PG, runId)
+    expect(run?.status).toBe("parked")
+    expect(run?.parkReason).toBe("awaiting_input")
+    expect(run?.doneSpans).toBe(1)
+    expect(run?.totalSpans).toBeGreaterThan(1)
+  })
+
+  it("start with translateEverything runs the file out", async () => {
+    const { contrib } = await seedWorld()
+    await seedMoreChapters()
+    const res = await req("POST", "/runs", contrib, { fileId: FILE, translateEverything: true })
+    expect(res.status).toBe(201)
+    const { runId } = (await res.json()) as { runId: string }
+    await settle()
+
+    const run = await getRun(env.AQUILLA_PG, runId)
+    expect(run?.spanAllowance).toBeNull()
+    expect(run?.doneSpans).toBe(run?.totalSpans)
+    expect(run?.parkReason).toBe("work_exhausted")
+  })
+
+  it("continue grants a batch and drafts again", async () => {
+    const { contrib } = await seedWorld()
+    await seedMoreChapters()
+    const runId = await startRun(contrib)
+    const parked = await getRun(env.AQUILLA_PG, runId)
+    expect(parked?.doneSpans).toBe(1)
+
+    const res = await req("POST", `/runs/${runId}/continue`, contrib)
+    expect(res.status).toBe(200)
+    await settle()
+
+    const after = await getRun(env.AQUILLA_PG, runId)
+    // The batch is what makes Continue feel like progress: more than the one
+    // passage an incidental grant buys.
+    expect(after?.doneSpans).toBeGreaterThan(1)
+  })
+
+  it("continue-all lifts the budget for the rest of the scope", async () => {
+    const { contrib } = await seedWorld()
+    await seedMoreChapters()
+    const runId = await startRun(contrib)
+
+    const res = await req("POST", `/runs/${runId}/continue-all`, contrib)
+    expect(res.status).toBe(200)
+    await settle()
+
+    const after = await getRun(env.AQUILLA_PG, runId)
+    expect(after?.spanAllowance).toBeNull()
+    expect(after?.doneSpans).toBe(after?.totalSpans)
+    expect(after?.parkReason).toBe("work_exhausted")
+  })
+
+  it("refuses continue to a viewer — it spends the project's model budget", async () => {
+    const { contrib, viewer } = await seedWorld()
+    await seedMoreChapters()
+    const runId = await startRun(contrib)
+
+    const res = await req("POST", `/runs/${runId}/continue`, viewer)
+    expect(res.status).toBe(403)
+    expect((await getRun(env.AQUILLA_PG, runId))?.doneSpans).toBe(1)
+  })
+
+  it("reviewing a staged draft buys one more passage and wakes the run", async () => {
+    const { contrib } = await seedWorld()
+    await seedMoreChapters()
+    const runId = await startRun(contrib)
+    expect((await getRun(env.AQUILLA_PG, runId))?.doneSpans).toBe(1)
+
+    const drafts = await listDrafts(env.AQUILLA_PG, PROJECT, FILE, "proposed")
+    expect(drafts.length).toBeGreaterThan(0)
+    const res = await req("POST", `/drafts/${drafts[0].id}/review`, contrib, { action: "rejected" })
+    expect(res.status).toBe(200)
+    await settle()
+
+    // This is the criterion the whole feature turns on: the run earns its next
+    // passage by the user engaging with the last one.
+    const after = await getRun(env.AQUILLA_PG, runId)
+    expect(after?.doneSpans).toBe(2)
+    expect(after?.status).toBe("parked")
+  })
+
+  it("steering a parked run wakes it for ONE passage, not the whole book", async () => {
+    const { contrib } = await seedWorld()
+    await seedMoreChapters()
+    const runId = await startRun(contrib)
+
+    const res = await req("POST", "/steering", contrib, {
+      kind: "direction",
+      body: "Keep the narrator's register plain.",
+      runId,
+    })
+    expect(res.status).toBe(201)
+    await settle()
+
+    const after = await getRun(env.AQUILLA_PG, runId)
+    // One span, then park again. A steering wake that bypassed the budget
+    // would be the hole that makes the whole gate decorative.
+    expect(after?.doneSpans).toBe(2)
+    expect(after?.status).toBe("parked")
+    expect(after?.parkReason).toBe("awaiting_input")
+  })
+})
+

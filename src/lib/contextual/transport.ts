@@ -33,6 +33,7 @@ import { fetchWithTimeout } from "@/lib/frontier/orgs"
 import { loadSession } from "@/lib/frontier/session-store"
 import {
   setContextualTransport,
+  type ContextualParkReason,
   type ContextualRunSnapshot,
   type ContextualTransport,
   type ContextualTransportSnapshot,
@@ -146,7 +147,7 @@ function projectForRun(runId: string): string {
   return projectId
 }
 
-async function postRunCommand(runId: string, command: "pause" | "resume" | "terminate"): Promise<void> {
+async function postRunCommand(runId: string, command: ContextualRunCommand): Promise<void> {
   const projectId = projectForRun(runId)
   const jwt = await requireJwt()
   const res = await fetchWithTimeout(
@@ -182,6 +183,7 @@ export const realContextualTransport: ContextualTransport = {
     fileId: string,
     anchorCellId?: string,
     targetLang = "",
+    translateEverything = false,
   ): Promise<{ runId: string }> {
     const jwt = await requireJwt()
     const res = await fetchWithTimeout(runsBase(projectId), {
@@ -192,6 +194,10 @@ export const realContextualTransport: ContextualTransport = {
         fileId,
         ...(anchorCellId ? { anchorCellId } : {}),
         ...(targetLang ? { targetLang } : {}),
+        // Omitted unless chosen, so the server's trust-gated default applies
+        // (AQU-1300) — sending `false` explicitly would mean the same thing,
+        // but a start that says nothing about budget is the honest default.
+        ...(translateEverything ? { translateEverything: true } : {}),
       }),
     })
     if (!res.ok) return throwFromResponse(res, "start contextual run failed")
@@ -203,6 +209,8 @@ export const realContextualTransport: ContextualTransport = {
   pause: (runId) => postRunCommand(runId, "pause"),
   resume: (runId) => postRunCommand(runId, "resume"),
   terminate: (runId) => postRunCommand(runId, "terminate"),
+  continueRun: (runId, scope) =>
+    postRunCommand(runId, scope === "all" ? "continue-all" : "continue"),
 }
 
 // ── Drafts: the run's actual output ─────────────────────────────────────────
@@ -295,6 +303,9 @@ export interface ContextualOverviewFile {
   appliedDrafts: number
   updatedAt: string
   lastError: string | null
+  /** Why this file's newest run parked (AQU-1300). A project-wide start is one
+   *  run per file, so this is where the per-file "waiting for you" is read. */
+  parkReason?: ContextualParkReason | null
 }
 
 export type ReadinessLevel = "ready" | "partial" | "missing"
@@ -357,6 +368,12 @@ export interface ContextualRunRecord {
   scopeGroup?: string | null
   anchorCellId?: string | null
   proposedDrafts?: number
+  /** AQU-1300. Spans the run may still process before it parks; `null` is
+   *  unlimited ("translate everything"). Absent from a pre-AQU-1300 backend. */
+  spanAllowance?: number | null
+  /** Why a `parked` run stopped. Only `awaiting_input` offers Continue /
+   *  Translate everything — `work_exhausted` is genuinely finished. */
+  parkReason?: ContextualParkReason | null
   activeDirections: string[]
 }
 
@@ -531,6 +548,18 @@ function normalizeRun(value: unknown): ContextualRunRecord | null {
     ...(row.proposedDrafts !== undefined
       ? { proposedDrafts: numberValue(row.proposedDrafts) }
       : {}),
+    // Both stay ABSENT rather than defaulting when the backend does not send
+    // them (AQU-1300). A missing allowance is "this server has no trust gate",
+    // which is not the same as a spent budget, and defaulting it to 0 would
+    // paint every run on an older backend as waiting for input.
+    ...(row.spanAllowance === null || typeof row.spanAllowance === "number"
+      ? { spanAllowance: row.spanAllowance }
+      : {}),
+    ...(row.parkReason === "awaiting_input" || row.parkReason === "work_exhausted"
+      ? { parkReason: row.parkReason }
+      : row.parkReason === null
+        ? { parkReason: null }
+        : {}),
     activeDirections: directions,
   }
 }
@@ -765,7 +794,15 @@ export async function startFileContextualRun(
   return realContextualTransport.start(projectId, fileId, undefined, targetLang)
 }
 
-export type ContextualRunCommand = "pause" | "resume" | "terminate"
+/** `continue` grants the run a batch of spans and resumes it; `continue-all`
+ *  lifts its budget entirely (AQU-1300). Both are only meaningful on a run
+ *  parked with `parkReason: "awaiting_input"`. */
+export type ContextualRunCommand =
+  | "pause"
+  | "resume"
+  | "terminate"
+  | "continue"
+  | "continue-all"
 
 /** Project-scoped controls for the inspector. Commands still pass through the
  * same role/state guards as the editor pill; the response is the authoritative

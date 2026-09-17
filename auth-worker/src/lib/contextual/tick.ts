@@ -32,6 +32,7 @@ import {
   findProposedCellsFromOtherRuns,
   appendContextualRunEvent,
   type ContextualRun,
+  type ContextualParkReason,
   type ContextualRunStatus,
   type ContextualSpanReason,
   type SpanCursor,
@@ -318,6 +319,11 @@ export interface ContextualRunStateFrame {
   done: number
   total: number
   failed?: number
+  /** Why a `parked` run stopped (AQU-1300). Carried on the LIVE frame, not
+   *  left to the next poll: parking is the moment the UI has to switch from
+   *  "drafting" to "waiting for you", and a frame that says only `parked`
+   *  cannot tell that apart from "finished". Omitted on every other status. */
+  parkReason?: ContextualParkReason
 }
 
 export interface ContextualSceneFrame {
@@ -408,6 +414,7 @@ export function runStateFrame(run: ContextualRun): ContextualRunStateFrame {
     done: run.doneSpans,
     total: run.totalSpans,
     failed: run.failedSpans,
+    ...(run.status === "parked" && run.parkReason ? { parkReason: run.parkReason } : {}),
   }
 }
 

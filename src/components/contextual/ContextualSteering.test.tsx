@@ -71,6 +71,7 @@ function makeTransport(overrides: Partial<ContextualTransport> = {}): Contextual
     pause: vi.fn(async () => {}),
     resume: vi.fn(async () => {}),
     terminate: vi.fn(async () => {}),
+    continueRun: vi.fn(async () => {}),
     ...overrides,
   }
 }

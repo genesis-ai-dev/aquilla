@@ -2109,6 +2109,8 @@ export interface ProjectAutopilotFileRow {
   appliedDrafts: number
   updatedAt: string
   lastError: string | null
+  /** Why this file's newest run parked (AQU-1300); null on any other status. */
+  parkReason: ContextualParkReason | null
 }
 
 export interface ProjectAutopilotSummary {
@@ -2137,7 +2139,7 @@ export async function getProjectAutopilotSummary(
       `WITH newest AS (
          SELECT DISTINCT ON (file_id, target_lang)
                 id, file_id, target_lang, status, done_spans, total_spans, failed_spans,
-                units_spent, last_error, updated_at
+                units_spent, last_error, park_reason, updated_at
           FROM contextual_runs
          WHERE project_id = ?
           ORDER BY file_id, target_lang, created_at DESC, id DESC
@@ -2175,6 +2177,7 @@ export async function getProjectAutopilotSummary(
       failed_spans: number
       units_spent: number
       last_error: string | null
+      park_reason: string | null
       updated_at: unknown
       proposed: number
       applied: number
@@ -2197,6 +2200,10 @@ export async function getProjectAutopilotSummary(
     // Summary rows bypass rowToRun, so keep the same legacy-read privacy
     // boundary here as snapshots/activity.
     lastError: sanitizeRunError(r.last_error),
+    // AQU-1300: a project-wide start fans out one run per file, and the
+    // overview is where those are seen. Without the reason every parked file
+    // reads "Idle" — including the ones holding for an answer.
+    parkReason: parseParkReason(r.park_reason),
   }))
 
   const sum = (pick: (f: ProjectAutopilotFileRow) => number) =>

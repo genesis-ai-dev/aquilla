@@ -56,6 +56,7 @@ const nearlyDone = (over: Partial<PlanUnit> = {}): PlanUnit =>
 type InspectorExtras = {
   onGoToFirstOpen?: (kind: PlanOpenKind) => void
   onOpenCell?: (cellId: string) => void
+  onOpenUnit?: () => void
   laneCount?: number
   assignments?: ReactNode
 }
@@ -85,6 +86,23 @@ const withSections = (sections: ReturnType<typeof section>[]) => {
   } as never)
   return async () => "tok"
 }
+
+describe("the title opens the file", () => {
+  it("is a button that hands the click upstairs when the panel can open it", () => {
+    const onOpenUnit = vi.fn()
+    renderInspector(unit(), true, false, null, { onOpenUnit })
+    const title = screen.getByTestId("plan-inspector-open-file")
+    expect(screen.getByRole("heading", { name: "Mark" })).toContainElement(title)
+    fireEvent.click(title)
+    expect(onOpenUnit).toHaveBeenCalledTimes(1)
+  })
+
+  it("is plain text when nothing can open it", () => {
+    renderInspector(unit())
+    expect(screen.queryByTestId("plan-inspector-open-file")).toBeNull()
+    expect(screen.getByRole("heading", { name: "Mark" })).toBeInTheDocument()
+  })
+})
 
 describe("access adapts the content", () => {
   it("gives a maintainer the date control and the Done button", () => {

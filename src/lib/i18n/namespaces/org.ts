@@ -1233,6 +1233,7 @@ export const org = defineNamespace({
     "org.projectOverview.plan.inspectorAria": "Details for {unit}",
     "org.projectOverview.plan.previousUnit": "Previous unit",
     "org.projectOverview.plan.nextUnit": "Next unit",
+    "org.projectOverview.plan.openFile": "Open in the editor",
     "org.projectOverview.plan.targetDate": "Target date",
     "org.projectOverview.plan.noTarget": "No target",
     "org.projectOverview.plan.noTargetSet": "No target date set",
@@ -2608,6 +2609,10 @@ export const org = defineNamespace({
       "org.projectOverview.plan.nextUnit": {
         description: "Tooltip on the down arrow that steps to the next unit.",
         maxLength: 20,
+      },
+      "org.projectOverview.plan.openFile": {
+        description: "Tooltip on the detail panel's title, which opens the unit's file in the editor.",
+        maxLength: 30,
       },
       "org.projectOverview.plan.targetDate": {
         description: "Label for the date a manager plans this unit to be finished by.",

@@ -1125,6 +1125,14 @@ export function ProjectOverview() {
         if (!id) return
         openWorkspace(editorCellHref(id, selectedPlanUnit.fileId, cellId, planLane, true))
       }}
+      // AQU-1278: the title opens the unit's FILE — no cell, so no flash — for
+      // the reader who wants the editor itself rather than the first gap in
+      // it (Sam, 2026-09-17). The lane still rides along, as on every link
+      // built from this lane-scoped board.
+      onOpenUnit={() => {
+        if (!id) return
+        openWorkspace(editorCellHref(id, selectedPlanUnit.fileId, null, planLane, false))
+      }}
     />
   ) : null
 

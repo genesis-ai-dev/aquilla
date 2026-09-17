@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { DatePicker, deadlineStringToDate, dateToDeadlineString } from "@/components/ui/date-picker"
 import { X, ChevronUp, ChevronDown, ArrowRight } from "lucide-react"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { fmtDeadlineDate } from "@/lib/format-date"
 import { formatRelativeTime } from "@/lib/i18n/format"
 import { isKnownBookCode } from "@/lib/file-labeling/bible-book-names"
@@ -49,7 +50,7 @@ import { shortVerses, verseChipLabel } from "./verse-chips"
  */
 export function PlanInspector({
   unit, now, canPlan, showAudio, projectId, getToken, lane, languageLabel, laneCount,
-  assignments, audioFiles, onPatch, onClose, onStep, onGoToFirstOpen, onOpenCell,
+  assignments, audioFiles, onPatch, onClose, onStep, onGoToFirstOpen, onOpenCell, onOpenUnit,
 }: {
   unit: PlanUnit
   now: number
@@ -109,6 +110,15 @@ export function PlanInspector({
    * something on its own) and simply do nothing when pressed.
    */
   onOpenCell?: (cellId: string) => void
+  /**
+   * AQU-1278 (Sam, 2026-09-17): open the editor on this unit's FILE, from its
+   * title. The plain "take me there" beside the two targeted links above — a
+   * reader who wants the file itself, not the first gap in it, used to have
+   * to close the panel and find the file in the sidebar. Same division of
+   * labour as the others: where the editor lives is ProjectOverview's
+   * business. Absent, the title is plain text.
+   */
+  onOpenUnit?: () => void
 }) {
   const t = useT()
   const { locale } = useI18n()
@@ -244,7 +254,23 @@ export function PlanInspector({
     >
       <header className="flex items-start justify-between gap-2.5 border-b px-4 py-3.5">
         <div className="min-w-0">
-          <h3 className="truncate text-base font-semibold tracking-tight">{planUnitLabel(unit)}</h3>
+          <h3 className="truncate text-base font-semibold tracking-tight">
+            {onOpenUnit ? (
+              // Styled as the board's other links are: the words as they were,
+              // a dotted underline on hover and focus, so the title still reads
+              // as a title until the pointer asks it what it does.
+              <AppTooltip content={t("org.projectOverview.plan.openFile")}>
+                <button
+                  type="button"
+                  data-testid="plan-inspector-open-file"
+                  onClick={onOpenUnit}
+                  className="block max-w-full truncate rounded-sm text-start decoration-dotted underline-offset-4 hover:underline focus-visible:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                >
+                  {planUnitLabel(unit)}
+                </button>
+              </AppTooltip>
+            ) : planUnitLabel(unit)}
+          </h3>
           <p className="mt-0.5 text-[11.5px] text-muted-foreground" data-testid="plan-inspector-meta">
             {meta}
           </p>

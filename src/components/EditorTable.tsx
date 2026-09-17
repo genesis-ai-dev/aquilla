@@ -6739,11 +6739,41 @@ function EditorRow({
                 className="w-full !px-0"
               />
             ) : (cell.medium !== "media" && (sourceDraft?.valueHtml || cell.originalHtml)) ? (
-              <SanitizedRichHtml
-                html={sourceDraft?.valueHtml || cell.originalHtml || ""}
-                idmlStyleCatalog={idmlStyleCatalog}
-                idmlParagraphStyleId={idmlParagraphStyleId}
-              />
+              // AQU-1135: a formatted source cell renders as sanitized HTML, so
+              // it cannot host the per-match TermLookupPopover triggers the
+              // plain-text path builds. It gets the highlights as decorated
+              // markup instead, and the click is delegated here — the same
+              // `.term-chip-host[data-source-term]` contract TranslatedEditor
+              // uses for the target lane, landing on the same popover.
+              <div
+                onClick={(event) => {
+                  const host = (event.target as HTMLElement).closest(
+                    ".term-chip-host[data-source-term]",
+                  )
+                  const term = host?.getAttribute("data-source-term")
+                  if (!term) return
+                  event.stopPropagation()
+                  handleTermChipClick(term, host as HTMLElement)
+                }}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter" && event.key !== " ") return
+                  const host = (event.target as HTMLElement).closest(
+                    ".term-chip-host[data-source-term]",
+                  )
+                  const term = host?.getAttribute("data-source-term")
+                  if (!term) return
+                  event.preventDefault()
+                  event.stopPropagation()
+                  handleTermChipClick(term, host as HTMLElement)
+                }}
+              >
+                <SanitizedRichHtml
+                  html={sourceDraft?.valueHtml || cell.originalHtml || ""}
+                  idmlStyleCatalog={idmlStyleCatalog}
+                  idmlParagraphStyleId={idmlParagraphStyleId}
+                  concepts={terminologyConcepts}
+                />
+              </div>
             ) : (
               <UsfmSourceText
                 // AQU-646: an imported media segment's stored `value` is the

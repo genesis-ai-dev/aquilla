@@ -1596,7 +1596,6 @@ export const my: Catalog = {
   "autopilot.readiness.languages.unset": "မူရင်း သို့မဟုတ် ဘာသာပြန်ဘာသာစကားကို မသတ်မှတ်ရသေးသဖြင့် Autopilot က လက်ရှိဘာသာပြန်ချက်များမှ ခန့်မှန်းရမည်။",
   "org.breadcrumb.allOrganizations": "အဖွဲ့အစည်းအားလုံး",
   "org.breadcrumb.organizationFallback": "အဖွဲ့အစည်း",
-  "org.switcher.workspaceFallback": "အလုပ်ခွင်",
   "org.switcher.triggerAriaLabel": "အဖွဲ့အစည်းပြောင်းရန်: {org}",
   "org.switcher.searchPlaceholder": "အဖွဲ့အစည်းရှာရန်…",
   "org.switcher.searchAriaLabel": "အဖွဲ့အစည်းရှာရန်",

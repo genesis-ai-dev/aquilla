@@ -1596,7 +1596,6 @@ export const th: Catalog = {
   "autopilot.readiness.languages.unset": "ยังไม่ได้ตั้งค่าภาษาต้นทางหรือภาษาปลายทาง โหมดอัตโนมัติจึงต้องอนุมานจากคำแปลที่มีอยู่ของคุณ",
   "org.breadcrumb.allOrganizations": "องค์กรทั้งหมด",
   "org.breadcrumb.organizationFallback": "องค์กร",
-  "org.switcher.workspaceFallback": "พื้นที่ทำงาน",
   "org.switcher.triggerAriaLabel": "ตัวสลับองค์กร: {org}",
   "org.switcher.searchPlaceholder": "ค้นหาองค์กร…",
   "org.switcher.searchAriaLabel": "ค้นหาองค์กร",

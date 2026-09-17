@@ -170,7 +170,7 @@ export const settings = defineNamespace({
     "settings.monday.callback.connecting": "Connecting to Monday.com…",
 
     // ── OrgSettingsIdentity ──
-    "settings.orgIdentity.nameDescription": "Shown across the workspace.",
+    "settings.orgIdentity.nameDescription": "Shown across the organization.",
     // "Organization name" (label, sr-only FieldLabel, placeholder) →
     // org.createDialog.nameLabel (identical text)
 

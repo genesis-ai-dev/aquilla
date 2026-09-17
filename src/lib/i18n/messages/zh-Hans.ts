@@ -1932,7 +1932,6 @@ export const zh_Hans: Catalog = {
   "autopilot.readiness.languages.unset": "尚未设置来源或目标语言，因此自动领航只能从您既有的译文中推断。",
   "org.breadcrumb.allOrganizations": "所有组织",
   "org.breadcrumb.organizationFallback": "组织",
-  "org.switcher.workspaceFallback": "工作区",
   "org.switcher.triggerAriaLabel": "组织切换器：{org}",
   "org.switcher.searchPlaceholder": "寻找组织…",
   "org.switcher.searchAriaLabel": "寻找组织",

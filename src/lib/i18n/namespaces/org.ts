@@ -1284,10 +1284,10 @@ export const org = defineNamespace({
     "org.projectOverview.plan.shortfallTranslateBrief": plural({ one: "{count} to translate", other: "{count} to translate" }),
     "org.projectOverview.plan.shortfallValidateBrief": plural({ one: "{count} to validate", other: "{count} to validate" }),
     "org.projectOverview.plan.shortfallRecordBrief": plural({ one: "{count} to record", other: "{count} to record" }),
-    // "to sign off" rather than a second "to validate": the brief forms drop
-    // the noun that told them apart, and two identical English strings in one
-    // catalog are a collision a translator cannot resolve from context.
-    "org.projectOverview.plan.shortfallAudioValidateBrief": plural({ one: "{count} to sign off", other: "{count} to sign off" }),
+    // Keeps its noun where the other brief forms drop theirs: with both nouns
+    // gone, "6 to validate · 8 to validate" would name one thing twice. Sam's
+    // word for this is "validated", never "sign off" (2026-09-17).
+    "org.projectOverview.plan.shortfallAudioValidateBrief": plural({ one: "{count} take to validate", other: "{count} takes to validate" }),
     "org.projectOverview.plan.shortfallPair": "{first} \u00b7 {second}",
     // A unit with nothing outstanding that nobody has marked done: it stays in
     // Overdue where its blown date belongs, and this line is how the row
@@ -1314,7 +1314,12 @@ export const org = defineNamespace({
     "org.projectOverview.plan.goToFirstUntranslated": "Go to first untranslated",
     "org.projectOverview.plan.goToFirstUnvalidated": "Go to first unvalidated",
     "org.projectOverview.plan.goToFirstUnrecorded": "Go to first unrecorded",
-    "org.projectOverview.plan.goToFirstUnsigned": "Go to first take to sign off",
+    "org.projectOverview.plan.goToFirstUnsigned": "Go to first unvalidated take",
+    // AQU-1278, round 7: what a bar's two percentages stand for, on hover.
+    "org.projectOverview.plan.readoutTranslated": "{done} of {total} translated",
+    "org.projectOverview.plan.readoutValidated": "{done} of {total} validated",
+    "org.projectOverview.plan.readoutRecorded": "{done} of {total} recorded",
+    "org.projectOverview.plan.readoutAudioValidated": "{done} of {total} validated",
     // AQU-1096: the list controls. Neutral throughout — the orphaned
     // filterFiles* keys say "files", which this surface never does.
     "org.projectOverview.plan.filterPlaceholder": "Filter by name\u2026",
@@ -2710,8 +2715,8 @@ export const org = defineNamespace({
       },
       "org.projectOverview.plan.shortfallAudioValidate": {
         description:
-          "One term of the shortfall line (see shortfallTranslate): recorded takes nobody has signed off. Not rendered anywhere today — audio is judged on what has been recorded until the recording-review UI exists (AQU-490), so this count is zero on every project. Translate it anyway; it appears the day that lands.",
-        placeholders: { count: "Recorded takes still awaiting sign-off — a number; it also selects the plural form." },
+          "One term of the shortfall line (see shortfallTranslate): recorded takes nobody has validated yet. Not rendered anywhere today — audio is judged on what has been recorded until the recording-review UI exists (AQU-490), so this count is zero on every project. Translate it anyway; it appears the day that lands.",
+        placeholders: { count: "Recorded takes still awaiting validation — a number; it also selects the plural form." },
       },
       "org.projectOverview.plan.shortfallTranslateBrief": {
         description:
@@ -2730,8 +2735,8 @@ export const org = defineNamespace({
       },
       "org.projectOverview.plan.shortfallAudioValidateBrief": {
         description:
-          "The short form of shortfallAudioValidate (see shortfallTranslateBrief): recorded takes nobody has signed off. Worded 'sign off' rather than 'validate' so it cannot collide with the validate term beside it once both have dropped their nouns. Not rendered today — audio is judged on what has been recorded until AQU-490 ships.",
-        placeholders: { count: "Recorded takes still awaiting sign-off — a number; it also selects the plural form." },
+          "The short form of shortfallAudioValidate (see shortfallTranslateBrief): recorded takes nobody has validated yet. Unlike the other brief forms it KEEPS its noun, because beside shortfallValidateBrief with both nouns dropped it would read as the same thing said twice. Not rendered today — audio is judged on what has been recorded until AQU-490 ships.",
+        placeholders: { count: "Recorded takes still awaiting validation — a number; it also selects the plural form." },
       },
       "org.projectOverview.plan.shortfallPair": {
         description:
@@ -2782,7 +2787,27 @@ export const org = defineNamespace({
       },
       "org.projectOverview.plan.goToFirstUnsigned": {
         description:
-          "Link that opens the editor at the first recorded take nobody has signed off (selected and approved). 'Sign off' rather than 'validate', matching shortfallAudioValidateBrief, so it cannot be confused with text validation. Not offered today — audio is judged on what has been recorded until AQU-490 ships.",
+          "Link that opens the editor at the first recorded take nobody has validated (selected and approved). 'Take' is what keeps it apart from goToFirstUnvalidated, which is about text. Not offered today — audio is judged on what has been recorded until AQU-490 ships.",
+      },
+      "org.projectOverview.plan.readoutTranslated": {
+        description:
+          "Hover tip, and accessible name, of the first percentage beside a text bar on the plan board and in its inspector: what that percentage stands for, as cells. \"1,530 of 1,533 translated\". Both numbers arrive already formatted for the reader's locale.",
+        placeholders: { done: "Cells with target text, formatted — e.g. '1,530'.", total: "The unit's cells, formatted — e.g. '1,533'." },
+      },
+      "org.projectOverview.plan.readoutValidated": {
+        description:
+          "Hover tip, and accessible name, of the second percentage beside a text bar: how many cells are validated, out of the unit's cells. See readoutTranslated.",
+        placeholders: { done: "Validated cells, formatted.", total: "The unit's cells, formatted." },
+      },
+      "org.projectOverview.plan.readoutRecorded": {
+        description:
+          "Hover tip, and accessible name, of the first percentage beside an audio bar: cells with a recorded take, out of the bar's own total — which on a dubbing project is the cue sheet's count, not the file's. See readoutTranslated.",
+        placeholders: { done: "Cells with a take, formatted.", total: "Cells the audio is measured against, formatted." },
+      },
+      "org.projectOverview.plan.readoutAudioValidated": {
+        description:
+          "Hover tip, and accessible name, of the second percentage beside an audio bar: takes that have been validated, out of the bar's own total. Same English as readoutValidated on purpose — Sam's word for audio validation is 'validated' (2026-09-17); a language that distinguishes the two may.",
+        placeholders: { done: "Validated takes, formatted.", total: "Cells the audio is measured against, formatted." },
       },
       "org.projectOverview.plan.filterPlaceholder": {
         description:

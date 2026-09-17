@@ -13,7 +13,7 @@
 
 import { useT, useI18n } from "@/lib/i18n/I18nProvider"
 import { fmtDeadlineDate } from "@/lib/format-date"
-import { formatRelativeTime } from "@/lib/i18n/format"
+import { formatNumber, formatRelativeTime } from "@/lib/i18n/format"
 import {
   planShortfallParts,
   planUnitNote,
@@ -188,4 +188,36 @@ export const GO_TO_FIRST_KEY: Record<PlanOpenKind, string> = {
   unvalidated: "org.projectOverview.plan.goToFirstUnvalidated",
   unrecorded: "org.projectOverview.plan.goToFirstUnrecorded",
   unsigned: "org.projectOverview.plan.goToFirstUnsigned",
+}
+
+/**
+ * AQU-1278, round 7: what a bar's two percentages stand for, as sentences for
+ * their hover tips — "1,530 of 1,533 validated". `total` is the BAR's own
+ * denominator: the unit's cells for text, and for audio whatever
+ * `planAudioTotal` says, which on a dubbing project is the cue sheet's count.
+ * Numbers are formatted for the reader's locale here because the catalog's
+ * interpolation does not group digits, and "1530 of 1533" is not how anyone
+ * writes a number.
+ */
+export function usePlanReadoutTips(): (
+  tone: "text" | "audio",
+  done: number,
+  validated: number,
+  total: number,
+) => { outer: string; inner: string } {
+  const t = useT()
+  const { locale } = useI18n()
+  return (tone, done, validated, total) => {
+    const n = (v: number) => formatNumber(v, locale)
+    const vars = (v: number) => ({ done: n(v), total: n(total) })
+    return tone === "text"
+      ? {
+          outer: t("org.projectOverview.plan.readoutTranslated", vars(done)),
+          inner: t("org.projectOverview.plan.readoutValidated", vars(validated)),
+        }
+      : {
+          outer: t("org.projectOverview.plan.readoutRecorded", vars(done)),
+          inner: t("org.projectOverview.plan.readoutAudioValidated", vars(validated)),
+        }
+  }
 }

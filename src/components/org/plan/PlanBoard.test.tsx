@@ -756,3 +756,24 @@ describe("the row's link follows the audio once the text is done (round 5)", () 
     expect(onOpenShortfall).toHaveBeenCalledTimes(1)
   })
 })
+
+describe("the percentages say what they stand for, on hover (round 7)", () => {
+  it("gives each figure the count out of the bar's own total as its accessible name", () => {
+    // Sam, 2026-09-17: percentages everywhere in print; the cells, with an
+    // "of", one hover away. Numbers grouped for the reader.
+    renderBoard([unit({ totalCount: 1533, filledCount: 1533, validatedCount: 1530, audioCount: 540, audioValidatedCount: 0, audioTotalCount: 548 })])
+    const names = screen.getAllByTestId("plan-readout-figure").map((el) => el.getAttribute("aria-label"))
+    expect(names).toEqual([
+      "1,533 of 1,533 translated",
+      "1,530 of 1,533 validated",
+      // The audio bar's total is the CUE SHEET's, not the file's.
+      "540 of 548 recorded",
+      "0 of 548 validated",
+    ])
+  })
+
+  it("no longer repeats the percentages in a title on the bar itself", () => {
+    renderBoard([unit({ filledCount: 40 })])
+    expect(screen.getByLabelText(/^Text/)).not.toHaveAttribute("title")
+  })
+})

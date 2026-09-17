@@ -37,7 +37,7 @@ import { PlanStatusPill } from "./PlanStatusPill"
 import { PlanBar, Readout } from "./PlanBar"
 import { PlanChapterGrid, PlanGridLegend, planSectionShortfall } from "./PlanChapterGrid"
 import { PLAN_TONE } from "./plan-tone"
-import { GO_TO_FIRST_KEY, usePlanShortfallText, usePlanStatusNote } from "./use-plan-note"
+import { GO_TO_FIRST_KEY, usePlanReadoutTips, usePlanShortfallText, usePlanStatusNote } from "./use-plan-note"
 import { useSectionVerses, type SectionVersesState } from "./use-section-verses"
 import { shortVerses, verseChipLabel } from "./verse-chips"
 
@@ -121,6 +121,7 @@ export function PlanInspector({
   // `usePlanStatusNote` is a hook and cannot be called conditionally.
   const noteKind = planUnitNote(unit, now, audioFiles)?.kind ?? null
   const validatedPct = planPct(unit.validatedCount, unit.totalCount)
+  const readoutTips = usePlanReadoutTips()
   const { sections } = usePlanUnitSections({ projectId, unit, getToken, lane })
 
   // AQU-1278. `audioFiles` comes from the board, which computes it over every
@@ -305,6 +306,7 @@ export function PlanInspector({
                 translated: planPct(unit.filledCount, unit.totalCount),
                 validated: validatedPct,
               })}
+              tips={readoutTips("text", unit.filledCount, unit.validatedCount, unit.totalCount)}
             />
             {showAudio && (
               <PlanBar
@@ -316,6 +318,7 @@ export function PlanInspector({
                   recorded: planPct(unit.audioCount, audioTotal),
                   validated: planPct(unit.audioValidatedCount, audioTotal),
                 })}
+                tips={readoutTips("audio", unit.audioCount, unit.audioValidatedCount, audioTotal)}
               />
             )}
             {/* AQU-1278. A recording hangs off the FILE, not off a target
@@ -649,7 +652,11 @@ function PlanChapterCard({
           translated: planPct(section.filledCount, section.totalCount),
           validated: planPct(section.validatedCount, section.totalCount),
         })}
-        readout={<Readout left={section.totalCount} right={section.validatedCount} />}
+        // Translated | validated, like every other readout — not total |
+        // validated, which it was until Sam's review (2026-09-17). Nobody had
+        // caught it because a nearly-complete chapter is usually fully
+        // translated, and then the two numbers coincide.
+        readout={<Readout left={section.filledCount} right={section.validatedCount} />}
       />
       {hasAudio && (
         <PlanBar
@@ -661,7 +668,7 @@ function PlanChapterCard({
             recorded: planPct(section.audioCount, section.totalCount),
             validated: planPct(section.audioValidatedCount, section.totalCount),
           })}
-          readout={<Readout left={section.totalCount} right={section.audioCount} />}
+          readout={<Readout left={section.audioCount} right={section.audioValidatedCount} />}
         />
       )}
       {/* ONE ROW, NEVER TWO — and it SCROLLS. Sam, 2026-09-16: every verse

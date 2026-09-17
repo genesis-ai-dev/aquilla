@@ -607,7 +607,9 @@ describe("the chapter card", () => {
       [],
     )
     // "100% | 90%" rounds the two outstanding cells out of existence; "20 | 18"
-    // is the thing a manager can act on.
+    // is the thing a manager can act on. Translated | validated — the card
+    // read total | validated until 2026-09-17, which nobody caught because on
+    // a nearly-complete chapter the two coincide.
     expect(screen.getByTestId("plan-chapter-detail")).toHaveTextContent("20 | 18")
   })
 
@@ -719,5 +721,20 @@ describe("the chapter card", () => {
       [],
     )
     expect(screen.getByTestId("plan-chapter-detail-title")).toHaveTextContent("Chapter 1")
+  })
+})
+
+describe("the inspector's percentages say what they stand for (round 7)", () => {
+  it("names each figure's count out of the bar's own total", () => {
+    renderInspector(
+      unit({ totalCount: 646, filledCount: 646, validatedCount: 640, audioCount: 540, audioValidatedCount: 0, audioTotalCount: 548 }),
+      true, true,
+    )
+    const names = within(screen.getByTestId("plan-inspector-bars"))
+      .getAllByTestId("plan-readout-figure").map((el) => el.getAttribute("aria-label"))
+    expect(names).toEqual([
+      "646 of 646 translated", "640 of 646 validated",
+      "540 of 548 recorded", "0 of 548 validated",
+    ])
   })
 })

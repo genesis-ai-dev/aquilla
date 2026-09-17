@@ -16,7 +16,7 @@
 // are the things you touch once and read never, and they were pushing the
 // shortfall below the fold on a short panel.
 
-import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react"
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react"
 import { useT, useI18n } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
@@ -181,6 +181,24 @@ export function PlanInspector({
   // never before — `cells.canonical_ref` is unindexed, so each of these is a
   // full-file scan and a grid that prefetched its fifty tiles would be fifty.
   const sectionVerses = useSectionVerses({ projectId, fileId: unit.fileId, getToken, lane })
+  /**
+   * The open chapter's verses, fetched when a chapter is open and not before.
+   *
+   * ON THE OPEN KEY, never on the grid. `cells.canonical_ref` is unindexed, so
+   * each of these is a full-file scan; a grid that prefetched its fifty tiles
+   * would be fifty of them. This fires only for the one chapter a reader
+   * deliberately opened, and `load` is idempotent, so a re-render costs
+   * nothing.
+   *
+   * `load`'s identity carries the project, file and LANE, so this is also what
+   * refreshes an open chapter when the reader changes target language from the
+   * board's picker: the cache key changed, the chips would otherwise sit empty
+   * until the chapter was closed and reopened.
+   */
+  const loadVerses = sectionVerses.load
+  useEffect(() => {
+    if (openSectionKey) loadVerses(openSectionKey)
+  }, [openSectionKey, loadVerses])
   const openSectionTitle = (() => {
     if (!openSection) return ""
     const numbered = numberedBookCodes(sections.map((s) => s.key))
@@ -432,15 +450,14 @@ export function PlanInspector({
               showAudio={hasAudio}
               nearlyComplete={nearlyComplete}
               selectedKey={openSectionKey}
-              onSelect={(key) =>
-                setOpenSectionKey((open) => {
-                  if (open === key) return null
-                  // The fetch rides the click that opens the chapter, not the
-                  // render that follows it — see `useSectionVerses`.
-                  sectionVerses.load(key)
-                  return key
-                })
-              }
+              // Pure state. The fetch used to be launched from inside this
+              // updater, which made a request a side effect of rendering:
+              // React may call an updater more than once, and StrictMode
+              // deliberately calls it twice, so one click fired two or three
+              // identical full-file scans. Opening a chapter is now a state
+              // change, and the effect above turns that state into the one
+              // request it needs.
+              onSelect={(key) => setOpenSectionKey((open) => (open === key ? null : key))}
             />
 
             {/* ONE of the two, never both. "3 chapters short" and "47 of 50
@@ -469,7 +486,14 @@ export function PlanInspector({
             {/* One chapter, opened from the grid: the same nested bars the unit
                 itself draws, so the part is measured exactly like the whole. */}
             {openSection && (
+              // KEYED BY CHAPTER, so opening another one gets a fresh card.
+              // Without this React reuses the instance, and the chip strip —
+              // which is a scroll container — keeps the scroll offset of the
+              // chapter before it: open a chapter with forty short verses,
+              // scroll to the end, open one with three, and the new chips are
+              // scrolled out of sight in an apparently empty row.
               <PlanChapterCard
+                key={openSection.key}
                 section={openSection}
                 title={openSectionTitle}
                 hasAudio={hasAudio}

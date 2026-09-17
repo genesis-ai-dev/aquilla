@@ -784,3 +784,55 @@ describe("the inspector's percentages say what they stand for (round 7)", () => 
     ])
   })
 })
+
+/**
+ * AQU-1278 (2026-09-17). A chapter's verses are ONE LANGUAGE'S: which are
+ * unwritten, which are unvalidated, which have a take. The board grew its own
+ * language picker, so switching is now one click away from these chips.
+ */
+describe("the chapter's verses belong to the language on screen", () => {
+  const verse = (cellId: string, ref: string, over: Record<string, boolean> = {}) =>
+    ({ cellId, ref, filled: true, validated: true, ...over })
+
+  const renderAt = (lane: string) => {
+    const props = {
+      unit: nearlyDone({ sectionKey: "GEN" }), now: NOW, canPlan: true, showAudio: false,
+      projectId: "p1", getToken: withSections([section("GEN 12", { totalCount: 20, filledCount: 20, validatedCount: 18 })]),
+      languageLabel: "German", onPatch: vi.fn().mockResolvedValue(true), onClose: vi.fn(), onStep: vi.fn(),
+    }
+    const { rerender } = render(<PlanInspector {...props} lane={lane} />)
+    return { rerender: (next: string) => rerender(<PlanInspector {...props} lane={next} />) }
+  }
+
+  it("re-reads the open chapter in the new language instead of showing the old one's", async () => {
+    vi.mocked(getFileSectionProgress).mockResolvedValue({ verses: [verse("c4", "GEN 12:4", { validated: false })] } as never)
+    const { rerender } = renderAt("")
+    await waitFor(() => expect(screen.getByTestId("plan-tile-GEN 12")).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId("plan-tile-GEN 12"))
+    await waitFor(() => expect(screen.getByTestId("plan-verse-chip-c4")).toBeInTheDocument())
+    expect(vi.mocked(getFileSectionProgress).mock.calls[0]?.[4]).toBe("")
+
+    vi.mocked(getFileSectionProgress).mockResolvedValue({ verses: [verse("c9", "GEN 12:9", { validated: false })] } as never)
+    rerender("tpi")
+    // The German answer is not reused for Tok Pisin, and the new read is
+    // asked for the lane now on screen.
+    await waitFor(() => expect(screen.getByTestId("plan-verse-chip-c9")).toBeInTheDocument())
+    expect(screen.queryByTestId("plan-verse-chip-c4")).toBeNull()
+    const lanes = vi.mocked(getFileSectionProgress).mock.calls.map((c) => c[4])
+    expect(lanes).toContain("tpi")
+  })
+
+  it("reads a chapter once however many times React renders it", async () => {
+    // The fetch used to be launched from inside a setState updater, which
+    // React may call more than once — StrictMode calls it twice on purpose —
+    // so one click fired two or three identical full-file scans.
+    vi.mocked(getFileSectionProgress).mockResolvedValue({ verses: [] } as never)
+    const { rerender } = renderAt("")
+    await waitFor(() => expect(screen.getByTestId("plan-tile-GEN 12")).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId("plan-tile-GEN 12"))
+    await waitFor(() => expect(screen.getByTestId("plan-chapter-detail")).toBeInTheDocument())
+    rerender("")
+    rerender("")
+    expect(getFileSectionProgress).toHaveBeenCalledTimes(1)
+  })
+})

@@ -154,6 +154,7 @@ describe('RenameFile', () => {
     ])
     expect(staged.res.status).toBe(200)
     // Desugaring is visible in the stored plan: it holds the file.rename event.
+    // AQU-1310: summary.events includes emitKindEffectLabel.
     expect(staged.body.summary.events).toEqual([
       {
         kind: 'file.rename',

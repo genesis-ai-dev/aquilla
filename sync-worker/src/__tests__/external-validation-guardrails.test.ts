@@ -366,6 +366,7 @@ describe('AQU-1184 — explicit cell lists only', () => {
 
     expect(res.status).toBe(200)
     // Counts still there, and the validation line is still marked testimony…
+    // AQU-1310: summary.events includes emitKindEffectLabel.
     expect(body.summary.events).toContainEqual({
       kind: 'cell.validate',
       count: 2,

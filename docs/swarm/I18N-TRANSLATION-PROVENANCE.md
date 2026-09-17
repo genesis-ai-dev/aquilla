@@ -2,6 +2,30 @@
 
 **Read this before treating any non-English catalog as reviewed.**
 
+> ## Correction — the `mfa` catalog was not Patani Malay (AQU-1306)
+>
+> Everything below about `mfa` describes a catalog that **was standard Malay, not Patani
+> Malay**. The Pattani Malay team reported on 2026-09-17 that selecting "Bahasa Melayu
+> Patani" produced ordinary Bahasa Malaysia, and an audit of all 4,251 translated values
+> confirmed it: **zero** distinctively Patani forms anywhere (no `kawe`, `takdok`, `guano`,
+> `mano`, `nok`, `buleh`), against 1,121 values carrying a distinctively standard-Malay form
+> whose Patani counterpart differs (`anda` ×361, `tidak` ×345, `tiada` ×208, `boleh` ×138).
+>
+> The "measurably worked" note below is the tell, not a success: the sweep agent argued about
+> what belongs in **"professional Malay technical UI"** and was never reasoning about Patani
+> at all. The coverage table's `mfa` row therefore measured fill rate against the wrong
+> language — a 98.5% score for content that was 0% Patani Malay.
+>
+> AQU-1306 moved the catalog to its true code, `ms` / "Bahasa Melayu"
+> (`src/lib/i18n/messages/ms.ts`), and retired `mfa` from the switcher; stored `mfa`
+> preferences alias to `ms` so nobody loses a working UI. **Patani Malay is now an unshipped
+> language**, and it must be authored and signed off by Patani Malay speakers — it is not
+> derivable from the `ms` catalog by machine, which is precisely how this shipped.
+>
+> The lesson generalizes to the rest of this document: an unreviewed catalog can be wrong
+> about *which language it is*, not merely about word choice, and none of the mechanical
+> checks listed under "Why coverage can never read 100%" can see that.
+
 ## What these translations are
 
 Every string added to `src/lib/i18n/messages/{th,my,mfa,ar}.ts` in this pass was produced by

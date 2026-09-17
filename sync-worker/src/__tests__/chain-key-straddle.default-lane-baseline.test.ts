@@ -19,6 +19,7 @@ import { handleRebuildProjectionRequest } from '../events/rebuild'
 import {
   eventQualifiedParentKey,
   qualifyParentKeyBase,
+  GENESIS_PARENT_KEY,
 } from '../events/chain-claims'
 import { laneOfEvent } from '../events/event-projection'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
@@ -183,7 +184,15 @@ describe('§2.6 chain-key straddle — legacy unqualified + explicit @lane tag o
       { target_lang: '', event_id: 'evt-legacy', value: 'legacy text' },
       { target_lang: TAG, event_id: 'evt-tagged', value: 'tagged text' },
     ])
-    expect(await chainClaimKeys(t)).toEqual([PARENT, `${PARENT}@lane:${TAG}`])
+    // Three slots: the source create claims the genesis key as
+    // `<null>@side:source` (origin/dev side-qualification so source never
+    // shares a slot with a target sibling), then the two target siblings
+    // straddle on PARENT vs PARENT@lane:<tag> — the §2.6 option-A property.
+    expect(await chainClaimKeys(t)).toEqual([
+      `${GENESIS_PARENT_KEY}@side:source`,
+      PARENT,
+      `${PARENT}@lane:${TAG}`,
+    ])
   })
 
   it('rebuild replay reproduces the same projection heads as live (replay == live)', async () => {

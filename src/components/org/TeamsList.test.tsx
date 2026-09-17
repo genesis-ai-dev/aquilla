@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from "vitest"
 import { render, screen, waitFor, fireEvent, act } from "@testing-library/react"
+import { pickSelectOption } from "@/test-utils/select"
 import { MemoryRouter } from "react-router-dom"
 import { OrgProvider } from "@/context/OrgContext"
 import { TeamsList } from "./TeamsList"
@@ -147,14 +148,7 @@ describe("TeamsList — AQU-333: internal/public visibility select", () => {
 
   /** Base UI Select: options live in a portaled listbox. */
   async function pickVisibility(optionName: RegExp) {
-    fireEvent.click(screen.getByRole("combobox", { name: /filter teams by visibility/i }))
-    const option = await screen.findByRole("option", { name: optionName })
-    fireEvent.pointerMove(option)
-    fireEvent.mouseMove(option)
-    fireEvent.keyDown(document.activeElement ?? option, { key: "Enter" })
-    await waitFor(() => {
-      expect(screen.queryByRole("listbox")).toBeNull()
-    })
+    await pickSelectOption(/filter teams by visibility/i, optionName)
   }
 
   it("renders the visibility select and defaults to Internal only", async () => {

@@ -533,6 +533,11 @@ function compilePayload(
         ...(e.payload.createdForTranslated !== undefined
           ? { createdForTranslated: e.payload.createdForTranslated }
           : {}),
+        // AQU-1233: every comment staged through the Agent API is agent-posted,
+        // so the marker is set here rather than taken from the caller — the
+        // payload validator already drops a supplied `viaAgent`, which means a
+        // credential can neither forge nor suppress it.
+        viaAgent: true,
       }
     }
     case 'assignment.create':

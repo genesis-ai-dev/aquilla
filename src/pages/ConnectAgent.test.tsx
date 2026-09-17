@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router-dom"
 import { ConnectAgent } from "./ConnectAgent"
 import { connectionRequest } from "@/lib/sync/agent-connect"
+import { pickSelectOption } from "@/test-utils/select"
 vi.mock("@/hooks/useFrontierSession", () => ({ useFrontierSession: () => ({ session: { jwt: "jwt", username: "alice" }, loading: false }) }))
 vi.mock("@/lib/sync/agent-connect", () => ({ connectionRequest: vi.fn() }))
 vi.mock("@/lib/sync/cloud-projects", () => ({ fetchAccessibleProjectsResult: async () => ({ ok: true, projects: [
@@ -16,16 +17,6 @@ vi.mock("@/lib/frontier/orgs", () => ({ listMyOrgs: async () => [
 const api = vi.mocked(connectionRequest)
 const request = { agentName: "My agent", mode: "ask", requestedProjectId: "p", expiresAt: "2030-01-01", tokenExpiresIn: 2592000 }
 const mount = () => render(<MemoryRouter initialEntries={["/connect-agent#user_code=ABCD-EFGH"]}><ConnectAgent /></MemoryRouter>)
-// Base UI Select commits on hover-highlight + Enter rather than a click under
-// happy-dom (same helper as ApiTokensSection.test.tsx).
-async function pickSelectOption(triggerName: string, optionName: string) {
-  fireEvent.click(screen.getByRole("combobox", { name: triggerName }))
-  const option = await screen.findByRole("option", { name: optionName })
-  fireEvent.pointerMove(option)
-  fireEvent.mouseMove(option)
-  fireEvent.keyDown(document.activeElement ?? option, { key: "Enter" })
-  await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull())
-}
 const review = async () => {
   mount()
   fireEvent.click(screen.getByRole("button", { name: "Review request" }))

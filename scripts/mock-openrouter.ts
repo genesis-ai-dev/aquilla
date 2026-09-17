@@ -96,7 +96,7 @@ ORDER BY s.canonical_ref`
 
 // ── Contextual pipeline nodes (auth-worker/src/lib/contextual/*) ────────────
 // Each node's system prompt carries a routing marker ([[ctx:construe]],
-// [[ctx:summarize]], [[ctx:draft]], [[ctx:support]], [[ctx:segment]],
+// [[ctx:summarize]], [[ctx:draft]], [[ctx:support]], [[ctx:segment]], [[ctx:reflect]],
 // [[ctx:verify:<stance>]]) so the mock can
 // return a VALID canned JSON body per node without sniffing prompt copy.
 
@@ -156,6 +156,18 @@ function contextualMockResponse(marker: string, userText: string) {
     const count = Number(userText.match(/Triage these (\d+) draft segment/)?.[1] ?? 0)
     const cells = Array.from({ length: count }, (_, idx) => ({ i: idx + 1, risky: false, reason: "mock: benign" }))
     return respond(JSON.stringify({ cells }))
+  }
+  if (marker.startsWith("reflect")) {
+    // Park-time reflection (AQU-1302). One deterministic abstracted note, so
+    // the e2e/tick path exercises parse → validate → propose end to end
+    // without the outcome depending on model wording.
+    return respond(JSON.stringify({
+      notes: [{
+        title: "Mock register convention",
+        note: "Keep the narrator's register plain and consistent across passages.",
+        why: "mock: the reviewer enforced it on every staged draft",
+      }],
+    }))
   }
   if (marker.startsWith("verify")) {
     const count = Number(userText.match(/Verify these (\d+) drafted cells/)?.[1] ?? 0)

@@ -333,6 +333,33 @@ describe("AutopilotActivityInspector", () => {
     expect(copied).not.toContain("must-not-copy")
   })
 
+  it("reads a park's memory proposals as one line, and names a reflection that failed", async () => {
+    // AQU-1302: a park proposes notes for the Memory tab. The thread gets ONE
+    // line per reflection, and a reflection that could not run says so rather
+    // than looking like a run that had nothing to say.
+    const reflection = {
+      ...activity.events[0],
+      id: "event-reflect",
+      kind: "memories_proposed",
+      spanId: undefined,
+      spanLabel: undefined,
+      status: "complete",
+      summary: "Proposed 2 notes for review",
+      details: { count: 2 },
+    }
+    activityMock.mockResolvedValueOnce({ ...activity, events: [reflection] })
+    const { unmount } = renderInspector()
+    expect(await screen.findByText("Proposed 2 notes for review")).toBeInTheDocument()
+    unmount()
+
+    activityMock.mockResolvedValueOnce({
+      ...activity,
+      events: [{ ...reflection, status: "failed", summary: "Proposed 0 notes for review", details: { count: 0 } }],
+    })
+    renderInspector()
+    expect(await screen.findByText("Could not review this run for notes")).toBeInTheDocument()
+  })
+
   it("degrades gracefully when historic events were not recorded", async () => {
     activityMock.mockResolvedValueOnce({ run, events: [], sceneBriefs: [], drafts: [], truncated: false })
     renderInspector()

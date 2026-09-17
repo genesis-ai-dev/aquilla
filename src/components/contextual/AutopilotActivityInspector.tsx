@@ -454,6 +454,7 @@ const EVENT_KIND_KEYS: Record<string, MessageKey> = {
   span_outcome: "autopilot.inspector.event.kind.spanOutcome",
   steering_queued: "autopilot.inspector.event.kind.steeringQueued",
   draft_reviewed: "autopilot.inspector.event.kind.draftReviewed",
+  memories_proposed: "autopilot.inspector.event.kind.memoriesProposed",
 }
 
 function detailNumber(event: ContextualActivityEvent, key: string): number | null {
@@ -547,6 +548,13 @@ function eventSummary(event: ContextualActivityEvent, t: TFunction): string {
     return event.details.steeringKind === "direction"
       ? t("autopilot.inspector.event.directionQueued")
       : t("autopilot.inspector.event.kind.steeringQueued")
+  }
+  if (event.kind === "memories_proposed") {
+    // A failed reflection is recorded rather than hidden (AQU-1302): a run
+    // that stopped learning should say so where its other work is.
+    if (event.status === "failed") return t("autopilot.inspector.event.memoriesUnavailable")
+    const count = detailNumber(event, "count") ?? 0
+    return t("autopilot.inspector.event.memoriesProposed", { count })
   }
   if (event.kind === "draft_reviewed") {
     if (event.details.outcome === "applied") return t("autopilot.inspector.event.draftApplied")

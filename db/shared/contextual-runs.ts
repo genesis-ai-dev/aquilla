@@ -90,6 +90,14 @@ export interface ContextualRun {
   anchorCellId: string | null
   /** Shared across every run one project-wide start created. */
   scopeGroup: string | null
+  /** AQU-1302 — when this run last reflected at a park. Evidence for the next
+   *  reflection is everything after this instant; NULL (never reflected) means
+   *  the run's own `createdAt` is the watermark. */
+  reflectedAt: string | null
+  /** `doneSpans` as of that reflection. The "at least 2 spans since the last
+   *  reflection" gate is a difference against this, so a single passage that
+   *  staged nine cells still counts as one passage. */
+  reflectedDoneSpans: number
   createdAt: string
   updatedAt: string
 }
@@ -149,6 +157,7 @@ export type ContextualRunEventKind =
   | "span_outcome"
   | "steering_queued"
   | "draft_reviewed"
+  | "memories_proposed"
 
 export type ContextualRunEventPhase = "reading" | "drafting" | "checking" | "staging"
 
@@ -313,6 +322,8 @@ interface RunRow {
   blocked_on_decision_id: string | null
   anchor_cell_id: string | null
   scope_group: string | null
+  reflected_at: unknown
+  reflected_done_spans: number | null
   created_at: unknown
   updated_at: unknown
 }
@@ -345,6 +356,8 @@ function rowToRun(r: RunRow): ContextualRun {
     blockedOnDecisionId: r.blocked_on_decision_id ?? null,
     anchorCellId: r.anchor_cell_id ?? null,
     scopeGroup: r.scope_group ?? null,
+    reflectedAt: r.reflected_at == null ? null : toIso(r.reflected_at),
+    reflectedDoneSpans: Number(r.reflected_done_spans ?? 0),
     createdAt: toIso(r.created_at),
     updatedAt: toIso(r.updated_at),
   }
@@ -353,7 +366,7 @@ function rowToRun(r: RunRow): ContextualRun {
 const RUN_COLS = `id, project_id, file_id, target_lang, status, initiated_by, role_snapshot,
   span_cursor, done_spans, total_spans, failed_spans, units_spent, calls_spent,
   last_error, steering_cursor, blocked_on_decision_id, anchor_cell_id, scope_group,
-  created_at, updated_at`
+  reflected_at, reflected_done_spans, created_at, updated_at`
 
 interface SteeringRow {
   id: string
@@ -606,6 +619,14 @@ function sanitizeEventDetails(input: AppendContextualRunEventInput): ContextualR
       }
       break
     }
+    case "memories_proposed":
+      // One line per reflection, never one per note. The note text and its
+      // memory path are reviewable rows in the Memory tab, not durable
+      // activity — the count is the whole fact this event carries.
+      details = {
+        ...(safeCount(d.count) !== undefined ? { count: safeCount(d.count) } : {}),
+      }
+      break
     case "draft_reviewed": {
       const draftId = safeEventString(d.draftId)
       const cellId = safeEventString(d.cellId)
@@ -687,6 +708,11 @@ function eventSummary(input: AppendContextualRunEventInput, details: ContextualR
     case "steering_queued":
       summary = details.steeringKind === "direction" ? "Direction queued" : "Steering queued"
       break
+    case "memories_proposed": {
+      const count = details.count ?? 0
+      summary = `Proposed ${count} note${count === 1 ? "" : "s"} for review`
+      break
+    }
     case "draft_reviewed":
       summary = details.outcome === "applied"
         ? "Draft applied"
@@ -1064,6 +1090,33 @@ export const parkRun = (db: AquillaDb, runId: string) =>
 /** Any active state → failed, recording the error. */
 export const failRun = (db: AquillaDb, runId: string, error: string) =>
   transitionRun(db, runId, [...ACTIVE_STATUSES], "failed", error)
+
+/**
+ * Move the run's reflection watermark forward (AQU-1302). Called once a park's
+ * reflection has actually run — whether it proposed notes or (just as validly)
+ * proposed none. Leaving it where it was on a failed reflection is deliberate:
+ * the next park retries over the same evidence rather than losing it.
+ *
+ * `reflected_done_spans` is written from the row itself, not from a caller's
+ * snapshot, so a wave that landed between gathering the evidence and marking
+ * cannot be skipped — it is simply counted toward the NEXT reflection.
+ * Status is untouched: reflection is bookkeeping about a park, not a transition.
+ */
+export async function markRunReflected(
+  db: AquillaDb,
+  runId: string,
+): Promise<ContextualRun | null> {
+  const row = await db
+    .prepare(
+      `UPDATE contextual_runs
+          SET reflected_at = now(), reflected_done_spans = done_spans
+        WHERE id = ?
+        RETURNING ${RUN_COLS}`,
+    )
+    .bind(runId)
+    .first<RunRow>()
+  return row ? rowToRun(row) : null
+}
 
 /** Block a live run on a decision (§4.5). `waiting` means "something left to
  *  do, but it needs a human" — distinct from `parked`, which means there is

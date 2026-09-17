@@ -1202,6 +1202,21 @@ export function ProjectOverview() {
   ]
   const activeLane: PortfolioLane | null =
     selectedLaneTag != null ? projectLanes.find((l) => l.lane === selectedLaneTag) ?? null : null
+  /**
+   * AQU-1278: the same lanes the tabs above offer, MINUS "All", for the plan
+   * board's own picker. The plan is one language's answer — "All" has no
+   * meaning for a shortfall or a link into the editor — and `planLane` has
+   * always resolved a null (All) selection to the default lane anyway. The
+   * picker shows the lane actually being counted, and choosing one sets the
+   * page's single lane selection, so the Progress card above agrees with it.
+   */
+  const planLaneOptions = useMemo(
+    () => projectLanes.map((l) => ({
+      tag: l.lane,
+      label: l.lane === "" ? (project?.targetLanguage || t("org.projectOverview.laneDefaultFallback")) : l.lane,
+    })),
+    [projectLanes, project?.targetLanguage, t],
+  )
   const tileTranslatedPct = activeLane ? laneTranslatedPct(activeLane) : audio ? translatedPct(audio) : 0
   const tileValidatedPct = activeLane ? laneValidatedPct(activeLane) : audio ? validatedPct(audio) : 0
   const CROSS_LANE_TOOLTIP = t("org.projectOverview.crossLaneTooltip")
@@ -1965,6 +1980,13 @@ export function ProjectOverview() {
                 assigneesByUnit={assigneesByUnit}
                 onOpenShortfall={(unit) => { void openPlanShortfall(unit) }}
                 laneLabel={showLaneTabs ? planLanguageLabel : null}
+                lanes={planLaneOptions}
+                lane={planLane}
+                // Wrapped, not passed straight to the setter: the menu calls
+                // its handler with (value, eventDetails), and a setState that
+                // is handed a second argument today is one refactor away from
+                // being handed something it would read as an updater.
+                onLaneChange={(next) => setSelectedLaneTag(next)}
                 emptyAction={
                   <Button
                     size="sm"

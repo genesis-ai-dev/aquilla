@@ -1187,6 +1187,7 @@ export const org = defineNamespace({
     // one project, a dub episode in another, a document in a third — so
     // nothing here may say "books".
     "org.projectOverview.plan.heading": "Plan",
+    "org.projectOverview.plan.laneMenuAria": "Language shown: {language}. Choose another.",
     "org.projectOverview.plan.regionAria": "Planning units, grouped by status",
     "org.projectOverview.plan.summaryDoneLabel": "of {total} done",
     "org.projectOverview.plan.summaryOverdueLabel": plural({ one: "overdue", other: "overdue" }),
@@ -2500,6 +2501,12 @@ export const org = defineNamespace({
       "org.projectOverview.plan.heading": {
         description: "Heading of the project dashboard's plan table. Neutral on purpose: rows are Bible books, dub episodes or documents depending on the project, so this must never say 'Books'.",
         maxLength: 16,
+      },
+      "org.projectOverview.plan.laneMenuAria": {
+        description: "Screen-reader name for the menu beside the Plan heading that chooses which target language the plan is counting. Only shown on projects with more than one target language.",
+        placeholders: {
+          language: "The target language the plan is currently showing — a language name or a lane tag. Not translated.",
+        },
       },
       "org.projectOverview.plan.regionAria": {
         description: "Screen-reader name for the plan list region, which arrow keys navigate.",

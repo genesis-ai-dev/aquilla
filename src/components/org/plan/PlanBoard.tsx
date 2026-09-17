@@ -23,6 +23,13 @@ import {
 import { groupPlanUnitsByFolder } from "@/lib/plan/plan-folders"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { TableEmptyState } from "@/components/ui/empty"
 import {
   InputGroup,
@@ -87,6 +94,70 @@ const GROUP_HINT_KEY: Record<PlanUnitStatus, string> = {
   done: "org.projectOverview.plan.groupHintDone",
 }
 
+/** One language the plan can be read in. `tag` is "" for the project default. */
+export interface PlanLaneOption {
+  tag: string
+  label: string
+}
+
+/**
+ * Which language the plan is counting, as a menu rather than a caption.
+ *
+ * A MENU, NOT A ROW OF TABS. The Progress card above uses tabs because it has
+ * an "All" and rarely more than a few lanes to show; a project can carry many
+ * target languages, and a row of them would push the summary pills and the
+ * whole control strip onto another line on exactly the projects that need the
+ * board most. The trigger reads as the caption it replaces, so the heading is
+ * still "Plan · Spanish" at a glance and only turns out to be a control when
+ * you go for it.
+ *
+ * NO "ALL" HERE. Every number on this board — a percentage, a shortfall, a
+ * link into the editor — belongs to one language. "All" would have to mean
+ * some blend of them, and the honest blend does not exist.
+ */
+function PlanLanePicker({ lanes, lane, onChange }: {
+  lanes: PlanLaneOption[]
+  lane: string
+  onChange: (lane: string) => void
+}) {
+  const t = useT()
+  // An unknown tag falls back to the first lane rather than rendering blank:
+  // the board IS showing something, and the picker has to name it.
+  const current = lanes.find((l) => l.tag === lane) ?? lanes[0]
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        data-testid="plan-lane-picker"
+        render={
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            className="-my-1 ms-1 h-6 gap-1 px-1.5 text-xs font-normal"
+            aria-label={t("org.projectOverview.plan.laneMenuAria", { language: current?.label ?? "" })}
+          >
+            {current?.label}
+            <ChevronDown className="h-3 w-3" />
+          </Button>
+        }
+      />
+      <DropdownMenuContent align="start">
+        <DropdownMenuRadioGroup value={lane} onValueChange={onChange}>
+          {lanes.map((option) => (
+            <DropdownMenuRadioItem
+              key={option.tag}
+              value={option.tag}
+              data-testid={`plan-lane-option-${option.tag || "default"}`}
+            >
+              {option.label}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 /**
  * A figure and its label. The numeral is rendered outside the translated
  * string so it can carry the weight that makes the strip scannable; the label
@@ -137,7 +208,7 @@ function PlanStat({ value, label, tone, testId }: {
 export function PlanBoard({
   units, now, projectId, selectedId, onSelect, actions, emptyAction,
   status = "ready", onRetry, orderRef,
-  shortChaptersByUnit, assigneesByUnit, onOpenShortfall, laneLabel,
+  shortChaptersByUnit, assigneesByUnit, onOpenShortfall, laneLabel, lanes, lane, onLaneChange,
 }: {
   units: PlanUnit[]
   now: number
@@ -200,6 +271,28 @@ export function PlanBoard({
    * one language, where there is nothing to tell apart.
    */
   laneLabel?: string | null
+  /**
+   * AQU-1278 (Sam, 2026-09-17): the languages this plan can be read in, and
+   * which one it is reading.
+   *
+   * THE BOARD HAS ALWAYS BEEN PER-LANGUAGE and never said so where you could
+   * act on it. The only lane control on the page sits inside the Progress card
+   * far above, and nothing there suggests it also decides which language the
+   * plan below is counting — Sam did not know it did. Worse, that control has
+   * an "All" option the plan cannot honour: a plan is one language's, so "All"
+   * quietly fell back to the default lane while the reader believed they were
+   * seeing everything.
+   *
+   * So the board gets its own picker, over REAL LANES ONLY, next to the
+   * heading it labels. It drives the same selection the Progress card does —
+   * one page, one answer to "which language am I looking at" — which turns a
+   * hidden coupling into a visible one. Absent (or a single-lane project), the
+   * static `laneLabel` renders exactly as before.
+   */
+  lanes?: PlanLaneOption[]
+  /** The lane tag being read: "" is the project's default language. */
+  lane?: string
+  onLaneChange?: (lane: string) => void
 }) {
   const t = useT()
   const listRef = useRef<HTMLDivElement | null>(null)
@@ -435,14 +528,16 @@ export function PlanBoard({
     <div className="overflow-hidden rounded-lg border bg-card" data-testid="plan-board">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b px-[17px] py-3.5">
         <div className="flex flex-wrap items-center gap-2">
-          <h2 className="me-1 text-xs font-semibold text-muted-foreground">
+          <h2 className="me-1 flex items-center text-xs font-semibold text-muted-foreground">
             {t("org.projectOverview.plan.heading")}
-            {laneLabel && (
+            {lanes && lanes.length > 1 && onLaneChange ? (
+              <PlanLanePicker lanes={lanes} lane={lane ?? ""} onChange={onLaneChange} />
+            ) : laneLabel ? (
               <span className="font-normal" data-testid="plan-lane-label">
                 {" \u00b7 "}
                 {laneLabel}
               </span>
-            )}
+            ) : null}
           </h2>
           <PlanStat
             testId="plan-summary"

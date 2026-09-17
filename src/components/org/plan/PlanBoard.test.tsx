@@ -915,3 +915,66 @@ describe("in order, in folders", () => {
     expect(orderRef.current.map((u) => u.fileId)).toEqual(["e3", "notes"])
   })
 })
+
+/**
+ * AQU-1278 (Sam, 2026-09-17). The board has always counted ONE language and
+ * never said so anywhere you could act on it: the page's only lane control
+ * sits in the Progress card far above, and nothing there suggests it also
+ * decides what the plan below is measuring.
+ */
+describe("choosing which language the plan counts", () => {
+  const LANES = [{ tag: "", label: "German" }, { tag: "tpi", label: "tpi" }]
+
+  it("names the lane it is showing, as a control", () => {
+    const onLaneChange = vi.fn()
+    render(
+      <PlanBoard units={BOOKS} now={NOW} projectId="p1" selectedId={null} onSelect={vi.fn()}
+        lanes={LANES} lane="" onLaneChange={onLaneChange} laneLabel="German" />,
+    )
+    expect(screen.getByTestId("plan-lane-picker")).toHaveTextContent("German")
+    // The caption it replaces is gone, not doubled up beside it.
+    expect(screen.queryByTestId("plan-lane-label")).toBeNull()
+  })
+
+  it("hands the chosen lane's tag back, so the whole page follows one selection", () => {
+    const onLaneChange = vi.fn()
+    render(
+      <PlanBoard units={BOOKS} now={NOW} projectId="p1" selectedId={null} onSelect={vi.fn()}
+        lanes={LANES} lane="" onLaneChange={onLaneChange} />,
+    )
+    fireEvent.click(screen.getByTestId("plan-lane-picker"))
+    fireEvent.click(screen.getByTestId("plan-lane-option-tpi"))
+    // The menu hands its change handler a second argument (the originating
+    // event); only the tag is asserted, and only the tag is forwarded.
+    expect(onLaneChange.mock.calls[0]?.[0]).toBe("tpi")
+  })
+
+  it("offers no All: every number here belongs to one language", () => {
+    render(
+      <PlanBoard units={BOOKS} now={NOW} projectId="p1" selectedId={null} onSelect={vi.fn()}
+        lanes={LANES} lane="" onLaneChange={vi.fn()} />,
+    )
+    fireEvent.click(screen.getByTestId("plan-lane-picker"))
+    expect(screen.getAllByTestId(/^plan-lane-option-/)).toHaveLength(2)
+  })
+
+  it("stays a plain caption on a project with one language", () => {
+    render(
+      <PlanBoard units={BOOKS} now={NOW} projectId="p1" selectedId={null} onSelect={vi.fn()}
+        lanes={[{ tag: "", label: "German" }]} lane="" onLaneChange={vi.fn()} laneLabel="German" />,
+    )
+    expect(screen.queryByTestId("plan-lane-picker")).toBeNull()
+    expect(screen.getByTestId("plan-lane-label")).toHaveTextContent("German")
+  })
+
+  it("names the lane it is actually reading when the selection is one it does not know", () => {
+    // The Progress tabs carry an "All" the plan cannot honour, and `planLane`
+    // has always resolved it to the default lane. The picker must say the
+    // default lane rather than go blank.
+    render(
+      <PlanBoard units={BOOKS} now={NOW} projectId="p1" selectedId={null} onSelect={vi.fn()}
+        lanes={LANES} lane="nope" onLaneChange={vi.fn()} />,
+    )
+    expect(screen.getByTestId("plan-lane-picker")).toHaveTextContent("German")
+  })
+})

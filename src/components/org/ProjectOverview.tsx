@@ -877,14 +877,22 @@ export function ProjectOverview() {
     [planUnits, projectAssignees, planUnitAssignments, planLane],
   )
 
-  /** The selected unit's own assignments, for the panel beside its bars. */
-  const selectedUnitAssignments = useMemo(() => {
-    if (!selectedPlanUnit) return NO_ASSIGNMENTS
-    return (
-      planUnitAssignments.get(unitAssignmentsKey(planUnitId(selectedPlanUnit), planLane)) ??
-      NO_ASSIGNMENTS
-    )
+  /**
+   * The selected unit's own assignments, AS THREE STATES, not two.
+   *
+   * `undefined` means the question has not been answered — the read is still
+   * in flight, or it failed, or the org's floor refused it. An empty array
+   * means it was answered and nobody is assigned. Collapsing the two is what
+   * made the panel tell a manager that every chapter of a fully staffed book
+   * was unassigned whenever the request 5xx'd. The board already draws this
+   * distinction (`mergeUnitAssignees`); the inspector now draws it too.
+   */
+  const selectedUnitAssignmentRows = useMemo(() => {
+    if (!selectedPlanUnit) return undefined
+    return planUnitAssignments.get(unitAssignmentsKey(planUnitId(selectedPlanUnit), planLane))
   }, [selectedPlanUnit, planUnitAssignments, planLane])
+  /** The same, flattened for the panel, which renders nothing either way. */
+  const selectedUnitAssignments = selectedUnitAssignmentRows ?? NO_ASSIGNMENTS
 
   /**
    * How many of the selected unit's chapters nobody is assigned to.
@@ -898,6 +906,24 @@ export function ProjectOverview() {
    * it would be a guess. Undefined then, and the line says nothing rather than
    * something indefensible — see `PlanAssignmentsProps.unassignedChapters`.
    */
+  /**
+   * The selected unit's own section keys.
+   *
+   * Shared by the unassigned count below and the assignment panel, which needs
+   * the WHOLE unit's keys to tell a book's front matter ("GEN" beside "GEN 1",
+   * "GEN 2" …) from a one-chapter book, where the same bare code IS chapter 1.
+   * A row judging from its own assignment's keys alone read front matter as
+   * chapter 1 and named a chapter the person was not assigned to.
+   */
+  const selectedUnitSectionKeys = useMemo(() => {
+    if (!selectedPlanUnit) return undefined
+    const sections = planFileSections.get(selectedPlanUnit.fileId)
+    if (!sections) return undefined
+    return sections
+      .filter((section) => sectionBelongsToUnit(section.key, selectedPlanUnit.sectionKey))
+      .map((s) => s.key)
+  }, [selectedPlanUnit, planFileSections])
+
   const unassignedChapterCount = useMemo(() => {
     if (!selectedPlanUnit) return undefined
     const sections = planFileSections.get(selectedPlanUnit.fileId)
@@ -917,18 +943,23 @@ export function ProjectOverview() {
     // renders "Every chapter is assigned.", which would be the exact opposite
     // of what an unassigned unit means.
     if (own.length === 0) return undefined
+    // NOT ANSWERED IS NOT "NOBODY". The read is in flight, or it failed, or
+    // the org's floor refused it — and "every chapter is unassigned" is the
+    // most alarming thing this line can say, so it must never be the thing a
+    // failed request says. Only a real empty answer means nobody.
+    if (selectedUnitAssignmentRows === undefined) return undefined
     // AQU-1278: with per-assignment chapter coverage on the wire, the answer no
     // longer collapses the moment somebody is assigned. Subtract the union of
     // what every assignment covers and what remains is genuinely unheld. An
     // older worker sends no `chapters` at all, and then there is nothing
     // honest to count — say nothing rather than guess.
-    if (selectedUnitAssignments.length === 0) return own.length
-    if (selectedUnitAssignments.some((a) => a.chapters === undefined)) return undefined
+    if (selectedUnitAssignmentRows.length === 0) return own.length
+    if (selectedUnitAssignmentRows.some((a) => a.chapters === undefined)) return undefined
     const covered = new Set(
-      selectedUnitAssignments.flatMap((a) => (a.chapters ?? []).map((c) => c.key)),
+      selectedUnitAssignmentRows.flatMap((a) => (a.chapters ?? []).map((c) => c.key)),
     )
     return own.filter((s) => !covered.has(s.key)).length
-  }, [selectedPlanUnit, selectedUnitAssignments, planFileSections])
+  }, [selectedPlanUnit, selectedUnitAssignmentRows, planFileSections])
 
   /**
    * Open the editor at a unit's first outstanding cell.
@@ -1125,6 +1156,7 @@ export function ProjectOverview() {
           lane={planLane}
           defaultLaneLabel={project?.targetLanguage ?? ""}
           unassignedChapters={unassignedChapterCount}
+          unitSectionKeys={selectedUnitSectionKeys}
           // Per FILE, not per project: a person assigned text in a book whose
           // file carries no recordings is not short a single take, and the
           // audio bar on their row would be a column of zeroes saying they are.

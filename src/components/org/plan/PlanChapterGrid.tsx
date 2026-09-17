@@ -314,8 +314,8 @@ function PlanTile({
   // that does not exist, to the one reader who cannot see that it is not on the
   // grid with the others.
   const aria = wide
-    ? t("org.projectOverview.plan.tileAriaSection", { section: ariaSubject, short: worst })
-    : t("org.projectOverview.plan.tileAria", { chapter: ariaSubject, short: worst })
+    ? t("org.projectOverview.plan.tileAriaSection", { section: ariaSubject, count: worst })
+    : t("org.projectOverview.plan.tileAria", { chapter: ariaSubject, count: worst })
 
   return (
     <button

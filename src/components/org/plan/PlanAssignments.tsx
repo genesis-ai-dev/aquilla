@@ -36,7 +36,7 @@ import { AssignModal } from "@/components/AssignModal"
 import { useProjectMembers } from "@/hooks/useProjectMembers"
 import { fmtDeadlineDate } from "@/lib/format-date"
 import { formatList } from "@/lib/i18n/format"
-import { isTimeBucketKey, numberedBookCodes, planSectionLabel } from "@/lib/plan/plan-section"
+import { classifyPlanSection, isTimeBucketKey, numberedBookCodes, planSectionLabel } from "@/lib/plan/plan-section"
 import { planPct, planUnitShortfall, type PlanShortfall } from "@/lib/plan/plan-status"
 import type { UnitAssignment, UnitAssignmentChapter } from "@/lib/sync/assignments"
 import type { FileReference, FileType } from "@/lib/parsers/types"
@@ -161,6 +161,19 @@ export interface PlanAssignmentsProps {
    * returns no chapter attribution, so there is nothing honest to count yet.
    */
   unassignedChapters?: number
+  /**
+   * Every section key of the unit this panel belongs to.
+   *
+   * ONLY THE WHOLE BOOK CAN SAY WHAT A BARE BOOK CODE IS. "GEN" beside
+   * "GEN 1", "GEN 2" … is a book's front matter; "GEN" on its own is a
+   * one-chapter book, and that IS chapter 1. Each row used to decide from its
+   * own assignment's keys alone, so an assignment covering only the front
+   * matter saw a lone "GEN", read it as a one-chapter book, and told the
+   * reader the work was in "ch. 1" — a chapter that exists and that this
+   * person is not assigned to. Omitted, a row falls back to its own keys and
+   * behaves as it did.
+   */
+  unitSectionKeys?: readonly string[]
   /** The org's memberProgressViewMinRole. Same floor the Team card uses. */
   minRole: number
   viewerRoleLevel: number | null | undefined
@@ -185,6 +198,7 @@ export function PlanAssignments({
   defaultLaneLabel,
   showAudio,
   unassignedChapters,
+  unitSectionKeys,
   minRole,
   viewerRoleLevel,
   ready,
@@ -226,6 +240,7 @@ export function PlanAssignments({
                 lane={lane}
                 defaultLaneLabel={defaultLaneLabel}
                 showAudio={showAudio}
+                unitSectionKeys={unitSectionKeys}
               />
             ))}
           </ul>
@@ -261,12 +276,14 @@ function PlanAssignmentRow({
   lane,
   defaultLaneLabel,
   showAudio,
+  unitSectionKeys,
 }: {
   assignment: UnitAssignment
   now: number
   lane: string
   defaultLaneLabel: string
   showAudio: boolean
+  unitSectionKeys?: readonly string[]
 }) {
   const t = useT()
   const readoutTips = usePlanReadoutTips()
@@ -288,13 +305,23 @@ function PlanAssignmentRow({
   // the same function that judged the person and the book, rather than by a
   // second rule on the server: that one owns the zero clamp and the flag that
   // decides whether audio counts sign-off, and it flips when AQU-490 lands.
-  const numbered = numberedBookCodes((a.chapters ?? []).map((c) => c.key))
+  // Classified against the WHOLE unit's keys, not this assignment's, so a bare
+  // book code is read as front matter wherever the book also has numbered
+  // chapters — see `unitSectionKeys`. The row's own keys are folded in so a
+  // caller that passes nothing behaves exactly as before.
+  const numbered = numberedBookCodes([
+    ...(unitSectionKeys ?? []),
+    ...(a.chapters ?? []).map((c) => c.key),
+  ])
   const shortChapters = (a.chapters ?? [])
     // ONLY REAL CHAPTERS get named. A subtitle file's "chapters" are five-minute
     // time buckets and a document's is one empty key — "· ch. t:000000300000"
     // would be the read's internals leaking onto the panel. Such a unit has no
     // grid either; the shortfall alone is the whole of what can be said.
+    // Front matter is not a chapter either, and naming it would print either a
+    // chapter number it does not own or the raw key.
     .filter((c) => c.key !== "" && !isTimeBucketKey(c.key))
+    .filter((c) => classifyPlanSection(c.key, numbered).kind !== "frontMatter")
     .filter((c) => chapterShortfall(c, showAudio).worst > 0)
     .map((c) => planSectionLabel(c.key, numbered))
 

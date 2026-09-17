@@ -162,20 +162,27 @@ export function PlanRule({ className = "" }: { className?: string }) {
 }
 
 /**
- * One figure of a readout. With a `tip` it is a hover target that says what
- * the figure stands for, and the same words are its accessible name, so a
- * keyboard or a screen reader gets them without a pointer. Without one it is
- * the bare figure.
+ * One figure of a readout: a hover target that says what the figure stands
+ * for. Without a `tip` it is the bare figure.
+ *
+ * NOT A TAB STOP (Sam, 2026-09-17). It carried `tabIndex={0}` so a keyboard
+ * could reach the tooltip, and the cost was out of all proportion: four of
+ * these per row, and on a real board they were 64 of 101 stops — nearly two
+ * thirds of the tab order spent on figures that DO nothing when focused, with
+ * a 66-book project putting some 260 of them between a reader and the next
+ * control. The ACCESSIBLE NAME stays: the sentence is still this element's
+ * name in the tree, so a screen reader reading the row still meets it, and
+ * the bar's own `aria-label` announces both percentages besides. Only the
+ * stop is gone.
  */
 function ReadoutFigure({ tip, children }: { tip?: string; children: ReactNode }) {
   if (!tip) return <>{children}</>
   return (
     <AppTooltip content={tip}>
       <span
-        tabIndex={0}
         aria-label={tip}
         data-testid="plan-readout-figure"
-        className="cursor-default rounded-sm underline-offset-[3px] decoration-dotted hover:underline focus-visible:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        className="cursor-default rounded-sm underline-offset-[3px] decoration-dotted hover:underline"
       >
         {children}
       </span>

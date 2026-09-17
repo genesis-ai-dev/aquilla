@@ -287,7 +287,40 @@ describe("where a person's outstanding work is", () => {
         scopeLabel: "Titus", cellsTotal: 10, translated: 10, validated: 8,
         chapters: [chapter("TIT", { validated: 8 })],
       })],
+      // A one-chapter book: the bare code is the only key the unit has, and it
+      // IS chapter 1.
+      unitSectionKeys: ["TIT"],
     })
     expect(screen.getByTestId("plan-assignment-left-a1")).toHaveTextContent("ch. 1")
+  })
+
+  it("does not call a book's front matter chapter 1", () => {
+    // The same bare "GEN" means the opposite thing here: beside GEN 1 and GEN 2
+    // it is the book's front matter, which is nobody's chapter. Judged from
+    // this assignment's keys alone the row read it as a one-chapter book and
+    // sent the reader to Genesis 1, a chapter Anna is not assigned to.
+    renderSection({
+      assignments: [assignment({
+        scopeLabel: "Genesis", cellsTotal: 10, translated: 10, validated: 8,
+        chapters: [chapter("GEN", { validated: 8 })],
+      })],
+      unitSectionKeys: ["GEN", "GEN 1", "GEN 2"],
+    })
+    const left = screen.getByTestId("plan-assignment-left-a1")
+    expect(left).toHaveTextContent("2 cells to validate")
+    expect(left).not.toHaveTextContent("ch.")
+  })
+
+  it("still names the real short chapters when front matter is short too", () => {
+    renderSection({
+      assignments: [assignment({
+        scopeLabel: "Genesis", cellsTotal: 30, translated: 30, validated: 24,
+        chapters: [chapter("GEN", { validated: 8 }), chapter("GEN 2", { validated: 8 })],
+      })],
+      unitSectionKeys: ["GEN", "GEN 1", "GEN 2"],
+    })
+    const left = screen.getByTestId("plan-assignment-left-a1")
+    expect(left).toHaveTextContent("ch. 2")
+    expect(left).not.toHaveTextContent("ch. 1")
   })
 })

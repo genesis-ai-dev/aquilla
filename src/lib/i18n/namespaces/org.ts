@@ -1389,8 +1389,14 @@ export const org = defineNamespace({
     // AQU-1278: the tile beneath the chapter grid for a book's USFM front
     // matter — cells with no chapter number, filed before chapter 1.
     "org.projectOverview.plan.frontMatter": "front matter",
-    "org.projectOverview.plan.tileAria": "Chapter {chapter}: {short} cells short",
-    "org.projectOverview.plan.tileAriaSection": "{section}: {short} cells short",
+    "org.projectOverview.plan.tileAria": plural({
+      one: "Chapter {chapter}: {count} cell short",
+      other: "Chapter {chapter}: {count} cells short",
+    }),
+    "org.projectOverview.plan.tileAriaSection": plural({
+      one: "{section}: {count} cell short",
+      other: "{section}: {count} cells short",
+    }),
     // Audio hangs off the file, not off a target language, so every lane reads
     // the same recordings — a manager comparing two lanes' audio bars and
     // finding them identical is seeing the truth, not a stuck filter.
@@ -2989,7 +2995,7 @@ export const org = defineNamespace({
           "Accessible name of one chapter tile in the inspector's grid. A sighted reader gets the colour and the number; a screen-reader user gets this instead, so it must carry both facts on its own.",
         placeholders: {
           chapter: "The chapter number — a number, not translated.",
-          short: "Outstanding cells in that chapter — a number.",
+          count: "Outstanding cells in that chapter — a number, and the one the plural agrees with.",
         },
       },
       "org.projectOverview.plan.tileAriaSection": {
@@ -2997,7 +3003,7 @@ export const org = defineNamespace({
           "Accessible name of a tile that is NOT a numbered chapter — USFM front matter, a one-chapter book, or a document's own section name. Those cannot sit on the numbered grid and must not be announced as \"Chapter Scene 4\", so they name themselves instead.",
         placeholders: {
           section: "The section's own key, e.g. a book code or a scene name. Not translated.",
-          short: "Outstanding cells in that section — a number.",
+          count: "Outstanding cells in that section — a number, and the one the plural agrees with.",
         },
       },
       "org.projectOverview.plan.audioSharedAcrossLanes": {

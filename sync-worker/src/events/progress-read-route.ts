@@ -1,4 +1,5 @@
 import { verifyTokenForProject } from '../auth'
+import { targetLaneDualReadBinds, targetLaneDualReadSql } from './lane-id-sql'
 
 export interface ProgressReadEnv {
   AQUILLA_PG?: AquillaDb
@@ -189,14 +190,14 @@ export async function handleProgressReadRequest(
             AND t.file_id = s.file_id
             AND t.cell_id = s.cell_id
             AND t.side = 'target'
-            AND t.target_lang = ?
+            AND ${targetLaneDualReadSql('t')}
           WHERE s.project_id = ? AND s.file_id = ? AND s.side = 'source'
             AND BTRIM(CASE
                   WHEN POSITION(':' IN COALESCE(s.canonical_ref, '')) > 0
                     THEN SPLIT_PART(s.canonical_ref, ':', 1)
                   ELSE COALESCE(s.canonical_ref, '')
                 END) = ?`,
-      ).bind(lane, projectId, fileId, sectionKey).all<{
+      ).bind(...targetLaneDualReadBinds(projectId, lane), projectId, fileId, sectionKey).all<{
         canonical_ref: string | null
         target_value: string
         endorsement_count: number | string
@@ -204,8 +205,9 @@ export async function handleProgressReadRequest(
       readValidationCount(env.AQUILLA_PG, projectId),
       env.AQUILLA_PG.prepare(
         `SELECT revision FROM file_section_progress
-          WHERE project_id = ? AND file_id = ? AND scope = 'section' AND section_key = ? AND target_lang = ?`,
-      ).bind(projectId, fileId, sectionKey, lane).first<{ revision: number | string | bigint }>(),
+          WHERE project_id = ? AND file_id = ? AND scope = 'section' AND section_key = ?
+            AND ${targetLaneDualReadSql()}`,
+      ).bind(projectId, fileId, sectionKey, ...targetLaneDualReadBinds(projectId, lane)).first<{ revision: number | string | bigint }>(),
     ])
     const revision = Number(revisionRow?.revision) || 0
     // Default lane ('') keeps the legacy etag byte-for-byte; non-default lanes
@@ -238,9 +240,9 @@ export async function handleProgressReadRequest(
         `SELECT scope, section_key, total_count, filled_count, validator_histogram, revision,
                 audio_count, audio_validated_count
            FROM file_section_progress
-          WHERE project_id = ? AND file_id = ? AND target_lang = ?`,
+          WHERE project_id = ? AND file_id = ? AND ${targetLaneDualReadSql()}`,
       )
-      .bind(projectId, fileId, lane)
+      .bind(projectId, fileId, ...targetLaneDualReadBinds(projectId, lane))
       .all<ProgressRow>(),
     readValidationCount(env.AQUILLA_PG, projectId),
   ])

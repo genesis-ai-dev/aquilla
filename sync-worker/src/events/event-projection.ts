@@ -26,6 +26,9 @@ import { ROLE } from './role-policy'
 import { trackPatchRequiresExisting } from './track-editing-authority'
 import { usableCorpusMarker } from './corpus-marker'
 import { commentAuthorLabel } from './comment-authorship'
+import { laneIdResolveBinds, laneIdResolveSql } from './lane-id-sql'
+
+export { laneIdResolveBinds, laneIdResolveSql } from './lane-id-sql'
 
 // A single event row as it lives in Postgres. JSON.parse on `payload` is the
 // caller's responsibility — `payload` here is already an object.
@@ -178,47 +181,6 @@ export function laneOfEvent(
   const lang = (payload as { targetLang?: unknown } | null | undefined)?.targetLang
   if (typeof lang === 'string' && lang !== '') return lang
   return projectDefaultLane != null && projectDefaultLane !== '' ? projectDefaultLane : ''
-}
-
-/**
- * AQU-1240 slice 5: SQL that resolves the opaque `lanes.id` a projected row
- * belongs to, from the (project, side, lane tag) the row already carries.
- *
- * Emitted as a scalar subquery embedded in the cells INSERT so that live
- * projection and rebuild/replay resolve IDENTICALLY — both run the exact same
- * SQL against the exact same `lanes` table. `lanes` is a side table (created by
- * the backfill / importer, not by event replay), so it is stable across a
- * rebuild: replaying the event log never mutates it, hence the resolved id is a
- * pure function of (project, side, tag), the property §6 (4-then-5 / 5-then-4
- * convergence) rests on.
- *
- *   - side='source' -> the project's single `role='source'` lane.
- *   - side='target' -> the `role='target'` lane whose `legacy_tag` matches the
- *     tag `laneOfEvent` returned ('' for the default lane).
- *
- * BEHAVIOR-NEUTRAL until lanes rows exist: with no matching lane the subquery
- * evaluates to NULL, so `lane_id` stays NULL. The column is additive/nullable
- * (migration 0093), so every key/read is byte-identical to pre-1240 until the
- * backfill (slice 4) or importer (slice 6) has populated `lanes`. On ON CONFLICT
- * the caller COALESCEs (`lane_id = COALESCE(excluded.lane_id, cells.lane_id)`) so
- * a resolved id is never regressed to NULL by a later lanes-less write.
- *
- * The caller MUST splice {@link laneIdResolveBinds} into the statement's bind
- * list at the lane_id value's position (see the cells inserts below).
- */
-export function laneIdResolveSql(side: 'source' | 'target'): string {
-  return side === 'source'
-    ? `(SELECT id FROM lanes WHERE project_id = ? AND role = 'source')`
-    : `(SELECT id FROM lanes WHERE project_id = ? AND role = 'target' AND legacy_tag = ?)`
-}
-
-/** Binds for {@link laneIdResolveSql}, in the order its `?` placeholders appear. */
-export function laneIdResolveBinds(
-  side: 'source' | 'target',
-  projectId: string,
-  laneTag: string,
-): unknown[] {
-  return side === 'source' ? [projectId] : [projectId, laneTag]
 }
 
 // FTS index maintenance: none. Postgres auto-maintains the cells.value_tsv
@@ -1236,12 +1198,13 @@ export function buildEventProjectionStmts(
           db
             .prepare(
               `INSERT INTO cell_validators (
-                project_id, file_id, cell_id, target_lang, event_id, username, decided_ts
-              ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                project_id, file_id, cell_id, target_lang, lane_id, event_id, username, decided_ts
+              ) VALUES (?, ?, ?, ?, ${laneIdResolveSql('target')}, ?, ?, ?)
               ON CONFLICT(project_id, file_id, cell_id, target_lang, username)
               DO UPDATE SET
                 event_id   = excluded.event_id,
-                decided_ts = excluded.decided_ts
+                decided_ts = excluded.decided_ts,
+                lane_id    = COALESCE(excluded.lane_id, cell_validators.lane_id)
               WHERE excluded.decided_ts > cell_validators.decided_ts`,
             )
             .bind(
@@ -1249,6 +1212,7 @@ export function buildEventProjectionStmts(
               event.fileId,
               event.cellId,
               lane,
+              ...laneIdResolveBinds('target', event.projectId, lane),
               p.editEventId,
               event.author,
               event.serverTs,

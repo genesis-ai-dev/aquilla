@@ -19,6 +19,7 @@ import {
   buildEventProjectionStmts,
   type PersistedEvent,
 } from '../events/event-projection'
+import { fullProgressRecomputeStmts } from '../events/progress-projection'
 import type { EventKind } from '../events/types'
 import { handleRebuildProjectionRequest } from '../events/rebuild'
 import { makeTestDb, type TestDb } from './helpers/pg-test-db'
@@ -209,5 +210,48 @@ describe('lane_id resolution — bulk import builders', () => {
     )
     expect(def.rows[0]?.lane_id).toBe(DEFAULT_TARGET_LANE)
     expect(es.rows[0]?.lane_id).toBe(ES_LANE)
+  })
+})
+
+describe('lane_id resolution — leftover projection writes (slice 7a)', () => {
+  it('cell.validate writes lane_id on cell_validators', async () => {
+    await seedLanes(t)
+    await project(t, [
+      SOURCE,
+      LEGACY_TARGET,
+      ES_TARGET,
+      ev({ kind: 'cell.validate', payload: { editEventId: 'tc-legacy' } }),
+      ev({
+        kind: 'cell.validate',
+        id: 'v-es',
+        payload: { editEventId: 'tc-es', targetLang: 'es' },
+      }),
+    ])
+
+    const r = await t.pg.query<{ target_lang: string; lane_id: string | null }>(
+      `SELECT target_lang, lane_id FROM cell_validators
+        WHERE project_id = $1 ORDER BY target_lang`,
+      [PROJECT],
+    )
+    expect(r.rows).toEqual([
+      { target_lang: '', lane_id: DEFAULT_TARGET_LANE },
+      { target_lang: 'es', lane_id: ES_LANE },
+    ])
+  })
+
+  it('progress recompute writes lane_id grouped by target_lang', async () => {
+    await seedLanes(t)
+    await project(t, [SOURCE, LEGACY_TARGET, ES_TARGET])
+    for (const s of fullProgressRecomputeStmts(t.db, PROJECT, FILE, 5000)) await s.run()
+
+    const r = await t.pg.query<{ target_lang: string; lane_id: string | null }>(
+      `SELECT DISTINCT target_lang, lane_id FROM file_section_progress
+        WHERE project_id = $1 ORDER BY target_lang`,
+      [PROJECT],
+    )
+    expect(r.rows).toEqual([
+      { target_lang: '', lane_id: DEFAULT_TARGET_LANE },
+      { target_lang: 'es', lane_id: ES_LANE },
+    ])
   })
 })

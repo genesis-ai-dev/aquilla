@@ -147,6 +147,29 @@ describe('assignment.create — lane (AQU-538 §3.5)', () => {
     expect(row!.target_lang).toBe('es')
   })
 
+  it('writes lane_id from the matching target lane when lanes exist', async () => {
+    const { db, snapshot } = await makeTestDb({
+      cells: seededCells(),
+      lanes: [
+        { id: 'lane-es', project_id: 'proj-1', role: 'target', name: 'Spanish', lang_code: 'es', legacy_tag: 'es' },
+      ],
+    })
+    const authed = await authorizeAssignment('assignment.create', {
+      assignmentId: 'as-lane-id',
+      scopeKind: 'books',
+      scope: [{ fileId: 'file-gen' }],
+      scopeLabel: 'Genesis',
+      assigneeUserId: 42,
+      targetLang: 'es',
+    })
+
+    await db.batch(handleAssignmentEvent(db, authed, 2100, 2).stmts)
+
+    const row = (await snapshot()).assignments.find((a) => a.assignment_id === 'as-lane-id')
+    expect(row!.target_lang).toBe('es')
+    expect(row!.lane_id).toBe('lane-es')
+  })
+
   it('defaults target_lang to the empty string when the lane is absent', async () => {
     const { db, snapshot } = await makeTestDb({ cells: seededCells() })
     const authed = await authorizeAssignment('assignment.create', {

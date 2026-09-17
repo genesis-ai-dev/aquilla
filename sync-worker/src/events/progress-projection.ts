@@ -1,4 +1,5 @@
 import type { AquillaDb, AquillaStatement } from '../../../db/shim/postgres'
+import { laneIdResolveFromColSql } from './lane-id-sql'
 
 export const MAX_VALIDATOR_HISTOGRAM_BUCKET = 15
 
@@ -147,10 +148,12 @@ export function fileProgressRecomputeStmt(
        )::bigint AS revision
      )
      INSERT INTO file_section_progress (
-       project_id, file_id, scope, section_key, target_lang, total_count, filled_count,
+       project_id, file_id, scope, section_key, target_lang, lane_id, total_count, filled_count,
        validator_histogram, revision, updated_at, audio_count, audio_validated_count, last_edit_at
      )
-     SELECT ?, ?, 'file', '', summary.lane, summary.total_count, summary.filled_count,
+     SELECT ?, ?, 'file', '', summary.lane,
+            ${laneIdResolveFromColSql('target', '?', 'summary.lane')},
+            summary.total_count, summary.filled_count,
             COALESCE(
               (SELECT jsonb_object_agg(validator_bucket::text, bucket_count)
                  FROM buckets WHERE buckets.lane = summary.lane),
@@ -167,13 +170,14 @@ export function fileProgressRecomputeStmt(
        updated_at = excluded.updated_at,
        audio_count = excluded.audio_count,
        audio_validated_count = excluded.audio_validated_count,
-       last_edit_at = excluded.last_edit_at`,
+       last_edit_at = excluded.last_edit_at,
+       lane_id = COALESCE(excluded.lane_id, file_section_progress.lane_id)`,
   ).bind(
     projectId, fileId,
     projectId, fileId,
     projectId, fileId,
     projectId, fileId, projectId,
-    projectId, fileId, updatedAt,
+    projectId, fileId, projectId, updatedAt,
   )
 }
 
@@ -230,7 +234,7 @@ export function sectionsProgressRecomputeStmt(
     projectId, fileId,           // paired
   ]
   if (uniqueCellIds.length > 0) binds.push(projectId, fileId, ...uniqueCellIds)
-  binds.push(projectId, fileId, projectId, projectId, fileId, updatedAt)
+  binds.push(projectId, fileId, projectId, projectId, fileId, projectId, updatedAt)
 
   return db.prepare(
     `WITH lanes AS (
@@ -304,10 +308,11 @@ export function sectionsProgressRecomputeStmt(
        )::bigint AS revision
      )
      INSERT INTO file_section_progress (
-       project_id, file_id, scope, section_key, target_lang, total_count, filled_count,
+       project_id, file_id, scope, section_key, target_lang, lane_id, total_count, filled_count,
        validator_histogram, revision, updated_at, audio_count, audio_validated_count, last_edit_at
      )
      SELECT ?, ?, summaries.scope, summaries.section_key, summaries.lane,
+            ${laneIdResolveFromColSql('target', '?', 'summaries.lane')},
             summaries.total_count, summaries.filled_count,
             COALESCE(histograms.validator_histogram, '{}'::jsonb),
             watermark.revision, ?,
@@ -326,7 +331,8 @@ export function sectionsProgressRecomputeStmt(
        updated_at = excluded.updated_at,
        audio_count = excluded.audio_count,
        audio_validated_count = excluded.audio_validated_count,
-       last_edit_at = excluded.last_edit_at`,
+       last_edit_at = excluded.last_edit_at,
+       lane_id = COALESCE(excluded.lane_id, file_section_progress.lane_id)`,
   ).bind(...binds)
 }
 
@@ -440,10 +446,11 @@ export function fullProgressRecomputeStmts(
          )::bigint AS revision
        )
        INSERT INTO file_section_progress (
-         project_id, file_id, scope, section_key, target_lang, total_count, filled_count,
+         project_id, file_id, scope, section_key, target_lang, lane_id, total_count, filled_count,
          validator_histogram, revision, updated_at, audio_count, audio_validated_count, last_edit_at
        )
        SELECT ?, ?, summaries.scope, summaries.section_key, summaries.lane,
+              ${laneIdResolveFromColSql('target', '?', 'summaries.lane')},
               summaries.total_count, summaries.filled_count,
               COALESCE(histograms.validator_histogram, '{}'::jsonb),
               watermark.revision, ?,
@@ -462,14 +469,15 @@ export function fullProgressRecomputeStmts(
          updated_at = excluded.updated_at,
          audio_count = excluded.audio_count,
          audio_validated_count = excluded.audio_validated_count,
-         last_edit_at = excluded.last_edit_at`,
+         last_edit_at = excluded.last_edit_at,
+         lane_id = COALESCE(excluded.lane_id, file_section_progress.lane_id)`,
     ).bind(
       projectId, fileId,
       projectId, fileId,
       projectId, fileId,
       projectId, fileId,
       projectId, fileId, projectId,
-      projectId, fileId, updatedAt,
+      projectId, fileId, projectId, updatedAt,
     ),
     db.prepare(
       // Prune sections/books whose cells are gone, and every book row once the

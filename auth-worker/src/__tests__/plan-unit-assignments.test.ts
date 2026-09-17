@@ -391,6 +391,18 @@ describe("GET /api/v2/projects/:projectId/assignments/unit", () => {
     await env.AQUILLA_PG.prepare(
       "INSERT INTO org_settings (org_id, settings) VALUES (1, '{\"memberProgressViewMinRole\":400}')",
     ).run()
+    // Still 403: the rows name people, and the ROSTER floor decides who may
+    // learn who is on a project. Independent key, same default (AQU-485).
+    const progressOnly = await app.request(
+      "/api/v2/projects/pa/assignments/unit?fileId=f1&section=GEN",
+      { headers: authHeader(await jwtFor("anna")) },
+      env,
+    )
+    expect(progressOnly.status).toBe(403)
+
+    await env.AQUILLA_PG.prepare(
+      "UPDATE org_settings SET settings = '{\"memberProgressViewMinRole\":400,\"rosterViewMinRole\":400}' WHERE org_id = 1",
+    ).run()
     const allowed = await app.request(
       "/api/v2/projects/pa/assignments/unit?fileId=f1&section=GEN",
       { headers: authHeader(await jwtFor("anna")) },

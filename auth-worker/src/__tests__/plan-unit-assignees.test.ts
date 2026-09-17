@@ -132,8 +132,23 @@ describe("GET /api/v2/projects/:id/assignments/units", () => {
     )
     expect(denied.status).toBe(403)
 
+    // Lowering the PROGRESS floor alone is not enough: this response carries
+    // usernames, and who may learn who is on a project is the ROSTER floor's
+    // question (AQU-485). Both default to maintainer, so a default org is
+    // unaffected; an org that lowers only one was handing out names the
+    // members route refuses.
     await env.AQUILLA_PG.prepare(
       "INSERT INTO org_settings (org_id, settings) VALUES (1, '{\"memberProgressViewMinRole\":400}')",
+    ).run()
+    const progressOnly = await app.request(
+      "/api/v2/projects/pa/assignments/units",
+      { headers: authHeader(await jwtFor("anna")) },
+      env,
+    )
+    expect(progressOnly.status).toBe(403)
+
+    await env.AQUILLA_PG.prepare(
+      "UPDATE org_settings SET settings = '{\"memberProgressViewMinRole\":400,\"rosterViewMinRole\":400}' WHERE org_id = 1",
     ).run()
     const allowed = await app.request(
       "/api/v2/projects/pa/assignments/units",

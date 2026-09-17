@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { MultiProjectInviteDialog } from "./MultiProjectInviteDialog"
 import { createServerInvite } from "@/lib/sync/invites"
-import { addProjectMember } from "@/lib/frontier/members"
+import { addProjectMember, lookupUser } from "@/lib/frontier/members"
 import type { RecipientValue } from "@/components/UsernameTypeahead"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 
@@ -123,5 +123,84 @@ describe("MultiProjectInviteDialog email mode (AQU-471)", () => {
       target: { value: "bob@example.com" },
     })
     expect(screen.getByRole("button", { name: /send invites/i })).toBeEnabled()
+  })
+})
+
+// AQU-1150: a filter box above the project checklist. The load-bearing part is
+// that filtering is purely presentational — it narrows the rendered rows and
+// must never disturb `selections`, which is what the count reads and what the
+// submit iterates. A filter that silently dropped a hidden selection would
+// fail the operator exactly when the dialog is most useful (a large org, where
+// you cannot see everything you picked at once).
+describe("MultiProjectInviteDialog project filter (AQU-1150)", () => {
+  const threeProjects = [
+    { id: "pa", name: "John" },
+    { id: "pb", name: "Mark" },
+    { id: "pc", name: "Luke" },
+  ] as CloudProjectSummary[]
+
+  function renderThree() {
+    return render(
+      <MultiProjectInviteDialog open={true} onOpenChange={() => {}} projects={threeProjects} />,
+    )
+  }
+
+  const searchBox = () => screen.getByRole("textbox", { name: "Search projects" })
+
+  it("narrows the list as you type and restores it when cleared", () => {
+    renderThree()
+    expect(screen.getAllByRole("checkbox")).toHaveLength(3)
+
+    fireEvent.change(searchBox(), { target: { value: "ar" } })
+    expect(screen.getByRole("checkbox", { name: "Select Mark" })).toBeInTheDocument()
+    expect(screen.queryByRole("checkbox", { name: "Select John" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("checkbox", { name: "Select Luke" })).not.toBeInTheDocument()
+
+    fireEvent.change(searchBox(), { target: { value: "" } })
+    expect(screen.getAllByRole("checkbox")).toHaveLength(3)
+  })
+
+  it("matches case-insensitively on any part of the name", () => {
+    renderThree()
+    fireEvent.change(searchBox(), { target: { value: "LUK" } })
+    expect(screen.getByRole("checkbox", { name: "Select Luke" })).toBeInTheDocument()
+    expect(screen.getAllByRole("checkbox")).toHaveLength(1)
+  })
+
+  it("says so when nothing matches, rather than showing an empty box", () => {
+    renderThree()
+    fireEvent.change(searchBox(), { target: { value: "zzzz" } })
+    expect(screen.getByText("No projects match your search.")).toBeInTheDocument()
+    expect(screen.queryAllByRole("checkbox")).toHaveLength(0)
+  })
+
+  it("keeps earlier selections through a filter — count AND submit include the hidden ones", async () => {
+    vi.mocked(lookupUser).mockResolvedValue({ id: 7, username: "bob" })
+    renderThree()
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select John" }))
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Mark" }))
+    expect(screen.getByText(/2 projects selected/)).toBeInTheDocument()
+
+    // Filter the two checked rows out of view, then check the third.
+    fireEvent.change(searchBox(), { target: { value: "luke" } })
+    expect(screen.queryByRole("checkbox", { name: "Select John" })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Luke" }))
+    expect(screen.getByText(/3 projects selected/)).toBeInTheDocument()
+
+    // The real regression guard: the grant goes out for all three, including
+    // the two the filter is hiding at submit time.
+    fireEvent.change(screen.getByLabelText("recipient-input"), { target: { value: "bob" } })
+    fireEvent.click(screen.getByRole("button", { name: "Add to projects" }))
+    await waitFor(() => expect(addProjectMember).toHaveBeenCalledTimes(3))
+    expect(addProjectMember).toHaveBeenCalledWith("jwt", "pa", "bob", 400)
+    expect(addProjectMember).toHaveBeenCalledWith("jwt", "pb", "bob", 400)
+    expect(addProjectMember).toHaveBeenCalledWith("jwt", "pc", "bob", 400)
+  })
+
+  it("does not offer a filter when the operator has no projects to filter", () => {
+    render(<MultiProjectInviteDialog open={true} onOpenChange={() => {}} projects={[]} />)
+    expect(screen.queryByRole("textbox", { name: "Search projects" })).not.toBeInTheDocument()
+    expect(screen.getByText(/no projects available/i)).toBeInTheDocument()
   })
 })

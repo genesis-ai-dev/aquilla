@@ -600,17 +600,18 @@ describe("the chapter card", () => {
       .toHaveTextContent("2 cells not yet validated")
   })
 
-  it("reads its bars in cells, not percentages", async () => {
+  it("reads its bars in percentages, with the counts on hover", async () => {
     await openChapter(
       nearlyDone({ sectionKey: "GEN" }),
       [section("GEN 12", { totalCount: 20, filledCount: 20, validatedCount: 18 })],
       [],
     )
-    // "100% | 90%" rounds the two outstanding cells out of existence; "20 | 18"
-    // is the thing a manager can act on. Translated | validated — the card
-    // read total | validated until 2026-09-17, which nobody caught because on
-    // a nearly-complete chapter the two coincide.
-    expect(screen.getByTestId("plan-chapter-detail")).toHaveTextContent("20 | 18")
+    // Percentages like every other bar, and the two cells "100% | 90%" rounds
+    // away are what the hover says (Sam, 2026-09-17, for consistency).
+    const card = screen.getByTestId("plan-chapter-detail")
+    expect(card).toHaveTextContent("100% | 90%")
+    expect(within(card).getAllByTestId("plan-readout-figure").map((el) => el.getAttribute("aria-label")))
+      .toEqual(["20 of 20 translated", "18 of 20 validated"])
   })
 
   it("draws a chip per short verse, in canonical order, and opens the cell", async () => {

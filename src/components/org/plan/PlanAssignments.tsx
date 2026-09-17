@@ -42,9 +42,9 @@ import type { UnitAssignment, UnitAssignmentChapter } from "@/lib/sync/assignmen
 import type { FileReference, FileType } from "@/lib/parsers/types"
 import { SectionVisibilityGate } from "../SectionVisibilityBadge"
 import { laneChipLabel } from "../project-lanes"
-import { PlanBar, Readout } from "./PlanBar"
+import { PlanBar } from "./PlanBar"
 import { PLAN_TONE } from "./plan-tone"
-import { usePlanShortfallRenderer } from "./use-plan-note"
+import { usePlanShortfallRenderer, usePlanReadoutTips } from "./use-plan-note"
 
 /** AssignModal takes the editor's cell selection; a PM surface has none. */
 const EMPTY_SELECTION: ReadonlySet<string> = new Set()
@@ -269,6 +269,7 @@ function PlanAssignmentRow({
   showAudio: boolean
 }) {
   const t = useT()
+  const readoutTips = usePlanReadoutTips()
   const { locale } = useI18n()
   const name = a.username ?? t("org.workloadRollup.unknownUser", { id: a.assigneeUserId })
   // '' and a real tag are different lanes, so compare the values themselves
@@ -378,11 +379,9 @@ function PlanAssignmentRow({
             translated: planPct(a.translated, a.cellsTotal),
             validated: planPct(a.validated, a.cellsTotal),
           })}
-          readout={
-            <span className="flex w-full" data-testid={`plan-assignment-text-${a.assignmentId}`}>
-              <Readout left={a.translated} right={a.validated} />
-            </span>
-          }
+          // Percentages like every other bar; the counts — "938 of 940
+          // validated" — are one hover away (Sam, 2026-09-17).
+          tips={readoutTips("text", a.translated, a.validated, a.cellsTotal)}
         />
         {showAudio && (
           <PlanBar
@@ -394,11 +393,7 @@ function PlanAssignmentRow({
               recorded: planPct(a.recorded, a.cellsTotal),
               validated: planPct(a.audioValidated, a.cellsTotal),
             })}
-            readout={
-              <span className="flex w-full" data-testid={`plan-assignment-audio-${a.assignmentId}`}>
-                <Readout left={a.recorded} right={a.audioValidated} />
-              </span>
-            }
+            tips={readoutTips("audio", a.recorded, a.audioValidated, a.cellsTotal)}
           />
         )}
       </div>

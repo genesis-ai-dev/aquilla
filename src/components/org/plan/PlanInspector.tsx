@@ -34,7 +34,7 @@ import { classifyPlanSection, numberedBookCodes } from "@/lib/plan/plan-section"
 import type { PlanUnitPatch } from "@/lib/sync/plan"
 import { usePlanUnitSections, type PlanSection } from "@/hooks/usePlanUnitSections"
 import { PlanStatusPill } from "./PlanStatusPill"
-import { PlanBar, Readout } from "./PlanBar"
+import { PlanBar } from "./PlanBar"
 import { PlanChapterGrid, PlanGridLegend, planSectionShortfall } from "./PlanChapterGrid"
 import { PLAN_TONE } from "./plan-tone"
 import { GO_TO_FIRST_KEY, usePlanReadoutTips, usePlanShortfallText, usePlanStatusNote } from "./use-plan-note"
@@ -597,6 +597,7 @@ function PlanChapterCard({
   onOpenCell?: (cellId: string) => void
 }) {
   const t = useT()
+  const readoutTips = usePlanReadoutTips()
   const rowRef = useRef<HTMLDivElement>(null)
 
   const shortfall = planSectionShortfall(section, hasAudio)
@@ -652,11 +653,11 @@ function PlanChapterCard({
           translated: planPct(section.filledCount, section.totalCount),
           validated: planPct(section.validatedCount, section.totalCount),
         })}
-        // Translated | validated, like every other readout — not total |
-        // validated, which it was until Sam's review (2026-09-17). Nobody had
-        // caught it because a nearly-complete chapter is usually fully
-        // translated, and then the two numbers coincide.
-        readout={<Readout left={section.filledCount} right={section.validatedCount} />}
+        // Percentages like every other bar, the counts one hover away (Sam,
+        // 2026-09-17, for consistency). "20 of 20 translated · 18 of 20
+        // validated" is what the hover says; the card's own header still
+        // says "2 cells not yet validated" in print.
+        tips={readoutTips("text", section.filledCount, section.validatedCount, section.totalCount)}
       />
       {hasAudio && (
         <PlanBar
@@ -668,7 +669,7 @@ function PlanChapterCard({
             recorded: planPct(section.audioCount, section.totalCount),
             validated: planPct(section.audioValidatedCount, section.totalCount),
           })}
-          readout={<Readout left={section.audioCount} right={section.audioValidatedCount} />}
+          tips={readoutTips("audio", section.audioCount, section.audioValidatedCount, section.totalCount)}
         />
       )}
       {/* ONE ROW, NEVER TWO — and it SCROLLS. Sam, 2026-09-16: every verse

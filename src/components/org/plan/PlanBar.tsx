@@ -39,7 +39,7 @@ const HUE: Record<PlanBarTone, string> = {
  */
 const ALPHA = { done: 0.33, validated: 0.67 } as const
 
-export function PlanBar({ label, outer, inner, tone, aria, readout, tips }: {
+export function PlanBar({ label, outer, inner, tone, aria, tips }: {
   /** Omitted where the caller supplies its own leading gutter (a chapter number). */
   label?: string
   /** Percentage 0–100 of the containing measure. */
@@ -48,17 +48,6 @@ export function PlanBar({ label, outer, inner, tone, aria, readout, tips }: {
   inner: number
   tone: PlanBarTone
   aria: string
-  /**
-   * AQU-1278: what to print in the readout slot, instead of "outer% | inner%".
-   *
-   * A unit reads in PERCENTAGES and a person or a chapter reads in CELLS. At
-   * those grains "940 | 938" is a fact a manager can act on — two cells left —
-   * where "99% | 99%" is those two cells rounded out of existence. The slot
-   * keeps its fixed width either way, so a column of bars stays aligned
-   * whichever kind of number is in it. Build it with `Readout` so the two
-   * numbers are separated the same way everywhere.
-   */
-  readout?: ReactNode
   /**
    * AQU-1278, round 7 (Sam, 2026-09-17): what each percentage STANDS FOR, as
    * a sentence — "1,530 of 1,533 validated" — shown on hover and read by a
@@ -107,9 +96,7 @@ export function PlanBar({ label, outer, inner, tone, aria, readout, tips }: {
           is finished. A flex box rather than right-aligned text so the
           `Readout` inside can pin its divider to the slot's centre. */}
       <span className="flex w-[72px] shrink-0 items-center text-[11px] tabular-nums text-muted-foreground">
-        {readout ?? (
-          <Readout left={`${outer}%`} right={`${inner}%`} leftTip={tips?.outer} rightTip={tips?.inner} />
-        )}
+        <Readout left={`${outer}%`} right={`${inner}%`} leftTip={tips?.outer} rightTip={tips?.inner} />
       </span>
     </span>
   )
@@ -122,9 +109,13 @@ export function PlanBar({ label, outer, inner, tone, aria, readout, tips }: {
  * way anyone would — "100 out of 99 percent", which is nonsense — because a
  * slash means division everywhere else a number appears. The two figures are
  * siblings (translated beside validated, recorded beside validated), so they
- * get a divider that only ever means "and": a thin vertical rule. The same
- * element serves percentages on a unit and counts on a person or a chapter,
- * so the three never drift into three notations.
+ * get a divider that only ever means "and": a thin vertical rule.
+ *
+ * PERCENTAGES EVERYWHERE, since 2026-09-17. A person's and a chapter's bars
+ * used to read in cells — "940 | 938" — on the argument that two cells left
+ * is a fact a manager can act on where "99% | 99%" rounds it away. Sam chose
+ * consistency instead: every bar reads the same way, and the count with its
+ * total is what the hover says.
  *
  * THE RULE SITS AT THE SLOT'S CENTRE ON EVERY ROW, not wherever the text
  * happens to end. Each number gets half the slot — the left one flush against
@@ -134,7 +125,7 @@ export function PlanBar({ label, outer, inner, tone, aria, readout, tips }: {
  * a "|" glyph so it can be taller than the digits and still centred on them;
  * the glyph survives for copy and screen readers, hidden from sight.
  */
-export function Readout({ left, right, leftTip, rightTip }: {
+function Readout({ left, right, leftTip, rightTip }: {
   left: ReactNode
   right: ReactNode
   /** What the left figure stands for, in full; makes it a hover target. */

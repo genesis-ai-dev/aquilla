@@ -5417,7 +5417,18 @@ export function ProjectWorkspace() {
   // ── FRO-192: assignment data ──────────────────────────────────────────────
   // Members list: used by AssignModal for the assignee picker and for building
   // the username→userId reverse map.
-  const { members: projectMembers } = useProjectMembers(project?.id ?? null)
+  const {
+    members: projectMembers,
+    rosterHidden: projectRosterHidden,
+    error: projectRosterError,
+  } = useProjectMembers(project?.id ?? null)
+  // AQU-1308: the roster gate and the assign gate used to disagree, so a
+  // project lead got a 403 here and AssignModal rendered an empty "Select
+  // member…" with no explanation. The server side is fixed; this keeps the
+  // picker honest whenever the fetch still fails (a genuinely hidden roster,
+  // or a network/server error).
+  const projectRosterUnavailable: "hidden" | "load-failed" | null =
+    projectRosterHidden ? "hidden" : projectRosterError ? "load-failed" : null
 
   // Current user's open assignments in this project, fetched once on mount and
   // on each new assignment (assignmentsRefreshKey increment).
@@ -12486,6 +12497,7 @@ export function ProjectWorkspace() {
           defaultLane={activeLane}
           defaultLaneLabel={activeTargetLanguage ?? ""}
           members={projectMembers}
+          rosterUnavailable={projectRosterUnavailable}
           roleLevel={currentRoleLevel}
           allowSelfAssignment={allowSelfAssignment}
           assignmentMinRole={assignmentMinRole}

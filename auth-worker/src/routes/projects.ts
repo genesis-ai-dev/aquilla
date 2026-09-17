@@ -58,7 +58,7 @@ import {
   getCommentFloors,
   getEffectiveOrgRole,
   getOrCreateUserOrg,
-  getRosterViewMinRole,
+  getProjectRosterViewMinRole,
   getTermbaseEditMinRole,
   getLanguageEditMinRole,
   listEffectiveProjectMembers,
@@ -1036,6 +1036,13 @@ function parsePrivilegedMinRole(raw: string | undefined): number | null {
  * floor or above, even when the full roster is hidden. That is the GitHub
  * "view admins" contract — a contributor still needs to see who can change
  * settings, without learning who else is on the project.
+ *
+ * AQU-1308: the floor applied here is `getProjectRosterViewMinRole` — the
+ * lower of the org's `rosterViewMinRole` and its `assignmentMinRole` — so a
+ * caller the org authorizes to assign work can always read the roster the
+ * assignee picker is built from. Under the shipped defaults (roster 600,
+ * assignment 500) a project lead was authorized to assign but 403'd on the
+ * roster, emptying every Assignee dropdown.
  */
 projects.get("/:projectId/members", authMiddleware, async (c) => {
   const user = c.get("user")
@@ -1053,7 +1060,7 @@ projects.get("/:projectId/members", authMiddleware, async (c) => {
   const privilegedMinRole = parsePrivilegedMinRole(c.req.query("minRole"))
 
   if (project.org_id != null && privilegedMinRole == null) {
-    const rosterMinRole = await getRosterViewMinRole(c.env, project.org_id)
+    const rosterMinRole = await getProjectRosterViewMinRole(c.env, project.org_id)
     if (!canViewRoster(role.level, rosterMinRole)) {
       return c.json({ error: "roster hidden by org policy", rosterHidden: true }, 403)
     }

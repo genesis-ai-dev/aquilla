@@ -820,6 +820,12 @@ export const org = defineNamespace({
     }),
     "org.assignWork.clearAllChapters": "Clear all",
     "org.assignWork.selfAssignNote": "Self-assignment is on — you can claim this work for yourself.",
+    // AQU-1308: the assignee picker must never render an empty "Select
+    // member…" when the roster fetch failed — say which failure it was.
+    "org.assignWork.rosterHiddenError":
+      "Your organization restricts who can see this project's member list, so there is no one to pick. Ask an owner or maintainer for access.",
+    "org.assignWork.rosterLoadError":
+      "Couldn’t load this project’s members, so the assignee list is empty. Close the panel and try again.",
 
     // -- AssignedToMe: assignee's open-assignments inbox --
     "org.assignedToMe.selectOrgDescription": "Assignments are scoped to a single organization.",
@@ -2132,6 +2138,14 @@ export const org = defineNamespace({
         description:
           "Status line above the chapter checkbox list in the Assign work panel, counting how many chapters are currently checked (zero checked means 'whole book').",
         placeholders: { count: "How many chapters are currently checked; also selects the plural form." },
+      },
+      "org.assignWork.rosterHiddenError": {
+        description:
+          "Inline error under the Assignee dropdown in the Assign work panel when the member list was refused because the organization has restricted who may view rosters. Explains why the dropdown is empty and who to ask.",
+      },
+      "org.assignWork.rosterLoadError": {
+        description:
+          "Inline error under the Assignee dropdown in the Assign work panel when the member list could not be fetched at all (no access, or a network/server failure). Explains why the dropdown is empty.",
       },
       "org.assignedToMe.cellsProgress": {
         description:

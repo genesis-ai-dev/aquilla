@@ -584,6 +584,7 @@ CREATE TABLE file_section_progress (
 );
 
 CREATE INDEX idx_file_section_progress_file_revision ON file_section_progress(project_id, file_id, revision);
+CREATE INDEX idx_file_section_progress_lane_id ON file_section_progress(project_id, file_id, lane_id) WHERE lane_id IS NOT NULL;
 
 -- AQU-1094/1095: per-unit planning metadata — the target date a manager plans
 -- against and the explicit mark that a unit is finished. section_key is '' for
@@ -858,18 +859,22 @@ CREATE INDEX idx_user_activity_days_day ON user_activity_days(day);
 CREATE INDEX assignment_cells_by_assignment ON assignment_cells(assignment_id);
 CREATE INDEX assignments_assignee ON assignments(assignee_user_id);
 CREATE INDEX assignments_project ON assignments(project_id);
+CREATE INDEX idx_assignments_lane_id ON assignments(project_id, lane_id) WHERE lane_id IS NOT NULL;
 CREATE INDEX idx_cell_audio_file ON cell_audio(project_id, file_id) WHERE deleted = 0;
 CREATE INDEX idx_cell_word_morph_file ON cell_word_morph(project_id, file_id);
 CREATE INDEX idx_cell_word_morph_lemma ON cell_word_morph(lemma) WHERE lemma IS NOT NULL;
 CREATE INDEX idx_cell_bt_cell ON cell_backtranslations(project_id, file_id, cell_id, created_at DESC);
 CREATE INDEX idx_cell_bt_file ON cell_backtranslations(project_id, file_id);
 CREATE INDEX idx_cell_validators_cell ON cell_validators(project_id, file_id, cell_id);
+CREATE INDEX idx_cell_validators_lane_id ON cell_validators(project_id, file_id, cell_id, lane_id) WHERE lane_id IS NOT NULL;
 CREATE INDEX idx_cell_waivers_file ON cell_waivers(project_id, file_id);
 CREATE INDEX idx_cells_decay_drags ON cells(project_id, endorsement_count);
 CREATE INDEX idx_cells_file_order ON cells(project_id, file_id, side, anchor_cell_id);
 -- AQU-1160: backs the cell-page-read chain-cache's bounded page fetch
 -- ((side, target_lang, cell_id) tuple lookup) — see 0083_cells_scan_index.sql.
 CREATE INDEX idx_cells_file_scan ON cells(project_id, file_id, side, target_lang, cell_id);
+-- AQU-1240 slice 7: dual-read prefers lane_id once backfill has populated it.
+CREATE INDEX idx_cells_lane_id ON cells(project_id, file_id, lane_id) WHERE lane_id IS NOT NULL;
 CREATE INDEX idx_cells_last_edit ON cells(project_id, file_id, side, last_edit_at);
 CREATE INDEX idx_cells_pair_lookup ON cells(project_id, cell_id, side);
 CREATE INDEX idx_cells_source_basis ON cells(source_event_id);

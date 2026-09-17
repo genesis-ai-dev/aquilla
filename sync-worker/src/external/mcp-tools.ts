@@ -342,6 +342,40 @@ export const MCP_TOOLS: McpToolDef[] = [
     },
   },
   {
+    name: 'read_comments',
+    description:
+      'Read reviewer comment threads (the feedback primitive) — the same threads the people ' +
+      'on this project see in the app. Args: projectId (required); fileId to narrow to one ' +
+      "file; fileId + cellId to read one cell's threads; limit (default 50, max 200) and " +
+      'cursor to page. Returns { data, nextCursor } ordered oldest-first, each item ' +
+      '{ commentId, scopeKind, fileId, cellId, cellRef, parentCommentId, body, resolved, ' +
+      'author, viaAgent, createdAt, updatedAt, deletedAt }. parentCommentId null means the ' +
+      'item IS a thread root; the replies to it carry its commentId. `author` is a stable ' +
+      'per-project pseudonym (u_3f9ab21c) unless this credential was minted to see real ' +
+      'identities — the same author is the same id within a project and a different one ' +
+      'across projects. `viaAgent` marks a comment posted through this API rather than typed ' +
+      'by a person, so you can tell your own earlier replies from a reviewer\'s. Read a ' +
+      "cell's threads before rewriting it: a reviewer may already have said what they want. " +
+      'To ANSWER a thread, stage an EmitEvents changeset (REST ' +
+      'POST .../projects/:projectId/changesets) with one comment.create carrying the thread ' +
+      "root's commentId as parentCommentId, plus that cell's fileId/cellId — it posts as you " +
+      '(the credential\'s minting user), marked "via agent", and notifies the thread the ' +
+      'normal way. A parentCommentId that does not exist fails at prepare with ' +
+      'validation_failed.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...projectIdProp,
+        fileId: { type: 'string', description: 'Restrict to one file.' },
+        cellId: { type: 'string', description: "Restrict to one cell's threads (requires fileId)." },
+        limit: { type: 'number', description: 'Page size (default 50, max 200).' },
+        cursor: { type: 'string', description: "Opaque cursor from a previous page's nextCursor." },
+      },
+      required: ['projectId'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'get_prompt_preview',
     description:
       'See the prompt the project copilot would ACTUALLY send when drafting one cell — base ' +

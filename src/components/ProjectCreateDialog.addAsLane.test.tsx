@@ -12,6 +12,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
+import { pickSelectOption } from "@/test-utils/select"
 import { ProjectCreateDialog } from "./ProjectCreateDialog"
 
 vi.mock("@/hooks/useFrontierSession", () => ({
@@ -84,22 +85,6 @@ const mockLinkProjectSource = vi.mocked(linkProjectSource)
 const mockCreateProject = vi.mocked(createProject)
 const mockFetchProjectSettings = vi.mocked(fetchProjectSettings)
 const mockPatchProjectSettings = vi.mocked(patchProjectSettings)
-
-// Base UI Select renders a combobox trigger; options live in a portaled
-// popup. Clicks on options don't reliably commit a selection under
-// happy-dom, but hover-highlighting + Enter does (the keyboard path). See
-// ProjectCreateDialog.linked.test.tsx for the original of this helper.
-async function pickSelectOption(triggerName: RegExp, optionName: RegExp) {
-  const trigger = screen.getByRole("combobox", { name: triggerName })
-  fireEvent.click(trigger)
-  const option = await screen.findByRole("option", { name: optionName })
-  fireEvent.pointerMove(option)
-  fireEvent.mouseMove(option)
-  fireEvent.keyDown(document.activeElement ?? option, { key: "Enter" })
-  await waitFor(() => {
-    expect(screen.queryByRole("listbox")).toBeNull()
-  })
-}
 
 async function pickCorpusSource() {
   fireEvent.click(screen.getByRole("radio", { name: /^Its Source/i }))

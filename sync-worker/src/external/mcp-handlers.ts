@@ -22,6 +22,7 @@ import { MAX_ARTIFACT_BYTES, handleExternalArtifactsRequest } from './artifacts-
 import { SERVER_PARSEABLE_FILE_TYPES, CLIENT_ONLY_FORMATS } from './import-parse'
 import { uiOnlySection } from './ui-only'
 import { handleExternalReadRequest } from './read-routes'
+import { handleExternalCommentsRequest } from './comments-route'
 import { handleExternalMemoryReadRequest } from './memory-read-routes'
 import { handleExternalExportRequest } from './export-route'
 import { handleExternalQualityRequest } from './quality-routes'
@@ -668,6 +669,36 @@ async function readHistory(
   return runRead(env, token, `${encodeURIComponent(projectId)}/cells/${encodeURIComponent(cellId)}/history`)
 }
 
+/** AQU-1233: comment reads live in their own route module (comments-route.ts),
+ *  so they are dispatched directly rather than through runRead's read-routes
+ *  delegate. Same bearer credential, same error mapping. */
+async function readComments(
+  env: ExternalEnv,
+  token: string,
+  args: Record<string, unknown>,
+): Promise<McpToolResult> {
+  const projectId = str(args, 'projectId')
+  if (!projectId) return fail('validation_failed', 'projectId is required')
+  const fileId = str(args, 'fileId')
+  const cellId = str(args, 'cellId')
+  if (cellId && !fileId) return fail('validation_failed', 'cellId requires fileId')
+  const params = new URLSearchParams()
+  if (fileId) params.set('fileId', fileId)
+  if (cellId) params.set('cellId', cellId)
+  if (typeof args.limit === 'number') params.set('limit', String(args.limit))
+  const cursor = str(args, 'cursor')
+  if (cursor) params.set('cursor', cursor)
+  const query = params.toString()
+  const req = new Request(
+    `${EXTERNAL_BASE}/${encodeURIComponent(projectId)}/comments${query ? `?${query}` : ''}`,
+    { headers: bearer(token) },
+  )
+  const res = await handleExternalCommentsRequest(req, env)
+  if (!res) return fail('not_found', 'comments route did not match')
+  if (!res.ok) return delegatedError(res)
+  return ok(await res.json())
+}
+
 /** MCP mirror of REST GET .../projects/:projectId/settings (AQU-1176) — the
  *  version read that makes patch_settings' ifMatchVersion usable. */
 async function readProjectSettings(
@@ -1273,6 +1304,8 @@ export async function callTool(
       return readContent(env, token, args)
     case 'read_history':
       return readHistory(env, token, args)
+    case 'read_comments':
+      return readComments(env, token, args)
     case 'get_project_settings':
       return readProjectSettings(env, token, args)
     case 'get_prompt_preview':

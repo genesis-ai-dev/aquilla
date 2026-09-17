@@ -562,6 +562,11 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
   // the empty-state UI as if the file genuinely has no cells.
   const tokenRetryRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const tokenAttemptsRef = useRef(0)
+  // `doFetch` re-enters itself from its own token-retry timer. It reaches the
+  // callback through this ref (kept pointed at the latest closure just below)
+  // rather than by name, so the retry always runs the current callback instead
+  // of the one captured when the timer was scheduled (react-hooks/immutability).
+  const doFetchRef = useRef<(soft?: boolean) => Promise<void>>(async () => {})
 
   statsRef.current = auditStats
   laneRef.current = lane
@@ -803,7 +808,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         if (tokenRetryRef.current) clearTimeout(tokenRetryRef.current)
         tokenRetryRef.current = setTimeout(() => {
           tokenRetryRef.current = null
-          if (generationRef.current === gen) void doFetch(soft)
+          if (generationRef.current === gen) void doFetchRef.current(soft)
         }, delay)
         return
       }
@@ -1019,6 +1024,7 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       if (generationRef.current === gen) inFlightRef.current = false
     }
   }, [rebuildFromCache, clearConfirmedShadows, mergeProtectedRows])
+  doFetchRef.current = doFetch
 
   // Reload on (projectId, fileId, enabled, lane) change. The optimistic-edit
   // shadow and freshness floors are per-file/per-lane local state — drop them

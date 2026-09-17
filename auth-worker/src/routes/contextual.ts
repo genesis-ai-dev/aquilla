@@ -1521,18 +1521,33 @@ contextual.post(
     } catch {
       /* best-effort — degrade to org 0 */
     }
-    const credit = await creditGuard(db, c.env, orgId, "agent")
-    if (!credit.ok) {
-      const { body: err, status } = errorJson(
-        "credit_cap_exceeded",
-        "Agent credit cap reached. Contact your org admin.",
-        429,
-        { reason: credit.reason },
-      )
-      return c.json(err, status)
+    // AQU-837: a metered pass reserves each model call against the weekly
+    // allowance and retires the legacy guards for itself.
+    let admit: PaidCallAdmit | undefined
+    if (agentUsageEnabled(c.env)) {
+      if (!agentUsageAllowed(c.env, c.req.url)) {
+        const { body: err, status } = errorJson("usage_rehearsal_unavailable", "Usage rehearsal is local-only.", 503)
+        return c.json(err, status)
+      }
+      if (orgId <= 0) {
+        const { body: err, status } = errorJson("permission_denied", "This project has no billing workspace.", 403)
+        return c.json(err, status)
+      }
+      admit = paidCallAdmit(new AgentUsageMeter(c.env, { orgId, userId: user.id, projectId }))
+    } else {
+      const credit = await creditGuard(db, c.env, orgId, "agent")
+      if (!credit.ok) {
+        const { body: err, status } = errorJson(
+          "credit_cap_exceeded",
+          "Agent credit cap reached. Contact your org admin.",
+          429,
+          { reason: credit.reason },
+        )
+        return c.json(err, status)
+      }
+      const words = await wordGuard(db, orgId)
+      if (!words.ok) return c.json(wordCapBody(words.reason), 429)
     }
-    const words = await wordGuard(db, orgId)
-    if (!words.ok) return c.json(wordCapBody(words.reason), 429)
 
     const pairs = await selectCellPairs(db, projectId, { fileId })
     if (pairs.length === 0) {
@@ -1546,6 +1561,7 @@ contextual.post(
       apiKey: c.env.OPENROUTER_API_KEY,
       models,
       signal: c.req.raw.signal,
+      ...(admit ? { admit } : {}),
       onUsage: (usage) => {
         meter.add({
           surface: "autopilot",
@@ -1572,6 +1588,16 @@ contextual.post(
         ...(note ? { note } : {}),
       })
     } catch (err) {
+      const reason = err instanceof Error ? err.message : ""
+      if (reason === "usage_exhausted") {
+        const { body, status } = errorJson("weekly_ai_allowance_exhausted",
+          "This workspace has used its available AI allowance. Try again after the weekly reset or update its plan.", 429)
+        return c.json(body, status)
+      }
+      if (reason === "usage_unpriced" || reason === "usage_unavailable") {
+        const { body, status } = errorJson("usage_accounting_unavailable", "Usage accounting is unavailable. Nothing was changed.", 503)
+        return c.json(body, status)
+      }
       console.error(`[contextual] segmentation pass failed for ${fileId}:`, err)
       const { body, status } = errorJson(
         "segmentation_failed",

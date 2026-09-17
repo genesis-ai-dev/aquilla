@@ -2,6 +2,28 @@
 
 Updated: 2026-09-16. Tickets: AQU-837 (billing readiness), AQU-1091 (pricing and app UI).
 
+## Segmentation metering and weekly-stop client copy — 2026-09-17
+
+- [x] Merge the dev-synced billing branch (f64a43ce8); conflicts resolved in
+  the draft context, schema, journeys, and env example.
+- [x] Meter `POST /:projectId/contextual/segmentation/generate` through the
+  same `makeLlmCall` admission; a spent week answers 429
+  `weekly_ai_allowance_exhausted` and unpriced/unavailable accounting 503,
+  instead of storing a silently degraded whole-file segmentation. Usage
+  refusals now propagate out of the segmentation pass; other call failures
+  still keep the surrounding passage whole.
+- [x] The agent client understands `budget.exhausted` with
+  `reason: "weekly_allowance"`: the meter shows a weekly-allowance stop with no
+  credit figures and notes that staged work is kept (`agent.budget.weeklyExhausted`).
+- [ ] Knowledge indexing and Monday analysis remain unmetered system-funded
+  paths; classify them explicitly before enforcement.
+
+Test impact: autopilot usage suite adds the segmentation case (4 pass);
+segmentation, contextual route, and tick suites pass (83); BudgetMeter adds
+the weekly case; agent client and i18n suites pass except two i18n catalog
+checks that already fail on the merged HEAD (`onboarding.connect.account`
+placeholder documentation, from dev), unrelated to the new key.
+
 ## Enforcement mode and legacy guard retirement — 2026-09-16
 
 - [x] One policy module (`lib/billing/usage-mode.ts`) decides metering for
@@ -36,9 +58,9 @@ metered call and still fill when metering is off. All metered producer suites
 - [x] The workspace billing card shows "N% of this week's AI allowance used"
   with the reset time when measured, and keeps the previous period-only copy
   otherwise. No credit counts or internal units are exposed.
-- [ ] Surface the same percentage in exhaustion errors, the agent panel, and
-  onboarding copy; wire the frontend `budget.exhausted` handling for the
-  `weekly_allowance` reason.
+- [x] Frontend `budget.exhausted` handling for the `weekly_allowance` reason
+  (2026-09-17 checkpoint). Percentage in exhaustion errors and onboarding copy
+  remain open.
 
 Test impact: ledger suite adds a summary case (96% reserved, 100% capped
 overrun, null for legacy); the chat suite asserts the API percent after real
@@ -61,8 +83,8 @@ unkeyed-string lint errors on HEAD; this adds the new string in the same style.
   edge and staged drafts stay reviewable. Spans already in flight in that wave
   fail their remaining calls with `usage_exhausted` and are reported as failed.
 - [ ] Resume after the weekly reset is manual (Play). Segmentation generation
-  and the remaining producers (knowledge indexing, Monday analysis) are still
-  unconnected; legacy guards and the per-run cap remain.
+  is metered (2026-09-17); knowledge indexing and Monday analysis remain
+  unconnected; the per-run cap remains as a safety ceiling.
 
 Test impact: new `billing-contextual-usage.test.ts` (three real-Postgres route
 tests: owner-funded settlement of every graph call with provider refs, pause on

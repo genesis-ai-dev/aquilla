@@ -50,9 +50,11 @@ async function setup() {
     _test.lastLoop = null
     return { status: response.status, runId }
   }
+  const generate = async (overrides: Partial<Env> = {}) => app.request(`http://127.0.0.1/api/v2/projects/${PROJECT}/contextual/segmentation/generate?fileId=${FILE}`,
+    { method: 'POST', headers: { ...authHeader(await jwtFor('alice')), 'Content-Type': 'application/json' }, body: '{}' }, { ...settings, ...overrides })
   const plan = (await readBillingWorkspace(env.AQUILLA_PG, 1))!.entitlement!
   const totals = () => readUsageTotals(env.AQUILLA_PG, 1, { start: plan.usagePeriodStart, end: plan.usagePeriodEnd })
-  return { start, totals, completions }
+  return { start, generate, totals, completions }
 }
 
 it('reserves and settles every autopilot graph call through the run owner workspace', async () => {
@@ -88,4 +90,20 @@ it('fails closed on unowned projects and non-local providers before creating a r
   expect((await f.start({}, 'unowned')).status).toBe(403)
   expect((await f.start({ OPENROUTER_BASE_URL: 'https://openrouter.ai/api/v1' })).status).toBe(503)
   expect(f.completions).toHaveLength(0)
+})
+
+it('meters the segmentation pass and refuses it with a 429 once the week is spent', async () => {
+  const f = await setup()
+  const period = (await readBillingWorkspace(env.AQUILLA_PG, 1))!.entitlement!
+  const response = await f.generate()
+  expect(response.status).toBe(200)
+  expect(f.completions).toHaveLength(1)
+  expect(await f.totals()).toEqual({ reserved: 0, settled: 160_000, committed: 160_000 })
+  await reserveWorkspaceUsage(env.AQUILLA_PG, { orgId: 1, projectId: PROJECT, userId: 1, requestId: 'spent', rail: 'agent', maxRawCostCents: 12.5 },
+    new Date(Date.parse(period.usagePeriodStart) + 1000))
+  const refused = await f.generate()
+  expect(refused.status).toBe(429)
+  expect(await refused.json()).toMatchObject({ error: { code: 'weekly_ai_allowance_exhausted' } })
+  expect(f.completions).toHaveLength(1)
+  expect((await f.generate({ AGENT_MODEL_DEFAULT: 'unknown', CONTEXTUAL_FAST_MODEL: 'unknown', AI_ALLOWED_MODELS: 'unknown' })).status).toBe(503)
 })

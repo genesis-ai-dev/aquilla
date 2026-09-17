@@ -97,11 +97,12 @@ export function buildBulkTargetCellCommitStmt(
   for (const event of rows) {
     const payload = event.payload as EventPayloads['target.cell.commit']
     const value = payload.value ?? ''
+    const lane = laneOfEvent(event.kind, payload, projectDefaultLane)
     binds.push(
       event.projectId,
       event.fileId,
       event.cellId,
-      laneOfEvent(event.kind, payload, projectDefaultLane),
+      lane,
       value,
       payload.valueHtml ?? null,
       event.id,
@@ -111,16 +112,18 @@ export function buildBulkTargetCellCommitStmt(
       countWords(value),
       contentHash(value),
       payload.ai_suggestion ? 1 : 0,
+      // AQU-1240 slice 5: resolve this row's opaque lane_id from (project, tag).
+      ...laneIdResolveBinds('target', event.projectId, lane),
     )
   }
   const placeholders = Array(rows.length)
-    .fill("(?, ?, ?, 'target', ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, ?, ?, ?)")
+    .fill(`(?, ?, ?, 'target', ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, ?, ?, ?, ${laneIdResolveSql('target')})`)
     .join(',\n')
   return db.prepare(
     `INSERT INTO cells (
       project_id, file_id, cell_id, side, target_lang, value, value_html, type,
       canonical_ref, anchor_cell_id, event_id, source_event_id,
-      last_editor, last_edit_at, validated, word_count, content_hash, ai_drafted
+      last_editor, last_edit_at, validated, word_count, content_hash, ai_drafted, lane_id
     ) VALUES ${placeholders}
     ON CONFLICT(project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
       value = excluded.value,
@@ -133,7 +136,8 @@ export function buildBulkTargetCellCommitStmt(
       content_hash = excluded.content_hash,
       validated = 0,
       endorsement_count = 0,
-      ai_drafted = excluded.ai_drafted`,
+      ai_drafted = excluded.ai_drafted,
+      lane_id = COALESCE(excluded.lane_id, cells.lane_id)`,
   ).bind(...binds)
 }
 
@@ -173,6 +177,47 @@ export function laneOfEvent(
   const lang = (payload as { targetLang?: unknown } | null | undefined)?.targetLang
   if (typeof lang === 'string' && lang !== '') return lang
   return projectDefaultLane != null && projectDefaultLane !== '' ? projectDefaultLane : ''
+}
+
+/**
+ * AQU-1240 slice 5: SQL that resolves the opaque `lanes.id` a projected row
+ * belongs to, from the (project, side, lane tag) the row already carries.
+ *
+ * Emitted as a scalar subquery embedded in the cells INSERT so that live
+ * projection and rebuild/replay resolve IDENTICALLY — both run the exact same
+ * SQL against the exact same `lanes` table. `lanes` is a side table (created by
+ * the backfill / importer, not by event replay), so it is stable across a
+ * rebuild: replaying the event log never mutates it, hence the resolved id is a
+ * pure function of (project, side, tag), the property §6 (4-then-5 / 5-then-4
+ * convergence) rests on.
+ *
+ *   - side='source' -> the project's single `role='source'` lane.
+ *   - side='target' -> the `role='target'` lane whose `legacy_tag` matches the
+ *     tag `laneOfEvent` returned ('' for the default lane).
+ *
+ * BEHAVIOR-NEUTRAL until lanes rows exist: with no matching lane the subquery
+ * evaluates to NULL, so `lane_id` stays NULL. The column is additive/nullable
+ * (migration 0093), so every key/read is byte-identical to pre-1240 until the
+ * backfill (slice 4) or importer (slice 6) has populated `lanes`. On ON CONFLICT
+ * the caller COALESCEs (`lane_id = COALESCE(excluded.lane_id, cells.lane_id)`) so
+ * a resolved id is never regressed to NULL by a later lanes-less write.
+ *
+ * The caller MUST splice {@link laneIdResolveBinds} into the statement's bind
+ * list at the lane_id value's position (see the cells inserts below).
+ */
+export function laneIdResolveSql(side: 'source' | 'target'): string {
+  return side === 'source'
+    ? `(SELECT id FROM lanes WHERE project_id = ? AND role = 'source')`
+    : `(SELECT id FROM lanes WHERE project_id = ? AND role = 'target' AND legacy_tag = ?)`
+}
+
+/** Binds for {@link laneIdResolveSql}, in the order its `?` placeholders appear. */
+export function laneIdResolveBinds(
+  side: 'source' | 'target',
+  projectId: string,
+  laneTag: string,
+): unknown[] {
+  return side === 'source' ? [projectId] : [projectId, laneTag]
 }
 
 // FTS index maintenance: none. Postgres auto-maintains the cells.value_tsv
@@ -306,12 +351,14 @@ export function buildBulkSourceCellCreateStmt(
       p.cameraState ?? null,
       // OBS parity: extensible per-cell metadata bucket, JSON-encoded for JSONB.
       p.metadata != null ? JSON.stringify(p.metadata) : null,
+      // AQU-1240 slice 5: resolve this source row's opaque lane_id.
+      ...laneIdResolveBinds('source', event.projectId, ''),
     )
   }
   // AQU-538: bulk import is source-only; source rows always live on the
   // default lane (target_lang = '', a literal — no bind).
   const placeholders = Array(rows.length)
-    .fill("(?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?::text::jsonb)")
+    .fill(`(?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?::text::jsonb, ${laneIdResolveSql('source')})`)
     .join(',\n')
   return db
     .prepare(
@@ -320,7 +367,8 @@ export function buildBulkSourceCellCreateStmt(
         canonical_ref, anchor_cell_id, event_id, source_event_id,
         last_editor, last_edit_at, validated, word_count, content_hash,
         start_ms, end_ms,
-        medium, sequence_index, transcription, camera_state, metadata
+        medium, sequence_index, transcription, camera_state, metadata,
+        lane_id
       ) VALUES ${placeholders}
       ON CONFLICT(project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
         side           = excluded.side,
@@ -341,7 +389,8 @@ export function buildBulkSourceCellCreateStmt(
         sequence_index = excluded.sequence_index,
         transcription  = excluded.transcription,
         camera_state   = excluded.camera_state,
-        metadata       = excluded.metadata`,
+        metadata       = excluded.metadata,
+        lane_id        = COALESCE(excluded.lane_id, cells.lane_id)`,
     )
     .bind(...binds)
 }
@@ -552,8 +601,9 @@ export function buildEventProjectionStmts(
               canonical_ref, anchor_cell_id, event_id, source_event_id,
               last_editor, last_edit_at, validated, word_count, content_hash,
               start_ms, end_ms,
-              medium, sequence_index, transcription, camera_state, metadata
-            ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?::text::jsonb${gateWhere}
+              medium, sequence_index, transcription, camera_state, metadata,
+              lane_id
+            ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?::text::jsonb, ${laneIdResolveSql(side)}${gateWhere}
             ON CONFLICT(project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
               side           = excluded.side,
               value          = excluded.value,
@@ -573,7 +623,8 @@ export function buildEventProjectionStmts(
               sequence_index = excluded.sequence_index,
               transcription  = excluded.transcription,
               camera_state   = excluded.camera_state,
-              metadata       = excluded.metadata${gateConflictWhere}`,
+              metadata       = excluded.metadata,
+              lane_id        = COALESCE(excluded.lane_id, cells.lane_id)${gateConflictWhere}`,
           )
           .bind(
             event.projectId,
@@ -598,6 +649,7 @@ export function buildEventProjectionStmts(
             transcription,
             cameraState,
             metadata,
+            ...laneIdResolveBinds(side, event.projectId, lane),
             ...gateBinds,
           ),
       )
@@ -728,8 +780,8 @@ export function buildEventProjectionStmts(
                 project_id, file_id, cell_id, side, target_lang, value, value_html, type,
                 canonical_ref, anchor_cell_id, event_id, source_event_id,
                 last_editor, last_edit_at, validated, word_count, content_hash,
-                ai_drafted, ai_draft
-              ) SELECT ?, ?, ?, 'target', ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, ?, ?, ?, ?${gateWhere}
+                ai_drafted, ai_draft, lane_id
+              ) SELECT ?, ?, ?, 'target', ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, 0, ?, ?, ?, ?, ${laneIdResolveSql('target')}${gateWhere}
               ON CONFLICT(project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
                 value             = excluded.value,
                 value_html        = excluded.value_html,
@@ -742,7 +794,8 @@ export function buildEventProjectionStmts(
                 validated         = 0,
                 endorsement_count = 0,
                 ai_drafted        = excluded.ai_drafted,
-                ai_draft          = excluded.ai_draft${gateConflictWhere}`,
+                ai_draft          = excluded.ai_draft,
+                lane_id           = COALESCE(excluded.lane_id, cells.lane_id)${gateConflictWhere}`,
             )
             .bind(
               event.projectId,
@@ -759,6 +812,7 @@ export function buildEventProjectionStmts(
               hash,
               aiDrafted,
               aiDrafted ? JSON.stringify(tp.ai_draft ?? null) : null,
+              ...laneIdResolveBinds('target', event.projectId, lane),
               ...gateBinds,
             ),
         )
@@ -2390,15 +2444,16 @@ case 'cell.audio.attach': {
                 project_id, file_id, cell_id, side, target_lang, value, value_html, type,
                 canonical_ref, anchor_cell_id, event_id, source_event_id,
                 last_editor, last_edit_at, validated, word_count, content_hash,
-                upstream_event_id, upstream_seq, tombstoned_at
-              ) VALUES (?, ?, ?, 'source', '', ?, NULL, NULL, NULL, NULL, ?, NULL, ?, ?, 0, 0, ?, ?, ?, ?)
+                upstream_event_id, upstream_seq, tombstoned_at, lane_id
+              ) VALUES (?, ?, ?, 'source', '', ?, NULL, NULL, NULL, NULL, ?, NULL, ?, ?, 0, 0, ?, ?, ?, ?, ${laneIdResolveSql('source')})
               ON CONFLICT (project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
                 event_id          = excluded.event_id,
                 last_editor       = excluded.last_editor,
                 last_edit_at      = excluded.last_edit_at,
                 upstream_event_id = excluded.upstream_event_id,
                 upstream_seq      = excluded.upstream_seq,
-                tombstoned_at     = excluded.tombstoned_at
+                tombstoned_at     = excluded.tombstoned_at,
+                lane_id           = COALESCE(excluded.lane_id, cells.lane_id)
               WHERE cells.upstream_seq IS NULL OR cells.upstream_seq < excluded.upstream_seq`,
             )
             .bind(
@@ -2413,6 +2468,7 @@ case 'cell.audio.attach': {
               p.upstream.eventId,
               upstreamSeq,
               event.serverTs,
+              ...laneIdResolveBinds('source', event.projectId, ''),
             ),
         )
         if (!opts?.deferFileCounters)
@@ -2432,11 +2488,11 @@ case 'cell.audio.attach': {
               canonical_ref, anchor_cell_id, event_id, source_event_id,
               last_editor, last_edit_at, validated, word_count, content_hash,
               start_ms, end_ms, medium, sequence_index, transcription, camera_state, metadata,
-              upstream_event_id, upstream_seq, tombstoned_at
+              upstream_event_id, upstream_seq, tombstoned_at, lane_id
             ) VALUES (
               ?, ?, ?, 'source', '', ?, ?, ?, ?, ?, ?, NULL, ?, ?, 0, ?, ?,
               ?, ?, ?, ?, ?, ?, ?,
-              ?, ?, NULL
+              ?, ?, NULL, ${laneIdResolveSql('source')}
             )
             ON CONFLICT (project_id, file_id, cell_id, side, target_lang) DO UPDATE SET
               value             = excluded.value,
@@ -2458,7 +2514,8 @@ case 'cell.audio.attach': {
               metadata          = COALESCE(excluded.metadata, cells.metadata),
               upstream_event_id = excluded.upstream_event_id,
               upstream_seq      = excluded.upstream_seq,
-              tombstoned_at     = NULL
+              tombstoned_at     = NULL,
+              lane_id           = COALESCE(excluded.lane_id, cells.lane_id)
             WHERE cells.upstream_seq IS NULL OR cells.upstream_seq < excluded.upstream_seq`,
           )
           .bind(
@@ -2484,6 +2541,7 @@ case 'cell.audio.attach': {
             p.metadata != null ? JSON.stringify(p.metadata) : null,
             p.upstream.eventId,
             upstreamSeq,
+            ...laneIdResolveBinds('source', event.projectId, ''),
           ),
       )
       if (!opts?.deferFileCounters)

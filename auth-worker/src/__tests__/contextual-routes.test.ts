@@ -1257,7 +1257,16 @@ describe("POST /contextual/runs {scope:'project'}", () => {
     await seedFairnessFiles()
     testEnv.CONTEXTUAL_MAX_CONCURRENCY = "1"
 
-    const response = await req("POST", "/runs", contrib, { scope: "project" })
+    // `translateEverything` (AQU-1300) lifts the per-run span budget. Fairness
+    // is a property of the SECOND wave — whether an early file can reacquire
+    // the project slot before a later one has had its first — so this needs
+    // each run to get past span 1. Under the trust-gated default of one span
+    // both runs park after their first wave and there is no fairness left to
+    // test. Two runs × two waves = the four span starts asserted below.
+    const response = await req("POST", "/runs", contrib, {
+      scope: "project",
+      translateEverything: true,
+    })
     expect(response.status).toBe(201)
     const body = await response.json() as {
       started: { runId: string; fileId: string }[]

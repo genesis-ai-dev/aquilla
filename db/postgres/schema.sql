@@ -1429,6 +1429,14 @@ CREATE TABLE IF NOT EXISTS contextual_runs (
   anchor_cell_id text,                  -- where the user was looking at start; rotates the first wave
   scope_group text,                     -- shared id across runs one project-wide start created
   blocked_on_decision_id text,          -- set while status='waiting'; the open contextual_decisions row blocking this run
+  -- AQU-1300 trust gate. span_allowance = spans this run may still process
+  -- before it parks; NULL = unlimited ("translate everything"). A fresh run
+  -- gets 1, and human input buys more. park_reason splits `parked` into
+  -- 'awaiting_input' (more work, needs a human) vs 'work_exhausted' (scope
+  -- finished) so "waiting for you" can never render as "all done".
+  span_allowance integer,
+  park_reason text
+    CHECK (park_reason IS NULL OR park_reason IN ('awaiting_input','work_exhausted')),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()  -- doubles as the driver heartbeat/lease
 );

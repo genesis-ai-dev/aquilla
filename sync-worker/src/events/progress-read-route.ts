@@ -188,12 +188,22 @@ export function counts(
   }
 }
 
+/**
+ * Book order, then chapter order. A key with no chapter number — a book's
+ * front matter section ("GEN"), or a cell reference the importer shaped as
+ * "GEN:h:1" — belongs to its BOOK and sorts BEFORE chapter 1, which is where
+ * the editor shows it and where the file put it. It used to sort after the
+ * last chapter, and with the whole value taken as the book name, after every
+ * known book: "Go to first untranslated" walked past an untranslated title to
+ * land on 1:1, or found nothing at all.
+ */
 function compareSections(a: string, b: string): number {
   const parse = (value: string) => {
-    const match = /^(\S+)\s+(\d+)/.exec(value.trim())
+    const trimmed = value.trim()
+    const match = /^(\S+)\s+(\d+)/.exec(trimmed)
     return match
       ? { book: match[1].toUpperCase(), chapter: Number(match[2]) }
-      : { book: value.toUpperCase(), chapter: Number.POSITIVE_INFINITY }
+      : { book: (trimmed.split(/[\s:]/)[0] ?? trimmed).toUpperCase(), chapter: -1 }
   }
   const left = parse(a)
   const right = parse(b)
@@ -210,12 +220,24 @@ function compareSections(a: string, b: string): number {
   return left.chapter - right.chapter || a.localeCompare(b)
 }
 
+/**
+ * Document order for cells, as their references describe it. Verses sort by
+ * number inside their chapter. Anything a chapter carries that is NOT a verse
+ * — a heading ("GEN 1:0"), text before the first verse ("GEN 2"), a book's
+ * front matter ("GEN:h:1") — sorts to the FRONT of its chapter or book, not
+ * the back: that is where the file has it and where the editor draws it.
+ * A one-chapter book's "TIT:4" is verse 4 of its only chapter.
+ */
 function compareCanonicalRefs(a: string, b: string): number {
   const parse = (value: string) => {
-    const match = /^(\S+)\s+(\d+):(\d+)(?:-(\d+))?/.exec(value.trim())
+    const match = /^([^\s:]+)(?:\s+(\d+))?:(\d+)(?:-(\d+))?/.exec(value.trim())
     return match
-      ? { section: `${match[1]} ${match[2]}`, verse: Number(match[3]), end: Number(match[4] ?? match[3]) }
-      : { section: value, verse: Number.POSITIVE_INFINITY, end: Number.POSITIVE_INFINITY }
+      ? {
+          section: match[2] != null ? `${match[1]} ${match[2]}` : match[1],
+          verse: Number(match[3]),
+          end: Number(match[4] ?? match[3]),
+        }
+      : { section: value, verse: -1, end: -1 }
   }
   const left = parse(a)
   const right = parse(b)

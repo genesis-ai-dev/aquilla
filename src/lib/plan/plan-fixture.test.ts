@@ -166,7 +166,10 @@ describe("AQU-1278 fixture", () => {
     // the row, so before the COALESCE fix this cell vanished from its chapter.
     const untyped = cellsFor(TEXT_BOOKS.find((b) => b.code === "GEN")!)
       .filter((c) => c.type === null)
-    expect(untyped.map((c) => c.ref)).toEqual(["GEN 1:1", "GEN", "GEN"])
+    // Two untyped front-matter lines first — the fixture places front matter
+    // where a real import does, at the head of the book, with the importer's
+    // "GEN:<marker>:1" refs — then Genesis 1:1.
+    expect(untyped.map((c) => c.ref)).toEqual(["GEN:mt1:1", "GEN:mt2:1", "GEN 1:1"])
   })
 
   it("keeps Titus on a section key equal to its book code", () => {

@@ -265,6 +265,26 @@ export function cellsFor(b: Book): FixtureCell[] {
     )
   }
 
+  // Genesis front matter, FIRST, shaped as the importer shapes it. A real USFM
+  // import gives the running header, the contents lines and the titles refs
+  // like "GEN:h:1" and "GEN:mt1:1" — book code, colon, marker — and places
+  // them at the head of the file, before chapter 1. The projection keys the
+  // section by everything before the first colon, so these become the bare
+  // "GEN" section, the grid's front-matter tile. Two paratext cells and two
+  // untyped ones, so the section survives the headings policy rather than
+  // being dropped whole. An earlier version of this fixture gave them a bare
+  // "GEN" ref and appended them AFTER chapter 50, which no importer does, and
+  // which hid an ordering bug in the first-open read that real imports hit.
+  if (b.code === "GEN") {
+    const markers = ["h", "toc1", "mt1", "mt2"]
+    markers.forEach((marker, i) => {
+      out.push({
+        cellId: `GEN-fm-${i + 1}`, ref: `GEN:${marker}:1`, type: i <= 1 ? "paratext" : null,
+        target: `Vorwort ${i + 1}`, validated: true, recorded: false,
+      })
+    })
+  }
+
   const dubbed = AUDIO_CODES.has(b.code)
   for (let ch = 1; ch <= b.chapters; ch += 1) {
     if ((b.missingChapters ?? []).includes(ch)) continue
@@ -295,17 +315,6 @@ export function cellsFor(b: Book): FixtureCell[] {
     }
   }
 
-  // Genesis front matter: refs with no chapter at all, which become a section
-  // keyed by the bare book code. Two paratext cells and two untyped ones, so
-  // the section survives the headings policy rather than being dropped whole.
-  if (b.code === "GEN") {
-    for (let i = 1; i <= 4; i += 1) {
-      out.push({
-        cellId: `GEN-fm-${i}`, ref: "GEN", type: i <= 2 ? "paratext" : null,
-        target: `Vorwort ${i}`, validated: true, recorded: false,
-      })
-    }
-  }
   return out
 }
 

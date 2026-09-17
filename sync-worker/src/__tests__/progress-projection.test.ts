@@ -872,6 +872,51 @@ describe('the first outstanding cell of a unit (readFirstOpenCell)', () => {
     expect(await readFirstOpenCell(db, PROJECT, 'bible', 'GEN', 'first', '')).toBe('v1')
   })
 
+  it('lands on a book\'s front matter and a chapter\'s pre-verse text, which sit FIRST', async () => {
+    // A real USFM import shapes front matter as "GEN:h:1" / "GEN:mt1:1" and
+    // puts it at the head of the file; text a chapter carries before its
+    // first verse is keyed "GEN 2". Neither parses as book-chapter-verse, and
+    // both used to sort to the END of the book — behind the last chapter, or
+    // behind every known book once the whole value was taken as a book name.
+    // So the link walked straight past an untranslated title and landed on
+    // 1:1. The editor draws them first; so must this.
+    const { db } = await makeTestDb({
+      files: [file('bible')],
+      project_settings: settings(),
+      cells: [
+        src('bible', 'h', { canonical_ref: 'GEN:h:1', type: 'paratext' }),
+        src('bible', 'mt', { canonical_ref: 'GEN:mt1:1', type: 'paratext' }),
+        src('bible', 'v1', { canonical_ref: 'GEN 1:1' }), tgt('bible', 'v1', 'done', 1),
+        src('bible', 'v2', { canonical_ref: 'GEN 1:2' }), tgt('bible', 'v2', 'done', 1),
+        src('bible', 'c2pre', { canonical_ref: 'GEN 2', type: 'text' }),
+        src('bible', 'v3', { canonical_ref: 'GEN 2:1' }),
+      ],
+    })
+    // The untranslated title comes before every verse.
+    expect(await readFirstOpenCell(db, PROJECT, 'bible', 'GEN', 'untranslated', '')).toBe('h')
+    expect(await readFirstOpenCell(db, PROJECT, 'bible', 'GEN', 'first', '')).toBe('h')
+
+    // With the front matter done, chapter 2's pre-verse text precedes 2:1.
+    await db.prepare(`INSERT INTO cells (project_id, file_id, cell_id, side, target_lang, value, event_id, last_editor, last_edit_at, validated, endorsement_count, word_count)
+                      VALUES (?, ?, 'h', 'target', '', 'Titel', 'tev-h', 'alice', 2, 1, 1, 1),
+                             (?, ?, 'mt', 'target', '', 'Titel', 'tev-mt', 'alice', 2, 1, 1, 1)`)
+      .bind(PROJECT, 'bible', PROJECT, 'bible').run()
+    expect(await readFirstOpenCell(db, PROJECT, 'bible', 'GEN', 'untranslated', '')).toBe('c2pre')
+  })
+
+  it('reads a one-chapter book\'s "TIT:4" as verse 4, in order', async () => {
+    const { db } = await makeTestDb({
+      files: [file('titus')],
+      project_settings: settings(),
+      cells: [
+        src('titus', 't10', { canonical_ref: 'TIT:10' }),
+        src('titus', 't2', { canonical_ref: 'TIT:2' }),
+        src('titus', 't0', { canonical_ref: 'TIT:0', type: 'heading' }), tgt('titus', 't0', 'x', 1),
+      ],
+    })
+    expect(await readFirstOpenCell(db, PROJECT, 'titus', 'TIT', 'untranslated', '')).toBe('t2')
+  })
+
   it('serves the answer over HTTP and refuses a queue it does not know', async () => {
     const { db } = await makeTestDb({
       files: [file('bible')],

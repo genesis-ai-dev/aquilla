@@ -17,7 +17,9 @@
 // "needs a date" narrowing, and per-group folds.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Search, X, ChevronDown, ChevronRight, CalendarOff, AlertTriangle } from "lucide-react"
+import {
+  Search, X, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, CalendarOff, AlertTriangle,
+} from "lucide-react"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
 import { TableEmptyState } from "@/components/ui/empty"
@@ -228,6 +230,30 @@ export function PlanBoard({
     () => groupPlanUnits(visible, now, audioFiles),
     [visible, now, audioFiles],
   )
+
+  // AQU-1278: COLLAPSE ALL (Sam, 2026-09-17). One control, two states: it
+  // reads "Collapse all" while any group on screen is open and "Expand all"
+  // once every one is folded. It sets the same per-project folds the group
+  // chevrons set, so a single chevron afterwards opens just that group and
+  // nothing new is remembered. This is what AQU-1255's five-row cap was
+  // reaching for — a board short enough to take in at once — and it gets there
+  // without hiding a row: every header keeps its count.
+  //
+  // "All folded" is judged over the groups DRAWN, not over every status: a
+  // project with no Done units has no Done group to fold, and a button that
+  // never said "Expand all" because an absent group was "still open" would be
+  // a button that never worked. Expanding clears the set outright, so a group
+  // folded earlier and filtered away today comes back open too.
+  const allFolded = groups.length > 0 && groups.every((g) => collapsed.has(g.status))
+  const toggleAll = useCallback(() => {
+    setCollapsed((prev) => {
+      const next = allFolded
+        ? new Set<PlanUnitStatus>()
+        : new Set<PlanUnitStatus>([...prev, ...groups.map((g) => g.status)])
+      saveCollapsedGroups(projectId, next)
+      return next
+    })
+  }, [allFolded, groups, projectId])
 
   // The summary counts the WHOLE project, never the filtered view. "1 of 3
   // done" under a filter that hid the other sixty-three would be a lie, and
@@ -478,6 +504,26 @@ export function PlanBoard({
               className={view === "order" ? "bg-accent text-foreground" : undefined}
             >
               {t("org.projectOverview.plan.viewOrder")}
+            </Button>
+            <span className="mx-1 h-4 w-px bg-border" aria-hidden />
+            {/* After the arrangement toggle, because it only means something
+                while there are groups. In "In order" it dims rather than
+                leaves, so the toolbar keeps its shape between the two. */}
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              data-testid="plan-collapse-all"
+              disabled={view === "order" || groups.length === 0}
+              title={t(allFolded
+                ? "org.projectOverview.plan.expandAllTooltip"
+                : "org.projectOverview.plan.collapseAllTooltip")}
+              onClick={toggleAll}
+            >
+              {allFolded
+                ? <ChevronsUpDown className="h-3 w-3" />
+                : <ChevronsDownUp className="h-3 w-3" />}
+              {t(allFolded ? "org.projectOverview.plan.expandAll" : "org.projectOverview.plan.collapseAll")}
             </Button>
           </div>
         </div>

@@ -777,3 +777,61 @@ describe("the percentages say what they stand for, on hover (round 7)", () => {
     expect(screen.getByLabelText(/^Text/)).not.toHaveAttribute("title")
   })
 })
+
+
+describe("collapse all (AQU-1278, Sam 2026-09-17)", () => {
+  // What AQU-1255's five-row cap was for — a board short enough to take in at
+  // once — without hiding a row: every group folds to its header and count.
+  const three = () => [
+    unit({ fileId: "a", doneAt: NOW, doneBy: "r" }),
+    unit({ fileId: "b", filledCount: 5 }),
+    nearlyDone({ fileId: "c" }),
+  ]
+  const folds = () => screen.getAllByTestId(/^plan-fold-/).map((el) => el.getAttribute("aria-expanded"))
+
+  it("folds every group on screen in one click, then offers to open them all", () => {
+    renderBoard(three())
+    const button = screen.getByTestId("plan-collapse-all")
+    expect(button).toHaveTextContent("Collapse all")
+    fireEvent.click(button)
+    expect(folds()).toEqual(["false", "false", "false"])
+    expect(screen.queryAllByTestId(/^plan-row-/)).toHaveLength(0)
+    expect(button).toHaveTextContent("Expand all")
+    fireEvent.click(button)
+    expect(folds()).toEqual(["true", "true", "true"])
+    expect(screen.getAllByTestId(/^plan-row-/)).toHaveLength(3)
+  })
+
+  it("sets the same folds the chevrons set, so one chevron opens one group", () => {
+    renderBoard(three())
+    fireEvent.click(screen.getByTestId("plan-collapse-all"))
+    fireEvent.click(screen.getByTestId("plan-fold-done"))
+    expect(screen.getByTestId("plan-fold-done")).toHaveAttribute("aria-expanded", "true")
+    expect(screen.getByTestId("plan-fold-in_progress")).toHaveAttribute("aria-expanded", "false")
+    // One group open again is not "all folded", so the button reads Collapse.
+    expect(screen.getByTestId("plan-collapse-all")).toHaveTextContent("Collapse all")
+  })
+
+  it("judges 'all folded' over the groups drawn, not over every status", () => {
+    // No Done group on this board; folding the two that exist must count.
+    renderBoard([unit({ fileId: "b", filledCount: 5 }), nearlyDone({ fileId: "c" })])
+    fireEvent.click(screen.getByTestId("plan-collapse-all"))
+    expect(screen.getByTestId("plan-collapse-all")).toHaveTextContent("Expand all")
+  })
+
+  it("remembers the folds per project, like the chevrons do", () => {
+    localStorage.clear()
+    renderBoard(three())
+    fireEvent.click(screen.getByTestId("plan-collapse-all"))
+    expect(JSON.parse(localStorage.getItem("aquilla:planGroups:p1") ?? "[]"))
+      .toEqual(["nearly_complete", "in_progress", "done"])
+  })
+
+  it("goes quiet in the In order arrangement, which has no groups", () => {
+    renderBoard(three())
+    fireEvent.click(screen.getByTestId("plan-view-order"))
+    expect(screen.getByTestId("plan-collapse-all")).toBeDisabled()
+    fireEvent.click(screen.getByTestId("plan-view-status"))
+    expect(screen.getByTestId("plan-collapse-all")).toBeEnabled()
+  })
+})

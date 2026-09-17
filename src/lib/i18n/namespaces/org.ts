@@ -1332,6 +1332,11 @@ export const org = defineNamespace({
     "org.projectOverview.plan.viewOrder": "In order",
     "org.projectOverview.plan.needsDate": "Needs a date",
     "org.projectOverview.plan.needsDateTooltip": "Show only the units nobody has given a target date yet.",
+    // AQU-1278: fold every group to its header, and back. One button, two labels.
+    "org.projectOverview.plan.collapseAll": "Collapse all",
+    "org.projectOverview.plan.expandAll": "Expand all",
+    "org.projectOverview.plan.collapseAllTooltip": "Fold every group to its header and count.",
+    "org.projectOverview.plan.expandAllTooltip": "Open every group.",
     // AQU-1278: the heading is just the noun. "Progress by chapter" described
     // the old stack of per-chapter bars; the grid beneath it now says how it
     // measures, and the legend sits on this very line saying what the colours
@@ -2840,6 +2845,22 @@ export const org = defineNamespace({
         description:
           "Toggle that narrows the plan to units with no target date and no Done mark \u2014 a planner's to-do list.",
         maxLength: 16,
+      },
+      "org.projectOverview.plan.collapseAll": {
+        description:
+          "Button in the plan board's toolbar, after the By status / In order toggle, that folds every status group down to its header and count in one click. Shown while at least one group is open; its twin expandAll takes over once all are folded. Disabled in the In order arrangement, which has no groups.",
+        maxLength: 16,
+      },
+      "org.projectOverview.plan.expandAll": {
+        description:
+          "The same button as collapseAll once every group on the board is folded: one click opens them all. Keep it the same length as collapseAll so the toolbar does not shift between the two.",
+        maxLength: 16,
+      },
+      "org.projectOverview.plan.collapseAllTooltip": {
+        description: "Hover text of the collapseAll button. A short sentence saying what one click does.",
+      },
+      "org.projectOverview.plan.expandAllTooltip": {
+        description: "Hover text of the expandAll button. A short sentence saying what one click does.",
       },
       "org.projectOverview.plan.chapters": {
         description: "Inspector heading over the grid of chapter tiles for a Bible book. A plural noun naming what is below it, not a sentence — the colour legend shares this line and the grid says how it measures.",

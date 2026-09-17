@@ -223,6 +223,34 @@ describe("GET .../plan — caching and auth", () => {
     expect((await get(db)).headers.get("ETag")).not.toBe(before)
   })
 
+  it("carries a shape marker, so a body cached before a shape change is not 304'd", async () => {
+    // AQU-1278. Every other part of this key is a property of the DATA, so
+    // when only the response SHAPE moves — this branch added audioTotalCount,
+    // corpusMarker and fileBookCode to every unit — nothing else in the key
+    // moves with it. A browser holding a body from the previous shape would
+    // revalidate, be told 304, and keep serving it: a dubbing project
+    // measured against its subtitle count, every file in one folder. Both
+    // progress ETags have carried a shape marker since AQU-1098 for exactly
+    // this; this one did not until the fields landed.
+    //
+    // Asserting the MARKER rather than the whole string on purpose: the key's
+    // other components are free to change, and a test that pinned all of them
+    // would fail on every one of those changes without saying anything.
+    const { db } = await makeTestDb({
+      files: [file("f1")],
+      file_section_progress: [progress("f1", "file", "")],
+    })
+    const etag = (await get(db)).headers.get("ETag")!
+    expect(etag).toContain(":s2")
+
+    // And the marker is load-bearing: a caller holding the same key from
+    // before the shape changed does NOT get a 304.
+    const previousShape = etag.replace(":s2", "")
+    expect(previousShape).not.toBe(etag)
+    const res = await get(db, { headers: { "If-None-Match": previousShape } })
+    expect(res.status).toBe(200)
+  })
+
   it("refuses a request with no token", async () => {
     const { db } = await makeTestDb({ files: [file("f1")] })
     const res = await handlePlanRequest(new Request(`https://sync.test/api/v1/projects/${P}/plan`), envWith(db))

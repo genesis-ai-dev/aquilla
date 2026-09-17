@@ -230,8 +230,19 @@ export async function handlePlanRequest(
     // activity needs the newest projection updated_at or a client caches an
     // audio-less board forever.
     // …and a fourth for the structural policy, which moves none of the three.
+    //
+    // `s2` MARKS THE RESPONSE SHAPE, the way both progress ETags do. Every
+    // other part of this key is a property of the DATA, so when only the
+    // SHAPE moves — AQU-1278 adding audioTotalCount, corpusMarker and
+    // fileBookCode to every unit — nothing in the key moves with it. A
+    // browser holding a body cached before the deploy would then revalidate
+    // (Cache-Control is no-cache, so it always does), be told 304, and keep
+    // serving the old body to the new client: a dubbing project measured
+    // against its subtitle count instead of its cue sheet, and every file in
+    // one "All files" folder, for as long as nothing in the project changes.
+    // s1 = the shape before AQU-1278; s2 = these three fields.
     const structuralTag = countStructural ? '' : ':nostruct'
-    const etag = `"plan:${projectId}:${lane}:${revision}:${planUpdatedAt}:${progressUpdatedAt}:${units.length}:v${validationCount}${structuralTag}"`
+    const etag = `"plan:${projectId}:${lane}:${revision}:${planUpdatedAt}:${progressUpdatedAt}:${units.length}:v${validationCount}:s2${structuralTag}"`
     if (request.headers.get('If-None-Match') === etag) {
       return new Response(null, { status: 304, headers: { ETag: etag, 'Cache-Control': 'private, no-cache' } })
     }

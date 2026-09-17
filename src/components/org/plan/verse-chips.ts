@@ -17,7 +17,13 @@ import type { PlanOpenKind } from "@/lib/plan/plan-status"
 
 /** A verse as the chapter detail returns it. */
 export interface ShortVerse {
-  cellId: string
+  /**
+   * The cell to open. Optional: a worker from before AQU-1278 sends no cell id
+   * at all, and a new client meets one for the length of a deploy. A chip
+   * exists to be clicked, so `shortVerses` drops a verse without one rather
+   * than drawing a chip that cannot keep its promise.
+   */
+  cellId?: string
   ref: string
   filled: boolean
   validated: boolean
@@ -41,12 +47,19 @@ export interface ShortVerse {
  * and after AQU-490 the takes nobody has signed off. Never two queues — the
  * row has space for one.
  */
-export function shortVerses(verses: readonly ShortVerse[], lead: PlanOpenKind): ShortVerse[] {
+export function shortVerses(
+  verses: readonly ShortVerse[],
+  lead: PlanOpenKind,
+): (ShortVerse & { cellId: string })[] {
+  // A verse with no cell id cannot be opened — see `ShortVerse.cellId` — and a
+  // chip that cannot land on its verse is worse than no chip: it repeats a
+  // key across the strip and opens the top of the file when pressed.
+  const openable = verses.filter((v): v is ShortVerse & { cellId: string } => Boolean(v.cellId))
   switch (lead) {
-    case "untranslated": return verses.filter((v) => !v.filled)
-    case "unvalidated": return verses.filter((v) => v.filled && !v.validated)
-    case "unrecorded": return verses.filter((v) => v.recorded === false)
-    case "unsigned": return verses.filter((v) => v.recorded === true && v.audioValidated === false)
+    case "untranslated": return openable.filter((v) => !v.filled)
+    case "unvalidated": return openable.filter((v) => v.filled && !v.validated)
+    case "unrecorded": return openable.filter((v) => v.recorded === false)
+    case "unsigned": return openable.filter((v) => v.recorded === true && v.audioValidated === false)
   }
 }
 

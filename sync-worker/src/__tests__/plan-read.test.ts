@@ -251,6 +251,45 @@ describe("GET .../plan — caching and auth", () => {
     expect(res.status).toBe(200)
   })
 
+  it("moves when a cue sheet is REMOVED, which changes every audio number", async () => {
+    // The unit's audio pair and its denominator are read off the sheet, and
+    // whether there IS a sheet is decided from the files table — but the
+    // clocks folded only projection rows, and a cue file is excluded from the
+    // unit set, so its own row reached nothing. Tombstoning a sheet flipped
+    // audioTotalCount to null and the counts back to the anchor's zeroes while
+    // the ETag stayed byte-identical, and the board went on serving the
+    // numbers of a sheet that no longer existed.
+    const { db } = await makeTestDb({
+      files: [
+        file("ep1", { cell_count: 120 }),
+        file("ep1-cues", {
+          role: "audio-cues", kind: "vtt", anchor_file_id: "ep1",
+          cell_count: 100, updated_at: TS,
+        }),
+      ],
+      file_section_progress: [
+        progress("ep1", "file", "", { total_count: 120, filled_count: 120 }),
+        progress("ep1-cues", "file", "", { total_count: 100, audio_count: 90 }),
+      ],
+    })
+    const before = await get(db)
+    const beforeEtag = before.headers.get("ETag")!
+    expect(((await before.json()) as PlanResponse).units[0]).toMatchObject({
+      audioTotalCount: 100, audioCount: 90,
+    })
+
+    await db.prepare("UPDATE files SET deleted_at = ?, updated_at = ? WHERE id = ?")
+      .bind(TS + 1000, TS + 1000, "ep1-cues").run()
+
+    const after = await get(db)
+    expect(((await after.json()) as PlanResponse).units[0]).toMatchObject({
+      audioTotalCount: null, audioCount: 0,
+    })
+    expect(after.headers.get("ETag")).not.toBe(beforeEtag)
+    // And the stale key is no longer honoured.
+    expect((await get(db, { headers: { "If-None-Match": beforeEtag } })).status).toBe(200)
+  })
+
   it("refuses a request with no token", async () => {
     const { db } = await makeTestDb({ files: [file("f1")] })
     const res = await handlePlanRequest(new Request(`https://sync.test/api/v1/projects/${P}/plan`), envWith(db))

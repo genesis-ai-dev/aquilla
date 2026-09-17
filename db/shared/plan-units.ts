@@ -205,7 +205,10 @@ export function readPlanUnitsSql(extraScope = ""): string {
             -- subtitle file, and without this the board that now reads its
             -- audio from the sheet would answer 304 to every request after it.
             GREATEST(COALESCE(pl.updated_at, 0), COALESCE(pd.updated_at, 0),
-                     COALESCE(ps.updated_at, 0)) AS progress_updated_at,
+                     COALESCE(ps.updated_at, 0),
+                     -- The cue sheet's own row, so adding, removing or
+                     -- restoring one moves the board ETag. See the cst join.
+                     COALESCE(cst.touched_at, 0)) AS progress_updated_at,
             pu.target_date, pu.done_at, pu.done_by,
             pu.updated_at AS plan_updated_at, pu.updated_by AS plan_updated_by
        FROM units u
@@ -230,6 +233,32 @@ export function readPlanUnitsSql(extraScope = ""): string {
           ORDER BY s.id DESC
           LIMIT 1
        ) cs ON TRUE
+       /*
+        * WHEN ANY CUE SIBLING WAS LAST TOUCHED — live or tombstoned.
+        *
+        * Whether a unit has a sheet is decided from the files table above, but
+        * the clocks below fold only projection rows, and a cue file is
+        * excluded from the unit set by PLAN_UNIT_FILE_PREDICATE, so its own
+        * files.updated_at reached nothing. Deleting a sheet therefore flipped every audio
+        * column on that unit — the quad falls back to the anchor's own zeroes
+        * and audio_total_count goes NULL — while leaving the plan ETag
+        * byte-identical, and the board went on serving cached numbers for a
+        * sheet that no longer existed. A restore had the same hole in
+        * reverse.
+        *
+        * Deliberately NOT filtered by deleted_at, and deliberately separate
+        * from cs above: the moment a sheet is tombstoned it drops out of cs
+        * entirely, taking its timestamp with it, which is exactly the event
+        * that needs to move the clock. MAX over every sibling keeps it.
+        */
+       LEFT JOIN LATERAL (
+         SELECT MAX(sc.updated_at) AS touched_at
+           FROM files sc
+          WHERE u.section_key = ''
+            AND sc.project_id = u.project_id
+            AND sc.anchor_file_id = u.file_id
+            AND sc.role = 'audio-cues'
+       ) cst ON TRUE
        LEFT JOIN file_section_progress ps
          ON ps.project_id = u.project_id AND ps.file_id = cs.id
         AND ps.scope = 'file'

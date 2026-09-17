@@ -68,3 +68,25 @@ describe("which verses are short — audio", () => {
     expect(shortVerses([verse("1", "GEN 1:1")], "unsigned")).toEqual([])
   })
 })
+
+describe("a verse the client cannot open", () => {
+  it("draws no chip, because a chip exists to be clicked", () => {
+    // A worker from before AQU-1278 sends no cell id at all, and a new client
+    // meets one for the length of a deploy (the SPA ships before the workers).
+    // Drawn anyway, every chip in that window carried the same undefined key
+    // and opened the top of the file instead of the verse it named.
+    const verses = [
+      { ref: "GEN 12:4", filled: true, validated: false },
+      { cellId: "c5", ref: "GEN 12:5", filled: true, validated: false },
+    ]
+    expect(shortVerses(verses, "unvalidated").map((v) => v.cellId)).toEqual(["c5"])
+  })
+
+  it("drops them for every queue, not just the text ones", () => {
+    const verses = [
+      { ref: "GEN 12:4", filled: true, validated: true, recorded: false },
+      { cellId: "c5", ref: "GEN 12:5", filled: true, validated: true, recorded: false },
+    ]
+    expect(shortVerses(verses, "unrecorded").map((v) => v.cellId)).toEqual(["c5"])
+  })
+})

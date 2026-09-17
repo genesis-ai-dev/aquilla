@@ -37,13 +37,21 @@ export interface SectionProgressDetailResponse {
   validationCount: number
   /**
    * AQU-1278: `cellId` is the SOURCE cell's id, which the plan board turns into
-   * an editor deep link (?cellId=<id>) at the first outstanding cell. Required,
-   * not optional: the server has always been able to send it and the section
-   * ETag gained a `:s2` shape marker the day it started to, so no cache can
-   * hand a reader a body from before the field existed.
+   * an editor deep link (?cellId=<id>) at the first outstanding cell.
+   *
+   * OPTIONAL, because a CACHE is not the only way to meet an older shape. The
+   * section ETag's marker does stop a stale body being revalidated into a new
+   * client — but the client and the workers deploy separately, and
+   * `deploy:aquilla` ships the SPA first, so for the length of a deploy a new
+   * client talks to a worker that never sent this field at all. Typed as
+   * required, every chip in that window carried `undefined`: React saw one
+   * repeated key across the strip, and a click promised a verse and opened the
+   * file. `shortVerses` drops a verse that has no cell id, so the strip is
+   * empty rather than dishonest, and the card's header still says how many
+   * cells are short.
    */
   verses: Array<{
-    cellId: string
+    cellId?: string
     ref: string
     filled: boolean
     validated: boolean

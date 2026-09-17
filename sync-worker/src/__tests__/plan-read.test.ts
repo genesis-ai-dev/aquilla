@@ -488,3 +488,42 @@ describe("audio comes from the linked cue sheet", () => {
     expect(((await after.json()) as PlanResponse).units[0].audioCount).toBe(9)
   })
 })
+
+// AQU-1278: the in-order arrangement groups by the files' sidebar folders,
+// which live in files.meta and nowhere else.
+describe("the unit carries its file's folder", () => {
+  it("reads the corpus marker out of the file's meta, and the file's book code", async () => {
+    const { db } = await makeTestDb({
+      files: [
+        file("ep1", { name: "Episode 1", meta: JSON.stringify({ corpusMarker: "Season 1", orderedBy: "time" }) }),
+        file("gen", { name: "Genesis", book_code: "GEN", meta: "{}" }),
+        file("bad", { name: "Broken", meta: "not json" }),
+      ],
+      file_section_progress: [
+        progress("ep1", "file", ""), progress("gen", "file", ""), progress("bad", "file", ""),
+      ],
+    })
+    const body = (await (await get(db)).json()) as PlanResponse
+    const by = new Map(body.units.map((u) => [u.fileId, u]))
+    expect(by.get("ep1")).toMatchObject({ corpusMarker: "Season 1", fileBookCode: null })
+    expect(by.get("gen")).toMatchObject({ corpusMarker: null, fileBookCode: "GEN" })
+    // A meta blob that will not parse names no folder, and breaks nothing.
+    expect(by.get("bad")).toMatchObject({ corpusMarker: null })
+  })
+
+  it("changes the ETag when a file is moved to another folder", async () => {
+    // A rename touches files.updated_at and nothing the other clocks watch.
+    const { db } = await makeTestDb({
+      files: [file("ep1", { meta: JSON.stringify({ corpusMarker: "Season 1" }), updated_at: TS })],
+      file_section_progress: [progress("ep1", "file", "")],
+    })
+    const tag = (await get(db)).headers.get("ETag")!
+    expect((await get(db, { headers: { "If-None-Match": tag } })).status).toBe(304)
+    await db.prepare(
+      `UPDATE files SET meta = ?, updated_at = ? WHERE project_id = ? AND id = 'ep1'`,
+    ).bind(JSON.stringify({ corpusMarker: "Season 2" }), TS + 5000, P).run()
+    const after = await get(db, { headers: { "If-None-Match": tag } })
+    expect(after.status).toBe(200)
+    expect(((await after.json()) as PlanResponse).units[0].corpusMarker).toBe("Season 2")
+  })
+})

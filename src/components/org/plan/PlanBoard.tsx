@@ -18,8 +18,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
-  Search, X, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, CalendarOff, AlertTriangle,
+  Search, X, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, CalendarOff, AlertTriangle, Folder,
 } from "lucide-react"
+import { groupPlanUnitsByFolder } from "@/lib/plan/plan-folders"
 import { useT } from "@/lib/i18n/I18nProvider"
 import { Button } from "@/components/ui/button"
 import { TableEmptyState } from "@/components/ui/empty"
@@ -39,6 +40,8 @@ import {
   PLAN_STATUS_LABEL_KEY,
   type PlanUnit,
   type PlanUnitStatus,
+  planUnitStatus,
+  PLAN_GROUP_ORDER,
 } from "@/lib/plan/plan-status"
 import {
   loadCollapsedGroups,
@@ -47,6 +50,9 @@ import {
   savePlanView,
   toggleCollapsedGroup,
   type PlanViewMode,
+  loadCollapsedFolders,
+  saveCollapsedFolders,
+  toggleCollapsedFolder,
 } from "@/lib/plan/plan-view"
 import type { PlanStatus } from "@/hooks/useProjectPlan"
 import { PLAN_TONE } from "./plan-tone"
@@ -62,6 +68,16 @@ import { PlanRow } from "./PlanRow"
  * status added to the union without a hint here fails the build rather than
  * rendering a group with a blank margin.
  */
+/** A folder header's tally, one term per status present: "3 done". */
+const FOLDER_TALLY_KEY: Record<PlanUnitStatus, string> = {
+  overdue: "org.projectOverview.plan.folderTallyOverdue",
+  soon: "org.projectOverview.plan.folderTallySoon",
+  nearly_complete: "org.projectOverview.plan.folderTallyNearlyComplete",
+  in_progress: "org.projectOverview.plan.folderTallyInProgress",
+  not_started: "org.projectOverview.plan.folderTallyNotStarted",
+  done: "org.projectOverview.plan.folderTallyDone",
+}
+
 const GROUP_HINT_KEY: Record<PlanUnitStatus, string> = {
   overdue: "org.projectOverview.plan.groupHintOverdue",
   soon: "org.projectOverview.plan.groupHintSoon",
@@ -198,6 +214,10 @@ export function PlanBoard({
   const [view, setView] = useState<PlanViewMode>(() => loadPlanView())
   const [collapsed, setCollapsed] = useState<Set<PlanUnitStatus>>(() => loadCollapsedGroups(projectId))
   useEffect(() => setCollapsed(loadCollapsedGroups(projectId)), [projectId])
+  // The in-order arrangement's folds, kept apart from the status folds: a
+  // reader who folds Season 2 has said nothing about Not started.
+  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(() => loadCollapsedFolders(projectId))
+  useEffect(() => setCollapsedFolders(loadCollapsedFolders(projectId)), [projectId])
 
   const chooseView = useCallback((next: PlanViewMode) => {
     setView(next)
@@ -208,6 +228,14 @@ export function PlanBoard({
     setCollapsed((prev) => {
       const next = toggleCollapsedGroup(prev, status)
       saveCollapsedGroups(projectId, next)
+      return next
+    })
+  }, [projectId])
+
+  const toggleFolder = useCallback((key: string) => {
+    setCollapsedFolders((prev) => {
+      const next = toggleCollapsedFolder(prev, key)
+      saveCollapsedFolders(projectId, next)
       return next
     })
   }, [projectId])
@@ -230,6 +258,10 @@ export function PlanBoard({
     () => groupPlanUnits(visible, now, audioFiles),
     [visible, now, audioFiles],
   )
+  // AQU-1278: the in-order arrangement is grouped too — by the project's
+  // folders, the way the editor's sidebar groups its files, with one group
+  // for everything where a project has none. See `plan-folders.ts`.
+  const folders = useMemo(() => groupPlanUnitsByFolder(visible), [visible])
 
   // AQU-1278: COLLAPSE ALL (Sam, 2026-09-17). One control, two states: it
   // reads "Collapse all" while any group on screen is open and "Expand all"
@@ -244,8 +276,21 @@ export function PlanBoard({
   // never said "Expand all" because an absent group was "still open" would be
   // a button that never worked. Expanding clears the set outright, so a group
   // folded earlier and filtered away today comes back open too.
-  const allFolded = groups.length > 0 && groups.every((g) => collapsed.has(g.status))
+  //
+  // In the in-order arrangement the same button folds the FOLDERS instead;
+  // each arrangement keeps its own folds.
+  const allFolded = view === "order"
+    ? folders.length > 0 && folders.every((f) => collapsedFolders.has(f.key))
+    : groups.length > 0 && groups.every((g) => collapsed.has(g.status))
   const toggleAll = useCallback(() => {
+    if (view === "order") {
+      setCollapsedFolders((prev) => {
+        const next = allFolded ? new Set<string>() : new Set([...prev, ...folders.map((f) => f.key)])
+        saveCollapsedFolders(projectId, next)
+        return next
+      })
+      return
+    }
     setCollapsed((prev) => {
       const next = allFolded
         ? new Set<PlanUnitStatus>()
@@ -253,7 +298,27 @@ export function PlanBoard({
       saveCollapsedGroups(projectId, next)
       return next
     })
-  }, [allFolded, groups, projectId])
+  }, [view, allFolded, folders, groups, projectId])
+
+  /**
+   * What a folder header says on its right: how its rows stand, as a tally —
+   * "3 done · 1 nearly complete". A folded folder still says how it stands,
+   * which is the whole reason a folded board is not a hidden one.
+   */
+  const folderTally = useCallback((members: readonly PlanUnit[]): string => {
+    const tally = new Map<PlanUnitStatus, number>()
+    for (const u of members) {
+      const s = planUnitStatus(u, now, audioFiles)
+      tally.set(s, (tally.get(s) ?? 0) + 1)
+    }
+    return PLAN_GROUP_ORDER
+      .filter((s) => (tally.get(s) ?? 0) > 0)
+      .map((s) => t(FOLDER_TALLY_KEY[s] as never, { count: tally.get(s) ?? 0 }))
+      .reduce<string | null>(
+        (acc, part) => (acc == null ? part : t("org.projectOverview.plan.shortfallPair", { first: acc, second: part })),
+        null,
+      ) ?? ""
+  }, [now, audioFiles, t])
 
   // The summary counts the WHOLE project, never the filtered view. "1 of 3
   // done" under a filter that hid the other sixty-three would be a lie, and
@@ -287,9 +352,9 @@ export function PlanBoard({
    * less, because a fold says what it is hiding and a truncation does not.
    */
   const ordered = useMemo(() => {
-    if (view === "order") return visible
+    if (view === "order") return folders.flatMap((f) => (collapsedFolders.has(f.key) ? [] : f.units))
     return groups.flatMap((g) => (collapsed.has(g.status) ? [] : g.units))
-  }, [view, visible, groups, collapsed])
+  }, [view, folders, collapsedFolders, groups, collapsed])
 
   useEffect(() => {
     if (orderRef) orderRef.current = ordered
@@ -506,15 +571,15 @@ export function PlanBoard({
               {t("org.projectOverview.plan.viewOrder")}
             </Button>
             <span className="mx-1 h-4 w-px bg-border" aria-hidden />
-            {/* After the arrangement toggle, because it only means something
-                while there are groups. In "In order" it dims rather than
-                leaves, so the toolbar keeps its shape between the two. */}
+            {/* After the arrangement toggle, because it acts on whichever
+                grouping the toggle chose: the status groups, or the folders
+                the in-order arrangement is grouped by. */}
             <Button
               type="button"
               variant="ghost"
               size="xs"
               data-testid="plan-collapse-all"
-              disabled={view === "order" || groups.length === 0}
+              disabled={view === "order" ? folders.length === 0 : groups.length === 0}
               title={t(allFolded
                 ? "org.projectOverview.plan.expandAllTooltip"
                 : "org.projectOverview.plan.collapseAllTooltip")}
@@ -582,9 +647,43 @@ export function PlanBoard({
           {view === "order" ? (
             // The server already sorts by canonical ordinal then name, so the
             // "in order" arrangement is the payload untouched — no client sort.
-            <ul className="divide-y" data-testid="plan-order-list">
-              {ordered.map(renderRow)}
-            </ul>
+            // AQU-1278 put it in FOLDERS (Sam, 2026-09-17): the project's own,
+            // as the sidebar shows them, or one group for everything. Neutral
+            // headers — no status colour, a folder mark for the dot, and a
+            // tally of the statuses inside on the right.
+            folders.map((folder) => {
+              const folded = collapsedFolders.has(folder.key)
+              return (
+                <section key={folder.key} data-testid={`plan-folder-${folder.key}`}>
+                  <h3 className="contents">
+                    <button
+                      type="button"
+                      data-testid={`plan-fold-folder-${folder.key}`}
+                      aria-expanded={!folded}
+                      onClick={() => toggleFolder(folder.key)}
+                      className="flex w-full items-center gap-2.5 border-y bg-muted px-[17px] py-[11px] text-start text-[12.5px] font-semibold text-foreground/80 transition-colors first:border-t-0 hover:bg-muted/70"
+                    >
+                      {folded
+                        ? <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
+                        : <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />}
+                      <Folder className="h-[13px] w-[13px] shrink-0 text-muted-foreground" aria-hidden />
+                      {folder.labelKey ? t(folder.labelKey as never) : folder.label}
+                      <span className="rounded-full border bg-card px-[7px] text-[11px] font-bold tabular-nums text-muted-foreground">
+                        {folder.units.length}
+                      </span>
+                      <span className="ms-auto hidden font-normal text-[11.5px] text-muted-foreground sm:block">
+                        {folderTally(folder.units)}
+                      </span>
+                    </button>
+                  </h3>
+                  {!folded && (
+                    <ul className="divide-y" data-testid="plan-order-list">
+                      {folder.units.map(renderRow)}
+                    </ul>
+                  )}
+                </section>
+              )
+            })
           ) : (
             groups.map((group) => {
               const tone = PLAN_TONE[group.status]

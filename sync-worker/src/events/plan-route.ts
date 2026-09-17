@@ -18,6 +18,7 @@ import { ROLE } from './role-policy'
 import { checkProjectMembership } from './membership'
 import { counts, readValidationCount, BOOK_INDEX } from './progress-read-route'
 import { readCountStructuralCells } from './structural-cells'
+import { resolveCorpusMarker } from './corpus-marker'
 import {
   readPlanUnitsSql,
   planUnitExistsStmt,
@@ -37,6 +38,14 @@ export interface PlanUnit {
   fileName: string
   fileRole: string | null
   fileKind: string | null
+  /**
+   * AQU-1278: the file's sidebar folder — its corpus marker, resolved the way
+   * the sidebar resolves it — so the board's in-order arrangement can group
+   * by the same folders the editor shows. Null where the file has none.
+   */
+  corpusMarker: string | null
+  /** The file's own book code, for a one-book file; lets a file-grain unit find its testament. */
+  fileBookCode: string | null
   /** '' for a file-grain unit; a Bible book code for a sub-file one. */
   sectionKey: string
   totalCount: number
@@ -74,6 +83,18 @@ export interface PlanRouteEnv {
   SYNC_SECRET_KEY?: string
 }
 
+/** The folder a file's meta names, or null; a blob that will not parse names none. */
+function corpusMarkerOf(meta: string | null): string | null {
+  if (!meta) return null
+  try {
+    const parsed: unknown = JSON.parse(meta)
+    if (!parsed || typeof parsed !== 'object') return null
+    return resolveCorpusMarker(parsed as { corpusMarker?: unknown; parserVersion?: unknown }) ?? null
+  } catch {
+    return null
+  }
+}
+
 function toUnit(row: PlanUnitRow, validationCount: number, countStructural: boolean): PlanUnit {
   const c = counts(
     {
@@ -103,6 +124,8 @@ function toUnit(row: PlanUnitRow, validationCount: number, countStructural: bool
     fileName: row.file_name,
     fileRole: row.file_role ?? null,
     fileKind: row.file_kind ?? null,
+    corpusMarker: corpusMarkerOf(row.file_meta),
+    fileBookCode: row.file_book_code ?? null,
     sectionKey: row.section_key,
     totalCount: c.totalCount,
     filledCount: c.filledCount,
@@ -163,6 +186,9 @@ async function readPlan(
     revision = Math.max(revision, Number(row.revision) || 0)
     planUpdatedAt = Math.max(planUpdatedAt, Number(row.plan_updated_at) || 0)
     progressUpdatedAt = Math.max(progressUpdatedAt, Number(row.progress_updated_at) || 0)
+    // A folder rename touches the file row and nothing the other clocks
+    // watch; without this the board keeps the old folder until an edit lands.
+    progressUpdatedAt = Math.max(progressUpdatedAt, Number(row.file_updated_at) || 0)
     return {
       unit: toUnit(row, validationCount, countStructural),
       book: row.section_key || row.file_book_code || null,

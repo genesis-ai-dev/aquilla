@@ -1337,6 +1337,14 @@ export const org = defineNamespace({
     "org.projectOverview.plan.expandAll": "Expand all",
     "org.projectOverview.plan.collapseAllTooltip": "Fold every group to its header and count.",
     "org.projectOverview.plan.expandAllTooltip": "Open every group.",
+    // AQU-1278: the in-order arrangement's folders.
+    "org.projectOverview.plan.folderAll": "All files",
+    "org.projectOverview.plan.folderTallyOverdue": plural({ one: "{count} overdue", other: "{count} overdue" }),
+    "org.projectOverview.plan.folderTallySoon": plural({ one: "{count} due soon", other: "{count} due soon" }),
+    "org.projectOverview.plan.folderTallyNearlyComplete": plural({ one: "{count} nearly complete", other: "{count} nearly complete" }),
+    "org.projectOverview.plan.folderTallyInProgress": plural({ one: "{count} in progress", other: "{count} in progress" }),
+    "org.projectOverview.plan.folderTallyNotStarted": plural({ one: "{count} not started", other: "{count} not started" }),
+    "org.projectOverview.plan.folderTallyDone": plural({ one: "{count} done", other: "{count} done" }),
     // AQU-1278: the heading is just the noun. "Progress by chapter" described
     // the old stack of per-chapter bars; the grid beneath it now says how it
     // measures, and the legend sits on this very line saying what the colours
@@ -2861,6 +2869,41 @@ export const org = defineNamespace({
       },
       "org.projectOverview.plan.expandAllTooltip": {
         description: "Hover text of the expandAll button. A short sentence saying what one click does.",
+      },
+      "org.projectOverview.plan.folderAll": {
+        description:
+          "Header of the single group the plan board's in-order arrangement draws when a project keeps none of its files in folders — every row sits under it, so it can be folded like any folder. Beside the count of rows.",
+        maxLength: 16,
+      },
+      "org.projectOverview.plan.folderTallyOverdue": {
+        description:
+          "One term of a folder header's tally on the plan board's in-order arrangement: how many rows inside the folder are overdue. Terms are joined with shortfallPair — \"3 done · 1 nearly complete\" — and only the non-zero ones appear. Same vocabulary as the group headings, lower case.",
+        placeholders: { count: "Rows in the folder with this status — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.folderTallySoon": {
+        description:
+          "One term of a folder header's tally on the plan board's in-order arrangement: how many rows inside the folder are due soon. Terms are joined with shortfallPair — \"3 done · 1 nearly complete\" — and only the non-zero ones appear. Same vocabulary as the group headings, lower case.",
+        placeholders: { count: "Rows in the folder with this status — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.folderTallyNearlyComplete": {
+        description:
+          "One term of a folder header's tally on the plan board's in-order arrangement: how many rows inside the folder are nearly complete. Terms are joined with shortfallPair — \"3 done · 1 nearly complete\" — and only the non-zero ones appear. Same vocabulary as the group headings, lower case.",
+        placeholders: { count: "Rows in the folder with this status — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.folderTallyInProgress": {
+        description:
+          "One term of a folder header's tally on the plan board's in-order arrangement: how many rows inside the folder are in progress. Terms are joined with shortfallPair — \"3 done · 1 nearly complete\" — and only the non-zero ones appear. Same vocabulary as the group headings, lower case.",
+        placeholders: { count: "Rows in the folder with this status — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.folderTallyNotStarted": {
+        description:
+          "One term of a folder header's tally on the plan board's in-order arrangement: how many rows inside the folder are not started. Terms are joined with shortfallPair — \"3 done · 1 nearly complete\" — and only the non-zero ones appear. Same vocabulary as the group headings, lower case.",
+        placeholders: { count: "Rows in the folder with this status — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.folderTallyDone": {
+        description:
+          "One term of a folder header's tally on the plan board's in-order arrangement: how many rows inside the folder are done. Terms are joined with shortfallPair — \"3 done · 1 nearly complete\" — and only the non-zero ones appear. Same vocabulary as the group headings, lower case.",
+        placeholders: { count: "Rows in the folder with this status — a number; it also selects the plural form." },
       },
       "org.projectOverview.plan.chapters": {
         description: "Inspector heading over the grid of chapter tiles for a Bible book. A plural noun naming what is below it, not a sentence — the colour legend shares this line and the grid says how it measures.",

@@ -827,11 +827,91 @@ describe("collapse all (AQU-1278, Sam 2026-09-17)", () => {
       .toEqual(["nearly_complete", "in_progress", "done"])
   })
 
-  it("goes quiet in the In order arrangement, which has no groups", () => {
+  it("works on the folders in the In order arrangement, with its own folds", () => {
+    localStorage.clear()
     renderBoard(three())
     fireEvent.click(screen.getByTestId("plan-view-order"))
-    expect(screen.getByTestId("plan-collapse-all")).toBeDisabled()
+    const button = screen.getByTestId("plan-collapse-all")
+    expect(button).toBeEnabled()
+    fireEvent.click(button)
+    expect(screen.getByTestId("plan-fold-folder-All")).toHaveAttribute("aria-expanded", "false")
+    expect(button).toHaveTextContent("Expand all")
+    // Folded a folder, not a status: back in By status everything is open.
+    expect(localStorage.getItem("aquilla:planGroups:p1")).toBeNull()
     fireEvent.click(screen.getByTestId("plan-view-status"))
-    expect(screen.getByTestId("plan-collapse-all")).toBeEnabled()
+    expect(screen.getAllByTestId(/^plan-row-/)).toHaveLength(3)
+  })
+})
+
+// AQU-1278, Sam 2026-09-17: the in-order arrangement lives in folders — the
+// project's own, as the sidebar shows them — or in one group for everything.
+describe("in order, in folders", () => {
+  const seasons = () => [
+    unit({ fileId: "e1", fileName: "Episode 1", corpusMarker: "Season 1", filledCount: 5 }),
+    unit({ fileId: "e2", fileName: "Episode 2", corpusMarker: "Season 1", filledCount: 5 }),
+    unit({ fileId: "e3", fileName: "Episode 3", corpusMarker: "Season 2", filledCount: 5 }),
+    unit({ fileId: "notes", fileName: "notes.txt", filledCount: 5 }),
+  ]
+  const inOrder = (units: PlanUnit[]) => {
+    localStorage.clear()
+    const r = renderBoard(units)
+    fireEvent.click(screen.getByTestId("plan-view-order"))
+    return r
+  }
+
+  it("groups by the files' folders, with the marker-less ones under Ungrouped", () => {
+    inOrder(seasons())
+    expect(screen.getAllByTestId(/^plan-folder-/).map((el) => el.getAttribute("data-testid")))
+      .toEqual(["plan-folder-Season 1", "plan-folder-Season 2", "plan-folder-Ungrouped"])
+    expect(within(screen.getByTestId("plan-folder-Season 1")).getAllByTestId(/^plan-row-/)).toHaveLength(2)
+    expect(screen.getByTestId("plan-fold-folder-Ungrouped")).toHaveTextContent("Ungrouped")
+  })
+
+  it("puts a Bible's books under their testaments", () => {
+    inOrder([
+      unit({ fileId: "bible", sectionKey: "GEN", fileName: "Bible", filledCount: 5 }),
+      unit({ fileId: "bible", sectionKey: "MAT", fileName: "Bible", filledCount: 5 }),
+    ])
+    expect(screen.getAllByTestId(/^plan-folder-/).map((el) => el.getAttribute("data-testid")))
+      .toEqual(["plan-folder-OT", "plan-folder-NT"])
+  })
+
+  it("gives a project with no folders one group, named for everything", () => {
+    inOrder([unit({ fileId: "a", filledCount: 5 }), unit({ fileId: "b", filledCount: 5 })])
+    expect(screen.getAllByTestId(/^plan-folder-/)).toHaveLength(1)
+    expect(screen.getByTestId("plan-fold-folder-All")).toHaveTextContent("All files")
+  })
+
+  it("says on the header how a folder stands, folded or not", () => {
+    inOrder([
+      unit({ fileId: "e1", corpusMarker: "Season 1", doneAt: NOW, doneBy: "r" }),
+      unit({ fileId: "e2", corpusMarker: "Season 1", filledCount: 5 }),
+      nearlyDone({ fileId: "e3", corpusMarker: "Season 1" }),
+    ])
+    expect(screen.getByTestId("plan-fold-folder-Season 1"))
+      .toHaveTextContent("1 nearly complete · 1 in progress · 1 done")
+    fireEvent.click(screen.getByTestId("plan-fold-folder-Season 1"))
+    expect(screen.queryAllByTestId(/^plan-row-/)).toHaveLength(0)
+    expect(screen.getByTestId("plan-fold-folder-Season 1")).toHaveTextContent("1 done")
+  })
+
+  it("remembers folder folds per project, apart from the status folds", () => {
+    inOrder(seasons())
+    fireEvent.click(screen.getByTestId("plan-fold-folder-Season 2"))
+    expect(JSON.parse(localStorage.getItem("aquilla:planFolders:p1") ?? "[]")).toEqual(["Season 2"])
+    expect(localStorage.getItem("aquilla:planGroups:p1")).toBeNull()
+  })
+
+  it("hands the inspector only the rows that are open", () => {
+    const orderRef = { current: [] as PlanUnit[] }
+    localStorage.clear()
+    render(
+      <PlanBoard units={seasons()} now={NOW} projectId="p1" orderRef={orderRef}
+        selectedId={null} onSelect={vi.fn()} />,
+    )
+    fireEvent.click(screen.getByTestId("plan-view-order"))
+    expect(orderRef.current.map((u) => u.fileId)).toEqual(["e1", "e2", "e3", "notes"])
+    fireEvent.click(screen.getByTestId("plan-fold-folder-Season 1"))
+    expect(orderRef.current.map((u) => u.fileId)).toEqual(["e3", "notes"])
   })
 })

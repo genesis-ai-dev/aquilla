@@ -120,7 +120,11 @@ async function seedProject(db: AquillaDb, p: Project): Promise<void> {
   await insertRows(db, "files", FILE_COLUMNS, [
     ...p.files.map((f) => [
       fileId(f), p.id, f.name, f.kind, null, null,
-      JSON.stringify(f.kind === "vtt" ? { orderedBy: "time", importFormat: "vtt" } : {}),
+      // Episodes sit in a season folder, as The Chosen's do: the board's
+      // in-order arrangement groups by it.
+      JSON.stringify(f.kind === "vtt"
+        ? { orderedBy: "time", importFormat: "vtt", corpusMarker: f.id.startsWith("s2") ? "Season 2" : "Season 1" }
+        : {}),
       f.cells, eventOf(f), "dev", NOW, NOW, NOW - DAY,
     ]),
     ...sheeted.map((f) => [

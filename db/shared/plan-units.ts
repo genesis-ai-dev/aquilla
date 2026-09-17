@@ -52,6 +52,8 @@ export function planUnitsSql(fileScope: string): string {
                  f.role        AS file_role,
                  f.kind        AS file_kind,
                  f.book_code   AS file_book_code,
+                 f.meta        AS file_meta,
+                 f.updated_at  AS file_updated_at,
                  f.cell_count  AS file_cell_count,
                  f.structural_cell_count AS file_structural_cell_count,
                  u.section_key
@@ -84,6 +86,14 @@ export interface PlanUnitRow {
   file_role: string | null
   file_kind: string | null
   file_book_code: string | null
+  /**
+   * AQU-1278: the file's meta blob, for its sidebar folder (`corpusMarker`).
+   * The board groups its in-order arrangement by the same folders the editor
+   * shows, and the folder lives nowhere but here.
+   */
+  file_meta: string | null
+  /** When the file row last changed — a folder rename moves this and nothing else. */
+  file_updated_at: number | string | null
   section_key: string
   total_count: number
   filled_count: number
@@ -156,7 +166,7 @@ export function readPlanUnitsSql(extraScope = ""): string {
   // the wrong one. The `TRUE` base keeps the composition safe when empty.
   return `WITH units AS (${planUnitsSql("f.project_id = ?")})
      SELECT u.project_id, u.file_id, u.file_name, u.file_role, u.file_kind,
-            u.file_book_code, u.section_key,
+            u.file_book_code, u.file_meta, u.file_updated_at, u.section_key,
             COALESCE(pl.total_count, pd.total_count,
                      CASE WHEN u.section_key = '' THEN u.file_cell_count END, 0) AS total_count,
             COALESCE(pl.filled_count, 0) AS filled_count,

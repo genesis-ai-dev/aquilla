@@ -27,6 +27,10 @@ export interface PlanUnit {
   fileName: string
   fileRole: string | null
   fileKind: string | null
+  /** AQU-1278: the file's sidebar folder, or null. Optional: an older worker sends neither. */
+  corpusMarker?: string | null
+  /** The file's own book code, for a one-book file. */
+  fileBookCode?: string | null
   /** '' for a file-grain unit; a Bible book code for a sub-file one. */
   sectionKey: string
   totalCount: number

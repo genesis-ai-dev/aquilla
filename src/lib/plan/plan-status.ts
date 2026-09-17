@@ -25,6 +25,12 @@ export interface PlanUnit {
   fileName: string
   /** '' for a file-grain unit, else a stable sub-file key (a Bible book code). */
   sectionKey: string
+  /** AQU-1278: the file's sidebar folder, for the in-order arrangement. See `plan-folders.ts`. */
+  corpusMarker?: string | null
+  /** The file's own book code, for a one-book file; lets a file-grain unit find its testament. */
+  fileBookCode?: string | null
+  /** `files.kind` as the importer wrote it; feeds the folder rule's Scripture test. */
+  fileKind?: string | null
   totalCount: number
   filledCount: number
   validatedCount: number

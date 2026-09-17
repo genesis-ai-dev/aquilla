@@ -102,11 +102,11 @@ describe("every lane is listed", () => {
 
 describe("a person's progress reads in cells", () => {
   it("shows counts, not percentages, beside the bars", () => {
-    // 940/938 out of 950 rounds to "99/99%" on the bar itself — the twelve
+    // 940 | 938 out of 950 rounds to "99% | 99%" on the bar itself — the twelve
     // cells still outstanding are exactly what a manager needs and exactly what
     // the percentage loses.
     renderSection({ assignments: [assignment()] })
-    expect(screen.getByTestId("plan-assignment-text-a1")).toHaveTextContent("940/938")
+    expect(screen.getByTestId("plan-assignment-text-a1")).toHaveTextContent("940 | 938")
     // Translation leads validation: a cell nobody has written cannot be
     // validated, so the ten untranslated cells are named first. AQU-1278: two
     // terms on one line drop the noun — this panel is three hundred pixels
@@ -132,7 +132,7 @@ describe("a person's progress reads in cells", () => {
         assignment({ translated: 950, validated: 950, recorded: 500, audioValidated: 0 }),
       ],
     })
-    expect(screen.getByTestId("plan-assignment-audio-a1")).toHaveTextContent("500/0")
+    expect(screen.getByTestId("plan-assignment-audio-a1")).toHaveTextContent("500 | 0")
     expect(screen.getByTestId("plan-assignment-left-a1")).toHaveTextContent("450 takes to record")
   })
 

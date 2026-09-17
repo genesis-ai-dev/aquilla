@@ -34,7 +34,7 @@ import { classifyPlanSection, numberedBookCodes } from "@/lib/plan/plan-section"
 import type { PlanUnitPatch } from "@/lib/sync/plan"
 import { usePlanUnitSections, type PlanSection } from "@/hooks/usePlanUnitSections"
 import { PlanStatusPill } from "./PlanStatusPill"
-import { PlanBar } from "./PlanBar"
+import { PlanBar, Readout } from "./PlanBar"
 import { PlanChapterGrid, PlanGridLegend, planSectionShortfall } from "./PlanChapterGrid"
 import { PLAN_TONE } from "./plan-tone"
 import { GO_TO_FIRST_KEY, usePlanShortfallText, usePlanStatusNote } from "./use-plan-note"
@@ -580,7 +580,7 @@ export function PlanInspector({
  * cells short" into somewhere to click.
  *
  * The bars read in COUNTS here rather than percentages. At chapter grain
- * "20/18" is two cells a manager can go and fix, where "100/90%" is those two
+ * "20 | 18" is two cells a manager can go and fix, where "100% | 90%" is those two
  * cells rounded into a shrug.
  */
 function PlanChapterCard({
@@ -649,7 +649,7 @@ function PlanChapterCard({
           translated: planPct(section.filledCount, section.totalCount),
           validated: planPct(section.validatedCount, section.totalCount),
         })}
-        readout={`${section.totalCount}/${section.validatedCount}`}
+        readout={<Readout left={section.totalCount} right={section.validatedCount} />}
       />
       {hasAudio && (
         <PlanBar
@@ -661,7 +661,7 @@ function PlanChapterCard({
             recorded: planPct(section.audioCount, section.totalCount),
             validated: planPct(section.audioValidatedCount, section.totalCount),
           })}
-          readout={`${section.totalCount}/${section.audioCount}`}
+          readout={<Readout left={section.totalCount} right={section.audioCount} />}
         />
       )}
       {/* ONE ROW, NEVER TWO — and it SCROLLS. Sam, 2026-09-16: every verse

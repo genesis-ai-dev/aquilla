@@ -42,7 +42,7 @@ import type { UnitAssignment, UnitAssignmentChapter } from "@/lib/sync/assignmen
 import type { FileReference, FileType } from "@/lib/parsers/types"
 import { SectionVisibilityGate } from "../SectionVisibilityBadge"
 import { laneChipLabel } from "../project-lanes"
-import { PlanBar } from "./PlanBar"
+import { PlanBar, Readout } from "./PlanBar"
 import { PLAN_TONE } from "./plan-tone"
 import { usePlanShortfallRenderer } from "./use-plan-note"
 
@@ -380,7 +380,7 @@ function PlanAssignmentRow({
           })}
           readout={
             <span data-testid={`plan-assignment-text-${a.assignmentId}`}>
-              {a.translated}/{a.validated}
+              <Readout left={a.translated} right={a.validated} />
             </span>
           }
         />
@@ -396,7 +396,7 @@ function PlanAssignmentRow({
             })}
             readout={
               <span data-testid={`plan-assignment-audio-${a.assignmentId}`}>
-                {a.recorded}/{a.audioValidated}
+                <Readout left={a.recorded} right={a.audioValidated} />
               </span>
             }
           />

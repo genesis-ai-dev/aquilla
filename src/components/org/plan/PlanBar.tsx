@@ -48,13 +48,14 @@ export function PlanBar({ label, outer, inner, tone, aria, readout }: {
   tone: PlanBarTone
   aria: string
   /**
-   * AQU-1278: what to print in the readout slot, instead of "outer/inner%".
+   * AQU-1278: what to print in the readout slot, instead of "outer% | inner%".
    *
    * A unit reads in PERCENTAGES and a person or a chapter reads in CELLS. At
-   * those grains "940/938" is a fact a manager can act on — two cells left —
-   * where "99/99%" is those two cells rounded out of existence. The slot keeps
-   * its fixed width either way, so a column of bars stays aligned whichever
-   * kind of number is in it.
+   * those grains "940 | 938" is a fact a manager can act on — two cells left —
+   * where "99% | 99%" is those two cells rounded out of existence. The slot
+   * keeps its fixed width either way, so a column of bars stays aligned
+   * whichever kind of number is in it. Build it with `Readout` so the two
+   * numbers are separated the same way everywhere.
    */
   readout?: ReactNode
 }) {
@@ -89,15 +90,36 @@ export function PlanBar({ label, outer, inner, tone, aria, readout }: {
           />
         )}
       </span>
-      <span className="w-[60px] shrink-0 text-end text-[11px] tabular-nums text-muted-foreground">
-        {readout ?? (
-          <>
-            {outer}
-            <span className="px-px opacity-40">/</span>
-            {inner}%
-          </>
-        )}
+      {/* 72px, not 60: "100% | 100%" is the widest this reads and it has to
+          fit without wrapping, or the row grows a line on the very unit that
+          is finished. */}
+      <span className="w-[72px] shrink-0 text-end text-[11px] tabular-nums text-muted-foreground">
+        {readout ?? <Readout left={`${outer}%`} right={`${inner}%`} />}
       </span>
     </span>
+  )
+}
+
+
+/**
+ * Two numbers in a bar's readout slot, separated the one way this board does it.
+ *
+ * A BAR, NOT A SLASH. The readout used to be "100/99%", and Sam read it the
+ * way anyone would — "100 out of 99 percent", which is nonsense — because a
+ * slash means division everywhere else a number appears. The two figures are
+ * siblings (translated beside validated, recorded beside signed off), so they
+ * get a divider that only ever means "and": a thin vertical bar. The same
+ * element serves percentages on a unit and counts on a person or a chapter,
+ * so the three never drift into three notations.
+ */
+export function Readout({ left, right }: { left: ReactNode; right: ReactNode }) {
+  return (
+    <>
+      {left}
+      {/* Real spaces, not padding: copied or read aloud this is "940 | 938",
+          which is what Sam wrote, and a test can say the same. */}
+      <span className="opacity-40">{" | "}</span>
+      {right}
+    </>
   )
 }

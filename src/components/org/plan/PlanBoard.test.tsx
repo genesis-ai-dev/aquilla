@@ -188,7 +188,7 @@ describe("audio columns", () => {
   it("shows them as soon as one unit has a recording", () => {
     renderBoard([unit({ filledCount: 50, audioCount: 20, audioValidatedCount: 5 })])
     expect(screen.getByLabelText(/^Audio/)).toBeInTheDocument()
-    // Labelled, so "20/5%" is not a riddle.
+    // Labelled, so "20% | 5%" is not a riddle.
     expect(screen.getByText("AUD")).toBeInTheDocument()
     expect(screen.getByText("TXT")).toBeInTheDocument()
   })

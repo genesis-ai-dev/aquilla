@@ -73,7 +73,7 @@ async function main() {
   let board = await openBoard("dev-plan-1278-vtt")
 
   const e1 = await rowText(board, "plan-1278-s1e1-")
-  check(/AUD/.test(e1) && /100\s*\/\s*0\s*%/.test(e1), "Episode 1 reads 100% recorded", e1)
+  check(/AUD/.test(e1) && /100%\s*\|\s*0%/.test(e1), "Episode 1 reads 100% recorded", e1)
 
   // The empty cue sheet. Its text is finished and signed off, so without the
   // sheet counting as an expectation this row reads "Nothing left" in Nearly

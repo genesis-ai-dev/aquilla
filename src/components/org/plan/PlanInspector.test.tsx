@@ -606,9 +606,9 @@ describe("the chapter card", () => {
       [section("GEN 12", { totalCount: 20, filledCount: 20, validatedCount: 18 })],
       [],
     )
-    // "100/90%" rounds the two outstanding cells out of existence; "20/18" is
-    // the thing a manager can act on.
-    expect(screen.getByTestId("plan-chapter-detail")).toHaveTextContent("20/18")
+    // "100% | 90%" rounds the two outstanding cells out of existence; "20 | 18"
+    // is the thing a manager can act on.
+    expect(screen.getByTestId("plan-chapter-detail")).toHaveTextContent("20 | 18")
   })
 
   it("draws a chip per short verse, in canonical order, and opens the cell", async () => {

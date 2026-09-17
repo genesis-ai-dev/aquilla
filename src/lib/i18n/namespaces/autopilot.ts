@@ -117,6 +117,18 @@ export const autopilot = defineNamespace({
       one: "{count} draft is ready for review.",
       other: "{count} drafts are ready for review.",
     }),
+    // AQU-1301: where to start, not just how far behind.
+    "autopilot.overview.reviewAtPassage": plural(
+      {
+        one: "Waiting on {spanLabel} — {count} draft to review.",
+        other: "Waiting on {spanLabel} — {count} drafts to review.",
+      },
+      "count",
+    ),
+    "autopilot.overview.widget.reviewBacklog": plural({
+      one: "+{count} in earlier passages",
+      other: "+{count} in earlier passages",
+    }),
     "autopilot.overview.complete": "Autopilot completed its latest run.",
     "autopilot.overview.stopped": "The latest Autopilot run was stopped.",
     "autopilot.overview.notStarted": "Ready to run — Autopilot hasn’t run on this project yet.",
@@ -415,6 +427,30 @@ export const autopilot = defineNamespace({
     ),
     "autopilot.inspector.review.loadMore": "Load more ready-to-review drafts",
     "autopilot.inspector.review.loadMoreRecords": "Load more draft records",
+    // — Passage-first pending actions (AQU-1301): the parked passage leads, the
+    //   backlog behind it is a count the reviewer opens on purpose ————
+    "autopilot.inspector.review.currentPassage": "Waiting on {spanLabel}",
+    "autopilot.inspector.review.currentPassageUnlabelled": "Waiting on this passage",
+    "autopilot.inspector.review.openPassage": "Open {spanLabel} in the editor",
+    "autopilot.inspector.review.restToggle": plural({
+      one: "and {count} more draft in earlier passages",
+      other: "and {count} more drafts in earlier passages",
+    }),
+    // Pluralized on ONE axis: a second count in the same sentence forces
+    // "1 files" in every locale whose plural rules differ from the first.
+    "autopilot.inspector.review.restSummary": plural({
+      one: "across {count} file",
+      other: "across {count} files",
+    }),
+    "autopilot.inspector.review.restHide": "Hide earlier passages",
+    "autopilot.inspector.review.blockedByDecision": plural({
+      one: "Waiting on {count} open question above before this passage can go further.",
+      other: "Waiting on {count} open questions above before this passage can go further.",
+    }),
+    "autopilot.inspector.review.passageDrafts": plural({
+      one: "{count} draft",
+      other: "{count} drafts",
+    }),
     "autopilot.inspector.history.title": "Draft history",
     "autopilot.inspector.history.description":
       "Previously applied, rejected, or superseded drafts from this run.",
@@ -721,6 +757,17 @@ export const autopilot = defineNamespace({
         "Overview sentence reporting draft suggestions awaiting human review.",
         { count: "Number of proposed drafts awaiting review." },
       ),
+      "autopilot.overview.reviewAtPassage": withPlaceholders(
+        "Autopilot card's primary line once a run parks: names the passage it is waiting on so the reviewer has somewhere to start, instead of a project-wide backlog total.",
+        {
+          spanLabel: "Human-readable passage reference, e.g. 'LUK 4:1–4:12'.",
+          count: "Drafts staged in that passage.",
+        },
+      ),
+      "autopilot.overview.widget.reviewBacklog": withPlaceholders(
+        "Second line on the review tile: drafts queued in earlier passages, behind the one the run parked on.",
+        { count: "Number of staged drafts outside the parked passage." },
+      ),
       "autopilot.overview.widget.reviewAria": withPlaceholders(
         "Accessible name of the overview widget opening ready-to-review evidence.",
         { count: "Number shown in the ready-to-review widget." },
@@ -989,6 +1036,30 @@ export const autopilot = defineNamespace({
       "autopilot.decisions.held": withPlaceholders(
         "Note below the shown decision cards reporting how many further open decisions are withheld rather than lost.",
         { count: "Number of additional open decisions not shown, beyond the ones displayed." },
+      ),
+      "autopilot.inspector.review.currentPassage": withPlaceholders(
+        "Heading over the passage the run is parked on — the drafts and question the reviewer should act on first.",
+        { spanLabel: "Human-readable passage reference, e.g. 'LUK 4:1–4:12'." },
+      ),
+      "autopilot.inspector.review.openPassage": withPlaceholders(
+        "Accessible name for the link that jumps the editor to a passage listed in the expanded backlog.",
+        { spanLabel: "Human-readable passage reference, e.g. 'LUK 4:1–4:12'." },
+      ),
+      "autopilot.inspector.review.restToggle": withPlaceholders(
+        "Button that expands the collapsed backlog. The backlog is a count, never a flat list, so the reviewer is never handed hundreds of drafts at once.",
+        { count: "Number of staged drafts in passages other than the one the run is parked on." },
+      ),
+      "autopilot.inspector.review.restSummary": withPlaceholders(
+        "Detail beside the backlog toggle giving how many files the queued passages span.",
+        { count: "Number of distinct files the earlier passages belong to." },
+      ),
+      "autopilot.inspector.review.blockedByDecision": withPlaceholders(
+        "Note under the parked passage's heading saying its drafts are gated on the open question shown in the decisions section above.",
+        { count: "Number of open questions raised on this passage." },
+      ),
+      "autopilot.inspector.review.passageDrafts": withPlaceholders(
+        "Count badge on one passage group in the expanded backlog.",
+        { count: "Number of staged drafts in that passage." },
       ),
       "autopilot.decisions.blastRadius": withPlaceholders(
         "Decision-card detail giving how many later passages the answer will affect, so the question reads as worth answering rather than as generic review.",

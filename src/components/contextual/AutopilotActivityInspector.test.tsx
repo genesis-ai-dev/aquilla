@@ -997,4 +997,114 @@ describe("AutopilotActivityInspector", () => {
     expect(screen.queryByText(new RegExp(lastError.split(" ")[0], "i"))).not.toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Run Autopilot" })).toBeInTheDocument()
   })
+
+  // ── AQU-1301: the pending set leads with the parked passage ──────────────
+
+  /** `n` proposed drafts spread over `spans` passages, newest passage last. */
+  function backlogActivity(spans: number, perSpan: number): ContextualRunActivity {
+    const drafts = []
+    for (let s = 1; s <= spans; s++) {
+      for (let d = 1; d <= perSpan; d++) {
+        drafts.push({
+          id: `draft-s${s}-c${d}`,
+          runId: RUN_ID,
+          fileId: "file-1",
+          cellId: `LUK ${s}:${d}`,
+          cellLabel: `LUK ${s}:${d}`,
+          spanLabel: `LUK ${s}:1–${s}:${perSpan}`,
+          text: `Draft ${s}.${d}`,
+          status: "proposed",
+          createdAt: `2026-08-11T1${s}:00:0${d}.000Z`,
+          provenance: { spanId: `span-${s}` },
+        })
+      }
+    }
+    return { ...activity, drafts }
+  }
+
+  it("leads with the parked passage and collapses the rest to one count", async () => {
+    activityMock.mockResolvedValue(backlogActivity(4, 3))
+    renderInspector({ initialSection: "review" })
+
+    // The passage the run got to, named — not a bare backlog total.
+    expect(await screen.findByText("Waiting on LUK 4:1–4:3")).toBeInTheDocument()
+    // The other nine drafts are ONE control, not nine cards.
+    const toggle = screen.getByRole("button", { name: "and 9 more drafts in earlier passages" })
+    expect(toggle).toHaveAttribute("aria-expanded", "false")
+    expect(screen.getByText("across 1 file")).toBeInTheDocument()
+    // Earlier passages are not rendered until asked for.
+    expect(screen.queryByText("Draft 1.1")).not.toBeInTheDocument()
+    expect(screen.getByText("Draft 4.1")).toBeInTheDocument()
+  })
+
+  it("expands the remainder into passages in passage order, each linking to the editor", async () => {
+    activityMock.mockResolvedValue(backlogActivity(4, 3))
+    renderInspector({ initialSection: "review" })
+
+    fireEvent.click(await screen.findByRole("button", { name: "and 9 more drafts in earlier passages" }))
+
+    const links = screen.getAllByRole("link", { name: /^Open LUK/ })
+    expect(links.map((link) => link.textContent)).toEqual([
+      "LUK 1:1–1:3",
+      "LUK 2:1–2:3",
+      "LUK 3:1–3:3",
+    ])
+    // Picking one navigates the editor to that passage's first cell.
+    expect(links[0]).toHaveAttribute("href", expect.stringContaining("file-1"))
+    expect(screen.getByRole("button", { name: "Hide earlier passages" })).toBeInTheDocument()
+  })
+
+  it("shows no remainder control when the backlog is only the parked passage", async () => {
+    activityMock.mockResolvedValue(backlogActivity(1, 3))
+    renderInspector({ initialSection: "review" })
+
+    expect(await screen.findByText("Waiting on LUK 1:1–1:3")).toBeInTheDocument()
+    // AC: no "and 0 more".
+    expect(screen.queryByRole("button", { name: /more drafts in earlier passages/ })).not.toBeInTheDocument()
+    expect(screen.queryByText(/^across \d+ file/)).not.toBeInTheDocument()
+  })
+
+  it("keeps an open decision above the drafts and out of the collapsed count", async () => {
+    activityMock.mockResolvedValue(backlogActivity(4, 3))
+    decisionsMock.mockResolvedValue({
+      decisions: [{
+        id: "dec-1",
+        fileId: "file-1",
+        spanId: "span-2",
+        cellIds: ["LUK 2:1"],
+        reason: "Which register for the greeting?",
+        readinessItem: null,
+        blastRadius: 4,
+        status: "open",
+        assignedUserId: null,
+      }],
+      openCount: 1,
+      cap: 3,
+    })
+    renderInspector({ initialSection: "review" })
+
+    // The blocked passage becomes the actionable one...
+    expect(await screen.findByText("Waiting on LUK 2:1–2:3")).toBeInTheDocument()
+    // ...the question itself is visible without expanding anything...
+    expect(screen.getByText("Which register for the greeting?")).toBeInTheDocument()
+    expect(screen.getByTestId("autopilot-current-passage-blocked")).toBeInTheDocument()
+    // ...and it is not buried in the count, which covers drafts only.
+    expect(screen.getByRole("button", { name: "and 9 more drafts in earlier passages" })).toBeInTheDocument()
+  })
+
+  it("counts the backlog the server reports, not just the page that loaded", async () => {
+    // A bounded draft page must not shrink the backlog number: the reviewer
+    // would see "and 6 more" beside a "showing 9 of 212" line saying otherwise.
+    activityMock.mockResolvedValue({
+      ...backlogActivity(3, 3),
+      draftCounts: { proposed: 212, applied: 0, rejected: 0, superseded: 0 },
+      truncatedCollections: { events: false, sceneBriefs: false, drafts: true },
+    })
+    renderInspector({ initialSection: "review" })
+
+    expect(await screen.findByText("Waiting on LUK 3:1–3:3")).toBeInTheDocument()
+    // 212 staged, 3 of them in the parked passage → 209 behind it.
+    expect(screen.getByRole("button", { name: "and 209 more drafts in earlier passages" }))
+      .toBeInTheDocument()
+  })
 })

@@ -295,6 +295,12 @@ export interface ContextualOverviewFile {
   appliedDrafts: number
   updatedAt: string
   lastError: string | null
+  /** The passage this run parked on (AQU-1301). Optional throughout: a server
+   *  predating the split omits them, and the surface then falls back to the
+   *  flat total rather than reporting a passage it cannot name. */
+  currentSpanId?: string | null
+  currentSpanLabel?: string | null
+  currentSpanDrafts?: number
 }
 
 export type ReadinessLevel = "ready" | "partial" | "missing"
@@ -332,6 +338,9 @@ export interface ContextualOverview {
   unitsSpent: number
   proposedDrafts: number
   appliedDrafts: number
+  /** Drafts in the passages the runs parked on — the actionable slice of
+   *  `proposedDrafts` (AQU-1301). Absent on older servers. */
+  currentSpanDrafts?: number
   readiness?: ContextReadiness
 }
 
@@ -813,6 +822,11 @@ export async function sendContextualSteering(runId: string, text: string): Promi
 export interface ContextualDecisionView {
   id: string
   fileId: string
+  /** The span the run raised this question on. The server has always sent it;
+   *  it is typed here so the pending surface can file the decision under its
+   *  passage rather than into an undifferentiated pile (AQU-1301). Optional
+   *  because a backend predating the column omits it. */
+  spanId?: string | null
   cellIds: string[]
   reason: string
   readinessItem: "terminology" | "brief" | "examples" | "rules" | "languages" | null

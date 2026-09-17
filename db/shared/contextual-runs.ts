@@ -1951,6 +1951,16 @@ export interface ProjectAutopilotFileRow {
   appliedDrafts: number
   updatedAt: string
   lastError: string | null
+  /** The span of this run's most recently staged proposal — the passage the
+   *  run got to before it parked (AQU-1301). Null when nothing is pending. */
+  currentSpanId: string | null
+  /** Human passage reference for `currentSpanId`, from the run's own event log
+   *  (no cell load: the overview is polled project-wide). Null when the run
+   *  never logged a label for that span. */
+  currentSpanLabel: string | null
+  /** Proposed drafts belonging to `currentSpanId`. The rest of
+   *  `proposedDrafts` is backlog behind it. */
+  currentSpanDrafts: number
 }
 
 export interface ProjectAutopilotSummary {
@@ -1962,6 +1972,10 @@ export interface ProjectAutopilotSummary {
   unitsSpent: number
   proposedDrafts: number
   appliedDrafts: number
+  /** Drafts sitting in the passage each run parked on, summed across lanes.
+   *  The actionable set; `proposedDrafts - currentSpanDrafts` is the backlog
+   *  the reviewer opens on purpose rather than is handed (AQU-1301). */
+  currentSpanDrafts: number
 }
 
 /**
@@ -1996,17 +2010,52 @@ export async function getProjectAutopilotSummary(
          SELECT COALESCE(SUM(proposed), 0) AS proposed,
                 COALESCE(SUM(applied), 0) AS applied
            FROM drafts_by_run
+       ),
+       -- AQU-1301: the passage each run parked on is its most recently staged
+       -- proposal. A draft with no span in provenance buckets under '' — one
+       -- unlabelled group, never silently merged into a labelled passage.
+       parked_span AS MATERIALIZED (
+         SELECT DISTINCT ON (d.run_id)
+                d.run_id,
+                COALESCE(d.provenance ->> 'spanId', '') AS span_id
+           FROM contextual_drafts d
+          WHERE d.project_id = ? AND d.status = 'proposed'
+          ORDER BY d.run_id, d.created_at DESC, d.id DESC
+       ),
+       parked_counts AS (
+         SELECT d.run_id, COUNT(*) AS drafts
+           FROM contextual_drafts d
+           JOIN parked_span s ON s.run_id = d.run_id
+          WHERE d.project_id = ? AND d.status = 'proposed'
+            AND COALESCE(d.provenance ->> 'spanId', '') = s.span_id
+          GROUP BY d.run_id
+       ),
+       -- The human passage reference already lives in the run's event log, so
+       -- the project-wide poll never loads a file's cells to render one.
+       parked_labels AS (
+         SELECT DISTINCT ON (e.run_id)
+                e.run_id, e.span_label
+           FROM contextual_run_events e
+           JOIN parked_span s ON s.run_id = e.run_id AND s.span_id = e.span_id
+          WHERE e.project_id = ? AND e.span_label IS NOT NULL
+          ORDER BY e.run_id, e.created_at DESC, e.id DESC
        )
        SELECT n.*, COALESCE(d.proposed, 0) AS proposed,
               COALESCE(d.applied, 0) AS applied,
               COALESCE(p.proposed, 0) AS project_proposed,
-              COALESCE(p.applied, 0) AS project_applied
+              COALESCE(p.applied, 0) AS project_applied,
+              s.span_id AS current_span_id,
+              l.span_label AS current_span_label,
+              COALESCE(c.drafts, 0) AS current_span_drafts
          FROM newest n
          LEFT JOIN drafts_by_run d ON d.run_id = n.id
+         LEFT JOIN parked_span s ON s.run_id = n.id
+         LEFT JOIN parked_counts c ON c.run_id = n.id
+         LEFT JOIN parked_labels l ON l.run_id = n.id
          CROSS JOIN project_drafts p
         ORDER BY n.updated_at DESC, n.id DESC`,
     )
-    .bind(projectId, projectId)
+    .bind(projectId, projectId, projectId, projectId, projectId)
     .all<{
       id: string
       file_id: string
@@ -2022,6 +2071,9 @@ export async function getProjectAutopilotSummary(
       applied: number
       project_proposed: number
       project_applied: number
+      current_span_id: string | null
+      current_span_label: string | null
+      current_span_drafts: number
     }>()
 
   const files: ProjectAutopilotFileRow[] = results.map((r) => ({
@@ -2039,6 +2091,10 @@ export async function getProjectAutopilotSummary(
     // Summary rows bypass rowToRun, so keep the same legacy-read privacy
     // boundary here as snapshots/activity.
     lastError: sanitizeRunError(r.last_error),
+    // '' is the no-span bucket, not a span id — report it as absent.
+    currentSpanId: r.current_span_id ? r.current_span_id : null,
+    currentSpanLabel: r.current_span_label ?? null,
+    currentSpanDrafts: Number(r.current_span_drafts ?? 0),
   }))
 
   const sum = (pick: (f: ProjectAutopilotFileRow) => number) =>
@@ -2052,6 +2108,7 @@ export async function getProjectAutopilotSummary(
     unitsSpent: sum((f) => f.unitsSpent),
     proposedDrafts: Number(results[0]?.project_proposed ?? 0),
     appliedDrafts: Number(results[0]?.project_applied ?? 0),
+    currentSpanDrafts: sum((f) => f.currentSpanDrafts),
   }
 }
 

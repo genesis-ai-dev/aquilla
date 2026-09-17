@@ -184,3 +184,31 @@ rule during its existing reconciliation: “A handled Stripe event's successful
 acknowledgement requires its deduplication receipt and database effects to commit
 atomically. Failed attempts remain retryable; duplicate delivery cannot repeat
 an effect.” Keep billing policy changes separate from that reliability rule.
+
+## Dev PR preparation — 2026-09-10
+
+The requested PR targets `dev`. The original branch includes the primary agent's
+unmerged billing foundation, so opening it directly would include 44 files.
+We preserve that branch and create a separate integration branch:
+
+- Branch: `codex/aqu-837-webhook-recovery-dev`
+- Worktree: `/private/tmp/aquilla-aqu-837-webhook-recovery-dev`
+- Dev base: `f151dd271589fb1cff73c9db8bca7615df01f205`
+- Implementation cherry-pick: `1694d412f`
+- Original handoff cherry-pick: `b5d4e6555`
+
+Both commits apply without conflicts. The dev PR changes only the seven files
+listed above. No primary-agent catalog, schema, pricing, entitlement, metering,
+or UI commits are included. Original base and implementation identities remain
+recorded above for coordination.
+
+On this exact dev base, the same four-file worker command passes 44 tests;
+14 live Postgres tests and worker TypeScript also pass. The original branch's
+four additional catalog-route tests are not present on dev. Initial test imports
+failed while root dependencies were still installing; after installation,
+verification passes without source or assertion changes.
+
+The earlier billing-sentinel statement describes the original primary-derived
+base. This dev base has its own affected-E2E selection rules; its actual pre-push
+selection and production build results are recorded in the PR test checklist.
+Linear remains Dispatched. The PR does not authorize merge or deployment.

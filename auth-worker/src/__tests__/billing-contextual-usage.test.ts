@@ -20,6 +20,9 @@ async function setup() {
   const paid = await completedPayment('pro', 'month')
   expect((await paid.send()).status).toBe(200)
   await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, org_id, created_by) VALUES (?, 'Autopilot', 1, 1)").bind(PROJECT).run()
+  // The start gate (AQU-827) needs both languages and an answered brief question.
+  await env.AQUILLA_PG.prepare('INSERT INTO project_settings (project_id, settings, version, updated_by) VALUES (?, ?, 1, 1)')
+    .bind(PROJECT, JSON.stringify({ sourceLanguage: 'en', targetLanguage: 'sw', translationBrief: { parameters: { purpose: 'Community reading' } } })).run()
   for (const [cellId, ref, text] of [['c1', 'MRK 1:1', 'In the beginning'], ['c2', 'MRK 1:2', 'was the word']] as const) {
     await env.AQUILLA_PG.prepare(`INSERT INTO cells (project_id, file_id, cell_id, side, value, canonical_ref, event_id, last_edit_at)
       VALUES (?, ?, ?, 'source', ?, ?, ?, 0)`).bind(PROJECT, FILE, cellId, text, ref, `ev-${cellId}`).run()
@@ -81,6 +84,7 @@ it('pauses a run at the span edge once the week is spent, without calling the pr
 it('fails closed on unowned projects and non-local providers before creating a run', async () => {
   const f = await setup()
   await env.AQUILLA_PG.prepare("INSERT INTO projects (id, name, created_by) VALUES ('unowned', 'Unowned', 1)").run()
+  await env.AQUILLA_PG.prepare("INSERT INTO project_settings (project_id, settings, version, updated_by) SELECT 'unowned', settings, 1, 1 FROM project_settings WHERE project_id = ?").bind(PROJECT).run()
   expect((await f.start({}, 'unowned')).status).toBe(403)
   expect((await f.start({ OPENROUTER_BASE_URL: 'https://openrouter.ai/api/v1' })).status).toBe(503)
   expect(f.completions).toHaveLength(0)

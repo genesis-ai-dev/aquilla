@@ -14,6 +14,8 @@
 //   GET /users                 — every user
 //   GET /projects              — every project + org/creator + cell/word rollup + shared flag
 //   GET /activity              — cross-tenant activity_logs feed (?limit, ?since)
+//   GET /retention             — DAU/WAU/MAU, Day-N + weekly cohort retention (?days, ?asOf)
+//   POST /retention/report     — email the weekly|monthly recap to the caller now
 //   GET /credits/orgs          — all orgs with day/week credit spend + caps
 //   PATCH /credits/org/:orgId  — update per-org credit config (org_settings.credits)
 
@@ -27,7 +29,9 @@ import { loadPlatformSettings, savePlatformSettings } from "../lib/platform-sett
 import { getAllowedModels } from "../lib/ai-budget"
 import { aggregateAbResults } from "../lib/model-ab"
 import adminBillingRoutes from "./admin-billing"
-import { sendAdminElevationCodeEmail } from "../services/email"
+import { sendAdminElevationCodeEmail, sendRetentionReportEmail } from "../services/email"
+import { loadRetentionMetrics } from "../lib/retention-load"
+import { buildRetentionReport, reportWindow } from "../lib/retention-report"
 import { DEFAULT_LLM_MODEL_ID } from "../lib/model-defaults"
 import {
   ADMIN_ELEVATION_VERIFY_MAX_FAILURES,
@@ -497,6 +501,169 @@ admin.get("/activity", async (c) => {
   })
 })
 
+/**
+ * GET /api/v2/admin/agent-sessions — list recent agent sessions (metadata only,
+ * no full convo). `limit` defaults to 50 and is capped at 200; `cursor` is an
+ * optional pagination cursor (updated_at timestamp). Returns sessions newest first.
+ *
+ * Weekly qualitative product review: see missed tool calls, unhelpful loops,
+ * users having to rephrase. Full transcript is fetched separately via
+ * GET /api/v2/admin/agent-sessions/:sessionId to avoid inadvertently including
+ * unpublished scripture in list responses.
+ */
+admin.get("/agent-sessions", async (c) => {
+  const rawLimit = parseInt(c.req.query("limit") ?? "50", 10)
+  const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 200) : 50
+  const cursor = c.req.query("cursor")
+
+  const where = cursor ? "WHERE s.updated_at < ?" : ""
+  const stmt = c.env.AQUILLA_PG.prepare(
+    `SELECT s.session_id, s.project_id, s.user_id, s.title, s.created_at, s.updated_at,
+            u.username,
+            p.name AS project_name,
+            json_array_length(s.convo::json) AS message_count,
+            (SELECT COUNT(*) FROM agent_runs r WHERE r.session_id = s.session_id) AS run_count,
+            (SELECT status FROM agent_runs r WHERE r.session_id = s.session_id ORDER BY started_at DESC LIMIT 1) AS last_status
+       FROM agent_sessions s
+       LEFT JOIN users u ON u.id = s.user_id
+       LEFT JOIN projects p ON p.id = s.project_id
+       ${where}
+      ORDER BY s.updated_at DESC
+      LIMIT ?`,
+  )
+  const bound = cursor ? stmt.bind(cursor, limit) : stmt.bind(limit)
+  const { results } = await bound.all<{
+    session_id: string
+    project_id: string
+    user_id: number
+    title: string
+    created_at: number
+    updated_at: number
+    username: string | null
+    project_name: string | null
+    message_count: number
+    run_count: number
+    last_status: string | null
+  }>()
+
+  return c.json({
+    sessions: results.map((r) => ({
+      sessionId: r.session_id,
+      projectId: r.project_id,
+      userId: r.user_id,
+      username: r.username,
+      projectName: r.project_name,
+      title: r.title,
+      messageCount: r.message_count,
+      runCount: r.run_count,
+      lastStatus: r.last_status,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    })),
+    nextCursor: results.length === limit ? results[results.length - 1]?.updated_at : null,
+  })
+})
+
+/**
+ * GET /api/v2/admin/agent-sessions/:sessionId — fetch one session's full
+ * transcript (convo) plus its runs. Read-only, for weekly qualitative product
+ * review (missed tool calls, unhelpful loops, users having to rephrase).
+ *
+ * The transcript may contain unpublished scripture — this endpoint is admin-gated
+ * and should never be exposed to non-admins.
+ */
+admin.get("/agent-sessions/:sessionId", async (c) => {
+  const sessionId = c.req.param("sessionId")
+  if (!sessionId) {
+    return c.json({ error: "session_id required" }, 400)
+  }
+
+  const session = await c.env.AQUILLA_PG.prepare(
+    `SELECT s.session_id, s.project_id, s.user_id, s.title, s.convo, s.created_at, s.updated_at, s.untrusted_active,
+            u.username,
+            p.name AS project_name
+       FROM agent_sessions s
+       LEFT JOIN users u ON u.id = s.user_id
+       LEFT JOIN projects p ON p.id = s.project_id
+      WHERE s.session_id = ?`,
+  )
+    .bind(sessionId)
+    .first<{
+      session_id: string
+      project_id: string
+      user_id: number
+      title: string
+      convo: string
+      created_at: number
+      updated_at: number
+      untrusted_active: boolean | number
+      username: string | null
+      project_name: string | null
+    }>()
+
+  if (!session) {
+    return c.json({ error: "session not found" }, 404)
+  }
+
+  // Parse the convo JSON string
+  let convo: unknown[]
+  try {
+    convo = JSON.parse(session.convo) as unknown[]
+  } catch {
+    convo = []
+  }
+
+  // Fetch associated runs
+  const { results: runs } = await c.env.AQUILLA_PG.prepare(
+    `SELECT run_id, prompt, model, status, prompt_tokens, completion_tokens, cost_cents, steps, staged_count, started_at, ended_at
+       FROM agent_runs
+      WHERE session_id = ?
+      ORDER BY started_at DESC`,
+  )
+    .bind(sessionId)
+    .all<{
+      run_id: string
+      prompt: string
+      model: string
+      status: string
+      prompt_tokens: number
+      completion_tokens: number
+      cost_cents: number
+      steps: number
+      staged_count: number
+      started_at: number
+      ended_at: number | null
+    }>()
+
+  return c.json({
+    session: {
+      sessionId: session.session_id,
+      projectId: session.project_id,
+      userId: session.user_id,
+      username: session.username,
+      projectName: session.project_name,
+      title: session.title,
+      convo,
+      untrustedActive: asBool(session.untrusted_active),
+      createdAt: session.created_at,
+      updatedAt: session.updated_at,
+    },
+    runs: runs.map((r) => ({
+      runId: r.run_id,
+      prompt: r.prompt,
+      model: r.model,
+      status: r.status,
+      promptTokens: r.prompt_tokens,
+      completionTokens: r.completion_tokens,
+      costCents: r.cost_cents,
+      steps: r.steps,
+      stagedCount: r.staged_count,
+      startedAt: r.started_at,
+      endedAt: r.ended_at,
+    })),
+  })
+})
+
 // ── Credit config endpoints ───────────────────────────────────────────────────
 // All gated by the requirePlatformAdmin middleware above — no per-route re-check
 // is needed.
@@ -804,5 +971,52 @@ admin.get("/ab-results", async (c) => {
 })
 
 admin.route("/", adminBillingRoutes)
+
+/**
+ * GET /api/v2/admin/retention — active-user + retention metrics computed from
+ * the user_activity_days rollup (see lib/retention.ts for definitions).
+ * ?days (30–365, default 90) sizes the daily series; ?asOf=YYYY-MM-DD pins
+ * the window end (default today, UTC).
+ */
+const retentionQuerySchema = z.object({
+  days: z.coerce.number().int().min(30).max(365).optional(),
+  asOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+})
+
+admin.get("/retention", zValidator("query", retentionQuerySchema), async (c) => {
+  const { days, asOf } = c.req.valid("query")
+  return c.json(await loadRetentionMetrics(c.env, { days, asOf }))
+})
+
+/**
+ * POST /api/v2/admin/retention/report — send the weekly|monthly recap to the
+ * calling operator right now (same builder the cron uses). Lets an admin get
+ * the email on demand and lets us verify the cron's output without waiting
+ * for Monday. 503 when EMAIL isn't bound (local/e2e).
+ */
+const retentionReportSchema = z.object({ period: z.enum(["weekly", "monthly"]) })
+
+admin.post("/retention/report", zValidator("json", retentionReportSchema), async (c) => {
+  const user = c.get("user")
+  const { period } = c.req.valid("json")
+  const window = reportWindow(period, new Date())
+  const [current, previous] = await Promise.all([
+    loadRetentionMetrics(c.env, { asOf: window.asOf }),
+    loadRetentionMetrics(c.env, { asOf: window.previous }),
+  ])
+  const environment = c.env.ENVIRONMENT ?? "development"
+  const report = buildRetentionReport({
+    period,
+    current,
+    previous,
+    environment,
+    dashboardUrl: environment === "production" ? "https://aquilla.app/admin" : null,
+  })
+  const sent = await sendRetentionReportEmail(c.env, [user.email], report)
+  if (!sent) {
+    return c.json({ error: "email_unavailable", message: "Email is not configured in this environment." }, 503)
+  }
+  return c.json({ ok: true, subject: report.subject, asOf: current.asOf })
+})
 
 export default admin

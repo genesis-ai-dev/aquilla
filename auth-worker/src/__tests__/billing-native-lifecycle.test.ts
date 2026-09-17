@@ -1,7 +1,7 @@
 import { createHmac } from 'node:crypto'
 import app from '../index'
 import { env } from 'cloudflare:test'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import frames from './fixtures/stripe-native-lifecycle.json'
 import nativeManifest from '../../../config/pricing/stripe-sandbox-native.json'
 import { catalogSchema } from '../lib/billing/catalog-schema'
@@ -10,7 +10,16 @@ import { reconcileWorkspaceLifecycle } from '../lib/billing/workspace-lifecycle'
 import { readBillingWorkspace, readWorkspaceEntitlement, readWorkspaceSubscriptionState } from '../lib/billing/workspace'
 const catalog = catalogSchema.parse(nativeManifest)
 const now = new Date((frames.initial.subscription.items.data[0]!.current_period_start + 3600) * 1000)
-afterEach(() => vi.unstubAllGlobals())
+// Checkout activation and fixture reconciliation must share one clock. A real
+// wall clock eventually puts activation after the recorded lifecycle events.
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] })
+  vi.setSystemTime(now)
+})
+afterEach(() => {
+  vi.useRealTimers()
+  vi.unstubAllGlobals()
+})
 function frame(phase: keyof typeof frames) {
   // Preserve actual Stripe fields/absence, adapting only our isolated test identity.
   return JSON.parse(JSON.stringify(frames[phase])

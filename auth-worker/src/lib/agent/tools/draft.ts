@@ -33,11 +33,15 @@ export interface DraftModelConfig {
   maxTokens?: number
 }
 
-export interface DraftContext {
+/** Everything the drafting pipeline itself needs. Deliberately free of any
+ *  staging concern: `generateDrafts` produces target.cell.commit emit inputs
+ *  and nothing more, so callers that stage through a DIFFERENT engine (the
+ *  external Agent API's DraftCells command, AQU-1186) reuse the identical
+ *  pipeline rather than re-implementing the copilot. */
+export interface DraftGenerationContext {
   projectId: string
   focusedFileId?: string
   aliases: AliasMap
-  stageCtx: EmitStageContext
   sourceLanguage?: string
   targetLanguage?: string
   briefSummary?: string
@@ -51,11 +55,43 @@ export interface DraftContext {
    *  the call; the returned settle records the provider body afterwards. */
   admitPaidCall?: (input: { model: string; promptChars: number }) => Promise<
     { ok: true; settle: (body: unknown) => Promise<unknown>; hold: (body: unknown) => Promise<unknown> } | { ok: false; message: string }>
+  /** Ceiling on cells drafted in one call. Defaults to the in-agent review
+   *  package size (MAX_LIMIT); the external DraftCells command passes the
+   *  project's configured completion batch size instead. */
+  maxCells?: number
+}
+
+export interface DraftContext extends DraftGenerationContext {
+  stageCtx: EmitStageContext
 }
 
 export interface DraftOutcome extends ToolOutcome {
   proposal?: AgentProposal
 }
+
+/** One compiled, not-yet-staged target.cell.commit. */
+export interface DraftEmit {
+  kind: string
+  fileId: string
+  cellId: string
+  payload: Record<string, unknown>
+}
+
+export type DraftGeneration =
+  | { ok: false; error: string }
+  | {
+      ok: true
+      fileId: string
+      emits: DraftEmit[]
+      /** Cells in the work list the model returned no usable text for. */
+      missed: string[]
+      /** Untranslated cells left in scope beyond this package. */
+      remaining: number
+      /** Work-list entries that actually received a draft (display rows). */
+      drafted: CellPair[]
+      /** True when nothing in scope needed drafting (not an error). */
+      empty: boolean
+    }
 
 // Keep agent proposals in the same human-review package used by the editor.
 const DEFAULT_LIMIT = 10
@@ -65,7 +101,7 @@ const EXAMPLES_N = 10
 const RESEARCH_RECORD_MAX_CHARS = 12_000
 const PROMPT_VERSION = "agent-draft-v3-staged-research"
 
-function groundingPrompt(ctx: DraftContext, examplesBlock: string, precedingBlock: string): string {
+function groundingPrompt(ctx: DraftGenerationContext, examplesBlock: string, precedingBlock: string): string {
   const pair = ctx.targetLanguage
     ? `You translate${ctx.sourceLanguage ? ` from ${ctx.sourceLanguage}` : ""} into ${ctx.targetLanguage}.`
     : "You translate into the project's target language — infer it from the example pairs."
@@ -75,7 +111,7 @@ The translation pairs below are your PRIMARY source of truth: they carry this te
 ${ctx.briefSummary ? `\nProject brief (honour it): ${ctx.briefSummary}\n` : ""}${examplesBlock}${precedingBlock}`
 }
 
-function researchSystemPrompt(ctx: DraftContext, examplesBlock: string, precedingBlock: string): string {
+function researchSystemPrompt(ctx: DraftGenerationContext, examplesBlock: string, precedingBlock: string): string {
   return `${groundingPrompt(ctx, examplesBlock, precedingBlock)}
 
 You are the RESEARCH pass, separate from final generation. Produce a compact evidence record, not a translation and not hidden chain-of-thought.
@@ -89,7 +125,7 @@ For each numbered source segment:
 Do not produce final translated segments in this pass.`
 }
 
-function draftSystemPrompt(ctx: DraftContext, examplesBlock: string, precedingBlock: string): string {
+function draftSystemPrompt(ctx: DraftGenerationContext, examplesBlock: string, precedingBlock: string): string {
   return `${groundingPrompt(ctx, examplesBlock, precedingBlock)}
 
 You are the GENERATION pass. Use the separate evidence record supplied by the user as a decision aid, while treating the project evidence above as authoritative.
@@ -150,7 +186,7 @@ async function callDraftModel(
 }
 /** Metered pass: reserve, call, then settle or hold. Unmetered runs call directly. */
 async function callPaidPass(
-  ctx: DraftContext,
+  ctx: DraftGenerationContext,
   modelCfg: DraftModelConfig,
   messages: { role: "system" | "user"; content: string }[],
 ): Promise<DraftModelResult> {
@@ -193,19 +229,26 @@ export function parseDraftReply(content: string): Map<number, string> {
   return out
 }
 
-export async function executeDraft(
+/**
+ * Run the two-phase drafting pipeline over the requested scope and return the
+ * compiled (still unstaged) target.cell.commit emits. Staging is the caller's
+ * job — `executeDraft` stages through emit-stage, the external DraftCells
+ * command stages through the changeset engine.
+ */
+export async function generateDrafts(
   db: AquillaDb,
   args: DraftArgs,
-  ctx: DraftContext,
+  ctx: DraftGenerationContext,
   modelCfg: DraftModelConfig,
-): Promise<DraftOutcome> {
+): Promise<DraftGeneration> {
   const scope = await resolveScope(db, args, {
     projectId: ctx.projectId,
     focusedFileId: ctx.focusedFileId,
     aliases: ctx.aliases,
   })
-  if (!scope.ok) return { ok: false, text: `error: ${scope.error}` }
-  const limit = Math.min(Math.max(Number(args.limit) || DEFAULT_LIMIT, 1), MAX_LIMIT)
+  if (!scope.ok) return { ok: false, error: scope.error }
+  const maxCells = Math.max(1, Math.floor(ctx.maxCells ?? MAX_LIMIT))
+  const limit = Math.min(Math.max(Number(args.limit) || DEFAULT_LIMIT, 1), maxCells)
 
   const all = await selectCellPairs(db, ctx.projectId, { fileId: scope.fileId, range: scope.range })
 
@@ -225,7 +268,7 @@ export async function executeDraft(
   work = work.slice(0, limit)
 
   if (work.length === 0) {
-    return { ok: true, text: "Nothing to draft — no untranslated cells in scope." }
+    return { ok: true, fileId: scope.fileId, emits: [], missed: [], remaining, drafted: [], empty: true }
   }
 
   // Discourse left-context: committed pairs immediately before the batch.
@@ -275,17 +318,17 @@ export async function executeDraft(
       { role: "user", content: `Research these ${work.length} source segments:${instructions}\n${numbered}` },
     ],
   )
-  if (!researched.ok) return { ok: false, text: `error: drafting research ${researched.error}` }
+  if (!researched.ok) return { ok: false, error: `drafting research ${researched.error}` }
   if (researched.usage) ctx.addUsage(researched.usage)
   if (ctx.canContinuePaidWork && !ctx.canContinuePaidWork()) {
     return {
       ok: false,
-      text: "error: run budget exhausted after the research pass — generation was not started",
+      error: "run budget exhausted after the research pass — generation was not started",
     }
   }
   const evidenceRecord = researched.content.trim().slice(0, RESEARCH_RECORD_MAX_CHARS)
   if (!evidenceRecord) {
-    return { ok: false, text: "error: drafting research returned no evidence record — retry or draft fewer cells" }
+    return { ok: false, error: "drafting research returned no evidence record — retry or draft fewer cells" }
   }
   ctx.sendProgress(`Researching ${work.length} cells`, work.length, work.length)
 
@@ -303,19 +346,17 @@ export async function executeDraft(
       },
     ],
   )
-  if (!generated.ok) return { ok: false, text: `error: drafting generation ${generated.error}` }
+  if (!generated.ok) return { ok: false, error: `drafting generation ${generated.error}` }
   if (generated.usage) ctx.addUsage(generated.usage)
 
   const drafts = parseDraftReply(generated.content)
   if (drafts.size === 0) {
-    return { ok: false, text: "error: drafting model returned no parseable [{i,t}] array — retry or draft fewer cells" }
+    return { ok: false, error: "drafting model returned no parseable [{i,t}] array — retry or draft fewer cells" }
   }
 
-  // Stage through the SAME path as a hand emit: role floors, staleness
-  // pre-check, provenance injection, and rule lint all apply.
   const generatedAt = Date.now()
   const exampleIds = examplePairs.flatMap((example) => example.cellId ? [example.cellId] : [])
-  const emits: { kind: string; fileId: string; cellId: string; payload: Record<string, unknown> }[] = []
+  const emits: DraftEmit[] = []
   const missed: string[] = []
   work.forEach((p, i) => {
     const t = drafts.get(i + 1)
@@ -345,19 +386,42 @@ export async function executeDraft(
       missed.push(p.canonicalRef ?? ctx.aliases.alias(p.cellId, "c"))
     }
   })
-  const { proposal, modelVerdictBlock } = await stageEvents(db, emits, ctx.stageCtx)
-
   ctx.sendProgress(`Drafting ${work.length} cells`, work.length, work.length)
 
+  return {
+    ok: true,
+    fileId: scope.fileId,
+    emits,
+    missed,
+    remaining,
+    drafted: work.filter((_, i) => drafts.has(i + 1)),
+    empty: false,
+  }
+}
+
+export async function executeDraft(
+  db: AquillaDb,
+  args: DraftArgs,
+  ctx: DraftContext,
+  modelCfg: DraftModelConfig,
+): Promise<DraftOutcome> {
+  const gen = await generateDrafts(db, args, ctx, modelCfg)
+  if (!gen.ok) return { ok: false, text: `error: ${gen.error}` }
+  if (gen.empty) return { ok: true, text: "Nothing to draft — no untranslated cells in scope." }
+
+  // Stage through the SAME path as a hand emit: role floors, staleness
+  // pre-check, provenance injection, and rule lint all apply.
+  const { proposal, modelVerdictBlock } = await stageEvents(db, gen.emits, ctx.stageCtx)
+
   const lines = [modelVerdictBlock]
-  if (missed.length > 0) lines.push(`No draft returned for: ${missed.join(", ")} — re-run draft with their cellIds.`)
-  if (remaining > 0) lines.push(`${remaining} more untranslated cells remain in scope — call draft again to continue.`)
+  if (gen.missed.length > 0) lines.push(`No draft returned for: ${gen.missed.join(", ")} — re-run draft with their cellIds.`)
+  if (gen.remaining > 0) lines.push(`${gen.remaining} more untranslated cells remain in scope — call draft again to continue.`)
 
   // Working-set rows carry the cells' CURRENT committed state — the drafted
   // values ride the proposal frame as the pending overlay. Echoing the draft
   // into `target` here made the panel show it as the crossed-out "old value"
   // above the identical proposed text.
-  const draftedRows = work.filter((_, i) => drafts.has(i + 1)).map((p) => pairToRow(p, scope.fileId))
+  const draftedRows = gen.drafted.map((p) => pairToRow(p, gen.fileId))
 
   return {
     ok: proposal !== null,

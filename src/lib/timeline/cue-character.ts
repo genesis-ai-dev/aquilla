@@ -43,7 +43,14 @@ export interface CueCharacter {
 
 const EMPTY: CueCharacter = { names: [], cameraState: undefined }
 
-const ownCastName = (cell: CellData): string | null =>
+/**
+ * The character the CELL ITSELF names — `metadata.cast_name`, as written by the
+ * character sheet's `cast.assign` event. Exported (AQU-1018) because the editor
+ * row's corner label needs the same answer this module already computes, and a
+ * second copy of the typeof/empty-string guard is exactly the kind that ends up
+ * one arm behind.
+ */
+export const ownCastName = (cell: CellData): string | null =>
   cell.metadata && typeof cell.metadata.cast_name === "string" && cell.metadata.cast_name !== ""
     ? cell.metadata.cast_name
     : null

@@ -148,6 +148,7 @@ export type ContextualRunEventKind =
   | "drafts_staged"
   | "span_outcome"
   | "steering_queued"
+  | "run_command"
   | "draft_reviewed"
 
 export type ContextualRunEventPhase = "reading" | "drafting" | "checking" | "staging"
@@ -196,6 +197,9 @@ export interface ContextualRunEventDetails {
   units?: number
   steeringId?: string
   steeringKind?: SteeringKind
+  /** Which run control a conversational message asked for (AQU-1299). The
+   *  message text itself is never durable — only the control it resolved to. */
+  command?: "pause" | "stop"
   draftId?: string
   cellId?: string
   outcome?: "applied" | "rejected" | "superseded"
@@ -606,6 +610,9 @@ function sanitizeEventDetails(input: AppendContextualRunEventInput): ContextualR
       }
       break
     }
+    case "run_command":
+      details = d.command === "pause" || d.command === "stop" ? { command: d.command } : {}
+      break
     case "draft_reviewed": {
       const draftId = safeEventString(d.draftId)
       const cellId = safeEventString(d.cellId)
@@ -686,6 +693,9 @@ function eventSummary(input: AppendContextualRunEventInput, details: ContextualR
       break
     case "steering_queued":
       summary = details.steeringKind === "direction" ? "Direction queued" : "Steering queued"
+      break
+    case "run_command":
+      summary = details.command === "pause" ? "Pause asked for in chat" : "Stop asked for in chat"
       break
     case "draft_reviewed":
       summary = details.outcome === "applied"

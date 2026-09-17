@@ -38,6 +38,7 @@ import {
   type ContextualTransportSnapshot,
 } from "./run-store"
 import { isOpaqueId } from "../../../shared/span-label"
+import type { RunCommandIntent } from "../../../shared/run-command-intent"
 
 // ── Typed errors ────────────────────────────────────────────────────────────
 
@@ -787,14 +788,30 @@ export async function commandContextualRun(
   return run
 }
 
+/** What the server did with a composer message (AQU-1299). `direction` is the
+ *  ordinary case: the message was queued as steering. `pause`/`stop` mean the
+ *  message was read as a run command and routed to that control instead —
+ *  `applied` says whether the run actually changed state (a stop typed at an
+ *  already-stopped run is honoured as a no-op, not an error). */
+export interface ContextualSteeringResult {
+  intent: RunCommandIntent
+  applied: boolean
+  run: ContextualRunRecord | null
+}
+
 /**
  * Free-text steering direction for a live run ("keep the tone formal").
  * Not part of ContextualTransport (the store doesn't sequence steering); the
  * steering UI calls this directly. The server route is project-scoped —
- * POST …/contextual/steering { kind, body, runId } — and waking a parked run
- * is its job, not the client's.
+ * POST …/contextual/steering { kind, body, runId } — and both waking a parked
+ * run and recognising a run command are its job, not the client's. The
+ * composer runs the same classifier only to choose its own optimistic
+ * feedback; the response here is authoritative.
  */
-export async function sendContextualSteering(runId: string, text: string): Promise<void> {
+export async function sendContextualSteering(
+  runId: string,
+  text: string,
+): Promise<ContextualSteeringResult> {
   const projectId = projectForRun(runId)
   const jwt = await requireJwt()
   const res = await fetchWithTimeout(
@@ -806,6 +823,12 @@ export async function sendContextualSteering(runId: string, text: string): Promi
     },
   )
   if (!res.ok) return throwFromResponse(res, "send steering failed")
+  const body = objectValue(await res.json())
+  const command = body?.command
+  const intent: RunCommandIntent = command === "pause" || command === "stop" ? command : "direction"
+  const run = normalizeRun(body?.run)
+  if (run) runProjects.set(run.runId, projectId)
+  return { intent, applied: body?.applied === true, run }
 }
 
 // ── Contextual decisions (human-in-the-loop question channel) ──────────────

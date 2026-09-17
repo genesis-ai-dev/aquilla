@@ -67,6 +67,7 @@ import {
   CONTEXTUAL_EVENT_LIST_LIMIT,
   CONTEXTUAL_RUN_LIST_DEFAULT_LIMIT,
   CONTEXTUAL_RUN_LIST_MAX_LIMIT,
+  transitionRun,
   claimStrandedRuns,
   listAutopilotCandidateFiles,
   listActiveAutopilotRunFiles,
@@ -76,6 +77,7 @@ import {
   CONTEXTUAL_PROJECT_LEASE_SECONDS,
   getProjectAutopilotSummary,
   type ContextualRun,
+  type ContextualRunStatus,
   type ContextualProjectLease,
   type AppendContextualRunEventInput,
 } from "../../../db/shared/contextual-runs"
@@ -96,6 +98,7 @@ import {
   type SegmentationPreviewQuery,
 } from "../lib/contextual/tick"
 import { friendlyScriptureLabel } from "../../../shared/span-label"
+import { classifyRunCommandIntent, type RunCommandIntent } from "../../../shared/run-command-intent"
 import { decorateActivityLabels, loadCellDisplayIndex } from "../lib/contextual/activity-labels"
 import {
   getCachedContextualRead,
@@ -1095,6 +1098,56 @@ const steeringSchema = z.object({
   runId: z.string().optional(),
 })
 
+/** Statuses a conversationally typed stop applies to. `parked` is deliberately
+ *  absent (AQU-1299): a parked run has nothing left to do, and the bug being
+ *  fixed is precisely that a message typed at one used to wake it. A stop there
+ *  changes nothing — least of all resumes it. */
+const COMPOSER_STOPPABLE: ContextualRunStatus[] = ["running", "pausing", "paused", "waiting"]
+
+/**
+ * A composer message the classifier read as a run command (AQU-1299). Routes to
+ * the SAME guarded transitions the Pause/Stop buttons use, records the command
+ * in durable activity so the human can see it was honoured, and — the point of
+ * the fix — never appends steering and never wakes a parked run.
+ */
+async function applyComposerRunCommand(
+  c: Context<AuthHonoEnv>,
+  projectId: string,
+  target: ContextualRun,
+  intent: Exclude<RunCommandIntent, "direction">,
+): Promise<Response> {
+  await appendActivitySafely(c.env.AQUILLA_PG, {
+    runId: target.id,
+    projectId,
+    fileId: target.fileId,
+    kind: "run_command",
+    status: "queued",
+    details: { command: intent },
+  })
+
+  const result =
+    intent === "pause"
+      ? await requestPause(c.env.AQUILLA_PG, target.id)
+      : await transitionRun(c.env.AQUILLA_PG, target.id, COMPOSER_STOPPABLE, "terminated")
+
+  // `invalid_state` is the ordinary outcome here, not an error: the human typed
+  // "stop" at a run that had already stopped. Report it as an unapplied command
+  // rather than a 409 the composer would have to render as a failure.
+  const applied = result.status === "ok"
+  if (result.status === "ok") {
+    await publishRunStateOutsideTick(c.env, c.env.AQUILLA_PG, projectId, result.run)
+  }
+  invalidateContextualReads(projectId)
+
+  const run = result.status === "ok" ? result.run : await getRun(c.env.AQUILLA_PG, target.id)
+  const draftCounts = await countDraftsByRun(c.env.AQUILLA_PG, projectId, target.id)
+  return c.json({
+    command: intent,
+    applied,
+    ...(run ? { run: runSnapshot(run, { proposedDrafts: draftCounts.proposed }) } : {}),
+  })
+}
+
 // POST /:projectId/contextual/steering — append steering (CONTRIBUTOR). A
 // parked run on the target file wakes and re-kicks so the steering applies.
 contextual.post(
@@ -1113,6 +1166,21 @@ contextual.post(
       : body.fileId
         ? await getActiveRun(c.env.AQUILLA_PG, projectId, body.fileId)
         : null
+    // AQU-1299: "stop"/"pause" typed here controls the run instead of steering
+    // it. The classifier is the same module the composer runs, so client and
+    // server always agree; the server check is what protects every other
+    // caller of this route (and is why a command can never become a direction
+    // even if a client skips its own fast path).
+    const intent = body.kind === "direction" ? classifyRunCommandIntent(body.body) : "direction"
+    if (intent !== "direction") {
+      if (target && target.projectId === projectId) {
+        return applyComposerRunCommand(c, projectId, target, intent)
+      }
+      // Nothing to command — but "stop" must still never be recorded as a
+      // drafting direction for whatever run comes next.
+      return c.json({ command: intent, applied: false })
+    }
+
     if (body.kind === "refresh_span") {
       const brief = await getSceneBrief(c.env.AQUILLA_PG, body.body.trim())
       if (

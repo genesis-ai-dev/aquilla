@@ -24,6 +24,7 @@ import {
   listDrafts,
   requestPause,
   confirmPause,
+  readUnconsumedSteering,
   resumeRun,
   terminateRun,
 } from "../../../db/shared/contextual-runs"
@@ -970,6 +971,93 @@ describe("POST /contextual/steering", () => {
     })
     expect(wrongLaneRefresh.status).toBe(400)
     expect((await getSceneBrief(env.AQUILLA_PG, foreignLane.brief.id))?.staleSince).toBeNull()
+  })
+})
+
+// AQU-1299: the steering route is the conversational path to the run's own
+// controls. A stop-shaped message must terminate rather than steer, and — the
+// original bug — must never be the thing that wakes a parked run back up.
+describe("POST /contextual/steering — run commands", () => {
+  it("terminates a running run, records the command, and appends no steering", async () => {
+    const { contrib } = await seedWorld()
+    const runId = await startRun(contrib)
+    // The seeded run parks immediately; put it back to work so a stop has
+    // something to stop (direct transition — no tick loop kicked).
+    expect((await resumeRun(env.AQUILLA_PG, runId)).status).toBe("ok")
+
+    const r = await req("POST", "/steering", contrib, {
+      kind: "direction",
+      body: "@Coordinator stop",
+      runId,
+    })
+    expect(r.status).toBe(200)
+    expect(await r.json()).toMatchObject({ command: "stop", applied: true })
+    expect((await getRun(env.AQUILLA_PG, runId))?.status).toBe("terminated")
+
+    const unconsumed = await readUnconsumedSteering(env.AQUILLA_PG, { projectId: PROJECT, fileId: FILE, runId })
+    expect(unconsumed.map((entry) => entry.body)).not.toContain("@Coordinator stop")
+
+    const activity = await req("GET", `/runs/${runId}/activity`, contrib)
+    const { events } = (await activity.json()) as {
+      events: { kind: string; details: { command?: string } }[]
+    }
+    expect(events.find((event) => event.kind === "run_command")?.details.command).toBe("stop")
+  })
+
+  it("pauses a running run at the next passage edge", async () => {
+    const { contrib } = await seedWorld()
+    const runId = await startRun(contrib)
+    expect((await resumeRun(env.AQUILLA_PG, runId)).status).toBe("ok")
+
+    const r = await req("POST", "/steering", contrib, {
+      kind: "direction",
+      body: "hold on",
+      runId,
+    })
+    expect(r.status).toBe(200)
+    expect(await r.json()).toMatchObject({ command: "pause", applied: true })
+    expect((await getRun(env.AQUILLA_PG, runId))?.status).toBe("pausing")
+  })
+
+  it("never wakes a parked run — the run stays parked and no loop is kicked", async () => {
+    const { contrib } = await seedWorld()
+    const runId = await startRun(contrib)
+    expect((await getRun(env.AQUILLA_PG, runId))?.status).toBe("parked")
+
+    for (const body of ["stop", "pause"]) {
+      const r = await req("POST", "/steering", contrib, { kind: "direction", body, runId })
+      expect(r.status).toBe(200)
+      expect(await r.json()).toMatchObject({ applied: false })
+      expect(_test.lastLoop).toBeNull()
+      expect((await getRun(env.AQUILLA_PG, runId))?.status).toBe("parked")
+    }
+  })
+
+  it("keeps a genuine instruction containing “stop” as steering", async () => {
+    const { contrib } = await seedWorld()
+    const runId = await startRun(contrib)
+    expect((await resumeRun(env.AQUILLA_PG, runId)).status).toBe("ok")
+
+    const direction = "stop using contractions in narration"
+    const r = await req("POST", "/steering", contrib, {
+      kind: "direction",
+      body: direction,
+      runId,
+    })
+    expect(r.status).toBe(201)
+    expect((await getRun(env.AQUILLA_PG, runId))?.status).toBe("running")
+
+    const unconsumed = await readUnconsumedSteering(env.AQUILLA_PG, { projectId: PROJECT, fileId: FILE, runId })
+    expect(unconsumed.map((entry) => entry.body)).toContain(direction)
+  })
+
+  it("refuses to record a command as a direction when there is no run to command", async () => {
+    const { contrib } = await seedWorld()
+    const r = await req("POST", "/steering", contrib, { kind: "direction", body: "stop", fileId: FILE })
+    expect(r.status).toBe(200)
+    expect(await r.json()).toMatchObject({ command: "stop", applied: false })
+    const unconsumed = await readUnconsumedSteering(env.AQUILLA_PG, { projectId: PROJECT, fileId: FILE, runId: "" })
+    expect(unconsumed.map((entry) => entry.body)).not.toContain("stop")
   })
 })
 

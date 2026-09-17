@@ -24,10 +24,12 @@
 -- same safe degradation direction 0092 relies on.
 --
 -- NOT applied automatically to live Neon branches (neon:status is a deploy
--- precondition and will fail until this has run). Apply by hand, then backfill:
---   set -a; . ./.env; set +a
---   npx tsx scripts/pg.ts db/postgres/migrations/0094_structural_audio_counters.sql
---   npm run neon:backfill:progress:prod
+-- precondition and will fail until this has run). Apply through the migration
+-- runner — it records the ledger row the deploy gate reads; a by-hand
+-- `scripts/pg.ts` apply leaves the gate red after the migration has run —
+-- then backfill only the files whose projection predates these columns:
+--   pnpm neon:apply:prod
+--   pnpm neon:backfill:progress:prod --missing-books
 
 BEGIN;
 

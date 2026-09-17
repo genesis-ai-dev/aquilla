@@ -113,6 +113,32 @@ it('keeps production, live keys, and missing rehearsal/local flags disabled', as
   expect((await checkout(input, 'alice', { ...config(), BASE_URL: 'https://aquilla.app' })).status).toBe(503)
   expect(stripe.requests).toHaveLength(0)
 })
+it('runs sandbox checkout on an allowlisted development deployment and nowhere else', async () => {
+  const stripe = await setup()
+  const input = await reviewed()
+  // A faithful dev deployment: the environment guard checks these bindings first.
+  const deployed = { ...config(), WRANGLER_LOCAL: undefined, ENVIRONMENT: 'development',
+    BASE_URL: 'https://dev.aquilla.app', SYNC_WORKER_URL: 'https://api.dev.aquilla.app/sync',
+    DEPLOYMENT_WORKER_NAME: 'aquilla-dev-identity',
+    CF_VERSION_METADATA: { id: 'dev-version', tag: 'aquilla-dev-identity-development-abc123', timestamp: '2026-09-17T00:00:00Z' },
+    BILLING_SANDBOX_HOSTS: 'api.dev.aquilla.app,dev.aquilla.app' } as unknown as Env
+  const started = await checkout(input, 'alice', deployed, 'https://api.dev.aquilla.app')
+  expect(started.status).toBe(200)
+  expect(new URLSearchParams(stripe.requests[0]!.body).get('success_url'))
+    .toBe('https://dev.aquilla.app/orgs/1/settings/billing?checkout=rehearsal')
+  // Production environment, an unlisted host, a live key, or an unlisted app
+  // origin each fail closed even with the flag and allowlist set.
+  for (const [settings, url] of [
+    [{ ...deployed, ENVIRONMENT: 'production' }, 'https://api.dev.aquilla.app'],
+    [deployed, 'https://api.aquilla.app'],
+    [{ ...deployed, STRIPE_SECRET_KEY: 'sk_live_fixture' }, 'https://api.dev.aquilla.app'],
+    [{ ...deployed, BASE_URL: 'https://aquilla.app' }, 'https://api.dev.aquilla.app'],
+    [{ ...deployed, BILLING_SANDBOX_HOSTS: undefined }, 'https://api.dev.aquilla.app'],
+  ] as const) {
+    expect((await checkout(input, 'bob', settings, url)).status, url).toBe(503)
+  }
+  expect(stripe.requests).toHaveLength(1)
+})
 it('never grants a legacy plan for signed rehearsal payment events', async () => {
   await setup()
   const metadata = { orgId: '1', kind: 'workspace_plan_rehearsal' }

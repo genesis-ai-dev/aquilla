@@ -266,8 +266,12 @@ export interface Env {
   BILLING_CHAT_USAGE_REHEARSAL?: string
   /** Weekly allowance metering for any provider; retires legacy guards for metered calls. */
   BILLING_WEEKLY_USAGE_ENFORCE?: string
-  /** Local loopback + test-key only. Never enables production purchasing. */
+  /** Sandbox billing opt-in: loopback locally, or the allowlisted hosts below
+   *  on a development deployment. Test-mode key required either way. */
   BILLING_WORKSPACE_CHECKOUT_REHEARSAL?: string
+  /** Comma-separated API and app hosts allowed to run sandbox billing when
+   *  ENVIRONMENT=development (e.g. api.dev.aquilla.app,dev.aquilla.app). */
+  BILLING_SANDBOX_HOSTS?: string
   /** Approved environment-specific catalog JSON. Amounts are fetched from Stripe. */
   STRIPE_PRICE_CATALOG?: string
   /** Explicit sandbox portal configurations; validated scope-specific management. */

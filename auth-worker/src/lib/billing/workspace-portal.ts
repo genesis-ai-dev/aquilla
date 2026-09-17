@@ -4,7 +4,7 @@ import { catalogSchema, readValidatedBillingCatalog } from './catalog'
 import type { BillingWorkspace } from '../../../../db/shared/billing-workspace'
 import { stripeForm } from './stripe'
 import { readWorkspaceEntitlement } from './workspace'
-import { workspaceCheckoutRehearsalEnabled, WorkspaceCheckoutConflict } from './workspace-checkout'
+import { sandboxReturnOrigin, workspaceCheckoutRehearsalEnabled, WorkspaceCheckoutConflict } from './workspace-checkout'
 
 const configurationSchema = z.object({
   id: z.string(), active: z.literal(true), livemode: z.literal(false),
@@ -35,11 +35,7 @@ export async function startWorkspacePortalRehearsal(
   const configuration = stored.scope === 'personal'
     ? env.STRIPE_PORTAL_PERSONAL_CONFIGURATION : env.STRIPE_PORTAL_TEAM_CONFIGURATION
   if (!/^bpc_[a-zA-Z0-9]+$/.test(configuration ?? '')) throw new Error('Portal configuration missing')
-  const target = new URL(env.BASE_URL ?? '')
-  if (!['http:', 'https:'].includes(target.protocol)
-    || !['localhost', '127.0.0.1', '[::1]'].includes(target.hostname)
-    || target.username || target.password) throw new Error('Local return origin required')
-  const returnUrl = `${target.origin}/orgs/${orgId}/settings/billing`
+  const returnUrl = `${sandboxReturnOrigin(env)}/orgs/${orgId}/settings/billing`
   const attempt = await env.AQUILLA_PG.prepare(`SELECT id, account_id
     FROM workspace_checkout_attempts WHERE org_id = ? AND resolved_at IS NULL`)
     .bind(orgId).first<{ id: string; account_id: string }>()

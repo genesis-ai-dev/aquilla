@@ -28,11 +28,29 @@ function readAttempt(db: AquillaDb, orgId: number) {
     expires_at, session_id FROM workspace_checkout_attempts WHERE org_id = ? AND resolved_at IS NULL`)
     .bind(orgId).first<Attempt>()
 }
+const LOOPBACK = ['localhost', '127.0.0.1', '[::1]']
+const sandboxHosts = (env: Env) => (env.BILLING_SANDBOX_HOSTS ?? '').split(',').map(h => h.trim()).filter(Boolean)
+/** Sandbox billing runs in exactly two places: wrangler-local loopback, or a
+ * deployed non-production environment whose API host is allowlisted in
+ * `BILLING_SANDBOX_HOSTS`. Both need the opt-in flag and a test-mode key, so a
+ * production Worker (live key, ENVIRONMENT=production) can never satisfy it.
+ */
 export function workspaceCheckoutRehearsalEnabled(env: Env, requestUrl: string) {
-  return env.BILLING_WORKSPACE_CHECKOUT_REHEARSAL === 'true'
-    && env.WRANGLER_LOCAL === '1'
-    && /^(sk|rk)_test_/.test(env.STRIPE_SECRET_KEY?.trim() ?? '')
-    && ['localhost', '127.0.0.1', '[::1]'].includes(new URL(requestUrl).hostname)
+  if (env.BILLING_WORKSPACE_CHECKOUT_REHEARSAL !== 'true') return false
+  if (!/^(sk|rk)_test_/.test(env.STRIPE_SECRET_KEY?.trim() ?? '')) return false
+  let host: string
+  try { host = new URL(requestUrl).hostname } catch { return false }
+  if (env.WRANGLER_LOCAL === '1' && LOOPBACK.includes(host)) return true
+  return env.ENVIRONMENT === 'development' && sandboxHosts(env).includes(host)
+}
+/** The app origin Stripe returns to: loopback locally, an allowlisted sandbox
+ * host when deployed. Never a browser-provided URL. */
+export function sandboxReturnOrigin(env: Env) {
+  const target = new URL(env.BASE_URL ?? '')
+  const deployed = env.ENVIRONMENT === 'development' && target.protocol === 'https:' && sandboxHosts(env).includes(target.hostname)
+  const local = env.WRANGLER_LOCAL === '1' && ['http:', 'https:'].includes(target.protocol) && LOOPBACK.includes(target.hostname)
+  if ((!local && !deployed) || target.username || target.password) throw new Error('Sandbox requires an allowlisted app return origin')
+  return target.origin
 }
 /** Rehearsal only. No payment/entitlement mutation and no production entry point. */
 export async function startWorkspaceCheckoutRehearsal(
@@ -78,12 +96,8 @@ export async function startWorkspaceCheckoutRehearsal(
     }
     const id = crypto.randomUUID()
     const expiresAt = nowSec + 23 * 60 * 60
-    // Rehearsal returns only to this local origin, never a browser-provided URL.
-    const returnTarget = new URL(env.BASE_URL ?? '')
-    if (!['http:', 'https:'].includes(returnTarget.protocol)
-      || !['localhost', '127.0.0.1', '[::1]'].includes(returnTarget.hostname)
-      || returnTarget.username || returnTarget.password) throw new Error('Rehearsal requires a local app return origin')
-    const origin = returnTarget.origin
+    // Rehearsal returns only to the sandbox app origin, never a browser-provided URL.
+    const origin = sandboxReturnOrigin(env)
     const metadata = { orgId: String(orgId), kind: 'workspace_plan_rehearsal',
       checkoutAttemptId: id, offer: quote.offer, billingInterval: quote.interval,
       priceVersion: quote.priceVersion, entitlementVersion: quote.entitlementVersion }

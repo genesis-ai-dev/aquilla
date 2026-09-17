@@ -92,14 +92,14 @@ export function PlanBar({ label, outer, inner, tone, aria, readout }: {
       </span>
       {/* 72px, not 60: "100% | 100%" is the widest this reads and it has to
           fit without wrapping, or the row grows a line on the very unit that
-          is finished. */}
-      <span className="w-[72px] shrink-0 text-end text-[11px] tabular-nums text-muted-foreground">
+          is finished. A flex box rather than right-aligned text so the
+          `Readout` inside can pin its divider to the slot's centre. */}
+      <span className="flex w-[72px] shrink-0 items-center text-[11px] tabular-nums text-muted-foreground">
         {readout ?? <Readout left={`${outer}%`} right={`${inner}%`} />}
       </span>
     </span>
   )
 }
-
 
 /**
  * Two numbers in a bar's readout slot, separated the one way this board does it.
@@ -108,18 +108,27 @@ export function PlanBar({ label, outer, inner, tone, aria, readout }: {
  * way anyone would — "100 out of 99 percent", which is nonsense — because a
  * slash means division everywhere else a number appears. The two figures are
  * siblings (translated beside validated, recorded beside signed off), so they
- * get a divider that only ever means "and": a thin vertical bar. The same
+ * get a divider that only ever means "and": a thin vertical rule. The same
  * element serves percentages on a unit and counts on a person or a chapter,
  * so the three never drift into three notations.
+ *
+ * THE RULE SITS AT THE SLOT'S CENTRE ON EVERY ROW, not wherever the text
+ * happens to end. Each number gets half the slot — the left one flush against
+ * the rule, the right one starting after it — so a column of bars shows one
+ * straight line of dividers down the board, and "100%" beside "0%" lines up
+ * with "98%" beside "96%" (Sam, 2026-09-17). Drawn as an element rather than
+ * a "|" glyph so it can be taller than the digits and still centred on them;
+ * the glyph survives for copy and screen readers, hidden from sight.
  */
 export function Readout({ left, right }: { left: ReactNode; right: ReactNode }) {
   return (
-    <>
-      {left}
-      {/* Real spaces, not padding: copied or read aloud this is "940 | 938",
-          which is what Sam wrote, and a test can say the same. */}
-      <span className="opacity-40">{" | "}</span>
-      {right}
-    </>
+    <span className="flex w-full items-center">
+      <span className="flex-1 text-end">
+        {left}
+        <span className="sr-only">{" | "}</span>
+      </span>
+      <span aria-hidden className="mx-[4px] h-[18px] w-px shrink-0 bg-current opacity-30" />
+      <span className="flex-1 text-start">{right}</span>
+    </span>
   )
 }

@@ -379,7 +379,7 @@ function PlanAssignmentRow({
             validated: planPct(a.validated, a.cellsTotal),
           })}
           readout={
-            <span data-testid={`plan-assignment-text-${a.assignmentId}`}>
+            <span className="flex w-full" data-testid={`plan-assignment-text-${a.assignmentId}`}>
               <Readout left={a.translated} right={a.validated} />
             </span>
           }
@@ -395,7 +395,7 @@ function PlanAssignmentRow({
               validated: planPct(a.audioValidated, a.cellsTotal),
             })}
             readout={
-              <span data-testid={`plan-assignment-audio-${a.assignmentId}`}>
+              <span className="flex w-full" data-testid={`plan-assignment-audio-${a.assignmentId}`}>
                 <Readout left={a.recorded} right={a.audioValidated} />
               </span>
             }

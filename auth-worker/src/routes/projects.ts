@@ -49,6 +49,7 @@ import {
   getFileChapters,
   getMyAssignments,
   getProjectAssignmentRoster,
+  getProjectUnitAssignees,
   getUnitAssignments,
 } from "../services/assignments"
 import {
@@ -1065,6 +1066,39 @@ projects.get("/:projectId/assignments/unit", authMiddleware, async (c) => {
 
   const assignments = await getUnitAssignments(c.env, projectId, fileId, sectionKey, lane)
   return c.json({ assignments })
+})
+
+/**
+ * GET /api/v2/projects/:projectId/assignments/units — who is on EVERY planning
+ * unit of the project, one row per (unit, person), for the plan board's avatar
+ * chips (AQU-1278, round 6). Names only, no progress: the per-unit route above
+ * still answers what each person has done once a unit is opened.
+ *
+ * Same floor as the per-unit read, for the same reason: a name on a row is
+ * per-member information, and an org that hides per-member progress from
+ * contributors has hidden this too.
+ */
+projects.get("/:projectId/assignments/units", authMiddleware, async (c) => {
+  const user = c.get("user")
+  const projectId = c.req.param("projectId") as string
+
+  const role = await resolveProjectRole(c.env, user, projectId)
+  if (!role) return c.json({ error: "no access to project" }, 403)
+
+  const project = await c.env.AQUILLA_PG.prepare("SELECT org_id FROM projects WHERE id = ?")
+    .bind(projectId)
+    .first<{ org_id: number | null }>()
+  if (!project) return c.json({ error: "project not found" }, 404)
+
+  const progressMinRole = project.org_id != null
+    ? await getMemberProgressViewMinRole(c.env, project.org_id)
+    : DEFAULT_MEMBER_PROGRESS_VIEW_MIN_ROLE
+  if (!canViewMemberProgress(role.level, progressMinRole)) {
+    return c.json({ error: "member progress hidden by org policy" }, 403)
+  }
+
+  const assignees = await getProjectUnitAssignees(c.env, projectId)
+  return c.json({ assignees })
 })
 
 /**

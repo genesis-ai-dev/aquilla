@@ -47,6 +47,7 @@ import { RightSidebarPanel } from "@/components/RightSidebarPanel"
 import { useIsLgUp } from "@/components/AppShell"
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import { planHasAudio } from "@/lib/plan/plan-status"
+import { mergeUnitAssignees } from "@/lib/plan/plan-assignees"
 import { useProjectPlan } from "@/hooks/useProjectPlan"
 import {
   audioFileIds,
@@ -70,7 +71,9 @@ import { fetchProjectFiles, type FileSummary } from "@/lib/sync/cells-read"
 import { fetchSyncToken } from "@/lib/sync/sync-token"
 import {
   getProjectAssignments,
+  getProjectUnitAssignees,
   getUnitAssignments,
+  type UnitAssignee,
   type AssigneeWorkload,
   type UnitAssignment,
 } from "@/lib/sync/assignments"
@@ -796,6 +799,27 @@ export function ProjectOverview() {
     return map
   }, [planUnits, planFileSections, planAudioFiles])
 
+  // AQU-1278, round 6: who is on EVERY unit, read once per project and again
+  // after each assignment made from the inspector (the nonce). Null until it
+  // lands and null when the org's member-progress floor refuses it, which is
+  // the difference between "not yet" and "not for you" — both draw no chips.
+  const [projectAssignees, setProjectAssignees] = useState<UnitAssignee[] | null>(null)
+  useEffect(() => {
+    if (!jwt || !id) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const rows = await getProjectUnitAssignees(jwt, id)
+        if (!cancelled) setProjectAssignees(rows)
+      } catch {
+        if (!cancelled) setProjectAssignees(null)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [jwt, id, planAssignmentsNonce])
+
   const selectedUnitFileId = selectedPlanUnit?.fileId ?? null
   const selectedUnitSectionKey = selectedPlanUnit?.sectionKey ?? null
 
@@ -833,43 +857,25 @@ export function ProjectOverview() {
   }, [jwt, id, selectedUnitFileId, selectedUnitSectionKey, planLane, planAssignmentsNonce])
 
   /**
-   * Who is working on each unit, for the board's rows.
+   * Who is on each row, for the avatar chips.
    *
-   * SWARM-TODO(AQU-1278): this map fills in as a manager opens units, because
-   * the only read that attributes an assignment to a unit is the PER-UNIT one
-   * above. There is no project-wide (file, book) → assignees endpoint: the
-   * org-wide workload read carries `scopeLabel`, a free-text display string
-   * ("All verses", "Genesis · GEN 1, GEN 2"), which cannot be turned back into
-   * a book code without guessing, and guessing here would put the wrong face on
-   * the wrong book. Fetching one per row is what the board's own prop comment
-   * forbids. The honest fix is a server read that returns assignments grouped
-   * by `bookKeyExpr` for a whole project in one response — the same expression
-   * `getUnitAssignments` already filters by.
-   *
-   * De-duplicated by user: one person can hold two assignments in one unit (a
-   * chapter run and a later top-up), and their face belongs on the row once.
+   * AQU-1278, round 6: read ONCE for the whole project, so every row has its
+   * people from the first paint. Until this read existed the board could only
+   * learn a unit's assignees from the per-unit read the inspector fires, and a
+   * row showed its chips the moment its inspector had been opened once and
+   * nothing before that (Sam, 2026-09-16). The per-unit read still overlays
+   * where it has been made — it is the fresher of the two after an assignment
+   * lands — and until the project-wide read arrives (or where the org's floor
+   * refuses it) the map holds only what the inspector has learned, exactly as
+   * before. `mergeUnitAssignees` owns the rule and is tested on its own.
    */
-  const assigneesByUnit = useMemo(() => {
-    const map = new Map<string, { userId: number; username: string | null }[]>()
-    for (const unit of planUnits) {
-      const unitId = planUnitId(unit)
-      const rows = planUnitAssignments.get(unitAssignmentsKey(unitId, planLane))
-      // AQU-1278: an EMPTY array is an answer and belongs in the map. Absent
-      // means nobody has asked — there is no project-wide assignee read, so a
-      // unit only learns its people when a manager opens it — and the row says
-      // "unassigned" for the one and nothing for the other. Skipping the empty
-      // case here collapsed the two into "absent" and the line never appeared.
-      if (!rows) continue
-      const byUser = new Map<number, { userId: number; username: string | null }>()
-      for (const row of rows) {
-        if (!byUser.has(row.assigneeUserId)) {
-          byUser.set(row.assigneeUserId, { userId: row.assigneeUserId, username: row.username })
-        }
-      }
-      map.set(unitId, [...byUser.values()])
-    }
-    return map
-  }, [planUnits, planUnitAssignments, planLane])
+  const assigneesByUnit = useMemo(
+    () => mergeUnitAssignees(planUnits, projectAssignees, (unitId) =>
+      planUnitAssignments.get(unitAssignmentsKey(unitId, planLane))
+        ?.map((row) => ({ userId: row.assigneeUserId, username: row.username })),
+    ),
+    [planUnits, projectAssignees, planUnitAssignments, planLane],
+  )
 
   /** The selected unit's own assignments, for the panel beside its bars. */
   const selectedUnitAssignments = useMemo(() => {

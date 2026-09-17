@@ -445,3 +445,28 @@ export async function unassignAssignment(args: UnassignAssignmentArgs): Promise<
   })
   await postAssignmentEvent(args.jwt, args.projectId, args.fileId, event)
 }
+
+/** One person on one planning unit — a board row's avatar chip (mirrors the server). */
+export interface UnitAssignee {
+  fileId: string
+  /** '' for a whole file, a book code for a book inside a Scripture file. */
+  sectionKey: string
+  userId: number
+  username: string | null
+}
+
+/**
+ * AQU-1278, round 6: who is on EVERY unit of a project, in one read, so the
+ * board can draw its avatar chips from the first paint instead of learning a
+ * unit's people only once its inspector has been opened. Same floor as
+ * `getUnitAssignments`: below it the server answers 403 and the board draws
+ * no chips at all rather than wrong ones.
+ */
+export async function getProjectUnitAssignees(jwt: string, projectId: string): Promise<UnitAssignee[]> {
+  const res = await fetchWithTimeout(
+    `${FRONTIER_BASE}/api/v2/projects/${encodeURIComponent(projectId)}/assignments/units`,
+    { headers: { Authorization: `Bearer ${jwt}` } },
+  )
+  if (!res.ok) throw new UserError(res.status, "", "project")
+  return ((await res.json()) as { assignees: UnitAssignee[] }).assignees
+}

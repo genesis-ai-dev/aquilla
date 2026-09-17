@@ -23,6 +23,7 @@
 
 import type { Env } from "../types"
 import { bookKeyExpr, sectionKeyExpr } from "../../../db/shared/plan-keys"
+import { planUnitsSql } from "../../../db/shared/plan-units"
 
 /** Per-assignee rollup for the manager workload view. */
 export interface AssigneeWorkload {
@@ -670,4 +671,74 @@ export async function getFileChapters(
     return ka.book === kb.book ? ka.num - kb.num : ka.book.localeCompare(kb.book)
   })
   return chapters
+}
+
+/** One person on one planning unit — the board's avatar chip, and nothing more. */
+export interface UnitAssignee {
+  fileId: string
+  /** '' for a whole file, a book code for a book inside a Scripture file. */
+  sectionKey: string
+  userId: number
+  username: string | null
+}
+
+/**
+ * AQU-1278, round 6: who is on EVERY unit of a project, in one read.
+ *
+ * The board draws a face per assignee on each row, and until this existed it
+ * could only learn a unit's people from the per-unit read the inspector fires
+ * when a unit is opened — so a row showed its chips the moment its inspector
+ * had been opened once, and nothing before that. Sam (2026-09-16): people do
+ * not show up on the board until the file has been clicked on.
+ *
+ * Membership is decided the way the plan decides what a unit IS: the same
+ * `planUnitsSql` the board's rows come from, joined to each assigned cell by
+ * the book key the projection derives. A file with book rows has no
+ * file-grain unit and vice versa, which is what lets one predicate serve both
+ * shapes. The structural policy applies for parity with `getUnitAssignments`:
+ * a person whose whole assignment is headings the project does not count is
+ * not on the inspector's list, so they are not on the row either.
+ *
+ * Live assignments only; one row per (unit, person); newest assignment first
+ * within a unit, matching the order the inspector lists people in.
+ */
+export async function getProjectUnitAssignees(env: Env, projectId: string): Promise<UnitAssignee[]> {
+  const rows = await env.AQUILLA_PG.prepare(
+    `WITH policy AS (
+       SELECT COALESCE(COALESCE(ps.count_structural, os.count_structural) = 'false', false)
+                AS exclude_structural
+         FROM projects p
+         LEFT JOIN project_settings ps ON ps.project_id = p.id
+         LEFT JOIN org_settings os ON os.org_id = p.org_id
+        WHERE p.id = ?
+     ), units AS (${planUnitsSql("f.project_id = ?")})
+     SELECT u.file_id           AS file_id,
+            u.section_key       AS section_key,
+            a.assignee_user_id  AS user_id,
+            usr.username        AS username,
+            MAX(a.created_at)   AS latest
+       FROM assignments a
+       JOIN assignment_cells ac ON ac.assignment_id = a.assignment_id
+       JOIN cells c ON c.project_id = a.project_id AND c.file_id = ac.file_id
+                   AND c.cell_id = ac.cell_id AND c.side = 'source'
+       -- A file with book units has no '' unit and a file without has only
+       -- the '' unit, so this OR is exact rather than lenient.
+       JOIN units u ON u.project_id = c.project_id AND u.file_id = c.file_id
+                   AND (u.section_key = '' OR u.section_key = ${bookKeyExpr("c")})
+       LEFT JOIN users usr ON usr.id = a.assignee_user_id
+       CROSS JOIN policy pol
+      WHERE a.project_id = ? AND a.unassigned_at IS NULL AND a.completed_at IS NULL
+        AND NOT (pol.exclude_structural AND COALESCE(c.type, '') IN ('heading', 'paratext'))
+      GROUP BY u.file_id, u.section_key, a.assignee_user_id, usr.username
+      ORDER BY u.file_id, u.section_key, latest DESC, a.assignee_user_id`,
+  )
+    // Positional: the policy CTE's project, the units CTE's project, the WHERE.
+    .bind(projectId, projectId, projectId)
+    .all<{ file_id: string; section_key: string; user_id: number; username: string | null }>()
+  return (rows.results ?? []).map((r) => ({
+    fileId: r.file_id,
+    sectionKey: r.section_key,
+    userId: r.user_id,
+    username: r.username,
+  }))
 }

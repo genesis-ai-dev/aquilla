@@ -26,6 +26,9 @@ import { normalizeLanguageTag } from '../language-normalize'
 /** Placeholder name for a default lane on a BLANK project (no targetLanguage). */
 export const BLANK_LANE_PLACEHOLDER = 'Untitled lane'
 
+/** Placeholder name for the source lane when sourceLanguage is unset. */
+export const SOURCE_LANE_PLACEHOLDER = 'Source'
+
 export type LaneRolePlan = {
   role: 'source' | 'target'
   /** '' for the default target lane; the tag for other target lanes; null for source. */
@@ -70,7 +73,7 @@ export function planLanesForProject(input: ProjectLaneInputs): LaneRolePlan[] {
   plans.push({
     role: 'source',
     legacyTag: null,
-    name: srcLabel || 'Source',
+    name: srcLabel || SOURCE_LANE_PLACEHOLDER,
     langCode: codeForLanguageLabel(srcLabel),
   })
 

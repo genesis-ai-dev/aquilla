@@ -16,6 +16,7 @@
 // either worker — the same handle both inject as `env.AQUILLA_PG`.
 
 import type { AquillaDb } from "../shim/postgres"
+import { ensureProjectLaneStmts } from "./lanes"
 
 // ──────────────────────────────────────────────────────────────────────────
 // Create project
@@ -118,6 +119,14 @@ export async function createProjectShared(
         .bind(input.projectId, JSON.stringify(seed), SEEDED_SETTINGS_VERSION, input.createdBy),
     )
   }
+
+  // AQU-1240 slice 6: every new project gets a source lane + a default target
+  // lane in the same batch as the project row, so the first cell write can
+  // resolve lane_id. Languages from settingsSeed name the rows; otherwise they
+  // land as placeholders and a later settings PATCH promotes the names.
+  stmts.push(
+    ...ensureProjectLaneStmts(db, input.projectId, { settings: seed }),
+  )
 
   if (stmts.length > 1) {
     const [projectResult] = await db.batch(stmts)
@@ -376,6 +385,9 @@ export async function updateProjectSettingsShared(
   const oldThreshold = validationThreshold(current.settings)
   const newThreshold = validationThreshold(normalizedSettings)
   const thresholdChanged = oldThreshold !== newThreshold
+  const laneStmts = ensureProjectLaneStmts(db, input.projectId, {
+    settings: normalizedSettings,
+  })
 
   // No existing row yet — INSERT. Otherwise UPDATE with a version guard so a
   // racing writer can't sneak past us.
@@ -393,6 +405,7 @@ export async function updateProjectSettingsShared(
           db, input.projectId, newThreshold, newVersion, newSettingsJson,
         ))
       }
+      stmts.push(...laneStmts)
       await db.batch(stmts)
     } catch (err) {
       // Race: another request inserted between our load and insert. Re-read and
@@ -423,6 +436,7 @@ export async function updateProjectSettingsShared(
         db, input.projectId, newThreshold, newVersion, newSettingsJson,
       ))
     }
+    stmts.push(...laneStmts)
     // H3: catch DB errors on the version-guarded UPDATE (e.g. a projection
     // statement failing) and return the discriminated `error` result rather than
     // letting the exception propagate uncaught. The caller (auth-worker route /

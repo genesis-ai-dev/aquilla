@@ -15,8 +15,9 @@ Updated: 2026-09-16. Tickets: AQU-837 (billing readiness), AQU-1091 (pricing and
 - [x] The agent client understands `budget.exhausted` with
   `reason: "weekly_allowance"`: the meter shows a weekly-allowance stop with no
   credit figures and notes that staged work is kept (`agent.budget.weeklyExhausted`).
-- [ ] Knowledge indexing and Monday analysis remain unmetered system-funded
-  paths; classify them explicitly before enforcement.
+- [x] Knowledge indexing and Monday analysis are classified platform-funded
+  (bounded, not user-selectable, org-scoped); see the usage map. Every
+  producer is now metered or explicitly classified. Ryder to confirm.
 
 Test impact: autopilot usage suite adds the segmentation case (4 pass);
 segmentation, contextual route, and tick suites pass (83); BudgetMeter adds

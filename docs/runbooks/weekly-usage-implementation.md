@@ -61,8 +61,9 @@ every LLM producer is connected. Measured 2026-08 rates from the local
   separate access contract instead of automatic reclassification.
 - The authenticated chat, import-classification, and agent routes now consume
   this foundation in explicit local scripted-provider rehearsal, and the
-  autopilot graph funds background waves from the run owner; knowledge
-  indexing and Monday analysis remain unconnected. It does
+  autopilot graph funds background waves from the run owner. Knowledge
+  indexing and Monday analysis are explicitly platform-funded, so every
+  producer is now either metered or classified. It does
   not authorize users itself: funded endpoints must validate project access first,
   calculate a trusted maximum cost, reserve before the call, and settle afterward.
   Billing usage remains unavailable until all active producers are connected.
@@ -76,8 +77,8 @@ every LLM producer is connected. Measured 2026-08 rates from the local
 | `auth-worker/src/routes/contextual.ts` and `lib/contextual/tick.ts` | Local rehearsal reserves and settles each graph call via `makeLlmCall({ admit })`, funded by the run's persisted owner; exhaustion pauses at the span edge | Segmentation generation is metered too (429 on a spent week). Remaining: automatic resume after reset. |
 | `auth-worker/src/routes/import-classify.ts` | Legacy cost plus sampled input words on valid result; local rehearsal reserves before the call and settles reported cost even for rejected recipes | Remaining: real-provider cost bound; a retry with a new key reserves again (same key returns 409). Manual import is untouched. |
 | `auth-worker/src/routes/import-sandbox.ts` | Cost plus filename words | Filename word count does not measure conversion-model work. Integrate selected unit and preserve source/commit artifacts on exhaustion. |
-| `auth-worker/src/lib/knowledge/index-doc.ts` | Direct provider request | Resolve document/project ownership; include or explicitly classify system-funded indexing before launch. |
-| `auth-worker/src/lib/monday/analyze.ts` | Direct provider request with usage parsing | Resolve organization and invoking workflow; include or explicitly classify system-funded analysis. |
+| `auth-worker/src/lib/knowledge/index-doc.ts` | Direct provider request; one bounded call per upload (`MAX_KB_TEXT_CHARS`), org-scoped docs may have no project | **Classified platform-funded (2026-09-17)**: not charged to the weekly allowance. The ledger keys reservations to a project, and widening it for this bounded, non-selectable call is not worth the schema change. Revisit if upload volume makes it material. |
+| `auth-worker/src/lib/monday/analyze.ts` | Direct provider request during Monday onboarding | **Classified platform-funded (2026-09-17)**: onboarding integration work, not translation capacity; not charged to the weekly allowance. |
 | `sync-worker/src/tts.ts` | Audio seconds plus configured compute cost after synthesis | Shared workspace pool across workers; reserve before synthesis, settle duration/cost, handle missing duration without recording free work. |
 | `sync-worker/src/voice-convert.ts`, `diarization.ts` | Separate media processing paths | Audit whether Aquilla-funded processing consumes this allowance; avoid accidental unmetered paid paths. |
 | External-agent tokens | Ordinary identity/permission boundaries | Check owning workspace capability and same usage pool at every funded AI endpoint; external provider bills stay outside Aquilla's allowance. |

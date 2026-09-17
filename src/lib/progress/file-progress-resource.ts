@@ -60,11 +60,18 @@ export interface SectionProgressDetailResponse {
 
 /** The queue a plan link lands in. Mirrors the sync worker's `PLAN_OPEN_KINDS`. */
 export type PlanOpenKind = "untranslated" | "unvalidated" | "unrecorded" | "unsigned"
+/**
+ * Everywhere a plan link can land: a queue, or `first` — the unit's first cell
+ * in document order whatever its state, which is how a BOOK inside a Scripture
+ * file is opened (the editor deep-links to cells and nothing else). Mirrors
+ * the sync worker's `PLAN_LANDING_KINDS`.
+ */
+export type PlanLandingKind = PlanOpenKind | "first"
 
 export interface PlanFirstOpenResponse {
   fileId: string
   unit: string
-  kind: PlanOpenKind
+  kind: PlanLandingKind
   cellId: string | null
 }
 
@@ -538,15 +545,16 @@ export async function getFileSectionProgress(
 
 /**
  * AQU-1278, round 5: the first cell of a unit that is outstanding in one
- * queue — where "Go to first …" lands. `unit` is the unit's section key ('' for
- * a whole file). Null means nothing in that queue, and the caller opens the
- * file instead. Never cached: it is asked on a click, about to be acted on.
+ * queue — where "Go to first …" lands — or, with `first`, the unit's first
+ * cell full stop. `unit` is the unit's section key ('' for a whole file). Null
+ * means nothing in that queue, and the caller opens the file instead. Never
+ * cached: it is asked on a click, about to be acted on.
  */
 export async function getPlanFirstOpenCell(
   projectId: string,
   fileId: string,
   unit: string,
-  kind: PlanOpenKind,
+  kind: PlanLandingKind,
   getTokenForFile: (fileId: string) => Promise<string | null>,
   lane = '',
 ): Promise<string | null> {

@@ -90,12 +90,22 @@ export interface SectionProgressDetailResponse {
  */
 export const PLAN_OPEN_KINDS = ['untranslated', 'unvalidated', 'unrecorded', 'unsigned'] as const
 export type PlanOpenKind = (typeof PLAN_OPEN_KINDS)[number]
+/**
+ * Everywhere a plan link can land: the four queues, plus `first` — the unit's
+ * first cell in document order, outstanding or not. That one exists for a
+ * BOOK inside a Scripture file (Sam, 2026-09-17): the editor deep-links to a
+ * cell and nothing else, so "open Revelation" can only mean "open the Bible
+ * file at Revelation's first verse", and only the server knows which cell
+ * that is.
+ */
+export const PLAN_LANDING_KINDS = [...PLAN_OPEN_KINDS, 'first'] as const
+export type PlanLandingKind = (typeof PLAN_LANDING_KINDS)[number]
 
 export interface PlanFirstOpenResponse {
   fileId: string
   /** The unit's section key: a book code, or '' for a whole file. */
   unit: string
-  kind: PlanOpenKind
+  kind: PlanLandingKind
   /** The SOURCE cell to land on, or null when nothing in the unit is outstanding in that queue. */
   cellId: string | null
 }
@@ -323,7 +333,7 @@ export async function readFirstOpenCell(
   projectId: string,
   fileId: string,
   unit: string,
-  kind: PlanOpenKind,
+  kind: PlanLandingKind,
   lane: string,
 ): Promise<string | null> {
   const [countStructural, validationCount, sheet] = await Promise.all([
@@ -371,6 +381,10 @@ export async function readFirstOpenCell(
       case 'unvalidated': return filled && Number(r.endorsement_count) < validationCount
       case 'unrecorded': return onSheet ? Number(r.cues_unrecorded) > 0 : !r.has_take
       case 'unsigned': return onSheet ? Number(r.cues_unsigned) > 0 : r.has_take && !r.take_signed
+      // The unit's first cell, whatever its state — still in document order,
+      // still under the structural policy, so a book opens at its first
+      // COUNTED cell and not on a heading the project does not count.
+      case 'first': return true
     }
   }
   return inDocumentOrder(results ?? []).find(outstanding)?.cell_id ?? null
@@ -406,10 +420,10 @@ export async function handleProgressReadRequest(
   if (firstOpenMatch) {
     const unit = (url.searchParams.get('unit') ?? '').trim()
     const kindParam = url.searchParams.get('kind') ?? ''
-    if (!(PLAN_OPEN_KINDS as readonly string[]).includes(kindParam)) {
+    if (!(PLAN_LANDING_KINDS as readonly string[]).includes(kindParam)) {
       return new Response(`unknown kind: ${kindParam}`, { status: 400 })
     }
-    const kind = kindParam as PlanOpenKind
+    const kind = kindParam as PlanLandingKind
     const cellId = await readFirstOpenCell(env.AQUILLA_PG, projectId, fileId, unit, kind, lane)
     const body: PlanFirstOpenResponse = { fileId, unit, kind, cellId }
     // A click, not a poll: no ETag, and nothing to keep — the answer moves

@@ -973,6 +973,38 @@ export function ProjectOverview() {
     [id, getPlanToken, planLane, planAudioFiles, openWorkspace],
   )
 
+  /**
+   * Open the editor on a unit — the inspector's title link (Sam, 2026-09-17).
+   *
+   * A whole-file unit is the file, opened at its top. A BOOK inside a
+   * Scripture file is that book's FIRST CELL: the editor deep-links to a cell
+   * and nothing else, so a file-level link would drop the reader at Genesis 1
+   * whichever book they clicked, and Sam ruled that intolerable. The server
+   * answers `first` in the same document order the queues use; nothing
+   * resolvable (an older worker, a failed read, a book with no cells) still
+   * opens the file, as `openPlanShortfall` does. The flash rides with the
+   * cell, as it does on every cell link: the editor scrolls the row into the
+   * middle of the screen, under the previous book's last verses, and without
+   * a marker "open Ruth" looks like it opened Philemon.
+   */
+  const openPlanUnit = useCallback(
+    async (unit: PlanUnit) => {
+      if (!id) return
+      let cellId: string | null = null
+      if (unit.sectionKey && getPlanToken) {
+        try {
+          cellId = await getPlanFirstOpenCell(
+            id, unit.fileId, unit.sectionKey, "first", () => getPlanToken(), planLane,
+          )
+        } catch {
+          cellId = null
+        }
+      }
+      openWorkspace(editorCellHref(id, unit.fileId, cellId, planLane, cellId != null))
+    },
+    [id, getPlanToken, planLane, openWorkspace],
+  )
+
   // AQU-1094/1095: setting a date and marking a unit done are maintainer work,
   // the same floor the project deadline uses. Read the FRESH role from
   // useProject, not the cached syncRole snapshot.
@@ -1125,14 +1157,10 @@ export function ProjectOverview() {
         if (!id) return
         openWorkspace(editorCellHref(id, selectedPlanUnit.fileId, cellId, planLane, true))
       }}
-      // AQU-1278: the title opens the unit's FILE — no cell, so no flash — for
-      // the reader who wants the editor itself rather than the first gap in
-      // it (Sam, 2026-09-17). The lane still rides along, as on every link
-      // built from this lane-scoped board.
-      onOpenUnit={() => {
-        if (!id) return
-        openWorkspace(editorCellHref(id, selectedPlanUnit.fileId, null, planLane, false))
-      }}
+      // AQU-1278: the title opens the unit itself — the file, or a book's
+      // first cell — for the reader who wants the editor rather than the
+      // first gap in it (Sam, 2026-09-17). See `openPlanUnit`.
+      onOpenUnit={() => { void openPlanUnit(selectedPlanUnit) }}
     />
   ) : null
 

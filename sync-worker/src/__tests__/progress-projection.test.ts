@@ -745,6 +745,11 @@ describe('the first outstanding cell of a unit (readFirstOpenCell)', () => {
     // Scoped to the book: Exodus's blank is not Genesis's.
     expect(await readFirstOpenCell(db, PROJECT, 'bible', 'EXO', 'untranslated', '')).toBe('e1')
     expect(await readFirstOpenCell(db, PROJECT, 'bible', 'EXO', 'unvalidated', '')).toBeNull()
+    // `first` is the book's first cell whatever its state — GEN 1:1 is
+    // finished and is still the answer — and Exodus's first, not Genesis's,
+    // which is the whole point: "open Exodus" cannot land on Genesis 1.
+    expect(await readFirstOpenCell(db, PROJECT, 'bible', 'GEN', 'first', '')).toBe('g1')
+    expect(await readFirstOpenCell(db, PROJECT, 'bible', 'EXO', 'first', '')).toBe('e1')
   })
 
   it("answers the audio queues from the cells' own takes", async () => {
@@ -863,6 +868,8 @@ describe('the first outstanding cell of a unit (readFirstOpenCell)', () => {
       ],
     })
     expect(await readFirstOpenCell(db, PROJECT, 'bible', 'GEN', 'untranslated', '')).toBe('v1')
+    // The policy holds for `first` too: a book opens on its first COUNTED cell.
+    expect(await readFirstOpenCell(db, PROJECT, 'bible', 'GEN', 'first', '')).toBe('v1')
   })
 
   it('serves the answer over HTTP and refuses a queue it does not know', async () => {
@@ -878,6 +885,12 @@ describe('the first outstanding cell of a unit (readFirstOpenCell)', () => {
     }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
     expect(ok.status).toBe(200)
     expect(await ok.json()).toEqual({ fileId: 'bible', unit: 'GEN', kind: 'untranslated', cellId: 'v1' })
+
+    const first = (await handleProgressReadRequest(new Request(`${base}?unit=GEN&kind=first`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }), { AQUILLA_PG: db, SYNC_SECRET_KEY: SECRET }))!
+    expect(first.status).toBe(200)
+    expect(await first.json()).toEqual({ fileId: 'bible', unit: 'GEN', kind: 'first', cellId: 'v1' })
 
     const bad = (await handleProgressReadRequest(new Request(`${base}?unit=GEN&kind=unfinished`, {
       headers: { Authorization: `Bearer ${token}` },

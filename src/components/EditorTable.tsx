@@ -179,6 +179,7 @@ import { useFileFontSizes } from "@/lib/store/file-view-prefs"
 import { useEditorActions } from "@/context/EditorActionsContext"
 import { isInMemberScope } from "@/lib/sync/member-scopes"
 import { SourceSelectionToolbar } from "./SourceSelectionToolbar"
+import { SOURCE_CELL_MENU_Z } from "@/lib/editor/source-cell-layers"
 import { buildSourceChip, type ContextChip } from "@/lib/agent/context-chip"
 import { ownCastName } from "@/lib/timeline/cue-character"
 import { parseTimestampRange } from "@/lib/video/vtt-generator"
@@ -3240,10 +3241,12 @@ function CellSourceMenu({
               onClick={(e) => e.stopPropagation()}
               className={cn(
                 // AQU-1134: the term action rail pops up over this corner and
-                // used to render BEHIND it. The rail sits at z-20, so the
-                // menu's own button has to stay below that — it was z-10 as
-                // the pencil and stays there.
-                "absolute end-1 top-1 z-10 flex size-6 shrink-0 items-center justify-center rounded-md",
+                // must render in FRONT of it. Both layers are owned by
+                // source-cell-layers.ts — don't hand-edit this one, the bug
+                // was the two being equal (z-10 each), which handed the
+                // painting order to DOM order and put this button on top.
+                "absolute end-1 top-1 flex size-6 shrink-0 items-center justify-center rounded-md",
+                SOURCE_CELL_MENU_Z,
                 "text-muted-foreground/50 transition-colors hover:bg-accent hover:text-foreground",
                 // Present but quiet until the row is reached for, exactly as
                 // the pencil was. `open` pins it so the trigger does not fade

@@ -74,30 +74,30 @@ function DesignLanguageCombobox({
   const selected = options.find((row) => row.value === value) ?? null
 
   return (
-    <ComboboxPrimitive.Root
-      className="w-full"
-      items={[...options]}
-      value={selected}
-      open={open}
-      onOpenChange={(next: boolean) => {
-        setOpen(next)
-        if (!next) setQuery("")
-      }}
-      inputValue={query}
-      onInputValueChange={(next: string) => setQuery(next)}
-      autoHighlight
-      onValueChange={(row: LocaleOption | null) => {
-        if (row) onValueChange(row.value)
-      }}
-      itemToStringLabel={(row: LocaleOption) => row.label}
-      itemToStringValue={(row: LocaleOption) => row.value}
-      isItemEqualToValue={(a: LocaleOption, b: LocaleOption) => a.value === b.value}
-      filter={(row: LocaleOption, q: string) => {
-        const needle = q.trim().toLowerCase()
-        if (!needle) return true
-        return row.label.toLowerCase().includes(needle) || row.value.toLowerCase().includes(needle)
-      }}
-    >
+    <div className="w-full">
+      <ComboboxPrimitive.Root
+        items={[...options]}
+        value={selected}
+        open={open}
+        onOpenChange={(next: boolean) => {
+          setOpen(next)
+          if (!next) setQuery("")
+        }}
+        inputValue={query}
+        onInputValueChange={(next: string) => setQuery(next)}
+        autoHighlight
+        onValueChange={(row: LocaleOption | null) => {
+          if (row) onValueChange(row.value)
+        }}
+        itemToStringLabel={(row: LocaleOption) => row.label}
+        itemToStringValue={(row: LocaleOption) => row.value}
+        isItemEqualToValue={(a: LocaleOption, b: LocaleOption) => a.value === b.value}
+        filter={(row: LocaleOption, q: string) => {
+          const needle = q.trim().toLowerCase()
+          if (!needle) return true
+          return row.label.toLowerCase().includes(needle) || row.value.toLowerCase().includes(needle)
+        }}
+      >
       <ComboboxPrimitive.Trigger
         id={id}
         className={cn(
@@ -133,6 +133,7 @@ function DesignLanguageCombobox({
         </ComboboxList>
       </ComboboxContent>
     </ComboboxPrimitive.Root>
+    </div>
   )
 }
 

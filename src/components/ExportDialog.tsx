@@ -67,6 +67,7 @@ import type { TextExportFormat } from "@/lib/export/project-zip-export"
 import { toast } from "@/components/ui/toast"
 
 import { previewAudioByCharacter } from "@/lib/export/audio-by-character"
+import { previewAudioByChapter } from "@/lib/export/audio-chapter"
 import { exportMetadataCsv } from "@/lib/export/exporters/metadata-csv"
 import { injectSdbhXml } from "@/lib/parsers/sdbh"
 import { useProjectCells } from "@/hooks/useProjectCells"
@@ -90,8 +91,9 @@ import {
 } from "@/lib/idml/release-gate"
 import { idmlTelemetryProperties } from "@/lib/idml/telemetry"
 
-export type ExportFormat = "usfm" | "txt" | "md" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "srt" | "audio-by-character" | "audio-by-line" | "character-sheets" | "project-report" | "docx" | "pptx" | "idml" | "plain-text-dump" | "metadata-csv" | "sdbh-xml"
+export type ExportFormat = "usfm" | "txt" | "md" | "tsv" | "csv" | "xlf" | "tmx" | "vtt" | "srt" | "audio-by-character" | "audio-by-line" | "audio-chapter" | "character-sheets" | "project-report" | "docx" | "pptx" | "idml" | "plain-text-dump" | "metadata-csv" | "sdbh-xml"
 export type ExportScope = "file" | "project"
+type AudioMode = "audio-by-character" | "audio-by-line" | "audio-chapter"
 
 interface FormatOption {
   id: ExportFormat
@@ -230,6 +232,14 @@ const BASE_FORMAT_OPTIONS: FormatOption[] = [
     labelKey: "importExport.format.audioByLine.label",
     ext: ".zip",
     descriptionKey: "importExport.format.audioByLine.description",
+    lossy: false,
+  },
+  {
+    // AQU-1201: verse recordings concatenated into one file per chapter.
+    id: "audio-chapter",
+    labelKey: "importExport.format.audioChapter.label",
+    ext: ".wav",
+    descriptionKey: "importExport.format.audioChapter.description",
     lossy: false,
   },
   // Advanced-only option — not shown in the main format list.
@@ -591,6 +601,10 @@ export function ExportDialog({
     () => audioPreview.reduce((n, c) => n + c.clipCount, 0),
     [audioPreview],
   )
+  const chapterPreview = useMemo(
+    () => previewAudioByChapter(audioSourceCells),
+    [audioSourceCells],
+  )
   /**
    * AQU-646 stage 4: takes living on ADDED tracks, which the preview above
    * cannot see.
@@ -666,7 +680,7 @@ export function ExportDialog({
   /** Which of the two audio deliverables the Audio card will produce. They are
    *  two forms of one thing — a mix track and a review folder — so they share a
    *  card and a button rather than competing as two entries in a list. */
-  const [audioMode, setAudioMode] = useState<"audio-by-character" | "audio-by-line">("audio-by-character")
+  const [audioMode, setAudioMode] = useState<AudioMode>("audio-by-character")
 
   /**
    * Remember the selection, per project and per user.
@@ -741,7 +755,7 @@ export function ExportDialog({
   const effectiveSubtitleTarget: SubtitleTarget =
     subtitleTarget === "audio" && hasAudioSibling ? "audio" : "subtitle"
 
-  const fileOnlyFormats = ["audio-by-character", "audio-by-line", "character-sheets", "vtt", "docx", "pptx", "idml", "plain-text-dump"] as const
+  const fileOnlyFormats = ["audio-by-character", "audio-by-line", "audio-chapter", "character-sheets", "vtt", "docx", "pptx", "idml", "plain-text-dump"] as const
   const isFileOnlyFormat = fileOnlyFormats.includes(format as typeof fileOnlyFormats[number])
   // SDBH XML reinjection spans every lexicon file — inherently project scope.
   // The report describes a PROJECT: name consistency only means anything across
@@ -790,7 +804,7 @@ export function ExportDialog({
       return true
     })
     if (!isDubbingFile) return visible
-    const featured = new Set<string>(["audio-by-character", "audio-by-line", nativeFormatId ?? ""])
+    const featured = new Set<string>(["audio-by-character", "audio-by-line", "audio-chapter", nativeFormatId ?? ""])
     const rest = visible.filter((f) => !featured.has(f.id))
     // The sibling subtitle format leads: a file imported as VTT features VTT
     // and offers SRT here, and the other way round.
@@ -922,7 +936,7 @@ export function ExportDialog({
   // Load cells for all project files when project scope is selected and the
   // format is a client-side one. Disabled until the user actually picks
   // project scope so we don't fan-out N fetches on dialog open.
-  const projectScopeEnabled = format === "sdbh-xml" || (scope === "project" && format !== "usfm" && format !== "audio-by-character" && format !== "audio-by-line" && format !== "vtt" && format !== "docx" && format !== "pptx" && format !== "plain-text-dump")
+  const projectScopeEnabled = format === "sdbh-xml" || (scope === "project" && format !== "usfm" && format !== "audio-by-character" && format !== "audio-by-line" && format !== "audio-chapter" && format !== "vtt" && format !== "docx" && format !== "pptx" && format !== "plain-text-dump")
 
   const { files: projectFileCells, isLoading: projectCellsLoading, error: projectCellsError } =
     useProjectCells({
@@ -1257,6 +1271,43 @@ export function ExportDialog({
           msg: lineNotes.length
             ? `Exported ${result.files} recordings — ${lineNotes.join("; ")}.`
             : `Exported ${result.files} recordings`,
+        })
+      } else if (fmt === "audio-chapter") {
+        // AQU-1201: concatenate verse takes in order into one file per chapter.
+        // The other two audio exports stay exactly as they are.
+        setStatus({ kind: "busy", msg: t("importExport.status.stitchingChapterAudio") })
+        const { exportAudioByChapter } = await import("@/lib/export/audio-chapter")
+        const { decodeToMono48k } = await import("@/lib/audio/decode-mono")
+        const { fetchCellAudio } = await import("@/lib/audio/upload")
+        const getSyncToken = (_pid: string, fileId: string) => getToken(fileId)
+        const result = await exportAudioByChapter({
+          cells: audioSourceCells,
+          projectId,
+          fetchBytes: ({ projectId: pid, fileId, audioId, ext }) =>
+            fetchCellAudio({ projectId: pid, fileId, audioId, ext, getSyncToken }),
+          decode: decodeToMono48k,
+          onProgress: (d, tot) =>
+            setStatus({ kind: "busy", msg: t("importExport.status.decodingCount", { done: d, total: tot }) }),
+        })
+        if (result.chapters === 0) {
+          const msg =
+            result.clips === 0
+              ? "No recordings found in this file, so there is nothing to export."
+              : `None of the ${result.clips} recordings could be read, so the export would be empty.`
+          setStatus({ kind: "error", msg })
+          return
+        }
+        const safeChapter = buildExportStem(false)
+        downloadBlob(result.blob, `${safeChapter}${result.downloadSuffix}`)
+        const notes: string[] = []
+        if (result.skipped > 0) {
+          notes.push(`${result.skipped} recording${result.skipped === 1 ? "" : "s"} could not be read`)
+        }
+        setStatus({
+          kind: "ok",
+          msg: notes.length
+            ? `${t("importExport.status.exportedAudioChapters", { count: result.chapters })} — ${notes.join("; ")}.`
+            : t("importExport.status.exportedAudioChapters", { count: result.chapters }),
         })
       } else if (fmt === "character-sheets") {
         // HER OWN FILES, BACK, CORRECTED. She resolves the disagreements here
@@ -1675,6 +1726,26 @@ export function ExportDialog({
           )
   }
 
+  /** How many verses will be stitched, and into how many chapter files. */
+  const renderChapterPreview = () => {
+    const preview = chapterPreview
+    return (
+      <div className="flex flex-col gap-1 text-xs" data-testid="export-chapter-preview">
+        <p className="font-medium text-muted-foreground text-[10px]">{t("importExport.dialog.characterPreviewHeading")}</p>
+        {preview.clipCount === 0 ? (
+          <p className="text-muted-foreground">{t("importExport.dialog.nothingRecordedYet")}</p>
+        ) : (
+          <p className="text-muted-foreground">
+            {t("importExport.dialog.chapterStitchPreview", {
+              clips: preview.clipCount,
+              chapters: preview.chapterCount,
+            })}
+          </p>
+        )}
+      </div>
+    )
+  }
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-md">
@@ -1794,6 +1865,11 @@ export function ExportDialog({
                     label: "By line",
                     hint: "One file per recording, numbered in playing order, each carrying a timestamp a DAW can place it from — plus a manifest listing them all. For reviewing and re-recording individual lines.",
                   },
+                  {
+                    id: "audio-chapter" as const,
+                    label: t("importExport.dialog.audioChapterModeLabel"),
+                    hint: t("importExport.dialog.audioChapterModeHint"),
+                  },
                 ]).map((mode) => (
                   <label
                     key={mode.id}
@@ -1827,7 +1903,7 @@ export function ExportDialog({
                 ))}
               </RadioGroup>
               {/* The preview belongs WITH the button that acts on it. */}
-              {renderCharacterPreview()}
+              {audioMode === "audio-chapter" ? renderChapterPreview() : renderCharacterPreview()}
               <Button
                 size="lg"
                 className="w-full justify-center"
@@ -2230,6 +2306,8 @@ export function ExportDialog({
         {!isDubbingFile && (format === "audio-by-character" || format === "audio-by-line")
           // i18n-exempt "file" is an ExportScope tag, not copy
           && effectiveScope === "file" && renderCharacterPreview()}
+        {!isDubbingFile && format === "audio-chapter"
+          && effectiveScope === "file" && renderChapterPreview()}
 
         {/* Lossy warning banner */}
         {isLossy && (

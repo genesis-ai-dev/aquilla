@@ -985,6 +985,16 @@ export const org = defineNamespace({
     }),
     "org.multiProjectInviteDialog.rolesSuffix": " — roles: {roles}",
     "org.multiProjectInviteDialog.sendInvitesButton": "Send invites",
+    // AQU-1149: page-level confirmation. The in-dialog "added"/"invited" row
+    // badges stay; these outlive the dialog so the outcome survives closing it.
+    "org.multiProjectInviteDialog.addedToast": plural({
+      one: "Added {username} to {count} project",
+      other: "Added {username} to {count} projects",
+    }),
+    "org.multiProjectInviteDialog.invitedToast": plural({
+      one: "Invite sent to {email} for {count} project",
+      other: "Invites sent to {email} for {count} projects",
+    }),
 
     // -- RemoveOrgMemberDialog: confirm-and-optionally-cascade org removal --
     "org.removeOrgMemberDialog.title": "Remove {username} from {orgName}?",
@@ -2306,6 +2316,22 @@ export const org = defineNamespace({
         description:
           "Trailing clause appended after org.multiProjectInviteDialog.projectsSelectedCount, only when more than one project is checked, listing the distinct roles chosen across them. Leading space is deliberate — it continues the preceding sentence rather than starting a new one.",
         placeholders: { roles: "Comma-joined list of the distinct, already-localized role names chosen across the checked projects." },
+      },
+      "org.multiProjectInviteDialog.addedToast": {
+        description:
+          "Success toast shown after the multi-project invite dialog grants an existing user membership, naming who was added and to how many projects. Counts only the projects that succeeded — when some fail, the failures stay as inline errors in the dialog and are not named here.",
+        placeholders: {
+          username: "The added person's username — not translated.",
+          count: "How many projects the grant succeeded on; also selects the plural form.",
+        },
+      },
+      "org.multiProjectInviteDialog.invitedToast": {
+        description:
+          "Success toast shown after the multi-project invite dialog sends email invites, naming the recipient address and how many project invites went out. Counts only the invites that were sent — failures stay as inline errors in the dialog.",
+        placeholders: {
+          email: "The recipient's email address — not translated.",
+          count: "How many project invites were sent; also selects the plural form.",
+        },
       },
       "org.removeOrgMemberDialog.title": {
         description: "Confirmation-dialog title naming who is being removed from which organization.",

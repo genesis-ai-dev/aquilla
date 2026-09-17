@@ -4,7 +4,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, waitFor, fireEvent } from "@testing-library/react"
 import { MultiProjectInviteDialog } from "./MultiProjectInviteDialog"
 import { createServerInvite } from "@/lib/sync/invites"
-import { addProjectMember } from "@/lib/frontier/members"
+import { addProjectMember, lookupUser } from "@/lib/frontier/members"
+import { toast } from "@/components/ui/toast"
 import type { RecipientValue } from "@/components/UsernameTypeahead"
 import type { CloudProjectSummary } from "@/lib/sync/cloud-projects"
 
@@ -20,6 +21,9 @@ vi.mock("@/lib/sync/invites", () => ({
 vi.mock("@/lib/frontier/members", () => ({
   addProjectMember: vi.fn(async () => ({})),
   lookupUser: vi.fn(async () => null),
+}))
+vi.mock("@/components/ui/toast", () => ({
+  toast: { add: vi.fn(), close: vi.fn(), update: vi.fn(), promise: vi.fn() },
 }))
 vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "jwt" }, loading: false }),
@@ -123,5 +127,84 @@ describe("MultiProjectInviteDialog email mode (AQU-471)", () => {
       target: { value: "bob@example.com" },
     })
     expect(screen.getByRole("button", { name: /send invites/i })).toBeEnabled()
+  })
+})
+
+// AQU-1149: the row badges die with the dialog, so the outcome also has to be
+// announced at page level. The toast counts SUCCESSES only — a partial failure
+// must not be rounded up to "added to 2 projects" while one of them failed.
+describe("MultiProjectInviteDialog confirmation toast (AQU-1149)", () => {
+  function selectBothProjects() {
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select John" }))
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Mark" }))
+  }
+
+  async function addAsUsername() {
+    vi.mocked(lookupUser).mockResolvedValue({ id: 7, username: "ciaran" })
+    renderDialog()
+    fireEvent.change(screen.getByLabelText("recipient-input"), {
+      target: { value: "ciaran" },
+    })
+    selectBothProjects()
+    fireEvent.click(screen.getByRole("button", { name: /add to projects/i }))
+  }
+
+  it("names the recipient and the project count after a clean add", async () => {
+    await addAsUsername()
+    await waitFor(() =>
+      expect(toast.add).toHaveBeenCalledWith({
+        type: "success",
+        title: "Added ciaran to 2 projects",
+      }),
+    )
+  })
+
+  it("counts only the successes on a partial failure, and keeps the error inline", async () => {
+    vi.mocked(addProjectMember)
+      .mockResolvedValueOnce({} as never)
+      .mockRejectedValueOnce(new Error("nope"))
+    await addAsUsername()
+    await waitFor(() =>
+      expect(toast.add).toHaveBeenCalledWith({
+        type: "success",
+        title: "Added ciaran to 1 project",
+      }),
+    )
+    // The failure stays where the operator can act on it, not in the toast.
+    expect(await screen.findByText("added")).toBeInTheDocument()
+    expect(toast.add).toHaveBeenCalledTimes(1)
+  })
+
+  it("stays silent when every project fails", async () => {
+    vi.mocked(addProjectMember)
+      .mockRejectedValueOnce(new Error("nope"))
+      .mockRejectedValueOnce(new Error("nope"))
+    const onSuccess = vi.fn()
+    vi.mocked(lookupUser).mockResolvedValue({ id: 7, username: "ciaran" })
+    renderDialog(onSuccess)
+    fireEvent.change(screen.getByLabelText("recipient-input"), {
+      target: { value: "ciaran" },
+    })
+    selectBothProjects()
+    fireEvent.click(screen.getByRole("button", { name: /add to projects/i }))
+    await waitFor(() => expect(addProjectMember).toHaveBeenCalledTimes(2))
+    expect(toast.add).not.toHaveBeenCalled()
+    expect(onSuccess).not.toHaveBeenCalled()
+  })
+
+  it("announces invites sent in email mode", async () => {
+    renderDialog()
+    fireEvent.click(screen.getByText("toggle-mode"))
+    fireEvent.change(screen.getByLabelText("recipient-input"), {
+      target: { value: "bob@example.com" },
+    })
+    selectBothProjects()
+    fireEvent.click(screen.getByRole("button", { name: /send invites/i }))
+    await waitFor(() =>
+      expect(toast.add).toHaveBeenCalledWith({
+        type: "success",
+        title: "Invites sent to bob@example.com for 2 projects",
+      }),
+    )
   })
 })

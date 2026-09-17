@@ -139,12 +139,26 @@ function Readout({ left, right, leftTip, rightTip }: {
         <ReadoutFigure tip={leftTip}>{left}</ReadoutFigure>
         <span className="sr-only">{" | "}</span>
       </span>
-      <span aria-hidden className="mx-[4px] h-[18px] w-px shrink-0 bg-current opacity-30" />
+      <PlanRule className="mx-[4px]" />
       <span className="flex-1 text-start">
         <ReadoutFigure tip={rightTip}>{right}</ReadoutFigure>
       </span>
     </span>
   )
+}
+
+/**
+ * The board's one divider between two things on a line: a thin vertical rule
+ * in the surrounding text's colour, taller than the digits it sits between.
+ * Born as the readout's "and" between translated and validated; the in-order
+ * row's count line uses the same rule between the cell count and the status
+ * ("120 cells | ● Nearly complete") because a middle dot there sat beside the
+ * status's own dot and read as two dots (Sam, 2026-09-17). Decorative only:
+ * hidden from assistive tech, so a caller that needs a spoken separator adds
+ * its own sr-only text.
+ */
+export function PlanRule({ className = "" }: { className?: string }) {
+  return <span aria-hidden className={`h-[18px] w-px shrink-0 bg-current opacity-30 ${className}`} />
 }
 
 /**

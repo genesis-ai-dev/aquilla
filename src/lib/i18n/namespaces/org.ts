@@ -1308,7 +1308,7 @@ export const org = defineNamespace({
     // many chapters are in the list, which the caller passes alongside — it is
     // not in the string, the same arrangement the summary pills use.
     "org.projectOverview.plan.shortfallWhere": plural({ one: "chapter {list}", other: "chapters {list}" }),
-    "org.projectOverview.plan.shortfallWhereMore": plural({ one: "{list} and {count} more", other: "{list} and {count} more" }),
+    "org.projectOverview.plan.shortfallWhereMore": plural({ one: "chapters {list} and {count} more", other: "chapters {list} and {count} more" }),
     // The links out of the plan and into the editor, landing on the first cell
     // that is actually missing something. Two keys rather than one with a
     // {kind} placeholder: an inflecting language cannot build "first
@@ -1405,7 +1405,7 @@ export const org = defineNamespace({
     // Who owns which slice of a unit, and how far along their slice is.
     "org.projectOverview.plan.assignedTo": "Assigned to",
     "org.projectOverview.plan.assign": "Assign",
-    "org.projectOverview.plan.assignmentScope": "{scope} \u00b7 {count} cells",
+    "org.projectOverview.plan.assignmentScope": plural({ one: "{scope} \u00b7 {count} cell", other: "{scope} \u00b7 {count} cells" }),
     "org.projectOverview.plan.assignmentDue": "due {date}",
     "org.projectOverview.plan.assignmentNoDeadline": "no deadline",
     // AQU-1278: the tail of a person's shortfall line — "2 to validate · ch. 12".
@@ -3020,7 +3020,7 @@ export const org = defineNamespace({
       },
       "org.projectOverview.plan.assignmentScope": {
         description:
-          "One row of the inspector's assignment list: what a person has been given and how big it is — \"Chapters 3–9 · 412 cells\". Not count-governed: the English noun stays plural whatever the number is. A locale whose noun must agree with {count} needs this key changed to a plural one, not worked around in translation.",
+          "One row of the inspector's assignment list: what a person has been given and how big it is — \"Chapters 3–9 · 412 cells\". Plural-governed by {count}: a one-cell assignment reads \"· 1 cell\".",
         placeholders: {
           scope: "The assigned slice, already formatted by the caller — e.g. 'Chapters 3–9' or a file name. Not translated.",
           count: "Cells in that slice — a number.",

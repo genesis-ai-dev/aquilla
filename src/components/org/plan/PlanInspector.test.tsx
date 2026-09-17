@@ -836,3 +836,25 @@ describe("the chapter's verses belong to the language on screen", () => {
     expect(getFileSectionProgress).toHaveBeenCalledTimes(1)
   })
 })
+
+describe("the chapter card names front matter in words", () => {
+  it("titles a book's front matter 'front matter', not its bare book code", async () => {
+    // The tile already uses the word; the card's title kept the raw key, so a
+    // reader opening the tile saw "GEN" as a title with no reason to know it
+    // meant the bit before chapter 1.
+    vi.mocked(getFileSectionProgress).mockResolvedValue({ verses: [] } as never)
+    render(
+      <PlanInspector unit={nearlyDone({ sectionKey: "GEN" })} now={NOW} canPlan showAudio={false}
+        projectId="p1" languageLabel="German" lane=""
+        getToken={withSections([
+          section("GEN", { totalCount: 5, filledCount: 5, validatedCount: 4 }),
+          section("GEN 1", { totalCount: 20, filledCount: 20, validatedCount: 20 }),
+        ])}
+        onPatch={vi.fn().mockResolvedValue(true)} onClose={vi.fn()} onStep={vi.fn()} />,
+    )
+    await waitFor(() => expect(screen.getByTestId("plan-tile-GEN")).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId("plan-tile-GEN"))
+    await waitFor(() => expect(screen.getByTestId("plan-chapter-detail")).toBeInTheDocument())
+    expect(screen.getByTestId("plan-chapter-detail-title")).toHaveTextContent(/^front matter$/)
+  })
+})

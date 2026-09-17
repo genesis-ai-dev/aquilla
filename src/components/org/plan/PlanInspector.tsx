@@ -204,11 +204,16 @@ export function PlanInspector({
     const numbered = numberedBookCodes(sections.map((s) => s.key))
     const kind = classifyPlanSection(openSection.key, numbered)
     // A numbered chapter — and a one-chapter book, which IS chapter 1 — names
-    // itself that way. Front matter and a document's own sections keep the
-    // names they have; "Chapter Scene 4" would invent one that does not exist.
+    // itself that way. Front matter gets the words the grid's own tile uses
+    // for it rather than its bare book code, which a reader has no reason to
+    // recognise as "the bit before chapter 1". A document's own sections keep
+    // the names they have; "Chapter Scene 4" would invent one that does not
+    // exist.
     return kind.kind === "chapter"
       ? t("org.projectOverview.plan.chapterTitle", { chapter: kind.n })
-      : openSection.key
+      : kind.kind === "frontMatter"
+        ? t("org.projectOverview.plan.frontMatter")
+        : openSection.key
   })()
   const shortChapters = sections.filter(
     // `hasAudio`, not `showAudio`. showAudio is a PROJECT-wide question — does

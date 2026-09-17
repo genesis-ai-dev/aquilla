@@ -154,7 +154,14 @@ describe('RenameFile', () => {
     ])
     expect(staged.res.status).toBe(200)
     // Desugaring is visible in the stored plan: it holds the file.rename event.
-    expect(staged.body.summary.events).toEqual([{ kind: 'file.rename', count: 1, testimony: false }])
+    expect(staged.body.summary.events).toEqual([
+      {
+        kind: 'file.rename',
+        count: 1,
+        testimony: false,
+        label: 'Rename a file',
+      },
+    ])
 
     const applied = await commit(env, contributor.token, staged.body.changeset.id)
     expect(applied.res.status).toBe(200)

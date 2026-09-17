@@ -1,18 +1,18 @@
 // NewVoiceModal — one modal, two ways to make a voice:
-//   • TTS voice — name it, pick the engine (Inworld / Gemini / Kokoro / MMS —
+//   • TTS voice — name it, pick the engine (Inworld / Gemini / MMS —
 //     seeded from the project's configured engine), and fill that engine's
-//     knobs (Gemini: describe how it sounds; Kokoro: pick a bundled speaker;
-//     MMS: language; Inworld: prebuilt catalog voice or Voice Design, plus
-//     quality / delivery / speed).
+//     knobs (Gemini: describe how it sounds; MMS: language; Inworld: prebuilt
+//     catalog voice (searchable API language + accent, then a stock speaker)
+//     or Voice Design, plus quality / delivery / speed).
 //     Gemini's base timbre stays a smart default (rotated so each new voice
-//     sounds distinct).
+//     sounds distinct). Leftover Kokoro project defaults remap to Inworld.
 //   • Clone voice — name it, pick a cloud engine that can clone (Inworld /
-//     Gemini — Kokoro and MMS are on-device and cannot), and capture a short
+//     Gemini — MMS is on-device and cannot), and capture a short
 //     reference clip (record, upload, or reuse a take). Generation is re-voiced
 //     to match it. A local project default is remapped to Inworld on this tab.
 //
 // Editing an existing voice reuses this same modal, locked to the voice's kind
-// (TTS: all four engines; clone: cloud clone engines only).
+// (TTS: all three engines; clone: cloud clone engines only).
 // Deliberately de-purpled: TTS uses the brand accent, Clone uses emerald.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
@@ -37,7 +37,6 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { VoiceCloneSection } from "@/components/VoiceCloneSection"
-import { KokoroVoiceField } from "@/components/voice/KokoroVoiceField"
 import { cn } from "@/lib/utils"
 import { isRecordedCloneClip, newVoiceId, VOICE_PALETTE } from "@/lib/audio/voices"
 import {
@@ -59,7 +58,7 @@ import {
   DEFAULT_INWORLD_DELIVERY_MODE,
 } from "@/lib/audio/inworld-voice-settings"
 import { InworldVoiceField } from "@/components/voice/InworldVoiceField"
-import { InworldLanguageField } from "@/components/voice/InworldLanguageField"
+import { InworldDesignLocaleFields } from "@/components/voice/InworldDesignLocaleFields"
 import { InworldVoiceSettings } from "@/components/voice/InworldVoiceSettings"
 import {
   InworldVoiceDesignField,
@@ -218,6 +217,12 @@ function NewVoiceModalBody({
   const setInworldVoice = useCallback((voiceId: string, language?: string) => {
     update({ voiceName: voiceId, language })
   }, [update])
+  const inworldLocaleLanguage = draft.language
+    ?? catalogLanguages.find((lane) => toInworldLanguage(lane))
+    ?? catalogLanguages[0]
+  const setInworldLanguage = useCallback((language: string) => {
+    update({ language })
+  }, [update])
   const [deleteOpen, setDeleteOpen] = useState(false)
 
   // Engine is per-voice; legacy voices without one follow the project default.
@@ -310,7 +315,7 @@ function NewVoiceModalBody({
     let next: Voice = { ...draft, name: draft.name.trim() || fallback }
     if (mode === "clone") {
       // A clone rides a cloning-capable engine; fall back to the hosted default
-      // if the draft's engine (kokoro/mms) can't re-voice a reference.
+      // if the draft's engine (mms) can't re-voice a reference.
       const base = draft.provider ?? projectProvider
       const cloneProvider = providerInfo(base).supportsCloning ? base : DEFAULT_TTS_PROVIDER
       next = normalizeVoiceForProvider(next, cloneProvider, { targetLanguage })
@@ -396,9 +401,9 @@ function NewVoiceModalBody({
                   if (!providerInfo(current).supportsCloning) pickProvider(DEFAULT_TTS_PROVIDER)
                 }
               }}
-              className="gap-0"
+              className="w-full gap-0"
             >
-              <TabsList size="lg" className="w-full" aria-label={t("audio.newVoice.kindGroupLabel")}>
+              <TabsList size="lg" className="grid w-full grid-cols-2" aria-label={t("audio.newVoice.kindGroupLabel")}>
                 <TabsTrigger value="tts">
                   <Sparkles /> {t("audio.newVoice.tabTts")}
                 </TabsTrigger>
@@ -425,7 +430,7 @@ function NewVoiceModalBody({
               />
             </Field>
 
-            {/* Engine — TTS offers all four; clone only the cloud engines that
+            {/* Engine — TTS offers cloud + MMS; clone only the cloud engines that
                 can re-voice a reference. Same slot on both tabs so the control
                 doesn't jump. */}
             <Field>
@@ -437,23 +442,20 @@ function NewVoiceModalBody({
               />
             </Field>
 
-            {mode === "tts" && activeProvider === "kokoro" && (
-              <KokoroVoiceField
-                value={draft.voiceName ?? ""}
-                targetLanguage={targetLanguage}
-                onChange={(v) => update({ voiceName: v || undefined })}
-              />
-            )}
             {mode === "tts" && activeProvider === "mms" && (
               <MmsLanguageField
                 value={draft.voiceName ?? ""}
                 onChange={(v) => update({ voiceName: v || undefined })}
               />
             )}
-            {activeProvider === "inworld" && languagePicker && !(mode === "tts" && inworldSource === "design") && (
-              <InworldLanguageField
-                value={draft.language}
-                onChange={(language) => update({ language })}
+            {mode === "clone" && activeProvider === "inworld" && (
+              <InworldDesignLocaleFields
+                copy="catalog"
+                language={inworldLocaleLanguage}
+                onLanguageChange={setInworldLanguage}
+                projectId={projectId}
+                fileId={fileId}
+                session={session}
               />
             )}
             {mode === "tts" && activeProvider === "inworld" && (
@@ -463,7 +465,7 @@ function NewVoiceModalBody({
                   onValueChange={(value) => setInworldSource(value as "prebuilt" | "design")}
                   className="gap-0"
                 >
-                  <TabsList className="w-full" aria-label={t("audio.newVoice.inworldSourceGroupLabel")}>
+                  <TabsList aria-label={t("audio.newVoice.inworldSourceGroupLabel")}>
                     <TabsTrigger value="prebuilt">
                       {t("audio.newVoice.tabPrebuilt")}
                     </TabsTrigger>
@@ -473,15 +475,26 @@ function NewVoiceModalBody({
                   </TabsList>
                 </Tabs>
                 {inworldSource === "prebuilt" ? (
-                  <InworldVoiceField
-                    value={draft.voiceName}
-                    language={draft.language}
-                    onChange={setInworldVoice}
-                    targetLanguages={catalogLanguages}
-                    projectId={projectId}
-                    fileId={fileId}
-                    session={session}
-                  />
+                  <>
+                    <InworldDesignLocaleFields
+                      copy="catalog"
+                      voicesOnly
+                      language={inworldLocaleLanguage}
+                      onLanguageChange={setInworldLanguage}
+                      projectId={projectId}
+                      fileId={fileId}
+                      session={session}
+                    />
+                    <InworldVoiceField
+                      value={draft.voiceName}
+                      language={draft.language}
+                      onChange={setInworldVoice}
+                      targetLanguages={draft.language ? [draft.language] : catalogLanguages}
+                      projectId={projectId}
+                      fileId={fileId}
+                      session={session}
+                    />
+                  </>
                 ) : (
                   <InworldVoiceDesignField
                     prompt={draft.prompt ?? ""}
@@ -491,7 +504,7 @@ function NewVoiceModalBody({
                     existingVoiceId={isInworldDesignedVoiceId(draft.voiceName) ? draft.voiceName : undefined}
                     existingPreviewAudioId={draft.designPreviewAudioId}
                     language={draft.language ?? catalogLanguages.find((lane) => toInworldLanguage(lane))}
-                    onLanguageChange={(language) => update({ language })}
+                    onLanguageChange={setInworldLanguage}
                     projectId={projectId}
                     fileId={fileId}
                     session={session}
@@ -696,7 +709,7 @@ function CloneReferenceSource({
       onValueChange={(value) => setSource(value as CloneSource)}
       className="gap-2"
     >
-      <TabsList className="w-full" aria-label={t("audio.newVoice.referenceSourceGroupLabel")}>
+      <TabsList aria-label={t("audio.newVoice.referenceSourceGroupLabel")}>
         <TabsTrigger value="record" className="pe-3">
           {t("audio.newVoice.referenceLabel")}
           {clipFilled && (

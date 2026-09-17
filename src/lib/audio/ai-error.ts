@@ -26,8 +26,19 @@ import {
   SEED_VC_NOT_CONFIGURED_BODY,
 } from "./tts-engine-error"
 
+/** Shown when hosted drafting has no OpenRouter key. Names the setting to
+ *  change and states that a user-supplied key is not Aquilla-billed. */
+const OPENROUTER_KEY_REQUIRED_BODY =
+  "This server has no OpenRouter key for hosted AI. In Project Settings → Advanced LLM, switch the provider to Custom, choose OpenRouter, and paste your key. Your key is sent from this browser to OpenRouter and is not billed as Aquilla usage."
+
+/** Drafting/chat-proxy failures. Must not be classified as TTS/voice errors. */
+function isTextGenerationFailure(lowered: string): boolean {
+  return lowered.includes("completion failed")
+}
+
 export type ErrorCategory =
   | "missing-gemini-key"
+  | "missing-openrouter-key"
   | "gemini-failed"
   | "hosted-tts-not-configured"
   | "hosted-tts-failed"
@@ -138,14 +149,32 @@ export function categorizeAiError(rawMessage: string): ActionableError {
     }
   }
 
+  // AQU-1158: a completion/chat-proxy failure is never a voice-engine
+  // problem. The hosted drafting path returns
+  // `OPENROUTER_API_KEY is not configured`; the old `api_key` heuristic
+  // below swallowed that and titled it "Gemini API key required".
+  if (
+    m.includes("openrouter_api_key") ||
+    m.includes("openrouter api key") ||
+    m.includes("openrouter_not_configured")
+  ) {
+    return {
+      category: "missing-openrouter-key",
+      title: t("audio.aiError.openRouterKeyRequiredTitle"),
+      body: OPENROUTER_KEY_REQUIRED_BODY,
+      raw,
+    }
+  }
+
   // Hosted TTS / clone conversion — name the engine BEFORE the Gemini-key
   // heuristic. A local sync-worker 503 ("TTS not configured") is Inworld,
   // not a missing Google key; sending people to Gemini settings is a lie.
-  if (
+  // Text-generation failures must not take these branches either.
+  if (!isTextGenerationFailure(m) && (
     m.includes("this line uses inworld") ||
     m.includes("tts not configured") ||
     (m.includes("voice/tts") && (status === 503 || m.includes("not configured")))
-  ) {
+  )) {
     return {
       category: "hosted-tts-not-configured",
       title: t("audio.aiError.inworldNotConfiguredTitle"),
@@ -189,12 +218,16 @@ export function categorizeAiError(rawMessage: string): ActionableError {
     }
   }
 
-  if (m.includes("api key") || m.includes("api_key") || m.includes("apikey") ||
-      (m.includes("gemini") && m.includes("key"))) {
+  // Gemini TTS only. A generic "api_key" substring (OPENROUTER_API_KEY,
+  // "invalid api key", …) is not a Gemini-voice failure.
+  if (
+    !isTextGenerationFailure(m) &&
+    (m.includes("gemini") && (m.includes("api key") || m.includes("api_key") || m.includes("apikey") || m.includes("key")))
+  ) {
     return {
       category: "missing-gemini-key",
       title: t("audio.aiError.geminiKeyRequiredTitle"),
-      body: "Add a Gemini API key to use this Gemini voice, or switch the line to Inworld TTS (hosted, no key) or a local engine (Kokoro or MMS).",
+      body: "Add a Gemini API key to use this Gemini voice, or switch the line to Inworld TTS (hosted, no key) or a local MMS engine.",
       raw,
     }
   }
@@ -250,7 +283,7 @@ export function categorizeAiError(rawMessage: string): ActionableError {
       title: t("audio.aiError.ttsNotConfiguredTitle"),
       // Worded to follow its own title rather than repeat it — the recorder
       // renders the two as one sentence.
-      body: "Switch this project to a local voice (Kokoro or MMS), which runs in the browser, or ask an administrator to configure the server voice service.",
+      body: "Switch this project to a local MMS voice, which runs in the browser, or ask an administrator to configure the server voice service.",
       raw,
     }
   }

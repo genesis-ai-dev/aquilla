@@ -2,17 +2,22 @@
 // Publish happens on Create/Save in NewVoiceModal, not here.
 
 import { useEffect, useRef, useState } from "react"
+import { useForm } from "@tanstack/react-form"
+import { z } from "zod"
 import { ExternalLink, Pause, Play, RotateCcw } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Field, FieldLabel } from "@/components/ui/field"
+import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { AppTooltip } from "@/components/ui/tooltip"
 import { Textarea } from "@/components/ui/textarea"
 import { InworldDesignLocaleFields } from "@/components/voice/InworldDesignLocaleFields"
 import { InworldDesignPresetChips } from "@/components/voice/InworldDesignPresetChips"
 import { VoiceInfoTip } from "@/components/voice/VoiceInfoTip"
-import { useT } from "@/lib/i18n/I18nProvider"
+import { isFieldInvalid } from "@/lib/forms/field-state"
+import { useSubmitError } from "@/lib/forms/submit-error"
+import { useT, type TFunction } from "@/lib/i18n/I18nProvider"
 import { audioSyncTokenFetcherForSession } from "@/lib/audio/sync-token-fetcher"
 import { getCellAudioStreamUrl, parseFrontierAudioUrl } from "@/lib/audio/upload"
 import { audioMimeForExt } from "@/lib/audio/mime"
@@ -37,6 +42,36 @@ import { designInworldVoice, synthesizeCellTts, type InworldDesignedPreview } fr
 import { cn } from "@/lib/utils"
 import type { FrontierSession } from "@/lib/frontier/types"
 import type { Voice } from "@/lib/parsers/types"
+
+function designPreviewSchema(t: TFunction) {
+  return z.object({
+    mode: z.enum(["freeform", "structured"]),
+    prompt: z.string(),
+    script: z.string(),
+  }).superRefine((data, ctx) => {
+    const prompt = data.prompt.trim()
+    if (data.mode === "structured" && !structuredDesignPromptHasValue(data.prompt)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: t("audio.newVoice.designStructuredEmpty"),
+        path: ["prompt"],
+      })
+    } else if (prompt.length < INWORLD_DESIGN_PROMPT_MIN) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: t("audio.newVoice.designPromptTooShort"),
+        path: ["prompt"],
+      })
+    }
+    if (data.script.trim().length < INWORLD_DESIGN_PREVIEW_TEXT_MIN) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: t("audio.newVoice.designScriptTooShort"),
+        path: ["script"],
+      })
+    }
+  })
+}
 
 export type InworldDesignSelection = {
   voiceId: string
@@ -80,70 +115,93 @@ export function InworldVoiceDesignField({
   audioQuality?: Voice["audioQuality"]
 }) {
   const t = useT()
-  const [mode, setMode] = useState<InworldDesignMode>(() => initialInworldDesignMode(prompt))
-  const [freeformDraft, setFreeformDraft] = useState(() =>
-    looksLikeInworldVoiceProfile(prompt) ? "" : prompt,
-  )
+  const savedProfile = looksLikeInworldVoiceProfile(prompt)
+  const [freeformDraft, setFreeformDraft] = useState(() => (savedProfile ? "" : prompt))
   const [structuredDraft, setStructuredDraft] = useState(() =>
-    looksLikeInworldVoiceProfile(prompt) ? prompt : blankStructuredDesignPrompt(),
+    savedProfile ? prompt : blankStructuredDesignPrompt(),
   )
   const [previews, setPreviews] = useState<InworldDesignedPreview[]>([])
-  const [generating, setGenerating] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [playingId, setPlayingId] = useState<string | null>(null)
   const [loadingSaved, setLoadingSaved] = useState(false)
-  const [script, setScript] = useState(INWORLD_DESIGN_DEFAULT_PREVIEW_TEXT)
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const aliveRef = useRef(true)
   const savedSrcRef = useRef<string | null>(null)
-  const designPrompt = (mode === "structured" ? structuredDraft : prompt).trim()
-  const trimmed = prompt.trim()
-  const trimmedScript = script.trim()
-  const tooShort = mode === "freeform" && trimmed.length > 0 && trimmed.length < INWORLD_DESIGN_PROMPT_MIN
-  const scriptTooShort = trimmedScript.length > 0 && trimmedScript.length < INWORLD_DESIGN_PREVIEW_TEXT_MIN
-  const promptReady = mode === "structured"
-    ? structuredDesignPromptHasValue(structuredDraft)
-      && structuredDraft.length >= INWORLD_DESIGN_PROMPT_MIN
-      && structuredDraft.length <= INWORLD_DESIGN_PROMPT_MAX
-    : trimmed.length >= INWORLD_DESIGN_PROMPT_MIN
-      && trimmed.length <= INWORLD_DESIGN_PROMPT_MAX
-  const canGenerate = promptReady
-    && trimmedScript.length >= INWORLD_DESIGN_PREVIEW_TEXT_MIN
-    && trimmedScript.length <= INWORLD_DESIGN_PREVIEW_TEXT_MAX
-    && !generating
+  const { submitError, setSubmitError, clearSubmitError } = useSubmitError()
+
+  const form = useForm({
+    defaultValues: {
+      mode: initialInworldDesignMode(prompt),
+      prompt,
+      script: INWORLD_DESIGN_DEFAULT_PREVIEW_TEXT,
+    },
+    validators: { onSubmit: designPreviewSchema(t) },
+    onSubmit: async ({ value }) => {
+      if (!projectId || !fileId || !session) {
+        setSubmitError(t("audio.newVoice.errorDesignNoProject"))
+        return
+      }
+      stopPreview()
+      clearSubmitError()
+      try {
+        const rows = await designInworldVoice(
+          {
+            projectId,
+            fileId,
+            designPrompt: value.prompt.trim(),
+            previewText: value.script.trim(),
+            numberOfSamples: INWORLD_DESIGN_SAMPLE_COUNT,
+            ...(value.mode === "structured" ? { designPromptMode: INWORLD_DESIGN_PROMPT_MODE_VERBATIM } : {}),
+            ...(language ? { language } : {}),
+          },
+          audioSyncTokenFetcherForSession(session),
+        )
+        setPreviews(rows)
+        const first = rows[0]
+        if (first) {
+          onSelectionChange(unpublishedSelection(first))
+          playPreview(first)
+        } else {
+          onSelectionChange(null)
+        }
+      } catch (err) {
+        setPreviews([])
+        onSelectionChange(null)
+        setSubmitError(err instanceof Error ? err.message : String(err))
+      }
+    },
+  })
 
   const selectMode = (next: InworldDesignMode) => {
-    if (next === mode) return
+    if (next === form.getFieldValue("mode")) return
     if (next === "structured") {
-      const nextText = looksLikeInworldVoiceProfile(prompt)
-        ? prompt
+      const current = form.getFieldValue("prompt")
+      const nextText = looksLikeInworldVoiceProfile(current)
+        ? current
         : structuredDraft.trim().length > 0
           ? structuredDraft
           : blankStructuredDesignPrompt()
       setStructuredDraft(nextText)
+      form.setFieldValue("prompt", nextText)
       onPromptChange(nextText)
     } else {
+      form.setFieldValue("prompt", freeformDraft)
       onPromptChange(freeformDraft)
     }
-    setMode(next)
+    form.setFieldValue("mode", next)
   }
 
-  const canPlaySaved = Boolean(existingVoiceId)
-    && !generating
-    && (
-      Boolean(existingPreviewAudioId)
-      || (
-        trimmedScript.length >= INWORLD_DESIGN_PREVIEW_TEXT_MIN
-        && trimmedScript.length <= INWORLD_DESIGN_PREVIEW_TEXT_MAX
-      )
-    )
   const savedPlaybackKey = existingPreviewAudioId
-    ?? `${existingVoiceId ?? ""}:${trimmedScript}:${language ?? ""}:${speakingRate ?? ""}:${deliveryMode ?? ""}:${audioQuality ?? ""}`
+    ?? `${existingVoiceId ?? ""}:${language ?? ""}:${speakingRate ?? ""}:${deliveryMode ?? ""}:${audioQuality ?? ""}`
 
   useEffect(() => {
     if (savedSrcRef.current?.startsWith("blob:")) URL.revokeObjectURL(savedSrcRef.current)
     savedSrcRef.current = null
   }, [savedPlaybackKey])
+
+  const dropSavedSrc = () => {
+    if (savedSrcRef.current?.startsWith("blob:")) URL.revokeObjectURL(savedSrcRef.current)
+    savedSrcRef.current = null
+  }
 
   const haltAudio = (audio: HTMLAudioElement | null) => {
     if (!audio) return
@@ -173,45 +231,6 @@ export function InworldVoiceDesignField({
     haltAudio(audioRef.current)
     audioRef.current = null
     setPlayingId(null)
-  }
-
-  const generate = async () => {
-    if (!canGenerate) return
-    if (!projectId || !fileId || !session) {
-      setError(t("audio.newVoice.errorDesignNoProject"))
-      return
-    }
-    stopPreview()
-    setGenerating(true)
-    setError(null)
-    try {
-      const rows = await designInworldVoice(
-        {
-          projectId,
-          fileId,
-          designPrompt,
-          previewText: trimmedScript,
-          numberOfSamples: INWORLD_DESIGN_SAMPLE_COUNT,
-          ...(mode === "structured" ? { designPromptMode: INWORLD_DESIGN_PROMPT_MODE_VERBATIM } : {}),
-          ...(language ? { language } : {}),
-        },
-        audioSyncTokenFetcherForSession(session),
-      )
-      setPreviews(rows)
-      const first = rows[0]
-      if (first) {
-        onSelectionChange(unpublishedSelection(first))
-        playPreview(first)
-      } else {
-        onSelectionChange(null)
-      }
-    } catch (err) {
-      setPreviews([])
-      onSelectionChange(null)
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setGenerating(false)
-    }
   }
 
   const playSrc = (src: string, id: string) => {
@@ -251,12 +270,18 @@ export function InworldVoiceDesignField({
       stopPreview()
       return
     }
+    const script = form.getFieldValue("script").trim()
+    const canPlaySaved = Boolean(existingPreviewAudioId)
+      || (
+        script.length >= INWORLD_DESIGN_PREVIEW_TEXT_MIN
+        && script.length <= INWORLD_DESIGN_PREVIEW_TEXT_MAX
+      )
     if (loadingSaved || !canPlaySaved) return
     if (!projectId || !fileId || !session) {
-      setError(t("audio.newVoice.errorDesignNoProject"))
+      setSubmitError(t("audio.newVoice.errorDesignNoProject"))
       return
     }
-    setError(null)
+    clearSubmitError()
     if (savedSrcRef.current) {
       playSrc(savedSrcRef.current, existingVoiceId)
       return
@@ -283,7 +308,7 @@ export function InworldVoiceDesignField({
         {
           projectId,
           fileId,
-          text: trimmedScript,
+          text: script,
           voiceId: existingVoiceId,
           ...(language ? { language } : {}),
           ...(speakingRate !== undefined ? { speakingRate } : {}),
@@ -307,143 +332,171 @@ export function InworldVoiceDesignField({
       savedSrcRef.current = src
       playSrc(src, existingVoiceId)
     } catch (err) {
-      if (aliveRef.current) setError(err instanceof Error ? err.message : String(err))
+      if (aliveRef.current) setSubmitError(err instanceof Error ? err.message : String(err))
     } finally {
       if (aliveRef.current) setLoadingSaved(false)
     }
   }
 
   return (
-    <div className="space-y-3">
-      <Tabs
-        value={mode}
-        onValueChange={(value) => {
-          if (value === "freeform" || value === "structured") selectMode(value)
+    <form
+      className="flex flex-col gap-5 space-y-4"
+      onSubmit={(e) => {
+        e.preventDefault()
+        void form.handleSubmit()
+      }}
+    >
+      <form.Subscribe
+        selector={(state) => state.values.mode}
+        children={(mode) => {
+          const promptFieldId = mode === "freeform" ? "inworld-design-prompt" : "inworld-design-profile"
+          return (
+            <Field className="gap-2.5">
+              <div className={cn("flex flex-col gap-1", mode === "structured" && "min-w-0")}>
+                <FieldLabel htmlFor={promptFieldId}>
+                  {mode === "freeform"
+                    ? t("audio.newVoice.describeLabel")
+                    : t("audio.newVoice.designStructuredLabel")}
+                </FieldLabel>
+                <p className="text-[11px] text-muted-foreground">
+                  {mode === "freeform"
+                    ? t("audio.newVoice.designPromptHint")
+                    : t("audio.newVoice.designStructuredHint")}{" "}
+                  <a
+                    href={INWORLD_VOICE_DESIGN_DOCS_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 underline underline-offset-2 hover:text-foreground"
+                  >
+                    {t("audio.newVoice.designDocsLink")}
+                    <ExternalLink className="size-3" aria-hidden />
+                  </a>
+                </p>
+              </div>
+
+              <Tabs
+                value={mode}
+                onValueChange={(value) => {
+                  if (value === "freeform" || value === "structured") selectMode(value)
+                }}
+                className="gap-0"
+              >
+                <TabsList aria-label={t("audio.newVoice.designModeGroupLabel")}>
+                  <AppTooltip content={t("audio.newVoice.designModeFreeformHint")} className="max-w-xs">
+                    <TabsTrigger value="freeform">{t("audio.newVoice.designModeFreeform")}</TabsTrigger>
+                  </AppTooltip>
+                  <AppTooltip content={t("audio.newVoice.designModeStructuredHint")} className="max-w-xs">
+                    <TabsTrigger value="structured">{t("audio.newVoice.designModeStructured")}</TabsTrigger>
+                  </AppTooltip>
+                </TabsList>
+              </Tabs>
+
+              <form.Field
+                name="prompt"
+                children={(field) => {
+                  const invalid = isFieldInvalid(field)
+                  const setPrompt = (next: string) => {
+                    field.handleChange(next)
+                    onPromptChange(next)
+                    if (mode === "freeform") setFreeformDraft(next)
+                    else setStructuredDraft(next)
+                  }
+                  return (
+                    <Field data-invalid={invalid} className="gap-2.5">
+                      {mode === "freeform" ? (
+                        <>
+                          <Textarea
+                            id="inworld-design-prompt"
+                            name={field.name}
+                            value={field.state.value}
+                            onBlur={field.handleBlur}
+                            onChange={(e) => setPrompt(e.target.value)}
+                            rows={3}
+                            maxLength={INWORLD_DESIGN_PROMPT_MAX}
+                            placeholder={t("audio.newVoice.designPromptPlaceholder")}
+                            aria-invalid={invalid}
+                          />
+                          <InworldDesignPresetChips
+                            mode="freeform"
+                            value={field.state.value}
+                            onSelect={setPrompt}
+                          />
+                        </>
+                      ) : (
+                        <>
+                          <Textarea
+                            id="inworld-design-profile"
+                            name={field.name}
+                            value={field.state.value}
+                            onBlur={field.handleBlur}
+                            onChange={(e) => setPrompt(e.target.value)}
+                            rows={13}
+                            maxLength={INWORLD_DESIGN_PROMPT_MAX}
+                            spellCheck={false}
+                            className="min-h-56 font-mono text-xs leading-5"
+                            aria-invalid={invalid}
+                          />
+                          <div className="flex items-center gap-1.5">
+                            <InworldDesignPresetChips
+                              mode="structured"
+                              value={field.state.value}
+                              onSelect={setPrompt}
+                            />
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-xs"
+                              className="ms-auto shrink-0"
+                              disabled={!structuredDesignPromptHasValue(field.state.value)}
+                              onClick={() => setPrompt(blankStructuredDesignPrompt())}
+                              aria-label={t("common.reset")}
+                            >
+                              <RotateCcw />
+                            </Button>
+                          </div>
+                        </>
+                      )}
+                      {invalid && <FieldError errors={field.state.meta.errors} />}
+                    </Field>
+                  )
+                }}
+              />
+            </Field>
+          )
         }}
-        className="gap-0"
-      >
-        <TabsList className="w-full" aria-label={t("audio.newVoice.designModeGroupLabel")}>
-          <TabsTrigger value="freeform">{t("audio.newVoice.designModeFreeform")}</TabsTrigger>
-          <TabsTrigger value="structured">{t("audio.newVoice.designModeStructured")}</TabsTrigger>
-        </TabsList>
-      </Tabs>
+      />
 
-      {mode === "freeform" ? (
-        <Field className="gap-2.5">
-          <div className="flex flex-col gap-1">
-            <FieldLabel htmlFor="inworld-design-prompt">{t("audio.newVoice.describeLabel")}</FieldLabel>
-            <p className="text-[11px] text-muted-foreground">
-              {t("audio.newVoice.designPromptHint")}{" "}
-              <a
-                href={INWORLD_VOICE_DESIGN_DOCS_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 underline underline-offset-2 hover:text-foreground"
-              >
-                {t("audio.newVoice.designDocsLink")}
-                <ExternalLink className="size-3" aria-hidden />
-              </a>
-            </p>
-          </div>
-          <Textarea
-            id="inworld-design-prompt"
-            value={prompt}
-            onChange={(e) => {
-              setFreeformDraft(e.target.value)
-              onPromptChange(e.target.value)
-            }}
-            rows={3}
-            maxLength={INWORLD_DESIGN_PROMPT_MAX}
-            placeholder={t("audio.newVoice.designPromptPlaceholder")}
-          />
-          <InworldDesignPresetChips
-            mode="freeform"
-            value={prompt}
-            onSelect={(text) => {
-              setFreeformDraft(text)
-              onPromptChange(text)
-            }}
-          />
-          {tooShort && (
-            <p className="text-[11px] text-destructive">{t("audio.newVoice.designPromptTooShort")}</p>
-          )}
-        </Field>
-      ) : (
-        <Field className="gap-2.5">
-          <div className="flex min-w-0 flex-col gap-1">
-            <FieldLabel htmlFor="inworld-design-profile">{t("audio.newVoice.designStructuredLabel")}</FieldLabel>
-            <p className="text-[11px] text-muted-foreground">
-              {t("audio.newVoice.designStructuredHint")}{" "}
-              <a
-                href={INWORLD_VOICE_DESIGN_DOCS_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 underline underline-offset-2 hover:text-foreground"
-              >
-                {t("audio.newVoice.designDocsLink")}
-                <ExternalLink className="size-3" aria-hidden />
-              </a>
-            </p>
-          </div>
-          <Textarea
-            id="inworld-design-profile"
-            value={structuredDraft}
-            onChange={(e) => {
-              setStructuredDraft(e.target.value)
-              onPromptChange(e.target.value)
-            }}
-            rows={13}
-            maxLength={INWORLD_DESIGN_PROMPT_MAX}
-            spellCheck={false}
-            className="min-h-56 font-mono text-xs leading-5"
-          />
-          <div className="flex items-center gap-1.5">
-            <InworldDesignPresetChips
-              mode="structured"
-              value={structuredDraft}
-              onSelect={(text) => {
-                setStructuredDraft(text)
-                onPromptChange(text)
-              }}
-            />
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              className="ms-auto shrink-0"
-              disabled={!structuredDesignPromptHasValue(structuredDraft)}
-              onClick={() => {
-                const blank = blankStructuredDesignPrompt()
-                setStructuredDraft(blank)
-                onPromptChange(blank)
-              }}
-              aria-label={t("common.reset")}
-            >
-              <RotateCcw />
-            </Button>
-          </div>
-        </Field>
-      )}
-
-      <Field>
-        <div className="flex items-center gap-1.5">
-          <FieldLabel htmlFor="inworld-design-script">{t("audio.newVoice.designScriptLabel")}</FieldLabel>
-          <VoiceInfoTip
-            content={t("audio.newVoice.designScriptHint")}
-            label={t("audio.newVoice.designScriptHelpAria")}
-          />
-        </div>
-        <Textarea
-          id="inworld-design-script"
-          value={script}
-          onChange={(e) => setScript(e.target.value)}
-          rows={3}
-          maxLength={INWORLD_DESIGN_PREVIEW_TEXT_MAX}
-        />
-        {scriptTooShort && (
-          <p className="text-[11px] text-destructive">{t("audio.newVoice.designScriptTooShort")}</p>
-        )}
-      </Field>
+      <form.Field
+        name="script"
+        children={(field) => {
+          const invalid = isFieldInvalid(field)
+          return (
+            <Field data-invalid={invalid}>
+              <div className="flex items-center gap-1.5">
+                <FieldLabel htmlFor="inworld-design-script">{t("audio.newVoice.designScriptLabel")}</FieldLabel>
+                <VoiceInfoTip
+                  content={t("audio.newVoice.designScriptHint")}
+                  label={t("audio.newVoice.designScriptHelpAria")}
+                />
+              </div>
+              <Textarea
+                id="inworld-design-script"
+                name={field.name}
+                value={field.state.value}
+                onBlur={field.handleBlur}
+                onChange={(e) => {
+                  field.handleChange(e.target.value)
+                  if (!existingPreviewAudioId) dropSavedSrc()
+                }}
+                rows={3}
+                maxLength={INWORLD_DESIGN_PREVIEW_TEXT_MAX}
+                aria-invalid={invalid}
+              />
+              {invalid && <FieldError errors={field.state.meta.errors} />}
+            </Field>
+          )
+        }}
+      />
 
       <InworldDesignLocaleFields
         language={language}
@@ -453,22 +506,26 @@ export function InworldVoiceDesignField({
         session={session}
       />
 
-      <div className="space-y-1.5">
-        <Button type="button" variant="outline" className="w-full" disabled={!canGenerate} onClick={() => void generate()}>
-          {generating ? (
-            <>
-              <Spinner className="size-3" />
-              {t("audio.newVoice.designGenerating")}
-            </>
-          ) : (
-            t("audio.newVoice.designGenerate")
-          )}
-        </Button>
-        <p className="text-[11px] text-muted-foreground">{t("audio.newVoice.designGenerateKnobsHint")}</p>
-      </div>
+      <form.Subscribe
+        selector={(state) => state.isSubmitting}
+        children={(isSubmitting) => (
+          <Button type="submit" variant="outline" className="w-full" disabled={isSubmitting}>
+            {isSubmitting ? (
+              <>
+                <Spinner className="size-3" />
+                {t("audio.newVoice.designGenerating")}
+              </>
+            ) : (
+              t("audio.newVoice.designGenerate")
+            )}
+          </Button>
+        )}
+      />
 
-      {error && (
-        <p className="select-text cursor-text break-words text-xs text-destructive" role="alert">{error}</p>
+      {submitError && (
+        <FieldError className="select-text cursor-text break-words text-xs">
+          {submitError}
+        </FieldError>
       )}
 
       {existingVoiceId && previews.length === 0 && (
@@ -477,18 +534,33 @@ export function InworldVoiceDesignField({
             <span className="min-w-0 flex-1 truncate px-2 text-sm">
               {t("audio.newVoice.designSavedLabel")}
             </span>
-            <Button
-              type="button"
-              size="icon-sm"
-              variant="ghost"
-              disabled={loadingSaved || (!canPlaySaved && playingId !== existingVoiceId)}
-              aria-label={playingId === existingVoiceId
-                ? t("audio.newVoice.designStopSaved")
-                : t("audio.newVoice.designPlaySaved")}
-              onClick={() => void toggleSaved()}
-            >
-              {loadingSaved ? <Spinner className="size-3.5" /> : playingId === existingVoiceId ? <Pause /> : <Play />}
-            </Button>
+            <form.Subscribe
+              selector={(state) => ({
+                submitting: state.isSubmitting,
+                script: state.values.script.trim(),
+              })}
+              children={({ submitting, script }) => {
+                const canPlaySaved = Boolean(existingPreviewAudioId)
+                  || (
+                    script.length >= INWORLD_DESIGN_PREVIEW_TEXT_MIN
+                    && script.length <= INWORLD_DESIGN_PREVIEW_TEXT_MAX
+                  )
+                return (
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="ghost"
+                    disabled={loadingSaved || submitting || (!canPlaySaved && playingId !== existingVoiceId)}
+                    aria-label={playingId === existingVoiceId
+                      ? t("audio.newVoice.designStopSaved")
+                      : t("audio.newVoice.designPlaySaved")}
+                    onClick={() => void toggleSaved()}
+                  >
+                    {loadingSaved ? <Spinner className="size-3.5" /> : playingId === existingVoiceId ? <Pause /> : <Play />}
+                  </Button>
+                )
+              }}
+            />
           </div>
           <p className="text-[11px] text-muted-foreground">{t("audio.newVoice.designExistingHint")}</p>
         </div>
@@ -546,6 +618,6 @@ export function InworldVoiceDesignField({
           })}
         </RadioGroup>
       )}
-    </div>
+    </form>
   )
 }

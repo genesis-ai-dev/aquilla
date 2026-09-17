@@ -151,7 +151,7 @@ export function CellTtsButton({
   const baseVoice = resolveCastVoice(projectTtsSettings, voiceCellId ?? cellId, cellTtsSettings?.voiceId)
   const provider = baseVoice.provider ?? resolveTtsProvider(projectTtsSettings)
   const voice = normalizeVoiceForProvider(baseVoice, provider, { targetLanguage })
-  const modelStatus = useModelStatus(provider === "mms" ? "mms" : "kokoro")
+  const modelStatus = useModelStatus("mms")
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const { session } = useFrontierSession()
   const [isPlaying, setIsPlaying] = useState(false)
@@ -373,7 +373,7 @@ export function CellTtsButton({
   // instead of vanishing — a disappearing control read as a bug in QA.
   const noText = !trimmed
 
-  const isLocalModel = provider === "mms" || provider === "kokoro"
+  const isLocalModel = provider === "mms"
   const downloadingModel = !playableAttachId && isLocalModel && modelStatus.kind === "downloading" && status.kind !== "idle"
   const isLoadingModel = status.kind === "loading" || downloadingModel
   const isSynthesizing = status.kind === "synthesizing"

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { ChevronDownIcon } from "lucide-react"
 import { Combobox as ComboboxPrimitive } from "@base-ui/react/combobox"
 import { Field, FieldLabel } from "@/components/ui/field"
@@ -15,7 +15,6 @@ import {
   SelectContent,
   SelectGroup,
   SelectItem,
-  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
@@ -31,8 +30,8 @@ import {
   isFamilyDefaultAccent,
   regionFlagEmoji,
   regionOf,
+  localeRowsForPicker,
   rowForDesignCode,
-  withExtraDesignLanguage,
 } from "@/lib/audio/inworld-design-locales"
 import { useInworldSupportedLanguages } from "@/lib/audio/inworld-voices"
 import type { FrontierSession } from "@/lib/frontier/types"
@@ -113,7 +112,7 @@ function DesignLanguageCombobox({
         align="start"
         side="bottom"
         sideOffset={4}
-        className="flex w-(--anchor-width) min-w-(--anchor-width) max-w-(--anchor-width) flex-col p-0 *:data-[slot=input-group]:mx-0! *:data-[slot=input-group]:my-0! *:data-[slot=input-group]:h-8 *:data-[slot=input-group]:rounded-none *:data-[slot=input-group]:border-0! *:data-[slot=input-group]:bg-transparent! *:data-[slot=input-group]:shadow-none!"
+        className="flex w-(--anchor-width) min-w-56 flex-col p-0 *:data-[slot=input-group]:mx-0! *:data-[slot=input-group]:my-0! *:data-[slot=input-group]:h-8 *:data-[slot=input-group]:rounded-none *:data-[slot=input-group]:border-0! *:data-[slot=input-group]:bg-transparent! *:data-[slot=input-group]:shadow-none!"
       >
         <ComboboxInput
           showTrigger={false}
@@ -124,7 +123,7 @@ function DesignLanguageCombobox({
           className="w-auto rounded-none border-0 bg-transparent shadow-none outline-none ring-0 hover:border-0! focus-within:border-0! has-[[data-slot=input-group-control]:focus-visible]:border-0! has-[[data-slot=input-group-control]:focus-visible]:ring-0! *:data-[slot=input-group-addon]:py-0 *:data-[slot=input-group-addon][data-align=inline-start]:pl-3 *:data-[slot=input-group-addon][data-align=inline-end]:pe-3 *:data-[slot=input-group-addon][data-align=inline-end]:has-[>button]:me-0"
         />
         <ComboboxSeparator className="mx-0 my-0" />
-        <ComboboxEmpty>{emptyText}</ComboboxEmpty>
+        <ComboboxEmpty className="flex-col items-center px-3 py-4 text-xs text-balance">{emptyText}</ComboboxEmpty>
         <ComboboxList className="max-h-80 flex-1">
           {(row: LocaleOption) => (
             <ComboboxItem key={row.value} value={row} className="min-w-0">
@@ -143,12 +142,18 @@ export function InworldDesignLocaleFields({
   projectId,
   fileId,
   session,
+  copy = "design",
+  voicesOnly = false,
 }: {
   language?: string
   onLanguageChange: (language: string) => void
   projectId?: string
   fileId?: string | null
   session?: FrontierSession | null
+  /** Voice Design vs prebuilt/clone catalog — same picker, different hints. */
+  copy?: "design" | "catalog"
+  /** Prebuilt: only languages Inworld already has SYSTEM speakers for. */
+  voicesOnly?: boolean
 }) {
   const t = useT()
   const { locale } = useI18n()
@@ -159,8 +164,8 @@ export function InworldDesignLocaleFields({
     session,
   })
   const rows = useMemo(
-    () => withExtraDesignLanguage(catalog, language),
-    [catalog, language],
+    () => localeRowsForPicker(catalog, language, voicesOnly),
+    [catalog, language, voicesOnly],
   )
   const selected = canonicalizeDesignLocale(language, rows)
   const selectedLanguage = familyCodeOf(selected, rows)
@@ -189,13 +194,18 @@ export function InworldDesignLocaleFields({
     if (selected !== language) onLanguageChange(selected)
   }, [selected, language, onLanguageChange])
 
+  const missingLanguageHint = t("audio.newVoice.catalogMissingLanguageHint")
+
   return (
-    <div className="grid grid-cols-2 gap-3">
+    <div className="flex flex-col gap-1.5">
+      <div className="grid grid-cols-2 gap-3">
       <Field className="min-w-0">
         <div className="flex items-center gap-1.5">
           <FieldLabel htmlFor="inworld-design-language">{t("audio.newVoice.inworldLanguageLabel")}</FieldLabel>
           <VoiceInfoTip
-            content={t("audio.newVoice.designLanguageHint")}
+            content={copy === "catalog"
+              ? t("audio.newVoice.catalogLanguageHint")
+              : t("audio.newVoice.designLanguageHint")}
             label={t("audio.newVoice.designLanguageHelpAria")}
           />
         </div>
@@ -214,7 +224,9 @@ export function InworldDesignLocaleFields({
         <div className="flex items-center gap-1.5">
           <FieldLabel htmlFor="inworld-design-accent">{t("audio.newVoice.designAccentLabel")}</FieldLabel>
           <VoiceInfoTip
-            content={t("audio.newVoice.designAccentHint")}
+            content={copy === "catalog"
+              ? t("audio.newVoice.catalogAccentHint")
+              : t("audio.newVoice.designAccentHint")}
             label={t("audio.newVoice.designAccentHelpAria")}
           />
         </div>
@@ -240,21 +252,22 @@ export function InworldDesignLocaleFields({
             className="max-h-80"
           >
             <SelectGroup>
-              {accents.map((row, index) => (
-                <Fragment key={row.code}>
-                  {index === 1 ? <SelectSeparator /> : null}
-                  <SelectItem value={row.code}>
-                    <span className="flex min-w-0 items-center gap-2">
-                      <AccentFlag region={regionOf(row.code)} />
-                      <span className="truncate">{accentLabel(row.code)}</span>
-                    </span>
-                  </SelectItem>
-                </Fragment>
+              {accents.map((row) => (
+                <SelectItem key={row.code} value={row.code}>
+                  <span className="flex min-w-0 items-center gap-2">
+                    <AccentFlag region={regionOf(row.code)} />
+                    <span className="truncate">{accentLabel(row.code)}</span>
+                  </span>
+                </SelectItem>
               ))}
             </SelectGroup>
           </SelectContent>
         </Select>
       </Field>
+      </div>
+      {voicesOnly && (
+        <p className="text-[11px] text-muted-foreground">{missingLanguageHint}</p>
+      )}
     </div>
   )
 }

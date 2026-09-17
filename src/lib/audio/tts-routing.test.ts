@@ -39,11 +39,20 @@ describe("hosted TTS guard", () => {
     ).rejects.toThrow(/server-side/i)
   })
 
-  it("synthesizeToWavBlob refuses legacy omnivoice as the same hosted path", async () => {
+  it("synthesizeToWavBlob refuses leftover omnivoice as the same hosted path", async () => {
     await expect(
       synthesizeToWavBlob("hi", {
         voice: { id: "v", name: "N", provider: "omnivoice" },
         projectProvider: "omnivoice",
+      }),
+    ).rejects.toThrow(/server-side/i)
+  })
+
+  it("synthesizeToWavBlob refuses leftover kokoro as the same hosted path", async () => {
+    await expect(
+      synthesizeToWavBlob("hi", {
+        voice: { id: "v", name: "N", provider: "kokoro", voiceName: "af_heart" },
+        projectProvider: "kokoro",
       }),
     ).rejects.toThrow(/server-side/i)
   })

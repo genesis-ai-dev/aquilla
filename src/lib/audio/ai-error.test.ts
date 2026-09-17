@@ -174,3 +174,27 @@ describe("categorizeAiError — names the TTS engine that failed", () => {
     expect(result.title).toBe("Gemini TTS failed")
   })
 })
+
+describe("categorizeAiError — OpenRouter key vs Gemini (AQU-1158)", () => {
+  const OPENROUTER_NOT_CONFIGURED =
+    'Completion failed: 500 {"error":"OPENROUTER_API_KEY is not configured"}'
+
+  it("titles a hosted OpenRouter miss as OpenRouter, never Gemini", () => {
+    const result = categorizeAiError(OPENROUTER_NOT_CONFIGURED)
+    expect(result.category).toBe("missing-openrouter-key")
+    expect(result.title).toBe("OpenRouter API key required")
+    expect(result.body).toMatch(/openrouter/i)
+    expect(result.body).toMatch(/custom/i)
+    expect(result.body).not.toMatch(/gemini/i)
+    expect(result.body).not.toMatch(/voice/i)
+    expect(result.raw).toBe(OPENROUTER_NOT_CONFIGURED)
+  })
+
+  it("does not treat a generic api_key substring in a completion failure as Gemini", () => {
+    const result = categorizeAiError(
+      'Completion failed: 401 {"error":{"message":"invalid api key","code":401}}',
+    )
+    expect(result.category).not.toBe("missing-gemini-key")
+    expect(result.title).not.toMatch(/gemini/i)
+  })
+})

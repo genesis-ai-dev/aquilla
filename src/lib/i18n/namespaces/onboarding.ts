@@ -17,6 +17,31 @@ import { defineNamespace, plural } from "./types"
  */
 export const onboarding = defineNamespace({
   keys: {
+    "onboarding.connect.title": "Connect your agent",
+    "onboarding.connect.description": "Approve access to one Aquilla project. Your agent receives its credential directly.",
+    "onboarding.connect.approved": "Access approved. Return to your agent to finish connecting. You can revoke access at any time.",
+    "onboarding.connect.denied": "Access denied. Your agent receives no credential.",
+    "onboarding.connect.manage": "Manage agent access",
+    "onboarding.connect.account": "Signed in as {username}",
+    "onboarding.connect.code": "Connection code",
+    "onboarding.connect.review": "Review request",
+    "onboarding.connect.agent": "Agent name: {name}",
+    "onboarding.connect.unverified": "This name is supplied by the agent and is not verified. Only approve a request you just started.",
+    "onboarding.connect.ask": "Read project data and stage changes. Applying changes requires your separate approval.",
+    "onboarding.connect.act": "Read project data and apply changes immediately, without further approval.",
+    "onboarding.connect.expiry": "Access expires after 30 days. You can revoke it from API tokens at any time.",
+    "onboarding.connect.project": "Project",
+    "onboarding.connect.choose": "Choose a project",
+    "onboarding.connect.noProjects": "You do not have the required access to an available project.",
+    "onboarding.connect.confirm": "I started this request and the code {code} matches the code shown by my agent.",
+    "onboarding.connect.approve": "Authorize agent",
+    "onboarding.connect.deny": "Deny access",
+    "onboarding.connect.error": "Unable to complete this request. It may have expired, already been used, or your access may have changed. Check your connection and try again.",
+    "onboarding.connect.setup": "Connect an AI agent",
+    "onboarding.connect.setupBody": "Copy these instructions to your agent. Approve its request in Aquilla without sharing a token or setting an environment variable.",
+    "onboarding.connect.copy": "Copy connection instructions",
+    "onboarding.connect.copyError": "Could not copy. Select and copy the instructions below.",
+
     // — Shared small words reused across this namespace's own surfaces ———————
     "onboarding.common.continue": "Continue",
     "onboarding.common.skipForNow": "Skip for now",
@@ -215,9 +240,6 @@ export const onboarding = defineNamespace({
     "onboarding.checklist.aiModels.whisper.label": "Whisper transcription",
     "onboarding.checklist.aiModels.whisper.blurb":
       "Word-level timing for recorded audio. Runs locally; no network after download.",
-    "onboarding.checklist.aiModels.kokoro.label": "Kokoro voices",
-    "onboarding.checklist.aiModels.kokoro.blurb":
-      "English voices that run in the browser after a one-time download.",
     "onboarding.checklist.aiModels.mms.label": "MMS multilingual voices",
     "onboarding.checklist.aiModels.mms.blurb":
       "Local voices for many languages — one language model per download.",
@@ -359,6 +381,13 @@ export const onboarding = defineNamespace({
     "onboarding.preferences.appearance.groupLabel": "Theme",
     "onboarding.preferences.appearance.themeDescription":
       "Follow your system appearance or choose a theme for this device.",
+    "onboarding.preferences.fontSize.groupLabel": "App font size",
+    "onboarding.preferences.fontSize.rowDescription":
+      "The overall size of menus, sidebars, settings, and editor cell text. A file's View settings can override the cell size; reset there to follow this size again.",
+    "onboarding.preferences.fontSize.small": "Small",
+    "onboarding.preferences.fontSize.default": "Default",
+    "onboarding.preferences.fontSize.large": "Large",
+    "onboarding.preferences.fontSize.extraLarge": "Extra Large",
 
     // — LanguageSection — group label reuses `language.label` (identical text)
     "onboarding.preferences.language.rowDescription":
@@ -395,7 +424,7 @@ export const onboarding = defineNamespace({
       "Optional personal AI provider override for this device only.",
     "onboarding.preferences.section.localModels.title": "Local models",
     "onboarding.preferences.section.localModels.description":
-      "Whisper transcription and Kokoro / MMS voices run entirely in your browser — stored once and shared across all projects on this device.",
+      "Whisper transcription and MMS voices run entirely in your browser — stored once and shared across all projects on this device.",
     "onboarding.preferences.section.usage.title": "Usage",
     "onboarding.preferences.section.usage.description": "Your audio and AI activity. No pricing is shown here.",
     "onboarding.preferences.section.apiTokens.title": "API tokens",
@@ -590,7 +619,7 @@ export const onboarding = defineNamespace({
       },
       "onboarding.checklist.aiModels.sizeMb": {
         description:
-          "Size badge next to an individual model's name (Whisper, Kokoro, MMS) before it has been downloaded.",
+          "Size badge next to an individual model's name (Whisper, MMS) before it has been downloaded.",
         placeholders: { size: "That model's download size in megabytes. A plain number." },
       },
       "onboarding.checklist.invite.copyLinkAriaLabel": {

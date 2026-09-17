@@ -40,9 +40,17 @@ vi.mock("@/hooks/useFrontierSession", () => ({
   useFrontierSession: () => ({ session: { jwt: "j", username: "u" } }),
 }))
 
+// A corrected transcript rides a cell.audio.attach into the outbox — not what
+// these tests are about.
+vi.mock("@/lib/sync/events-emit", () => ({
+  emitCellAudioAttach: vi.fn(async () => "evt-1"),
+}))
+
 import { CellTakeBlock } from "./CellTakeBlock"
+import { loadTranscriptCorrections } from "@/lib/store/transcript-corrections-store"
 import type { CellData } from "@/hooks/useCells"
 import type { ProjectRecord } from "@/lib/parsers/types"
+import type { WordTiming } from "@/lib/codex-editor/types"
 
 const project = {
   id: "p1",
@@ -87,6 +95,7 @@ function draw(over: Partial<React.ComponentProps<typeof CellTakeBlock>> = {}) {
 beforeEach(() => {
   audioCalls.length = 0
   transcribeCalls.length = 0
+  localStorage.clear()
 })
 
 describe("whose recording it plays", () => {
@@ -145,5 +154,37 @@ describe("what it offers", () => {
     draw({ editable: false })
     expect(screen.getByRole("button", { name: /re-record/i })).toBeDisabled()
     expect(screen.getByRole("button", { name: /transcribe/i })).toBeDisabled()
+  })
+})
+
+// AQU-463: a correction here is not just a fix to this one transcript — it is
+// the only moment the app ever learns how ASR mishears this project's words.
+describe("what a correction teaches the project", () => {
+  const timings: WordTiming[] = ["the", "killy", "elders", "met"].map((word, i) => ({
+    word,
+    start: i * 5,
+    end: i * 5 + word.length,
+    t0: i,
+    t1: i + 1,
+  }))
+
+  function correctTranscript(to: string) {
+    draw({ timings, cellText: "the kilisusu elders met" })
+    fireEvent.click(screen.getByRole("button", { name: /correct the transcript/i }))
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: to } })
+    fireEvent.click(screen.getByRole("button", { name: /^save$/i }))
+  }
+
+  it("remembers the word the human fixed, against this project", async () => {
+    correctTranscript("the kilisusu elders met")
+    await waitFor(() =>
+      expect(loadTranscriptCorrections("p1")).toMatchObject([{ heard: "killy", corrected: "kilisusu" }]),
+    )
+  })
+
+  it("learns nothing when the human rewrote the line instead of fixing a word", async () => {
+    correctTranscript("alpha bravo charlie met")
+    await waitFor(() => expect(screen.queryByRole("textbox")).not.toBeInTheDocument())
+    expect(loadTranscriptCorrections("p1")).toEqual([])
   })
 })

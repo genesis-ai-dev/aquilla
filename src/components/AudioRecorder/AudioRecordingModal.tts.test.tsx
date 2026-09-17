@@ -382,7 +382,10 @@ describe("AudioRecordingModal — auto-advance toggle (SUB-50)", () => {
     renderTwo()
     fireEvent.click(screen.getByTestId("rec-settings"))
     expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-pressed", "true")
-    fireEvent.click(screen.getByRole("button", { name: /Save/ }))
+    // By testid, not by name: the settings popover is open at this point, and
+    // AQU-1216 put the word "Saved" into the auto-advance description, so a
+    // /Save/ role query matches that control too.
+    fireEvent.click(screen.getByTestId("rec-save"))
     await waitFor(() => expect(onActiveCellChange).toHaveBeenCalledWith("c2"), { timeout: 2000 })
   })
 
@@ -393,7 +396,7 @@ describe("AudioRecordingModal — auto-advance toggle (SUB-50)", () => {
     fireEvent.click(screen.getByTestId("rec-auto-advance"))
     expect(screen.getByTestId("rec-auto-advance")).toHaveAttribute("aria-pressed", "false")
 
-    fireEvent.click(screen.getByRole("button", { name: /Save/ }))
+    fireEvent.click(screen.getByTestId("rec-save"))
     await waitFor(() => expect(emitAttach).toHaveBeenCalled()) // the save DID happen
     await new Promise((r) => setTimeout(r, 700)) // well past the 450ms advance window
     expect(onActiveCellChange).not.toHaveBeenCalled()

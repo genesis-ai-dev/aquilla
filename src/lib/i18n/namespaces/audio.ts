@@ -28,9 +28,14 @@ export const audio = defineNamespace({
     "audio.newVoice.designPromptHint":
       "Write in English. Include age, gender, accent, pitch, pace, and tone. Under 30 characters rarely works.",
     "audio.newVoice.designPromptTooShort": "Write at least 30 characters so Inworld can shape a voice.",
+    "audio.newVoice.designStructuredEmpty": "Fill in at least one attribute so Inworld can shape a voice.",
     "audio.newVoice.designModeGroupLabel": "Voice design mode",
     "audio.newVoice.designModeFreeform": "Freeform",
     "audio.newVoice.designModeStructured": "Structured",
+    "audio.newVoice.designModeFreeformHint":
+      "Describe the voice in your own words, and we build the full voice profile from it",
+    "audio.newVoice.designModeStructuredHint":
+      "Edit the voice profile directly for full control over the voice's nuances",
     "audio.newVoice.designPresetGroupLabel": "Voice design presets",
     "audio.newVoice.designPresetAgent": "Agent",
     "audio.newVoice.designPresetNarrator": "Narrator",
@@ -47,12 +52,18 @@ export const audio = defineNamespace({
     "audio.newVoice.designScriptTooShort": "Write at least 50 characters so the preview has enough to say.",
     "audio.newVoice.designLanguageHint":
       "The language this designed voice will speak. The preview script is read in this language too.",
+    "audio.newVoice.catalogLanguageHint":
+      "Stock voices for languages Inworld already has speakers for.",
+    "audio.newVoice.catalogMissingLanguageHint":
+      "Can't find the language? Go to the Voice design tab to design one yourself.",
     "audio.newVoice.designLanguageHelpAria": "About the language",
     "audio.newVoice.designLanguageSearch": "Find a language…",
     "audio.newVoice.designLanguageSearchAria": "Find a language",
     "audio.newVoice.designAccentLabel": "Accent",
     "audio.newVoice.designAccentHint":
       "Regional accent for that language. Default is just en; American English is en-US; British is en-GB.",
+    "audio.newVoice.catalogAccentHint":
+      "Regional accent used to load matching stock voices. Default is the language tag without a region.",
     "audio.newVoice.designAccentHelpAria": "About the accent",
     "audio.newVoice.designAccentUS": "American",
     "audio.newVoice.designAccentGB": "British",
@@ -61,10 +72,8 @@ export const audio = defineNamespace({
     "audio.newVoice.designAccentDefault": "Default",
     "audio.newVoice.designAccentStandard": "Standard",
     "audio.newVoice.designGenerate": "Generate previews",
-    "audio.newVoice.designGenerateKnobsHint":
-      "Previews ignore audio quality, delivery, and talking speed.",
     "audio.newVoice.designKnobsHint":
-      "The options below only apply when you generate a line with this voice. They don't affect the voices you hear in this dialog.",
+      "These options only apply when you generate a line with this voice. They don't affect the previews you hear in this dialog.",
     "audio.newVoice.designGenerating": "Generating…",
     "audio.newVoice.designDocsLink": "Voice design guide",
     "audio.newVoice.designPreviewLabel": "Preview {n}",
@@ -111,16 +120,6 @@ export const audio = defineNamespace({
     "audio.newVoice.talkingSpeedHelpAria": "About talking speed",
     "audio.newVoice.describeLabel": "Describe the voice",
     "audio.newVoice.describePlaceholder": "e.g. a warm older man, calm and clear",
-    "audio.newVoice.kokoroLabel": "Voice",
-    "audio.newVoice.kokoroPlaceholder": "e.g. af_bella",
-    "audio.newVoice.kokoroGroupAmerican": "American English",
-    "audio.newVoice.kokoroGroupBritish": "British English",
-    "audio.newVoice.kokoroGenderFemale": "Female",
-    "audio.newVoice.kokoroGenderMale": "Male",
-    "audio.newVoice.kokoroEnglishOnlyHint":
-      "On-device Kokoro speaks English. Pick an American or British voice, or switch this line to Inworld TTS, Gemini, or MMS.",
-    "audio.newVoice.kokoroPlaySample": "Play {name} sample",
-    "audio.newVoice.kokoroStopSample": "Stop {name} sample",
     "audio.newVoice.mmsLanguageLabel": "Language",
     "audio.newVoice.singleVoiceHint":
       "{engine} uses a single neural voice. Use the Clone tab to make it sound like a specific person.",
@@ -307,12 +306,18 @@ export const audio = defineNamespace({
     "audio.recordingModal.formatCompressedAriaLabel":
       "Recording format: compressed — click to record in WAV",
     "audio.recordingModal.settingsAriaLabel": "Recorder settings",
-    "audio.recordingModal.autoAdvanceTitle": "Move on after saving",
-    "audio.recordingModal.autoAdvanceOnDescription": "Jumps to the next line",
-    "audio.recordingModal.autoAdvanceOffDescription": "Stays on this line",
+    "audio.recordingModal.autoAdvanceTitle": "Move on after saving a recording",
+    "audio.recordingModal.autoAdvanceOnDescription":
+      "Saved recordings jump to the next line. Uploaded files stay here.",
+    "audio.recordingModal.autoAdvanceOffDescription":
+      "Saved recordings stay on this line, and so do uploaded files.",
+    "audio.recordingModal.countdownTitle": "Countdown",
+    "audio.recordingModal.countdownOnDescription": "Counts 3-2-1 before recording",
+    "audio.recordingModal.countdownOffDescription": "Starts recording straight away",
     "audio.recordingModal.beepTitle": "Countdown beep",
     "audio.recordingModal.beepOnDescription": "3-2-1 tones before recording",
     "audio.recordingModal.beepOffDescription": "Silent countdown",
+    "audio.recordingModal.beepNotApplicableDescription": "No countdown to beep",
     "audio.recordingModal.noTakesYet": "No takes yet — record one and it lands here.",
 
     // RecordingVideoSurface — the film panel inside that dialog, and the
@@ -339,6 +344,10 @@ export const audio = defineNamespace({
     "audio.takesStrip.syncFailedTooltip":
       "Couldn't save to the server — this take is still on this device. Retry to send it again.",
     "audio.takesStrip.syncFailedRetry": "Not saved — retry",
+    "audio.takesStrip.textDriftBadge": "Text changed",
+    "audio.takesStrip.textDriftTooltip":
+      "Recorded {date}, when this line read: “{text}”. The text has changed since — " +
+      "re-record to match, or keep this take if you are reviewing the older wording.",
     "audio.takesStrip.playTakeTooltip": "Play take",
     "audio.takesStrip.removeNoiseTooltip": "Remove noise (adds a cleaned take)",
     "audio.takesStrip.revertTooltip": "Revert to the original recording",
@@ -420,7 +429,6 @@ export const audio = defineNamespace({
     "audio.provider.inworldHint":
       "Runs on our servers. Standard uses Inworld TTS 2 Flash; Highest uses Inworld TTS 2. No user API key; usage is cloud-metered. Supports voice cloning from a reference recording.",
     "audio.provider.geminiHint": "BYOK Google AI key. Promptable, high-quality voices.",
-    "audio.provider.kokoroHint": "Runs in-browser after a one-time local model download.",
     "audio.provider.mmsHintSherpa": "Local browser voices loaded from the Sherpa-ONNX MMS mirror.",
     "audio.provider.mmsHintHosted": "Local browser voices loaded from the hosted MMS model bucket.",
     "audio.provider.mmsHintFallback": "Local browser voices for supported MMS language repos.",
@@ -452,7 +460,6 @@ export const audio = defineNamespace({
     // ai-consent.ts — display name of each heavy in-browser AI model, shown
     // in the first-run download-consent dialog (AiModelConsentDialog).
     "audio.consent.whisperLabel": "Whisper (transcription)",
-    "audio.consent.kokoroLabel": "Kokoro (text-to-speech)",
     "audio.consent.mmsLabel": "MMS (multilingual TTS)",
 
     // ai-error.ts categorizeAiError() — plain-language heading for each
@@ -461,6 +468,7 @@ export const audio = defineNamespace({
     "audio.aiError.modelNotAvailableTitle": "Model not available",
     "audio.aiError.tooLargeTitle": "Too much text for this model",
     "audio.aiError.geminiKeyRequiredTitle": "Gemini API key required",
+    "audio.aiError.openRouterKeyRequiredTitle": "OpenRouter API key required",
     "audio.aiError.geminiFailedTitle": "Gemini TTS failed",
     "audio.aiError.inworldNotConfiguredTitle": "Inworld TTS isn't configured",
     "audio.aiError.inworldFailedTitle": "Inworld TTS failed",
@@ -551,7 +559,7 @@ export const audio = defineNamespace({
       "audio.newVoice.engineLabel": {
         description:
           "Form label above the row of TTS engine choice cards. On the TTS tab " +
-          "this is all four engines (Inworld, Gemini, Kokoro, MMS). On the Clone " +
+          "this is Inworld, Gemini, and MMS. On the Clone " +
           "tab it is only the cloud engines that can clone a reference clip " +
           "(Inworld, Gemini) — on-device engines are omitted, not shown disabled. " +
           "'Engine' means which speech-synthesis backend generates this voice's audio.",
@@ -611,8 +619,13 @@ export const audio = defineNamespace({
       },
       "audio.newVoice.designPromptTooShort": {
         description:
-          "Inline validation under the Voice Design description when the text is " +
-          "shorter than 30 characters and Generate is disabled.",
+          "Inline validation under the Voice Design description when Generate " +
+          "previews is clicked with fewer than 30 characters.",
+      },
+      "audio.newVoice.designStructuredEmpty": {
+        description:
+          "Inline validation under the Voice profile textarea when Generate " +
+          "previews is clicked with an empty Structured template.",
       },
       "audio.newVoice.designModeGroupLabel": {
         description:
@@ -630,6 +643,16 @@ export const audio = defineNamespace({
           "Tab on Voice Design: edit the voice profile as one attribute per line " +
           "(dialect, gender, age, …). Short noun. Opposite of Freeform.",
         maxLength: 14,
+      },
+      "audio.newVoice.designModeFreeformHint": {
+        description:
+          "Hover tooltip on the Freeform tab. Explains that a plain-English " +
+          "description is expanded into the full voice profile.",
+      },
+      "audio.newVoice.designModeStructuredHint": {
+        description:
+          "Hover tooltip on the Structured tab. Explains that the user edits " +
+          "the voice-profile attributes directly for finer control.",
       },
       "audio.newVoice.designPresetGroupLabel": {
         description:
@@ -706,18 +729,33 @@ export const audio = defineNamespace({
           "Tooltip on the info icon beside Language on Voice Design. Explains " +
           "that the designed voice and its preview script use this language.",
       },
+      "audio.newVoice.catalogLanguageHint": {
+        description:
+          "Tooltip on the info icon beside Language on the Inworld prebuilt tab. " +
+          "Explains that the searchable list is only languages that already have " +
+          "Inworld SYSTEM speakers.",
+      },
+      "audio.newVoice.catalogMissingLanguageHint": {
+        description:
+          "Helper under Language and Accent on the Inworld prebuilt tab. Tells " +
+          "the user to open the Voice design tab when a language is missing " +
+          "from the stock catalog. Plain text, not a control.",
+      },
       "audio.newVoice.designLanguageHelpAria": {
         description:
-          "Accessible name for the info-icon button beside Language on Voice Design.",
+          "Accessible name for the info-icon button beside Language on Voice Design " +
+          "and on the Inworld prebuilt/clone language picker.",
       },
       "audio.newVoice.designLanguageSearch": {
         description:
-          "Placeholder inside the Voice Design Language combobox search field. " +
-          "The list has ~95 Inworld TTS-2 languages.",
+          "Placeholder inside the Inworld Language combobox search field on Voice " +
+          "Design and on the prebuilt/clone tabs. The list is every language Inworld " +
+          "returns from supportedLanguages.",
       },
       "audio.newVoice.designLanguageSearchAria": {
         description:
-          "Accessible name for the search field inside the Voice Design Language combobox.",
+          "Accessible name for the search field inside the Inworld Language combobox " +
+          "on Voice Design and on the prebuilt/clone tabs.",
       },
       "audio.newVoice.designAccentLabel": {
         description:
@@ -730,6 +768,12 @@ export const audio = defineNamespace({
           "Tooltip on the info icon beside Accent on Voice Design. Explains that accent " +
           "is the regional variant, that Default is the family code (en for English), " +
           "and that American vs British English are en-US / en-GB.",
+      },
+      "audio.newVoice.catalogAccentHint": {
+        description:
+          "Tooltip on the info icon beside Accent on the Inworld prebuilt and clone " +
+          "tabs. Explains that accent is the regional variant used to load matching " +
+          "stock voices, and that Default is the family code without a region.",
       },
       "audio.newVoice.designAccentHelpAria": {
         description:
@@ -770,8 +814,8 @@ export const audio = defineNamespace({
       },
       "audio.newVoice.designScriptTooShort": {
         description:
-          "Inline validation under the Voice Design preview-script field when the " +
-          "text is shorter than 50 characters and Generate is disabled.",
+          "Inline validation under the Voice Design preview-script field when " +
+          "Generate previews is clicked with fewer than 50 characters.",
       },
       "audio.newVoice.designGenerate": {
         description:
@@ -779,20 +823,13 @@ export const audio = defineNamespace({
           "previews from the description. Verb phrase, present tense.",
         maxLength: 22,
       },
-      "audio.newVoice.designGenerateKnobsHint": {
-        description:
-          "Helper under the Generate previews button. Tells the user that audio " +
-          "quality, delivery, and talking speed are not sent with Voice Design " +
-          "preview generation — those knobs only affect later line TTS.",
-      },
       "audio.newVoice.designKnobsHint": {
         description:
-          "Helper above the Audio quality / Delivery / Talking speed controls " +
-          "when the Voice Design tab is selected. 'The options below' are those " +
-          "three knobs. They still save on the voice for later line TTS. The " +
-          "second sentence names what they do not change: the Voice Design " +
-          "preview clips (and the saved-voice row) you can play in this dialog. " +
-          "'Generate a line' is later cell TTS, not the Generate previews button.",
+          "Single helper above the Audio quality / Delivery / Talking speed " +
+          "controls on the Voice Design tab. Those knobs still save on the voice " +
+          "for later line TTS. They do not change Voice Design preview clips " +
+          "(or the saved-voice row) you can play in this dialog. 'Generate a " +
+          "line' is later cell TTS, not the Generate previews button.",
       },
       "audio.newVoice.designGenerating": {
         description:
@@ -864,10 +901,9 @@ export const audio = defineNamespace({
       },
       "audio.newVoice.inworldLanguageLabel": {
         description:
-          "Form label for the Inworld language dropdown on the New Voice dialog. " +
-          "Shown when any of the project's target-language lanes does not map onto an " +
-          "Inworld BCP-47 code (for example a display name like French), even if other " +
-          "lanes are valid codes.",
+          "Form label for the Inworld language combobox on the New Voice dialog. " +
+          "Used on Voice Design and on the prebuilt/clone tabs. The list is every " +
+          "language from Inworld's supportedLanguages catalog, with search.",
       },
       "audio.newVoice.inworldLanguagePlaceholder": {
         description:
@@ -1007,56 +1043,6 @@ export const audio = defineNamespace({
         description:
           "Placeholder example text inside the empty 'describe the voice' textarea, " +
           "showing the kind of description that works well.",
-      },
-      "audio.newVoice.kokoroLabel": {
-        description:
-          "Label for the voice-picker dropdown shown only when the Kokoro engine is " +
-          "selected. Lists Kokoro's built-in American and British speakers. 'Kokoro' " +
-          "is the engine's proper name — do not translate it if it appears nearby.",
-      },
-      "audio.newVoice.kokoroPlaceholder": {
-        description:
-          "Placeholder example inside the empty Kokoro voice-id field, showing the " +
-          "format of a real id. The example code itself ('af_bella') is data, not " +
-          "prose — keep it as-is; only 'e.g.' needs translating.",
-      },
-      "audio.newVoice.kokoroGroupAmerican": {
-        description:
-          "Section heading inside the Kokoro voice dropdown for American English speakers.",
-      },
-      "audio.newVoice.kokoroGroupBritish": {
-        description:
-          "Section heading inside the Kokoro voice dropdown for British English speakers.",
-      },
-      "audio.newVoice.kokoroGenderFemale": {
-        description:
-          "Short gender tag next to a female Kokoro speaker's name in the dropdown.",
-      },
-      "audio.newVoice.kokoroGenderMale": {
-        description:
-          "Short gender tag next to a male Kokoro speaker's name in the dropdown.",
-      },
-      "audio.newVoice.kokoroEnglishOnlyHint": {
-        description:
-          "Helper under the Kokoro voice dropdown when the project's target language " +
-          "is not English. Tells the user Kokoro only speaks English and names the " +
-          "other engines that can speak other languages. 'Kokoro', 'Inworld TTS', " +
-          "'Gemini', and 'MMS' are engine names — do not translate them.",
-      },
-      "audio.newVoice.kokoroPlaySample": {
-        description:
-          "Accessible name of the play button that previews a Kokoro speaker. " +
-          "{name} is the speaker's given name (Heart, Bella, George).",
-        placeholders: {
-          name: "The Kokoro speaker's given name, e.g. Heart or Bella.",
-        },
-      },
-      "audio.newVoice.kokoroStopSample": {
-        description:
-          "Accessible name of the same button while that speaker's sample is playing.",
-        placeholders: {
-          name: "The Kokoro speaker's given name, e.g. Heart or Bella.",
-        },
       },
       "audio.newVoice.mmsLanguageLabel": {
         description:
@@ -1713,7 +1699,7 @@ export const audio = defineNamespace({
         description:
           "Label on the recorder's voice button while a local voice model is " +
           "downloading, so a wait of tens of seconds does not read as a hang. " +
-          "Only local engines (Kokoro, MMS) report progress. Keep it short — " +
+          "Only local engines (MMS) report progress. Keep it short — " +
           "the button is about half the panel wide.",
         placeholders: { percent: "Whole-number download progress, 0 to 100, without the % sign." },
         maxLength: 18,
@@ -1822,9 +1808,36 @@ export const audio = defineNamespace({
       "audio.recordingModal.settingsAriaLabel": {
         description:
           "Screen-reader name of the gear button at the end of the recorder's " +
-          "bottom strip. It opens a small menu holding two preferences: whether " +
-          "to move on to the next line after each save, and whether the countdown " +
-          "beeps.",
+          "bottom strip. It opens a small menu holding three preferences: whether " +
+          "to move on to the next line after each save, whether a 3-2-1 countdown " +
+          "runs before each take, and whether that countdown beeps.",
+      },
+      "audio.recordingModal.countdownTitle": {
+        description:
+          "Name of the preference in the recorder's gear menu that decides " +
+          "whether a 3-2-1 countdown runs before each take. The noun for the " +
+          "count-in itself, not an instruction.",
+        maxLength: 24,
+      },
+      "audio.recordingModal.countdownOnDescription": {
+        description:
+          "One-line description under that preference while the countdown is ON: " +
+          "pressing Record counts three, two, one and then starts capturing.",
+        maxLength: 40,
+      },
+      "audio.recordingModal.countdownOffDescription": {
+        description:
+          "One-line description under the same preference while the countdown is " +
+          "OFF: pressing Record begins capturing immediately, with no count-in.",
+        maxLength: 40,
+      },
+      "audio.recordingModal.beepNotApplicableDescription": {
+        description:
+          "One-line description under the 'Countdown beep' preference while the " +
+          "countdown itself has been turned off, which is why the beep control is " +
+          "greyed out and cannot be pressed: there is no countdown left for it to " +
+          "sound during. States the reason, does not instruct.",
+        maxLength: 40,
       },
       "audio.recordingModal.filmAriaLabel": {
         description:
@@ -1899,6 +1912,27 @@ export const audio = defineNamespace({
           "Label on the small red button shown on a take that failed to save to the " +
           "server; pressing it queues the save again. Very short — it sits inline on " +
           "a compact take row.",
+      },
+      "audio.takesStrip.textDriftBadge": {
+        description:
+          "Very short label on an amber badge marking a take that was recorded " +
+          "against an OLDER version of this line's text — the wording has been " +
+          "edited since the recording was made, so the audio and the text no longer " +
+          "agree. Not an error: the take is fine, it just speaks the old wording. " +
+          "Sits inline on a compact take row beside the take's name.",
+        maxLength: 16,
+      },
+      "audio.takesStrip.textDriftTooltip": {
+        description:
+          "Hover title on that badge. Gives the date the take was recorded and " +
+          "quotes the line's wording AS IT READ THEN, then says the text has since " +
+          "changed and names the two reasonable responses. Deliberately not a " +
+          "warning — reviewing audio against its own older wording is a normal " +
+          "workflow, so the tone is informative.",
+        placeholders: {
+          date: "Date the recording was made, already formatted for the user's locale.",
+          text: "The line's text as it read at the moment of recording, quoted verbatim.",
+        },
       },
       "audio.takesStrip.playTakeTooltip": {
         description:
@@ -2147,12 +2181,6 @@ export const audio = defineNamespace({
           "bring your own key — the user must supply their own Google AI key for this " +
           "engine to work.",
       },
-      "audio.provider.kokoroHint": {
-        description:
-          "Tooltip on the Kokoro engine card in the TTS engine picker, explaining the " +
-          "one-time local model download that happens before this on-device engine " +
-          "can generate audio.",
-      },
       "audio.provider.mmsHintSherpa": {
         description:
           "Tooltip on the MMS engine card in the TTS engine picker, shown in the " +
@@ -2262,11 +2290,6 @@ export const audio = defineNamespace({
           "model download consent dialog (AiModelConsentDialog) — names the feature " +
           "in parentheses since 'Whisper' alone doesn't say what it's for.",
       },
-      "audio.consent.kokoroLabel": {
-        description:
-          "Display name for the Kokoro text-to-speech model in the same consent " +
-          "dialog as audio.consent.whisperLabel, same naming pattern.",
-      },
       "audio.consent.mmsLabel": {
         description:
           "Display name for the MMS multilingual text-to-speech model in the same " +
@@ -2293,6 +2316,14 @@ export const audio = defineNamespace({
         description:
           "Popover heading when a Gemini-voice TTS request fails because no Gemini " +
           "API key is configured for the project.",
+      },
+      "audio.aiError.openRouterKeyRequiredTitle": {
+        description:
+          "Red-line / popover heading when text generation (the sparkle / draft " +
+          "path) fails because the hosted chat proxy has no OPENROUTER_API_KEY. " +
+          "Must never be worded as a Gemini or voice-engine problem — this is a " +
+          "text-generation credential, and the body tells the user to paste their " +
+          "own OpenRouter key under Custom provider (BYOK, not Aquilla usage).",
       },
       "audio.aiError.geminiFailedTitle": {
         description:
@@ -2362,7 +2393,7 @@ export const audio = defineNamespace({
       },
       "audio.aiError.modelLoadFailedTitle": {
         description:
-          "Popover heading when an on-device model (Whisper/Kokoro/MMS/transformers " +
+          "Popover heading when an on-device model (Whisper/MMS/transformers " +
           "runtime) fails to download or initialize.",
       },
       "audio.aiError.audioFormatUnsupportedTitle": {

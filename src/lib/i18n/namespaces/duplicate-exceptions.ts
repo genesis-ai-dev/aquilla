@@ -81,12 +81,6 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "as its siblings. editor.selection.validate is the imperative toolbar button " +
     "that performs the sign-off. Operation name vs command; they diverge wherever " +
     "operation names are nominalized.",
-  "audio.newVoice.kokoroLabel":
-    "Field label for the Kokoro speaker dropdown in the New voice modal — which " +
-    "built-in voice this engine should speak with. editor.navTitle.voice is the " +
-    "editor's own audio-lens tab label naming a workspace mode. A form-field " +
-    "label and a navigation tab are different UI roles that happen to share the " +
-    "word 'Voice' and diverge in most target languages.",
   "audio.newVoice.mmsLanguageLabel":
     "Names the spoken language the MMS engine should synthesize. common.language " +
     "labels the switcher that changes the language of the interface itself. Two " +
@@ -867,6 +861,12 @@ export const DUPLICATE_EXCEPTIONS: Record<string, string> = {
     "Custom badge. org.projectOverview.laneDefaultFallback names the unnamed " +
     "target LANE shown when a project has no named lanes — a placeholder noun " +
     "('the default one'), a different grammatical role.",
+  "onboarding.preferences.fontSize.default":
+    "Option in the app-wide font-size select for the baseline UI scale (root " +
+    "unset, today's sizes). Distinct from terminology.livingMemory.prompt.defaultBadge " +
+    "(a status badge on a built-in prompt) and org.projectOverview.laneDefaultFallback " +
+    "(placeholder name of an unnamed workflow lane). A scale choice, a badge, and a " +
+    "lane noun take different words outside English.",
   "terminology.livingMemory.section.examples.title":
     "Index-row title for the validated-example-pairs section of Living Memory " +
     "— a plain plural noun heading. agent.run.tool.examples is the display " +

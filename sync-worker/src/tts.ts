@@ -31,6 +31,17 @@ import {
   synthesizeInworldSpeech,
   type InworldTtsConfig,
 } from "./inworld-tts"
+import { countRecentRateLimitEvents, recordRateLimitEvent } from "../../db/shared/rate-limit"
+
+// [Pen test] API security & data exposure (2026-09-03): runTtsGuard's daily
+// seconds cap is log-only unless TTS_BUDGET_ENFORCE is set, which it isn't in
+// any deployed environment — over-cap requests are logged but never blocked.
+// That left this hosted synthesis call with no volumetric control: a
+// scripted flood just runs. Per-user sliding-window cap, same primitive/window
+// as the external Agent API's per-credential throttles — wide enough that a
+// real batch-narration session (many short clips in one sitting) never trips
+// it, tight enough to blunt a flood against the shared Inworld endpoint.
+const TTS_MAX_PER_USER_PER_WINDOW = 200
 
 export interface TtsEnv {
   SNAPSHOTS: R2Bucket
@@ -183,6 +194,16 @@ export async function handleTtsRequest(
 
   // Resolve org_id from the project row. Mirrors export-floor.ts pattern.
   const db = env.AQUILLA_PG
+
+  // Volumetric floor: unlike runTtsGuard below, this actually blocks (see
+  // comment at TTS_MAX_PER_USER_PER_WINDOW).
+  const rateLimitIdentifier = `user:${userId}`
+  const recentTtsCalls = await countRecentRateLimitEvents(db, "tts_synthesize", rateLimitIdentifier)
+  if (recentTtsCalls >= TTS_MAX_PER_USER_PER_WINDOW) {
+    return Response.json({ error: "rate_limited", message: "Too many TTS requests, slow down." }, { status: 429 })
+  }
+  await recordRateLimitEvent(db, "tts_synthesize", rateLimitIdentifier)
+
   const projectRow = await db
     .prepare(`SELECT org_id FROM projects WHERE id = ?`)
     .bind(projectId)
@@ -248,6 +269,7 @@ export async function handleTtsRequest(
     wavBytes = synth.wavBytes
     durationSeconds = Number.isFinite(synth.durationSeconds) ? Math.max(0, synth.durationSeconds) : 0
   } catch (err) {
+    console.error("[tts] upstream unreachable:", err)
     const message = err instanceof Error ? err.message : String(err)
     return new Response(message, { status: 502 })
   }

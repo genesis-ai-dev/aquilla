@@ -95,21 +95,39 @@ describe("InworldVoiceDesignField", () => {
     vi.unstubAllGlobals()
   })
 
-  it("disables Generate until the description is at least 30 characters", () => {
+  it("keeps Generate enabled and shows a field error when the description is too short", async () => {
+    const user = userEvent.setup()
     renderField({ prompt: "too short for a useful voice" })
+    const generate = screen.getByRole("button", { name: "Generate previews" })
+    expect(generate).toBeEnabled()
+    expect(screen.queryByText(/at least 30 characters/)).toBeNull()
+    await user.click(generate)
     expect(screen.getByText(/at least 30 characters/)).toBeTruthy()
-    expect(screen.getByRole("button", { name: "Generate previews" })).toBeDisabled()
-    expect(screen.getByText("Previews ignore audio quality, delivery, and talking speed.")).toBeTruthy()
+    expect(designInworldVoice).not.toHaveBeenCalled()
   })
 
-  it("disables Generate when the preview script is too short", async () => {
+  it("keeps Generate enabled and shows a field error when the preview script is too short", async () => {
     const user = userEvent.setup()
     renderField({ prompt: LONG_PROMPT })
-    expect(screen.getByRole("button", { name: "Generate previews" })).toBeEnabled()
+    const generate = screen.getByRole("button", { name: "Generate previews" })
+    expect(generate).toBeEnabled()
     await user.clear(screen.getByLabelText("Preview script"))
     await user.type(screen.getByLabelText("Preview script"), "too short")
+    expect(generate).toBeEnabled()
+    await user.click(generate)
     expect(screen.getByText(/at least 50 characters/)).toBeTruthy()
-    expect(screen.getByRole("button", { name: "Generate previews" })).toBeDisabled()
+    expect(designInworldVoice).not.toHaveBeenCalled()
+  })
+
+  it("explains Freeform and Structured on hover", async () => {
+    renderField()
+    const freeformHelp =
+      "Describe the voice in your own words, and we build the full voice profile from it"
+    const structuredHelp =
+      "Edit the voice profile directly for full control over the voice's nuances"
+    expect(screen.queryByRole("tooltip")).toBeNull()
+    await expectTooltip(screen.getByRole("tab", { name: "Freeform" }), freeformHelp)
+    await expectTooltip(screen.getByRole("tab", { name: "Structured" }), structuredHelp)
   })
 
   it("explains the preview script behind an info icon on the label", async () => {
@@ -127,10 +145,12 @@ describe("InworldVoiceDesignField", () => {
     renderField()
     const label = screen.getByText("Describe the voice")
     const hint = screen.getByText(/Write in English/)
+    const tabs = screen.getByRole("tablist", { name: "Voice design mode" })
     const input = screen.getByLabelText("Describe the voice")
     const guide = screen.getByRole("link", { name: /Voice design guide/ })
     expect(label.compareDocumentPosition(hint) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(hint.compareDocumentPosition(input) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(hint.compareDocumentPosition(tabs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(tabs.compareDocumentPosition(input) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(hint).toContainElement(guide)
   })
 
@@ -401,10 +421,17 @@ describe("InworldVoiceDesignField", () => {
     expect(screen.getByRole("tab", { name: "Structured" })).toHaveAttribute("aria-selected", "true")
     expect(screen.queryByLabelText("Describe the voice")).toBeNull()
     const profile = screen.getByLabelText("Voice profile")
+    const hint = screen.getByText(/One attribute per line/)
+    const tabs = screen.getByRole("tablist", { name: "Voice design mode" })
+    expect(hint.compareDocumentPosition(tabs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(tabs.compareDocumentPosition(profile) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(profile).toHaveValue(blankStructuredDesignPrompt())
     expect(profile).toHaveClass("font-mono")
     expect(screen.queryByLabelText("Dialect")).toBeNull()
-    expect(screen.getByRole("button", { name: "Generate previews" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Generate previews" })).toBeEnabled()
+    await user.click(screen.getByRole("button", { name: "Generate previews" }))
+    expect(screen.getByText(/Fill in at least one attribute/)).toBeTruthy()
+    expect(designInworldVoice).not.toHaveBeenCalled()
     const chips = screen.getByRole("group", { name: "Voice design presets" })
     const reset = screen.getByRole("button", { name: "Reset" })
     expect(reset).toBeDisabled()
@@ -514,7 +541,7 @@ describe("InworldVoiceDesignField", () => {
     await user.click(reset)
     expect(screen.getByLabelText("Voice profile")).toHaveValue(blankStructuredDesignPrompt())
     expect(onPromptChange).toHaveBeenCalledWith(blankStructuredDesignPrompt())
-    expect(screen.getByRole("button", { name: "Generate previews" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "Generate previews" })).toBeEnabled()
     expect(reset).toBeDisabled()
   })
 

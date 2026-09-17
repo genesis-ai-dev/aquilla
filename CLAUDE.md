@@ -152,7 +152,7 @@ repository commands; unnamed profiles use local-only Worker names. See
   (sync-worker `external/*`) with PAT credentials scoped org/project.
 - **Other major subsystems:** comments (`src/lib/sync/comments-read.ts`, `useComments`),
   search (`src/lib/search/` dual-index + replace), DCS linked-project sync (`src/lib/dcs/`,
-  Gitea catalog + delta import), audio/TTS stack (`src/lib/audio/`, Modal + Gemini/Kokoro),
+  Gitea catalog + delta import), audio/TTS stack (`src/lib/audio/`, Modal + Gemini/Inworld),
   export (`src/lib/export/`), rules/health/completion (`src/lib/rules|health|completion/`),
   local prefs (`src/lib/store/`, localStorage-backed).
 - **React Compiler gotcha:** the compiler memoizes away version-only dependencies; when

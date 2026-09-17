@@ -44,6 +44,16 @@ export function rowForDesignCode(
   return rows.find((row) => row.code.toLowerCase() === needle)
 }
 
+/** Rows for Language/Accent. `voicesOnly` keeps languages that have SYSTEM voices. */
+export function localeRowsForPicker(
+  rows: readonly InworldSupportedLanguage[],
+  extra: string | undefined,
+  voicesOnly: boolean,
+): InworldSupportedLanguage[] {
+  const source = voicesOnly ? rows.filter((row) => row.hasVoices) : rows
+  return withExtraDesignLanguage(source, voicesOnly ? undefined : extra)
+}
+
 export function withExtraDesignLanguage(
   rows: readonly InworldSupportedLanguage[],
   extra?: string,
@@ -51,6 +61,7 @@ export function withExtraDesignLanguage(
   const mapped = toInworldLanguage(extra) ?? extra?.trim()
   if (!mapped) return [...rows]
   if (rows.some((row) => row.code.toLowerCase() === mapped.toLowerCase())) return [...rows]
+  if (familyMatchingLabel(mapped, rows)) return [...rows]
   const familyCode = mapped.split("-")[0] || mapped
   const family = rows.find((row) => row.familyCode.toLowerCase() === familyCode.toLowerCase())
   return [

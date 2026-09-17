@@ -124,6 +124,18 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks())
 
 describe("ApiTokensSection", () => {
+  it("copies connection instructions without minting or disclosing a token", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } })
+    render(<ApiTokensSection />)
+    fireEvent.click(screen.getByRole("button", { name: "Copy connection instructions" }))
+    await waitFor(() => expect(writeText).toHaveBeenCalledOnce())
+    const prompt = writeText.mock.calls[0][0] as string
+    expect(prompt).toContain("/api/v2/agent-connect")
+    expect(prompt).not.toContain("aqk_")
+    expect(mockMintCredential).not.toHaveBeenCalled()
+  })
+
   it("renders the credential list from the mocked client (prefix, mode, resolved scope, revoked state)", async () => {
     render(<ApiTokensSection />)
 

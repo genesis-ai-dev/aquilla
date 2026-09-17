@@ -176,6 +176,7 @@ import { useEditorActions } from "@/context/EditorActionsContext"
 import { isInMemberScope } from "@/lib/sync/member-scopes"
 import { SourceSelectionToolbar } from "./SourceSelectionToolbar"
 import { buildSourceChip, type ContextChip } from "@/lib/agent/context-chip"
+import { ownCastName } from "@/lib/timeline/cue-character"
 import { parseTimestampRange } from "@/lib/video/vtt-generator"
 import { FootnoteInline } from "./footnotes/FootnoteInline"
 import {
@@ -226,8 +227,18 @@ const ESTIMATED_ROW_HEIGHT_PX = 140
 
 /** The gutter track widens by the character circle's w-6 when the cast
  *  gutter is on (stacked media lens). One shared type keeps the header row,
- *  paragraph bar, and rows in the same template. */
-type EditorGridCols = "grid-cols-[84px_1fr_1fr]" | "grid-cols-[132px_1fr_1fr]"
+ *  paragraph bar, and rows in the same template.
+ *
+ *  AQU-1101: the text tracks are `minmax(0,1fr)`, never a bare `1fr`. A bare
+ *  `1fr` carries an implicit `min-width: auto`, so a single unbreakable token
+ *  (a URL, a long identifier) widens ITS track to min-content and steals the
+ *  width from the sibling — source and target stop lining up with each other
+ *  and with the header row. Flooring the minimum at 0 makes the two tracks
+ *  equal fractions of the row whatever the content is; the cell surfaces then
+ *  break the token with `break-words` (see EditorCellSurface). */
+type EditorGridCols =
+  | "grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]"
+  | "grid-cols-[132px_minmax(0,1fr)_minmax(0,1fr)]"
 const LEGEND_LIST_DRAW_DISTANCE_PX = 240
 
 /**
@@ -495,7 +506,8 @@ function SynthStatusBadge({
       error.category === "hosted-tts-failed" ||
       error.category === "seed-vc-not-configured" ||
       error.category === "seed-vc-failed" ||
-      error.category === "gemini-failed"
+      error.category === "gemini-failed" ||
+      error.category === "missing-openrouter-key"
     ) {
       // Soft fixes — the popover body explains what to do; no inline action.
     } else {
@@ -1809,7 +1821,9 @@ export const EditorTable = forwardRef<EditorTableHandle, EditorTableProps>(funct
   // fixed width keeps Source header-aligned. No right gutter; the floating
   // action rail is absolutely positioned. Target reserves pe-9 for the
   // expand chevron.
-  const gridCols: EditorGridCols = castGutter ? "grid-cols-[132px_1fr_1fr]" : "grid-cols-[84px_1fr_1fr]"
+  const gridCols: EditorGridCols = castGutter
+    ? "grid-cols-[132px_minmax(0,1fr)_minmax(0,1fr)]"
+    : "grid-cols-[84px_minmax(0,1fr)_minmax(0,1fr)]"
 
   const handleMouseUp = useCallback(() => {
     if (isDragging.current && dragCells.current.size > 1) {
@@ -5393,11 +5407,24 @@ function EditorRow({
   // parsers produce (<b>, <i>, <u>, <s>, <code>). Anything else in an imported
   // document — notably <img>/<a>, which DOMPurify's defaults let through —
   // is dropped rather than rendered. See OPS-8.
-  // Prefer the explicitly-assigned cast member's name; fall back to the cell's
-  // own label (e.g. a chapter/verse marker from USFM), then nothing.
+  // Prefer the explicitly-assigned cast member's name; then the character the
+  // cell itself names; then the cell's own label (e.g. a chapter/verse marker
+  // from USFM), then nothing.
+  //
+  // AQU-1018: `ownCastName` is the middle rung, and it is what makes a freshly
+  // imported subtitle row say who is speaking. The assigned-voice name only
+  // resolves once `castAssignments` has landed AND the voice is still in the
+  // library, and neither holds at the moment the client actually needs the
+  // label: on import there are no targets yet to read the name off, the
+  // character sheet's `cast.assign` events land BEFORE the `saveTts` that mints
+  // the voices (a documented degraded-success window in
+  // ProjectWorkspace.handleImportCharacters), and deleting a voice later strands
+  // every assignment pointing at it. In all three the sheet's `cast_name` is
+  // sitting right there on the cell — the cast gutter has always drawn it — and
+  // the two corners went blank anyway.
   const castVoiceId = cellLabelsEnabled ? assignedCastVoiceId(project.ttsSettings, cell.id) : undefined
   const castName = castVoiceId ? findVoice(project.ttsSettings, castVoiceId)?.name : undefined
-  const labelText = castName ?? cell.cellLabel ?? null
+  const labelText = castName ?? ownCastName(cell) ?? cell.cellLabel ?? null
   const showCellLabel = cellLabelsEnabled && labelText
 
   // The cell number tints by worst severity. That's the whole signal — the
@@ -5482,6 +5509,10 @@ function EditorRow({
   // AQU-354: does a rail control specifically hold focus? Used to pin the rail
   // open (an in-progress interaction must never be idle-collapsed).
   const [railHasFocus, setRailHasFocus] = useState(false)
+  // AQU-200: the rail's `⋯` overflow. Lifted here (rather than owned by
+  // CellActionRail) because the rail's pin has to know about it — the popup
+  // portals out of the rail, so onFocusCapture can't.
+  const [railOverflowOpen, setRailOverflowOpen] = useState(false)
 
   // ── Expansion state ───────────────────────────────────────────────────────
   const alignmentModelForExpansion = useMemo(() => {
@@ -5523,6 +5554,15 @@ function EditorRow({
         : transcriptNeedsAttention
           ? "amber"
           : null
+
+  // AQU-200: the `⋯` now hides the two rail buttons that carried an
+  // at-a-glance signal of their own — open comments (primary dot) and an
+  // existing take (emerald dot on Play). Collapsing them must not make the
+  // row read as "nothing here", so the strongest of those signals moves onto
+  // the trigger. Comments win: an unread comment is addressed to a person,
+  // where "this line has audio" is only a state.
+  const railOverflowAttentionDot: "emerald" | "primary" | null =
+    openCommentCount > 0 ? "primary" : hasAudio ? "emerald" : null
 
   // First-open auto-tab: prefer the most-attention-worthy tab. Only applied
   // when the panel was closed and is being opened — once open, the user's
@@ -5569,6 +5609,7 @@ function EditorRow({
     railHasFocus,
     showMicDeniedHelp,
     showGenerateConfirm,
+    overflowOpen: railOverflowOpen,
     hasFocusWithin,
     remoteChangedWhileFocused,
   })
@@ -6046,7 +6087,12 @@ function EditorRow({
               // source column. pe-7 clears the floating pencil.
               // select-text: global chrome disables selection; source must stay
               // selectable for add-to-termbase / Ask AI from selection.
-              "relative flex h-full min-h-[40px] flex-col rounded-lg px-2 py-1.5 pe-7 select-text transition-[colors,opacity]",
+              // AQU-1101: min-w-0 + break-words. `minmax(0,1fr)` floors the
+              // TRACK, but a grid item keeps `min-width: auto` and would still
+              // overflow its area on an unbreakable token; min-w-0 lets it
+              // shrink and break-words (inherited by the text below) breaks the
+              // token instead of blowing the column out.
+              "relative flex h-full min-h-[40px] min-w-0 flex-col break-words rounded-lg px-2 py-1.5 pe-7 select-text transition-[colors,opacity]",
               // Match the target well — same muted fill + ring (not a darker
               // primary-tinted edit chrome).
               "focus-within:bg-muted focus-within:ring-1 focus-within:ring-ring/40 focus-within:ring-inset",
@@ -6129,13 +6175,14 @@ function EditorRow({
                   2026-08-26) — "put that character label also in the top left
                   of source cells… we'll just scoot the time range over".
 
-                  THE SAME VALUE THE TARGET CORNER SHOWS, deliberately: the two
-                  names in this app are not interchangeable (the sheet's
-                  `cast_name` is what the timeline, the recorder and the exports
-                  print), and Sam's call was that these two corners agree with
-                  each other rather than with those. It therefore rides the
-                  same "Show cell labels" preference and goes blank in the same
-                  places.
+                  THE SAME VALUE THE TARGET CORNER SHOWS, deliberately: Sam's
+                  call was that these two corners agree with EACH OTHER, so both
+                  read the one `labelText` and both ride the "Show cell labels"
+                  preference. AQU-1018 did not weaken that — it only gave
+                  `labelText` a `cast_name` rung beneath the assigned voice, so
+                  the corners now agree with the timeline/recorder/exports in the
+                  cases where they used to agree on NOTHING. The two names still
+                  are not interchangeable, and an assigned voice still wins.
 
                   `dir="auto"` because the lane is forced LTR for timecodes and
                   a name is not a timecode. The width cap is what does the
@@ -6341,6 +6388,7 @@ function EditorRow({
                     editable={editable && !isLoading && !lockHolderLabel}
                     subdued={showCompletionOverlay}
                     empty={!visibleTranslated?.trim()}
+                    preserveWhitespace={Boolean(idmlConfiguration)}
                     onClick={(event) => {
                       event.stopPropagation()
                       requestTargetEdit(idmlConfiguration
@@ -6587,66 +6635,83 @@ function EditorRow({
               onToggleExpanded={() => setExpanded((p) => !p)}
               alwaysShowChevron
               expansionAttentionDot={chevronAttentionDot}
-            >
-              <TargetDraftActions
-                targetText={visibleTranslated}
-                status={cell.status}
-                editable={editable}
-                isAnonymous={Boolean(isAnonymous)}
-                isCompletionConfigured={isCompletionConfigured}
-                isCompletionAvailable={isCompletionAvailable}
-                isLoading={isLoading}
-                onDraft={completeSingleAndReturn}
-                onRegenerate={() => onCompleteSingle(cell, { regenerate: true })}
-                onAiSetupNeeded={onAiSetupNeeded}
-                onDragStart={onDragStart}
-                onDragEnter={onDragEnter}
-                onConfirmOpenChange={setShowGenerateConfirm}
-              />
-
-              {/* p1-paragraph-ui-wiring (Task 3 + coordinator follow-up): draft
-                  the whole paragraph as one model call. ALL of the gates below
-                  must hold for the button to even render (unlike Sparkles,
-                  which stays visible in a disabled/"set up AI" state) — a
-                  paragraph-wide action that can't run yet shouldn't invite a
-                  click. Hidden when: the group is a single cell (the Sparkles
-                  button already covers it), the group has nothing left to
-                  draft (every cell already validated — resolves the silent
-                  no-op), or the parent didn't wire onCompleteParagraph.
-                  `groupBusy` covers BOTH this row's own in-flight state and
-                  any OTHER cell in the group still drafting (a validated
-                  start cell never gets its own `completing` entry, so relying
-                  on `isLoading` alone would let a second click re-fire
-                  completeParagraph mid-fan-out). */}
-              {cell.paragraphStart === true &&
-                editable &&
-                !isAnonymous &&
-                isCompletionConfigured &&
-                isCompletionAvailable &&
-                onCompleteParagraph &&
-                paragraphGroupSize !== undefined &&
-                paragraphGroupSize > 1 &&
-                (paragraphDraftableCount ?? 0) > 0 && (() => {
-                const groupBusy = paragraphGroupInFlight ?? isLoading
-                return (
-                  <RailButton
-                    icon={<PilcrowRight className="h-3.5 w-3.5" />}
-                    tooltip={groupBusy ? t("editor.ai.generating") : t("editor.ai.draftParagraph", { count: paragraphGroupSize })}
-                    onClick={() => {
-                      if (groupBusy) return
-                      setShowParagraphConfirm(true)
-                    }}
-                    disabled={groupBusy}
-                    pulsing={groupBusy}
+              overflowOpen={railOverflowOpen}
+              onOverflowOpenChange={setRailOverflowOpen}
+              overflowAttentionDot={railOverflowAttentionDot}
+              overflowLabel={t("editor.rail.moreActions")}
+              // AQU-200: AI-generate is the one action that stays a direct
+              // button. Validate is the other always-visible action, and it
+              // already lives in the row's left gutter — it is not moved.
+              // Paragraph-draft rides in `primary` beside the sparkle because
+              // it IS the generate action at group scale; it is already behind
+              // strict gates and only ever renders on a paragraph's first row,
+              // so it costs at most one extra button on a minority of rows.
+              primary={
+                <>
+                  <TargetDraftActions
+                    targetText={visibleTranslated}
+                    status={cell.status}
+                    editable={editable}
+                    isAnonymous={Boolean(isAnonymous)}
+                    isCompletionConfigured={isCompletionConfigured}
+                    isCompletionAvailable={isCompletionAvailable}
+                    isLoading={isLoading}
+                    onDraft={completeSingleAndReturn}
+                    onRegenerate={() => onCompleteSingle(cell, { regenerate: true })}
+                    onAiSetupNeeded={onAiSetupNeeded}
+                    onDragStart={onDragStart}
+                    onDragEnter={onDragEnter}
+                    onConfirmOpenChange={setShowGenerateConfirm}
                   />
-                )
-              })()}
 
-              {/* FRO-237: Direct mic button on the rail when no audio — one-click
-                  action without needing to open a popover ("just hit the record
-                  mic — quick action"). Replaces the redundant Record item inside
-                  the ⋯ popover. When audio IS present, FRO-236's Play icon on
-                  the overflow button already gives a direct play affordance.
+                  {/* p1-paragraph-ui-wiring (Task 3 + coordinator follow-up): draft
+                      the whole paragraph as one model call. ALL of the gates below
+                      must hold for the button to even render (unlike Sparkles,
+                      which stays visible in a disabled/"set up AI" state) — a
+                      paragraph-wide action that can't run yet shouldn't invite a
+                      click. Hidden when: the group is a single cell (the Sparkles
+                      button already covers it), the group has nothing left to
+                      draft (every cell already validated — resolves the silent
+                      no-op), or the parent didn't wire onCompleteParagraph.
+                      `groupBusy` covers BOTH this row's own in-flight state and
+                      any OTHER cell in the group still drafting (a validated
+                      start cell never gets its own `completing` entry, so relying
+                      on `isLoading` alone would let a second click re-fire
+                      completeParagraph mid-fan-out). */}
+                  {cell.paragraphStart === true &&
+                    editable &&
+                    !isAnonymous &&
+                    isCompletionConfigured &&
+                    isCompletionAvailable &&
+                    onCompleteParagraph &&
+                    paragraphGroupSize !== undefined &&
+                    paragraphGroupSize > 1 &&
+                    (paragraphDraftableCount ?? 0) > 0 && (() => {
+                    const groupBusy = paragraphGroupInFlight ?? isLoading
+                    return (
+                      <RailButton
+                        icon={<PilcrowRight className="h-3.5 w-3.5" />}
+                        tooltip={groupBusy ? t("editor.ai.generating") : t("editor.ai.draftParagraph", { count: paragraphGroupSize })}
+                        onClick={() => {
+                          if (groupBusy) return
+                          setShowParagraphConfirm(true)
+                        }}
+                        disabled={groupBusy}
+                        pulsing={groupBusy}
+                      />
+                    )
+                  })()}
+                </>
+              }
+            >
+              {/* AQU-200 moves the mic back behind the `⋯`, reversing FRO-237's
+                  promotion of it to a direct rail button ("just hit the record
+                  mic — quick action"). That was the right call against a rail of
+                  six buttons and the wrong one for a rail of two: the ticket
+                  names record among the actions that collapse. If recording
+                  turns out to be frequent enough to deserve the third direct
+                  slot, promote it back by moving this block into `primary` —
+                  nothing else has to change.
                   WARN fix: the button must NOT be disabled when micDenied —
                   disabled elements receive no mouse events, so the "click for
                   help" affordance is unreachable. Instead keep it enabled and

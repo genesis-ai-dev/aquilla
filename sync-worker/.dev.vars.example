@@ -1,9 +1,9 @@
 # Copy to .dev.vars for local dev (.dev.vars is gitignored).
 # For production secrets use: wrangler secret put SYNC_SECRET_KEY
 
-# Must match frontier-server's SYNC_SECRET_KEY so /sync-token JWTs verify here.
-# Distinct from Frontier's main SECRET_KEY (which signs access tokens) so a
-# sync-worker compromise cannot forge Frontier access tokens.
+# Must match auth-worker's SYNC_SECRET_KEY so /sync-token JWTs verify here.
+# Distinct from auth-worker's main SECRET_KEY (which signs access tokens) so a
+# sync-worker compromise cannot forge auth-worker access tokens.
 SYNC_SECRET_KEY="test-sync-secret-key"
 
 # OPS-2: dedicated bearer for the operator-only routes (/admin/*, /migrate/*,

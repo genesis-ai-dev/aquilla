@@ -11,7 +11,7 @@
 import { env } from "cloudflare:test"
 import { describe, it, expect } from "vitest"
 import {
-  planCreatesProject,
+  planCreatesTenant,
   requiredRoleForChangeset,
   UNREADABLE_PLAN_FLOOR,
 } from "../lib/changeset-floor"
@@ -117,14 +117,18 @@ describe("requiredRoleForChangeset", () => {
     ).toBe(700)
   })
 
-  it("flags a project-creation plan, which keeps the creator rule", () => {
-    expect(planCreatesProject([{ kind: "CreateProject", name: "Fresh" }])).toBe(true)
-    expect(planCreatesProject(JSON.stringify([{ kind: "CreateProject", name: "Fresh" }]))).toBe(true)
-    expect(planCreatesProject([{ kind: "SetTranslation", fileId: "f", cellId: "c", value: "x" }])).toBe(
+  it("flags a tenant-creation plan, which keeps the creator rule", () => {
+    expect(planCreatesTenant([{ kind: "CreateProject", name: "Fresh" }])).toBe(true)
+    expect(planCreatesTenant(JSON.stringify([{ kind: "CreateProject", name: "Fresh" }]))).toBe(true)
+    // AQU-1221: CreateOrg gets the same carve-out — it is filed under a project
+    // id that never resolves, so a role floor would deny everyone.
+    expect(planCreatesTenant([{ kind: "CreateOrg", name: "Partner Co" }])).toBe(true)
+    expect(planCreatesTenant(JSON.stringify([{ kind: "CreateOrg", name: "Partner Co" }]))).toBe(true)
+    expect(planCreatesTenant([{ kind: "SetTranslation", fileId: "f", cellId: "c", value: "x" }])).toBe(
       false,
     )
-    expect(planCreatesProject(null)).toBe(false)
-    expect(planCreatesProject("not json")).toBe(false)
+    expect(planCreatesTenant(null)).toBe(false)
+    expect(planCreatesTenant("not json")).toBe(false)
   })
 
   it("fails closed on a plan it cannot read", async () => {

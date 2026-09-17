@@ -220,7 +220,7 @@ import { applyPresenceFrame, applyLockClaimed, applyLockReleased } from "@/lib/s
 import { canPerform, canOpenAssignUi } from "@/lib/sync/role-policy"
 import { denialMessage } from "@/lib/permissions/denial"
 import { useFocusLock } from "@/hooks/useFocusLock"
-import type { WsReconciler } from "@/lib/sync/ws-reconciler"
+import type { ProjectWsServerMessage, WsReconciler } from "@/lib/sync/ws-reconciler"
 import {
   createProjectPresenceStore,
   presentCellOf,
@@ -541,6 +541,17 @@ export function ProjectWorkspace() {
   const t = useT()
   const { id: projectId, fileId: routeFileId } = useParams<{ id: string; fileId?: string }>()
   const navigate = useNavigate()
+  // Declared up here because effects further down set and read them long before
+  // the values they mirror are computed. Keeping the declarations ahead of every
+  // use is what makes the mirroring legal (react-hooks/immutability).
+  //
+  // Holds a cell to scroll to once cells are loaded after a restore-location
+  // navigation (or an AQU-646 media→text trace, which also flashes). Set by
+  // the restore effect / deep-link / switchLens; consumed by the effect that
+  // fires when `cells` are available AND the text editor is mounted.
+  const pendingCellScrollRef = useRef<{ cellId: string; flash: boolean } | null>(null)
+  /** Mirrors currentUsername (computed much further down). */
+  const currentUsernameRef = useRef<string>("local")
   const { orgs, activeOrg, activeOrgId, isAllOrgs, refresh: refreshOrgs } = useActiveOrg()
   const goToProjects = useCallback(() => {
     navigate(
@@ -1107,12 +1118,6 @@ export function ProjectWorkspace() {
   // (CellVoicePanel). Cloning from a cell opens NewVoiceModal at the
   // workspace root, not inside the dock.
   const [lens, setLens] = useEditorLensPreference(projectId ?? "")
-  // ISSUE-3 fix: /project/:id/voice deep-link activates audio lens on mount,
-  // and surfaces the Voices dock tab (where the voice controls now live).
-  useEffect(() => {
-    if (location.pathname.endsWith("/voice")) { switchLens("audio"); setDockTab("voices") }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.pathname])
   // A2: "Open audio setup" CTA from the cell error popover must navigate to a
   // page where the Gemini API key can be set. The old implementation called
   // setLens("audio") which is a no-op when already in audio mode. Navigate to
@@ -1131,14 +1136,6 @@ export function ProjectWorkspace() {
   const [timelineSelectedCellId, setTimelineSelectedCellId] = useState<string | null>(null)
   const viewSettingsRef = useRef<ViewSettingsMenuHandle>(null)
   const fileOptionsAnchorRef = useRef<HTMLButtonElement>(null)
-  // Holds a cell to scroll to once cells are loaded after a restore-location
-  // navigation (or an AQU-646 media→text trace, which also flashes). Set by
-  // the restore effect / deep-link / switchLens; consumed by the effect that
-  // fires when `cells` are available AND the text editor is mounted.
-  const pendingCellScrollRef = useRef<{ cellId: string; flash: boolean } | null>(null)
-  // Mirrors currentUsername (computed later in the function) so effects that
-  // are declared before currentUsername can access it via ref.
-  const currentUsernameRef = useRef<string>("local")
   // Phase 2c-gamma: the per-file Y.Doc is gone. The editor hydrates from the
   // cells projection and writes via the outbox. `doc`/`docLoading` are
   // retained as no-op constants so downstream cellAreaState + props don't
@@ -2850,6 +2847,13 @@ export function ProjectWorkspace() {
     setLinkingModeRequest((r) => ({ on: false, nonce: (r?.nonce ?? 0) + 1 }))
   }, [])
 
+  /** The auto-linker is writing pairings right now. Several hundred events and
+   *  a handful of round trips, so without a sign of life the timeline just
+   *  looks like the matcher did nothing. */
+  const [cueLinksPending, setCueLinksPending] = useState(false)
+  const [importAudioVttOpen, setImportAudioVttOpen] = useState(false)
+  const [importCharactersOpen, setImportCharactersOpen] = useState(false)
+  const [characterCheckOpen, setCharacterCheckOpen] = useState(false)
   /**
    * LEAVING A FILE PUTS THE DRAWERS AWAY. (Sam, 2026-08-18)
    *
@@ -2863,18 +2867,14 @@ export function ProjectWorkspace() {
    *
    * `closeCueLinkDrawer` already does both halves, so calling it on every file
    * change makes the comment true and leaves the two in step.
+   *
+   * Sits below `characterCheckOpen` so it uses the live setter rather than one
+   * referenced above its own `useState` (react-hooks/immutability).
    */
   useEffect(() => {
     closeCueLinkDrawer()
     setCharacterCheckOpen(false)
   }, [activeFileId, closeCueLinkDrawer])
-  /** The auto-linker is writing pairings right now. Several hundred events and
-   *  a handful of round trips, so without a sign of life the timeline just
-   *  looks like the matcher did nothing. */
-  const [cueLinksPending, setCueLinksPending] = useState(false)
-  const [importAudioVttOpen, setImportAudioVttOpen] = useState(false)
-  const [importCharactersOpen, setImportCharactersOpen] = useState(false)
-  const [characterCheckOpen, setCharacterCheckOpen] = useState(false)
   /** ONE DRAWER AT A TIME. They share a single 80-wide slot, and one of them is
    *  a mode — three at once would be a mess nobody asked for. */
   const openCharacterCheck = useCallback(() => {
@@ -5774,6 +5774,15 @@ export function ProjectWorkspace() {
     setLens(next)
   }, [lens, setLens, activeFile, cellStore])
 
+  // ISSUE-3 fix: /project/:id/voice deep-link activates audio lens on mount,
+  // and surfaces the Voices dock tab (where the voice controls now live).
+  // Declared after switchLens so it calls the live callback rather than one
+  // captured before it exists (react-hooks/immutability).
+  useEffect(() => {
+    if (location.pathname.endsWith("/voice")) { switchLens("audio"); setDockTab("voices") }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname])
+
   // Traces never outlive the file they were captured in.
   useEffect(() => {
     timelineSelectedCellIdRef.current = null
@@ -6208,6 +6217,10 @@ export function ProjectWorkspace() {
   // AQU-1154: lets the WS onOpen handler (declared before the focus-lock hook
   // below) re-claim the cell the user is still editing after a reconnect.
   const focusLockClaimRef = useRef<((cellId: string) => void) | null>(null)
+  // Likewise, this lets that handler forward lock/presence frames to the
+  // focus-lock hook. Both are declared ahead of the WS effect that reads them so
+  // the effect below can keep them current (react-hooks/immutability).
+  const focusLockFeedFrameRef = useRef<((msg: ProjectWsServerMessage) => void) | null>(null)
   // The row this user is on (focus-pinned in the table), lease or not. Kept
   // in a ref so a reconnect can re-announce it; the DO drops presence on close.
   const viewingCellRef = useRef<string | null>(null)
@@ -6523,7 +6536,7 @@ export function ProjectWorkspace() {
               presenceStore.applyPresenceFrame(msg.users)
               // FRO-288: forward presence snapshots to the focus-lock hook so
               // it can update heldBy when another user holds our focused cell.
-              focusLockFeedFrameRef.current(msg)
+              focusLockFeedFrameRef.current?.(msg)
               // B4 fix: applyPresenceFrame always returns a NEW Map, so ref and
               // state never share the same object — subsequent handlers cannot
               // cause React's bail-out by mutating the shared instance in place.
@@ -6541,7 +6554,7 @@ export function ProjectWorkspace() {
               if (msg.t === "presence.diff") presenceStore.applyPresenceDiff(msg.user)
               else presenceStore.applyPresenceLeft(msg.connId)
               const users = presenceStore.getUserSnapshots()
-              focusLockFeedFrameRef.current({ t: "presence", users })
+              focusLockFeedFrameRef.current?.({ t: "presence", users })
               const next = applyPresenceFrame(users, currentUsername)
               if (sameStringMap(cellLockHoldersRef.current, next)) return
               cellLockHoldersRef.current = next
@@ -6554,7 +6567,7 @@ export function ProjectWorkspace() {
               presenceStore.applyLockClaimed(msg.cellId, msg.by.userId)
               // FRO-288: forward lock.claimed to the hook so it can update
               // isHeld / heldBy and stop our renewal timer on takeover.
-              focusLockFeedFrameRef.current(msg)
+              focusLockFeedFrameRef.current?.(msg)
               if (msg.by.userId === currentUsername) return
               // B4 fix: build ONE new Map from the ref (authoritative, always
               // current), assign to ref synchronously (RACE-5 preserved), and
@@ -6570,7 +6583,7 @@ export function ProjectWorkspace() {
             } else if (msg.t === "lock.released") {
               presenceStore.applyLockReleased(msg.cellId)
               // FRO-288: forward lock.released so the hook clears heldBy.
-              focusLockFeedFrameRef.current(msg)
+              focusLockFeedFrameRef.current?.(msg)
               // B4 fix: same pattern — new Map from ref, sync ref, direct setState.
               // Prevents the bail-out that left cells visually locked after a
               // lease-expiry sweep (which broadcasts a lone lock.released frame).
@@ -6647,7 +6660,6 @@ export function ProjectWorkspace() {
     lane: activeLane,
     currentUserId: currentUsername,
   })
-  const focusLockFeedFrameRef = useRef(focusLockFeedFrame)
   useEffect(() => { focusLockFeedFrameRef.current = focusLockFeedFrame }, [focusLockFeedFrame])
   useEffect(() => { focusLockClaimRef.current = focusLockState.claim }, [focusLockState.claim])
 

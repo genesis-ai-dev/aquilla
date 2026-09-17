@@ -151,7 +151,7 @@ export async function handlePlanRequest(
   if (!env.SYNC_SECRET_KEY) return new Response('SYNC_SECRET_KEY not configured', { status: 500 })
   if (!env.AQUILLA_PG) return new Response('AQUILLA_PG binding not configured', { status: 500 })
   const db = env.AQUILLA_PG
-  const projectId = decodeURIComponent(match[1]!)
+  const projectId = decodeURIComponent(match[1])
 
   const authHeader = request.headers.get('Authorization') ?? ''
   const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null

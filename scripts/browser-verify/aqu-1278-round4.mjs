@@ -58,8 +58,19 @@ async function main() {
     return board
   }
 
+  // An element's text as ONE line, its line breaks turned into " | ".
+  //
+  // RUNS OF SEPARATORS COLLAPSE TO ONE. A bar's readout carries an sr-only
+  // " | " between its two percentages (it is what a screen reader says in
+  // place of the drawn rule), and `innerText` gives that its own line — so a
+  // readout arrives here as "100%", "|", "98%" and naive joining produced
+  // "100% | | | 98%". Every assertion below reads the VISIBLE text, where
+  // there is exactly one divider, so the run collapses to match. Without
+  // this the audio-readout check silently stopped asserting anything the day
+  // the separator landed — which is why this is one helper and not three.
+  const oneLine = (text) => text.replace(/\n/g, " | ").replace(/(?:\s*\|\s*)+/g, " | ")
   const rowText = async (board, name) =>
-    (await board.getByTestId(`plan-row-${name}`).innerText()).replace(/\n/g, " | ")
+    oneLine(await board.getByTestId(`plan-row-${name}`).innerText())
 
   const openRow = async (board, testid) => {
     const row = board.getByTestId(`plan-row-${testid}`)
@@ -123,7 +134,7 @@ async function main() {
   board = await openBoard("dev-plan-1278")
   const jonah = board.locator('[data-testid^="plan-row-"]', { hasText: "Jonah" }).first()
   await jonah.scrollIntoViewIfNeeded()
-  const jonahText = (await jonah.innerText()).replace(/\n/g, " | ")
+  const jonahText = oneLine(await jonah.innerText())
   const jonahLink = jonah.locator('[data-testid^="plan-shortfall-"]')
   check(await jonahLink.count() > 0, "Jonah is overdue AND links to its remaining cells", jonahText)
 
@@ -138,7 +149,7 @@ async function main() {
   check(
     await genShortfall.locator('[data-testid="plan-go-to-first-open"]').count() > 0,
     "the link sits under Progress on a book too",
-    (await genShortfall.innerText().catch(() => "")).replace(/\n/g, " | "),
+    oneLine(await genShortfall.innerText().catch(() => "")),
   )
   await shot("04-genesis-inspector")
 
@@ -146,7 +157,7 @@ async function main() {
   console.log("\nvideo-&-audio-test — the project that read 0% recorded")
   board = await openBoard("4e6e0861-1a33-4aae-9766-0c0667b2aa0b")
   const ep1 = board.locator('[data-testid^="plan-row-"]', { hasText: "Season 1 · Episode 1" }).first()
-  const ep1Text = (await ep1.innerText()).replace(/\n/g, " | ")
+  const ep1Text = oneLine(await ep1.innerText())
   check(/AUD/.test(ep1Text), "the episode now draws an audio bar at all", ep1Text)
   await shot("05-real-dubbing-board")
 

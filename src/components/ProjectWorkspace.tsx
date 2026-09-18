@@ -15,7 +15,8 @@ import {
   resolveScopeLabelCellId as resolveScopeLabelCellIdFor,
 } from "@/lib/editor/milestone-jump-targets"
 import { CellAreaPlaceholder } from "./CellAreaPlaceholder"
-import { WorkspaceSkeleton } from "./WorkspaceSkeleton"
+import { WorkspaceMainSkeleton } from "./WorkspaceSkeleton"
+import { Skeleton } from "@/components/ui/skeleton"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
 import { EmptyState, NotFoundIcon } from "@/components/ui/empty"
 import { TabStrip } from "./TabStrip"
@@ -10692,7 +10693,36 @@ export function ProjectWorkspace() {
     handleWorkspaceAction(importAction)
   }, [actionCtx, handleWorkspaceAction, project])
 
-  if (status === "loading") return <WorkspaceSkeleton />
+  // AQU-1325: while the project record loads, paint the real chrome (rail,
+  // account switcher, breadcrumb) around a main-area skeleton. None of the
+  // chrome depends on the record, so blanking it behind a whole-page template
+  // only made a slow round-trip look like a page load.
+  if (status === "loading") {
+    return (
+      <AppShell
+        railCollapsed={dockTab === null}
+        dockStorageKey={projectId}
+        leftDock={
+          <LeftDock
+            activeTab={dockTab}
+            onActiveTabChange={setDockTab}
+            filesPanel={
+              <div className="flex flex-col gap-2 p-3" aria-hidden="true">
+                {Array.from({ length: 6 }).map((_, index) => (
+                  <Skeleton key={index} className="h-8" style={{ width: `${72 + (index % 3) * 8}%` }} />
+                ))}
+              </div>
+            }
+            agentPanel={null}
+            searchPanel={null}
+          />
+        }
+        header={<OrgBreadcrumb section={t("common.project")} />}
+        statusBar={null}
+        main={<WorkspaceMainSkeleton />}
+      />
+    )
+  }
   if (status === "no-session") {
     return (
       <SignedOutWorkspace

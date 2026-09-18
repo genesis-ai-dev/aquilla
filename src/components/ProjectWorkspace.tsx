@@ -11167,6 +11167,10 @@ export function ProjectWorkspace() {
                   activeFileId={activeFileId}
                   fileProgress={fileProgress}
                   activeChapterHealth={activeChapterHealth}
+                  // AQU-1326: the sidebar's per-file /progress reads wait for
+                  // the editor's first cell page, same gate as the other
+                  // secondary reads above.
+                  deferSectionProgress={!editorFirstPaint}
                   suggestionFileIds={suggestionFileIds}
                   validationCount={validationCount}
                   getTokenForFile={getTokenForFile}

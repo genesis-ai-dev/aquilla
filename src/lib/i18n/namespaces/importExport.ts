@@ -777,6 +777,21 @@ export const importExport = defineNamespace({
     "importExport.errors.artifactBindingNetworkFailed": "Artifact binding failed: {detail}",
     "importExport.errors.artifactBindingFailed": "Artifact binding failed",
 
+    // — Thrown-error triage: src/lib/import/cell-size.ts (AQU-990) —
+    "importExport.errors.oversizedCells": plural({
+      one:
+        "Import failed: {count} cell in {fileName} is larger than the {maxSize} per-cell " +
+        "limit ({cells}). Split that section in the source document and import again.",
+      other:
+        "Import failed: {count} cells in {fileName} are larger than the {maxSize} per-cell " +
+        "limit ({cells}). Split those sections in the source document and import again.",
+    }),
+    "importExport.errors.oversizedCellSource": "{label} — source text, {size}",
+    "importExport.errors.oversizedCellTarget": "{label} — translation, {size}",
+    // No inflected noun to agree with the count, so a single form is correct
+    // here rather than a plural() whose English forms would be identical.
+    "importExport.errors.oversizedCellsMore": "and {count} more",
+
     // — Door43 (DCS) sync badge, catalog browser and upstream panel —
     // (importExport.linked.* below is the linked-project upstream-changes
     //  review surface, which is not Door43-specific.)
@@ -905,15 +920,16 @@ export const importExport = defineNamespace({
       "reference; leave it unmapped to match rows to cells in order.",
     "importExport.columnMapping.typeColumnLabel": "Content type",
     "importExport.errors.failedToParseFile": "Failed to parse file",
-    "importExport.fileTarget.acceptedFormats": "USFM, CSV, TSV, or XLSX",
-    "importExport.fileTarget.description": "Fills this file's target column from a USFM file or spreadsheet. Source " +
-      "text is never changed. You'll review every match before anything is " +
-      "saved.",
+    "importExport.fileTarget.acceptedFormats": "USFM, CSV, TSV, XLSX, or VTT",
+    "importExport.fileTarget.description": "Fills this file's target column from a USFM file, spreadsheet, or VTT " +
+      "subtitle file. Source text is never changed. You'll review every match " +
+      "before anything is saved.",
     "importExport.fileTarget.dropZoneHint": "Drop a file here, or",
+    "importExport.fileTarget.noCuesInVtt": "No cues found in this VTT file.",
     "importExport.fileTarget.noVersesInUsfm": "No verses found in this USFM file.",
     "importExport.fileTarget.title": "Import target translations into \"{fileName}\"",
-    "importExport.fileTarget.unsupportedFileType": "Unsupported file type. Use USFM (.usfm/.sfm) or a spreadsheet " +
-      "(.csv/.tsv/.xlsx).",
+    "importExport.fileTarget.unsupportedFileType": "Unsupported file type. Use USFM (.usfm/.sfm), a spreadsheet " +
+      "(.csv/.tsv/.xlsx), or a WebVTT subtitle file (.vtt).",
     "importExport.paired.applyingTargets": "Applying target translations to cells.",
     "importExport.paired.description": "Upload a CSV or XLSX file where each row has both source and target " +
       "text. Rows are matched to existing source cells by canonical reference.",
@@ -946,8 +962,9 @@ export const importExport = defineNamespace({
       other: "Import {count} cells",
     }),
     "importExport.review.matchedCount": "{count} matched",
-    "importExport.review.orderMatchWarning": "No ref column mapped — rows were matched to cells in order. Check the " +
-      "source text next to each row to confirm alignment before importing.",
+    "importExport.review.orderMatchWarning": "Incoming rows carry no reference, so they were matched to cells in " +
+      "order. Check the source text next to each row to confirm alignment " +
+      "before importing.",
     "importExport.review.replacesExisting": "Replaces: {text}",
     "importExport.review.title": "Review matches",
     "importExport.review.uncoveredCellCount": plural({
@@ -1634,6 +1651,49 @@ export const importExport = defineNamespace({
       "importExport.errors.sourceUploadTooLarge": {
         description: "Thrown when a source artifact upload exceeds the server-side size ceiling.",
         placeholders: { maxSize: "The size limit, already formatted (e.g. '95.0 MB') — not translated." },
+      },
+      "importExport.errors.oversizedCells": {
+        description:
+          "Thrown before any upload when one or more parsed cells exceed the server's " +
+          "per-cell text ceiling, so the user learns which sections are too big instead " +
+          "of waiting out a full upload that ends in a raw HTTP 413. The closing " +
+          "sentence is the remedy: break the oversized section up in the original " +
+          "document and re-import.",
+        placeholders: {
+          count: "Number of oversized cells found.",
+          fileName: "Name of the file being imported — not translated.",
+          maxSize: "The per-cell limit, already formatted (e.g. '256 KB') — not translated.",
+          cells:
+            "Pre-joined list of the offending cells, each already rendered by " +
+            "oversizedCellSource / oversizedCellTarget — not translated.",
+        },
+      },
+      "importExport.errors.oversizedCellSource": {
+        description:
+          "One entry in the oversized-cell list, for a cell whose SOURCE text is too " +
+          "big. Reads as a label followed by which side is at fault and how large it " +
+          "is; a fragment inside a sentence, so it takes no closing full stop.",
+        placeholders: {
+          label: "Canonical Scripture reference, or '#12' for the cell's position — not translated.",
+          size: "The cell's size, already formatted (e.g. '412 KB') — not translated.",
+        },
+      },
+      "importExport.errors.oversizedCellTarget": {
+        description:
+          "One entry in the oversized-cell list, for a cell whose pre-filled TRANSLATION " +
+          "is too big (paired imports carry both sides). Same shape as the source " +
+          "variant; a fragment inside a sentence, so it takes no closing full stop.",
+        placeholders: {
+          label: "Canonical Scripture reference, or '#12' for the cell's position — not translated.",
+          size: "The cell's size, already formatted (e.g. '412 KB') — not translated.",
+        },
+      },
+      "importExport.errors.oversizedCellsMore": {
+        description:
+          "Final entry in the oversized-cell list when more cells are oversized than the " +
+          "message names individually. A fragment appended after the listed ones, so it " +
+          "takes no closing full stop.",
+        placeholders: { count: "How many oversized cells are not listed individually." },
       },
       "importExport.errors.sourceUploadNetworkFailed": {
         description:
@@ -2390,6 +2450,13 @@ export const importExport = defineNamespace({
           "in the open file's translations. Deliberately unfinished: the sentence " +
           "continues into the 'Choose file' button rendered directly beneath it, so " +
           "keep the trailing 'or' (or its equivalent) leading into that button.",
+      },
+      "importExport.fileTarget.noCuesInVtt": {
+        description:
+          "Error shown in red under the drop area when a WebVTT subtitle file was " +
+          "read successfully but contained no cues, so there is nothing to fill in. " +
+          "Single short statement of fact. 'VTT' is the file extension and stays " +
+          "untranslated.",
       },
       "importExport.fileTarget.noVersesInUsfm": {
         description:

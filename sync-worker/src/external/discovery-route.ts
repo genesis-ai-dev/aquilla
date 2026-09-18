@@ -14,6 +14,7 @@
 // so it is deliberately unauthenticated.
 
 import { matchUiOnly, uiOnlyHint, uiOnlySection } from './ui-only'
+import { AGENT_SKILLS } from '../../../db/shared/agent-skills'
 
 const EXTERNAL_ROOT = '/api/v1/external'
 
@@ -57,6 +58,7 @@ function apiMap(): Record<string, unknown> {
         'A separate host serves /api/v2/credentials (minting, browser session required) and the human approval pages. In production: this host is https://api.aquilla.app/sync, identity is https://api.aquilla.app/identity. Agents normally never call the identity host.',
     },
     quickstart: [
+      `0. Setting up a partner project? GET ${EXTERNAL_ROOT}/skills/project-setup and follow it (one ProjectSetup command, one approval).`,
       `1. GET ${EXTERNAL_ROOT}/me — confirm your token works; learn your mode (ask|act) and scope.`,
       `2. GET ${EXTERNAL_ROOT}/projects — find a projectId you can access.`,
       `3. GET ${EXTERNAL_ROOT}/projects/:projectId/files — list files; then .../files/:fileId/cells to read content.`,
@@ -75,12 +77,18 @@ function apiMap(): Record<string, unknown> {
       'GET /api/v1/external/commands': 'Index of every command kind you can stage. No auth needed.',
       'GET /api/v1/external/commands/:kind': 'One command kind’s full parameter doc, gotchas, and example (MCP: the describe_command tool). No auth needed.',
       'GET /api/v1/external/docs': 'This API map rendered as Markdown prose. No auth needed.',
+      'GET /api/v1/external/skills': 'Index of agent skills — L2 playbooks that sequence existing commands (MCP: the get_skill tool). No auth needed.',
+      'GET /api/v1/external/skills/:name': 'One skill’s full Markdown body. Start with project-setup when standing up a partner project. No auth needed.',
+      'GET /api/v1/external/setup-template': 'The partner intake form as Markdown (to email a partner) plus the JSON schema of the ProjectSetup body it produces. No auth needed.',
+      'POST /api/v1/external/setup-template/parse': 'Body { markdown } (the filled intake form) → { setup, warnings, nextStep }: a ProjectSetup body minus kind/projectId, every blank named, required: true on the four never-guess fields. Pure transform; no auth needed.',
       'GET /api/v1/external/projects/:projectId/files': 'List a project’s files.',
       'GET /api/v1/external/projects/:projectId/files/:fileId/cells': 'Read a file’s cells (source + target). Supports since/limit/cursor, and lane=<tag> to filter targets to one target-language lane (see multiLanguage).',
       'GET /api/v1/external/projects/:projectId/files/:fileId/export': 'Export a file in its delivered format (round-trip: the original artifact with current translations substituted in). Optional lane=<tag>. See "exporting" below.',
       'GET /api/v1/external/projects/:projectId/search?q=': 'Full-text search cells. Optional side=source|target.',
       'GET /api/v1/external/projects/:projectId/similar?cellId=': 'Translation memory: source cells most LIKE this one, each with its current target and a score in [0,1]. Pass cellId (the query cell is excluded) or text=<free text>, not both. Optional limit (default 10, max 50). LEXICAL ONLY — scored by term overlap, NOT by meaning: it will not find a paraphrase that shares no words. Use search when you know the words you want; use this when you have a line and want prior renderings of similar lines.',
       'GET /api/v1/external/projects/:projectId/cells/:cellId/history': 'Append-only event history for one cell.',
+      'GET /api/v1/external/projects/:projectId/comments':
+        'Reviewer comment threads, oldest first. Optional fileId, or fileId+cellId for one cell; limit (default 50, max 200) + cursor to page. parentCommentId null = thread root. `author` is a per-project pseudonym unless the credential was minted with real identities; `viaAgent` marks comments this API posted. Reply with an EmitEvents changeset carrying comment.create + parentCommentId.',
       'GET /api/v1/external/projects/:projectId/settings': 'Project settings blob + its live version: { projectId, settings, version, updatedAt }. Read this before staging a PatchSettings command — `version` is the ifMatchVersion that command requires. No settings row yet reads as {} at version 0.',
       'GET /api/v1/external/projects/:projectId/cells/:cellId/prompt-preview': 'The prompt the project copilot would actually send for this cell — assembled messages plus labeled parts (base instructions, brief, rules block, injected terms, retrieved examples, discourse context). Optional targetLang=<lane>, fileId=<id>. Use it to verify a PatchSettings prompt/terminology change instead of guessing.',
       'GET /api/v1/external/projects/:projectId/memory': 'Living Memory: the project brief plus every memory entry (examples, decisions, notes, observations) with its status — the same rows the in-app Memory page shows. Filter with ?status=proposed|approved|rejected|archived and ?kind=example|decision|note|observation|other. Each entry carries inRetrieval: whether the copilot is actually being given it.',
@@ -103,13 +111,21 @@ function apiMap(): Record<string, unknown> {
         'Cell reads carry lastEditor and history events carry author. By default both are a stable per-project opaque id (e.g. "u_3f9ab21c"): you can tell that two edits came from the SAME person, and nothing else. The ids are per-project — the same translator is a different id in another project, so do not correlate across projects. Machine authors ("importer", "system", "agent") pass through under their real names.',
       pii: 'A credential minted with pii enabled returns real usernames, and GET /me additionally returns userId + username. Only an OWNER of the credential\'s org/project can mint one, and it is off unless they asked for it.',
       agentAuthorship:
-        'A project may set agentAuthorship: "none", in which case lastEditor and author are ABSENT from the payload entirely (the key is missing, not null) regardless of the token. Do not treat a missing author as a data error; the project has opted out of authorship exposure. This setting is not writable through any agent surface.',
+        'A project may set agentAuthorship: "none", in which case lastEditor and author are ABSENT from the payload entirely (the key is missing, not null) regardless of the token. Do not treat a missing author as a data error; the project has opted out of authorship exposure. An agent may SET this to "none" (tightening — AQU-1282), and may never clear it.',
       auditing: 'Every read call is recorded against the calling credential (which project, which file or cell, how many rows).',
     },
     // AQU-1178: what is deliberately NOT here, so an agent stops guessing at
     // endpoints that will never exist. Same list the MCP get_capabilities tool
     // publishes and the 404 hints quote (sync-worker/src/external/ui-only.ts).
     uiOnly: uiOnlySection(),
+    // AQU-1294: skills — server-owned sequencing prose. Same shared set the MCP
+    // get_skill tool and the in-app harness serve (db/shared/agent-skills.ts).
+    skills: {
+      index: AGENT_SKILLS.map((s) => ({ name: s.name, title: s.title, oneLiner: s.oneLiner })),
+      endpoint: `GET ${EXTERNAL_ROOT}/skills/:name`,
+      note:
+        'A skill sequences EXISTING commands and routes; it adds no capability and stages nothing on its own. project-setup: intake template → one ProjectSetup command → one approval → verification receipt.',
+    },
     orgScopedReads: {
       note:
         'Credentials are scoped org-or-project. An ORG-scoped token can work a partner’s whole workspace from one credential: list its orgs, enumerate each org’s projects, and search several projects in one call. Scope only ever narrows — a PROJECT-scoped token sees exactly its one project (and that project’s org) from these routes, and naming anything outside the scope returns scope_denied rather than an empty list, so "not yours" never looks like "empty".',
@@ -179,7 +195,7 @@ function apiMap(): Record<string, unknown> {
         '3. Commit as usual (ask mode: a human approves at the approvalUrl first). `ifMatchVersion` is re-checked at commit — a racing writer surfaces as plan_stale, so re-read and re-prepare.',
       ],
       rules:
-        'PatchSettings must be the SOLE command in its changeset. Floors: `terminology` needs the org termbase-edit floor (default PROJECT_LEAD 500); every other key needs MAINTAINER 600. The policy keys that govern agent oversight itself — agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, validationCount, validationCountAudio, allowSelfValidation, harmonize_min_role, contributeToGlobalTm — are NEVER writable through any agent surface (permission_denied), and UpdateProjectSettings is likewise rejected if its blob would change one.',
+        'PatchSettings must be the SOLE command in its changeset. Floors: `terminology` needs the org termbase-edit floor (default PROJECT_LEAD 500); every other key needs MAINTAINER 600. The policy keys that govern agent oversight itself — agentMemoryAutonomy, validationRoleFloor, validationNamedUsers, validationCount, validationCountAudio, allowSelfValidation, harmonize_min_role, contributeToGlobalTm, cellEditingFloor, agentAuthorship — are writable in the RESTRICTIVE direction ONLY (AQU-1282): a write that TIGHTENS oversight stages like any other, a write that would LOOSEN it returns permission_denied naming the key in details.loosening, and the direction is re-checked against live settings at commit. GET /api/v1/external/commands/PatchSettings has the per-key direction table. UpdateProjectSettings (deprecated whole-blob replace) is still rejected outright if its blob would change any policy key.',
     },
     multiLanguage: {
       note:

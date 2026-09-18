@@ -1,10 +1,26 @@
 import "fake-indexeddb/auto"
 import "@testing-library/jest-dom/vitest"
-import { afterEach, vi } from "vitest"
+import { afterEach, expect, vi } from "vitest"
 import { cleanup } from "@testing-library/react"
 import type { ReactNode } from "react"
 import { resetWindowFocusRevalidateForTests } from "@/lib/sync/window-focus-revalidate"
 import { resetAllRequestCoalescersForTests } from "@/lib/request-coalescer"
+import {
+  createOffMachineFetchGuard,
+  takeOffMachineRequestViolations,
+} from "./test-setup.fetch-guard"
+
+// Block unit tests from reaching anything off this machine (AQU-1277). The
+// auth/sync base URLs fall back to production when VITE_AUTH_BASE is unset, so
+// a missing or exhausted fetch mock used to hit api.aquilla.app for real. This
+// runs before any test file loads, so it is the value tests capture as their
+// `originalFetch` and restore in afterEach. A test that installs its own mock
+// (vi.fn / vi.spyOn / vi.stubGlobal) replaces the guard for its own duration
+// and is unaffected.
+globalThis.fetch = createOffMachineFetchGuard(globalThis.fetch, () => {
+  const { testPath, currentTestName } = expect.getState()
+  return [testPath, currentTestName].filter(Boolean).join(" › ") || "unknown test"
+})
 
 // Stub PostHog globally. A real VITE_POSTHOG_KEY in a developer's .env makes
 // src/lib/posthog.ts call posthog.init() at import time, which tries to fetch a
@@ -94,4 +110,16 @@ afterEach(() => {
   // and a roster cached in one test would answer the next test's fetch.
   resetWindowFocusRevalidateForTests()
   resetAllRequestCoalescersForTests()
+
+  // The guard throws at the call site, but callers routinely wrap fetch in
+  // try/catch, which would swallow it and leave the test green despite a
+  // blocked production call. Re-raise here so the violation is always fatal.
+  const blocked = takeOffMachineRequestViolations()
+  if (blocked.length > 0) {
+    throw new Error(
+      `[AQU-1277] This test made ${blocked.length} off-machine request(s), which were ` +
+        `blocked before leaving the machine:\n  ${blocked.join("\n  ")}\n` +
+        `Mock fetch for these calls. See src/test-setup.fetch-guard.ts.`,
+    )
+  }
 })

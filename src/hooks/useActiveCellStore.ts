@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import type { CellData } from "./useCells"
-import { buildCellData } from "./useCells"
+import { buildCellData, PAINT_COALESCE_MS } from "./useCells"
 import type { CellAuditStats } from "./useCellsAuditStats"
 import { streamFileCells, fetchCellsByIds, fetchCellsDelta } from "@/lib/sync/cells-read"
 import type { CellRow } from "@/lib/sync/cells-read-types"
@@ -2116,6 +2116,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
 
     const effectiveSoft = soft || usedCache
     setIsError(false)
+    let paintTimer: ReturnType<typeof setTimeout> | undefined
     try {
       const token = tokenFetcher ? await tokenFetcher(fid) : null
       if (!token) {
@@ -2172,8 +2173,19 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
 
       const buffer: CellRow[] = []
       const hardRows: CellRow[] = []
+      // Every page contains complete rows; coalesce their publication while
+      // keeping soft refetches atomic and preserving in-flight local edits.
       let paintedFirstPage = false
-      const pushRows = (rows: CellRow[], rebuild: boolean): boolean | void => {
+      let lastPaintAt = 0
+      const paintRows = () => {
+        if (paintTimer) clearTimeout(paintTimer)
+        paintTimer = undefined
+        if (generationRef.current !== gen) return
+        paintedFirstPage = true
+        lastPaintAt = Date.now()
+        store.replaceRows(store.mergeProtectedRows(hardRows, startSeq).rows, { full: true })
+      }
+      const pushRows = (rows: CellRow[]): boolean | void => {
         if (generationRef.current !== gen) return false
         if (rows.length === 0) return
         if (effectiveSoft) {
@@ -2181,10 +2193,9 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
           return
         }
         for (const row of rows) hardRows.push(row)
-        if (rebuild && !paintedFirstPage) {
-          paintedFirstPage = true
-          store.replaceRows(hardRows, { full: true })
-        }
+        const remaining = PAINT_COALESCE_MS - (Date.now() - lastPaintAt)
+        if (!paintedFirstPage || remaining <= 0) paintRows()
+        else paintTimer ??= setTimeout(paintRows, remaining)
       }
 
       const startSeq = store.getWriteSeq()
@@ -2213,9 +2224,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
         }
       }
 
-      await streamFileCells(pid, fid, token, (rows) => pushRows(rows, false), "target", trackStreamMeta())
-      if (generationRef.current !== gen) return
-      await streamFileCells(pid, fid, token, (rows) => pushRows(rows, true), "source", trackStreamMeta())
+      await streamFileCells(pid, fid, token, pushRows, undefined, trackStreamMeta(), undefined, true)
       if (generationRef.current !== gen) return
 
       let discardedProtected = false
@@ -2265,6 +2274,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
         }, FETCH_RETRY_DELAYS_MS[attempt])
       }
     } finally {
+      if (paintTimer) clearTimeout(paintTimer)
       if (generationRef.current === gen) {
         inFlightRef.current = false
         if (pendingSoftRefetchRef.current) {

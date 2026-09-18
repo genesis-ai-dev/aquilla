@@ -2,10 +2,11 @@
 //
 // Mirrors the DOCX skeleton-injection exporter (./docx.ts): the server serves
 // the raw PPTX side-car bytes; the client opens the zip with JSZip, walks the
-// slide XML in the SAME order as the import parser (src/lib/parsers/pptx.ts —
-// slides sorted numerically, then p:sp shapes, then a:p paragraphs, skipping
-// paragraphs whose a:r run text is empty), and substitutes translations
-// paragraph-by-paragraph.
+// slide XML in the SAME order as the import parser — literally the same walk,
+// `pptxParagraphBlocks` from src/lib/parsers/pptx.ts (slides sorted
+// numerically, then every text box and table-cell paragraph in document order,
+// skipping paragraphs whose a:r run text is empty) — and substitutes
+// translations paragraph-by-paragraph.
 //
 // Fidelity levels:
 //   1. Slide/shape/paragraph STRUCTURE is fully preserved — only a:t text
@@ -22,6 +23,7 @@
 
 import JSZip from "jszip"
 import type { CellData } from "@/hooks/useCells"
+import { pptxParagraphBlocks, pptxSlideParts } from "@/lib/parsers/pptx"
 import {
   packageBlockKey,
   translationsByPackageBlock,
@@ -73,14 +75,8 @@ export async function exportPptx(
 ): Promise<PptxExportResult> {
   const zip = await JSZip.loadAsync(rawPptxBytes)
 
-  // Slide files in numeric order — identical to extractPptxStrings.
-  const slideFiles = Object.keys(zip.files)
-    .filter((f) => /^ppt\/slides\/slide\d+\.xml$/.test(f))
-    .sort((a, b) => {
-      const numA = parseInt(a.match(/slide(\d+)/)?.[1] || "0")
-      const numB = parseInt(b.match(/slide(\d+)/)?.[1] || "0")
-      return numA - numB
-    })
+  // Slide files in numeric order — the same helper extractPptxStrings uses.
+  const slideFiles = pptxSlideParts(zip)
 
   if (slideFiles.length === 0) {
     throw new Error("Malformed PPTX: no ppt/slides/slideN.xml parts found in side-car")
@@ -160,68 +156,69 @@ export async function exportPptx(
     const xmlStr = await zip.file(slideFile)!.async("string")
     const doc = parser.parseFromString(xmlStr, "application/xml")
 
-    const shapes = doc.getElementsByTagName("p:sp")
     let slideMutated = false
 
-    const shapeList = Array.from(shapes)
-    for (let spIdx = 0; spIdx < shapeList.length; spIdx++) {
-      // SNAPSHOT, because `getElementsByTagName` returns a LIVE collection and
-      // this loop now inserts and removes paragraphs. Iterating the live list
-      // while mutating it shifts `pIdx` and `length` underneath the walk, which
-      // silently skips paragraphs — and the locator path indexes by `pIdx`, so
-      // every translation after the first edit would land on the wrong one.
-      const paragraphs = Array.from(shapeList[spIdx].getElementsByTagName("a:p"))
+    // SNAPSHOT of the whole slide's paragraphs up front, because
+    // `getElementsByTagName` returns LIVE collections and this loop inserts and
+    // removes paragraphs. Walking a live list while mutating it shifts the
+    // indices underneath the walk, which silently skips paragraphs — and the
+    // locators are built from those indices, so every translation after the
+    // first edit would land on the wrong paragraph.
+    //
+    // AQU-1124: table paragraphs are only walked once the file carries
+    // locators. Decks imported before table support have no cells for them, and
+    // the positional fallback below maps cells to paragraphs BY POSITION — so
+    // counting a table paragraph there would shift every mapping after it.
+    const blocks = pptxParagraphBlocks(doc).filter(
+      (block) => block.kind === "shape" || hasLocatedTranslations,
+    )
 
-      for (let pIdx = 0; pIdx < paragraphs.length; pIdx++) {
-        const p = paragraphs[pIdx]
-        // Skip-empty rule mirrors the parser: only text inside a:r runs counts.
-        if (!paragraphPlainText(p).trim()) continue
+    for (const block of blocks) {
+      const p = block.p
+      // Skip-empty rule mirrors the parser: only text inside a:r runs counts.
+      if (!paragraphPlainText(p).trim()) continue
 
-        const blockKey = packageBlockKey(
-          slideFile,
-          `p:sp[${spIdx + 1}]/p:txBody/a:p[${pIdx + 1}]`,
-        )
-        const located = locatedTranslations.get(blockKey)
+      const blockKey = packageBlockKey(slideFile, block.blockPath)
+      const located = locatedTranslations.get(blockKey)
 
-        // AQU-1068: this paragraph's cell was removed in the app, so the
-        // paragraph leaves the deck. The snapshot above means the removal
-        // cannot disturb the indices this walk is built on.
-        if (removedKeys.has(blockKey)) {
-          p.parentNode?.removeChild(p)
-          removed++
-          slideMutated = true
-          continue
-        }
-
-        const group = groupOrder[paraCursor]
-        paraCursor++
-        if (!located && (hasLocatedTranslations || !group)) {
-          untouched++
-          if (insertAfter(p, blockKey)) slideMutated = true
-          continue
-        }
-        const translation = located?.plain ?? (group ? groupToTranslation.get(group) : undefined) ?? ""
-        if (!translation) {
-          untouched++
-          if (insertAfter(p, blockKey)) slideMutated = true
-          continue
-        }
-
-        if (countDistinctRunFormats(p) > 1) {
-          warnings.push({
-            segment: located?.label ?? group ?? "unknown paragraph",
-            detail:
-              "slide paragraph had mixed inline formatting; translation keeps only the first run's styling",
-          })
-        }
-        if (injectTranslationIntoParagraph(p, translation)) {
-          injected++
-          slideMutated = true
-        } else {
-          untouched++
-        }
-        if (insertAfter(p, blockKey)) slideMutated = true
+      // AQU-1068: this paragraph's cell was removed in the app, so the
+      // paragraph leaves the deck. The snapshot above means the removal
+      // cannot disturb the indices this walk is built on.
+      if (removedKeys.has(blockKey)) {
+        p.parentNode?.removeChild(p)
+        removed++
+        slideMutated = true
+        continue
       }
+
+      const group = groupOrder[paraCursor]
+      paraCursor++
+      if (!located && (hasLocatedTranslations || !group)) {
+        untouched++
+        if (insertAfter(p, blockKey)) slideMutated = true
+        continue
+      }
+      const translation = located?.plain ?? (group ? groupToTranslation.get(group) : undefined) ?? ""
+      if (!translation) {
+        untouched++
+        if (insertAfter(p, blockKey)) slideMutated = true
+        continue
+      }
+
+      if (countDistinctRunFormats(p) > 1) {
+        warnings.push({
+          segment: located?.label ?? group ?? "unknown paragraph",
+          detail:
+            "slide paragraph had mixed inline formatting; translation keeps only the first run's styling",
+        })
+      }
+      if (injectTranslationIntoParagraph(p, translation)) {
+        injected++
+        slideMutated = true
+      } else {
+        untouched++
+      }
+      if (insertAfter(p, blockKey)) slideMutated = true
     }
 
     if (slideMutated) {

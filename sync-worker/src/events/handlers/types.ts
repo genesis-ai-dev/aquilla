@@ -38,6 +38,9 @@ export interface DispatchResult {
    * BATCH_LIMIT-sized chunks via db.batch().
    */
   stmts: AquillaStatement[]
+  /** Index of the idempotent events INSERT. A zero row count identifies
+   * a concurrent replay that the route's earlier ID prefetch missed. */
+  eventInsertStmtIndex?: number
   /**
    * Per-event Realtime frame. Caller may coalesce many of these for
    * broadcast.

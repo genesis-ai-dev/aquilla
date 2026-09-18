@@ -4,6 +4,7 @@ mod fs_bridge;
 mod keychain;
 mod llm_proxy;
 mod repo_root;
+mod shutdown_guard;
 
 use llm_proxy::LlmConfig;
 use tauri::Manager;
@@ -25,6 +26,7 @@ pub fn run() {
     }
 
     builder
+        .on_window_event(shutdown_guard::handle_window_event)
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -49,6 +51,7 @@ pub fn run() {
                     .expect("axum server error");
             });
             app.manage(llm_config);
+            app.manage(shutdown_guard::ShutdownGuardState::new());
 
             Ok(())
         })
@@ -69,7 +72,9 @@ pub fn run() {
             connectivity::get_connectivity,
             llm_proxy::set_llm_config,
             llm_proxy::get_llm_config,
+            shutdown_guard::confirm_offline_shutdown,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(shutdown_guard::handle_run_event);
 }

@@ -30,6 +30,7 @@ import { OutboxProvider } from "@/context/OutboxContext"
 import { OfflineStoreProvider } from "@/context/OfflineStoreContext"
 import { OfflineSyncManagerMount } from "@/components/OfflineSyncManagerMount"
 import { UnsyncedOfflineWorkGuard } from "@/components/UnsyncedOfflineWorkGuard"
+import { OfflineShutdownGuard } from "@/components/OfflineShutdownGuard"
 import { LocalLlmConfigMount } from "@/components/LocalLlmConfigMount"
 import { ConflictToast } from "@/components/ConflictToast"
 import { NavHistoryProvider } from "@/context/NavHistoryContext"
@@ -272,6 +273,7 @@ export default function App() {
     <OfflineStoreProvider>
       <OfflineSyncManagerMount />
       <UnsyncedOfflineWorkGuard />
+      <OfflineShutdownGuard />
       <LocalLlmConfigMount />
       <TooltipProvider delay={600}>
         <SyncingProvider>

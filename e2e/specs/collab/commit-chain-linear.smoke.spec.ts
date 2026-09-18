@@ -63,6 +63,57 @@ async function pendingCellEvents(page: Page, cellId: string) {
   }, cellId)
 }
 
+test("three pending corrections on an already translated verse preserve every parent", async ({ alice }, testInfo) => {
+  const jwt = await jwtFor("alice")
+  const seeded = await seedProjectWithFile(jwt, { name: `Existing head ${Date.now()}` })
+  const cellId = seeded.cellIds[CELL_INDEX]
+  const sync = waitForProjectSyncReady(alice, seeded.projectId)
+  const ws = await openSeededProject(alice, seeded)
+  await sync
+  await ws.editCell(CELL_INDEX, "BASE-H")
+  await expect.poll(() => pendingCellEvents(alice, cellId)).toEqual([])
+  const resync = waitForProjectSyncReady(alice, seeded.projectId)
+  await alice.reload()
+  await resync
+  await ws.waitForEditor(cellId)
+  await expect.poll(() => ws.readTargetText(CELL_INDEX)).toBe("BASE-H")
+
+  let release!: () => void
+  const gate = new Promise<void>((resolve) => { release = resolve })
+  await alice.route(/\/events$/, async (route) => {
+    if (commitEventsIn(route.request(), cellId).length > 0) await gate
+    await route.continue()
+  })
+  try {
+    for (const value of ["EDIT-A", "EDIT-B", "EDIT-C"]) {
+      await ws.activateTargetCell(CELL_INDEX)
+      await ws.replaceActiveTargetText(CELL_INDEX, value)
+      await ws.blurEditor()
+      await expect.poll(async () => (await pendingCellEvents(alice, cellId))
+        .some((e) => e.payload.value === value)).toBe(true)
+    }
+    const queued = (await pendingCellEvents(alice, cellId))
+      .filter((e) => e.kind === "target.cell.commit")
+    await testInfo.attach("existing-head-pending-chain", {
+      body: JSON.stringify(queued, null, 2), contentType: "application/json",
+    })
+    for (let i = 1; i < queued.length; i++) {
+      expect.soft(queued[i].parentId, queued[i].payload.value).toBe(queued[i - 1].id)
+    }
+    release()
+    await expectLinearChain(jwt, seeded, cellId, ["BASE-H", "EDIT-A", "EDIT-B", "EDIT-C"])
+    await expect.poll(() => pendingCellEvents(alice, cellId)).toEqual([])
+    const reloaded = waitForProjectSyncReady(alice, seeded.projectId)
+    await alice.reload()
+    await reloaded
+    await ws.waitForEditor(cellId)
+    await expect.poll(() => ws.readTargetText(CELL_INDEX)).toBe("EDIT-C")
+  } finally {
+    release()
+    await alice.unrouteAll({ behavior: "wait" })
+  }
+})
+
 const valueOf = (payload: unknown): string | undefined =>
   (payload as { value?: string } | null)?.value
 
@@ -224,17 +275,20 @@ test("a second tab of the same user sees the first tab's commit and chains on it
 // AQU-1309: force the reported ordering without depending on network speed.
 // Both saves cross the real SPA/outbox/worker/Postgres boundary. Only their
 // delivery is gated; the AI provider supplies deterministic draft text.
-for (const { draftOrigin, loseAck } of [
-  { draftOrigin: "human", loseAck: false },
-  { draftOrigin: "AI", loseAck: false },
-  { draftOrigin: "AI", loseAck: true },
+for (const { draftOrigin, loseAck, bufferAtAck } of [
+  { draftOrigin: "human", loseAck: false, bufferAtAck: false },
+  { draftOrigin: "AI", loseAck: false, bufferAtAck: false },
+  { draftOrigin: "AI", loseAck: true, bufferAtAck: false },
+  { draftOrigin: "AI", loseAck: false, bufferAtAck: true },
 ]) {
-  const delivery = loseAck ? "lost acknowledgement and retry" : "delayed delivery"
+  const delivery = bufferAtAck ? "correction only in editor buffer"
+    : loseAck ? "lost acknowledgement and retry" : "delayed delivery"
   test(`${draftOrigin} draft pending (${delivery}): correction chains locally and survives the older save`, async ({ alice }, testInfo) => {
     const jwt = await jwtFor("alice")
     const seeded = await seedProjectWithFile(jwt, {
       name: `Pending ${draftOrigin} ${Date.now()}`,
     })
+    if (bufferAtAck) await alice.clock.install()
     const cellId = seeded.cellIds[CELL_INDEX]
     const sync = waitForProjectSyncReady(alice, seeded.projectId)
     const ws = await openSeededProject(alice, seeded)
@@ -307,7 +361,25 @@ for (const { draftOrigin, loseAck } of [
       await expect.poll(() => ws.readTargetText(CELL_INDEX)).toBe("DRAFT-A")
 
       await ws.activateTargetCell(CELL_INDEX)
+      if (bufferAtAck) {
+        // Freeze the idle debounce so the correction cannot acquire an
+        // IndexedDB overlay before the older save lands. Network/IDB work
+        // still runs; no wall-clock delay decides whether the race occurs.
+        const now = await alice.evaluate(() => Date.now())
+        await alice.clock.pauseAt(now + 100)
+      }
       await ws.replaceActiveTargetText(CELL_INDEX, "HUMAN-B")
+      if (bufferAtAck) {
+        expect((await pendingCellEvents(alice, cellId))
+          .some((e) => e.payload.value === "HUMAN-B")).toBe(false)
+        releaseDraft()
+        await expect.poll(() => draftDelivered, { timeout: 30_000 }).toBe(true)
+        // Waiting for the outbox to drain proves the author processed A's
+        // acknowledgement, rather than merely receiving a network response.
+        await expect.poll(() => pendingCellEvents(alice, cellId)).toEqual([])
+        expect(await ws.readTargetText(CELL_INDEX)).toBe("HUMAN-B")
+        await alice.clock.resume()
+      }
       // Navigation commits the correction and its automatic self-validation.
       await ws.activateTargetCell(1)
       await ws.replaceActiveTargetText(1, "NEXT-VERSE")

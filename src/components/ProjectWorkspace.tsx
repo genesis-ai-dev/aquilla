@@ -1593,17 +1593,17 @@ export function ProjectWorkspace() {
     // cellSummaries reflect the ACTIVE lane, so only this lane's keys can be
     // confirmed/cleared here; another lane's entries stay dormant until that
     // lane is active again.
+    // AQU-1309: only confirmation of THIS pending head retires it. With
+    // H → A → B queued locally, the projection can still report H. H differs
+    // from B's immediate parent A, but that is lag, not evidence of a competing
+    // edit. Forgetting B here makes the next edit branch off H and go stale.
+    // Actual conflicts are resolved by subscribeStaleSiblings above.
     for (const summary of cellSummaries) {
       const key = laneCellKey(summary.id)
       const pending = pendingTargetCommitHeadsRef.current.get(key)
       if (!pending) continue
       const projectedHead = summary.targetEventId ?? null
       if (projectedHead === pending.eventId) {
-        pendingTargetCommitHeadsRef.current.delete(key)
-        if (pendingCompletionEventIdRef.current.get(key) === pending.eventId) {
-          pendingCompletionEventIdRef.current.delete(key)
-        }
-      } else if (projectedHead && projectedHead !== pending.parentId) {
         pendingTargetCommitHeadsRef.current.delete(key)
         if (pendingCompletionEventIdRef.current.get(key) === pending.eventId) {
           pendingCompletionEventIdRef.current.delete(key)

@@ -4,14 +4,49 @@ Date: 2026-09-18. Base: origin/main at de229bd497.
 
 ## Result
 
-The client captures the pending AI draft's event ID as the parent of the
-human correction. The controlled browser reproduction preserves the human
-correction and its validation through acknowledgement, navigation, and reload.
-It does not reproduce the reported persistent text loss.
+Two separate bugs are reproduced and fixed in PR #698 (target: dev):
 
-It does reproduce a false conflict: overlapping attempts of the same AI
-event ID receive one successful response and one response listing that same
-ID in `stale`. This is a retry of one edit, not two competing edits.
+1. **The client forgets an unacknowledged parent after several edits.** On an
+   already-translated verse H, queued edits should form H → A → B → C. A
+   workspace effect sees the lagging projection H, notices H differs from B's
+   immediate parent A, and incorrectly clears B from the pending-head map. C
+   falls back to H and the server rejects it as a stale sibling. After the fix,
+   C chains on B and survives navigation, acknowledgement, and reload.
+2. **The server misclassifies overlapping retries of one event as conflicts.**
+   Both requests can miss the early duplicate lookup. The transaction INSERT
+   result now distinguishes the duplicate from a newly inserted competing edit.
+
+The original two-save AI → correction test preserves the correction. The
+already-translated, three-pending-edit case exposes the client bug that simpler
+fixtures miss. This matches the same-author/different-ID sibling pattern found
+in the Burmese project's production event history. We do not have a session
+trace proving every reported AI revert followed this exact path.
+
+## Client parent-chain reproduction
+
+1. Save BASE-H and reload, establishing a real target head.
+2. Hold subsequent event requests before they reach the server.
+3. Edit/blur three times: EDIT-A, EDIT-B, EDIT-C. Inspect IndexedDB after each.
+4. Before the client fix, parents are A→H, B→A, **C→H**. The server logs C
+   but reports it stale; C does not become the visible projected head.
+5. Remove the effect's inference that any non-parent projection means conflict.
+   Retire the pending head only when that event is confirmed; explicit server
+   stale handling remains in place for genuine conflicts.
+6. The same browser test now passes: A→H, B→A, C→B; C persists after reload.
+
+No clock manipulation is used in this test. Baseline artifact:
+`/private/tmp/aqu-1309-existing-head-results.json`; fixed artifact:
+`/private/tmp/aqu-1309-parent-fixed-results.json`.
+
+Production cross-check: among the latest 2,000 target commits (Sep 10–17),
+multiple Burmese-team events contain different text but share the same author
+and parent with an earlier winning event. For example, loser
+`01a0a0c8-b416-70fd-8133-6f9bfee0efba` and winner
+`01a0a0c8-a535-7073-9f30-db135edfb596` share parent
+`01a0a0c8-82e5-76ea-9c5c-a681b77f9588`; their client timestamps differ by
+3.809 seconds. Text lengths/hashes differ (132 vs 140 characters), so this is
+not an identical-event retry. The account is a Burmese posteditor. This gives
+production evidence for same-author branching, not just a synthetic race.
 
 ## Reproduction
 
@@ -77,8 +112,12 @@ After the fix, all six browser cases and all 44 event-route tests pass. The
 same-ID regression also asserts exactly one applied frame across both attempts.
 The different-ID control retains first-child/head arbitration.
 
-The reported text overwrite is still unproven. Next: trace an incoming AI value
-while a newer editor buffer has not yet entered IndexedDB.
+The two-save buffer-only case also passes: pause the editor idle debounce, type B,
+confirm B is absent from IndexedDB, release A and await its outbox drain, then
+navigate, save B, and reload. Install the browser clock before application
+timers. A discarded probe installed it mid-session, produced a destroyed-editor
+timer exception and a visual revert; that result is a harness artifact, not
+product evidence.
 
 ## Confidence path findings (read-only)
 
@@ -96,6 +135,44 @@ The existing switch is browser-local (`health-confidence-overlay`), not a
 per-project setting. These facts explain recurring expensive work during editing;
 they do not yet prove which resource causes production save convoys.
 
+## Production database evidence
+
+Read-only inspection on Sep 18 at 16:18–16:25 UTC. Statistics reset Sep 7 at
+16:11 UTC; these are accumulated statement times, not HTTP durations or CPU
+utilization. Queries contain no translation text in the captured output.
+
+- Confidence-neighbor SQL: 6,418 recorded calls, 3,184.9ms mean, 19,659ms max,
+  20,440,657ms total (5.68 hours). About 52% of all recorded database statement
+  execution time in this snapshot belongs to this one query shape. This does
+  not include a per-project breakdown or establish the resource behind each
+  slow save.
+- Sequence allocation: 54,322 calls, 0.16ms mean, 244.13ms max. The observed
+  10–15 second wait is not explained by this SQL statement's recorded duration.
+- Chain claim: 14,293 calls, 0.17ms mean, 187.34ms max.
+- A project-wide file-counter statement reaches 13.3s, but it has a different
+  shape from the current per-file save counter. Do not attribute it to normal
+  saves solely from its duration.
+- At inspection time the other database connections were idle. No active lock
+  convoy was captured; this does not rule out the reported busy-hour behavior.
+
+For a Burmese project file with 1,599 source and 1,599 translated/unvalidated
+target rows, plain EXPLAIN estimates one row. A bounded EXPLAIN ANALYZE for
+**one asker**, in a read-only transaction with a five-second statement timeout,
+shows 1,599 repeated source index probes and 8,368 shared-buffer hits (24.4ms).
+The full query repeats neighbor search for all unvalidated askers, despite the
+client requesting at most 100 output scores. An eight-asker control takes 210ms.
+This identifies a concrete confidence-query scaling problem, not yet a causal
+proof of save queueing.
+
+A throwaway materialized-file alternative takes 404.5ms for the same eight
+askers and returns the same row count. It is slower; no such SQL change is
+included in the PR. No production schema, settings, or data were changed.
+
+Evidence files (local, no credentials): `aqu-1309-db-stats.json`,
+`aqu-1309-db-stats-detail.json`, `aqu-1309-confidence-plan.json`,
+`aqu-1309-confidence-one-asker.json`, `aqu-1309-confidence-eight-askers.json`,
+and `aqu-1309-confidence-candidate.json`, all under `/private/tmp`.
+
 ## Validation and scope
 
 Commands run:
@@ -111,6 +188,10 @@ git diff --check
 
 - Baseline browser run: 4 passed, 2 failed on the new false-conflict assertion.
 - Fixed browser run: 6 passed (`/private/tmp/aqu-1309-fixed-results.json`).
+- Additional buffer-only case: passed (`/private/tmp/aqu-1309-buffer-confirm-results.json`).
+- Initial affected-browser gates: 7 passed, then 8 passed after adding the buffer-only case.
+- Existing-head regression: failed before the client fix; passed after it (14.0s).
+- Secret scan: clean.
 - Worker route integration: 44 passed, including concurrent retry/control.
 - Worker type-check: passed.
 - E2E policy/impact guards: 26 passed.
@@ -119,7 +200,8 @@ git diff --check
 
 Earlier diagnostic harness versions had an attempt-counter race and an
 intercepted-request timeout waiter that stalled. Those are not product failures;
-the final run completes and fails on the explicit response-contract assertion.
+the baseline run completes and fails on the explicit response-contract assertion.
+The fixed run passes that assertion.
 
 The isolated worktree uses existing dependency directories. Vite reports a
 blocked font URL from that symlink, so these runs do not assess visual fidelity.
@@ -127,13 +209,15 @@ The final worker logs contain no slow-request warnings.
 
 The test crosses editor/AI event producers, IndexedDB, HTTP delivery,
 sync-worker arbitration, Postgres projection, and UI rehydration. The journey
-map now includes these pending-draft cases. The PR fixes retry classification;
-no production settings or deployment changed. The broader issue remains in
-progress because persistent text loss and production queueing remain unproven.
+map now includes these pending-draft cases. The PR fixes parent retention and
+retry classification. No production settings or deployment changed. The broader
+issue remains in progress: production queueing, project confidence controls, and
+telemetry are not resolved by these correctness fixes.
 
 The spec's `queue-edits-offline.md` acceptance criteria already require ordered
 delivery preserving parent references. The fix restores the existing
-parent-chain conflict rule: replaying an identical event is not a competing edit.
+parent-chain conflict rule: local descendants retain their pending ancestry,
+and replaying an identical event is not a competing edit.
 No spec change is needed. Production frontend `/version.json` reports the tested
 base `de229bd` (built Sep 17). The production worker version and reported server
 latency remain unverified by this local reproduction.

@@ -795,6 +795,7 @@ export async function handleEventsWriteRequest(
   // when assembling the response; the value carries enough context for the
   // client to navigate the user to the affected cell's history drawer.
   const staleEntries = new Map<string, StaleEntry>()
+  const replayedCellEventIds = new Set<string>()
   // F5: target.cell.commit events whose sourceEventId pin is stale (source
   // has advanced since the translator last fetched). Accepted + projected
   // (LWW) but flagged so the client can surface a "source changed" banner.
@@ -806,6 +807,7 @@ export async function handleEventsWriteRequest(
     id: string
     stmtStart: number
     stmtCount: number
+    eventInsertStmtIndex?: number
     eventFrame: Extract<RealtimeMessage, { t: 'event' }>
     /** `events.server_seq` assigned to this event (seqBase + slot). */
     serverSeq: number
@@ -1447,6 +1449,7 @@ export async function handleEventsWriteRequest(
       id: rawEvent.id,
       stmtStart: stmtsBefore,
       stmtCount: pendingStmts.length - stmtsBefore,
+      eventInsertStmtIndex: outcome.result.eventInsertStmtIndex,
       eventFrame: outcome.result.eventFrame,
       serverSeq,
       dirtyEntry,
@@ -1575,7 +1578,17 @@ export async function handleEventsWriteRequest(
     ): void => {
       let offset = 0
       for (const e of chunk.entries) {
-        if (e.headStmtIndex !== undefined && !staleEntries.has(e.id)) {
+        if (
+          e.eventInsertStmtIndex !== undefined &&
+          results[offset + e.eventInsertStmtIndex]?.meta.changes === 0
+        ) {
+          // AQU-1309: overlapping attempts can both miss the ID prefetch.
+          // The INSERT decides idempotency atomically. A retry of an event
+          // already in the log is not a competing edit, even if its head
+          // write is now a no-op or a newer head failed the pre-check.
+          replayedCellEventIds.add(e.id)
+          staleEntries.delete(e.id)
+        } else if (e.headStmtIndex !== undefined && !staleEntries.has(e.id)) {
           if (results[offset + e.headStmtIndex]?.meta.changes === 0) {
             staleEntries.set(e.id, {
               id: e.id,
@@ -1637,7 +1650,7 @@ export async function handleEventsWriteRequest(
           stale: accepted
             .filter((a) => staleEntries.has(a.id))
             .map((a) => staleEntries.get(a.id)!),
-          staleSource: staleSourceEntries,
+          staleSource: staleSourceEntries.filter((entry) => !replayedCellEventIds.has(entry.id)),
         },
         { status: 200 },
       )
@@ -1647,11 +1660,17 @@ export async function handleEventsWriteRequest(
       accepted.push({ id: entry.id })
     }
 
+    // Replays follow the existing-ID fast path: acknowledge them without
+    // inventing another applied frame or broadcasting an unpersisted seq.
+    const newEntries = committedEntries.filter(
+      (entry) => !replayedCellEventIds.has(entry.id),
+    )
+
     // Comment notifications — fire-and-forget via ctx.waitUntil so they
     // never delay the response. Only fires for comment.create events.
     if (ctx && env.AQUILLA_PG) {
       const baseUrl = env.BASE_URL ?? 'https://aquilla.app'
-      for (const entry of committedEntries) {
+      for (const entry of newEntries) {
         if (entry.eventFrame.kind === 'comment.create') {
           // Retrieve the original raw event payload by matching event id.
           const rawEvent = rawEvents.find((e) => e.id === entry.id)
@@ -1688,7 +1707,7 @@ export async function handleEventsWriteRequest(
 
       // Coalesce dirty tables per (project, file) before broadcast.
       const dirtyByScope = new Map<string, { project: string; file: string; tables: Set<ProjectionTable> }>()
-      for (const entry of committedEntries) {
+      for (const entry of newEntries) {
         if (!entry.dirtyEntry) continue
         const dirty = entry.dirtyEntry
         const key = `${dirty.project}|${dirty.file}`
@@ -1701,7 +1720,7 @@ export async function handleEventsWriteRequest(
       }
 
       const broadcasts: Promise<void>[] = []
-      for (const entry of committedEntries) {
+      for (const entry of newEntries) {
         broadcasts.push(broadcastRealtime(broadcastEnv, entry.eventFrame))
       }
       for (const { project, file, tables } of dirtyByScope.values()) {
@@ -1724,8 +1743,8 @@ export async function handleEventsWriteRequest(
     // ProjectSync DO broadcast (peers) and the HTTP response `applied[]`
     // (the author's own client, which would otherwise refetch after its
     // outbox flush — see src/lib/sync/outbox-flush.ts onApplied).
-    const rowsByCell = await readEventAppliedRows(db, committedEntries)
-    for (const entry of committedEntries) {
+    const rowsByCell = await readEventAppliedRows(db, newEntries)
+    for (const entry of newEntries) {
       appliedFrames.push(buildAppliedFrame(entry, rowsByCell))
     }
 
@@ -1784,7 +1803,7 @@ export async function handleEventsWriteRequest(
         string,
         { fileIds: Set<string>; cellIds: Set<string> }
       >()
-      for (const entry of committedEntries) {
+      for (const entry of newEntries) {
         const frame = entry.eventFrame
         if (!LINK_NOTIFY_LANE_KINDS.has(frame.kind)) continue
         let delta = laneDeltaByProject.get(frame.project)
@@ -1837,7 +1856,7 @@ export async function handleEventsWriteRequest(
     stale: accepted
       .filter((a) => staleEntries.has(a.id))
       .map((a) => staleEntries.get(a.id)!),
-    staleSource: staleSourceEntries,
+    staleSource: staleSourceEntries.filter((entry) => !replayedCellEventIds.has(entry.id)),
     // Same shape as the `event.applied` WS frame, one per committed event.
     // Lets the author's client land its own write's projected rows straight
     // from the POST (no by-ids GET after the outbox flush). Omitted on the

@@ -42,6 +42,14 @@ interface Verse { chapter: number; verse: number; heading: boolean; frontMatter:
 /** Pull the chapter and verse back out of a fixture cell's canonical ref. */
 function locate(ref: string, code: string): Verse | null {
   if (ref === code) return { chapter: 0, verse: 0, heading: false, frontMatter: true }
+  // Importer-shaped front matter — "GEN:mt1:1", book code : marker : line.
+  // The fixture moved to this shape when it started placing front matter
+  // where a real import does; matching only the bare code silently dropped
+  // every front-matter line from the written packs.
+  const parts = ref.split(":")
+  if (parts.length === 3 && parts[0] === code && !/^\d+$/.test(parts[1])) {
+    return { chapter: 0, verse: 0, heading: false, frontMatter: true }
+  }
   const [left, right] = ref.split(":")
   const verse = Number(right)
   const chapter = left === code ? 1 : Number(left.slice(code.length + 1))

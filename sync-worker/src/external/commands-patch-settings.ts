@@ -2,8 +2,10 @@
 // registry §2). Replaces named top-level settings keys under the same version
 // guard + threshold re-projection as UpdateProjectSettings (the shared merge
 // lives in db/shared/projects.ts::patchProjectSettingsShared), with per-key
-// role floors and a hard policy-key denial. Also owns the policy-key guard the
-// deprecated UpdateProjectSettings whole-blob command now enforces.
+// role floors and a directional policy-key gate (AQU-1282: restrictive-
+// direction writes are admitted, loosening ones refused). Also owns the
+// policy-key guard the deprecated UpdateProjectSettings whole-blob command
+// still enforces.
 
 import { errorResponse, toErrorResponse } from './errors'
 import { deepEqualJson } from './canonical'
@@ -33,6 +35,7 @@ import {
   patchProjectSettingsShared,
 } from '../../../db/shared/projects'
 import { validateSettingsKeyValue } from '../../../db/shared/project-settings-keys'
+import { loosensPolicy } from '../../../db/shared/policy-direction'
 import { ROLE } from '../events/role-policy'
 
 /** One top-level settings key replace. `value` is any JSON value (null stores
@@ -49,10 +52,12 @@ export interface PatchSettingsCommand {
   ifMatchVersion: number
 }
 
-/** Settings keys that govern the agent-oversight machinery itself. NEVER
- *  writable through any agent surface (permission_denied always) — an agent
- *  must not be able to loosen the gates that review its own work. Enforced for
- *  PatchSettings ops AND (as a changed-value guard) for the deprecated
+/** Settings keys that govern the agent-oversight machinery itself. Writable
+ *  through the agent surface ONLY in the restrictive direction (AQU-1282 §1,
+ *  db/shared/policy-direction.ts) — an agent must not be able to loosen the
+ *  gates that review its own work, but may tighten them. Enforced
+ *  directionally for PatchSettings ops (prepare AND commit, against the live
+ *  blob) and as a flat changed-value guard for the deprecated
  *  UpdateProjectSettings whole-blob replace. */
 export const POLICY_SETTINGS_KEYS: readonly string[] = [
   'agentMemoryAutonomy',
@@ -161,14 +166,13 @@ export function validatePatchSettingsCommand(
     // AQU-1224: a key the settings schema doesn't carry is a TYPO, not a new
     // setting — reject it here so nothing reaches the human approval queue,
     // and name the key so the caller can correct it (describe_command lists
-    // the legal ones). Policy keys skip the VALUE check so they always resolve
-    // to the permission_denied prepare emits for them, never a type complaint.
-    if (!POLICY_KEY_SET.has(op.key)) {
-      const problem = validateSettingsKeyValue(op.key, op.value)
-      if (problem) {
-        issues.push({ index, message: `PatchSettings.ops[${opIndex}]: ${problem}` })
-        return null
-      }
+    // the legal ones). Policy keys get the same type check (AQU-1282: they are
+    // writable now), so a mistyped value names the key rather than reading as
+    // a loosening attempt.
+    const problem = validateSettingsKeyValue(op.key, op.value)
+    if (problem) {
+      issues.push({ index, message: `PatchSettings.ops[${opIndex}]: ${problem}` })
+      return null
     }
     // A duplicate key is a caller bug (later would silently clobber earlier),
     // unlike SetTranslation's loop-generated cell batches — reject, don't warn.
@@ -292,21 +296,31 @@ function requiredRoleForOps(
   return floor
 }
 
-/** Ops naming a POLICY key → the permission_denied response, else null. */
-function policyOpDenial(ops: readonly PatchSettingsOp[]): Response | null {
-  const policyOps = ops.filter((op) => POLICY_KEY_SET.has(op.key))
-  if (policyOps.length === 0) return null
+/** AQU-1282 §1: ops naming a POLICY key whose write would LOOSEN it (or
+ *  cannot be read) against `live` → the permission_denied response, else
+ *  null. Tightening writes pass — they still ride the ask-mode approval gate.
+ *  `details.loosening` names each offending op so the agent can correct it. */
+function policyOpDenial(
+  ops: readonly PatchSettingsOp[],
+  live: Record<string, unknown>,
+): Response | null {
+  const loosening = loosensPolicy(ops, live)
+  if (loosening.length === 0) return null
   return errorResponse(
     'permission_denied',
-    'policy settings keys are never writable through the agent surface',
-    { policyKeys: policyOps.map((op) => op.key) },
+    'policy settings keys are writable in the restrictive direction only',
+    {
+      policyKeys: ops.filter((op) => POLICY_KEY_SET.has(op.key)).map((op) => op.key),
+      loosening: loosening.map(({ key, current, proposed, reason }) => ({ key, current, proposed, reason })),
+    },
   )
 }
 
 /**
- * Prepare a PatchSettings changeset (sole command): policy-key denial, dynamic
- * per-key role floors, and the settings version pin (plan_stale on drift) —
- * the same guard sequence its commit re-runs.
+ * Prepare a PatchSettings changeset (sole command): directional policy-key
+ * gate against the live blob, dynamic per-key role floors, and the settings
+ * version pin (plan_stale on drift) — the same guard sequence its commit
+ * re-runs.
  */
 export async function preparePatchSettings(
   db: AquillaDb,
@@ -321,7 +335,9 @@ export async function preparePatchSettings(
     return errorResponse('validation_failed', 'PatchSettings.projectId must match the changeset project')
   }
 
-  const denial = policyOpDenial(cmd.ops)
+  // The live blob serves both the policy direction check and the version pin.
+  const current = await loadProjectSettings(db, urlProjectId)
+  const denial = policyOpDenial(cmd.ops, current.settings)
   if (denial) return denial
 
   const [termbaseFloor, languageFloor] = await Promise.all([
@@ -336,7 +352,6 @@ export async function preparePatchSettings(
     })
   }
 
-  const current = await loadProjectSettings(db, urlProjectId)
   if (current.version !== cmd.ifMatchVersion) {
     return errorResponse('plan_stale', 'settings version changed since prepare', {
       expected: cmd.ifMatchVersion,
@@ -371,8 +386,10 @@ export async function preparePatchSettings(
 
 /**
  * Commit a PatchSettings changeset (receipt-only). Re-runs the prepare-time
- * guards live (scope, policy denial, per-key floors), consumes the ask-mode
- * confirmation via the shared gates, then applies the per-key merge through
+ * guards live (scope, policy direction against the LIVE blob — a human who
+ * tightened further between prepare and commit must not see a stale tighten
+ * apply as a loosen — and per-key floors), consumes the ask-mode confirmation
+ * via the shared gates, then applies the per-key merge through
  * patchProjectSettingsShared — version drift maps to plan_stale, with the same
  * own-crash-retry absorption as UpdateProjectSettings.
  */
@@ -394,7 +411,8 @@ export async function commitPatchSettings(
     return toErrorResponse(err)
   }
 
-  const denial = policyOpDenial(cmd.ops)
+  const live = await loadProjectSettings(db, projectId)
+  const denial = policyOpDenial(cmd.ops, live.settings)
   if (denial) return denial
 
   const [termbaseFloor, languageFloor] = await Promise.all([

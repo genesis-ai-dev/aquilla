@@ -6,6 +6,14 @@ import { Settings, OrgSettingsIdentity, OrgSettingsKnowledge, OrgSettingsSecurit
 import { renameOrg, listMyOrgs } from "@/lib/frontier/orgs"
 import { toast } from "@/components/ui/toast"
 
+// AQU-1277: OrgProvider loads the project directory via
+// fetchAccessibleProjectsResult, which catches its own network errors. Unmocked
+// it reached production identity for real while the tests stayed green.
+vi.mock("@/lib/sync/cloud-projects", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sync/cloud-projects")>()),
+  fetchAccessibleProjectsResult: vi.fn(async () => ({ ok: true as const, projects: [] })),
+}))
+
 vi.mock("@/components/ui/toast", () => ({
   toast: { add: vi.fn(), close: vi.fn(), update: vi.fn(), promise: vi.fn() },
 }))

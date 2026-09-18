@@ -1653,6 +1653,10 @@ CREATE TABLE IF NOT EXISTS agent_authorizations (
   mode TEXT NOT NULL CHECK (mode IN ('ask', 'act')),
   requested_project_id TEXT,
   project_id TEXT,
+  -- 0092: the org scope the human approved. Mirrors project_id; a grant
+  -- carries at most one of the two. No requested_org_id — agents request a
+  -- project or nothing.
+  org_id TEXT,
   user_id TEXT,
   status TEXT NOT NULL DEFAULT 'pending'
     CHECK (status IN ('pending', 'approved', 'denied', 'consumed')),

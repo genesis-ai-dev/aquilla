@@ -976,6 +976,10 @@ export const org = defineNamespace({
     "org.multiProjectInviteDialog.emailModeHint":
       "They'll receive one email per selected project with a single-use invite link.",
     "org.multiProjectInviteDialog.projectsFieldLabel": "Projects",
+    // AQU-1150: filter box above the project checklist.
+    "org.multiProjectInviteDialog.searchPlaceholder": "Search projects…",
+    "org.multiProjectInviteDialog.searchProjectsAriaLabel": "Search projects",
+    // "No projects match your search." → org.orgProjectsDataTable.noSearchMatch (identical text)
     "org.multiProjectInviteDialog.selectProjectAriaLabel": "Select {name}",
     "org.multiProjectInviteDialog.noProjectsAvailable":
       "No projects available — create one first or check back when sync completes.",
@@ -2306,6 +2310,19 @@ export const org = defineNamespace({
           "Accessible name for one project's checkbox in the multi-project invite " +
           "dialog's project checklist.",
         placeholders: { name: "The project's name — not translated." },
+      },
+      "org.multiProjectInviteDialog.searchPlaceholder": {
+        description:
+          "Placeholder in the filter box above the multi-project invite dialog's " +
+          "project checklist. Typing narrows the visible rows to projects whose " +
+          "name contains what was typed; it never changes what is already checked.",
+        maxLength: 24,
+      },
+      "org.multiProjectInviteDialog.searchProjectsAriaLabel": {
+        description:
+          "Accessible name for that same filter box. The input has no visible " +
+          "label, only the placeholder, so this is what a screen reader announces. " +
+          "No trailing ellipsis — punctuation is read aloud.",
       },
       "org.multiProjectInviteDialog.projectsSelectedCount": {
         description:

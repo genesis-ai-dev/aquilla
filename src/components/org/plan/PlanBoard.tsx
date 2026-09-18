@@ -495,6 +495,9 @@ export function PlanBoard({
     [step, selectedId, onSelect],
   )
 
+  // Stable per board instance — see the row's memo note.
+  const selectUnit = useCallback((unit: PlanUnit) => onSelect(planUnitId(unit)), [onSelect])
+
   const renderRow = (unit: PlanUnit) => {
     const id = planUnitId(unit)
     return (
@@ -510,16 +513,16 @@ export function PlanBoard({
         // board re-rendering once per background read.
         shortChapters={shortChaptersByUnit?.get(id)}
         assignees={assigneesByUnit?.get(id)}
-        // Bound to the unit here, exactly like `onSelect` below it, so a row
-        // never has to know how a unit is addressed. Absent when the owner
-        // supplied no handler, so the row can drop the link rather than render
-        // a button that does nothing.
-        onOpenShortfall={onOpenShortfall ? () => onOpenShortfall(unit) : undefined}
+        // The SAME function to every row, never an arrow bound per row: the
+        // row is memoized, and a per-row closure would be fresh on every
+        // board render, turning the memo into pure overhead. The row hands
+        // its own unit back instead.
+        onOpenShortfall={onOpenShortfall}
         // In Order mode no header above the row carries its status, so the row
         // carries it itself.
         showStatus={view === "order"}
         selected={id === selectedId}
-        onSelect={() => onSelect(id)}
+        onSelect={selectUnit}
       />
     )
   }

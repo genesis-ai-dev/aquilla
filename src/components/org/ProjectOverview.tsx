@@ -951,6 +951,15 @@ export function ProjectOverview() {
    * middle of the screen, under the previous book's last verses, and without
    * a marker "open Ruth" looks like it opened Philemon.
    */
+  // Identity-stable for the memoized rows — an inline arrow at the call site
+  // would re-render all of them on every overview render. The `void` keeps a
+  // rejected navigation out of the unhandled-rejection channel, as the old
+  // inline wrapper did.
+  const handleOpenShortfall = useCallback(
+    (unit: PlanUnit) => { void openPlanShortfall(unit) },
+    [openPlanShortfall],
+  )
+
   const openPlanUnit = useCallback(
     async (unit: PlanUnit) => {
       if (!id) return
@@ -1940,7 +1949,7 @@ export function ProjectOverview() {
                 onSelect={setSelectedPlanUnitId}
                 shortChaptersByUnit={planShortChaptersByUnit}
                 assigneesByUnit={assigneesByUnit}
-                onOpenShortfall={(unit) => { void openPlanShortfall(unit) }}
+                onOpenShortfall={handleOpenShortfall}
                 laneLabel={showLaneTabs ? planLanguageLabel : null}
                 lanes={planLaneOptions}
                 lane={planLane}

@@ -16,7 +16,7 @@
 // the answer is short enough to be a fact rather than a report, and it never
 // pushes the date off the row: the date keeps line one whenever there is one.
 
-import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react"
+import { memo, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react"
 import { useT, useI18n } from "@/lib/i18n/I18nProvider"
 import { fmtDeadlineDate } from "@/lib/format-date"
 import { formatList } from "@/lib/i18n/format"
@@ -166,7 +166,21 @@ function useAssigneeChipCapacity(
  */
 const WHERE_CHAPTERS_NAMED = 3
 
-export function PlanRow({
+/**
+ * MEMOIZED (Sam, 2026-09-17, the efficiency round). Every board state change
+ * — a selection, a keystroke in the filter, a fold — re-rendered all sixty-six
+ * rows, and each row's render is not free: two shortfall computations, the
+ * chip-capacity measurement, four readout tooltips. Under `memo` a selection
+ * change re-renders exactly two rows, the one losing the ring and the one
+ * gaining it.
+ *
+ * THE CONTRACT THAT MAKES IT WORK: every prop must be identity-stable across
+ * board renders, which is why `onSelect` and `onOpenShortfall` take the UNIT
+ * as an argument — bound-per-row arrows here would be fresh every render and
+ * turn the memo into pure overhead. The board passes the same two functions
+ * to every row; the row hands its own unit back.
+ */
+export const PlanRow = memo(function PlanRow({
   unit,
   now,
   selected,
@@ -188,7 +202,7 @@ export function PlanRow({
    * the grid is identical in both arrangements.
    */
   showStatus?: boolean
-  onSelect: () => void
+  onSelect: (unit: PlanUnit) => void
   /**
    * Files that carry recordings, from `audioFileIds` over the WHOLE board.
    * Optional so the row stays testable alone; omitted, the unit's own audio
@@ -198,7 +212,7 @@ export function PlanRow({
   /** Labels of the chapters still short, already ordered — e.g. ["12", "40"]. */
   shortChapters?: string[]
   /** Opens the editor at the first outstanding cell. Absent → plain text. */
-  onOpenShortfall?: () => void
+  onOpenShortfall?: (unit: PlanUnit) => void
   assignees?: readonly PlanRowAssignee[]
 }) {
   const t = useT()
@@ -351,7 +365,7 @@ export function PlanRow({
       aria-label={openable ? (openLabel ?? undefined) : undefined}
       onClick={openable ? (e) => {
         e.stopPropagation()
-        onOpenShortfall?.()
+        onOpenShortfall?.(unit)
       } : undefined}
       onKeyDown={openable ? (e) => {
         if (e.key !== "Enter" && e.key !== " ") return
@@ -359,7 +373,7 @@ export function PlanRow({
         // both have to be swallowed, not just handled.
         e.preventDefault()
         e.stopPropagation()
-        onOpenShortfall?.()
+        onOpenShortfall?.(unit)
       } : undefined}
     >
       {text}
@@ -406,7 +420,7 @@ export function PlanRow({
         data-plan-unit={`${unit.fileId}:${unit.sectionKey}`}
         data-selected={selected ? "true" : undefined}
         aria-current={selected ? "true" : undefined}
-        onClick={onSelect}
+        onClick={() => onSelect(unit)}
         // AQU-1278 widened the third column from minmax(130px,0.7fr) and took
         // every pixel of it off the bars, which had the slack: the minimums
         // still add to 520 and the fractions still add to 3.5, so nothing else
@@ -528,4 +542,4 @@ export function PlanRow({
       </button>
     </li>
   )
-}
+})

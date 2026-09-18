@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import type { CellData } from "./useCells"
 import { buildCellData, PAINT_COALESCE_MS } from "./useCells"
-import type { PagePaint } from "./useCells"
 import type { CellAuditStats } from "./useCellsAuditStats"
 import { streamFileCells, fetchCellsByIds, fetchCellsDelta } from "@/lib/sync/cells-read"
 import type { CellRow } from "@/lib/sync/cells-read-types"
@@ -243,16 +242,6 @@ export class CellStore {
   private sourceOrder: string[] = []
   private targetOrder: string[] = []
   private indexById = new Map<string, number>()
-  /**
-   * AQU-1326 (follow-up): how far the TARGET stream of a cold file open has
-   * landed. `null` — the target side is complete (or no hard load is in
-   * flight), so every cell's target state is authoritative. Otherwise only
-   * cells at or before `throughCellId` in anchor order have been paired with
-   * their target row; every cell after it renders `targetPending` so a
-   * translator never types into a cell whose server value has not arrived.
-   * `throughCellId: null` means no target page has landed yet.
-   */
-  private targetFrontier: { throughCellId: string | null } | null = null
   private sourceById = new Map<string, CellRow>()
   private targetById = new Map<string, CellRow>()
   // AQU-538: target rows for NON-active lanes, retained verbatim so `toRows()`
@@ -411,7 +400,6 @@ export class CellStore {
     // moved on, which is the exact confusion the set exists to prevent.
     this.removedCellIds = new Set()
     this.cellVersionById = new Map()
-    this.targetFrontier = null
     this.maxServerSeq = null
     this.projectEpoch = null
     this.writeSeq = 0
@@ -595,20 +583,8 @@ export class CellStore {
     )
     this.applyContentOverlays(cell)
     this.applyOwnTake(cell)
-    if (this.isTargetPending(cellId)) cell.targetPending = true
     this.viewCache.set(cellId, { version, view: cell })
     return cell
-  }
-
-  /** True while a cold load's TARGET stream has not yet reached this cell. */
-  isTargetPending(cellId: string): boolean {
-    const frontier = this.targetFrontier
-    if (frontier === null) return false
-    if (frontier.throughCellId === null) return true
-    const through = this.indexById.get(frontier.throughCellId)
-    const index = this.indexById.get(cellId)
-    if (through === undefined || index === undefined) return false
-    return index > through
   }
 
   /**
@@ -970,20 +946,8 @@ export class CellStore {
     return this.derivedCache.textPairs.length === 0 ? EMPTY_TEXT_PAIRS : this.derivedCache.textPairs
   }
 
-  replaceRows(
-    rows: CellRow[],
-    opts: {
-      maxServerSeq?: number | null
-      changedCellIds?: Iterable<string>
-      full?: boolean
-      /** See `targetFrontier`. Only meaningful with `full: true` — a full
-       *  replace bumps every cell, which is what makes a moved frontier
-       *  re-derive `targetPending` on every view. Omit to leave it as is. */
-      targetFrontier?: { throughCellId: string | null } | null
-    } = {},
-  ): void {
+  replaceRows(rows: CellRow[], opts: { maxServerSeq?: number | null; changedCellIds?: Iterable<string>; full?: boolean } = {}): void {
     const changedIds = opts.full ? new Set<string>(this.order) : new Set(opts.changedCellIds ?? [])
-    if (opts.targetFrontier !== undefined) this.targetFrontier = opts.targetFrontier
     const sourceById = new Map<string, CellRow>()
     const targetById = new Map<string, CellRow>()
     const sourceOrder: string[] = []
@@ -2152,6 +2116,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
 
     const effectiveSoft = soft || usedCache
     setIsError(false)
+    let paintTimer: ReturnType<typeof setTimeout> | undefined
     try {
       const token = tokenFetcher ? await tokenFetcher(fid) : null
       if (!token) {
@@ -2208,125 +2173,66 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
 
       const buffer: CellRow[] = []
       const hardRows: CellRow[] = []
-      // AQU-1326 (follow-up): both sides stream CONCURRENTLY and the view fills
-      // in by ROW, not by column. The first paint waits for the first SOURCE
-      // page (source rows are what the editor renders); target pages that
-      // land before it are held and ride that paint. Every later paint is
-      // driven by the TARGET side (`"progressive"`), throttled to one per
-      // PAINT_COALESCE_MS because `replaceRows({ full: true })` is O(rows).
-      //
-      // Each paint also carries the target FRONTIER — the last target row
-      // received so far. Cells past it render `targetPending` (a loading
-      // placeholder, editor closed) instead of looking empty: previously the
-      // whole source side streamed first, so a big file painted every row with
-      // a blank target column and a translator could start typing into a cell
-      // whose translation was still in flight. The unconditional final replace
-      // below clears the frontier and swaps in the complete list.
+      // Every page contains complete rows; coalesce their publication while
+      // keeping soft refetches atomic and preserving in-flight local edits.
       let paintedFirstPage = false
-      let sourceSeen = false
-      let targetThroughCellId: string | null = null
-      let targetDone = false
       let lastPaintAt = 0
-      let streamsSettled = false
-      let streamError: unknown = null
-      let trailingPaint: ReturnType<typeof setTimeout> | null = null
-      const frontier = () => (targetDone ? null : { throughCellId: targetThroughCellId })
-      const paintNow = () => {
+      const paintRows = () => {
+        if (paintTimer) clearTimeout(paintTimer)
+        paintTimer = undefined
+        if (generationRef.current !== gen) return
+        paintedFirstPage = true
         lastPaintAt = Date.now()
-        store.replaceRows(hardRows, { full: true, targetFrontier: frontier() })
+        store.replaceRows(store.mergeProtectedRows(hardRows, startSeq).rows, { full: true })
       }
-      // A page that arrives inside the coalesce window is not lost, only
-      // deferred: it repaints at the end of the window unless another page or
-      // the final replace gets there first. Without this, the last target page
-      // before a long gap would sit unpainted (and its cells "pending") until
-      // the whole stream finished.
-      const schedulePaint = () => {
-        if (trailingPaint !== null) return
-        trailingPaint = setTimeout(() => {
-          trailingPaint = null
-          if (generationRef.current !== gen || streamsSettled) return
-          paintNow()
-        }, Math.max(0, PAINT_COALESCE_MS - (Date.now() - lastPaintAt)))
-      }
-      const pushRows = (rows: CellRow[], paint: PagePaint, isLast: boolean): boolean | void => {
-        // The other side failed: stop this stream too (returning false ends
-        // pagination) so it cannot keep painting behind the error state.
-        if (generationRef.current !== gen || streamError !== null) return false
-        if (paint === "first-only") sourceSeen = true
-        if (paint === "progressive") {
-          if (isLast) targetDone = true
-          if (rows.length > 0) targetThroughCellId = rows[rows.length - 1].cellId
-        }
+      const pushRows = (rows: CellRow[]): boolean | void => {
+        if (generationRef.current !== gen) return false
+        if (rows.length === 0) return
         if (effectiveSoft) {
           for (const row of rows) buffer.push(row)
           return
         }
         for (const row of rows) hardRows.push(row)
-        if (hardRows.length === 0 || !sourceSeen) return
-        if (!paintedFirstPage) {
-          paintedFirstPage = true
-          paintNow()
-          return
-        }
-        if (paint !== "progressive") return
-        if (Date.now() - lastPaintAt < PAINT_COALESCE_MS) {
-          schedulePaint()
-          return
-        }
-        paintNow()
+        const remaining = PAINT_COALESCE_MS - (Date.now() - lastPaintAt)
+        if (!paintedFirstPage || remaining <= 0) paintRows()
+        else paintTimer ??= setTimeout(paintRows, remaining)
       }
 
       const startSeq = store.getWriteSeq()
-      // The `?since=` cursor must be the EARLIEST watermark of the two-stream
-      // snapshot: anything that lands mid-stream has a higher seq, so the next
-      // delta re-fetches it. With concurrent streams "first page to arrive" is
-      // not "first page served", so take the MIN of each side's first page.
-      // AQU-943: the epoch rides along; sides disagreeing means a wipe landed
-      // mid-stream, which is treated like a torn snapshot (no cursor stored).
-      const sideFirst: { seq: number | null; epoch: number | null }[] = []
+      let streamMaxSeq: number | null = null
+      // AQU-943: incarnation of `streamMaxSeq`, taken from the same first page
+      // so cursor and epoch always describe the same snapshot.
+      let streamEpoch: number | null = null
       let streamTorn = false
+      let cursorSeen = false
       const trackStreamMeta = () => {
-        let seen = false
-        let first: number | null = null
+        let sideFirst: number | null = null
+        let sideSeen = false
         return (meta: { maxServerSeq?: number | null; projectEpoch?: number | null }) => {
           const value = typeof meta.maxServerSeq === "number" ? meta.maxServerSeq : null
-          if (!seen) {
-            seen = true
-            first = value
-            sideFirst.push({ seq: value, epoch: typeof meta.projectEpoch === "number" ? meta.projectEpoch : null })
-          } else if (value !== first) {
+          if (!cursorSeen) {
+            cursorSeen = true
+            streamMaxSeq = value
+            streamEpoch = typeof meta.projectEpoch === "number" ? meta.projectEpoch : null
+          }
+          if (!sideSeen) {
+            sideSeen = true
+            sideFirst = value
+          } else if (value !== sideFirst) {
             streamTorn = true
           }
         }
       }
 
-      const settle = (stream: Promise<void>) =>
-        stream.catch((err: unknown) => {
-          if (streamError === null) streamError = err
-        })
-      await Promise.all([
-        settle(streamFileCells(pid, fid, token, (rows, isLast) => pushRows(rows, "first-only", isLast), "source", trackStreamMeta())),
-        settle(streamFileCells(pid, fid, token, (rows, isLast) => pushRows(rows, "progressive", isLast), "target", trackStreamMeta())),
-      ])
-      streamsSettled = true
-      if (trailingPaint !== null) clearTimeout(trailingPaint)
+      await streamFileCells(pid, fid, token, pushRows, undefined, trackStreamMeta(), undefined, true)
       if (generationRef.current !== gen) return
-      if (streamError !== null) throw streamError
-      let streamMaxSeq: number | null = null
-      let streamEpoch: number | null = null
-      if (sideFirst.length > 0 && sideFirst.every((side) => side.seq !== null)) {
-        const earliest = sideFirst.reduce((a, b) => ((b.seq as number) < (a.seq as number) ? b : a))
-        streamMaxSeq = earliest.seq
-        streamEpoch = earliest.epoch
-        if (sideFirst.some((side) => side.epoch !== streamEpoch)) streamTorn = true
-      }
 
       let discardedProtected = false
       if (effectiveSoft) {
         store.clearConfirmedShadows(buffer, startSeq)
         const { rows: kept, discardedCellIds } = store.mergeProtectedRows(buffer, startSeq)
         discardedProtected = discardedCellIds.size > 0
-        store.replaceRows(kept, { full: true, targetFrontier: null })
+        store.replaceRows(kept, { full: true })
       } else {
         // AQU-1068: the hard path replaces EVERY row, and a cold-cache open of
         // a big file streams for seconds — long enough for someone to insert a
@@ -2340,7 +2246,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
         store.clearConfirmedShadows(hardRows, startSeq)
         const { rows: kept, discardedCellIds } = store.mergeProtectedRows(hardRows, startSeq)
         discardedProtected = discardedCellIds.size > 0
-        store.replaceRows(kept, { full: true, targetFrontier: null })
+        store.replaceRows(kept, { full: true })
       }
 
       const watermark = streamTorn || discardedProtected ? null : streamMaxSeq
@@ -2368,6 +2274,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
         }, FETCH_RETRY_DELAYS_MS[attempt])
       }
     } finally {
+      if (paintTimer) clearTimeout(paintTimer)
       if (generationRef.current === gen) {
         inFlightRef.current = false
         if (pendingSoftRefetchRef.current) {

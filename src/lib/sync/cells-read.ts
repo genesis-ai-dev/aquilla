@@ -191,6 +191,8 @@ export async function fetchFile(
 }
 
 export interface FetchFileCellsOptions {
+  /** Keep all sides/lanes of each cell together on a page. */
+  paired?: boolean
   /** Restrict to a single side. Omit to fetch both source and target rows
    *  — the default for the editor table which renders them paired. */
   side?: "source" | "target"
@@ -211,6 +213,8 @@ export interface FetchFileCellsOptions {
  *  locally (cells-read-types is owned elsewhere this wave); `maxServerSeq`
  *  is absent when talking to a pre-M2-1 server. */
 export interface CellsPageWithMeta extends CellsPage {
+  /** Server confirms this page contains complete source/target row groups. */
+  completeRows?: boolean
   maxServerSeq?: number | null
   /** AQU-943: the project incarnation this page's watermark belongs to.
    *  Absent when talking to a pre-AQU-943 server. */
@@ -230,6 +234,7 @@ export async function fetchFileCells(
   jwt: string,
 ): Promise<CellsPageWithMeta> {
   const params = new URLSearchParams()
+  if (opts.paired) params.set("paired", "1")
   if (opts.side) params.set("side", opts.side)
   if (typeof opts.limit === "number") params.set("limit", String(opts.limit))
   if (opts.cursor) params.set("cursor", opts.cursor)
@@ -363,8 +368,9 @@ export async function fetchCellsByIds(
 /**
  * Stream every page of cells for a file. Invokes `onPage(rows, isLast)` after
  * each successful page fetch so the caller can render incrementally instead
- * of waiting for the whole file. Pages arrive in server order: source rows in
- * anchor-chain order first, then target rows in anchor-chain order.
+ * of waiting for the whole file. With `paired`, each page contains complete
+ * source/target/lane groups in source-chain order, followed by target-only
+ * groups. Otherwise the legacy order is sources then targets.
  *
  * `onPage` may return `false` (or a Promise resolving to `false`) to abort
  * pagination — typically because the caller switched files mid-stream and
@@ -393,17 +399,26 @@ export async function streamFileCells(
   side?: "source" | "target",
   onMeta?: (meta: { maxServerSeq?: number | null; projectEpoch?: number | null }) => void,
   lane?: string,
+  paired = false,
 ): Promise<void> {
   let cursor: string | undefined
-  // Hard cap on page iterations as a safety belt against a malformed nextCursor
-  // loop. At max page size (2000) this allows up to 200k cells per file.
-  const MAX_PAGES = 100
+  // A SPA can arrive before its worker deployment. Older workers ignore the
+  // opt-in and return columns, so buffer their entire response before paint.
+  const legacyRows: CellRow[] = []
+  let legacy = false
+  // Paired reads combine the old side/lane streams, so allow enough pages
+  // for a translated Bible plus additional target languages.
+  const MAX_PAGES = paired ? 1000 : 100
   for (let i = 0; i < MAX_PAGES; i++) {
-    const page = await fetchFileCells(projectId, fileId, { side, cursor, lane }, jwt)
+    const page = await fetchFileCells(projectId, fileId, { side, cursor, lane, paired }, jwt)
     if (onMeta) onMeta({ maxServerSeq: page.maxServerSeq, projectEpoch: page.projectEpoch })
     const nextCursor = page.nextCursor ?? undefined
     const isLast = nextCursor === undefined
-    const cont = await onPage(page.cells, isLast)
+    legacy ||= paired && page.completeRows !== true
+    if (legacy) legacyRows.push(...page.cells)
+    // Empty callbacks preserve the caller's cancellation fence while an old
+    // worker is buffering; they never expose an incomplete editable row.
+    const cont = await onPage(legacy ? (isLast ? legacyRows : []) : page.cells, isLast)
     if (cont === false) return
     if (isLast) return
     cursor = nextCursor

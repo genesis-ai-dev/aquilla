@@ -76,7 +76,7 @@ const FILE_ROWS = [row("c1", "source", "hello"), row("c1", "target", "hola", { e
 /** Default stream: serves FILE_ROWS for either side. */
 function serveStream(rows: CellRow[] = FILE_ROWS) {
   streamMock.mockImplementation(async (_p, _f, _jwt, onPage, side) => {
-    await onPage(rows.filter((r) => r.side === side), true)
+    await onPage(rows.filter((r) => !side || r.side === side), true)
   })
 }
 
@@ -244,24 +244,22 @@ describe("I3: queue, don't drop", () => {
     streamMock.mockImplementation(async (_p, _f, _jwt, onPage, side) => {
       streams++
       if (streams === 1) await gate.promise
-      await onPage(FILE_ROWS.filter((r) => r.side === side), true)
+      await onPage(FILE_ROWS.filter((r) => !side || r.side === side), true)
     })
     const { result } = renderStore()
-    // Both sides start together; the first (source) is parked on the gate.
-    await waitFor(() => expect(streams).toBe(2))
+    await waitFor(() => expect(streams).toBe(1))
 
     // Reconnect resync while the initial load is still streaming.
     act(() => result.current.revalidate())
     act(() => result.current.revalidate())
-    expect(streams).toBe(2)
+    expect(streams).toBe(1)
 
     gate.resolve()
-    // Initial load = 2 stream calls (source + target). The stream mock reports
-    // no cursor, so the queued soft pass is a full re-stream: exactly one more
-    // pair (the two queued requests coalesce), then nothing.
-    await waitFor(() => expect(streams).toBe(4))
+    // One paired stream per load. No cursor means the queued soft pass
+    // re-streams once; the two queued requests coalesce.
+    await waitFor(() => expect(streams).toBe(2))
     await new Promise((r) => setTimeout(r, 20))
-    expect(streams).toBe(4)
+    expect(streams).toBe(2)
     expect(deltaMock).not.toHaveBeenCalled()
   })
 })
@@ -313,22 +311,21 @@ describe("I4: cache hygiene", () => {
     streamMock.mockRejectedValue(new Error("boom"))
     const { result } = renderStore()
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
-    // Each attempt is one stream PAIR (source + target start together).
-    expect(streamMock).toHaveBeenCalledTimes(2)
+    expect(streamMock).toHaveBeenCalledTimes(1)
     expect(result.current.isError).toBe(true)
     expect(result.current.isLoading).toBe(false)
 
     await act(async () => { await vi.advanceTimersByTimeAsync(1999) })
-    expect(streamMock).toHaveBeenCalledTimes(2)
+    expect(streamMock).toHaveBeenCalledTimes(1)
     await act(async () => { await vi.advanceTimersByTimeAsync(1) })
-    expect(streamMock).toHaveBeenCalledTimes(4)
+    expect(streamMock).toHaveBeenCalledTimes(2)
     await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
-    expect(streamMock).toHaveBeenCalledTimes(6)
+    expect(streamMock).toHaveBeenCalledTimes(3)
     await act(async () => { await vi.advanceTimersByTimeAsync(10000) })
-    expect(streamMock).toHaveBeenCalledTimes(8)
+    expect(streamMock).toHaveBeenCalledTimes(4)
     // Budget exhausted: no fifth attempt, ever.
     await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
-    expect(streamMock).toHaveBeenCalledTimes(8)
+    expect(streamMock).toHaveBeenCalledTimes(4)
     expect(result.current.isError).toBe(true)
   })
 
@@ -341,16 +338,15 @@ describe("I4: cache hygiene", () => {
       { initialProps: { fileId: "f1" } },
     )
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
-    // f1's failed load — one stream pair.
-    expect(streamMock).toHaveBeenCalledTimes(2)
+    expect(streamMock).toHaveBeenCalledTimes(1)
     serveStream()
     rerender({ fileId: "f2" })
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
-    // f2's own load — one stream pair.
-    expect(streamMock).toHaveBeenCalledTimes(4)
+    // f2's own load — one complete-row stream.
+    expect(streamMock).toHaveBeenCalledTimes(2)
     await act(async () => { await vi.advanceTimersByTimeAsync(20_000) })
     // The old f1 retry never fires.
-    expect(streamMock).toHaveBeenCalledTimes(4)
+    expect(streamMock).toHaveBeenCalledTimes(2)
     expect(result.current.isError).toBe(false)
   })
 })

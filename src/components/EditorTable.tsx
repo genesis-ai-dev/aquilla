@@ -22,7 +22,6 @@ import {
   VolumeX,
 } from "lucide-react"
 import { Spinner } from "@/components/ui/spinner"
-import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
 import { Badge, badgeVariants } from "@/components/ui/badge"
 import { LaneCombobox } from "@/components/LaneCombobox"
@@ -5057,10 +5056,6 @@ function EditorRow({
     : sourceReadOnlyReason
   const hasTranslatedText = Boolean(visibleTranslated?.trim())
   const showCompletionOverlay = isLoading && !hasTranslatedText
-  // AQU-1326: the file is still streaming in and this row's target has not
-  // landed — its translation is unknown, not empty. Render a placeholder and
-  // keep the editor closed so nobody types over a translation in flight.
-  const targetPending = Boolean(cell.targetPending)
   const sourceCellDirection = useMemo(
     () =>
       resolveTextDirection(
@@ -5720,7 +5715,7 @@ function EditorRow({
 
   const editorFocusedRef = useRef(false)
   const requestTargetEdit = useCallback((pointerSelection?: IdmlPointerSelection | null) => {
-    if (!editable || isLoading || lockHolderLabel || targetPending) return
+    if (!editable || isLoading || lockHolderLabel) return
     pendingIdmlPointerSelectionRef.current = pointerSelection ?? null
     // AQU-746: open the keystroke-buffer window and move focus to the persistent
     // row wrapper *synchronously*, before React swaps the read view out. Without
@@ -5731,7 +5726,7 @@ function EditorRow({
     pendingActivationInputRef.current = ""
     rowRef.current?.focus({ preventScroll: true })
     onActivateEditor(cell.id)
-  }, [editable, isLoading, lockHolderLabel, targetPending, onActivateEditor, cell.id])
+  }, [editable, isLoading, lockHolderLabel, onActivateEditor, cell.id])
 
   const handleTargetPresenceSelection = useCallback((selection: TargetPresenceSelection | null) => {
     onTargetPresenceSelection?.(cell.id, selection)
@@ -6882,14 +6877,7 @@ function EditorRow({
               compact={hasInlineFootnotes}
               empty={!visibleTranslated?.trim()}
             >
-                {targetPending ? (
-                  <Skeleton
-                    role="status"
-                    aria-label={t("editor.cell.loadingTranslation")}
-                    data-target-pending
-                    className="my-1.5 h-4 w-3/5"
-                  />
-                ) : isEditorActive ? (
+                {isEditorActive ? (
                   <TranslatedEditor
                     ref={translatedEditorRef}
                     cellId={cell.id}
@@ -7075,7 +7063,7 @@ function EditorRow({
                   must never cover work that exists, nor sit under a caret.
                   Accepting routes through handleEditorCommit, so it lands as
                   an ordinary human edit with every normal guard applied. */}
-              {!hasTranslatedText && !showCompletionOverlay && !isEditorActive && !targetPending && (
+              {!hasTranslatedText && !showCompletionOverlay && !isEditorActive && (
                 <ContextualDraftCard
                   cellId={cell.id}
                   projectId={project.id}

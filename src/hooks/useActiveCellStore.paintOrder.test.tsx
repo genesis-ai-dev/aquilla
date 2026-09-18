@@ -6,11 +6,7 @@
 // `ProjectWorkspace` mounts `useActiveCellStore`. These tests pin the ordering
 // on the hook the editor really uses.
 //
-// The rule: both sides stream CONCURRENTLY and the view fills in by ROW. The
-// first paint waits for the first SOURCE page; every cell the TARGET stream
-// has not reached yet renders `targetPending` (a loading placeholder, editor
-// closed) instead of looking empty. A translation may land a page late, but
-// it is never dropped and never mistaken for an empty cell.
+// AQU-1328: first paint must contain whole rows, including existing targets.
 
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { act, renderHook, waitFor } from "@testing-library/react"
@@ -75,117 +71,71 @@ beforeEach(() => {
   vi.clearAllMocks()
 })
 
-describe("useActiveCellStore — file-open paint order (AQU-1326)", () => {
-  it("requests both sides at once, source first", async () => {
-    streamMock.mockImplementation(async (_p, _f, _jwt, onPage, side) => {
-      await onPage(side === "source" ? SOURCE_ROWS : TARGET_ROWS, true)
+describe("useActiveCellStore — complete-row paint (AQU-1328)", () => {
+  it("requests a single paired stream containing every target lane", async () => {
+    streamMock.mockImplementation(async (_p, _f, _jwt, onPage) => {
+      await onPage([...SOURCE_ROWS, ...TARGET_ROWS], true)
     })
     const { result } = renderStore()
     await waitFor(() => expect(result.current.isLoading).toBe(false))
-
-    const sides = streamMock.mock.calls.map((call) => call[4])
-    expect(sides).toEqual(["source", "target"])
-    expect(result.current.store.getCellView("c1")?.targetPending).toBeUndefined()
-    expect(result.current.store.getCellView("c2")?.targetPending).toBeUndefined()
+    expect(streamMock).toHaveBeenCalledOnce()
+    expect(streamMock.mock.calls[0].slice(4)).toEqual([undefined, expect.any(Function), undefined, true])
+    expect(result.current.store.getCellView("c1")?.translated).toBe("Translated 1")
   })
 
-  it("paints the first source page without waiting for the target stream", async () => {
-    // The target stream is parked, modelling a mostly-translated file whose
-    // target side is as large as its source side. The view must paint from the
-    // source stream alone rather than waiting behind it.
-    let releaseTarget!: () => void
-    const targetGate = new Promise<void>((resolve) => { releaseTarget = resolve })
-    streamMock.mockImplementation(async (_p, _f, _jwt, onPage, side) => {
-      if (side === "target") {
-        await targetGate
-        await onPage(TARGET_ROWS, true)
-        return
-      }
-      await onPage(SOURCE_ROWS, true)
+  it("reveals complete rows before the tail and preserves edits made during loading", async () => {
+    let releaseTail!: () => void
+    const tail = new Promise<void>((resolve) => { releaseTail = resolve })
+    streamMock.mockImplementation(async (_p, _f, _jwt, onPage) => {
+      await onPage([SOURCE_ROWS[0], TARGET_ROWS[0], row("empty", "source", "Untranslated")], false)
+      await tail
+      await onPage([SOURCE_ROWS[1], TARGET_ROWS[1]], true)
     })
-
     const { result } = renderStore()
-
-    // Painted from the source side while the target side is still in flight —
-    // and every cell says so, rather than presenting as empty.
     await waitFor(() => expect(result.current.store.getAllSummaries()).toHaveLength(2))
     expect(result.current.isLoading).toBe(true)
-    const painted = result.current.store.getAllSummaries()
-    expect(painted.map((cell) => cell.id)).toEqual(["c1", "c2"])
-    expect(result.current.store.getCellView("c1")?.targetPending).toBe(true)
-    expect(result.current.store.getCellView("c2")?.targetPending).toBe(true)
-
-    // Translations land behind the first paint and are merged in, not lost.
-    await act(async () => {
-      releaseTarget()
-      await Promise.resolve()
-    })
-    await waitFor(() => expect(result.current.isLoading).toBe(false))
     expect(result.current.store.getCellView("c1")?.translated).toBe("Translated 1")
-    expect(result.current.store.getCellView("c2")?.translated).toBe("Translated 2")
-  })
-
-  it("marks only the cells past the target frontier as pending while the target stream is mid-flight", async () => {
-    // Target page 1 covers c1; page 2 (c2) is parked. c1 must show its real
-    // (translated) state and c2 must still read as pending, not empty.
-    let releaseSecondTargetPage!: () => void
-    const gate = new Promise<void>((resolve) => { releaseSecondTargetPage = resolve })
-    streamMock.mockImplementation(async (_p, _f, _jwt, onPage, side) => {
-      if (side === "target") {
-        await onPage([TARGET_ROWS[0]], false)
-        await gate
-        await onPage([TARGET_ROWS[1]], true)
-        return
-      }
-      await onPage(SOURCE_ROWS, true)
-    })
-
-    const { result } = renderStore()
-    await waitFor(() => expect(result.current.store.getCellView("c1")?.translated).toBe("Translated 1"))
-    expect(result.current.store.getCellView("c1")?.targetPending).toBeUndefined()
-    expect(result.current.store.getCellView("c2")?.targetPending).toBe(true)
-    expect(result.current.store.getCellView("c2")?.translated).toBe("")
-
-    await act(async () => {
-      releaseSecondTargetPage()
-      await Promise.resolve()
-    })
+    expect(result.current.store.getCellView("empty")?.translated).toBe("")
+    expect(result.current.store.getCellView("c2")).toBeNull()
+    act(() => result.current.applyOptimisticTargetEdit("c1", { value: "My correction" }))
+    await act(async () => { releaseTail() })
     await waitFor(() => expect(result.current.isLoading).toBe(false))
+    expect(result.current.store.getCellView("c1")?.translated).toBe("My correction")
     expect(result.current.store.getCellView("c2")?.translated).toBe("Translated 2")
-    expect(result.current.store.getCellView("c2")?.targetPending).toBeUndefined()
   })
 
-  it("holds a target page that lands before the first source page and paints it with that page", async () => {
-    let releaseSource!: () => void
-    const gate = new Promise<void>((resolve) => { releaseSource = resolve })
-    streamMock.mockImplementation(async (_p, _f, _jwt, onPage, side) => {
-      if (side === "source") {
-        await gate
-        await onPage(SOURCE_ROWS, true)
-        return
-      }
+  it("publishes a coalesced page even when the following page is still pending", async () => {
+    let releaseTail!: () => void
+    const tail = new Promise<void>((resolve) => { releaseTail = resolve })
+    streamMock.mockImplementation(async (_p, _f, _jwt, onPage) => {
+      await onPage([SOURCE_ROWS[0], TARGET_ROWS[0]], false)
+      await onPage([SOURCE_ROWS[1], TARGET_ROWS[1]], false)
+      await tail
+      await onPage([row("c3", "source", "Last")], true)
+    })
+    const { result } = renderStore()
+    await waitFor(() => expect(result.current.store.getCellView("c2")?.translated).toBe("Translated 2"))
+    expect(result.current.isLoading).toBe(true)
+    expect(result.current.store.getCellView("c3")).toBeNull()
+    await act(async () => { releaseTail() })
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
+  })
+
+  it("retains complete rows and exposes an error when the tail fails", async () => {
+    streamMock.mockImplementation(async (_p, _f, _jwt, onPage) => {
+      await onPage([SOURCE_ROWS[0], TARGET_ROWS[0]], false)
+      throw new Error("Tail failed")
+    })
+    const { result } = renderStore()
+    await waitFor(() => expect(result.current.isError).toBe(true))
+    expect(result.current.isLoading).toBe(false)
+    expect(result.current.store.getCellView("c1")?.translated).toBe("Translated 1")
+    expect(result.current.store.getCellView("c2")).toBeNull()
+  })
+
+  it("still paints target-only rows", async () => {
+    streamMock.mockImplementation(async (_p, _f, _jwt, onPage) => {
       await onPage(TARGET_ROWS, true)
-    })
-    const { result } = renderStore()
-    // The target page alone must not paint target-only rows.
-    await act(async () => { await Promise.resolve() })
-    expect(result.current.store.getAllSummaries()).toHaveLength(0)
-
-    await act(async () => {
-      releaseSource()
-      await Promise.resolve()
-    })
-    await waitFor(() => expect(result.current.isLoading).toBe(false))
-    expect(result.current.store.getAllSummaries().map((cell) => cell.id)).toEqual(["c1", "c2"])
-    expect(result.current.store.getCellView("c1")?.translated).toBe("Translated 1")
-  })
-
-  it("still paints a file whose source side is empty (target-only rows survive)", async () => {
-    // The source pass yields nothing, so nothing paints until the target pass
-    // — the final replace must still swap those rows in rather than leaving
-    // the file blank.
-    streamMock.mockImplementation(async (_p, _f, _jwt, onPage, side) => {
-      await onPage(side === "source" ? [] : TARGET_ROWS, true)
     })
     const { result } = renderStore()
     await waitFor(() => expect(result.current.isLoading).toBe(false))

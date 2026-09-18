@@ -132,7 +132,6 @@ export const editor = defineNamespace({
     // — Per-cell actions menu (ellipsis popover) ——————————————————
     "editor.cell.addComment": "Add comment",
     "editor.cell.closeDetails": "Close cell details",
-    "editor.cell.loadingTranslation": "Loading translation…",
 
     // — Waveform strip under a translated cell ——————————————————————
     "editor.waveform.scrubber": "Audio scrubber",
@@ -1989,12 +1988,6 @@ export const editor = defineNamespace({
           "Screen-reader name of the X button in the header of the panel that " +
           "expands under a cell row (back-translation, audio, footnotes, history). " +
           "It collapses that panel only; it does not close the file or the editor.",
-      },
-      "editor.cell.loadingTranslation": {
-        description:
-          "Screen-reader name of the placeholder shown in a row's target column " +
-          "while the file is still opening and this row's translation has not " +
-          "arrived from the server yet. The cell cannot be edited until it does.",
       },
       "editor.waveform.scrubber": {
         description:

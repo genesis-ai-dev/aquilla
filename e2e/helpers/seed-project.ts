@@ -233,27 +233,27 @@ export async function readCellHistory(
  * for cells to render. Replaces createProject + openProject + importFile +
  * openFileBySubstring + waitForEditor. */
 export async function openSeededProject(page: Page, seeded: SeededProject): Promise<Workspace> {
-  const sourceCellsPath = `/api/v1/projects/${seeded.projectId}/files/${seeded.fileId}/cells`
-  const sourceCellsLoaded = page.waitForResponse((response) => {
+  const cellsPath = `/api/v1/projects/${seeded.projectId}/files/${seeded.fileId}/cells`
+  const cellsLoaded = page.waitForResponse((response) => {
     if (response.request().method() !== "GET") return false
     const url = new URL(response.url())
-    return url.pathname === sourceCellsPath && url.searchParams.get("side") === "source"
+    return url.pathname === cellsPath && url.searchParams.get("paired") === "1"
   }, { timeout: 60_000 })
 
   await page.goto(`/project/${seeded.projectId}/editor/file/${seeded.fileId}`)
-  const sourceResponse = await sourceCellsLoaded
-  if (!sourceResponse.ok()) {
+  const cellsResponse = await cellsLoaded
+  if (!cellsResponse.ok()) {
     throw new Error(
-      `Seeded source cells failed to load: HTTP ${sourceResponse.status()} — ${await sourceResponse.text()}`,
+      `Seeded complete rows failed to load: HTTP ${cellsResponse.status()} — ${await cellsResponse.text()}`,
     )
   }
-  const payload = await sourceResponse.json() as {
+  const payload = await cellsResponse.json() as {
     cells?: Array<{ cellId?: string }>
   }
   const firstCellId = seeded.cellIds[0]
   if (!firstCellId || !payload.cells?.some((cell) => cell.cellId === firstCellId)) {
     throw new Error(
-      `Seeded source response did not contain expected first cell ${firstCellId ?? "<missing>"}`,
+      `Seeded complete-row response did not contain expected first cell ${firstCellId ?? "<missing>"}`,
     )
   }
 

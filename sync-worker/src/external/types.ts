@@ -2,6 +2,7 @@
 
 import type { EventsRouteEnv } from '../events/route'
 import type { Command } from './commands'
+import type { PatchSettingsOp } from './commands-patch-settings'
 import type { CellPrecondition } from './preconditions'
 
 /** Environment for the external API — a superset of the /events perimeter env
@@ -21,7 +22,15 @@ export type ExternalEnv = EventsRouteEnv & {
 
 /** A skipped / warned item — nothing is ever silently dropped (§3). */
 export interface ChangesetWarning {
-  code: 'missing_cell' | 'duplicate_command' | 'stale_pin' | 'rejected' | 'duplicate_file'
+  code:
+    | 'missing_cell'
+    | 'duplicate_command'
+    | 'stale_pin'
+    | 'rejected'
+    | 'duplicate_file'
+    /** ProjectSetup (AQU-1294): a plan step whose end-state already existed, so
+     *  it is skipped rather than applied. A healthy outcome, not a problem. */
+    | 'superseded_step'
   fileId: string
   cellId: string
   message: string
@@ -44,6 +53,7 @@ export type ReceiptOnlyCommandKind =
   | 'UpdateProjectSettings'
   | 'PatchSettings'
   | 'SetBrief'
+  | 'RegenerateBriefSummary'
   | 'AddOrgMember'
   | 'SetOrgRole'
   | 'RemoveOrgMember'
@@ -51,6 +61,7 @@ export type ReceiptOnlyCommandKind =
   | 'ArchiveProject'
   | 'UnarchiveProject'
   | 'Membership'
+  | 'ProjectSetup'
 
 /** Per-kind effect line for an EmitEvents changeset. `testimony` marks
  *  validation kinds (cell.validate / cell.unvalidate) so review UIs render
@@ -280,6 +291,9 @@ export interface PlannedEventIds {
   /** SetBrief (receipt-only): the settings version pinned at prepare — the
    *  brief lives in the settings blob, so it takes the same version guard. */
   setBrief?: { version: number }
+  /** RegenerateBriefSummary (receipt-only, AQU-1282): the settings version
+   *  pinned at prepare — same guard as setBrief. */
+  regenerateBriefSummary?: { version: number }
   /** AQU-1235 org membership (receipt-only): the resolved target org + user
    *  (pinned at prepare so commit writes the SAME identity the human approved,
    *  never a re-resolution of the username), plus the role the target held at
@@ -325,6 +339,60 @@ export interface PlannedEventIds {
   /** InsertCell / DeleteCell / SplitCell: the whole structural plan — minted
    *  event ids, pinned parent heads, and the prepare-time cut text. */
   structure?: StructurePlan
+  /** ProjectSetup (AQU-1294): the ordered step ledger the commit walks, plus
+   *  the settings version the plan was prepared against. Each step carries its
+   *  own status, which commit persists back into this ledger after EVERY step
+   *  — so a retry commit resumes at the failed step instead of re-applying the
+   *  ones that already landed. */
+  projectSetup?: ProjectSetupPlan
+}
+
+/** Status of one ProjectSetup step. `superseded` is a HEALTHY skip: the step's
+ *  end-state already existed at prepare (or at commit), so there is nothing to
+ *  apply. `failed` is what a retry resumes at. */
+export type ProjectSetupStepStatus = 'pending' | 'applied' | 'superseded' | 'failed'
+
+/** One expansion step of a ProjectSetup plan, in the fixed server-owned order:
+ *  settings → policy → brief → members → imports (array order). */
+export type ProjectSetupStep =
+  | { index: number; kind: 'settings'; status: ProjectSetupStepStatus; ops: PatchSettingsOp[] }
+  | { index: number; kind: 'policy'; status: ProjectSetupStepStatus; ops: PatchSettingsOp[] }
+  | { index: number; kind: 'brief'; status: ProjectSetupStepStatus }
+  | {
+      index: number
+      kind: 'members'
+      status: ProjectSetupStepStatus
+      /** Resolved at prepare so commit writes the PEOPLE the human approved. */
+      pinned: { username: string; userId: string; role: number }[]
+    }
+  | {
+      index: number
+      kind: 'import'
+      status: ProjectSetupStepStatus
+      artifactId: string
+      fileName: string
+      fileType: string
+      resultIndex?: number
+      sourceLanguage?: string
+      targetLanguage?: string
+      /** Cell count from the prepare-time parse. Commit re-parses the (immutable)
+       *  artifact and fails the step if the count moved — the approver approved
+       *  a file of this size. */
+      cellCount: number
+      /** This import's own minted id ledger (a composite plan holds one per
+       *  import, so it cannot live at PlannedEventIds.planImport). */
+      planned: NonNullable<PlannedEventIds['planImport']>
+      /** Set once the step applies, so a resumed commit does not re-import. */
+      fileId?: string
+    }
+
+export interface ProjectSetupPlan {
+  /** The live settings version at prepare. The commit does NOT guard on it —
+   *  the server reads the live version immediately before each settings write
+   *  (plan_stale never surfaces from inside a plan) — it is the receipt's
+   *  before-value and the approval page's pin. */
+  settingsVersion: number
+  steps: ProjectSetupStep[]
 }
 
 /** Prepare-time event ids for a cell-field changeset (AQU-1183). Lists, not
@@ -395,6 +463,47 @@ export interface ReceiptOnlyReceipt {
   previousRole?: number
   /** AQU-1235: the org role written (absent for a removal). */
   role?: number
+  /** RegenerateBriefSummary (AQU-1282): length of the rendered L1 summary. */
+  briefSummaryChars?: number
+  /** RegenerateBriefSummary (AQU-1282): the model that rendered it. */
+  l1ModelId?: string
+  /** SetBrief (AQU-1282): outcome of the best-effort L1 auto-render that runs
+   *  after the sections commit. `rendered:false` never fails the commit — the
+   *  sections landed; RegenerateBriefSummary re-runs the render on demand. */
+  briefSummary?:
+    | { rendered: true; chars: number; model: string }
+    | { rendered: false; reason: string }
+}
+
+/** AQU-1294 ProjectSetup receipt: a ReceiptOnlyReceipt (it is a row write, not
+ *  events) plus the plan's step ledger and the server-computed VERIFICATION —
+ *  the facts an operator would otherwise have to re-query five endpoints for.
+ *
+ *  On a mid-plan failure this receipt is written while the row stays
+ *  `committing`, so the retry commit reads `completedSteps` / `failedStep` and
+ *  resumes where it stopped. */
+export interface ProjectSetupReceipt extends ReceiptOnlyReceipt {
+  command: 'ProjectSetup'
+  completedSteps: { index: number; kind: ProjectSetupStep['kind']; status: ProjectSetupStepStatus }[]
+  /** null on a fully applied plan. */
+  failedStep: { index: number; kind: ProjectSetupStep['kind']; error: string } | null
+  /** Present only once every step is applied or superseded. */
+  verification?: ProjectSetupVerification
+}
+
+/** Spec §2.4 — computed server-side after the last step. */
+export interface ProjectSetupVerification {
+  /** The settings version after the plan's last settings/brief write. */
+  settingsVersion: number
+  /** The plan's usernames with their LIVE effective roles. */
+  members: { username: string; role: number }[]
+  files: { fileId: string; name: string; cellCount: number; cellsWithMarkup: number }[]
+  /** prompt-preview's `parts.brief` is non-empty on the first source cell of
+   *  the first created file (no files: the brief's L1 summary is non-empty). */
+  briefReachesCopilot: boolean
+  /** Policy keys the plan asked for that the server refused at commit because
+   *  they would have LOOSENED against the live blob. */
+  policyKeysNotApplied: string[]
 }
 
 /** AQU-1228 receipt for the Living Memory write commands. Also receipt-only (a

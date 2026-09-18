@@ -7,6 +7,10 @@
 // language as the neighbouring expansion tabs (text-xs, muted keys,
 // foreground values). No editing in v1.
 //
+// Nested objects/arrays recurse into the same key/value layout so a translator
+// reads labelled rows rather than a JSON blob; anything that doesn't fit that
+// shape (too deep, non-plain values) still falls back to compact JSON.
+//
 // Contract: EditorTable only mounts this tab when `metadata` is a non-null
 // object with at least one key, so an empty object renders an empty list —
 // `hasCellMetadata` (exported below) is the gate.
@@ -38,10 +42,31 @@ const isAttachmentArray = (value: unknown): value is AttachmentLike[] =>
       typeof (item as AttachmentLike).url === "string",
   )
 
+const isPrimitive = (value: unknown): value is string | number | boolean =>
+  typeof value === "string" || typeof value === "number" || typeof value === "boolean"
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  value != null && typeof value === "object" && !Array.isArray(value)
+
+// Past this nesting depth the labelled layout costs more indentation than it
+// buys in legibility, so we stop recursing and show the raw JSON.
+const MAX_DEPTH = 3
+
+function JsonFallback({ value }: { value: unknown }) {
+  return (
+    <code className="rounded bg-muted px-1 py-0.5 text-[11px] text-foreground break-all">
+      {JSON.stringify(value) ?? String(value)}
+    </code>
+  )
+}
+
 /** Renders one metadata value in the most legible form available. */
-function MetadataValue({ value }: { value: unknown }) {
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+function MetadataValue({ value, depth = 0 }: { value: unknown; depth?: number }) {
+  if (isPrimitive(value)) {
     return <span className="text-foreground">{String(value)}</span>
+  }
+  if (value == null) {
+    return <span className="text-muted-foreground">—</span>
   }
   if (isAttachmentArray(value)) {
     return (
@@ -80,12 +105,61 @@ function MetadataValue({ value }: { value: unknown }) {
       </span>
     )
   }
-  // Objects / other arrays: compact JSON fallback.
-  return (
-    <code className="rounded bg-muted px-1 py-0.5 text-[11px] text-foreground break-all">
-      {JSON.stringify(value)}
-    </code>
-  )
+  if (depth >= MAX_DEPTH) {
+    return <JsonFallback value={value} />
+  }
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return <span className="text-muted-foreground">—</span>
+    }
+    // A flat list of labels (DCS `tags`, say) reads best as chips; anything
+    // with structure in it gets one labelled block per entry.
+    if (value.every(isPrimitive)) {
+      return (
+        <span className="flex flex-wrap items-baseline gap-1">
+          {value.map((item, i) => (
+            <span
+              key={`${String(item)}-${i}`}
+              className="rounded bg-muted px-1 py-0.5 text-[11px] text-foreground break-all"
+            >
+              {String(item)}
+            </span>
+          ))}
+        </span>
+      )
+    }
+    return (
+      <span className="flex flex-col gap-1.5">
+        {value.map((item, i) => (
+          <span key={i} className="flex items-baseline gap-2">
+            <span className="shrink-0 font-medium text-muted-foreground">{i + 1}.</span>
+            <span className="min-w-0">
+              <MetadataValue value={item} depth={depth + 1} />
+            </span>
+          </span>
+        ))}
+      </span>
+    )
+  }
+  if (isPlainObject(value)) {
+    const entries = Object.entries(value)
+    if (entries.length === 0) {
+      return <span className="text-muted-foreground">—</span>
+    }
+    return (
+      <span className="flex flex-col gap-1.5">
+        {entries.map(([key, child]) => (
+          <span key={key} className="flex items-baseline gap-2">
+            <span className="shrink-0 font-medium text-muted-foreground">{key}</span>
+            <span className="min-w-0">
+              <MetadataValue value={child} depth={depth + 1} />
+            </span>
+          </span>
+        ))}
+      </span>
+    )
+  }
+  return <JsonFallback value={value} />
 }
 
 /** Compact read-only key/value view of a cell's metadata bucket. */

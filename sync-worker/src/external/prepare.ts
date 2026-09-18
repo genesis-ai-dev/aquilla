@@ -24,6 +24,7 @@ import {
   type PatchSettingsCommand,
   type PlanImportCommand,
   type ProjectLifecycleCommand,
+  type RegenerateBriefSummaryCommand,
   type RenameFileCommand,
   type SetBriefCommand,
   type SetTranslationCommand,
@@ -42,6 +43,9 @@ import {
 import { isProjectLifecycleCommand, prepareProjectLifecycle } from './commands-project-lifecycle'
 import { renameFileToEmitEvents } from './commands-rename-file'
 import { prepareSetBrief } from './commands-set-brief'
+import { prepareProjectSetup } from './prepare-project-setup'
+import type { ProjectSetupCommand } from './commands-project-setup'
+import { prepareRegenerateBriefSummary } from './commands-regenerate-brief'
 import { isMemoryCommand, prepareMemoryCommand } from './commands-memory'
 import { prepareEmitEvents } from './emit-events-engine'
 import { prepareCellFields } from './cell-fields-engine'
@@ -277,6 +281,32 @@ export async function prepareChangesetCore(
       return errorResponse('validation_failed', 'SetBrief must be the only command in a changeset')
     }
     return prepareSetBrief(db, cred, projectId, id, autonomyMode, setBrief, env)
+  }
+
+  // RegenerateBriefSummary (AQU-1282): sole command, same settings-blob
+  // version pin as SetBrief; the render itself happens at commit.
+  const regenBrief = validated.commands.find(
+    (c): c is RegenerateBriefSummaryCommand => c.kind === 'RegenerateBriefSummary',
+  )
+  if (regenBrief) {
+    if (validated.commands.length !== 1) {
+      return errorResponse('validation_failed', 'RegenerateBriefSummary must be the only command in a changeset')
+    }
+    return prepareRegenerateBriefSummary(db, cred, projectId, id, autonomyMode, regenBrief, env)
+  }
+
+  // AQU-1294 ProjectSetup: the composite setup plan. Sole command and FORCED
+  // ask-mode; its module owns the effective floor (the max of the blocks it
+  // carries), every named-field rejection, and the step ledger — so like the
+  // settings commands it skips the generic role gate below.
+  const projectSetup = validated.commands.find(
+    (c): c is ProjectSetupCommand => c.kind === 'ProjectSetup',
+  )
+  if (projectSetup) {
+    if (validated.commands.length !== 1) {
+      return errorResponse('validation_failed', 'ProjectSetup must be the only command in a changeset')
+    }
+    return prepareProjectSetup(db, cred, projectId, id, projectSetup, env)
   }
 
   // AQU-1228 Living Memory writes: sole command; receipt-only like

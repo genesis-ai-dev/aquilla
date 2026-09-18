@@ -140,6 +140,32 @@ describe("GlossaryEditor", () => {
     expect(screen.getByText("grace")).toBeInTheDocument()
   })
 
+  it("persists a rendering removed from the concept detail view as a term event", async () => {
+    // The detail view is where a lead actually reads a term's usage, so the
+    // rendering edits it offers have to reach the event log from there — not
+    // only from the glossary row's edit dialog.
+    mockProject = {
+      id: "p1",
+      name: "P",
+      terminology: [
+        concept({
+          renderings: [
+            { rendering: "favor", status: "preferred" },
+            { rendering: "gracia", status: "admitted" },
+          ],
+        }),
+      ],
+    } as unknown as ProjectRecord
+    renderEditor({}, "/project/p1/terminology?concept=c1")
+
+    fireEvent.click(await screen.findByRole("button", { name: /remove rendering favor/i }))
+
+    await waitFor(() => expect(emitTermUpdate).toHaveBeenCalled())
+    expect(emitTermUpdate.mock.calls[0][0]).toMatchObject({
+      renderings: [{ rendering: "gracia", status: "admitted" }],
+    })
+  })
+
   it("renders the workspace-owned glossary immediately without a duplicate project resolve", () => {
     mockProjectLoading = true
     const workspaceProject = {

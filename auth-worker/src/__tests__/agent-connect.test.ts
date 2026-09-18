@@ -94,6 +94,62 @@ describe("browser authorization → existing credential consumer", () => {
     expect((await post("request", { user_code: grant.user_code })).status).toBe(401)
     expect((await post("decision", { user_code: grant.user_code, approve: true, project_id: "p", code_confirmed: true })).status).toBe(401)
   })
+  it("mints the mode the human granted, not the one the agent asked for", async () => {
+    // The consent screen is the authority on autonomy: an agent that asked for
+    // ask must be grantable act, and an agent that asked for act must be
+    // downgradable, without either re-running the flow.
+    const jwt = await seed(); const request = await start("ask")
+    expect((await post("decision", { user_code: request.user_code, approve: true,
+      code_confirmed: true, project_id: "p", mode: "act" }, jwt)).status).toBe(200)
+    const token = await (await poll(request.device_code)).json() as { access_token: string; scope: string }
+    expect(token.scope).toBe("act")
+    expect(await validateApiCredential(env.AQUILLA_PG, token.access_token)).toMatchObject({ mode: "act", projectId: "p" })
+  })
+  it("checks the granted mode's floor, not the requested mode's", async () => {
+    // Bob is a contributor: enough for ask, never enough for act — including
+    // when the agent politely asked for ask and Bob reaches for act.
+    await seed()
+    await env.AQUILLA_PG.prepare("INSERT INTO project_members (project_id, user_id, role_level, granted_by) VALUES ('p', 2, 400, 1)").run()
+    const bob = await jwtFor("bob"); const request = await start("ask")
+    expect((await post("decision", { user_code: request.user_code, approve: true,
+      code_confirmed: true, project_id: "p", mode: "act" }, bob)).status).toBe(403)
+    expect((await post("decision", { user_code: request.user_code, approve: true,
+      code_confirmed: true, project_id: "p", mode: "ask" }, bob)).status).toBe(200)
+  })
+  it("grants org scope when the agent pinned nothing", async () => {
+    await seedUser(1, "alice")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'Come and See', 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)").run()
+    const jwt = await jwtFor("alice"); const request = await start("act")
+    expect((await post("decision", { user_code: request.user_code, approve: true,
+      code_confirmed: true, org_id: "1", mode: "act" }, jwt)).status).toBe(200)
+    const token = await (await poll(request.device_code)).json() as { access_token: string; org_id: string; project_id: string | null }
+    expect(token).toMatchObject({ org_id: "1", project_id: null })
+    expect(await validateApiCredential(env.AQUILLA_PG, token.access_token)).toMatchObject({ mode: "act", orgId: "1" })
+  })
+  it("refuses org scope below the mode's floor", async () => {
+    await seedUser(1, "alice"); await seedUser(2, "bob")
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'Come and See', 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 2, 400, 1)").run()
+    const bob = await jwtFor("bob")
+    const act = await start("act")
+    expect((await post("decision", { user_code: act.user_code, approve: true, code_confirmed: true, org_id: "1" }, bob)).status).toBe(403)
+    const ask = await start("ask")
+    expect((await post("decision", { user_code: ask.user_code, approve: true, code_confirmed: true, org_id: "1" }, bob)).status).toBe(200)
+  })
+  it("keeps a requested project pinned and takes exactly one scope", async () => {
+    // The pin is the agent's guarantee that approval means what it asked for;
+    // silently widening it to the whole org would grant beyond what was shown.
+    const jwt = await seed()
+    await env.AQUILLA_PG.prepare("INSERT INTO organizations (id, name, owner_user_id) VALUES (1, 'Come and See', 1)").run()
+    await env.AQUILLA_PG.prepare("INSERT INTO org_members (org_id, user_id, role_level, granted_by) VALUES (1, 1, 700, 1)").run()
+    const pinned = await start("ask", "p")
+    expect((await post("decision", { user_code: pinned.user_code, approve: true, code_confirmed: true, org_id: "1" }, jwt)).status).toBe(403)
+    const open = await start("ask")
+    // Neither scope, and both scopes, are equally malformed.
+    expect((await post("decision", { user_code: open.user_code, approve: true, code_confirmed: true }, jwt)).status).toBe(400)
+    expect((await post("decision", { user_code: open.user_code, approve: true, code_confirmed: true, org_id: "1", project_id: "p" }, jwt)).status).toBe(400)
+  })
   it("supports form requests and rejects unknown client IDs", async () => {
     const response = await app.request("/api/v2/agent-connect/device_authorization", { method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },

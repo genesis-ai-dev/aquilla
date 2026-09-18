@@ -80,9 +80,67 @@ Every Workers Builds preview uses its branch's auth and sync code with shared
 development Hyperdrive/R2 storage, including builds of `main`. The web Worker's
 single repository connection deploys all three using `wrangler preview`.
 Repository code converts slash-named branches into a stable, lowercase, hashed
-preview name. These previews never replace a live Worker. See the
+preview name. These previews never replace a live Worker. They are NOT a working
+miniature of the stack — a preview sync-worker cannot call a preview auth-worker, and
+previews cannot be logged; read "Preview limitations" below before trusting a preview
+QA result for anything crossing those two Workers. See the
 [Workers Builds runbook](runbooks/cloudflare-workers-builds.md#one-time-preview-setup)
 for required runtime secrets and limits of shared development data.
+
+### Preview limitations (AQU-1283/1294 investigation, 2026-09-16)
+
+Previews are branch code on shared development data, but they are **not** a working
+miniature of the stack. Two limits are load-bearing and neither is obvious from a
+green build.
+
+**A preview Worker cannot call another preview Worker.** `cloudflare-stack-preview.mjs`
+deploys auth before sync and hands sync the auth preview's origin as
+`AUTH_WORKER_URL`, which is correct on paper. In practice that subrequest returns a
+404 (Cloudflare's HTML edge page, not the identity Worker's JSON), deterministically,
+on every build. The same aliased URL answers correctly from the public internet — 401
+on a bad bearer, 400 on a bad body — so the target is healthy and only the
+Worker-to-Worker hop fails. The precise mechanism is unproven; see "why this stays
+unproven" below.
+
+Everything crossing that seam is therefore untestable on a preview:
+
+| Caller | Endpoint on auth-worker |
+| --- | --- |
+| `commands-draft-cells.ts` (`DraftCells`) | `POST /api/v1/ai/agent/internal/draft-cells` |
+| `brief-summary-bridge.ts` (`SetBrief` auto-render, `RegenerateBriefSummary`, `ProjectSetup`) | `POST /api/v1/ai/agent/internal/brief-summary` |
+| `monday-notify.ts` | `POST /api/v2/monday/internal/push` |
+
+A route that already exists on `dev` masks this, because the failure looks like a
+route that is merely absent. AQU-1283's PR was the first to add a NEW internal route
+on this seam, which is why it surfaced there and not earlier. Do not read "the preview
+404s" as "the code is broken".
+
+**You cannot get logs out of a preview.** Cloudflare documents that preview URLs
+support no Workers Logs, no `wrangler tail`, and no Logpush
+(<https://developers.cloudflare.com/workers/versions-and-deployments/preview-urls/>).
+`wrangler preview settings` reads only the shared Previews Base, never a deployed
+preview's effective vars. So there is no supported way to observe what a preview
+actually resolved a binding to.
+
+**Why this stays unproven.** Combining the two: the failing call is invisible (no
+logs) and its configuration is unreadable (no per-preview settings). The leading
+explanation is that a subrequest to a preview URL resolves to the bare Worker rather
+than the alias — `https://aquilla-auth-preview.<subdomain>.workers.dev` has no
+deployment and returns exactly the observed HTML 404, while the aliased host does not
+404 under any input. Also note Cloudflare's own limitation that preview URLs "are not
+generated for Workers that implement a Durable Object", which sync-worker does
+(`ProjectSync`). Proving it needs either Cloudflare support or a throwaway pair of
+Workers reproducing the hop outside this repo.
+
+**What to do instead.** Verify the two halves separately rather than end to end:
+
+1. Probe the auth preview directly to prove the route exists and is gated —
+   `POST https://<alias>-aquilla-auth-preview.<subdomain>.workers.dev/identity/<path>`
+   returns 400 for a malformed body and 401 for a bad bearer.
+2. Assert the caller's degradation on the sync preview — the named error code, the
+   human approval not being consumed, and any partial work still committing.
+3. Cover the success path in worker tests, which stub the bridge and run the real
+   HTTP handlers.
 
 The agent sandbox and not-yet-enabled resource proxy follow the same rule: their
 production profiles are main-only, their unnamed profiles have distinct local

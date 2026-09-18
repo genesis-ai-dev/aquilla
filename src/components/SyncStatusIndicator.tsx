@@ -41,13 +41,21 @@ export function SyncStatusIndicator({ status, className }: SyncStatusIndicatorPr
   const [open, setOpen] = useState(false)
   const activity = useConnectionActivity(open)
   const connected = status === "live" || status === "syncing" || status === "retrying"
-  const formatRate = (bytes: number) => {
-    if (!connected) return "—"
-    if (bytes === 0) return t("editor.sync.noActivity")
-    const unit = bytes >= 1_000_000 ? "MB/s" : bytes >= 1_000 ? "kB/s" : "B/s"
+  const number = (value: number, digits = 0) =>
+    new Intl.NumberFormat(locale, { maximumFractionDigits: digits }).format(value)
+  const formatBytes = (bytes: number) => {
+    const unit = bytes >= 1_000_000 ? "MB" : bytes >= 1_000 ? "kB" : "B"
     const value = bytes >= 1_000_000 ? bytes / 1_000_000 : bytes >= 1_000 ? bytes / 1_000 : bytes
-    return `${new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(value)} ${unit}`
+    return `${number(value, 1)} ${unit}`
   }
+  const formatRate = (bytes: number) => !connected ? "—"
+    : bytes === 0 ? t("editor.sync.noActivity") : `${formatBytes(bytes)}/s`
+  const formatLatency = (ms: number | null) => ms == null ? "—" : `${number(ms)} ms`
+  const lastReply = activity.lastReplyAgeMs == null ? t("editor.sync.waitingForActivity")
+    : activity.lastReplyAgeMs < 1000 ? t("editor.sync.replyJustNow")
+    : activity.lastReplyAgeMs < 60_000
+      ? t("editor.sync.replySecondsAgo", { count: Math.floor(activity.lastReplyAgeMs / 1000) })
+      : t("editor.sync.replyMinutesAgo", { count: Math.floor(activity.lastReplyAgeMs / 60_000) })
   const { dot, labelKey, tooltipKey } = describeStatus(status)
   const label = t(labelKey)
   const tooltip = t(tooltipKey)
@@ -72,26 +80,45 @@ export function SyncStatusIndicator({ status, className }: SyncStatusIndicatorPr
           <span className="leading-none">{label}</span>
         </PopoverTrigger>
       </AppTooltip>
-      <PopoverContent align="end" className="w-72 gap-3 p-3">
+      <PopoverContent align="end" className="w-80 max-w-[calc(100vw-2rem)] gap-3 p-3">
         <PopoverHeader>
           <PopoverTitle>{t("editor.sync.connection")}</PopoverTitle>
           <PopoverDescription className="text-xs">{tooltip}</PopoverDescription>
         </PopoverHeader>
         <Separator />
+        <div className="grid grid-cols-[minmax(0,1fr)_4.5rem_6rem] gap-2 text-end text-xs text-muted-foreground">
+          <span aria-hidden="true" />
+          <span>{t("editor.sync.activityNow")}</span>
+          <span>{t("editor.sync.pastFiveMinutes")}</span>
+        </div>
         <dl className="flex flex-col gap-3 text-xs">
           {([
-            [ArrowUp, t("editor.sync.upload"), formatRate(activity.upload)],
-            [ArrowDown, t("editor.sync.download"), formatRate(activity.download)],
-            [Clock3, t("editor.sync.responseTime"), !connected ? "—" : activity.latency == null
-              ? t("editor.sync.waitingForActivity")
-              : `${new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(activity.latency)} ms`],
-          ] as const).map(([Icon, label, value]) => (
-            <div key={label} className="flex items-center justify-between gap-3">
+            [ArrowUp, t("editor.sync.upload"), formatRate(activity.upload),
+              t("editor.sync.transferredTotal", { amount: formatBytes(activity.recent.upload) })],
+            [ArrowDown, t("editor.sync.download"), formatRate(activity.download),
+              t("editor.sync.transferredTotal", { amount: formatBytes(activity.recent.download) })],
+            [Clock3, t("editor.sync.serverReply"), connected ? formatLatency(activity.latency) : "—",
+              activity.recent.averageLatency == null ? "—"
+                : t("editor.sync.averageReply", { time: formatLatency(activity.recent.averageLatency) })],
+          ] as const).map(([Icon, label, value, history]) => (
+            <div key={label} className="grid grid-cols-[minmax(0,1fr)_4.5rem_6rem] items-center gap-2">
               <dt className="flex items-center gap-2 text-muted-foreground"><Icon className="size-3.5" aria-hidden="true" />{label}</dt>
               <dd className="text-end font-medium tabular-nums">{value}</dd>
+              <dd className="text-end text-muted-foreground tabular-nums">{history}</dd>
             </div>
           ))}
         </dl>
+        <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+          {activity.recent.slowestLatency != null && (
+            <p>{t("editor.sync.slowestReply", { time: formatLatency(activity.recent.slowestLatency) })}</p>
+          )}
+          <p>{t("editor.sync.requestCount", { count: activity.recent.requests })}
+            {" · "}<span className={cn(activity.recent.failures > 0 && "text-destructive")}>
+              {t("editor.sync.failureCount", { count: activity.recent.failures })}
+            </span>
+          </p>
+          <p>{lastReply}</p>
+        </div>
         <Separator />
         <p className="text-xs leading-relaxed text-muted-foreground">{t("editor.sync.activityHelp")}</p>
       </PopoverContent>

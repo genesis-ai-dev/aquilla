@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { recordSyncBytes } from "@/lib/sync/connection-activity"
+import { observedSyncFetch, readSyncJson, recordSyncBytes } from "@/lib/sync/connection-activity"
 import { I18nProvider } from "@/lib/i18n/I18nProvider"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { SyncStatusIndicator, type SyncStatus } from "./SyncStatusIndicator"
@@ -23,7 +23,11 @@ function renderPill(status: SyncStatus) {
 
 describe("SyncStatusIndicator", () => {
   // Keep the activity window fixed while real user-event interactions complete.
-  beforeEach(() => vi.spyOn(performance, "now").mockReturnValue(1000))
+  let now = 0
+  beforeEach(() => {
+    now += 600_000
+    vi.spyOn(performance, "now").mockReturnValue(now)
+  })
   afterEach(() => vi.restoreAllMocks())
 
   it("opens from the keyboard, shows observed traffic and closes with Escape", async () => {
@@ -36,8 +40,9 @@ describe("SyncStatusIndicator", () => {
     const dialog = await screen.findByRole("dialog", { name: "Connection" })
     expect(within(dialog).getByText("Upload")).toBeTruthy()
     expect(within(dialog).getByText("Download")).toBeTruthy()
-    expect(within(dialog).getByText("Response time")).toBeTruthy()
+    expect(within(dialog).getByText("Server reply")).toBeTruthy()
     expect(within(dialog).getByText("1 kB/s")).toBeTruthy()
+    expect(within(dialog).getByText("5 kB total")).toBeTruthy()
     expect(within(dialog).getByText("Waiting for activity")).toBeTruthy()
     await user.keyboard("{Escape}")
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
@@ -46,11 +51,34 @@ describe("SyncStatusIndicator", () => {
 
   it("does not present stored readings as current while offline", async () => {
     const user = userEvent.setup()
+    recordSyncBytes("upload", "x".repeat(5_000))
     renderPill("offline")
     await user.click(screen.getByRole("button", { name: /saved locally/i }))
     const dialog = await screen.findByRole("dialog", { name: "Connection" })
-    expect(within(dialog).getAllByText("—")).toHaveLength(3)
+    expect(within(dialog).getAllByText("—")).toHaveLength(4)
+    expect(within(dialog).getByText("5 kB total")).toBeTruthy()
     expect(within(dialog).queryByText("1 kB/s")).toBeNull()
+  })
+
+  it("keeps useful history and freshness after the immediate sample expires, without probes", async () => {
+    const user = userEvent.setup()
+    const response = await observedSyncFetch("/events", { method: "POST", body: "saved" }, vi.fn(async () => {
+      vi.mocked(performance.now).mockReturnValue(now + 100)
+      return new Response('{"ok":true}')
+    }))
+    await readSyncJson(response)
+    vi.mocked(performance.now).mockReturnValue(now + 35_100)
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+    renderPill("live")
+    await user.click(screen.getByRole("button", { name: /all changes are saved/i }))
+    const dialog = await screen.findByRole("dialog", { name: "Connection" })
+    expect(within(dialog).getAllByText("Idle")).toHaveLength(2)
+    expect(within(dialog).getByText("100 ms avg")).toBeTruthy()
+    expect(within(dialog).getByText("Slowest reply: 100 ms")).toBeTruthy()
+    expect(within(dialog).getByText("Last reply 35s ago")).toBeTruthy()
+    expect(within(dialog).getByText("5 B total")).toBeTruthy()
+    expect(within(dialog).getByText("11 B total")).toBeTruthy()
+    expect(fetchSpy).not.toHaveBeenCalled()
   })
 
   it.each<[SyncStatus, string, RegExp]>([

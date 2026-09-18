@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
 import { Spinner } from "@/components/ui/spinner"
 import { AppTooltip } from "@/components/ui/tooltip"
+import { toast } from "@/components/ui/toast"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog"
@@ -139,7 +140,17 @@ export function MultiProjectInviteDialog({
         })
         setPerProjectError(errors)
         setDone(successes)
-        if (Object.keys(successes).length > 0) onSuccess?.()
+        const sent = Object.keys(successes).length
+        if (sent > 0) {
+          // AQU-1149: the row badges vanish with the dialog, so the only trace
+          // of the outcome has to live at page level. Counts successes only —
+          // the failures stay inline, where the operator can act on them.
+          toast.add({
+            type: "success",
+            title: t("org.multiProjectInviteDialog.invitedToast", { count: sent, email }),
+          })
+          onSuccess?.()
+        }
         return
       }
       // If the typeahead already verified the user, skip the redundant
@@ -171,7 +182,17 @@ export function MultiProjectInviteDialog({
       })
       setPerProjectError(errors)
       setDone(successes)
-      if (Object.keys(successes).length > 0) onSuccess?.()
+      const added = Object.keys(successes).length
+      if (added > 0) {
+        toast.add({
+          type: "success",
+          title: t("org.multiProjectInviteDialog.addedToast", {
+            count: added,
+            username: target.username,
+          }),
+        })
+        onSuccess?.()
+      }
     } catch (err) {
       setTopError(toUserFacingError(err, "project").message)
     } finally {

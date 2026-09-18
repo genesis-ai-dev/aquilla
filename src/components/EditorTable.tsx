@@ -7,9 +7,9 @@ import {
   type OnViewableItemsChangedInfo,
 } from "@legendapp/list/react"
 import {
-  Check, AlertTriangle, AlertCircle,
+  Check, AlertTriangle,
   MessageCircle, Play, Pause, Mic, MicOff, FileText,
-  ArrowRight, Activity, NotebookPen, Pencil, ChevronDown, Music, Braces,
+  Activity, NotebookPen, Pencil, ChevronDown, Music, Braces,
   Languages,
   Pilcrow,
   PilcrowRight,
@@ -62,6 +62,7 @@ import { useHealthCalculationsEnabled } from "@/lib/health/kill-switch"
 import { TranslatedEditor, type FootnoteInsertionAnchor, type TranslatedEditorHandle } from "./TranslatedEditor"
 import { TimelineAddMedia } from "./TimelineAddMedia"
 import { CellTtsButton } from "./CellTtsButton"
+import { CellIssuesTab } from "./CellIssuesTab"
 import { BacktranslationPanel } from "./BacktranslationPanel"
 import {
   overlayBacktranslation,
@@ -7681,68 +7682,15 @@ function EditorRow({
                   : undefined,
               disabled: cellInfractions.length === 0 && waivedInfractions.length === 0,
               renderContent: () => (
-                <div className="flex flex-col gap-1.5">
-                  {cellInfractions.length === 0 && waivedInfractions.length === 0 ? (
-                    <p className="py-3 text-center text-xs text-muted-foreground">
-                      {t("editor.issues.none")}
-                    </p>
-                  ) : (
-                    <>
-                      {cellInfractions.map((inf) => {
-                        const rule = ruleMap.get(inf.ruleId)
-                        const isMajor = rule?.severity === "major"
-                        const Icon = isMajor ? AlertTriangle : AlertCircle
-                        return (
-                          <button
-                            key={inf.ruleId}
-                            type="button"
-                            onClick={() => setOpenRuleId(inf.ruleId)}
-                            className="bg-card flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-start text-xs transition-all"
-                          >
-                            <Icon
-                              className={cn(
-                                "mt-0.5 h-3 w-3 shrink-0",
-                                isMajor ? "text-red-500" : "text-amber-500",
-                              )}
-                            />
-                            <span className="flex-1">
-                              <span className="font-medium text-foreground">
-                                {rule ? translateRuleName(rule, t) : inf.ruleId}
-                              </span>
-                              <span className="ms-1 text-muted-foreground">
-                                — {formatInfractionReason(inf, t)}
-                              </span>
-                            </span>
-                            <ArrowRight className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground/50" />
-                          </button>
-                        )
-                      })}
-                      {waivedInfractions.length > 0 && (
-                        <>
-                          <div className="mt-2 px-1 text-xs text-muted-foreground">
-                            {t("editor.issues.waived")}
-                          </div>
-                          {waivedInfractions.map((inf) => {
-                            const rule = ruleMap.get(inf.ruleId)
-                            return (
-                              <button
-                                key={`waived-${inf.ruleId}`}
-                                type="button"
-                                onClick={() => setOpenRuleId(inf.ruleId)}
-                                className="bg-muted flex w-full items-start gap-2 rounded-xl px-2.5 py-1.5 text-start text-xs text-muted-foreground/70 transition-all"
-                              >
-                                <Check className="mt-0.5 h-3 w-3 shrink-0" />
-                                <span className="flex-1">
-                                  {rule ? translateRuleName(rule, t) : inf.ruleId}
-                                </span>
-                              </button>
-                            )
-                          })}
-                        </>
-                      )}
-                    </>
-                  )}
-                </div>
+                <CellIssuesTab
+                  activeInfractions={cellInfractions}
+                  waivedInfractions={waivedInfractions}
+                  ruleMap={ruleMap}
+                  editable={editable}
+                  onOpenRule={setOpenRuleId}
+                  onWaive={handleWaive}
+                  onUnwaive={handleUnwaive}
+                />
               ),
             },
             // Metadata — untranslated import columns (DCS TSV supportReference/

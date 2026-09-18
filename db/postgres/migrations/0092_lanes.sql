@@ -7,9 +7,10 @@
 -- nothing and is reversible (DROP TABLE).
 --
 -- Columns, each load-bearing:
---   * id         — opaque, non-enumerable; appears in shareable links. UUID text
---                  for parity with projects.id (deliberately opaque so callers
---                  never parse it — a slug swap later is invisible to them).
+--   * id         — opaque 8-hex, app-generated (see src/lib/lanes/lane-id.ts).
+--                  PRIMARY KEY is composite (project_id, id) so a project's
+--                  child rows can only point at that project's lanes.
+--                  Deliberately opaque so callers never parse it.
 --   * role       — 'source' (one shared source lane per project, NOT lane-
 --                  addressable) or 'target' (one per distinct target_lang value,
 --                  including '' = the default lane).
@@ -21,19 +22,23 @@
 --   * legacy_tag — IMMUTABLE. The target_lang value this lane had at cutover, so
 --                  rename-safe replay resolves historical events by tag, never by
 --                  name. '' for the default target lane; NULL for the source lane.
+--   * position / archived_at — additive: stable display order and soft-archive.
 --
 -- No FK to projects (matches project_member_lane_roles; the app is event-sourced
 -- and avoids FKs). Prod audit: mostly one target lane ('') per project, so most
 -- projects get exactly two rows (one source + one default target).
 CREATE TABLE IF NOT EXISTS lanes (
-    id          TEXT        PRIMARY KEY DEFAULT gen_random_uuid()::text,
+    id          TEXT        NOT NULL,   -- opaque 8-hex, app-generated (see src/lib/lanes/lane-id.ts)
     project_id  TEXT        NOT NULL,
     role        TEXT        NOT NULL CHECK (role IN ('source', 'target')),
     name        TEXT        NOT NULL,
     lang_code   TEXT,
     legacy_tag  TEXT,
+    position    INTEGER     NOT NULL DEFAULT 0,   -- stable display order
+    archived_at TIMESTAMPTZ,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (project_id, id)
 );
 
 -- Exactly one source lane per project.

@@ -20,10 +20,11 @@ import {
   SOURCE_LANE_PLACEHOLDER,
   type ProjectLaneInputs,
 } from "../../src/lib/lanes/backfill-plan"
+import { newLaneId } from "../../src/lib/lanes/lane-id"
 import type { AquillaDb, AquillaStatement } from "../shim/postgres"
 
-const INSERT_SOURCE = `INSERT INTO lanes (project_id, role, name, lang_code, legacy_tag)
-   VALUES (?, 'source', ?, ?, NULL)
+const INSERT_SOURCE = `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+   VALUES (?, ?, 'source', ?, ?, NULL, ?)
    ON CONFLICT (project_id) WHERE role = 'source' DO UPDATE SET
      name = CASE
        WHEN lanes.name IN ('${SOURCE_LANE_PLACEHOLDER}') THEN excluded.name
@@ -32,8 +33,8 @@ const INSERT_SOURCE = `INSERT INTO lanes (project_id, role, name, lang_code, leg
      lang_code = COALESCE(excluded.lang_code, lanes.lang_code),
      updated_at = now()`
 
-const INSERT_TARGET = `INSERT INTO lanes (project_id, role, name, lang_code, legacy_tag)
-   VALUES (?, 'target', ?, ?, ?)
+const INSERT_TARGET = `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+   VALUES (?, ?, 'target', ?, ?, ?, ?)
    ON CONFLICT (project_id, legacy_tag) WHERE role = 'target' DO UPDATE SET
      name = CASE
        WHEN lanes.name IN ('${BLANK_LANE_PLACEHOLDER}') THEN excluded.name
@@ -114,10 +115,10 @@ export function ensureProjectLaneStmts(
   const plan = planLanesForProject(
     settingsToLaneInputs(opts?.settings, opts?.dataTargetTags ?? []),
   )
-  return plan.map((row) =>
+  return plan.map((row, i) =>
     row.role === "source"
-      ? db.prepare(INSERT_SOURCE).bind(projectId, row.name, row.langCode)
-      : db.prepare(INSERT_TARGET).bind(projectId, row.name, row.langCode, row.legacyTag),
+      ? db.prepare(INSERT_SOURCE).bind(newLaneId(), projectId, row.name, row.langCode, i)
+      : db.prepare(INSERT_TARGET).bind(newLaneId(), projectId, row.name, row.langCode, row.legacyTag, i),
   )
 }
 

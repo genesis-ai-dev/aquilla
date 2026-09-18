@@ -28,6 +28,7 @@
 //        --statement-timeout <pg interval>  --lock-timeout <pg interval>
 import { makePostgres } from '../db/shim/postgres'
 import { planLanesForProject, type LaneRolePlan } from '../src/lib/lanes/backfill-plan'
+import { newLaneId } from '../src/lib/lanes/lane-id'
 
 function connectionString(): string {
   const direct = process.env.AQUILLA_DATABASE_URL?.trim()
@@ -100,12 +101,12 @@ const CELLS_UPDATE = `UPDATE cells c SET lane_id = l.id
      AND ( (c.side = 'source' AND l.role = 'source')
         OR (c.side = 'target' AND l.role = 'target' AND l.legacy_tag = c.target_lang) )`
 
-const INSERT_SOURCE = `INSERT INTO lanes (project_id, role, name, lang_code, legacy_tag)
-   VALUES (?, 'source', ?, ?, NULL)
+const INSERT_SOURCE = `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+   VALUES (?, ?, 'source', ?, ?, NULL, ?)
    ON CONFLICT (project_id) WHERE role = 'source' DO NOTHING`
 
-const INSERT_TARGET = `INSERT INTO lanes (project_id, role, name, lang_code, legacy_tag)
-   VALUES (?, 'target', ?, ?, ?)
+const INSERT_TARGET = `INSERT INTO lanes (id, project_id, role, name, lang_code, legacy_tag, position)
+   VALUES (?, ?, 'target', ?, ?, ?, ?)
    ON CONFLICT (project_id, legacy_tag) WHERE role = 'target' DO NOTHING`
 
 // Distinct target_lang values that actually appear in the data (target side).
@@ -190,11 +191,11 @@ async function main(): Promise<void> {
       }
 
       if (apply) {
-        for (const l of plan) {
+        for (const [i, l] of plan.entries()) {
           if (l.role === 'source') {
-            await db.prepare(INSERT_SOURCE).bind(p.id, l.name, l.langCode).run()
+            await db.prepare(INSERT_SOURCE).bind(newLaneId(), p.id, l.name, l.langCode, i).run()
           } else {
-            await db.prepare(INSERT_TARGET).bind(p.id, l.name, l.langCode, l.legacyTag).run()
+            await db.prepare(INSERT_TARGET).bind(newLaneId(), p.id, l.name, l.langCode, l.legacyTag, i).run()
           }
         }
         for (const table of TARGET_ONLY_TABLES) {

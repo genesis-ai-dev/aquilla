@@ -113,6 +113,71 @@ describe("applyBibleSwapToIdml", () => {
       applyBibleSwapToIdml(studyIdml, new Uint8Array([1, 2, 3, 4])),
     ).rejects.toThrow(/not a valid IDML\/ZIP archive/)
   })
+
+  it("copies missing Bible heading styles into the Study stylesheet", async () => {
+    const studyStyles = `<?xml version="1.0"?>
+<idPkg:Styles>
+  <RootParagraphStyleGroup Self="u78">
+    <ParagraphStyle Self="ParagraphStyle/#base.title" Name="#base.title">
+      <Properties>
+        <AppliedFont type="string">Myriad Pro</AppliedFont>
+      </Properties>
+    </ParagraphStyle>
+    <ParagraphStyleGroup Self="ParagraphStyleGroup/$ID/title" Name="$ID/title">
+      <ParagraphStyle Self="ParagraphStyle/title%3amt1" Name="title:mt1"/>
+    </ParagraphStyleGroup>
+  </RootParagraphStyleGroup>
+</idPkg:Styles>`
+    const bibleStyles = `<?xml version="1.0"?>
+<idPkg:Styles>
+  <RootParagraphStyleGroup Self="u79">
+    <ParagraphStyle Self="ParagraphStyle/#base.title" Name="#base.title">
+      <Properties>
+        <AppliedFont type="string">Source Sans 3</AppliedFont>
+      </Properties>
+    </ParagraphStyle>
+    <ParagraphStyleGroup Self="ParagraphStyleGroup/$ID/title" Name="$ID/title">
+      <ParagraphStyle Self="ParagraphStyle/title%3as1" Name="title:s1" FontStyle="Regular">
+        <Properties>
+          <BasedOn type="object">ParagraphStyle/#base.title</BasedOn>
+          <AllNestedStyles type="list">
+            <ListItem type="record">
+              <AppliedCharacterStyle type="object">CharacterStyle/#base.bd</AppliedCharacterStyle>
+            </ListItem>
+          </AllNestedStyles>
+        </Properties>
+      </ParagraphStyle>
+    </ParagraphStyleGroup>
+  </RootParagraphStyleGroup>
+</idPkg:Styles>`
+    const studyIdml = await idmlWith({
+      "Stories/Story_u1.xml": STUDY_STORY,
+      "Resources/Styles.xml": studyStyles,
+    })
+    const bibleIdml = await idmlWith({
+      "Stories/Story_b1.xml": BIBLE_STORY,
+      "Resources/Styles.xml": bibleStyles,
+    })
+
+    const { idml } = await applyBibleSwapToIdml(studyIdml, bibleIdml, { swapMode: "structure" })
+    const zip = await JSZip.loadAsync(idml)
+    const merged = await zip.file("Resources/Styles.xml")!.async("text")
+    expect(merged).toContain('Self="ParagraphStyle/title%3as1"')
+    expect(merged).toContain("Source Sans 3")
+    expect(merged).toContain("CharacterStyle/#base.bd")
+    expect(merged).toContain("Myriad Pro")
+  })
+
+  it("replaces the Bible's quotation dash with an em dash before splicing", async () => {
+    const bible = story("JOS", verse("1", "1", "\u2015Vinde a mim\u2015 disse Josué."))
+    const studyIdml = await idmlWith({ "Stories/Story_u1.xml": STUDY_STORY })
+    const bibleIdml = await idmlWith({ "Stories/Story_b1.xml": bible })
+
+    const { idml } = await applyBibleSwapToIdml(studyIdml, bibleIdml)
+    const swapped = (await storiesOf(idml))["Stories/Story_u1.xml"]
+    expect(swapped).toContain("\u2014Vinde a mim\u2014 disse Josué.")
+    expect(swapped).not.toContain("\u2015")
+  })
 })
 
 describe("bible swap worker protocol", () => {

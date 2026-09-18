@@ -665,3 +665,92 @@ describe("Biblica study-note selection", () => {
     expect(selection.verseUnitCount).toBeGreaterThan(0)
   })
 })
+
+describe("Biblica study-note selection — book names", () => {
+  it("takes the running head and contents entries so they can be translated", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-id", "meta%3aid", run("$ID/[No character style]", "JOS - New International Readers Version")),
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "JOS")),
+      paragraph("p-h", "meta%3ah", run("$ID/[No character style]", "Joshua")),
+      paragraph("p-toc1", "meta%3atoc1", run("$ID/[No character style]", "Joshua")),
+      paragraph("p-toc2", "meta%3atoc2", run("$ID/[No character style]", "Joshua")),
+      paragraph("p-toc3", "meta%3atoc3", run("$ID/[No character style]", "Jos")),
+      bookTitle("p-title", "Joshua"),
+      note("p-n", "What is the book of Joshua?"),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units)
+
+    expect(selection.notes.map((entry) => entry.unit.sourceText)).toEqual([
+      "Joshua",
+      "Joshua",
+      "Joshua",
+      "Joshua",
+      "Jos",
+      "What is the book of Joshua?",
+    ])
+    expect(selection.notes.map((entry) => entry.unit.sourceText).join("\n"))
+      .not.toContain("JOS")
+    expect(selection.notes.map((entry) => entry.unit.sourceText).join("\n"))
+      .not.toMatch(/Readers Version/)
+  })
+
+  it("puts them in the book preface, after the title they name", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "JOS")),
+      paragraph("p-h", "meta%3ah", run("$ID/[No character style]", "Joshua")),
+      paragraph("p-toc1", "meta%3atoc1", run("$ID/[No character style]", "Joshua")),
+      bookTitle("p-title", "Joshua"),
+      note("p-n", "What is the book of Joshua?"),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units)
+
+    expect(selection.notes.map((entry) => [
+      entry.unit.sourceText,
+      entry.chapterLabel,
+      entry.bookCode,
+    ])).toEqual([
+      ["Joshua", "Preface", "JOS"],
+      ["Joshua", "Preface", "JOS"],
+      ["Joshua", "Preface", "JOS"],
+      ["What is the book of Joshua?", "Preface", "JOS"],
+    ])
+  })
+
+  it("holds them back past a division heading that introduces the book", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "MAT")),
+      paragraph("p-h", "meta%3ah", run("$ID/[No character style]", "Matthew")),
+      divisionHeading("p-div", "Stories about Jesus"),
+      note("p-n", "The books from Matthew to Acts are stories about Jesus."),
+      bookTitle("p-title", "The Gospel of Matthew"),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units)
+
+    const runningHead = selection.notes.find((entry) => entry.unit.sourceText === "Matthew")
+    expect(runningHead?.chapterLabel).toBe("Preface")
+    expect(runningHead?.bookCode).toBe("MAT")
+    expect(selection.notes.map((entry) => entry.section?.label ?? entry.chapterLabel)).toEqual([
+      "Stories about Jesus",
+      "Stories about Jesus",
+      "Preface",
+      "Preface",
+    ])
+  })
+
+  it("does not hand a titleless book's names to the next book", async () => {
+    const parsed = await parseIdml(await makeBiblicaIdml([
+      paragraph("p-2jn", "meta%3abk", run("$ID/[No character style]", "2JN")),
+      paragraph("p-2h", "meta%3ah", run("$ID/[No character style]", "2 John")),
+      paragraph("p-3jn", "meta%3abk", run("$ID/[No character style]", "3JN")),
+      paragraph("p-3h", "meta%3ah", run("$ID/[No character style]", "3 John")),
+      bookTitle("p-title", "3 John"),
+    ]))
+    const selection = selectBiblicaStudyNotes(parsed.units)
+
+    expect(selection.notes.map((entry) => [entry.unit.sourceText, entry.bookCode])).toEqual([
+      ["2 John", "2JN"],
+      ["3 John", "3JN"],
+      ["3 John", "3JN"],
+    ])
+  })
+})

@@ -17,6 +17,8 @@ import {
   applyBibleSwapWithShared,
   buildBibleSwapSharedResources,
   deserializeVersificationPlan,
+  mergeBibleHeadingStylesIntoStudyStylesXml,
+  normalizeBibleStoryXmlGlyphs,
   type BibleSwapMode,
   type SerializedVersificationPlan,
   type SwapStats,
@@ -247,7 +249,27 @@ export async function applyBibleSwapToIdml(
 
   const studyZip = await JSZip.loadAsync(toTightZipBytes(studyIdmlData))
   const bibleZip = await JSZip.loadAsync(toTightZipBytes(bibleIdmlData))
-  const bibleStoryXml = await largestBibleStoryXml(bibleZip)
+
+  // Structure swap copies Bible `title:s1` headings into the Study stories.
+  // Those styles live only in the Bible package; without them InDesign
+  // falls back to body text (Charis SIL Regular) instead of Source Sans 3
+  // Semibold. Merge the missing heading-role styles before rewriting stories.
+  const studyStylesFile = studyZip.file("Resources/Styles.xml")
+  const bibleStylesFile = bibleZip.file("Resources/Styles.xml")
+  if (studyStylesFile && bibleStylesFile) {
+    const studyStylesXml = await studyStylesFile.async("text")
+    const mergedStylesXml = mergeBibleHeadingStylesIntoStudyStylesXml(
+      studyStylesXml,
+      await bibleStylesFile.async("text"),
+    )
+    if (mergedStylesXml !== studyStylesXml) {
+      studyZip.file("Resources/Styles.xml", mergedStylesXml)
+    }
+  }
+
+  // Every swap path reads the Bible from here, so this is the one place the
+  // Bible's own glyphs have to be reconciled with the study Bible's fonts.
+  const bibleStoryXml = normalizeBibleStoryXmlGlyphs(await largestBibleStoryXml(bibleZip))
 
   const { swapMode = "surgical", serializedPlan, language, studyVolume } = options
   console.log(

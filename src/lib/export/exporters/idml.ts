@@ -18,6 +18,7 @@ import {
   readIdmlRejoinMetadata,
   type IdmlRejoinMetadata,
 } from "@/lib/idml/rejoin"
+import { applyBiblicaProtectedHtmlReflow } from "@/lib/biblica/export-reflow"
 
 const IDML_MIME = "application/vnd.adobe.indesign-idml-package"
 
@@ -283,8 +284,25 @@ function cellContract(cell: CellData): CellContract {
       validation.diagnostics,
     )
   }
+
+  let targetHtml = cell.translatedHtml
+  let targetSlots = validation.slots
+  const reflowedHtml = applyBiblicaProtectedHtmlReflow(
+    isRecord(cell.metadata) ? cell.metadata : undefined,
+    cell.originalHtml,
+    targetHtml,
+    metadata,
+  )
+  if (reflowedHtml !== targetHtml) {
+    const reflowed = validateIdmlTranslation(cell.originalHtml, reflowedHtml, metadata)
+    if (reflowed.valid) {
+      targetHtml = reflowedHtml
+      targetSlots = reflowed.slots
+    }
+  }
+
   const hasTranslation = metadata.editableSlotIndexes.some((slotIndex) => (
-    (validation.slots[slotIndex] ?? "").length > 0
+    (targetSlots[slotIndex] ?? "").length > 0
   ))
   if (!hasTranslation && cell.translated.trim().length > 0) {
     throw new IdmlWebExportError(
@@ -297,8 +315,8 @@ function cellContract(cell: CellData): CellContract {
     locator,
     metadata,
     sourceHtml: cell.originalHtml,
-    targetHtml: cell.translatedHtml,
-    targetSlots: validation.slots,
+    targetHtml,
+    targetSlots,
     hasTranslation,
     ...(rejoin ? { rejoin } : {}),
   }

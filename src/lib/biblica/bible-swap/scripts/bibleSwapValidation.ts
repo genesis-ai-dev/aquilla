@@ -12,6 +12,7 @@ import {
     applyBibleSwapWithShared,
     buildBibleSwapSharedResources,
     deserializeVersificationPlan,
+    normalizeBibleStoryXmlGlyphs,
     type BibleSwapMappingDocument,
 } from "../index";
 import {
@@ -170,7 +171,12 @@ export async function swapAndValidateVolume(
 ): Promise<VolumeValidation> {
     const { study, bible } = volumePaths(pair, language);
     const studyXml = await loadMainStory(study);
-    const bibleXml = await loadMainStory(bible);
+    // Production swaps the *normalized* Bible (`applyBibleSwapToIdml`), which
+    // rewrites the quotation dash the study fonts cannot print. Scoring against
+    // the raw Bible would mark all ~1,200 dialogue verses per volume as wrong
+    // text while hiding a genuine failure to normalize, so the expected side
+    // has to be the same string the swap actually reads.
+    const bibleXml = normalizeBibleStoryXmlGlyphs(await loadMainStory(bible));
 
     const plan = deserializeVersificationPlan(
         loadMappingDocument(language, pair.volume).plan

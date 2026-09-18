@@ -95,6 +95,23 @@ function translate(cell: CellData): void {
   cell.translated = cell.original.toUpperCase()
 }
 
+/** Put translated text in specific protected slots, leaving the rest empty. */
+function fillSlots(cell: CellData, texts: Record<number, string>): void {
+  const container = document.createElement("div")
+  container.innerHTML = cell.translatedHtml ?? cell.originalHtml ?? ""
+  const paragraph = container.firstElementChild
+  if (!(paragraph instanceof HTMLParagraphElement)) {
+    throw new Error(`Cell ${cell.id} is not one canonical IDML paragraph`)
+  }
+  for (const [index, text] of Object.entries(texts)) {
+    const slot = paragraph.querySelector<HTMLElement>(`span[data-idml-slot="${index}"]`)
+    if (!slot) throw new Error(`Cell ${cell.id} is missing slot ${index}`)
+    slot.textContent = text
+  }
+  cell.translatedHtml = paragraph.outerHTML
+  cell.translated = paragraph.textContent ?? ""
+}
+
 function cellsFor(cells: readonly CellData[], texts: readonly string[]): CellData[] {
   return texts.map((text) => {
     const cell = cells.find((candidate) => candidate.original === text)
@@ -172,13 +189,11 @@ describe("IDML export of a note block that was imported as several cells", () =>
   })
 
   /**
-   * AQU-1234: the reason the Agent API refuses InsertCell / DeleteCell /
-   * SplitCell on a file imported with preserved export slots. A row that never
-   * came from the package has no locator, and the exporter has nowhere to put
-   * it — so ONE inserted line takes the whole deliverable down. Refusing the
-   * structural edit is what keeps this file round-trippable.
+   * AQU-1068: a cell somebody ADDED in the app has no IDML locator. Skipping it
+   * is cheaper than refusing the whole download — InDesign files cannot hold
+   * added content in the first place (`rowActionAvailability` refuses insert).
    */
-  it("refuses to export a file containing a row that carries no IDML locator", async () => {
+  it("skips a user-added row and still exports the imported notes", async () => {
     const { bytes, cells } = await importBiblicaCells()
     for (const cell of cells) translate(cell)
     const inserted: CellData = {
@@ -190,9 +205,12 @@ describe("IDML export of a note block that was imported as several cells", () =>
       metadata: { aquillaOrigin: { version: 1, kind: "user-insert" } },
     }
 
-    await expect(exportIdml(bytes, [...cells, inserted], directExecutor)).rejects.toThrow(
-      IdmlWebExportError,
-    )
+    const result = await exportIdml(bytes, [...cells, inserted], directExecutor)
+    const story = await storyOf(result.blob)
+    expect(story).toContain(`<Content>${SAMPLE_NOTES.preface.toUpperCase()}</Content>`)
+    expect(story).not.toContain("A line somebody added after the import.")
+    expect(result.report.missing).toBe(0)
+    expect(result.report.rejected).toBe(0)
   })
 
   it("refuses to export a note block whose other sentences are absent", async () => {
@@ -265,6 +283,49 @@ describe("IDML export of a note block that was imported as several cells", () =>
     // apostrophe into the Marathi text.
     expect(story).not.toContain("<Content>ʼ</Content>")
     expect(result.report).toMatchObject({ missing: 0, rejected: 0 })
+  })
+
+  it("clears the untranslated English tail after a structural apostrophe", async () => {
+    const { bytes, cells } = await importBiblicaCells([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "JOS")),
+      paragraph(
+        "p-n",
+        "intro%3aipi",
+        run("k_xt", "Aaron")
+          + run("source%20serif", "ʼ")
+          + run("k_xt", "s walking stick"),
+      ),
+    ])
+    const cell = cells[0]!
+    fillSlots(cell, { 0: "O cajado de Arão:" })
+
+    const result = await exportIdml(bytes, cells, directExecutor)
+    const story = await storyOf(result.blob)
+
+    expect(story).toContain("<Content>O cajado de Arão:</Content>")
+    expect(story).not.toContain("s walking stick")
+    expect(story).not.toContain("<Content>ʼ</Content>")
+  })
+
+  it("writes leftover bold punctuation into the following plain run", async () => {
+    const { bytes, cells } = await importBiblicaCells([
+      paragraph("p-bk", "meta%3abk", run("$ID/[No character style]", "GEN")),
+      paragraph(
+        "p-n",
+        "intro%3aipi",
+        run("k_xt", "David") + run("$ID/[No character style]", ". The king of Israel."),
+      ),
+    ])
+    const cell = cells[0]!
+    fillSlots(cell, { 0: "Davi.", 1: " O rei de Israel." })
+
+    const result = await exportIdml(bytes, cells, directExecutor)
+    const story = await storyOf(result.blob)
+
+    expect(story).toContain("<Content>Davi</Content>")
+    expect(story).toContain("<Content>. O rei de Israel.</Content>")
+    expect(story).not.toContain("<Content>Davi.</Content>")
+    expect(story).toContain("k_xt")
   })
 
   it("writes a translated front/back matter volume back into its layout paragraphs", async () => {

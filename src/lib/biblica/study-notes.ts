@@ -3,11 +3,12 @@
  *
  * The shared IDML engine parses every literal location in the document
  * losslessly, scripture included. A Biblica study-Bible import wants the
- * `intro:*` note paragraphs and the `head:*` headings the layout sets around
- * the verses (Psalm labels, superscriptions, speaker lines): the Bible text
- * itself is set from the publisher's scripture files, not translated here.
- * Verse runs are still walked, because they are what tells us which book and
- * chapter each note section belongs to.
+ * `intro:*` note paragraphs, the `head:*` headings the layout sets around
+ * the verses (Psalm labels, superscriptions, speaker lines), and the book's
+ * printed name (`meta:h` / `meta:toc1–3`) that InDesign draws running heads
+ * and contents from. The Bible text itself is set from the publisher's
+ * scripture files, not translated here. Verse runs are still walked, because
+ * they are what tells us which book and chapter each note section belongs to.
  *
  * Biblica also ships the study Bible's front and back matter — title pages and
  * contents, "how to use", the Bible Dictionary, the timelines, the maps, the
@@ -52,6 +53,7 @@ import {
   bookCodeFromParagraphText,
   computeChapterRangeLabel,
   isBiblicaBookMarkerStyle,
+  isBiblicaBookNameStyle,
   isBiblicaBookTitleStyle,
   isBiblicaChapterHeadingStyle,
   isBiblicaDivisionHeadingStyle,
@@ -375,89 +377,22 @@ export function selectBiblicaStudyNotes(
     hasEncounteredVerses = true
   }
 
-  for (const unit of units) {
+  // Book-name paragraphs (`meta:h` / `meta:toc*`) sit in IDML before the title
+  // they name, and a division heading introducing a group of books can sit
+  // between them. Held until `intro:imt1`, they land in that book's preface
+  // rather than opening the book's own milestone ahead of the division. Each
+  // cell still exports to its original paragraph via the locator.
+  const pendingBookNames: IdmlTranslationUnit[] = []
+
+  const emitNote = (unit: IdmlTranslationUnit): void => {
     const paragraphStyle = unit.paragraphStyleId ?? ""
 
-    // A note, a scripture heading, or a new book ends any verse that was still
-    // open, so those paragraphs are never treated as scripture continuations.
-    if (
-      isBiblicaNoteSectionStyle(paragraphStyle)
-      || isBiblicaScriptureHeadingStyle(paragraphStyle)
-      || isBiblicaBookMarkerStyle(paragraphStyle)
-    ) {
-      openSpanningVerse = null
-    }
-
-    const scan = scanUnit(unit, currentChapter)
-
-    if (scan.bookCode && scan.bookCode !== currentBook) {
-      currentBook = scan.bookCode
-      currentChapter = "1"
-      hasEncounteredVerses = false
-      firstChapterInRange = null
-      lastChapterInRange = null
-      currentLabel = null
-      currentSection = null
-    } else if (scan.verses.length > 0) {
-      // Chapter anchors in note paragraphs are often the previous book's
-      // closing markers flushed into `intro:ie` (Job 42:17 into Psalms).
-      // Only scripture verses may move the running chapter.
-      currentChapter = scan.chapter
-    }
-
-    // Some packages omit meta:bk and name the book in a structural running
-    // heading instead. Never infer a book from an editable note itself: a
-    // document-level preface may begin with "ISA — …" and must remain the
-    // standalone Preface until the real book boundary arrives. Front and back
-    // matter is not scoped to a book at all, and its layout text — contents
-    // lines, dictionary entries — can read like a book code by accident.
-    if (!currentBook && !frontBackMatter && !isBiblicaNoteSectionStyle(paragraphStyle)) {
-      const fallback = bookCodeFromParagraphText(unit.sourceText)
-      if (fallback) currentBook = fallback
-    }
-
-    // Scripture paragraph: record which chapters it covered, then skip it.
-    if (scan.verses.length > 0) {
-      currentLabel = null
-      currentSection = null
-      for (const verse of scan.verses) updateChapterRange(verse.chapter)
-      openSpanningVerse = opensSpanningVerse(scan) ?? null
-      verseUnitCount += 1
-      continue
-    }
-
-    // Continuation of a verse that began in an earlier paragraph.
-    if (openSpanningVerse) {
-      currentLabel = null
-      currentSection = null
-      updateChapterRange(currentChapter)
-      if (scan.closesEarlierVerse && scan.metaVerseCounts.has(openSpanningVerse)) {
-        openSpanningVerse = null
-      }
-      verseUnitCount += 1
-      continue
-    }
-
-    // In a book volume only intro/* notes and head/* scripture headings become
-    // editable cells; running headers, tables of contents and the poetry/prose
-    // the Bible text itself supplies stay in the package untouched. A
-    // front/back volume sets its text in layout styles instead, so there every
-    // paragraph is a cell except the running heads InDesign regenerates from
-    // the layout.
-    const isFurniture = frontBackMatter
-      ? isBiblicaRunningHeadStyle(paragraphStyle)
-      : !isBiblicaNoteSectionStyle(paragraphStyle)
-        && !isBiblicaScriptureHeadingStyle(paragraphStyle)
-    if (isFurniture) {
-      otherUnitCount += 1
-      continue
-    }
     if (
       isStructuralOnlyContent(unit.slots.map((slot) => slot.text))
       || !noteHasVisibleText(unit, frontBackMatter)
     ) {
       otherUnitCount += 1
-      continue
+      return
     }
 
     // A division heading opens a section about a group of books, which runs
@@ -514,6 +449,7 @@ export function selectBiblicaStudyNotes(
     // One cell per line: a list set as a single paragraph would otherwise arrive
     // as one cell holding every item. Lines that are only structural glue own no
     // cell, and their slots keep their source text on export.
+    let emitted = false
     for (const line of partitionIdmlUnitAtLineBreaks(unit)) {
       if (
         isStructuralOnlyContent(line.slots.map((slot) => slot.text))
@@ -536,6 +472,7 @@ export function selectBiblicaStudyNotes(
       // even when it is the only one left after the delimiters were dropped.
       const isPartOfLine = cells.length > 1 || cells.length !== slices.length
       for (const [index, slice] of cells.entries()) {
+        emitted = true
         notes.push({
           unit: slice.unit,
           ...(isPartOfLine
@@ -548,7 +485,109 @@ export function selectBiblicaStudyNotes(
         })
       }
     }
+    if (!emitted) otherUnitCount += 1
   }
+
+  const flushBookNames = (): void => {
+    if (pendingBookNames.length === 0) return
+    const held = pendingBookNames.splice(0)
+    for (const heldUnit of held) emitNote(heldUnit)
+  }
+
+  for (const unit of units) {
+    const paragraphStyle = unit.paragraphStyleId ?? ""
+
+    // A note, a scripture heading, or a new book ends any verse that was still
+    // open, so those paragraphs are never treated as scripture continuations.
+    if (
+      isBiblicaNoteSectionStyle(paragraphStyle)
+      || isBiblicaScriptureHeadingStyle(paragraphStyle)
+      || isBiblicaBookMarkerStyle(paragraphStyle)
+      || isBiblicaBookNameStyle(paragraphStyle)
+    ) {
+      openSpanningVerse = null
+    }
+
+    const scan = scanUnit(unit, currentChapter)
+
+    if (scan.bookCode && scan.bookCode !== currentBook) {
+      // A book with no title of its own must not hand its names to the next book.
+      flushBookNames()
+      currentBook = scan.bookCode
+      currentChapter = "1"
+      hasEncounteredVerses = false
+      firstChapterInRange = null
+      lastChapterInRange = null
+      currentLabel = null
+      currentSection = null
+    } else if (scan.verses.length > 0) {
+      // Chapter anchors in note paragraphs are often the previous book's
+      // closing markers flushed into `intro:ie` (Job 42:17 into Psalms).
+      // Only scripture verses may move the running chapter.
+      currentChapter = scan.chapter
+    }
+
+    // Some packages omit meta:bk and name the book in a structural running
+    // heading instead. Never infer a book from an editable note itself: a
+    // document-level preface may begin with "ISA — …" and must remain the
+    // standalone Preface until the real book boundary arrives. Front and back
+    // matter is not scoped to a book at all, and its layout text — contents
+    // lines, dictionary entries — can read like a book code by accident.
+    if (!currentBook && !frontBackMatter && !isBiblicaNoteSectionStyle(paragraphStyle)) {
+      const fallback = bookCodeFromParagraphText(unit.sourceText)
+      if (fallback) currentBook = fallback
+    }
+
+    // Scripture paragraph: record which chapters it covered, then skip it.
+    if (scan.verses.length > 0) {
+      currentLabel = null
+      currentSection = null
+      for (const verse of scan.verses) updateChapterRange(verse.chapter)
+      openSpanningVerse = opensSpanningVerse(scan) ?? null
+      verseUnitCount += 1
+      continue
+    }
+
+    // Continuation of a verse that began in an earlier paragraph.
+    if (openSpanningVerse) {
+      currentLabel = null
+      currentSection = null
+      updateChapterRange(currentChapter)
+      if (scan.closesEarlierVerse && scan.metaVerseCounts.has(openSpanningVerse)) {
+        openSpanningVerse = null
+      }
+      verseUnitCount += 1
+      continue
+    }
+
+    // In a book volume the intro/* notes, the head/* scripture headings, and
+    // the book's printed name (`meta:h` / `meta:toc1–3`) become editable cells.
+    // The rest of the meta/* metadata and the poetry/prose the Bible text itself
+    // supplies stay in the package untouched. A front/back volume sets its text
+    // in layout styles instead, so there every paragraph is a cell except the
+    // running heads InDesign regenerates from the layout.
+    const isFurniture = frontBackMatter
+      ? isBiblicaRunningHeadStyle(paragraphStyle)
+      : !isBiblicaNoteSectionStyle(paragraphStyle)
+        && !isBiblicaScriptureHeadingStyle(paragraphStyle)
+        && !isBiblicaBookNameStyle(paragraphStyle)
+    if (isFurniture) {
+      otherUnitCount += 1
+      continue
+    }
+
+    if (!frontBackMatter && isBiblicaBookNameStyle(paragraphStyle)) {
+      pendingBookNames.push(unit)
+      continue
+    }
+
+    emitNote(unit)
+    if (!frontBackMatter && isBiblicaBookTitleStyle(paragraphStyle)) {
+      flushBookNames()
+    }
+  }
+
+  flushBookNames()
 
   return { notes, verseUnitCount, otherUnitCount }
 }

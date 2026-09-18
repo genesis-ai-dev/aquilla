@@ -37,6 +37,10 @@ export {
 
 export { buildChapterBlockIndex } from "./chapterBlocks";
 
+export { normalizeBibleStoryXmlGlyphs } from "./bibleTextNormalization";
+export { mergeBibleHeadingStylesIntoStudyStylesXml } from "./headingStyleMerge";
+export { canonicalizeParagraphStyle, isHeadingRoleTitleStyle } from "./paragraphStyleRoles";
+
 export {
     buildCompatVerseIndex,
     serializeCompatVerseIndex,

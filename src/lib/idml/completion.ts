@@ -4,6 +4,7 @@ import {
   type IdmlFormatMetadataV2,
 } from "@aquilla/idml-roundtrip"
 import { clearBiblicaApostropheGlue } from "@/lib/biblica/apostrophe-glue"
+import { applyBiblicaProtectedHtmlReflow } from "@/lib/biblica/export-reflow"
 import { sanitizeIdmlEditorHtml } from "@/lib/richtext/editor-content"
 import { plainTextFromProtectedHtml } from "./protected-html"
 
@@ -177,6 +178,19 @@ export function normalizeProtectedCompletion(
     if (cleared.valid) {
       normalizedHtml = withoutGlue
       validation = cleared
+    }
+  }
+  const reflowedHtml = applyBiblicaProtectedHtmlReflow(
+    cell.metadata,
+    cell.originalHtml,
+    normalizedHtml,
+    metadata,
+  )
+  if (reflowedHtml !== normalizedHtml) {
+    const reflowed = validateIdmlTranslation(cell.originalHtml, reflowedHtml, metadata)
+    if (reflowed.valid) {
+      normalizedHtml = reflowedHtml
+      validation = reflowed
     }
   }
   const hasEditableText = metadata.editableSlotIndexes.some(

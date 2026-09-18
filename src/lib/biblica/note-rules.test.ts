@@ -3,6 +3,7 @@ import {
   bookCodeFromParagraphText,
   computeChapterRangeLabel,
   isBiblicaBookMarkerStyle,
+  isBiblicaBookNameStyle,
   isBiblicaChapterHeadingStyle,
   isBiblicaNoteSectionStyle,
   isBiblicaScriptureHeadingStyle,
@@ -14,6 +15,7 @@ import {
   isStructuralApostropheSegment,
   isStructuralOnlyContent,
   isVerseNumberCharacterStyle,
+  getJoinableApostropheSegmentIndexes,
 } from "./note-rules"
 
 describe("Biblica IDML style rules", () => {
@@ -27,6 +29,13 @@ describe("Biblica IDML style rules", () => {
     expect(isBiblicaBookMarkerStyle("ParagraphStyle/meta%3abk")).toBe(true)
     expect(isBiblicaBookMarkerStyle("ParagraphStyle/meta:bk")).toBe(true)
     expect(isBiblicaBookMarkerStyle("ParagraphStyle/meta%3arh")).toBe(false)
+
+    expect(isBiblicaBookNameStyle("ParagraphStyle/meta%3ah")).toBe(true)
+    expect(isBiblicaBookNameStyle("ParagraphStyle/meta:toc1")).toBe(true)
+    expect(isBiblicaBookNameStyle("ParagraphStyle/meta%3atoc3")).toBe(true)
+    expect(isBiblicaBookNameStyle("ParagraphStyle/meta%3arh")).toBe(false)
+    expect(isBiblicaBookNameStyle("ParagraphStyle/meta%3abk")).toBe(false)
+    expect(isBiblicaBookNameStyle("ParagraphStyle/meta%3aid")).toBe(false)
 
     expect(isBiblicaChapterHeadingStyle("ParagraphStyle/head%3acl")).toBe(true)
     expect(isBiblicaChapterHeadingStyle("ParagraphStyle/intro%3ahead%3acl")).toBe(true)
@@ -71,6 +80,27 @@ describe("Biblica IDML style rules", () => {
     expect(isStructuralApostropheSegment("dejiny", "CharacterStyle/Source Serif")).toBe(true)
     expect(isStructuralApostropheSegment("\u2019", "CharacterStyle/Minion")).toBe(true)
     expect(isStructuralApostropheSegment("dejiny", "CharacterStyle/Minion")).toBe(false)
+  })
+
+  it("joins apostrophe halves that share a character style and keeps style-boundary halves apart", () => {
+    expect(
+      getJoinableApostropheSegmentIndexes(
+        [1],
+        ["CharacterStyle/plain", "CharacterStyle/source serif", "CharacterStyle/plain"],
+      ),
+    ).toEqual([1])
+    expect(
+      getJoinableApostropheSegmentIndexes(
+        [1],
+        ["CharacterStyle/k_xt", "CharacterStyle/source serif", "CharacterStyle/k_xt"],
+      ),
+    ).toEqual([1])
+    expect(
+      getJoinableApostropheSegmentIndexes(
+        [1],
+        ["CharacterStyle/k_xt", "CharacterStyle/source serif", "CharacterStyle/plain"],
+      ),
+    ).toEqual([])
   })
 
   it("detects paragraphs whose only content is ACE markers or whitespace", () => {

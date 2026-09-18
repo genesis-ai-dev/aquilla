@@ -29,6 +29,7 @@ import { OrgProvider } from "@/context/OrgContext"
 import { OutboxProvider } from "@/context/OutboxContext"
 import { OfflineStoreProvider } from "@/context/OfflineStoreContext"
 import { OfflineSyncManagerMount } from "@/components/OfflineSyncManagerMount"
+import { UnsyncedOfflineWorkGuard } from "@/components/UnsyncedOfflineWorkGuard"
 import { ConflictToast } from "@/components/ConflictToast"
 import { NavHistoryProvider } from "@/context/NavHistoryContext"
 import { TooltipProvider } from "@/components/ui/tooltip"
@@ -269,6 +270,7 @@ export default function App() {
     // Provider, so this is the one knob for hover timing across the app.
     <OfflineStoreProvider>
       <OfflineSyncManagerMount />
+      <UnsyncedOfflineWorkGuard />
       <TooltipProvider delay={600}>
         <SyncingProvider>
           <PrivateModeBanner />

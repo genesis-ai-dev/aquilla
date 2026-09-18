@@ -26,40 +26,24 @@
 -- B's row. Those are fixed in the same commit (sync-worker/src/events/
 -- event-projection.ts, sync-worker/src/events/route.ts).
 --
--- ORDER OF OPERATIONS — CODE FIRST, THEN THIS FILE
+-- ORDER: PREPARE INDEX → VERIFY → DEPLOY COMPATIBLE WORKER → APPLY.
 --
--- Deploy the sync-worker change BEFORE applying this migration. New code is
--- safe against the old schema in both directions: `ON CONFLICT (project_id,
--- comment_id)` needs a unique index on those columns, which step 1 below
--- creates without touching the old PK, and the extra `AND project_id = ?`
--- predicates are correct under either key. Applying the contract step against
--- OLD code would be the unsafe order — its `ON CONFLICT(comment_id)` names a
--- constraint that no longer exists and every comment.create would error.
+-- 1. pnpm neon:prepare:comments:prod (or :dev) creates the unique index
+--    CONCURRENTLY in its own query and verifies its columns and validity.
+--    It preserves the old primary key, so the old worker remains compatible.
+-- 2. Deploy a sync-worker using ON CONFLICT (project_id, comment_id).
+--    Confirm all production traffic uses it before proceeding. The old
+--    ON CONFLICT(comment_id) worker fails after the global key is removed.
+-- 3. pnpm neon:apply:prod (or :dev) executes this transaction and records
+--    completion in schema_migrations. Do not baseline to skip this migration.
 --
--- EXPAND → VERIFY → CONTRACT. The table takes live traffic, so the new unique
--- index is built CONCURRENTLY (no write lock) and only swapped in once it is
--- proven valid. Run the three steps as three separate invocations, checking the
--- verification between them — CREATE INDEX CONCURRENTLY cannot run inside a
--- transaction block, so this file is applied statement by statement:
---
---   set -a; . ./.env; set +a
---   # ── 1. EXPAND ─────────────────────────────────────────────────────────
---   npx tsx scripts/pg.ts "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS \
---     comments_project_comment_pk ON comments (project_id, comment_id)"
---
---   # ── 2. VERIFY — must print indisvalid=t and zero duplicate groups ─────
---   npx tsx scripts/pg.ts "SELECT indisvalid FROM pg_index \
---     WHERE indexrelid = 'comments_project_comment_pk'::regclass"
---   npx tsx scripts/pg.ts "SELECT project_id, comment_id, count(*) FROM comments \
---     GROUP BY 1,2 HAVING count(*) > 1"
---
---   # ── 3. CONTRACT — swap the key over (brief ACCESS EXCLUSIVE lock) ─────
---   npx tsx scripts/pg.ts db/postgres/migrations/0093_comments_project_scoped_pk.sql
---
--- If step 2 shows indisvalid=f the concurrent build failed midway: DROP INDEX
--- CONCURRENTLY comments_project_comment_pk and re-run step 1. Do not proceed to
--- step 3 with an invalid index — USING INDEX would reject it and the table
--- would be left keyless.
+-- CREATE INDEX CONCURRENTLY cannot run in the migration runner's multi-
+-- statement transaction. Preparation is deliberately a separate command.
+-- A database already migrated manually is recognized by its primary-key
+-- columns, not the temporary index name: PostgreSQL renames the index when
+-- attaching it to comments_pkey. Replaying this file preserves that key.
+-- Missing/invalid preparation fails before the drop and rolls back the file.
+-- See docs/runbooks/comments-primary-key-rollout.md for the deploy gate.
 --
 -- No foreign key references comments(comment_id) anywhere in the schema
 -- (`parent_comment_id` is a plain TEXT column, not an FK), so nothing dangles
@@ -81,10 +65,54 @@
 -- Drop the global key and promote the already-built project-scoped index in
 -- one transaction, so there is no window in which the table has no primary key.
 BEGIN;
+SET LOCAL lock_timeout = '5s';
+LOCK TABLE comments IN ACCESS EXCLUSIVE MODE;
 
-ALTER TABLE comments DROP CONSTRAINT IF EXISTS comments_pkey;
+DO $$
+DECLARE
+  key_name text;
+  key_columns text[];
+BEGIN
+  SELECT c.conname, ARRAY(
+    SELECT a.attname::text
+    FROM unnest(c.conkey) WITH ORDINALITY k(n, pos)
+    JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.n
+    ORDER BY k.pos
+  ) INTO key_name, key_columns
+  FROM pg_constraint c
+  WHERE c.conrelid = 'comments'::regclass AND c.contype = 'p';
 
-ALTER TABLE comments
-  ADD CONSTRAINT comments_pkey PRIMARY KEY USING INDEX comments_project_comment_pk;
+  IF key_columns = ARRAY['project_id', 'comment_id'] THEN
+    RETURN;
+  END IF;
+  IF key_columns IS DISTINCT FROM ARRAY['comment_id'] THEN
+    RAISE EXCEPTION 'Unexpected comments primary key: %', key_columns;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_index i
+    JOIN pg_class idx ON idx.oid = i.indexrelid
+    JOIN pg_am am ON am.oid = idx.relam
+    WHERE i.indexrelid = to_regclass('comments_project_comment_pk')
+      AND i.indrelid = 'comments'::regclass
+      AND i.indisvalid AND i.indisready AND i.indisunique
+      AND NOT i.indisprimary AND am.amname = 'btree'
+      AND i.indpred IS NULL AND i.indexprs IS NULL
+      AND i.indnkeyatts = 2 AND i.indnatts = 2
+      AND ARRAY(
+        SELECT a.attname::text
+        FROM unnest(i.indkey) WITH ORDINALITY k(n, pos)
+        JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.n
+        ORDER BY k.pos
+      ) = ARRAY['project_id', 'comment_id']
+  ) THEN
+    RAISE EXCEPTION
+      'Missing or invalid index on (project_id, comment_id); run neon-target.ts <production|dev> prepare-comments-key, then verify worker compatibility before apply';
+  END IF;
+
+  EXECUTE format('ALTER TABLE comments DROP CONSTRAINT %I', key_name);
+  ALTER TABLE comments ADD CONSTRAINT comments_pkey
+    PRIMARY KEY USING INDEX comments_project_comment_pk;
+END $$;
 
 COMMIT;

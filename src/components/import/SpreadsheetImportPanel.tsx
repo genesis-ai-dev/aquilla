@@ -197,7 +197,11 @@ export function SpreadsheetImportPanel({
             },
           })
         }
-        checkpoint.castApplied = true
+        // Replace the checkpoint rather than mutating it in place, so a retry
+        // still sees the cast as applied without an in-place write to a value
+        // that came out of a hook (react-hooks/immutability).
+        checkpoint = { ...checkpoint, castApplied: true }
+        commitCheckpoint.current = checkpoint
       }
 
       await onImported(checkpoint.refs)

@@ -33,6 +33,17 @@ export const onboarding = defineNamespace({
     "onboarding.connect.project": "Project",
     "onboarding.connect.choose": "Choose a project",
     "onboarding.connect.noProjects": "You do not have the required access to an available project.",
+    "onboarding.connect.modeChanged":
+      "The agent asked for {requested} mode. It will get the mode you pick here.",
+    "onboarding.connect.pinned":
+      "The agent asked for this specific project, so it can't be changed here. Deny the request if it isn't the one you want.",
+    "onboarding.connect.scope": "Access to",
+    "onboarding.connect.scopeProject": "One project",
+    "onboarding.connect.scopeOrg": "A whole organization",
+    "onboarding.connect.scopeHint":
+      "Organization access covers every project in it, including ones added later. Only organizations and projects where you hold the required role are listed.",
+    "onboarding.connect.chooseOrg": "Choose an organization",
+    "onboarding.connect.noOrgs": "You do not have the required access to an available organization.",
     "onboarding.connect.confirm": "I started this request and the code {code} matches the code shown by my agent.",
     "onboarding.connect.approve": "Authorize agent",
     "onboarding.connect.deny": "Deny access",
@@ -465,6 +476,9 @@ export const onboarding = defineNamespace({
     "onboarding.apiTokens.expiredBadge": "Expired",
     // "Expires {date}" row text reuses `common.expiresOn` (identical text)
     "onboarding.apiTokens.lastUsedOn": "Last used {date}",
+    "onboarding.apiTokens.createdOn": "Created {date}",
+    "onboarding.apiTokens.scope.orgBadge": "Whole org: {name}",
+    "onboarding.apiTokens.scope.projectBadge": "Project: {name}",
     "onboarding.apiTokens.agentSetupButton": "Agent setup",
     // "Revoke" button reuses `common.revoke` (identical text)
     "onboarding.apiTokens.revokeDialogTitle": "Revoke token?",
@@ -476,6 +490,13 @@ export const onboarding = defineNamespace({
     "onboarding.apiTokens.newTokenDialogTitle": "Your new API token",
     "onboarding.apiTokens.showOnceWarning":
       "Copy this now — you will not see it again. If you lose it, revoke this token and mint a new one.",
+    // Pasting a token into a chat window is the most common way these leak:
+    // the transcript, and often the vendor's logs, keep it for the token's
+    // whole 30-day life. Say so at the one moment the plaintext is on screen.
+    "onboarding.apiTokens.exposureWarning":
+      "Anyone holding this token has your {mode}-mode access to this scope until it expires or you revoke it. Put it straight into a credential store or a private file. Don't paste it into a chat, a terminal command, or anything an agent prints — it stays in those transcripts and logs.",
+    "onboarding.apiTokens.exposureConnectHint":
+      "Connecting an agent? \"Connect an AI agent\" above is safer: the agent gets its own credential directly and the token never passes through you.",
     "onboarding.apiTokens.agentHandoffHint":
       "Handing this to an agent? Copy the token wrapped in a ready-to-paste prompt that sends the agent to the API's self-describing endpoint to learn what it can do, and spells out this token's {mode} mode.",
     "onboarding.apiTokens.copyAgentInstructions": "Copy agent instructions",
@@ -661,6 +682,30 @@ export const onboarding = defineNamespace({
       "onboarding.apiTokens.lastUsedOn": {
         description: "Last-used date shown on a token's row in the personal API tokens list.",
         placeholders: { date: "The date the token was last used, already locale-formatted." },
+      },
+      "onboarding.apiTokens.createdOn": {
+        description: "Creation date shown on a token's row in the personal API tokens list.",
+        placeholders: { date: "The date the token was created, already locale-formatted." },
+      },
+      "onboarding.apiTokens.scope.orgBadge": {
+        description:
+          "Scope chip on a token's row for a token scoped to an entire organization. Rendered next to a building icon.",
+        placeholders: { name: "The organization's name, or its raw id when the name can't be resolved." },
+      },
+      "onboarding.apiTokens.scope.projectBadge": {
+        description:
+          "Scope chip on a token's row for a token scoped to a single project. Rendered next to a folder icon.",
+        placeholders: { name: "The project's name, or its raw id when the name can't be resolved." },
+      },
+      "onboarding.apiTokens.exposureWarning": {
+        description:
+          "Security warning shown beside the plaintext token immediately after minting it, explaining that the token is a live credential and must not be pasted into chats or logs.",
+        placeholders: { mode: "The token's access mode, 'ask' or 'act'. Not translated — a literal API value." },
+      },
+      "onboarding.connect.modeChanged": {
+        description:
+          "Note under the mode picker on the agent-consent page, shown only when the human picked a different mode than the agent requested.",
+        placeholders: { requested: "The mode the agent asked for, 'ask' or 'act'. Not translated — a literal API value." },
       },
       "onboarding.apiTokens.revokeWarning": {
         description:

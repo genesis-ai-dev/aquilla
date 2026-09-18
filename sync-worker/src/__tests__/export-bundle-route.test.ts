@@ -104,6 +104,6 @@ describe("GET /export/bundle", () => {
     const res = await handleExportBundleRequest(req, env)
 
     expect(res?.status).toBe(200)
-    expect(cellBinds).toEqual([["p1", "f1", "fr-CA"]])
+    expect(cellBinds).toEqual([["p1", "f1", "p1", "fr-CA", "fr-CA"]])
   })
 })

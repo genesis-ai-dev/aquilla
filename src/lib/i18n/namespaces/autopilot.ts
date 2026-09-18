@@ -226,6 +226,27 @@ export const autopilot = defineNamespace({
       other: "Queued · {count} passages remaining",
     }),
     "autopilot.pill.idle": "Idle · no work queued",
+
+    // — Trust gate: parked awaiting input (AQU-1300) ————————————————
+    // The run has budget left over, not work left over. Word these as a
+    // deliberate hand-back ("waiting for you"), never as an error or a stall —
+    // stopping to ask is the feature, and copy that apologises for it teaches
+    // people to switch it off.
+    "autopilot.pill.waitingForYou": "Waiting for you",
+    "autopilot.pill.waitingWithRemaining": plural({
+      one: "Waiting for you · {count} passage left",
+      other: "Waiting for you · {count} passages left",
+    }),
+    "autopilot.pill.announcement.waitingForYou":
+      "Autopilot drafted a passage and is waiting for you. Review it, then continue.",
+    "autopilot.pill.waitingOnDecision":
+      "Waiting on your answer to a question about this passage.",
+    "autopilot.action.continue": "Continue",
+    "autopilot.action.continueHint": "Draft a few more passages, then check back with you",
+    "autopilot.action.translateEverything": "Translate everything",
+    "autopilot.action.translateEverythingHint":
+      "Draft every remaining passage in this file without stopping to ask",
+    "autopilot.error.continueFailed": "Autopilot couldn’t continue. Retry.",
     "autopilot.pill.completeWithAttention":
       "{done}/{total} complete · {failed} need attention",
     "autopilot.pill.announcement.completeWithAttention":
@@ -809,6 +830,10 @@ export const autopilot = defineNamespace({
       "autopilot.pill.queuedRemaining": withPlaceholders(
         "Compact visible editor-pill label for queued passages remaining.",
         { count: "Number of queued passages remaining." },
+      ),
+      "autopilot.pill.waitingWithRemaining": withPlaceholders(
+        "Editor-pill label for a run that paused itself to ask the person whether to keep drafting. It is waiting by design, not stuck.",
+        { count: "Number of passages in this file Autopilot has not drafted yet." },
       ),
       "autopilot.pill.completeWithAttention": withPlaceholders(
         "Editor-pill summary when a run finished some passages and left others needing a person.",

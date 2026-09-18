@@ -14,7 +14,7 @@ import {
   resolveRecordingRowCellId,
   resolveScopeLabelCellId as resolveScopeLabelCellIdFor,
 } from "@/lib/editor/milestone-jump-targets"
-import { CellAreaPlaceholder } from "./CellAreaPlaceholder"
+import { CellAreaPlaceholder, CellRowsLoadStatus } from "./CellAreaPlaceholder"
 import { WorkspaceMainSkeleton } from "./WorkspaceSkeleton"
 import { Skeleton } from "@/components/ui/skeleton"
 import { LoadingPanel } from "@/components/ui/loading-overlay"
@@ -12177,6 +12177,7 @@ export function ProjectWorkspace() {
             chapterNavTrailing={timelineStacked ? undefined : fileChapterToolbar ?? undefined}
           />
               </div>
+              <CellRowsLoadStatus loading={cellsLoading} error={cellsError} onRetryClick={retryCells} />
               </div>
               {mediaSections.showsRail("text") && (
                 <MediaSectionRail

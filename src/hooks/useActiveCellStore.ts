@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import type { CellData } from "./useCells"
 import { buildCellData, PAINT_COALESCE_MS } from "./useCells"
-import type { PagePaint } from "./useCells"
 import type { CellAuditStats } from "./useCellsAuditStats"
 import { streamFileCells, fetchCellsByIds, fetchCellsDelta } from "@/lib/sync/cells-read"
 import type { CellRow } from "@/lib/sync/cells-read-types"
@@ -2117,6 +2116,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
 
     const effectiveSoft = soft || usedCache
     setIsError(false)
+    let paintTimer: ReturnType<typeof setTimeout> | undefined
     try {
       const token = tokenFetcher ? await tokenFetcher(fid) : null
       if (!token) {
@@ -2173,17 +2173,19 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
 
       const buffer: CellRow[] = []
       const hardRows: CellRow[] = []
-      // AQU-1326: the SOURCE side is `"first-only"` — its first page kills the
-      // skeleton and later pages ride the final replace. The TARGET side is
-      // `"progressive"`: it may repaint after that first paint so translated
-      // rows fill in as they land, throttled to one repaint per
-      // PAINT_COALESCE_MS because `replaceRows({ full: true })` is O(rows) and
-      // one per page would be O(pages × cells). The unconditional final
-      // replace below always swaps in the complete list, so a throttled-away
-      // repaint only ever delays a translation by a window.
+      // Every page contains complete rows; coalesce their publication while
+      // keeping soft refetches atomic and preserving in-flight local edits.
       let paintedFirstPage = false
       let lastPaintAt = 0
-      const pushRows = (rows: CellRow[], paint: PagePaint): boolean | void => {
+      const paintRows = () => {
+        if (paintTimer) clearTimeout(paintTimer)
+        paintTimer = undefined
+        if (generationRef.current !== gen) return
+        paintedFirstPage = true
+        lastPaintAt = Date.now()
+        store.replaceRows(store.mergeProtectedRows(hardRows, startSeq).rows, { full: true })
+      }
+      const pushRows = (rows: CellRow[]): boolean | void => {
         if (generationRef.current !== gen) return false
         if (rows.length === 0) return
         if (effectiveSoft) {
@@ -2191,17 +2193,9 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
           return
         }
         for (const row of rows) hardRows.push(row)
-        if (!paintedFirstPage) {
-          paintedFirstPage = true
-          lastPaintAt = Date.now()
-          store.replaceRows(hardRows, { full: true })
-          return
-        }
-        if (paint !== "progressive") return
-        const now = Date.now()
-        if (now - lastPaintAt < PAINT_COALESCE_MS) return
-        lastPaintAt = now
-        store.replaceRows(hardRows, { full: true })
+        const remaining = PAINT_COALESCE_MS - (Date.now() - lastPaintAt)
+        if (!paintedFirstPage || remaining <= 0) paintRows()
+        else paintTimer ??= setTimeout(paintRows, remaining)
       }
 
       const startSeq = store.getWriteSeq()
@@ -2230,18 +2224,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
         }
       }
 
-      // AQU-1326: SOURCE side first, so the first row paints after one cells
-      // page whatever fraction of the file is translated; the TARGET side
-      // follows and merges in behind it. Previously the target side streamed
-      // first and silently, which on a mostly-translated file (target stream
-      // as large as the source stream) pushed first paint out by roughly half
-      // the file. `cursorSeen` still takes the first page of whichever stream
-      // runs first — now the source side, still the earliest watermark of the
-      // snapshot — so the delta cursor and B2 torn-snapshot rules are
-      // unchanged.
-      await streamFileCells(pid, fid, token, (rows) => pushRows(rows, "first-only"), "source", trackStreamMeta())
-      if (generationRef.current !== gen) return
-      await streamFileCells(pid, fid, token, (rows) => pushRows(rows, "progressive"), "target", trackStreamMeta())
+      await streamFileCells(pid, fid, token, pushRows, undefined, trackStreamMeta(), undefined, true)
       if (generationRef.current !== gen) return
 
       let discardedProtected = false
@@ -2291,6 +2274,7 @@ export function useActiveCellStore(opts: UseActiveCellStoreOptions): UseActiveCe
         }, FETCH_RETRY_DELAYS_MS[attempt])
       }
     } finally {
+      if (paintTimer) clearTimeout(paintTimer)
       if (generationRef.current === gen) {
         inFlightRef.current = false
         if (pendingSoftRefetchRef.current) {

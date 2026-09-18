@@ -30,6 +30,22 @@ import { subscribeWindowRegainedFocus } from "@/lib/sync/window-focus-revalidate
 // this local widening so the lane filter compiles under `no-any`. Once
 // `CellRow.targetLang` exists, drop `LaneCellRow` and read `r.targetLang`.
 type LaneCellRow = CellRow & { targetLang?: string }
+
+/**
+ * AQU-1326: how a streamed page is allowed to repaint the view.
+ * - `"first-only"` — paint only if nothing has painted yet (the SOURCE side:
+ *   the first page kills the empty state, later pages ride the final rebuild).
+ * - `"progressive"` — may also repaint after the first paint, throttled, so
+ *   rows merged in behind the first paint (the TARGET side) become visible
+ *   before the stream ends.
+ */
+type PagePaint = "first-only" | "progressive"
+
+/** Minimum gap between two `"progressive"` repaints within one stream. A
+ *  rebuild is O(rows); throttling keeps total rebuild work linear in the file
+ *  rather than O(pages × cells) while still filling translations in during a
+ *  long stream. */
+const PAINT_COALESCE_MS = 200
 /** The lane a row belongs to. Source rows and default-lane targets → `''`. */
 function laneOf(r: CellRow): string {
   return (r as LaneCellRow).targetLang ?? ""
@@ -889,8 +905,18 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       // rebuild after both streams (below) swaps in the complete list once.
       // Rebuilding on every page was O(pages × cells) — the dominant cost of a
       // ~60-page Bible-sized first open.
+      //
+      // AQU-1326: `"progressive"` pages (the TARGET side) may repaint after
+      // that first paint so translated rows fill in as they land instead of
+      // waiting for the whole stream. Those repaints are throttled to one per
+      // PAINT_COALESCE_MS for the same reason the source side paints once: a
+      // rebuild is O(rows), so one per page is O(pages × cells). The
+      // unconditional final rebuild below always swaps in the complete list,
+      // so a throttled-away repaint only ever delays a translation by a
+      // window — it can never lose one.
       let paintedFirstPage = false
-      const pushRows = (rows: CellRow[], rebuild: boolean): boolean | void => {
+      let lastPaintAt = 0
+      const pushRows = (rows: CellRow[], paint: PagePaint): boolean | void => {
         if (generationRef.current !== gen) return false
         if (rows.length === 0) return
         if (effectiveSoft) {
@@ -902,28 +928,42 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         // is always the owned `[]` seeded above (cache hits and resyncs take
         // the effectiveSoft buffer path), so mutating it in place is safe.
         for (const r of rows) rowsRef.current.push(r)
-        if (rebuild && !paintedFirstPage) {
+        if (!paintedFirstPage) {
           paintedFirstPage = true
+          lastPaintAt = Date.now()
           rebuildFromCache()
+          return
         }
+        if (paint !== "progressive") return
+        const now = Date.now()
+        if (now - lastPaintAt < PAINT_COALESCE_MS) return
+        lastPaintAt = now
+        rebuildFromCache()
       }
       // AQU-247: the local-mutation clock at the moment the server snapshot
       // begins. Any cell mutated after this point is fresher than this
       // fetch's data — it can neither confirm that cell's shadow nor replace
       // its rows at the swap below.
       const startSeq = writeSeqRef.current
-      // Stream the TARGET side first. The combined read returns every source
-      // row before any target row, so on a Bible-sized file (~30k source cells
-      // vs. a handful of translated target cells) fetching both sides at once
-      // hides every translation behind the entire ~60-page source stream —
-      // committed edits look lost on reload until the whole file loads. The
-      // target side is tiny (one page), so loading it up front means a
-      // translated cell shows its value the moment its source row paints.
-      // Seed it silently (no rebuild) so we don't flash target-only orphan rows.
+      // AQU-1326: stream the SOURCE side FIRST and paint on its first page.
+      // Source rows are what the editor renders — an untranslated row is still
+      // a usable row — so first paint now costs exactly chunk + token + one
+      // cells page, whatever fraction of the file is translated.
       //
-      // The TARGET stream's first page carries the earliest watermark of the
-      // whole two-stream snapshot — the safe `?since=` cursor: anything that
+      // The TARGET side follows and merges in progressively (throttled repaints
+      // in `pushRows`), so translated cells fill in a page behind rather than
+      // gating the first row. The previous order seeded the target side FIRST
+      // and silently (no rebuild), so a translated cell showed its value the
+      // instant its source row painted — tuned for a Bible-sized file with a
+      // handful of translations. On a mostly-translated file the target stream
+      // is as large as the source stream, so that made first paint wait for
+      // roughly half the file plus one page.
+      //
+      // The SOURCE stream's first page now carries the earliest watermark of
+      // the whole two-stream snapshot — the safe `?since=` cursor: anything that
       // lands mid-stream has a higher seq, so the next delta re-fetches it.
+      // (`cursorSeen` below still takes the first page of whichever stream runs
+      // first; only which side that is has changed.)
       //
       // B2 (torn snapshot): the server paginates by OFFSET, so a row that
       // shifts across a page boundary while the stream is in flight can be
@@ -960,8 +1000,8 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         projectId,
         fileId,
         token,
-        (rows) => pushRows(rows, false),
-        "target",
+        (rows) => pushRows(rows, "first-only"),
+        "source",
         trackStreamMeta(),
       )
       if (generationRef.current !== gen) return
@@ -969,8 +1009,8 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         projectId,
         fileId,
         token,
-        (rows) => pushRows(rows, true),
-        "source",
+        (rows) => pushRows(rows, "progressive"),
+        "target",
         trackStreamMeta(),
       )
       if (generationRef.current !== gen) return
@@ -986,10 +1026,10 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         rowsRef.current = kept
         discardedProtected = discardedCellIds.size > 0
       }
-      // Final rebuild: the source pass paints per page, but a target-only or
-      // empty-source file yields no source page to trigger one — and the
-      // target seed pass is intentionally silent. This also swaps in the soft
-      // buffer. Cheap and idempotent on the hard path.
+      // Final rebuild: the source pass paints its first page and the target
+      // pass repaints at most once per throttle window, so the last target
+      // pages (and a file with no source rows at all) still need this. It also
+      // swaps in the soft buffer. Cheap and idempotent on the hard path.
       rebuildFromCache()
       // Persist the freshly-loaded snapshot (+ its delta cursor). Best-effort;
       // failures are swallowed inside writeCellsCache so a hostile IDB never

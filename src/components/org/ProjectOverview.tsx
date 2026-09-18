@@ -37,9 +37,10 @@ import { downloadBlob } from "@/lib/export/export-service"
 import { PlanBoard } from "./plan/PlanBoard"
 import { PlanInspector } from "./plan/PlanInspector"
 import { PlanAssignments, type PlanAssignTarget } from "./plan/PlanAssignments"
-import { planSectionShortfall } from "./plan/PlanChapterGrid"
 import {
-  classifyPlanSection,
+  assignmentsShowAudio, shortChaptersByUnit, unassignedChapterCount, unitSectionKeys,
+} from "./plan/plan-derive"
+import {
   numberedBookCodes,
   planSectionLabel,
 } from "@/lib/plan/plan-section"
@@ -59,7 +60,7 @@ import {
   type PlanOpenKind,
   type PlanUnit,
 } from "@/lib/plan/plan-status"
-import { sectionBelongsToUnit, type PlanSection } from "@/hooks/usePlanUnitSections"
+import { type PlanSection } from "@/hooks/usePlanUnitSections"
 import {
   getFileProgress,
   getPlanFirstOpenCell,
@@ -766,38 +767,12 @@ export function ProjectOverview() {
     return () => { cancelled = true }
   }, [id, getPlanToken, planLane, planFileKey])
 
-  /**
-   * Which chapters of each unit are still short — the row's "chapters 3, 9, 41".
-   *
-   * Derived, not fetched: one file's section rows answer this for every unit in
-   * that file, so a whole-Bible import resolves sixty-six rows from a single
-   * read. A unit whose file has not arrived yet is simply absent, and the row
-   * draws no chapter line rather than an empty one.
-   */
-  const shortChaptersByUnit = useMemo(() => {
-    const map = new Map<string, string[]>()
-    for (const unit of planUnits) {
-      const sections = planFileSections.get(unit.fileId)
-      if (!sections) continue
-      const hasAudio = planAudioFiles.has(unit.fileId)
-      const mine = sections.filter((s) => sectionBelongsToUnit(s.key, unit.sectionKey))
-      const numbered = numberedBookCodes(mine.map((s) => s.key))
-      const short = mine
-        .filter(
-          (section) =>
-            // AQU-1278: front matter is left OUT of this line. The row says
-            // "chapters 12 and 40", and a book title filed before chapter 1 is
-            // not a chapter — naming it here would send a reader looking for a
-            // numbered tile that does not exist. The grid still shows it, in
-            // its own row, labelled as what it is.
-            classifyPlanSection(section.key, numbered).kind !== "frontMatter" &&
-            planSectionShortfall(section, hasAudio).worst > 0,
-        )
-        .map((section) => section.label)
-      if (short.length > 0) map.set(planUnitId(unit), short)
-    }
-    return map
-  }, [planUnits, planFileSections, planAudioFiles])
+  // The row's "chapters 3, 9, 41" — judged in `plan-derive.ts`, where a test
+  // can hold it still; this memo only caches it against the three inputs.
+  const planShortChaptersByUnit = useMemo(
+    () => shortChaptersByUnit(planUnits, planFileSections, planAudioFiles),
+    [planUnits, planFileSections, planAudioFiles],
+  )
 
   // AQU-1278, round 6: who is on EVERY unit, read once per project and again
   // after each assignment made from the inspector (the nonce). Null until it
@@ -894,18 +869,8 @@ export function ProjectOverview() {
   /** The same, flattened for the panel, which renders nothing either way. */
   const selectedUnitAssignments = selectedUnitAssignmentRows ?? NO_ASSIGNMENTS
 
-  /**
-   * How many of the selected unit's chapters nobody is assigned to.
-   *
-   * ONLY ANSWERABLE AT ONE END, and answering it there is still worth doing.
-   * With no assignment on the unit at all, every chapter is unassigned — true,
-   * and the case a manager most wants named out loud. With one or more, the
-   * answer needs to know WHICH chapters each assignment covers, and the
-   * per-unit read has already aggregated that away: `cellsTotal` counts cells,
-   * not chapters, and two assignments may overlap, so any number derived from
-   * it would be a guess. Undefined then, and the line says nothing rather than
-   * something indefensible — see `PlanAssignmentsProps.unassignedChapters`.
-   */
+  // How many of the selected unit's chapters nobody holds — the judgment,
+  // its three-state assignment answer included, lives in `plan-derive.ts`.
   /**
    * The selected unit's own section keys.
    *
@@ -917,48 +882,16 @@ export function ProjectOverview() {
    */
   const selectedUnitSectionKeys = useMemo(() => {
     if (!selectedPlanUnit) return undefined
-    const sections = planFileSections.get(selectedPlanUnit.fileId)
-    if (!sections) return undefined
-    return sections
-      .filter((section) => sectionBelongsToUnit(section.key, selectedPlanUnit.sectionKey))
-      .map((s) => s.key)
+    return unitSectionKeys(selectedPlanUnit, planFileSections.get(selectedPlanUnit.fileId))
   }, [selectedPlanUnit, planFileSections])
 
-  const unassignedChapterCount = useMemo(() => {
+  const selectedUnassignedChapters = useMemo(() => {
     if (!selectedPlanUnit) return undefined
-    const sections = planFileSections.get(selectedPlanUnit.fileId)
-    if (!sections) return undefined
-    const mine = sections.filter((section) =>
-      sectionBelongsToUnit(section.key, selectedPlanUnit.sectionKey),
+    return unassignedChapterCount(
+      selectedPlanUnit,
+      planFileSections.get(selectedPlanUnit.fileId),
+      selectedUnitAssignmentRows,
     )
-    const numbered = numberedBookCodes(mine.map((s) => s.key))
-    // Front matter is not a chapter, so it cannot be an unassigned one — a
-    // Genesis every chapter of which is spoken for would otherwise report one
-    // stray chapter nobody can be given.
-    const own = mine.filter(
-      (s) => classifyPlanSection(s.key, numbered).kind !== "frontMatter",
-    )
-    // A media file's sections are time ranges, which nobody plans by, and a unit
-    // with no chapters at all must not report ZERO — zero is the value that
-    // renders "Every chapter is assigned.", which would be the exact opposite
-    // of what an unassigned unit means.
-    if (own.length === 0) return undefined
-    // NOT ANSWERED IS NOT "NOBODY". The read is in flight, or it failed, or
-    // the org's floor refused it — and "every chapter is unassigned" is the
-    // most alarming thing this line can say, so it must never be the thing a
-    // failed request says. Only a real empty answer means nobody.
-    if (selectedUnitAssignmentRows === undefined) return undefined
-    // AQU-1278: with per-assignment chapter coverage on the wire, the answer no
-    // longer collapses the moment somebody is assigned. Subtract the union of
-    // what every assignment covers and what remains is genuinely unheld. An
-    // older worker sends no `chapters` at all, and then there is nothing
-    // honest to count — say nothing rather than guess.
-    if (selectedUnitAssignmentRows.length === 0) return own.length
-    if (selectedUnitAssignmentRows.some((a) => a.chapters === undefined)) return undefined
-    const covered = new Set(
-      selectedUnitAssignmentRows.flatMap((a) => (a.chapters ?? []).map((c) => c.key)),
-    )
-    return own.filter((s) => !covered.has(s.key)).length
   }, [selectedPlanUnit, selectedUnitAssignmentRows, planFileSections])
 
   /**
@@ -1155,7 +1088,7 @@ export function ProjectOverview() {
           now={tableNow}
           lane={planLane}
           defaultLaneLabel={project?.targetLanguage ?? ""}
-          unassignedChapters={unassignedChapterCount}
+          unassignedChapters={selectedUnassignedChapters}
           unitSectionKeys={selectedUnitSectionKeys}
           // Per FILE, not per project: a person assigned text in a book whose
           // file carries no recordings is not short a single take, and the
@@ -1167,10 +1100,7 @@ export function ProjectOverview() {
           // is structurally zero however much of the episode they have dubbed.
           // Sam ruled this a real gap and a later ticket — **TODO: assignment-
           // level audio on dubbing projects** — and text-only until then.
-          showAudio={
-            planAudioFiles.has(selectedPlanUnit.fileId) &&
-            selectedPlanUnit.audioTotalCount == null
-          }
+          showAudio={assignmentsShowAudio(selectedPlanUnit, planAudioFiles)}
           minRole={orgSettings.memberProgressViewMinRole}
           viewerRoleLevel={projectRoleLevel}
           ready={orgSettings.hasFetched}
@@ -2008,7 +1938,7 @@ export function ProjectOverview() {
                 orderRef={planOrderRef}
                 selectedId={selectedPlanUnitId}
                 onSelect={setSelectedPlanUnitId}
-                shortChaptersByUnit={shortChaptersByUnit}
+                shortChaptersByUnit={planShortChaptersByUnit}
                 assigneesByUnit={assigneesByUnit}
                 onOpenShortfall={(unit) => { void openPlanShortfall(unit) }}
                 laneLabel={showLaneTabs ? planLanguageLabel : null}

@@ -93,6 +93,10 @@ import { consumeMediaImportSeed, autoTranscribeImportedMedia } from "@/lib/audio
 import { warmFileDubs } from "@/lib/audio/warm-dubs"
 import { effectiveSourceText } from "@/lib/cell-text"
 import { resolveDeepLinkLaneFromSearchParams } from "./project-workspace-lane-deeplink"
+import {
+  restoreMayPark, stepPendingScroll,
+  type PendingCellScroll, type PendingScrollAttempt,
+} from "./pending-cell-scroll"
 import { resolveActiveTargetLanguage } from "./project-workspace-lane-target"
 import { useAudioCueCells } from "@/hooks/useAudioCueCells"
 import { scaleCueTimes, uploadAudioCueFile, type ParsedAudioVtt } from "@/lib/import/audio-vtt"
@@ -485,16 +489,6 @@ function projectRecordsEquivalent(a: ProjectRecord | null, b: ProjectRecord | nu
 const PRESENCE_LOCK_STALE_CLEAR_MS = 31_000
 /** Trailing throttle for row-selection presence (`viewingCell`). */
 const VIEWING_CELL_PRESENCE_THROTTLE_MS = 250
-/**
- * How many cell-store versions a parked scroll (`pendingCellScrollRef`) may
- * spend looking for its row before it gives up. AQU-1278: it needs more than
- * one because a file's cells stream in — the target can land two or three
- * versions after the store stops being empty — but it needs a ceiling far more,
- * because an id the file simply does not have would otherwise retry on every
- * version bump for the rest of the session (see the consuming effect).
- */
-const PENDING_CELL_SCROLL_MAX_ATTEMPTS = 8
-
 function sameStringMap(a: ReadonlyMap<string, string>, b: ReadonlyMap<string, string>): boolean {
   if (a.size !== b.size) return false
   for (const [key, value] of a) {
@@ -935,7 +929,7 @@ export function ProjectWorkspace() {
     if (
       savedLoc?.cellId &&
       savedLoc.fileId === nextFileId &&
-      pendingCellScrollRef.current?.source !== "link"
+      restoreMayPark(pendingCellScrollRef.current)
     ) {
       pendingCellScrollRef.current = {
         cellId: savedLoc.cellId,
@@ -1197,29 +1191,12 @@ export function ProjectWorkspace() {
   // the restore effect / deep-link / switchLens; consumed by the effect that
   // fires when `cells` are available AND the text editor is mounted.
   //
-  // AQU-1278 widened the entry from `{ cellId, flash }`:
-  // - `fileId` is the file the cell was parked FOR. The parker always knows it
-  //   (the restore parks for the file it is about to navigate to), and the
-  //   consumer needs it so a park left over from a file the user has since left
-  //   is dropped instead of scrolling whatever file is open now.
-  // - `source` ranks the three parkers against each other. Only one ordering
-  //   question exists today and it is settled in the restore effect: a `link`
-  //   is an explicit request from the user and outranks a `restore`, which is
-  //   only a convenience. `trace` is the media→text hand-off, which can never
-  //   race either (it fires from a click, long after both).
-  const pendingCellScrollRef = useRef<{
-    cellId: string
-    flash: boolean
-    fileId: string | null
-    source: "link" | "restore" | "trace"
-  } | null>(null)
-  // AQU-1278 give-up bookkeeping for the park above: the cell we have been
-  // trying, whether we were ever actually in its file, and how many store
-  // versions we have spent. Keyed by cell id so that ANY fresh park starts with
-  // a full budget without every parker having to remember to reset a counter.
-  const pendingCellScrollTryRef = useRef<
-    { cellId: string; arrived: boolean; attempts: number } | null
-  >(null)
+  // AQU-1278 widened the entry from `{ cellId, flash }` — the shape, the
+  // parking precedence and the give-up rules all live in
+  // `pending-cell-scroll.ts`, where they are tested; these refs only carry
+  // the state between renders.
+  const pendingCellScrollRef = useRef<PendingCellScroll | null>(null)
+  const pendingCellScrollTryRef = useRef<PendingScrollAttempt | null>(null)
   // Mirrors currentUsername (computed later in the function) so effects that
   // are declared before currentUsername can access it via ref.
   const currentUsernameRef = useRef<string>("local")
@@ -6031,29 +6008,19 @@ export function ProjectWorkspace() {
       pendingCellScrollRef.current = null
       pendingCellScrollTryRef.current = null
     }
-    let attempt = pendingCellScrollTryRef.current
-    if (!attempt || attempt.cellId !== pending.cellId) {
-      attempt = { cellId: pending.cellId, arrived: false, attempts: 0 }
-      pendingCellScrollTryRef.current = attempt
-    }
-    // A park is made BEFORE the navigation that opens its file, so a file
-    // mismatch is ambiguous on its own: it means either "the route hasn't
-    // caught up yet" or "the user has moved on". `arrived` tells them apart —
-    // only a mismatch AFTER we were once in the parked file is a departure.
-    // The budget below covers the other case (a file we never reach at all).
-    const onParkedFile = !pending.fileId || pending.fileId === activeFileId
-    if (onParkedFile) attempt.arrived = true
-    else if (attempt.arrived) {
+    // The decision — arrival, departure, the budget, and whether scrolling
+    // now would hijack a file this cell was never parked for — is
+    // `stepPendingScroll`'s, and tested there. This effect only executes it.
+    const step = stepPendingScroll(pending, pendingCellScrollTryRef.current, activeFileId)
+    if (step.kind === "give-up") {
       giveUp()
       return
     }
-
-    attempt.attempts += 1
-    // Never scroll a file this cell wasn't parked for: that is the hijack.
-    const ok = onParkedFile
+    pendingCellScrollTryRef.current = step.attempt
+    const ok = step.kind === "try"
       ? editor.scrollToCellId(pending.cellId, { flash: pending.flash })
       : false
-    if (ok || attempt.attempts >= PENDING_CELL_SCROLL_MAX_ATTEMPTS) giveUp()
+    if (ok || step.last) giveUp()
   }, [activeFileId, cellStore, cellStoreVersion, lens])
 
   const drawerRule = rules.find((r) => r.id === drawerRuleId) || null

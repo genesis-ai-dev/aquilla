@@ -251,6 +251,40 @@ describe("GET .../plan — caching and auth", () => {
     expect(res.status).toBe(200)
   })
 
+  it("moves when the validation threshold or the headings policy changes", async () => {
+    // Both change every number on the board without touching a single row
+    // this ETag's clocks watch: validatedCount is derived from the histogram
+    // against the threshold at READ time, and the structural subtraction is
+    // applied at read time too. Each therefore has its own tag in the key —
+    // v<N> and :nostruct — and losing either would hand a 304 to a client
+    // whose numbers all just changed.
+    const { db } = await makeTestDb({
+      // The headings policy is resolved FROM the project row (a query driven
+      // from project_settings would hide every project that inherits), so the
+      // project and its org must exist for the policy to be readable at all.
+      organizations: [{ id: 1, name: "Org", owner_user_id: 1 }],
+      projects: [{ id: P, name: "Plan", org_id: 1 }],
+      org_settings: [{ org_id: 1, settings: "{}", version: 1 }],
+      files: [file("f1")],
+      project_settings: [{ project_id: P, settings: JSON.stringify({ validationCount: 1 }), version: 1, updated_at: TS }],
+      file_section_progress: [progress("f1", "file", "")],
+    })
+    const first = (await get(db)).headers.get("ETag")!
+
+    await db.prepare("UPDATE project_settings SET settings = ? WHERE project_id = ?")
+      .bind(JSON.stringify({ validationCount: 2 }), P).run()
+    const raised = (await get(db)).headers.get("ETag")!
+    expect(raised).not.toBe(first)
+    expect((await get(db, { headers: { "If-None-Match": first } })).status).toBe(200)
+
+    await db.prepare("UPDATE project_settings SET settings = ? WHERE project_id = ?")
+      .bind(JSON.stringify({ validationCount: 2, countStructuralCells: false }), P).run()
+    const excluded = (await get(db)).headers.get("ETag")!
+    expect(excluded).not.toBe(raised)
+    expect(excluded).toContain(":nostruct")
+    expect((await get(db, { headers: { "If-None-Match": raised } })).status).toBe(200)
+  })
+
   it("moves when a cue sheet is REMOVED, which changes every audio number", async () => {
     // The unit's audio pair and its denominator are read off the sheet, and
     // whether there IS a sheet is decided from the files table — but the

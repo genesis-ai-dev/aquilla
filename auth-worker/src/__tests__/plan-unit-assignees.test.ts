@@ -99,6 +99,47 @@ describe("getProjectUnitAssignees (AQU-1278 board chips)", () => {
     expect(rows).toHaveLength(4)
   })
 
+  it("drops a person whose whole assignment is structural, under the exclude policy", async () => {
+    // dana holds only GEN's chapter heading. With the org excluding
+    // structural cells, that heading counts for nothing — so dana must not
+    // appear as a face on GEN. erin holds an UNTYPED cell: a null type means
+    // content, and the COALESCE in the policy predicate is what keeps
+    // NOT (NULL IN (...)) from silently dropping her row too.
+    await seed()
+    const db = testEnv.AQUILLA_PG
+    await db.prepare(
+      `INSERT INTO org_settings (org_id, settings) VALUES (1, '{"countStructuralCells":false}')`,
+    ).run()
+    await seedUser(5, "dana")
+    await seedUser(6, "erin")
+    await db.prepare(
+      `INSERT INTO cells (project_id, file_id, cell_id, side, value, event_id, last_edit_at, canonical_ref, type) VALUES
+        ('pa','f1','gh','source','Genesis 1','e-pa',1,'GEN 1:0','heading'),
+        ('pa','f1','gu','source','words','e-pa',1,'GEN 1:3',NULL)`,
+    ).run()
+    await db.prepare(
+      `INSERT INTO assignments (assignment_id, project_id, assignee_user_id, scope_kind, scope_label, target_lang, cells_total, deadline, created_by, created_at) VALUES
+        ('as-dana', 'pa', 5, 'cells', 'GEN heading', '', 1, NULL, 1, 1400),
+        ('as-erin', 'pa', 6, 'cells', 'GEN 1:3',     '', 1, NULL, 1, 1450)`,
+    ).run()
+    await db.prepare(
+      `INSERT INTO assignment_cells (assignment_id, file_id, cell_id) VALUES
+        ('as-dana','f1','gh'), ('as-erin','f1','gu')`,
+    ).run()
+
+    const gen = (await getProjectUnitAssignees(testEnv, "pa")).filter((r) => r.sectionKey === "GEN")
+    const names = gen.map((r) => r.username)
+    expect(names).not.toContain("dana")
+    expect(names).toContain("erin")
+
+    // With the policy counting structural cells, dana is real work again.
+    await db.prepare(
+      `UPDATE org_settings SET settings = '{"countStructuralCells":true}' WHERE org_id = 1`,
+    ).run()
+    const counted = (await getProjectUnitAssignees(testEnv, "pa")).filter((r) => r.sectionKey === "GEN")
+    expect(counted.map((r) => r.username)).toContain("dana")
+  })
+
   it("lists the newest assignment's person first within a unit", async () => {
     await seed()
     const gen = (await getProjectUnitAssignees(testEnv, "pa")).filter((r) => r.sectionKey === "GEN")

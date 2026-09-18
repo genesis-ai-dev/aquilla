@@ -101,6 +101,19 @@ describe("planRowsToCsv", () => {
     expect(exodus).toContain("Exodus,In progress,")
   })
 
+  it("measures a dubbing unit's audio against its cue sheet, like the board", () => {
+    // 646 subtitle cells, a 100-cue sheet, 90 takes: the board reads 90%, and
+    // the export must say the same number — measured against the file's own
+    // cell count it would read 13% and the export would be the one believed.
+    const [, row] = planRowsToCsv([unit({
+      fileName: "Episode 1", totalCount: 646, filledCount: 646, validatedCount: 646,
+      audioTotalCount: 100, audioCount: 90, audioValidatedCount: 0,
+    })], NOW).split("\r\n")
+    const cols = row.split(",")
+    expect(cols[7]).toBe("90")
+    expect(cols[8]).toBe("0")
+  })
+
   it("quotes a name containing a comma rather than splitting the row", () => {
     const csv = planRowsToCsv([unit({ fileName: 'Episode 3, "Joy"' })], NOW)
     expect(csv).toContain('"Episode 3, ""Joy"""')

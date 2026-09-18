@@ -77,6 +77,30 @@ describe("passive connection activity", () => {
     expect(getConnectionActivity().recent).toMatchObject({ requests: 2, failures: 2, averageLatency: 100 })
   })
 
+  it("produces bounded graph points, preserving unobserved and idle reply gaps", async () => {
+    const { observedSyncFetch, recordSyncBytes, getConnectionActivity } = await import("./connection-activity")
+    recordSyncBytes("upload", "x".repeat(100))
+    recordSyncBytes("download", "x".repeat(200))
+    for (const ms of [20, 40]) {
+      await observedSyncFetch("/cells", undefined, vi.fn(async () => {
+        vi.advanceTimersByTime(ms)
+        return new Response("{}")
+      }))
+    }
+    let history = getConnectionActivity().history
+    expect(history).toHaveLength(60)
+    expect(history[0]).toEqual({ upload: null, download: null, latency: null })
+    expect(history[59]).toEqual({ upload: 20, download: 40, latency: 30 })
+    vi.advanceTimersByTime(10_000)
+    history = getConnectionActivity().history
+    expect(history[57]).toEqual({ upload: 20, download: 40, latency: 30 })
+    expect(history[59]).toEqual({ upload: 0, download: 0, latency: null })
+    vi.advanceTimersByTime(300_000)
+    expect(getConnectionActivity().history).toEqual(Array.from({ length: 60 }, () => ({
+      upload: 0, download: 0, latency: null,
+    })))
+  })
+
   it("does not classify navigation cancellation as a failed connection, but counts timeouts", async () => {
     const { observedSyncFetch, getConnectionActivity } = await import("./connection-activity")
     for (const name of ["AbortError", "TimeoutError"]) {

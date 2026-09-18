@@ -1472,6 +1472,10 @@ export const editor = defineNamespace({
     "editor.navTitle.projectMembers": "Project members",
 
     // — Per-file sync status chip (WS connection to the sync-worker) ————
+    "editor.sync.trafficHistory": "Upload and download activity over the past five minutes",
+    "editor.sync.replyHistory": "Observed server replies over the past five minutes",
+    "editor.sync.fiveMinutesAgo": "5 min ago",
+    "editor.sync.historyHelp": "5-second averages. Gaps mean no reply was measured. History builds while this tab is open.",
     "editor.sync.activityNow": "Now",
     "editor.sync.pastFiveMinutes": "Past 5 min",
     "editor.sync.serverReply": "Server reply",
@@ -5424,6 +5428,10 @@ export const editor = defineNamespace({
         screenshot: "workspace-nav",
         maxLength: 24,
       },
+      "editor.sync.trafficHistory": { description: "Upload and download activity over the past five minutes. Connection history chart accessible name." },
+      "editor.sync.replyHistory": { description: "Observed server replies over the past five minutes. Connection history chart accessible name." },
+      "editor.sync.fiveMinutesAgo": { description: "5 min ago. Connection history chart caption." },
+      "editor.sync.historyHelp": { description: "5-second averages. Gaps mean no reply was measured. History builds while this tab is open. Connection history chart caption." },
       "editor.sync.activityNow": { description: "Column heading for the last five seconds of traffic and latest server reply." },
       "editor.sync.pastFiveMinutes": { description: "Column heading for rolling five-minute transfer totals and average reply time." },
       "editor.sync.serverReply": { description: "Label for elapsed request-to-response time, including server processing; not network ping." },

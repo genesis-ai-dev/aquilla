@@ -4,6 +4,13 @@ const WINDOW_MS = 5_000
 const HISTORY_MS = 5 * 60_000
 const LATENCY_MAX_AGE_MS = 30_000
 const encoder = new TextEncoder()
+const collectionStartedAt = performance.now()
+
+export interface ConnectionHistoryPoint {
+  upload: number | null
+  download: number | null
+  latency: number | null
+}
 interface ActivityBucket {
   upload: number
   download: number
@@ -43,12 +50,19 @@ export function getConnectionActivity() {
   prune(now)
   let upload = 0
   let download = 0
+  const firstSecond = Math.floor(now / 1000) - 299
+  const historyBuckets = Array.from({ length: 60 }, () => ({ upload: 0, download: 0, replies: 0, replyMs: 0 }))
   const recent: ActivityBucket = { upload: 0, download: 0, requests: 0, failures: 0, replies: 0, replyMs: 0, slowestMs: 0 }
   for (const [second, bytes] of buckets) {
     if (second > Math.floor((now - WINDOW_MS) / 1000)) {
       upload += bytes.upload
       download += bytes.download
     }
+    const point = historyBuckets[Math.floor((second - firstSecond) / 5)]
+    point.upload += bytes.upload
+    point.download += bytes.download
+    point.replies += bytes.replies
+    point.replyMs += bytes.replyMs
     recent.upload += bytes.upload
     recent.download += bytes.download
     recent.requests += bytes.requests
@@ -57,7 +71,17 @@ export function getConnectionActivity() {
     recent.replyMs += bytes.replyMs
     recent.slowestMs = Math.max(recent.slowestMs, bytes.slowestMs)
   }
+  const history: ConnectionHistoryPoint[] = historyBuckets.map((point, index) => {
+    // Blank before this tab started collecting; missing replies are never 0 ms.
+    const observed = (firstSecond + (index + 1) * 5) * 1000 > collectionStartedAt
+    return {
+      upload: observed ? point.upload / 5 : null,
+      download: observed ? point.download / 5 : null,
+      latency: point.replies ? point.replyMs / point.replies : null,
+    }
+  })
   return {
+    history,
     upload: upload / (WINDOW_MS / 1000),
     download: download / (WINDOW_MS / 1000),
     latency: responseTime && now - responseTime.at < LATENCY_MAX_AGE_MS

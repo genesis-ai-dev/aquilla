@@ -1,5 +1,6 @@
 import { useState } from "react"
 import { ArrowDown, ArrowUp, Clock3 } from "lucide-react"
+import { ConnectionHistoryChart } from "./ConnectionHistoryChart"
 import { useConnectionActivity } from "@/hooks/useConnectionActivity"
 import { Popover, PopoverTrigger, PopoverContent, PopoverHeader, PopoverTitle, PopoverDescription } from "@/components/ui/popover"
 import { Separator } from "@/components/ui/separator"
@@ -80,7 +81,7 @@ export function SyncStatusIndicator({ status, className }: SyncStatusIndicatorPr
           <span className="leading-none">{label}</span>
         </PopoverTrigger>
       </AppTooltip>
-      <PopoverContent align="end" className="w-80 max-w-[calc(100vw-2rem)] gap-3 p-3">
+      <PopoverContent align="end" className="w-80 max-w-[calc(100vw-2rem)] max-h-[var(--available-height)] overflow-y-auto gap-3 p-3">
         <PopoverHeader>
           <PopoverTitle>{t("editor.sync.connection")}</PopoverTitle>
           <PopoverDescription className="text-xs">{tooltip}</PopoverDescription>
@@ -108,6 +109,7 @@ export function SyncStatusIndicator({ status, className }: SyncStatusIndicatorPr
             </div>
           ))}
         </dl>
+        <ConnectionHistoryChart history={activity.history} />
         <div className="flex flex-col gap-1 text-xs text-muted-foreground">
           {activity.recent.slowestLatency != null && (
             <p>{t("editor.sync.slowestReply", { time: formatLatency(activity.recent.slowestLatency) })}</p>

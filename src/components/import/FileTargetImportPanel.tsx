@@ -23,6 +23,7 @@ import {
   matchTargetRowsByRef,
   matchTargetRowsByOrder,
   usfmToTargetRows,
+  vttToTargetRows,
   type FileTargetCellRef,
   type FileTargetMatchResult,
   type TargetRow,
@@ -62,6 +63,10 @@ type PanelStep = "file" | "sheet" | "mapping" | "review"
 
 const USFM_EXTENSIONS = new Set(["usfm", "sfm", "usf"])
 const SHEET_EXTENSIONS = new Set(["csv", "tsv", "xlsx"])
+// AQU-1142: WebVTT subtitle target import. Partners producing dubbing/subtitle
+// translations deliver a translated .vtt whose cues should populate the open
+// cue file's target column, matched positionally against the source cues.
+const VTT_EXTENSIONS = new Set(["vtt"])
 
 export function FileTargetImportPanel({
   projectId,
@@ -111,6 +116,17 @@ export function FileTargetImportPanel({
           return
         }
         showReview(matchTargetRowsByRef(rows, cells), false)
+      } else if (VTT_EXTENSIONS.has(ext)) {
+        // AQU-1142: VTT cues carry timestamps, never canonical refs, so match
+        // positionally (cue N → cell N) — the review screen surfaces any
+        // misalignment before commit via the same order-match warning used
+        // for spreadsheets without a ref column.
+        const rows = vttToTargetRows(decodeImportText(await file.arrayBuffer(), file.name))
+        if (rows.length === 0) {
+          setError(t("importExport.fileTarget.noCuesInVtt"))
+          return
+        }
+        showReview(matchTargetRowsByOrder(rows, cells), true)
       } else if (ext === "xls") {
         setError(t("importExport.spreadsheet.legacyXlsUnsupported"))
         return
@@ -183,11 +199,13 @@ export function FileTargetImportPanel({
             bytes: await sourceFile.arrayBuffer(),
             format: USFM_EXTENSIONS.has(sourceFile.name.split(".").pop()?.toLowerCase() ?? "")
               ? "usfm"
-              : sourceFile.name.toLowerCase().endsWith(".xlsx")
-                ? "xlsx"
-                : sourceFile.name.toLowerCase().endsWith(".tsv")
-                  ? "tsv"
-                  : "csv",
+              : VTT_EXTENSIONS.has(sourceFile.name.split(".").pop()?.toLowerCase() ?? "")
+                ? "vtt"
+                : sourceFile.name.toLowerCase().endsWith(".xlsx")
+                  ? "xlsx"
+                  : sourceFile.name.toLowerCase().endsWith(".tsv")
+                    ? "tsv"
+                    : "csv",
           },
         },
       )
@@ -231,7 +249,7 @@ export function FileTargetImportPanel({
             </span>
             <input
               type="file"
-              accept=".usfm,.sfm,.usf,.csv,.tsv,.xlsx"
+              accept=".usfm,.sfm,.usf,.csv,.tsv,.xlsx,.vtt"
               className="sr-only"
               onChange={(e) => {
                 const file = e.target.files?.[0]
@@ -296,6 +314,10 @@ export function FileTargetImportPanel({
   if (step === "review" && matchResult) {
     const { matched, orphans, unmatchedSourceCount } = matchResult
     const conflicts = matched.filter((m) => m.hasConflict)
+    // AQU-1143: a ref-less match that aligned by cue timecode is not the
+    // fragile top-to-bottom pairing this warns about — don't send the user off
+    // to eyeball 500 rows for a drift that cannot have happened.
+    const showOrderMatchWarning = matchedByOrder && matchResult.alignedBy !== "overlap"
 
     function toggleCell(cellId: string) {
       setSelectedCellIds((prev) => {
@@ -316,7 +338,7 @@ export function FileTargetImportPanel({
             {orphans.length > 0 && <span>{t("importExport.review.unmatchedRowCount", { count: orphans.length })}</span>}
             {unmatchedSourceCount > 0 && <span>{t("importExport.review.uncoveredCellCount", { count: unmatchedSourceCount })}</span>}
           </div>
-          {matchedByOrder && (
+          {showOrderMatchWarning && (
             <p className="mt-1.5 text-xs text-amber-600">
               {t("importExport.review.orderMatchWarning")}
             </p>

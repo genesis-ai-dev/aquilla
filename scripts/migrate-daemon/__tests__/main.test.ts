@@ -15,6 +15,16 @@ import type { MaterializeResult } from "../stages/materialize"
 import type { PushResult } from "../stages/push"
 import type { RunLock } from "../../../src/lib/migrate/run-lock"
 
+// AQU-1277: the discovery stage calls the real GitLab API module directly — the
+// StageFns stubs below don't cover it — so the fake `https://git` credentials
+// sent a real request off the machine. These tests assert on job processing and
+// graceful abort, not on discovery, so an empty catalog is the faithful stub.
+vi.mock("../../../src/lib/migrate/gitlab/api", async (importActual) => ({
+  ...(await importActual<typeof import("../../../src/lib/migrate/gitlab/api")>()),
+  listTopLevelGroups: vi.fn(async () => []),
+  listDescendantGroups: vi.fn(async () => []),
+}))
+
 describe("parseArgs", () => {
   it("defaults to the daemon command", () => {
     expect(parseArgs([], {})).toEqual({ cmd: "daemon", kind: "content", dryRun: false, force: false })

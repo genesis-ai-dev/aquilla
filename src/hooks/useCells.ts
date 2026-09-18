@@ -39,13 +39,13 @@ type LaneCellRow = CellRow & { targetLang?: string }
  *   rows merged in behind the first paint (the TARGET side) become visible
  *   before the stream ends.
  */
-type PagePaint = "first-only" | "progressive"
+export type PagePaint = "first-only" | "progressive"
 
 /** Minimum gap between two `"progressive"` repaints within one stream. A
  *  rebuild is O(rows); throttling keeps total rebuild work linear in the file
  *  rather than O(pages × cells) while still filling translations in during a
  *  long stream. */
-const PAINT_COALESCE_MS = 200
+export const PAINT_COALESCE_MS = 200
 /** The lane a row belongs to. Source rows and default-lane targets → `''`. */
 function laneOf(r: CellRow): string {
   return (r as LaneCellRow).targetLang ?? ""

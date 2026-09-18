@@ -106,7 +106,9 @@ import {
   resolveSidebarAgentClick,
   reconcileContextualAfterRealtimeOpen,
   reconcileContextualDraftsAfterAppliedEvent,
+  nextPaintGate,
 } from "./project-workspace-helpers"
+import type { PaintGate } from "./project-workspace-helpers"
 import { useWorkspaceSearch } from "@/hooks/useWorkspaceSearch"
 import { ParallelPassagesPanel, type ParallelPanelMode, type ParallelPanelScope, type ReplaceAllPayload } from "./ParallelPassagesPanel"
 import type { EditorTableHandle } from "./EditorTable"
@@ -1336,7 +1338,8 @@ export function ProjectWorkspace() {
   // editor-critical requests (sync token → cells page) go out alone, and the
   // rest start once the first cell page is on screen. Flipped by the effect
   // just below the cell store, which owns the definition of "painted".
-  const [editorFirstPaint, setEditorFirstPaint] = useState(false)
+  const [paintGate, setPaintGate] = useState<PaintGate>(() => ({ file: null, sawLoad: false, open: false }))
+  const editorFirstPaint = paintGate.open
   // Server-backed (Postgres) audit stats for the active file with the client outbox applied
   // on top — pending commits/validates show up immediately, before the next
   // 30s refetch. Source of truth for project-wide validation views.
@@ -1382,13 +1385,26 @@ export function ProjectWorkspace() {
   const cellSummaries = useMemo(() => readAtVersion(cellStoreVersion, () => cellStore.getAllSummaries()), [cellStore, cellStoreVersion])
   // AQU-1326: the gate the deferred hooks above wait on. "Painted" is the first
   // cell page reaching the store — but a file that legitimately has no cells,
-  // a load that failed, and the no-file-open case must all release the gate too,
-  // or those hooks would never run. Recomputed on every file switch so each
-  // open gets the same ordering rather than inheriting the last file's gate.
-  const cellsPainted = cellSummaries.length > 0 || cellsError || !cellsLoading
+  // a load that failed, and the no-file-open case must all release the gate
+  // too, or those hooks would never run.
+  //
+  // The reducer is pure and lives in `project-workspace-helpers` so the rule
+  // (in particular why "not loading" is not "settled") is tested directly —
+  // same extract-the-guard pattern as `shouldApplyCheckResult`.
   useEffect(() => {
-    setEditorFirstPaint(cellsPainted)
-  }, [activeFileId, cellsPainted])
+    setPaintGate((prev) =>
+      nextPaintGate(prev, {
+        fileId: activeFileId ?? null,
+        cellCount: cellSummaries.length,
+        cellsError,
+        cellsLoading,
+      }),
+    )
+    // `cellStoreVersion` is a dep so any store change re-evaluates the gate —
+    // a repaint that happens to leave the cell COUNT unchanged would otherwise
+    // not re-run this. The reducer returns its previous object when nothing
+    // changed, so the extra runs cost a comparison and no render.
+  }, [activeFileId, cellStoreVersion, cellSummaries.length, cellsError, cellsLoading])
   const localFileProgress = useMemo(() => readAtVersion(cellStoreVersion, () => cellStore.getFileProgressSnapshot()), [cellStore, cellStoreVersion])
   useEffect(() => {
     if (!project?.id || !activeFileId || !localFileProgress) return

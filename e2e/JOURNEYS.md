@@ -114,6 +114,7 @@ UI chrome that used to be one smoke file per click is covered under
 - View settings, tab strip, selection bar, outbox inspector, term-lookup popover,
   video attachment dialog, cell-expansion Escape close, setup-checklist expand/skip
   (except survives-refresh, which stays smoke)
+- Live connection popover: keyboard open/close, observed upload/download activity, and offline readings (`SyncStatusIndicator.test.tsx`); passive sampling and expiry (`connection-activity.test.ts`).
 - Auth form micro-UI: show/hide password, signup checklist, forgot/reset form chrome
 - Project settings pane links / toggles (except rename/save persistence smoke)
 - Import dialog chrome / specialized options landing (except persist-reload journeys), including the mutually exclusive Biblica title choice and its independent sentence-split option (`ImportDialog.biblicaEdition.test.tsx`)

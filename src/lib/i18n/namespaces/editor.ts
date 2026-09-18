@@ -1472,6 +1472,13 @@ export const editor = defineNamespace({
     "editor.navTitle.projectMembers": "Project members",
 
     // — Per-file sync status chip (WS connection to the sync-worker) ————
+    "editor.sync.connection": "Connection",
+    "editor.sync.upload": "Upload",
+    "editor.sync.download": "Download",
+    "editor.sync.responseTime": "Response time",
+    "editor.sync.noActivity": "Idle",
+    "editor.sync.waitingForActivity": "Waiting for activity",
+    "editor.sync.activityHelp": "Estimated sync activity in this tab. Idle means no recent transfers. Lower response time means a faster reply.",
     "editor.sync.live": "Live",
     "editor.sync.liveTooltip": "Live — all changes are saved to the server and syncing across devices",
     "editor.sync.syncing": "Syncing",
@@ -5406,6 +5413,13 @@ export const editor = defineNamespace({
         screenshot: "workspace-nav",
         maxLength: 24,
       },
+      "editor.sync.connection": { description: "Connection popover connection label for observed sync activity." },
+      "editor.sync.upload": { description: "Connection popover upload label for observed sync activity." },
+      "editor.sync.download": { description: "Connection popover download label for observed sync activity." },
+      "editor.sync.responseTime": { description: "Connection popover responseTime label for observed sync activity." },
+      "editor.sync.noActivity": { description: "Connection popover noActivity label for observed sync activity." },
+      "editor.sync.waitingForActivity": { description: "Connection popover waitingForActivity label for observed sync activity." },
+      "editor.sync.activityHelp": { description: "Plain-language explanation of passively observed sync payload rates and request response times." },
       "editor.sync.live": {
         description:
           "Label of the per-file sync status chip in the editor header when the " +

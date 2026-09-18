@@ -11,6 +11,7 @@
 
 import { syncWorkerHttpOrigin } from "./sync-worker-url"
 import { timeoutSignal } from "./fetch-timeout"
+import { observedSyncFetch, readSyncJson } from "./connection-activity"
 import type { CellRow, CellsPage, FileSummary } from "./cells-read-types"
 // Re-export so consumers (e.g. org/ProjectOverview) can import FileSummary from
 // the read-API module rather than reaching into cells-read-types directly.
@@ -32,7 +33,7 @@ async function readJson<T>(res: Response): Promise<T> {
     const body = await res.text().catch(() => "")
     throw new CellsReadError(res.status, body)
   }
-  return (await res.json()) as T
+  return readSyncJson<T>(res)
 }
 
 function authHeaders(jwt: string): Record<string, string> {
@@ -105,7 +106,7 @@ async function fetchCellsJson<T>(url: string, jwt: string): Promise<T> {
   let lastError: unknown
   for (let attempt = 0; attempt < CELL_READ_ATTEMPTS; attempt++) {
     try {
-      const res = await fetch(url, fetchInit(jwt))
+      const res = await observedSyncFetch(url, fetchInit(jwt))
       return await readJson<T>(res)
     } catch (error) {
       lastError = error
@@ -141,7 +142,7 @@ export async function fetchProjectFiles(
   do {
     const params = new URLSearchParams({ limit: String(FILES_PAGE_SIZE) })
     if (cursor) params.set("cursor", cursor)
-    const res = await fetch(`${base}?${params.toString()}`, fetchInit(jwt))
+    const res = await observedSyncFetch(`${base}?${params.toString()}`, fetchInit(jwt))
     const body: { files: FileSummary[]; nextCursor?: string | null } = await readJson(res)
     for (const f of body.files) {
       // A file edited between two page fetches can move ahead of the cursor
@@ -166,7 +167,7 @@ export async function fetchDeletedFiles(
   jwt: string,
 ): Promise<FileSummary[]> {
   const url = `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}/files?trash=1`
-  const res = await fetch(url, { headers: authHeaders(jwt) })
+  const res = await observedSyncFetch(url, { headers: authHeaders(jwt) })
   const body = await readJson<{ files: FileSummary[] }>(res)
   return body.files
 }
@@ -184,7 +185,7 @@ export async function fetchFile(
   const url =
     `${syncWorkerHttpOrigin()}/api/v1/projects/${encodeURIComponent(projectId)}` +
     `/files/${encodeURIComponent(fileId)}`
-  const res = await fetch(url, fetchInit(jwt))
+  const res = await observedSyncFetch(url, fetchInit(jwt))
   const body = await readJson<{ file: FileSummary }>(res)
   return body.file
 }

@@ -385,3 +385,86 @@ describe("exportPptx — content removed in the app", () => {
     expect(withEmpty).toBe(without)
   })
 })
+
+// AQU-1124: text inside a PowerPoint table (a p:graphicFrame holding a:tbl)
+// is now imported, so the exporter has to put translations back into it.
+describe("exportPptx — table cells (AQU-1124)", () => {
+  const TABLE_CELL_1 = "p:graphicFrame[1]/a:tbl/a:tr[1]/a:tc[1]/a:txBody/a:p[1]"
+  const TABLE_CELL_2 = "p:graphicFrame[1]/a:tbl/a:tr[1]/a:tc[2]/a:txBody/a:p[1]"
+
+  /** One slide: a text box, then a one-row two-column table, then a text box. */
+  async function makeTableDeck(): Promise<ArrayBuffer> {
+    const zip = new JSZip()
+    zip.file(
+      "ppt/slides/slide1.xml",
+      slideXml(
+        shape(`<a:p><a:r><a:t>Before table</a:t></a:r></a:p>`) +
+        `<p:graphicFrame><a:graphic><a:graphicData><a:tbl>` +
+        `<a:tr>` +
+        `<a:tc><a:txBody><a:p><a:r><a:t>Book</a:t></a:r></a:p></a:txBody></a:tc>` +
+        `<a:tc><a:txBody><a:p><a:r><a:t>Chapters</a:t></a:r></a:p></a:txBody></a:tc>` +
+        `</a:tr>` +
+        `</a:tbl></a:graphicData></a:graphic></p:graphicFrame>` +
+        shape(`<a:p><a:r><a:t>After table</a:t></a:r></a:p>`),
+      ),
+    )
+    return zip.generateAsync({ type: "arraybuffer" })
+  }
+
+  it("injects translations into table-cell paragraphs", async () => {
+    const bytes = await makeTableDeck()
+    const cells = [
+      withLocator(makeCell("t1", "Book", "Libro", "g1"), "ppt/slides/slide1.xml", TABLE_CELL_1),
+      withLocator(makeCell("t2", "Chapters", "Capítulos", "g2"), "ppt/slides/slide1.xml", TABLE_CELL_2),
+    ]
+    const result = await exportPptx(bytes, cells)
+
+    expect(result.injected).toBe(2)
+    const reExtracted = await extractPptxStrings(await result.blob.arrayBuffer())
+    expect(reExtracted.map((s) => s.original)).toEqual([
+      "Before table",
+      "Libro",
+      "Capítulos",
+      "After table",
+    ])
+  })
+
+  it("round-trips the whole slide: import, translate, export, re-import", async () => {
+    const bytes = await makeTableDeck()
+    const imported = await extractPptxStrings(bytes)
+    const cells = imported.map((s, i) =>
+      withLocator(
+        makeCell(`c${i}`, s.original, `${s.original} (es)`, `g${i}`),
+        s.sourceLocation!.file,
+        s.sourceLocation!.blockPath,
+      ),
+    )
+    const result = await exportPptx(bytes, cells)
+
+    expect(result.injected).toBe(4)
+    expect(result.untouched).toBe(0)
+    const reExtracted = await extractPptxStrings(await result.blob.arrayBuffer())
+    expect(reExtracted.map((s) => s.original)).toEqual([
+      "Before table (es)",
+      "Book (es)",
+      "Chapters (es)",
+      "After table (es)",
+    ])
+  })
+
+  it("legacy positional files (no locators) still map cells to shapes only", async () => {
+    // A deck imported before table support has no cells for the table
+    // paragraphs. Counting them in the positional walk would slide every
+    // mapping after the table onto the wrong paragraph.
+    const bytes = await makeTableDeck()
+    const cells = [
+      makeCell("c1", "Before table", "Antes", "g1"),
+      makeCell("c2", "After table", "Después", "g2"),
+    ]
+    const result = await exportPptx(bytes, cells)
+
+    expect(result.injected).toBe(2)
+    const reExtracted = await extractPptxStrings(await result.blob.arrayBuffer())
+    expect(reExtracted.map((s) => s.original)).toEqual(["Antes", "Book", "Chapters", "Después"])
+  })
+})

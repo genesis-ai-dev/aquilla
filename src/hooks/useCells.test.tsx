@@ -46,17 +46,40 @@ const streamMeta: {
 } = {}
 // Optional override: a queue of pages to deliver one-at-a-time. When non-empty,
 // the streamFileCells mock pulls from here instead of calling fetchAllMock.
-const pagesMock: { queue: CellRow[][]; pendingResolvers: Array<() => void> } = {
+const pagesMock: { queue: CellRow[][]; pendingResolvers: Array<() => void>; drained: boolean } = {
   queue: [],
   pendingResolvers: [],
+  drained: false,
 }
 
-// The editor loads in two passes per fetch — target side first (tiny), then
-// source — so translations aren't hidden behind the full source stream on
-// large files. Tests still provide ONE combined dataset; cache it on the
-// target pass and reuse on the source pass so a `mockResolvedValueOnce` is
-// consumed once per load (call counts unchanged) and each pass gets its side.
+// The editor loads in two passes per fetch — AQU-1326: SOURCE side first (so
+// the first row paints after one page regardless of how much of the file is
+// translated), then TARGET. Tests still provide ONE combined dataset; cache it
+// on whichever pass runs first and reuse it on the second so a
+// `mockResolvedValueOnce` is consumed once per load (call counts unchanged) and
+// each pass gets its side. The cache is deliberately order-agnostic — it is
+// keyed on "have both passes of this round been served yet", not on the side —
+// so it stays correct if the two passes are ever reordered again, and it resets
+// per fetch round so a revalidate re-consults `fetchAllMock`.
 let sideCache: CellRow[] | null = null
+let sideCacheServed: Array<"source" | "target"> = []
+/** Target-side stream gate (AQU-1326): when armed, the TARGET pass parks until
+ *  `releaseTargetStream()` is called, so a test can assert the view paints from
+ *  the SOURCE stream alone. */
+const targetGate: { wait: Promise<void> | null; release: (() => void) | null; rows: CellRow[] } = {
+  wait: null,
+  release: null,
+  rows: [],
+}
+function holdTargetStream(rows: CellRow[]) {
+  targetGate.rows = rows
+  targetGate.wait = new Promise<void>((resolve) => {
+    targetGate.release = resolve
+  })
+}
+function releaseTargetStream() {
+  targetGate.release?.()
+}
 
 type OnPage = (rows: CellRow[], isLast: boolean) => boolean | void | Promise<boolean | void>
 
@@ -80,6 +103,25 @@ vi.mock("@/lib/sync/cells-read", () => ({
         projectEpoch: streamMeta.projectEpoch === undefined ? TEST_EPOCH : streamMeta.projectEpoch,
       })
     }
+    if (side === "target" && targetGate.wait) {
+      // Park the target stream until the test releases it. Meta fires with the
+      // page, as the real stream does.
+      await targetGate.wait
+      fireMeta(0)
+      await onPage(targetGate.rows, true)
+      return
+    }
+    if (side === "target" && pagesMock.drained) {
+      // AQU-1326: the source pass runs FIRST and empties the queue, so the
+      // target pass that follows it can no longer recognise a pages fixture by
+      // a non-empty queue. `drained` hands this one target pass the empty
+      // response the fixture intends, then clears so a later fetch round falls
+      // back to `fetchAllMock`.
+      pagesMock.drained = false
+      fireMeta(0)
+      await onPage([], true)
+      return
+    }
     if (pagesMock.queue.length > 0) {
       // Streaming/pagination fixtures are source pages; the target pass yields
       // nothing so the source pass drains the queue.
@@ -88,6 +130,7 @@ vi.mock("@/lib/sync/cells-read", () => ({
         await onPage([], true)
         return
       }
+      pagesMock.drained = true
       const pages = pagesMock.queue.splice(0)
       for (let i = 0; i < pages.length; i++) {
         fireMeta(i)
@@ -98,11 +141,20 @@ vi.mock("@/lib/sync/cells-read", () => ({
     }
     fireMeta(0)
     let rows: CellRow[]
-    if (side === "source" && sideCache !== null) {
+    const servedSide = side ?? "source"
+    if (sideCache !== null && !sideCacheServed.includes(servedSide)) {
       rows = sideCache
+      sideCacheServed.push(servedSide)
+      // Both passes of this round have now been served — reset so the next
+      // fetch round consults `fetchAllMock` again.
+      if (sideCacheServed.length >= 2) {
+        sideCache = null
+        sideCacheServed = []
+      }
     } else {
       rows = (await fetchAllMock(projectId, fileId, jwt, side)) ?? []
       sideCache = rows
+      sideCacheServed = [servedSide]
     }
     const filtered = side ? rows.filter((r) => r.side === side) : rows
     await onPage(filtered, true)
@@ -214,7 +266,12 @@ beforeEach(() => {
   fetchDeltaMock.mockReset()
   pagesMock.queue = []
   pagesMock.pendingResolvers = []
+  pagesMock.drained = false
   sideCache = null
+  sideCacheServed = []
+  targetGate.wait = null
+  targetGate.release = null
+  targetGate.rows = []
   cacheEntry.value = null
   cacheWrites.length = 0
   delete streamMeta.maxServerSeq
@@ -285,11 +342,13 @@ describe("useCells (Phase 2a, D1-backed)", () => {
     expect(result.current.cells.map((c) => c.id)).toEqual(["a", "b", "c"])
   })
 
-  it("loads the target side first so translations aren't hidden behind the source stream", async () => {
-    // Regression: on a 30k-cell file with a few translations, the combined
-    // read returns all source rows before any target row, so translations
-    // only appeared after the entire file streamed in — committed edits
-    // looked lost on reload. The hook now fetches the target side first.
+  it("loads the source side first, then merges the target side in (AQU-1326)", async () => {
+    // The two sides are read as separate passes because the combined read
+    // returns every source row before any target row. AQU-1326 fixed the pass
+    // ORDER: the source side goes first so the first row can paint after one
+    // page (see the paint test below), and the target side follows and merges
+    // in. Both sides must still be present once the load settles — that was
+    // the original reason the target side was hoisted ahead of the source.
     fetchAllMock.mockResolvedValue([
       makeRow({ cellId: "c1", side: "source", value: "src" }),
       makeRow({ cellId: "c1", side: "target", value: "tgt" }),
@@ -298,10 +357,10 @@ describe("useCells (Phase 2a, D1-backed)", () => {
       useCells({ projectId: "proj-a", fileId: "file-x", getToken, enabled: true }),
     )
     await waitFor(() => expect(result.current.cells).toHaveLength(1))
-    expect(result.current.cells[0].translated).toBe("tgt")
+    await waitFor(() => expect(result.current.cells[0].translated).toBe("tgt"))
     expect(result.current.cells[0].original).toBe("src")
-    // The very first read pass targets the (small) target side.
-    expect(fetchAllMock.mock.calls[0][3]).toBe("target")
+    // The very first read pass is the editor-critical source side.
+    expect(fetchAllMock.mock.calls[0][3]).toBe("source")
   })
 
   it("revalidate() triggers a refetch and reflects new data", async () => {
@@ -432,6 +491,47 @@ describe("useCells (Phase 2a, D1-backed)", () => {
     await waitFor(() => expect(result.current.cells).toHaveLength(4))
     expect(result.current.cells.map((c) => c.id)).toEqual(["p1a", "p1b", "p2a", "p3a"])
     expect(result.current.isLoading).toBe(false)
+  })
+
+  it("AQU-1326: paints the first SOURCE page without waiting for the target stream", async () => {
+    // Regression guard. The loader used to stream the whole TARGET side first
+    // (silently, no rebuild) and only paint once the first SOURCE page landed
+    // behind it. That was tuned for a Bible-sized file with a handful of
+    // translations; on a mostly-translated file the target stream is as large
+    // as the source stream, so the first row waited for roughly half the file.
+    //
+    // Holding the target stream open models exactly that: the view must paint
+    // from the source stream alone, then merge the translations in when they
+    // arrive.
+    holdTargetStream([
+      makeRow({ cellId: "s1", side: "target", value: "Translated 1" }),
+    ])
+    pagesMock.queue = [
+      [
+        makeRow({ cellId: "s1", side: "source", value: "Source 1" }),
+        makeRow({ cellId: "s2", side: "source", value: "Source 2" }),
+      ],
+    ]
+    const { result } = renderHook(() =>
+      useCells({ projectId: "proj-a", fileId: "file-x", getToken, enabled: true }),
+    )
+
+    // Painted on the source page while the target side is still in flight.
+    await waitFor(() => expect(result.current.cells).toHaveLength(2))
+    expect(result.current.cells.map((c) => c.id)).toEqual(["s1", "s2"])
+    expect(result.current.cells[0].translated).toBe("")
+    // The load is genuinely still running — this is a first paint, not a
+    // finished fetch that merely happened to be fast.
+    expect(result.current.isLoading).toBe(true)
+
+    // Translations land a page behind and are merged in, not lost.
+    await act(async () => {
+      releaseTargetStream()
+      await Promise.resolve()
+    })
+    await waitFor(() => expect(result.current.cells[0].translated).toBe("Translated 1"))
+    expect(result.current.cells).toHaveLength(2)
+    await waitFor(() => expect(result.current.isLoading).toBe(false))
   })
 
   it("does not rebuild the whole cell list on every page of a hard stream (no O(N^2) first open)", async () => {
@@ -1437,6 +1537,7 @@ describe("FRO-274: quarantined outbox filtering and shadow clear", () => {
     fetchByIdsMock.mockReset()
     fetchByIdsMock.mockResolvedValue([])
     sideCache = null
+    sideCacheServed = []
   })
 
   it("quarantined (failed) outbox record is excluded from the pending overlay", async () => {
@@ -1615,6 +1716,7 @@ describe("FRO-IMPORT-OPT: outbox subscription debounce", () => {
     fetchByIdsMock.mockReset()
     fetchByIdsMock.mockResolvedValue([])
     sideCache = null
+    sideCacheServed = []
     peekOutboxBatchCallCount = 0
   })
 

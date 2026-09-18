@@ -1,11 +1,12 @@
 use axum::{
     body::Body,
-    extract::State,
+    extract::{Query, State},
     http::StatusCode,
     response::IntoResponse,
-    routing::post,
+    routing::{get, post},
     Router,
 };
+use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use tower_http::cors::CorsLayer;
 
@@ -44,12 +45,25 @@ pub async fn get_llm_config(
     Ok((endpoint, model))
 }
 
+/// Resolves the target endpoint for a proxied request: an explicit `?endpoint=`
+/// query param wins (used by the Settings UI to test/detect against a value
+/// that hasn't been Saved yet), falling back to the persisted `LlmConfig` set
+/// via `set_llm_config` (used by real completion requests, which always act on
+/// the saved config).
+fn resolve_endpoint(config: &LlmConfig, params: &HashMap<String, String>) -> Result<String, String> {
+    if let Some(e) = params.get("endpoint").filter(|e| !e.is_empty()) {
+        return Ok(e.clone());
+    }
+    config.endpoint.read().map(|e| e.clone()).map_err(|e| e.to_string())
+}
+
 pub async fn proxy_handler(
     State((config, client)): State<(LlmConfig, reqwest::Client)>,
+    Query(params): Query<HashMap<String, String>>,
     body: axum::body::Bytes,
 ) -> impl IntoResponse {
-    let endpoint = match config.endpoint.read() {
-        Ok(e) => e.clone(),
+    let endpoint = match resolve_endpoint(&config, &params) {
+        Ok(e) => e,
         Err(e) => {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -59,7 +73,10 @@ pub async fn proxy_handler(
         }
     };
 
-    let url = format!("{endpoint}/api/chat");
+    // OpenAI-compatible chat endpoint — matches Ollama's own /v1 compat layer,
+    // LM Studio, llama.cpp server, vLLM, and text-generation-webui alike, so
+    // the offline path isn't locked to one local runner.
+    let url = format!("{endpoint}/v1/chat/completions");
     let upstream = match client
         .post(&url)
         .header("content-type", "application/json")
@@ -79,10 +96,44 @@ pub async fn proxy_handler(
     (status, Body::from_stream(stream)).into_response()
 }
 
+/// GET /llm/models — lists models available at the target endpoint via the
+/// same OpenAI-compatible `/v1/models` listing every local runner supports,
+/// so the Settings UI can offer a "Detect models" picker instead of requiring
+/// the exact model id to be typed and remembered.
+pub async fn models_handler(
+    State((config, client)): State<(LlmConfig, reqwest::Client)>,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let endpoint = match resolve_endpoint(&config, &params) {
+        Ok(e) => e,
+        Err(e) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("config lock poisoned: {e}"),
+            )
+                .into_response()
+        }
+    };
+
+    let url = format!("{endpoint}/v1/models");
+    let upstream = match client.get(&url).send().await {
+        Ok(r) => r,
+        Err(e) => {
+            return (StatusCode::BAD_GATEWAY, format!("upstream error: {e}")).into_response()
+        }
+    };
+
+    let status = StatusCode::from_u16(upstream.status().as_u16())
+        .unwrap_or(StatusCode::BAD_GATEWAY);
+    let stream = upstream.bytes_stream();
+    (status, Body::from_stream(stream)).into_response()
+}
+
 pub fn build_router(config: LlmConfig) -> Router {
     let client = reqwest::Client::new();
     Router::new()
         .route("/llm/chat", post(proxy_handler))
+        .route("/llm/models", get(models_handler))
         .layer(CorsLayer::permissive())
         .with_state((config, client))
 }

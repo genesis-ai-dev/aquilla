@@ -12,6 +12,23 @@ interface ConnectivityChangedPayload {
   online: boolean
 }
 
+/**
+ * One-shot connectivity check for non-React call sites — no event
+ * subscription, just the current value. `null` outside Tauri or if the IPC
+ * bridge isn't ready. Used by the completion path (Phase 6) to decide whether
+ * a chat/completion request should route to the local LLM proxy instead of
+ * the hosted provider.
+ */
+export async function isOnline(): Promise<boolean | null> {
+  if (!isTauriRuntime()) return null
+  try {
+    const { invoke } = await import("@tauri-apps/api/core")
+    return await invoke<boolean>("get_connectivity")
+  } catch {
+    return null
+  }
+}
+
 /** `null` outside Tauri, or before the first `get_connectivity` call resolves. */
 export function useConnectivity(): boolean | null {
   const [online, setOnline] = useState<boolean | null>(null)

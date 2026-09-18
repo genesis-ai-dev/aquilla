@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { renderHook, waitFor, act } from "@testing-library/react"
-import { useConnectivity } from "./connectivity"
+import { isOnline, useConnectivity } from "./connectivity"
 
 let tauriRuntime = false
 vi.mock("./is-tauri", () => ({
@@ -64,5 +64,25 @@ describe("useConnectivity", () => {
     await waitFor(() => expect(result.current).toBe(true))
     unmount()
     expect(unlisten).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("isOnline", () => {
+  it("returns null outside Tauri without invoking", async () => {
+    expect(await isOnline()).toBeNull()
+    expect(invoke).not.toHaveBeenCalled()
+  })
+
+  it("returns the current value inside Tauri", async () => {
+    tauriRuntime = true
+    invoke.mockResolvedValueOnce(false)
+    expect(await isOnline()).toBe(false)
+    expect(invoke).toHaveBeenCalledWith("get_connectivity")
+  })
+
+  it("returns null if the IPC call rejects", async () => {
+    tauriRuntime = true
+    invoke.mockRejectedValueOnce(new Error("not ready"))
+    expect(await isOnline()).toBeNull()
   })
 })

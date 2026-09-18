@@ -1383,6 +1383,7 @@ export const org = defineNamespace({
     "org.projectOverview.plan.chapterCellsUntranslated": plural({ one: "{count} cell not yet translated", other: "{count} cells not yet translated" }),
     "org.projectOverview.plan.chapterCellsUnvalidated": plural({ one: "{count} cell not yet validated", other: "{count} cells not yet validated" }),
     "org.projectOverview.plan.chapterTakesUnrecorded": plural({ one: "{count} take not yet recorded", other: "{count} takes not yet recorded" }),
+    "org.projectOverview.plan.chapterTakesUnvalidated": plural({ one: "{count} take not yet validated", other: "{count} takes not yet validated" }),
     // The overflow chip at the end of the verse row, when the outstanding
     // verses outnumber the chips one row can hold.
     // …and its sibling for a document, which has no sections at all.
@@ -2974,6 +2975,13 @@ export const org = defineNamespace({
         description:
           "Beside the chapter card's heading: how many cells in this chapter still have no target text. Shown when translation is the outstanding work; its two siblings cover validation and recording. Reads as a fact about the chapter, not as an instruction.",
         placeholders: { count: "Cells with no target text — a number; it also selects the plural form." },
+      },
+      "org.projectOverview.plan.chapterTakesUnvalidated": {
+        description:
+          "Beside the chapter card's heading (see chapterCellsUntranslated): how many recorded takes nobody has validated yet. Distinct from chapterTakesUnrecorded — these ARE recorded.",
+        placeholders: {
+          count: "How many takes await validation — a number; the plural form is selected by it.",
+        },
       },
       "org.projectOverview.plan.chapterCellsUnvalidated": {
         description:

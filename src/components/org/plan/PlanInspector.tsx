@@ -672,7 +672,16 @@ function PlanChapterCard({
           ? "org.projectOverview.plan.chapterCellsUntranslated"
           : lead.kind === "validate"
             ? "org.projectOverview.plan.chapterCellsUnvalidated"
-            : "org.projectOverview.plan.chapterTakesUnrecorded") as never,
+            : lead.kind === "record"
+              ? "org.projectOverview.plan.chapterTakesUnrecorded"
+              // audio_validate: these takes ARE recorded — what they lack is
+              // validation, and the old fall-through said "not yet recorded",
+              // sending the reader to record work that already existed. The
+              // branch is DORMANT today: AUDIO_JUDGED_ON_RECORDED zeroes the
+              // audio_validate part everywhere, so no test can reach it
+              // through the panel until AQU-490 flips that flag. It is here
+              // so flip day changes the measurement, not the words.
+              : "org.projectOverview.plan.chapterTakesUnvalidated") as never,
         { count: lead.count },
       )
     : null

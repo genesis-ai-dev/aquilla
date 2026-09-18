@@ -322,7 +322,9 @@ for (const { draftOrigin, loseAck, bufferAtAck } of [
       const draftAttempt = hasDraft ? ++draftAttempts : 0
       if (hasDraft) {
         draftRequest = commits.find((e) => e.value === "DRAFT-A")
-        await draftGate
+        // Commit the first lost-ack attempt immediately, then drop its response.
+        // Holding it until the native timeout races Playwright's route abort.
+        if (!loseAck || draftAttempt !== 1) await draftGate
       }
       if (hasCorrection) {
         correctionIntercepted = true

@@ -45,9 +45,31 @@ describe("CellMetadataTab", () => {
     expect(link).toHaveAttribute("href", "https://cdn.example.org/obs/01-01.mp3")
   })
 
-  it("falls back to compact JSON for arbitrary nested objects", () => {
+  it("renders a list of labels as separate values, not one JSON blob", () => {
+    // DCS `tags` is a flat label list — a translator scans it, so each label
+    // has to read as its own value rather than as quoted JSON.
     render(<CellMetadataTab metadata={{ tags: ["keyterm", "name"] }} />)
-    expect(screen.getByText('["keyterm","name"]')).toBeInTheDocument()
+    expect(screen.getByText("keyterm")).toBeInTheDocument()
+    expect(screen.getByText("name")).toBeInTheDocument()
+    expect(screen.queryByText('["keyterm","name"]')).not.toBeInTheDocument()
+  })
+
+  it("labels the keys of a nested object instead of printing JSON", () => {
+    // Nested structure carries meaning in its keys; hiding them behind
+    // JSON punctuation is what made this tab unreadable.
+    render(<CellMetadataTab metadata={{ source: { book: "GEN", chapter: 1 } }} />)
+    expect(screen.getByText("source")).toBeInTheDocument()
+    expect(screen.getByText("book")).toBeInTheDocument()
+    expect(screen.getByText("GEN")).toBeInTheDocument()
+    expect(screen.getByText("chapter")).toBeInTheDocument()
+    expect(screen.getByText("1")).toBeInTheDocument()
+  })
+
+  it("falls back to compact JSON past the nesting depth the layout can carry", () => {
+    // Indentation stops paying for itself eventually — beyond that the raw
+    // value is more honest than a column of near-empty rows.
+    render(<CellMetadataTab metadata={{ a: { b: { c: { d: { e: 1 } } } } }} />)
+    expect(screen.getByText('{"e":1}')).toBeInTheDocument()
   })
 
   describe("hasCellMetadata (the EditorTable tab gate)", () => {

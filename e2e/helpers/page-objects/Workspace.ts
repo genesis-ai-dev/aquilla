@@ -816,9 +816,21 @@ export class Workspace {
 
   /** Replace the complete target value, then wait for its authoritative commit. */
   async replaceCell(index: number, text: string): Promise<void> {
+    await this.replaceCellMeasuringCommit(index, text)
+  }
+
+  /** `replaceCell`, returning the wall-clock milliseconds from the committing
+   * blur to the server's authoritative `/events` acknowledgement.
+   *
+   * Activation and typing are deliberately outside the measurement: the number
+   * the production timing probe (AQU-1024) asserts on is the write round-trip,
+   * not how long Playwright took to focus a cell. */
+  async replaceCellMeasuringCommit(index: number, text: string): Promise<number> {
     const target = await this.activateTargetCell(index)
     await target.fill(text)
+    const startedAt = Date.now()
     await this.commitTargetCellEdit(index, text)
+    return Date.now() - startedAt
   }
 
   async readCell(index: number): Promise<string> {

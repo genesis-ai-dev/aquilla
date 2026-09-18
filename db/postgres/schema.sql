@@ -725,8 +725,16 @@ CREATE TABLE cell_backtranslations (
     PRIMARY KEY (project_id, file_id, cell_id, target_event_id)
 );
 
+-- AQU-1296: comment identity is PROJECT-SCOPED. `comment_id` was a global
+-- primary key, but the ids themselves are not globally unique — the Codex
+-- importer namespaces the event id and the file id per project and leaves
+-- `payload.commentId` as the raw legacy id. Two projects importing the same
+-- source (a fork, a re-import, a migration rehearsal) therefore emit identical
+-- comment ids, and `ON CONFLICT(comment_id) DO NOTHING` silently swallowed the
+-- second project's every insert. Every reader/writer of this table must match
+-- on (project_id, comment_id), never comment_id alone.
 CREATE TABLE comments (
-    comment_id        TEXT PRIMARY KEY,
+    comment_id        TEXT NOT NULL,
     project_id        TEXT NOT NULL,
     scope_kind        TEXT NOT NULL,
     file_id           TEXT,
@@ -743,7 +751,8 @@ CREATE TABLE comments (
     -- thread. Drives the "Translation changed since this thread was created"
     -- badge. NULL = unknown baseline (reply, non-cell scope, or legacy row) →
     -- never shown as stale.
-    created_for_translated TEXT
+    created_for_translated TEXT,
+    PRIMARY KEY (project_id, comment_id)
 );
 
 -- ─────────────────────────── terminology concepts ──────────────────────

@@ -248,6 +248,12 @@ export const autopilot = defineNamespace({
     "autopilot.steering.sendFailed": "That direction didn't reach the agent. Try again.",
     "autopilot.steering.sending": "Sending direction…",
     "autopilot.steering.send": "Send",
+    "autopilot.steering.commandHint":
+      "Type “stop” or “pause” on its own to control the run instead of directing it.",
+    "autopilot.steering.sendStop": "Stop the run",
+    "autopilot.steering.sendPause": "Pause the run",
+    "autopilot.steering.commandNothingRunning":
+      "Autopilot wasn’t working, so nothing changed.",
     "autopilot.steering.queuedDirections": plural({
       one: "{count} direction queued",
       other: "{count} directions queued",
@@ -363,6 +369,9 @@ export const autopilot = defineNamespace({
     "autopilot.inspector.event.kind.draftsStaged": "Drafts staged",
     "autopilot.inspector.event.kind.spanOutcome": "Passage outcome",
     "autopilot.inspector.event.kind.steeringQueued": "Steering queued",
+    "autopilot.inspector.event.kind.runCommand": "Asked in chat",
+    "autopilot.inspector.event.runCommandStop": "You asked Autopilot to stop.",
+    "autopilot.inspector.event.runCommandPause": "You asked Autopilot to pause.",
     "autopilot.inspector.event.kind.draftReviewed": "Draft reviewed",
     "autopilot.inspector.event.kind.unknown": "Activity event",
     "autopilot.inspector.event.status.started": "Work started",

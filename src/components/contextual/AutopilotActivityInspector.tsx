@@ -453,6 +453,7 @@ const EVENT_KIND_KEYS: Record<string, MessageKey> = {
   drafts_staged: "autopilot.inspector.event.kind.draftsStaged",
   span_outcome: "autopilot.inspector.event.kind.spanOutcome",
   steering_queued: "autopilot.inspector.event.kind.steeringQueued",
+  run_command: "autopilot.inspector.event.kind.runCommand",
   draft_reviewed: "autopilot.inspector.event.kind.draftReviewed",
 }
 
@@ -547,6 +548,11 @@ function eventSummary(event: ContextualActivityEvent, t: TFunction): string {
     return event.details.steeringKind === "direction"
       ? t("autopilot.inspector.event.directionQueued")
       : t("autopilot.inspector.event.kind.steeringQueued")
+  }
+  if (event.kind === "run_command") {
+    return event.details.command === "pause"
+      ? t("autopilot.inspector.event.runCommandPause")
+      : t("autopilot.inspector.event.runCommandStop")
   }
   if (event.kind === "draft_reviewed") {
     if (event.details.outcome === "applied") return t("autopilot.inspector.event.draftApplied")

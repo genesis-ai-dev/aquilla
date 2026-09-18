@@ -366,7 +366,13 @@ describe('AQU-1184 — explicit cell lists only', () => {
 
     expect(res.status).toBe(200)
     // Counts still there, and the validation line is still marked testimony…
-    expect(body.summary.events).toContainEqual({ kind: 'cell.validate', count: 2, testimony: true })
+    // AQU-1310: summary.events includes emitKindEffectLabel.
+    expect(body.summary.events).toContainEqual({
+      kind: 'cell.validate',
+      count: 2,
+      testimony: true,
+      label: 'Mark 2 translations as validated — recorded under your name',
+    })
     // …but a count alone is not an approvable plan: each cell is named with its text.
     expect(body.summary.testimony).toEqual([
       { kind: 'cell.validate', fileId: FILE, cellId: 'cell-1', text: 'En el principio', truncated: false },

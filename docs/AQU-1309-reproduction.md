@@ -65,9 +65,11 @@ and passes afterward.
 7. Assert no response classifies A's repeated event ID as a stale sibling.
 
 Cases: human draft, AI draft, and AI draft with its first response dropped
-after the server processes it. The AI interaction in these runs spans the
-client timeout and queues a repeat of A. Delivery barriers can therefore
-release the original attempt and its retry together.
+after the server processes it. The delayed AI case spans the client timeout
+and queues a repeat of A. Delivery barriers can therefore release the original
+attempt and its retry together. The lost-ack case commits the first request
+immediately and drops its response; only subsequent attempts wait on the gate.
+This avoids racing Playwright's abort against an already-canceled request.
 
 ## Before the fix
 
@@ -184,6 +186,7 @@ E2E_VITE_MODE=dev npx tsx scripts/e2e-up.ts -- \
 pnpm test:e2e:guard
 npm run build
 git diff --check
+E2E_VITE_MODE=dev pnpm test:e2e:affected --base origin/dev
 ```
 
 - Baseline browser run: 4 passed, 2 failed on the new false-conflict assertion.
@@ -191,6 +194,7 @@ git diff --check
 - Additional buffer-only case: passed (`/private/tmp/aqu-1309-buffer-confirm-results.json`).
 - Initial affected-browser gates: 7 passed, then 8 passed after adding the buffer-only case.
 - Existing-head regression: failed before the client fix; passed after it (14.0s).
+- Final affected-browser gate: 12 passed across four specs (2.5 minutes).
 - Secret scan: clean.
 - Worker route integration: 44 passed, including concurrent retry/control.
 - Worker type-check: passed.
@@ -202,6 +206,18 @@ Earlier diagnostic harness versions had an attempt-counter race and an
 intercepted-request timeout waiter that stalled. Those are not product failures;
 the baseline run completes and fails on the explicit response-contract assertion.
 The fixed run passes that assertion.
+
+The broader two-user throttled run reaches and passes convergence, event
+retention, and exactly-one-competing-sibling checks. Its history recovery step
+initially fails because the page object still searches the row for Edit history.
+AQU-200 moved that action into a portalled overflow. The helper now uses the
+existing `openRowAction` method; the recovery assertions remain unchanged.
+A subsequent run fails before editing: `openSeededProject` cannot read a
+source response body (`Network.getResponseBody: No resource with given
+identifier found`). A diagnostic rerun passes the complete throttled journey,
+including promoting the bumped edit and convergence in both browsers. That
+rerun confirms the recovery path but does not resolve the intermittent setup
+failure. The clean 12-test affected gate does not include this extra spec.
 
 The isolated worktree uses existing dependency directories. Vite reports a
 blocked font URL from that symlink, so these runs do not assess visual fidelity.

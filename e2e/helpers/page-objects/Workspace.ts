@@ -1017,23 +1017,10 @@ export class Workspace {
     await this.page.locator("aside").click()
   }
 
-  private actionRail(index: number): Locator {
-    return this.cellRow(index).locator('[data-slot="cell-action-rail"]')
-  }
-
-  /** Open the per-cell "Edit history" drawer from the row's action rail. The
-   * rail springs out on row hover (data-revealed) — same reveal handshake as
-   * clickSparkleOnFirstCell. */
+  /** Open the per-cell "Edit history" drawer through the action overflow. */
   async openHistoryDrawer(index: number): Promise<void> {
-    const row = this.cellRow(index)
-    await row.scrollIntoViewIfNeeded()
-    await row.hover()
-    await expect(this.actionRail(index)).toHaveAttribute("data-revealed", "true", { timeout: 5_000 })
-    const button = row.getByRole("button", { name: "Edit history" }).first()
-    await expect(button).toBeVisible()
-    // The unrevealed rail wrapper can intercept the hit-test if idle-hide
-    // races the click; the button is already asserted visible.
-    await button.click({ force: true })
+    const button = await this.openRowAction(this.cellRow(index), "Edit history")
+    await button.click()
     await expect(this.page.getByRole("heading", { name: /^Edit history/ })).toBeVisible()
   }
 

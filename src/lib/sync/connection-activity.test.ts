@@ -20,10 +20,10 @@ describe("passive connection activity", () => {
     expect(result).toBe(response)
     expect(fetchFn).toHaveBeenCalledExactlyOnceWith("/events", init)
     expect(await readSyncJson(result)).toEqual({ text: "é" })
-    expect(getConnectionActivity()).toMatchObject({ upload: 13 / 5, download: 13 / 5, latency: 125 })
-    vi.advanceTimersByTime(5_000)
-    expect(getConnectionActivity()).toMatchObject({ upload: 0, download: 0, latency: 125 })
-    vi.advanceTimersByTime(25_000)
+    expect(getConnectionActivity()).toMatchObject({ upload: 13 / 3, download: 13 / 3, latency: 125 })
+    vi.advanceTimersByTime(3_000)
+    expect(getConnectionActivity()).toMatchObject({ upload: 13 / 3, download: 13 / 3, latency: 125 })
+    vi.advanceTimersByTime(27_000)
     expect(getConnectionActivity()).toMatchObject({
       latency: null, lastReplyAgeMs: 30_000,
       recent: { upload: 13, download: 13, requests: 1, failures: 0, averageLatency: 125, slowestLatency: 125 },
@@ -34,32 +34,50 @@ describe("passive connection activity", () => {
     const { recordSyncBytes, getConnectionActivity } = await import("./connection-activity")
     recordSyncBytes("upload", "hello")
     recordSyncBytes("download", "é")
-    expect(getConnectionActivity()).toMatchObject({ upload: 1, download: 0.4, latency: null })
-    vi.advanceTimersByTime(5_000)
+    expect(getConnectionActivity()).toMatchObject({ upload: 5 / 3, download: 2 / 3, latency: null })
+    // The last real rate lingers briefly after traffic stops, then fades to idle.
+    vi.advanceTimersByTime(3_000)
+    expect(getConnectionActivity()).toMatchObject({ upload: 5 / 3, download: 2 / 3, recent: { upload: 5, download: 2 } })
+    vi.advanceTimersByTime(10_000)
     expect(getConnectionActivity()).toMatchObject({ upload: 0, download: 0, recent: { upload: 5, download: 2 } })
-    vi.advanceTimersByTime(295_000)
+    vi.advanceTimersByTime(287_000)
     expect(getConnectionActivity().recent).toEqual({
       upload: 0, download: 0, requests: 0, failures: 0, averageLatency: null, slowestLatency: null,
     })
   })
 
-  it("averages every reply rather than averaging buckets or showing the last sample", async () => {
+  it("shows the mean of the last three replies so the band only moves when the average shifts", async () => {
     const { observedSyncFetch, getConnectionActivity } = await import("./connection-activity")
-    for (const ms of [20, 40, 1200]) {
-      await observedSyncFetch("/cells", undefined, vi.fn(async () => {
-        vi.advanceTimersByTime(ms)
-        return new Response("{}")
-      }))
-    }
+    const reply = async (ms: number) => observedSyncFetch("/cells", undefined, vi.fn(async () => {
+      vi.advanceTimersByTime(ms)
+      return new Response("{}")
+    }))
+    for (const ms of [20, 40, 60]) await reply(ms)
+    expect(getConnectionActivity()).toMatchObject({ latency: 40, quality: "good" })
+    // One spike is diluted; the band holds.
+    await reply(600)
+    expect(getConnectionActivity()).toMatchObject({ latency: (40 + 60 + 600) / 3, quality: "good" })
+    // A shifted average (three slow replies) moves the band.
+    await reply(600)
+    await reply(600)
     expect(getConnectionActivity()).toMatchObject({
-      latency: 1200, lastReplyAgeMs: 0,
-      recent: { requests: 3, failures: 0, averageLatency: 420, slowestLatency: 1200 },
+      latency: 600, quality: "fair", lastReplyAgeMs: 0,
+      recent: { requests: 6, failures: 0, averageLatency: 320, slowestLatency: 600 },
     })
     vi.advanceTimersByTime(300_000)
     expect(getConnectionActivity()).toMatchObject({
-      latency: null, lastReplyAgeMs: 300_000,
+      latency: null, quality: null, lastReplyAgeMs: 300_000,
       recent: { requests: 0, averageLatency: null, slowestLatency: null },
     })
+  })
+
+  it("bands latency with boundaries far enough apart that jitter does not flip the label", async () => {
+    const { qualityFor } = await import("./connection-activity")
+    expect(qualityFor(null)).toBeNull()
+    expect(qualityFor(299)).toBe("good")
+    expect(qualityFor(300)).toBe("fair")
+    expect(qualityFor(999)).toBe("fair")
+    expect(qualityFor(1000)).toBe("slow")
   })
 
   it("counts transport and HTTP failures without inventing timings for transport failures", async () => {

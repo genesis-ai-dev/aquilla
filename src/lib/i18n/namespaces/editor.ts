@@ -132,6 +132,7 @@ export const editor = defineNamespace({
     // — Per-cell actions menu (ellipsis popover) ——————————————————
     "editor.cell.addComment": "Add comment",
     "editor.cell.closeDetails": "Close cell details",
+    "editor.cell.loadingTranslation": "Loading translation…",
 
     // — Waveform strip under a translated cell ——————————————————————
     "editor.waveform.scrubber": "Audio scrubber",
@@ -1491,6 +1492,12 @@ export const editor = defineNamespace({
     "editor.sync.upload": "Upload",
     "editor.sync.download": "Download",
     "editor.sync.responseTime": "Response time",
+    "editor.sync.ping": "Ping",
+    "editor.sync.connectionDetails": "Connection details",
+    "editor.sync.showDetails": "Show connection details",
+    "editor.sync.qualityGood": "Good",
+    "editor.sync.qualityFair": "OK",
+    "editor.sync.qualitySlow": "Slow",
     "editor.sync.noActivity": "Idle",
     "editor.sync.waitingForActivity": "Waiting for activity",
     "editor.sync.activityHelp": "Sync traffic in this tab, not your internet speed. Small transfers are normal. Reply times include server work.",
@@ -1982,6 +1989,12 @@ export const editor = defineNamespace({
           "Screen-reader name of the X button in the header of the panel that " +
           "expands under a cell row (back-translation, audio, footnotes, history). " +
           "It collapses that panel only; it does not close the file or the editor.",
+      },
+      "editor.cell.loadingTranslation": {
+        description:
+          "Screen-reader name of the placeholder shown in a row's target column " +
+          "while the file is still opening and this row's translation has not " +
+          "arrived from the server yet. The cell cannot be edited until it does.",
       },
       "editor.waveform.scrubber": {
         description:
@@ -5447,6 +5460,12 @@ export const editor = defineNamespace({
       "editor.sync.upload": { description: "Connection popover upload label for observed sync activity." },
       "editor.sync.download": { description: "Connection popover download label for observed sync activity." },
       "editor.sync.responseTime": { description: "Connection popover responseTime label for observed sync activity." },
+      "editor.sync.ping": { description: "Tile label in the connection popover for the averaged server reply time.", maxLength: 10 },
+      "editor.sync.connectionDetails": { description: "Title of the dialog with full sync telemetry: history chart, totals, request counts." },
+      "editor.sync.showDetails": { description: "Accessible name of the (i) button in the connection popover that opens the details dialog." },
+      "editor.sync.qualityGood": { description: "Latency band shown beside the median server reply time when replies are under 300 ms.", maxLength: 8 },
+      "editor.sync.qualityFair": { description: "Latency band shown beside the median server reply time when replies are between 300 ms and 1 s.", maxLength: 8 },
+      "editor.sync.qualitySlow": { description: "Latency band shown beside the median server reply time when replies are 1 s or longer.", maxLength: 8 },
       "editor.sync.noActivity": { description: "Connection popover noActivity label for observed sync activity." },
       "editor.sync.waitingForActivity": { description: "Connection popover waitingForActivity label for observed sync activity." },
       "editor.sync.activityHelp": { description: "Plain-language explanation of passively observed sync payload rates and request response times." },

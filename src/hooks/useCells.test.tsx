@@ -61,7 +61,10 @@ const pagesMock: { queue: CellRow[][]; pendingResolvers: Array<() => void>; drai
 // keyed on "have both passes of this round been served yet", not on the side —
 // so it stays correct if the two passes are ever reordered again, and it resets
 // per fetch round so a revalidate re-consults `fetchAllMock`.
-let sideCache: CellRow[] | null = null
+// Held as a PROMISE: the two passes now start concurrently, so the second
+// must share the first's in-flight `fetchAllMock` call rather than re-consult
+// it (a `mockResolvedValueOnce` would otherwise be consumed by one side only).
+let sideCache: Promise<CellRow[]> | null = null
 let sideCacheServed: Array<"source" | "target"> = []
 /** Target-side stream gate (AQU-1326): when armed, the TARGET pass parks until
  *  `releaseTargetStream()` is called, so a test can assert the view paints from
@@ -143,7 +146,7 @@ vi.mock("@/lib/sync/cells-read", () => ({
     let rows: CellRow[]
     const servedSide = side ?? "source"
     if (sideCache !== null && !sideCacheServed.includes(servedSide)) {
-      rows = sideCache
+      const shared = sideCache
       sideCacheServed.push(servedSide)
       // Both passes of this round have now been served — reset so the next
       // fetch round consults `fetchAllMock` again.
@@ -151,10 +154,12 @@ vi.mock("@/lib/sync/cells-read", () => ({
         sideCache = null
         sideCacheServed = []
       }
+      rows = await shared
     } else {
-      rows = (await fetchAllMock(projectId, fileId, jwt, side)) ?? []
-      sideCache = rows
+      const shared = Promise.resolve(fetchAllMock(projectId, fileId, jwt, side)).then((r) => r ?? [])
+      sideCache = shared
       sideCacheServed = [servedSide]
+      rows = await shared
     }
     const filtered = side ? rows.filter((r) => r.side === side) : rows
     await onPage(filtered, true)

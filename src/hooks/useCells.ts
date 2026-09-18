@@ -78,6 +78,10 @@ export interface CellData {
    *  When set, `translated` / `translatedHtml` reflect the *pending* value, not
    *  the server projection. UI can render a subtle "queued" indicator. */
   hasPendingEdit?: boolean
+  /** AQU-1326: the file is still streaming in and this cell's TARGET row has
+   *  not arrived yet, so `translated` is unknown (not known-empty). The row
+   *  renders a loading placeholder and refuses to open the editor. */
+  targetPending?: boolean
   /** Current target head is machine-generated and has not been human-edited or approved. */
   aiDrafted?: boolean
   /** Provenance for the current untouched AI draft; absent on human-owned text. */
@@ -914,10 +918,34 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       // unconditional final rebuild below always swaps in the complete list,
       // so a throttled-away repaint only ever delays a translation by a
       // window — it can never lose one.
+      // AQU-1326 (follow-up): both sides stream CONCURRENTLY so rows fill in
+      // together rather than the whole source column landing before any
+      // target row. First paint still waits for the first SOURCE page; target
+      // pages that land before it ride that paint.
       let paintedFirstPage = false
+      let sourceSeen = false
       let lastPaintAt = 0
+      let streamsSettled = false
+      let streamError: unknown = null
+      let trailingPaint: ReturnType<typeof setTimeout> | null = null
+      const paintNow = () => {
+        lastPaintAt = Date.now()
+        rebuildFromCache()
+      }
+      // A page inside the coalesce window repaints at the end of the window
+      // unless another page or the final rebuild gets there first.
+      const schedulePaint = () => {
+        if (trailingPaint !== null) return
+        trailingPaint = setTimeout(() => {
+          trailingPaint = null
+          if (generationRef.current !== gen || streamsSettled) return
+          paintNow()
+        }, Math.max(0, PAINT_COALESCE_MS - (Date.now() - lastPaintAt)))
+      }
       const pushRows = (rows: CellRow[], paint: PagePaint): boolean | void => {
-        if (generationRef.current !== gen) return false
+        // The other side failed: stop this stream too (false ends pagination).
+        if (generationRef.current !== gen || streamError !== null) return false
+        if (paint === "first-only") sourceSeen = true
         if (rows.length === 0) return
         if (effectiveSoft) {
           for (const r of rows) buffer.push(r)
@@ -928,42 +956,28 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
         // is always the owned `[]` seeded above (cache hits and resyncs take
         // the effectiveSoft buffer path), so mutating it in place is safe.
         for (const r of rows) rowsRef.current.push(r)
+        if (!sourceSeen) return
         if (!paintedFirstPage) {
           paintedFirstPage = true
-          lastPaintAt = Date.now()
-          rebuildFromCache()
+          paintNow()
           return
         }
         if (paint !== "progressive") return
-        const now = Date.now()
-        if (now - lastPaintAt < PAINT_COALESCE_MS) return
-        lastPaintAt = now
-        rebuildFromCache()
+        if (Date.now() - lastPaintAt < PAINT_COALESCE_MS) {
+          schedulePaint()
+          return
+        }
+        paintNow()
       }
       // AQU-247: the local-mutation clock at the moment the server snapshot
       // begins. Any cell mutated after this point is fresher than this
       // fetch's data — it can neither confirm that cell's shadow nor replace
       // its rows at the swap below.
       const startSeq = writeSeqRef.current
-      // AQU-1326: stream the SOURCE side FIRST and paint on its first page.
-      // Source rows are what the editor renders — an untranslated row is still
-      // a usable row — so first paint now costs exactly chunk + token + one
-      // cells page, whatever fraction of the file is translated.
-      //
-      // The TARGET side follows and merges in progressively (throttled repaints
-      // in `pushRows`), so translated cells fill in a page behind rather than
-      // gating the first row. The previous order seeded the target side FIRST
-      // and silently (no rebuild), so a translated cell showed its value the
-      // instant its source row painted — tuned for a Bible-sized file with a
-      // handful of translations. On a mostly-translated file the target stream
-      // is as large as the source stream, so that made first paint wait for
-      // roughly half the file plus one page.
-      //
-      // The SOURCE stream's first page now carries the earliest watermark of
-      // the whole two-stream snapshot — the safe `?since=` cursor: anything that
-      // lands mid-stream has a higher seq, so the next delta re-fetches it.
-      // (`cursorSeen` below still takes the first page of whichever stream runs
-      // first; only which side that is has changed.)
+      // The `?since=` cursor must be the EARLIEST watermark of the two-stream
+      // snapshot, so with concurrent streams take the MIN of each side's first
+      // page rather than the first page to arrive. Sides disagreeing on the
+      // AQU-943 epoch is treated like a torn snapshot (no cursor stored).
       //
       // B2 (torn snapshot): the server paginates by OFFSET, so a row that
       // shifts across a page boundary while the stream is in flight can be
@@ -972,48 +986,42 @@ export function useCells(opts: UseCellsOptions): UseCellsResult {
       // `maxServerSeq` bump within a side-stream; when seen, the snapshot's
       // rows are kept (better than blanking) but NO cursor is stored, so the
       // next trigger full-streams once and self-heals.
-      let streamMaxSeq: number | null = null
-      // AQU-943: incarnation of `streamMaxSeq`, taken from the same first page
-      // so cursor and epoch always describe the same snapshot.
-      let streamEpoch: number | null = null
+      const sideFirst: { seq: number | null; epoch: number | null }[] = []
       let streamTorn = false
-      let cursorSeen = false
       const trackStreamMeta = () => {
-        let sideFirst: number | null = null
-        let sideSeen = false
+        let seen = false
+        let first: number | null = null
         return (meta: { maxServerSeq?: number | null; projectEpoch?: number | null }) => {
           const v = typeof meta.maxServerSeq === "number" ? meta.maxServerSeq : null
-          if (!cursorSeen) {
-            cursorSeen = true
-            streamMaxSeq = v
-            streamEpoch = typeof meta.projectEpoch === "number" ? meta.projectEpoch : null
-          }
-          if (!sideSeen) {
-            sideSeen = true
-            sideFirst = v
-          } else if (v !== sideFirst) {
+          if (!seen) {
+            seen = true
+            first = v
+            sideFirst.push({ seq: v, epoch: typeof meta.projectEpoch === "number" ? meta.projectEpoch : null })
+          } else if (v !== first) {
             streamTorn = true
           }
         }
       }
-      await streamFileCells(
-        projectId,
-        fileId,
-        token,
-        (rows) => pushRows(rows, "first-only"),
-        "source",
-        trackStreamMeta(),
-      )
+      const settle = (stream: Promise<void>) =>
+        stream.catch((err: unknown) => {
+          if (streamError === null) streamError = err
+        })
+      await Promise.all([
+        settle(streamFileCells(projectId, fileId, token, (rows) => pushRows(rows, "first-only"), "source", trackStreamMeta())),
+        settle(streamFileCells(projectId, fileId, token, (rows) => pushRows(rows, "progressive"), "target", trackStreamMeta())),
+      ])
+      streamsSettled = true
+      if (trailingPaint !== null) clearTimeout(trailingPaint)
       if (generationRef.current !== gen) return
-      await streamFileCells(
-        projectId,
-        fileId,
-        token,
-        (rows) => pushRows(rows, "progressive"),
-        "target",
-        trackStreamMeta(),
-      )
-      if (generationRef.current !== gen) return
+      if (streamError !== null) throw streamError
+      let streamMaxSeq: number | null = null
+      let streamEpoch: number | null = null
+      if (sideFirst.length > 0 && sideFirst.every((side) => side.seq !== null)) {
+        const earliest = sideFirst.reduce((a, b) => ((b.seq as number) < (a.seq as number) ? b : a))
+        streamMaxSeq = earliest.seq
+        streamEpoch = earliest.epoch
+        if (sideFirst.some((side) => side.epoch !== streamEpoch)) streamTorn = true
+      }
       let discardedProtected = false
       if (effectiveSoft) {
         // Confirm shadows against the SERVER buffer before it becomes rowsRef,

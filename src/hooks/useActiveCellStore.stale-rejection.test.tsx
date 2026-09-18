@@ -247,15 +247,16 @@ describe("I3: queue, don't drop", () => {
       await onPage(FILE_ROWS.filter((r) => r.side === side), true)
     })
     const { result } = renderStore()
-    await waitFor(() => expect(streams).toBe(1))
+    // Both sides start together; the first (source) is parked on the gate.
+    await waitFor(() => expect(streams).toBe(2))
 
     // Reconnect resync while the initial load is still streaming.
     act(() => result.current.revalidate())
     act(() => result.current.revalidate())
-    expect(streams).toBe(1)
+    expect(streams).toBe(2)
 
     gate.resolve()
-    // Initial load = 2 stream calls (target + source). The stream mock reports
+    // Initial load = 2 stream calls (source + target). The stream mock reports
     // no cursor, so the queued soft pass is a full re-stream: exactly one more
     // pair (the two queued requests coalesce), then nothing.
     await waitFor(() => expect(streams).toBe(4))
@@ -312,21 +313,22 @@ describe("I4: cache hygiene", () => {
     streamMock.mockRejectedValue(new Error("boom"))
     const { result } = renderStore()
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
-    expect(streamMock).toHaveBeenCalledTimes(1)
+    // Each attempt is one stream PAIR (source + target start together).
+    expect(streamMock).toHaveBeenCalledTimes(2)
     expect(result.current.isError).toBe(true)
     expect(result.current.isLoading).toBe(false)
 
     await act(async () => { await vi.advanceTimersByTimeAsync(1999) })
-    expect(streamMock).toHaveBeenCalledTimes(1)
-    await act(async () => { await vi.advanceTimersByTimeAsync(1) })
     expect(streamMock).toHaveBeenCalledTimes(2)
-    await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
-    expect(streamMock).toHaveBeenCalledTimes(3)
-    await act(async () => { await vi.advanceTimersByTimeAsync(10000) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(1) })
     expect(streamMock).toHaveBeenCalledTimes(4)
+    await act(async () => { await vi.advanceTimersByTimeAsync(5000) })
+    expect(streamMock).toHaveBeenCalledTimes(6)
+    await act(async () => { await vi.advanceTimersByTimeAsync(10000) })
+    expect(streamMock).toHaveBeenCalledTimes(8)
     // Budget exhausted: no fifth attempt, ever.
     await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
-    expect(streamMock).toHaveBeenCalledTimes(4)
+    expect(streamMock).toHaveBeenCalledTimes(8)
     expect(result.current.isError).toBe(true)
   })
 
@@ -339,15 +341,16 @@ describe("I4: cache hygiene", () => {
       { initialProps: { fileId: "f1" } },
     )
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
-    expect(streamMock).toHaveBeenCalledTimes(1)
+    // f1's failed load — one stream pair.
+    expect(streamMock).toHaveBeenCalledTimes(2)
     serveStream()
     rerender({ fileId: "f2" })
     await act(async () => { await vi.advanceTimersByTimeAsync(0) })
     // f2's own load — one stream pair.
-    expect(streamMock).toHaveBeenCalledTimes(3)
+    expect(streamMock).toHaveBeenCalledTimes(4)
     await act(async () => { await vi.advanceTimersByTimeAsync(20_000) })
     // The old f1 retry never fires.
-    expect(streamMock).toHaveBeenCalledTimes(3)
+    expect(streamMock).toHaveBeenCalledTimes(4)
     expect(result.current.isError).toBe(false)
   })
 })

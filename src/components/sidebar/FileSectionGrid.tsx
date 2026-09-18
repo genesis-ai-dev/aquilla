@@ -10,12 +10,27 @@ interface Props {
   getTokenForFile: (fileId: string) => Promise<string | null>
   onSectionClick: (sectionLabel: string) => void
   chapters?: BookHealthChapter[]
+  /**
+   * AQU-1326: hold the per-file `/progress` read until the editor's first cell
+   * page has painted. The active file is expanded on open, so this grid's fetch
+   * otherwise goes out just ahead of the cell stream and takes a slot from it.
+   * Deferring costs nothing visible — the same spinner shows either way, and
+   * for the active file the spine renders from `chapters` regardless.
+   */
+  deferFetch?: boolean
 }
 
 /** Sections shown beneath an expanded file, with per-cell health squares. */
-export function FileSectionGrid({ projectId, fileId, validationCount, getTokenForFile, onSectionClick, chapters }: Props) {
+export function FileSectionGrid({ projectId, fileId, validationCount, getTokenForFile, onSectionClick, chapters, deferFetch }: Props) {
   const t = useT()
-  const { sections, error, retry } = useSectionProgressState(projectId, fileId, validationCount, getTokenForFile)
+  // A null fileId is the hook's own no-op: it skips the fetch and re-fires as
+  // soon as a real id arrives, so the gate needs no extra plumbing.
+  const { sections, error, retry } = useSectionProgressState(
+    projectId,
+    deferFetch ? null : fileId,
+    validationCount,
+    getTokenForFile,
+  )
 
   if (!chapters && sections === null) {
     return (
